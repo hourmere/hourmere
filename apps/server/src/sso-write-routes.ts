@@ -41,6 +41,8 @@ const writeExceptions = new Set([
   // Independent proof permits the caller to enroll or withdraw their own link.
   'POST /api/v1/team/sso/providers/{providerId}/link',
   'DELETE /api/v1/team/sso/providers/{providerId}/link',
+  // A current member can withdraw their own delegated authority without a live proof.
+  'DELETE /api/v1/team/sso/delegations/{bindingId}',
 ])
 
 /** New versioned writes inherit enforcement unless their operation has an exact exception. */

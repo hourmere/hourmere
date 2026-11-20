@@ -165,13 +165,13 @@ function isSlackDestinationPath(path: string): boolean {
   return /^\/api\/v1\/slack-destinations(?:\/|$)/i.test(path)
 }
 
-/** SSO protocol requests and trust writes, including link retirement, carry proof material. */
+/** SSO protocol requests and trust writes carry proof material. */
 function isSsoTrustPath(path: string): boolean {
   try {
     path = decodeURIComponent(path)
   } catch {}
   return (
-    /^\/api\/v1\/team\/sso\/(?:providers|domains)(?:\/|$)/i.test(path) ||
+    /^\/api\/v1\/team\/sso\/(?:providers|domains|delegations)(?:\/|$)/i.test(path) ||
     /^\/api\/auth\/(?:sign-in\/sso|sso\/(?:callback|oidc\/complete))(?:\/|$)/i.test(path)
   )
 }

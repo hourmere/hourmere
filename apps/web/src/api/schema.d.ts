@@ -2315,8 +2315,16 @@ export interface paths {
                                 /** Format: date-time */
                                 createdAt: string;
                                 /** Format: uuid */
+                                credentialId?: string;
+                                /** Format: uuid */
                                 id: string;
                                 organizationName: string;
+                                ssoDelegation?: {
+                                    /** Format: date-time */
+                                    expiresAt: string;
+                                    /** Format: uuid */
+                                    id: string;
+                                };
                             }[];
                         };
                     };
@@ -4836,6 +4844,46 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/team/sso/delegations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bind delegated SSO proof to an owned team credential
+         * @description Requires fresh SSO step-up in the current team. SSO remains unavailable.
+         */
+        post: operations["bindSsoDelegation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/team/sso/delegations/{bindingId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke the caller’s exact SSO delegation
+         * @description Requires a current team browser session. SSO remains unavailable.
+         */
+        delete: operations["revokeSsoDelegation"];
         options?: never;
         head?: never;
         patch?: never;
@@ -18086,6 +18134,177 @@ export interface operations {
                             owner?: "another_owner_is_needed_before_you_can_leave";
                         };
                     };
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    bindSsoDelegation: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for writes and must match the current team. */
+                "X-Expected-Organization-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    credentialId: string;
+                    /** @enum {string} */
+                    credentialKind: "api_key" | "oauth_grant";
+                    expectedTrustGeneration: number;
+                    /** Format: uuid */
+                    proofAttemptId?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Owned delegation ID and expiration */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: date-time */
+                        expiresAt: string;
+                        /** Format: uuid */
+                        id: string;
+                    };
+                };
+            };
+            /** @description invalid_request or sso_oidc_completion_invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied or sso_reauthentication_required sso_required: This team requires a current SSO proof. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoFreshProofChallenge"] | components["schemas"]["Error"];
+                };
+            };
+            /** @description sso_disabled or sso_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed, sso_configuration_changed or sso_domain_unverified */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    revokeSsoDelegation: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for writes and must match the current team. */
+                "X-Expected-Organization-Id"?: string;
+            };
+            path: {
+                bindingId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The exact owned delegation was revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description sso_disabled or sso_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             /** @description The API key's rate limit is used up */

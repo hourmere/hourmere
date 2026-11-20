@@ -122,6 +122,8 @@ const restContract = {
     'POST /api/v1/team/sso/providers/{providerId}/link',
     'DELETE /api/v1/team/sso/providers/{providerId}/link',
     'DELETE /api/v1/team/sso/providers/{providerId}/links/{linkId}',
+    'POST /api/v1/team/sso/delegations',
+    'DELETE /api/v1/team/sso/delegations/{bindingId}',
     'GET /api/v1/organizations/{organizationId}/provisioning-tokens',
     'POST /api/v1/organizations/{organizationId}/provisioning-tokens',
     'POST /api/v1/organizations/{organizationId}/provisioning-tokens/{id}/rotate',

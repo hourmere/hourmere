@@ -24,7 +24,7 @@ import { isUuid } from './organizations.ts'
 
 export const MCP_OAUTH_SCOPE = 'mcp:tools'
 export const MCP_OAUTH_SCOPES = [MCP_OAUTH_SCOPE, 'offline_access']
-const OFFLINE_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000
+export const MCP_OAUTH_CONSENT_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000
 const hashOAuthToken = (token: string) => createHash('sha256').update(token).digest('base64url')
 const invalidGrant = () =>
   new APIError('BAD_REQUEST', {
@@ -113,7 +113,10 @@ async function currentConsent(db: Db, grantId: string, userId: string, clientId?
     .whereRef('c.clientId', '=', 'g.client_id')
     .$if(clientId !== undefined, (q) => q.where('g.client_id', '=', clientId as string))
     .executeTakeFirst()
-  if (!consent || new Date(consent.createdAt).getTime() + OFFLINE_LIFETIME_MS <= Date.now())
+  if (
+    !consent ||
+    new Date(consent.createdAt).getTime() + MCP_OAUTH_CONSENT_LIFETIME_MS <= Date.now()
+  )
     throw invalidGrant()
   return consent
 }
@@ -422,7 +425,7 @@ export function createMcpOAuthResolver({
       .executeTakeFirst()
     if (
       !row ||
-      new Date(row.createdAt).getTime() + OFFLINE_LIFETIME_MS <= Date.now() ||
+      new Date(row.createdAt).getTime() + MCP_OAUTH_CONSENT_LIFETIME_MS <= Date.now() ||
       !Array.isArray(row.scopes) ||
       !row.scopes.includes(MCP_OAUTH_SCOPE) ||
       (scopes.includes('offline_access') && !row.scopes.includes('offline_access')) ||

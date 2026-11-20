@@ -344,6 +344,10 @@ describe.skipIf(!serverUrl)('SSO team read compatibility', () => {
         expect(new TextDecoder().decode(after.bytes), name).toContain(example)
         expect(after, name).toEqual(before)
         expect(policyStatements(), name).toHaveLength(1)
+        expect(
+          statements.some((statement) => statement.includes('sso_delegation_bindings')),
+          name,
+        ).toBe(false)
       }
       const errors = [
         {
@@ -432,6 +436,9 @@ describe.skipIf(!serverUrl)('SSO team read compatibility', () => {
         content: [{ type: 'text', text: '{"error":"sso_required"}' }],
       })
       expect(policyStatements()).toHaveLength(1)
+      expect(statements.some((statement) => statement.includes('sso_delegation_bindings'))).toBe(
+        false,
+      )
     }
 
     statements.length = 0
