@@ -3,6 +3,7 @@ import { parseQuestions } from '@hourmere/scheduling'
 import {
   validateWorkflowDefinition,
   type WorkflowDefinition,
+  type WorkflowValidationContext,
   workflowReferences,
 } from './definition.ts'
 import type { WorkflowOwner } from './ownership.ts'
@@ -14,6 +15,19 @@ export async function validateWorkflowWriteDefinition(
   owner: WorkflowOwner,
   followUpHostNotesEnabled: boolean | undefined,
 ): Promise<WorkflowDefinition> {
+  return validateWorkflowDefinition(
+    candidate,
+    await loadWorkflowDefinitionFacts(trx, candidate, owner, followUpHostNotesEnabled),
+  )
+}
+
+/** Load only the configuration metadata referenced by the candidate. */
+export async function loadWorkflowDefinitionFacts(
+  trx: Db,
+  candidate: WorkflowDefinition,
+  owner: WorkflowOwner,
+  followUpHostNotesEnabled: boolean | undefined,
+): Promise<WorkflowValidationContext> {
   const refs = workflowReferences(candidate)
   const events = refs.eventTypeIds.length
     ? await trx
@@ -40,7 +54,7 @@ export async function validateWorkflowWriteDefinition(
         .forShare()
         .execute()
     : []
-  return validateWorkflowDefinition(candidate, {
+  return {
     owner,
     followUpHostNotesEnabled,
     webhooks: new Map(
@@ -67,5 +81,5 @@ export async function validateWorkflowWriteDefinition(
         },
       ]),
     ),
-  })
+  }
 }

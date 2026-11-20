@@ -10,6 +10,8 @@ import {
   deleteWorkflow,
   getWorkflow,
   listWorkflows,
+  PreviewWorkflowInputSchema,
+  previewWorkflow,
   UpdateWorkflowInputSchema,
   updateWorkflow,
   WORKFLOW_BOOKING_SOURCES,
@@ -17,6 +19,7 @@ import {
   WORKFLOW_PAGE,
   WORKFLOW_RECIPIENT_CLASSES,
   type WorkflowAuditPort,
+  WorkflowPreviewSchema,
   WorkflowTriggerSchema,
 } from '@hourmere/workflows'
 import {
@@ -201,6 +204,10 @@ export const UpdateWorkflowInput = UpdateWorkflowInputSchema.openapi('UpdateWork
 
 export const CreateWorkflowInput = CreateWorkflowInputSchema.openapi('CreateWorkflowInput')
 
+export const WorkflowPreview = WorkflowPreviewSchema.openapi('WorkflowPreview')
+
+export const WORKFLOW_PREVIEW_DESCRIPTION = `${WORKFLOWS_NOT_AVAILABLE} Requires full API-key scope and current personal ownership or team owner/admin access in the active organization. Supply owner, the candidate definition fields and optional synthetic example values. Returns the match outcome, rendered email text and escaped HTML, and static estimates. Preview uses synthetic booking data and makes no deliveries.`
+
 const errors = {
   list: errorResponses({
     400: 'invalid_request or invalid_cursor',
@@ -297,6 +304,45 @@ export function workflowRoutes({
             c.req.valid('json'),
           ),
           201,
+        ),
+    )
+
+    app.openapi(
+      createRoute({
+        method: 'post',
+        path: '/api/v1/workflows/preview',
+        tags: ['Workflows'],
+        operationId: 'previewWorkflow',
+        summary: 'Preview a booking workflow with synthetic data',
+        description: WORKFLOW_PREVIEW_DESCRIPTION,
+        security: authenticated,
+        middleware,
+        request: {
+          headers: z.object({
+            'x-expected-organization-id': z.string().optional().openapi({
+              description:
+                'Required for session requests: the organization where the action opened. Ignored for API keys.',
+            }),
+          }),
+          body: { required: true, content: json(PreviewWorkflowInputSchema) },
+        },
+        responses: {
+          200: { description: 'Synthetic workflow preview', content: json(WorkflowPreview) },
+          ...errorResponses({
+            400: 'invalid_request, invalid_workflow or render_limit',
+            403: 'insufficient_scope or cross-origin session write',
+            404: 'workflows_disabled or workflow_not_found',
+            409: 'organization_context_changed',
+          }),
+        },
+      }),
+      async (c) =>
+        c.json(
+          await previewWorkflow(
+            writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+            c.req.valid('json'),
+          ),
+          200,
         ),
     )
 

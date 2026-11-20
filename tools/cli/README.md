@@ -584,6 +584,19 @@ protection, minimal history and mail charges. All three interfaces remain unavai
 最小历史记录和邮件额度记录。目前功能仍硬关闭，三个接口均返回 `workflows_disabled`，
 MCP 工具列表不显示此工具。
 
+`workflows preview --input FILE|-` takes a JSON candidate with `owner`, `name`, `scope`,
+`trigger`, `actions`, and optional `enabled`, `conditions` and synthetic `example` values.
+It requires a `full` key and current personal owner or team owner/admin access. The response
+reports match results, rendered email and estimates based on published limits. Preview uses
+synthetic booking details and performs no delivery. While workflows are hard-off, the command
+exits `1` with `workflows_disabled` on stderr.
+
+中文：`workflows preview --input FILE|-` 从文件或标准输入读取候选工作流 JSON，包含
+`owner`、`name`、`scope`、`trigger`、`actions`，以及可选的 `enabled`、`conditions`
+和合成示例 `example`。需要 `full` 密钥和当前个人所有者或团队所有者／管理员权限。
+结果包含匹配状态、邮件预览以及根据公开限制计算的估算值。预览使用合成预约数据，
+不会发起投递。工作流硬关闭时，命令退出码为 `1`，并在标准错误输出 `workflows_disabled`。
+
 ## Manage meeting polls
 
 Use `hourmere polls <command> --input -` with a key for the poll's organization.
