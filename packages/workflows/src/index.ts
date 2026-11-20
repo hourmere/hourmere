@@ -58,6 +58,7 @@ export {
   type WorkflowDispatchContext,
   type WorkflowWakePort,
   workflowJobs,
+  workflowWebhookAuditIdentities,
 } from './dispatcher.ts'
 export {
   type RenderedWorkflowEmail,
