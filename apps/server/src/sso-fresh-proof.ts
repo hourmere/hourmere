@@ -37,8 +37,8 @@ export interface FreshProofRequest {
   sessionId: string
   organizationId: string
   operation: string
-  /** Defaults to administration. Mailbox-only proof on an enforced team is for independent local proof. */
-  proofMode?: 'mailbox' | 'sso' | 'administration'
+  /** Trust reduction uses administration proof and points to recovery when step-up is unavailable. */
+  proofMode?: 'mailbox' | 'sso' | 'administration' | 'trust_reduction'
   input: unknown
   /** The operation's input without proofAttemptId. Unknown properties are always refused. */
   schema: z.ZodObject
@@ -61,6 +61,19 @@ interface FreshMailboxProof {
   mailbox: string
   provenAt: string
   expiresAt: string
+}
+
+interface RecoveryAuthority {
+  id: string
+  deadline: string
+  acceptedAt: string
+}
+
+export interface RecoveryProofContext {
+  preflight: boolean
+  enforced: boolean
+  hasProofAttempt: boolean
+  preparedGrantId: string | undefined
 }
 
 /** Nested Zod objects may strip unknown keys; none may silently disappear from the retry. */
@@ -109,7 +122,10 @@ export async function runWithFreshProof<T>(
       trx: Db,
       binding: string,
       now: string,
-    ) => Promise<{ id: string; deadline: string } | undefined>
+      context: RecoveryProofContext,
+    ) => Promise<RecoveryAuthority | undefined>
+    /** A target can be eligible for recovery while remaining unavailable to ordinary proof. */
+    authorizeOrdinary?: () => void
     /** Optional I/O after preflight, outside the transaction. Authority is checked again. */
     prepare?: () => Promise<void>
     mutate: (
@@ -118,6 +134,7 @@ export async function runWithFreshProof<T>(
       browserBinding: string,
       mailboxProof: FreshMailboxProof | undefined,
       attemptId: string,
+      recovery?: RecoveryAuthority,
     ) => Promise<T>
   },
 ): Promise<FreshProofResult<T>> {
@@ -145,6 +162,7 @@ export async function runWithFreshProof<T>(
   const cookie = setCookie === undefined ? {} : { setCookie }
   const clock = deps.now ?? databaseClock
   const prepare = Symbol('prepare')
+  let preparedGrantId: string | undefined
   const run = (prepared: boolean): Promise<FreshProofResult<T> | typeof prepare> =>
     teamWriteTransaction(deps.db.transaction(), async (trx) => {
       // Follow the shared team-write lock order: person, organization, then session/attempt.
@@ -174,22 +192,43 @@ export async function runWithFreshProof<T>(
         AND s."expiresAt" > ${now}::timestamptz`.execute(trx)
       const mailbox = session.rows[0]?.mailbox
       if (!mailbox) throw new HTTPException(403, { message: 'forbidden' })
-      const recovery = await callbacks.consumeRecovery?.(trx, binding, now)
+      const recovery = await callbacks.consumeRecovery?.(trx, binding, now, {
+        preflight: !prepared,
+        enforced: policies[0]?.require_sso === true,
+        hasProofAttempt: proofAttemptId !== undefined,
+        preparedGrantId,
+      })
       if (recovery) {
         const checked = await checkTeamWriteBeforeAuthorityChange(trx, recovery)
-        const value = await callbacks.mutate(trx, input, browserBinding, undefined, recovery.id)
+        if (!prepared) {
+          preparedGrantId = recovery.id
+          return prepare
+        }
+        const value = await callbacks.mutate(
+          trx,
+          input,
+          browserBinding,
+          undefined,
+          recovery.id,
+          recovery,
+        )
         if (checked === undefined)
           await checkTeamWriteDeadline(trx, recovery.deadline, () => {
             throw new DomainError('forbidden', 'sso_required')
           })
         return { status: 'complete', value, ...cookie }
       }
+      callbacks.authorizeOrdinary?.()
       const independentMailbox = request.proofMode === 'mailbox'
       const delegatedSso = request.proofMode === 'sso'
       const policy = policies[0]
       const needsSso = delegatedSso || (!independentMailbox && policy?.require_sso === true)
       const trustGeneration = needsSso ? (policy?.trust_generation ?? 1) : null
-      if (needsSso) requireSsoEnabled(deps.capabilities, 'oidc')
+      if (needsSso) {
+        if (request.proofMode === 'trust_reduction' && !deps.capabilities.ssoOidcEnabled)
+          throw new DomainError('forbidden', 'sso_required')
+        requireSsoEnabled(deps.capabilities, 'oidc')
+      }
       const needsMailbox = !needsSso
       if (proofAttemptId) {
         const { rows } = await sql<{
