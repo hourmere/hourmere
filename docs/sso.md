@@ -1156,6 +1156,24 @@ If another policy or recovery change intervenes, a stale revision returns
 204，不返回团队数据，并通知提名人与受邀者。两个操作均更新策略版本。OIDC 和 SAML 都关闭时，
 两个接口均返回 `404 sso_disabled`。
 
+An accepted recovery owner starts browser recovery with `POST /api/v1/team/sso/recovery/use`.
+Send the current `expectedRevision` and `X-Expected-Organization-Id` from the instance origin.
+Complete the mailbox challenge and retry with `proofAttemptId`. A successful `204` grants
+authority to that browser and session for the remainder of the mailbox proof window. It
+records `sso_recovery.used` and queues a notice for the team's owners. The same proof can
+start recovery once. Provider and policy reads leave the grant available and return only SSO
+configuration when recovery supplies access. An owner can spend it once to turn off
+enforcement with `PUT /api/v1/team/sso/policy` and `requireSso: false`, without enabling
+JIT. The grant ends at the mailbox proof deadline or when the browser loses its session or
+current recovery ownership. Both protocols remain hard-off and the new route returns
+`404 sso_disabled`.
+
+已接受提名的恢复所有者可在当前团队的浏览器会话中启动恢复。请求需带上团队和策略版本，
+并在验证自己的邮箱后使用同一个证明重试。成功返回 `204`，记录审计事件并通知团队所有者。
+恢复授权随邮箱证明一起到期，可反复查看 SSO 配置，或使用一次来关闭强制单点登录。
+授权不能用于启用即时入组或访问其他团队数据。OIDC 和 SAML 均关闭时，接口返回
+`404 sso_disabled`。
+
 `bindSsoDelegation` takes `{credentialKind, credentialId, expectedTrustGeneration,
 proofAttemptId?}`, verifies that the current team member owns the credential and
 that it belongs to the current team, and returns `201` with `{id, expiresAt}`.

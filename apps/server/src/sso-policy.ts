@@ -13,6 +13,7 @@ import {
   currentSsoProviderTestStatus,
 } from './sso-oidc-test-receipts.ts'
 import { authorizeSsoRead, ssoPolicySummary } from './sso-reads.ts'
+import { consumeSsoRecoveryAuthority } from './sso-recovery-use.ts'
 import { EXPECTED_ORGANIZATION_HEADER, organizationContextAccess } from './team-management.ts'
 
 const policyInput = z.strictObject({
@@ -83,6 +84,7 @@ export async function setSsoPolicy(
   principal: Principal,
   headers: Headers,
   input: z.infer<typeof SetSsoPolicyInput>,
+  recoveryRequired = false,
 ) {
   requireSsoEnabled(deps.capabilities)
   if (principal.kind !== 'session' || principal.organization.personal) throw denied()
@@ -95,6 +97,8 @@ export async function setSsoPolicy(
   )
   let before: ReturnType<typeof ssoPolicySummary>
   let domains: ReturnType<typeof policyDomains> | undefined
+  let eligibleForRecovery = false
+  const recoveryDenied = () => new DomainError('forbidden', 'sso_required')
   return runWithFreshProof(
     deps,
     {
@@ -121,6 +125,9 @@ export async function setSsoPolicy(
           .forUpdate()
           .executeTakeFirst()
         before = ssoPolicySummary(stored)
+        const enablesJit = input.admission === 'jit' && before.admission !== 'jit'
+        eligibleForRecovery = before.requireSso && !input.requireSso && !enablesJit
+        if (recoveryRequired && !eligibleForRecovery) throw recoveryDenied()
         if (input.requireSso !== before.requireSso) {
           const member = await trx
             .selectFrom('auth.member')
@@ -133,7 +140,6 @@ export async function setSsoPolicy(
         if (input.expectedRevision !== before.policyRevision)
           throw new DomainError('conflict', 'sso_configuration_changed')
         const enablesEnforcement = input.requireSso && !before.requireSso
-        const enablesJit = input.admission === 'jit' && before.admission !== 'jit'
         if (!enablesEnforcement && !enablesJit) return
         const testedProviders = enablesEnforcement
           ? await getTestedProviders(trx, deps.capabilities, organizationId)
@@ -145,6 +151,13 @@ export async function setSsoPolicy(
         await requireVerifiedDomain(domains)
         if (enablesEnforcement && !(await currentSsoRecoveryOwner(trx, organizationId)))
           throw new DomainError('conflict', 'sso_recovery_required')
+      },
+      consumeRecovery: async (trx, binding, now) => {
+        if (!eligibleForRecovery || (!recoveryRequired && input.proofAttemptId !== undefined))
+          return
+        const authority = await consumeSsoRecoveryAuthority(trx, principal, binding, now)
+        if (!authority && recoveryRequired) throw recoveryDenied()
+        return authority
       },
       mutate: async (trx) => {
         // A verified claim can expire during proof consumption.

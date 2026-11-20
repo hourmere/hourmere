@@ -203,6 +203,12 @@ const GUARDED_SSO_WRITES = [
     runtimePath: '/api/v1/team/sso/recovery/:enrollmentId/accept',
     operationId: 'acceptSsoRecoveryEnrollment',
   },
+  {
+    method: 'post',
+    path: '/api/v1/team/sso/recovery/use',
+    runtimePath: '/api/v1/team/sso/recovery/use',
+    operationId: 'useSsoRecovery',
+  },
 ] as const
 
 function expectNoUnguardedSsoRoutes(paths: string[]) {
@@ -718,6 +724,7 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
     ],
     ['/recovery', { ownerUserId: randomUUID(), expectedRevision: 1 }],
     [`/recovery/${randomUUID()}/accept`, { expectedRevision: 1 }],
+    ['/recovery/use', { expectedRevision: 1 }],
     [`/providers/${randomUUID()}/activation`, { expectedRevision: 1, enabled: true }],
   ])(
     'keeps proof inputs private in validation and request diagnostics for %s',

@@ -2,6 +2,7 @@ import { API_KEY_REST_OPERATIONS } from '@hourmere/auth'
 import type { Context } from 'hono'
 import { createMiddleware } from 'hono/factory'
 import type { CallerEnv } from './caller.ts'
+import { hasSsoRecoveryAuthority } from './sso-recovery-use.ts'
 import {
   requireTeamRead,
   type SsoTeamReadDeps,
@@ -48,10 +49,13 @@ export function teamReadRoute(operation: string) {
     return
   if (operation === 'GET /api/v1/bookings/{id}/organization') return 'resolved_target'
   if (operation === 'GET /api/v1/me') return 'own_summary'
+  if (operation === 'GET /api/v1/team/sso/providers' || operation === 'GET /api/v1/team/sso/policy')
+    return 'sso_configuration'
   return 'active_team'
 }
 
 const checks = new WeakMap<Context, TeamReadCheck>()
+const recoveryReads = new WeakSet<Context>()
 const registered = new WeakSet<object>()
 
 export function isTeamReadMiddleware(handler: object) {
@@ -62,8 +66,12 @@ export function restTeamReadAccess(c: Context) {
   return checks.get(c)
 }
 
+export function isSsoRecoveryRead(c: Context) {
+  return recoveryReads.has(c)
+}
+
 export function teamReadMiddleware(
-  deps: SsoTeamReadDeps,
+  deps: SsoTeamReadDeps & { publicUrl: string },
   route: NonNullable<ReturnType<typeof teamReadRoute>>,
 ) {
   const middleware = createMiddleware<CallerEnv>(async (c, next) => {
@@ -72,8 +80,20 @@ export function teamReadMiddleware(
     checks.set(c, check)
     // The booking handoff first resolves its authorized target. The browser's own
     // summary uses the access decision to limit its projection during enrollment.
-    if (route === 'active_team' || (route === 'own_summary' && principal.kind !== 'session'))
+    if (route === 'sso_configuration') {
+      const access = await check()
+      if (
+        !access.allowed &&
+        (await hasSsoRecoveryAuthority(deps.db, principal, c.req.raw.headers, deps.publicUrl))
+      )
+        recoveryReads.add(c)
+      else requireTeamRead(access)
+    } else if (
+      route === 'active_team' ||
+      (route === 'own_summary' && principal.kind !== 'session')
+    ) {
       requireTeamRead(await check())
+    }
     await next()
   })
   registered.add(middleware)

@@ -1138,10 +1138,7 @@ describe.skipIf(!databaseUrl)('SSO mailbox proof', () => {
       [
         'cleanup',
         'cleanup deletes consumed attempts',
-        [
-          'WHERE consumed_at IS NOT NULL OR expires_at <= clock_timestamp()',
-          'WHERE expires_at <= clock_timestamp()',
-        ],
+        ['OR (consumed_at IS NOT NULL AND (', 'OR (false AND ('],
       ],
       // biome-ignore lint/suspicious/noTemplateCurlyInString: exact source-copy mutation anchor.
       ['cleanup', 'cleanup is bounded', ['        LIMIT ${limit}\n', '\n']],

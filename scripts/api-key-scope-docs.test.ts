@@ -216,6 +216,7 @@ describe('published API key scope tables', () => {
         'DELETE /api/v1/team/sso/delegations/{bindingId}',
         'POST /api/v1/team/sso/recovery',
         'POST /api/v1/team/sso/recovery/{enrollmentId}/accept',
+        'POST /api/v1/team/sso/recovery/use',
       ])
         expect(document).toContain(`| \`${operation}\` | Browser session only | — |`)
     }
@@ -236,6 +237,7 @@ describe('published API key scope tables', () => {
       'revoke_sso_delegation',
       'configure_sso_recovery',
       'accept_sso_recovery_enrollment',
+      'use_sso_recovery',
     ])
       expect(API_KEY_MCP_OPERATIONS.some((operation) => operation.tool === tool)).toBe(false)
   })

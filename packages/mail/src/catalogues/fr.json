@@ -73,6 +73,8 @@
   "ssoRecovery.nominated.message": "Un propriétaire d’équipe vous a proposé pour la récupération de l’authentification unique. Ouvrez Hourmere dans les 72 heures pour consulter la proposition. Pour l’accepter, vous devez confirmer séparément votre adresse e-mail.",
   "ssoRecovery.enrolled.subject": "Proposition de récupération de l’authentification unique acceptée",
   "ssoRecovery.enrolled.message": "Un propriétaire d’équipe a accepté une proposition de récupération de l’authentification unique. Si ce changement vous surprend, contactez l’administration de votre équipe.",
+  "ssoRecovery.used.subject": "La récupération de l’authentification unique a été utilisée",
+  "ssoRecovery.used.message": "Un propriétaire d’équipe a confirmé sa boîte mail et lancé la récupération de l’authentification unique. Si cette activité vous surprend, contactez l’administration de votre équipe.",
   "teamInvitation.defaultTeam": "Votre équipe",
   "teamInvitation.defaultInviter": "Un membre de l’équipe",
   "teamInvitation.subject": "Invitation à rejoindre {team}",

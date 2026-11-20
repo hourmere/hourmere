@@ -43,6 +43,8 @@ const writeExceptions = new Set([
   'DELETE /api/v1/team/sso/providers/{providerId}/link',
   // The nominee proves their own mailbox and learns nothing about the team.
   'POST /api/v1/team/sso/recovery/{enrollmentId}/accept',
+  // A current recovery owner proves their own mailbox to obtain limited recovery authority.
+  'POST /api/v1/team/sso/recovery/use',
   // A current member can withdraw their own delegated authority without a live proof.
   'DELETE /api/v1/team/sso/delegations/{bindingId}',
 ])

@@ -165,7 +165,7 @@ function isSlackDestinationPath(path: string): boolean {
   return /^\/api\/v1\/slack-destinations(?:\/|$)/i.test(path)
 }
 
-/** SSO protocol requests and trust writes carry proof material. */
+/** SSO protocol requests and trust writes (including recovery use) carry proof material. */
 function isSsoTrustPath(path: string, method: string): boolean {
   try {
     path = decodeURIComponent(path)
@@ -444,7 +444,7 @@ export function createApp({
     app,
     resolveCaller,
     apiNotFound,
-    ssoTeamReads,
+    ssoTeamReads && { ...ssoTeamReads, publicUrl },
   )
   // Logs one line with control characters escaped: error text can carry request input
   // (e.g. Postgres echoing a malformed value) and must not be able to forge log lines.
