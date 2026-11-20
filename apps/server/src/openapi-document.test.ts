@@ -167,6 +167,8 @@ it('attaches the team proof middleware to every private team write in the server
       'POST /api/v1/workflows',
       'PATCH /api/v1/workflows/:id',
       'DELETE /api/v1/workflows/:id',
+      // Authorizes as a write and reads live team configuration, but persists nothing.
+      'POST /api/v1/workflows/preview',
     ]),
   )
 
