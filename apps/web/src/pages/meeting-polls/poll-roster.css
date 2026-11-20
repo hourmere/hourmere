@@ -8,7 +8,7 @@
 
 .poll-roster-entry {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-3);
   align-items: start;
   padding-block: var(--space-3);
@@ -27,7 +27,7 @@
 
 .poll-invite-row {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-3);
   align-items: end;
   min-inline-size: 0;
@@ -38,13 +38,16 @@
   max-inline-size: 100%;
 }
 
-@media (max-width: 640px) {
-  .poll-roster-entry,
-  .poll-invite-row {
-    grid-template-columns: minmax(0, 1fr);
+.poll-invite-row > .button {
+  justify-self: start;
+}
+
+@media (min-width: 640px) {
+  .poll-roster-entry {
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .poll-invite-row > .button {
-    justify-self: start;
+  .poll-invite-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
   }
 }
