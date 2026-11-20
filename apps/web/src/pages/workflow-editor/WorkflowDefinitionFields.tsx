@@ -181,7 +181,7 @@ export function WorkflowTranslations({
               <button
                 className="button button-small"
                 type="button"
-                aria-label={t('Remove {language} translation', { language: label })}
+                aria-label={t('Remove translation for {language}', { language: label })}
                 onClick={() => {
                   const next = { ...content }
                   delete next[code]

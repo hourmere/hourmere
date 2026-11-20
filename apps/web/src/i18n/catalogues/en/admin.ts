@@ -2579,7 +2579,7 @@ export const admin = {
   'Custom body': 'Custom body',
   'Add language': 'Add language',
   'Add translation': 'Add translation',
-  'Remove {language} translation': 'Remove {language} translation',
+  'Remove translation for {language}': 'Remove translation for {language}',
   'Remove translation': 'Remove translation',
   'Replace saved custom text with built-in text': 'Replace saved custom text with built-in text',
   'Create workflow': 'Create workflow',

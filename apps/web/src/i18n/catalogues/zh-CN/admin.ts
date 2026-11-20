@@ -2459,7 +2459,7 @@ export const admin = {
   'Custom body': '自定义正文',
   'Add language': '添加语言',
   'Add translation': '添加译文',
-  'Remove {language} translation': '移除{language}译文',
+  'Remove translation for {language}': '移除译文（{language}）',
   'Remove translation': '移除译文',
   'Replace saved custom text with built-in text': '将已保存的自定义内容替换为内置模板',
   'Create workflow': '创建工作流',
