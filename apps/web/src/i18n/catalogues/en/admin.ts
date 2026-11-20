@@ -2517,6 +2517,7 @@ export const admin = {
   // SSO recovery enrollment
   'This team must retain at least one recovery owner while SSO is enforced.':
     'This team must retain at least one recovery owner while SSO is enforced.',
+
   // Booking workflows
   'Loading workflows…': 'Loading workflows…',
   'No workflows yet.': 'No workflows yet.',

@@ -2399,6 +2399,7 @@ export const admin = {
   // SSO recovery enrollment
   'This team must retain at least one recovery owner while SSO is enforced.':
     '团队启用强制单点登录时，必须保留至少一位恢复所有者。',
+
   // Booking workflows
   'Loading workflows…': '正在加载工作流…',
   'No workflows yet.': '暂无工作流。',

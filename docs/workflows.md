@@ -31,10 +31,10 @@ claimed for the internal attempt service. The email attempt resolves the capture
 revision under the marker transaction, rechecks live booking and workflow eligibility and
 resolves the current host-text policy. Dispatcher and repair entry points are no-ops while
 hard-off, and production registers no workflow worker. The wake port requires transactional
-enqueueing deduplicated by run ID; its production adapter belongs with later worker wiring. The
-retention worker is still planned. Guarded workflow run history reads and the app's workflow
-list, lifecycle actions, editor, preview and run history are in place.
+enqueueing deduplicated by run ID; its production adapter belongs with later worker wiring. No retention
+worker exists yet. Step 16a adds the guarded workflow run history reads.
 Definition changes and previews use the shared audit journal inside their transactions.
+The app's workflow list, lifecycle actions, editor, preview and run history are in place.
 Decisions below are Hourmere decisions unless explicitly
 attributed to another product. Existing reminders and follow-ups remain available.
 
