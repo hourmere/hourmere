@@ -79,6 +79,10 @@ export const WorkflowEditorPage = lazy(() =>
     default: m.WorkflowEditorPage,
   })),
 )
+export const WorkflowRunHistoryPage = page(
+  () => import('./pages/WorkflowRunHistoryPage.tsx'),
+  (m) => m.default,
+)
 export const MeetingPollCreatePage = page(
   () => import('./pages/meeting-polls/MeetingPollCreate.tsx'),
   (m) => m.MeetingPollCreatePage,

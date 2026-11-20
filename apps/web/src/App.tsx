@@ -53,6 +53,7 @@ import {
   TeamBookingsPage,
   TroubleshootPage,
   WorkflowEditorPage,
+  WorkflowRunHistoryPage,
   WorkflowsPage,
 } from './lazy-pages.tsx'
 import { BookingPanelContext } from './pages/bookings/BookingPanel.tsx'
@@ -93,8 +94,9 @@ export const appRoutes = createRoutesFromElements(
           <Route path="meeting-polls/new" element={<MeetingPollCreatePage />} />
           <Route path="meeting-polls/:id" element={<HostMeetingPollRoute />} />
           <Route path={PATHS.workflows} element={<WorkflowRoute />} />
-          <Route path={PATHS.newWorkflow} element={<WorkflowRoute editor />} />
-          <Route path={`${PATHS.workflows}/:id/edit`} element={<WorkflowRoute editor />} />
+          <Route path={PATHS.newWorkflow} element={<WorkflowRoute view="editor" />} />
+          <Route path={`${PATHS.workflows}/:id/edit`} element={<WorkflowRoute view="editor" />} />
+          <Route path={`${PATHS.workflows}/:id/runs`} element={<WorkflowRoute view="history" />} />
           <Route path="team/bookings" element={<TeamBookingsPage />} />
           <Route path="analytics" element={<AnalyticsPage />} />
           <Route path="bookings/:id" element={<BookingDetailPage />} />
@@ -134,18 +136,17 @@ export const appRoutes = createRoutesFromElements(
   </>,
 )
 
-function WorkflowRoute({ editor = false }: { editor?: boolean }) {
+function WorkflowRoute({ view = 'list' }: { view?: 'list' | 'editor' | 'history' }) {
   const { workflowsEnabled, followUpHostNotesEnabled } = useOutletContext<{
     workflowsEnabled: boolean | undefined
     followUpHostNotesEnabled: boolean
   }>()
   if (workflowsEnabled === undefined) return <PageSkeleton />
   if (!workflowsEnabled) return <AppNotFoundPage />
-  return editor ? (
-    <WorkflowEditorPage followUpHostNotesEnabled={followUpHostNotesEnabled} />
-  ) : (
-    <WorkflowsPage />
-  )
+  if (view === 'editor')
+    return <WorkflowEditorPage followUpHostNotesEnabled={followUpHostNotesEnabled} />
+  if (view === 'history') return <WorkflowRunHistoryPage />
+  return <WorkflowsPage />
 }
 
 const routingFormRoutes = createRoutesFromElements(

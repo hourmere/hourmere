@@ -92,28 +92,33 @@ describe('workflow discovery in the app shell', () => {
     expect(api.to('GET /api/v1/workflows')).toHaveLength(0)
   })
 
-  it.each([false, undefined])(
-    'handles the direct route as absent when discovery returns %s',
-    async (flag) => {
-      const discovery = later()
-      const api = fakeApi({
-        ...signedIn,
-        'GET /api/v1/instance': () => discovery.response,
-      })
-      renderApp('/app/workflows')
+  describe.each(['/workflows', '/workflows/00000000-0000-4000-8000-000000000001/runs'])(
+    'direct access to %s',
+    (path) => {
+      it.each([false, undefined])(
+        'keeps the page hidden when discovery returns %s',
+        async (flag) => {
+          const discovery = later()
+          const api = fakeApi({
+            ...signedIn,
+            'GET /api/v1/instance': () => discovery.response,
+          })
+          renderApp(`/app${path}`)
 
-      await screen.findByRole('status', { name: 'Loading…' })
-      expect(screen.queryByRole('link', { name: 'Workflows' })).toBeNull()
-      expect(api.to('GET /api/v1/workflows')).toHaveLength(0)
-      await discovery.answer(json(200, { termsUrl, workflowsEnabled: flag }))
+          await screen.findByRole('status', { name: 'Loading…' })
+          expect(screen.queryByRole('link', { name: 'Workflows' })).toBeNull()
+          expect(api.to(`GET /api/v1${path}`)).toHaveLength(0)
+          await discovery.answer(json(200, { termsUrl, workflowsEnabled: flag }))
 
-      await screen.findByRole('heading', { name: 'Page not found', level: 1 })
-      expect(screen.getByRole('link', { name: 'Terms of service' }).getAttribute('href')).toBe(
-        termsUrl,
+          await screen.findByRole('heading', { name: 'Page not found', level: 1 })
+          expect(screen.getByRole('link', { name: 'Terms of service' }).getAttribute('href')).toBe(
+            termsUrl,
+          )
+          expect(screen.queryByRole('link', { name: 'Workflows' })).toBeNull()
+          expect(api.to('GET /api/v1/instance')).toHaveLength(1)
+          expect(api.to(`GET /api/v1${path}`)).toHaveLength(0)
+        },
       )
-      expect(screen.queryByRole('link', { name: 'Workflows' })).toBeNull()
-      expect(api.to('GET /api/v1/instance')).toHaveLength(1)
-      expect(api.to('GET /api/v1/workflows')).toHaveLength(0)
     },
   )
 

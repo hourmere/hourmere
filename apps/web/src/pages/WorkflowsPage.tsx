@@ -7,7 +7,7 @@ import { PageHeader } from '../components/PageHeader.tsx'
 import { PageSkeleton } from '../components/PageSkeleton.tsx'
 import { useLoad, usePageTitle } from '../hooks.ts'
 import { useI18n } from '../i18n/runtime.tsx'
-import { PATHS, workflowEditPath } from '../paths.ts'
+import { PATHS, workflowEditPath, workflowRunHistoryPath } from '../paths.ts'
 import { useMe, useSession } from '../session.tsx'
 import { useTeamManagementAccess } from '../team-management.tsx'
 
@@ -342,13 +342,22 @@ function WorkflowListPage({
               ) : (
                 <div className="card-actions">
                   {selection === null && (
-                    <Link
-                      className="button button-small"
-                      to={workflowEditPath(workflow.id)}
-                      aria-label={t('Edit {name}', { name: workflow.name })}
-                    >
-                      {t('Edit')}
-                    </Link>
+                    <>
+                      <Link
+                        className="button button-small"
+                        to={workflowRunHistoryPath(workflow.id)}
+                        aria-label={t('Run history for {name}', { name: workflow.name })}
+                      >
+                        {t('Run history')}
+                      </Link>
+                      <Link
+                        className="button button-small"
+                        to={workflowEditPath(workflow.id)}
+                        aria-label={t('Edit {name}', { name: workflow.name })}
+                      >
+                        {t('Edit')}
+                      </Link>
+                    </>
                   )}
                   {([workflow.enabled ? 'disable' : 'enable', 'delete'] as const).map((action) => (
                     <button

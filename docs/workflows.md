@@ -946,6 +946,25 @@ current version before trying to save again.
 其他示例。预览只展示结果，不会保存更改。
 新建的工作流默认禁用。如果其他编辑已更新版本，请先核对最新版本再尝试保存。
 
+### View workflow run history in the app
+
+When workflows are available, choose **Run history** next to a workflow in the current
+space. Personal workflows are visible to their owner, and team history is available to
+current team owners and admins. History lists runs finished in the past 30 days, newest
+first. Use **Next page** or **Previous page** to browse older or newer records.
+
+Each entry shows the trigger, workflow revision, scheduled and finish times, run outcome
+and any recorded reason, such as the mail budget limit. Email counts report sends,
+rejections, attempts with an unknown send outcome, and skipped recipients.
+
+中文：功能开放后，可在当前空间的工作流列表中选择 **执行历史**。个人工作流仅限所有者查看，
+团队工作流的执行历史仅限当前团队所有者和管理员查看。历史按结束时间从新到旧列出最近 30 天内
+已结束的执行，可用 **下一页** 或 **上一页** 浏览。
+
+每条记录显示触发时机、工作流版本、计划执行时间、结束时间和执行结果。如果记录了原因，
+例如达到邮件发送额度上限，页面也会显示。邮件统计按已发送、被拒绝、已尝试发送但结果未知，
+以及已跳过的收件人分类计数。
+
 ## Rollout and limitations
 
 [Release tags can select main commits](../.github/workflows/release.yml), so an environment

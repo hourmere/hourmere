@@ -38,6 +38,13 @@ import {
   type WorkflowEditorAuditPageId,
   workflowEditorAuditPages,
 } from './workflow-editor-audit.ts'
+import {
+  isWorkflowRunHistoryAuditPage,
+  leavePendingWorkflowRunHistoryAudit,
+  openWorkflowRunHistoryAuditPage,
+  type WorkflowRunHistoryAuditPageId,
+  workflowRunHistoryAuditPages,
+} from './workflow-run-history-audit.ts'
 
 const pollAuditPages = [
   { id: 'poll-unavailable', title: 'Unavailable meeting poll' },
@@ -64,6 +71,7 @@ export const auditPages = [
   ...routingFormAuditPages,
   ...workflowAuditPages,
   ...workflowEditorAuditPages,
+  ...workflowRunHistoryAuditPages,
   { id: 'host', title: 'Public host' },
   { id: 'booking', title: 'Public booking' },
   { id: 'booking-form', title: 'Booking form' },
@@ -238,20 +246,29 @@ export async function openAuditPage(
     await leavePendingHostPollAudit(page, app.url)
     await leavePendingWorkflowAudit(page, app.url)
     await leavePendingWorkflowEditorAudit(page, app.url)
+    await leavePendingWorkflowRunHistoryAudit(page, app.url)
     // Earlier audit states create real bookings; pin the calendar and list filters
     // before navigation so later pages never inherit wall-clock-dependent rows.
     await page.clock.setFixedTime(new Date(AUDIT_NOW))
-    if (isWorkflowAuditPage(id) || isWorkflowEditorAuditPage(id)) {
+    if (
+      isWorkflowAuditPage(id) ||
+      isWorkflowEditorAuditPage(id) ||
+      isWorkflowRunHistoryAuditPage(id)
+    ) {
       await app.auditSignIn(
         true,
         locale,
-        id === 'team-workflows' || id === 'team-workflow-edit' ? 'team' : undefined,
+        id === 'team-workflows' || id === 'team-workflow-edit' || id === 'team-workflow-run-history'
+          ? 'team'
+          : undefined,
       )
       await page.addInitScript(prepareAuditLocale, locale)
       const language = locale === 'zh-CN' ? locale : 'en'
       const path = isWorkflowAuditPage(id)
         ? await openWorkflowAuditPage(page, app, id, language)
-        : await openWorkflowEditorAuditPage(page, app, id, language)
+        : isWorkflowEditorAuditPage(id)
+          ? await openWorkflowEditorAuditPage(page, app, id, language)
+          : await openWorkflowRunHistoryAuditPage(page, app, id, language)
       verifyAuditPath(page.url(), path)
       await page.evaluate(() => window.scrollTo(0, 0))
       await page.evaluate(settleAuditLayout)
@@ -291,6 +308,7 @@ export async function openAuditPage(
         | RoutingFormAuditPageId
         | WorkflowAuditPageId
         | WorkflowEditorAuditPageId
+        | WorkflowRunHistoryAuditPageId
       >,
       string
     > = {
