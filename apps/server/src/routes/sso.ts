@@ -29,6 +29,12 @@ export const SsoProviderPage = z
             status: z.string(),
           }),
         ),
+        links: z
+          .array(z.object({ id: z.uuid(), generation: z.int().positive() }))
+          .optional()
+          .openapi({
+            description: 'Opaque link IDs and generations for browser-session recovery.',
+          }),
       }),
     ),
     nextCursor: z.string().nullable(),
@@ -63,7 +69,7 @@ export function ssoRoutes(deps: SsoReadDeps): RouteModule {
         tags: ['SSO'],
         summary: 'List safe SSO provider drafts for the current team',
         description:
-          'Owner/admin only; read/full API key or authorized MCP OAuth. SSO is being built and is not available yet. Follow nextCursor for all providers. Configuration, secrets, raw metadata and identities are never returned. Objects and status strings may gain values.',
+          'Owner/admin only; read/full API key or authorized MCP OAuth. SSO is being built and is not available yet. Follow nextCursor for all providers. Opaque links and generations are only returned to browser sessions. Configuration, secrets, raw metadata and identity claims are never returned. Objects and status strings may gain values.',
         security: authenticated,
         middleware: [enabled, caller] as const,
         request: {
@@ -85,6 +91,7 @@ export function ssoRoutes(deps: SsoReadDeps): RouteModule {
           await listSsoProviders(deps, c.var.principal, {
             ...query,
             limit: queryLimit(query.limit),
+            includeRecoveryLinks: !c.req.raw.headers.has('authorization'),
           }),
           200,
         )

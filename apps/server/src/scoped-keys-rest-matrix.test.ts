@@ -186,6 +186,8 @@ const classes = {
     'DELETE /api/v1/team/sso/providers/{providerId}',
     'POST /api/v1/team/sso/providers/{providerId}/test',
     'POST /api/v1/team/sso/providers/{providerId}/link',
+    'DELETE /api/v1/team/sso/providers/{providerId}/link',
+    'DELETE /api/v1/team/sso/providers/{providerId}/links/{linkId}',
     'GET /api/v1/organizations/{organizationId}/provisioning-tokens',
     'POST /api/v1/organizations/{organizationId}/provisioning-tokens',
     'POST /api/v1/organizations/{organizationId}/provisioning-tokens/{id}/rotate',
@@ -484,6 +486,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
         path = path
           .replaceAll('{id}', randomUUID())
           .replaceAll('{providerId}', randomUUID())
+          .replaceAll('{linkId}', randomUUID())
           .replaceAll('{invitationId}', randomUUID())
           .replaceAll('{operationId}', randomUUID())
           .replaceAll('{memberUserId}', owner.user.id)
@@ -991,14 +994,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 177-operation contract and all 531 scope combinations', () => {
+    it('covers the exact 179-operation contract and all 537 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(177)
-      expect(new Set(ids).size).toBe(177)
+      expect(ids).toHaveLength(179)
+      expect(new Set(ids).size).toBe(179)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(531)
+      expect(cases).toHaveLength(537)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {

@@ -24,7 +24,9 @@ export const MeSso = z
         expiresAt: z.iso.datetime(),
       }),
     ),
-    links: z.array(z.object({ id: z.uuid(), providerId: z.uuid() })),
+    links: z.array(
+      z.object({ id: z.uuid(), providerId: z.uuid(), generation: z.int().positive() }),
+    ),
     proofs: z.array(z.object({ providerId: z.uuid(), expiresAt: z.iso.datetime() })),
   })
   .openapi('MeSso', {
@@ -101,11 +103,11 @@ export async function readSsoMe(
         ORDER BY a.id
       )) AS attempts,
       to_json(ARRAY(
-        SELECT json_build_object('id', l.id, 'providerId', l.provider_id)
+        SELECT json_build_object('id', l.id, 'providerId', l.provider_id, 'generation', l.generation)
         FROM sso_identity_links l
         JOIN sso_providers p ON p.id = l.provider_id AND p.organization_id = l.organization_id
         WHERE l.user_id = c.user_id AND l.organization_id = c.organization_id
-          AND l.retired_at IS NULL AND p.protocol = 'oidc'
+          AND l.retired_at IS NULL AND p.protocol = 'oidc' AND p.retired_at IS NULL
         ORDER BY l.id
       )) AS links,
       to_json(ARRAY(

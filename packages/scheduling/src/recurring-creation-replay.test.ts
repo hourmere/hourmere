@@ -179,15 +179,22 @@ describe.skipIf(!serverUrl)('recurring creation receipts and admission on Postgr
     ).toEqual([])
   })
 
-  it.each(['google_meet', 'zoom'])('refuses automatic %s before any admission', async (kind) => {
+  it.each([
+    ['google_meet', 'automatic_meet'],
+    ['zoom', 'automatic_zoom'],
+  ])('preserves automatic %s eligibility before admission commits', async (kind, code) => {
     const s = await setup({ location: { kind, autoCreate: true } })
+    const request = s.request()
+    await expect(createPublicBookingSeries(s.ctx, request, enabled)).rejects.toMatchObject({
+      code: `${code}_disabled`,
+    })
     await expect(
       createPublicBookingSeries(
         { ...s.ctx, automaticMeet: true, automaticZoom: true },
-        s.request(),
+        request,
         enabled,
       ),
-    ).rejects.toMatchObject({ code: 'recurrence_not_supported' })
+    ).rejects.toMatchObject({ code: `${code}_unavailable` })
     expect(await s.admissions()).toEqual([])
     expect(
       await db

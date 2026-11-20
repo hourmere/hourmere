@@ -283,13 +283,21 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
       expect(imports()).toHaveLength(1)
       const managed = await getManagedBooking(ctx, b.manageToken as string)
       expect(managed.location?.url).toBe(outcome === 'success' ? JOIN : undefined)
-      await sendBookingNotification(
-        mail(),
-        b.booking.id,
-        outcome === 'success' ? 'confirmed' : 'conference_failed',
-      )
+      const notice = db
+        .selectFrom('booking_conference_notifications')
+        .select(['kind', 'due_at', 'delivered'])
+        .where('booking_id', '=', b.booking.id)
+      expect(await notice.execute()).toEqual([
+        {
+          kind: outcome === 'success' ? 'confirmed' : 'conference_failed',
+          due_at: future(),
+          delivered: false,
+        },
+      ])
+      await dispatchConferenceNotifications(mail())
       expect(sent).toHaveLength(2)
       expect(sent.every((message) => !!message.attachments?.length)).toBe(outcome === 'success')
+      expect(await notice.executeTakeFirstOrThrow()).toMatchObject({ delivered: true })
       const snapshot = await db
         .selectFrom('bookings')
         .select('location_option')

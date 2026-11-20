@@ -67,6 +67,8 @@
   "mailboxProof.expiry": "此链接将在 {minutes} 分钟后过期，仅能使用一次，且只能在申请确认的浏览器中使用。如果你没有申请确认，可以忽略此邮件。",
   "mailboxProof.fallback": "如果按钮无法使用，请将此链接复制到浏览器中：",
   "mailboxProof.footer": "你收到此邮件是因为有人请求 Hourmere 确认此电子邮件地址。",
+  "ssoLinkRemoval.subject": "单点登录关联已解除",
+  "ssoLinkRemoval.message": "您的 Hourmere 账户有一项单点登录关联已解除。您仍可使用邮箱登录。如果您没有预期此变更，请联系团队管理员。",
   "teamInvitation.defaultTeam": "你的团队",
   "teamInvitation.defaultInviter": "团队成员",
   "teamInvitation.subject": "邀请你加入团队：{team}",

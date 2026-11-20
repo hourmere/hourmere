@@ -10,6 +10,7 @@ import {
   type SeriesEmailRecipient,
   seriesBookingEmail,
 } from '@hourmere/mail'
+import { seriesConfirmationDeadline } from '@hourmere/scheduling/series-confirmation'
 import { sql } from 'kysely'
 import { z } from 'zod'
 import {
@@ -50,13 +51,27 @@ interface Action {
 function claimSeriesNotification(db: Db, now: Date, leaseId: string) {
   // Claim only the intent. Recipient transactions and SMTP run after this commits.
   // An expired final lease is terminal even if its worker crashed.
+  const conferenceDeadline = seriesConfirmationDeadline(
+    sql.ref('intent.organization_id'),
+    sql.ref('intent.series_id'),
+    sql.ref('s.created_at'),
+    now,
+  )
   return sql<Action>`
     WITH next AS (
-      SELECT id FROM booking_series_notifications
-      WHERE row_type = 'outbox' AND kind IN ('confirmation', 'cancellation')
-        AND outbox_state = 'pending' AND due_at <= ${now}
-        AND (lease_until IS NULL OR lease_until <= ${now})
-      ORDER BY due_at, id LIMIT 1 FOR UPDATE SKIP LOCKED
+      SELECT intent.id FROM booking_series_notifications intent
+      JOIN booking_series s ON (s.organization_id, s.id) = (intent.organization_id, intent.series_id)
+      WHERE intent.row_type = 'outbox' AND intent.kind IN ('confirmation', 'cancellation')
+        AND intent.outbox_state = 'pending'
+        AND (intent.lease_until IS NULL OR intent.lease_until <= ${now})
+        AND (
+          intent.due_at <= ${now}
+          OR (
+            intent.kind = 'confirmation' AND intent.attempts = 0 AND s.created_at <= ${now}
+            AND COALESCE(${conferenceDeadline} <= ${now}, true)
+          )
+        )
+      ORDER BY intent.due_at, intent.id LIMIT 1 FOR UPDATE OF intent SKIP LOCKED
     )
     UPDATE booking_series_notifications n SET
       outbox_state = CASE WHEN n.attempts >= ${MAX_ATTEMPTS} THEN 'exhausted' ELSE 'pending' END,
