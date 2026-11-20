@@ -149,6 +149,49 @@ it('covers every requested real page and limits en-GB to the booking page', () =
     'routing-manager-rules-fields-denied',
     'routing-manager-rules-fields-error',
     'routing-manager-rules-invalid-mapping',
+    'workflows',
+    'team-workflows',
+    'workflows-empty',
+    'workflows-loading',
+    'workflows-forbidden',
+    'workflows-error',
+    'workflows-enable-confirm',
+    'workflows-disable-confirm',
+    'workflows-delete-confirm',
+    'workflows-updating',
+    'workflows-enabled',
+    'workflows-disabled',
+    'workflows-deleted',
+    'workflows-stale',
+    'workflows-context-changed',
+    'workflows-unavailable',
+    'workflows-update-error',
+    'workflow-create',
+    'team-workflow-edit',
+    'workflow-edit-built-in',
+    'workflow-edit-loading',
+    'workflow-edit-forbidden',
+    'workflow-edit-error',
+    'workflow-webhooks-loading',
+    'workflow-webhooks-empty',
+    'workflow-webhooks-forbidden',
+    'workflow-webhooks-error',
+    'workflow-preview-loading',
+    'workflow-preview',
+    'workflow-preview-fallback',
+    'workflow-preview-scope-mismatch',
+    'workflow-preview-condition-false',
+    'workflow-preview-error',
+    'workflow-save-pending',
+    'workflow-save-stale',
+    'workflow-save-context-changed',
+    'workflow-save-error',
+    'workflow-run-history',
+    'team-workflow-run-history',
+    'workflow-run-history-empty',
+    'workflow-run-history-loading',
+    'workflow-run-history-error',
+    'workflow-run-history-forbidden',
     'host',
     'booking',
     'booking-form',
@@ -276,6 +319,11 @@ const routingManagerAuditUrl = pathToFileURL(
   resolve('tools/e2e/routing-form-manager-audit.ts'),
 ).href
 const hostPollAuditUrl = pathToFileURL(resolve('tools/e2e/host-meeting-poll-audit.ts')).href
+const workflowAuditUrl = pathToFileURL(resolve('tools/e2e/workflow-audit.ts')).href
+const workflowEditorAuditUrl = pathToFileURL(resolve('tools/e2e/workflow-editor-audit.ts')).href
+const workflowRunHistoryAuditUrl = pathToFileURL(
+  resolve('tools/e2e/workflow-run-history-audit.ts'),
+).href
 const visualSource = readFileSync('tools/e2e/specs/visual.spec.ts', 'utf8')
 const fixtureSource = readFileSync('tools/e2e/fixtures.ts', 'utf8')
 const shellSource = readFileSync('apps/web/src/components/AppShell.tsx', 'utf8')
@@ -346,7 +394,10 @@ function sourceCopyResult(
     pages
       .replace("'./routing-form-audit.ts'", JSON.stringify(routingAuditUrl))
       .replace("'./routing-form-manager-audit.ts'", JSON.stringify(routingManagerAuditUrl))
-      .replace("'./host-meeting-poll-audit.ts'", JSON.stringify(hostPollAuditUrl)),
+      .replace("'./host-meeting-poll-audit.ts'", JSON.stringify(hostPollAuditUrl))
+      .replace("'./workflow-audit.ts'", JSON.stringify(workflowAuditUrl))
+      .replace("'./workflow-editor-audit.ts'", JSON.stringify(workflowEditorAuditUrl))
+      .replace("'./workflow-run-history-audit.ts'", JSON.stringify(workflowRunHistoryAuditUrl)),
   )
   writeFileSync(join(directory, 'visual.spec.ts'), visual)
   writeFileSync(join(directory, 'fixtures.ts'), fixture)
@@ -543,6 +594,23 @@ const expected={
   'routing-manager-rules-fields-denied':{path:routingEditorPath,public:false,space:'team',wait:'testid:routing-booking-fields-denied'},
   'routing-manager-rules-fields-error':{path:routingEditorPath,public:false,space:'team',wait:'testid:routing-booking-fields-error',preview:'stale'},
   'routing-manager-rules-invalid-mapping':{path:routingEditorPath,public:false,space:'team',wait:'rules.0.target.mappings.0.options-error'},
+  'workflows':{path:'/app/workflows',public:false,wait:'SyntheticAppointmentFollowUp'},
+  'team-workflows':{path:'/app/workflows',public:false,space:'team',wait:'SyntheticAppointmentFollowUp'},
+  'workflows-empty':{path:'/app/workflows',public:false,wait:'No workflows yet.'},
+  'workflows-loading':{path:'/app/workflows',public:false,wait:'Loading workflows…'},
+  'workflows-forbidden':{path:'/app/workflows',public:false,wait:'Workflows are unavailable in this space.'},
+  'workflows-error':{path:'/app/workflows',public:false,wait:'Could not load workflows.'},
+  'workflows-enable-confirm':{path:'/app/workflows',public:false,wait:'Enable workflow'},
+  'workflows-disable-confirm':{path:'/app/workflows',public:false,wait:'Disable workflow'},
+  'workflows-delete-confirm':{path:'/app/workflows',public:false,wait:'Delete workflow'},
+  'workflows-updating':{path:'/app/workflows',public:false,wait:'Updating workflow…'},
+  'workflows-enabled':{path:'/app/workflows',public:false,wait:'Workflow enabled.'},
+  'workflows-disabled':{path:'/app/workflows',public:false,wait:'Workflow disabled.'},
+  'workflows-deleted':{path:'/app/workflows',public:false,wait:'Workflow deleted.'},
+  'workflows-stale':{path:'/app/workflows',public:false,wait:'Updated appointment follow-up'},
+  'workflows-context-changed':{path:'/app/workflows',public:false,wait:'Your space changed. Reload before making changes.'},
+  'workflows-unavailable':{path:'/app/workflows',public:false,wait:'This workflow is unavailable.'},
+  'workflows-update-error':{path:'/app/workflows',public:false,wait:'Could not update this workflow.'},
   'booking-form':{path:'/fixture-host/layout-audit',public:true,wait:'.details-step form input[type="email"]'},
   'booking-confirmation':{path:'/fixture-host/layout-audit',public:true,wait:'.confirmation .booking-details'},
   'booking-time-zone':{path:'/fixture-host/layout-audit',public:true,wait:'.tz-panel [role="listbox"]:visible'},

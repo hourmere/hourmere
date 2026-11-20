@@ -215,12 +215,12 @@ not grant host rescheduling or reschedule-request authority through REST, MCP or
   Self-hosters can install its local package; downstream effects need durable idempotency.
 - [Zapier](/docs/zapier) is not yet published in the Zapier directory. The source app
   can be deployed privately with your own Zapier account.
-- Booking workflows are [design only](https://github.com/hourmere/hourmere/blob/main/docs/workflows.md).
-  Conditional email and webhook actions are not available yet, including for self-hosters.
-  During implementation, generated API-key/MCP scope tables, OpenAPI and CLI help may list
-  operations before enablement; those entries will document their disabled behavior.
-  Docker Compose may also forward workflow settings that have no effect until then.
-  Existing reminders, follow-ups and signed booking webhooks keep their current behavior.
+- Booking workflows are hard-off, including on self-hosted instances. The
+  [operating guide](https://github.com/hourmere/hourmere/blob/main/docs/workflows.md) covers
+  the app and the published REST, MCP and CLI operations. These operations return
+  `workflows_disabled` for otherwise authorized calls. Operator opt-in is unavailable,
+  and internal Compose forwards have no effect while hard-off. Existing reminders,
+  follow-ups and signed booking webhooks continue to work.
 - [Cal.com imports](/docs/calcom-import#known-limitations) create inactive drafts and read-only
   local busy records. Same-owner incremental completion is unavailable; group-slot overlaps
   block the batch, while daily/weekly/monthly limit differences are reported as warnings.
