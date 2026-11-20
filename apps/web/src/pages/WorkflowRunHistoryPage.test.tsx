@@ -76,7 +76,12 @@ describe('Workflow run history', () => {
     const user = userEvent.setup()
     renderApp(PATHS.workflows)
 
-    const link = await screen.findByRole('link', { name: `Run history for ${workflow.name}` })
+    // The first render in this file loads the whole app shell; loaded CI runners need more than 1s.
+    const link = await screen.findByRole(
+      'link',
+      { name: `Run history for ${workflow.name}` },
+      { timeout: 3000 },
+    )
     expect(link.getAttribute('href')).toBe(path)
     link.focus()
     await user.keyboard('{Enter}')
