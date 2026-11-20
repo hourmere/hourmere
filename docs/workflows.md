@@ -901,7 +901,7 @@ The web app learns availability from instance discovery. Step 4 adds an optional
 workflows are enabled. It reports the constant and the operator switch together: false
 while hard-off, then the value of `WORKFLOWS_ENABLED` from step 19b. Step 19a computes it
 from the injected operator state. Clients treat an absent field as false. The web app shows
-workflow navigation and routes only when it is true. The planned editor will hide custom
+workflow navigation and routes only when it is true. The editor hides custom
 subject/body fields when `followUpHostNotesEnabled` is false. Under operator-off, recovery
 reads, disable and delete stay available through REST, MCP and CLI; the web app offers no
 separate recovery view in v1.
