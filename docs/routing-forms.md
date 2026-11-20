@@ -354,6 +354,13 @@ cannot reuse a consumed receipt. Keep minimal consumed digest/booking evidence w
 booking for replay, without recoverable token or duplicate answer ciphertext. Rollback
 leaves the receipt unconsumed. Reschedule/cancel do not revive it or send new routing mail.
 
+The internal booking service takes the ordinary organization, host, event and assignment
+locks before locking the form and receipt. It rechecks expiry after those locks and stores
+the pinned routing labels and answers separately from the invitee's final booking responses.
+At creation it omits the after-booking redirect snapshot. A keyed booking indexes the
+fingerprint of the receipt digest and final request on its provenance row. Replay matches
+it against the booking's idempotency key and credential scope without reading a receipt.
+
 Unbooked receipts are inaccessible to form administrators and have no response list/export.
 Erase encrypted answers at expiry, with the bounded cleanup grace above; expired receipts
 are unusable even when cleanup is delayed. Infrastructure outages can delay physical
@@ -490,7 +497,7 @@ cascades. Use composite unique keys/FKs to prevent cross-organization associatio
 | `routing_form_versions` | `id`, `organization_id`, `form_id`, positive `version_number`, immutable `questions`/`rules`/`fallback` JSONB, `published_at`, historical publisher UUID; composite form FK and unique form/version number; unique organization/form/id for pointer FK | form + version number |
 | `routing_target_dependencies` | `organization_id`, `version_id`, rule identity (UUID text or `fallback`), historical `event_type_id`, derived health code/time; composite version FK; no cascading event/user FK; JSON target is authoritative | organization + event_type_id; unique version/rule |
 | `routing_receipts` | `id`, `organization_id`, `form_id`, `version_id`, unique `token_hash`, nullable `answers_ciphertext`, matched/resolved rule identities, resolved target snapshot, `created_at`, `expires_at`, nullable `consumed_booking_id`; composite version/booking FKs; expiry after creation; consumed implies booking and no answer ciphertext | digest unique; partial expiry + id for unconsumed cleanup; partial organization + form + expiry for unconsumed admission counts; consuming booking |
-| `booking_routing` | `booking_id` PK/composite organization FK with cascade, historical form/version UUIDs and version number, matched/resolved rule IDs, immutable question/answer snapshots; no cascading FK to form/version | organization + booking; form/version for authorized maintenance only |
+| `booking_routing` | `booking_id` PK/composite organization FK with cascade, historical form/version UUIDs and version number, matched/resolved rule IDs, immutable question/answer snapshots, optional exact-request replay fingerprint; no cascading FK to form/version | organization + booking; form/version for authorized maintenance only; unique non-null replay fingerprint |
 | `routing_form_operations` (0083) | `id`, `organization_id`, `operation` (`create` or `publish`), historical actor kind (`session`, `api_key` or `oauth`) and actor UUID without FK, `request_id` UUID, 32-byte canonical input fingerprint, result reference (`form_id`, and `version_id` exactly for a publication), `created_at`; composite form and version FKs with cascade; rows reject every update | organization + actor kind + actor + request key unique; organization + form + version unique with nulls not distinct (one creation record per form, one publication record per version) |
 
 Published-version pointers must reference that same form and organization (deferred FK
@@ -617,6 +624,37 @@ transport checks return `routing_forms_disabled` and MCP discovery omits `route_
 还须提供 `slug` 以及 `handle` 或 `teamSlug` 中的一项，并使用已认证的 MCP 连接。CLI 标准输出
 隐藏凭据和链接，`--output FILE` 可将完整响应写入新建的 0600 文件。功能目前硬关闭，通过传输
 检查的调用返回 `routing_forms_disabled`，MCP 工具列表不显示 `route_lead`。
+
+Send `{ routeToken }` to `POST /api/v1/routing-continuations/resolve` to read the
+selected event's current title, duration options, locations and booking questions,
+along with editable `prefill` and the original `expiresAt`. The response may show an
+individual host's display details and leaves out the event's booking address and host pool. Prefill contains only values whose
+saved mappings still fit the current booking fields. To find available times, send
+`{ routeToken, start, end }` to `POST /api/v1/routing-continuations/slots`.
+Use RFC 3339 instants for the range and supply `durationMinutes` or
+`locationOptionId` when selecting a non-default length or location. The response
+contains `slots` from ordinary availability. Reads neither reserve a time nor
+renew or consume the 30-minute capability. Unusable capabilities return
+`routing_unavailable`. The two endpoints share the 120-per-minute client limit
+and accept anonymous requests or a supplied `bookings` or `full` key.
+
+MCP `resolve_routing_continuation` and `find_routed_slots` take the same JSON on an
+authorized MCP connection. In the CLI, use `routing-forms resolve` or
+`routing-forms slots` with `--input -` or `--input FILE`. Keep the token private
+and in the request body. Routing remains hard-off. Calls return
+`routing_forms_disabled` after transport checks, and MCP discovery omits both tools.
+
+中文：向 `POST /api/v1/routing-continuations/resolve` 发送 `{ routeToken }`，读取所选活动的
+当前标题、时长选项、地点、预约问题、可编辑的预填值及原失效时间。响应可显示单主持人的公开信息，
+不包含活动的预约地址或主持人池。
+仅在已保存的映射仍适用于当前预约字段时预填。查询时段使用
+`POST /api/v1/routing-continuations/slots`，在 JSON 中提供凭据和 RFC 3339 格式的
+`start`、`end`。选择非默认时长或地点时可提供 `durationMinutes` 或 `locationOptionId`。
+返回的 `slots` 使用普通预约的可用时段规则。读取不会保留时段，也不会消耗凭据或延长其 30 分钟有效期。
+不可用的凭据统一返回 `routing_unavailable`。两个接口共享每个客户端每分钟 120 次的限额，支持匿名访问，
+提供密钥时须具备 `bookings` 或 `full` 权限。MCP 和 CLI 接受相同的 JSON，CLI 使用
+`routing-forms resolve` 或 `routing-forms slots` 并从标准输入或文件读取。功能目前硬关闭，
+通过传输检查的调用返回 `routing_forms_disabled`，MCP 工具列表不显示这两个工具。
 
 When routing is enabled, invitees open a personal form at `/route/{handle}/{slug}` or
 a team form at `/route/team/{teamSlug}/{slug}`. The page marks optional questions and

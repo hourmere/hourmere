@@ -256,13 +256,14 @@ export async function bindSsoDelegation(
           )
             throw invalidProof()
 
-          // A rebind replaces the owned credential's prior lease, including after an
-          // API key moved teams through its native settings. Revokes still name the old ID.
-          await trx
+          // Revokes still name the old ID when a fresh lease replaces it.
+          const replaced = await trx
             .deleteFrom('sso_delegation_bindings')
             .where(credential.column, '=', input.credentialId)
             .where('user_id', '=', userId)
-            .execute()
+            .returning(['id', 'organization_id', 'provider_id'])
+            .executeTakeFirst()
+          if (replaced) await auditDelegationRevocation(trx, principal, replaced)
           const binding = await trx
             .insertInto('sso_delegation_bindings')
             .values({
@@ -313,6 +314,31 @@ export async function bindSsoDelegation(
   }
 }
 
+async function auditDelegationRevocation(
+  trx: Db,
+  principal: Principal,
+  binding: { id: string; organization_id: string; provider_id: string },
+) {
+  const provider = await trx
+    .selectFrom('sso_providers')
+    .select(['protocol', 'revision'])
+    .where('id', '=', binding.provider_id)
+    .where('organization_id', '=', binding.organization_id)
+    .executeTakeFirstOrThrow()
+  await writeSsoAuditEvent(trx, {
+    ...auditActor(principal),
+    organizationId: binding.organization_id,
+    action: 'sso_delegation.revoked',
+    targetType: 'sso_delegation',
+    targetId: binding.id,
+    details: {
+      method: z.enum(['oidc', 'saml']).parse(provider.protocol),
+      providerId: binding.provider_id,
+      revision: provider.revision,
+    },
+  })
+}
+
 export async function revokeSsoDelegation(
   deps: SsoDelegationDeps,
   principal: Principal,
@@ -329,26 +355,9 @@ export async function revokeSsoDelegation(
       .where('id', '=', bindingId)
       .where('organization_id', '=', organizationId)
       .where('user_id', '=', userId)
-      .returning(['id', 'provider_id'])
+      .returning(['id', 'organization_id', 'provider_id'])
       .executeTakeFirst()
     if (!binding) throw missing()
-    const provider = await trx
-      .selectFrom('sso_providers')
-      .select(['protocol', 'revision'])
-      .where('id', '=', binding.provider_id)
-      .where('organization_id', '=', organizationId)
-      .executeTakeFirstOrThrow()
-    await writeSsoAuditEvent(trx, {
-      ...auditActor(principal),
-      organizationId,
-      action: 'sso_delegation.revoked',
-      targetType: 'sso_delegation',
-      targetId: binding.id,
-      details: {
-        method: z.enum(['oidc', 'saml']).parse(provider.protocol),
-        providerId: binding.provider_id,
-        revision: provider.revision,
-      },
-    })
+    await auditDelegationRevocation(trx, principal, binding)
   })
 }

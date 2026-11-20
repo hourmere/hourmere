@@ -38,6 +38,8 @@ const ungated: Record<string, string> = {
   'mcp:opt_out_meeting_poll_reminder': 'capability link: public poll reminder opt-out',
   'mcp:get_public_routing_form': 'public: published routing form',
   'mcp:route_lead': 'public: published routing form submission',
+  'mcp:resolve_routing_continuation': 'capability link: capability token, no team session',
+  'mcp:find_routed_slots': 'capability link: capability token, no team session',
   'mcp:find_available_slots:personal': 'public: personal booking page slots',
   'mcp:find_available_slots:team': 'public: team booking page slots',
   'mcp:create_booking:personal': 'public: personal booking page',
@@ -115,6 +117,8 @@ it('classifies every registered MCP tool and mode as gated or as a listed except
   // Preview authorizes like a write (writable owner, full scope) and reads live team
   // configuration, but persists nothing: it stays behind the write admission check.
   expect(all.find((unit) => unit.id === 'mcp:preview_workflow')?.gate).toBe('write')
+  // Run history reads a team workflow's retained runs (CLI `workflows runs` calls this tool).
+  expect(all.find((unit) => unit.id === 'mcp:list_workflow_runs')?.gate).toBe('read')
 })
 
 function mcpCall(app: App, key: string, name: string, args: Record<string, unknown>) {

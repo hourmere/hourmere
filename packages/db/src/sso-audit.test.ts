@@ -37,6 +37,7 @@ const spec = (action: SsoAuditAction) =>
     required: readonly SsoAuditDetailKey[]
     optional: readonly SsoAuditDetailKey[]
     outcomes?: readonly string[]
+    reasons?: readonly string[]
   }
 const keysOf = (action: SsoAuditAction) => [...spec(action).required, ...spec(action).optional]
 const sensitive = Object.values(ssoSensitiveValues)
@@ -47,7 +48,7 @@ function valuesFor(action: SsoAuditAction): Record<SsoAuditDetailKey, unknown> {
     providerId: ssoAuditTestId(),
     revision: 12,
     outcome: spec(action).outcomes?.[0],
-    reason: 'signature_invalid',
+    reason: spec(action).reasons?.[0] ?? 'signature_invalid',
     correlationId: ssoAuditTestId(),
   }
 }
@@ -133,6 +134,7 @@ describe('SSO audit catalogue', () => {
         // Recovery enrollment and use.
         'sso_recovery.nominated',
         'sso_recovery.enrolled',
+        'sso_recovery.removed',
         'sso_recovery.used',
         // Operator maintenance commands.
         'sso_maintenance.enforcement_disabled',

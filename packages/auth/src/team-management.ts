@@ -1,6 +1,7 @@
 import type { Db } from '@hourmere/db'
 import { sql } from 'kysely'
 import type { Principal } from './caller.ts'
+import { ssoRecoveryOwner } from './sso-recovery-membership.ts'
 
 export interface TeamManager {
   userId: string
@@ -10,6 +11,7 @@ export interface TeamManager {
 
 interface TeamReader extends Omit<TeamManager, 'role'> {
   role: 'owner' | 'admin' | 'member'
+  recoveryOwner?: true
 }
 
 const uuid = (id: string) =>
@@ -69,7 +71,11 @@ export async function checkTeamManagementAccess(
   principal: Principal,
   teamId: string,
   lock: boolean | 'key share' = false,
-  context?: { expectedOrganizationId: string; allowPersonal: boolean },
+  context?: {
+    expectedOrganizationId: string
+    allowPersonal: boolean
+    includeRecoveryOwner?: boolean
+  },
   allowMemberRead = false,
 ): Promise<TeamReader> {
   const expectedTeamId =
@@ -118,6 +124,7 @@ export async function checkTeamManagementAccess(
     Boolean(lock),
     context?.allowPersonal,
     allowMemberRead,
+    context?.includeRecoveryOwner,
   )
   const { personal, role } = membership
 
@@ -147,7 +154,12 @@ export async function checkTeamManagementAccess(
     }
   }
 
-  return { userId: principal.user.id, organizationId: organization.id, role }
+  return {
+    userId: principal.user.id,
+    organizationId: organization.id,
+    role,
+    ...(membership.recoveryOwner && { recoveryOwner: true }),
+  }
 }
 
 /** Shared current-team policy for session management and durable invitation senders. */
@@ -158,6 +170,7 @@ export async function checkTeamManagementMembership(
   lock = false,
   allowPersonal = false,
   allowMemberRead = false,
+  includeRecoveryOwner = false,
 ): Promise<TeamReader & { personal: boolean }> {
   const personal = await db
     .selectFrom('personal_organizations')
@@ -173,7 +186,9 @@ export async function checkTeamManagementMembership(
     .where('userId', '=', userId)
     .where('organizationId', '=', teamId)
   if (lock) memberQuery = memberQuery.forShare()
-  const member = await memberQuery.executeTakeFirst()
+  const member = await memberQuery
+    .$if(includeRecoveryOwner, (query) => query.select(ssoRecoveryOwner))
+    .executeTakeFirst()
   // Better Auth can store multiple roles. Only these exact known tokens grant management.
   const roles = teamRoles(member?.role)
   const role = roles.includes('owner')
@@ -185,5 +200,11 @@ export async function checkTeamManagementMembership(
         : undefined
   if (!role) throw denied()
 
-  return { userId, organizationId: teamId, role, personal: Boolean(personal) }
+  return {
+    userId,
+    organizationId: teamId,
+    role,
+    personal: Boolean(personal),
+    ...(member?.recoveryOwner && { recoveryOwner: true }),
+  }
 }

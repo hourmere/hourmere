@@ -2513,4 +2513,8 @@ export const admin = {
   'Remove time {time}': 'Remove time {time}',
   // Workflow audit
   Workflows: 'Workflows',
+
+  // SSO recovery enrollment
+  'This team must retain at least one recovery owner while SSO is enforced.':
+    'This team must retain at least one recovery owner while SSO is enforced.',
 } as const

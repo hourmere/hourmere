@@ -4,6 +4,7 @@ import type { Transaction } from 'kysely'
 import type { Principal } from './caller.ts'
 import { isUuid } from './organizations.ts'
 import type { SsoAdmissionRemoval } from './sso-admission-blocks.ts'
+import { removeSsoRecoveryOwner, ssoRecoveryOwner } from './sso-recovery-membership.ts'
 import {
   checkTeamManagementAccess,
   type TeamManager,
@@ -39,6 +40,7 @@ export async function teamMemberRemovalTarget(
   let query = db
     .selectFrom('auth.member')
     .selectAll()
+    .select(ssoRecoveryOwner)
     .where('organizationId', '=', actor.organizationId)
     .where('userId', '=', memberUserId)
   if (lock) query = query.forUpdate()
@@ -64,6 +66,8 @@ async function removeTeamMemberInTransaction(
   trx: Transaction<Database>,
   actor: TeamManager,
   input: Pick<TeamMemberRemovalInput, 'memberUserId' | 'recordAdmissionRemoval'>,
+  principal: Principal,
+  checkProof: () => Promise<string | undefined>,
 ): Promise<TeamMemberRemoval> {
   const member = await teamMemberRemovalTarget(trx, actor, input.memberUserId, true)
   if (teamRoles(member.role).includes('owner')) {
@@ -71,6 +75,14 @@ async function removeTeamMemberInTransaction(
   }
   // Self departure must use scheduling's impact check and atomic personal fallback.
   if (member.userId === actor.userId) throw teamManagementDenied()
+  if (member.recoveryOwner) {
+    await removeSsoRecoveryOwner(trx, principal, {
+      organizationId: actor.organizationId,
+      userId: member.userId,
+      isOwner: teamRoles(member.role).includes('owner'),
+      checkProof,
+    })
+  }
 
   const configured = await trx
     .selectFrom('event_types as event')
@@ -163,7 +175,21 @@ export function removeTeamMember(
       principal.kind === 'session'
         ? { userId: principal.user.id, sessionId: principal.sessionId }
         : null
-    const result = await removeTeamMemberInTransaction(trx, { ...actor, role: actor.role }, input)
+    const checkProof = () =>
+      lockSharedTeamSsoProof(
+        trx,
+        input.ssoCapabilities ?? ssoHardOff,
+        identity,
+        actor.organizationId,
+        nativeSsoRequired,
+      )
+    const result = await removeTeamMemberInTransaction(
+      trx,
+      { ...actor, role: actor.role },
+      input,
+      principal,
+      checkProof,
+    )
     await writeAuditEvent(trx, {
       organizationId: actor.organizationId,
       ...auditActor(principal),
@@ -171,13 +197,7 @@ export function removeTeamMember(
       targetType: 'user',
       targetId: result.memberUserId,
     })
-    await lockSharedTeamSsoProof(
-      trx,
-      input.ssoCapabilities ?? ssoHardOff,
-      identity,
-      actor.organizationId,
-      nativeSsoRequired,
-    )
+    await checkProof()
     return result
   }
   return db.isTransaction
