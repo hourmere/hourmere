@@ -9,6 +9,7 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import * as scheduling from '@hourmere/scheduling'
 import { createTestTeam, createTestUser } from '@hourmere/scheduling/testing'
+import { workflowDefinitionAuditPort } from '@hourmere/workflows'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createApp } from '../app.ts'
@@ -92,6 +93,7 @@ function productSourceCopy(change?: Change): Factory {
     openTimeSnippetTools: () => [],
     availabilityTroubleshootingTools: () => [],
     workflowTools: () => [],
+    workflowDefinitionAuditPort,
     ssoReadTools: () => [],
     ssoOidcEnabled: false,
     ssoSamlEnabled: false,
