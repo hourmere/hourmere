@@ -5,7 +5,13 @@ import { pathToFileURL } from 'node:url'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { type MailMessage, MailRejectedError } from '@hourmere/mail'
-import { createFixtures, createTestUser, testContext, weekdays } from '@hourmere/scheduling/testing'
+import {
+  createFixtures,
+  createTestTeam,
+  createTestUser,
+  testContext,
+  weekdays,
+} from '@hourmere/scheduling/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import * as ballots from '../../scheduling/src/meeting-poll-ballots.ts'
@@ -57,17 +63,20 @@ describe.skipIf(!serverUrl)('meeting poll durable credential mail', () => {
     await owned?.drop()
   })
 
-  async function setup(deadlineLeadHours = 24) {
+  async function setup(deadlineLeadHours = 24, team = false) {
     const owner = await createTestUser(db)
     await db
       .insertInto('profiles')
       .values({ user_id: owner.id, handle: `poll-${randomUUID().slice(0, 8)}`, time_zone: 'UTC' })
       .execute()
+    const organization = team
+      ? (await createTestTeam(db, [{ user: owner, role: 'owner' }])).as(owner).organization
+      : owner.principal.organization
     const principal = {
       kind: 'session' as const,
       sessionId: randomUUID(),
       user: owner.principal.user,
-      organization: owner.principal.organization,
+      organization,
     }
     const ctx = { ...testContext(db, principal), meetingPollSecret: SECRET }
     await fixtures.schedule(owner.id, {
@@ -78,7 +87,9 @@ describe.skipIf(!serverUrl)('meeting poll durable credential mail', () => {
         sunday: [{ start: '00:00', end: '24:00' }],
       },
     })
-    const eventTypeId = await fixtures.eventType(principal.organization.id, owner.id)
+    const eventTypeId = await fixtures.eventType(organization.id, team ? null : owner.id, {
+      hosts: [{ userId: owner.id }],
+    })
     const started = performance.now()
     const wall = await db
       .selectNoFrom(sql<Date>`clock_timestamp()`.as('now'))
@@ -205,6 +216,30 @@ describe.skipIf(!serverUrl)('meeting poll durable credential mail', () => {
   }
 
   const send = Delivery.deliverMeetingPollEmail
+
+  it('rechecks host invitation mail without restricting public verification', async () => {
+    const s = await setup(24, true)
+    const invited = await s.invite()
+    await db
+      .insertInto('sso_policies')
+      .values({ organization_id: s.ctx.principal.organization.id, require_sso: true })
+      .execute()
+    const enrolled = await s.enroll()
+    for (const row of await s.rows()) await send(s.deps, row)
+    expect(s.messages.map((message) => message.to)).toEqual([enrolled.voter.email])
+    expect(await s.rows()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          voter_id: invited.voter.id,
+          state: 'skipped',
+          attempts: 0,
+          error_class: 'sso_required',
+          capability_ciphertext: null,
+        }),
+        expect.objectContaining({ voter_id: enrolled.voter.id, state: 'sent' }),
+      ]),
+    )
+  })
 
   it('delivers identical verification content to known and unknown accounts without exposing credentials in storage', async () => {
     const s = await setup()

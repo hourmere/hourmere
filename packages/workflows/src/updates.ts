@@ -1,4 +1,5 @@
 import { ApiKeyScopeError } from '@hourmere/auth'
+import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { sql } from 'kysely'
 import { z } from 'zod'
@@ -34,7 +35,7 @@ export async function updateWorkflowDefinition(
   if (!parsed.success) throw invalid()
   if (!uuidSchema.safeParse(id).success) throw notFound()
   const { expectedRevision, ...patch } = parsed.data
-  return ctx.db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     await ctx.prepareOrganizationWrite?.(trx)
     // This lookup reveals nothing outside the current organization; lock and re-read below.
     const identity = await trx

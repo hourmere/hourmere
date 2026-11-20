@@ -481,12 +481,11 @@ describe('workflow hard-off', () => {
       '@hourmere/scheduling/text',
     ])
     const auditImports = new Set(['@hourmere/db/audit'])
-    // Creation adds hashing, scope enforcement and SQL; these dependencies are confined to
-    // that service, while hard-off.ts and the other modules keep the existing import pin.
-    const creationImports = new Set(['node:crypto', '@hourmere/auth', 'kysely'])
-    const updateImports = new Set(['@hourmere/auth', 'kysely'])
-    const deleteImports = new Set(['@hourmere/auth', 'kysely'])
-    const previewImports = new Set(['@hourmere/auth', '@hourmere/core'])
+    // Authoring uses scope enforcement, SQL and the shared committing transaction.
+    // These imports stay confined to the writers; hard-off.ts keeps its existing pin.
+    const writeImports = new Set(['@hourmere/auth', '@hourmere/db/team-write', 'kysely'])
+    const creationImports = new Set(['node:crypto', ...writeImports])
+    const previewImports = new Set(['@hourmere/auth', '@hourmere/core', '@hourmere/db/team-write'])
     const readImports = new Set(['@hourmere/scheduling/sealed-secret', 'kysely'])
     const dispatcherImports = new Set(['node:crypto', 'kysely', '@hourmere/jobs'])
     // The renderer reads static notification catalogues and text helpers without the mailer.
@@ -521,12 +520,12 @@ describe('workflow hard-off', () => {
             !allowed.has(specifier) &&
             !(file === 'packages/workflows/src/audit.ts' && auditImports.has(specifier)) &&
             !(file === 'packages/workflows/src/creates.ts' && creationImports.has(specifier)) &&
-            !(file === 'packages/workflows/src/updates.ts' && updateImports.has(specifier)) &&
+            !(file === 'packages/workflows/src/updates.ts' && writeImports.has(specifier)) &&
             !(file === 'packages/workflows/src/capture.ts' && captureImports.has(specifier)) &&
             !(
               file === 'packages/workflows/src/dispatcher.ts' && dispatcherImports.has(specifier)
             ) &&
-            !(file === 'packages/workflows/src/deletes.ts' && deleteImports.has(specifier)) &&
+            !(file === 'packages/workflows/src/deletes.ts' && writeImports.has(specifier)) &&
             !(file === 'packages/workflows/src/preview.ts' && previewImports.has(specifier)) &&
             !(file === 'packages/workflows/src/reads.ts' && readImports.has(specifier)) &&
             !(file === 'packages/workflows/src/email.ts' && emailImports.has(specifier)) &&

@@ -3,6 +3,7 @@
 import { createHash } from 'node:crypto'
 import { ApiKeyScopeError, type Principal } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
+import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { lockWorkflowOwner } from '@hourmere/scheduling'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { sql } from 'kysely'
@@ -139,7 +140,7 @@ export async function createWorkflowDefinition(
   if (!parsed.success) throw invalid()
   const request = parsed.data
   const digest = fingerprint(request)
-  return ctx.db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     await ctx.prepareOrganizationWrite?.(trx)
     const owner = await writableOwner(trx, ctx, request.owner)
     assertWorkflowTextPolicy(request, ctx.followUpHostNotesEnabled)

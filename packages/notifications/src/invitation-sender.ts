@@ -3,7 +3,10 @@ import {
   checkTeamManagementMembership,
   invitationRecipientIsMember,
   invitationRoleAllowed,
+  ssoHardOff,
   TeamManagementError,
+  type TeamSsoCapabilities,
+  teamSsoAccess,
 } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import {
@@ -38,6 +41,7 @@ export interface InvitationEmailSenderDeps extends Pick<NotificationMailLimits, 
   secret: string
   defaultLanguage?: unknown
   log?: ((line: string) => void) | undefined
+  ssoCapabilities?: TeamSsoCapabilities | undefined
 }
 
 type ErrorCode =
@@ -54,6 +58,20 @@ type ErrorCode =
 interface Claim extends InvitationEmailRequest {
   attempt: number
   leaseId: string
+}
+
+function currentInvitationSsoAccess(
+  db: Db,
+  deps: InvitationEmailSenderDeps,
+  organizationId: string,
+  authorizedByUserId: string,
+  actor: InvitationEmailRequest['actor'],
+) {
+  return teamSsoAccess(
+    { db, capabilities: deps.ssoCapabilities ?? ssoHardOff },
+    actor?.userId === authorizedByUserId ? actor : null,
+    organizationId,
+  )
 }
 
 /** Locks match admission, resend, cleanup and repair; always read time after lock waits. */
@@ -173,11 +191,18 @@ async function claimAttempt(deps: InvitationEmailSenderDeps, request: Invitation
     }
 
     await lockNotificationEmailBudget(trx)
-    const authorized = await invitationAuthorizationIsCurrent(
-      trx,
-      invitation,
-      delivery.authorized_by_user_id ?? invitation.inviterId,
-    )
+    const authorizedByUserId = delivery.authorized_by_user_id ?? invitation.inviterId
+    const authorized =
+      (await invitationAuthorizationIsCurrent(trx, invitation, authorizedByUserId)) &&
+      (
+        await currentInvitationSsoAccess(
+          trx,
+          deps,
+          invitation.organizationId,
+          authorizedByUserId,
+          request.actor,
+        )
+      ).allowed
     // Budget and authorization reads can wait; only a fresh clock can grant an attempt.
     const now = await databaseTime(trx)
     if (invitation.status !== 'pending' || invitation.expiresAt <= now) {
@@ -258,9 +283,10 @@ async function currentMessage(deps: InvitationEmailSenderDeps, claim: Claim) {
       return
     }
     const organization = await trx
-      .selectFrom('auth.organization')
-      .select('name')
-      .where('id', '=', invitation.organizationId)
+      .selectFrom('auth.organization as o')
+      .leftJoin('sso_policies as policy', 'policy.organization_id', 'o.id')
+      .select(['o.name', 'policy.require_sso'])
+      .where('o.id', '=', invitation.organizationId)
       .executeTakeFirst()
     const inviter = await trx
       .selectFrom('auth.user as u')
@@ -269,6 +295,21 @@ async function currentMessage(deps: InvitationEmailSenderDeps, claim: Claim) {
       .where('u.id', '=', authorizedByUserId)
       .executeTakeFirst()
     if (!organization || !inviter) {
+      await terminal(trx, claim, 'skipped', 'invitation_ineligible', now)
+      return
+    }
+    if (
+      organization.require_sso &&
+      !(
+        await currentInvitationSsoAccess(
+          trx,
+          deps,
+          invitation.organizationId,
+          authorizedByUserId,
+          claim.actor,
+        )
+      ).allowed
+    ) {
       await terminal(trx, claim, 'skipped', 'invitation_ineligible', now)
       return
     }

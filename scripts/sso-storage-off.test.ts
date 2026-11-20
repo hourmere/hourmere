@@ -14,8 +14,9 @@
 // before writing browser proof. OIDC completion uses pending attempts and updates the
 // proven mailbox on the link. Draft reads owns
 // the provider/domain inventory, policies and opaque recovery link summaries, behind the same
-// hard-off gate. The provider test
-// receipt query correlates the audit journal with the provider's current revision. The other module
+// hard-off gate. The shared team proof service checks policy and live browser proof
+// in every state. The invitation sender also joins the policy in its existing organization
+// lookup before delivery. The provider test receipt query correlates the audit journal with the provider's current revision. The other module
 // that names the tables, apps/server/src/sso-storage-errors.ts, only recognises them in
 // database errors so that the error log omits their row details; it imports nothing and
 // performs no data access. The scan is limited to the new table names; it never compares whole
@@ -50,8 +51,8 @@ const DATA_OWNERS: Readonly<Record<string, readonly string[]>> = {
     'sso_policies',
   ],
   'apps/server/src/sso-mailbox-proof.ts': ['sso_attempts', 'sso_mailbox_tokens', 'sso_providers'],
-  'apps/server/src/sso-me.ts': [
-    'sso_attempts',
+  'apps/server/src/sso-me.ts': ['sso_attempts', 'sso_identity_links', 'sso_providers'],
+  'packages/auth/src/team-sso.ts': [
     'sso_browser_proofs',
     'sso_domains',
     'sso_identity_links',
@@ -59,14 +60,24 @@ const DATA_OWNERS: Readonly<Record<string, readonly string[]>> = {
     'sso_provider_domains',
     'sso_providers',
   ],
-  'apps/server/src/sso-fresh-proof.ts': ['sso_attempts', 'sso_policies'],
+  'apps/server/src/sso-fresh-proof.ts': [
+    'sso_attempts',
+    'sso_identity_links',
+    'sso_policies',
+    'sso_providers',
+  ],
   'apps/server/src/sso-oidc-admission-write.ts': [
     'sso_attempts',
     'sso_identity_links',
     'sso_policies',
   ],
   'apps/server/src/sso-oidc-admission.ts': ['sso_attempts', 'sso_providers'],
-  'apps/server/src/sso-oidc-attempt.ts': ['sso_attempts', 'sso_providers'],
+  'apps/server/src/sso-oidc-attempt.ts': [
+    'sso_attempts',
+    'sso_identity_links',
+    'sso_policies',
+    'sso_providers',
+  ],
   'apps/server/src/sso-oidc-completion.ts': ['sso_attempts', 'sso_identity_links'],
   'apps/server/src/sso-oidc-link.ts': [
     'sso_attempts',
@@ -97,6 +108,7 @@ const DATA_OWNERS: Readonly<Record<string, readonly string[]>> = {
     'sso_identity_links',
     'sso_policies',
   ],
+  'packages/notifications/src/invitation-sender.ts': ['sso_policies'],
   'packages/auth/src/sso-admission-blocks.ts': [
     'sso_identity_links',
     'sso_policies',

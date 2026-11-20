@@ -12,6 +12,7 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { ApiKeyScopeError, requireActiveApiKey } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
+import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { sql } from 'kysely'
 import {
   findOneTimeEventType,
@@ -240,7 +241,7 @@ export async function createMeetingPoll(
   requireWriteScope(ctx)
   const request = validCreateInput(input)
   const source = pollSource(ctx, options.source)
-  return ctx.db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, request.eventTypeId)
     const authority = await lockAuthority(trx, ctx)
     const named = await trx
@@ -441,7 +442,7 @@ export async function closeMeetingPoll(
 ): Promise<MeetingPoll> {
   requireWriteScope(ctx)
   const request = validHostWrite(input)
-  return ctx.db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     const poll = await lockManagedPoll(trx, ctx, request.id)
     if (poll.effectiveStatus === 'closed') return loadPoll(trx, ctx, poll.id)
     if (poll.status === 'canceled')
@@ -463,7 +464,7 @@ export async function cancelMeetingPoll(
 ): Promise<MeetingPoll> {
   requireWriteScope(ctx)
   const request = validHostWrite(input)
-  return ctx.db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     const poll = await lockManagedPoll(trx, ctx, request.id)
     if (poll.status === 'canceled') return loadPoll(trx, ctx, poll.id)
     if (poll.status === 'scheduled') throw alreadyScheduled()
@@ -490,7 +491,7 @@ export async function deleteMeetingPoll(
 ): Promise<void> {
   requireWriteScope(ctx)
   const request = validHostWrite(input)
-  await ctx.db.transaction().execute(async (trx) => {
+  await teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     const poll = await lockManagedPoll(trx, ctx, request.id)
     requireHostRevision(poll, request.expectedHostRevision)
     const deleted = await trx
@@ -514,7 +515,7 @@ export async function rotateMeetingPollLink(
   requireWriteScope(ctx)
   const request = validHostWrite(input)
   const key = validIdempotencyKey(input.idempotencyKey)
-  return ctx.db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     const poll = await lockManagedPoll(trx, ctx, request.id)
     const receipt = receiptIdentity(ctx, 'rotate_link', key, {
       pollId: poll.id.toLowerCase(),

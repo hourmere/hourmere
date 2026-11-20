@@ -11,10 +11,11 @@ export function nativeTeamLeave(
   db: Db,
   recordAdmissionRemoval?: SsoAdmissionRemoval,
 ): NonNullable<AuthConfig['leaveTeamMember']> {
-  return (principal, teamId, expectedOrganizationId, transaction) =>
+  return (principal, teamId, expectedOrganizationId, transaction, ssoCapabilities) =>
     leaveTeamMember(
       { db: transaction ?? db, principal, now: () => Temporal.Now.instant() },
       { teamId, expectedOrganizationId },
       recordAdmissionRemoval,
+      ssoCapabilities,
     )
 }

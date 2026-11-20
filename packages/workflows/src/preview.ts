@@ -1,5 +1,6 @@
 import { ApiKeyScopeError } from '@hourmere/auth'
 import { validateTimeZone } from '@hourmere/core'
+import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { LOCATION_KINDS, MAX_ANSWER_LENGTH, MAX_GUESTS, MAX_QUESTIONS } from '@hourmere/scheduling'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { z } from 'zod'
@@ -106,7 +107,7 @@ export async function previewWorkflowCandidate(
   if (!parsed.success) throw invalid('Invalid workflow preview')
   const { owner: selector, example = {}, ...candidate } = parsed.data
   const { db, followUpHostNotesEnabled, principal } = ctx
-  return db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(db.transaction(), async (trx) => {
     await ctx.prepareOrganizationWrite?.(trx)
     const owner = await writableOwner(trx, ctx, selector)
     const facts = await loadWorkflowDefinitionFacts(trx, candidate, owner, followUpHostNotesEnabled)

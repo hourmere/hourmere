@@ -1,5 +1,6 @@
 import type { Db } from '@hourmere/db'
 import { auditActor } from '@hourmere/db/audit'
+import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { sql } from 'kysely'
 import { findOneTimeEventType, selectDurationMinutes } from './availability.ts'
 import {
@@ -89,7 +90,7 @@ export async function finalizeMeetingPoll(
   const secret = requireSecret(ctx.meetingPollSecret)
   const { idempotencyKey, ...request } = validRequest(input)
   const source = meetingPollSource(ctx, options.source)
-  return ctx.db.transaction().execute(async (trx) => {
+  return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     await ensureMeetingPollKey(trx, secret)
     const { authority, poll } = await lockHostPoll(trx, ctx, request.id)
     // Authorize before inspecting a receipt. The initial event read is unlocked so a new

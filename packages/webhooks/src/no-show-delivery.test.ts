@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { createDb, type Db, isImportedBooking } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
+import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs } from '@hourmere/jobs'
 import { setAttendeeNoShow } from '@hourmere/scheduling'
@@ -183,6 +184,7 @@ describe.skipIf(!serverUrl)('no-show webhook delivery through the real marking s
       'assertBookingLocallyManaged',
       'auditActor',
       'writeAuditEvent',
+      'teamWriteTransaction',
       `${copy}; return setAttendeeNoShow`,
     )(
       DomainError,
@@ -191,6 +193,7 @@ describe.skipIf(!serverUrl)('no-show webhook delivery through the real marking s
       assertBookingLocallyManaged,
       auditActor,
       writeAuditEvent,
+      teamWriteTransaction,
     ) as typeof setAttendeeNoShow
     const { ctx, webhook, bookingId, attendeeId } = await fixture()
     await mutant(ctx, bookingId, attendeeId, true)

@@ -4,6 +4,8 @@ import { requireSsoEnabled } from '../sso.ts'
 import { getSsoPolicy, listSsoProviders, type SsoReadDeps } from '../sso-reads.ts'
 import { defineTool, type Tool } from './tools.ts'
 
+const GET_SSO_POLICY = 'get_sso_policy'
+
 /** Administrator reads use the same authorization and safe projections as REST. */
 export function ssoReadTools(deps: SsoReadDeps): Tool[] {
   const shared = {
@@ -34,13 +36,14 @@ export function ssoReadTools(deps: SsoReadDeps): Tool[] {
     }),
     defineTool({
       ...shared,
-      name: 'get_sso_policy',
+      name: GET_SSO_POLICY,
       title: 'Get SSO policy',
       description:
         'Reads the current team SSO policy for owners/admins with read/full API key scope or mcp:tools OAuth. Never returns configuration, secrets, raw metadata or identities. SSO is being built and is not available yet.',
       input: z.strictObject({}),
       output: SsoPolicy,
-      run: (_args, call) => getSsoPolicy(deps, call.caller),
+      run: async (_args, call) =>
+        getSsoPolicy(deps, call.caller, (await call.checkTeamRead?.(GET_SSO_POLICY))?.policy),
     }),
   ]
 }

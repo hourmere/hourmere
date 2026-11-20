@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { createDb, type Db } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
+import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
@@ -27,6 +28,7 @@ function sourceCopy(replacement?: [string, string]): typeof service {
     'TeamManagementError',
     'auditActor',
     'writeAuditEvent',
+    'teamWriteTransaction',
     `${source}; return {createScimToken,listScimTokens,rotateScimToken,revokeScimToken,authenticateScimToken}`,
   )(
     createHash,
@@ -37,6 +39,7 @@ function sourceCopy(replacement?: [string, string]): typeof service {
     TeamManagementError,
     auditActor,
     writeAuditEvent,
+    teamWriteTransaction,
   )
 }
 

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { Principal } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { withAuditRequest } from '@hourmere/db/audit'
+import { withTeamWriteCheck } from '@hourmere/db/team-write'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { listAuditEvents, purgeAuditEvents, setAuditLogSettings } from '@hourmere/scheduling'
 import { createTestTeam, createTestUser, testContext } from '@hourmere/scheduling/testing'
@@ -300,6 +301,26 @@ describe.skipIf(!serverUrl)('workflow definition journal', () => {
     })
     expect(await journal(team.id).execute()).toEqual([])
     const created = await createWorkflowDefinition(context(session), input)
+    const proofRevoked = new Error('Synthetic team proof revoked before commit')
+    await expect(
+      withTeamWriteCheck(
+        {
+          organizationId: team.id,
+          identity: { userId: admin.id, sessionId: session.sessionId },
+          async lockProof(trx) {
+            expect(
+              await journal(team.id, trx).where('action', '=', 'workflow.previewed').execute(),
+            ).toHaveLength(1)
+            throw proofRevoked
+          },
+          expired: () => {
+            throw proofRevoked
+          },
+        },
+        () => previewWorkflowCandidate(context(session), candidate({ kind: 'team', id: team.id })),
+      ),
+    ).rejects.toThrow(proofRevoked)
+    expect(await journal(team.id).where('action', '=', 'workflow.previewed').execute()).toEqual([])
     const list = (principal: Principal) =>
       listAuditEvents(testContext(db, principal), { action: 'workflow.created' })
     for (const user of [owner, admin]) {
