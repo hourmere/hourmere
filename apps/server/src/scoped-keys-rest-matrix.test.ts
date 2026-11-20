@@ -83,6 +83,7 @@ const classes = {
     'POST /api/v1/public/-/routing/teams/{teamSlug}/{slug}/route',
     'POST /api/v1/routing-continuations/resolve',
     'POST /api/v1/routing-continuations/slots',
+    'POST /api/v1/routing-continuations/bookings',
     'POST /api/v1/public/meeting-polls/enroll',
     'POST /api/v1/public/meeting-polls/recover',
     'POST /api/v1/public/meeting-polls/verify',
@@ -280,6 +281,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
     let app: ReturnType<typeof createApp>
     let date: string
     let routeToken: string
+    let routingForm: { id: string; versionId: string }
     let sequence = 0
     const keys = new Map<ApiKeyScope, string>()
     const personalKeys = new Map<ApiKeyScope, string>()
@@ -366,6 +368,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
           enabled: true,
         })
         if (principal.organization.personal) {
+          routingForm = { id: form.id, versionId: publication.version.id }
           const outcome = await submitRoutingForm(
             { db, routingFormsEnabled: true, routingSecret: secret },
             { formId: form.id, organizationId: principal.organization.id },
@@ -434,7 +437,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       await database?.drop()
     })
 
-    async function prepare(operation: string, kind: Class) {
+    async function prepare(operation: string, kind: Class, scope: ApiKeyScope) {
       const [method, template] = operation.split(' ') as [string, string]
       let path = template
       let id = mainEvent
@@ -669,6 +672,19 @@ describe.skipIf(!process.env.DATABASE_URL)(
           }
           expectedStatus = 201
         }
+      } else if (template === '/api/v1/routing-continuations/bookings') {
+        const outcome = await submitRoutingForm(
+          { db, routingFormsEnabled: true, routingSecret: secret },
+          { formId: routingForm.id, organizationId: owner.organization.id },
+          { versionId: routingForm.versionId, answers: {} },
+        )
+        if (outcome.kind !== 'continuation') throw Error('Fixture must issue a continuation')
+        payload = {
+          routeToken: outcome.routeToken,
+          start: `${date}T${scope === 'bookings' ? '11:30' : '11:00'}:00Z`,
+          invitee: { name: 'Matrix invitee', email: 'matrix@example.test', timeZone: 'UTC' },
+        }
+        expectedStatus = 201
       } else if (template.startsWith('/api/v1/routing-continuations/')) {
         payload = { routeToken, ...(template.endsWith('/slots') && { start, end }) }
       } else if (template.startsWith('/api/v1/public/-/routing/')) {
@@ -1016,18 +1032,18 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 183-operation contract and all 549 scope combinations', () => {
+    it('covers the exact 184-operation contract and all 552 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(183)
-      expect(new Set(ids).size).toBe(183)
+      expect(ids).toHaveLength(184)
+      expect(new Set(ids).size).toBe(184)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(549)
+      expect(cases).toHaveLength(552)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
-      const fixture = await prepare(operation, kind)
+      const fixture = await prepare(operation, kind, scope)
       const beforeProvider = google.calls.length
       try {
         const response = await app.request(

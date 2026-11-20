@@ -232,6 +232,7 @@ export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.fr
   rest('GET', '/api/v1/public/{handle}/{slug}', 'booking_read', 'optional_key'),
   rest('POST', '/api/v1/routing-continuations/resolve', 'booking_write', 'optional_key'),
   rest('POST', '/api/v1/routing-continuations/slots', 'booking_write', 'optional_key'),
+  rest('POST', '/api/v1/routing-continuations/bookings', 'booking_write', 'optional_key'),
   rest('POST', '/api/v1/public/{handle}/{slug}/bookings', 'booking_write', 'optional_key'),
   rest('GET', '/api/v1/public/{handle}/{slug}/slots', 'booking_read', 'optional_key'),
   rest('GET', '/api/v1/public/teams/{handle}/{slug}', 'booking_read', 'optional_key'),
@@ -428,6 +429,7 @@ export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.free
     'POST /api/v1/book/{token}/bookings',
     'POST /api/v1/public/{handle}/{slug}/bookings',
     'POST /api/v1/public/teams/{handle}/{slug}/bookings',
+    'POST /api/v1/routing-continuations/bookings',
   ]),
   mcp(
     'create_booking',
@@ -442,6 +444,7 @@ export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.free
     'team',
   ),
   mcp('create_booking', 'booking_write', ['POST /api/v1/book/{token}/bookings'], 'oneTimeLink'),
+  mcp('create_booking', 'booking_write', ['POST /api/v1/routing-continuations/bookings'], 'routed'),
   mcp('request_reschedule', 'booking_write', ['POST /api/v1/bookings/{id}/request-reschedule']),
   mcp('reschedule_booking', 'booking_write', [
     'POST /api/v1/bookings/{id}/reschedule',
