@@ -34,9 +34,8 @@ const postReads = new Set(
     (op) => op.method === 'POST' && readClasses.has(op.operationClass),
   ).map((op) => op.id),
 )
-// These previews require full API-key scope and only read team data.
+// Preview requires full API-key scope and does not publish or save a draft.
 postReads.add('POST /api/v1/routing-forms/{id}/preview')
-postReads.add('POST /api/v1/workflows/preview')
 
 export function teamReadRoute(operation: string) {
   const [method, path] = operation.split(' ')
