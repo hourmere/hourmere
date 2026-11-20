@@ -31,6 +31,13 @@ import {
   type WorkflowAuditPageId,
   workflowAuditPages,
 } from './workflow-audit.ts'
+import {
+  isWorkflowEditorAuditPage,
+  leavePendingWorkflowEditorAudit,
+  openWorkflowEditorAuditPage,
+  type WorkflowEditorAuditPageId,
+  workflowEditorAuditPages,
+} from './workflow-editor-audit.ts'
 
 const pollAuditPages = [
   { id: 'poll-unavailable', title: 'Unavailable meeting poll' },
@@ -56,6 +63,7 @@ export const auditPages = [
   ...hostPollAuditPages,
   ...routingFormAuditPages,
   ...workflowAuditPages,
+  ...workflowEditorAuditPages,
   { id: 'host', title: 'Public host' },
   { id: 'booking', title: 'Public booking' },
   { id: 'booking-form', title: 'Booking form' },
@@ -229,13 +237,21 @@ export async function openAuditPage(
     await leavePendingRoutingFormAudit(page, app.url)
     await leavePendingHostPollAudit(page, app.url)
     await leavePendingWorkflowAudit(page, app.url)
+    await leavePendingWorkflowEditorAudit(page, app.url)
     // Earlier audit states create real bookings; pin the calendar and list filters
     // before navigation so later pages never inherit wall-clock-dependent rows.
     await page.clock.setFixedTime(new Date(AUDIT_NOW))
-    if (isWorkflowAuditPage(id)) {
-      await app.auditSignIn(true, locale, id === 'team-workflows' ? 'team' : undefined)
+    if (isWorkflowAuditPage(id) || isWorkflowEditorAuditPage(id)) {
+      await app.auditSignIn(
+        true,
+        locale,
+        id === 'team-workflows' || id === 'team-workflow-edit' ? 'team' : undefined,
+      )
       await page.addInitScript(prepareAuditLocale, locale)
-      const path = await openWorkflowAuditPage(page, app, id, locale === 'zh-CN' ? locale : 'en')
+      const language = locale === 'zh-CN' ? locale : 'en'
+      const path = isWorkflowAuditPage(id)
+        ? await openWorkflowAuditPage(page, app, id, language)
+        : await openWorkflowEditorAuditPage(page, app, id, language)
       verifyAuditPath(page.url(), path)
       await page.evaluate(() => window.scrollTo(0, 0))
       await page.evaluate(settleAuditLayout)
@@ -270,7 +286,11 @@ export async function openAuditPage(
     const paths: Record<
       Exclude<
         AuditPageId,
-        HostPollAuditPageId | PollAuditPageId | RoutingFormAuditPageId | WorkflowAuditPageId
+        | HostPollAuditPageId
+        | PollAuditPageId
+        | RoutingFormAuditPageId
+        | WorkflowAuditPageId
+        | WorkflowEditorAuditPageId
       >,
       string
     > = {

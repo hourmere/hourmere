@@ -236,7 +236,13 @@ function Shell() {
             </div>
           )}
           <Suspense fallback={<PageSkeleton />}>
-            <Outlet context={{ workflowsEnabled }} />
+            <Outlet
+              context={{
+                workflowsEnabled,
+                followUpHostNotesEnabled:
+                  instance.status === 'ready' && instance.data?.followUpHostNotesEnabled === true,
+              }}
+            />
           </Suspense>
         </main>
       </div>

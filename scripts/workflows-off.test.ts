@@ -17,7 +17,7 @@ import { prepareTools } from '../apps/server/src/mcp/tools.ts'
 import { openApiDocument } from '../apps/server/src/openapi-document.ts'
 import { productionAppOptions, productTools } from '../apps/server/src/server.ts'
 import { workflowsGuard } from '../apps/server/src/workflows.ts'
-import { PATHS } from '../apps/web/src/paths.ts'
+import { PATHS, workflowEditPath } from '../apps/web/src/paths.ts'
 // After the server modules, which extend zod for OpenAPI before any schema is built.
 import * as workflows from '../packages/workflows/src/index.ts'
 import { COMMANDS, HELP, REST_COMMANDS } from '../tools/cli/src/cli.ts'
@@ -525,7 +525,7 @@ describe('booking workflows are off and expose the shipped operations', () => {
     }
   })
 
-  it('registers only the shipped CLI commands and workflow list path', () => {
+  it('registers only the shipped workflow CLI commands and app paths', () => {
     const commands = [
       ...Object.keys(COMMANDS),
       ...Object.values(COMMANDS),
@@ -544,12 +544,16 @@ describe('booking workflows are off and expose the shipped operations', () => {
     ).toEqual(shipped.map(({ command, tool }) => [command, tool]).sort())
     expect(Object.keys(REST_COMMANDS).filter((name) => /workflow/i.test(name))).toEqual([])
     expect(HELP).toContain('workflows_disabled')
-    // app-routes.test.tsx verifies the path and navigation stay hidden while off.
+    // app-routes and WorkflowEditorPage verify these paths stay hidden while off.
     expect(
       Object.entries(PATHS).filter(
         ([name, path]) => /workflow/i.test(name) || workflowSegment.test(path),
       ),
-    ).toEqual([['workflows', '/app/workflows']])
+    ).toEqual([
+      ['workflows', '/app/workflows'],
+      ['newWorkflow', '/app/workflows/new'],
+    ])
+    expect(workflowEditPath('workflow-id')).toBe('/app/workflows/workflow-id/edit')
   })
 
   it('recognises the workflow storage tables as whole identifiers, in any case', () => {

@@ -922,6 +922,30 @@ state before trying again.
 重新启用也不会补跑。确认 **删除工作流** 后，工作流将被移除，待执行任务也会终止。删除无法撤销。
 如果操作期间工作流或当前空间发生变化，请核对最新状态后再试。
 
+### Create, edit and preview workflows in the app
+
+When workflows are available, create a workflow from the list or open one for editing.
+Choose all event types in the current space or a single eligible event type. Set the
+booking change or timing that triggers it, and add conditions that must all match.
+Choose email recipients or select an existing webhook endpoint in the same space.
+
+Where the instance allows host-written text, add a subject and body for each language
+you want to customize. Other languages use the built-in message. Preview uses a
+synthetic booking to show the rendered email, why the example would be skipped, and
+when it uses a fallback template. Change the preview language or event type to check
+another example. Preview leaves the saved workflow as it was.
+New workflows start disabled. If another edit changes the saved revision, review the
+current version before trying to save again.
+
+中文：功能开放后，可在工作流列表中新建工作流，也可打开已有工作流进行编辑。选择当前空间中的
+全部活动类型或一个符合条件的活动类型，再设置触发工作流的预约变更或时间，以及必须同时满足的
+条件。最后选择邮件收件人，或选择当前空间中已有的 webhook 端点。
+
+实例允许主持人自定义文案时，可为需要自定义的语言分别填写邮件主题和正文。其他语言使用内置文案。
+预览使用合成预约展示邮件内容、示例被跳过的原因，以及何时使用备用模板。可切换预览语言或活动类型来检查
+其他示例。预览只展示结果，不会保存更改。
+新建的工作流默认禁用。如果其他编辑已更新版本，请先核对最新版本再尝试保存。
+
 ## Rollout and limitations
 
 [Release tags can select main commits](../.github/workflows/release.yml), so an environment

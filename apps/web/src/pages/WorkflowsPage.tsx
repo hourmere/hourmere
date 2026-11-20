@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { Link } from 'react-router'
 import { api, type Schemas, unwrap } from '../api/client.ts'
 import { isOrganizationContextChanged, RequestError } from '../api/errors.ts'
 import { EmptyState } from '../components/EmptyState.tsx'
@@ -6,6 +7,7 @@ import { PageHeader } from '../components/PageHeader.tsx'
 import { PageSkeleton } from '../components/PageSkeleton.tsx'
 import { useLoad, usePageTitle } from '../hooks.ts'
 import { useI18n } from '../i18n/runtime.tsx'
+import { PATHS, workflowEditPath } from '../paths.ts'
 import { useMe, useSession } from '../session.tsx'
 import { useTeamManagementAccess } from '../team-management.tsx'
 
@@ -63,7 +65,13 @@ export default function WorkflowsPage() {
   return (
     <>
       <div ref={pageStart} tabIndex={-1}>
-        <PageHeader title={t('Workflows')} />
+        <PageHeader title={t('Workflows')}>
+          {manage && (
+            <Link className="button button-primary" to={PATHS.newWorkflow}>
+              {t('New workflow')}
+            </Link>
+          )}
+        </PageHeader>
       </div>
       {manage ? (
         <WorkflowList
@@ -333,6 +341,15 @@ function WorkflowListPage({
                 </div>
               ) : (
                 <div className="card-actions">
+                  {selection === null && (
+                    <Link
+                      className="button button-small"
+                      to={workflowEditPath(workflow.id)}
+                      aria-label={t('Edit {name}', { name: workflow.name })}
+                    >
+                      {t('Edit')}
+                    </Link>
+                  )}
                   {([workflow.enabled ? 'disable' : 'enable', 'delete'] as const).map((action) => (
                     <button
                       key={action}

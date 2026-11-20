@@ -52,6 +52,7 @@ import {
   TeamBookingPage,
   TeamBookingsPage,
   TroubleshootPage,
+  WorkflowEditorPage,
   WorkflowsPage,
 } from './lazy-pages.tsx'
 import { BookingPanelContext } from './pages/bookings/BookingPanel.tsx'
@@ -92,6 +93,8 @@ export const appRoutes = createRoutesFromElements(
           <Route path="meeting-polls/new" element={<MeetingPollCreatePage />} />
           <Route path="meeting-polls/:id" element={<HostMeetingPollRoute />} />
           <Route path={PATHS.workflows} element={<WorkflowRoute />} />
+          <Route path={PATHS.newWorkflow} element={<WorkflowRoute editor />} />
+          <Route path={`${PATHS.workflows}/:id/edit`} element={<WorkflowRoute editor />} />
           <Route path="team/bookings" element={<TeamBookingsPage />} />
           <Route path="analytics" element={<AnalyticsPage />} />
           <Route path="bookings/:id" element={<BookingDetailPage />} />
@@ -131,10 +134,18 @@ export const appRoutes = createRoutesFromElements(
   </>,
 )
 
-function WorkflowRoute() {
-  const { workflowsEnabled } = useOutletContext<{ workflowsEnabled: boolean | undefined }>()
+function WorkflowRoute({ editor = false }: { editor?: boolean }) {
+  const { workflowsEnabled, followUpHostNotesEnabled } = useOutletContext<{
+    workflowsEnabled: boolean | undefined
+    followUpHostNotesEnabled: boolean
+  }>()
   if (workflowsEnabled === undefined) return <PageSkeleton />
-  return workflowsEnabled ? <WorkflowsPage /> : <AppNotFoundPage />
+  if (!workflowsEnabled) return <AppNotFoundPage />
+  return editor ? (
+    <WorkflowEditorPage followUpHostNotesEnabled={followUpHostNotesEnabled} />
+  ) : (
+    <WorkflowsPage />
+  )
 }
 
 const routingFormRoutes = createRoutesFromElements(
