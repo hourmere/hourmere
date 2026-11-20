@@ -10,7 +10,7 @@ added the definition reads (`listWorkflows`/`getWorkflow`,
 the tools and `workflowsEnabled` is false. Step 5 adds creation (`createWorkflow`,
 `create_workflow`, `workflows create`) over the retained keys from step 5a; its interfaces
 also answer `404 workflows_disabled` after the full-scope check. The guarded creation
-service writes definitions, revisions and creation keys only. Step 6 adds editing, enabling
+service writes definitions, revisions and creation keys. Step 6 adds editing, enabling
 and disabling (`updateWorkflow`, `update_workflow`, `workflows update`) behind the same
 hard-off guard. Content edits append immutable revisions; enable/disable changes only the
 definition row. Neither operation rewrites enrollments or execution rows. Step 7 adds deletion
@@ -33,6 +33,7 @@ resolves the current host-text policy. Dispatcher and repair entry points are no
 hard-off, and production registers no workflow worker. The wake port requires transactional
 enqueueing deduplicated by run ID; its production adapter belongs with later worker wiring. No retention
 worker or web interface exists yet. Step 16a adds the guarded workflow run history reads.
+Definition changes and previews use the shared audit journal inside their transactions.
 Decisions below are Hourmere decisions unless explicitly
 attributed to another product. Existing reminders and follow-ups remain available.
 
@@ -747,9 +748,8 @@ Event ownership:
   writer main has by then, for definition and preview events. Step 16c binds the execution
   events and closes the no-op path, so no production wiring can select it.
 
-If no accepted writer is on main when step 16b starts, stop there: keep hard-off and do not
-proceed to opt-in. The no-op port is safe only while hard-off and must not survive step 16c.
-Record `workflow.created`, `workflow.updated`, `workflow.enabled`, `workflow.disabled`,
+The shared [audit journal](audit-log.md#workflow-actions) is the production binding for
+all workflow events. Record `workflow.created`, `workflow.updated`, `workflow.enabled`, `workflow.disabled`,
 `workflow.deleted`, `workflow.previewed`, `workflow.run_scheduled`,
 `workflow.run_cancelled`, `workflow.run_skipped`, `workflow.email_attempted`,
 `workflow.email_sent`, `workflow.email_rejected`, `workflow.email_delivery_unknown`,
@@ -798,8 +798,9 @@ without a write. Content changes append a revision; an enable/disable-only patch
 current content revision and changes only the live definition row. Existing captured revisions,
 enrollments and execution rows remain untouched, including on re-enable. Enablement checks
 the combined all-event/per-event cap under the same owner lock as creation. Updates reject
-webhook actions until subscription support is implemented, and record actual update, enable
-and disable transitions through the injected audit port (no-op in production while hard-off).
+webhook actions until subscription support is implemented, and record update, enable
+and disable transitions through the injected audit port. The production hard-off guard
+runs before any workflow transaction or audit write.
 No separate enable or disable interface exists. Delete uses expected revision and
 is idempotent within retained identity. Its strict REST body is `{ "expectedRevision": 1 }`;
 MCP and CLI include `id` in the same input. REST returns `204` and MCP/CLI return
@@ -831,11 +832,13 @@ or `condition_false`. Email actions render one sample per recipient class, inclu
 the example skips, and report the selected template locale and any fallback. Webhook
 actions return their per-match delivery estimate. Email estimates report the selected
 class count and published default mail caps. The only database reads authorize the owner
-and validate the candidate’s event-type and webhook configuration.
+and validate the candidate’s event-type and webhook configuration. A successful preview
+records a [workflow audit event](audit-log.md#workflow-actions) in that transaction.
 
 中文：预览接收明确的 `owner`、候选定义字段和可选的 `example`。示例可替换预约时间、
 收件人名称、语言、时区和条件值。响应包含合成示例的匹配结果、每类收件人的纯文本与转义
-HTML、语言回退和静态额度估计。预览只读取权限及候选定义引用的配置。功能仍硬关闭，
+HTML、语言回退和静态额度估计。预览只读取权限及候选定义引用的配置，成功时在同一事务中
+记录审计事件，仅包含已授权空间和固定的触发类型及原因代码等审计元数据。功能仍硬关闭，
 三个接口统一返回 `workflows_disabled`，MCP 工具列表隐藏预览。
 
 Step 4 settles the read representation and refusals. A definition reads as `id`, `owner`

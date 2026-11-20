@@ -111,7 +111,7 @@ const DATA_ACCESS = [
 const DEFINITION_TABLES = ['workflow_definitions', 'workflow_revisions', 'workflow_creation_keys']
 const WEBHOOK_DELIVERY_TEST_FIXTURE = 'packages/webhooks/src/workflow-delivery-fixture.ts'
 
-/** Every non-test source file in the src directory of each apps, packages and tools workspace. */
+/** Process source in each workspace, with standalone scripts when checking audit wiring. */
 function productionSources(): string[] {
   const rootPath = fileURLToPath(root)
   const files: string[] = []
@@ -125,14 +125,16 @@ function productionSources(): string[] {
     }
   }
   for (const group of ['apps', 'packages', 'tools'])
-    for (const name of readdirSync(new URL(group, root))) {
-      const source = new URL(`${group}/${name}/src`, root)
-      try {
-        if (statSync(source).isDirectory()) walk(fileURLToPath(source))
-      } catch {
-        // Not a workspace with sources.
+    for (const name of readdirSync(new URL(group, root)))
+      for (const directory of ['src', 'scripts']) {
+        const source = new URL(`${group}/${name}/${directory}`, root)
+        try {
+          if (statSync(source).isDirectory()) walk(fileURLToPath(source))
+        } catch {
+          // Not a workspace with sources.
+        }
       }
-    }
+  walk(fileURLToPath(new URL('scripts', root)))
   return files.filter((file) => file !== WEBHOOK_DELIVERY_TEST_FIXTURE).sort()
 }
 
@@ -745,23 +747,38 @@ describe('booking workflows are off and expose the shipped operations', () => {
     expect(capture).toBeGreaterThan(core)
     const service = readFileSync(new URL('packages/workflows/src/capture.ts', root), 'utf8')
     expect(service).toContain(
-      'export const captureWorkflowBooking = workflowCapture(captureBookingWorkflows)',
+      'export const captureWorkflowBooking = workflowCapture((...args: CaptureArgs) =>\n' +
+        '  captureBookingWorkflows(...args, workflowAuditPort),',
     )
   })
 
   it('keeps dispatcher and repair handlers guarded and absent from production registration', () => {
     const service = readFileSync(new URL('packages/workflows/src/dispatcher.ts', root), 'utf8')
+    expect(service).toContain('export const dispatchWorkflowRuns = workflowExecution(')
     expect(service).toContain(
-      'export const dispatchWorkflowRuns = workflowExecution(dispatchDueWorkflowRuns)',
+      'dispatchDueWorkflowRuns({ ...ctx, audit: workflowAuditPort }, options)',
     )
+    expect(service).toContain('export const repairWorkflowWakes = workflowExecution(')
     expect(service).toContain(
-      'export const repairWorkflowWakes = workflowExecution(repairWorkflowRunWakes)',
+      'repairWorkflowRunWakes({ ...ctx, audit: workflowAuditPort }, port, limit)',
     )
     for (const file of productionSources().filter(
       (file) => !file.startsWith('packages/workflows/src/'),
     )) {
       const source = readFileSync(new URL(file, root), 'utf8')
       expect(source, file).not.toMatch(/\bworkflowJobs\b|workflow-dispatch-v1|workflow-repair-v1/)
+    }
+  })
+
+  it('keeps the retired audit port out of server, worker, CLI and script wiring', () => {
+    const sources = productionSources()
+    expect(sources).toContain('apps/server/src/server.ts')
+    expect(sources).toContain('packages/webhooks/src/delivery.ts')
+    expect(sources).toContain('tools/cli/src/cli.ts')
+    expect(sources).toContain('scripts/webhook-reconciliation-benchmark.ts')
+    for (const file of sources) {
+      const source = readFileSync(new URL(file, root), 'utf8')
+      expect(source, file).not.toMatch(/\b(?:hardOffWorkflowAuditPort|noopAuditPort)\b/)
     }
   })
 
@@ -776,7 +793,9 @@ describe('booking workflows are off and expose the shipped operations', () => {
     expect(service).toContain(
       'const guardedWorkflowWebhook = workflowExecution(deliverWorkflowWebhook)',
     )
-    expect(service).toContain("if (retry === 'workflow') return guardedWorkflowWebhook(")
+    expect(service).toMatch(
+      /if \(retry === 'workflow'\)\s+return guardedWorkflowWebhook\(deps, deliveryId, signal, jobAttempt\)/,
+    )
     for (const file of productionSources()) {
       const source = readFileSync(new URL(file, root), 'utf8')
       expect(source, file).not.toContain('workflow-delivery-fixture')

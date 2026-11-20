@@ -9,7 +9,6 @@ import {
   PreviewWorkflowInputSchema,
   previewWorkflow,
   updateWorkflow,
-  type WorkflowAuditPort,
 } from '@hourmere/workflows'
 import {
   CreateWorkflowInput,
@@ -34,12 +33,10 @@ import { defineTool, type Tool } from './tools.ts'
  */
 export function workflowTools({
   db,
-  audit,
   followUpHostNotesEnabled,
   workflowRunCursorSecret,
 }: {
   db: Db
-  audit?: WorkflowAuditPort
   followUpHostNotesEnabled?: boolean | undefined
   workflowRunCursorSecret?: string | undefined
 }): Tool[] {
@@ -58,7 +55,7 @@ export function workflowTools({
       output: Workflow,
       annotations: { ...annotations, readOnlyHint: false },
       run(args, call) {
-        return createWorkflow({ db, audit, followUpHostNotesEnabled, principal: call.caller }, args)
+        return createWorkflow({ db, followUpHostNotesEnabled, principal: call.caller }, args)
       },
     }),
     defineTool({
@@ -69,11 +66,7 @@ export function workflowTools({
       output: Workflow,
       annotations: { ...annotations, readOnlyHint: false, idempotentHint: false },
       run({ id, ...args }, call) {
-        return updateWorkflow(
-          { db, audit, followUpHostNotesEnabled, principal: call.caller },
-          id,
-          args,
-        )
+        return updateWorkflow({ db, followUpHostNotesEnabled, principal: call.caller }, id, args)
       },
     }),
     defineTool({
@@ -84,7 +77,7 @@ export function workflowTools({
       output: z.object({ deleted: z.literal(true) }),
       annotations: { ...annotations, readOnlyHint: false, destructiveHint: true },
       async run({ id, ...args }, call) {
-        await deleteWorkflow({ db, audit, principal: call.caller }, id, args)
+        await deleteWorkflow({ db, principal: call.caller }, id, args)
         return { deleted: true as const }
       },
     }),
@@ -96,10 +89,7 @@ export function workflowTools({
       output: WorkflowPreview,
       annotations,
       run(args, call) {
-        return previewWorkflow(
-          { db, audit, followUpHostNotesEnabled, principal: call.caller },
-          args,
-        )
+        return previewWorkflow({ db, followUpHostNotesEnabled, principal: call.caller }, args)
       },
     }),
     defineTool({
