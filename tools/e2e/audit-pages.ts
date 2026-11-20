@@ -11,6 +11,13 @@ import {
 } from './audit-data.ts'
 import type { FixtureApp } from './fixtures.ts'
 import {
+  type HostPollAuditPageId,
+  hostPollAuditPages,
+  isHostPollAuditPage,
+  leavePendingHostPollAudit,
+  openHostPollAuditPage,
+} from './host-meeting-poll-audit.ts'
+import {
   isRoutingFormAuditPage,
   leavePendingRoutingFormAudit,
   openRoutingFormAuditPage,
@@ -39,6 +46,7 @@ function isPollAuditPage(id: string): id is PollAuditPageId {
 
 export const auditPages = [
   ...pollAuditPages,
+  ...hostPollAuditPages,
   ...routingFormAuditPages,
   { id: 'host', title: 'Public host' },
   { id: 'booking', title: 'Public booking' },
@@ -211,21 +219,20 @@ export async function openAuditPage(
 ): Promise<void> {
   try {
     await leavePendingRoutingFormAudit(page, app.url)
+    await leavePendingHostPollAudit(page, app.url)
     // Earlier audit states create real bookings; pin the calendar and list filters
     // before navigation so later pages never inherit wall-clock-dependent rows.
     await page.clock.setFixedTime(new Date(AUDIT_NOW))
-    if (isPollAuditPage(id) || isRoutingFormAuditPage(id)) {
-      await app.auditSignIn(false, locale)
+    if (isHostPollAuditPage(id) || isPollAuditPage(id) || isRoutingFormAuditPage(id)) {
+      await app.auditSignIn(isHostPollAuditPage(id), locale)
       await page.addInitScript(prepareAuditLocale, locale)
       if (isPollAuditPage(id)) await openPollAuditPage(page, app, id)
       else {
-        const path = await openRoutingFormAuditPage(
-          page,
-          app.url,
-          id,
-          locale === 'zh-CN' ? locale : 'en',
-        )
-        verifyAuditPath(page.url(), path)
+        const language = locale === 'zh-CN' ? locale : 'en'
+        const path = isHostPollAuditPage(id)
+          ? await openHostPollAuditPage(page, app, id, language)
+          : await openRoutingFormAuditPage(page, app.url, id, language)
+        verifyAuditPath(page.url(), new URL(path, app.url).pathname)
       }
       await page.evaluate(() => window.scrollTo(0, 0))
       await page.evaluate(settleAuditLayout)
@@ -238,7 +245,10 @@ export async function openAuditPage(
       id === 'team-bookings' || id === 'team-booking-detail' ? 'team' : undefined,
     )
     await page.addInitScript(prepareAuditLocale, locale)
-    const paths: Record<Exclude<AuditPageId, PollAuditPageId | RoutingFormAuditPageId>, string> = {
+    const paths: Record<
+      Exclude<AuditPageId, HostPollAuditPageId | PollAuditPageId | RoutingFormAuditPageId>,
+      string
+    > = {
       host: '/fixture-host',
       booking: fixture.bookingPath,
       'booking-form': fixture.bookingPath,

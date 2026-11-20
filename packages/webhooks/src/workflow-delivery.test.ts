@@ -10,9 +10,14 @@ import {
 } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
+  createRecordingWorkflowAudit,
+  expectWorkflowAuditRedacted,
+} from '../../workflows/src/testing.ts'
+import {
   captureWorkflowWebhook,
   deliverWorkflowWebhook,
   WEBHOOK_DELIVERY_JOB,
+  webhookBookingNotifier,
   webhookDeliveryJob,
 } from './delivery.ts'
 import { createWebhook } from './service.ts'
@@ -25,6 +30,9 @@ import {
 const serverUrl = process.env.DATABASE_URL
 const now = Temporal.Instant.from('2030-11-03T12:00Z')
 const settings = { enabled: true, encryptionKey: Buffer.alloc(32, 9).toString('base64') }
+const privateAttendee = { name: 'Private Invitee', email: 'private-invitee@example.com' }
+const privateAnswer = 'Private answer fixture'
+const privateLocation = 'https://meeting.example/fixture-private-room'
 
 describe.skipIf(!serverUrl)('workflow webhook outbox', () => {
   let owned: TestDatabase
@@ -88,11 +96,15 @@ describe.skipIf(!serverUrl)('workflow webhook outbox', () => {
       [user.id],
       '2030-11-03T09:00Z',
       '2030-11-03T09:30Z',
-      { eventTypeId, attendee: { name: 'Private Invitee', email: 'private-invitee@example.com' } },
+      { eventTypeId, attendee: privateAttendee },
     )
     await db
       .updateTable('bookings')
-      .set({ rescheduled_from_id: previous })
+      .set({
+        rescheduled_from_id: previous,
+        responses: JSON.stringify({ question: privateAnswer }),
+        location: JSON.stringify({ type: 'link', url: privateLocation }),
+      })
       .where('id', '=', bookingId)
       .execute()
     const { webhook, secret } = await endpoint('selected')
@@ -106,7 +118,7 @@ describe.skipIf(!serverUrl)('workflow webhook outbox', () => {
         capturedAt: now.subtract({ hours: 24 }),
       })
     const { capture: input } = await seed()
-    return { input, seed, endpoint, eventTypeId, webhook, secret, previous }
+    return { input, seed, endpoint, eventTypeId, webhook, secret, previous, user }
   }
 
   const deliveries = (bookingId: string) =>
@@ -123,14 +135,17 @@ describe.skipIf(!serverUrl)('workflow webhook outbox', () => {
   it.each([true, false])(
     'captures distinct runs once each and signs the exact field allow-list (personal=%s)',
     async (personal) => {
-      const { input, seed, endpoint, eventTypeId, webhook, secret, previous } =
+      const { input, seed, endpoint, eventTypeId, webhook, secret, previous, user } =
         await fixture(personal)
+      const audit = await createRecordingWorkflowAudit(db)
       await endpoint('also-subscribed')
       const { capture: second } = await seed()
       const capture = (event: typeof input) =>
         db
           .transaction()
-          .execute((trx) => captureQueuedWorkflowWebhook(jobs, settings, trx, event, now))
+          .execute((trx) =>
+            captureQueuedWorkflowWebhook(jobs, settings, trx, event, now, audit.port),
+          )
       await expect(Promise.all([capture(input), capture(input), capture(second)])).resolves.toEqual(
         [undefined, undefined, undefined],
       )
@@ -147,6 +162,7 @@ describe.skipIf(!serverUrl)('workflow webhook outbox', () => {
         db,
         ...settings,
         now: () => now,
+        workflowAudit: audit.port,
         transport: async (request: WebhookRequest) => {
           requests.push(request)
           return 204
@@ -166,6 +182,35 @@ describe.skipIf(!serverUrl)('workflow webhook outbox', () => {
         await deliverWorkflowWebhook(deps, row.id, signal, 2)
       }
       expect(requests).toHaveLength(2)
+      const events = await audit.read()
+      expectWorkflowAuditRedacted(events, [
+        privateAttendee.name,
+        privateAttendee.email,
+        privateAnswer,
+        privateLocation,
+        'Fixture booking',
+        webhook.url,
+        secret,
+        settings.encryptionKey,
+        input.bookingId,
+        ...requests.map(({ body }) => body),
+      ])
+      expect(events).toHaveLength(4)
+      for (const captured of [input, second]) {
+        expect(events.filter(({ workflowId }) => workflowId === captured.workflowId)).toEqual(
+          ['workflow.webhook_queued', 'workflow.webhook_completed'].map((event) => ({
+            event,
+            occurredAt: now,
+            actor: { kind: 'background', job: 'dispatch' },
+            owner: personal
+              ? { kind: 'personal', organizationId: input.organizationId, userId: user.id }
+              : { kind: 'team', organizationId: input.organizationId },
+            workflowId: captured.workflowId,
+            revision: captured.workflowRevision,
+            trigger: captured.trigger,
+          })),
+        )
+      }
       for (const [index, request] of requests.entries()) {
         const row = rows[index]
         const captured = row?.workflow_run_id === input.workflowRunId ? input : second
@@ -203,10 +248,11 @@ describe.skipIf(!serverUrl)('workflow webhook outbox', () => {
 
   it('keeps the delivery and queued job in the caller transaction', async () => {
     const { input } = await fixture()
+    const audit = await createRecordingWorkflowAudit(db)
     let rolledBackId: string | undefined
     await expect(
       db.transaction().execute(async (trx) => {
-        await captureWorkflowWebhook(jobs, settings, trx, input, now)
+        await captureWorkflowWebhook(jobs, settings, trx, input, now, audit.port)
         const row = await trx
           .selectFrom('webhook_deliveries')
           .select('id')
@@ -214,12 +260,85 @@ describe.skipIf(!serverUrl)('workflow webhook outbox', () => {
           .executeTakeFirstOrThrow()
         rolledBackId = row.id
         expect(await queued(row.id)).toEqual([])
+        expect((await audit.read(trx)).map(({ event }) => event)).toEqual([
+          'workflow.webhook_queued',
+        ])
         throw new Error('rollback workflow fixture')
       }),
     ).rejects.toThrow('rollback workflow fixture')
     expect(rolledBackId).toBeDefined()
     expect(await deliveries(input.bookingId)).toEqual([])
     expect(await queued(rolledBackId as string)).toEqual([])
+    expect(await audit.read()).toEqual([])
+  })
+
+  it('records only the terminal failure across retries and leaves booking webhook delivery alone', async () => {
+    const { input, webhook, secret } = await fixture()
+    const audit = await createRecordingWorkflowAudit(db)
+    const privateError = 'Private receiver error fixture'
+    const requests: WebhookRequest[] = []
+    const deps = {
+      db,
+      ...settings,
+      now: () => now,
+      workflowAudit: audit.port,
+      transport: async (request: WebhookRequest) => {
+        requests.push(request)
+        if (JSON.parse(request.body).type === 'workflow.executed') throw new Error(privateError)
+        return 204
+      },
+    }
+    await db.transaction().execute(async (trx) => {
+      await captureQueuedWorkflowWebhook(jobs, settings, trx, input, now, audit.port)
+      await webhookBookingNotifier(jobs, settings)(
+        trx,
+        { type: 'created', bookingId: input.bookingId, start: now.subtract({ hours: 3 }) },
+        now,
+      )
+    })
+    const rows = await deliveries(input.bookingId)
+    const workflow = rows.find((row) => row.event_type === 'workflow.executed')
+    const booking = rows.find((row) => row.event_type === 'booking.created')
+    if (!workflow || !booking) throw new Error('Missing fixture deliveries')
+    const signal = new AbortController().signal
+    await webhookDeliveryJob(deps).handler(
+      { deliveryId: booking.id },
+      { id: randomUUID(), attempt: 1, signal },
+    )
+    await expect(deliverWorkflowWebhook(deps, workflow.id, signal)).rejects.toThrow(
+      'Webhook delivery failed',
+    )
+    expect((await audit.read()).map(({ event }) => event)).toEqual(['workflow.webhook_queued'])
+    await expect(deliverWorkflowWebhook(deps, workflow.id, signal, 13)).rejects.toThrow(
+      'Webhook delivery failed',
+    )
+    await deliverWorkflowWebhook(deps, workflow.id, signal, 13)
+    expect(requests).toHaveLength(3)
+    const events = await audit.read()
+    expectWorkflowAuditRedacted(events, [
+      privateAttendee.name,
+      privateAttendee.email,
+      privateAnswer,
+      privateLocation,
+      privateError,
+      webhook.url,
+      secret,
+      settings.encryptionKey,
+      ...requests.map(({ body }) => body),
+    ])
+    const queued = events[0]
+    expect(queued?.event).toBe('workflow.webhook_queued')
+    expect(events).toEqual([queued, { ...queued, event: 'workflow.webhook_failed' }])
+    expect(await deliveries(input.bookingId)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: booking.id, status: 'delivered' }),
+        expect.objectContaining({
+          id: workflow.id,
+          status: 'failed',
+          last_error: 'transport_error',
+        }),
+      ]),
+    )
   })
 
   it('requires the selected endpoint to be active and subscribed in the booking organization', async () => {

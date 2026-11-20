@@ -56,6 +56,7 @@ export async function prepareMeetingPollDeadlineMessage(
   return meetingPollDeadlineEmail({
     to: recipient.email,
     publicUrl: deps.publicUrl,
+    organizationId: poll.organization_id,
     pollId: poll.id,
     pollTitle: poll.title,
     deadlineAt: poll.deadline_at,

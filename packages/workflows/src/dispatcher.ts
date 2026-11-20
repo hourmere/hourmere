@@ -4,10 +4,15 @@ import { type Db, isImportedBooking } from '@hourmere/db'
 import { defineJob } from '@hourmere/jobs'
 import { sql } from 'kysely'
 import { z } from 'zod'
-import type { WorkflowSkipReason } from './audit.ts'
-import { WorkflowDefinitionSchema } from './definition.ts'
+import {
+  hardOffWorkflowAuditPort,
+  type WorkflowAuditPort,
+  type WorkflowSkipReason,
+} from './audit.ts'
+import { WorkflowDefinitionSchema, type WorkflowTriggerType } from './definition.ts'
 import { workflowExecution } from './hard-off.ts'
 import { WORKFLOW_MAX_LATE_MINUTES } from './limits.ts'
+import type { WorkflowOwner } from './ownership.ts'
 import { workflowDispatchWindow, workflowTimerDueAt } from './timers.ts'
 
 export const WORKFLOW_DISPATCH_PAGE = 100
@@ -15,6 +20,7 @@ export const WORKFLOW_CLAIM_SECONDS = 60
 export interface WorkflowDispatchContext {
   db: Db
   now: () => Temporal.Instant
+  audit?: WorkflowAuditPort | undefined
 }
 export interface WorkflowRunClaim {
   runId: string
@@ -107,7 +113,16 @@ export async function lockedWorkflowRun(
     .selectAll()
     .where('id', '=', run.enrollment_id)
     .executeTakeFirstOrThrow()
-  return { run, enrollment, definition, booking }
+  const owner: WorkflowOwner = personal
+    ? { kind: 'personal', organizationId: run.organization_id, userId: personal.user_id }
+    : { kind: 'team', organizationId: run.organization_id }
+  const auditIdentity = {
+    owner,
+    workflowId: enrollment.workflow_id,
+    revision: enrollment.revision,
+    trigger: enrollment.trigger as WorkflowTriggerType,
+  }
+  return { run, enrollment, definition, booking, auditIdentity }
 }
 type LockedRun = NonNullable<Awaited<ReturnType<typeof lockedWorkflowRun>>>
 export function workflowRunWindow(run: LockedRun['run'], now: Temporal.Instant) {
@@ -122,6 +137,7 @@ export async function finishWorkflowRun(
   locked: LockedRun,
   result: WorkflowSkipReason | 'completed' | 'retired',
   now: Temporal.Instant,
+  audit?: WorkflowAuditPort,
 ) {
   const { run, enrollment, definition } = locked
   const terminal = result === 'retired' || result === 'completed'
@@ -136,7 +152,7 @@ export async function finishWorkflowRun(
     })
     .where('id', '=', run.id)
     .execute()
-  if (!terminal)
+  if (!terminal) {
     await trx
       .updateTable('workflow_recipient_claims')
       .set({
@@ -149,6 +165,14 @@ export async function finishWorkflowRun(
       .where('run_id', '=', run.id)
       .where('state', '=', 'pending')
       .execute()
+    await (audit ?? hardOffWorkflowAuditPort()).record(trx, {
+      ...locked.auditIdentity,
+      event: 'workflow.run_skipped',
+      actor: { kind: 'background', job: 'dispatch' },
+      occurredAt: now,
+      reason: result,
+    })
+  }
   if (definition) {
     const counts = await trx
       .selectFrom('workflow_recipient_claims')
@@ -194,6 +218,7 @@ export async function completeWorkflowEmailRun(
   trx: Db,
   locked: LockedRun,
   now: Temporal.Instant,
+  audit?: WorkflowAuditPort,
   skipReason?: 'budget_suppressed' | 'expired' | 'existing_notification' | 'render_limit',
 ) {
   const recipients = await trx
@@ -207,18 +232,32 @@ export async function completeWorkflowEmailRun(
     locked,
     skipReason && recipients.every(({ state }) => state === 'skipped') ? skipReason : 'completed',
     now,
+    audit,
   )
   return true
 }
 
-async function recoverWorkflowEmailMarker(trx: Db, locked: LockedRun, now: Temporal.Instant) {
+async function recoverWorkflowEmailMarker(
+  trx: Db,
+  locked: LockedRun,
+  now: Temporal.Instant,
+  audit?: WorkflowAuditPort,
+) {
   const abandoned = await trx
     .updateTable('workflow_recipient_claims')
     .set({ state: 'delivery_unknown', claim_token: null, finished_at: date(now) })
     .where('run_id', '=', locked.run.id)
     .where('state', '=', 'dispatching')
-    .executeTakeFirst()
-  return abandoned.numUpdatedRows > 0n
+    .returning('id')
+    .execute()
+  for (const _ of abandoned)
+    await (audit ?? hardOffWorkflowAuditPort()).record(trx, {
+      ...locked.auditIdentity,
+      event: 'workflow.email_delivery_unknown',
+      actor: { kind: 'background', job: 'repair' },
+      occurredAt: now,
+    })
+  return abandoned.length > 0
 }
 
 export async function workflowRunEligibility(trx: Db, locked: LockedRun) {
@@ -292,11 +331,12 @@ export async function lockWorkflowWebhookRun(
   if (
     !locked ||
     locked.run.organization_id !== delivery.organizationId ||
-    locked.run.booking_id !== delivery.bookingId ||
-    locked.run.state === 'retired' ||
-    locked.run.state === 'skipped'
+    locked.run.booking_id !== delivery.bookingId
   )
     return
+  const { auditIdentity } = locked
+  const ineligible = { auditIdentity, eligibility: undefined }
+  if (locked.run.state === 'retired' || locked.run.state === 'skipped') return ineligible
   const eligibility = await workflowRunEligibility(trx, locked)
   if (
     eligibility.reason ||
@@ -304,14 +344,42 @@ export async function lockWorkflowWebhookRun(
       (action) => action.type === 'webhook' && action.webhookId === delivery.webhookId,
     )
   )
-    return
+    return ineligible
   return {
-    eventTypeId: eligibility.eventType.id,
-    expiresAt: Math.min(
-      locked.run.expires_at.getTime(),
-      instant(locked.run.due_at).add({ minutes: WORKFLOW_MAX_LATE_MINUTES }).epochMilliseconds,
-    ),
+    auditIdentity,
+    eligibility: {
+      eventTypeId: eligibility.eventType.id,
+      expiresAt: Math.min(
+        locked.run.expires_at.getTime(),
+        instant(locked.run.due_at).add({ minutes: WORKFLOW_MAX_LATE_MINUTES }).epochMilliseconds,
+      ),
+    },
   }
+}
+
+/** Orphan repair holds delivery locks. Read immutable enrollments without locking a parent. */
+export async function workflowWebhookAuditIdentities(trx: Db, deliveryIds: string[]) {
+  const rows = await trx
+    .selectFrom('webhook_deliveries as d')
+    .innerJoin('workflow_runs as r', (join) =>
+      join
+        .onRef('r.id', '=', 'd.workflow_run_id')
+        .onRef('r.organization_id', '=', 'd.organization_id')
+        .onRef('r.booking_id', '=', 'd.booking_id'),
+    )
+    .innerJoin('workflow_enrollments as e', 'e.id', 'r.enrollment_id')
+    .leftJoin('personal_organizations as p', 'p.organization_id', 'd.organization_id')
+    .select(['e.workflow_id', 'e.revision', 'e.trigger', 'd.organization_id', 'p.user_id'])
+    .where('d.id', 'in', deliveryIds)
+    .execute()
+  return rows.map((row): LockedRun['auditIdentity'] => ({
+    owner: row.user_id
+      ? { kind: 'personal', userId: row.user_id, organizationId: row.organization_id }
+      : { kind: 'team', organizationId: row.organization_id },
+    workflowId: row.workflow_id,
+    revision: row.revision,
+    trigger: row.trigger as WorkflowTriggerType,
+  }))
 }
 
 /** Bounded discovery is unlocked; each candidate is rechecked under ordered locks. */
@@ -392,12 +460,12 @@ export async function claimDueWorkflowRuns(
       if (!canClaim(run, now)) return
       if (run.due_at.getTime() > now.epochMilliseconds) return
       const recovered =
-        run.state === 'claimed' && (await recoverWorkflowEmailMarker(trx, locked, now))
-      if (recovered && (await completeWorkflowEmailRun(trx, locked, now))) return
+        run.state === 'claimed' && (await recoverWorkflowEmailMarker(trx, locked, now, ctx.audit))
+      if (recovered && (await completeWorkflowEmailRun(trx, locked, now, ctx.audit))) return
       const { reason } = await workflowRunEligibility(trx, locked)
       const afterWait = ctx.now()
       if (reason || workflowRunWindow(run, afterWait) === 'expired') {
-        await finishWorkflowRun(trx, locked, reason ?? 'expired', afterWait)
+        await finishWorkflowRun(trx, locked, reason ?? 'expired', afterWait, ctx.audit)
         return
       }
       if (await waitingForEmailRetry(trx, run.id, afterWait)) {
@@ -451,7 +519,7 @@ export async function dispatchClaimedWorkflowRun(
         .where('state', '=', 'dispatching')
         .executeTakeFirst()
       if (marker) return 'stale'
-      await finishWorkflowRun(trx, locked, reason ?? 'expired', now)
+      await finishWorkflowRun(trx, locked, reason ?? 'expired', now, ctx.audit)
       return reason === 'retired' ? 'retired' : 'skipped'
     }
     return window === 'open' ? 'ready' : 'stale'
@@ -486,7 +554,7 @@ async function repairRetiredWorkflowEmailMarkers(ctx: WorkflowDispatchContext, l
     await ctx.db.transaction().execute(async (trx) => {
       const locked = await lockedWorkflowRun(trx, id)
       if (locked?.run.finished_at && locked.run.finished_at <= cutoff())
-        await recoverWorkflowEmailMarker(trx, locked, ctx.now())
+        await recoverWorkflowEmailMarker(trx, locked, ctx.now(), ctx.audit)
     })
 }
 
