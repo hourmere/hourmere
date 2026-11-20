@@ -1,10 +1,14 @@
 import type { Db } from '@hourmere/db'
+import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { sql } from 'kysely'
 import { findOneTimeEventType } from './availability.ts'
+import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
+import { resolvedBookingHosts } from './hosts.ts'
 import { isUuid, jsonb } from './internal.ts'
 import { InvalidStoredQuestionsError } from './questions.ts'
 import type { RoutingContinuationContext } from './routing-continuation.ts'
+import type { RoutingAnswers, RoutingQuestion } from './routing-form-config.ts'
 import { loadRoutingTargetEvents, routingTargetProblem } from './routing-form-targets.ts'
 import {
   isRoutingReceiptToken,
@@ -12,6 +16,123 @@ import {
   validateRoutingReceiptSnapshot,
 } from './routing-receipt.ts'
 import { openRoutingAnswers, routingTokenDigest } from './routing-receipt-crypto.ts'
+
+export interface RoutingBookingSnapshot {
+  formId: string
+  versionId: string
+  versionNumber: number
+  matchedRuleId: string
+  resolvedRuleId: string
+  questions: RoutingQuestion[]
+  answers: RoutingAnswers
+}
+
+type RoutingBookingRead =
+  | { access: 'host'; routing: RoutingBookingSnapshot | null }
+  | { access: 'team_admin'; routing: RoutingBookingSnapshot }
+
+/** Read provenance and current authorization from the same database snapshot. */
+export async function readBookingRoutingSnapshot(
+  { db, principal }: ServiceContext,
+  bookingId: string,
+  allowTeamAdmin: boolean,
+): Promise<RoutingBookingRead | undefined> {
+  const { id: userId } = principal.user
+  const { id: organizationId } = principal.organization
+  const row = await db
+    .selectFrom('auth.member as member')
+    .innerJoin('auth.user as actor', 'actor.id', 'member.userId')
+    .leftJoin(resolvedBookingHosts(db).as('host'), (join) =>
+      join.on('host.booking_id', '=', bookingId).onRef('host.user_id', '=', 'member.userId'),
+    )
+    .leftJoin('booking_routing as routing', (join) =>
+      join
+        .on('routing.booking_id', '=', bookingId)
+        .onRef('routing.organization_id', '=', 'member.organizationId'),
+    )
+    .select([
+      'host.user_id as hostId',
+      'routing.form_id as formId',
+      'routing.version_id as versionId',
+      'routing.version_number as versionNumber',
+      'routing.matched_rule_id as matchedRuleId',
+      'routing.resolved_rule_id as resolvedRuleId',
+      'routing.questions',
+      'routing.answers',
+    ])
+    .where('member.organizationId', '=', organizationId)
+    .where('member.userId', '=', userId)
+    .where('actor.emailVerified', '=', true)
+    .where((eb) => eb.not(scimSuspended(organizationId, userId)))
+    .where((eb) => {
+      const host = eb('host.user_id', 'is not', null)
+      if (principal.kind !== 'session') return host
+      const session = eb
+        .selectFrom('auth.session as session')
+        .select('session.id')
+        .where('session.id', '=', principal.sessionId)
+        .whereRef('session.userId', '=', 'member.userId')
+        .where('session.expiresAt', '>', sql<Date>`clock_timestamp()`)
+      const activeOrganization = sql<string>`lower(${sql.ref('session.activeOrganizationId')})`
+      if (principal.organization.personal) {
+        // Session resolution falls back to personal space when there is no effective active team.
+        return eb.and([
+          host,
+          eb.exists(
+            session.where((eb) =>
+              eb.or([
+                eb(activeOrganization, '=', organizationId.toLowerCase()),
+                eb.not(
+                  eb.exists(
+                    eb
+                      .selectFrom('auth.member as active')
+                      .select('active.userId')
+                      .whereRef('active.userId', '=', 'session.userId')
+                      .where((eb) =>
+                        eb(
+                          sql<string>`${eb.ref('active.organizationId')}::text`,
+                          '=',
+                          activeOrganization,
+                        ),
+                      )
+                      .where((eb) =>
+                        eb.not(scimSuspended(eb.ref('active.organizationId'), userId)),
+                      ),
+                  ),
+                ),
+              ]),
+            ),
+          ),
+        ])
+      }
+      const activeTeamSession = eb.exists(
+        session.where(activeOrganization, '=', organizationId.toLowerCase()),
+      )
+      if (!allowTeamAdmin) return eb.and([activeTeamSession, host])
+      const personal = eb.exists(
+        eb
+          .selectFrom('personal_organizations')
+          .select('organization_id')
+          .whereRef('organization_id', '=', 'member.organizationId'),
+      )
+      // Better Auth stores exact role tokens in a comma-separated string.
+      const teamAdmin = sql<boolean>`${eb.ref('member.role')} ~ '(^|,)[[:space:]]*(owner|admin)[[:space:]]*(,|$)'`
+      return eb.and([
+        activeTeamSession,
+        eb.or([
+          host,
+          eb.and([eb('routing.booking_id', 'is not', null), teamAdmin, eb.not(personal)]),
+        ]),
+      ])
+    })
+    .executeTakeFirst()
+  if (!row) return undefined
+  const { hostId, ...snapshot } = row
+  // Both JSON fields were validated when the immutable snapshot was written.
+  const routing = snapshot.formId === null ? null : (snapshot as RoutingBookingSnapshot)
+  if (hostId !== null) return { access: 'host', routing }
+  if (routing) return { access: 'team_admin', routing }
+}
 
 export const routedBookingUnavailable = () => new DomainError('conflict', 'routing_unavailable')
 

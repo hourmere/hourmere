@@ -144,6 +144,8 @@ const SHIPPED_SCHEMAS = [
   'RoutingContinuationSlots',
   'RoutedBookingInput',
   'RoutedBookingResult',
+  'BookingRouting',
+  'TeamBookingRoutingDetail',
 ]
 const SHIPPED_TAGS = ['Routing forms']
 
@@ -175,7 +177,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-// The one routing-named schema property a1b publishes: the effective routing state at
+// The effective routing state at
 // `GET /api/v1/instance` (always false until the operator setting exists).
 const INSTANCE_CAPABILITY = 'Instance.routingFormsEnabled'
 
@@ -673,18 +675,22 @@ describe('routing forms remain hard-off with configuration and public metadata i
     expect(properties.length).toBeGreaterThan(500)
     expect(properties).toContain('Slot.start')
     expect(
-      properties.filter((name) => {
-        const [owner, property] = name.split('.')
-        return SHIPPED_SCHEMAS.includes(owner ?? '')
-          ? isRoutingName(property ?? '')
-          : isRoutingName(name)
-      }),
+      properties
+        .filter((name) => {
+          const [owner, property] = name.split('.')
+          return SHIPPED_SCHEMAS.includes(owner ?? '')
+            ? isRoutingName(property ?? '')
+            : isRoutingName(name)
+        })
+        .sort(),
     ).toEqual([
+      'HostBooking.routing',
       INSTANCE_CAPABILITY,
-      'RoutingSubmissionResponse.routeToken',
       'RoutedBookingInput.routeToken',
       'RoutingContinuationInput.routeToken',
       'RoutingContinuationSlotsInput.routeToken',
+      'RoutingSubmissionResponse.routeToken',
+      'TeamBookingRoutingDetail.routing',
     ])
   })
 

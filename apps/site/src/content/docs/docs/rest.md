@@ -342,6 +342,22 @@ to arbitrary hosts' private bookings. Results default to ascending start time an
 order unchanged for every page. Rate limits return `429` and `Retry-After`; slot races
 return `slot_taken` or `slot_unavailable`. Recheck availability before retrying with a new key.
 
+Read one hosted booking with `GET /api/v1/bookings/{id}`. With stored routing provenance,
+the response includes `routing` with `formId`, `versionId`, `versionNumber`, `matchedRuleId`,
+`resolvedRuleId`, `questions` and `answers`. `questions` keeps the original labels and
+select options. `answers` is keyed by routing question ID, with option IDs for select
+answers. The booking's final answers are in `responses`.
+
+Current hosts in the booking's organization can use a session or a `read`, `bookings` or
+`full` API key. A verified browser session in the current team also lets owners and admins
+who do not host the routed booking read its `id` and `routing` fields. The stored snapshot
+is available while routing forms are disabled. Ordinary booking details, booking lists
+and the team administration endpoints omit `routing`.
+
+中文：`GET /api/v1/bookings/{id}` 在已保存路由快照的预约详情中返回 `routing`。当前组织的主持人
+可以读取完整详情。未主持预约的团队所有者和管理员可通过当前团队的浏览器会话读取 `id` 和 `routing`。
+路由表单停用后仍可读取已保存的快照。普通预约、预约列表和团队管理接口省略该字段。
+
 Team owners/admins can use `GET /api/v1/team/bookings` with a verified browser session in
 the current team. It includes bookings hosted by other members and returns only the team
 administration fields: ID, status, times, cancellation time, event ID/title, saved host

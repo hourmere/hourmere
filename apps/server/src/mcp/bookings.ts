@@ -17,6 +17,7 @@ import {
   DomainError,
   getBookingActivity,
   getGroupOccurrenceAttendees,
+  getHostBookingDetail,
   getPublicEventType,
   getPublicTeamEventType,
   listBookingAttendeeNoShows,
@@ -46,6 +47,7 @@ import {
   CancelGroupOccurrenceResult,
   GroupAttendeesQuery,
   GroupOccurrenceAttendees,
+  HostBooking,
   Instant,
   ListBookingsQuery,
   RequestRescheduleBody,
@@ -614,6 +616,25 @@ export function bookingTools({
     },
   })
 
+  const getBooking = defineTool({
+    name: 'get_booking',
+    title: 'Read booking details',
+    description:
+      'Read a single booking you currently host in the acting organization. A routed booking includes its original form, version, matched and resolved rule IDs, and saved question and answer snapshots, even while routing forms are disabled. Requires a full, read or bookings API key, or an MCP OAuth grant with the same host access.',
+    input: z.strictObject({ bookingId: z.uuid() }),
+    output: HostBooking,
+    privateDiagnostics: true,
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async run({ bookingId }, call) {
+      return getHostBookingDetail(context(call.caller), bookingId)
+    },
+  })
+
   const getGroupAttendees = defineTool({
     name: 'get_group_occurrence_attendees',
     title: 'Read group occurrence attendees',
@@ -790,6 +811,7 @@ export function bookingTools({
     requestRescheduleTool,
     cancelBooking,
     listBookings,
+    getBooking,
     exportBookings,
     retryConference,
     retryCalendarCopy,

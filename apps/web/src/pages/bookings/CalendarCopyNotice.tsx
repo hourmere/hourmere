@@ -49,6 +49,10 @@ export function CalendarCopyNotice({
           }),
         )
         if (!active || currentLifecycle.current !== lifecycle) return
+        if (!('status' in current)) {
+          setFailed(true)
+          return
+        }
         setFailed(false)
         callback.current(current)
         count++

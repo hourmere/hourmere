@@ -75,6 +75,7 @@ export const COMMANDS = {
   'troubleshoot-availability': 'troubleshoot_availability',
   book: 'create_booking',
   list: 'list_bookings',
+  booking: 'get_booking',
   export: 'export_bookings',
   reschedule: 'reschedule_booking',
   'request-reschedule': 'request_reschedule',
@@ -155,9 +156,11 @@ Commands: whoami, profile, catalog, event, create-event, duplicate-event, update
           set-event-notifications, schedules, schedule, slots, open-time-snippet,
           troubleshoot-availability,
           schedule-availability, save-availability,
-          book, list, reschedule, request-reschedule, cancel, set-no-show, booking-attendees, group-attendees, cancel-group,
+          book, list, booking, reschedule, request-reschedule, cancel, set-no-show, booking-attendees, group-attendees, cancel-group,
           booking-activity, retry-meeting, retry-calendar-copy
           one-time-links create|list|revoke
+Read booking details with booking --input FILE|- and JSON {bookingId}.
+Requires a full, read or bookings key with access to the booking.
 Meeting polls
   Every poll command requires JSON on stdin (--input -). Input files and --output are refused.
   Keep tokens, invitation addresses and idempotency keys out of command arguments and shell history.

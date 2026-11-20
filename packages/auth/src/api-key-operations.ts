@@ -472,6 +472,7 @@ export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.free
   mcp('cancel_booking', 'booking_write', ['POST /api/v1/bookings/{id}/cancel'], 'host'),
   mcp('cancel_booking', 'booking_write', ['POST /api/v1/bookings/manage/cancel'], 'manageToken'),
   mcp('list_bookings', 'booking_read', ['GET /api/v1/bookings']),
+  mcp('get_booking', 'booking_read', ['GET /api/v1/bookings/{id}']),
   mcp('set_attendee_no_show', 'booking_write', [
     'PATCH /api/v1/bookings/{id}/attendees/{attendeeId}/no-show',
   ]),
@@ -607,6 +608,7 @@ export const API_KEY_CLI_OPERATIONS: readonly ApiKeyCliOperation[] = Object.free
   cli('slots', 'find_available_slots'),
   cli('book', 'create_booking'),
   cli('list', 'list_bookings'),
+  cli('booking', 'get_booking'),
   cli('export', 'export_bookings'),
   cli('reschedule', 'reschedule_booking'),
   cli('request-reschedule', 'request_reschedule'),

@@ -111,21 +111,19 @@ export const RoutingFormListInput = z.strictObject({
 // Response objects remain open to additive fields within API v1.
 // Stored routing IDs can use any PostgreSQL UUID, regardless of version or variant.
 const storedIdentity = z.guid()
-export const RoutingFormQuestion = z.discriminatedUnion('type', [
-  z.object({
-    id: z.uuid(),
-    label: z.string(),
-    required: z.boolean(),
-    type: z.enum(['short_text', 'email']),
-  }),
-  z.object({
-    id: z.uuid(),
-    label: z.string(),
-    required: z.boolean(),
-    type: z.literal('select'),
-    options: z.array(z.object({ id: z.uuid(), label: z.string() })),
-  }),
-])
+function routingFormQuestion<T extends z.ZodType<string>>(id: T) {
+  const fields = { id, label: z.string(), required: z.boolean() }
+  return z.discriminatedUnion('type', [
+    z.object({ ...fields, type: z.enum(['short_text', 'email']) }),
+    z.object({
+      ...fields,
+      type: z.literal('select'),
+      options: z.array(z.object({ id, label: z.string() })),
+    }),
+  ])
+}
+export const RoutingFormQuestion = routingFormQuestion(identity)
+export const StoredRoutingFormQuestion = routingFormQuestion(storedIdentity)
 const responseTarget = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('event'),

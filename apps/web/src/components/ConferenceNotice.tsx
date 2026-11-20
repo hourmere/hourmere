@@ -75,6 +75,11 @@ export function ConferenceNotice({
               }),
             )
         if (!active || currentLifecycle.current !== lifecycle) return
+        if (!('status' in data)) {
+          setReadError(true)
+          setPaused(true)
+          return
+        }
         setReadError(false)
         setCurrent(data)
         changed.current?.(data)

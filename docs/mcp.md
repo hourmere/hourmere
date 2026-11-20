@@ -120,6 +120,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `cancel_booking` | `host` | `cancel` | `full, bookings` |
 | `cancel_booking` | `manageToken` | `cancel` | `full, bookings` |
 | `list_bookings` | — | `list` | `full, read, bookings` |
+| `get_booking` | — | `booking` | `full, read, bookings` |
 | `set_attendee_no_show` | — | `set-no-show` | `full, bookings` |
 | `get_booking_attendees` | — | `booking-attendees` | `full, read, bookings` |
 | `get_group_occurrence_attendees` | — | `group-attendees` | `full, read, bookings` |
@@ -484,6 +485,23 @@ organization to prevent a browser workspace switch from downloading another work
 Use `hourmere export --input export.json --output bookings.csv` for a streamed private
 file. Keeping rows out of MCP responses prevents large personal-data dumps in model
 context. See [CSV exports](https://hourmere.com/docs/booking-export).
+
+## Read one booking
+
+`get_booking` takes `{ "bookingId": "<booking UUID>" }` and returns the same detail as
+`GET /api/v1/bookings/{id}` for a current booking host in the credential's organization.
+Use an MCP OAuth grant or a `read`, `bookings` or `full` API key. Missing and unavailable
+bookings both return `booking_not_found`.
+
+When a booking has stored routing provenance, `routing` includes the original form and
+version IDs, version number, matched and resolved rule IDs, and the saved question and
+answer snapshots. Answers use question IDs, and select answers use option IDs with
+their labels in the saved questions. The snapshot is still available while routing forms
+are disabled. Bookings without provenance and `list_bookings` omit `routing`.
+
+中文：`get_booking` 按 `bookingId` 读取当前组织内由你主持的预约。只有已保存路由快照的预约才返回
+`routing`，其中包含原表单版本、匹配及实际采用的规则 ID，以及问题和答案快照。停用路由表单后仍可读取
+已有快照，`list_bookings` 不返回该字段。
 
 ## Booking activity
 

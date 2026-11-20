@@ -9,7 +9,7 @@ import {
   cancelManagedBooking,
   exportBookingsCsv,
   getGroupOccurrenceAttendees,
-  getHostBooking,
+  getHostBookingDetail,
   getManagedBookingDetails,
   LOCATION_KINDS,
   listBookingAttendeeNoShows,
@@ -40,6 +40,7 @@ import { restTeamReadAccess } from '../sso-read-routes.ts'
 import { requireTeamRead } from '../sso-team-reads.ts'
 import { bookingWriteAccess, EXPECTED_ORGANIZATION_HEADER } from '../team-management.ts'
 import { PublicBranding } from './public-branding.ts'
+import { StoredRoutingFormQuestion } from './routing-forms.ts'
 
 // Schemas shared with the public routes (public.ts).
 
@@ -234,6 +235,31 @@ export const Booking = z
       }),
   })
   .openapi('Booking')
+
+const BookingRouting = z
+  .object({
+    formId: z.guid(),
+    versionId: z.guid(),
+    versionNumber: z.number().int().positive(),
+    matchedRuleId: z.union([z.guid(), z.literal('fallback')]),
+    resolvedRuleId: z.union([z.guid(), z.literal('fallback')]),
+    questions: z.array(StoredRoutingFormQuestion),
+    answers: z.record(z.string(), z.string()).openapi({
+      description:
+        'Original answers keyed by question UUID. Select answers are option UUIDs with labels in the stored questions.',
+    }),
+  })
+  .openapi('BookingRouting')
+
+export const HostBooking = Booking.extend({
+  routing: BookingRouting.optional().openapi({
+    description: 'The original stored routing provenance and question and answer snapshots.',
+  }),
+}).openapi('HostBooking')
+
+const TeamBookingRoutingDetail = z
+  .object({ id: z.uuid(), routing: BookingRouting })
+  .openapi('TeamBookingRoutingDetail')
 
 export const ManagedBooking = Booking.extend({
   branding: PublicBranding.optional(),
@@ -1189,20 +1215,31 @@ export function bookingRoutes({
       createRoute({
         method: 'get',
         path: '/api/v1/bookings/{id}',
-        summary: 'A booking the caller hosts',
+        operationId: 'getBooking',
+        summary: 'Read one booking with authorized host detail',
+        description:
+          'A current host in the booking organization can read the booking and any stored routing snapshot. A current owner or admin who does not host a routed team booking can read its ID and routing snapshot through a verified browser session in that team. API keys require read, bookings or full scope. Stored snapshots remain readable while routing forms are off.',
         security: authenticated,
         middleware: caller,
         request: { params: z.object({ id: z.uuid() }) },
         responses: {
-          200: { description: 'The booking', content: json(Booking) },
+          200: {
+            description: 'Host booking detail or the routing snapshot available to team managers',
+            content: json(z.union([HostBooking, TeamBookingRoutingDetail])),
+          },
           400: invalidId,
           401: unauthorized,
-          404: hostNotFound,
+          404: error('No such booking visible in the current organization (`booking_not_found`)'),
           429: keyRateLimited,
         },
       }),
       async (c) =>
-        c.json(await getHostBooking(context(c.var.principal), c.req.valid('param').id), 200),
+        c.json(
+          await getHostBookingDetail(context(c.var.principal), c.req.valid('param').id, {
+            allowTeamAdmin: true,
+          }),
+          200,
+        ),
     )
 
     app.openapi(

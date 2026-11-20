@@ -11,6 +11,7 @@
     "exemption": "browser-session-only",
     "reason": "Releasing domain authority requires interactive administrator proof."
   },
+  "getBooking": { "mcp": "get_booking", "cli": "booking" },
   "getGroupOccurrenceAttendees": {
     "mcp": "get_group_occurrence_attendees",
     "cli": "group-attendees"

@@ -16,6 +16,7 @@ const REQUIRED_READS: Readonly<Record<string, string>> = {
   getMeetingPollResults: 'GET /api/v1/meeting-polls/{id}/results',
   listSsoProviders: 'GET /api/v1/team/sso/providers',
   getGroupOccurrenceAttendees: 'GET /api/v1/group-occurrences/{id}/attendees',
+  getBooking: 'GET /api/v1/bookings/{id}',
   getSsoPolicy: 'GET /api/v1/team/sso/policy',
   getPublicRoutingForm: 'GET /api/v1/public/-/routing/{handle}/{slug}',
   getPublicTeamRoutingForm: 'GET /api/v1/public/-/routing/teams/{teamSlug}/{slug}',
