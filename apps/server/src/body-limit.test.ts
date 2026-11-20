@@ -107,4 +107,56 @@ describe('request bodies over a real socket', () => {
     expect((await send('TRACE', '/api/v1/missing')).status).toBe(404)
     expect((await send('TRACE', '/mcp')).status).toBe(405)
   })
+
+  // A fresh connection per request: a refused request line may close its socket.
+  const sendRaw = (method: string, path: string, body?: string) =>
+    new Promise<{ status: number; cacheControl?: string; body: string }>((resolve, reject) => {
+      const req = http.request(
+        {
+          host: '127.0.0.1',
+          port,
+          method,
+          path,
+          headers: body === undefined ? {} : { 'content-type': 'application/json' },
+          timeout: 3000,
+        },
+        (res) => {
+          let text = ''
+          res.setEncoding('utf8')
+          res.on('data', (chunk) => {
+            text += chunk
+          })
+          res.on('end', () =>
+            resolve({
+              status: res.statusCode ?? 0,
+              cacheControl: res.headers['cache-control'],
+              body: text,
+            }),
+          )
+        },
+      )
+      req.on('timeout', () => req.destroy(new Error('no answer within 3 s')))
+      req.on('error', reject)
+      req.end(body)
+    })
+
+  it('runs the /api middleware for paths with an encoded line terminator', async () => {
+    // hono < 4.13.16 skipped wildcard middleware (and wildcard routes) for such paths, so they
+    // fell through to the default 404 without the API's privacy headers or body limit.
+    for (const path of ['/api/v1/missing%0A/x', '/api/v1/missing%0D/x', '/api/v1/a%E2%80%A8/x']) {
+      expect(await sendRaw('GET', path)).toEqual({
+        status: 404,
+        cacheControl: 'no-store',
+        body: '{"error":"not_found"}',
+      })
+      const oversized = await sendRaw('POST', path, JSON.stringify({ data: 'x'.repeat(200_000) }))
+      expect(oversized.status).toBe(413)
+    }
+  })
+
+  it('refuses a raw backslash in the request path before routing', async () => {
+    // @hono/node-server >= 2.1.6: a WHATWG-normalised `\` must not reach the app as `/`.
+    expect((await sendRaw('GET', '/api\\health')).status).toBe(400)
+    expect((await sendRaw('GET', '/api%5Chealth')).status).toBe(404)
+  })
 })

@@ -3769,6 +3769,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/routing-continuations/bookings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Book a slot through a routing continuation
+         * @description Books the event selected by the private route capability. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key. Routing is currently hard-off. An exact committed replay with the same capability, Idempotency-Key and booking authority still succeeds after expiry or disablement.
+         */
+        post: operations["createRoutedBooking"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/routing-continuations/resolve": {
         parameters: {
             query?: never;
@@ -7818,6 +7838,108 @@ export interface components {
         /** @description Answers to the event type's questions, keyed by question id: text for short_text, long_text and phone; one option for select; a list of options for multi_select; true or false for checkbox */
         Responses: {
             [key: string]: string | string[] | boolean;
+        };
+        RoutedBookingInput: {
+            /** @description Selected meeting length in whole minutes, from the event type's allowedDurationsMinutes. Omitted uses the default for a new booking, or preserves the original booking length when rescheduling. */
+            durationMinutes?: number;
+            /** @description Up to ten additional email recipients, only when the event type has allowGuests enabled; otherwise guests_not_allowed */
+            guests?: {
+                /** Format: email */
+                email: string;
+                name: string;
+            }[];
+            invitee: {
+                /** Format: email */
+                email: string;
+                /** @description BCP 47 language tag. Registered interface and notification languages: en, zh-CN, de, fr, es, pt-BR. Regional tags are matched to a registered language; unsupported languages and missing translations fall back to English. Locale does not change the meeting time zone. */
+                locale?: string;
+                name: string;
+                /** @description IANA time zone */
+                timeZone: string;
+            };
+            /** @description Required for an askInvitee phone option: + and 7–15 total digits including the country code, first digit nonzero. Spaces, parentheses, dots and hyphens are removed before E.164 validation. */
+            inviteePhone?: string;
+            /** @description An id from the public event locations. Omission selects the default or first option. */
+            locationOptionId?: string;
+            responses?: components["schemas"]["Responses"];
+            /** @description Private capability from route submission. Use it instead of a direct booking address or one-time token. */
+            routeToken: string;
+            /** @description Explicit invitee consent to SMS booking reminders. Requires inviteePhone. */
+            smsConsent?: boolean;
+            /**
+             * Format: date-time
+             * @description The start of an offered slot
+             * @example 2026-11-02T09:00:00.000Z
+             */
+            start: string;
+        };
+        RoutedBookingResult: {
+            booking: {
+                /** @description The actual round-robin winner; no private host identity or availability mapping */
+                assignedHost?: {
+                    name: string;
+                    timeZone: string;
+                } | null;
+                /** @description The invitee first, then guests */
+                attendees: components["schemas"]["Attendee"][];
+                /**
+                 * Format: date-time
+                 * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
+                 * @example 2026-11-02T09:00:00.000Z
+                 */
+                cancelledAt: string | null;
+                cancelReason: string | null;
+                conference?: {
+                    /**
+                     * @description Stable failure code, or null. conference_pending_timeout means Google still reports a pending conference after the polling budget; provider_unavailable means a provider or transport failure. Clients must accept additional codes.
+                     * @example conference_pending_timeout
+                     */
+                    errorCode: string | null;
+                    /** @enum {string} */
+                    provider: "google_meet" | "zoom";
+                    /** @enum {string} */
+                    status: "pending" | "ready" | "failed";
+                };
+                /**
+                 * Format: date-time
+                 * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
+                 * @example 2026-11-02T09:00:00.000Z
+                 */
+                createdAt: string;
+                /**
+                 * Format: date-time
+                 * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
+                 * @example 2026-11-02T09:00:00.000Z
+                 */
+                end: string;
+                /** Format: uuid */
+                eventTypeId: string | null;
+                /** Format: uuid */
+                id: string;
+                location: components["schemas"]["BookingLocation"];
+                /**
+                 * Format: uuid
+                 * @description The booking this one replaced when it was rescheduled
+                 */
+                rescheduledFromId: string | null;
+                responses: components["schemas"]["Responses"];
+                /**
+                 * @description How the booking was made; import means a read-only busy record managed in the original system
+                 * @enum {string}
+                 */
+                source: "web" | "embed" | "api" | "mcp" | "import";
+                /**
+                 * Format: date-time
+                 * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
+                 * @example 2026-11-02T09:00:00.000Z
+                 */
+                start: string;
+                /** @enum {string} */
+                status: "confirmed" | "cancelled";
+                title: string;
+            };
+            /** @description The invitee's own manage token, sent as X-Manage-Token to /api/v1/bookings/manage. Returned once on creation or an invitee reschedule; creation replays and host reschedules return null. A host reschedule transfers the existing hash to the successor so the invitee's original token keeps working; an invitee reschedule leaves the old token on the cancelled booking. Emails carry their own tokens that follow the chain. */
+            manageToken: string | null;
         };
         RoutingContinuation: {
             eventType: {
@@ -16492,6 +16614,105 @@ export interface operations {
             };
             /** @description waitlist_smtp_not_configured: SMTP is required; waitlist_full: 100 active entries reached; waitlist_unavailable or availability_changed: refresh availability before trying again */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    createRoutedBooking: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description A random key (1–255 printable ASCII characters), e.g. a UUIDv4 */
+                "idempotency-key"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RoutedBookingInput"];
+            };
+        };
+        responses: {
+            /** @description Exact booking replay */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoutedBookingResult"];
+                };
+            };
+            /** @description Booked */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoutedBookingResult"];
+                };
+            };
+            /** @description Invalid booking request or Idempotency-Key */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description routing_forms_disabled */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description routing_unavailable, idempotency_key_reused or ordinary booking conflicts */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description payload_too_large (maximum 2,097,152 bytes) */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };

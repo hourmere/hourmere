@@ -255,6 +255,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `GET /api/v1/public/{handle}/{slug}` | Public or manage token; check a supplied key | `full, read, bookings` |
 | `POST /api/v1/routing-continuations/resolve` | Public or manage token; check a supplied key | `full, bookings` |
 | `POST /api/v1/routing-continuations/slots` | Public or manage token; check a supplied key | `full, bookings` |
+| `POST /api/v1/routing-continuations/bookings` | Public or manage token; check a supplied key | `full, bookings` |
 | `POST /api/v1/public/{handle}/{slug}/bookings` | Public or manage token; check a supplied key | `full, bookings` |
 | `GET /api/v1/public/{handle}/{slug}/slots` | Public or manage token; check a supplied key | `full, read, bookings` |
 | `GET /api/v1/public/teams/{handle}/{slug}` | Public or manage token; check a supplied key | `full, read, bookings` |
@@ -384,6 +385,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `create_booking` | `personal` | `book` | `full, bookings` |
 | `create_booking` | `team` | `book` | `full, bookings` |
 | `create_booking` | `oneTimeLink` | `book` | `full, bookings` |
+| `create_booking` | `routed` | `book` | `full, bookings` |
 | `request_reschedule` | — | `request-reschedule` | `full, bookings` |
 | `reschedule_booking` | — | `reschedule` | `full, bookings` |
 | `reschedule_booking` | `host` | `reschedule` | `full, bookings` |

@@ -1,5 +1,5 @@
-// Routing configuration, public form and continuation read interfaces are present by name.
-// Production remains hard-off. Booking and UI surfaces are reserved. Runtime refusal is tested by the
+// Routing configuration, public form and continuation interfaces are present by name.
+// Production remains hard-off. The continuation UI is reserved. Runtime refusal is tested by the
 // routing adapter tests. This inventory still examines production assembly and all source
 // paths, without snapshots or a git baseline. The web keeps its separate Off inventory.
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
@@ -103,6 +103,11 @@ const SHIPPED_OPERATIONS = [
     path: '/api/v1/routing-continuations/slots',
     operationId: 'findRoutedSlots',
   },
+  {
+    method: 'post',
+    path: '/api/v1/routing-continuations/bookings',
+    operationId: 'createRoutedBooking',
+  },
 ]
 const SHIPPED_PATHS = [...new Set(SHIPPED_OPERATIONS.map(({ path }) => path))]
 const SHIPPED_COMMANDS = {
@@ -137,6 +142,8 @@ const SHIPPED_SCHEMAS = [
   'RoutingContinuationSlotsInput',
   'RoutingContinuation',
   'RoutingContinuationSlots',
+  'RoutedBookingInput',
+  'RoutedBookingResult',
 ]
 const SHIPPED_TAGS = ['Routing forms']
 
@@ -675,6 +682,7 @@ describe('routing forms remain hard-off with configuration and public metadata i
     ).toEqual([
       INSTANCE_CAPABILITY,
       'RoutingSubmissionResponse.routeToken',
+      'RoutedBookingInput.routeToken',
       'RoutingContinuationInput.routeToken',
       'RoutingContinuationSlotsInput.routeToken',
     ])
@@ -796,13 +804,20 @@ describe('routing forms remain hard-off with configuration and public metadata i
       const instance = await app.request('/api/v1/instance')
       expect(instance.status).toBe(200)
       expect(await instance.json()).toHaveProperty('routingFormsEnabled', false)
-      // This pool cannot connect. A guard wired after a lookup therefore fails, as does a
-      // handler reached before input validation: every operation refuses even malformed input.
+      // This pool cannot connect. Booking validates input first for the exact replay exception;
+      // omitting its idempotency key ensures it need not query the database.
       for (const { method, path } of SHIPPED_OPERATIONS) {
+        const body = path.endsWith('/bookings')
+          ? JSON.stringify({
+              routeToken: 'r'.repeat(43),
+              start: '2026-11-02T09:00:00Z',
+              invitee: { name: 'Invitee', email: 'off@example.test', timeZone: 'UTC' },
+            })
+          : '{'
         const response = await app.request(path.replace(/\{\w+\}/g, 'unavailable'), {
           method: method.toUpperCase(),
           headers: { authorization: 'Bearer hm_inventory', 'content-type': 'application/json' },
-          ...(['post', 'patch', 'delete'].includes(method) ? { body: '{' } : {}),
+          ...(['post', 'patch', 'delete'].includes(method) ? { body } : {}),
         })
         expect(response.status, `${method} ${path}`).toBe(404)
         expect(await response.json()).toEqual({ error: 'routing_forms_disabled' })

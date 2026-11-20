@@ -26,6 +26,7 @@ import {
   MAX_SLOT_RANGE_DAYS,
   type PublicContext,
   prepareBookingExport,
+  type RoutingContinuationContext,
   requestReschedule,
   rescheduleHostBooking,
   rescheduleManagedBooking,
@@ -52,7 +53,14 @@ import {
   RescheduleRequestId,
   SelectedDurationMinutes,
 } from '../routes/bookings.ts'
-import { CreateBooking, PageParams, PublicEventType, Slot } from '../routes/public.ts'
+import {
+  bookRoutingContinuation,
+  CreateBooking,
+  PageParams,
+  PublicEventType,
+  RouteBookingToken,
+  Slot,
+} from '../routes/public.ts'
 import { defineTool, type McpCaller, type Tool } from './tools.ts'
 
 const handle = PageParams.shape.handle.openapi({
@@ -166,14 +174,30 @@ const CreateBookingInput = z
       description:
         'Makes retries safe: a retry with the same key and the same arguments returns the original booking (replayed: true, manageToken null) instead of booking again; the same key with different arguments fails with idempotency_key_reused. Use a new random value (e.g. a UUIDv4) per booking; 1–255 printable ASCII characters. Keys are scoped to your API key.',
     }),
+    routeToken: RouteBookingToken.optional().openapi({
+      description:
+        'Private routing capability from route_lead. Use the start returned by find_routed_slots. Omit handle, teamSlug, slug, oneTimeToken and waitlistToken. Routing forms must be enabled to create a booking; exact authorized replays still work while off.',
+    }),
   })
   .refine(
     (v) =>
-      v.oneTimeToken !== undefined
+      v.routeToken !== undefined ||
+      (v.oneTimeToken !== undefined
         ? v.handle === undefined && v.teamSlug === undefined && v.slug === undefined
-        : (v.handle === undefined) !== (v.teamSlug === undefined) && v.slug !== undefined,
+        : (v.handle === undefined) !== (v.teamSlug === undefined) && v.slug !== undefined),
     { message: 'Give oneTimeToken, or exactly one of handle or teamSlug together with slug' },
   )
+  .refine(
+    ({ routeToken, handle, teamSlug, slug, oneTimeToken, waitlistToken }) =>
+      routeToken === undefined ||
+      [handle, teamSlug, slug, oneTimeToken, waitlistToken].every(
+        (selector) => selector === undefined,
+      ),
+    { message: 'Use routeToken without any public booking selector or waitlistToken' },
+  )
+
+const hasRouteToken = (args: unknown) =>
+  typeof args === 'object' && args !== null && 'routeToken' in args
 
 const CreateBookingOutput = BookingWithToken.extend({
   replayed: z.boolean().openapi({
@@ -230,6 +254,9 @@ const ListBookingsInput = z.strictObject(ListBookingsQuery.shape)
 export interface BookingToolsDeps {
   db: Db
   waitlistSecret?: string | undefined
+  routingFormsEnabled?: boolean | undefined
+  routingSecret?: string | undefined
+  receiptNow?: RoutingContinuationContext['receiptNow']
   smtpConfigured?: boolean | undefined
   bookingMaxInviteeReschedules?: number | undefined
   now?: () => Temporal.Instant
@@ -256,6 +283,9 @@ export interface BookingToolsDeps {
 export function bookingTools({
   db,
   waitlistSecret,
+  routingFormsEnabled,
+  routingSecret,
+  receiptNow,
   smtpConfigured,
   bookingMaxInviteeReschedules,
   now = () => Temporal.Now.instant(),
@@ -372,17 +402,21 @@ export function bookingTools({
 
   const createBooking = defineTool({
     name: 'create_booking',
-    scopeModes: ['personal', 'team', 'oneTimeLink'],
+    scopeModes: ['personal', 'team', 'oneTimeLink', 'routed'],
     privateInput: (args) =>
-      typeof args === 'object' &&
-      args !== null &&
-      ('oneTimeToken' in args || 'waitlistToken' in args),
+      hasRouteToken(args) ||
+      (typeof args === 'object' &&
+        args !== null &&
+        ('oneTimeToken' in args || 'waitlistToken' in args)),
+    privateDiagnostics: hasRouteToken,
     scopeMode: (args) =>
-      typeof args === 'object' && args !== null && 'oneTimeToken' in args
-        ? 'oneTimeLink'
-        : typeof args === 'object' && args !== null && 'teamSlug' in args
-          ? 'team'
-          : 'personal',
+      hasRouteToken(args)
+        ? 'routed'
+        : typeof args === 'object' && args !== null && 'oneTimeToken' in args
+          ? 'oneTimeLink'
+          : typeof args === 'object' && args !== null && 'teamSlug' in args
+            ? 'team'
+            : 'personal',
     title: 'Create a booking',
     description:
       "Books a slot of someone's event type for an invitee, as their booking page would. start must be the exact start of a slot find_available_slots returned. Answer the event type's questions in responses, keyed by question id (required ones must be answered). Returns the booking and its manageToken: keep the token, it is shown only this once and is what reschedule_booking and cancel_booking need to act as the invitee. Fails with slot_unavailable if the time is not offered and slot_taken if someone else just booked it; then pick another slot. Fails with booking_changed if the round-robin host pool or activation changed while the call waited; call find_available_slots again before retrying. Choose locationOptionId from the event locations; askInvitee phone options require inviteePhone normalized to E.164 (common phone separators are removed). Use the same locationOptionId for slot lookup and booking. location_unavailable means the chosen option cannot be used by the assigned host. Pass the same durationMinutes used to find the slot; omission uses the event type’s default. Pass an idempotencyKey so that a retry after a lost response cannot book twice. For a one-time link, provide only oneTimeToken instead of handle/teamSlug/slug; it is consumed atomically with the booking. Unavailable links return the same one_time_link_not_found error; reschedule the resulting booking with its manageToken.",
@@ -396,6 +430,24 @@ export function bookingTools({
     },
     async run(args, call) {
       call.rateLimit(bookLimit)
+      if (args.routeToken !== undefined) {
+        return bookRoutingContinuation(
+          { ...pub, routingFormsEnabled, routingSecret, receiptNow },
+          {
+            routeToken: args.routeToken,
+            start: args.start,
+            durationMinutes: args.durationMinutes,
+            locationOptionId: args.locationOptionId,
+            inviteePhone: args.inviteePhone,
+            smsConsent: args.smsConsent,
+            invitee: args.invitee,
+            guests: args.guests,
+            responses: args.responses,
+          },
+          origin(call.caller),
+          args.idempotencyKey,
+        )
+      }
       if (args.oneTimeToken !== undefined) {
         return createOneTimeBooking(
           pub,

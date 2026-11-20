@@ -436,7 +436,17 @@ describe('MCP scoped discovery and dispatch', () => {
     '%s protects direct runTool calls for every tool and explicit dispatch mode',
     async (scope) => {
       for (const original of catalog) {
-        for (const args of [{}, { teamSlug: 'team' }, { bookingId: randomUUID() }]) {
+        const inputs: Record<string, unknown>[] = [
+          {},
+          { teamSlug: 'team' },
+          { bookingId: randomUUID() },
+        ]
+        if (original.name === 'create_booking') {
+          const routed = { routeToken: 'x'.repeat(43) }
+          expect(original.scopeMode?.(routed)).toBe('routed')
+          inputs.push(routed)
+        }
+        for (const args of inputs) {
           const tool = probe(original)
           const result = await runTool(
             tool,

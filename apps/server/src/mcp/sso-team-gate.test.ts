@@ -45,6 +45,7 @@ const ungated: Record<string, string> = {
   'mcp:create_booking:personal': 'public: personal booking page',
   'mcp:create_booking:team': 'public: team booking page',
   'mcp:create_booking:oneTimeLink': 'capability link: one-time booking link',
+  'mcp:create_booking:routed': 'capability link: routing continuation token',
   'mcp:reschedule_booking:manageToken': 'capability link: invitee manage token',
   'mcp:cancel_booking:manageToken': 'capability link: invitee manage token',
   'mcp:join_waitlist:personal': 'public: personal booking page waitlist',

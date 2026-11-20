@@ -87,6 +87,7 @@ const restContract = {
     'POST /api/v1/public/-/routing/teams/{teamSlug}/{slug}/route',
     'POST /api/v1/routing-continuations/resolve',
     'POST /api/v1/routing-continuations/slots',
+    'POST /api/v1/routing-continuations/bookings',
     'POST /api/v1/public/meeting-polls/enroll',
     'POST /api/v1/public/meeting-polls/recover',
     'POST /api/v1/public/meeting-polls/verify',
@@ -323,6 +324,16 @@ function verifyOneTimeWrites(allows: Allows) {
     }
   }
 }
+
+it('authorizes routed booking over REST, MCP and CLI with full or bookings keys', () => {
+  const rest = 'POST /api/v1/routing-continuations/bookings'
+  expect(apiKeyOperation(rest)).toMatchObject({ authentication: 'optional_key' })
+  for (const id of [rest, 'mcp:create_booking:routed', 'cli:book']) {
+    expect(apiKeyAllows({ kind: 'api_key', apiKeyScope: 'read' }, id), id).toBe(false)
+    for (const apiKeyScope of ['full', 'bookings'] as const)
+      expect(apiKeyAllows({ kind: 'api_key', apiKeyScope }, id), id).toBe(true)
+  }
+})
 
 function verifyPollWriteScopes(allows: Allows) {
   for (const id of [

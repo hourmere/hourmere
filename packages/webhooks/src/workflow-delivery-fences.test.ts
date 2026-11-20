@@ -3,13 +3,19 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs } from '@hourmere/jobs'
 import { cancelHostBooking } from '@hourmere/scheduling'
-import type { WorkflowAuditPort, WorkflowAuditRecord } from '@hourmere/workflows'
+import {
+  type WorkflowAuditPort,
+  type WorkflowAuditRecord,
+  workflowAuditPort,
+} from '@hourmere/workflows'
 import { ColumnNode, type QueryId, sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { captureBookingWorkflows } from '../../workflows/src/capture.ts'
 import {
   createRecordingWorkflowAudit,
   expectWorkflowAuditRedacted,
+  workflowExecutionAuditRow,
+  workflowJournal,
 } from '../../workflows/src/testing.ts'
 import { updateWorkflowDefinition } from '../../workflows/src/updates.ts'
 import {
@@ -92,21 +98,21 @@ describe.skipIf(!serverUrl)('workflow webhook delivery fences', () => {
     workflowAudit?: WorkflowAuditPort,
   ) {
     return deliverWorkflowWebhook(
-      { db, ...fixture.settings, now: fixture.ctx.now, transport, workflowAudit },
+      { db, ...fixture.settings, now: fixture.ctx.now, transport },
       fixture.delivery.id,
       signal(),
       attempt,
+      workflowAudit,
     )
   }
 
   it('expires an unstarted delivery exactly at due plus sixty minutes', async () => {
     const fixture = await workflowDeliveryFixture(db, jobs)
-    const audit = await createRecordingWorkflowAudit(db)
     fixture.clock.now = expiry
     const receiver = vi.fn(async () => 204)
     // pg-boss can count a killed worker even though no network attempt began.
-    await send(fixture, receiver, 2, audit.port)
-    await send(fixture, receiver, 3, audit.port)
+    await send(fixture, receiver, 2)
+    await send(fixture, receiver, 3)
     expect(await saved(fixture.delivery.id)).toMatchObject({
       status: 'skipped',
       last_error: 'expired',
@@ -114,16 +120,22 @@ describe.skipIf(!serverUrl)('workflow webhook delivery fences', () => {
       last_attempt_at: null,
     })
     expect(receiver).not.toHaveBeenCalled()
-    const events = await audit.read()
-    expectPrivateDeliveryDataAbsent(events, fixture)
+    const organizationId = fixture.ctx.principal.organization.id
+    const events = await workflowJournal(db, organizationId)
+      .where('action', '=', 'workflow.webhook_failed')
+      .execute()
     expect(events).toEqual([
-      {
-        ...auditIdentity(fixture),
-        event: 'workflow.webhook_failed',
-        actor: { kind: 'background', job: 'dispatch' },
-        occurredAt: expiry,
-        reason: 'expired',
-      },
+      workflowExecutionAuditRow(
+        organizationId,
+        fixture.workflow.id,
+        'workflow.webhook_failed',
+        'dispatch',
+        {
+          revision: fixture.workflow.revision,
+          trigger: fixture.workflow.trigger.type,
+          reason: 'expired',
+        },
+      ),
     ])
   })
 
@@ -218,13 +230,28 @@ describe.skipIf(!serverUrl)('workflow webhook delivery fences', () => {
 
   it('keeps a timely first-attempt marker when the acknowledgement transaction rolls back', async () => {
     const fixture = await workflowDeliveryFixture(db, jobs)
-    const audit = await createRecordingWorkflowAudit(db)
+    const organizationId = fixture.ctx.principal.organization.id
+    const journal = (connection: Db = db) =>
+      workflowJournal(connection, organizationId)
+        .where('action', '=', 'workflow.webhook_completed')
+        .execute()
+    const completed = workflowExecutionAuditRow(
+      organizationId,
+      fixture.workflow.id,
+      'workflow.webhook_completed',
+      'dispatch',
+      {
+        revision: fixture.workflow.revision,
+        trigger: fixture.workflow.trigger.type,
+      },
+    )
     const began = expiry.subtract({ seconds: 1 })
     fixture.clock.now = began
     const crash = new Error('synthetic acknowledgement rollback')
     const abortAcknowledgement: WorkflowAuditPort = {
       async record(trx, event) {
-        await audit.port.record(trx, event)
+        await workflowAuditPort.record(trx, event)
+        expect(await journal(trx)).toEqual([completed])
         throw crash
       },
     }
@@ -236,26 +263,17 @@ describe.skipIf(!serverUrl)('workflow webhook delivery fences', () => {
       attempts: 0,
       last_attempt_at: new Date(began.epochMilliseconds),
     })
-    expect(await audit.read()).toEqual([])
+    expect(await journal()).toEqual([])
 
     fixture.clock.now = expiry.add({ hours: 1 })
-    await send(fixture, receiver, 2, audit.port)
-    await send(fixture, receiver, 3, audit.port)
+    await send(fixture, receiver, 2)
+    await send(fixture, receiver, 3)
     expect(await saved(fixture.delivery.id)).toMatchObject({ status: 'delivered', attempts: 2 })
     expect(receiver.mock.calls.map(([request]) => request.headers['webhook-id'])).toEqual([
       fixture.delivery.id,
       fixture.delivery.id,
     ])
-    const events = await audit.read()
-    expectPrivateDeliveryDataAbsent(events, fixture)
-    expect(events).toEqual([
-      {
-        ...auditIdentity(fixture),
-        event: 'workflow.webhook_completed',
-        actor: { kind: 'background', job: 'dispatch' },
-        occurredAt: fixture.clock.now,
-      },
-    ])
+    expect(await journal()).toEqual([completed])
   })
 
   it.each(['cancel', 'disable'] as const)(
@@ -368,10 +386,24 @@ describe.skipIf(!serverUrl)('workflow webhook delivery fences', () => {
   })
 
   it('reuses bounded reconciliation for a workflow delivery that lost its queue job', async () => {
-    const audit = await createRecordingWorkflowAudit(db)
     const { delivery: live } = await workflowDeliveryFixture(db, jobs)
     const fixture = await workflowDeliveryFixture(db, jobs)
     const { delivery: orphan } = fixture
+    const organizationId = fixture.ctx.principal.organization.id
+    const journal = (connection: Db = db) =>
+      workflowJournal(connection, organizationId)
+        .where('action', '=', 'workflow.webhook_failed')
+        .execute()
+    const failed = workflowExecutionAuditRow(
+      organizationId,
+      fixture.workflow.id,
+      'workflow.webhook_failed',
+      'repair',
+      {
+        revision: fixture.workflow.revision,
+        trigger: fixture.workflow.trigger.type,
+      },
+    )
     await owned.pool.query('DELETE FROM pgboss.job WHERE name=$1 AND singleton_key=$2', [
       WEBHOOK_DELIVERY_JOB,
       orphan.id,
@@ -389,8 +421,8 @@ describe.skipIf(!serverUrl)('workflow webhook delivery fences', () => {
       })
       .returning('id')
       .executeTakeFirstOrThrow()
-    const tick = (port: WorkflowAuditPort) =>
-      webhookCleanupJob(db, fixture.ctx.now, port).handler(
+    const tick = (connection = db) =>
+      webhookCleanupJob(connection, fixture.ctx.now).handler(
         {},
         {
           id: randomUUID(),
@@ -399,36 +431,31 @@ describe.skipIf(!serverUrl)('workflow webhook delivery fences', () => {
         },
       )
     const rollback = new Error('Workflow audit rejected reconciliation')
-    await expect(
-      tick({
-        async record(trx, record) {
-          await audit.port.record(trx, record)
-          expectPrivateDeliveryDataAbsent(await audit.read(trx), fixture)
-          throw rollback
-        },
-      }),
-    ).rejects.toBe(rollback)
-    expect(await audit.read()).toEqual([])
+    const inserts = new WeakSet<QueryId>()
+    const abortAudit = db.withPlugin({
+      transformQuery({ node, queryId }) {
+        if (node.kind === 'RawNode' && node.sqlFragments[0]?.includes('INSERT INTO audit_events'))
+          inserts.add(queryId)
+        return node
+      },
+      async transformResult({ queryId, result }) {
+        if (inserts.has(queryId)) throw rollback
+        return result
+      },
+    })
+    await expect(tick(abortAudit)).rejects.toBe(rollback)
+    expect(await journal()).toEqual([])
     expect(await saved(orphan.id)).toMatchObject({ status: 'pending' })
     expect(await saved(ordinary.id)).toMatchObject({ status: 'failed', last_error: 'job_missing' })
 
-    await tick(audit.port)
-    await tick(audit.port)
+    await tick()
+    await tick()
     expect(await saved(live.id)).toMatchObject({ status: 'pending', attempts: 0 })
     expect(await saved(orphan.id)).toMatchObject({
       status: 'failed',
       last_error: 'job_missing',
       attempts: 0,
     })
-    const events = await audit.read()
-    expectPrivateDeliveryDataAbsent(events, fixture)
-    expect(events).toEqual([
-      {
-        ...auditIdentity(fixture),
-        event: 'workflow.webhook_failed',
-        actor: { kind: 'background', job: 'repair' },
-        occurredAt: fixture.clock.now,
-      },
-    ])
+    expect(await journal()).toEqual([failed])
   })
 })

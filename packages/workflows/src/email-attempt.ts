@@ -6,7 +6,7 @@ import { stampWorkflowEmail, type WorkflowMailLimits } from '@hourmere/notificat
 import { findPublicBookingPath, parseQuestions } from '@hourmere/scheduling'
 import { DomainError } from '@hourmere/scheduling/errors'
 import type { NotificationSnapshot } from '@hourmere/scheduling/notification-settings'
-import { hardOffWorkflowAuditPort } from './audit.ts'
+import { workflowAuditPort } from './audit.ts'
 import { coreWorkflowIntents } from './capture.ts'
 import {
   completeWorkflowEmailRun,
@@ -305,7 +305,7 @@ export async function markWorkflowEmailAttempt(
           })
           .where('id', '=', recipientClaimId)
           .execute()
-        await (ctx.audit ?? hardOffWorkflowAuditPort()).record(trx, {
+        await (ctx.audit ?? workflowAuditPort).record(trx, {
           ...locked.auditIdentity,
           event: 'workflow.email_attempted',
           actor: { kind: 'background', job: 'dispatch' },
@@ -385,7 +385,7 @@ export async function finishWorkflowEmailAttempt(
       })
       .execute()
     if (state !== 'skipped')
-      await (ctx.audit ?? hardOffWorkflowAuditPort()).record(trx, {
+      await (ctx.audit ?? workflowAuditPort).record(trx, {
         ...locked.auditIdentity,
         event: `workflow.email_${state}`,
         actor: { kind: 'background', job: 'dispatch' },

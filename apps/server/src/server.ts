@@ -251,6 +251,7 @@ export function productRoutes({
   waitlistSecret,
   meetingPollSecret,
   routingSecret,
+  routingBookingReceiptNow,
   workflowRunCursorSecret,
   smtpConfigured,
   recurringBookingsEnabled,
@@ -277,6 +278,7 @@ export function productRoutes({
   ssoSamlEnabled?: boolean
   /** In-process test injection only; no operator setting exists during hard-off. */
   routingFormsEnabled?: boolean
+  routingBookingReceiptNow?: () => Temporal.Instant
   successRedirectAllowIpHosts?: boolean
   successRedirectPolicy?: ServiceContext['successRedirectPolicy']
   bookingMaxInviteeReschedules?: number | undefined
@@ -407,6 +409,7 @@ export function productRoutes({
       db,
       routingFormsEnabled: routingEnabled,
       routingSecret,
+      receiptNow: routingBookingReceiptNow,
       smsRemindersAvailable,
       waitlistSecret,
       smtpConfigured,
@@ -461,7 +464,11 @@ export function productRoutes({
     analyticsRoutes({ db }),
     readinessRoutes({ db, automaticMeet, automaticZoom }),
     // Registered while hard-off: every operation answers 404 workflows_disabled.
-    workflowRoutes({ db, followUpHostNotesEnabled, workflowRunCursorSecret }),
+    workflowRoutes({
+      db,
+      followUpHostNotesEnabled,
+      workflowRunCursorSecret,
+    }),
   ]
 }
 
@@ -473,6 +480,7 @@ export function productTools({
   waitlistSecret,
   meetingPollSecret,
   routingSecret,
+  routingBookingReceiptNow,
   smtpConfigured,
   publicUrl,
   slotSnippetsEnabled = false,
@@ -499,6 +507,7 @@ export function productTools({
   waitlistSecret?: string | undefined
   meetingPollSecret?: string | undefined
   routingSecret?: string | undefined
+  routingBookingReceiptNow?: (() => Temporal.Instant) | undefined
   smtpConfigured?: boolean | undefined
   slotSnippetsEnabled?: boolean | undefined
   routingFormsEnabled?: boolean | undefined
@@ -528,6 +537,9 @@ export function productTools({
       automaticMeet,
       automaticZoom,
       bookingMaxInviteeReschedules,
+      routingFormsEnabled: routingEnabled,
+      routingSecret,
+      receiptNow: routingBookingReceiptNow,
     }),
     ...catalogTools({ db, followUpHostNotesEnabled, smsRemindersAvailable }),
     ...brandingTools({ db }),
@@ -563,7 +575,11 @@ export function productTools({
     }),
     ...waitlistTools({ db, secret: waitlistSecret, publicUrl, smtpConfigured }),
     // Always in the catalog; hidden from tools/list and refused while workflows are off.
-    ...workflowTools({ db, followUpHostNotesEnabled, workflowRunCursorSecret }),
+    ...workflowTools({
+      db,
+      followUpHostNotesEnabled,
+      workflowRunCursorSecret,
+    }),
     ...ssoReadTools({ db, capabilities: { ssoOidcEnabled, ssoSamlEnabled } }),
     ...routingFormConfigurationTools({
       db,
