@@ -2431,7 +2431,7 @@ export const admin = {
   // Workflow editor and preview
   'New workflow': '新建工作流',
   'Edit workflow': '编辑工作流',
-  'Edit {name}': '编辑 {name}',
+  'Edit {name}': '编辑“{name}”',
   'Loading workflow editor…': '正在加载工作流编辑器…',
   'Could not load the workflow editor.': '无法加载工作流编辑器。',
   'Workflow name': '工作流名称',
@@ -2498,9 +2498,9 @@ export const admin = {
   'At most': '至多',
   Conditions: '条件',
   'All conditions must match.': '须满足所有条件。',
-  'Condition {number}': '条件 {number}',
+  'Condition {number}': '条件{number}',
   'Condition type': '条件类型',
-  'Remove condition {number}': '移除条件 {number}',
+  'Remove condition {number}': '移除条件{number}',
   'Add condition': '添加条件',
   Comparison: '比较方式',
   'Choose an event type with an eligible question or remove this condition.':

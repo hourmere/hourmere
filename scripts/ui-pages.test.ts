@@ -121,6 +121,26 @@ it('covers every requested real page and limits en-GB to the booking page', () =
     'workflows-context-changed',
     'workflows-unavailable',
     'workflows-update-error',
+    'workflow-create',
+    'team-workflow-edit',
+    'workflow-edit-built-in',
+    'workflow-edit-loading',
+    'workflow-edit-forbidden',
+    'workflow-edit-error',
+    'workflow-webhooks-loading',
+    'workflow-webhooks-empty',
+    'workflow-webhooks-forbidden',
+    'workflow-webhooks-error',
+    'workflow-preview-loading',
+    'workflow-preview',
+    'workflow-preview-fallback',
+    'workflow-preview-scope-mismatch',
+    'workflow-preview-condition-false',
+    'workflow-preview-error',
+    'workflow-save-pending',
+    'workflow-save-stale',
+    'workflow-save-context-changed',
+    'workflow-save-error',
     'host',
     'booking',
     'booking-form',
@@ -246,6 +266,7 @@ const pagesSource = readFileSync('tools/e2e/audit-pages.ts', 'utf8')
 const routingAuditUrl = pathToFileURL(resolve('tools/e2e/routing-form-audit.ts')).href
 const hostPollAuditUrl = pathToFileURL(resolve('tools/e2e/host-meeting-poll-audit.ts')).href
 const workflowAuditUrl = pathToFileURL(resolve('tools/e2e/workflow-audit.ts')).href
+const workflowEditorAuditUrl = pathToFileURL(resolve('tools/e2e/workflow-editor-audit.ts')).href
 const visualSource = readFileSync('tools/e2e/specs/visual.spec.ts', 'utf8')
 const fixtureSource = readFileSync('tools/e2e/fixtures.ts', 'utf8')
 const shellSource = readFileSync('apps/web/src/components/AppShell.tsx', 'utf8')
@@ -316,7 +337,8 @@ function sourceCopyResult(
     pages
       .replace("'./routing-form-audit.ts'", JSON.stringify(routingAuditUrl))
       .replace("'./host-meeting-poll-audit.ts'", JSON.stringify(hostPollAuditUrl))
-      .replace("'./workflow-audit.ts'", JSON.stringify(workflowAuditUrl)),
+      .replace("'./workflow-audit.ts'", JSON.stringify(workflowAuditUrl))
+      .replace("'./workflow-editor-audit.ts'", JSON.stringify(workflowEditorAuditUrl)),
   )
   writeFileSync(join(directory, 'visual.spec.ts'), visual)
   writeFileSync(join(directory, 'fixtures.ts'), fixture)
