@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { isReservedName } from '@hourmere/core'
 import type { Db } from '@hourmere/db'
+import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { APIError } from 'better-auth/api'
 import type { OrganizationOptions } from 'better-auth/plugins/organization'
 
@@ -16,6 +17,7 @@ export async function isMember(db: Db, userId: string, organizationId: string): 
     .select('id')
     .where('userId', '=', userId)
     .where('organizationId', '=', organizationId)
+    .where((eb) => eb.not(scimSuspended(organizationId, userId)))
     .executeTakeFirst()
   return row !== undefined
 }

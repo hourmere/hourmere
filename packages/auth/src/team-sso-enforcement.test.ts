@@ -3,6 +3,7 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { leaveTeamMember } from '@hourmere/scheduling'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { suspendScimMember } from '../../db/src/scim-suspension-fixtures.ts'
 import { identityFixture, link, proofValues } from '../../db/src/sso-identity-fixtures.ts'
 import { insert } from '../../db/src/sso-storage-fixtures.ts'
 import {
@@ -207,22 +208,28 @@ describe.skipIf(!databaseUrl)('native and trusted team SSO enforcement', () => {
     ]
   }
 
-  function headers(f: Fixture, operation: Operation, cookie?: string) {
+  function headers(f: Fixture, operation: Operation, cookie?: string, expected = f.team) {
     return new Headers({
       cookie: cookie ?? (operation.recipient ? f.recipient.cookie : f.ownerSession.cookie),
       origin,
       'content-type': 'application/json',
-      'x-expected-organization-id': f.team,
+      'x-expected-organization-id': expected,
     })
   }
 
-  function http(instance: Auth, f: Fixture, operation: Operation, cookie?: string) {
+  function http(
+    instance: Auth,
+    f: Fixture,
+    operation: Operation,
+    cookie?: string,
+    expected?: string,
+  ) {
     const url = new URL(`/api/auth/organization/${operation.path}`, origin)
     url.search = new URLSearchParams(operation.query).toString()
     return instance.handler(
       new Request(url, {
         method: operation.body ? 'POST' : 'GET',
-        headers: headers(f, operation, cookie),
+        headers: headers(f, operation, cookie, expected),
         ...(operation.body && { body: JSON.stringify(operation.body) }),
       }),
     )
@@ -716,6 +723,79 @@ describe.skipIf(!databaseUrl)('native and trusted team SSO enforcement', () => {
       .where('id', '=', personal.id)
       .executeTakeFirstOrThrow()
     expect(current.activeOrganizationId).toBe(f.ownerPersonal)
+  })
+
+  it('blocks native team selection and reads after SCIM suspension while preserving other spaces', async () => {
+    const f = await fixture()
+    const personalId = await ensurePersonalOrganization(db, f.member)
+    const { id, cookie } = f.memberSession
+    await db
+      .insertInto('auth.member')
+      .values({
+        organizationId: f.otherTeam,
+        userId: f.member,
+        role: 'member',
+        createdAt: new Date(),
+      })
+      .execute()
+    const read: Operation = {
+      api: 'getFullOrganization',
+      path: 'get-full-organization',
+      query: { organizationSlug: f.slug },
+    }
+    const selection = (body: Record<string, unknown>): Operation => ({
+      api: 'setActiveOrganization',
+      path: 'set-active',
+      body,
+    })
+    const active = async () =>
+      (
+        await db
+          .selectFrom('auth.session')
+          .select('activeOrganizationId')
+          .where('id', '=', id)
+          .executeTakeFirstOrThrow()
+      ).activeOrganizationId
+    expect((await http(off, f, read, cookie)).status).toBe(200)
+    expect(await active()).toBe(f.team)
+
+    await suspendScimMember(db, f.team, f.member)
+    const denied = {
+      code: 'TEAM_MANAGEMENT_ACCESS_DENIED',
+      message: 'team_management_access_denied',
+    }
+    for (const body of [{ organizationId: f.team }, { organizationSlug: f.slug }]) {
+      const response = await http(off, f, selection(body), cookie, personalId)
+      expect(response.status).toBe(403)
+      expect(await response.json()).toEqual(denied)
+      expect(response.headers.getSetCookie()).toEqual([])
+      await expect(
+        off.api.setActiveOrganization({ body, headers: new Headers({ cookie }) }),
+      ).rejects.toMatchObject({ statusCode: 403, body: denied })
+    }
+    const deniedRead = await http(off, f, read, cookie)
+    expect(deniedRead.status).toBe(403)
+    expect(await deniedRead.json()).toEqual(denied)
+
+    const organizations = await http(off, f, lists[0], cookie)
+    expect(organizations.status).toBe(200)
+    expect(
+      (await organizations.json()).map((organization: { id: string }) => organization.id).sort(),
+    ).toEqual([personalId, f.otherTeam].sort())
+    expect(await active()).toBe(f.team)
+
+    const other = await http(off, f, selection({ organizationId: f.otherTeam }), cookie, personalId)
+    expect(other.status).toBe(200)
+    expect(await active()).toBe(f.otherTeam)
+    const personal = await http(
+      off,
+      f,
+      selection({ organizationId: personalId }),
+      cookie,
+      f.otherTeam,
+    )
+    expect(personal.status).toBe(200)
+    expect(await active()).toBe(personalId)
   })
 
   it('preserves the membership denial for a caller outside the target team', async () => {

@@ -146,6 +146,7 @@ it('attaches the team proof middleware to every private team write in the server
       'DELETE /api/v1/team/sso/domains/:domainId',
       'POST /api/v1/team/sso/providers',
       'POST /api/v1/team/sso/providers/:providerId/test',
+      'POST /api/v1/team/sso/providers/:providerId/activation',
       'PATCH /api/v1/team/sso/providers/:providerId',
       'DELETE /api/v1/team/sso/providers/:providerId',
       'DELETE /api/v1/team/sso/providers/:providerId/links/:linkId',

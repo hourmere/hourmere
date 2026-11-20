@@ -17,6 +17,7 @@ import {
   type TeamManagementError,
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
+import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import {
   getSelfReadiness,
@@ -36,7 +37,9 @@ import {
 import { createMiddleware } from 'hono/factory'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { isMember } from '../../../../packages/auth/src/organizations.ts'
 import { signTestMcpAccessToken } from '../../../../packages/auth/src/testing.ts'
+import { suspendScimMember } from '../../../../packages/db/src/scim-suspension-fixtures.ts'
 import { createApp } from '../app.ts'
 import { ErrorBody, errorResponses, json, serviceContext } from '../openapi.ts'
 import type { teamManagementAccess } from '../team-management.ts'
@@ -91,7 +94,7 @@ function readRouteCopy(
     TeamManagementError: typeof TeamManagementError
   }>(
     'packages/auth/src/team-management.ts',
-    { sql },
+    { sql, isMember, scimSuspended },
     '({ checkTeamManagementAccess, TeamManagementError })',
     mutation,
   )
@@ -361,6 +364,7 @@ describe.skipIf(!process.env.DATABASE_URL)('booking readiness real authenticatio
           ensurePersonalOrganization,
           parsePersistedApiKeyMetadata,
           isUuid: (id: string) => z.uuid().safeParse(id).success,
+          scimSuspended,
           sql,
           ssoDelegationStatus,
           ssoHardOff,
@@ -507,6 +511,22 @@ describe.skipIf(!process.env.DATABASE_URL)('booking readiness real authenticatio
     })
     expect(JSON.stringify(personal.body).includes(team.id)).toBe(false)
     expect(owned.pool.totalCount + authPool.totalCount).toBeLessThanOrEqual(20)
+  })
+
+  it('keeps personal self readiness available with the suspended team still active on the session', async () => {
+    const user = await createTestUser(db)
+    const team = await createTestTeam(db, [{ user, role: 'member' }])
+    const current = await session(user, team.id)
+    const before = await answer(await get(selfPath, current.cookie))
+    expect(before.status).toBe(200)
+    expect(before.body).toMatchObject({ member: { subject: { organizationId: team.id } } })
+    await suspendScimMember(db, team.id, user.id)
+
+    const personal = await answer(await get(selfPath, current.cookie))
+    expect(personal.status).toBe(200)
+    expect(personal.body).toMatchObject({
+      member: { subject: { organizationId: user.principal.organization.id } },
+    })
   })
 })
 

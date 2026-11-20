@@ -7,6 +7,7 @@ import {
   type Auth,
   createAuth,
   createAuthPool,
+  createBrowserSession,
   createCallerResolver,
   type Principal,
 } from '@hourmere/auth'
@@ -19,6 +20,7 @@ import {
 } from '@hourmere/scheduling'
 import { createFixtures, createTestTeam, createTestUser } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { suspendScimMember } from '../../../../packages/db/src/scim-suspension-fixtures.ts'
 import { createApp } from '../app.ts'
 import * as Routes from './one-time-links.ts'
 import {
@@ -31,6 +33,7 @@ import {
 const path = (event: string) => `/api/v1/event-types/${event}/one-time-links`
 const basePath = '/api/v1/event-types/{eventTypeId}/one-time-links'
 const publicUrl = 'https://hourmere.example.com'
+const sessionSecret = 'synthetic-one-time-admin-test-secret-000000000000'
 async function sourceCopy(replacement: readonly [string, string]): Promise<typeof Routes> {
   const location = new URL('./one-time-links.ts', import.meta.url)
   const original = readFileSync(location, 'utf8')
@@ -110,7 +113,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
         pool: authPool,
         db,
         baseURL: publicUrl,
-        secret: 'synthetic-one-time-admin-test-secret-000000000000',
+        secret: sessionSecret,
         signup,
         mailer: { send: async () => {} },
       })
@@ -362,6 +365,37 @@ describe.skipIf(!process.env.DATABASE_URL)(
         (await send('DELETE', `${path(s.eventTypeId)}/${link.id}`, principal.organization.id))
           .status,
       ).toBe(200)
+    })
+    it('allows a personal link write with a cookie whose active team is SCIM-suspended', async () => {
+      const user = await createTestUser(db)
+      const team = await createTestTeam(db, [{ user, role: 'member' }])
+      const organizationId = user.principal.organization.id
+      const eventTypeId = await fixtures.eventType(organizationId, user.id)
+      const session = await db.transaction().execute((trx) =>
+        createBrowserSession(
+          trx,
+          { publicUrl, secret: sessionSecret },
+          {
+            userId: user.id,
+            organizationId: team.id,
+            now: Temporal.Now.instant().toString(),
+            headers: new Headers(),
+          },
+        ),
+      )
+      await suspendScimMember(db, team.id, user.id)
+
+      const response = await app.request(path(eventTypeId), {
+        method: 'POST',
+        headers: {
+          cookie: session.cookie.split(';')[0] as string,
+          origin: publicUrl,
+          'content-type': 'application/json',
+          'x-expected-organization-id': organizationId,
+        },
+        body: '{}',
+      })
+      expect(response.status).toBe(201)
     })
     async function verifyMemberSession(module = Routes) {
       const owner = await createTestUser(db)

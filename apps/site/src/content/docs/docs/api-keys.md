@@ -315,6 +315,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `PATCH /api/v1/team/sso/providers/{providerId}` | Browser session only | — |
 | `DELETE /api/v1/team/sso/providers/{providerId}` | Browser session only | — |
 | `POST /api/v1/team/sso/providers/{providerId}/test` | Browser session only | — |
+| `POST /api/v1/team/sso/providers/{providerId}/activation` | Browser session only | — |
 | `POST /api/v1/team/sso/providers/{providerId}/link` | Browser session only | — |
 | `DELETE /api/v1/team/sso/providers/{providerId}/link` | Browser session only | — |
 | `DELETE /api/v1/team/sso/providers/{providerId}/links/{linkId}` | Browser session only | — |

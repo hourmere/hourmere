@@ -1,5 +1,6 @@
 import { validateTimeZone, validateWeeklyHours } from '@hourmere/core'
 import type { Db, EventTypeHosts, EventTypes, Schedules } from '@hourmere/db'
+import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { type Selectable, sql } from 'kysely'
 import { z } from 'zod'
 import { assertCachedCalendarSync, servedHandle } from './availability.ts'
@@ -293,6 +294,11 @@ export async function getSelfReadiness(
           sql<string>`${sql.ref('activeMember.organizationId')}::text`,
           '=',
           sql.ref('s.activeOrganizationId'),
+        )
+        .on((eb) =>
+          eb.not(
+            scimSuspended(eb.ref('activeMember.organizationId'), eb.ref('activeMember.userId')),
+          ),
         ),
     )
     .leftJoin('personal_organizations as personal', 'personal.user_id', 's.userId')
@@ -300,6 +306,7 @@ export async function getSelfReadiness(
     .select(['m.id', 'm.userId', 'u.name', 'u.emailVerified', 'p.user_id as personalOwner'])
     .where('m.organizationId', '=', principal.organization.id)
     .where('m.userId', '=', principal.user.id)
+    .where((eb) => eb.not(scimSuspended(eb.ref('m.organizationId'), eb.ref('m.userId'))))
     .where('u.emailVerified', '=', true)
     .where('s.id', '=', principal.sessionId)
     .where('s.expiresAt', '>', sql<Date>`clock_timestamp()`)

@@ -5,6 +5,7 @@ import {
   type TeamManager,
 } from '@hourmere/auth'
 import type { Database, Db } from '@hourmere/db'
+import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { createMiddleware } from 'hono/factory'
@@ -161,6 +162,7 @@ export function bookingWriteAccess(principal: Principal, expectedOrganizationId?
       .select('id')
       .where('userId', '=', principal.user.id)
       .where('organizationId', '=', organizationId)
+      .where((eb) => eb.not(scimSuspended(organizationId, principal.user.id)))
       .forShare()
       .executeTakeFirst()
     const session = await db
@@ -185,6 +187,7 @@ export function bookingWriteAccess(principal: Principal, expectedOrganizationId?
             .select('id')
             .where('userId', '=', principal.user.id)
             .where('organizationId', '=', session.activeOrganizationId)
+            .where((eb) => eb.not(scimSuspended(eb.ref('organizationId'), eb.ref('userId'))))
             .executeTakeFirst()
         : undefined
     const personal = activeMember

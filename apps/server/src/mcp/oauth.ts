@@ -15,6 +15,7 @@ import {
 } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
+import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { defineJob } from '@hourmere/jobs'
 import { DomainError } from '@hourmere/scheduling'
 import type { MiddlewareHandler } from 'hono'
@@ -161,6 +162,7 @@ export function mcpOAuthBroker({ auth, db, publicUrl, ssoCapabilities = ssoHardO
       .select(['o.id', 'o.name', 'o.slug'])
       .where('m.userId', '=', p.user.id)
       .where('u.emailVerified', '=', true)
+      .where((eb) => eb.not(scimSuspended(eb.ref('o.id'), eb.ref('u.id'))))
       .orderBy('o.name')
   }
   async function organization(client: Db, p: Session, organizationId: string) {

@@ -12,6 +12,7 @@ import {
   invitationResendDenial,
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
+import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import {
   type InvitationMailLimits,
@@ -23,6 +24,7 @@ import { createTestTeam, createTestUser, type TestUser } from '@hourmere/schedul
 import { createMiddleware } from 'hono/factory'
 import { sql } from 'kysely'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { isMember } from '../../../../packages/auth/src/organizations.ts'
 import { expectKilled, guardCopy, recordCopyFault } from '../../../../scripts/source-copy-guard.ts'
 import { createApp } from '../app.ts'
 import { ErrorBody, json, type RouteModule } from '../openapi.ts'
@@ -1316,7 +1318,7 @@ describe.skipIf(!serverUrl)(
         replacement?.file === 'access'
           ? roleSource.replace(replacement.before, replacement.after)
           : roleSource,
-        { sql },
+        { sql, isMember, scimSuspended },
         '{ checkTeamManagementAccess, TeamManagementError }',
       )
       const middlewareSource = readFileSync(

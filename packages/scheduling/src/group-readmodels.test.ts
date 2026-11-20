@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { createDb, type Db } from '@hourmere/db'
+import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -181,7 +182,7 @@ describe.skipIf(!serverUrl)('group seat read models', () => {
     const read = copy<typeof resolveBookingOrganization>(
       'booking-organization',
       'resolveBookingOrganization',
-      { sql, DomainError, isUuid, resolvedBookingHosts },
+      { sql, DomainError, isUuid, resolvedBookingHosts, scimSuspended },
       true,
     )
     await expect(verifyOrganization(read)).rejects.toMatchObject({ name: 'AssertionError' })
