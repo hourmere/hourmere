@@ -141,6 +141,12 @@ it('covers every requested real page and limits en-GB to the booking page', () =
     'workflow-save-stale',
     'workflow-save-context-changed',
     'workflow-save-error',
+    'workflow-run-history',
+    'team-workflow-run-history',
+    'workflow-run-history-empty',
+    'workflow-run-history-loading',
+    'workflow-run-history-error',
+    'workflow-run-history-forbidden',
     'host',
     'booking',
     'booking-form',
@@ -267,6 +273,9 @@ const routingAuditUrl = pathToFileURL(resolve('tools/e2e/routing-form-audit.ts')
 const hostPollAuditUrl = pathToFileURL(resolve('tools/e2e/host-meeting-poll-audit.ts')).href
 const workflowAuditUrl = pathToFileURL(resolve('tools/e2e/workflow-audit.ts')).href
 const workflowEditorAuditUrl = pathToFileURL(resolve('tools/e2e/workflow-editor-audit.ts')).href
+const workflowRunHistoryAuditUrl = pathToFileURL(
+  resolve('tools/e2e/workflow-run-history-audit.ts'),
+).href
 const visualSource = readFileSync('tools/e2e/specs/visual.spec.ts', 'utf8')
 const fixtureSource = readFileSync('tools/e2e/fixtures.ts', 'utf8')
 const shellSource = readFileSync('apps/web/src/components/AppShell.tsx', 'utf8')
@@ -338,7 +347,8 @@ function sourceCopyResult(
       .replace("'./routing-form-audit.ts'", JSON.stringify(routingAuditUrl))
       .replace("'./host-meeting-poll-audit.ts'", JSON.stringify(hostPollAuditUrl))
       .replace("'./workflow-audit.ts'", JSON.stringify(workflowAuditUrl))
-      .replace("'./workflow-editor-audit.ts'", JSON.stringify(workflowEditorAuditUrl)),
+      .replace("'./workflow-editor-audit.ts'", JSON.stringify(workflowEditorAuditUrl))
+      .replace("'./workflow-run-history-audit.ts'", JSON.stringify(workflowRunHistoryAuditUrl)),
   )
   writeFileSync(join(directory, 'visual.spec.ts'), visual)
   writeFileSync(join(directory, 'fixtures.ts'), fixture)
