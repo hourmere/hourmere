@@ -1,5 +1,7 @@
 import { DomainError } from '@hourmere/scheduling'
 
+export const USE_SSO_RECOVERY = 'useSsoRecovery'
+
 export interface SsoCapabilities {
   readonly ssoOidcEnabled: boolean
   readonly ssoSamlEnabled: boolean

@@ -5023,7 +5023,7 @@ export interface paths {
         get: operations["getSsoPolicy"];
         /**
          * Set the current team SSO policy
-         * @description Requires a verified team owner or administrator browser session and fresh administration proof. Only owners can change enforcement. SSO remains unavailable.
+         * @description Requires a verified team owner or administrator browser session and fresh administration proof. An enrolled owner can spend recovery authority to turn off enforcement without enabling JIT. SSO remains unavailable.
          */
         put: operations["setSsoPolicy"];
         post?: never;
@@ -5199,6 +5199,26 @@ export interface paths {
          * @description Requires the nominated owner’s browser session and independent mailbox proof. SSO remains unavailable.
          */
         post: operations["acceptSsoRecoveryEnrollment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/team/sso/recovery/use": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start SSO recovery for the current team
+         * @description Requires an enrolled owner’s browser session and fresh mailbox proof. Permits inspecting SSO configuration and turning off enforcement once. SSO remains unavailable.
+         */
+        post: operations["useSsoRecovery"];
         delete?: never;
         options?: never;
         head?: never;
@@ -20309,6 +20329,89 @@ export interface operations {
                 };
             };
             /** @description sso_disabled or sso_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed or sso_configuration_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    useSsoRecovery: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for writes and must match the current team. */
+                "X-Expected-Organization-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    expectedRevision: number;
+                    /** Format: uuid */
+                    proofAttemptId?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Recovery authority granted to the current browser session */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied or sso_reauthentication_required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoFreshProofChallenge"] | components["schemas"]["Error"];
+                };
+            };
+            /** @description sso_disabled */
             404: {
                 headers: {
                     [name: string]: unknown;

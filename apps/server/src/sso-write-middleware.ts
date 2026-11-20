@@ -1,6 +1,8 @@
 import { withTeamWriteCheck } from '@hourmere/db/team-write'
+import type { Context } from 'hono'
 import { createMiddleware } from 'hono/factory'
 import type { CallerEnv } from './caller.ts'
+import { hasSsoRecoveryAuthority } from './sso-recovery-use.ts'
 import {
   requireTeamRead,
   type SsoTeamReadDeps,
@@ -27,15 +29,33 @@ export async function withTeamWriteAccess<T>(
 }
 
 const registered = new WeakSet<object>()
+const recoveryWrites = new WeakSet<Context>()
 
 export function isTeamWriteMiddleware(handler: object) {
   return registered.has(handler)
 }
 
-export function teamWriteMiddleware(deps: SsoTeamReadDeps) {
+export function isSsoRecoveryWrite(c: Context) {
+  return recoveryWrites.has(c)
+}
+
+export function teamWriteMiddleware(deps: SsoTeamReadDeps, recoveryPublicUrl?: string) {
   const middleware = createMiddleware<CallerEnv>(async (c, next) => {
     const principal = c.var.principal
-    await withTeamWriteAccess(deps, principal, teamReadAccess(deps, principal), next)
+    const check = teamReadAccess(deps, principal)
+    if (recoveryPublicUrl !== undefined) {
+      const access = await check()
+      if (
+        !access.allowed &&
+        !access.suspended &&
+        (await hasSsoRecoveryAuthority(deps.db, principal, c.req.raw.headers, recoveryPublicUrl))
+      ) {
+        // The policy service must consume the grant under lock before executing the write.
+        recoveryWrites.add(c)
+        return next()
+      }
+    }
+    await withTeamWriteAccess(deps, principal, check, next)
   })
   registered.add(middleware)
   return middleware

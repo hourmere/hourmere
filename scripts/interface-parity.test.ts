@@ -736,6 +736,7 @@ describe('REST, MCP and CLI write parity', () => {
       ['revokeSsoDelegation', 'delete', '/api/v1/team/sso/delegations/{bindingId}'],
       ['configureSsoRecovery', 'post', '/api/v1/team/sso/recovery'],
       ['acceptSsoRecoveryEnrollment', 'post', '/api/v1/team/sso/recovery/{enrollmentId}/accept'],
+      ['useSsoRecovery', 'post', '/api/v1/team/sso/recovery/use'],
     ]) {
       expect(
         inventory.rest.find((operation) => operation.operationId === operationId),
@@ -764,6 +765,7 @@ describe('REST, MCP and CLI write parity', () => {
       'revoke_sso_delegation',
       'configure_sso_recovery',
       'accept_sso_recovery_enrollment',
+      'use_sso_recovery',
     ]) {
       expect(inventory.mcp).not.toContain(tool)
       expect(Object.values(inventory.cli)).not.toContain(tool)

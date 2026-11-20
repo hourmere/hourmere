@@ -5,6 +5,7 @@ import type { CallerEnv } from '../caller.ts'
 import { errorResponses, json, type RouteModule } from '../openapi.ts'
 import { requireSsoEnabled } from '../sso.ts'
 import { SetSsoPolicyInput, type SsoPolicyDeps, setSsoPolicy } from '../sso-policy.ts'
+import { isSsoRecoveryWrite } from '../sso-write-middleware.ts'
 import { teamManagementSessionCaller } from '../team-management.ts'
 import { SsoPolicy } from './sso.ts'
 import { FreshProofChallenge } from './sso-drafts.ts'
@@ -26,7 +27,7 @@ export function ssoPolicyRoutes(deps: SsoPolicyDeps): RouteModule {
         tags: ['SSO'],
         summary: 'Set the current team SSO policy',
         description:
-          'Requires a verified team owner or administrator browser session and fresh administration proof. Only owners can change enforcement. SSO remains unavailable.',
+          'Requires a verified team owner or administrator browser session and fresh administration proof. An enrolled owner can spend recovery authority to turn off enforcement without enabling JIT. SSO remains unavailable.',
         security: [{ session: [] }],
         middleware: [guard, teamManagementSessionCaller(caller)] as const,
         request: {
@@ -56,6 +57,7 @@ export function ssoPolicyRoutes(deps: SsoPolicyDeps): RouteModule {
           c.var.principal,
           c.req.raw.headers,
           c.req.valid('json'),
+          isSsoRecoveryWrite(c),
         )
         if (result.setCookie) c.header('Set-Cookie', result.setCookie, { append: true })
         if (result.status === 'proof_required') return c.json(result.body, 403)

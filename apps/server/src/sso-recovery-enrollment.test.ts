@@ -1,28 +1,39 @@
 import { randomBytes, randomUUID } from 'node:crypto'
 import {
+  type CallerResolver,
   createAuth,
   createAuthPool,
   createBrowserSession,
   createCallerResolver,
   type SignupPolicy,
 } from '@hourmere/auth'
-import { createDb, type Db } from '@hourmere/db'
+import type { Database, Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import type { MailMessage } from '@hourmere/mail'
-import { sql } from 'kysely'
+import { createTestTeam, createTestUser } from '@hourmere/scheduling/testing'
+import { Kysely, PostgresDialect, sql } from 'kysely'
+import type { PoolClient } from 'pg'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { suspendScimMember } from '../../../packages/db/src/scim-suspension-fixtures.ts'
 import {
+  apiKey,
   type IdentityFixture,
   identityFixture,
   linkValues,
 } from '../../../packages/db/src/sso-identity-fixtures.ts'
 import { recoveryOwnerValues } from '../../../packages/db/src/sso-storage-fixtures.ts'
 import { createApp } from './app.ts'
+import { memberRemovalRoutes } from './routes/member-removal.ts'
 import { ssoRoutes } from './routes/sso.ts'
+import { ssoDelegationRoutes } from './routes/sso-delegation.ts'
 import { ssoIdentityRecoveryRoutes } from './routes/sso-link-recovery.ts'
+import { ssoPolicyRoutes } from './routes/sso-policy.ts'
 import { ssoRecoveryEnrollmentRoutes } from './routes/sso-recovery-enrollment.ts'
+import { teamBookingRoutes } from './routes/team-bookings.ts'
+import { SSO_DELEGATIONS_PATH } from './sso-delegation-proof.ts'
 import {
   bindingCookieName,
+  cleanupSsoAttempts,
   databaseClock,
   deliverMailboxProof,
   MAILBOX_PROOF_CONSUME_PATH,
@@ -40,6 +51,7 @@ const publicUrl = 'https://recovery-enrollment.example.test'
 const secret = randomBytes(32).toString('base64url')
 const signup: SignupPolicy = { mode: 'open', allowedDomains: [] }
 const recoveryPath = '/api/v1/team/sso/recovery'
+const recoveryUsePath = `${recoveryPath}/use`
 const acceptancePath = (id: string) => `${recoveryPath}/${id}/accept`
 const policyPath = '/api/v1/team/sso/policy'
 const providersPath = '/api/v1/team/sso/providers'
@@ -48,18 +60,24 @@ type Attempt = { id: string; cookie: string }
 type Notice = Parameters<SsoRecoveryEnrollmentQueue['enqueue']>[1]
 type Enrollment = { enrollmentId: string; expiresAt: string; policyRevision: number }
 
-describe.skipIf(!databaseUrl)('SSO recovery enrollment', () => {
+describe.skipIf(!databaseUrl)('SSO recovery', () => {
   let owned: TestDatabase
   let db: Db
   let authPool: ReturnType<typeof createAuthPool>
   let auth: ReturnType<typeof createAuth>
   let fixture: IdentityFixture
+  const statements: string[] = []
 
   beforeAll(async () => {
     owned = await createTestDatabase(databaseUrl as string, undefined, {
-      tag: 'sso_enrollment',
+      tag: 'sso_recovery',
     })
-    db = createDb(owned.pool)
+    db = new Kysely<Database>({
+      dialect: new PostgresDialect({ pool: owned.pool }),
+      log(event) {
+        if (event.level === 'query') statements.push(event.query.sql)
+      },
+    })
     authPool = createAuthPool(owned.url, signup)
     auth = createAuth({
       pool: authPool,
@@ -85,23 +103,32 @@ describe.skipIf(!databaseUrl)('SSO recovery enrollment', () => {
     }
   })
 
-  function instance(enabled = true) {
+  function instance(
+    enabled = true,
+    resolveCaller: CallerResolver = createCallerResolver({ auth, db }),
+  ) {
     const capabilities = { ssoOidcEnabled: enabled, ssoSamlEnabled: false }
     const notices: Notice[] = []
     const proofJobs: MailboxProofEmailPayload[] = []
     const state = { now: undefined as string | undefined, failQueue: false }
+    const now = (trx: Db) =>
+      state.now === undefined ? databaseClock(trx) : Promise.resolve(state.now)
     const app = createApp({
       checkDb: async () => {},
       authHandler: auth.handler,
-      resolveCaller: createCallerResolver({ auth, db }),
+      resolveCaller,
       publicUrl,
       routes: [
         ssoRoutes({ db, capabilities }),
+        ssoPolicyRoutes({ db, capabilities, publicUrl, now }),
+        ssoDelegationRoutes({ db, capabilities, publicUrl }),
+        memberRemovalRoutes({ db }),
+        teamBookingRoutes({ db }),
         ssoRecoveryEnrollmentRoutes({
           db,
           capabilities,
           publicUrl,
-          now: (trx) => (state.now === undefined ? databaseClock(trx) : Promise.resolve(state.now)),
+          now,
           notificationQueue: {
             async enqueue(name, payload, { transaction }) {
               expect(name).toBe('sso-recovery-enrollment-email')
@@ -227,6 +254,23 @@ describe.skipIf(!databaseUrl)('SSO recovery enrollment', () => {
     expect(await consumed.json()).toEqual({ status: 'proven' })
   }
 
+  async function deliverNotices(h: Instance) {
+    const delivered: MailMessage[] = []
+    const worker = ssoRecoveryEnrollmentEmailJob({
+      db,
+      capabilities: h.capabilities,
+      publicUrl,
+      mailer: { send: async (message) => void delivered.push(message) },
+    })
+    for (const notice of h.notices)
+      await worker.handler(worker.payload.parse(notice), {
+        id: 'synthetic-notice',
+        attempt: 1,
+        signal: new AbortController().signal,
+      })
+    return delivered
+  }
+
   async function nominate(
     h: Instance,
     cookie: string,
@@ -311,6 +355,65 @@ describe.skipIf(!databaseUrl)('SSO recovery enrollment', () => {
       .executeTakeFirstOrThrow()
   }
 
+  const recoveryRevision = 7
+
+  async function enforceSso() {
+    await db
+      .insertInto('sso_recovery_owners')
+      .values({
+        ...recoveryOwnerValues(fixture),
+        accepted_at: sql<string>`statement_timestamp() - interval '1 minute'`,
+      })
+      .execute()
+    await db
+      .insertInto('sso_policies')
+      .values({
+        organization_id: fixture.team,
+        require_sso: true,
+        policy_revision: recoveryRevision,
+      })
+      .execute()
+  }
+
+  function read(h: Instance, path: string, cookie: string, headers: Record<string, string> = {}) {
+    return h.app.request(new URL(path, publicUrl), { headers: { cookie, ...headers } })
+  }
+
+  function useRecovery(h: Instance, cookie: string, proofAttemptId?: string) {
+    return write(h, recoveryUsePath, cookie, { expectedRevision: recoveryRevision, proofAttemptId })
+  }
+
+  async function recoveryProof(h: Instance, cookie: string) {
+    const proof = await challenge(await useRecovery(h, cookie), cookie)
+    await prove(h, proof, fixture.owner)
+    return proof
+  }
+
+  async function recover(h: Instance, cookie: string) {
+    const proof = await recoveryProof(h, cookie)
+    const result = await useRecovery(h, proof.cookie, proof.id)
+    expect(result.status).toBe(204)
+    expect(result.headers.get('cache-control')).toBe('no-store')
+    expect(await result.text()).toBe('')
+    return proof
+  }
+
+  async function expireProof(id: string) {
+    // Age the fixture to the same persisted state reached by letting its mailbox proof expire.
+    // Leave the attempt's own expiry in the future so either boundary is independently observable.
+    await db.transaction().execute(async (trx) => {
+      await sql`SET LOCAL session_replication_role = replica`.execute(trx)
+      await sql`UPDATE sso_attempts SET
+          created_at = statement_timestamp() - interval '5 seconds',
+          expires_at = statement_timestamp() + interval '5 minutes',
+          mailbox_proven_at = statement_timestamp() - interval '4 seconds',
+          mailbox_proof_expires_at = statement_timestamp() - interval '1 second',
+          consumed_at = CASE WHEN consumed_at IS NOT NULL
+            THEN statement_timestamp() - interval '2 seconds' END
+        WHERE id = ${id}::uuid`.execute(trx)
+    })
+  }
+
   async function seedNomination() {
     return db
       .insertInto('sso_recovery_nominations')
@@ -337,6 +440,441 @@ describe.skipIf(!databaseUrl)('SSO recovery enrollment', () => {
     expect(response.status).toBe(status)
     expect(await response.json()).toEqual({ error })
   }
+
+  async function raceTeamWrites(
+    write: () => Response | Promise<Response>,
+    beforeRelease?: (blocker: PoolClient) => Promise<void>,
+  ) {
+    const blocker = await owned.pool.connect()
+    let requests: Promise<Response>[] = []
+    try {
+      await blocker.query('BEGIN')
+      const {
+        rows: [lock],
+      } = await blocker.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+      if (!lock) throw new Error('Expected the blocker PID')
+      await blocker.query('SELECT id FROM auth.organization WHERE id=$1 FOR UPDATE', [fixture.team])
+      requests = Array.from({ length: 2 }, () => Promise.resolve(write()))
+      await vi.waitFor(
+        async () => {
+          const {
+            rows: [waiting],
+          } = await owned.pool.query<{ count: number }>(
+            `WITH RECURSIVE blocked(pid) AS (
+             SELECT $1::integer
+             UNION
+             SELECT activity.pid FROM pg_stat_activity activity JOIN blocked
+               ON blocked.pid = ANY(pg_blocking_pids(activity.pid))
+             WHERE activity.datname = current_database()
+           ) SELECT count(*)::int - 1 AS count FROM blocked`,
+            [lock.pid],
+          )
+          expect(waiting?.count).toBe(2)
+        },
+        { timeout: 3000, interval: 10 },
+      )
+      await beforeRelease?.(blocker)
+      await blocker.query('COMMIT')
+    } finally {
+      await blocker.query('ROLLBACK')
+      blocker.release()
+    }
+    return Promise.all(requests)
+  }
+
+  it('consumes a fresh mailbox ceremony once even with two concurrent retries', async () => {
+    const h = instance()
+    await enforceSso()
+    const owner = await browser(fixture.owner)
+    const proof = await recoveryProof(h, owner.cookie)
+    expect(await attemptUse(proof.id)).toEqual({ consumed_at: null })
+    await checkError(await read(h, policyPath, proof.cookie), 403, 'sso_required')
+
+    const responses = await raceTeamWrites(() => useRecovery(h, proof.cookie, proof.id))
+    expect(responses.map(({ status }) => status).sort()).toEqual([204, 403])
+    const refused = responses.find(({ status }) => status === 403)
+    if (!refused) throw new Error('Expected one retry to require new proof')
+    expect((await challenge(refused, proof.cookie)).id).not.toBe(proof.id)
+    expect(await attemptUse(proof.id)).toEqual({ consumed_at: expect.anything() })
+    expect(await journal()).toEqual([
+      {
+        action: 'sso_recovery.used',
+        actor_id: fixture.owner,
+        credential_id: owner.id,
+        target_id: fixture.team,
+        details: { correlationId: proof.id },
+      },
+    ])
+    expect(h.notices).toHaveLength(2)
+    expect(h.notices).toEqual(
+      expect.arrayContaining(
+        [fixture.owner, fixture.coOwner].map((userId) => ({
+          kind: 'used',
+          userId,
+          organizationId: fixture.team,
+          language: expect.any(String),
+        })),
+      ),
+    )
+    const delivered = await deliverNotices(h)
+    expect(delivered.map(({ to }) => to).sort()).toEqual(
+      (await Promise.all([email(fixture.owner), email(fixture.coOwner)])).sort(),
+    )
+    expect(delivered.every(({ sensitive, text }) => sensitive && !text.includes(proof.id))).toBe(
+      true,
+    )
+    expect(await policy()).toEqual({ require_sso: true, policy_revision: 7, trust_generation: 1 })
+  })
+
+  it('binds recovery use to its expected revision, browser session and origin', async () => {
+    const h = instance()
+    await enforceSso()
+    const owner = await browser(fixture.owner)
+    const proof = await recoveryProof(h, owner.cookie)
+    const retry = { expectedRevision: recoveryRevision, proofAttemptId: proof.id }
+    const wrongRevision = await write(h, recoveryUsePath, proof.cookie, {
+      ...retry,
+      expectedRevision: recoveryRevision - 1,
+    })
+    await checkError(wrongRevision, 409, 'sso_configuration_changed')
+    const wrongTeam = await write(h, recoveryUsePath, proof.cookie, retry, {
+      'X-Expected-Organization-Id': fixture.otherTeam,
+    })
+    await checkError(wrongTeam, 403, 'team_management_access_denied')
+    for (const headers of [
+      { origin: 'https://outside.example.test' },
+      { authorization: 'Bearer synthetic-agent-fixture' },
+    ] as Record<string, string>[]) {
+      await checkError(
+        await write(h, recoveryUsePath, proof.cookie, retry, headers),
+        403,
+        'team_management_access_denied',
+      )
+    }
+    const missingBinding = await challenge(
+      await useRecovery(h, owner.cookie, proof.id),
+      owner.cookie,
+    )
+    expect(missingBinding.id).not.toBe(proof.id)
+    expect(await attemptUse(proof.id)).toEqual({ consumed_at: null })
+    expect(await journal()).toEqual([])
+    expect(h.notices).toEqual([])
+    expect((await useRecovery(h, proof.cookie, proof.id)).status).toBe(204)
+  })
+
+  it('rejects expired proof, non-owners, demoted owners and owners who never enrolled', async () => {
+    const h = instance()
+    await enforceSso()
+    for (const userId of [fixture.coOwner, fixture.member, fixture.admin]) {
+      await checkError(
+        await useRecovery(h, (await browser(userId)).cookie),
+        403,
+        'team_management_access_denied',
+      )
+    }
+    const owner = await browser(fixture.owner)
+    const expired = await recoveryProof(h, owner.cookie)
+    await expireProof(expired.id)
+    expect(
+      (await challenge(await useRecovery(h, expired.cookie, expired.id), expired.cookie)).id,
+    ).not.toBe(expired.id)
+    expect(await attemptUse(expired.id)).toEqual({ consumed_at: null })
+
+    const proof = await recoveryProof(h, expired.cookie)
+    // A remaining stored recovery row must not make a demoted member usable.
+    await db
+      .updateTable('auth.member')
+      .set({ role: 'admin' })
+      .where('id', '=', fixture.ownerMember)
+      .execute()
+    await checkError(
+      await useRecovery(h, proof.cookie, proof.id),
+      403,
+      'team_management_access_denied',
+    )
+    expect(await attemptUse(proof.id)).toEqual({ consumed_at: null })
+    expect(await journal()).toEqual([])
+    expect(h.notices).toEqual([])
+  })
+
+  it('retains recovery through repeated configuration reads and stops at mailbox expiry', async () => {
+    const h = instance()
+    await enforceSso()
+    const owner = await browser(fixture.owner)
+    const otherSession = await browser(fixture.owner)
+    const proof = await recover(h, owner.cookie)
+    await cleanupSsoAttempts(db)
+    expect(await attemptUse(proof.id)).toEqual({ consumed_at: expect.anything() })
+    for (let index = 0; index < 2; index++) {
+      const readPolicy = await read(h, policyPath, proof.cookie)
+      expect(readPolicy.status).toBe(200)
+      expect(await readPolicy.json()).toEqual({
+        requireSso: true,
+        admission: 'invitation_only',
+        policyRevision: 7,
+        trustGeneration: 1,
+      })
+      const providers = await read(h, providersPath, proof.cookie)
+      expect(providers.status).toBe(200)
+      const page = (await providers.json()) as {
+        data: Record<string, unknown>[]
+        nextCursor: string | null
+      }
+      expect(page.data).toEqual([expect.objectContaining({ id: fixture.provider.id })])
+      expect(page.data[0]).not.toHaveProperty('links')
+      expect(page.nextCursor).toBeNull()
+    }
+    for (const path of [policyPath, providersPath]) {
+      await checkError(await read(h, path, owner.cookie), 403, 'sso_required')
+      await checkError(
+        await read(h, path, proof.cookie.replace(owner.cookie, otherSession.cookie)),
+        403,
+        'sso_required',
+      )
+      await checkError(
+        await read(h, path, proof.cookie, { origin: 'https://other.example.test' }),
+        403,
+        'sso_required',
+      )
+    }
+
+    await expireProof(proof.id)
+    for (const path of [policyPath, providersPath])
+      await checkError(await read(h, path, proof.cookie), 403, 'sso_required')
+    await checkError(
+      await write(
+        h,
+        policyPath,
+        proof.cookie,
+        {
+          expectedRevision: recoveryRevision,
+          requireSso: false,
+          admission: 'invitation_only',
+        },
+        {},
+        'PUT',
+      ),
+      403,
+      'sso_required',
+    )
+    expect(await policy()).toMatchObject({ require_sso: true, policy_revision: recoveryRevision })
+    await cleanupSsoAttempts(db)
+    expect(
+      await db.selectFrom('sso_attempts').select('id').where('id', '=', proof.id).execute(),
+    ).toEqual([])
+  })
+
+  it('keeps query counts for configuration and fresh proof on a team without SSO data', async () => {
+    const h = instance()
+    const owner = await createTestUser(db)
+    const team = await createTestTeam(db, [{ user: owner, role: 'owner' }])
+    const session = await browser(owner.id, team.id)
+    const cookie = `${session.cookie}; ${bindingCookieName(publicUrl)}=${randomBytes(32).toString('base64url')}`
+    const headers = { 'X-Expected-Organization-Id': team.id }
+    const queries = [
+      { path: providersPath, send: () => read(h, providersPath, cookie, headers), status: 200 },
+      { path: policyPath, send: () => read(h, policyPath, cookie, headers), status: 200 },
+      {
+        path: 'policy fresh proof',
+        send: () =>
+          write(
+            h,
+            policyPath,
+            cookie,
+            { expectedRevision: 1, requireSso: false, admission: 'invitation_only' },
+            headers,
+            'PUT',
+          ),
+        status: 403,
+      },
+    ]
+    const counts: Record<string, number> = {}
+    for (const { path, send, status } of queries) {
+      statements.length = 0
+      const response = await send()
+      expect(response.status).toBe(status)
+      counts[path] = statements.length
+      expect(statements.some((statement) => statement.includes('sso_recovery_owners'))).toBe(false)
+    }
+    expect(counts).toEqual({ [providersPath]: 11, [policyPath]: 10, 'policy fresh proof': 21 })
+  })
+
+  it('refuses recovery if the owner is suspended after caller resolution', async () => {
+    const h = instance()
+    await enforceSso()
+    const proof = await recover(h, (await browser(fixture.owner)).cookie)
+    const resolved = await createCallerResolver({ auth, db })(new Headers({ cookie: proof.cookie }))
+    expect(resolved).toMatchObject({ ok: true, principal: { organization: { id: fixture.team } } })
+    await suspendScimMember(db, fixture.team, fixture.owner)
+    const stale = instance(true, async () => resolved)
+    for (const path of [policyPath, providersPath])
+      await checkError(await read(stale, path, proof.cookie), 403, 'team_management_access_denied')
+    await checkError(
+      await write(
+        stale,
+        policyPath,
+        proof.cookie,
+        {
+          expectedRevision: recoveryRevision,
+          requireSso: false,
+          admission: 'invitation_only',
+        },
+        {},
+        'PUT',
+      ),
+      403,
+      'team_management_access_denied',
+    )
+    expect(await attemptUse(proof.id)).toEqual({ consumed_at: expect.anything() })
+    expect(await policy()).toMatchObject({ require_sso: true, policy_revision: recoveryRevision })
+  })
+
+  it('permits only enforcement disable and consumes authority with that policy write', async () => {
+    const h = instance()
+    await enforceSso()
+    const proof = await recover(h, (await browser(fixture.owner)).cookie)
+    const disable = {
+      expectedRevision: recoveryRevision,
+      requireSso: false,
+      admission: 'invitation_only',
+    }
+    const client = await owned.pool.connect()
+    let keyId: string
+    try {
+      keyId = await apiKey(client, fixture.owner, fixture.team)
+    } finally {
+      client.release()
+    }
+    await checkError(
+      await write(h, policyPath, proof.cookie, { ...disable, admission: 'jit' }, {}, 'PUT'),
+      403,
+      'sso_required',
+    )
+    await checkError(
+      await write(h, `/api/v1/team/members/${fixture.member}/removal`, proof.cookie, {
+        teamId: fixture.team,
+      }),
+      403,
+      'sso_required',
+    )
+    await checkError(
+      await write(h, SSO_DELEGATIONS_PATH, proof.cookie, {
+        credentialKind: 'api_key',
+        credentialId: keyId,
+        expectedTrustGeneration: 1,
+      }),
+      403,
+      'sso_required',
+    )
+    await checkError(
+      await write(h, recoveryPath, proof.cookie, {
+        expectedRevision: recoveryRevision,
+        ownerUserId: fixture.coOwner,
+      }),
+      403,
+      'sso_required',
+    )
+    await checkError(await read(h, '/api/v1/team/bookings', proof.cookie), 403, 'sso_required')
+    expect(await policy()).toMatchObject({ require_sso: true, policy_revision: recoveryRevision })
+    expect(await recoveryOwners()).toHaveLength(1)
+    expect(await nominations()).toEqual([])
+    expect(
+      await db
+        .selectFrom('auth.member')
+        .select('id')
+        .where('id', '=', fixture.memberMember)
+        .executeTakeFirst(),
+    ).toBeDefined()
+    expect(
+      await db
+        .selectFrom('sso_delegation_bindings')
+        .select('id')
+        .where('organization_id', '=', fixture.team)
+        .execute(),
+    ).toEqual([])
+
+    const responses = await raceTeamWrites(() =>
+      write(h, policyPath, proof.cookie, disable, {}, 'PUT'),
+    )
+    const disabled = responses.find(({ status }) => status === 200)
+    if (!disabled) throw new Error('Expected a successful policy write')
+    const refused = responses.find((response) => response !== disabled)
+    expect([403, 409]).toContain(refused?.status)
+    expect(await disabled.json()).toEqual({
+      requireSso: false,
+      admission: 'invitation_only',
+      policyRevision: 8,
+      trustGeneration: 2,
+    })
+    expect(
+      await db.selectFrom('sso_attempts').select('id').where('id', '=', proof.id).execute(),
+    ).toEqual([])
+    expect((await journal()).map(({ action }) => action)).toEqual([
+      'sso_recovery.used',
+      'sso_enforcement.disabled',
+    ])
+    await challenge(
+      await write(h, policyPath, proof.cookie, { ...disable, expectedRevision: 8 }, {}, 'PUT'),
+      proof.cookie,
+    )
+  })
+
+  it('honors recovery when the ordinary browser proof ends while the policy write waits', async () => {
+    const h = instance()
+    await enforceSso()
+    const owner = await browser(fixture.owner)
+    const proof = await recover(h, owner.cookie)
+    const link = await db
+      .insertInto('sso_identity_links')
+      .values({
+        organization_id: fixture.team,
+        user_id: fixture.owner,
+        provider_id: String(fixture.provider.id),
+        issuer: String(fixture.provider.issuer),
+        subject: randomUUID(),
+        proven_email: await email(fixture.owner),
+        email_proven_at: await databaseClock(db),
+      })
+      .returning(['id', 'generation'])
+      .executeTakeFirstOrThrow()
+    await db
+      .insertInto('sso_browser_proofs')
+      .values({
+        organization_id: fixture.team,
+        user_id: fixture.owner,
+        member_id: fixture.ownerMember,
+        provider_id: String(fixture.provider.id),
+        link_id: link.id,
+        link_generation: link.generation,
+        trust_generation: 1,
+        domain_id: String(fixture.domain.id),
+        domain_generation: Number(fixture.domain.generation),
+        session_id: owner.id,
+        expires_at: sql<string>`clock_timestamp() + interval '1 minute'`,
+      })
+      .execute()
+    expect((await read(h, '/api/v1/team/bookings', proof.cookie)).status).toBe(200)
+    const responses = await raceTeamWrites(
+      () =>
+        write(
+          h,
+          policyPath,
+          proof.cookie,
+          {
+            expectedRevision: recoveryRevision,
+            requireSso: false,
+            admission: 'invitation_only',
+          },
+          {},
+          'PUT',
+        ),
+      async (blocker) => {
+        await blocker.query('DELETE FROM sso_browser_proofs WHERE session_id=$1', [owner.id])
+      },
+    )
+    expect(responses.map(({ status }) => status).sort()).toEqual([200, 409])
+    expect(await policy()).toMatchObject({ require_sso: false, trust_generation: 2 })
+  })
 
   it('nominates without granting access, then adds the nominee and audits and notifies both owners', async () => {
     const h = instance()
@@ -367,20 +905,7 @@ describe.skipIf(!databaseUrl)('SSO recovery enrollment', () => {
       },
     ])
 
-    const delivered: MailMessage[] = []
-    const worker = ssoRecoveryEnrollmentEmailJob({
-      db,
-      capabilities: h.capabilities,
-      publicUrl,
-      mailer: { send: async (message) => void delivered.push(message) },
-    })
-    const runNotice = (notice: Notice) =>
-      worker.handler(worker.payload.parse(notice), {
-        id: 'synthetic-notice',
-        attempt: 1,
-        signal: new AbortController().signal,
-      })
-    for (const notice of h.notices) await runNotice(notice)
+    const delivered = await deliverNotices(h)
     expect(delivered.map(({ to, sensitive }) => ({ to, sensitive }))).toEqual([
       { to: await email(fixture.coOwner), sensitive: true },
     ])
@@ -440,13 +965,12 @@ describe.skipIf(!databaseUrl)('SSO recovery enrollment', () => {
         expect.objectContaining({ kind: 'enrolled', userId: fixture.coOwner }),
       ]),
     )
-    delivered.length = 0
-    for (const notice of h.notices) await runNotice(notice)
-    expect(delivered.map(({ to }) => to).sort()).toEqual(
+    const confirmations = await deliverNotices(h)
+    expect(confirmations.map(({ to }) => to).sort()).toEqual(
       (await Promise.all([email(fixture.owner), email(fixture.coOwner)])).sort(),
     )
     expect(
-      delivered.every(
+      confirmations.every(
         ({ sensitive, text }) => sensitive && !text.includes(enrollment.enrollmentId),
       ),
     ).toBe(true)
@@ -756,10 +1280,11 @@ describe.skipIf(!databaseUrl)('SSO recovery enrollment', () => {
     },
   )
 
-  it('keeps both operations hard-off before authentication or request validation', async () => {
+  it('keeps recovery operations hard-off before authentication or request validation', async () => {
     const h = instance(false)
     await checkError(await write(h, recoveryPath, '', {}), 404, 'sso_disabled')
     await checkError(await write(h, acceptancePath(randomUUID()), '', {}), 404, 'sso_disabled')
+    await checkError(await write(h, recoveryUsePath, '', {}), 404, 'sso_disabled')
     expect(await recoveryOwners()).toEqual([])
     expect(await nominations()).toEqual([])
     expect(h.notices).toEqual([])

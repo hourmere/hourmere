@@ -73,6 +73,8 @@
   "ssoRecovery.nominated.message": "一位团队所有者提名您为单点登录恢复所有者。请在 72 小时内打开 Hourmere 查看提名。接受提名时，您需要使用自己的邮箱单独完成验证。",
   "ssoRecovery.enrolled.subject": "单点登录恢复提名已接受",
   "ssoRecovery.enrolled.message": "一位团队所有者接受了单点登录恢复提名。如果您没有预期此变更，请联系团队管理员。",
+  "ssoRecovery.used.subject": "已使用单点登录恢复",
+  "ssoRecovery.used.message": "一位团队所有者验证了自己的邮箱并启动了单点登录恢复。如果您没有预期此操作，请联系团队管理员。",
   "teamInvitation.defaultTeam": "你的团队",
   "teamInvitation.defaultInviter": "团队成员",
   "teamInvitation.subject": "邀请你加入团队：{team}",

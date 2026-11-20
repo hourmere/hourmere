@@ -143,7 +143,7 @@ export function installRestApiKeyScopes(
   app: OpenAPIHono,
   resolveCaller: CallerResolver,
   notFoundHandler: Handler,
-  ssoTeamReads?: SsoTeamReadDeps,
+  ssoTeamReads?: SsoTeamReadDeps & { publicUrl: string },
 ) {
   const boundHandlers = new WeakSet()
   const register = app.openapi
@@ -217,7 +217,16 @@ export function installRestApiKeyScopes(
           ...(ssoTeamReads && protectedRead
             ? [teamReadMiddleware(ssoTeamReads, protectedRead)]
             : []),
-          ...(ssoTeamReads && protectedWrite ? [teamWriteMiddleware(ssoTeamReads)] : []),
+          ...(ssoTeamReads && protectedWrite
+            ? [
+                teamWriteMiddleware(
+                  ssoTeamReads,
+                  operationId === 'PUT /api/v1/team/sso/policy'
+                    ? ssoTeamReads.publicUrl
+                    : undefined,
+                ),
+              ]
+            : []),
         ],
         responses: {
           ...route.responses,
