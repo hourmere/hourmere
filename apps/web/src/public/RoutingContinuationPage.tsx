@@ -28,6 +28,7 @@ import { useRequest } from './paths.ts'
 import { SlotPicker, type SlotPickerPosition } from './SlotPicker.tsx'
 import { zoneName } from './time.ts'
 import {
+  type Answer,
   bookingErrors,
   bookingLocale,
   type FieldErrors,
@@ -40,9 +41,83 @@ function unavailable(error: unknown) {
   return code === 'routing_unavailable' || code === 'routing_forms_disabled'
 }
 
-function invalidatedSelection(error: unknown) {
-  const code = codeOf(error)
-  return code === 'invalid_duration' || code === 'invalid_location_choice'
+type StaleConfiguration = 'invalid_duration' | 'invalid_location_choice' | 'invalid_responses'
+
+const refreshNotice: Record<StaleConfiguration, UiText> = {
+  invalid_duration: 'This meeting length is no longer offered. Please choose a time again.',
+  invalid_location_choice: 'Choose one of the available locations.',
+  invalid_responses: 'This form has changed. Review your answers before continuing.',
+}
+
+function staleConfiguration(code: string | undefined): code is StaleConfiguration {
+  return (
+    code === 'invalid_duration' ||
+    code === 'invalid_location_choice' ||
+    code === 'invalid_responses'
+  )
+}
+
+type ContinuationEvent = RoutingContinuation['eventType']
+
+interface Draft {
+  event: ContinuationEvent
+  values: BookingFormValues
+  durationMinutes: number
+  slot: Slot | null
+  revision: number
+}
+
+function refreshDraft(draft: Draft, event: ContinuationEvent, code: StaleConfiguration): Draft {
+  const previous = draft.event
+  const { locationOptionId, inviteePhone, smsConsent, ...values } = draft.values
+  const previousTypes = new Map(previous.questions.map(({ id, type }) => [id, type]))
+  const answers: Record<string, Answer> = {}
+  for (const question of event.questions) {
+    const value = values.answers[question.id]
+    if (
+      !Object.hasOwn(values.answers, question.id) ||
+      value === undefined ||
+      previousTypes.get(question.id) !== question.type
+    )
+      continue
+    if (
+      question.type === 'select' &&
+      (typeof value !== 'string' || !question.options?.includes(value))
+    )
+      continue
+    answers[question.id] = Array.isArray(value)
+      ? value.filter((option) => question.options?.includes(option))
+      : value
+  }
+  const locationId = event.locations?.some(({ id }) => id === locationOptionId)
+    ? locationOptionId
+    : undefined
+  const location = selectedLocation(event.locations ?? [], locationId)
+  const previousLocation = selectedLocation(previous.locations ?? [], locationOptionId)
+  const locationChanged = previousLocation?.id !== location?.id
+  const consent = event.smsRemindersEnabled ? smsConsent : undefined
+  const keepPhone = consent || (!locationChanged && location?.askInvitee)
+  const allowed = event.allowedDurationsMinutes ?? [event.durationMinutes]
+  const durationMinutes = allowed.includes(draft.durationMinutes)
+    ? draft.durationMinutes
+    : event.durationMinutes
+  return {
+    event,
+    durationMinutes,
+    slot:
+      code === 'invalid_responses' && durationMinutes === draft.durationMinutes && !locationChanged
+        ? draft.slot
+        : null,
+    revision: draft.revision + Number(locationChanged),
+    values: {
+      ...values,
+      answers,
+      guests: event.allowGuests ? values.guests : [],
+      ...(locationId !== undefined && { locationOptionId: locationId }),
+      ...(consent !== undefined && { smsConsent: consent }),
+      ...(keepPhone && inviteePhone !== undefined && { inviteePhone }),
+    },
+  }
 }
 
 function Unavailable() {
@@ -61,23 +136,32 @@ function Unavailable() {
 export function RoutingContinuationPage({ routeToken }: { routeToken: string | null }) {
   return (
     <MemoryLanguage>
-      {routeToken ? <ResolvedPage routeToken={routeToken} /> : <Unavailable />}
+      {routeToken ? <ResolvedPage key={routeToken} routeToken={routeToken} /> : <Unavailable />}
     </MemoryLanguage>
   )
 }
 
 function ResolvedPage({ routeToken }: { routeToken: string }) {
-  const { t, uiText } = useI18n()
   const resolve = useCallback(
     (signal: AbortSignal) => resolveRoutingContinuation(routeToken, signal),
     [routeToken],
   )
   const [state, retry] = useRequest(resolve)
-  usePageTitle(state.status === 'ready' ? literal(state.data.eventType.title) : 'Booking')
-
   if (state.status === 'ready')
-    return <ContinuationBooking routeToken={routeToken} continuation={state.data} />
+    return <ContinuationBooking routeToken={routeToken} initial={state.data} />
   if (state.status === 'error' && unavailable(state.error)) return <Unavailable />
+  return <ResolveStatus state={state} retry={retry} />
+}
+
+function ResolveStatus({
+  state,
+  retry,
+}: {
+  state: { status: 'loading' } | { status: 'error'; error: unknown }
+  retry: () => void
+}) {
+  const { t, uiText } = useI18n()
+  usePageTitle('Booking')
   return (
     <PublicLayout wide={state.status === 'loading'}>
       {state.status === 'loading' ? (
@@ -96,27 +180,31 @@ function ResolvedPage({ routeToken }: { routeToken: string }) {
 
 function ContinuationBooking({
   routeToken,
-  continuation: { eventType: event, prefill },
+  initial,
 }: {
   routeToken: string
-  continuation: RoutingContinuation
+  initial: RoutingContinuation
 }) {
   const { t, ui, locale: language, explicit, formatLocale } = useI18n()
   const browserLocale = useMemo(preferredLocale, [])
   const locale = formatLocale ?? browserLocale
   const [timeZone, setTimeZone] = useState(detectTimeZone)
   const [now, setNow] = useState(currentTime)
-  const [durationMinutes, setDurationMinutes] = useState(event.durationMinutes)
-  const [slot, setSlot] = useState<Slot | null>(null)
-  const [pickerPosition, setPickerPosition] = useState<SlotPickerPosition | null>(null)
-  const [revision, setRevision] = useState(0)
-  const [notice, setNotice] = useState<UiText | null>(null)
-  const [values, setValues] = useState<BookingFormValues>(() => ({
-    name: prefill.inviteeName ?? '',
-    email: prefill.inviteeEmail ?? '',
-    answers: prefill.responses,
-    guests: [],
+  const { prefill } = initial
+  const [{ event, values, durationMinutes, slot, revision }, setDraft] = useState<Draft>(() => ({
+    event: initial.eventType,
+    durationMinutes: initial.eventType.durationMinutes,
+    slot: null,
+    revision: 0,
+    values: {
+      name: prefill.inviteeName ?? '',
+      email: prefill.inviteeEmail ?? '',
+      answers: prefill.responses,
+      guests: [],
+    },
   }))
+  const [pickerPosition, setPickerPosition] = useState<SlotPickerPosition | null>(null)
+  const [notice, setNotice] = useState<UiText | null>(null)
   const [serverErrors, setServerErrors] = useState<FieldErrors>({})
   const [formError, setFormError] = useState<UiText | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -128,6 +216,26 @@ function ContinuationBooking({
   const attempt = useRef<{ key: string; details: string; body: RoutedBookingInput } | null>(null)
   const chosenLocation = selectedLocation(event.locations ?? [], values.locationOptionId)
   const locationOptionId = chosenLocation?.id
+  usePageTitle(literal(event.title))
+
+  const refresh = useCallback(
+    async (code: StaleConfiguration, signal: AbortSignal) => {
+      let updated: RoutingContinuation
+      try {
+        updated = await resolveRoutingContinuation(routeToken, signal)
+      } catch (error) {
+        if (signal.aborted) return
+        if (!unavailable(error)) throw error
+        setGone(true)
+        return
+      }
+      if (signal.aborted) return
+      attempt.current = null
+      setDraft((draft) => refreshDraft(draft, updated.eventType, code))
+      setNotice(refreshNotice[code])
+    },
+    [routeToken],
+  )
 
   const load = useMemo(() => {
     const loadSlots = routingContinuationSlots(routeToken, durationMinutes, locationOptionId)
@@ -135,28 +243,39 @@ function ContinuationBooking({
       try {
         return await loadSlots(start, end, signal)
       } catch (error) {
-        if (!signal.aborted && (unavailable(error) || invalidatedSelection(error))) setGone(true)
+        if (!signal.aborted) {
+          const code = codeOf(error)
+          if (unavailable(error)) setGone(true)
+          else if (staleConfiguration(code)) await refresh(code, signal)
+        }
         throw error
       }
     }
-  }, [routeToken, durationMinutes, locationOptionId])
+  }, [routeToken, durationMinutes, locationOptionId, refresh])
 
   useEffect(() => () => request.current?.abort(), [])
 
   function changeTime(message: UiText | null = null) {
-    setSlot(null)
+    setDraft((draft) => ({ ...draft, slot: null }))
     setNotice(message)
     setNow(currentTime())
   }
 
   function changeDetails(next: BookingFormValues) {
     if (request.current) return
-    if (selectedLocation(event.locations ?? [], next.locationOptionId)?.id !== locationOptionId) {
+    const locationChanged =
+      selectedLocation(event.locations ?? [], next.locationOptionId)?.id !== locationOptionId
+    if (locationChanged) {
       attempt.current = null
-      setRevision((value) => value + 1)
-      changeTime()
+      setNotice(null)
+      setNow(currentTime())
     }
-    setValues(next)
+    setDraft((draft) => ({
+      ...draft,
+      values: next,
+      slot: locationChanged ? null : draft.slot,
+      revision: draft.revision + Number(locationChanged),
+    }))
     setServerErrors({})
     setFormError(null)
   }
@@ -211,8 +330,14 @@ function ContinuationBooking({
     } catch (error) {
       if (active.signal.aborted) return
       const code = codeOf(error)
-      if (unavailable(error) || invalidatedSelection(error) || code === 'invalid_responses') {
+      if (unavailable(error)) {
         setGone(true)
+      } else if (staleConfiguration(code)) {
+        try {
+          await refresh(code, active.signal)
+        } catch (refreshError) {
+          if (!active.signal.aborted) setFormError(failureMessage(refreshError))
+        }
       } else if (
         code === 'slot_taken' ||
         code === 'slot_unavailable' ||
@@ -299,6 +424,7 @@ function ContinuationBooking({
               <FocusHeading level={2} id="details-heading" className="step-title">
                 {t('Your details')}
               </FocusHeading>
+              {notice && <p role="status">{ui(notice)}</p>}
               {(prefill.inviteeName ||
                 prefill.inviteeEmail ||
                 Object.keys(prefill.responses).length > 0) && (
@@ -334,7 +460,7 @@ function ContinuationBooking({
               onSelect={(next) => {
                 if (attempt.current && attempt.current.body.start !== next.start)
                   attempt.current = null
-                setSlot(next)
+                setDraft((draft) => ({ ...draft, slot: next }))
                 setNotice(null)
                 setFormError(null)
                 setServerErrors({})
@@ -382,7 +508,7 @@ function ContinuationBooking({
                               checked={durationMinutes === minutes}
                               onChange={() => {
                                 attempt.current = null
-                                setDurationMinutes(minutes)
+                                setDraft((draft) => ({ ...draft, durationMinutes: minutes }))
                                 setNotice(null)
                               }}
                             />

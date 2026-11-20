@@ -1019,6 +1019,12 @@ Only keyed routed bookings set it. It binds the token digest and final booking r
 Replay matches it against the ordinary booking idempotency record's key and credential
 scope without reading a receipt. The fingerprint shares the immutable snapshot's booking retention.
 
+Migration 0167 marks bookings that have a routing snapshot. A reschedule reads the marker
+under the existing booking lock and copies the snapshot to the successor, leaving replay
+evidence and the consumed receipt on the original booking. The snapshot insert marks its
+booking and refuses payment holds. Ordinary bookings use the default marker and need no
+snapshot lookup.
+
 Migration 0083 adds `routing_form_operations`, the idempotency records of form creation and
 publication requests that carry a client `requestId`. A record holds the organization, the
 operation (`create` or `publish`), the acting credential by kind (`session`, `api_key` or
