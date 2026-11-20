@@ -69,6 +69,10 @@
   "mailboxProof.footer": "You received this email because someone asked Hourmere to confirm this email address.",
   "ssoLinkRemoval.subject": "A single sign-on link was removed",
   "ssoLinkRemoval.message": "A single sign-on link on your Hourmere account was removed. You can still sign in using your email. If you didn’t expect this change, contact your team administrator.",
+  "ssoRecovery.nominated.subject": "You were nominated for single sign-on recovery",
+  "ssoRecovery.nominated.message": "A team owner nominated you for single sign-on recovery. Open Hourmere within 72 hours to review the nomination. Accepting requires a separate confirmation from your own mailbox.",
+  "ssoRecovery.enrolled.subject": "Single sign-on recovery enrollment was accepted",
+  "ssoRecovery.enrolled.message": "A team owner accepted a nomination for single sign-on recovery. Contact your team administrator if you did not expect this change.",
   "teamInvitation.defaultTeam": "Your team",
   "teamInvitation.defaultInviter": "A team member",
   "teamInvitation.subject": "Invitation to join {team}",
@@ -161,9 +165,5 @@
   "series.cancelled.member": "Cancelled",
   "series.manage": "Manage series",
   "series.view": "View series",
-  "series.repair": "To retry a meeting link, open the affected booking in Hourmere.",
-  "ssoRecovery.nominated.subject": "You were nominated for single sign-on recovery",
-  "ssoRecovery.nominated.message": "A team owner nominated you for single sign-on recovery. Open Hourmere within 72 hours to review the nomination. Accepting requires a separate confirmation from your own mailbox.",
-  "ssoRecovery.enrolled.subject": "Single sign-on recovery enrollment was accepted",
-  "ssoRecovery.enrolled.message": "A team owner accepted a nomination for single sign-on recovery. Contact your team administrator if you did not expect this change."
+  "series.repair": "To retry a meeting link, open the affected booking in Hourmere."
 }

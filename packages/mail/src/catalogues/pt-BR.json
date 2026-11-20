@@ -69,6 +69,10 @@
   "mailboxProof.footer": "Você recebeu este e-mail porque alguém pediu ao Hourmere que confirmasse este endereço de e-mail.",
   "ssoLinkRemoval.subject": "Um vínculo de login único foi removido",
   "ssoLinkRemoval.message": "Um vínculo de login único da sua conta do Hourmere foi removido. Você ainda pode entrar por e-mail. Se não esperava essa alteração, entre em contato com quem administra sua equipe.",
+  "ssoRecovery.nominated.subject": "Você foi indicado para a recuperação do login único",
+  "ssoRecovery.nominated.message": "Uma pessoa proprietária da equipe indicou você para a recuperação do login único. Abra o Hourmere em até 72 horas para consultar a indicação. Para aceitar, confirme separadamente seu próprio e-mail.",
+  "ssoRecovery.enrolled.subject": "Indicação para a recuperação do login único aceita",
+  "ssoRecovery.enrolled.message": "Uma pessoa proprietária da equipe aceitou uma indicação para a recuperação do login único. Se você não esperava essa alteração, entre em contato com quem administra sua equipe.",
   "teamInvitation.defaultTeam": "Sua equipe",
   "teamInvitation.defaultInviter": "Um membro da equipe",
   "teamInvitation.subject": "Convite para participar de {team}",
@@ -161,9 +165,5 @@
   "series.cancelled.member": "Cancelada",
   "series.manage": "Gerenciar série",
   "series.view": "Ver série",
-  "series.repair": "Para tentar gerar o link da reunião novamente, abra o agendamento correspondente no Hourmere.",
-  "ssoRecovery.nominated.subject": "Você foi indicado para a recuperação do login único",
-  "ssoRecovery.nominated.message": "Uma pessoa proprietária da equipe indicou você para a recuperação do login único. Abra o Hourmere em até 72 horas para consultar a indicação. Para aceitar, confirme separadamente seu próprio e-mail.",
-  "ssoRecovery.enrolled.subject": "Indicação para a recuperação do login único aceita",
-  "ssoRecovery.enrolled.message": "Uma pessoa proprietária da equipe aceitou uma indicação para a recuperação do login único. Se você não esperava essa alteração, entre em contato com quem administra sua equipe."
+  "series.repair": "Para tentar gerar o link da reunião novamente, abra o agendamento correspondente no Hourmere."
 }
