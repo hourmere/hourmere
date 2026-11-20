@@ -6,8 +6,7 @@ import { cimd } from '@better-auth/cimd'
 import { fetchClientMetadataResource } from '@better-auth/cimd/node'
 import { mcp } from '@better-auth/mcp'
 import type { Database, Db } from '@hourmere/db'
-import type { BetterAuthPlugin } from 'better-auth'
-import { APIError, createAuthMiddleware } from 'better-auth/api'
+import { APIError } from 'better-auth/api'
 import {
   createDpopReplayStore,
   enforceDpopBinding,
@@ -39,6 +38,9 @@ const delegationRequired = (): never => {
     error_description: 'This team requires a current SSO delegation.',
   })
 }
+
+type DelegationAuthority = { organizationId: string; userId: string; credentialId: string }
+const tokenIssuance = new AsyncLocalStorage<{ authority?: DelegationAuthority }>()
 
 /** Created and checked by the session-authenticated broker; never supplied by a client. */
 export interface BoundMcpOAuthIntent {
@@ -161,94 +163,123 @@ async function requireDelegation(
   userId: string,
   credentialId: string,
 ) {
-  if (consent.ssoDelegationStatus === null || consent.ssoDelegationStatus === 'unenforced') return
+  if (consent.ssoDelegationStatus === null) return
   if (consent.ssoDelegationStatus === 'required') delegationRequired()
-  await db.transaction().execute(async (trx) => {
-    // Authority writers lock the team before changing its provider and policy.
-    await trx
-      .selectFrom('auth.organization')
-      .select('id')
-      .where('id', '=', consent.organization_id)
-      .forShare()
-      .executeTakeFirst()
-    await lockSsoDelegation(
-      trx,
-      capabilities,
-      { organizationId: consent.organization_id, userId, kind: 'oauth_grant', credentialId },
-      delegationRequired,
-    )
-  })
+  const authority = { organizationId: consent.organization_id, userId, credentialId }
+  if (consent.ssoDelegationStatus === 'valid')
+    await db.transaction().execute((trx) => lockDelegation(trx, capabilities, authority))
+  const issuance = tokenIssuance.getStore()
+  if (issuance) issuance.authority = authority
 }
 
-function offlineAccessLifecycle(
+async function lockDelegation(
+  trx: Transaction<Database>,
+  capabilities: TeamSsoCapabilities,
+  authority: DelegationAuthority,
+  denied = delegationRequired,
+) {
+  // Authority writers lock the team before changing its provider and policy.
+  await trx
+    .selectFrom('auth.organization')
+    .select('id')
+    .where('id', '=', authority.organizationId)
+    .forShare()
+    .executeTakeFirst()
+  await lockSsoDelegation(trx, capabilities, { ...authority, kind: 'oauth_grant' }, denied)
+}
+
+async function checkRefresh(
   db: Db,
   resource: string,
   capabilities: TeamSsoCapabilities,
-): BetterAuthPlugin {
-  return {
-    id: 'hourmere-mcp-offline-access',
-    hooks: {
-      before: [
-        {
-          matcher: (ctx) =>
-            ctx.path === '/oauth2/token' && ctx.body?.grant_type === 'refresh_token',
-          handler: createAuthMiddleware(async (ctx) => {
-            if (typeof ctx.body?.refresh_token !== 'string') return
-            const refresh = await db
-              .selectFrom('auth.oauthRefreshToken')
-              .select(['referenceId', 'userId', 'clientId', 'scopes'])
-              .where('token', '=', hashOAuthToken(ctx.body.refresh_token))
-              .executeTakeFirst()
-            // Unknown tokens and client authentication remain the provider's responsibility.
-            if (!refresh) return
-            if (!refresh.referenceId || !isUuid(refresh.referenceId)) throw invalidGrant()
-            const consent = await currentConsent(
-              db,
-              capabilities,
-              refresh.referenceId,
-              refresh.userId,
-              refresh.clientId,
-            )
-            if (
-              !Array.isArray(consent.scopes) ||
-              !consent.scopes.includes(MCP_OAUTH_SCOPE) ||
-              (Array.isArray(refresh.scopes) &&
-                refresh.scopes.includes('offline_access') &&
-                !consent.scopes.includes('offline_access')) ||
-              !Array.isArray(consent.resources) ||
-              !consent.resources.includes(resource)
-            )
-              throw invalidGrant()
-            // Check even lost-response replay, which bypasses customAccessTokenClaims.
-            await requireMembership(db, refresh.userId, consent.organization_id, invalidGrant)
-            await requireDelegation(db, capabilities, consent, refresh.userId, refresh.referenceId)
-          }),
-        },
-      ],
-      after: [
-        {
-          matcher: (ctx) => ctx.path === '/oauth2/token',
-          handler: createAuthMiddleware(async (ctx) => {
-            const response = ctx.context.returned as { refresh_token?: unknown } | undefined
-            if (typeof response?.refresh_token !== 'string') return
-            // Better Auth rotates with a fresh relative TTL. Cap the persisted token before
-            // returning it, using the original consent time rather than the rotation time.
-            await db
-              .updateTable('auth.oauthRefreshToken as r')
-              .from('auth.oauthConsent as c')
-              .set({
-                expiresAt: sql<Date>`least(r."expiresAt", c."createdAt" + interval '720 hours')`,
-              })
-              .whereRef('r.referenceId', '=', 'c.referenceId')
-              .whereRef('r.userId', '=', 'c.userId')
-              .whereRef('r.clientId', '=', 'c.clientId')
-              .where('r.token', '=', hashOAuthToken(response.refresh_token))
-              .execute()
-          }),
-        },
-      ],
-    },
-  }
+  tokenHash: string,
+) {
+  const refresh = await db
+    .selectFrom('auth.oauthRefreshToken')
+    .select(['referenceId', 'userId', 'clientId', 'scopes'])
+    .where('token', '=', tokenHash)
+    .executeTakeFirst()
+  // Unknown tokens and client authentication remain the provider's responsibility.
+  if (!refresh) return
+  if (!refresh.referenceId || !isUuid(refresh.referenceId)) throw invalidGrant()
+  const consent = await currentConsent(
+    db,
+    capabilities,
+    refresh.referenceId,
+    refresh.userId,
+    refresh.clientId,
+  )
+  if (
+    !Array.isArray(consent.scopes) ||
+    !consent.scopes.includes(MCP_OAUTH_SCOPE) ||
+    (Array.isArray(refresh.scopes) &&
+      refresh.scopes.includes('offline_access') &&
+      !consent.scopes.includes('offline_access')) ||
+    !Array.isArray(consent.resources) ||
+    !consent.resources.includes(resource)
+  )
+    throw invalidGrant()
+  // Check even lost-response replay, which bypasses customAccessTokenClaims.
+  await requireMembership(db, refresh.userId, consent.organization_id, invalidGrant)
+  await requireDelegation(db, capabilities, consent, refresh.userId, refresh.referenceId)
+}
+
+function capRefreshDeadline(db: Db, tokenHash: string) {
+  // Better Auth rotates with a fresh relative TTL. Cap it to the original consent time.
+  return db
+    .updateTable('auth.oauthRefreshToken as r')
+    .from('auth.oauthConsent as c')
+    .set({ expiresAt: sql<Date>`least(r."expiresAt", c."createdAt" + interval '720 hours')` })
+    .whereRef('r.referenceId', '=', 'c.referenceId')
+    .whereRef('r.userId', '=', 'c.userId')
+    .whereRef('r.clientId', '=', 'c.clientId')
+    .where('r.token', '=', tokenHash)
+    .execute()
+}
+
+const staleDelegation = new Error('SSO delegation changed during token issuance')
+
+async function finalizeDelegatedTokens(
+  db: Db,
+  capabilities: TeamSsoCapabilities,
+  authority: DelegationAuthority,
+  accessToken: string,
+  refreshHash: string | undefined,
+  presentedHash: string | undefined,
+) {
+  const live = await db.transaction().execute(async (trx) => {
+    try {
+      await lockDelegation(trx, capabilities, authority, () => {
+        throw staleDelegation
+      })
+    } catch (error) {
+      if (error !== staleDelegation) throw error
+      // JWTs never leave this request. Revoke any persisted opaque and refresh tokens
+      // and clear the original rotation response so a later rebind cannot replay them.
+      await trx
+        .deleteFrom('auth.oauthAccessToken')
+        .where('token', '=', hashOAuthToken(accessToken))
+        .where('referenceId', '=', authority.credentialId)
+        .execute()
+      if (presentedHash)
+        await trx
+          .updateTable('auth.oauthRefreshToken')
+          .set({ rotationReplayResponse: null, rotationReplayExpiresAt: null })
+          .where('token', '=', presentedHash)
+          .where('referenceId', '=', authority.credentialId)
+          .execute()
+      if (refreshHash)
+        await trx
+          .deleteFrom('auth.oauthRefreshToken')
+          .where('token', '=', refreshHash)
+          .where('referenceId', '=', authority.credentialId)
+          .execute()
+      return false
+    }
+    if (refreshHash) await capRefreshDeadline(trx, refreshHash)
+    return true
+  })
+  if (!live) delegationRequired()
 }
 
 export function mcpOAuthPlugins(
@@ -258,7 +289,7 @@ export function mcpOAuthPlugins(
   capabilities = ssoHardOff,
 ) {
   const { issuer, resource } = mcpOAuthUrls(baseUrl)
-  return [
+  const plugins = [
     jwt({ jwt: { issuer }, disableSettingJwtHeader: true }),
     mcp({
       resource,
@@ -322,8 +353,44 @@ export function mcpOAuthPlugins(
       },
     }),
     cimd({ fetchClientMetadataResource: metadataFetcher, metadataProfile: 'mcp-2026-07-28' }),
-    offlineAccessLifecycle(db, resource, capabilities),
   ] as const
+  const endpoints = plugins[1].endpoints
+  const token = endpoints.oauth2Token
+  endpoints.oauth2Token = Object.assign((context: Parameters<typeof token>[0]) => {
+    return tokenIssuance.run({}, async () => {
+      const body = context?.body
+      // The provider trims the grant type during validation but treats the token as opaque.
+      const presentedHash =
+        typeof body?.grant_type === 'string' &&
+        body.grant_type.trim() === 'refresh_token' &&
+        typeof body.refresh_token === 'string'
+          ? hashOAuthToken(body.refresh_token)
+          : undefined
+      if (presentedHash) await checkRefresh(db, resource, capabilities, presentedHash)
+      const result = await token(context)
+      // Better Auth dispatches endpoints with returnHeaders and returnStatus enabled.
+      const response =
+        'response' in result
+          ? (result.response as Pick<typeof result, 'access_token' | 'refresh_token'>)
+          : result
+      const refreshHash = response.refresh_token && hashOAuthToken(response.refresh_token)
+      const authority = tokenIssuance.getStore()?.authority
+      // Native issuance and replay have finished. Check reliance before letting either
+      // return tokens. Keep Better Auth's single-use code and rotation semantics intact.
+      if (authority && response.access_token)
+        await finalizeDelegatedTokens(
+          db,
+          capabilities,
+          authority,
+          response.access_token,
+          refreshHash,
+          presentedHash,
+        )
+      else if (refreshHash) await capRefreshDeadline(db, refreshHash)
+      return result
+    })
+  }, token) as typeof token
+  return plugins
 }
 
 /** Only MCP accepts these tokens; the REST resolver deliberately remains unchanged. */

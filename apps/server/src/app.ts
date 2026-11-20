@@ -171,7 +171,7 @@ function isSsoTrustPath(path: string): boolean {
     path = decodeURIComponent(path)
   } catch {}
   return (
-    /^\/api\/v1\/team\/sso\/(?:providers|domains|delegations)(?:\/|$)/i.test(path) ||
+    /^\/api\/v1\/team\/sso\/(?:providers|domains|delegations|recovery)(?:\/|$)/i.test(path) ||
     /^\/api\/auth\/(?:sign-in\/sso|sso\/(?:callback|oidc\/complete))(?:\/|$)/i.test(path)
   )
 }

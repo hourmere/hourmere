@@ -101,6 +101,7 @@ it('attaches the team proof middleware to every private team write in the server
     // Independent proof is available before a member has a live SSO proof.
     'POST /api/v1/team/sso/providers/:providerId/link',
     'DELETE /api/v1/team/sso/providers/:providerId/link',
+    'POST /api/v1/team/sso/recovery/:enrollmentId/accept',
     // A current member may withdraw their delegated authority after browser proof expires.
     'DELETE /api/v1/team/sso/delegations/:bindingId',
   ])
@@ -139,6 +140,7 @@ it('attaches the team proof middleware to every private team write in the server
       'POST /api/v1/branding/logo',
       'PUT /api/v1/audit-log/settings',
       'POST /api/v1/team/sso/delegations',
+      'POST /api/v1/team/sso/recovery',
       'POST /api/v1/team/sso/domains',
       'POST /api/v1/team/sso/domains/:domainId/verify',
       'DELETE /api/v1/team/sso/domains/:domainId',

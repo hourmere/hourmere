@@ -172,6 +172,7 @@ import { ssoDelegationRoutes } from './routes/sso-delegation.ts'
 import { ssoDomainRoutes } from './routes/sso-domains.ts'
 import { ssoDraftRoutes } from './routes/sso-drafts.ts'
 import { ssoIdentityRecoveryRoutes } from './routes/sso-link-recovery.ts'
+import { ssoRecoveryEnrollmentRoutes } from './routes/sso-recovery-enrollment.ts'
 import { teamBookingRoutes } from './routes/team-bookings.ts'
 import { teamInvitationRoutes } from './routes/team-invitations.ts'
 import { webhookRoutes } from './routes/webhooks.ts'
@@ -187,6 +188,10 @@ import {
   mailboxProofRoutes,
 } from './sso-mailbox-proof.ts'
 import { type OidcProviderTestDeps, oidcSignInRoutes } from './sso-oidc-sign-in.ts'
+import {
+  type SsoRecoveryEnrollmentQueue,
+  ssoRecoveryEnrollmentEmailJob,
+} from './sso-recovery-enrollment.ts'
 import type { InvitationSummaryMailLimits } from './team-invitations.ts'
 import { createWorkerHealthApp } from './worker-health.ts'
 
@@ -231,6 +236,7 @@ export function productRoutes({
   ssoConfigurationKey,
   ssoPrivateTargets,
   ssoLinkRemovalQueue,
+  ssoRecoveryEnrollmentQueue,
   ssoOidcEnabled: oidcEnabled = ssoOidcEnabled,
   ssoSamlEnabled: samlEnabled = ssoSamlEnabled,
   routingFormsEnabled: routingEnabled = routingFormsEnabled,
@@ -265,6 +271,7 @@ export function productRoutes({
   ssoConfigurationKey?: Buffer | undefined
   ssoPrivateTargets?: OidcProviderTestDeps['privateTargets']
   ssoLinkRemovalQueue?: SsoLinkRemovalQueue | undefined
+  ssoRecoveryEnrollmentQueue?: SsoRecoveryEnrollmentQueue | undefined
   /** In-process test injection only; no operator setting exists during hard-off. */
   ssoOidcEnabled?: boolean
   /** In-process test injection only; no operator setting exists during hard-off. */
@@ -365,6 +372,12 @@ export function productRoutes({
       publicUrl,
       capabilities: { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled },
       notificationQueue: ssoLinkRemovalQueue,
+    }),
+    ssoRecoveryEnrollmentRoutes({
+      db,
+      publicUrl,
+      capabilities: { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled },
+      notificationQueue: ssoRecoveryEnrollmentQueue,
     }),
     ssoDelegationRoutes({
       db,
@@ -599,6 +612,7 @@ export interface ProductionAppDeps extends RecurringBookingAdmissionDeps {
   /** The job queue SSO mailbox proof emails are enqueued on. */
   mailboxProofQueue: MailboxProofQueue
   ssoLinkRemovalQueue?: SsoLinkRemovalQueue | undefined
+  ssoRecoveryEnrollmentQueue?: SsoRecoveryEnrollmentQueue | undefined
 }
 
 /**
@@ -628,6 +642,7 @@ export function productionAppOptions({
   enqueueCalendarWritebackRecovery,
   mailboxProofQueue,
   ssoLinkRemovalQueue,
+  ssoRecoveryEnrollmentQueue,
   recurringBookingsEnabled,
 }: ProductionAppDeps): AppDeps {
   // All configuration transports and public booking routes share the instance policy.
@@ -679,6 +694,7 @@ export function productionAppOptions({
       ssoConfigurationKey,
       ssoPrivateTargets,
       ssoLinkRemovalQueue,
+      ssoRecoveryEnrollmentQueue,
       scimProvisioningEnabled: config.SCIM_PROVISIONING_ENABLED,
       mcpAuth: config.MCP_OAUTH_ENABLED ? auth : undefined,
       publicUrl: config.PUBLIC_URL,
@@ -1126,6 +1142,12 @@ async function start(
         capabilities: { ssoOidcEnabled, ssoSamlEnabled },
         mailer,
       }),
+      ssoRecoveryEnrollmentEmailJob({
+        db,
+        capabilities: { ssoOidcEnabled, ssoSamlEnabled },
+        publicUrl: config.PUBLIC_URL,
+        mailer,
+      }),
       bookingNotificationJob(notificationDeps),
       rescheduleRequestExpiryJob({
         db,
@@ -1314,6 +1336,7 @@ async function start(
           ),
         mailboxProofQueue: jobs,
         ssoLinkRemovalQueue: jobs,
+        ssoRecoveryEnrollmentQueue: jobs,
       }),
     ).fetch
   }

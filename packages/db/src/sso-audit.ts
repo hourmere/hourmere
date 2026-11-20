@@ -67,6 +67,7 @@ interface DetailSpec {
   readonly required: readonly SsoAuditDetailKey[]
   readonly optional: readonly SsoAuditDetailKey[]
   readonly outcomes?: readonly string[]
+  readonly reasons?: readonly string[]
 }
 
 /** A provider's configuration as it now stands: protocol, provider and its revision. */
@@ -125,12 +126,17 @@ export const ssoAuditDetails = {
   'sso_enforcement.disabled': policyChange,
   'sso_enforcement.updated': policyChange,
   'sso_delegation.bound': providerEvent,
-  'sso_delegation.revoked': providerEvent,
+  'sso_delegation.revoked': {
+    ...providerEvent,
+    optional: [...providerEvent.optional, 'reason'],
+    reasons: ['key_moved_team'],
+  },
   // Proofs.
   'sso_proof.revoked': providerEvent,
   // Recovery. A use names the mailbox ceremony's attempt, never its capability.
   'sso_recovery.nominated': empty,
   'sso_recovery.enrolled': empty,
+  'sso_recovery.removed': empty,
   'sso_recovery.used': { required: [], optional: ['correlationId'] },
   // Operator maintenance commands.
   'sso_maintenance.enforcement_disabled': policyChange,
@@ -166,7 +172,7 @@ interface DetailValues<A extends SsoAuditAction> {
   providerId: string
   revision: number
   outcome: Spec<A> extends { outcomes: readonly (infer O)[] } ? O : never
-  reason: SsoAuditReason
+  reason: Spec<A> extends { reasons: readonly (infer R)[] } ? R : SsoAuditReason
   correlationId: string
 }
 /** The details one SSO action takes: its required keys, and its optional keys when known. */
@@ -197,7 +203,7 @@ const validValue: Record<SsoAuditDetailKey, (value: unknown, spec: DetailSpec) =
     (value as number) >= 1 &&
     (value as number) <= SSO_AUDIT_MAX_REVISION,
   outcome: (value, spec) => (spec.outcomes ?? []).includes(value as string),
-  reason: (value) => (SSO_AUDIT_REASONS as readonly unknown[]).includes(value),
+  reason: (value, spec) => (spec.reasons ?? SSO_AUDIT_REASONS).includes(value as string),
   correlationId: (value) => typeof value === 'string' && SSO_AUDIT_ID.test(value),
 }
 

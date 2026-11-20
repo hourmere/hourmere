@@ -621,7 +621,11 @@ export {
   type ScimTokenActor,
   ScimTokenError,
 } from './scim-tokens.ts'
-
+export {
+  advanceSsoRecoveryRevision,
+  removeSsoRecoveryOwner,
+  SsoRecoveryRequiredError,
+} from './sso-recovery-membership.ts'
 export {
   liveBrowserProofQuery,
   lockSharedTeamSsoProof,

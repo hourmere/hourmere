@@ -366,6 +366,7 @@ it('classifies every production worker by its source of authority', () => {
     'signInEmailJobs',
     'ssoDomainRecheckJob',
     'ssoLinkRemovalEmailJob',
+    'ssoRecoveryEnrollmentEmailJob',
     'webhookCleanupJob',
   ]
   expect(workerNames(definitions.value).sort()).toEqual(

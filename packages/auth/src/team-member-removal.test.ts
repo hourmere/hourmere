@@ -25,6 +25,12 @@ import {
 import { organizationOperationRecords, recordTeamRoleChange } from './organization-operations.ts'
 import { isUuid, organizationGuards, personalOwner } from './organizations.ts'
 import {
+  removeSsoRecoveryOwner,
+  SsoRecoveryRequiredError,
+  soleOwnerDepartureFlags,
+  ssoRecoveryOwner,
+} from './sso-recovery-membership.ts'
+import {
   checkTeamManagementAccess,
   TeamManagementError,
   teamManagementDenied,
@@ -69,6 +75,8 @@ function sourceCopy(replacement?: Replacement): Remove {
     lockSharedTeamSsoProof,
     ssoHardOff,
     nativeSsoRequired,
+    ssoRecoveryOwner,
+    removeSsoRecoveryOwner,
   }
   return guardCopy(
     new Function(...Object.keys(bindings), `${source}; return removeTeamMember`)(
@@ -116,6 +124,10 @@ function policySourceCopy(
     ssoHardOff,
     nativeSsoRequired,
     trustedAddMember,
+    ssoRecoveryOwner,
+    removeSsoRecoveryOwner,
+    soleOwnerDepartureFlags,
+    SsoRecoveryRequiredError,
   }
   return guardCopy(
     new Function(...Object.keys(bindings), `${source}; return createTeamRolePolicy`)(

@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { runWithTransaction, tryGetCurrentAuthEndpointContext } from '@better-auth/core/context'
 import type { Database } from '@hourmere/db'
-import { writeAuditEvent } from '@hourmere/db/audit'
+import { writeAuditEvent, writeSsoAuditEvent } from '@hourmere/db/audit'
 import type { BetterAuthPlugin } from 'better-auth'
 import type { DBTransactionAdapter } from 'better-auth/adapters'
 import {
@@ -13,6 +13,7 @@ import {
   signOut,
 } from 'better-auth/api'
 import { sql, type Transaction } from 'kysely'
+import { z } from 'zod'
 
 const transactions = new AsyncLocalStorage<{
   trx: Transaction<Database>
@@ -321,10 +322,37 @@ export function authAuditRecords(): BetterAuthPlugin {
                     if (!sameId(organizationId, updated?.organizationId)) {
                       // The adapter has locked the key. Any bind that won that lock has
                       // committed, and any later bind must recheck the new organization.
-                      await trx
+                      const binding = await trx
                         .deleteFrom('sso_delegation_bindings')
                         .where('api_key_id', '=', targetId)
-                        .execute()
+                        .returning(['id', 'organization_id', 'provider_id'])
+                        .executeTakeFirst()
+                      if (binding) {
+                        const provider = await trx
+                          .selectFrom('sso_providers')
+                          .select(['protocol', 'revision'])
+                          .where('id', '=', binding.provider_id)
+                          .where('organization_id', '=', binding.organization_id)
+                          .executeTakeFirstOrThrow()
+                        await writeSsoAuditEvent(trx, {
+                          organizationId: binding.organization_id,
+                          actor: userId
+                            ? { type: 'user', id: userId }
+                            : { type: 'system', id: 'auth' },
+                          credential: session
+                            ? { type: 'session', id: session.session.id }
+                            : { type: 'none' },
+                          action: 'sso_delegation.revoked',
+                          targetType: 'sso_delegation',
+                          targetId: binding.id,
+                          details: {
+                            method: z.enum(['oidc', 'saml']).parse(provider.protocol),
+                            providerId: binding.provider_id,
+                            revision: provider.revision,
+                            reason: 'key_moved_team',
+                          },
+                        })
+                      }
                     }
                   }
                   action =

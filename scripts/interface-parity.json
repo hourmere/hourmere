@@ -53,6 +53,14 @@
     "exemption": "browser-session-only",
     "reason": "Withdrawing the caller's delegated SSO proof requires the owning browser session."
   },
+  "configureSsoRecovery": {
+    "exemption": "browser-session-only",
+    "reason": "Nominating a recovery owner requires fresh interactive owner proof."
+  },
+  "acceptSsoRecoveryEnrollment": {
+    "exemption": "browser-session-only",
+    "reason": "The nominee must independently prove their mailbox and explicitly accept."
+  },
   "deleteWorkflow": { "mcp": "delete_workflow", "cli": "workflows delete" },
   "previewWorkflow": { "mcp": "preview_workflow", "cli": "workflows preview" },
   "listWorkflowRuns": { "mcp": "list_workflow_runs", "cli": "workflows runs" },

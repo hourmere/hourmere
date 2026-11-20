@@ -100,6 +100,12 @@ const DATA_OWNERS: Readonly<Record<string, readonly string[]>> = {
     'sso_browser_proofs',
     'sso_delegation_bindings',
   ],
+  'apps/server/src/sso-recovery-enrollment.ts': [
+    'sso_policies',
+    'sso_recovery_nominations',
+    'sso_recovery_owners',
+  ],
+  'packages/auth/src/sso-recovery-membership.ts': ['sso_policies', 'sso_recovery_owners'],
   'apps/server/src/sso-delegation.ts': [
     'sso_attempts',
     'sso_delegation_bindings',
@@ -118,7 +124,7 @@ const DATA_OWNERS: Readonly<Record<string, readonly string[]>> = {
     'sso_provider_domains',
     'sso_providers',
   ],
-  'packages/auth/src/audit.ts': ['sso_delegation_bindings'],
+  'packages/auth/src/audit.ts': ['sso_delegation_bindings', 'sso_providers'],
   'apps/server/src/mcp/oauth.ts': ['sso_policies'],
   'apps/server/src/sso-oidc-test-receipts.ts': ['sso_providers'],
   'apps/server/src/sso-reads.ts': [
