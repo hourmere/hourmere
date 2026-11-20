@@ -203,7 +203,10 @@ Pass routeToken in private JSON to routing-forms resolve to read current booking
 For routing-forms slots, also pass start and end as UTC timestamps, and optionally durationMinutes
 and locationOptionId. Both commands require bookings or full scope and leave the receipt usable
 until its original expiry. The input token is redacted from stdout, output files and errors.
-Routing form commands return routing_forms_disabled until routing forms are enabled on the instance.
+For routed bookings, pass routeToken to book in private JSON instead of handle/teamSlug/slug or
+oneTimeToken. Use bookings or full scope. The input token is redacted from stdout, output files and errors.
+While routing forms are off, these calls return routing_forms_disabled. An exact committed booking
+can still be replayed with the same input, idempotency key and API key.
 Workflows: workflows list (owner {kind, id}; optional limit, cursor), workflows get (id).
            workflows runs (id; optional limit 1–100, cursor) returns run history. Pass nextCursor as cursor.
            workflows create (owner, idempotencyKey, name, scope, trigger, actions; optional enabled, conditions).
@@ -481,10 +484,11 @@ export async function runCli(options: {
     const key = options.env.HOURMERE_API_KEY ?? ''
     if (!/^hm_[A-Za-z0-9_-]{1,512}$/.test(key)) throw new CliError('invalid_api_key')
     const input = await readInput(args.input, options.stdin)
+    const routeTokenPattern = /^[A-Za-z0-9_-]{43}$/
     const routeToken =
-      (args.command === 'routing-forms resolve' || args.command === 'routing-forms slots') &&
+      ['book', 'routing-forms resolve', 'routing-forms slots'].includes(args.command) &&
       typeof input.routeToken === 'string' &&
-      /^[A-Za-z0-9_-]{43}$/.test(input.routeToken)
+      routeTokenPattern.test(input.routeToken)
         ? input.routeToken
         : ''
     if (routeToken) secrets.push(routeToken)
@@ -523,6 +527,16 @@ export async function runCli(options: {
     }
     // Webhook arguments go to the shared strict schema after the server scope check.
     const checkBookingTokens = !args.command.startsWith('webhooks ')
+    if (
+      args.command === 'book' &&
+      Object.hasOwn(input, 'routeToken') &&
+      (typeof input.routeToken !== 'string' ||
+        !routeTokenPattern.test(input.routeToken) ||
+        ['handle', 'teamSlug', 'slug', 'oneTimeToken', 'waitlistToken', 'expectedGroupSlotId'].some(
+          (field) => Object.hasOwn(input, field),
+        ))
+    )
+      throw new CliError('invalid_request')
     if (checkBookingTokens && Object.hasOwn(input, 'oneTimeToken')) {
       if (
         args.command !== 'book' ||

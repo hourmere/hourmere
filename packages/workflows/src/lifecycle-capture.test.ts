@@ -31,7 +31,12 @@ import type { WorkflowAuditRecord } from './audit.ts'
 import { captureBookingWorkflows } from './capture.ts'
 import { createWorkflowDefinition } from './creates.ts'
 import { deleteWorkflowDefinition } from './deletes.ts'
-import { createRecordingWorkflowAudit, expectWorkflowAuditRedacted } from './testing.ts'
+import {
+  createRecordingWorkflowAudit,
+  expectWorkflowAuditRedacted,
+  workflowExecutionAuditRow,
+  workflowJournal,
+} from './testing.ts'
 import { updateWorkflowDefinition } from './updates.ts'
 
 const NOW = Temporal.Instant.from('2030-01-07T08:00:00Z')
@@ -196,20 +201,35 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow booking lifecycle capture',
     expect(saved.filter((e) => e.occurrence === 'cancelled')).toMatchObject([
       { workflow_id: workflow.id, revision: 1 },
     ])
-    return { user: s.user, workflow, delayed, timer }
+    return { user: s.user, workflow, delayed, timer, bookingId: created.booking.id }
   }
   it('coalesces cancellation replay without retiring its delayed cancellation action', async () => {
-    const audit = await createRecordingWorkflowAudit(db)
-    const { user, workflow, delayed, timer } = await cancellationCheck((trx, event, now, secret) =>
-      captureBookingWorkflows(trx, event, now, secret, audit.port),
-    )
-    expectLifecycleAudit(user, await audit.read(), [
-      { event: 'workflow.run_scheduled', workflowId: delayed.id, trigger: 'booking.created' },
-      { event: 'workflow.run_scheduled', workflowId: timer.id, trigger: 'before_start' },
-      { event: 'workflow.run_cancelled', workflowId: delayed.id, trigger: 'booking.created' },
-      { event: 'workflow.run_cancelled', workflowId: timer.id, trigger: 'before_start' },
-      { event: 'workflow.run_scheduled', workflowId: workflow.id, trigger: 'booking.cancelled' },
+    const { user, workflow, delayed, timer, bookingId } =
+      await cancellationCheck(captureBookingWorkflows)
+    const organizationId = user.principal.organization.id
+    const records = await workflowJournal(db, organizationId)
+      .where('action', 'like', 'workflow.run_%')
+      .execute()
+    expectWorkflowAuditRedacted(records, [
+      bookingId,
+      secret,
+      'Booker',
+      'booker@example.com',
+      user.email,
     ])
+    const expected = (
+      [
+        ['workflow.run_scheduled', delayed.id, 'booking.created'],
+        ['workflow.run_scheduled', timer.id, 'before_start'],
+        ['workflow.run_cancelled', delayed.id, 'booking.created'],
+        ['workflow.run_cancelled', timer.id, 'before_start'],
+        ['workflow.run_scheduled', workflow.id, 'booking.cancelled'],
+      ] as const
+    ).map(([action, id, trigger]) =>
+      workflowExecutionAuditRow(organizationId, id, action, 'capture', { revision: 1, trigger }),
+    )
+    expect(records).toHaveLength(expected.length)
+    expect(records).toEqual(expect.arrayContaining(expected))
   })
 
   async function successorCheck(operation: Capture) {

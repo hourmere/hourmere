@@ -656,6 +656,28 @@ and in the request body. Routing remains hard-off. Calls return
 `routing-forms resolve` 或 `routing-forms slots` 并从标准输入或文件读取。功能目前硬关闭，
 通过传输检查的调用返回 `routing_forms_disabled`，MCP 工具列表不显示这两个工具。
 
+To book an offered slot, send `routeToken`, `start`, `invitee` and any other applicable
+booking fields to `POST /api/v1/routing-continuations/bookings`. The endpoint shares the
+ordinary public `book` rate limit and accepts JSON bodies up to 2 MiB. It accepts anonymous
+requests and validates any supplied `bookings` or `full` API key. Use `routeToken` as the only
+selector in MCP `create_booking` or CLI `book --input FILE`. Keep it private and omit
+event addresses, one-time tokens and waitlist tokens. The CLI hides the input capability
+in output and errors. Keep the same random `Idempotency-Key` (REST header) or
+`idempotencyKey` (MCP and CLI input) and original credential for retries. An exact committed
+replay still works after expiry or disablement and returns a null `manageToken`. Creation and
+replay omit the reusable event address and `successRedirect`. Routing stays hard-off, and
+MCP discovery continues to list `create_booking` with the optional `routeToken` field.
+
+中文：预约时段时，向 `POST /api/v1/routing-continuations/bookings` 提交 `routeToken`、
+`start`、`invitee` 和适用的预约字段。此接口与普通公开预约共享 `book` 限额，JSON 请求体上限
+为 2 MiB。支持匿名访问，提供密钥时须具备 `bookings` 或 `full` 权限。调用 MCP
+`create_booking` 或 CLI `book --input FILE` 时，仅使用 `routeToken` 指定活动，省略活动地址、
+一次性预约凭据和候补凭据。CLI 会在输出和错误中隐藏输入凭据。重试须使用原凭据、相同的预约内容
+和相同的随机幂等键，REST 用 `Idempotency-Key` 请求头，MCP 和 CLI 用 `idempotencyKey`
+字段。已提交的请求在凭据过期或路由功能关闭后仍可精确重放，此时 `manageToken` 为 null。
+创建和重放响应均省略可复用的活动地址及 `successRedirect`。功能仍处于硬关闭状态，MCP
+工具列表仍显示 `create_booking` 及其可选的 `routeToken` 字段。
+
 When routing is enabled, invitees open a personal form at `/route/{handle}/{slug}` or
 a team form at `/route/team/{teamSlug}/{slug}`. The page marks optional questions and
 explains validation errors alongside the affected fields. If the host publishes a new

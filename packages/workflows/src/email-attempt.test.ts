@@ -15,7 +15,7 @@ import pg from 'pg'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { fakeSmtpServer } from '../../mail/src/smtp-testing.ts'
 import { reserveInvitationEmailBudget } from '../../notifications/src/invitation-mail-limits.ts'
-import type { WorkflowAuditEvent, WorkflowAuditPort } from './audit.ts'
+import { type WorkflowAuditEvent, workflowAuditPort } from './audit.ts'
 import { captureBookingWorkflows } from './capture.ts'
 import { createWorkflowDefinition } from './creates.ts'
 import {
@@ -30,7 +30,11 @@ import {
   finishWorkflowEmailAttempt,
   markWorkflowEmailAttempt,
 } from './email-attempt.ts'
-import { createRecordingWorkflowAudit, expectWorkflowAuditRedacted } from './testing.ts'
+import {
+  expectWorkflowAuditRedacted,
+  workflowExecutionAuditRow,
+  workflowJournal,
+} from './testing.ts'
 
 const DUE = Temporal.Instant.from('2035-01-08T12:00:00Z')
 const START = DUE.add({ minutes: 90 })
@@ -107,7 +111,7 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow email attempts', () => {
     }
   })
 
-  async function fixture(audit?: WorkflowAuditPort) {
+  async function fixture(privateContent = false) {
     const user = await createTestUser(db)
     const team = await createTestTeam(db, [{ user, role: 'owner' }])
     const fixtures = createFixtures(db)
@@ -125,7 +129,9 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow email attempts', () => {
       scope: { type: 'all_event_types' },
       trigger: { type: 'before_start', offsetMinutes: 90 },
       actions: [
-        audit ? { ...action, content: { en: { subject: title, body: PRIVATE_BODY } } } : action,
+        privateContent
+          ? { ...action, content: { en: { subject: title, body: PRIVATE_BODY } } }
+          : action,
       ],
       enabled: true,
     })
@@ -138,7 +144,7 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow email attempts', () => {
       await trx
         .updateTable('bookings')
         .set({
-          ...(audit && { responses: JSON.stringify({ notes: PRIVATE_ANSWER }) }),
+          ...(privateContent && { responses: JSON.stringify({ notes: PRIVATE_ANSWER }) }),
           notification_snapshot: JSON.stringify(
             createNotificationSnapshot({ reminders: [], followUps: [] }),
           ),
@@ -159,10 +165,12 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow email attempts', () => {
       .executeTakeFirstOrThrow()
     const savedRun = () =>
       db.selectFrom('workflow_runs').selectAll().where('id', '=', run.id).executeTakeFirstOrThrow()
-    const savedRecipients = () =>
-      db.selectFrom('workflow_recipient_claims').selectAll().where('run_id', '=', run.id).execute()
-    const recipient = async () => {
-      const recipients = await savedRecipients()
+    const recipient = async (connection = db) => {
+      const recipients = await connection
+        .selectFrom('workflow_recipient_claims')
+        .selectAll()
+        .where('run_id', '=', run.id)
+        .execute()
       expect(recipients).toHaveLength(1)
       const row = recipients[0]
       if (!row) throw new Error('Expected a captured recipient')
@@ -181,7 +189,6 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow email attempts', () => {
     const execution = (transport = mailer, database = worker) => ({
       db: database,
       now: context.now,
-      audit,
       mailer: transport,
       followUpHostNotesEnabled: () => true,
       budget: { secret: SECRET, workflowMailMaxPerHour: 1, workflowOwnerMailMaxPerHour: 1 },
@@ -219,11 +226,13 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow email attempts', () => {
   }
 
   async function expectAudit(
-    audit: Awaited<ReturnType<typeof createRecordingWorkflowAudit>>,
     scenario: Awaited<ReturnType<typeof fixture>>,
-    expected: readonly [WorkflowAuditEvent, Temporal.Instant, ('dispatch' | 'repair')?][],
+    expected: readonly [WorkflowAuditEvent, ('dispatch' | 'repair')?][],
+    connection = db,
   ) {
-    const records = await audit.read()
+    const records = await workflowJournal(connection, scenario.team.id)
+      .where('action', 'like', 'workflow.email_%')
+      .execute()
     expectWorkflowAuditRedacted(records, [
       SECRET,
       PRIVATE_BODY,
@@ -231,17 +240,17 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow email attempts', () => {
       scenario.title,
       scenario.attendee.email,
       scenario.attendee.name,
+      scenario.bookingId,
+      scenario.run.id,
+      scenario.firstRecipient.id,
     ])
     expect(records).toEqual(
-      expected.map(([event, occurredAt, job = 'dispatch']) => ({
-        event,
-        occurredAt,
-        actor: { kind: 'background', job },
-        owner: { kind: 'team', organizationId: scenario.team.id },
-        workflowId: scenario.workflow.id,
-        revision: 1,
-        trigger: 'before_start',
-      })),
+      expected.map(([event, job = 'dispatch']) =>
+        workflowExecutionAuditRow(scenario.team.id, scenario.workflow.id, event, job, {
+          revision: 1,
+          trigger: 'before_start',
+        }),
+      ),
     )
   }
 
@@ -274,8 +283,7 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow email attempts', () => {
   it.each(['connection', 'greeting', 'authentication'] as const)(
     'retries a failed %s with the same reservation, recipient intent and Message-ID',
     async (phase) => {
-      const audit = await createRecordingWorkflowAudit(db)
-      const s = await fixture(audit.port)
+      const s = await fixture(true)
       const ids: (string | undefined)[] = []
       const remember = (message: MailMessage) => ids.push(message.messageId)
       let failure = mailer
@@ -292,7 +300,7 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow email attempts', () => {
       }
       const first = await s.claim()
       expect(await s.attempt(first, observeSmtp(failure, remember))).toBe('retry_scheduled')
-      await expectAudit(audit, s, [['workflow.email_attempted', DUE]])
+      await expectAudit(s, [['workflow.email_attempted']])
       expect(smtp.received.to).toEqual([])
       expect(smtp.received.messages).toEqual([])
       const original = await oneCharge()
@@ -350,10 +358,10 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow email attempts', () => {
       expect(
         await finishWorkflowEmailAttempt(s.execution(), second, s.firstRecipient.id, 'sent'),
       ).toBe('stale')
-      await expectAudit(audit, s, [
-        ['workflow.email_attempted', DUE],
-        ['workflow.email_attempted', due],
-        ['workflow.email_sent', due],
+      await expectAudit(s, [
+        ['workflow.email_attempted'],
+        ['workflow.email_attempted'],
+        ['workflow.email_sent'],
       ])
     },
   )
@@ -440,8 +448,7 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow email attempts', () => {
   it.each(['MAIL', 'RCPT', 'DATA', 'after DATA'] as const)(
     'makes a definitive permanent %s rejection terminal',
     async (phase) => {
-      const audit = await createRecordingWorkflowAudit(db)
-      const s = await fixture(audit.port)
+      const s = await fixture(true)
       const response = '550 5.7.1 message refused'
       if (phase === 'MAIL') smtp.received.mailReply = response
       if (phase === 'RCPT') smtp.received.rcptReplies.set(s.attendee.email, response)
@@ -461,16 +468,12 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow email attempts', () => {
       expect(await s.attempt(taken)).toBe('stale')
       expect(smtp.received.connections).toBe(1)
       expect(await s.savedHistory()).toMatchObject([{ outcome: 'completed', rejected: 1 }])
-      await expectAudit(audit, s, [
-        ['workflow.email_attempted', DUE],
-        ['workflow.email_rejected', DUE],
-      ])
+      await expectAudit(s, [['workflow.email_attempted'], ['workflow.email_rejected']])
     },
   )
 
   it('records terminal ambiguity after a disconnect after DATA and never replays SMTP', async () => {
-    const audit = await createRecordingWorkflowAudit(db)
-    const s = await fixture(audit.port)
+    const s = await fixture(true)
     smtp.received.disconnectAfterData = true
     const taken = await s.claim()
     expect(await s.attempt(taken)).toBe('delivery_unknown')
@@ -489,15 +492,11 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow email attempts', () => {
     expect(smtp.received.connections).toBe(1)
     expect(smtp.received.messages).toHaveLength(1)
     expect(await oneCharge()).toEqual(charged)
-    await expectAudit(audit, s, [
-      ['workflow.email_attempted', DUE],
-      ['workflow.email_delivery_unknown', DUE],
-    ])
+    await expectAudit(s, [['workflow.email_attempted'], ['workflow.email_delivery_unknown']])
   })
 
   it('repairs a worker lost after marker commit and before SMTP as delivery unknown', async () => {
-    const audit = await createRecordingWorkflowAudit(db)
-    const s = await fixture(audit.port)
+    const s = await fixture(true)
     const taken = await s.claim()
     expect(await markWorkflowEmailAttempt(s.execution(), taken, s.firstRecipient.id)).toMatchObject(
       { message: { to: s.attendee.email } },
@@ -516,15 +515,15 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow email attempts', () => {
     expect(await s.savedHistory()).toMatchObject([{ outcome: 'completed', delivery_unknown: 1 }])
     expect(smtp.received.connections).toBe(0)
     expect(await oneCharge()).toEqual(charged)
-    await expectAudit(audit, s, [
-      ['workflow.email_attempted', DUE],
-      ['workflow.email_delivery_unknown', s.clock.now, 'repair'],
+    expect(await s.claimDue(db)).toEqual([])
+    await expectAudit(s, [
+      ['workflow.email_attempted'],
+      ['workflow.email_delivery_unknown', 'repair'],
     ])
   })
 
   it('rolls back a recorded email marker and its charge before SMTP can run', async () => {
-    const audit = await createRecordingWorkflowAudit(db)
-    const s = await fixture(audit.port)
+    const s = await fixture(true)
     const taken = await s.claim()
     const rollback = new Error('Rollback after recording the email marker')
     await expect(
@@ -533,15 +532,10 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow email attempts', () => {
           ...s.execution(mailer, db),
           audit: {
             async record(trx, record) {
-              await audit.port.record(trx, record)
-              const records = await audit.read(trx)
-              expectWorkflowAuditRedacted(records, [
-                SECRET,
-                PRIVATE_BODY,
-                PRIVATE_ANSWER,
-                s.attendee.email,
-              ])
-              expect(records.map(({ event }) => event)).toEqual(['workflow.email_attempted'])
+              expect(await s.recipient(trx)).toMatchObject({ state: 'dispatching', attempts: 1 })
+              await workflowAuditPort.record(trx, record)
+              await expectAudit(s, [['workflow.email_attempted']], trx)
+              await expectAudit(s, [])
               throw rollback
             },
           },
@@ -550,16 +544,13 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow email attempts', () => {
         s.firstRecipient.id,
       ),
     ).rejects.toBe(rollback)
-    expect(await audit.read()).toEqual([])
+    await expectAudit(s, [])
     expect(await s.recipient()).toMatchObject({ state: 'pending', attempts: 0 })
     expect(await db.selectFrom('notification_email_sends').selectAll().execute()).toEqual([])
     expect(smtp.received.connections).toBe(0)
 
     expect(await s.attempt(taken)).toBe('sent')
-    await expectAudit(audit, s, [
-      ['workflow.email_attempted', DUE],
-      ['workflow.email_sent', DUE],
-    ])
+    await expectAudit(s, [['workflow.email_attempted'], ['workflow.email_sent']])
   })
 
   it('repairs a worker lost after actual SMTP acceptance and ignores its late result', async () => {

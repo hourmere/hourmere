@@ -36,6 +36,7 @@ import { workflowTools } from './mcp/workflows.ts'
 import { instanceRoutes } from './routes/instance.ts'
 import { webhookRoutes } from './routes/webhooks.ts'
 import { Workflow, WorkflowPage, WorkflowPreview, workflowRoutes } from './routes/workflows.ts'
+import { productRoutes, productTools } from './server.ts'
 
 // The enabled build's guards, for this file only: every operation runs its service.
 vi.mock('../../../packages/workflows/src/hard-off.ts', () => ({
@@ -184,11 +185,7 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
       authHandler: async () => new Response(null, { status: 404 }),
       resolveCaller,
       routes: [
-        workflowRoutes({
-          db: routesDb,
-          workflowRunCursorSecret,
-          audit: { record: async () => {} },
-        }),
+        workflowRoutes({ db: routesDb, workflowRunCursorSecret }),
         instanceRoutes({ publicUrl: URL, socialProviders: {} }),
         webhookRoutes({
           db: routesDb,
@@ -197,11 +194,7 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
         }),
       ],
       mcp: mcpEndpoint({
-        tools: workflowTools({
-          db: routesDb,
-          workflowRunCursorSecret,
-          audit: { record: async () => {} },
-        }),
+        tools: workflowTools({ db: routesDb, workflowRunCursorSecret }),
       }),
       ...(ssoDb && {
         ssoTeamReads: {
@@ -257,11 +250,9 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
         checkDb: async () => {},
         authHandler: async () => new Response(null, { status: 404 }),
         resolveCaller,
-        routes: [
-          workflowRoutes({ db, followUpHostNotesEnabled, audit: { record: async () => {} } }),
-        ],
+        routes: [workflowRoutes({ db, followUpHostNotesEnabled })],
         mcp: mcpEndpoint({
-          tools: workflowTools({ db, followUpHostNotesEnabled, audit: { record: async () => {} } }),
+          tools: workflowTools({ db, followUpHostNotesEnabled }),
         }),
       })
       const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' }
@@ -883,6 +874,70 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
     })
   const previewTool = (token: string, input: object) =>
     mcp(token, 'tools/call', { name: 'preview_workflow', arguments: input })
+
+  it('binds the shared journal in the production REST and MCP registries', async () => {
+    const user = await createTestUser(db)
+    const organizationId = user.principal.organization.id
+    const testApp = createApp({
+      publicUrl: URL,
+      checkDb: async () => {},
+      authHandler: async () => new Response(null, { status: 404 }),
+      resolveCaller,
+      routes: productRoutes({
+        db,
+        socialProviders: {},
+        invitationMailLimits: { secret: workflowRunCursorSecret },
+      }),
+      mcp: mcpEndpoint({ tools: productTools({ db }) }),
+    })
+    const headers = {
+      authorization: `Bearer ${bearer(user, 'full')}`,
+      'content-type': 'application/json',
+    }
+    const input = previewInput({ kind: 'personal', id: user.id })
+    const created = await testApp.request('/api/v1/workflows', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ ...input, idempotencyKey: randomUUID() }),
+    })
+    expect(created.status).toBe(201)
+    const { id } = Workflow.parse(await created.json())
+    const previewed = await testApp.request('/mcp', {
+      method: 'POST',
+      headers: { ...headers, accept: 'application/json, text/event-stream' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'preview_workflow', arguments: input },
+      }),
+    })
+    const response = await previewed.text()
+    expect(previewed.status).toBe(200)
+    expect(response).toContain('"synthetic":true')
+    expect(
+      await db
+        .selectFrom('audit_events')
+        .select(['action', 'target_type', 'target_id', 'details'])
+        .where('organization_id', '=', organizationId)
+        .where('action', 'in', ['workflow.created', 'workflow.previewed'])
+        .orderBy('id')
+        .execute(),
+    ).toEqual([
+      {
+        action: 'workflow.created',
+        target_type: 'workflow',
+        target_id: id,
+        details: { revision: 1, trigger: 'booking.created' },
+      },
+      {
+        action: 'workflow.previewed',
+        target_type: 'workflow_preview',
+        target_id: organizationId,
+        details: { trigger: 'booking.created' },
+      },
+    ])
+  })
 
   it('returns the same synthetic preview over REST, MCP and CLI for personal and team owners', async () => {
     for (const [token, input] of [

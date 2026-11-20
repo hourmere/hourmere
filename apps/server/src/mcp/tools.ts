@@ -102,7 +102,7 @@ export interface Tool<I extends z.ZodType = z.ZodType, O extends z.ZodType = z.Z
   /** Static validation wording for private configuration inputs. */
   privateValidationMessage?: string
   /** Omit arbitrary exception details for requests containing private contact information. */
-  privateDiagnostics?: boolean
+  privateDiagnostics?: boolean | ((args: unknown) => boolean)
   /**
    * The switch of the feature the tool belongs to, set only by that feature's registration
    * helper (routingFormTools in ../routing-forms.ts). While it throws, the tool is left out
@@ -254,8 +254,12 @@ export async function runTool(
   const disabled = disabledResult(tool, logError)
   if (disabled) return disabled
   const privateInput = tool.privateInput?.(args) === true
+  const privateDiagnostics =
+    typeof tool.privateDiagnostics === 'function'
+      ? tool.privateDiagnostics(args)
+      : tool.privateDiagnostics
   const diagnostic = (detail: unknown) =>
-    tool.privateDiagnostics
+    privateDiagnostics
       ? '[private request diagnostic omitted]'
       : privateInput
         ? redactOneTimeLogDetails(inspect(detail, { breakLength: Number.POSITIVE_INFINITY }))

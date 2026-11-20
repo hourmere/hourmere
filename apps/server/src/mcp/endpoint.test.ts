@@ -6,13 +6,16 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { z } from '@hono/zod-openapi'
 import type { CallerResult, Principal } from '@hourmere/auth'
+import type { Db } from '@hourmere/db'
 import { DomainError, type DomainErrorKind } from '@hourmere/scheduling'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { type AppDeps, createApp } from '../app.ts'
 import { CHUNK_SIZE, chunkedBody } from '../chunked-body.ts'
 import { createRateLimiter } from '../rate-limit.ts'
+import { bookingTools } from './bookings.ts'
 import { MCP_BODY_LIMIT, mcpEndpoint } from './endpoint.ts'
+import baselineBookingTool from './fixtures/create-booking-tool.json' with { type: 'json' }
 import { clip, defineTool, type Tool } from './tools.ts'
 import { whoamiTool } from './whoami.ts'
 
@@ -219,6 +222,82 @@ describe('MCP transport', () => {
     })
     expect(tools.find((t) => t.name === 'probe')?.annotations?.destructiveHint).toBe(true)
     await client.close()
+  })
+
+  it.each([false, true])(
+    'preserves the listed create_booking schema with optional routeToken (routing enabled: %s)',
+    async (routingFormsEnabled) => {
+      const a = appWith(bookingTools({ db: {} as Db, routingFormsEnabled }))
+      const { result } = await message(
+        await rpc({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, {}, a),
+      )
+      const { tools } = result as {
+        tools: { name: string; description: string; inputSchema: unknown }[]
+      }
+      const listed = tools.find((t) => t.name === 'create_booking')
+      expect(listed?.description).toBe(baselineBookingTool.description)
+      expect(listed?.inputSchema).toEqual({
+        ...baselineBookingTool.inputSchema,
+        properties: {
+          ...baselineBookingTool.inputSchema.properties,
+          routeToken: {
+            type: 'string',
+            description:
+              'Private routing capability from route_lead. Use the start returned by find_routed_slots. Omit handle, teamSlug, slug, oneTimeToken and waitlistToken. Routing forms must be enabled to create a booking; exact authorized replays still work while off.',
+          },
+        },
+      })
+    },
+  )
+
+  it('uses the booking rate limit for routed calls even while routing is off', async () => {
+    const a = appWith(
+      bookingTools({
+        db: {} as Db,
+        rateLimits: { book: { limit: 1, windowSeconds: 60 } },
+      }),
+    )
+    const routeToken = 'x'.repeat(43)
+    const input = {
+      start: '2026-11-02T09:00:00Z',
+      invitee: { name: 'Routed invitee', email: 'invitee@example.test', timeZone: 'UTC' },
+    }
+    const book = async (args: Record<string, unknown>) => {
+      const { result } = await message(
+        await rpc(
+          {
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'tools/call',
+            params: {
+              name: 'create_booking',
+              arguments: { ...input, ...args },
+            },
+          },
+          {},
+          a,
+        ),
+      )
+      return result as { content: unknown; isError: boolean }
+    }
+    for (const selector of [
+      { handle: 'host' },
+      { teamSlug: 'team' },
+      { slug: 'event' },
+      { oneTimeToken: 'o'.repeat(43) },
+      { waitlistToken: 'waitlist' },
+    ]) {
+      const result = await book({ routeToken, ...selector })
+      expect(result.isError).toBe(true)
+      expect(textOf(result)).toEqual({
+        error: 'invalid_request',
+        message: 'Invalid booking request',
+      })
+    }
+    expect(textOf(await book({ routeToken }))).toEqual({ error: 'routing_forms_disabled' })
+    expect(textOf(await book({ handle: 'host', slug: 'event' }))).toMatchObject({
+      error: 'rate_limited',
+    })
   })
 
   it('is stateless: no session id, and GET and DELETE are 405', async () => {

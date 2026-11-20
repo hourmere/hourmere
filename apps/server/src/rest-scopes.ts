@@ -22,7 +22,7 @@ import { teamWriteRoute } from './sso-write-routes.ts'
 
 // Bound from the declared route at registration, never from a caller-controlled URL.
 const operations = new WeakMap<Context, string>()
-const auditPrincipals = new WeakMap<Context, Principal>()
+const auditPrincipals = new WeakMap<Context, Extract<Principal, { kind: 'api_key' }>>()
 
 /** Preserve public capability/idempotency semantics while attributing a validated key. */
 export function publicBookingAuditOrigin(
@@ -31,6 +31,19 @@ export function publicBookingAuditOrigin(
 ): BookingOrigin {
   const principal = auditPrincipals.get(c)
   return { source, apiKeyId: null, ...(principal ? { audit: auditActor(principal) } : {}) }
+}
+
+/** Routed retries are bound to the credential that made the booking. */
+export function routedBookingAuditOrigin(c: Context): BookingOrigin {
+  const principal = auditPrincipals.get(c)
+  return principal
+    ? {
+        source: 'api',
+        apiKeyId: principal.apiKeyId,
+        actorUserId: principal.user.id,
+        audit: auditActor(principal),
+      }
+    : { source: 'web', apiKeyId: null }
 }
 
 // The check of each featureGate middleware, and the gate of the route a request matched.

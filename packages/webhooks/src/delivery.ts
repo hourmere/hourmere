@@ -28,7 +28,6 @@ export interface WebhookQueue {
 export interface WebhookDeps extends WebhookSettings {
   db: Db
   now?: (() => Temporal.Instant) | undefined
-  workflowAudit?: WorkflowAuditPort | undefined
   /** Only isolated fixtures replace the built-in HTTP(S)/DNS transport. */
   transport?: WebhookTransport | undefined
   /** Only isolated fixtures shorten the Slack sender wait (SLACK_SENDER_WAIT_MS). */
@@ -77,7 +76,6 @@ export async function captureWorkflowWebhook(
   trx: Db,
   input: WorkflowWebhookCapture,
   now: Temporal.Instant,
-  audit?: WorkflowAuditPort,
 ): Promise<void> {
   if (!settings.enabled) return
   if (!trx.isTransaction) throw new Error('Webhook capture requires the workflow transaction')
@@ -148,8 +146,8 @@ export async function captureWorkflowWebhook(
     created_at: new Date(now.epochMilliseconds),
   })
   if (!inserted) return
-  const { hardOffWorkflowAuditPort } = await import('@hourmere/workflows')
-  await (audit ?? hardOffWorkflowAuditPort()).record(trx, {
+  const { workflowAuditPort } = await import('@hourmere/workflows')
+  await workflowAuditPort.record(trx, {
     event: 'workflow.webhook_queued',
     occurredAt: now,
     actor: { kind: 'background', job: 'dispatch' },
@@ -364,6 +362,7 @@ export async function deliverWorkflowWebhook(
   deliveryId: string,
   signal: AbortSignal,
   jobAttempt = 1,
+  audit?: WorkflowAuditPort,
 ) {
   const identity = await deps.db
     .selectFrom('webhook_deliveries')
@@ -373,7 +372,7 @@ export async function deliverWorkflowWebhook(
     .executeTakeFirst()
   if (!identity?.workflow_run_id) return
   // Keep workflow schema initialization out of ordinary webhook delivery.
-  const { hardOffWorkflowAuditPort, lockWorkflowWebhookRun } = await import('@hourmere/workflows')
+  const { lockWorkflowWebhookRun, workflowAuditPort } = await import('@hourmere/workflows')
   const runId = identity.workflow_run_id
   const now = deps.now ?? (() => Temporal.Now.instant())
   const retry = await deps.db.transaction().execute(async (trx) => {
@@ -452,7 +451,7 @@ export async function deliverWorkflowWebhook(
     const attemptAt = now()
     async function recordOutcome(outcome: 'delivered' | 'failed', reason?: 'expired') {
       if (!locked) return
-      await (deps.workflowAudit ?? hardOffWorkflowAuditPort()).record(trx, {
+      await (audit ?? workflowAuditPort).record(trx, {
         ...locked.auditIdentity,
         event: outcome === 'delivered' ? 'workflow.webhook_completed' : 'workflow.webhook_failed',
         occurredAt: attemptAt,
@@ -746,11 +745,7 @@ function throwIfWebhookRetry(retry: boolean, signal: AbortSignal) {
     throw new Error(signal.aborted ? 'Webhook delivery interrupted' : 'Webhook delivery failed')
 }
 
-export function webhookCleanupJob(
-  db: Db,
-  now = () => Temporal.Now.instant(),
-  workflowAudit?: WorkflowAuditPort,
-) {
+export function webhookCleanupJob(db: Db, now = () => Temporal.Now.instant()) {
   return defineJob({
     name: 'webhook-cleanup',
     payload: z.strictObject({}),
@@ -839,17 +834,16 @@ export function webhookCleanupJob(
             if (!pending) return
             const { rows } = await failOrphanedDeliveries(trx, true, remaining)
             if (rows.length === 0) return
-            const { hardOffWorkflowAuditPort, workflowWebhookAuditIdentities } = await import(
+            const { workflowAuditPort, workflowWebhookAuditIdentities } = await import(
               '@hourmere/workflows'
             )
             const repaired = await workflowWebhookAuditIdentities(
               trx,
               rows.map(({ id }) => id),
             )
-            const audit = workflowAudit ?? hardOffWorkflowAuditPort()
             const occurredAt = now()
             for (const auditIdentity of repaired)
-              await audit.record(trx, {
+              await workflowAuditPort.record(trx, {
                 ...auditIdentity,
                 event: 'workflow.webhook_failed',
                 occurredAt,

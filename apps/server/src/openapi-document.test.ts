@@ -50,6 +50,7 @@ it('attaches the team proof middleware to every private team read in the server 
   for (const route of [
     'POST /api/v1/routing-continuations/resolve',
     'POST /api/v1/routing-continuations/slots',
+    'POST /api/v1/routing-continuations/bookings',
   ])
     expect(teamReadRoutes).not.toContain(route)
 })
@@ -119,6 +120,7 @@ it('attaches the team proof middleware to every private team write in the server
   for (const route of [
     'POST /api/v1/routing-continuations/resolve',
     'POST /api/v1/routing-continuations/slots',
+    'POST /api/v1/routing-continuations/bookings',
   ]) {
     expect(routes.map(({ method, path }) => `${method} ${path}`)).toContain(route)
     expect(teamWriteRoutes).not.toContain(route)

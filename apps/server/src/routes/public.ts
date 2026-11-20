@@ -2,8 +2,10 @@ import { createRoute, z } from '@hono/zod-openapi'
 import type { Db } from '@hourmere/db'
 import {
   type BookingNotifier,
+  type BookingOrigin,
   createPublicBooking,
   createPublicTeamBooking,
+  createRoutedBooking,
   getPublicBrandLogo,
   getPublicEventType,
   getPublicHost,
@@ -14,6 +16,7 @@ import {
   MAX_GUESTS,
   MAX_SLOT_RANGE_DAYS,
   type PublicContext,
+  type RoutingContinuationContext,
   resendWaitlistVerification,
   WaitlistRateLimitError,
 } from '@hourmere/scheduling'
@@ -21,8 +24,9 @@ import { routeBodyLimit } from '../body-limit.ts'
 import { localeDescription } from '../i18n/locale-description.ts'
 import { ErrorBody, json, Question, type RouteModule } from '../openapi.ts'
 import { createRateLimiter, PUBLIC_RATE_LIMITS, type RateLimit, rateLimit } from '../rate-limit.ts'
-import { publicBookingAuditOrigin } from '../rest-scopes.ts'
+import { publicBookingAuditOrigin, routedBookingAuditOrigin } from '../rest-scopes.ts'
 import {
+  Booking,
   BookingWithToken,
   Instant,
   LocationKind,
@@ -196,6 +200,56 @@ export const CreateBooking = z
   })
   .openapi('CreateBooking')
 
+export const RouteBookingToken = z.string().openapi({
+  description:
+    'Private capability from route submission. Use it instead of a direct booking address or one-time token.',
+})
+
+export const RoutedBookingInput = z
+  .strictObject({
+    ...CreateBooking.omit({ source: true, waitlistToken: true }).shape,
+    routeToken: RouteBookingToken,
+  })
+  .openapi('RoutedBookingInput')
+
+export const RoutedBookingResult = z
+  .object({
+    booking: Booking.pick({
+      id: true,
+      eventTypeId: true,
+      status: true,
+      start: true,
+      end: true,
+      title: true,
+      location: true,
+      conference: true,
+      responses: true,
+      attendees: true,
+      rescheduledFromId: true,
+      cancelledAt: true,
+      cancelReason: true,
+      source: true,
+      createdAt: true,
+      assignedHost: true,
+    }),
+    manageToken: BookingWithToken.shape.manageToken,
+  })
+  .openapi('RoutedBookingResult')
+
+export async function bookRoutingContinuation(
+  ctx: RoutingContinuationContext,
+  input: z.infer<typeof RoutedBookingInput>,
+  origin: BookingOrigin,
+  idempotencyKey?: string,
+) {
+  const result = await createRoutedBooking(
+    ctx,
+    { ...input, start: Temporal.Instant.from(input.start), idempotencyKey },
+    origin,
+  )
+  return { ...RoutedBookingResult.parse(result), replayed: result.replayed }
+}
+
 export const WaitlistJoinBody = z
   .strictObject({
     email,
@@ -248,6 +302,7 @@ export interface PublicRoutesDeps {
   routingFormsEnabled?: boolean
   /** BETTER_AUTH_SECRET. Fixtures may omit it while routing forms are off. */
   routingSecret?: string | undefined
+  receiptNow?: RoutingContinuationContext['receiptNow']
   /** Queues the booking emails in the booking's transaction; none are sent without it. */
   notify?: BookingNotifier | undefined
   /** Overrides an endpoint group's default rate limit in tests. */
@@ -271,6 +326,7 @@ export function publicRoutes({
   publicUrl = 'http://localhost:3000',
   routingFormsEnabled = false,
   routingSecret,
+  receiptNow,
   rateLimits = {},
 }: PublicRoutesDeps): RouteModule {
   const ctx: PublicContext = {
@@ -289,6 +345,7 @@ export function publicRoutes({
   const pageLimit = limit('page')
   const slotsLimit = limit('slots')
   const bookLimit = limit('book')
+  const routedSecurity: Record<string, string[]>[] = [{}, { apiKey: [] }]
   return (shared) => {
     const { app } = shared
     publicRoutingFormRoutes({
@@ -299,6 +356,45 @@ export function publicRoutes({
       routingSecret,
       publicUrl,
     })(shared)
+    app.openapi(
+      createRoute({
+        method: 'post',
+        path: '/api/v1/routing-continuations/bookings',
+        operationId: 'createRoutedBooking',
+        tags: ['Public'],
+        summary: 'Book a slot through a routing continuation',
+        description:
+          'Books the event selected by the private route capability. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key. Routing is currently hard-off. An exact committed replay with the same capability, Idempotency-Key and booking authority still succeeds after expiry or disablement.',
+        security: routedSecurity,
+        middleware: [bookLimit, routeBodyLimit(BOOKING_BODY_LIMIT)],
+        request: {
+          headers: z.object({
+            'idempotency-key': z.string().optional().openapi({
+              description: 'A random key (1–255 printable ASCII characters), e.g. a UUIDv4',
+            }),
+          }),
+          body: { content: json(RoutedBookingInput), required: true },
+        },
+        responses: {
+          201: { description: 'Booked', content: json(RoutedBookingResult) },
+          200: { description: 'Exact booking replay', content: json(RoutedBookingResult) },
+          400: error('Invalid booking request or Idempotency-Key'),
+          404: error('routing_forms_disabled'),
+          409: error('routing_unavailable, idempotency_key_reused or ordinary booking conflicts'),
+          413: error('payload_too_large (maximum 2,097,152 bytes)'),
+          429: rateLimited,
+        },
+      }),
+      async (c) => {
+        const { replayed, ...result } = await bookRoutingContinuation(
+          { ...ctx, routingFormsEnabled, routingSecret, receiptNow },
+          c.req.valid('json'),
+          routedBookingAuditOrigin(c),
+          c.req.valid('header')['idempotency-key'],
+        )
+        return replayed ? c.json(result, 200) : c.json(result, 201)
+      },
+    )
     app.openapi(
       createRoute({
         method: 'get',
