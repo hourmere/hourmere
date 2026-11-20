@@ -2555,6 +2555,7 @@ export const admin = {
   'Question {number}': 'Question {number}',
   'No questions yet.': 'No questions yet.',
   'Remove option': 'Remove option',
+  'Remove option: {0}': 'Remove option: {0}',
   'Could not confirm creation. Try again to recover this draft.':
     'Could not confirm creation. Try again to recover this draft.',
 } as const

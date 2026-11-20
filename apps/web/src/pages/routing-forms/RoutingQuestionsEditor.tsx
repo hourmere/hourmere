@@ -247,13 +247,7 @@ function QuestionOptions({
                     focusField(`${field}.${Math.min(index, rest.length - 1)}.label`)
                   }}
                   disabled={options.length === 1}
-                  aria-label={t('Remove option {0}{1}, of question {2}', {
-                    '0': index + 1,
-                    '1': option.label.trim()
-                      ? t(', “{label}”', { label: option.label.trim() })
-                      : '',
-                    '2': number,
-                  })}
+                  aria-label={t('Remove option: {0}', { '0': name })}
                 >
                   {t('Remove option')}
                 </button>

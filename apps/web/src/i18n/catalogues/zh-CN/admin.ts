@@ -2436,6 +2436,7 @@ export const admin = {
   'Question {number}': '第{number}题',
   'No questions yet.': '还没有问题。',
   'Remove option': '移除选项',
+  'Remove option: {0}': '移除选项：{0}',
   'Could not confirm creation. Try again to recover this draft.':
     '无法确认是否已创建表单。请重试以找回草稿。',
 } as const

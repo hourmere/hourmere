@@ -98,6 +98,9 @@ describe('Routing questions', () => {
     await user.type(screen.getByRole('textbox', { name: '问题 1 的选项 1' }), '小团队')
     await user.click(screen.getByRole('button', { name: '添加选项' }))
     expect(document.activeElement).toBe(screen.getByRole('textbox', { name: '问题 1 的选项 2' }))
+    expect(screen.getByRole('button', { name: '移除选项：问题 1 的选项 2' }).textContent).toBe(
+      '移除选项',
+    )
     const withSecondOption = latest()?.[0]
     if (withSecondOption?.type !== 'select') throw new Error('Expected a select question')
     const firstId = changed.options[0]?.id
