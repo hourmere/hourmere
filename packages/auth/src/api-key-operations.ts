@@ -307,6 +307,12 @@ export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.fr
   rest('PATCH', '/api/v1/team/sso/providers/{providerId}', 'session_only', 'session_only'),
   rest('DELETE', '/api/v1/team/sso/providers/{providerId}', 'session_only', 'session_only'),
   rest('POST', '/api/v1/team/sso/providers/{providerId}/test', 'session_only', 'session_only'),
+  rest(
+    'POST',
+    '/api/v1/team/sso/providers/{providerId}/activation',
+    'session_only',
+    'session_only',
+  ),
   rest('POST', '/api/v1/team/sso/providers/{providerId}/link', 'session_only', 'session_only'),
   rest('DELETE', '/api/v1/team/sso/providers/{providerId}/link', 'session_only', 'session_only'),
   rest(
