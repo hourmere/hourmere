@@ -11,8 +11,8 @@ import type { MessageKey } from '../../i18n/translate.ts'
 import { PATHS } from '../../paths.ts'
 import { useMe, useSession } from '../../session.tsx'
 import { useTeamManagementAccess } from '../../team-management.tsx'
-import { SsoDomains } from './SsoDomains.tsx'
-import { SsoProviders } from './SsoProviders.tsx'
+import { SsoDomainSetup } from './SsoDomainSetup.tsx'
+import { SsoProviderSetup } from './SsoProviderSetup.tsx'
 import type { SsoDomain, SsoMutation, SsoProvider } from './setup.ts'
 
 async function loadProviders(organizationId: string, signal: AbortSignal) {
@@ -42,7 +42,7 @@ export function SsoSetupPage() {
   const me = useMe()
   const access = useTeamManagementAccess()
   const { ssoOidcEnabled } = useOutletContext<AppShellContext>()
-  const showDomains = useMatch(PATHS.ssoDomains) !== null
+  const showDomains = useMatch(PATHS.ssoDomainSettings) !== null
   const title = showDomains ? 'SSO domains' : 'Single sign-on'
   usePageTitle(title)
   const sessionTeam = !me.organization.personal && me.principal.kind === 'session'
@@ -68,7 +68,7 @@ export function SsoSetupPage() {
                 {t('Identity providers')}
               </NavLink>
             )}
-            <NavLink to={PATHS.ssoDomains} className="button">
+            <NavLink to={PATHS.ssoDomainSettings} className="button">
               {t('SSO domains')}
             </NavLink>
           </nav>
@@ -231,14 +231,14 @@ function SsoInventory({
         </p>
       )}
       {showDomains ? (
-        <SsoDomains
+        <SsoDomainSetup
           {...paneProps}
           rememberDomain={(domain) =>
             setRemembered((previous) => new Map(previous).set(domain.id, domain))
           }
         />
       ) : (
-        <SsoProviders {...paneProps} providers={providers} reload={reload} />
+        <SsoProviderSetup {...paneProps} providers={providers} reload={reload} />
       )}
     </>
   )

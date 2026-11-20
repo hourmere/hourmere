@@ -145,7 +145,7 @@ export function SettingsPage() {
                 {t('Identity providers')}
               </Link>
             )}
-            <Link className="button" to={PATHS.ssoDomains}>
+            <Link className="button" to={PATHS.ssoDomainSettings}>
               {t('SSO domains')}
             </Link>
           </div>

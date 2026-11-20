@@ -51,12 +51,14 @@ function renderDomains(routes: Routes = {}) {
     [generateChallenge]: () => json(201, record),
     ...routes,
   })
-  renderApp(PATHS.ssoDomains)
+  renderApp(PATHS.ssoDomainSettings)
   return api
 }
 
 async function enterDomain(user: ReturnType<typeof userEvent.setup>) {
-  await user.type(await screen.findByRole('textbox', { name: 'Domain name' }), domain.name)
+  // Initial navigation loads the signed-in frame and the setup page in separate chunks.
+  const input = await screen.findByRole('textbox', { name: 'Domain name' }, { timeout: 3000 })
+  await user.type(input, domain.name)
   await user.click(screen.getByRole('button', { name: 'Generate DNS challenge' }))
   return screen.findByRole('region', { name: 'DNS TXT record' })
 }

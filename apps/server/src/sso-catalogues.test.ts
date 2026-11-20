@@ -228,9 +228,9 @@ const GUARDED_SSO_WEB_PATHS = ['/app/settings/sso', '/app/settings/sso/domains']
 const guardedSsoWebNames: ReadonlySet<string> = new Set([
   ...GUARDED_SSO_WEB_PATHS.map((path) => `'${path}'`),
   'sso',
-  'ssoDomains',
+  'ssoDomainSettings',
   '<Route path={PATHS.sso} element={<SsoSetupRoute />}>',
-  '<Route path={PATHS.ssoDomains} element={null} />',
+  '<Route path={PATHS.ssoDomainSettings} element={null} />',
 ])
 
 // The createApp and createAuth options exactly as startServer assembles them

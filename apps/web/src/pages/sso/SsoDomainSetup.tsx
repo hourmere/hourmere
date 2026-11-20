@@ -7,6 +7,7 @@ import { browserTimeZone, zoned } from '../../format.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import type { MessageKey } from '../../i18n/translate.ts'
 import type { SsoDomain, SsoMutation } from './setup.ts'
+import './sso-setup.css'
 
 type DnsChallenge =
   operations['createSsoDomainChallenge']['responses'][201]['content']['application/json']
@@ -30,7 +31,7 @@ function comparableDomainName(value: string): string | undefined {
   }
 }
 
-export function SsoDomains({
+export function SsoDomainSetup({
   domains,
   busy,
   mutate,
@@ -147,7 +148,7 @@ export function SsoDomains({
     <>
       <section className="panel" aria-labelledby={formId}>
         <h2 id={formId}>{t('DNS verification')}</h2>
-        <form className="stack" onSubmit={submit}>
+        <form className="stack sso-domain-form" onSubmit={submit}>
           <Field
             id={`${formId}-name`}
             label={t('Domain name')}

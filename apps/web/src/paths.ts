@@ -26,7 +26,7 @@ export const PATHS = {
   auditLog: `${APP_BASE}/audit-log`,
   settings: `${APP_BASE}/settings`,
   sso: '/app/settings/sso',
-  ssoDomains: '/app/settings/sso/domains',
+  ssoDomainSettings: '/app/settings/sso/domains',
   newTeam: `${APP_BASE}/teams/new`,
   signIn: '/sign-in',
 } as const

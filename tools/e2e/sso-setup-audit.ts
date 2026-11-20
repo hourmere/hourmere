@@ -141,7 +141,7 @@ export async function openSsoSetupAuditPage(
 ) {
   const copy = (key: Key) => (locale === 'zh-CN' ? chinese[key] : english[key])
   const domains = state.startsWith('sso-domain')
-  const path = domains ? PATHS.ssoDomains : PATHS.sso
+  const path = domains ? PATHS.ssoDomainSettings : PATHS.sso
   const { collection, release } = await mockSsoSetupAudit(page, app, state)
   try {
     await Promise.all([

@@ -121,7 +121,7 @@ export const appRoutes = createRoutesFromElements(
           <Route path="settings" element={<SettingsPage />} />
           <Route path={PATHS.sso} element={<SsoSetupRoute />}>
             {/* The shared setup page selects the pane and keeps the team inventory across routes. */}
-            <Route path={PATHS.ssoDomains} element={null} />
+            <Route path={PATHS.ssoDomainSettings} element={null} />
           </Route>
           <Route path="teams/new" element={<CreateTeamPage />} />
           <Route path="*" element={<AppNotFoundPage />} />
@@ -155,7 +155,7 @@ export const appRoutes = createRoutesFromElements(
 
 function SsoSetupRoute() {
   const { ssoOidcEnabled, ssoSamlEnabled } = useOutletContext<AppShellContext>()
-  const isDomains = useMatch(PATHS.ssoDomains) !== null
+  const isDomains = useMatch(PATHS.ssoDomainSettings) !== null
   if (ssoOidcEnabled === undefined || ssoSamlEnabled === undefined) return <PageSkeleton />
   if (!ssoOidcEnabled && !(isDomains && ssoSamlEnabled)) return <AppNotFoundPage />
   return <SsoSetupPage />

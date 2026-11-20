@@ -32,7 +32,7 @@ const TERMS = 'https://example.test/terms'
 afterEach(() => vi.unstubAllEnvs())
 
 describe('SSO setup while hard-off', () => {
-  it.each([PATHS.settings, PATHS.eventTypes, PATHS.sso, PATHS.ssoDomains, PATHS.signIn])(
+  it.each([PATHS.settings, PATHS.eventTypes, PATHS.sso, PATHS.ssoDomainSettings, PATHS.signIn])(
     'never enters the SSO network path from %s',
     async (path) => {
       vi.stubEnv('SSO_OIDC_ENABLED', 'true')
@@ -61,7 +61,7 @@ describe('SSO setup while hard-off', () => {
         [PATHS.settings]: 'Settings',
         [PATHS.eventTypes]: 'Event types',
         [PATHS.sso]: 'Page not found',
-        [PATHS.ssoDomains]: 'Page not found',
+        [PATHS.ssoDomainSettings]: 'Page not found',
         [PATHS.signIn]: 'Sign in to Hourmere',
       }[path]
       await screen.findByRole('heading', { name: heading, level: 1 })
@@ -122,7 +122,7 @@ describe('SSO setup in an enabled test instance', () => {
             role: context === 'member' ? 'member' : 'owner',
           }),
       })
-      renderApp(PATHS.ssoDomains)
+      renderApp(PATHS.ssoDomainSettings)
       expect((await screen.findByRole('alert')).textContent).toBe(
         'SSO settings are unavailable in this team.',
       )

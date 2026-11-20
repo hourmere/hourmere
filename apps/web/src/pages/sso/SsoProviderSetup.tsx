@@ -19,7 +19,7 @@ const endpointFields = [
   ['jwksUrl', 'JWKS URL'],
 ] as const
 
-export function SsoProviders({
+export function SsoProviderSetup({
   providers,
   ...props
 }: ProviderProps & { providers: SsoProvider[] }) {
