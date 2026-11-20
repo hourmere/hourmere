@@ -253,6 +253,8 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `POST /api/v1/public/-/routing/{handle}/{slug}/route` | Public or manage token; check a supplied key | `full, bookings` |
 | `POST /api/v1/public/-/routing/teams/{teamSlug}/{slug}/route` | Public or manage token; check a supplied key | `full, bookings` |
 | `GET /api/v1/public/{handle}/{slug}` | Public or manage token; check a supplied key | `full, read, bookings` |
+| `POST /api/v1/routing-continuations/resolve` | Public or manage token; check a supplied key | `full, bookings` |
+| `POST /api/v1/routing-continuations/slots` | Public or manage token; check a supplied key | `full, bookings` |
 | `POST /api/v1/public/{handle}/{slug}/bookings` | Public or manage token; check a supplied key | `full, bookings` |
 | `GET /api/v1/public/{handle}/{slug}/slots` | Public or manage token; check a supplied key | `full, read, bookings` |
 | `GET /api/v1/public/teams/{handle}/{slug}` | Public or manage token; check a supplied key | `full, read, bookings` |
@@ -354,6 +356,8 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `preview_routing_form` | — | `routing-forms preview` | `full` |
 | `get_public_routing_form` | — | `routing-forms public` | `full, read, bookings` |
 | `route_lead` | — | `routing-forms route` | `full, bookings` |
+| `resolve_routing_continuation` | — | `routing-forms resolve` | `full, bookings` |
+| `find_routed_slots` | — | `routing-forms slots` | `full, bookings` |
 | `list_audit_events` | — | `audit-log list` | `full` |
 | `get_audit_log_settings` | — | `audit-log settings` | `full` |
 | `set_audit_log_settings` | — | `audit-log set-retention` | `full` |

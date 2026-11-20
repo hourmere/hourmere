@@ -106,12 +106,14 @@ export function validateQuestions(value: unknown): Question[] {
 export function parseQuestions(value: unknown): Question[] {
   const result = QuestionsSchema.safeParse(value)
   if (!result.success) {
-    throw new Error('event_types.questions does not match QuestionsSchema', {
+    throw new InvalidStoredQuestionsError('event_types.questions does not match QuestionsSchema', {
       cause: result.error,
     })
   }
   return result.data
 }
+
+export class InvalidStoredQuestionsError extends Error {}
 
 const PHONE = /^\+?[0-9][0-9 ().-]*$/
 

@@ -169,7 +169,7 @@ export interface BookingWithToken {
 }
 
 export const MAX_GUESTS = 10
-const MAX_NAME = 200
+export const MAX_NAME = 200
 const MAX_LOCALE = 35
 const MAX_REASON = 1000
 // A BCP 47 language tag's shape, e.g. "en", "en-US", "zh-Hant-TW".

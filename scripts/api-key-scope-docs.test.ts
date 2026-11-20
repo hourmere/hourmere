@@ -265,6 +265,24 @@ describe('published API key scope tables', () => {
   })
 
   it.each(documents)(
+    '$path lists routing continuation reads as capability operations with bookings or full keys',
+    ({ document, section }) => {
+      for (const [verb, tool] of [
+        ['resolve', 'resolve_routing_continuation'],
+        ['slots', 'find_routed_slots'],
+      ]) {
+        expect(document).toContain(
+          `| \`${tool}\` | — | \`routing-forms ${verb}\` | \`full, bookings\` |`,
+        )
+        if (section === 'all')
+          expect(document).toContain(
+            `| \`POST /api/v1/routing-continuations/${verb}\` | Public or manage token; check a supplied key | \`full, bookings\` |`,
+          )
+      }
+    },
+  )
+
+  it.each(documents)(
     '$path lists workflow history for full and read keys',
     ({ document, section }) => {
       expect(document).toContain('| `list_workflow_runs` | — | `workflows runs` | `full, read` |')

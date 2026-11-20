@@ -17,6 +17,14 @@ import {
   TeamRoutingFormAddress,
 } from '../routes/public-routing-forms.ts'
 import {
+  findRoutingContinuationSlots,
+  RoutingContinuation,
+  RoutingContinuationInput,
+  RoutingContinuationSlots,
+  RoutingContinuationSlotsInput,
+  readRoutingContinuation,
+} from '../routes/routing-continuations.ts'
+import {
   ArchiveRoutingForm,
   CreateRoutingForm,
   PreviewRoutingForm,
@@ -64,17 +72,38 @@ export function routingFormConfigurationTools({
   routingFormsEnabled = false,
   routingSecret,
   publicUrl = 'http://localhost:3000',
+  automaticMeet,
+  automaticZoom,
+  smsRemindersAvailable,
 }: {
   db: Db
   routingFormsEnabled?: boolean | undefined
   routingSecret?: string | undefined
   publicUrl?: string | undefined
+  automaticMeet?: boolean | undefined
+  automaticZoom?: boolean | undefined
+  smsRemindersAvailable?: boolean | undefined
 }): Tool[] {
+  const now = () => Temporal.Now.instant()
   const context = (principal: McpCaller): ServiceContext => ({
     db,
     principal,
-    now: () => Temporal.Now.instant(),
+    now,
   })
+  const continuation = {
+    db,
+    now,
+    routingFormsEnabled,
+    routingSecret,
+    automaticMeet,
+    automaticZoom,
+    smsRemindersAvailable,
+  }
+  const privateContinuation = {
+    privateInput: () => true,
+    privateValidationMessage: 'Invalid routing continuation request',
+    privateDiagnostics: true,
+  }
   const read = {
     readOnlyHint: true,
     destructiveHint: false,
@@ -178,6 +207,26 @@ export function routingFormConfigurationTools({
           routingFormAddress({ handle, teamSlug, slug }),
           input,
         ),
+    }),
+    defineTool({
+      name: 'resolve_routing_continuation',
+      title: 'Resolve a routing continuation',
+      description: `${ROUTING_FORMS_DISABLED} Supply only the private routeToken from route_lead. Returns current booking fields, editable prefill and the original expiry. The token expires 30 minutes after issuance and reads do not consume or renew it. Accepts bookings or full keys, or an authorized MCP OAuth connection.`,
+      input: RoutingContinuationInput,
+      output: RoutingContinuation,
+      annotations: read,
+      ...privateContinuation,
+      run: (args) => readRoutingContinuation(continuation, args),
+    }),
+    defineTool({
+      name: 'find_routed_slots',
+      title: 'Find slots for the selected event',
+      description: `${ROUTING_FORMS_DISABLED} Supply the private routeToken from route_lead and start/end RFC 3339 instants. The event is selected by the capability. Use durationMinutes and locationOptionId from resolve_routing_continuation if needed. Available times are not reserved. Accepts bookings or full keys, or an authorized MCP OAuth connection.`,
+      input: RoutingContinuationSlotsInput,
+      output: RoutingContinuationSlots,
+      annotations: read,
+      ...privateContinuation,
+      run: (args) => findRoutingContinuationSlots(continuation, args),
     }),
   ])
 }
