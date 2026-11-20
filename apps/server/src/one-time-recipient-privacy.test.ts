@@ -310,8 +310,8 @@ describe.skipIf(!serverUrl)('one-time recipient address privacy', () => {
   it('kills source-copy mutations of redirect persistence and legacy replay projection', async () => {
     const normal = await bookingSourceCopy()
     const unsafeSave = await bookingSourceCopy([
-      "if (!oneTimeLink && (origin.source === 'web' || origin.source === 'embed'))",
-      "if (origin.source === 'web' || origin.source === 'embed')",
+      "if (!oneTimeLink && !routing && (origin.source === 'web' || origin.source === 'embed'))",
+      "if (!routing && (origin.source === 'web' || origin.source === 'embed'))",
     ])
     const unsafeReplay = await bookingSourceCopy([
       'if (replay) return oneTimeBookingResult(replay)',

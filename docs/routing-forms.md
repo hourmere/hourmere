@@ -354,6 +354,13 @@ cannot reuse a consumed receipt. Keep minimal consumed digest/booking evidence w
 booking for replay, without recoverable token or duplicate answer ciphertext. Rollback
 leaves the receipt unconsumed. Reschedule/cancel do not revive it or send new routing mail.
 
+The internal booking service takes the ordinary organization, host, event and assignment
+locks before locking the form and receipt. It rechecks expiry after those locks and stores
+the pinned routing labels and answers separately from the invitee's final booking responses.
+At creation it omits the after-booking redirect snapshot. A keyed booking indexes the
+fingerprint of the receipt digest and final request on its provenance row. Replay matches
+it against the booking's idempotency key and credential scope without reading a receipt.
+
 Unbooked receipts are inaccessible to form administrators and have no response list/export.
 Erase encrypted answers at expiry, with the bounded cleanup grace above; expired receipts
 are unusable even when cleanup is delayed. Infrastructure outages can delay physical
@@ -490,7 +497,7 @@ cascades. Use composite unique keys/FKs to prevent cross-organization associatio
 | `routing_form_versions` | `id`, `organization_id`, `form_id`, positive `version_number`, immutable `questions`/`rules`/`fallback` JSONB, `published_at`, historical publisher UUID; composite form FK and unique form/version number; unique organization/form/id for pointer FK | form + version number |
 | `routing_target_dependencies` | `organization_id`, `version_id`, rule identity (UUID text or `fallback`), historical `event_type_id`, derived health code/time; composite version FK; no cascading event/user FK; JSON target is authoritative | organization + event_type_id; unique version/rule |
 | `routing_receipts` | `id`, `organization_id`, `form_id`, `version_id`, unique `token_hash`, nullable `answers_ciphertext`, matched/resolved rule identities, resolved target snapshot, `created_at`, `expires_at`, nullable `consumed_booking_id`; composite version/booking FKs; expiry after creation; consumed implies booking and no answer ciphertext | digest unique; partial expiry + id for unconsumed cleanup; partial organization + form + expiry for unconsumed admission counts; consuming booking |
-| `booking_routing` | `booking_id` PK/composite organization FK with cascade, historical form/version UUIDs and version number, matched/resolved rule IDs, immutable question/answer snapshots; no cascading FK to form/version | organization + booking; form/version for authorized maintenance only |
+| `booking_routing` | `booking_id` PK/composite organization FK with cascade, historical form/version UUIDs and version number, matched/resolved rule IDs, immutable question/answer snapshots, optional exact-request replay fingerprint; no cascading FK to form/version | organization + booking; form/version for authorized maintenance only; unique non-null replay fingerprint |
 | `routing_form_operations` (0083) | `id`, `organization_id`, `operation` (`create` or `publish`), historical actor kind (`session`, `api_key` or `oauth`) and actor UUID without FK, `request_id` UUID, 32-byte canonical input fingerprint, result reference (`form_id`, and `version_id` exactly for a publication), `created_at`; composite form and version FKs with cascade; rows reject every update | organization + actor kind + actor + request key unique; organization + form + version unique with nulls not distinct (one creation record per form, one publication record per version) |
 
 Published-version pointers must reference that same form and organization (deferred FK
