@@ -1052,6 +1052,9 @@ creation, preview, enabling and all edits (including renames) with
 `404 workflows_disabled`, and stops new capture/dispatch. Definition/history reads,
 disable-only updates and deletion remain available for recovery. MCP discovery while off
 omits workflow tools; authorized direct recovery calls remain usable after step 19b only.
+During step 19a, production `GET /api/v1/instance` always reports
+`workflowsEnabled: false`. When tests simulate an implemented build, this field reports
+the injected operator setting.
 Pending runs become terminally skipped as `instance_disabled` only when they are claimed
 while off; future runs are not eagerly swept. Re-enabling never revives skipped work, but future
 not-yet-due rows remain eligible. Disabling one definition is lazy in the same way, with
@@ -1062,6 +1065,13 @@ supported; an environment copied from step 19b, or a Compose install with the em
 forward, picks up the flip. Cloud and self-hosting have an identical workflow feature set
 without paid gating. Hourmere Cloud runs the independent host-text switch off, as described
 above. After opt-in ships, operators can configure the instance and owner mail sub-caps.
+
+中文：19a 期间，生产环境的 `GET /api/v1/instance` 始终返回
+`workflowsEnabled: false`。测试模拟已实现的构建时，该字段反映注入的运营开关。
+关停时可读取定义和历史、仅停用或删除工作流，创建、预览、启用及其他编辑均会被拒绝。
+MCP 工具不会出现在发现列表中。关停期间领取的到期任务会以 `instance_disabled`
+终止，尚未到期的任务仍可在恢复后执行。单个工作流停用的历史原因是
+`workflow_disabled`。
 
 Out of scope: SMS, WhatsApp, AI calls, arbitrary HTTP methods/bodies, attachments, billing,
 marketing campaigns, arbitrary recipient lists, OR/path builders, loops, multiple action

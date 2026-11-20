@@ -152,6 +152,7 @@ describe.skipIf(!serverUrl)('workflow webhook outbox', () => {
       )
 
       const requests: WebhookRequest[] = []
+      const productionQueries: string[] = []
       const deps = {
         db,
         ...settings,
@@ -161,15 +162,32 @@ describe.skipIf(!serverUrl)('workflow webhook outbox', () => {
           return 204
         },
       }
+      const productionJob = webhookDeliveryJob({
+        ...deps,
+        workflowsEnabled: true,
+        db: db.withPlugin({
+          transformQuery({ node }) {
+            productionQueries.push(node.kind)
+            return node
+          },
+          async transformResult({ result }) {
+            return result
+          },
+        }),
+      })
       for (const row of rows) {
         expect(row.webhook_id).toBe(webhook.id)
         expect(row.request_id).toBeNull()
         expect(await queued(row.id)).toEqual([{ deliveryId: row.id }])
         const signal = new AbortController().signal
-        await webhookDeliveryJob(deps).handler(
+        productionQueries.length = 0
+        await productionJob.handler(
           { deliveryId: row.id },
           { id: randomUUID(), attempt: 1, signal },
         )
+        // Only ordinary delivery classification runs while workflow execution is hard-off.
+        expect(productionQueries).toEqual(['SelectQueryNode', 'SelectQueryNode', 'SelectQueryNode'])
+        expect((await deliveries(input.bookingId)).find(({ id }) => id === row.id)).toEqual(row)
         expect(requests.filter(({ headers }) => headers['webhook-id'] === row.id)).toHaveLength(0)
         await deliverWorkflowWebhook(deps, row.id, signal)
         await deliverWorkflowWebhook(deps, row.id, signal, 2)
