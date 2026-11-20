@@ -190,6 +190,7 @@ const classes = {
     'DELETE /api/v1/team/sso/providers/{providerId}',
     'POST /api/v1/team/sso/providers/{providerId}/test',
     'POST /api/v1/team/sso/providers/{providerId}/activation',
+    'PUT /api/v1/team/sso/policy',
     'POST /api/v1/team/sso/providers/{providerId}/link',
     'DELETE /api/v1/team/sso/providers/{providerId}/link',
     'DELETE /api/v1/team/sso/providers/{providerId}/links/{linkId}',
@@ -508,6 +509,11 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
       if (template === '/api/v1/bookings/export.csv') path += `?from=${start}&to=${end}`
       if (kind === 'session_only') {
+        if (template === '/api/v1/team/sso/policy') {
+          headers.origin = publicUrl
+          headers['X-Expected-Organization-Id'] = teamId
+          payload = { expectedRevision: 1, requireSso: true, admission: 'invitation_only' }
+        }
         path = path
           .replaceAll('{id}', randomUUID())
           .replaceAll('{providerId}', randomUUID())
@@ -1036,14 +1042,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 187-operation contract and all 561 scope combinations', () => {
+    it('covers the exact 188-operation contract and all 564 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(187)
-      expect(new Set(ids).size).toBe(187)
+      expect(ids).toHaveLength(188)
+      expect(new Set(ids).size).toBe(188)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(561)
+      expect(cases).toHaveLength(564)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {

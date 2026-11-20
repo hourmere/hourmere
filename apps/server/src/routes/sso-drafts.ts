@@ -323,7 +323,7 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
         tags: ['SSO'],
         summary: 'Retire an SSO provider',
         description:
-          'Verified team owner/admin browser session with fresh proof and expected revision. An authorized repeat retirement is idempotent. SSO remains unavailable.',
+          'Verified team owner/admin browser session with fresh proof and expected revision. An enforced team must keep a usable provider. An authorized repeat retirement is idempotent. SSO remains unavailable.',
         security: [{ session: [] }],
         middleware: [...middleware] as const,
         request: {
@@ -342,6 +342,11 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
             content: json(z.object({ deleted: z.boolean() })),
           },
           ...errors,
+          409: {
+            description:
+              'organization_context_changed, sso_configuration_changed or sso_last_provider',
+            content: json(ErrorBody),
+          },
         },
       }),
       async (c) => {

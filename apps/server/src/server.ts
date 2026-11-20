@@ -172,6 +172,7 @@ import { ssoDelegationRoutes } from './routes/sso-delegation.ts'
 import { ssoDomainRoutes } from './routes/sso-domains.ts'
 import { ssoDraftRoutes } from './routes/sso-drafts.ts'
 import { ssoIdentityRecoveryRoutes } from './routes/sso-link-recovery.ts'
+import { ssoPolicyRoutes } from './routes/sso-policy.ts'
 import { ssoRecoveryEnrollmentRoutes } from './routes/sso-recovery-enrollment.ts'
 import { teamBookingRoutes } from './routes/team-bookings.ts'
 import { teamInvitationRoutes } from './routes/team-invitations.ts'
@@ -358,6 +359,11 @@ export function productRoutes({
     brandingRoutes({ db }),
     auditLogRoutes({ db, auditLogRetentionDays }),
     ssoRoutes({ db, capabilities: { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled } }),
+    ssoPolicyRoutes({
+      db,
+      publicUrl,
+      capabilities: { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled },
+    }),
     ssoDomainRoutes({
       db,
       publicUrl,

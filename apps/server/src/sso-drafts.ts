@@ -255,6 +255,12 @@ function providerDomains(db: Db, organizationId: string) {
     .where('d.retired_at', 'is', null)
 }
 
+function liveProviderDomains(db: Db, organizationId: string) {
+  return providerDomains(db, organizationId)
+    .where('d.verified_at', 'is not', null)
+    .where('d.verification_expires_at', '>', sql<Date>`clock_timestamp()`)
+}
+
 async function checkActivation(
   db: Db,
   capabilities: SsoCapabilities,
@@ -262,12 +268,9 @@ async function checkActivation(
   enable: boolean,
   testStatus: string,
 ) {
-  const domains = providerDomains(db, row.organization_id)
-    .where('d.verified_at', 'is not', null)
-    .where('d.verification_expires_at', '>', sql<Date>`clock_timestamp()`)
   if (enable) {
     if (testStatus !== 'passed') throw new DomainError('conflict', 'sso_test_required')
-    const verified = await domains
+    const verified = await liveProviderDomains(db, row.organization_id)
       .select('d.id')
       .where('pd.provider_id', '=', row.id)
       .where('d.last_check_outcome', '=', 'positive')
@@ -276,7 +279,10 @@ async function checkActivation(
     if (!verified) throw new DomainError('conflict', 'sso_domain_unverified')
     return
   }
+  await requireUsableReplacement(db, capabilities, row)
+}
 
+async function requireUsableReplacement(db: Db, capabilities: SsoCapabilities, row: Provider) {
   if (!row.enabled) return
   const enforced = await db
     .selectFrom('sso_policies')
@@ -287,7 +293,7 @@ async function checkActivation(
   if (!enforced) return
 
   // A failed recheck freezes new activation but does not end existing sign-ins before expiry.
-  const alternative = await domains
+  const alternative = await liveProviderDomains(db, row.organization_id)
     .innerJoin('sso_providers as p', (join) =>
       join
         .onRef('p.id', '=', 'pd.provider_id')
@@ -502,10 +508,12 @@ export async function deleteSsoProvider(
           row.revision !== DeleteSsoProviderInput.parse(input).expectedRevision
         )
           throw changed()
+        await requireUsableReplacement(db, deps.capabilities, row)
       },
       mutate: async (db) => {
         const old = await provider(db, p.organization.id, providerId)
         if (old.retired_at) return { deleted: true as const }
+        await requireUsableReplacement(db, deps.capabilities, old)
         const configuration = openSsoProviderConfiguration(
           configurationKey(deps),
           { organizationId: p.organization.id, providerId, revision: old.revision },
