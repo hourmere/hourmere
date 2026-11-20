@@ -151,6 +151,12 @@ const GUARDED_SSO_WRITES = [
   },
   {
     method: 'post',
+    path: '/api/v1/team/sso/providers/{providerId}/activation',
+    runtimePath: '/api/v1/team/sso/providers/:providerId/activation',
+    operationId: 'activateSsoProvider',
+  },
+  {
+    method: 'post',
     path: '/api/v1/team/sso/providers/{providerId}/link',
     runtimePath: '/api/v1/team/sso/providers/:providerId/link',
     operationId: 'linkSsoAccount',
@@ -706,6 +712,7 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
     ],
     ['/recovery', { ownerUserId: randomUUID(), expectedRevision: 1 }],
     [`/recovery/${randomUUID()}/accept`, { expectedRevision: 1 }],
+    [`/providers/${randomUUID()}/activation`, { expectedRevision: 1, enabled: true }],
   ])(
     'keeps proof inputs private in validation and request diagnostics for %s',
     async (suffix, fields) => {
@@ -777,7 +784,7 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
       for (const [path, method, operationId] of [
         [write.path, 'put', write.operationId],
         [`${write.path}/`, write.method, write.operationId],
-        [write.path, write.method, 'activateSsoProvider'],
+        [write.path, write.method, 'setSsoPolicy'],
       ])
         expect(() => check(path as string, method as string, operationId as string)).toThrow(
           expect.objectContaining({ name: 'AssertionError' }),

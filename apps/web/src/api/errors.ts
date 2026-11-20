@@ -162,6 +162,11 @@ export function errorMessage(err: unknown): UiText {
     API_KEY_SCOPE_IMMUTABLE: 'API key scope cannot be changed; create a replacement key.',
     SESSION_REQUIRED: 'Use a browser session without an Authorization header.',
     SSO_REQUIRED: 'Sign in with this team’s SSO to continue.',
+    sso_test_required:
+      'Test this single sign-on provider’s current configuration before enabling it.',
+    sso_domain_unverified: 'Verify a domain linked to this single sign-on provider and try again.',
+    sso_last_provider:
+      'This team must keep at least one usable provider while single sign-on is enforced.',
     INVALID_METADATA: 'Check the API key organization and scope.',
     invalid_request: 'Check the form and try again.',
     organization_context_changed: 'Your team context changed. Reload before making changes.',
