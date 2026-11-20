@@ -37,6 +37,7 @@ import { ssoDelegationRoutes } from './routes/sso-delegation.ts'
 import { ssoDomainRoutes } from './routes/sso-domains.ts'
 import { ssoDraftRoutes } from './routes/sso-drafts.ts'
 import { ssoIdentityRecoveryRoutes } from './routes/sso-link-recovery.ts'
+import { ssoPolicyRoutes } from './routes/sso-policy.ts'
 import { sealSsoProviderConfiguration, ssoProviderConfigurationAad } from './sso-configuration.ts'
 import { ssoLinkRemovalEmailJob } from './sso-link-recovery.ts'
 import {
@@ -56,6 +57,7 @@ const callbackPath = (providerId: string) => `/api/auth/sso/callback/${providerI
 const completePath = '/api/auth/sso/oidc/complete'
 const acceptInvitationPath = '/api/auth/organization/accept-invitation'
 const providersPath = '/api/v1/team/sso/providers'
+const policyPath = '/api/v1/team/sso/policy'
 const domainsPath = '/api/v1/team/sso/domains'
 const delegationsPath = '/api/v1/team/sso/delegations'
 const providerTestPath = (providerId: string) => `${providersPath}/${providerId}/test`
@@ -277,6 +279,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       routes: [
         eventTypeRoutes({ db }),
         ssoRoutes({ db, capabilities }),
+        ssoPolicyRoutes({ db, publicUrl, capabilities }),
         ssoDomainRoutes({ db, publicUrl, capabilities }),
         ssoDelegationRoutes({ db, publicUrl, capabilities, configurationKey }),
         ssoIdentityRecoveryRoutes({
@@ -1680,6 +1683,38 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       expect((await storedLink(target.link.id))?.retired_at).toBeInstanceOf(Date)
       expect(recoveryJobs).toHaveLength(1)
     }
+  })
+
+  it('turns enforcement off only after the owner completes a fresh OIDC step-up', async () => {
+    const f = await stepUpFixture()
+    await enforceSso()
+    const writePolicy = (cookie: string, proofAttemptId?: string) =>
+      app.request(new URL(policyPath, publicUrl), {
+        method: 'PUT',
+        headers: {
+          cookie,
+          origin: publicUrl,
+          'content-type': 'application/json',
+          'x-expected-organization-id': fixture.team,
+        },
+        body: JSON.stringify({
+          expectedRevision: 1,
+          requireSso: false,
+          admission: 'invitation_only',
+          proofAttemptId,
+        }),
+      })
+    const pending = await freshProofChallenge(await writePolicy(f.owner.cookie), f.owner.cookie, [
+      'sso',
+    ])
+    const attempt = await startStepUp(f.providerId, pending)
+    expectStepUpRedirect(
+      await callback(attempt, idp.issue(attempt, { ...f.claims, auth_time: await authTime() })),
+    )
+    const response = await writePolicy(pending.cookie, pending.id)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ requireSso: false })
+    expect((await attemptRow(pending)).consumed_at).toBeInstanceOf(Date)
   })
 
   it('adds mailbox proof to an OIDC step-up without signed auth_time', async () => {

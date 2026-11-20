@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { sql, type Transaction, type TransactionBuilder } from 'kysely'
-import type { Database } from './index.ts'
+import type { Database, Db } from './index.ts'
 
 type TeamTransaction = Transaction<Database>
 
@@ -14,6 +14,17 @@ export interface TeamWriteCheck {
 
 const activeCheck = new AsyncLocalStorage<TeamWriteCheck>()
 const checkedBeforeChange = new WeakMap<TeamTransaction, { deadline: string | undefined }>()
+const lockedOrganizations = new WeakMap<Db, string>()
+
+/** Record a lock acquired by the service and held until its team write commits. */
+export function recordTeamWriteOrganizationLock(db: Db, organizationId: string) {
+  if (!db.isTransaction || !activeCheck.getStore()) return
+  lockedOrganizations.set(db, organizationId.toLowerCase())
+}
+
+export function hasTeamWriteOrganizationLock(db: Db, organizationId: string) {
+  return lockedOrganizations.get(db) === organizationId.toLowerCase()
+}
 
 /** The authenticated team transport enters this scope to recheck authority at commit. */
 export function withTeamWriteCheck<T>(check: TeamWriteCheck, write: () => Promise<T>): Promise<T> {

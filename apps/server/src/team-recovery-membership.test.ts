@@ -183,6 +183,24 @@ describe.skipIf(!databaseUrl)('team membership and SSO recovery ownership', () =
     },
   )
 
+  it.each(['native removal', 'demotion'] as const)(
+    'keeps the PostgreSQL query count for %s with a stored unenforced policy',
+    async (operation) => {
+      const f = await fixture('admin')
+      await db
+        .insertInto('sso_policies')
+        .values({ organization_id: f.teamId, require_sso: false })
+        .execute()
+      const queries = vi.spyOn(pg.Client.prototype, 'query')
+      try {
+        expect((await request(f, operation)).status).toBe(200)
+        expect(queries).toHaveBeenCalledTimes(queryCounts[operation])
+      } finally {
+        queries.mockRestore()
+      }
+    },
+  )
+
   async function recover(f: Fixture, owner = f.target) {
     await db
       .insertInto('sso_recovery_owners')

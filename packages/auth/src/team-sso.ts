@@ -1,6 +1,6 @@
 import type { Db } from '@hourmere/db'
 import { scimSuspended } from '@hourmere/db/scim-suspension'
-import { teamWriteCheckFor } from '@hourmere/db/team-write'
+import { hasTeamWriteOrganizationLock, teamWriteCheckFor } from '@hourmere/db/team-write'
 import { sql } from 'kysely'
 import { jsonObjectFrom } from 'kysely/helpers/postgres'
 
@@ -111,7 +111,7 @@ export async function lockTeamSsoPolicy(
   userId: string | undefined,
   organizationLocked = false,
 ) {
-  if (!organizationLocked) {
+  if (!organizationLocked && !hasTeamWriteOrganizationLock(db, organizationId)) {
     await db
       .selectFrom('auth.organization')
       .select('id')

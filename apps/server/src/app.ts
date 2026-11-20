@@ -166,11 +166,12 @@ function isSlackDestinationPath(path: string): boolean {
 }
 
 /** SSO protocol requests and trust writes carry proof material. */
-function isSsoTrustPath(path: string): boolean {
+function isSsoTrustPath(path: string, method: string): boolean {
   try {
     path = decodeURIComponent(path)
   } catch {}
   return (
+    (method === 'PUT' && /^\/api\/v1\/team\/sso\/policy\/?$/i.test(path)) ||
     /^\/api\/v1\/team\/sso\/(?:providers|domains|delegations|recovery)(?:\/|$)/i.test(path) ||
     /^\/api\/auth\/(?:sign-in\/sso|sso\/(?:callback|oidc\/complete))(?:\/|$)/i.test(path)
   )
@@ -201,7 +202,7 @@ function isWaitlistEntryPath(path: string): boolean {
 const validationHook: Hook<unknown, Env, string, unknown> = (result, c) => {
   if (result.success) return
   if (isMeetingPollPath(c.req.path)) return c.json({ error: 'invalid_request' }, 400)
-  if (isSsoTrustPath(c.req.path) || isCalDavConnectionPath(c.req.path))
+  if (isSsoTrustPath(c.req.path, c.req.method) || isCalDavConnectionPath(c.req.path))
     return c.json({ error: 'invalid_request' }, 400)
   if (isWaitlistAdmissionPath(c.req.path)) return c.json({ error: 'invalid_request' }, 400)
   if (isPublicRoutingFormPath(c.req.path)) return c.json({ error: 'invalid_request' }, 400)
@@ -403,7 +404,7 @@ const requestLogger = createMiddleware(async (c, next) => {
   if (
     !isOneTimeLinkPath(c.req.path) &&
     !isSlackDestinationPath(c.req.path) &&
-    !(isSsoTrustPath(c.req.path) || isCalDavConnectionPath(c.req.path))
+    !(isSsoTrustPath(c.req.path, c.req.method) || isCalDavConnectionPath(c.req.path))
   )
     return ordinaryRequestLogger(c, next)
   await next()
@@ -462,7 +463,7 @@ export function createApp({
       )
       return
     }
-    const ssoTrust = c.var.oidcInvitationAcceptance || isSsoTrustPath(c.req.path)
+    const ssoTrust = c.var.oidcInvitationAcceptance || isSsoTrustPath(c.req.path, c.req.method)
     const text = isMeetingPollPath(c.req.path)
       ? 'private meeting poll request failed'
       : isCalDavConnectionPath(c.req.path)
@@ -530,7 +531,7 @@ export function createApp({
           !isPublicRoutingFormPath(c.req.path) &&
           !isMeetingPollPath(c.req.path) &&
           !isSlackDestinationPath(c.req.path) &&
-          !(isSsoTrustPath(c.req.path) || isCalDavConnectionPath(c.req.path))
+          !(isSsoTrustPath(c.req.path, c.req.method) || isCalDavConnectionPath(c.req.path))
           ? { error, message: err.message }
           : { error },
         err.status,
@@ -566,7 +567,7 @@ export function createApp({
         ...(errorAlias !== undefined && { errorAlias }),
         ...(err.detail &&
           !isOneTimeLinkPath(c.req.path) &&
-          !(isSsoTrustPath(c.req.path) || isCalDavConnectionPath(c.req.path)) && {
+          !(isSsoTrustPath(c.req.path, c.req.method) || isCalDavConnectionPath(c.req.path)) && {
             message: err.detail,
           }),
         ...(err.code === 'one_time_link_already_created' &&
