@@ -546,4 +546,6 @@ export const common = {
   // MCP OAuth SSO delegation
   'Complete team SSO before trying again. If you already approved the connection, bind its SSO delegation to continue.':
     '请先完成团队 SSO 验证，再重试。如果你已批准此连接，请绑定其 SSO 委托后继续。',
+  // Routing continuation booking
+  'Open the original form to request a new booking link.': '请打开原表单，获取新的预约链接。',
 } as const
