@@ -160,6 +160,18 @@ it('covers every requested real page and limits en-GB to the booking page', () =
     'workflow-run-history-loading',
     'workflow-run-history-error',
     'workflow-run-history-forbidden',
+    'sso-providers',
+    'sso-providers-empty',
+    'sso-provider-create',
+    'sso-provider-replace-secret',
+    'sso-provider-retire',
+    'sso-domains',
+    'sso-domain-challenge',
+    'sso-domain-retire',
+    'sso-setup-loading',
+    'sso-setup-forbidden',
+    'sso-setup-error',
+    'sso-setup-conflict',
     'host',
     'booking',
     'booking-form',
@@ -289,6 +301,7 @@ const workflowEditorAuditUrl = pathToFileURL(resolve('tools/e2e/workflow-editor-
 const workflowRunHistoryAuditUrl = pathToFileURL(
   resolve('tools/e2e/workflow-run-history-audit.ts'),
 ).href
+const ssoSetupAuditUrl = pathToFileURL(resolve('tools/e2e/sso-setup-audit.ts')).href
 const visualSource = readFileSync('tools/e2e/specs/visual.spec.ts', 'utf8')
 const fixtureSource = readFileSync('tools/e2e/fixtures.ts', 'utf8')
 const shellSource = readFileSync('apps/web/src/components/AppShell.tsx', 'utf8')
@@ -361,7 +374,8 @@ function sourceCopyResult(
       .replace("'./host-meeting-poll-audit.ts'", JSON.stringify(hostPollAuditUrl))
       .replace("'./workflow-audit.ts'", JSON.stringify(workflowAuditUrl))
       .replace("'./workflow-editor-audit.ts'", JSON.stringify(workflowEditorAuditUrl))
-      .replace("'./workflow-run-history-audit.ts'", JSON.stringify(workflowRunHistoryAuditUrl)),
+      .replace("'./workflow-run-history-audit.ts'", JSON.stringify(workflowRunHistoryAuditUrl))
+      .replace("'./sso-setup-audit.ts'", JSON.stringify(ssoSetupAuditUrl)),
   )
   writeFileSync(join(directory, 'visual.spec.ts'), visual)
   writeFileSync(join(directory, 'fixtures.ts'), fixture)
@@ -542,6 +556,18 @@ const expected={
   'workflows-context-changed':{path:'/app/workflows',public:false,wait:'Your space changed. Reload before making changes.'},
   'workflows-unavailable':{path:'/app/workflows',public:false,wait:'This workflow is unavailable.'},
   'workflows-update-error':{path:'/app/workflows',public:false,wait:'Could not update this workflow.'},
+  'sso-providers':{path:'/app/settings/sso',public:false,space:'team',wait:'SyntheticIdentityProvider'},
+  'sso-providers-empty':{path:'/app/settings/sso',public:false,space:'team',wait:'No identity providers yet.'},
+  'sso-provider-create':{path:'/app/settings/sso',public:false,space:'team',wait:'heading:Add OIDC provider'},
+  'sso-provider-replace-secret':{path:'/app/settings/sso',public:false,space:'team',wait:'label:New client secret'},
+  'sso-provider-retire':{path:'/app/settings/sso',public:false,space:'team',wait:'button:Retire provider'},
+  'sso-domains':{path:'/app/settings/sso/domains',public:false,space:'team',wait:'label:Domain name'},
+  'sso-domain-challenge':{path:'/app/settings/sso/domains',public:false,space:'team',wait:'button:Copy TXT value'},
+  'sso-domain-retire':{path:'/app/settings/sso/domains',public:false,space:'team',wait:'button:Retire domain'},
+  'sso-setup-loading':{path:'/app/settings/sso',public:false,space:'team',wait:'Loading SSO settings…'},
+  'sso-setup-forbidden':{path:'/app/settings/sso',public:false,space:'team',wait:'SSO settings are unavailable in this team.'},
+  'sso-setup-error':{path:'/app/settings/sso',public:false,space:'team',wait:'Could not load SSO settings.'},
+  'sso-setup-conflict':{path:'/app/settings/sso',public:false,space:'team',wait:'button:Reload settings'},
   'booking-form':{path:'/fixture-host/layout-audit',public:true,wait:'.details-step form input[type="email"]'},
   'booking-confirmation':{path:'/fixture-host/layout-audit',public:true,wait:'.confirmation .booking-details'},
   'booking-time-zone':{path:'/fixture-host/layout-audit',public:true,wait:'.tz-panel [role="listbox"]:visible'},

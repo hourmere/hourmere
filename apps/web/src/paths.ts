@@ -25,6 +25,8 @@ export const PATHS = {
   apiKeys: `${APP_BASE}/api-keys`,
   auditLog: `${APP_BASE}/audit-log`,
   settings: `${APP_BASE}/settings`,
+  sso: '/app/settings/sso',
+  ssoDomains: '/app/settings/sso/domains',
   newTeam: `${APP_BASE}/teams/new`,
   signIn: '/sign-in',
 } as const

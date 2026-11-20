@@ -33,6 +33,14 @@ const WIDE_PAGES: readonly string[] = NAV_ITEMS.map(({ to }) => to).filter(
   (to) => to !== PATHS.settings && to !== PATHS.workflows,
 )
 
+export type AppShellContext = {
+  workflowsEnabled: boolean | undefined
+  followUpHostNotesEnabled: boolean
+  ssoOidcEnabled: boolean | undefined
+  ssoSamlEnabled: boolean | undefined
+  showSsoSettings: boolean
+}
+
 function keepActiveVisible(list: HTMLUListElement) {
   const selected = list.querySelector('[aria-current="page"]')
   if (!selected) return
@@ -67,6 +75,14 @@ function Shell() {
       ? undefined
       : instance.status === 'ready' && instance.data?.workflowsEnabled === true
   const managesTeam = teamAccess.status === 'ready' && teamAccess.role !== null
+  const ssoOidcEnabled =
+    instance.status === 'loading'
+      ? undefined
+      : instance.status === 'ready' && instance.data?.ssoOidcEnabled === true
+  const ssoSamlEnabled =
+    instance.status === 'loading'
+      ? undefined
+      : instance.status === 'ready' && instance.data?.ssoSamlEnabled === true
   const showWorkflows =
     workflowsEnabled === true &&
     me.principal.kind === 'session' &&
@@ -237,11 +253,19 @@ function Shell() {
           )}
           <Suspense fallback={<PageSkeleton />}>
             <Outlet
-              context={{
-                workflowsEnabled,
-                followUpHostNotesEnabled:
-                  instance.status === 'ready' && instance.data?.followUpHostNotesEnabled === true,
-              }}
+              context={
+                {
+                  workflowsEnabled,
+                  followUpHostNotesEnabled:
+                    instance.status === 'ready' && instance.data?.followUpHostNotesEnabled === true,
+                  ssoOidcEnabled,
+                  ssoSamlEnabled,
+                  showSsoSettings:
+                    (ssoOidcEnabled === true || ssoSamlEnabled === true) &&
+                    managesTeam &&
+                    me.principal.kind === 'session',
+                } satisfies AppShellContext
+              }
             />
           </Suspense>
         </main>

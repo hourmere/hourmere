@@ -222,6 +222,17 @@ function expectNoUnguardedSsoRoutes(paths: string[]) {
   )
 }
 
+// The web setup routes return not-found while hard-off. Their runtime gate and absence
+// of SSO network requests are exercised through the app router in SsoSetup.test.tsx.
+const GUARDED_SSO_WEB_PATHS = ['/app/settings/sso', '/app/settings/sso/domains'] as const
+const guardedSsoWebNames: ReadonlySet<string> = new Set([
+  ...GUARDED_SSO_WEB_PATHS.map((path) => `'${path}'`),
+  'sso',
+  'ssoDomains',
+  '<Route path={PATHS.sso} element={<SsoSetupRoute />}>',
+  '<Route path={PATHS.ssoDomains} element={null} />',
+])
+
 // The createApp and createAuth options exactly as startServer assembles them
 // (productionAppOptions and productionAuthOptions in apps/server/src/server.ts), from a
 // configuration that turns on every optional group: MCP OAuth, SCIM, the built web app, the
@@ -976,8 +987,14 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
       'packages/auth/src/testing.ts',
     )
     const sources = shipped.map((file) => [file, readFileSync(new URL(file, root), 'utf8')])
-    const literals = sources.flatMap(([, source = '']) =>
-      [...source.matchAll(/(['"`])(\/[^'"`\s]*)\1/g)].map(([, , literal = '']) => literal),
+    const literals = sources.flatMap(([file, source = '']) =>
+      [...source.matchAll(/(['"`])(\/[^'"`\s]*)\1/g)]
+        .map(([, , literal = '']) => literal)
+        .filter(
+          (literal) =>
+            file !== 'apps/web/src/paths.ts' ||
+            !GUARDED_SSO_WEB_PATHS.some((path) => path === literal),
+        ),
     )
     expect(literals.length).toBeGreaterThan(500)
     // Literals from the server, a package and the web app, and the one exempt route.
@@ -1079,25 +1096,30 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
     )
   })
 
-  it('publishes no SSO web routes or shared paths', async () => {
+  it('declares only the guarded SSO setup web routes and shared paths', async () => {
     const [app, paths] = await Promise.all([
       readFile(new URL('../../web/src/App.tsx', import.meta.url), 'utf8'),
       readFile(new URL('../../web/src/paths.ts', import.meta.url), 'utf8'),
     ])
-    expectNoSso(webRouteNames(app, paths))
+    const unguardedNames = (app: string, paths: string) =>
+      webRouteNames(app, paths).filter((name) => !guardedSsoWebNames.has(name))
+    expect(webRouteNames(app, paths).filter(isSsoName).sort()).toEqual(
+      [...guardedSsoWebNames].sort(),
+    )
+    expectNoSso(unguardedNames(app, paths))
     // Source-copy probes exercise the same assertion as the real route sources.
     expectNoSso(
-      webRouteNames(
+      unguardedNames(
         `${app}\n<Route path="/app/associations" element={<AssociationsPage />} />`,
         paths,
       ),
     )
     for (const name of ['sso', 'SAML', 'oidc']) {
       expect(() =>
-        expectNoSso(webRouteNames(`${app}\n<Route path="/app/${name}" />`, paths)),
+        expectNoSso(unguardedNames(`${app}\n<Route path="/app/${name}" />`, paths)),
       ).toThrow(expect.objectContaining({ name: 'AssertionError' }))
       expect(() =>
-        expectNoSso(webRouteNames(app, `${paths}\nexport const nextPath = '/app/${name}'`)),
+        expectNoSso(unguardedNames(app, `${paths}\nexport const nextPath = '/app/${name}'`)),
       ).toThrow(expect.objectContaining({ name: 'AssertionError' }))
     }
   })

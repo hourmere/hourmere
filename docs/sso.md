@@ -1465,6 +1465,34 @@ requirements intended for admin JSON. Return only safe redirects under `/app`, t
 fixed sign-in error page, or the exact internal SAML completion route
 `/api/auth/sso/saml2/complete`. RelayState and request data cannot override callbacks/scopes.
 
+## Provider and domain setup in team settings
+
+With the OIDC test capability injected, a current team owner or admin can open
+**Settings → Single sign-on** to create, edit or retire an OIDC provider and manage
+its associated domains. Issuer and client ID are fixed after creation. To change the
+client secret, select **Replace client secret** and enter a new value. Saving other
+fields keeps the stored secret. If another administrator changes the revision, reload
+the settings and review the current configuration before submitting changes again.
+
+In **SSO domains**, generate a challenge for the exact domain, copy its TXT name and
+value, and publish them in DNS before choosing **Verify domain**. The TXT record is
+shown once and disappears on dismissal, navigation or reload. Generating a new
+challenge rotates the value and resets verification. The domain list shows domains
+linked to providers plus those added during the current visit. Associate a new domain
+with a provider to find it on a later visit. Writes that require fresh proof show the
+verification requirement. The fresh-proof prompt is part of Activation UI.
+
+生产环境仍关闭 OIDC 和 SAML。注入 OIDC 测试能力后，当前团队的所有者或管理员可在
+**设置 → 单点登录**中创建、编辑或停用提供方，并管理关联域名。创建后，签发者网址和客户端
+ID 固定。如需更换密钥，请选择**替换客户端密钥**并输入新值。保存其他更改时会保留现有密钥。
+如果配置版本已变更，请重新加载设置并核对当前配置，再提交更改。
+
+在**单点登录域名**中为确切域名生成挑战，复制 TXT 记录名称和值并将其添加到 DNS，然后选择
+**验证域名**。TXT 记录仅显示一次，关闭记录、离开页面或重新加载后即消失。重新生成挑战会
+更换记录值并重置验证状态。列表包含已关联到提供方的域名，以及本次访问期间新增的域名。
+将新域名关联到提供方后，下次访问时仍可找到它。需要新鲜证明的写入会提示验证身份，验证流程
+由启用界面提供。
+
 ## Self-hosting and local acceptance
 
 Operators configure canonical HTTPS `PUBLIC_URL`, working SMTP for independent email
@@ -1630,9 +1658,12 @@ would fail any effect; the worker role's routes get no exemption. The existing M
 source literals, and the same document's Better Auth endpoint
 `/.well-known/openid-configuration` among Better Auth endpoint paths: there Hourmere is
 the OAuth authorization server for MCP clients, not an SSO relying party. The suite
-checks that nothing else is exempt. The web source check covers JSX `<Route>` attributes in
+checks that nothing else is exempt in these server surfaces. The web source check covers JSX `<Route>` attributes in
 `apps/web/src/App.tsx`, including nested `<Routes>`, and strings, template parts and
-identifiers in `apps/web/src/paths.ts`. It does not inspect imported route
+identifiers in `apps/web/src/paths.ts`. Its only SSO declarations are the guarded setup
+routes and their two paths, `/app/settings/sso` and `/app/settings/sso/domains`. Browser
+component tests check that hard-off hides the Settings entry, renders not-found on both
+routes and sends no SSO requests. The source check does not inspect imported route
 components, other files or route-object definitions; extend that inventory if routing
 moves to those sources. The startup check also runs the production entry point
 `apps/server/src/index.ts` in a child process with `SSO_OIDC_ENABLED=true` and
