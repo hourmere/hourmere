@@ -150,7 +150,12 @@ describe('SSO provider activation', () => {
       [testProvider]: () => json(200, { url: idpUrl, attemptId: proofAttemptId }),
     })
 
-    const test = await screen.findByRole('button', { name: `Test provider ${draft.displayName}` })
+    // The first visit loads the signed-in shell and lazy settings route before fetching providers.
+    const test = await screen.findByRole(
+      'button',
+      { name: `Test provider ${draft.displayName}` },
+      { timeout: 3000 },
+    )
     expect(screen.getAllByRole('button', { name: /^Test provider / })).toEqual([test])
     expect(requests.to(testProvider)).toHaveLength(0)
     expect(requests.to(activateProvider)).toHaveLength(0)
