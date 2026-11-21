@@ -16,7 +16,7 @@ HOURMERE_E2E_BOOTSTRAP_URL=postgres://hourmere:hourmere@localhost:5432/hourmere 
 ```
 
 The PostgreSQL bootstrap connection creates and drops a disposable Hourmere database.
-Keycloak uses its own ephemeral database inside its container and a random loopback
+Keycloak uses an in-memory database inside its container and a random loopback
 HTTPS port. The fixture generates a TLS certificate, an OIDC client secret and a password
 at startup. It imports [the synthetic realm](realm.json) with one exact callback and
 personas for linked sign-in, self-link, same-email sign-in and new account admission.
@@ -42,7 +42,6 @@ requests are refused.
 
 PostgreSQL, the container and the browser context are disposable. Teardown
 removes the exact container created by this run and its private temporary files. Each
-container carries a unique `com.hourmere.e2e.keycloak-owner` label and uses its writable
-layer for the realm database. The fixture uses the exact name and label to recover
-ownership if Docker fails after creating a container. No Docker volume or shared Compose
-service is involved.
+container carries a unique `com.hourmere.e2e.keycloak-owner` label. The fixture uses the
+exact name and label to recover ownership if Docker fails after creating a container.
+No Docker volume or shared Compose service is involved.

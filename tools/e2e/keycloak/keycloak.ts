@@ -30,7 +30,7 @@ async function command(program: string, action: string, args: string[], timeout 
   }
 }
 
-function discoveryReady(issuer: string, ca: string): Promise<boolean> {
+function discoveryStatus(issuer: string, ca: string): Promise<string> {
   return new Promise((resolve) => {
     const request = get(
       `${issuer}/.well-known/openid-configuration`,
@@ -41,17 +41,18 @@ function discoveryReady(issuer: string, ca: string): Promise<boolean> {
         response.on('data', (chunk: string) => {
           body += chunk
         })
-        response.once('error', () => resolve(false))
+        response.once('error', () => resolve('response interrupted'))
         response.once('end', () => {
+          if (response.statusCode !== 200) return resolve(`HTTP ${response.statusCode}`)
           try {
-            resolve(response.statusCode === 200 && JSON.parse(body).issuer === issuer)
+            resolve(JSON.parse(body).issuer === issuer ? 'ready' : 'issuer did not match')
           } catch {
-            resolve(false)
+            resolve('invalid discovery response')
           }
         })
       },
     )
-    request.once('error', () => resolve(false))
+    request.once('error', () => resolve('HTTPS connection unavailable'))
   })
 }
 
@@ -179,6 +180,9 @@ export async function startKeycloak(redirectUri: string) {
         label,
         '--log-driver',
         'none',
+        // These short-lived JVMs run side by side with Chrome and PostgreSQL in CI.
+        '--env',
+        'JAVA_OPTS_APPEND=-XX:ActiveProcessorCount=2 -XX:TieredStopAtLevel=1',
         '--publish',
         '127.0.0.1::8443',
         '--mount',
@@ -189,6 +193,7 @@ export async function startKeycloak(redirectUri: string) {
         `type=bind,src=${privateKeyPath},dst=/opt/keycloak/conf/fixture.key,readonly`,
         KEYCLOAK_IMAGE,
         'start-dev',
+        '--db=dev-mem',
         '--import-realm',
         '--https-certificate-file=/opt/keycloak/conf/fixture.crt',
         '--https-certificate-key-file=/opt/keycloak/conf/fixture.key',
@@ -209,8 +214,10 @@ export async function startKeycloak(redirectUri: string) {
     const origin = `https://127.0.0.1:${port}`
     const issuer = `${origin}/realms/${realm.realm}`
     const deadline = Date.now() + 45_000
+    let discovery = 'not checked'
     while (Date.now() < deadline) {
-      if (await discoveryReady(issuer, certificate))
+      discovery = await discoveryStatus(issuer, certificate)
+      if (discovery === 'ready')
         return {
           origin,
           issuer,
@@ -223,7 +230,25 @@ export async function startKeycloak(redirectUri: string) {
         }
       await delay(250)
     }
-    throw new Error('The owned Keycloak realm did not publish discovery before its deadline')
+    const state = await command(
+      'docker',
+      'read the owned Keycloak state',
+      [
+        'container',
+        'inspect',
+        '--format',
+        '{{.State.Status}} {{.State.ExitCode}} {{.State.OOMKilled}}',
+        id,
+      ],
+      2000,
+    ).catch(() => '')
+    const safeState =
+      /^(running|exited|dead|restarting|created|paused|removing) \d{1,3} (true|false)$/.test(state)
+        ? state
+        : 'unavailable'
+    throw new Error(
+      `The owned Keycloak realm did not publish discovery before its deadline (${discovery}, Docker state/exit/OOM ${safeState})`,
+    )
   } catch (error) {
     await close()
     throw error
