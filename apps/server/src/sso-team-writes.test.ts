@@ -7,11 +7,13 @@ import {
   lockSharedTeamSsoProof,
 } from '@hourmere/auth'
 import type { Database, Db } from '@hourmere/db'
+import { suspendScimMembership } from '@hourmere/db/scim-suspension'
 import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createFixtures } from '@hourmere/scheduling/testing'
-import { Kysely, PostgresDialect, TableNode, UpdateQueryNode } from 'kysely'
+import { Kysely, PostgresDialect, sql, TableNode, UpdateQueryNode } from 'kysely'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { prepareScimSuspension } from '../../../packages/db/src/scim-suspension-fixtures.ts'
 import {
   bindingValues,
   type IdentityFixture,
@@ -273,10 +275,12 @@ describe.skipIf(!serverUrl)('SSO proof on team writes', () => {
   })
 
   it('adds one memoized request lookup and leaves the no-policy committing SQL and locks identical', async () => {
-    async function trace(enforce: boolean, title: string) {
-      const app = instance({ enforce })
+    async function trace(enforce: boolean, title: string, authorization?: string) {
+      const app = instance({ enforce, enabled: false })
       statements.length = 0
-      const response = await updateEvent(app, title)
+      const response = authorization
+        ? await writeAsKey(app, authorization, title)
+        : await updateEvent(app, title)
       expect(response.status).toBe(200)
       const begin = statements.indexOf('begin')
       const commit = statements.indexOf('commit', begin)
@@ -286,14 +290,34 @@ describe.skipIf(!serverUrl)('SSO proof on team writes', () => {
       expect(transaction.some((statement) => statement.startsWith('update "event_types"'))).toBe(
         true,
       )
-      return { transaction, policyLookups: statements.filter((s) => s.includes('sso_policies')) }
+      return { transaction, statements: [...statements] }
     }
 
     const legacy = await trace(false, 'First update')
     const protectedWrite = await trace(true, 'Second update')
     expect(protectedWrite.transaction).toEqual(legacy.transaction)
-    expect(protectedWrite.policyLookups).toHaveLength(1)
-    expect(await currentTitle()).toBe('Second update')
+    expect(protectedWrite.statements.filter((s) => s.includes('sso_policies'))).toHaveLength(1)
+    expect(protectedWrite.statements).toHaveLength(21)
+
+    const key = await issueKey()
+    const authorization = `Bearer ${key.key}`
+    const legacyKey = await trace(false, 'First key update', authorization)
+    const protectedKey = await trace(true, 'Second key update', authorization)
+    expect(protectedKey.transaction).toEqual(legacyKey.transaction)
+    expect(protectedKey.statements).toHaveLength(14)
+    expect(protectedKey.statements.filter((s) => s.includes('sso_policies'))).toHaveLength(1)
+
+    // An unenforced policy is still checked using the service's existing team lock.
+    await db
+      .insertInto('sso_policies')
+      .values({ organization_id: fixture.team, require_sso: false })
+      .execute()
+    const unenforced = await trace(true, 'Third update')
+    expect(unenforced.statements.filter((s) => s.includes('sso_policies'))).toHaveLength(2)
+    expect(unenforced.statements.filter((s) => !s.includes('sso_policies'))).toEqual(
+      protectedWrite.statements.filter((s) => !s.includes('sso_policies')),
+    )
+    expect(await currentTitle()).toBe('Third update')
   })
 
   it('lets a member with live proof leave the team and revoke that proof atomically', async () => {
@@ -367,6 +391,112 @@ describe.skipIf(!serverUrl)('SSO proof on team writes', () => {
       expect(blocked.rowCount).toBe(1)
     })
   }
+
+  it.each(['api_key', 'session'] as const)(
+    'rolls back a no-policy %s write that reaches the commit check during suspension',
+    async (kind) => {
+      const target = await db
+        .transaction()
+        .execute((trx) => prepareScimSuspension(trx, fixture.team, fixture.owner))
+      const headers = new Headers({ cookie: actor.cookie })
+      if (kind === 'api_key') headers.set('authorization', `Bearer ${(await issueKey()).key}`)
+      const caller = await createCallerResolver({ auth, db })(headers)
+      expect(caller).toMatchObject({ ok: true, principal: { kind, scimProvisioned: true } })
+      if (!caller.ok) throw new Error('Expected a resolved caller')
+      const { principal } = caller
+      const deps = { db, capabilities: { ssoOidcEnabled: false, ssoSamlEnabled: false } }
+      const { wrote, release, writerDb } = pauseEventWrite()
+      // The complete event edit service already locks the team. Use a title-only
+      // update so the authorization hook is the only lock on auth.organization.
+      const writing = withTeamWriteAccess(deps, principal, teamReadAccess(deps, principal), () =>
+        teamWriteTransaction(writerDb.transaction(), (trx) =>
+          trx
+            .updateTable('event_types')
+            .set({ title: 'Must roll back' })
+            .where('id', '=', eventId)
+            .execute(),
+        ),
+      ).then(
+        () => ({ committed: true }),
+        (error: unknown) => ({ committed: false, error }),
+      )
+      try {
+        await Promise.race([
+          wrote,
+          writing.then((result) => {
+            expect(result, 'write must reach its update before suspension').toBeUndefined()
+          }),
+        ])
+        await db.transaction().execute(async (trx) => {
+          const { rows } = await sql<{ pid: number }>`SELECT pg_backend_pid() AS pid`.execute(trx)
+          await suspendScimMembership(trx, target)
+          release()
+          await Promise.race([
+            waitForBlocked(rows[0]?.pid),
+            writing.then((result) => {
+              expect(result, 'write must wait for the suspension transaction').toBeUndefined()
+            }),
+          ])
+        })
+      } finally {
+        release()
+        await writing
+      }
+      expect(await writing).toMatchObject({ committed: false, error: { message: 'sso_required' } })
+      expect(await currentTitle()).toBe('Before writing')
+    },
+  )
+
+  it('rolls back a host cancellation by an ordinary team key after suspension commits', async () => {
+    const start = Temporal.Now.instant().add({ hours: 24 })
+    const bookingId = await createFixtures(db).booking(
+      fixture.team,
+      [fixture.member],
+      start.toString(),
+      start.add({ minutes: 30 }).toString(),
+    )
+    const credential = await auth.api.createApiKey({
+      body: {
+        userId: fixture.member,
+        metadata: { organizationId: fixture.team, scope: 'bookings' },
+      },
+    })
+    const app = instance()
+    const target = await db
+      .transaction()
+      .execute((trx) => prepareScimSuspension(trx, fixture.team, fixture.member))
+    let pending: Promise<Response> | undefined
+    try {
+      await db.transaction().execute(async (trx) => {
+        const { rows } = await sql<{ pid: number }>`SELECT pg_backend_pid() AS pid`.execute(trx)
+        await suspendScimMembership(trx, target)
+        pending = Promise.resolve(
+          app.request(new URL(`/api/v1/bookings/${bookingId}/cancel`, publicUrl), {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              authorization: `Bearer ${credential.key}`,
+            },
+            body: '{}',
+          }),
+        )
+        // Request admission still sees the pre-commit membership. Its actual write
+        // waits for the team lock and must recheck suspension before committing.
+        await waitForBlocked(rows[0]?.pid)
+      })
+      if (!pending) throw new Error('Expected a pending cancellation')
+      await expectRefused(await pending)
+    } finally {
+      await pending
+    }
+    expect(
+      await db
+        .selectFrom('bookings')
+        .select('status')
+        .where('id', '=', bookingId)
+        .executeTakeFirst(),
+    ).toEqual({ status: 'confirmed' })
+  })
 
   it('rolls back a write when another transaction revokes its proof before commit', async () => {
     await requireSso()

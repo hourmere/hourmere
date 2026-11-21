@@ -56,7 +56,7 @@ export function ssoLinkRemovalEmailJob({
     payload: notificationPayload,
     retry: { limit: 3, delaySeconds: 5, backoff: true, maxDelaySeconds: 60 },
     handler: async ({ userId, language }, { signal }) => {
-      if (!capabilities.ssoOidcEnabled) return
+      if (!capabilities.ssoOidcEnabled && !capabilities.ssoSamlEnabled) return
       try {
         const user = await db
           .selectFrom('auth.user')
@@ -132,7 +132,7 @@ export async function retireSsoIdentityLink(
         sessionId: actor.id,
         organizationId,
         operation,
-        ...(self ? { proofMode: 'mailbox' as const } : {}),
+        proofMode: self ? 'mailbox' : 'trust_reduction',
         input: { ...request, providerId, linkId },
         schema: input.extend({ providerId: z.uuid(), linkId: z.uuid() }),
       },
@@ -168,7 +168,7 @@ export async function retireSsoIdentityLink(
             )
               throw denied()
           }
-          requireSsoEnabled(deps.capabilities, 'oidc')
+          if (self) requireSsoEnabled(deps.capabilities, 'oidc')
           if (provider.protocol !== 'oidc') throw new DomainError('not_found', 'sso_disabled')
           if (link.generation !== request.expectedLinkGeneration) throw changed()
           target = { userId: link.user_id, revision: provider.revision }

@@ -623,6 +623,7 @@ export {
 } from './scim-tokens.ts'
 export {
   advanceSsoRecoveryRevision,
+  currentSsoRecoveryOwner,
   removeSsoRecoveryOwner,
   SsoRecoveryRequiredError,
 } from './sso-recovery-membership.ts'

@@ -42,8 +42,7 @@ export function ssoReadTools(deps: SsoReadDeps): Tool[] {
         'Reads the current team SSO policy for owners/admins with read/full API key scope or mcp:tools OAuth. Never returns configuration, secrets, raw metadata or identities. SSO is being built and is not available yet.',
       input: z.strictObject({}),
       output: SsoPolicy,
-      run: async (_args, call) =>
-        getSsoPolicy(deps, call.caller, (await call.checkTeamRead?.(GET_SSO_POLICY))?.policy),
+      run: (_args, call) => getSsoPolicy(deps, call.caller, call.teamRead?.policy),
     }),
   ]
 }

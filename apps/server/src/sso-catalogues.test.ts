@@ -108,6 +108,12 @@ const GUARDED_SSO_READS = [
 // Session-only writes are registered and tested below for the hard-off response.
 const GUARDED_SSO_WRITES = [
   {
+    method: 'put',
+    path: '/api/v1/team/sso/policy',
+    runtimePath: '/api/v1/team/sso/policy',
+    operationId: 'setSsoPolicy',
+  },
+  {
     method: 'post',
     path: '/api/v1/team/sso/domains',
     runtimePath: '/api/v1/team/sso/domains',
@@ -196,6 +202,12 @@ const GUARDED_SSO_WRITES = [
     path: '/api/v1/team/sso/recovery/{enrollmentId}/accept',
     runtimePath: '/api/v1/team/sso/recovery/:enrollmentId/accept',
     operationId: 'acceptSsoRecoveryEnrollment',
+  },
+  {
+    method: 'post',
+    path: '/api/v1/team/sso/recovery/use',
+    runtimePath: '/api/v1/team/sso/recovery/use',
+    operationId: 'useSsoRecovery',
   },
 ] as const
 
@@ -712,6 +724,7 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
     ],
     ['/recovery', { ownerUserId: randomUUID(), expectedRevision: 1 }],
     [`/recovery/${randomUUID()}/accept`, { expectedRevision: 1 }],
+    ['/recovery/use', { expectedRevision: 1 }],
     [`/providers/${randomUUID()}/activation`, { expectedRevision: 1, enabled: true }],
   ])(
     'keeps proof inputs private in validation and request diagnostics for %s',
@@ -782,9 +795,9 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
         expectNoSsoOperations({ paths: { [path]: { [method]: { operationId } } } })
       check(write.path, write.method, write.operationId)
       for (const [path, method, operationId] of [
-        [write.path, 'put', write.operationId],
+        [write.path, write.method === 'put' ? 'post' : 'put', write.operationId],
         [`${write.path}/`, write.method, write.operationId],
-        [write.path, write.method, 'setSsoPolicy'],
+        [write.path, write.method, 'setSsoUnexpectedPolicy'],
       ])
         expect(() => check(path as string, method as string, operationId as string)).toThrow(
           expect.objectContaining({ name: 'AssertionError' }),

@@ -4,9 +4,11 @@
 // answers a direct call after the scope check and before the arguments are read; the CLI
 // reports the same code. No database is reachable here, so any lookup would fail loudly.
 import { randomUUID } from 'node:crypto'
+import '@hono/zod-openapi'
 import type { ApiKeyScope, CallerResolver, Principal } from '@hourmere/auth'
 import { createDb, createPool } from '@hourmere/db'
 import { DomainError } from '@hourmere/scheduling/errors'
+import { workflowsEnabled } from '@hourmere/workflows'
 import { describe, expect, it, vi } from 'vitest'
 import { runCli } from '../../../tools/cli/src/cli.ts'
 import { createApp } from './app.ts'
@@ -14,7 +16,7 @@ import { mcpEndpoint } from './mcp/endpoint.ts'
 import { type McpCaller, runTool, type Tool } from './mcp/tools.ts'
 import { workflowTools } from './mcp/workflows.ts'
 import { workflowRoutes } from './routes/workflows.ts'
-import { workflowFeatureTools, workflowsAvailable } from './workflows.ts'
+import { workflowFeatureTools } from './workflows.ts'
 
 const URL = 'http://localhost:4187'
 const user = { id: randomUUID(), name: 'Workflow off', email: 'workflow-off@example.test' }
@@ -62,14 +64,15 @@ const fullOnlyTools = ['create_workflow', 'update_workflow', 'delete_workflow', 
 /** An app whose database refuses every connection: a lookup would answer 500. */
 function appWith(tools?: readonly Tool[]) {
   const db = createDb(createPool('postgres://workflows-off@127.0.0.1:9/workflows-off'))
+  const settings = { workflowsEnabled: true }
   const app = createApp({
     publicUrl: URL,
     checkDb: async () => {},
     authHandler: async () => new Response(null, { status: 404 }),
     resolveCaller,
-    routes: [workflowRoutes({ db })],
+    routes: [workflowRoutes({ db, ...settings })],
     mcp: mcpEndpoint({
-      tools: tools ?? workflowTools({ db }),
+      tools: tools ?? workflowTools({ db, ...settings }),
       oauth: {
         resolve: async () => ({
           ok: true,
@@ -162,6 +165,7 @@ describe('workflow POST, PATCH and DELETE routes while off', () => {
           for (const input of [
             '{',
             '{}',
+            '{"expectedRevision":1,"enabled":false}',
             JSON.stringify({ id: randomUUID(), actions: [{ type: 'webhook' }] }),
           ]) {
             const response = await app.request(path, {
@@ -207,7 +211,7 @@ describe('workflow MCP tools while off', () => {
       )
       expect(tool.description).toContain('workflows_disabled')
     }
-    expect(workflowsAvailable()).toBe(false)
+    expect(workflowsEnabled({ workflowsEnabled: true })).toBe(false)
   })
 
   it('are left out of tools/list and refused on a direct call for every caller', async () => {
@@ -219,6 +223,7 @@ describe('workflow MCP tools while off', () => {
         for (const [name, args] of [
           ['create_workflow', {}],
           ['update_workflow', {}],
+          ['update_workflow', { id: randomUUID(), expectedRevision: 1, enabled: false }],
           ['delete_workflow', {}],
           ['preview_workflow', { example: { bookingId: randomUUID() } }],
           ['list_workflows', {}],
@@ -290,6 +295,7 @@ describe('workflow MCP tools while off', () => {
           (tool) => tool.name === 'list_workflows',
         ) as Tool),
         name,
+        discoverable: undefined,
         requireAvailable,
         run: vi.fn(async () => ({ data: [], nextCursor: null })),
       }) as Tool
@@ -334,10 +340,15 @@ describe('workflow MCP tools while off', () => {
 
   it('wraps only the given tools, leaving their behavior otherwise unchanged', () => {
     const base = workflowTools({ db: {} as never })[0] as Tool
-    const plain = { ...base, name: 'plain_tool', requireAvailable: undefined }
-    const [wrapped] = workflowFeatureTools([plain])
+    const plain = {
+      ...base,
+      name: 'plain_tool',
+      requireAvailable: undefined,
+      discoverable: undefined,
+    }
+    const [wrapped] = workflowFeatureTools([plain], { workflowsEnabled: true })
     expect(wrapped).not.toBe(plain)
-    expect({ ...wrapped, requireAvailable: undefined }).toEqual(plain)
+    expect({ ...wrapped, requireAvailable: undefined, discoverable: undefined }).toEqual(plain)
     expect(plain.requireAvailable).toBeUndefined()
   })
 })
@@ -348,7 +359,7 @@ describe('workflow CLI commands while off', () => {
     ['get', 'get_workflow', { id: randomUUID() }],
     ['runs', 'list_workflow_runs', { id: randomUUID(), limit: 1, cursor: 'abc' }],
     ['create', 'create_workflow', {}],
-    ['update', 'update_workflow', {}],
+    ['update', 'update_workflow', { id: randomUUID(), expectedRevision: 1, enabled: false }],
     ['delete', 'delete_workflow', {}],
     ['preview', 'preview_workflow', {}],
   ] as const)(

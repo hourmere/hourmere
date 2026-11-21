@@ -3,14 +3,16 @@ import { randomBytes } from 'node:crypto'
 import {
   API_KEY_MCP_OPERATIONS,
   type Auth,
+  type CallerResolver,
   createAuth,
   createAuthPool,
   createCallerResolver,
 } from '@hourmere/auth'
-import { createDb, type Db } from '@hourmere/db'
+import type { Database, Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { createFixtures, createTestTeam, createTestUser } from '@hourmere/scheduling/testing'
+import { Kysely, PostgresDialect } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { createApp } from '../app.ts'
@@ -122,7 +124,11 @@ it('classifies every registered MCP tool and mode as gated or as a listed except
   expect(all.find((unit) => unit.id === 'mcp:list_workflow_runs')?.gate).toBe('read')
 })
 
-function mcpCall(app: App, key: string, name: string, args: Record<string, unknown>) {
+function toolRequest(id: number, name: string, args: Record<string, unknown>) {
+  return { jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } }
+}
+
+function mcpRequest(app: App, key: string, body: unknown) {
   return app.request('/mcp', {
     method: 'POST',
     headers: {
@@ -130,13 +136,12 @@ function mcpCall(app: App, key: string, name: string, args: Record<string, unkno
       accept: 'application/json, text/event-stream',
       authorization: `Bearer ${key}`,
     },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'tools/call',
-      params: { name, arguments: args },
-    }),
+    body: JSON.stringify(body),
   })
+}
+
+function mcpCall(app: App, key: string, name: string, args: Record<string, unknown>) {
+  return mcpRequest(app, key, toolRequest(1, name, args))
 }
 
 type App = ReturnType<typeof createApp>
@@ -159,10 +164,17 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP team SSO gate', () => {
   let authPool: ReturnType<typeof createAuthPool>
   let auth: Auth
   const ran: string[] = []
+  const policyReads: string[] = []
 
   beforeAll(async () => {
     database = await createTestDatabase(process.env.DATABASE_URL as string)
-    db = createDb(database.pool)
+    db = new Kysely<Database>({
+      dialect: new PostgresDialect({ pool: database.pool }),
+      log(event) {
+        if (event.level === 'query' && event.query.sql.includes('from "sso_policies" as "policy"'))
+          policyReads.push(event.query.sql)
+      },
+    })
     const signup = { mode: 'closed', allowedDomains: [] } as const
     authPool = createAuthPool(database.url, signup)
     auth = createAuth({
@@ -180,11 +192,11 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP team SSO gate', () => {
     await database?.drop()
   })
 
-  function app(tools: readonly Tool[]) {
+  function app(tools: readonly Tool[], resolveCaller = createCallerResolver({ auth, db })) {
     return createApp({
       checkDb: async () => {},
       authHandler: auth.handler,
-      resolveCaller: createCallerResolver({ auth, db }),
+      resolveCaller,
       publicUrl,
       mcp: mcpEndpoint({ tools }),
       ssoTeamReads: { db, capabilities: { ssoOidcEnabled: false, ssoSamlEnabled: false } },
@@ -266,5 +278,44 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP team SSO gate', () => {
     expect(updated.structuredContent).toMatchObject({ id: eventTypeId, title: 'After' })
     const whoami = await mcpResult(await mcpCall(plain, key, 'whoami', {}))
     expect(whoami.isError).toBeUndefined()
+  })
+
+  it('shares one team policy query across the reads and write in a legacy batch', async () => {
+    const { eventTypeId, key } = await team(false)
+    const resolve = createCallerResolver({ auth, db })
+    const resolveWithoutDelegationStatus: CallerResolver = async (headers) => {
+      const result = await resolve(headers)
+      if (!result.ok || result.principal.kind !== 'api_key') return result
+      // Exercise the endpoint's policy query when the injected resolver omits the decision.
+      const { ssoDelegationStatus: _status, ...principal } = result.principal
+      return { ...result, principal }
+    }
+    const application = app(catalog(db), resolveWithoutDelegationStatus)
+
+    policyReads.length = 0
+    const batch = await mcpRequest(application, key, [
+      toolRequest(1, 'get_event_type', { id: eventTypeId }),
+      toolRequest(2, 'update_event_type', { id: eventTypeId, title: 'Updated in batch' }),
+      toolRequest(3, 'get_event_type', { id: eventTypeId }),
+    ])
+    expect(batch.status).toBe(200)
+    const replies = (await batch.text())
+      .split('\n')
+      .filter((line) => line.startsWith('data: {'))
+      .map((line) => JSON.parse(line.slice(6)))
+      .sort((a, b) => a.id - b.id)
+    expect(replies).toMatchObject([
+      { id: 1, result: { structuredContent: { id: eventTypeId } } },
+      { id: 2, result: { structuredContent: { id: eventTypeId, title: 'Updated in batch' } } },
+      { id: 3, result: { structuredContent: { id: eventTypeId } } },
+    ])
+    expect(policyReads).toHaveLength(1)
+
+    policyReads.length = 0
+    const next = await mcpResult(
+      await mcpCall(application, key, 'get_event_type', { id: eventTypeId }),
+    )
+    expect(next.structuredContent).toMatchObject({ id: eventTypeId, title: 'Updated in batch' })
+    expect(policyReads).toHaveLength(1)
   })
 })

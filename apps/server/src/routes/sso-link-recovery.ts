@@ -92,7 +92,14 @@ export function ssoIdentityRecoveryRoutes(deps: SsoIdentityRecoveryDeps): RouteM
           params: z.object({ providerId: z.uuid(), linkId: z.uuid() }),
           body: { required: true, content: json(RemoveSsoIdentityLinkInput) },
         },
-        responses,
+        responses: {
+          ...responses,
+          403: {
+            ...responses[403],
+            description:
+              'team_management_access_denied, sso_required or sso_reauthentication_required; retry a proof challenge with the exact input after completing fresh proof',
+          },
+        },
       }),
       async (c) => {
         const { providerId, linkId } = c.req.valid('param')

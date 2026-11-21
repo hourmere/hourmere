@@ -1,5 +1,5 @@
 import type { Db } from '@hourmere/db'
-import { scimSuspended } from '@hourmere/db/scim-suspension'
+import { scimProvisioned, scimSuspended } from '@hourmere/db/scim-suspension'
 import { sql } from 'kysely'
 import { type ApiKeyScope, parsePersistedApiKeyMetadata } from './api-key-metadata.ts'
 import type { Auth } from './index.ts'
@@ -33,6 +33,8 @@ export type Principal = {
   organization: CallerOrganization
   /** The caller's own marker, independent of the organization they currently act in. */
   personalOrganizationId?: string | null
+  /** Whether the active team already has a SCIM connection. */
+  scimProvisioned?: boolean
 } & (
   | { kind: 'session'; sessionId: string }
   | {
@@ -80,7 +82,10 @@ export function createCallerResolver({
   db: Db
   ssoCapabilities?: TeamSsoCapabilities
 }): CallerResolver {
-  type Membership = Pick<Principal, 'user' | 'organization' | 'personalOrganizationId'> & {
+  type Membership = Pick<
+    Principal,
+    'user' | 'organization' | 'personalOrganizationId' | 'scimProvisioned'
+  > & {
     emailVerified: boolean
     apiKeyScope?: ApiKeyScope
     ssoDelegationStatus?: SsoDelegationStatus
@@ -129,6 +134,7 @@ export function createCallerResolver({
         'k.metadata as apiKeyMetadata',
         'k.expiresAt as apiKeyExpiresAt',
       ])
+      .select((eb) => scimProvisioned(eb.ref('o.id')).as('scimProvisioned'))
       .$if(apiKeyId !== undefined, (qb) =>
         qb.select(
           sql<SsoDelegationStatus>`CASE WHEN p.user_id IS NULL THEN ${ssoDelegationStatus(
@@ -162,6 +168,7 @@ export function createCallerResolver({
       emailVerified: row.emailVerified,
       user: { id: row.userId, name: row.userName, email: row.email },
       personalOrganizationId: row.personalOrganizationId,
+      ...(row.scimProvisioned && { scimProvisioned: true }),
       organization: {
         id: row.organizationId,
         name: row.organizationName,

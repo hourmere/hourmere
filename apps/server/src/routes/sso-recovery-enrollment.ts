@@ -2,8 +2,8 @@ import { createRoute, z } from '@hono/zod-openapi'
 import { DomainError } from '@hourmere/scheduling'
 import type { MiddlewareHandler } from 'hono'
 import type { CallerEnv } from '../caller.ts'
-import { errorResponses, json, type RouteModule } from '../openapi.ts'
-import { requireSsoEnabled } from '../sso.ts'
+import { ErrorBody, errorResponses, json, type RouteModule } from '../openapi.ts'
+import { requireSsoEnabled, USE_SSO_RECOVERY } from '../sso.ts'
 import {
   ACCEPT_SSO_RECOVERY_ENROLLMENT,
   AcceptSsoRecoveryEnrollmentInput,
@@ -13,6 +13,7 @@ import {
   configureSsoRecovery,
   type SsoRecoveryEnrollmentDeps,
 } from '../sso-recovery-enrollment.ts'
+import { UseSsoRecoveryInput, useSsoRecovery } from '../sso-recovery-use.ts'
 import { teamManagementSessionCaller } from '../team-management.ts'
 import { FreshProofChallenge } from './sso-drafts.ts'
 
@@ -44,6 +45,43 @@ export function ssoRecoveryEnrollmentRoutes(deps: SsoRecoveryEnrollmentDeps): Ro
   }
   return ({ app, caller }) => {
     const middleware = [guard, teamManagementSessionCaller(caller)] as const
+    app.openapi(
+      createRoute({
+        method: 'post',
+        path: `${path}/use`,
+        operationId: USE_SSO_RECOVERY,
+        tags: ['SSO'],
+        summary: 'Start SSO recovery for the current team',
+        description:
+          'Requires an enrolled owner’s browser session and fresh mailbox proof. Permits inspecting SSO configuration and one provider repair write or one write turning off enforcement. SSO remains unavailable.',
+        security: [{ session: [] }],
+        middleware: [...middleware] as const,
+        request: { headers, body: { required: true, content: json(UseSsoRecoveryInput) } },
+        responses: {
+          ...errorResponses({
+            400: 'invalid_request',
+            404: 'sso_disabled',
+            409: 'organization_context_changed or sso_configuration_changed',
+          }),
+          403: {
+            description: responses[403].description,
+            content: json(z.union([FreshProofChallenge, ErrorBody])),
+          },
+          204: { description: 'Recovery authority granted to the current browser session' },
+        },
+      }),
+      async (c) => {
+        const result = await useSsoRecovery(
+          deps,
+          c.var.principal,
+          c.req.raw.headers,
+          c.req.valid('json'),
+        )
+        if (result.setCookie) c.header('Set-Cookie', result.setCookie, { append: true })
+        if (result.status === 'proof_required') return c.json(result.body, 403)
+        return c.body(null, 204)
+      },
+    )
     app.openapi(
       createRoute({
         method: 'post',

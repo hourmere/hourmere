@@ -32,6 +32,14 @@ function currentRecoveryOwners(db: Db, organizationId: string) {
     )`)
 }
 
+/** Use under the organization write lock, which also serializes changes to owner standing. */
+export function currentSsoRecoveryOwner(db: Db, organizationId: string, userId?: string) {
+  const owners = currentRecoveryOwners(db, organizationId)
+  return (userId === undefined ? owners : owners.where('recovery.user_id', '=', userId))
+    .limit(1)
+    .executeTakeFirst()
+}
+
 /** Better Auth has already refused the departure. Classify its early sole-owner response. */
 export function soleOwnerDepartureFlags(db: Db, organizationId: string, userId: string) {
   const owners = currentRecoveryOwners(db, organizationId)

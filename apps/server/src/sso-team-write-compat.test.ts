@@ -6,12 +6,13 @@ import {
   createCallerResolver,
 } from '@hourmere/auth'
 import { calendarBookingNotifier } from '@hourmere/calendars'
-import { createDb, type Db } from '@hourmere/db'
+import type { Database, Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import type { EnqueueOptions } from '@hourmere/jobs'
 import { BOOKING_NOTIFICATION_JOB, bookingNotifier } from '@hourmere/notifications'
 import { createFixtures, createTestTeam, createTestUser } from '@hourmere/scheduling/testing'
 import { WEBHOOK_DELIVERY_JOB, webhookBookingNotifier } from '@hourmere/webhooks'
+import { Kysely, PostgresDialect } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
 import { loadConfig } from './config.ts'
@@ -35,6 +36,7 @@ describe.skipIf(!serverUrl)('team writes without an SSO policy', () => {
   let authPool: ReturnType<typeof createAuthPool>
   let db: Db
   let app: ReturnType<typeof createApp>
+  const statements: string[] = []
   const jobs: { name: string; payload: unknown; inTransaction: boolean }[] = []
   const queue = {
     async enqueue(name: string, payload: unknown, options?: EnqueueOptions) {
@@ -45,7 +47,12 @@ describe.skipIf(!serverUrl)('team writes without an SSO policy', () => {
 
   beforeAll(async () => {
     owned = await createTestDatabase(serverUrl as string)
-    db = createDb(owned.pool)
+    db = new Kysely<Database>({
+      dialect: new PostgresDialect({ pool: owned.pool }),
+      log(event) {
+        if (event.level === 'query') statements.push(event.query.sql)
+      },
+    })
     const config = loadConfig({
       DATABASE_URL: owned.url,
       PUBLIC_URL: origin,
@@ -288,16 +295,19 @@ describe.skipIf(!serverUrl)('team writes without an SSO policy', () => {
     const eventId = await createFixtures(db).eventType(team.id, null, {
       hosts: [{ userId: member.id }],
     })
+    statements.length = 0
     const role = await write('POST', '/api/auth/organization/update-member-role', {
       organizationId: team.id,
       memberId: row.id,
       role: 'admin',
     })
     expect(role.status).toBe(200)
+    const roleQueries = [...statements]
     expect(
       await db.selectFrom('auth.member').select('role').where('id', '=', row.id).executeTakeFirst(),
     ).toEqual({ role: 'admin' })
     const path = `/api/v1/team/members/${member.id}/removal`
+    statements.length = 0
     expect(await answer(await write('POST', path, { teamId: team.id }))).toEqual({
       status: 200,
       body: {
@@ -306,6 +316,12 @@ describe.skipIf(!serverUrl)('team writes without an SSO policy', () => {
         deactivatedEventTypeIds: [eventId],
       },
     })
+    const removalQueries = [...statements]
+    expect(roleQueries).toHaveLength(30)
+    expect(removalQueries).toHaveLength(36)
+    expect(
+      [...roleQueries, ...removalQueries].some((query) => query.includes('sso_attempts')),
+    ).toBe(false)
     expect(
       await db.selectFrom('auth.member').select('id').where('id', '=', row.id).executeTakeFirst(),
     ).toBeUndefined()

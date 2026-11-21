@@ -1,6 +1,6 @@
 import type { Db } from '@hourmere/db'
 import { scimSuspended } from '@hourmere/db/scim-suspension'
-import { teamWriteCheckFor } from '@hourmere/db/team-write'
+import { hasTeamWriteOrganizationLock, teamWriteCheckFor } from '@hourmere/db/team-write'
 import { sql } from 'kysely'
 import { jsonObjectFrom } from 'kysely/helpers/postgres'
 
@@ -104,6 +104,34 @@ export function memoizeTeamSsoAccess(deps: TeamSsoDeps, identity: TeamSsoSession
   }
 }
 
+/** Read suspension in a fresh READ COMMITTED snapshot after waiting for the team. */
+export async function lockTeamSsoPolicy(
+  db: Db,
+  organizationId: string,
+  userId: string | undefined,
+  organizationLocked = false,
+) {
+  if (!organizationLocked && !hasTeamWriteOrganizationLock(db, organizationId)) {
+    await db
+      .selectFrom('auth.organization')
+      .select('id')
+      .where('id', '=', organizationId)
+      .forKeyShare()
+      .executeTakeFirst()
+  }
+  const lockedPolicy = db
+    .selectFrom('sso_policies')
+    .select(['require_sso', 'trust_generation'])
+    .where('organization_id', '=', organizationId)
+    .forShare()
+  return db
+    .selectNoFrom([
+      jsonObjectFrom(lockedPolicy).as('policy'),
+      (userId ? scimSuspended(organizationId, userId) : sql<boolean>`false`).as('suspended'),
+    ])
+    .executeTakeFirstOrThrow()
+}
+
 /** Reuse the read predicate on the committing connection, with locks held through commit. */
 export async function lockTeamSsoProof(
   { capabilities }: Pick<TeamSsoDeps, 'capabilities'>,
@@ -111,20 +139,14 @@ export async function lockTeamSsoProof(
   identity: TeamSsoSession | null,
   organizationId: string,
   denied: () => never,
+  options?: { organizationLocked: true },
 ): Promise<string | undefined> {
-  const lockedPolicy = db
-    .selectFrom('sso_policies')
-    .select(['require_sso', 'trust_generation'])
-    .where('organization_id', '=', organizationId)
-    .forShare()
-  const { policy, suspended } = await db
-    .selectNoFrom([
-      jsonObjectFrom(lockedPolicy).as('policy'),
-      (identity ? scimSuspended(organizationId, identity.userId) : sql<boolean>`false`).as(
-        'suspended',
-      ),
-    ])
-    .executeTakeFirstOrThrow()
+  const { policy, suspended } = await lockTeamSsoPolicy(
+    db,
+    organizationId,
+    identity?.userId,
+    options?.organizationLocked,
+  )
   if (suspended) denied()
   if (!policy?.require_sso) return
   if (!identity || !(capabilities.ssoOidcEnabled || capabilities.ssoSamlEnabled)) denied()
@@ -143,7 +165,7 @@ export async function lockTeamSsoProof(
   return deadline
 }
 
-/** Shared native and REST services can join the REST caller's check for this actor and team. */
+/** Services already holding the team lock can join the REST caller's check for this actor. */
 export function lockSharedTeamSsoProof(
   db: Db,
   capabilities: TeamSsoCapabilities,
@@ -154,5 +176,7 @@ export function lockSharedTeamSsoProof(
   const check = teamWriteCheckFor(organizationId, identity)
   return check && db.isTransaction
     ? check.lockProof(db as Parameters<typeof check.lockProof>[0])
-    : lockTeamSsoProof({ capabilities }, db, identity, organizationId, denied)
+    : lockTeamSsoProof({ capabilities }, db, identity, organizationId, denied, {
+        organizationLocked: true,
+      })
 }

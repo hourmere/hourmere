@@ -10,7 +10,7 @@ import type { CallerResolver, Principal } from '@hourmere/auth'
 import { createGoogleCalendarClient, createMicrosoftCalendarClient } from '@hourmere/calendars'
 import { createZoomClient } from '@hourmere/conferences'
 import { createDb, createPool } from '@hourmere/db'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createApp } from '../apps/server/src/app.ts'
 import { loadConfig } from '../apps/server/src/config.ts'
 import { prepareTools } from '../apps/server/src/mcp/tools.ts'
@@ -138,11 +138,17 @@ function productionSources(): string[] {
   return files.filter((file) => file !== WEBHOOK_DELIVERY_TEST_FIXTURE).sort()
 }
 
-// Frozen alongside the package hard-off module: availability and tool discovery must never
-// acquire a configuration, environment or caller-controlled escape hatch.
+// Pinned alongside the package hard-off module. An injected operator setting is evaluated
+// behind the implementation guard and cannot override it.
 const FROZEN_SERVER_GUARD_STATEMENTS = [
-  `import { DomainError } from '@hourmere/scheduling'`,
-  `import { requireWorkflowsImplemented, workflowOperation } from '@hourmere/workflows'`,
+  `import {
+  requireWorkflowsEnabled,
+  requireWorkflowsImplemented,
+  requireWorkflowUpdateAllowed,
+  type WorkflowSettings,
+  workflowOperation,
+  workflowsEnabled,
+} from '@hourmere/workflows'`,
   `import type { Context, Next } from 'hono'`,
   `import { createMiddleware } from 'hono/factory'`,
   `import type { CallerEnv } from './caller.ts'`,
@@ -152,17 +158,28 @@ const FROZEN_SERVER_GUARD_STATEMENTS = [
     await next()
   }),
 )`,
-  `export function workflowFeatureTools(tools: readonly Tool[]): Tool[] {
-  return tools.map((tool) => ({ ...tool, requireAvailable: requireWorkflowsImplemented }))
+  `export function workflowsEnabledGuard(settings: WorkflowSettings) {
+  return createMiddleware<CallerEnv>(async (_c, next) => {
+    requireWorkflowsEnabled(settings)
+    await next()
+  })
 }`,
-  `export function workflowsAvailable(): boolean {
-  try {
-    requireWorkflowsImplemented()
-    return true
-  } catch (error) {
-    if (error instanceof DomainError && error.code === 'workflows_disabled') return false
-    throw error
-  }
+  `export function workflowUpdateGuard(settings: WorkflowSettings) {
+  return createMiddleware<CallerEnv>(async (c, next) => {
+    if (!workflowsEnabled(settings))
+      requireWorkflowUpdateAllowed(settings, await c.req.json().catch(() => undefined))
+    await next()
+  })
+}`,
+  `export function workflowFeatureTools(tools: readonly Tool[], settings: WorkflowSettings): Tool[] {
+  return tools.map((tool) => ({
+    ...tool,
+    discoverable: () => workflowsEnabled(settings),
+    requireAvailable(args) {
+      requireWorkflowsImplemented()
+      return tool.requireAvailable?.(args)
+    },
+  }))
 }`,
 ]
 
@@ -293,6 +310,7 @@ function productionApp(db: ReturnType<typeof createDb>, databaseUrl: string) {
     productionAppOptions({
       config,
       db,
+      workflowsEnabled: true,
       auth: { handler: async () => new Response(null, { status: 404 }) },
       resolveCaller,
       resolveMcpOAuth: async () => ({ ok: false, error: 'invalid_token' }),
@@ -421,9 +439,11 @@ describe('booking workflows are off and expose the shipped operations', () => {
     expect(instance?.properties).toHaveProperty(['workflowsEnabled', 'type'], 'boolean')
   })
 
-  it('serves the shipped workflow routes, each refusing while off, and reports workflows off', async () => {
+  it('denies workflow routes and reports workflows off even when the injected setting is on', async () => {
     const databaseUrl = 'postgres://workflows-off@127.0.0.1:9/workflows-off'
-    const db = createDb(createPool(databaseUrl))
+    const pool = createPool(databaseUrl)
+    const connect = vi.spyOn(pool, 'connect')
+    const db = createDb(pool)
     try {
       const app = productionApp(db, databaseUrl)
       const routes = app.routes.map(({ path }) => path)
@@ -485,6 +505,7 @@ describe('booking workflows are off and expose the shipped operations', () => {
       const instance = await app.request('/api/v1/instance')
       expect(instance.status).toBe(200)
       expect(await instance.json()).toHaveProperty('workflowsEnabled', false)
+      expect(connect).not.toHaveBeenCalled()
     } finally {
       await db.destroy()
     }
@@ -493,7 +514,9 @@ describe('booking workflows are off and expose the shipped operations', () => {
   it('catalogues the shipped tools, lists none of them and refuses direct calls', async () => {
     // No handlers run and no connection opens; the pool is still closed explicitly.
     const databaseUrl = 'postgres://workflows-off@127.0.0.1:9/workflows-off'
-    const db = createDb(createPool(databaseUrl))
+    const pool = createPool(databaseUrl)
+    const connect = vi.spyOn(pool, 'connect')
+    const db = createDb(pool)
     try {
       const names = prepareTools(productTools({ db, slotSnippetsEnabled: true })).map(
         ({ tool }) => tool.name,
@@ -522,6 +545,7 @@ describe('booking workflows are off and expose the shipped operations', () => {
         expect(
           toolError(await mcp(app, 'bookings', 'tools/call', { name: tool, arguments: {} })),
         ).toMatchObject({ error: 'insufficient_scope' })
+      expect(connect).not.toHaveBeenCalled()
     } finally {
       await db.destroy()
     }
@@ -740,29 +764,31 @@ describe('booking workflows are off and expose the shipped operations', () => {
 
   it('wires only guarded lifecycle capture after core intents in the production notifier', () => {
     const server = readFileSync(new URL('apps/server/src/server.ts', root), 'utf8')
-    expect(server).toContain("import { captureWorkflowBooking } from '@hourmere/workflows'")
+    expect(server).toContain(
+      "import { captureWorkflowBooking, type WorkflowSettings } from '@hourmere/workflows'",
+    )
     expect(server).toContain(
       'const notifyAttendeeNoShow = webhookAttendeeNoShowNotifier(jobs, webhookSettings)',
     )
     const notifier = server.slice(server.indexOf('const notify: BookingNotifier = async'))
     const core = notifier.indexOf('await emailNotifier(trx, event, now)')
     const capture = notifier.indexOf(
-      'await captureWorkflowBooking(trx, event, now, config.BETTER_AUTH_SECRET)',
+      'await captureWorkflowBooking(trx, event, now, config.BETTER_AUTH_SECRET, {',
     )
     expect(core).toBeGreaterThanOrEqual(0)
     expect(capture).toBeGreaterThan(core)
     const service = readFileSync(new URL('packages/workflows/src/capture.ts', root), 'utf8')
     expect(service).toContain(
-      'export const captureWorkflowBooking = workflowCapture((...args: CaptureArgs) =>\n' +
-        '  captureBookingWorkflows(...args, workflowAuditPort),',
+      'export const captureWorkflowBooking = guardedCapture(captureBookingWorkflows)',
     )
+    expect(service).toMatch(/function guardedCapture\([^)]*\)\s*{\s*return workflowCapture\(/)
   })
 
   it('keeps dispatcher and repair handlers guarded and absent from production registration', () => {
     const service = readFileSync(new URL('packages/workflows/src/dispatcher.ts', root), 'utf8')
     expect(service).toContain('export const dispatchWorkflowRuns = workflowExecution(')
     expect(service).toContain(
-      'dispatchDueWorkflowRuns({ ...ctx, audit: workflowAuditPort }, options)',
+      '{ ...ctx, audit: workflowAuditPort, instanceDisabled: !workflowsEnabled(ctx) }',
     )
     expect(service).toContain('export const repairWorkflowWakes = workflowExecution(')
     expect(service).toContain(
@@ -796,8 +822,9 @@ describe('booking workflows are off and expose the shipped operations', () => {
       'packages/workflows/src/index.ts',
     ]
     const service = readFileSync(new URL(deliveryFile, root), 'utf8')
+    expect(service).toContain('const guardedWorkflowWebhook = workflowExecution(')
     expect(service).toContain(
-      'const guardedWorkflowWebhook = workflowExecution(deliverWorkflowWebhook)',
+      '{ ...deps, enabled: deps.enabled && deps.workflowsEnabled === true }',
     )
     expect(service).toMatch(
       /if \(retry === 'workflow'\)\s+return guardedWorkflowWebhook\(deps, deliveryId, signal, jobAttempt\)/,

@@ -22,6 +22,7 @@ import {
   TestSsoProviderInput,
   testSsoProvider,
 } from '../sso-oidc-sign-in.ts'
+import { isSsoRecoveryWrite } from '../sso-write-middleware.ts'
 import { teamManagementSessionCaller } from '../team-management.ts'
 
 export const SsoProviderDraft = z
@@ -70,6 +71,22 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
     requireSsoEnabled(deps.capabilities, 'oidc')
     await next()
   }
+  const activationEnabled: MiddlewareHandler<CallerEnv> = async (c, next) => {
+    c.header('Cache-Control', 'no-store')
+    c.header('Referrer-Policy', 'no-referrer')
+    requireSsoEnabled(deps.capabilities)
+    if (!deps.capabilities.ssoOidcEnabled) {
+      let input: unknown
+      try {
+        input = await c.req.json()
+      } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error
+      }
+      if (input && typeof input === 'object' && 'enabled' in input && input.enabled === true)
+        requireSsoEnabled(deps.capabilities, 'oidc')
+    }
+    await next()
+  }
   const exactOrigin: MiddlewareHandler<CallerEnv> = async (c, next) => {
     if (c.req.header('origin') !== new URL(deps.publicUrl).origin)
       throw new DomainError('forbidden', 'team_management_access_denied')
@@ -108,7 +125,7 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
         tags: ['SSO'],
         summary: 'Create a disabled SSO provider draft',
         description:
-          'Verified team owner/admin browser session with fresh proof only. Secrets are write-only. OIDC and SAML are being built and remain unavailable.',
+          'Verified team owner/admin browser session with fresh proof. An enrolled owner can spend one recovery grant on an enforced team. Secrets are write-only. OIDC and SAML are being built and remain unavailable.',
         security: [{ session: [] }],
         middleware: [...middleware] as const,
         request: {
@@ -131,6 +148,7 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
           c.var.principal,
           c.req.raw.headers,
           c.req.valid('json'),
+          isSsoRecoveryWrite(c),
         )
         if (result.setCookie) c.header('Set-Cookie', result.setCookie, { append: true })
         if (result.status === 'proof_required') return c.json(result.body, 403)
@@ -143,9 +161,9 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
         path: '/api/v1/team/sso/providers/{providerId}/test',
         operationId: 'testSsoProvider',
         tags: ['SSO'],
-        summary: 'Start a browser-bound OIDC test of a disabled SSO provider',
+        summary: 'Start a browser-bound OIDC provider test',
         description:
-          'Verified team owner/admin browser session with fresh proof and expected revision. Follow the authorization URL in the same browser and check the provider inventory for the result. SSO remains unavailable.',
+          'Verified team owner/admin browser session with fresh proof and expected revision. An enrolled owner can spend one recovery grant on an enforced team to test a provider, including an enabled provider. Follow the authorization URL in the same browser and check the provider inventory for the result. SSO remains unavailable.',
         security: [{ session: [] }],
         middleware: [oidcEnabled, ...sessionMiddleware] as const,
         request: {
@@ -173,6 +191,7 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
           c.req.raw.headers,
           c.req.valid('param').providerId,
           c.req.valid('json'),
+          isSsoRecoveryWrite(c),
         )
         if (result.status === 'proof_required') {
           if (result.setCookie) c.header('Set-Cookie', result.setCookie, { append: true })
@@ -191,9 +210,9 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
         tags: ['SSO'],
         summary: 'Enable or disable an SSO provider',
         description:
-          'Verified team owner browser session with fresh administration proof. Enabling requires a passed test of the current revision and a positively rechecked, unexpired linked domain. An enforced team must keep a usable provider. SSO remains unavailable.',
+          'Verified team owner browser session with fresh administration proof. An enrolled owner can spend one recovery grant on an enforced team. Enabling requires a passed test of the current revision and a positively rechecked, unexpired linked domain. An enforced team must keep a usable provider. SSO remains unavailable.',
         security: [{ session: [] }],
-        middleware: [oidcEnabled, ...sessionMiddleware] as const,
+        middleware: [activationEnabled, ...sessionMiddleware] as const,
         request: {
           headers: z.object({
             'X-Expected-Organization-Id': z.string().optional().openapi({
@@ -220,6 +239,7 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
           c.req.raw.headers,
           c.req.valid('param').providerId,
           c.req.valid('json'),
+          isSsoRecoveryWrite(c),
         )
         if (result.setCookie) c.header('Set-Cookie', result.setCookie, { append: true })
         if (result.status === 'proof_required') return c.json(result.body, 403)
@@ -284,7 +304,7 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
         tags: ['SSO'],
         summary: 'Update an SSO provider draft',
         description:
-          'Verified team owner/admin browser session with fresh proof and expected revision. Omitted secrets are preserved; replacements are never returned. SSO remains unavailable.',
+          'Verified team owner/admin browser session with fresh proof and expected revision. An enrolled owner can spend one recovery grant on an enforced team. Omitted secrets are preserved; replacements are never returned. SSO remains unavailable.',
         security: [{ session: [] }],
         middleware: [...middleware] as const,
         request: {
@@ -309,6 +329,7 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
           c.req.raw.headers,
           c.req.valid('param').providerId,
           c.req.valid('json'),
+          isSsoRecoveryWrite(c),
         )
         if (result.setCookie) c.header('Set-Cookie', result.setCookie, { append: true })
         if (result.status === 'proof_required') return c.json(result.body, 403)
@@ -323,7 +344,7 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
         tags: ['SSO'],
         summary: 'Retire an SSO provider',
         description:
-          'Verified team owner/admin browser session with fresh proof and expected revision. An authorized repeat retirement is idempotent. SSO remains unavailable.',
+          'Verified team owner/admin browser session with fresh proof and expected revision. An enforced team must keep a usable provider. An authorized repeat retirement is idempotent. SSO remains unavailable.',
         security: [{ session: [] }],
         middleware: [...middleware] as const,
         request: {
@@ -342,6 +363,11 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
             content: json(z.object({ deleted: z.boolean() })),
           },
           ...errors,
+          409: {
+            description:
+              'organization_context_changed, sso_configuration_changed or sso_last_provider',
+            content: json(ErrorBody),
+          },
         },
       }),
       async (c) => {

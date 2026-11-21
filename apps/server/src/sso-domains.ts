@@ -404,6 +404,7 @@ export async function deleteSsoDomain(
       sessionId: p.sessionId,
       organizationId: p.organization.id,
       operation: 'deleteSsoDomain',
+      proofMode: 'trust_reduction',
       input: boundInput(input, domainId),
       schema: generation.extend({ domainId: z.uuid() }),
     },

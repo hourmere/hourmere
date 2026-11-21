@@ -323,8 +323,10 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `DELETE /api/v1/team/sso/delegations/{bindingId}` | Browser session only | — |
 | `POST /api/v1/team/sso/recovery` | Browser session only | — |
 | `POST /api/v1/team/sso/recovery/{enrollmentId}/accept` | Browser session only | — |
+| `POST /api/v1/team/sso/recovery/use` | Browser session only | — |
 | `GET /api/v1/team/sso/providers` | Session or API key | `full, read` |
 | `GET /api/v1/team/sso/policy` | Session or API key | `full, read` |
+| `PUT /api/v1/team/sso/policy` | Browser session only | — |
 | `GET /api/v1/openapi.json` | Public; no key needed | `full, read, bookings` |
 
 ### MCP tools and CLI commands

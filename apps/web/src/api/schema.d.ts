@@ -4958,7 +4958,11 @@ export interface paths {
          * @description Owner/admin only; read/full API key or authorized MCP OAuth. An unconfigured team has invitation-only admission and no SSO requirement. SSO is being built and is not available yet.
          */
         get: operations["getSsoPolicy"];
-        put?: never;
+        /**
+         * Set the current team SSO policy
+         * @description Requires a verified team owner or administrator browser session and fresh administration proof. An enrolled owner can spend recovery authority to turn off enforcement without enabling JIT. SSO remains unavailable.
+         */
+        put: operations["setSsoPolicy"];
         post?: never;
         delete?: never;
         options?: never;
@@ -4981,7 +4985,7 @@ export interface paths {
         put?: never;
         /**
          * Create a disabled SSO provider draft
-         * @description Verified team owner/admin browser session with fresh proof only. Secrets are write-only. OIDC and SAML are being built and remain unavailable.
+         * @description Verified team owner/admin browser session with fresh proof. An enrolled owner can spend one recovery grant on an enforced team. Secrets are write-only. OIDC and SAML are being built and remain unavailable.
          */
         post: operations["createSsoProvider"];
         delete?: never;
@@ -5002,14 +5006,14 @@ export interface paths {
         post?: never;
         /**
          * Retire an SSO provider
-         * @description Verified team owner/admin browser session with fresh proof and expected revision. An authorized repeat retirement is idempotent. SSO remains unavailable.
+         * @description Verified team owner/admin browser session with fresh proof and expected revision. An enforced team must keep a usable provider. An authorized repeat retirement is idempotent. SSO remains unavailable.
          */
         delete: operations["deleteSsoProvider"];
         options?: never;
         head?: never;
         /**
          * Update an SSO provider draft
-         * @description Verified team owner/admin browser session with fresh proof and expected revision. Omitted secrets are preserved; replacements are never returned. SSO remains unavailable.
+         * @description Verified team owner/admin browser session with fresh proof and expected revision. An enrolled owner can spend one recovery grant on an enforced team. Omitted secrets are preserved; replacements are never returned. SSO remains unavailable.
          */
         patch: operations["updateSsoProvider"];
         trace?: never;
@@ -5025,7 +5029,7 @@ export interface paths {
         put?: never;
         /**
          * Enable or disable an SSO provider
-         * @description Verified team owner browser session with fresh administration proof. Enabling requires a passed test of the current revision and a positively rechecked, unexpired linked domain. An enforced team must keep a usable provider. SSO remains unavailable.
+         * @description Verified team owner browser session with fresh administration proof. An enrolled owner can spend one recovery grant on an enforced team. Enabling requires a passed test of the current revision and a positively rechecked, unexpired linked domain. An enforced team must keep a usable provider. SSO remains unavailable.
          */
         post: operations["activateSsoProvider"];
         delete?: never;
@@ -5088,8 +5092,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Start a browser-bound OIDC test of a disabled SSO provider
-         * @description Verified team owner/admin browser session with fresh proof and expected revision. Follow the authorization URL in the same browser and check the provider inventory for the result. SSO remains unavailable.
+         * Start a browser-bound OIDC provider test
+         * @description Verified team owner/admin browser session with fresh proof and expected revision. An enrolled owner can spend one recovery grant on an enforced team to test a provider, including an enabled provider. Follow the authorization URL in the same browser and check the provider inventory for the result. SSO remains unavailable.
          */
         post: operations["testSsoProvider"];
         delete?: never;
@@ -5132,6 +5136,26 @@ export interface paths {
          * @description Requires the nominated owner’s browser session and independent mailbox proof. SSO remains unavailable.
          */
         post: operations["acceptSsoRecoveryEnrollment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/team/sso/recovery/use": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start SSO recovery for the current team
+         * @description Requires an enrolled owner’s browser session and fresh mailbox proof. Permits inspecting SSO configuration and one provider repair write or one write turning off enforcement. SSO remains unavailable.
+         */
+        post: operations["useSsoRecovery"];
         delete?: never;
         options?: never;
         head?: never;
@@ -18893,7 +18917,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description team_management_access_denied */
+            /** @description team_management_access_denied or sso_required */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -19292,6 +19316,94 @@ export interface operations {
             };
         };
     };
+    setSsoPolicy: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for writes and must match the current team. */
+                "X-Expected-Organization-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    admission: "invitation_only" | "jit";
+                    expectedRevision: number;
+                    /** Format: uuid */
+                    proofAttemptId?: string;
+                    requireSso: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The updated team policy */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoPolicy"];
+                };
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied or sso_reauthentication_required sso_required: This team requires a current SSO proof. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoFreshProofChallenge"] | components["schemas"]["Error"];
+                };
+            };
+            /** @description sso_disabled */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed, sso_configuration_changed, sso_domain_unverified, sso_test_required or sso_recovery_required */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     listSsoProviders: {
         parameters: {
             query?: {
@@ -19542,7 +19654,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description organization_context_changed or sso_configuration_changed */
+            /** @description organization_context_changed, sso_configuration_changed or sso_last_provider */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -19983,7 +20095,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description team_management_access_denied or sso_reauthentication_required; retry the exact input after completing fresh proof sso_required: This team requires a current SSO proof. */
+            /** @description team_management_access_denied, sso_required or sso_reauthentication_required; retry a proof challenge with the exact input after completing fresh proof sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -20263,6 +20375,89 @@ export interface operations {
                 };
             };
             /** @description sso_disabled or sso_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed or sso_configuration_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    useSsoRecovery: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for writes and must match the current team. */
+                "X-Expected-Organization-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    expectedRevision: number;
+                    /** Format: uuid */
+                    proofAttemptId?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Recovery authority granted to the current browser session */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied or sso_reauthentication_required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoFreshProofChallenge"] | components["schemas"]["Error"];
+                };
+            };
+            /** @description sso_disabled */
             404: {
                 headers: {
                     [name: string]: unknown;
