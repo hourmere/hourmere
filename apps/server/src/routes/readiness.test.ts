@@ -38,6 +38,7 @@ import { createMiddleware } from 'hono/factory'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { isMember } from '../../../../packages/auth/src/organizations.ts'
+import { ssoRecoveryTeamsFor } from '../../../../packages/auth/src/sso-recovery-membership.ts'
 import { signTestMcpAccessToken } from '../../../../packages/auth/src/testing.ts'
 import { suspendScimMember } from '../../../../packages/db/src/scim-suspension-fixtures.ts'
 import { createApp } from '../app.ts'
@@ -369,6 +370,7 @@ describe.skipIf(!process.env.DATABASE_URL)('booking readiness real authenticatio
           sql,
           ssoDelegationStatus,
           ssoHardOff,
+          ssoRecoveryTeamsFor,
         },
         'createCallerResolver',
         mutation,
@@ -384,8 +386,8 @@ describe.skipIf(!process.env.DATABASE_URL)('booking readiness real authenticatio
     await expect(
       verify(
         resolver([
-          'authorization === null ? fromSession(headers) : fromApiKey(authorization)',
-          "authorization === null || headers.has('cookie') ? fromSession(headers) : fromApiKey(authorization)",
+          'return authorization === null',
+          "return authorization === null || headers.has('cookie')",
         ]),
       ),
     ).rejects.toMatchObject({ name: 'AssertionError', actual: 200, expected: 403 })
