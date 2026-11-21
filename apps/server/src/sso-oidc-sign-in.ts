@@ -87,7 +87,7 @@ export const OidcSignInInput = z.discriminatedUnion('intent', [
     returnTo: z.string().optional(),
   }),
 ])
-const completeInput = z.strictObject({ attemptId: z.uuidv7() })
+export const OidcCompleteInput = z.strictObject({ attemptId: z.uuidv7() })
 const invitationInput = z.strictObject({ invitationId: z.uuid() })
 const completionInvalid = { error: 'sso_oidc_completion_invalid' } as const
 const sealedConfig = z.strictObject({
@@ -834,7 +834,7 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
         if (c.req.method !== 'POST') return c.json({ error: 'method_not_allowed' }, 405)
         if (c.req.header('origin') !== origin || c.req.header('authorization') !== undefined)
           return c.json({ error: 'forbidden' }, 403)
-        const parsed = completeInput.safeParse(await c.req.json().catch(() => null))
+        const parsed = OidcCompleteInput.safeParse(await c.req.json().catch(() => null))
         if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
         const wait = completions.hit(rateLimitKey(c.var.clientIp))
         if (wait !== undefined) {

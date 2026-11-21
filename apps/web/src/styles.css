@@ -776,6 +776,12 @@ input[readonly] {
   width: 100%;
 }
 
+.button-wrap {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
 /* Messages and panels */
 
 .alert {

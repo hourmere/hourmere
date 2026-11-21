@@ -16,7 +16,12 @@ import {
   MailboxProofConsumeInput,
   MailboxProofSendInput,
 } from '../../apps/server/src/sso-mailbox-proof.ts'
-import { OIDC_SIGN_IN_PATH, OidcSignInInput } from '../../apps/server/src/sso-oidc-sign-in.ts'
+import {
+  OIDC_COMPLETE_PATH,
+  OIDC_SIGN_IN_PATH,
+  OidcCompleteInput,
+  OidcSignInInput,
+} from '../../apps/server/src/sso-oidc-sign-in.ts'
 
 // Authentication ceremonies are outside the published product API and its parity inventory.
 // Extend the web client's declaration from the inputs the existing auth handlers validate.
@@ -44,6 +49,10 @@ function authPost(
   }
 }
 
+const oidcComplete = authPost(OidcCompleteInput, 200, {
+  status: { type: 'string', const: 'link_required' },
+})
+
 const authPaths = {
   [MAILBOX_PROOF_SEND_PATH]: authPost(MailboxProofSendInput, 202, {
     status: { type: 'string', const: 'queued' },
@@ -55,7 +64,19 @@ const authPaths = {
     url: { type: 'string', format: 'uri' },
     redirect: { type: 'boolean', const: true },
   }),
-}
+  [OIDC_COMPLETE_PATH]: {
+    post: {
+      ...oidcComplete.post,
+      responses: {
+        ...oidcComplete.post.responses,
+        302: {
+          description: 'Completed. Redirect to the same-origin application destination.',
+          headers: { Location: { schema: { type: 'string' } } },
+        },
+      },
+    },
+  },
+} satisfies NonNullable<OpenAPI3['paths']>
 
 const out = new URL('../../apps/web/src/api/schema.d.ts', import.meta.url)
 const doc = (await openApiDocument()) as OpenAPI3
