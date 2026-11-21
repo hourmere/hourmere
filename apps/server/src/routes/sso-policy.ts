@@ -5,7 +5,7 @@ import type { CallerEnv } from '../caller.ts'
 import { errorResponses, json, type RouteModule } from '../openapi.ts'
 import { requireSsoEnabled } from '../sso.ts'
 import { SetSsoPolicyInput, type SsoPolicyDeps, setSsoPolicy } from '../sso-policy.ts'
-import { isSsoRecoveryWrite } from '../sso-write-middleware.ts'
+import { ssoRecoveryWritePrincipal } from '../sso-write-middleware.ts'
 import { teamManagementSessionCaller } from '../team-management.ts'
 import { SsoPolicy } from './sso.ts'
 import { FreshProofChallenge } from './sso-drafts.ts'
@@ -33,7 +33,8 @@ export function ssoPolicyRoutes(deps: SsoPolicyDeps): RouteModule {
         request: {
           headers: z.object({
             'X-Expected-Organization-Id': z.string().optional().openapi({
-              description: 'Required for writes and must match the current team.',
+              description:
+                'Required. Identifies the active team or the team of a live recovery grant.',
             }),
           }),
           body: { required: true, content: json(SetSsoPolicyInput) },
@@ -52,12 +53,13 @@ export function ssoPolicyRoutes(deps: SsoPolicyDeps): RouteModule {
         },
       }),
       async (c) => {
+        const recovery = ssoRecoveryWritePrincipal(c)
         const result = await setSsoPolicy(
           deps,
-          c.var.principal,
+          recovery ?? c.var.principal,
           c.req.raw.headers,
           c.req.valid('json'),
-          isSsoRecoveryWrite(c),
+          recovery !== undefined,
         )
         if (result.setCookie) c.header('Set-Cookie', result.setCookie, { append: true })
         if (result.status === 'proof_required') return c.json(result.body, 403)

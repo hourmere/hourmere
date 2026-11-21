@@ -5461,7 +5461,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Start SSO recovery for the current team
+         * Start SSO recovery for the specified team
          * @description Requires an enrolled owner’s browser session and fresh mailbox proof. Permits inspecting SSO configuration and one provider repair write or one write turning off enforcement. SSO remains unavailable.
          */
         post: operations["useSsoRecovery"];
@@ -7371,6 +7371,13 @@ export interface components {
                 oauthConsentId?: string;
             };
             sso?: components["schemas"]["MeSso"];
+            /** @description Teams requiring SSO for which this browser caller is an accepted, current recovery owner. Each revision is the expectedRevision for useSsoRecovery. */
+            ssoRecoveryTeams?: {
+                displayName: string;
+                /** Format: uuid */
+                id: string;
+                policyRevision: number;
+            }[];
             user: {
                 email: string;
                 /** Format: uuid */
@@ -19445,7 +19452,10 @@ export interface operations {
     getSsoPolicy: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Identifies the active team or the team of a live browser recovery grant. */
+                "X-Expected-Organization-Id"?: string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -19520,7 +19530,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Required for writes and must match the current team. */
+                /** @description Required. Identifies the active team or the team of a live recovery grant. */
                 "X-Expected-Organization-Id"?: string;
             };
             path?: never;
@@ -19610,7 +19620,10 @@ export interface operations {
                 cursor?: string;
                 limit?: string;
             };
-            header?: never;
+            header?: {
+                /** @description Identifies the active team or the team of a live browser recovery grant. */
+                "X-Expected-Organization-Id"?: string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -19685,7 +19698,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Required for writes; must match the current team. Missing or stale context returns 409. */
+                /** @description Required. Identifies the active team or the team of a live recovery grant. */
                 "X-Expected-Organization-Id"?: string;
             };
             path?: never;
@@ -19878,7 +19891,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Required for writes; must match the current team. Missing or stale context returns 409. */
+                /** @description Required. Identifies the active team or the team of a live recovery grant. */
                 "X-Expected-Organization-Id"?: string;
             };
             path: {
@@ -19983,7 +19996,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Required for writes and must match the current team. */
+                /** @description Required. Identifies the active team or the team of a live recovery grant. */
                 "X-Expected-Organization-Id"?: string;
             };
             path: {
@@ -20337,7 +20350,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Required for writes; must match the current team. Missing or stale context returns 409. */
+                /** @description Required. Identifies the active team or the team of a live recovery grant. */
                 "X-Expected-Organization-Id"?: string;
             };
             path: {
@@ -20607,7 +20620,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Required for writes and must match the current team. */
+                /** @description Required. Identifies the team to recover, which can differ from the active space. */
                 "X-Expected-Organization-Id"?: string;
             };
             path?: never;

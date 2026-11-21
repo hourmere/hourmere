@@ -3015,4 +3015,9 @@ export const admin = {
     'This recovery nomination is unavailable. Ask a team owner to send a new one.',
   'Could not complete the recovery nomination. Try again.':
     'Could not complete the recovery nomination. Try again.',
+
+  // SSO recovery team discovery
+  'SSO recovery for {name}': 'SSO recovery for {name}',
+  'Team to recover': 'Team to recover',
+  'Choose a team': 'Choose a team',
 } as const

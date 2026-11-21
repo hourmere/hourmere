@@ -4,6 +4,7 @@ import {
   createAuthPool,
   createBrowserSession,
   createCallerResolver,
+  ensurePersonalOrganization,
   liveSsoDelegationSummaries,
   MCP_OAUTH_CONSENT_LIFETIME_MS,
   recordSsoAdmissionRemoval,
@@ -2076,12 +2077,18 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     expect(await audit()).toEqual([])
   })
 
-  it.each([true, false])(
-    'spends separate recovery ceremonies to update, test and re-activate a broken provider (initially enabled: %s)',
-    async (enabled) => {
+  it.each([
+    { enabled: true, personal: false },
+    { enabled: false, personal: false },
+    { enabled: true, personal: true },
+  ])(
+    'spends separate recovery grants for each repair step (enabled: $enabled, personal: $personal)',
+    async ({ enabled, personal }) => {
       const { providerId } = await provider({ discovery: true, enabled })
       const other = await provider()
-      const owner = await browserSession(fixture.owner)
+      const space = personal ? await ensurePersonalOrganization(db, fixture.owner) : fixture.team
+      const owner = await browserSession(fixture.owner, space)
+      const withoutGrant = personal ? 'team_management_access_denied' : 'sso_required'
       const otherSession = await browserSession(fixture.owner)
       const admin = await browserSession(fixture.admin)
       await enrollRecoveryOwner()
@@ -2100,7 +2107,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       await expectWriteError(
         await testRequest(providerId, first.cookie, { expectedRevision: 2 }),
         403,
-        'sso_required',
+        withoutGrant,
       )
 
       const second = await recoveryGrant(first.cookie)
@@ -2143,7 +2150,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       await expectWriteError(
         await providerWrite('POST', activationPath, second.cookie, activation),
         403,
-        'sso_required',
+        withoutGrant,
       )
 
       const third = await recoveryGrant(second.cookie)
@@ -2155,9 +2162,9 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       await expectWriteError(
         await providerWrite('POST', activationPath, third.cookie, activation),
         403,
-        'sso_required',
+        withoutGrant,
       )
-      await expectSsoRequired(third.cookie)
+      if (!personal) await expectSsoRequired(third.cookie)
       const events = await audit()
       expect(events.filter(({ action }) => action === 'sso_recovery.used')).toHaveLength(3)
       expect(events.filter(({ action }) => action === 'sso_provider.enabled')).toHaveLength(

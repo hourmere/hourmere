@@ -43,6 +43,16 @@ const POLICY_DATA = {
   requireSso: true,
   trustGeneration: 2,
 } satisfies Schemas['SsoPolicy']
+const RECOVERY_TEAM = {
+  id: TEAM.organization.id,
+  displayName: TEAM.organization.name,
+  policyRevision: POLICY_DATA.policyRevision,
+}
+const SECOND_RECOVERY_TEAM = {
+  id: '00000000-0000-7000-8000-000000000039',
+  displayName: 'Second team',
+  policyRevision: 11,
+}
 const PROVIDER = {
   id: ID,
   protocol: 'oidc',
@@ -52,7 +62,7 @@ const PROVIDER = {
   revision: 4,
   enabled: true,
   testStatus: 'failed',
-  validationStatus: 'valid',
+  validationStatus: 'unknown',
   domains: [{ id: DOMAIN, generation: 2, name: 'example.test', status: 'verified' }],
   createdAt: '2026-10-01T09:00:00.000Z',
 } satisfies Schemas['SsoProviderPage']['data'][number]
@@ -68,6 +78,12 @@ const enabled: Routes = {
   ...signedInAs(TEAM),
   'GET /api/v1/instance': enabledInstance,
   [POLICY]: () => json(200, POLICY_DATA),
+}
+
+const personalRecovery: Routes = {
+  ...signedInAs({ ...ME, ssoRecoveryTeams: [RECOVERY_TEAM] }),
+  ...emptyAccount,
+  'GET /api/v1/instance': enabledInstance,
 }
 
 async function verify(step: number) {
@@ -88,13 +104,17 @@ async function verify(step: number) {
   await userEvent.click(continueButton)
 }
 
-function useFixture(overrides: Routes = {}) {
+function useFixture(overrides: Routes = {}, requireGrantForPolicy = false) {
   let ceremonies = 0
   let latestAttempt = ''
   let grant = false
   let provider: Schemas['SsoProviderPage']['data'][number] = { ...PROVIDER }
   const api = fakeApi({
     ...enabled,
+    [POLICY]: () =>
+      requireGrantForPolicy && !grant
+        ? json(403, { error: 'sso_required' })
+        : json(200, POLICY_DATA),
     [USE]: ({ body }) => {
       const input = body as { expectedRevision: number; proofAttemptId?: string }
       expect(input.expectedRevision).toBe(POLICY_DATA.policyRevision)
@@ -127,7 +147,7 @@ function useFixture(overrides: Routes = {}) {
         expectedRevision: 4,
         oidc: { clientSecret: 'new test secret' },
       })
-      provider = { ...provider, revision: 5, testStatus: 'not_tested' }
+      provider = { ...provider, revision: 5, testStatus: 'unknown' }
       grant = false
       return json(200, { provider })
     },
@@ -168,7 +188,7 @@ describe('SSO recovery while hard-off', () => {
     [PATHS.ssoRecovery, 'Page not found'],
   ])('has no entry or SSO request from %s', async (path, heading) => {
     const api = fakeApi({
-      ...signedInAs(TEAM),
+      ...signedInAs({ ...TEAM, ssoRecoveryTeams: [RECOVERY_TEAM] }),
       ...emptyAccount,
       ...emptyTeamLists,
       'GET /api/v1/instance': () =>
@@ -201,6 +221,125 @@ describe('SSO recovery while hard-off', () => {
 })
 
 describe('SSO recovery with the capability present', () => {
+  it('starts and completes recovery from ordinary personal settings without switching spaces', async () => {
+    const api = useFixture(personalRecovery, true)
+    renderApp(PATHS.settings)
+    await userEvent.click(await screen.findByRole('link', { name: 'SSO recovery' }))
+    await screen.findByRole('heading', { name: 'SSO recovery for Example team' })
+    await userEvent.click(await screen.findByRole('button', { name: START }))
+    expect(api.to(POLICY)).toHaveLength(0)
+    expect(api.to(PROVIDERS)).toHaveLength(0)
+
+    await verify(1)
+    await userEvent.click(await screen.findByRole('button', { name: 'Stop requiring SSO' }))
+    const confirmation = screen.getByRole('group', {
+      name: 'Stop requiring single sign-on for this team?',
+    })
+    await userEvent.click(within(confirmation).getByRole('button', { name: 'Stop requiring SSO' }))
+    await screen.findByText('Single sign-on is now optional for this team.')
+    expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(0)
+    for (const operation of [USE, SEND, CONSUME, POLICY, PROVIDERS, TURN_OFF]) {
+      const requests = api.to(operation)
+      expect(requests.length).toBeGreaterThan(0)
+      for (const { headers } of requests) {
+        expect(headers.get('x-expected-organization-id')).toBe(RECOVERY_TEAM.id)
+      }
+    }
+  })
+
+  it('offers each discovered team when the current team membership read is blocked', async () => {
+    const api = fakeApi({
+      ...signedInAs({ ...TEAM, ssoRecoveryTeams: [RECOVERY_TEAM, SECOND_RECOVERY_TEAM] }),
+      ...emptyAccount,
+      ...emptyTeamLists,
+      'GET /api/v1/instance': enabledInstance,
+      'GET /api/auth/organization/get-active-member': () => json(403, { code: 'SSO_REQUIRED' }),
+      [USE]: () =>
+        json(403, {
+          error: 'sso_reauthentication_required',
+          attemptId: attemptId(1),
+          proofMethods: ['mailbox'],
+          expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+        }),
+    })
+    renderApp(PATHS.settings)
+    await userEvent.click(await screen.findByRole('link', { name: 'SSO recovery' }))
+    await screen.findByRole('heading', { name: 'SSO recovery for Example team' })
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Team to recover' }), [
+      SECOND_RECOVERY_TEAM.id,
+    ])
+    await screen.findByRole('heading', { name: 'SSO recovery for Second team' })
+    await userEvent.click(screen.getByRole('button', { name: START }))
+    await screen.findByRole('button', { name: 'Send verification email' })
+    expect(api.to(POLICY)).toHaveLength(0)
+    expect(api.to(USE)).toHaveLength(1)
+    expect(api.to(USE)[0]?.headers.get('x-expected-organization-id')).toBe(SECOND_RECOVERY_TEAM.id)
+    expect(api.to(USE)[0]?.body).toEqual({ expectedRevision: SECOND_RECOVERY_TEAM.policyRevision })
+  })
+
+  it('shows a stale discovered revision and only restarts after an explicit refresh and start', async () => {
+    let revision = RECOVERY_TEAM.policyRevision
+    const api = fakeApi({
+      ...signedInAs(ME),
+      'GET /api/v1/me': () =>
+        json(200, { ...ME, ssoRecoveryTeams: [{ ...RECOVERY_TEAM, policyRevision: revision }] }),
+      'GET /api/v1/instance': enabledInstance,
+      [USE]: ({ body }) => {
+        if ((body as { expectedRevision: number }).expectedRevision !== revision)
+          return json(409, { error: 'sso_configuration_changed' })
+        return json(403, {
+          error: 'sso_reauthentication_required',
+          attemptId: attemptId(1),
+          proofMethods: ['mailbox'],
+          expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+        })
+      },
+    })
+    renderApp(PATHS.ssoRecovery)
+    const start = await screen.findByRole('button', { name: START })
+    revision += 1
+    await userEvent.click(start)
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'These SSO settings changed. Reload before trying again.',
+    )
+    expect(screen.queryByRole('button', { name: START })).toBeNull()
+    expect(api.to(USE).map(({ body }) => body)).toEqual([
+      { expectedRevision: RECOVERY_TEAM.policyRevision },
+    ])
+
+    await userEvent.click(screen.getByRole('button', { name: 'Reload settings' }))
+    const retry = await screen.findByRole('button', { name: START })
+    expect(api.to(USE)).toHaveLength(1)
+    expect(api.to(POLICY)).toHaveLength(0)
+    expect(api.to(SEND)).toHaveLength(0)
+    await userEvent.click(retry)
+    await screen.findByRole('button', { name: 'Send verification email' })
+    expect(api.to(USE).map(({ body }) => body)).toEqual([
+      { expectedRevision: RECOVERY_TEAM.policyRevision },
+      { expectedRevision: revision },
+    ])
+  })
+
+  it('clears the recovery action when refreshing a stale revision finds no eligible team', async () => {
+    let eligible = true
+    const api = fakeApi({
+      ...signedInAs(ME),
+      'GET /api/v1/me': () =>
+        json(200, eligible ? { ...ME, ssoRecoveryTeams: [RECOVERY_TEAM] } : ME),
+      'GET /api/v1/instance': enabledInstance,
+      [USE]: () => json(409, { error: 'sso_configuration_changed' }),
+    })
+    renderApp(PATHS.ssoRecovery)
+    await userEvent.click(await screen.findByRole('button', { name: START }))
+    const reload = await screen.findByRole('button', { name: 'Reload settings' })
+    eligible = false
+    await userEvent.click(reload)
+    expect((await screen.findByRole('alert')).textContent).toBe(UNAVAILABLE)
+    expect(screen.queryByRole('button', { name: START })).toBeNull()
+    expect(api.to(USE)).toHaveLength(1)
+    expect(api.to(POLICY)).toHaveLength(0)
+  })
+
   it.each(['admin', 'member', 'other-team', 'personal'])(
     'does not load recovery for %s context',
     async (context) => {
@@ -266,8 +405,8 @@ describe('SSO recovery with the capability present', () => {
     expect(api.to(SEND)).toHaveLength(0)
   })
 
-  it('takes one new mailbox ceremony per update, test and reactivation', async () => {
-    const api = useFixture()
+  it('takes one new mailbox ceremony per update, test and reactivation from personal space', async () => {
+    const api = useFixture(personalRecovery, true)
     renderApp(PATHS.ssoRecovery)
     const start = await screen.findByRole('button', { name: START })
     expect(api.to(USE)).toHaveLength(0)
@@ -301,6 +440,7 @@ describe('SSO recovery with the capability present', () => {
     expect(handoff.getAttribute('href')).toBe(PROVIDER_URL)
     expect(handoff.getAttribute('target')).toBe('_blank')
     expect(screen.queryByRole('button', { name: 'Enable provider Example IdP' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Check provider test result' })).toBeNull()
 
     await userEvent.click(screen.getByRole('button', { name: AGAIN }))
     await verify(3)

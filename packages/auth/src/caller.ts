@@ -5,6 +5,7 @@ import { type ApiKeyScope, parsePersistedApiKeyMetadata } from './api-key-metada
 import type { Auth } from './index.ts'
 import { ensurePersonalOrganization, isUuid } from './organizations.ts'
 import { type SsoDelegationStatus, ssoDelegationStatus } from './sso-delegation-access.ts'
+import { type SsoRecoveryTeam, ssoRecoveryTeamsFor } from './sso-recovery-membership.ts'
 import { ssoHardOff, type TeamSsoCapabilities } from './team-sso.ts'
 
 /** Every API key starts with this, so leaked keys are recognizable (e.g. by secret scanners). */
@@ -58,13 +59,16 @@ export type CallerResult = {
   /** Set-Cookie values to pass on: Better Auth extends or clears the session cookie. */
   setCookie: string[]
 } & (
-  | { ok: true; principal: Principal }
+  | { ok: true; principal: Principal; ssoRecoveryTeams?: SsoRecoveryTeam[] }
   | { ok: false; error: 'unauthorized' }
   | { ok: false; error: 'rate_limited'; retryAfterSeconds: number | null }
 )
 
 /** Identifies the caller of a request from its headers. */
-export type CallerResolver = (headers: Headers) => Promise<CallerResult>
+export type CallerResolver = (
+  headers: Headers,
+  options?: { includeSsoRecoveryTeams?: boolean },
+) => Promise<CallerResult>
 
 const BEARER = /^Bearer[ \t]+(\S+)[ \t]*$/i
 
@@ -89,6 +93,7 @@ export function createCallerResolver({
     emailVerified: boolean
     apiKeyScope?: ApiKeyScope
     ssoDelegationStatus?: SsoDelegationStatus
+    ssoRecoveryTeams?: SsoRecoveryTeam[]
   }
 
   /**
@@ -100,7 +105,7 @@ export function createCallerResolver({
   async function inOrganization(
     userId: string,
     organizationId: string,
-    apiKeyId?: string,
+    { apiKeyId, recoverySessionId }: { apiKeyId?: string; recoverySessionId?: string } = {},
   ): Promise<Membership | undefined> {
     if (!isUuid(userId) || !isUuid(organizationId)) return undefined
     if (apiKeyId !== undefined && !isUuid(apiKeyId)) return undefined
@@ -146,6 +151,14 @@ export function createCallerResolver({
           )} END`.as('ssoDelegationStatus'),
         ),
       )
+      .$if(recoverySessionId !== undefined, (qb) =>
+        qb.select(
+          sql<SsoRecoveryTeam[] | null>`CASE WHEN u."emailVerified"
+            THEN ${ssoRecoveryTeamsFor(db, userId, recoverySessionId as string)} END`.as(
+            'ssoRecoveryTeams',
+          ),
+        ),
+      )
       .where('m.userId', '=', userId)
       .where('m.organizationId', '=', organizationId)
       .where((eb) => eb.not(scimSuspended(organizationId, userId)))
@@ -165,6 +178,7 @@ export function createCallerResolver({
     return {
       ...(metadata ? { apiKeyScope: metadata.scope } : {}),
       ...(apiKeyId === undefined ? {} : { ssoDelegationStatus: row.ssoDelegationStatus ?? null }),
+      ...(row.ssoRecoveryTeams?.length && { ssoRecoveryTeams: row.ssoRecoveryTeams }),
       emailVerified: row.emailVerified,
       user: { id: row.userId, name: row.userName, email: row.email },
       personalOrganizationId: row.personalOrganizationId,
@@ -215,7 +229,7 @@ export function createCallerResolver({
     const stored = persisted ? parsePersistedApiKeyMetadata(persisted.metadata) : null
     if (!stored) return { ok: false, error: 'unauthorized', setCookie: [] }
     const organizationId = stored.organizationId ?? (await ensurePersonalOrganization(db, userId))
-    const membership = await inOrganization(userId, organizationId, result.key.id)
+    const membership = await inOrganization(userId, organizationId, { apiKeyId: result.key.id })
     // Keys belong to verified users only; one from before that rule (or planted in an
     // account whose real owner has not signed in yet) does not work. Read in the same
     // statement as the key's existence, so a key deleted when the email was proven cannot
@@ -230,7 +244,10 @@ export function createCallerResolver({
     }
   }
 
-  async function fromSession(headers: Headers): Promise<CallerResult> {
+  async function fromSession(
+    headers: Headers,
+    includeSsoRecoveryTeams: boolean,
+  ): Promise<CallerResult> {
     const { headers: responseHeaders, response: session } = await auth.api.getSession({
       headers,
       returnHeaders: true,
@@ -243,26 +260,38 @@ export function createCallerResolver({
       typeof session.session.activeOrganizationId === 'string'
         ? session.session.activeOrganizationId
         : undefined
+    const membershipOptions =
+      includeSsoRecoveryTeams && (ssoCapabilities.ssoOidcEnabled || ssoCapabilities.ssoSamlEnabled)
+        ? { recoverySessionId: session.session.id }
+        : undefined
     // A session without effective membership in its active organization acts in the personal one.
     const membership =
-      (active ? await inOrganization(userId, active) : undefined) ??
-      (await inOrganization(userId, await ensurePersonalOrganization(db, userId)))
+      (active ? await inOrganization(userId, active, membershipOptions) : undefined) ??
+      (await inOrganization(
+        userId,
+        await ensurePersonalOrganization(db, userId),
+        membershipOptions,
+      ))
     if (!membership) return { ok: false, error: 'unauthorized', setCookie }
     const {
       emailVerified: _,
       apiKeyScope: _scope,
       ssoDelegationStatus: _sso,
+      ssoRecoveryTeams,
       ...caller
     } = membership
     return {
       ok: true,
       principal: { ...caller, kind: 'session', sessionId: session.session.id },
+      ...(ssoRecoveryTeams && { ssoRecoveryTeams }),
       setCookie,
     }
   }
 
-  return (headers) => {
+  return (headers, { includeSsoRecoveryTeams = false } = {}) => {
     const authorization = headers.get('authorization')
-    return authorization === null ? fromSession(headers) : fromApiKey(authorization)
+    return authorization === null
+      ? fromSession(headers, includeSsoRecoveryTeams)
+      : fromApiKey(authorization)
   }
 }

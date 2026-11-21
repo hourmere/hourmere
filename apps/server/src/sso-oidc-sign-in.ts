@@ -58,8 +58,8 @@ import {
 import { recordOidcProviderTest } from './sso-oidc-test-receipts.ts'
 import { verifyOidcIdToken } from './sso-oidc-verifier.ts'
 import { authorizeSsoRead } from './sso-reads.ts'
-import { providerRecoveryAuthority } from './sso-recovery-use.ts'
-import { EXPECTED_ORGANIZATION_HEADER, organizationContextAccess } from './team-management.ts'
+import { providerRecoveryAuthority, ssoWriteContextAccess } from './sso-recovery-use.ts'
+import { EXPECTED_ORGANIZATION_HEADER } from './team-management.ts'
 
 export const OIDC_SIGN_IN_PATH = '/api/auth/sign-in/sso'
 export const OIDC_CALLBACK_PATH = '/api/auth/sso/callback/:providerId'
@@ -279,12 +279,7 @@ export async function testSsoProvider(
       },
       authorize: async (db) => {
         await authorizeSsoRead({ ...deps, db }, principal)
-        await organizationContextAccess(
-          principal,
-          headers.get(EXPECTED_ORGANIZATION_HEADER) ?? undefined,
-          true,
-          true,
-        )(db, organizationId)
+        await ssoWriteContextAccess(db, principal, headers, recoveryRequired)
         authorized = await draft(db)
       },
       authorizeOrdinary: () => {

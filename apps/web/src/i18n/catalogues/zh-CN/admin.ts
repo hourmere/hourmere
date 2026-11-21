@@ -2878,4 +2878,9 @@ export const admin = {
   'This recovery nomination is unavailable. Ask a team owner to send a new one.':
     '此恢复提名不可用。请联系团队所有者重新发送提名。',
   'Could not complete the recovery nomination. Try again.': '无法完成恢复提名。请重试。',
+
+  // SSO recovery team discovery
+  'SSO recovery for {name}': '{name}的单点登录恢复',
+  'Team to recover': '要恢复的团队',
+  'Choose a team': '选择团队',
 } as const

@@ -379,6 +379,23 @@ says so). They only enroll, confirm or withdraw the caller's own authority and e
 team data or administrator configuration.
 This allows an unlinked member to obtain the proof enforcement requires; successful
 linking still grants no team access until the SSO/admission checks pass.
+
+With an internal SSO protocol enabled, the same `/api/v1/me` exception lets a verified
+browser session discover the enforced teams where the caller is a current owner with
+accepted recovery enrollment. The optional `ssoRecoveryTeams` array contains only
+`id`, `displayName` and `policyRevision` for each of those teams. It works from any
+active space, including personal space. Pending nominations, former owners and teams
+without enforcement are excluded. The field is omitted for callers with no eligible
+teams, for API keys and OAuth clients, and while both protocols are hard-off. The
+summary alone grants no team access. A recovery grant requires separate mailbox proof.
+
+内部启用单点登录协议时，已验证的浏览器会话可通过同一个 `/api/v1/me` 例外查看自己当前
+担任所有者、已接受恢复提名且已强制使用单点登录的团队。在个人空间或其他空间中均可查看。
+可选的 `ssoRecoveryTeams` 数组对每个团队仅返回 `id`、`displayName` 和 `policyRevision`。
+待接受提名、已失去所有者身份的用户及未强制使用单点登录的团队均不符合条件。没有符合条件
+的团队、使用 API 密钥或 OAuth 客户端，或两种协议均在代码中关闭时，响应省略此字段。
+该摘要不授予团队访问权。取得恢复授权仍须单独验证邮箱。
+
 Check both `/api/v1` and native Better Auth team routes and shared services; middleware
 alone does not protect trusted calls, transactions or queued operations. A stored
 `requireSso` policy is enforced whatever the rollout constants or settings say (see
@@ -926,9 +943,9 @@ lacks proof for an enforced team keeps its active organization ID for enrollment
 receives empty organization name and slug strings. Unbound team API keys receive
 `403 sso_required` on private REST reads including `/me`. Private MCP reads including
 `whoami` return a tool error with `sso_required` for unbound API keys and OAuth grants.
-Personal spaces and teams
-without enforcement keep their previous responses. While both protocols are hard-off,
-`/me` omits the `sso` object and an enforced team's browser proofs cannot satisfy the policy.
+The `sso` object is separate from the optional recovery team list described above.
+While both protocols are hard-off, `/me` omits both fields and an enforced team's
+browser proofs cannot satisfy the policy.
 
 内部开启 OIDC 时，`GET /api/v1/me` 为当前团队成员的活动团队会话增加可选的 `sso`
 对象。它包含是否强制 SSO、已启用提供商的标识、显示名称与版本、本人有效关联的
@@ -938,9 +955,9 @@ without enforcement keep their previous responses. While both protocols are hard
 未持有效证明的浏览器会话仍可获得登记所需的组织 ID，组织名称和标识符为空字符串。
 缺少绑定的团队 API 密钥读取私有 REST 数据（包括 `/me`）时会收到
 `403 sso_required`。缺少绑定的 API 密钥和 OAuth 授权调用私有 MCP 读取工具
-（包括 `whoami`）时会收到 `sso_required` 工具错误。个人空间和未强制 SSO 的团队
-沿用原响应。两种协议均在代码中关闭时，
-`/me` 省略 `sso` 对象，浏览器证明无法满足已存储的强制策略。
+（包括 `whoami`）时会收到 `sso_required` 工具错误。`sso` 对象与上文的可选恢复团队列表
+分别返回。两种协议均在代码中关闭时，`/me` 省略这两个字段，浏览器证明无法满足已存储的
+强制策略。
 
 The built draft reads use the current team context and freshly check verified owner/admin
 membership. `listSsoProviders` accepts `limit` (1–100, default 50) and `cursor`; it returns
@@ -1170,21 +1187,28 @@ If another policy or recovery change intervenes, a stale revision returns
 两个接口均返回 `404 sso_disabled`。
 
 An accepted recovery owner starts browser recovery with `POST /api/v1/team/sso/recovery/use`.
-Send the current `expectedRevision` and `X-Expected-Organization-Id` from the instance origin.
+Send the current `policyRevision` as `expectedRevision` and the recovery team's ID as
+`X-Expected-Organization-Id` from the instance origin. The team can differ from the
+active space. If the revision changes, the request returns `409 sso_configuration_changed`.
+Reload the current summary before starting again.
 Complete the mailbox challenge and retry with `proofAttemptId`. A successful `204` grants
 authority to that browser and session for the remainder of the mailbox proof window. It
 records `sso_recovery.used` and queues a notice for the team's owners. The same proof can
-start recovery once. Provider and policy reads leave the grant available and return only SSO
-configuration when recovery supplies access. On an enforced team, an owner can spend one
-grant to create, update, test or activate a provider, or to turn off enforcement with
+start recovery once. Send the same team header on recovery reads and writes when
+working from another space. Provider and policy reads leave the grant available and
+return only SSO configuration when recovery supplies access. On an enforced team, an
+owner can spend one grant to create, update, test or activate a provider, or to turn off enforcement with
 `PUT /api/v1/team/sso/policy` and `requireSso: false`. Each successful write spends the
 grant in its transaction. Updating, testing and re-activating a provider takes three
 mailbox ceremonies. The grant ends at the mailbox proof deadline or when the browser loses its session or
 current recovery ownership. Both protocols remain hard-off and the new route returns
 `404 sso_disabled`.
 
-已接受提名的恢复所有者可在当前团队的浏览器会话中启动恢复。请求需带上团队和策略版本，
-并在验证自己的邮箱后使用同一个证明重试。成功返回 `204`，记录审计事件并通知团队所有者。
+已接受提名的恢复所有者可在浏览器会话中启动恢复。请求须以 `X-Expected-Organization-Id`
+指定恢复目标团队，并以 `expectedRevision` 传入当前策略版本。目标团队可以与当前空间不同。
+策略版本已变化时返回 `409 sso_configuration_changed`，请刷新摘要后重试。验证自己的
+邮箱后使用同一个证明重试。成功返回 `204`，记录审计事件并通知团队所有者。在其他空间
+恢复时，后续读写请求须带上同一个团队请求头。
 恢复授权随邮箱证明一起到期，可反复查看 SSO 配置。在强制 SSO 的团队，可使用一次授权来
 创建、更新、测试或启停提供者，或关闭强制单点登录。每项成功写入均在同一事务中消耗授权，
 因此更新、测试和重新启用同一个提供者需要三次邮箱验证。
@@ -1200,10 +1224,14 @@ verification. The resulting grant lets the owner inspect the providers and make 
 Save the repair, verify again to test the saved revision, and complete the provider test in
 a new tab. Return to the recovery tab and verify again to enable the tested revision. The
 owner can also spend a grant to stop requiring SSO while keeping the team's admission mode.
-The browser must already be in the affected team and be able to read its current SSO policy
-to start recovery. If the session cannot enter that team or read the policy, this screen
-cannot start recovery.
+An enrolled owner can use the same Settings entry after an ordinary sign-in that lands
+in personal space. Choose a team if more than one is eligible and select **Start recovery**
+to begin mailbox verification. The session stays in its current space throughout recovery.
 Both protocols remain hard-off, so these controls are hidden in production.
+
+OIDC sign-in uses session storage in the sign-in tab to restore the return URL
+fragment. If storage is unavailable, sign-in can still finish and returns to the
+accepted path and query. The fragment is lost.
 
 在网页应用中，团队所有者可在**设置 → 团队成员**中提名当前所有者。受邀者在对应团队空间
 打开邮件中的链接，选择**接受提名**，并在 72 小时内验证自己的 Hourmere 邮箱。仅打开
@@ -1213,9 +1241,11 @@ Both protocols remain hard-off, so these controls are hidden in production.
 所有者可查看身份提供方并进行一次更改。保存修复后，请重新验证邮箱，测试已保存的版本，
 并在新标签页完成测试。回到恢复页面，再次验证邮箱后启用通过测试的版本。所有者也可使用
 一次授权关闭强制单点登录，保留团队原有的入组方式。两种协议目前都在代码中关闭，生产环境
-不会显示这些操作。
-开始恢复前，浏览器会话须已进入受影响的团队，且能够读取当前的单点登录策略。无法读取策略
-或进入团队的会话无法从此页面启动恢复。
+不会显示这些操作。已接受提名的恢复所有者在普通登录进入个人空间后，仍可打开同一设置入口。
+若有多个符合条件的团队，请选择目标团队，然后点击**开始恢复**以验证邮箱。恢复期间会话留在原空间。
+
+OIDC 登录使用登录标签页的会话存储来恢复回跳网址的片段。浏览器无法使用会话存储时，
+仍可完成登录并返回已接受的路径和查询参数，但网址片段会丢失。
 
 `bindSsoDelegation` takes `{credentialKind, credentialId, expectedTrustGeneration,
 proofAttemptId?}`, verifies that the current team member owns the credential and

@@ -127,6 +127,7 @@ export function SettingsPage() {
     role.status === 'ready' ? (role.data?.split(',').map((value) => value.trim()) ?? []) : []
   const currentOwner =
     roles.includes('owner') && roles.every((value) => ['owner', 'admin', 'member'].includes(value))
+  const canStartRecovery = recoveryEnabled && (currentOwner || Boolean(me.ssoRecoveryTeams?.length))
   const blockedBySso =
     membership.status === 'ready' && typeof membership.data === 'object' && membership.data !== null
   const acceptanceAccess =
@@ -231,7 +232,7 @@ export function SettingsPage() {
           onDismissCallback={dismissLinkCallback}
         />
       )}
-      {(shell?.showSsoSettings || (recoveryEnabled && currentOwner)) && (
+      {(shell?.showSsoSettings || canStartRecovery) && (
         <section className="panel" aria-labelledby="sso-settings-heading">
           <h2 id="sso-settings-heading">{t('Single sign-on')}</h2>
           <div className="form-actions">
@@ -245,7 +246,7 @@ export function SettingsPage() {
                 {t('SSO domains')}
               </Link>
             )}
-            {recoveryEnabled && currentOwner && (
+            {canStartRecovery && (
               <Link className="button" to={PATHS.ssoRecovery}>
                 {t('SSO recovery')}
               </Link>

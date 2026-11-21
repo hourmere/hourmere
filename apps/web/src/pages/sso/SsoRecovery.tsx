@@ -4,6 +4,7 @@ import { api, type Schemas, unwrap } from '../../api/client.ts'
 import { isOrganizationContextChanged, RequestError } from '../../api/errors.ts'
 import type { AppShellContext } from '../../components/AppShell.tsx'
 import { ConfirmAction } from '../../components/ConfirmAction.tsx'
+import { Field } from '../../components/forms.tsx'
 import { PageHeader } from '../../components/PageHeader.tsx'
 import { PageSkeleton } from '../../components/PageSkeleton.tsx'
 import { usePageTitle } from '../../hooks.ts'
@@ -36,20 +37,74 @@ export function SsoRecoveryPage() {
   const { ssoOidcEnabled } = useOutletContext<AppShellContext>()
   const access = useTeamManagementAccess()
   const team = !me.organization.personal && me.principal.kind === 'session'
+  const recoveryTeams = me.principal.kind === 'session' ? (me.ssoRecoveryTeams ?? []) : []
+  const current = recoveryTeams.find(({ id }) => id === me.organization.id)
+  const [selectedId, selectTeam] = useState(
+    () => current?.id ?? recoveryTeams[0]?.id ?? me.organization.id,
+  )
+  const selected = recoveryTeams.find(({ id }) => id === selectedId)
+  const activeTeam = team && selectedId === me.organization.id
+  const currentOwner = team && access.status === 'ready' && access.role === 'owner'
+  const includeCurrent = currentOwner && !current
+  const showPicker =
+    recoveryTeams.length > 0 && (recoveryTeams.length > 1 || includeCurrent || !selected)
+  const picker = useId()
   usePageTitle('SSO recovery')
 
   return (
     <>
-      <PageHeader title={t('SSO recovery')}>
+      <PageHeader
+        title={
+          selected ? (
+            <span className="user-content">
+              {t('SSO recovery for {name}', { name: selected.displayName })}
+            </span>
+          ) : (
+            t('SSO recovery')
+          )
+        }
+      >
         <Link className="button" to={PATHS.settings}>
           {t('Settings')}
         </Link>
       </PageHeader>
-      {team && access.status === 'loading' ? (
+      {showPicker && (
+        <div className="panel">
+          <Field id={picker} label={t('Team to recover')}>
+            {(control) => (
+              <select
+                {...control}
+                value={selected || (includeCurrent && activeTeam) ? selectedId : ''}
+                onChange={(event) => selectTeam(event.currentTarget.value)}
+              >
+                <option value="" disabled>
+                  {t('Choose a team')}
+                </option>
+                {includeCurrent && (
+                  <option value={me.organization.id}>{me.organization.name}</option>
+                )}
+                {recoveryTeams.map(({ id, displayName }) => (
+                  <option key={id} value={id}>
+                    {displayName}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Field>
+        </div>
+      )}
+      {selected ? (
+        <RecoveryFlow
+          key={`${me.user.id}:${selected.id}:recovery`}
+          organizationId={selected.id}
+          discoveredRevision={selected.policyRevision}
+          oidcEnabled={ssoOidcEnabled === true}
+        />
+      ) : activeTeam && access.status === 'loading' ? (
         <PageSkeleton label={loading} />
-      ) : team && access.status === 'error' ? (
+      ) : activeTeam && access.status === 'error' ? (
         <RecoveryNotice message={loadError} action="Try again" onAction={access.reload} />
-      ) : team && access.status === 'ready' && access.role === 'owner' ? (
+      ) : activeTeam && currentOwner ? (
         <RecoveryFlow
           key={`${me.user.id}:${me.organization.id}`}
           organizationId={me.organization.id}
@@ -112,11 +167,14 @@ function loadPolicy(organizationId: string, signal: AbortSignal) {
 
 function recoveryReadiness(policy: Policy): Readiness {
   if (policy.requireSso === false) return { status: 'not-enforced' }
-  return policy.requireSso === true &&
-    Number.isSafeInteger(policy.policyRevision) &&
-    policy.policyRevision >= 1 &&
-    policy.policyRevision <= 2_147_483_646
-    ? { status: 'ready', revision: policy.policyRevision }
+  return policy.requireSso === true
+    ? revisionReadiness(policy.policyRevision)
+    : { status: 'unavailable' }
+}
+
+function revisionReadiness(revision: number): Readiness {
+  return Number.isSafeInteger(revision) && revision >= 1 && revision <= 2_147_483_646
+    ? { status: 'ready', revision }
     : { status: 'unavailable' }
 }
 
@@ -126,14 +184,22 @@ type ProviderTest = { url: string; providerId: string; revision: number }
 function RecoveryFlow({
   organizationId,
   oidcEnabled,
+  discoveredRevision,
 }: {
   organizationId: string
   oidcEnabled: boolean
+  discoveredRevision?: number
 }) {
   const { locale, t } = useI18n()
-  const { confirmReload } = useSession()
+  const { confirmReload, refresh } = useSession()
   const heading = useId()
-  const [readiness, setReadiness] = useState<Readiness>({ status: 'loading' })
+  // Keep the starting revision while the mailbox challenge is open. A changed revision
+  // needs a fresh challenge and an explicit retry, including after a background /me read.
+  const [readiness, setReadiness] = useState<Readiness>(() =>
+    discoveredRevision === undefined
+      ? { status: 'loading' }
+      : revisionReadiness(discoveredRevision),
+  )
   const [version, setVersion] = useState(0)
   const [proof, setProof] = useState<SsoProofChallenge | null>(null)
   const [inventory, setInventory] = useState<Inventory | null>(null)
@@ -146,9 +212,11 @@ function RecoveryFlow({
   const opener = useRef<HTMLElement | null>(null)
   const repairHeading = useRef<HTMLHeadingElement>(null)
   const testLink = useRef<HTMLAnchorElement>(null)
+  const discovered = discoveredRevision !== undefined
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: version retries the policy read
   useEffect(() => {
+    if (discovered) return
     const controller = new AbortController()
     void loadPolicy(organizationId, controller.signal).then(
       (policy) => {
@@ -159,7 +227,7 @@ function RecoveryFlow({
       },
     )
     return () => controller.abort()
-  }, [organizationId, version])
+  }, [discovered, organizationId, version])
 
   useLayoutEffect(() => {
     function reset() {
@@ -195,9 +263,23 @@ function RecoveryFlow({
   }, [providerTest])
 
   function resetRead() {
-    setReadiness({ status: 'loading' })
-    setWriteError(null)
-    setVersion((previous) => previous + 1)
+    if (!discovered) {
+      setReadiness({ status: 'loading' })
+      setWriteError(null)
+      setVersion((previous) => previous + 1)
+      return
+    }
+    void run(async (signal) => {
+      setReadiness({ status: 'loading' })
+      const updated = await refresh({ fresh: true })
+      if (signal.aborted) return
+      const team = updated?.ssoRecoveryTeams?.find(({ id }) => id === organizationId)
+      setReadiness(
+        team
+          ? revisionReadiness(team.policyRevision)
+          : { status: updated ? 'unavailable' : 'error' },
+      )
+    })
   }
 
   async function run(action: (signal: AbortSignal) => Promise<void>) {
@@ -232,7 +314,7 @@ function RecoveryFlow({
         (provider) =>
           provider.id === test.providerId &&
           provider.revision === test.revision &&
-          provider.testStatus === 'not_tested',
+          (provider.testStatus === 'unknown' || provider.testStatus === 'not_tested'),
       )
         ? test
         : null,

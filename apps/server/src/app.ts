@@ -724,14 +724,20 @@ export function createApp({
   })
 
   // Authenticated routes list this middleware; it provides c.var.principal.
-  const caller = requireCaller(resolveCaller, { allowedOrigin: new URL(publicUrl).origin })
+  const allowedOrigin = new URL(publicUrl).origin
+  const caller = requireCaller(resolveCaller, { allowedOrigin })
+  const capabilities = ssoTeamReads?.capabilities
+  const meCaller =
+    capabilities?.ssoOidcEnabled || capabilities?.ssoSamlEnabled
+      ? requireCaller(resolveCaller, { allowedOrigin, includeSsoRecoveryTeams: true })
+      : caller
 
   const meRoute = createRoute({
     method: 'get',
     path: '/api/v1/me',
     summary: 'The caller and the organization they act in',
     security: authenticated,
-    middleware: caller,
+    middleware: meCaller,
     responses: {
       200: { description: 'The signed-in caller', content: json(Me) },
       401: { description: 'No valid session or API key', content: json(ErrorBody) },
@@ -756,7 +762,11 @@ export function createApp({
         publicUrl,
         access?.policy ?? null,
       ))
-    return c.json(sso ? { ...identity, sso } : identity, 200)
+    const ssoRecoveryTeams = !access?.suspended && c.var.ssoRecoveryTeams
+    return c.json(
+      { ...identity, ...(sso && { sso }), ...(ssoRecoveryTeams && { ssoRecoveryTeams }) },
+      200,
+    )
   })
 
   for (const register of routes) register({ app, caller })

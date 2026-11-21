@@ -2,7 +2,7 @@ import { API_KEY_REST_OPERATIONS } from '@hourmere/auth'
 import type { Context } from 'hono'
 import { createMiddleware } from 'hono/factory'
 import type { CallerEnv } from './caller.ts'
-import { hasSsoRecoveryAuthority } from './sso-recovery-use.ts'
+import { hasSsoRecoveryAuthority, otherSsoRecoveryTeam } from './sso-recovery-use.ts'
 import {
   requireTeamRead,
   type SsoTeamReadDeps,
@@ -55,7 +55,7 @@ export function teamReadRoute(operation: string) {
 }
 
 const checks = new WeakMap<Context, TeamReadCheck>()
-const recoveryReads = new WeakSet<Context>()
+const recoveryReads = new WeakMap<Context, CallerEnv['Variables']['principal']>()
 const registered = new WeakSet<object>()
 
 export function isTeamReadMiddleware(handler: object) {
@@ -66,8 +66,8 @@ export function restTeamReadAccess(c: Context) {
   return checks.get(c)
 }
 
-export function isSsoRecoveryRead(c: Context) {
-  return recoveryReads.has(c)
+export function ssoRecoveryReadPrincipal(c: Context) {
+  return recoveryReads.get(c)
 }
 
 export function teamReadMiddleware(
@@ -81,13 +81,20 @@ export function teamReadMiddleware(
     // The booking handoff first resolves its authorized target. The browser's own
     // summary uses the access decision to limit its projection during enrollment.
     if (route === 'sso_configuration') {
+      const headers = c.req.raw.headers
+      const target = otherSsoRecoveryTeam(principal, headers)
+      if (target && (await hasSsoRecoveryAuthority(deps.db, target, headers, deps.publicUrl))) {
+        recoveryReads.set(c, target)
+        return next()
+      }
       const access = await check()
       if (
         !access.allowed &&
         !access.suspended &&
-        (await hasSsoRecoveryAuthority(deps.db, principal, c.req.raw.headers, deps.publicUrl))
+        !target &&
+        (await hasSsoRecoveryAuthority(deps.db, principal, headers, deps.publicUrl))
       )
-        recoveryReads.add(c)
+        recoveryReads.set(c, principal)
       else requireTeamRead(access)
     } else if (
       route === 'active_team' ||

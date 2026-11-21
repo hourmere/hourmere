@@ -5,6 +5,7 @@ import {
   createAuthPool,
   createBrowserSession,
   createCallerResolver,
+  ensurePersonalOrganization,
   type SignupPolicy,
 } from '@hourmere/auth'
 import type { Database, Db } from '@hourmere/db'
@@ -582,6 +583,81 @@ describe.skipIf(!databaseUrl)('SSO recovery', () => {
     expect(await journal()).toEqual([])
     expect(h.notices).toEqual([])
     expect((await useRecovery(h, proof.cookie, proof.id)).status).toBe(204)
+  })
+
+  it('recovers an enforced team from the owner’s personal session without switching spaces', async () => {
+    const h = instance(
+      true,
+      createCallerResolver({
+        auth,
+        db,
+        ssoCapabilities: { ssoOidcEnabled: true, ssoSamlEnabled: false },
+      }),
+    )
+    await enforceSso()
+    const personal = await ensurePersonalOrganization(db, fixture.owner)
+    const owner = await browser(fixture.owner, personal)
+    const target = { 'X-Expected-Organization-Id': fixture.team }
+    const disable = {
+      expectedRevision: recoveryRevision,
+      requireSso: false,
+      admission: 'invitation_only',
+    }
+    const summary = await read(h, '/api/v1/me', owner.cookie)
+    expect(summary.status).toBe(200)
+    expect(await summary.json()).toMatchObject({
+      organization: { id: personal, personal: true },
+      ssoRecoveryTeams: [
+        { id: fixture.team, displayName: expect.any(String), policyRevision: recoveryRevision },
+      ],
+    })
+
+    expect((await read(h, policyPath, owner.cookie, target)).status).toBe(403)
+    expect((await write(h, policyPath, owner.cookie, disable, target, 'PUT')).status).toBe(403)
+    await checkError(
+      await write(h, recoveryUsePath, owner.cookie, { expectedRevision: recoveryRevision - 1 }),
+      409,
+      'sso_configuration_changed',
+    )
+
+    const proof = await recover(h, owner.cookie)
+    const readPolicy = await read(h, policyPath, proof.cookie, target)
+    expect(readPolicy.status).toBe(200)
+    expect(await readPolicy.json()).toMatchObject({
+      requireSso: true,
+      policyRevision: recoveryRevision,
+    })
+    const providers = await read(h, providersPath, proof.cookie, target)
+    expect(providers.status).toBe(200)
+    expect(await providers.json()).toMatchObject({
+      data: [expect.objectContaining({ id: fixture.provider.id })],
+    })
+    expect((await read(h, providersPath, proof.cookie)).status).toBe(403)
+    const bookings = await read(h, '/api/v1/team/bookings', proof.cookie, target)
+    expect(bookings.status).toBe(409)
+    expect(await bookings.json()).toMatchObject({ error: 'organization_context_changed' })
+    expect(
+      (
+        await read(h, providersPath, proof.cookie, {
+          'X-Expected-Organization-Id': fixture.otherTeam,
+        })
+      ).status,
+    ).toBe(403)
+    const otherSession = await browser(fixture.owner, personal)
+    const otherCookie = proof.cookie.replace(owner.cookie, otherSession.cookie)
+    expect((await read(h, policyPath, otherCookie, target)).status).toBe(403)
+    expect((await write(h, policyPath, otherCookie, disable, target, 'PUT')).status).toBe(403)
+
+    const disabled = await write(h, policyPath, proof.cookie, disable, target, 'PUT')
+    expect(disabled.status).toBe(200)
+    expect(await disabled.json()).toMatchObject({
+      requireSso: false,
+      policyRevision: recoveryRevision + 1,
+    })
+    expect((await read(h, policyPath, proof.cookie, target)).status).toBe(403)
+    expect(await (await read(h, '/api/v1/me', proof.cookie)).json()).toMatchObject({
+      organization: { id: personal, personal: true },
+    })
   })
 
   it('rejects expired proof, non-owners, demoted owners and owners who never enrolled', async () => {
