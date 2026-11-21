@@ -1,107 +1,31 @@
-import type { Locator, Page } from '@playwright/test'
+import type { Page } from '@playwright/test'
+import {
+  button,
+  clickPrivate,
+  emailLinkLabel,
+  expectSession,
+  expectSignedOut,
+  isAuthorization,
+  mailboxSendLabel,
+  openPrivateLink,
+  proveMailbox,
+  returnPath,
+  signInAtKeycloak,
+  signInUrl,
+  signInWithEmail,
+  signOut,
+  ssoLabel,
+  submitKeycloakLogin,
+} from '../keycloak/browser.ts'
 import { expect, type KeycloakFixture, test } from '../keycloak/fixture.ts'
 
-const returnPath = '/app/event-types'
 const callbackRoute = '/api/auth/sso/callback/'
 const mailboxProofPath = '/app/mailbox-proof'
 const completePath = '/api/auth/sso/oidc/complete'
 const invitationPath = '/api/auth/organization/accept-invitation'
-const ssoLabel = 'Sign in with single sign-on'
-const emailLinkLabel = 'Email me a sign-in link'
-const mailboxSendLabel = 'Send verification email'
-const mailboxProven = 'Email verification complete.'
 const genericOutcome =
   'To continue, sign in with your usual method or use a current team invitation.'
 const personalSignInLabels = ['Continue with Google', 'Sign in with Microsoft']
-
-function button(page: Page, name: string) {
-  return page.getByRole('button', { name, exact: true })
-}
-
-function signInUrl(app: KeycloakFixture) {
-  const url = new URL('/sign-in', app.url)
-  url.search = new URLSearchParams({ sso: app.providerId, next: returnPath }).toString()
-  return url.href
-}
-
-function isAuthorization(url: URL, { idp }: KeycloakFixture) {
-  const authorize = new URL(`${idp.issuer}/protocol/openid-connect/auth`)
-  return url.origin === authorize.origin && url.pathname === authorize.pathname
-}
-
-async function openPrivateLink(page: Page, url: URL) {
-  try {
-    await page.goto(url.href)
-  } catch {
-    throw new Error('The browser could not open the fixture sign-in link')
-  }
-}
-
-async function clickPrivate(button: Locator) {
-  try {
-    await button.click()
-  } catch {
-    throw new Error('The browser could not submit the fixture authentication step')
-  }
-}
-
-async function fillPrivate(input: Locator, value: string) {
-  try {
-    await input.fill(value)
-  } catch {
-    throw new Error('The browser could not fill a private fixture field')
-  }
-}
-
-async function submitKeycloakLogin(page: Page, app: KeycloakFixture, username: string) {
-  await page.locator('input[name="username"]').fill(username)
-  await fillPrivate(page.locator('input[name="password"]'), app.idp.password)
-  await clickPrivate(page.getByRole('button', { name: /^sign in$/i }))
-}
-
-async function signInAtKeycloak(
-  page: Page,
-  app: KeycloakFixture,
-  username = app.idp.linked.username,
-) {
-  await clickPrivate(button(page, ssoLabel))
-  await submitKeycloakLogin(page, app, username)
-}
-
-async function signInWithEmail(page: Page, app: KeycloakFixture, email: string) {
-  await page.getByRole('textbox', { name: 'Email', exact: true }).fill(email)
-  await button(page, emailLinkLabel).click()
-  await expect(page.getByRole('heading', { name: 'Check your email' })).toBeVisible()
-  await openPrivateLink(page, await app.magicLink(email))
-  await clickPrivate(button(page, 'Sign in to Hourmere'))
-}
-
-async function expectSession(page: Page, app: KeycloakFixture, userId: string, personal: boolean) {
-  await expect
-    .poll(() => {
-      const url = new URL(page.url())
-      return url.origin === app.url && url.pathname === returnPath
-    })
-    .toBe(true)
-  await expect(button(page, 'Sign out')).toBeVisible()
-  const response = await page.request.get(`${app.url}/api/v1/me`)
-  expect(response.status()).toBe(200)
-  expect(await response.json()).toMatchObject({
-    user: { id: userId },
-    principal: { kind: 'session' },
-    organization: personal ? { personal } : { id: app.teamId, personal },
-  })
-}
-
-async function expectSignedOut(page: Page, app: KeycloakFixture) {
-  expect((await page.request.get(`${app.url}/api/v1/me`)).status()).toBe(401)
-}
-
-async function signOut(page: Page, app: KeycloakFixture) {
-  await button(page, 'Sign out').click()
-  await expect(button(page, emailLinkLabel)).toBeVisible()
-  await expectSignedOut(page, app)
-}
 
 async function expectRefusal(page: Page, app: KeycloakFixture) {
   await expect(page.getByRole('alert')).toHaveText('You could not be signed in. Please try again.')
@@ -227,17 +151,6 @@ async function openMemberSettings(page: Page, app: KeycloakFixture) {
   const capabilities = await instance.json()
   await expect(page.getByRole('heading', { name: 'Account', exact: true })).toBeVisible()
   return capabilities
-}
-
-async function proveMailbox(page: Page, app: KeycloakFixture, email: string) {
-  await button(page, mailboxSendLabel).click()
-  const field = page.getByLabel('Email verification link', { exact: true })
-  await expect(field).toBeEnabled()
-  const link = await app.mailboxLink(email)
-  await fillPrivate(field, link.href)
-  await clickPrivate(button(page, 'Verify email link'))
-  await expect(page.getByText(mailboxProven, { exact: true })).toBeVisible()
-  return new URLSearchParams(link.hash.slice(1)).get('attempt')
 }
 
 async function beginAdmission(page: Page, app: KeycloakFixture, username: string) {
