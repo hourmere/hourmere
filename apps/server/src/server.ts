@@ -187,7 +187,7 @@ import { teamInvitationRoutes } from './routes/team-invitations.ts'
 import { webhookRoutes } from './routes/webhooks.ts'
 import { workflowRoutes } from './routes/workflows.ts'
 import { zoomEventRoutes } from './routes/zoom-events.ts'
-import { resolveRoutingFormsEnabled } from './routing-form-setting.ts'
+import { parseRoutingFormsEnabled, resolveRoutingFormsEnabled } from './routing-form-setting.ts'
 import { closeConnectionsWhen, closeServer } from './shutdown.ts'
 import { configuredSmsJobs, createConfiguredSmsInbound } from './sms.ts'
 import { SSO_DOMAIN_RECHECK_JOB, ssoDomainRecheckJob } from './sso-domain-recheck.ts'
@@ -887,6 +887,7 @@ async function start(
   restoreConsole: () => void,
 ): Promise<RunningServer> {
   const config = loadConfig(env)
+  const routingFormsRequested = parseRoutingFormsEnabled(env.ROUTING_FORMS_ENABLED)
   const workflowsEnabled = config.WORKFLOWS_ENABLED
   const role = config.HOURMERE_ROLE
   if (config.WEBHOOK_PRIVATE_TARGETS.length)
@@ -906,7 +907,7 @@ async function start(
   let routingFormsEnabled = false
   try {
     // Only a web-serving role can claim /route. Skip the lookup entirely when off.
-    if (role !== 'worker' && config.ROUTING_FORMS_ENABLED) {
+    if (role !== 'worker' && routingFormsRequested) {
       routingFormsEnabled = await resolveRoutingFormsEnabled({ db, routingFormsEnabled: true })
     }
     await db.transaction().execute((trx) => ensureWaitlistKey(trx, config.BETTER_AUTH_SECRET))
