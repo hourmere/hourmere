@@ -46,9 +46,9 @@ export interface ScimResourceRequest {
 export type ScimBody = { ok: true; value: unknown } | { ok: false; reply: ScimReply }
 
 export interface ScimReply {
-  status: 200 | 201 | 400 | 401 | 403 | 404 | 409 | 412 | 413 | 429 | 501
+  status: 200 | 201 | 204 | 400 | 401 | 403 | 404 | 409 | 412 | 413 | 429 | 501
   body: unknown
-  /** Response headers such as Location or Retry-After; the content type is always SCIM's. */
+  /** Additional response headers such as Location or Retry-After. */
   headers?: Record<string, string> | undefined
 }
 
@@ -127,7 +127,7 @@ export function mountScim(
   if (options?.resources && !publicUrl) throw new Error('SCIM resources need the public URL')
   const origin = publicUrl ? new URL(publicUrl).origin : ''
   const limit = createRateLimiter({ limit: 120, windowSeconds: 60 })
-  const send = (c: Context, status: ScimReply['status'] | 401 | 429 | 500, body: unknown) => {
+  const send = (c: Context, status: Exclude<ScimReply['status'], 204> | 500, body: unknown) => {
     c.header('Content-Type', 'application/scim+json')
     return c.body(JSON.stringify(body), status)
   }
@@ -170,6 +170,7 @@ export function mountScim(
       })
       if (reply) {
         for (const [name, value] of Object.entries(reply.headers ?? {})) c.header(name, value)
+        if (reply.status === 204) return c.body(null, 204)
         return send(c, reply.status, reply.body)
       }
       return respond(c, 404, 'SCIM resources are not available yet.')

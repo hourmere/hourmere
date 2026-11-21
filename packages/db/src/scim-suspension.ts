@@ -14,6 +14,7 @@ export async function suspendScimMembership(
   trx: Transaction<Database>,
   { organizationId, userId, connectionId, scimUserId }: ScimMembershipSuspension,
   actor: { type: 'scim_token'; id: string } | { type: 'system' },
+  { reuseExistingBlock = false } = {},
 ) {
   // Team selection and proof issuance take the corresponding team lock before
   // checking suspension. They can finish before revocation or see the committed block.
@@ -39,28 +40,45 @@ export async function suspendScimMembership(
     trx,
   )
 
-  const block = await trx
-    .insertInto('scim_membership_blocks')
-    .columns(['organization_id', 'user_id', 'source', 'kind', 'connection_id', 'scim_user_id'])
-    .expression((eb) =>
-      eb
-        .selectFrom('scim_users')
-        .select([
-          'organization_id',
-          'linked_user_id',
-          eb.val('scim').as('source'),
-          eb.val('suspension').as('kind'),
-          'connection_id',
-          'id',
-        ])
+  // Retirement also revokes credentials for a User that was already suspended, keeping
+  // that User's original blocker and its attribution intact.
+  const existingBlock = reuseExistingBlock
+    ? await trx
+        .selectFrom('scim_membership_blocks')
+        .select('id')
         .where('organization_id', '=', organizationId)
+        .where('user_id', '=', userId)
+        .where('source', '=', 'scim')
+        .where('kind', '=', 'suspension')
         .where('connection_id', '=', connectionId)
-        .where('id', '=', scimUserId)
-        .where('linked_user_id', '=', userId)
-        .where('retired_at', 'is', null),
-    )
-    .returning('id')
-    .executeTakeFirstOrThrow()
+        .where('scim_user_id', '=', scimUserId)
+        .where('cleared_at', 'is', null)
+        .executeTakeFirst()
+    : undefined
+  const block =
+    existingBlock ??
+    (await trx
+      .insertInto('scim_membership_blocks')
+      .columns(['organization_id', 'user_id', 'source', 'kind', 'connection_id', 'scim_user_id'])
+      .expression((eb) =>
+        eb
+          .selectFrom('scim_users')
+          .select([
+            'organization_id',
+            'linked_user_id',
+            eb.val('scim').as('source'),
+            eb.val('suspension').as('kind'),
+            'connection_id',
+            'id',
+          ])
+          .where('organization_id', '=', organizationId)
+          .where('connection_id', '=', connectionId)
+          .where('id', '=', scimUserId)
+          .where('linked_user_id', '=', userId)
+          .where('retired_at', 'is', null),
+      )
+      .returning('id')
+      .executeTakeFirstOrThrow())
 
   // Delete by indexed account ID in one batch. A simultaneous rolling refresh only
   // updates the existing row, so it either completes before deletion or finds no session.

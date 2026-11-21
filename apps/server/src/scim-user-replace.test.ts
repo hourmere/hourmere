@@ -143,7 +143,7 @@ describe.skipIf(!databaseUrl)('SCIM User profile replacement and PATCH', () => {
   function send(
     organization: Organization,
     resource: string,
-    method: 'GET' | 'POST' | 'PUT' | 'PATCH',
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     body?: Json | string,
     headers: Record<string, string> = {},
     application = app,
@@ -720,6 +720,12 @@ describe.skipIf(!databaseUrl)('SCIM User profile replacement and PATCH', () => {
         404,
       ),
     ).toEqual(unavailable)
+    expect(
+      await expectError(
+        await send(organization, `Users/${id}`, 'DELETE', undefined, {}, application),
+        404,
+      ),
+    ).toEqual(unavailable)
     for (const resource of [
       'Users',
       `Users/${id}`,
@@ -734,7 +740,7 @@ describe.skipIf(!databaseUrl)('SCIM User profile replacement and PATCH', () => {
           404,
         ),
       ).toEqual(unavailable)
-    expect((await stored(id)).user_name).toBe('production-control')
+    expect(await stored(id)).toMatchObject({ user_name: 'production-control', retired_at: null })
     expect(await updates(id)).toEqual([])
   })
 

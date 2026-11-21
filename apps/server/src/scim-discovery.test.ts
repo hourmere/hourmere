@@ -509,6 +509,8 @@ describe('SCIM discovery representations', () => {
       'scim-user-lifecycle',
       'scim-user-replace',
       'scim-user-patch',
+      'scim-user-retirement',
+      'scim-user-retirement-claims',
       'scim-user-write',
     ]
     expect(files.some((file) => file.endsWith('server.ts'))).toBe(true)

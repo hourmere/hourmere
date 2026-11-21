@@ -25,24 +25,13 @@ async function replace(
   id: string,
   method: 'PUT' | 'PATCH',
 ): Promise<ScimReply> {
-  if (request.hasWritePrecondition)
-    return {
-      status: 412,
-      body: scimError(412, 'Conditional writes are not supported.'),
-    }
   if (!SCIM_USER_ID.test(id)) return scimUserNotFound
   const projection = parseScimProjection(request.query, scimUserQuery)
-  if (!projection.ok) return projection.reply
-  const body = await request.body?.()
-  if (!body) return invalidSyntax('The request body is required.').reply
-  if (!body.ok) return body.reply
+  // Read the request before taking a lock, but only report validation errors for live IDs.
+  const body = !request.hasWritePrecondition && projection.ok ? await request.body?.() : undefined
   const { principal } = request
   const organizationId = principal.organizationId
   try {
-    const write =
-      method === 'PATCH'
-        ? { method, operations: parseScimUserPatch(body.value) }
-        : { method, ...parseScimUserWrite(body.value) }
     return await db
       .transaction()
       .setIsolationLevel('read committed')
@@ -59,6 +48,15 @@ async function replace(
           .forUpdate()
           .executeTakeFirst()
         if (!entry) return scimUserNotFound
+        if (request.hasWritePrecondition)
+          return { status: 412, body: scimError(412, 'Conditional writes are not supported.') }
+        if (!projection.ok) return projection.reply
+        if (!body) return invalidSyntax('The request body is required.').reply
+        if (!body.ok) return body.reply
+        const write =
+          method === 'PATCH'
+            ? { method, operations: parseScimUserPatch(body.value) }
+            : { method, ...parseScimUserWrite(body.value) }
         const normalized =
           write.method === 'PATCH'
             ? normalizeScimUserPatch(entry, write.operations)

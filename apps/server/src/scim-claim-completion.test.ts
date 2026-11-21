@@ -29,6 +29,7 @@ import type { ScimResourceHandler } from './scim.ts'
 import { SCIM_URN, scimDiscovery } from './scim-discovery.ts'
 import { type ScimUserCreationDeps, scimUserCreation } from './scim-user-create.ts'
 import { scimUserReplacement } from './scim-user-replace.ts'
+import { scimUserRetirement } from './scim-user-retirement.ts'
 import { scimUsers } from './scim-users.ts'
 import { productionAppOptions, productionAuthOptions } from './server.ts'
 
@@ -248,6 +249,7 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
     scimDiscovery(request) ??
     scimUserCreation(creationDeps)(request) ??
     scimUserReplacement(db)(request) ??
+    scimUserRetirement(db)(request) ??
     scimUsers(db)(request)
 
   async function listen(fetch: (request: Request) => Response | Promise<Response>) {
@@ -285,7 +287,12 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
     return { url: await listen(app.fetch), auth }
   }
 
-  async function provision(served: { url: string }, organization: Team, address: string) {
+  async function provision(
+    served: { url: string },
+    organization: Team,
+    address: string,
+    identifiers: { userName: string; externalId?: string } = { userName: `user-${unique()}` },
+  ) {
     const response = await fetch(`${served.url}/scim/v2/${organization.id}/Users`, {
       method: 'POST',
       headers: {
@@ -294,7 +301,7 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
       },
       body: JSON.stringify({
         schemas: [SCIM_URN.user],
-        userName: `user-${unique()}`,
+        ...identifiers,
         displayName: 'Provisioned Person',
         name: { givenName: 'Provisioned', familyName: 'Person' },
         emails: [{ value: address, type: 'work', primary: true }],
@@ -1185,6 +1192,186 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
         .executeTakeFirst(),
     ).toEqual({ linked_user_id: recipient })
   })
+  it.each(['pending', 'invalidated'] as const)(
+    'cancels the invitation of an unfinished %s claim and requires a fresh proof after retirement',
+    async (state) => {
+      const served = await instance()
+      const organization = await team()
+      const address = `retired-${unique()}@example.com`
+      const recipient = await person(address)
+      const { cookie } = await signIn(recipient)
+      const identifiers = { userName: `retired-${unique()}`, externalId: `idp-${unique()}` }
+      const first = await provision(served, organization, address, identifiers)
+      const oldInvitationId = first.claim.invitation_id
+      if (!oldInvitationId) throw new Error('Expected a SCIM-issued invitation')
+      const url = `${served.url}/scim/v2/${organization.id}/Users/${first.id}`
+      const headers = {
+        authorization: `Bearer ${organization.secret}`,
+        'content-type': 'application/scim+json',
+      }
+      const delivery = () =>
+        db
+          .selectFrom('invitation_deliveries')
+          .selectAll()
+          .where('invitation_id', '=', oldInvitationId)
+          .executeTakeFirstOrThrow()
+      if (state === 'invalidated') {
+        // A work address change invalidates the claim and leaves the invitation live.
+        expect(
+          (
+            await fetch(url, {
+              method: 'PUT',
+              headers,
+              body: JSON.stringify({
+                schemas: [SCIM_URN.user],
+                ...identifiers,
+                emails: [{ type: 'work', value: `new-${unique()}@example.com` }],
+              }),
+            })
+          ).status,
+        ).toBe(200)
+        await db
+          .updateTable('invitation_deliveries')
+          .set({ state: 'smtp_accepted', attempts: 1, smtp_accepted_at: new Date() })
+          .where('invitation_id', '=', oldInvitationId)
+          .execute()
+      }
+      const before = await snapshot(organization.id)
+      const previousClaim = before.claims.find((claim) => claim.id === first.claim.id)
+      expect(previousClaim?.invalidated_at).toEqual(
+        state === 'invalidated' ? expect.any(Date) : null,
+      )
+      expect(before.invitations).toEqual([
+        expect.objectContaining({ id: oldInvitationId, status: 'pending' }),
+      ])
+      const previousDelivery = await delivery()
+
+      const deletion = await fetch(url, { method: 'DELETE', headers })
+      expect(deletion.status).toBe(204)
+      expect(await deletion.text()).toBe('')
+      const retired = await snapshot(organization.id)
+      expect(retired.invitations).toEqual([{ ...before.invitations[0], status: 'canceled' }])
+      expect(retired.members).toEqual(before.members)
+      expect(retired.claims).toEqual([
+        { ...previousClaim, invalidated_at: previousClaim?.invalidated_at ?? expect.any(Date) },
+      ])
+      expect(retired.events).toContainEqual({
+        action: 'membership.invitation_cancelled',
+        actor_type: 'scim_token',
+        actor_id: expect.any(String),
+        credential_type: 'none',
+        credential_id: null,
+        target_type: 'invitation',
+        target_id: oldInvitationId,
+        details: {},
+      })
+      if (state === 'pending') {
+        expect(await delivery()).toEqual({
+          ...previousDelivery,
+          state: 'skipped',
+          last_error_code: 'invitation_ineligible',
+          updated_at: expect.any(Date),
+        })
+      } else {
+        expect(await delivery()).toEqual(previousDelivery)
+      }
+
+      const fresh = await provision(served, organization, address, identifiers)
+      const newInvitationId = fresh.claim.invitation_id
+      expect(fresh.id).not.toBe(first.id)
+      if (!newInvitationId) throw new Error('Expected a fresh invitation')
+      expect(newInvitationId).not.toBe(oldInvitationId)
+      const beforeProof = await snapshot(organization.id)
+      expect(beforeProof.members).toEqual(before.members)
+      expect(beforeProof.entries.find((entry) => entry.id === fresh.id)).toMatchObject({
+        linked_user_id: null,
+        linked_member_id: null,
+      })
+      const refused = await accept(served, cookie, oldInvitationId)
+      expect(refused).toMatchObject({ status: 400, body: { code: 'INVITATION_NOT_FOUND' } })
+      expect(refused).toEqual(await accept(served, cookie, randomUUID()))
+      expect(await snapshot(organization.id)).toEqual(beforeProof)
+      expect((await accept(served, cookie, newInvitationId)).status).toBe(200)
+      const afterProof = await snapshot(organization.id)
+      const member = afterProof.members.find((row) => row.userId === recipient)
+      expect(member).toMatchObject({ role: 'member' })
+      expect(afterProof.entries).toEqual([
+        retired.entries[0],
+        expect.objectContaining({
+          id: fresh.id,
+          linked_user_id: recipient,
+          linked_member_id: member?.id,
+        }),
+      ])
+      expect(claimed(afterProof.events).map((event) => event.target_id)).toEqual([fresh.id])
+    },
+  )
+  it.each(['issued', 'renewed'] as const)(
+    'preserves an invitation %s by a local owner when its SCIM User retires',
+    async (authority) => {
+      const served = await instance()
+      const organization = await team()
+      const owner = organization.people.owner
+      const address = `local-${unique()}@example.com`
+      const recipient = await person(address)
+      const local =
+        authority === 'issued' ? await appInvitation(organization, owner, address) : undefined
+      const { id, claim } = await provision(served, organization, address)
+      const invitationId = claim.invitation_id
+      if (!invitationId) throw new Error('Expected the claim to bind the invitation')
+      if (authority === 'issued') {
+        expect(invitationId).toBe(local?.id)
+      } else {
+        // Backdate the generation past the resend cooldown, then renew through the same
+        // service as the dashboard. Its generation and expiry now belong to local authority.
+        await sql`UPDATE invitation_deliveries SET generation_started_at = now() - interval '2 minutes',
+          updated_at = now() - interval '2 minutes' WHERE invitation_id = ${invitationId}`.execute(
+          db,
+        )
+        const renewed = await appInvitation(organization, owner, address, {
+          resend: true,
+          invitationId,
+          expectedGeneration: 1,
+          requestId: randomUUID(),
+        })
+        expect(renewed.id).toBe(invitationId)
+        expect(renewed.expiresAt.getTime()).toBeGreaterThan(claim.expires_at.getTime())
+      }
+      const delivery = () =>
+        db
+          .selectFrom('invitation_deliveries')
+          .selectAll()
+          .where('invitation_id', '=', invitationId)
+          .executeTakeFirstOrThrow()
+      const before = await snapshot(organization.id)
+      const delivered = await delivery()
+      const response = await fetch(`${served.url}/scim/v2/${organization.id}/Users/${id}`, {
+        method: 'DELETE',
+        headers: { authorization: `Bearer ${organization.secret}` },
+      })
+      expect(response.status).toBe(204)
+      const retired = await snapshot(organization.id)
+      expect(retired.invitations).toEqual(before.invitations)
+      expect(retired.claims).toEqual([{ ...claim, invalidated_at: expect.any(Date) }])
+      expect(retired.events).toEqual([
+        ...before.events,
+        expect.objectContaining({ action: 'scim_user.retired', target_id: id }),
+      ])
+      expect(await delivery()).toEqual(delivered)
+
+      const answer = await accept(served, (await signIn(recipient)).cookie, invitationId)
+      expect(answer.status, JSON.stringify(answer.body)).toBe(200)
+      const after = await snapshot(organization.id)
+      expect(after.entries).toEqual(retired.entries)
+      expect(after.claims).toEqual(retired.claims)
+      expect(after.members).toContainEqual({
+        id: expect.any(String),
+        userId: recipient,
+        role: 'member',
+      })
+      expect(claimed(after.events)).toEqual([])
+    },
+  )
   it('admits an account another entry links without a second link', async () =>
     verifyLinkedElsewhere(await instance()))
   it('completes once under repeated and concurrent acceptance', async () =>
