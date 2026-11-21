@@ -187,6 +187,7 @@ import { teamInvitationRoutes } from './routes/team-invitations.ts'
 import { webhookRoutes } from './routes/webhooks.ts'
 import { workflowRoutes } from './routes/workflows.ts'
 import { zoomEventRoutes } from './routes/zoom-events.ts'
+import { parseRoutingFormsEnabled, resolveRoutingFormsEnabled } from './routing-form-setting.ts'
 import { closeConnectionsWhen, closeServer } from './shutdown.ts'
 import { configuredSmsJobs, createConfiguredSmsInbound } from './sms.ts'
 import { SSO_DOMAIN_RECHECK_JOB, ssoDomainRecheckJob } from './sso-domain-recheck.ts'
@@ -209,10 +210,6 @@ import { createWorkerHealthApp } from './worker-health.ts'
 // only in-process tests inject enabled capabilities into productRoutes.
 const ssoOidcEnabled = false
 const ssoSamlEnabled = false
-// Routing forms are hard-off in code until their operator setting lands
-// (docs/routing-forms.md, Rollout gating): no environment variable or other setting reads
-// this, and production never overrides it; only in-process tests inject `true`.
-const routingFormsEnabled = false
 
 /**
  * The /api/v1 route groups, each created with what it needs. The OpenAPI document (and with
@@ -249,7 +246,7 @@ export function productRoutes({
   ssoRecoveryEnrollmentQueue,
   ssoOidcEnabled: oidcEnabled = ssoOidcEnabled,
   ssoSamlEnabled: samlEnabled = ssoSamlEnabled,
-  routingFormsEnabled: routingEnabled = routingFormsEnabled,
+  routingFormsEnabled: routingEnabled = false,
   successRedirectAllowIpHosts = false,
   successRedirectPolicy = { publicUrl, allowIpHosts: successRedirectAllowIpHosts },
   bookingMaxInviteeReschedules,
@@ -504,7 +501,7 @@ export function productTools({
   smtpConfigured,
   publicUrl,
   slotSnippetsEnabled = false,
-  routingFormsEnabled: routingEnabled = routingFormsEnabled,
+  routingFormsEnabled: routingEnabled = false,
   followUpHostNotesEnabled,
   workflowRunCursorSecret,
   workflowsEnabled,
@@ -619,6 +616,8 @@ export function productTools({
 export interface ProductionAppDeps extends RecurringBookingAdmissionDeps {
   config: Config
   db: Db
+  /** Effective state after the startup namespace check. */
+  routingFormsEnabled?: boolean
   /** Better Auth session reads are used by the provider-test callback. */
   auth: Pick<Auth, 'handler'> & { api?: Pick<Auth['api'], 'getSession'> }
   /** createCallerResolver for that auth. */
@@ -654,6 +653,7 @@ export interface ProductionAppDeps extends RecurringBookingAdmissionDeps {
 export function productionAppOptions({
   config,
   db,
+  routingFormsEnabled = false,
   auth,
   resolveCaller,
   resolveMcpOAuth,
@@ -742,6 +742,7 @@ export function productionAppOptions({
       recurringBookingsEnabled,
       embedAllowedOrigins: config.EMBED_ALLOWED_ORIGINS,
       slotSnippetsEnabled: config.SLOT_SNIPPETS_ENABLED,
+      routingFormsEnabled,
       successRedirectPolicy,
       bookingMaxInviteeReschedules: config.BOOKING_MAX_INVITEE_RESCHEDULES,
       bookingExportMaxConcurrent: config.BOOKING_EXPORT_MAX_CONCURRENT,
@@ -777,6 +778,7 @@ export function productionAppOptions({
       tools: productTools({
         db,
         slotSnippetsEnabled: config.SLOT_SNIPPETS_ENABLED,
+        routingFormsEnabled,
         waitlistSecret: config.BETTER_AUTH_SECRET,
         meetingPollSecret: config.BETTER_AUTH_SECRET,
         publicUrl: config.PUBLIC_URL,
@@ -885,6 +887,7 @@ async function start(
   restoreConsole: () => void,
 ): Promise<RunningServer> {
   const config = loadConfig(env)
+  const routingFormsRequested = parseRoutingFormsEnabled(env.ROUTING_FORMS_ENABLED)
   const workflowsEnabled = config.WORKFLOWS_ENABLED
   const role = config.HOURMERE_ROLE
   if (config.WEBHOOK_PRIVATE_TARGETS.length)
@@ -901,7 +904,12 @@ async function start(
   }
 
   let runWorkflowJobs = false
+  let routingFormsEnabled = false
   try {
+    // Only a web-serving role can claim /route. Skip the lookup entirely when off.
+    if (role !== 'worker' && routingFormsRequested) {
+      routingFormsEnabled = await resolveRoutingFormsEnabled({ db, routingFormsEnabled: true })
+    }
     await db.transaction().execute((trx) => ensureWaitlistKey(trx, config.BETTER_AUTH_SECRET))
     await db.transaction().execute((trx) => ensureMeetingPollKey(trx, config.BETTER_AUTH_SECRET))
     // A paused worker still skips due runs from an earlier opt-in. A fresh default
@@ -1383,6 +1391,7 @@ async function start(
     fetch = createApp(
       productionAppOptions({
         config,
+        routingFormsEnabled,
         recurringBookingsEnabled: recurringBookingAdmissionEnabled(options),
         db,
         auth,

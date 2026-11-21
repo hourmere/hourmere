@@ -47,7 +47,8 @@ const Instance = z
       description: 'Whether SAML SSO is enabled; absent when unknown',
     }),
     routingFormsEnabled: z.boolean().optional().openapi({
-      description: 'Whether routing forms are enabled; absent when unknown',
+      description:
+        'Effective state of routing forms. ROUTING_FORMS_ENABLED defaults to false. A legacy route handle keeps routing forms off. Absent when unknown.',
     }),
     followUpHostNotesEnabled: z.boolean().optional().openapi({
       description: 'Whether hosts may add plain-text notes to follow-up emails',
@@ -107,7 +108,7 @@ export function instanceRoutes({
   slotSnippetsEnabled?: boolean
   ssoOidcEnabled?: boolean
   ssoSamlEnabled?: boolean
-  /** The effective routing-forms state; the server passes its hard-off constant. */
+  /** The effective routing-forms state after the startup collision check. */
   routingFormsEnabled?: boolean
   hostedSignupUrl?: string
   privacyPolicyUrl?: string

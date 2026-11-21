@@ -89,7 +89,7 @@ export function routingContinuationRoutes(
   rate: RateLimit = PUBLIC_RATE_LIMITS.routingContinuation,
 ): RouteModule {
   const bucket = createRateLimiter(rate)
-  // Hard-off and OpenAPI fixtures may omit the server secret.
+  // Off-state and OpenAPI fixtures may omit the server secret.
   const key = ctx.routingSecret ?? randomBytes(32).toString('base64url')
   const limit = rateLimit(
     { hit: (client) => bucket.hit(routingRequestKey(key, 'routingContinuation', client)) },

@@ -108,6 +108,14 @@ function assertPolicyChanges(source: string) {
 }
 
 describe('after-booking redirect documentation', () => {
+  it('documents the lack of a continuation for routed bookings on every surface', () => {
+    const limits = guide().split('## Current limits and policy changes')[1] ?? ''
+    const withoutLinks = limits.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    expect(prose(withoutLinks)).toContain(
+      'A booking made through a routing form receives no after-booking continuation even when the event type has one. This applies to bookings on /route/continue and to REST, MCP and CLI bookings made with a routeToken.',
+    )
+  })
+
   it('keeps the URL rules aligned with the shared service contract', () => assertUrlPolicy(guide()))
   it('publishes exactly the service whitelist with encoding and duplicate-query semantics', () =>
     assertParameters(guide()))
