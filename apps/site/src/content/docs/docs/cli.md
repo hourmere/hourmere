@@ -433,6 +433,17 @@ construct the replacement object; `--clear-success-redirect` clears it. See
 [after-booking redirects](/docs/after-booking#cli) for flag syntax, privacy warnings,
 field errors and the current limitations.
 
+## Use routing forms
+
+The `routing-forms` commands are in CLI help even while routing is off. On a
+self-hosted instance, routing is off by default and the operator can enable it with
+`ROUTING_FORMS_ENABLED=true` and a server restart. Calls to routing commands while
+off report `routing_forms_disabled` on stderr and exit with status 1.
+Submit answers with `routing-forms route` and save a continuation to a private file with
+`--output`. Use `routing-forms resolve` and `routing-forms slots` to choose a time,
+then pass `routeToken` as the only event selector to `book --input FILE`.
+See [routing form commands and examples](/docs/routing-forms-api).
+
 ## Booking and private results
 
 Choose a slot's UTC `start` unchanged. A booking input could contain:

@@ -172,6 +172,9 @@ The widget's completion message includes no redirect URL, booking details or per
 
 Only initial successful public web/embed bookings receive a continuation. API/MCP/CLI
 bookings, one-time booking links, management reads, rescheduling and cancellation do not.
+A booking made through a [routing form](/docs/routing-forms) receives no after-booking
+continuation even when the event type has one. This applies to bookings on
+`/route/continue` and to REST, MCP and CLI bookings made with a `routeToken`.
 The target comes only from saved event-type configuration; invitees cannot supply one in
 the booking request. New settings affect future bookings, and an exact creation retry
 retains its original destination snapshot even after the host changes configuration.

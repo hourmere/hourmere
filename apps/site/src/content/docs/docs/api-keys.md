@@ -119,6 +119,11 @@ New operations require explicit classification; `read` and `bookings` do not gai
 because an endpoint uses GET or a tool advertises itself as read-only.
 
 Routing operations return `routing_forms_disabled` until an operator enables routing.
+Routing is off by default. Self-hosted operators can set `ROUTING_FORMS_ENABLED=true`
+and restart the server. The tables still list routing operations while off, but MCP
+discovery omits the dedicated routing tools. After enablement, form management requires
+the personal owner or a current team owner or admin in addition to the listed key scope.
+See [routing credentials and examples](/docs/routing-forms-api#availability-and-credentials).
 
 <!-- api-key-scope-table:start -->
 

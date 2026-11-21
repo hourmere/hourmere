@@ -1,13 +1,13 @@
 ---
 title: Routing forms for agents and integrations
 description: Publish routing forms, submit answers, and hand off or book an offered time through REST, MCP and the CLI.
-draft: true
 ---
 
-Routing forms stay off in self-hosted Hourmere and Hourmere Cloud releases that precede
-the operator setting.
-Check `routingFormsEnabled` on `GET /api/v1/instance` before starting a flow.
-Use the examples below once the instance reports `true`.
+Routing forms are off by default. On self-hosted Hourmere, set
+`ROUTING_FORMS_ENABLED=true` and restart the server to enable them. Hourmere operates
+the setting on Cloud. See [Routing forms](/docs/routing-forms#availability-and-the-operator-setting)
+for deployment steps and handle collision recovery.
+Use the examples below once `GET /api/v1/instance` reports `routingFormsEnabled: true`.
 
 ## Availability and credentials
 
@@ -92,13 +92,40 @@ Creation returns a disabled, unpublished draft. For the operations below, replac
 `expectedRevision` with the latest `draftRevision` from the form. In REST, put `id` in the
 URL and omit it from the JSON body. In MCP and the CLI, include it in the JSON.
 
-| Action | MCP arguments or CLI JSON |
-| --- | --- |
-| Edit the draft | `{"id":"<form UUID>","expectedRevision":1,"title":"Book a consultation"}` |
-| Preview the saved draft | `{"id":"<form UUID>","answers":{"7db8c949-7e6d-44cf-a50f-126496fc8e53":"alex@example.com"}}` |
-| Publish | `{"id":"<form UUID>","expectedRevision":2,"requestId":"5c0ac678-4a09-4ef0-a611-e3ff3567941f"}` |
-| Enable via update | `{"id":"<form UUID>","expectedRevision":3,"enabled":true}` |
-| Archive | `{"id":"<form UUID>","expectedRevision":4}` |
+Edit the draft with `update_routing_form` or `hourmere routing-forms update`.
+
+```json
+{
+  "id": "<form UUID>",
+  "expectedRevision": 1,
+  "title": "Book a consultation"
+}
+```
+
+Preview the saved draft with `preview_routing_form` or `hourmere routing-forms preview`.
+
+```json
+{
+  "id": "<form UUID>",
+  "answers": {
+    "7db8c949-7e6d-44cf-a50f-126496fc8e53": "alex@example.com"
+  }
+}
+```
+
+Publish with `publish_routing_form` or `hourmere routing-forms publish`.
+
+```json
+{
+  "id": "<form UUID>",
+  "expectedRevision": 2,
+  "requestId": "5c0ac678-4a09-4ef0-a611-e3ff3567941f"
+}
+```
+
+Enable through update with `{"id":"<form UUID>","expectedRevision":3,"enabled":true}`.
+When you no longer need the form, archive it with `archive_routing_form` or
+`hourmere routing-forms archive` and `{"id":"<form UUID>","expectedRevision":4}`.
 
 An update replaces any draft arrays you send. Preview returns the matched rule, resolved target
 and any target failures. It stores no answers and issues no capability. Publish rechecks targets

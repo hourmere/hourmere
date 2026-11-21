@@ -9,6 +9,7 @@ import { parseWebhookPrivateTargets } from '@hourmere/webhooks'
 import { z } from 'zod'
 import { isTrustedProxyEntry } from './client-ip.ts'
 import { DEFAULT_HTTP_TIMEOUTS, type HttpTimeouts } from './http-timeouts.ts'
+import { parseRoutingFormsEnabled } from './routing-form-setting.ts'
 import { DEFAULT_HSTS_MAX_AGE } from './security-headers.ts'
 import { resolveSmsSecretFiles, smsConfigSchema, validateSmsConfig } from './sms-config.ts'
 import { loadStripeConfig, type StripeConfig } from './stripe-config.ts'
@@ -685,6 +686,7 @@ export type Config = Omit<
   httpTimeouts: HttpTimeouts
   /** DATABASE_CONNECTION_TIMEOUT, in milliseconds, for the application and auth pools. */
   databaseConnectionTimeout: number
+  ROUTING_FORMS_ENABLED: boolean
   /** Social sign-in providers whose credentials are set. */
   socialProviders: { google?: OAuthClient; microsoft?: OAuthClient }
   stripe?: StripeConfig
@@ -715,6 +717,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   } = c
   return {
     ...rest,
+    ROUTING_FORMS_ENABLED: parseRoutingFormsEnabled(env.ROUTING_FORMS_ENABLED),
     trustedProxies: TRUSTED_PROXIES ?? [],
     signup: { mode: SIGNUP, allowedDomains: SIGNUP_ALLOWED_DOMAINS ?? [] },
     httpTimeouts: {
