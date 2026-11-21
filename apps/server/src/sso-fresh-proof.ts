@@ -10,7 +10,7 @@ import { DomainError } from '@hourmere/scheduling'
 import { HTTPException } from 'hono/http-exception'
 import { sql } from 'kysely'
 import { z } from 'zod'
-import { requireSsoEnabled, type SsoCapabilities } from './sso.ts'
+import { requireSsoEnabled, SCIM_MAPPING_CONSENT, type SsoCapabilities } from './sso.ts'
 import {
   bindingCookieName,
   browserBindingDigest,
@@ -37,6 +37,8 @@ export interface FreshProofRequest {
   sessionId: string
   organizationId: string
   operation: string
+  /** Only the resource-test mapping service can request mailbox proof without SSO. */
+  scimMappingConsentEnabled?: boolean
   /** Trust reduction uses administration proof and points to recovery when step-up is unavailable. */
   proofMode?: 'mailbox' | 'sso' | 'administration' | 'trust_reduction'
   input: unknown
@@ -147,7 +149,12 @@ export async function runWithFreshProof<T>(
     ) => Promise<T>
   },
 ): Promise<FreshProofResult<T>> {
-  requireSsoEnabled(deps.capabilities)
+  if (request.operation === SCIM_MAPPING_CONSENT) {
+    if (!request.scimMappingConsentEnabled)
+      throw new DomainError('not_found', 'scim_resources_disabled')
+  } else {
+    requireSsoEnabled(deps.capabilities)
+  }
   const publicUrl = new URL(deps.publicUrl)
   if (request.headers.get('origin') !== publicUrl.origin || request.headers.has('authorization'))
     throw new HTTPException(403, { message: 'forbidden' })
