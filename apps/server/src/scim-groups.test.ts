@@ -9,7 +9,7 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createTestTeam, createTestUser, type TestUser } from '@hourmere/scheduling/testing'
 import { sql } from 'kysely'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
 import { loadConfig } from './config.ts'
 import { scimDiscoveryWithGroups } from './scim-discovery.ts'
@@ -23,6 +23,7 @@ const signup = { mode: 'open', allowedDomains: [] } as const
 const GROUP = 'urn:ietf:params:scim:schemas:core:2.0:Group'
 const LIST = 'urn:ietf:params:scim:api:messages:2.0:ListResponse'
 const ERROR = 'urn:ietf:params:scim:api:messages:2.0:Error'
+const PATCH = 'urn:ietf:params:scim:api:messages:2.0:PatchOp'
 
 type Token = { id: string; organizationId: string; connectionId: string; secret: string }
 type Application = ReturnType<typeof createApp>
@@ -35,6 +36,7 @@ const groupBody = (externalId: string, displayName: string, members?: object[]) 
   displayName,
   ...(members === undefined ? {} : { members }),
 })
+const patchBody = (...operations: object[]) => ({ schemas: [PATCH], Operations: operations })
 const query = (parameters: Record<string, string>) => `?${new URLSearchParams(parameters)}`
 
 async function expectError(response: Response, status: number, scimType?: string) {
@@ -57,10 +59,12 @@ function call(
   {
     method = 'GET',
     body,
+    headers,
     organizationId = token.organizationId,
   }: {
     method?: string
     body?: object
+    headers?: Record<string, string>
     organizationId?: string
   } = {},
 ) {
@@ -69,6 +73,7 @@ function call(
     headers: {
       authorization: `Bearer ${token.secret}`,
       'content-type': 'application/scim+json',
+      ...headers,
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   })
@@ -224,6 +229,14 @@ describe.skipIf(!databaseUrl)('SCIM Group resources', () => {
     ).name
   const scopedRows = (mappingId: string) =>
     db.selectFrom('scim_groups').selectAll().where('mapping_id', '=', mappingId).execute()
+  const updateEvents = (id: string) =>
+    db
+      .selectFrom('audit_events')
+      .select(['organization_id', 'actor_type', 'actor_id', 'credential_type', 'details'])
+      .where('action', '=', 'scim_group.updated')
+      .where('target_type', '=', 'scim_group')
+      .where('target_id', '=', id)
+      .execute()
 
   it('refuses unmapped children and binds creation to the exact reservation', async () => {
     const parent = await team('Directory parent')
@@ -388,8 +401,14 @@ describe.skipIf(!databaseUrl)('SCIM Group resources', () => {
     const crossTeam = await call(app, token, `Groups/${a.id}`, { organizationId: first.id })
     await expectError(crossTeam, 401)
     expect(crossTeam.headers.get('WWW-Authenticate')).toBe('Bearer')
-    for (const method of ['PUT', 'PATCH', 'DELETE'])
-      await expectError(await call(app, token, `Groups/${a.id}`, { method }), 404)
+    for (const method of ['PUT', 'PATCH']) {
+      // Even a malformed request for an unknown or unavailable Group gets the same 404.
+      for (const id of [randomUUID(), foreign.id, h.id, r.id, pendingMapping]) {
+        const refused = await call(app, token, `Groups/${id}`, { method, body: {} })
+        expect(await expectError(refused, 404)).toBe(unknown)
+      }
+    }
+    await expectError(await call(app, token, `Groups/${a.id}`, { method: 'DELETE' }), 404)
   })
 
   it('projects only directory-managed members of the mapped child', async () => {
@@ -627,6 +646,325 @@ describe.skipIf(!databaseUrl)('SCIM Group resources', () => {
     expect(await storedName(child.id)).toBe('Owner after suspension')
   })
 
+  it('requires a replacement name, preserves the reservation and ignores read-only PUT echoes', async () => {
+    const parent = await team('Replacement parent')
+    const child = await team('Replacement child')
+    const token = await issue(parent.id)
+    const mapping = await reserve(token, child.id, 'Fixed-Identifier')
+    const original = await create(token, groupBody('Fixed-Identifier', 'Initial replacement name'))
+    const path = `Groups/${original.id}`
+    const before = await scopedRows(mapping)
+    const replace = (body: object) => call(app, token, path, { method: 'PUT', body })
+
+    await expectError(await replace({ schemas: [GROUP] }), 400, 'invalidValue')
+    for (const externalId of ['fixed-identifier', null]) {
+      await expectError(
+        await replace({ ...groupBody('Fixed-Identifier', 'Refused replacement'), externalId }),
+        400,
+        'mutability',
+      )
+    }
+    await expectError(
+      await call(app, token, path, {
+        method: 'PUT',
+        headers: { 'if-match': '*' },
+        body: groupBody('Fixed-Identifier', 'Conditional replacement'),
+      }),
+      412,
+    )
+    expect(await scopedRows(mapping)).toEqual(before)
+    expect(await updateEvents(original.id)).toEqual([])
+
+    const body = {
+      schemas: [GROUP],
+      DISPLAYNAME: '  Full replacement name  ',
+      id: randomUUID(),
+      meta: { created: 'untrusted creation time', location: 'untrusted location' },
+    }
+    const replacement = await replace(body)
+    expect(replacement.status).toBe(200)
+    expect(replacement.headers.get('content-type')).toBe('application/scim+json')
+    const updated = await replacement.json()
+    expect(updated).toMatchObject({
+      schemas: [GROUP],
+      id: original.id,
+      externalId: 'Fixed-Identifier',
+      displayName: 'Full replacement name',
+      meta: { resourceType: 'Group', location: `${base(parent.id)}/${path}` },
+    })
+    const [after] = await scopedRows(mapping)
+    expect(after).toEqual({ ...before[0], updated_at: expect.any(Date) })
+    expect(after?.updated_at).not.toEqual(before[0]?.updated_at)
+    expect(await (await call(app, token, path)).json()).toEqual(updated)
+    expect(await (await replace({ ...body, externalId: 'Fixed-Identifier' })).json()).toEqual(
+      updated,
+    )
+    expect(await updateEvents(original.id)).toEqual([
+      {
+        organization_id: parent.id,
+        actor_type: 'scim_token',
+        actor_id: token.id,
+        credential_type: 'none',
+        details: {},
+      },
+    ])
+  })
+
+  it('applies name PATCH operations in order and rejects mixed member requests atomically', async () => {
+    const parent = await team('Patch parent')
+    const child = await team('Patch child')
+    const token = await issue(parent.id)
+    const mapping = await reserve(token, child.id, 'patch-reservation')
+    const original = await create(token, groupBody('patch-reservation', 'Initial patch name'))
+    const path = `Groups/${original.id}`
+    const patch = (...operations: object[]) =>
+      call(app, token, path, { method: 'PATCH', body: patchBody(...operations) })
+    const first = { op: 'RePlAcE', path: `${GROUP}:DISPLAYNAME`, value: 'Intermediate name' }
+    const rename = { op: 'add', value: { displayName: '  Final patch name  ' } }
+    const keepExternalId = { op: 'replace', path: 'externalId', value: 'patch-reservation' }
+    const changed = await patch(first, rename, keepExternalId)
+    expect(changed.status).toBe(200)
+    expect(await changed.json()).toMatchObject({
+      id: original.id,
+      externalId: 'patch-reservation',
+      displayName: 'Final patch name',
+    })
+
+    const before = await scopedRows(mapping)
+    for (const operation of [
+      { op: 'replace', path: 'Members', value: [] },
+      { op: 'remove', path: `${GROUP}:mEmBeRs[value eq "${randomUUID()}"]` },
+      { op: 'Remove', path: 'members', value: [{ value: randomUUID() }] },
+      { op: 'replace', value: { displayName: 'Pathless rejected name', MeMbErS: [] } },
+      { op: 'replace', path: 'members.role', value: 'owner' },
+    ]) {
+      await expectError(await patch(first, operation), 403, 'mutability')
+    }
+    await expectError(await patch(first, { op: 'remove', path: 'externalId' }), 400, 'mutability')
+    await expectError(await patch(first, { op: 'remove', path: 'displayName' }), 400, 'mutability')
+    await expectError(
+      await patch(first, { op: 'replace', path: 'slug', value: 'private' }),
+      400,
+      'invalidPath',
+    )
+    expect(await storedName(child.id)).toBe('Final patch name')
+    expect(await scopedRows(mapping)).toEqual(before)
+    expect(await updateEvents(original.id)).toHaveLength(1)
+  })
+
+  it('refuses manual name collisions without exposing the other team and permits equal directory names', async () => {
+    const parent = await team('Name collision parent')
+    const child = await team('Collision subject')
+    const manual = await team('Private manual name')
+    const sibling = await team('Mapped sibling')
+    const token = await issue(parent.id)
+    const mapping = await reserve(token, child.id, 'name-collision')
+    await reserve(token, sibling.id, 'another-name')
+    const original = await create(token, groupBody('name-collision', 'Before name collision'))
+    await create(token, groupBody('another-name', 'Shared managed name'))
+    const path = `Groups/${original.id}`
+    const before = await scopedRows(mapping)
+
+    const collision = '  pRiVaTe MaNuAl NaMe  '
+    const put = await call(app, token, path, {
+      method: 'PUT',
+      body: groupBody('name-collision', collision),
+    })
+    const patch = await call(app, token, path, {
+      method: 'PATCH',
+      body: patchBody({ op: 'replace', path: 'displayName', value: collision }),
+    })
+    const refused = await expectError(put, 409, 'uniqueness')
+    expect(await expectError(patch, 409, 'uniqueness')).toBe(refused)
+    expect(refused.toLowerCase()).not.toContain('private manual name')
+    expect(refused).not.toContain(manual.id)
+    expect(await storedName(manual.id)).toBe('Private manual name')
+    expect(await storedName(child.id)).toBe(original.displayName)
+    expect(await scopedRows(mapping)).toEqual(before)
+    expect(await updateEvents(original.id)).toEqual([])
+
+    const accepted = await call(app, token, path, {
+      method: 'PATCH',
+      body: patchBody({ op: 'replace', path: 'displayName', value: 'Shared managed name' }),
+    })
+    expect(accepted.status).toBe(200)
+    expect(await storedName(child.id)).toBe('Shared managed name')
+    expect(await storedName(sibling.id)).toBe('Shared managed name')
+  })
+
+  it('refuses changes to a protected roster and role grants without disclosing manual membership', async () => {
+    const admin = await createTestUser(db, 'Promoted directory member')
+    const ordinary = await createTestUser(db, 'Ordinary directory member')
+    const manual = await createTestUser(db, 'Manual directory-linked member')
+    const parent = await team('Protected roster parent', [admin, ordinary, manual])
+    const child = await team('Protected roster child', [manual])
+    const token = await issue(parent.id)
+    const mapping = await reserve(token, child.id, 'protected-roster')
+    const adminId = await linkedUser(token, admin)
+    const ordinaryId = await linkedUser(token, ordinary)
+    const manualId = await linkedUser(token, manual)
+    const original = await create(
+      token,
+      groupBody('protected-roster', 'Original roster name', [
+        { value: adminId },
+        { value: ordinaryId },
+      ]),
+    )
+    await db
+      .updateTable('auth.member')
+      .set({ role: 'admin' })
+      .where('id', '=', await memberId(child.id, admin))
+      .execute()
+    const path = `Groups/${original.id}`
+    const before = await scopedRows(mapping)
+    const childMembers = () =>
+      db
+        .selectFrom('auth.member')
+        .select(['id', 'role'])
+        .where('organizationId', '=', child.id)
+        .orderBy('id')
+        .execute()
+    const roster = await childMembers()
+    const replace = (members: object[]) =>
+      call(app, token, path, {
+        method: 'PUT',
+        body: groupBody('protected-roster', 'Attempted roster replacement', members),
+      })
+
+    await expectError(await replace([{ value: ordinaryId }]), 403, 'mutability')
+    await expectError(
+      await replace([{ value: adminId, role: 'member' }, { value: ordinaryId }]),
+      403,
+      'mutability',
+    )
+    await expectError(
+      await replace([{ value: adminId }, { value: ordinaryId, roles: ['owner'] }]),
+      403,
+      'mutability',
+    )
+    await expectError(
+      await call(app, token, path, {
+        method: 'PUT',
+        body: { ...groupBody('protected-roster', 'Attempted grant'), roles: ['owner'] },
+      }),
+      403,
+      'mutability',
+    )
+    await expectError(
+      await call(app, token, path, {
+        method: 'PATCH',
+        body: patchBody({ op: 'remove', path: `members[value eq "${adminId}"]` }),
+      }),
+      403,
+      'mutability',
+    )
+    expect(await storedName(child.id)).toBe(original.displayName)
+    expect(await scopedRows(mapping)).toEqual(before)
+    expect(await childMembers()).toEqual(roster)
+    expect(await updateEvents(original.id)).toEqual([])
+
+    const renamed = await replace([
+      { value: ordinaryId },
+      { value: adminId, $ref: `/Users/${adminId}` },
+    ])
+    expect(renamed.status).toBe(200)
+    const result = await renamed.json()
+    expect(result).toMatchObject({
+      displayName: 'Attempted roster replacement',
+      members: [adminId, ordinaryId].sort().map((value) => ({
+        value,
+        type: 'User',
+        $ref: `${base(parent.id)}/Users/${value}`,
+      })),
+    })
+    expect(JSON.stringify(result)).not.toContain(child.owner.id)
+    expect(JSON.stringify(result)).not.toContain(manualId)
+    const omitted = await call(app, token, path, {
+      method: 'PUT',
+      body: groupBody('protected-roster', 'Attempted roster replacement'),
+    })
+    expect(omitted.status).toBe(200)
+    expect(await omitted.json()).toEqual(result)
+    expect(await childMembers()).toEqual(roster)
+  })
+
+  it('rolls back the Group timestamp and child name when the update audit fails', async () => {
+    const parent = await team('SCIM Group update audit failure parent')
+    const child = await team('SCIM Group update audit child')
+    const token = await issue(parent.id)
+    const mapping = await reserve(token, child.id, 'atomic-update')
+    const original = await create(token, groupBody('atomic-update', 'Committed Group name'))
+    const before = await scopedRows(mapping)
+    await sql`CREATE FUNCTION test_refuse_group_update_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.action = 'scim_group.updated' AND EXISTS (
+          SELECT 1 FROM auth.organization WHERE id = NEW.organization_id
+            AND name = 'SCIM Group update audit failure parent'
+        ) THEN RAISE EXCEPTION 'injected SCIM Group audit failure'; END IF;
+        RETURN NEW;
+      END $$`.execute(db)
+    await sql`CREATE TRIGGER test_refuse_group_update_audit BEFORE INSERT ON audit_events
+      FOR EACH ROW EXECUTE FUNCTION test_refuse_group_update_audit()`.execute(db)
+
+    const response = await call(app, token, `Groups/${original.id}`, {
+      method: 'PATCH',
+      body: patchBody({ op: 'replace', path: 'displayName', value: 'Uncommitted update name' }),
+    })
+    await expectError(response, 500)
+    expect(await storedName(child.id)).toBe(original.displayName)
+    expect(await scopedRows(mapping)).toEqual(before)
+    expect(await updateEvents(original.id)).toEqual([])
+  })
+
+  it('rechecks mapping authority after waiting behind the team locks', async () => {
+    const parent = await team('Concurrent mapping parent')
+    const child = await team('Concurrent mapping child')
+    const token = await issue(parent.id)
+    const mapping = await reserve(token, child.id, 'concurrent-mapping')
+    const original = await create(token, groupBody('concurrent-mapping', 'Before suspension'))
+    let pending: Promise<Response> | undefined
+    try {
+      await db.transaction().execute(async (trx) => {
+        await trx
+          .selectFrom('auth.organization')
+          .select('id')
+          .where('id', 'in', [parent.id, child.id])
+          .orderBy('id')
+          .forUpdate()
+          .execute()
+        const { rows } = await sql<{ pid: number }>`SELECT pg_backend_pid() AS pid`.execute(trx)
+        const pid = rows[0]?.pid
+        pending = Promise.resolve(
+          call(app, token, `Groups/${original.id}`, {
+            method: 'PUT',
+            body: groupBody('concurrent-mapping', 'Name denied after suspension'),
+          }),
+        )
+        await vi.waitFor(
+          async () => {
+            const { rows } = await sql<{ waiting: boolean }>`SELECT EXISTS (
+              SELECT 1 FROM pg_stat_activity
+              WHERE datname = current_database() AND ${pid} = ANY(pg_blocking_pids(pid))
+            ) AS waiting`.execute(db)
+            expect(rows[0]?.waiting).toBe(true)
+          },
+          { timeout: 3_000, interval: 15 },
+        )
+        await trx
+          .updateTable('scim_team_mappings')
+          .set({ suspended_at: sql`clock_timestamp()` })
+          .where('id', '=', mapping)
+          .execute()
+      })
+    } finally {
+      await pending?.catch(() => {})
+    }
+    if (!pending) throw new Error('The concurrent SCIM request must finish.')
+    await expectError(await pending, 404)
+    expect(await storedName(child.id)).toBe(original.displayName)
+    expect(await updateEvents(original.id)).toEqual([])
+  })
+
   it.each([
     [true, 'SCIM resources are not available yet.'],
     [false, 'SCIM provisioning is disabled.'],
@@ -694,6 +1032,19 @@ describe.skipIf(!databaseUrl)('SCIM Group resources', () => {
       })
       expect(posted.status).toBe(404)
       expect(await posted.text()).toBe(expected)
+      const path = `Groups/${value.id}`
+      for (const [method, body] of [
+        ['PUT', groupBody('production-reservation', 'PUT name not applied')],
+        [
+          'PATCH',
+          patchBody({ op: 'replace', path: 'displayName', value: 'PATCH name not applied' }),
+        ],
+      ] as const) {
+        const response = await call(production, token, path, { method, body })
+        expect(response.status, method).toBe(404)
+        expect(response.headers.get('content-type')).toBe('application/scim+json')
+        expect(await response.text(), method).toBe(expected)
+      }
       expect(await storedName(child.id)).toBe(value.displayName)
     },
   )

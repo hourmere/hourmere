@@ -5,6 +5,7 @@ import { writeAuditEvent } from '@hourmere/db/audit'
 import { sql } from 'kysely'
 import type { ScimReply, ScimResourceHandler, ScimResourceRequest } from './scim.ts'
 import { SCIM_URN } from './scim-discovery.ts'
+import { invalidPath, parseScimPatch, SCIM_PATCH_PATH_LIMIT } from './scim-patch.ts'
 import {
   parseScimListQuery,
   parseScimProjection,
@@ -33,6 +34,12 @@ const unavailable = () =>
   refuse(409, 'No available Group reservation matches this externalId.', 'uniqueness')
 const invalidMember = () =>
   invalidValue('Each Group member must name an active, linked User of this connection.')
+const immutableRoster = () =>
+  refuse(403, 'This Group write cannot change memberships or roles.', 'mutability')
+const immutableExternalId = () =>
+  refuse(400, 'The approved Group externalId cannot be changed or removed.', 'mutability')
+const groupSchema = SCIM_URN.group.toLowerCase()
+const groupFields = ['schemas', 'id', 'meta', 'externalid', 'displayname', 'members']
 
 // The binding scopes both reservations and activated Groups to the authenticated parent.
 function authorizedMappings(db: Db, { tokenId, organizationId }: Principal) {
@@ -181,7 +188,7 @@ function parseMembers(value: unknown, base: string): string[] {
   return [...new Set(ids)]
 }
 
-function parseGroup(body: unknown, base: string) {
+function groupAttributes(body: unknown) {
   if (typeof body !== 'object' || body === null || Array.isArray(body))
     throw invalidSyntax('The request body must be a Group object.')
   const group = scimAttributes(body, 'Group')
@@ -189,14 +196,13 @@ function parseGroup(body: unknown, base: string) {
   if (
     !Array.isArray(schemas) ||
     schemas.length === 0 ||
-    !schemas.every(
-      (schema) =>
-        typeof schema === 'string' && schema.toLowerCase() === SCIM_URN.group.toLowerCase(),
-    )
+    !schemas.every((schema) => typeof schema === 'string' && schema.toLowerCase() === groupSchema)
   )
     throw invalidSyntax('The schemas attribute must name only the Group schema.')
-  onlyScimAttributes(group, ['schemas', 'id', 'meta', 'externalid', 'displayname', 'members'])
-  const name = group.get('displayname')
+  return group
+}
+
+function groupDisplayName(name: unknown) {
   const displayName = typeof name === 'string' ? name.trim() : ''
   if (
     !displayName ||
@@ -205,9 +211,71 @@ function parseGroup(body: unknown, base: string) {
     /[\p{Cc}\p{Zl}\p{Zp}]/u.test(displayName)
   )
     throw invalidValue('The displayName must be a single line of text up to 200 characters.')
+  return displayName
+}
+
+function parseGroup(body: unknown, base: string) {
+  const group = groupAttributes(body)
+  onlyScimAttributes(group, groupFields)
+  const displayName = groupDisplayName(group.get('displayname'))
   const externalId = scimText(group.get('externalid'), 'externalId', 256)
   if (!externalId) throw invalidValue('The externalId attribute is required.')
   return { externalId, displayName, members: parseMembers(group.get('members'), base) }
+}
+
+function checkExternalId(value: unknown, row: Row) {
+  if (scimText(value, 'externalId', 256) !== row.external_id) throw immutableExternalId()
+}
+
+function replacementName(body: unknown, base: string, row: Row) {
+  const group = groupAttributes(body)
+  if (['role', 'roles', 'entitlements'].some((field) => group.has(field))) throw immutableRoster()
+  onlyScimAttributes(group, groupFields)
+  if (group.has('externalid')) checkExternalId(group.get('externalid'), row)
+  if (group.has('members')) {
+    const members = parseMembers(group.get('members'), base).sort()
+    if (
+      members.length !== row.member_ids.length ||
+      members.some((member, index) => member !== row.member_ids[index])
+    )
+      throw immutableRoster()
+  }
+  return groupDisplayName(group.get('displayname'))
+}
+
+function patchedName(body: unknown, row: Row) {
+  let name = row.name
+  for (const operation of parseScimPatch(body, 'Group')) {
+    const { op, path, value } = operation
+    const fields =
+      path === undefined ? scimAttributes(value, 'PATCH value') : new Map([[path, value]])
+    if (fields.size === 0) throw invalidValue('A pathless PATCH value must name attributes.')
+    const seen = new Set<string>()
+    for (const [field, item] of fields) {
+      if (field.length > SCIM_PATCH_PATH_LIMIT || field !== field.trim()) throw invalidPath()
+      const lower = field.toLowerCase()
+      const target = lower.startsWith(`${groupSchema}:`)
+        ? lower.slice(groupSchema.length + 1)
+        : lower
+      if (seen.has(target)) throw invalidSyntax('A PATCH attribute is named more than once.')
+      seen.add(target)
+      if (/^(?:members|role|roles|entitlements)(?:$|[.[])/.test(target)) throw immutableRoster()
+      if (op === 'remove' && Object.hasOwn(operation, 'value'))
+        throw invalidValue('A Group remove operation takes only a path.')
+      if (target === 'externalid') {
+        checkExternalId(item, row)
+      } else if (target === 'displayname') {
+        if (op === 'remove')
+          throw refuse(400, 'The displayName attribute is required.', 'mutability')
+        name = groupDisplayName(item)
+      } else if (['schemas', 'id', 'meta'].includes(target) || target.startsWith('meta.')) {
+        throw refuse(400, 'The PATCH attribute is read-only.', 'mutability')
+      } else {
+        throw invalidPath()
+      }
+    }
+  }
+  return name
 }
 
 function availableMapping(db: Db, principal: Principal, externalId: string) {
@@ -388,13 +456,127 @@ async function createGroup(db: Db, request: ScimResourceRequest): Promise<ScimRe
   }
 }
 
-/** Group reads and creation, injected only by SCIM resource test harnesses. */
+async function checkManualName(db: Db, childId: string, displayName: string) {
+  const conflict = await db
+    .selectFrom('auth.organization as other_team')
+    .select('other_team.id')
+    .where('other_team.id', '!=', childId)
+    .where(sql<boolean>`lower(other_team.name) = lower(${displayName})`)
+    .where(({ not, exists, selectFrom }) =>
+      not(
+        exists(
+          selectFrom('personal_organizations')
+            .select('organization_id')
+            .whereRef('organization_id', '=', 'other_team.id'),
+        ),
+      ),
+    )
+    .where(({ not, exists, selectFrom }) =>
+      not(
+        exists(
+          selectFrom('scim_team_mappings as mapping')
+            .innerJoin('scim_groups as scim_group', 'scim_group.mapping_id', 'mapping.id')
+            .select('mapping.id')
+            .whereRef('mapping.live_child_organization_id', '=', 'other_team.id')
+            .where('mapping.suspended_at', 'is', null),
+        ),
+      ),
+    )
+    .limit(1)
+    .executeTakeFirst()
+  if (conflict) throw refuse(409, 'The requested Group name is unavailable.', 'uniqueness')
+}
+
+async function updateGroup(
+  db: Db,
+  request: ScimResourceRequest,
+  id: string,
+  method: 'PUT' | 'PATCH',
+): Promise<ScimReply> {
+  if (!RESOURCE_ID.test(id)) return notFound
+  const projection = parseScimProjection(request.query, scimGroupQuery)
+  const body = !request.hasWritePrecondition && projection.ok ? await request.body?.() : undefined
+  const { principal } = request
+  const { organizationId } = principal
+  try {
+    return await db
+      .transaction()
+      .setIsolationLevel('read committed')
+      .execute(async (trx) => {
+        const group = visibleGroups(trx, principal).where('scim_group.id', '=', id)
+        const candidate = await group.select('child.id as childId').executeTakeFirst()
+        if (!candidate) return notFound
+        const { childId } = candidate
+
+        // Match creation: ordered organization locks, then credential and mapping.
+        const teams = await lockMappingTeams(trx, [organizationId, childId])
+        if (teams.length !== 2) return notFound
+        const connectionId = await lockScimTokenConnection(trx, principal)
+        const row = await selectGroups(group)
+          .where('child.id', '=', childId)
+          .where('mapping.connection_id', '=', connectionId)
+          .forUpdate(['mapping', 'scim_group'])
+          .executeTakeFirst()
+        if (!row) return notFound
+        if (request.hasWritePrecondition)
+          return refuse(412, 'Conditional writes are not supported.').reply
+        if (!projection.ok) return projection.reply
+        if (!body) return invalidSyntax('The request body is required.').reply
+        if (!body.ok) return body.reply
+
+        const name =
+          method === 'PUT'
+            ? replacementName(body.value, request.base, row)
+            : patchedName(body.value, row)
+        if (name !== row.name) {
+          await checkManualName(trx, childId, name)
+          await trx
+            .updateTable('auth.organization')
+            .set({ name })
+            .where('id', '=', childId)
+            .execute()
+          const { updated_at } = await trx
+            .updateTable('scim_groups')
+            .set({ updated_at: sql<Date>`greatest(updated_at, clock_timestamp())` })
+            .where('id', '=', id)
+            .returning('updated_at')
+            .executeTakeFirstOrThrow()
+          await writeAuditEvent(trx, {
+            organizationId,
+            actor: { type: 'scim_token', id: principal.tokenId },
+            credential: { type: 'none' },
+            action: 'scim_group.updated',
+            targetType: 'scim_group',
+            targetId: id,
+          })
+          row.name = name
+          row.updated_at = updated_at
+        }
+        return {
+          status: 200,
+          body: projectScimResource(
+            scimGroupQuery,
+            representation(row, request.base),
+            projection.value,
+          ),
+        }
+      })
+  } catch (error) {
+    const reply = scimWriteRefusal(error)
+    if (reply) return reply
+    throw error
+  }
+}
+
+/** Group resources, injected only by SCIM resource test harnesses. */
 export function scimGroups(db: Db): ScimResourceHandler {
   return (request) => {
     if (request.method === 'POST' && request.path === '/Groups') return createGroup(db, request)
-    if (request.method !== 'GET' && request.method !== 'HEAD') return
     const match = /^\/Groups(?:\/([^/]*))?$/.exec(request.path)
     if (!match) return
+    if ((request.method === 'PUT' || request.method === 'PATCH') && match[1] !== undefined)
+      return updateGroup(db, request, match[1], request.method)
+    if (request.method !== 'GET' && request.method !== 'HEAD') return
     return match[1] === undefined ? listGroups(db, request) : readGroup(db, request, match[1])
   }
 }

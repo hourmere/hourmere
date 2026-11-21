@@ -669,6 +669,31 @@ returns the same 409 `uniqueness`. A nested Group request returns 400 `invalidVa
 name, initial roster and parent journal's `scim_group.created` event commit together.
 The event identifies the token and opaque Group ID without recording request attributes.
 
+In the resource test harness, `PUT /Groups/{id}` replaces the Group's non-member fields
+and requires `displayName`. `PATCH /Groups/{id}` applies non-member operations in order
+and commits them together. The mapping's exact, case-sensitive `externalId` is retained
+when omitted or echoed. Changing or removing it returns 400 `mutability`. A changed name
+that matches another manually named non-personal team case-insensitively returns a generic 409
+`uniqueness`. Active directory-managed children may share a name, and an unchanged name
+can be replayed even if a manual duplicate already exists.
+
+PUT accepts an omitted `members` field or an exact echo of the current mapped roster.
+A different roster, any member operation in PATCH (including filtered paths and pathless
+values), or an attempted role assignment returns 403 `mutability` for the entire request.
+Both methods return 200 with the projected Group and return 412 for unsupported write
+preconditions. A name change records `scim_group.updated` in the parent journal in the
+same transaction. The event identifies the token and Group ID and omits request attributes.
+A no-op preserves `meta.lastModified` and adds no audit event.
+
+资源测试环境中的 `PUT /Groups/{id}` 完整替换非成员字段，必须提供 `displayName`。
+`PATCH /Groups/{id}` 按顺序应用非成员操作，全部成功后才提交。省略或原样传回 `externalId`
+会保留映射中区分大小写的原值，修改或移除该字段会返回 400 `mutability`。新名称与其他手动命名的非个人团队
+重名时（不区分大小写），返回通用的 409 `uniqueness`。启用目录管理的子团队可以同名，已有手动重名也不影响
+原样重试。PUT 可省略 `members`，或原样传回当前映射成员列表。PUT 尝试更改成员、PATCH 包含任何成员操作，
+或请求试图分配角色时，整次请求返回 403 `mutability`。成功返回 200 及按请求投影的群组，不支持的写入前置条件
+返回 412。名称变更与父团队审计事件 `scim_group.updated` 在同一事务提交，事件仅记录令牌和群组 ID 等审计元数据。
+原样重试保留 `meta.lastModified`，也不增加审计事件。
+
 Activation makes the child name directory-managed. Existing manual members, owners and
 admins keep their membership and roles. Group `members` contains only the memberships
 created by that mapping. Resolve additions to an active User in the same connection whose
