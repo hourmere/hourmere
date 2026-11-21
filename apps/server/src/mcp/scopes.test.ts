@@ -112,22 +112,9 @@ const all = [
   'resolve_routing_continuation',
   'find_routed_slots',
 ]
-// Hidden catalog entries never reach handlers. Workflows check scope first; SSO
-// answers sso_disabled before scope or arguments while both protocols are hard-off.
+// SSO answers sso_disabled before scope or arguments while both protocols are hard-off.
 const ssoUnavailable = new Set(['list_sso_providers', 'get_sso_policy'])
-const unavailable = new Set([
-  'create_workflow',
-  'update_workflow',
-  'delete_workflow',
-  'preview_workflow',
-  'list_workflows',
-  'get_workflow',
-  'list_workflow_runs',
-  ...ssoUnavailable,
-])
-const disabled = (name: string) => ({
-  error: ssoUnavailable.has(name) ? 'sso_disabled' : 'workflows_disabled',
-})
+const ssoDisabled = { error: 'sso_disabled' }
 // Full scope only: audit reads reveal who did what (see api-key-operations.ts).
 const auditReads = new Set(['list_audit_events', 'get_audit_log_settings'])
 const configurationWrites = new Set([
@@ -234,7 +221,12 @@ const denial = {
   error: 'insufficient_scope',
   message: 'This API key does not allow this operation.',
 }
-const catalog = productTools({ db: {} as Db, slotSnippetsEnabled: true, routingFormsEnabled: true })
+const catalog = productTools({
+  db: {} as Db,
+  slotSnippetsEnabled: true,
+  routingFormsEnabled: true,
+  workflowsEnabled: true,
+})
 function principal(scope: ApiKeyScope): McpCaller {
   return {
     kind: 'api_key',
@@ -339,7 +331,7 @@ describe('MCP scoped discovery and dispatch', () => {
           )
           const { tools } = await client.listTools()
           expect(tools.map((tool) => tool.name)).toEqual(
-            expected(scope).filter((name) => !unavailable.has(name)),
+            expected(scope).filter((name) => !ssoUnavailable.has(name)),
           )
           for (const tool of tools) {
             expect(tool.inputSchema.additionalProperties).toBe(false)
@@ -378,12 +370,9 @@ describe('MCP scoped discovery and dispatch', () => {
           tool.run.mockClear()
           const { res, message } = await rpc(tool.name, scope, era, {}, target)
           expect(res.status, `${scope}/${era}/${tool.name}`).toBe(200)
-          if (
-            (expected(scope).includes(tool.name) && unavailable.has(tool.name)) ||
-            ssoUnavailable.has(tool.name)
-          ) {
+          if (ssoUnavailable.has(tool.name)) {
             expect(message.result.isError, `${scope}/${tool.name}`).toBe(true)
-            expect(textOf(message.result)).toEqual(disabled(tool.name))
+            expect(textOf(message.result)).toEqual(ssoDisabled)
             expect(tool.run).not.toHaveBeenCalled()
           } else if (expected(scope).includes(tool.name)) {
             expect(message.result.isError, `${scope}/${tool.name}`).toBeFalsy()
@@ -457,11 +446,8 @@ describe('MCP scoped discovery and dispatch', () => {
               throw Error('Unexpected tool error')
             },
           )
-          if (
-            (expected(scope).includes(tool.name) && unavailable.has(tool.name)) ||
-            ssoUnavailable.has(tool.name)
-          ) {
-            expect(textOf(result as { content: { text: string }[] })).toEqual(disabled(tool.name))
+          if (ssoUnavailable.has(tool.name)) {
+            expect(textOf(result as { content: { text: string }[] })).toEqual(ssoDisabled)
             expect(tool.run).not.toHaveBeenCalled()
           } else if (expected(scope).includes(tool.name)) expect(tool.run).toHaveBeenCalledTimes(1)
           else {
@@ -532,7 +518,7 @@ describe('MCP scoped discovery and dispatch', () => {
         }),
       )
       expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual(
-        all.filter((name) => !unavailable.has(name)),
+        all.filter((name) => !ssoUnavailable.has(name)),
       )
       const identity = await client.callTool({ name: 'whoami', arguments: {} })
       expect(identity.structuredContent).toHaveProperty('principal')
@@ -662,10 +648,10 @@ describe('CLI scope parity', () => {
         })
         expect(fetcher).toHaveBeenCalledTimes(1)
         expect((stdout + stderr).includes(key)).toBe(false)
-        if ((expected(scope).includes(name) && unavailable.has(name)) || ssoUnavailable.has(name)) {
+        if (ssoUnavailable.has(name)) {
           expect(code, `${scope}/${command}`).toBe(1)
           expect(stdout).toBe('')
-          expect(JSON.parse(stderr)).toMatchObject(disabled(name))
+          expect(JSON.parse(stderr)).toMatchObject(ssoDisabled)
         } else if (expected(scope).includes(name)) {
           expect(code, `${scope}/${command}`).toBe(0)
           expect(JSON.parse(stdout)).toEqual({ dispatched: name })

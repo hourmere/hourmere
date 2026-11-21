@@ -68,7 +68,7 @@ describe.skipIf(!serverUrl)('workflow webhook outbox', () => {
         url: `https://hooks.example.com/${path}`,
         events: ['booking.created'],
       })
-      // Seed the stored subscription without bypassing the production hard-off guard.
+      // Seed the existing subscription used by the delivery tests.
       if (subscribed)
         await db
           .updateTable('webhooks')
@@ -152,7 +152,6 @@ describe.skipIf(!serverUrl)('workflow webhook outbox', () => {
       )
 
       const requests: WebhookRequest[] = []
-      const productionQueries: string[] = []
       const deps = {
         db,
         ...settings,
@@ -162,35 +161,23 @@ describe.skipIf(!serverUrl)('workflow webhook outbox', () => {
           return 204
         },
       }
-      const productionJob = webhookDeliveryJob({
-        ...deps,
-        workflowsEnabled: true,
-        db: db.withPlugin({
-          transformQuery({ node }) {
-            productionQueries.push(node.kind)
-            return node
-          },
-          async transformResult({ result }) {
-            return result
-          },
-        }),
-      })
+      const productionJob = webhookDeliveryJob({ ...deps, workflowsEnabled: true })
       for (const row of rows) {
         expect(row.webhook_id).toBe(webhook.id)
         expect(row.request_id).toBeNull()
         expect(await queued(row.id)).toEqual([{ deliveryId: row.id }])
         const signal = new AbortController().signal
-        productionQueries.length = 0
         await productionJob.handler(
           { deliveryId: row.id },
           { id: randomUUID(), attempt: 1, signal },
         )
-        // Only ordinary delivery classification runs while workflow execution is hard-off.
-        expect(productionQueries).toEqual(['SelectQueryNode', 'SelectQueryNode', 'SelectQueryNode'])
-        expect((await deliveries(input.bookingId)).find(({ id }) => id === row.id)).toEqual(row)
-        expect(requests.filter(({ headers }) => headers['webhook-id'] === row.id)).toHaveLength(0)
-        await deliverWorkflowWebhook(deps, row.id, signal)
-        await deliverWorkflowWebhook(deps, row.id, signal, 2)
+        await productionJob.handler(
+          { deliveryId: row.id },
+          { id: randomUUID(), attempt: 2, signal },
+        )
+        expect((await deliveries(input.bookingId)).find(({ id }) => id === row.id)).toMatchObject({
+          status: 'delivered',
+        })
       }
       expect(requests).toHaveLength(2)
       const events = await workflowJournal(db, input.organizationId)
@@ -247,6 +234,34 @@ describe.skipIf(!serverUrl)('workflow webhook outbox', () => {
       }
     },
   )
+
+  it('skips a persisted workflow relay while operator-off without sending', async () => {
+    const { input } = await fixture()
+    await db
+      .transaction()
+      .execute((trx) => captureQueuedWorkflowWebhook(jobs, settings, trx, input, now))
+    const [row] = await deliveries(input.bookingId)
+    if (!row) throw new Error('Missing workflow delivery')
+    const requests: WebhookRequest[] = []
+    const job = webhookDeliveryJob({
+      ...settings,
+      db,
+      workflowsEnabled: false,
+      now: () => now,
+      transport: async (request) => {
+        requests.push(request)
+        return 204
+      },
+    })
+    await job.handler(
+      { deliveryId: row.id },
+      { id: randomUUID(), attempt: 1, signal: new AbortController().signal },
+    )
+    expect(requests).toEqual([])
+    expect(await deliveries(input.bookingId)).toEqual([
+      expect.objectContaining({ id: row.id, status: 'skipped', last_error: 'disabled' }),
+    ])
+  })
 
   it('keeps the delivery and queued job in the caller transaction', async () => {
     const { input } = await fixture()

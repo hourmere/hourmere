@@ -468,22 +468,19 @@ SSO 正在开发中，尚不可用。表中的 SSO 操作在运营者能够启�
 `404 sso_disabled`；目前 OIDC 和 SAML 在代码中保持关闭，任何配置均无法启用。
 关闭时 MCP 工具列表不包含上述工具；允许范围内的直接调用和 CLI 命令返回相同错误。
 
-Booking workflow operations (`GET /api/v1/workflows`, `GET /api/v1/workflows/{id}`,
-`list_workflows`, `get_workflow`, `workflows list` and `workflows get`) are listed before the
-feature is available: until booking workflows are enabled they answer
-`404 workflows_disabled` to every key their scope allows, and `tools/list` omits the tools.
-A key whose scope does not allow them still gets `insufficient_scope` first.
+Booking workflow reads (`GET /api/v1/workflows`, `GET /api/v1/workflows/{id}` and
+`GET /api/v1/workflows/{id}/runs`) require a `read` or `full` key and remain available
+while workflows are off. Disabling a workflow without other edits and deleting it
+also remain available with a `full` key. Ownership and current team roles still apply.
+While workflows are off, `tools/list` omits the workflow tools.
 
-Workflow history (`GET /api/v1/workflows/{id}/runs`, `list_workflow_runs`, `workflows runs`)
-follows the same hard-off behavior and requires a `read` or `full` key.
+Creation, synthetic preview (`POST /api/v1/workflows/preview`), enabling and other edits
+require a `full` key and return `404 workflows_disabled` while workflows are off. A key
+whose scope does not allow a workflow operation still gets `insufficient_scope` first.
 
-中文：工作流执行历史需要 `read` 或 `full` 密钥，功能硬关闭时返回 `workflows_disabled`。
-
-Synthetic preview (`POST /api/v1/workflows/preview`, `preview_workflow`, `workflows preview`)
-requires a `full` key and current owner/admin access. It follows the same hard-off behavior.
-
-中文：工作流合成预览需要 `full` 密钥及当前所有者或管理员权限。硬关闭时，允许的调用
-返回 `workflows_disabled`，MCP 工具列表不显示此工具。
+中文：工作流关闭时，有权限的调用者仍可使用 `read` 或 `full` 密钥读取工作流和执行历史，
+使用 `full` 密钥仅停用工作流或删除工作流。创建、合成预览、启用及其他修改返回
+`404 workflows_disabled`。MCP 工具列表隐藏工作流工具。
 
 CSV export through API keys is limited to the owner's personal organization (`read` or
 `full`). Team-wide CSV exports retain the existing browser-session-only team-admin access

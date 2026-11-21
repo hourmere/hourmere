@@ -179,10 +179,12 @@ SSO 正在开发中，尚不可用。表中的 SSO 操作在运营者能够启�
 `404 sso_disabled`；目前 OIDC 和 SAML 在代码中保持关闭，任何配置均无法启用。
 关闭时 MCP 工具列表不包含上述工具；允许范围内的直接调用和 CLI 命令返回相同错误。
 
-The booking workflow tools are published and hard-off. `tools/list` omits them, and a
-direct call with otherwise allowed credentials returns `isError: true` with
-`workflows_disabled`. A `bookings` key gets `insufficient_scope`. The CLI reports the
-same codes. See the [workflow operating guide](workflows.md#operating-guide).
+The operator can enable booking workflows with `WORKFLOWS_ENABLED=true`. While off,
+`tools/list` omits workflow tools. Direct calls can still read workflows and run
+history, disable a workflow, or delete it with the required scope and role. Creation,
+preview, enabling and other edits return `isError: true` with `workflows_disabled`
+(REST 404). A `bookings` key gets `insufficient_scope`. The CLI reports the same codes.
+See the [workflow operating guide](workflows.md#operating-guide).
 `create_workflow` requires full scope and accepts `owner`, a retained `idempotencyKey`,
 and the definition fields (`name`, `scope`, `trigger`, `actions`, optional `enabled` and
 `conditions`). Identical normalized retries return the stored definition; changed input
@@ -239,8 +241,8 @@ API key. IDs that are missing or belong to another organization return `webhook_
 
 `create_webhook` and `update_webhook` accept `booking.created`, `booking.rescheduled`,
 `booking.cancelled`, `booking.reschedule_requested`, `booking.reschedule_request_expired`,
-`booking.attendee_no_show_changed` and `workflow.executed` in `events`. Workflows are
-hard-off. Adding `workflow.executed` returns a tool error with `workflows_disabled`
+`booking.attendee_no_show_changed` and `workflow.executed` in `events`. While workflows
+are off, adding `workflow.executed` returns a tool error with `workflows_disabled`
 (REST 404). On create, it takes precedence over `webhooks_disabled` (REST 409).
 
 `rotate_webhook_secret` takes `{ id }` and requires a `full` API key. Each successful
@@ -269,7 +271,7 @@ for supported events, URL policy and configuration.
 `rotate_webhook_secret` 需要 `full` 密钥，每次成功轮换仅在本次响应中返回新签名密钥。
 `list_webhook_deliveries` 接受 `read` 或 `full` 密钥，每页最多返回最近 30 天的 50 条元数据。
 下一页将 `nextAfter` 作为 `after` 传入，直至其为 null。投递历史不包含正文、请求头或密钥。
-工作流仍处于硬关闭状态。新增 `workflow.executed` 订阅会返回 `workflows_disabled`
+工作流关闭时，新增 `workflow.executed` 订阅会返回 `workflows_disabled`
 工具错误（对应 REST 404），创建时优先于 `webhooks_disabled`（对应 REST 409）。
 
 ## Manage hosted bookings
@@ -530,14 +532,15 @@ previous values. Content edits append a revision, while an `enabled`-only change
 it. A stale expectation returns `workflow_revision_conflict`. Disabling and re-enabling
 leave existing booking enrollments and execution rows unchanged. A webhook action must
 reference an active endpoint in the acting organization subscribed to `workflow.executed`.
-These operations return `workflows_disabled` while hard-off.
+While workflows are off, an update that only sets `enabled: false` is allowed.
+Enabling or editing returns `workflows_disabled`.
 
 中文：`update_workflow` / `workflows update` 需要 `full` 权限，输入 `id`、
 `expectedRevision` 和要修改的字段。REST 使用 `PATCH /api/v1/workflows/{id}`，正文不含
 `id`。省略的字段保持不变，数组整体替换。内容修改会新增修订，仅切换 `enabled` 不改变
 修订号；旧修订返回 `workflow_revision_conflict`。停用和重新启用不会修改已有预约的工作流
 登记或执行记录。Webhook 动作须引用当前组织中已订阅 `workflow.executed` 的启用端点。
-功能仍硬关闭，返回 `workflows_disabled`。
+工作流关闭时仍可仅设置 `enabled: false`。启用或修改其他字段会返回 `workflows_disabled`。
 
 `delete_workflow` / `workflows delete` requires `full` scope and accepts `id` and
 `expectedRevision`. REST uses `DELETE /api/v1/workflows/{id}` with only
@@ -545,39 +548,37 @@ These operations return `workflows_disabled` while hard-off.
 A stale revision conflicts. A repeated delete succeeds while the tombstone is retained,
 but always rechecks current owner/admin permission. Missing or unauthorized IDs return the
 same `workflow_not_found`. Deletion retires pending runs and preserves creation-key replay
-protection, minimal history and mail charges. All three interfaces remain unavailable
-(`workflows_disabled`) while workflows are hard-off, and MCP discovery omits the tool.
+protection, minimal history and mail charges. Authorized deletion remains available while
+workflows are off. MCP discovery hides the tool in that state.
 
 中文：`delete_workflow` / `workflows delete` 需要 `full` 权限，输入 `id` 和
 `expectedRevision`。REST 使用 `DELETE /api/v1/workflows/{id}`，JSON 正文只含
 `expectedRevision`，成功返回 `204`；MCP/CLI 返回 `{ "deleted": true }`。
 版本过期会冲突；保留删除标记期间可以安全重试，但每次都会重新检查当前所有者或管理员权限。
 不存在和无权限的 ID 均返回 `workflow_not_found`。删除会终止待执行任务，保留创建幂等键、
-最小历史记录和邮件额度记录。目前功能仍硬关闭，三个接口均返回 `workflows_disabled`，
-MCP 工具列表不显示此工具。
+最小历史记录和邮件额度记录。工作流关闭时，有权限的调用者仍可删除工作流，MCP 工具列表隐藏此工具。
 
 `preview_workflow` / `workflows preview` use the same body as `POST /api/v1/workflows/preview`.
 Supply `owner`, `name`, `scope`, `trigger` and `actions`, with optional `enabled`,
 `conditions` and synthetic `example` values. API keys need `full` scope and current
 personal owner or team owner/admin authority. Preview returns the example match result,
-rendered email samples and static estimates. While hard-off it returns `workflows_disabled`
+rendered email samples and static estimates. While workflows are off, preview returns `workflows_disabled`
 and MCP discovery hides the tool.
 
 中文：`preview_workflow`、`workflows preview` 和 `POST /api/v1/workflows/preview`
 使用相同的 JSON 输入，包括所有者、候选定义和可选的合成示例。密钥需要 `full` 权限，
 调用者须为当前个人所有者或团队所有者、管理员。结果包括匹配状态、邮件样本和静态额度
-估计。功能仍硬关闭，返回 `workflows_disabled`，MCP 工具列表隐藏预览。
+估计。工作流关闭时，预览返回 `workflows_disabled`，MCP 工具列表隐藏预览。
 
 `list_workflow_runs` and `workflows runs --json` take `id` and optional `limit` and `cursor`.
 Use `nextCursor` for the next page of the same workflow. Pages list finished runs with fixed
 outcome codes and aggregate counts for the personal owner or current team owner/admin.
 History omits booking IDs and private booking details. API keys need `read` or `full`.
-While workflows are off, direct calls return `workflows_disabled` and discovery hides the tool.
+While workflows are off, history remains available through direct calls and discovery hides the tool.
 
 中文：`list_workflow_runs` 和 `workflows runs --json` 接收 `id`，可选 `limit` 和 `cursor`。
 个人所有者或当前团队所有者、管理员可用 `read` 或 `full` 密钥查看安全状态与汇总计数。
-历史不含预约 ID 或预约隐私信息。功能仍硬关闭，调用会返回 `workflows_disabled`，
-MCP 工具列表隐藏此工具。
+历史不含预约 ID 或预约隐私信息。工作流关闭时仍可直接调用，MCP 工具列表隐藏此工具。
 
 ## SMS reminders
 

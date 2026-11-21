@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { loadConfig } from '../apps/server/src/config.ts'
 
 const root = new URL('../', import.meta.url)
 // Source-copy mutation probes leave the tracked Compose files untouched.
@@ -158,6 +159,39 @@ describe.skipIf(!hasCompose)(
             /^ghcr\.io\/hourmere\/hourmere:(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?$/,
           )
           expect(service).not.toHaveProperty('build')
+        }
+      },
+    )
+
+    it.each([
+      { enabled: false, mailCap: 20, ownerCap: 5 },
+      { enabled: true, mailCap: 12, ownerCap: 3 },
+    ])(
+      'loads the same workflow settings in every role when enabled=$enabled',
+      ({ enabled, mailCap, ownerCap }) => {
+        const forwarded = {
+          WORKFLOWS_ENABLED: enabled ? 'true' : '',
+          WORKFLOW_MAIL_MAX_PER_HOUR: enabled ? String(mailCap) : '',
+          WORKFLOW_OWNER_MAIL_MAX_PER_HOUR: enabled ? String(ownerCap) : '',
+        }
+        const env: Record<string, string> = enabled ? forwarded : {}
+        const standalone = render([], env)
+        const split = render(['image', 'proxy', 'worker'], { HOURMERE_VERSION: '1.2.3', ...env })
+        expect(standalone.status).toBe(0)
+        expect(split.status).toBe(0)
+        for (const [role, service] of [
+          ['all', standalone.config?.services.app],
+          ['web', split.config?.services.app],
+          ['worker', split.config?.services.worker],
+        ] as const) {
+          expect(service).toBeDefined()
+          expect(service?.environment).toMatchObject(forwarded)
+          expect(loadConfig(service?.environment ?? {})).toMatchObject({
+            HOURMERE_ROLE: role,
+            WORKFLOWS_ENABLED: enabled,
+            WORKFLOW_MAIL_MAX_PER_HOUR: mailCap,
+            WORKFLOW_OWNER_MAIL_MAX_PER_HOUR: ownerCap,
+          })
         }
       },
     )
