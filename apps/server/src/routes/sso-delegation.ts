@@ -93,7 +93,7 @@ export function ssoDelegationRoutes(deps: SsoDelegationDeps): RouteModule {
         responses: {
           ...errorResponses({
             400: 'invalid_request',
-            403: 'team_management_access_denied',
+            403: 'team_management_access_denied or sso_required',
             404: 'sso_disabled or sso_not_found',
             409: 'organization_context_changed',
           }),
