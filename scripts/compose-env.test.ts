@@ -172,12 +172,16 @@ describe('documented Compose configuration', () => {
     expect(compose).toMatch(/^ {6}ZOOM_MEETINGS_ENABLED: \$\{ZOOM_MEETINGS_ENABLED:-false\}$/m)
   })
 
-  it('forwards workflow mail sub-caps with empty defaults before operator publication', () => {
+  it('forwards the workflow opt-in and both mail sub-caps with empty defaults', () => {
     const environment = composeAppEnvironment(compose)
-    for (const key of ['WORKFLOW_MAIL_MAX_PER_HOUR', 'WORKFLOW_OWNER_MAIL_MAX_PER_HOUR']) {
+    for (const key of [
+      'WORKFLOWS_ENABLED',
+      'WORKFLOW_MAIL_MAX_PER_HOUR',
+      'WORKFLOW_OWNER_MAIL_MAX_PER_HOUR',
+    ]) {
       expect(environment.get(key)).toBe(`\${${key}:-}`)
-      expect(example).not.toContain(key)
-      expect(reference).not.toContain(key)
+      expect(example).toMatch(new RegExp(`^${key}=$`, 'm'))
+      documentedVariable(key)
     }
     expect(worker).toMatch(/extends:\s+file: docker-compose\.yml\s+service: app/)
   })

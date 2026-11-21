@@ -1306,10 +1306,9 @@ run IDs and never recreates identities or intents. The internal email attempt se
 commits the reservation and shared ledger charge with the recipient marker, then calls
 SMTP outside the transaction. Only the matching marker token can schedule a known-not-sent
 retry. Retry admission restamps both rows under the same organization and mail-budget locks.
-Expired marker leases resolve to `delivery_unknown`. There is no production
-workflow worker or retention worker, and workflow capture, dispatch and repair stay hard-off behind
-`WORKFLOWS_IMPLEMENTED = false`. The test that keeps production modules away from the definition
-tables covers these tables too.
+Expired marker leases resolve to `delivery_unknown`. `WORKFLOWS_ENABLED` opts the instance
+into capture and delivery. The worker installs workflow repair and retention when enabled
+or when startup finds unfinished work or an interrupted attempt to recover.
 
 - **Enrollments** record a booking's capture of one workflow revision at one lifecycle
   occurrence: its creation (the creation trigger and the timers; a reschedule successor
@@ -1321,7 +1320,8 @@ tables covers these tables too.
   Their due and expiry instants never change, a worker claims one with a token and a lease,
   and a run starts pending, or skipped with a fixed reason (as capture records `minimum_gap`
   and `offset_not_future`). Completed, skipped and retired runs are final; skip reasons are the
-  contract's fixed codes. A partial index holds only unfinished runs for the due scan.
+  contract's fixed codes. Partial indexes support the unfinished due scan and the finished
+  retention scan.
 - **Recipient claims** are the recipients of an email run: an attendee or assigned host and
   the workflow-purpose digest of the normalized address, never the address, unique per run
   and digest. A timer email's winning recipient also holds its intent (category, offset,
@@ -1379,16 +1379,24 @@ deadlock (40P01) and each documented order to completion, with the lock statemen
 `workflow-storage-lock-order.ts` that later steps reuse.
 
 Execution identity outlives a definition's content. Enrollments name their workflow and
-revision without a foreign key to the definition, and enrollments, runs and recipient claims
-hold no definition content, rendered text or addresses. They are removed only with their
-booking (or, for runs and claims, their parent) or organization, never by retention. Purging a
-tombstoned definition (deleting it with its revisions and history) is refused (23514) while one
-of its runs is pending or claimed, and keeps every booking's enrollment, run and claim, so a
-replayed capture or a repair meets the same unique identity and the same final state and
-cannot dispatch again. With its organization or personal owner a definition always goes;
-without its personal-organization marker (no production path removes it), a personal owner's
-deletion leaves that organization's bookings and their unfinished runs, which dispatch must
-end without history because their workflow is gone.
+revision without a foreign key to the definition and retain the unique capture identity until
+booking or organization deletion. The workflow retention job deletes history and terminal
+runs older than 30 elapsed days by finish time, at most 100 rows per table per invocation,
+skipping locked rows without taking organization or definition locks. Migration 0177
+limits standalone run deletion to the same eligibility rules as the job. A run must be
+completed, skipped or retired for more than 720 elapsed hours and have neither a
+`dispatching` claim nor a pending webhook delivery. The existing
+foreign key removes the run and its recipient claims together, so the database can enforce
+the retention rule directly. The enrollment remains as the capture replay fence, and a
+stale wake finds no due run. Booking and organization cascades still remove all their runs.
+Audit events, mail reservations and webhook deliveries follow their own lifecycles.
+
+Purging a tombstoned definition (deleting it with its revisions and history) is refused
+(23514) while one of its runs is pending or claimed. The definition purge keeps every
+booking's enrollment, run and claim in place. A definition always goes with its organization
+or personal owner. Without its personal-organization marker (no production path removes it),
+a personal owner's deletion leaves that organization's bookings and their unfinished runs,
+which dispatch must end without history because their workflow is gone.
 
 `workflow-storage-execution-coverage.test.ts` drops every constraint, index, trigger and NOT
 NULL column through `checkConstraintCoverage` (expectation file
