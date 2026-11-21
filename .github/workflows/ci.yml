@@ -282,6 +282,10 @@ jobs:
           cache: npm
       - name: Verify the existing Chrome installation
         run: google-chrome --version
+      - name: Pull the pinned Keycloak browser fixture image
+        run: |
+          image=$(node --input-type=module -e "import { KEYCLOAK_IMAGE } from './tools/e2e/keycloak/keycloak.ts'; console.log(KEYCLOAK_IMAGE)")
+          docker pull "$image"
       - run: npm ci --ignore-scripts --audit=false --fund=false
       - run: npm run build --workspace @hourmere/web
       - name: Build a disposable site fixture and run browser regressions

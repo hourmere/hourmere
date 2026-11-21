@@ -272,6 +272,10 @@ the account sign-in gate. Each scenario runs at desktop and mobile viewport size
 are genuine SPA/HTTP/PostgreSQL flows, without API response mocks. CI runs the suite in a
 separate job with its own PostgreSQL service and the runner's installed Chrome.
 
+The Keycloak OIDC spec runs in the required browser suite and needs Docker and OpenSSL.
+See the [Keycloak fixture README](tools/e2e/keycloak/README.md) for its image pin, local
+command and resource ownership.
+
 CI also builds a disposable static-site fixture and checks documentation table geometry at
 360px and 1280px, including page overflow, identifier line counts and mid-word header wraps.
 Touch copy controls are checked at both widths. These site tests use only a local static

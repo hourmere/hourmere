@@ -1,0 +1,63 @@
+{
+  "realm": "hourmere-fixture",
+  "displayName": "Hourmere OIDC fixture",
+  "enabled": true,
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": false,
+  "duplicateEmailsAllowed": true,
+  "verifyEmail": false,
+  "clients": [
+    {
+      "clientId": "hourmere-fixture",
+      "protocol": "openid-connect",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      }
+    }
+  ],
+  "users": [
+    {
+      "id": "2a751178-b113-44b1-8acb-63aadd2ff535",
+      "username": "linked",
+      "firstName": "Linked",
+      "lastName": "Fixture",
+      "email": "linked@company.example.com",
+      "emailVerified": true,
+      "enabled": true
+    },
+    {
+      "id": "648794c7-2a23-4938-a24f-d5690c365532",
+      "username": "same-email",
+      "firstName": "Same Email",
+      "lastName": "Fixture",
+      "email": "linked@company.example.com",
+      "emailVerified": true,
+      "enabled": true
+    },
+    {
+      "id": "a4066fca-aa43-4a08-9eae-6fd9c5b358b1",
+      "username": "unverified",
+      "firstName": "Unverified",
+      "lastName": "Fixture",
+      "email": "unverified@company.example.com",
+      "emailVerified": false,
+      "enabled": true
+    },
+    {
+      "id": "ed59ba0b-a858-493b-8bc1-61facf0d1eb4",
+      "username": "disabled",
+      "firstName": "Disabled",
+      "lastName": "Fixture",
+      "email": "disabled@company.example.com",
+      "emailVerified": true,
+      "enabled": false
+    }
+  ]
+}
