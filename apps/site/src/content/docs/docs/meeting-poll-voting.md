@@ -4,14 +4,7 @@ description: Verify your email, choose possible meeting times, and understand po
 ---
 
 Open the public link shared by the host or the private voting link sent to your mailbox.
-Hosts can create and manage polls in the dashboard or through [REST](/docs/rest#manage-meeting-polls), MCP and CLI.
-In the dashboard, **Meeting polls** shows completed and active polls in your current space.
-Choose **Create meeting poll** to propose times, and copy the public voting link while
-it is shown if you chose public admission. Use the invitation roster to send invitations.
-Open a poll to review ballots and advisory availability, choose a time and attendees,
-or close, cancel or delete the poll. The deadline email links to the poll's results.
-Sign in and switch to its space if prompted. After scheduling, open the resulting booking
-from the results page. Deleting the poll preserves the booking.
+If you are organizing the meeting, see [Create and manage meeting polls](/docs/meeting-polls).
 
 ## Open and verify your link
 
@@ -57,17 +50,19 @@ reminders without changing your ballot or granting access to it. It does not wit
 or stop every kind of poll email. Requests already accepted for delivery cannot be recalled.
 
 After voting closes, a valid retained voter link can still show the safe poll details and
-your prior ballot, but cannot change them. Invalid, expired verification, removed and revoked links use
-one neutral unavailable message without revealing which case applies.
+your prior ballot, but cannot change them. Invalid, expired verification, removed and
+revoked links use one neutral unavailable message without revealing which case applies.
+After scheduling, the poll shows the originally chosen time. Use the booking or outcome
+emails for later rescheduling or cancellation updates.
 
 ## What others can see
 
 - **Private polls:** other voters cannot see your name, email, answers or choices, and
   no aggregate totals are shown.
-- **Aggregate polls:** verified voters can see separate yes, if-need-be and no totals for
-  each time. With a small group, totals can reveal someone else's choices; this is not
-  anonymity. The voting page hides totals while you are withdrawn. The public API still
-  permits a retained verified withdrawn credential to read aggregate totals.
+- **Aggregate polls:** verified voters who are still participating can see separate yes,
+  if-need-be and no totals for each time. With a small group, totals can reveal someone
+  else's choices. After you withdraw, aggregate totals are hidden on the page and in the
+  public API.
 - The host and authorized managers can see the private roster, ballots, answers and
   verification or withdrawal state. Other voters never receive that roster.
 
@@ -79,13 +74,7 @@ Português (Brasil).
 
 ## 中文说明
 
-请打开主持人分享的公开链接，或发送到你邮箱的私密投票链接。主持人可在管理端或通过
-[REST](/docs/rest#manage-meeting-polls)、MCP 和 CLI 创建并管理投票。
-在管理端打开**会议投票**，即可查看当前空间的投票。选择**创建会议投票**后可提出候选时间。
-如果选择通过公开链接参与，请在链接显示时立即复制。你也可以从邀请名单发送邀请。
-打开投票后，可以查看选票和参考
-可用性、选择时段及参会者，或结束、取消或删除投票。截止通知会链接到结果页，必要时
-请先登录并切换到投票所属空间。排定后可从结果页打开预约，删除投票不会取消预约。
+请打开主持人分享的公开链接，或发送到你邮箱的个人投票链接。如果你负责组织会议，请参阅[创建和管理会议投票](/docs/meeting-polls)。
 
 投票不需要 Hourmere 账号。通过公开链接填写姓名、邮箱和时区后，页面会统一提示检查
 邮件，不透露该邮箱是否已登记，也不保证邮件送达。打开邮件链接不会自动验证或投票；
@@ -99,13 +88,14 @@ Português (Brasil).
 找回功能不会给已撤回的投票者发送链接。邮件中的提醒退订链接需要明确确认，只停止提醒，
 不撤回选票，也不停止所有类型的投票邮件。
 
-私密投票不向其他投票者展示姓名、邮箱、答案、选项或总数。汇总投票仅向已验证投票者
-展示各时段的三类票数；人数较少时仍可能推断他人的选择，因此汇总不等于匿名。
-页面在撤回后隐藏汇总，但公开 API 仍允许持有有效已验证撤回凭证的人读取汇总。
+私密投票不向其他投票人展示姓名、邮箱、问题答案、个别选择或总票数。汇总投票只向
+已验证且仍在参与的投票人展示各时段的三类票数。人数较少时，仍可能由此推断他人的选择。
+撤回后，网页和公开 API 都不再显示汇总票数。
 主持人及有权管理的人员可查看名单、选票和答案。投票并不预留时间，也不保证入选；
 主持人可选择部分同意参加的投票者，指定的预约人可管理整场会议，最终日历邀请可能向
 参会者展示其他参会者。
 
 有效链接在投票关闭后可只读查看安全信息及自己的旧选票。无效、过期、移除及撤销的链接
-显示统一的不可用信息。链接中的私密凭证只放在 `#` 后并通过请求正文提交，不写入浏览器
-存储。请勿转发私人投票链接或将其放入日志、分析工具及支持工单。
+显示统一的不可用信息。排定会议后，投票页面只显示最初选定的时间。后续改期或取消请查看
+预约邮件或结果通知。链接中的私密凭证只放在 `#` 后并通过请求正文提交，不写入浏览器存储。
+请勿转发个人投票链接，或将其放入日志、分析工具和支持工单。

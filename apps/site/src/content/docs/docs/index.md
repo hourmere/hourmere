@@ -53,8 +53,10 @@ The website at hourmere.com is separate from your Hourmere instance.
   receive notification when a matching time opens; manage entries in the editor, REST,
   MCP or CLI. Available in full to self-hosters.
 
-- [Voting in a meeting poll](/docs/meeting-poll-voting): understand verification, ballots
-  and privacy. Hosts can create polls through [REST](/docs/rest#manage-meeting-polls), MCP and CLI.
+- [Create and manage meeting polls](/docs/meeting-polls): propose times, invite voters,
+  review responses and schedule a meeting in the app or through REST, MCP or CLI.
+- [Voting in a meeting poll](/docs/meeting-poll-voting): verify your email, submit or
+  withdraw a ballot, and understand who can see your choices.
 
 ## Create an event type
 
@@ -215,12 +217,10 @@ not grant host rescheduling or reschedule-request authority through REST, MCP or
   Self-hosters can install its local package; downstream effects need durable idempotency.
 - [Zapier](/docs/zapier) is not yet published in the Zapier directory. The source app
   can be deployed privately with your own Zapier account.
-- Booking workflows are hard-off, including on self-hosted instances. The
-  [operating guide](https://github.com/hourmere/hourmere/blob/main/docs/workflows.md) covers
-  the app and the published REST, MCP and CLI operations. These operations return
-  `workflows_disabled` for otherwise authorized calls. Operator opt-in is unavailable,
-  and internal Compose forwards have no effect while hard-off. Existing reminders,
-  follow-ups and signed booking webhooks continue to work.
+- Booking workflows are available and off by default. Self-hosted operators can opt in
+  without a paid plan. Existing reminders, follow-ups and signed booking webhooks continue
+  to work. See the [configuration reference](/docs/configuration#email-and-registration)
+  and [workflow operating guide](https://github.com/hourmere/hourmere/blob/main/docs/workflows.md#operating-guide).
 - [Cal.com imports](/docs/calcom-import#known-limitations) create inactive drafts and read-only
   local busy records. Same-owner incremental completion is unavailable; group-slot overlaps
   block the batch, while daily/weekly/monthly limit differences are reported as warnings.
@@ -238,6 +238,12 @@ not grant host rescheduling or reschedule-request authority through REST, MCP or
 - [Booking waitlists](/docs/booking-waitlist#known-limitations) support one-on-one
   single-host types at the default meeting length. Nothing is reserved; the first
   successful ordinary booking wins, and email delivery is not guaranteed.
+- [Meeting polls](/docs/meeting-polls#known-limitations) offer up to 20 times and 40 voting
+  places. They do not reserve time, select a winner automatically, or support group seats,
+  paid checkout or one-time links. Voter pages show the originally chosen time after
+  scheduling. Email requires working SMTP and a worker, and terminal poll history stays
+  until the poll, its linked booking or the space is deleted.
+  中文：会议投票最多提供 20 个候选时段和 40 个投票名额。投票不预留时段，不自动选出时间，也不支持团体名额、付费结账或一次性预约链接。投票人页面保留最初选定的时间。投票邮件依赖 SMTP 和后台工作进程。已结束的投票记录会保留，直至删除投票、关联预约或所属空间。
 - CalDAV (including iCloud, Fastmail and Nextcloud) is not available to connect yet.
   The [design and internal connection foundation](https://github.com/hourmere/hourmere/blob/main/docs/caldav.md)
   includes internal busy-time sync and conditional booking writes, with no production

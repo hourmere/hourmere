@@ -24,12 +24,13 @@ const input = (user: TestUser, extra: Record<string, unknown> = {}) => ({
   actions: [{ type: 'email', recipients: ['booker'] }],
   ...extra,
 })
-describe('workflow update hard-off', () => {
-  it('refuses before reading context or input', async () => {
+describe('workflow update while operator-off', () => {
+  it('refuses non-recovery input before touching the database', async () => {
     const ctx = new Proxy(
       {},
       {
-        get() {
+        get(_target, key) {
+          if (key === 'workflowsEnabled') return false
           throw new Error('context read')
         },
       },

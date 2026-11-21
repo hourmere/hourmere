@@ -189,6 +189,7 @@ export async function manageInvitation(
         identity,
         organizationId,
         nativeSsoRequired,
+        { organizationLocked: true },
       )
       const { invitation, delivery, existing, replacingExpired, newGeneration } =
         await admitInvitation(

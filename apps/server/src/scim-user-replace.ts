@@ -8,9 +8,9 @@ import {
   scimError,
 } from './scim.ts'
 import { parseScimProjection, projectScimResource, scimUserQuery } from './scim-query.ts'
+import { applyScimUserLifecycle } from './scim-user-lifecycle.ts'
 import { normalizeScimUserPatch, parseScimUserPatch } from './scim-user-patch.ts'
 import {
-  assertScimActiveUnchanged,
   invalidSyntax,
   lockScimWriteConnection,
   parseScimUserWrite,
@@ -42,7 +42,7 @@ async function replace(
     const write =
       method === 'PATCH'
         ? { method, operations: parseScimUserPatch(body.value) }
-        : { method, ...parseScimUserWrite(body.value, 'PUT') }
+        : { method, ...parseScimUserWrite(body.value) }
     return await db
       .transaction()
       .setIsolationLevel('read committed')
@@ -59,14 +59,22 @@ async function replace(
           .forUpdate()
           .executeTakeFirst()
         if (!entry) return scimUserNotFound
-        if (write.method === 'PUT') assertScimActiveUnchanged(write.active, entry.active)
-        const { profile, managers } =
+        const normalized =
           write.method === 'PATCH'
             ? normalizeScimUserPatch(entry, write.operations)
-            : { profile: write.profile, managers: [write.profile.manager_id] }
+            : {
+                ...write,
+                managers: [write.profile.manager_id],
+                deactivationRequested: write.active === false,
+              }
+        const { profile, managers, active = entry.active } = normalized
         await validateScimManager(trx, organizationId, connectionId, ...managers)
+        const actor = { type: 'scim_token', id: principal.tokenId } as const
+        await applyScimUserLifecycle(trx, entry, normalized, actor)
         const fields = Object.keys(profile) as (keyof typeof profile)[]
-        if (fields.some((field) => profile[field] !== entry[field])) {
+        const profileChanged = fields.some((field) => profile[field] !== entry[field])
+        const activeChanged = active !== entry.active
+        if (profileChanged || activeChanged) {
           if (profile.work_email?.toLowerCase() !== entry.work_email?.trim().toLowerCase()) {
             // The old proof cannot claim the new mailbox. Keep the invitation under its own
             // acceptance rules and leave completed claims and their links intact.
@@ -82,12 +90,18 @@ async function replace(
           }
           await trx
             .updateTable('scim_users')
-            .set({ ...profile, updated_at: sql<Date>`clock_timestamp()` })
+            .set({
+              ...(profileChanged ? profile : {}),
+              active,
+              updated_at: sql<Date>`clock_timestamp()`,
+            })
             .where('id', '=', id)
             .executeTakeFirst()
+        }
+        if (profileChanged) {
           await writeAuditEvent(trx, {
             organizationId,
-            actor: { type: 'scim_token', id: principal.tokenId },
+            actor,
             credential: { type: 'none' },
             action: 'scim_user.updated',
             targetType: 'scim_user',
@@ -95,6 +109,16 @@ async function replace(
             ...(write.method === 'PATCH'
               ? { details: { operations: write.operations.map(({ op }) => op) } }
               : {}),
+          })
+        }
+        if (activeChanged) {
+          await writeAuditEvent(trx, {
+            organizationId,
+            actor,
+            credential: { type: 'none' },
+            action: active ? 'scim_user.reactivated' : 'scim_user.deactivated',
+            targetType: 'scim_user',
+            targetId: id,
           })
         }
         const representation = await readScimUser(trx, request, id)

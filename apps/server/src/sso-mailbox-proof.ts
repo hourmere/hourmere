@@ -25,7 +25,7 @@ import { sql } from 'kysely'
 import { z } from 'zod'
 import { withClientIpHeader } from './client-ip.ts'
 import { createRateLimiter, type RateLimiter, rateLimitKey } from './rate-limit.ts'
-import { requireSsoEnabled, type SsoCapabilities } from './sso.ts'
+import { requireSsoEnabled, type SsoCapabilities, USE_SSO_RECOVERY } from './sso.ts'
 import { ssoStorageDiagnostic } from './sso-storage-errors.ts'
 
 /** The auth-protocol endpoints (outside /api/v1 and the interface-parity inventory). */
@@ -110,6 +110,15 @@ export function bindingCookieName(publicUrl: string) {
   return new URL(publicUrl).protocol === 'https:'
     ? `__Host-${BROWSER_BINDING_COOKIE}`
     : BROWSER_BINDING_COOKIE
+}
+
+export function readBindingCookie(headers: Headers, name: string) {
+  return headers
+    .get('cookie')
+    ?.split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${name}=`))
+    ?.slice(name.length + 1)
 }
 
 function sameDigest(a: string | null, b: string | null): boolean {
@@ -345,8 +354,8 @@ export async function consumeMailboxProof(
 }
 
 /**
- * Deletes at most `limit` attempts that are consumed or expired at the database clock, sign-in
- * attempts included; their mailbox tokens go with them (foreign key cascade). Returns how many.
+ * Deletes at most `limit` expired or spent attempts and cascades their mailbox tokens.
+ * Completed recovery attempts remain until the mailbox deadline or a repair spends them.
  */
 export async function cleanupSsoAttempts(
   db: Db,
@@ -356,7 +365,10 @@ export async function cleanupSsoAttempts(
     WITH gone AS (
       DELETE FROM sso_attempts WHERE id IN (
         SELECT id FROM sso_attempts
-        WHERE consumed_at IS NOT NULL OR expires_at <= clock_timestamp()
+        WHERE expires_at <= clock_timestamp() OR (consumed_at IS NOT NULL AND (
+          operation IS DISTINCT FROM ${USE_SSO_RECOVERY}
+          OR mailbox_proof_expires_at <= clock_timestamp()
+        ))
         ORDER BY expires_at
         LIMIT ${limit}
         FOR UPDATE SKIP LOCKED)
@@ -399,8 +411,10 @@ export interface MailboxProofModule {
   mount(shared: { app: OpenAPIHono; resolveCaller: CallerResolver; publicUrl: string }): void
 }
 
-const SendInput = z.strictObject({ attemptId: z.uuid() })
-const ConsumeInput = z.strictObject({ attemptId: z.uuid(), token: z.string().min(1).max(256) })
+export const MailboxProofSendInput = z.strictObject({ attemptId: z.uuid() })
+export const MailboxProofConsumeInput = MailboxProofSendInput.extend({
+  token: z.string().min(1).max(256),
+})
 
 /**
  * The two endpoints. createApp mounts them ahead of Better Auth's `/api/auth/*`, in every
@@ -478,7 +492,7 @@ export function mailboxProofRoutes(deps: {
       }
 
       app.all(MAILBOX_PROOF_SEND_PATH, async (c) => {
-        const admitted = await admit(c, sends, SendInput)
+        const admitted = await admit(c, sends, MailboxProofSendInput)
         if (admitted instanceof Response) return admitted
         const { input, presenter, language } = admitted
         // No attempt lookup here: the worker decides, so every answer is the same.
@@ -491,7 +505,7 @@ export function mailboxProofRoutes(deps: {
       })
 
       app.all(MAILBOX_PROOF_CONSUME_PATH, async (c) => {
-        const admitted = await admit(c, consumes, ConsumeInput)
+        const admitted = await admit(c, consumes, MailboxProofConsumeInput)
         if (admitted instanceof Response) return admitted
         const proven = await consumeMailboxProof(
           { capabilities: deps.capabilities, db: deps.db, limits, now: deps.now, guesses },

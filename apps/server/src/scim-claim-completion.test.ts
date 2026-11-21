@@ -28,6 +28,7 @@ import { loadConfig } from './config.ts'
 import type { ScimResourceHandler } from './scim.ts'
 import { SCIM_URN, scimDiscovery } from './scim-discovery.ts'
 import { type ScimUserCreationDeps, scimUserCreation } from './scim-user-create.ts'
+import { scimUserReplacement } from './scim-user-replace.ts'
 import { scimUsers } from './scim-users.ts'
 import { productionAppOptions, productionAuthOptions } from './server.ts'
 
@@ -242,9 +243,12 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
       enqueued.push(payload)
     },
   }
-  // The resource test flag: discovery, reads and creation injected in code.
+  // The resource test flag: discovery, reads and User writes injected in code.
   const flagged: ScimResourceHandler = (request) =>
-    scimDiscovery(request) ?? scimUserCreation(creationDeps)(request) ?? scimUsers(db)(request)
+    scimDiscovery(request) ??
+    scimUserCreation(creationDeps)(request) ??
+    scimUserReplacement(db)(request) ??
+    scimUsers(db)(request)
 
   async function listen(fetch: (request: Request) => Response | Promise<Response>) {
     const port = await new Promise<number>((resolve) => {
@@ -267,6 +271,7 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
       baseURL: origin,
       secret,
       signup: open,
+      scimResourcesEnabled: true,
       mailer: { send: async () => {} },
       ...(completion ? { scimClaims: completion } : {}),
     })
@@ -1146,6 +1151,40 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
     verifyExpiredClaim(await instance()))
   it('refuses admission while a local or SCIM blocker exists', async () =>
     verifyTombstones(await instance()))
+  it('leaves a pending claim unusable until its User is active again', async () => {
+    const served = await instance()
+    const organization = await team()
+    const address = `pending-${unique()}@example.com`
+    const recipient = await person(address)
+    const { cookie } = await signIn(recipient)
+    const { id, claim } = await provision(served, organization, address)
+    if (!claim.invitation_id) throw new Error('Expected a SCIM-issued invitation')
+    const patch = (active: boolean) =>
+      fetch(`${served.url}/scim/v2/${organization.id}/Users/${id}`, {
+        method: 'PATCH',
+        headers: {
+          authorization: `Bearer ${organization.secret}`,
+          'content-type': 'application/scim+json',
+        },
+        body: JSON.stringify({
+          schemas: ['urn:ietf:params:scim:api:messages:2.0:PatchOp'],
+          Operations: [{ op: 'replace', path: 'active', value: active }],
+        }),
+      })
+    expect((await patch(false)).status).toBe(200)
+    const before = await snapshot(organization.id)
+    expect(await accept(served, cookie, claim.invitation_id)).toEqual({ status: 403, body: denied })
+    expect(await snapshot(organization.id)).toEqual(before)
+    expect((await patch(true)).status).toBe(200)
+    expect((await accept(served, cookie, claim.invitation_id)).status).toBe(200)
+    expect(
+      await db
+        .selectFrom('scim_users')
+        .select('linked_user_id')
+        .where('id', '=', id)
+        .executeTakeFirst(),
+    ).toEqual({ linked_user_id: recipient })
+  })
   it('admits an account another entry links without a second link', async () =>
     verifyLinkedElsewhere(await instance()))
   it('completes once under repeated and concurrent acceptance', async () =>

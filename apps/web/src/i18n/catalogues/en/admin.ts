@@ -2856,6 +2856,140 @@ export const admin = {
     'Save your edits over the fields that also changed in the latest draft?',
   'Routing form reloaded.': 'Routing form reloaded.',
   'Saved fallback event name unavailable.': 'Saved fallback event name unavailable.',
+  // Single sign-on provider and domain setup
+  'Single sign-on': 'Single sign-on',
+  'SSO domains': 'SSO domains',
+  'Loading SSO settings…': 'Loading SSO settings…',
+  'SSO settings are unavailable in this team.': 'SSO settings are unavailable in this team.',
+  'Could not load SSO settings.': 'Could not load SSO settings.',
+  'These SSO settings changed. Reload before trying again.':
+    'These SSO settings changed. Reload before trying again.',
+  'Reload settings': 'Reload settings',
+  'Could not save SSO settings.': 'Could not save SSO settings.',
+  'Confirm your identity before changing SSO settings.':
+    'Confirm your identity before changing SSO settings.',
+  'Could not verify this domain. Check the TXT record or generate a new challenge.':
+    'Could not verify this domain. Check the TXT record or generate a new challenge.',
+  'Identity providers': 'Identity providers',
+  'Add provider': 'Add provider',
+  'Add OIDC provider': 'Add OIDC provider',
+  'Edit provider': 'Edit provider',
+  'No identity providers yet.': 'No identity providers yet.',
+  'Issuer URL': 'Issuer URL',
+  'Client ID': 'Client ID',
+  'Client secret': 'Client secret',
+  'Replace client secret': 'Replace client secret',
+  'New client secret': 'New client secret',
+  'Keep current secret': 'Keep current secret',
+  'Endpoint overrides': 'Endpoint overrides',
+  'Leave URLs blank to keep the current settings.':
+    'Leave URLs blank to keep the current settings.',
+  'Authorization endpoint': 'Authorization endpoint',
+  'Token endpoint': 'Token endpoint',
+  'JWKS URL': 'JWKS URL',
+  'Associated domains': 'Associated domains',
+  'Revision {revision}': 'Revision {revision}',
+  'Retire provider': 'Retire provider',
+  'Retire provider {name}': 'Retire provider {name}',
+  'Retire this provider? This action is permanent.':
+    'Retire this provider? This action is permanent.',
+  'Retiring provider…': 'Retiring provider…',
+  'DNS verification': 'DNS verification',
+  'Domain name': 'Domain name',
+  'Enter the exact domain to verify. Generating a challenge for an existing domain resets its verification.':
+    'Enter the exact domain to verify. Generating a challenge for an existing domain resets its verification.',
+  'Generate DNS challenge': 'Generate DNS challenge',
+  'DNS TXT record': 'DNS TXT record',
+  'Publish this TXT record in your DNS settings. The value is shown once, so copy it before dismissing this record.':
+    'Publish this TXT record in your DNS settings. The value is shown once, so copy it before dismissing this record.',
+  'TXT name': 'TXT name',
+  'TXT value': 'TXT value',
+  'Copy TXT name': 'Copy TXT name',
+  'Copy TXT value': 'Copy TXT value',
+  'Challenge expires at {time}.': 'Challenge expires at {time}.',
+  'Available domains': 'Available domains',
+  'Domains from your providers and domains added in this visit appear here.':
+    'Domains from your providers and domains added in this visit appear here.',
+  'Awaiting DNS verification': 'Awaiting DNS verification',
+  Verified: 'Verified',
+  'Verification unknown': 'Verification unknown',
+  'Verification failed': 'Verification failed',
+  'Verify domain': 'Verify domain',
+  'Verify domain {domain}': 'Verify domain {domain}',
+  'Rotate challenge for {domain}': 'Rotate challenge for {domain}',
+  'Retire domain {domain}': 'Retire domain {domain}',
+  'Rotate DNS challenge?': 'Rotate DNS challenge?',
+  'Generate a new TXT value for {domain} and reset its verification?':
+    'Generate a new TXT value for {domain} and reset its verification?',
+  'Rotate challenge': 'Rotate challenge',
+  'Retire domain?': 'Retire domain?',
+  'Retiring {domain} ends its use for single sign-on.':
+    'Retiring {domain} ends its use for single sign-on.',
+  'Retire domain': 'Retire domain',
+  'Domain retired.': 'Domain retired.',
+
+  // SSO activation
+  'Test provider': 'Test provider',
+  'Test provider {name}': 'Test provider {name}',
+  'Continue to identity provider': 'Continue to identity provider',
+  'Current revision passed its test.': 'Current revision passed its test.',
+  'Current revision failed its test.': 'Current revision failed its test.',
+  'No test result for the current revision.': 'No test result for the current revision.',
+  'Enable provider': 'Enable provider',
+  'Disable provider': 'Disable provider',
+  'Enable provider {name}': 'Enable provider {name}',
+  'Disable provider {name}': 'Disable provider {name}',
+  'Enable this provider?': 'Enable this provider?',
+  'Disable this provider?': 'Disable this provider?',
+  'Enabling provider…': 'Enabling provider…',
+  'Disabling provider…': 'Disabling provider…',
+  'Pass a test of this provider’s current revision before enabling it.':
+    'Pass a test of this provider’s current revision before enabling it.',
+  'Verify an associated domain before enabling this provider.':
+    'Verify an associated domain before enabling this provider.',
+  'Enable another usable OIDC provider before disabling this provider.':
+    'Enable another usable OIDC provider before disabling this provider.',
+  'SSO enforcement': 'SSO enforcement',
+  'Loading SSO enforcement…': 'Loading SSO enforcement…',
+  'Could not load SSO enforcement.': 'Could not load SSO enforcement.',
+  'SSO enforcement is unavailable in this team.': 'SSO enforcement is unavailable in this team.',
+  'This team requires single sign-on.': 'This team requires single sign-on.',
+  'Single sign-on is optional for this team.': 'Single sign-on is optional for this team.',
+  'Require SSO': 'Require SSO',
+  'Stop requiring SSO': 'Stop requiring SSO',
+  'Require single sign-on for this team?': 'Require single sign-on for this team?',
+  'Stop requiring single sign-on for this team?': 'Stop requiring single sign-on for this team?',
+  'Before requiring SSO, have an owner test the OIDC draft, then enable that revision with a verified domain. A current owner must also accept recovery enrollment.':
+    'Before requiring SSO, have an owner test the OIDC draft, then enable that revision with a verified domain. A current owner must also accept recovery enrollment.',
+  'A current owner must accept recovery enrollment before you can require SSO.':
+    'A current owner must accept recovery enrollment before you can require SSO.',
+  'A team owner must pass a test of the current version of an enabled OIDC provider.':
+    'A team owner must pass a test of the current version of an enabled OIDC provider.',
+  'An enabled OIDC provider with a verified domain is required.':
+    'An enabled OIDC provider with a verified domain is required.',
+  'Could not change the team’s SSO enforcement.': 'Could not change the team’s SSO enforcement.',
+  'Verify by email': 'Verify by email',
+  'Send verification email': 'Send verification email',
+  'Check your Hourmere email. Copy the verification link and paste it here.':
+    'Check your Hourmere email. Copy the verification link and paste it here.',
+  'Email verification link': 'Email verification link',
+  'Verify email link': 'Verify email link',
+  'Email verification complete.': 'Email verification complete.',
+  'Verify with single sign-on': 'Verify with single sign-on',
+  'Identity provider': 'Identity provider',
+  'Start SSO verification': 'Start SSO verification',
+  'Open identity provider': 'Open identity provider',
+  'After signing in, return to this tab and select Continue.':
+    'After signing in, return to this tab and select Continue.',
+  'Could not start identity verification. Try again.':
+    'Could not start identity verification. Try again.',
+  'Could not verify that link. Check the link or request a new email.':
+    'Could not verify that link. Check the link or request a new email.',
+  'Identity verification is unavailable.': 'Identity verification is unavailable.',
+  'This verification request expired. Start again.':
+    'This verification request expired. Start again.',
+  'Could not confirm your SSO sign-in. Finish signing in or start SSO verification again.':
+    'Could not confirm your SSO sign-in. Finish signing in or start SSO verification again.',
 
   // Booking routing answers
   'Original routing answers': 'Original routing answers',

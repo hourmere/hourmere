@@ -174,20 +174,52 @@ export function mcpOAuthBroker({ auth, db, publicUrl, ssoCapabilities = ssoHardO
     if (row?.id !== organizationId) throw forbidden()
     return row
   }
-  async function approvalProof(trx: Db, p: Session, organizationId: string) {
-    // Authority writers lock the team before changing its provider and policy.
-    await trx
+  async function lockOrganization(trx: Db, organizationId: string, userId?: string) {
+    // Hold the team before its grants, intents or policy. Suspension takes it exclusively.
+    const locked = await trx
       .selectFrom('auth.organization')
       .select('id')
       .where('id', '=', organizationId)
+      .where(({ not, exists, selectFrom }) =>
+        not(
+          exists(
+            selectFrom('personal_organizations')
+              .select('organization_id')
+              .where('organization_id', '=', organizationId),
+          ),
+        ),
+      )
+      .$if(userId !== undefined, (query) =>
+        query.where(({ exists, selectFrom }) =>
+          exists(
+            selectFrom('auth.member')
+              .select('id')
+              .where('organizationId', '=', organizationId)
+              .where('userId', '=', userId as string),
+          ),
+        ),
+      )
       .forShare()
       .executeTakeFirst()
+    if (!locked && userId !== undefined) {
+      // A personal-space consent keeps its existing user-first lock order.
+      const personal = await trx
+        .selectFrom('personal_organizations')
+        .select('organization_id')
+        .where('organization_id', '=', organizationId)
+        .where('user_id', '=', userId)
+        .executeTakeFirst()
+      if (!personal) throw forbidden()
+    }
+  }
+  function approvalProof(trx: Db, p: Session, organizationId: string) {
     return lockTeamSsoProof(
       { capabilities: ssoCapabilities },
       trx,
       { sessionId: p.sessionId, userId: p.user.id },
       organizationId,
       ssoRequired,
+      { organizationLocked: true },
     )
   }
   async function hasDelegation(trx: Db, p: Session, organizationId: string, credentialId: string) {
@@ -214,15 +246,18 @@ export function mcpOAuthBroker({ auth, db, publicUrl, ssoCapabilities = ssoHardO
       .executeTakeFirst()
     if (!row) throw expired()
   }
-  async function bound(trx: Db, p: Session, intentId: string, q: URLSearchParams) {
-    const row = await trx
+  async function bound(trx: Db, p: Session, intentId: string, q: URLSearchParams, writing = false) {
+    const intent = trx
       .selectFrom('mcp_oauth_intents')
-      .selectAll()
       .where('id', '=', intentId)
       .where('user_id', '=', p.user.id)
       .where('session_id', '=', p.sessionId)
-      .forUpdate()
-      .executeTakeFirst()
+    if (writing) {
+      const target = await intent.select('organization_id').executeTakeFirst()
+      if (!target) throw expired()
+      await lockOrganization(trx, target.organization_id)
+    }
+    const row = await intent.selectAll().forUpdate().executeTakeFirst()
     if (
       !row ||
       row.used_at ||
@@ -289,6 +324,7 @@ export function mcpOAuthBroker({ auth, db, publicUrl, ssoCapabilities = ssoHardO
       const p = session(principal),
         v = await validated(oauthQuery, headers, clientIp)
       const outcome = await db.transaction().execute(async (trx) => {
+        await lockOrganization(trx, organizationId, p.user.id)
         await lock(trx, p.user.id, organizationId, v.clientId)
         await current(trx, p)
         const selected = await organization(trx, p, organizationId)
@@ -382,7 +418,7 @@ export function mcpOAuthBroker({ auth, db, publicUrl, ssoCapabilities = ssoHardO
       const p = session(principal),
         v = await validated(oauthQuery, headers, clientIp)
       const outcome = await db.transaction().execute(async (trx) => {
-        const row = await bound(trx, p, intentId, v.q)
+        const row = await bound(trx, p, intentId, v.q, true)
         const ssoProof =
           accept && row.hasPolicy ? await approvalProof(trx, p, row.organization_id) : undefined
         const nativeResult = await withMcpOAuthIntent(
@@ -479,6 +515,7 @@ export function mcpOAuthBroker({ auth, db, publicUrl, ssoCapabilities = ssoHardO
           .whereRef('c.clientId', '=', 'g.client_id')
           .executeTakeFirst()
         if (!c) throw new DomainError('not_found', 'oauth_connection_not_found')
+        await lockOrganization(trx, c.organization_id)
         await lock(trx, p.user.id, c.organization_id, c.client_id)
         await trx
           .updateTable('auth.oauthRefreshToken')
@@ -493,7 +530,12 @@ export function mcpOAuthBroker({ auth, db, publicUrl, ssoCapabilities = ssoHardO
           .where('referenceId', '=', c.id)
           .where('clientId', '=', c.client_id)
           .execute()
-        await trx.deleteFrom('mcp_oauth_grants').where('id', '=', c.id).execute()
+        const revoked = await trx
+          .deleteFrom('mcp_oauth_grants')
+          .where('id', '=', c.id)
+          .returning('id')
+          .executeTakeFirst()
+        if (!revoked) throw new DomainError('not_found', 'oauth_connection_not_found')
         await writeAuditEvent(trx, {
           organizationId: c.organization_id,
           ...auditActor(p),

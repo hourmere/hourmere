@@ -729,6 +729,7 @@ describe('REST, MCP and CLI write parity', () => {
       ['deleteSsoProvider', 'delete', '/api/v1/team/sso/providers/{providerId}'],
       ['testSsoProvider', 'post', '/api/v1/team/sso/providers/{providerId}/test'],
       ['activateSsoProvider', 'post', '/api/v1/team/sso/providers/{providerId}/activation'],
+      ['setSsoPolicy', 'put', '/api/v1/team/sso/policy'],
       ['linkSsoAccount', 'post', '/api/v1/team/sso/providers/{providerId}/link'],
       ['unlinkSsoAccount', 'delete', '/api/v1/team/sso/providers/{providerId}/link'],
       ['removeSsoIdentityLink', 'delete', '/api/v1/team/sso/providers/{providerId}/links/{linkId}'],
@@ -736,6 +737,7 @@ describe('REST, MCP and CLI write parity', () => {
       ['revokeSsoDelegation', 'delete', '/api/v1/team/sso/delegations/{bindingId}'],
       ['configureSsoRecovery', 'post', '/api/v1/team/sso/recovery'],
       ['acceptSsoRecoveryEnrollment', 'post', '/api/v1/team/sso/recovery/{enrollmentId}/accept'],
+      ['useSsoRecovery', 'post', '/api/v1/team/sso/recovery/use'],
     ]) {
       expect(
         inventory.rest.find((operation) => operation.operationId === operationId),
@@ -755,6 +757,7 @@ describe('REST, MCP and CLI write parity', () => {
       'delete_sso_provider',
       'test_sso_provider',
       'activate_sso_provider',
+      'set_sso_policy',
       'link_sso_account',
       'create_sso_domain_challenge',
       'verify_sso_domain',
@@ -763,6 +766,7 @@ describe('REST, MCP and CLI write parity', () => {
       'revoke_sso_delegation',
       'configure_sso_recovery',
       'accept_sso_recovery_enrollment',
+      'use_sso_recovery',
     ]) {
       expect(inventory.mcp).not.toContain(tool)
       expect(Object.values(inventory.cli)).not.toContain(tool)

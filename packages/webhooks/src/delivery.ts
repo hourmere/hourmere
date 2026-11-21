@@ -76,8 +76,8 @@ export async function captureWorkflowWebhook(
   trx: Db,
   input: WorkflowWebhookCapture,
   now: Temporal.Instant,
-): Promise<void> {
-  if (!settings.enabled) return
+): Promise<boolean> {
+  if (!settings.enabled) return false
   if (!trx.isTransaction) throw new Error('Webhook capture requires the workflow transaction')
   const booking = await trx
     .selectFrom('bookings as b')
@@ -96,7 +96,7 @@ export async function captureWorkflowWebhook(
     .where('b.id', '=', input.bookingId)
     .where('b.organization_id', '=', input.organizationId)
     .executeTakeFirst()
-  if (!booking || (await isImportedBooking(trx, booking.id))) return
+  if (!booking || (await isImportedBooking(trx, booking.id))) return false
 
   const eventType = 'workflow.executed'
   const endpoint = await trx
@@ -112,7 +112,7 @@ export async function captureWorkflowWebhook(
     )
     .forShare()
     .executeTakeFirst()
-  if (!endpoint) return
+  if (!endpoint) return false
 
   const eventId = randomUUID()
   const inserted = await insertWebhookDelivery(queue, trx, {
@@ -145,7 +145,7 @@ export async function captureWorkflowWebhook(
     }),
     created_at: new Date(now.epochMilliseconds),
   })
-  if (!inserted) return
+  if (!inserted) return true
   const { workflowAuditPort } = await import('@hourmere/workflows')
   await workflowAuditPort.record(trx, {
     event: 'workflow.webhook_queued',
@@ -162,6 +162,7 @@ export async function captureWorkflowWebhook(
     revision: input.workflowRevision,
     trigger: input.trigger,
   })
+  return true
 }
 
 async function captureBookingWebhook(
@@ -492,7 +493,15 @@ export async function deliverWorkflowWebhook(
   throwIfWebhookRetry(retry, signal)
 }
 
-const guardedWorkflowWebhook = workflowExecution(deliverWorkflowWebhook)
+const guardedWorkflowWebhook = workflowExecution(
+  (deps: WebhookDeps, deliveryId: string, signal: AbortSignal, jobAttempt: number) =>
+    deliverWorkflowWebhook(
+      { ...deps, enabled: deps.enabled && deps.workflowsEnabled === true },
+      deliveryId,
+      signal,
+      jobAttempt,
+    ),
+)
 
 /** At least once. A crash after the receiver accepts but before commit can duplicate an ID. */
 export async function deliverWebhook(

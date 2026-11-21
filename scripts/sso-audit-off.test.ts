@@ -18,11 +18,18 @@ const AUDIT_LAYER = new Set([
   'packages/db/src/sso-audit-check-source.ts',
 ])
 const EMITTERS: Readonly<Record<string, readonly string[]>> = {
+  'apps/server/src/sso-policy.ts': [
+    'sso_enforcement.enabled',
+    'sso_enforcement.disabled',
+    'sso_enforcement.updated',
+  ],
   'apps/server/src/sso-recovery-enrollment.ts': ['sso_recovery.nominated', 'sso_recovery.enrolled'],
+  'apps/server/src/sso-recovery-use.ts': ['sso_recovery.used'],
   'packages/auth/src/sso-recovery-membership.ts': ['sso_recovery.removed'],
   'packages/auth/src/audit.ts': ['sso_delegation.revoked'],
   'apps/server/src/sso-delegation.ts': ['sso_delegation.bound', 'sso_delegation.revoked'],
   'apps/server/src/sso-domain-retirement.ts': ['sso_maintenance.domain_retired'],
+  'apps/server/src/sso-operator-recovery.ts': ['sso_maintenance.enforcement_disabled'],
   'apps/server/src/sso-domain-recheck.ts': ['sso_domain.renewed', 'sso_domain.expired'],
   'apps/server/src/sso-domains.ts': [
     'sso_domain.challenged',

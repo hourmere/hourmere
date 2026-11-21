@@ -147,14 +147,16 @@ recipient deliveries. Generated database interfaces and selectable row types des
 storage. The internal host lifecycle service in `packages/scheduling/src/meeting-polls.ts`
 creates, reads, closes, cancels and deletes polls and rotates public links; it validates
 every candidate against the availability engine at creation, fixes every
-creation setting and never reopens a closed or canceled poll. Host reads and lifecycle
-writes are exposed through REST, MCP and CLI. Creation and link rotation remain internal. The
-internal enrollment and verification service in
+creation setting and never reopens a closed or canceled poll. Hosts can create polls,
+read results, rotate links and manage the lifecycle through the web app, REST, MCP and
+CLI. The enrollment and verification service in
 `packages/scheduling/src/meeting-poll-voters.ts` enrolls public voters, invites and
 re-invites mailboxes, verifies mailbox possession, re-delivers lost credentials and resends
 invitations, enforcing the 40-place cap, the per-IP pending cap and the recovery and
-resend counters under the poll lock. It queues durable delivery rows. Credential mail workers now deliver those rows and an
-hourly sweep erases expired capability ciphertext; no transport, flag or UI is added. The internal ballot service in
+resend counters under the poll lock. It queues durable delivery rows for the mail worker.
+An hourly sweep erases expired capability ciphertext. Voters use the no-login browser
+pages or public REST, or supply the same capabilities through authenticated MCP and CLI.
+There is no meeting-poll feature flag. The ballot service in
 `packages/scheduling/src/meeting-poll-ballots.ts` submits and replaces complete ballots,
 withdraws and reactivates voters and records reminder opt-outs under the same locks and
 database deadline clock. Ballots and withdrawals advance the ballot and results revisions;
@@ -182,16 +184,15 @@ status and sequence to skip superseded notices and uses the existing recipient l
 deduplicate sends.
 The internal cleanup service in `packages/scheduling/src/meeting-poll-cleanup.ts`, run by the
 hourly `meeting-poll-cleanup-v1` worker job, deletes expired public pending voters and
-replay tombstones past their purge instant (and terminal polls once an installation
-retention is supplied) in bounded batches that skip locked rows instead of waiting. Poll
+replay tombstones past their purge instant. Batches skip locked rows. Poll
 deletion and cleanup leave no voter data behind: only the receipts' pseudonymous replay
 tombstones remain after a poll is deleted. Migration `0088_meeting_poll_receipt_tombstones.sql`
 makes the deletion trigger also replace the request fingerprint of every receipt but `create`
 (an invitation's covers invitee names and mailboxes) with a constant, and clears existing
 tombstones the same way.
-See [the meeting-poll design](meeting-polls.md) for lifecycle, scoped foreign keys,
-capacity bounds and the remaining implementation steps. Numeric admission and cleanup
-constants live in `packages/scheduling/src/meeting-poll-policy.ts`.
+Numeric admission and cleanup constants live in
+`packages/scheduling/src/meeting-poll-policy.ts`. See the [meeting poll reference](meeting-polls.md)
+for lifecycle, scoped foreign keys and capacity bounds.
 
 Migration `0084_meeting_poll_key_state.sql` adds the installation-wide
 `meeting_poll_key_state` row: a keyed fingerprint of the meeting-poll secret that mailbox
@@ -213,15 +214,14 @@ both revisions. The deadline closure transaction queues a host delivery for the 
 creator if they still manage the event. The mail worker rechecks current authority before
 sending.
 Capacity and voting expiry are synchronous database-clock decisions, never dependent on
-worker punctuality. Normal terminal poll history follows the installation's booking-data
-retention policy from its terminal transition (deadline for automatic closure); with no
-such policy, the current repository retains booking and terminal poll history until
-explicit deletion. Both cleanup and capability-expiry workers are registered in worker roles.
+worker punctuality. The shipped worker does not set the internal terminal-retention
+parameter. Terminal poll history remains until explicit poll, linked-booking or
+organization deletion. Both cleanup and capability-expiry jobs run in worker-enabled roles.
 
-Mailbox digest counters and terminal delivery receipts remain for the entire retained
-poll lifetime so removing/recreating voters cannot reset mail budgets, reminder receipts
-or opt-outs. Counters' `purge_at` is unset until the parent is due for retention deletion;
-poll deletion cascades them. Delivery ciphertext is cleared immediately at terminal
+Mailbox digest counters remain for the entire retained poll lifetime, so
+removing or recreating a voter cannot reset mail budgets, reminder receipts or opt-outs.
+Terminal deliveries remain with their recipient until deletion. Poll deletion cascades
+counters and deliveries. Delivery ciphertext is cleared immediately at terminal
 sent/suppressed/skipped state; retries have at most 5 attempts and 5-minute leases.
 Operation receipts lose poll/booking references (`poll_id` and `booking_id`) on poll deletion,
 then retain only pseudonymous replay digests for 90 days before the hourly purge: the
@@ -230,8 +230,8 @@ digest can be recomputed from the bare ID, and in a personal space the organizat
 identifies the user.
 Organization deletion removes them immediately. Poll deletion preserves the booking;
 linked-booking deletion first deletes poll history and clears receipt references.
-See [the full cleanup contract](meeting-polls.md#storage-policy-and-cleanup-schedule)
-for the later workers and installation retention integration.
+See [the cleanup schedule](meeting-polls.md#storage-policy-and-cleanup-schedule)
+for worker cadence and retention behavior.
 
 ## Tables
 
@@ -1058,6 +1058,11 @@ pending challenges never reserve the name.
 Browser-only recovery enrollment binds the nomination and acceptance to their own proof
 attempts and advances `policy_revision` under the organization write lock. Membership
 changes use that same lock when removing accepted recovery status.
+Browser-only policy writes share the organization write lock. Enabling enforcement share-locks
+the latest general and owner test receipts for the current provider revision after taking the
+organization lock. An eligible OIDC provider must have passing results from both receipts and a
+verified domain, and the team must have an accepted current recovery owner. The policy and its audit
+event commit together.
 OIDC and SAML stay hard-off. A test restricts table references to
 the storage layer and each explicitly named data owner.
 
@@ -1170,6 +1175,16 @@ account deletion; a subject-keyed JIT check adds its column there in the step th
   what it relied on is unchanged: its provider still at the frozen revision and not retired
   (and enabled, for a sign-in or link), and its step-up's link live, provider enabled and
   trust generation current. Logging out deletes the session's attempts.
+  A consumed mailbox attempt for `useSsoRecovery` grants recovery to that session, team
+  and browser binding, while the mailbox and accepted recovery ownership are still
+  current. Cleanup keeps it until the mailbox proof expires. Each recovery-authorized
+  provider repair or enforcement-disable write spends the grant by deleting that attempt
+  in the same transaction as the protected write. A later ceremony supersedes the session's
+  previous grant for the team.
+  A recovery-authorized provider test creates a separate test attempt in that transaction.
+  Its expiry cannot exceed the grant's deadline. The authenticated state binds the provider's
+  activation state and the owner's accepted recovery enrollment. The callback can only record
+  that attempt's test receipt.
   The internal OIDC verifier uses this storage for sign-in attempts. Its pending row stores
   the state digest and browser-binding digest. The authenticated state envelope carries the
   nonce, PKCE verifier and return path, bound to the attempt and its provider revision.
@@ -1291,10 +1306,9 @@ run IDs and never recreates identities or intents. The internal email attempt se
 commits the reservation and shared ledger charge with the recipient marker, then calls
 SMTP outside the transaction. Only the matching marker token can schedule a known-not-sent
 retry. Retry admission restamps both rows under the same organization and mail-budget locks.
-Expired marker leases resolve to `delivery_unknown`. There is no production
-workflow worker or retention worker, and workflow capture, dispatch and repair stay hard-off behind
-`WORKFLOWS_IMPLEMENTED = false`. The test that keeps production modules away from the definition
-tables covers these tables too.
+Expired marker leases resolve to `delivery_unknown`. `WORKFLOWS_ENABLED` opts the instance
+into capture and delivery. The worker installs workflow repair and retention when enabled
+or when startup finds unfinished work or an interrupted attempt to recover.
 
 - **Enrollments** record a booking's capture of one workflow revision at one lifecycle
   occurrence: its creation (the creation trigger and the timers; a reschedule successor
@@ -1306,7 +1320,8 @@ tables covers these tables too.
   Their due and expiry instants never change, a worker claims one with a token and a lease,
   and a run starts pending, or skipped with a fixed reason (as capture records `minimum_gap`
   and `offset_not_future`). Completed, skipped and retired runs are final; skip reasons are the
-  contract's fixed codes. A partial index holds only unfinished runs for the due scan.
+  contract's fixed codes. Partial indexes support the unfinished due scan and the finished
+  retention scan.
 - **Recipient claims** are the recipients of an email run: an attendee or assigned host and
   the workflow-purpose digest of the normalized address, never the address, unique per run
   and digest. A timer email's winning recipient also holds its intent (category, offset,
@@ -1364,16 +1379,24 @@ deadlock (40P01) and each documented order to completion, with the lock statemen
 `workflow-storage-lock-order.ts` that later steps reuse.
 
 Execution identity outlives a definition's content. Enrollments name their workflow and
-revision without a foreign key to the definition, and enrollments, runs and recipient claims
-hold no definition content, rendered text or addresses. They are removed only with their
-booking (or, for runs and claims, their parent) or organization, never by retention. Purging a
-tombstoned definition (deleting it with its revisions and history) is refused (23514) while one
-of its runs is pending or claimed, and keeps every booking's enrollment, run and claim, so a
-replayed capture or a repair meets the same unique identity and the same final state and
-cannot dispatch again. With its organization or personal owner a definition always goes;
-without its personal-organization marker (no production path removes it), a personal owner's
-deletion leaves that organization's bookings and their unfinished runs, which dispatch must
-end without history because their workflow is gone.
+revision without a foreign key to the definition and retain the unique capture identity until
+booking or organization deletion. The workflow retention job deletes history and terminal
+runs older than 30 elapsed days by finish time, at most 100 rows per table per invocation,
+skipping locked rows without taking organization or definition locks. Migration 0177
+limits standalone run deletion to the same eligibility rules as the job. A run must be
+completed, skipped or retired for more than 720 elapsed hours and have neither a
+`dispatching` claim nor a pending webhook delivery. The existing
+foreign key removes the run and its recipient claims together, so the database can enforce
+the retention rule directly. The enrollment remains as the capture replay fence, and a
+stale wake finds no due run. Booking and organization cascades still remove all their runs.
+Audit events, mail reservations and webhook deliveries follow their own lifecycles.
+
+Purging a tombstoned definition (deleting it with its revisions and history) is refused
+(23514) while one of its runs is pending or claimed. The definition purge keeps every
+booking's enrollment, run and claim in place. A definition always goes with its organization
+or personal owner. Without its personal-organization marker (no production path removes it),
+a personal owner's deletion leaves that organization's bookings and their unfinished runs,
+which dispatch must end without history because their workflow is gone.
 
 `workflow-storage-execution-coverage.test.ts` drops every constraint, index, trigger and NOT
 NULL column through `checkConstraintCoverage` (expectation file
@@ -1808,9 +1831,22 @@ The phases within that organization boundary are:
   reads the earliest owner who invites. When the address's pending invitation expires during
   one of those waits, it rolls back to the savepoint and runs the invitation service once more.
 - SCIM User replacement and PATCH take the organization update lock, the provisioning token key
-  share lock, and the live resource update lock. It holds the organization lock through
-  any claim invalidation and the audit write, so invitation acceptance cannot hold a claim
-  lock while competing with that replacement for the resource.
+  share lock, and the live resource update lock. They read the linked account's current role and
+  local blockers under that organization lock, which serializes with role changes and departure.
+  The organization lock stays held through any claim invalidation, suspension or reactivation and
+  the audit write, so invitation acceptance cannot hold a claim lock while competing with that
+  replacement for the resource.
+- The internal SCIM suspension write holds the organization update lock through the
+  blocker insert and bulk deletion of active-team sessions and remaining team browser
+  proofs for that account. It takes the `hourmere.scim-session-revocation:<userId>`
+  transaction advisory lock after the organization lock so suspensions across teams
+  serialize when the same sessions carry proofs for both teams. Native team selection
+  and OIDC proof issuance take the organization lock before checking suspension.
+  Team writes that need a commit-time check hold the same organization row with at
+  least key-share strength and read the blocker in a fresh READ COMMITTED statement
+  after acquiring the lock.
+  Session refresh only updates existing rows and serializes with their deletion through
+  the session row lock.
 - Invitation acceptance takes the recipient's `auth.user` share lock, the organization update
   lock, its session no-key-update lock and the invitation update lock. When SCIM claim
   completion is wired, it then locks the claim bound to that invitation and that claim's

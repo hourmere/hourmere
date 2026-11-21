@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto'
+import '@hono/zod-openapi'
 import type { Principal } from '@hourmere/auth'
 import { createDb, type Database, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import {
+  TeamAdminBookingListItemSchema,
+  TeamAdminBookingListPageSchema,
+} from '@hourmere/scheduling'
 import {
   createFixtures,
   createTestTeam,
@@ -193,10 +198,12 @@ describe.skipIf(!serverUrl)('host booking routing detail over REST', () => {
   async function routedFixture() {
     const host = await createTestUser(db, 'Assigned host')
     const admin = await createTestUser(db, 'Routing team admin')
+    const owner = await createTestUser(db, 'Routing team owner')
     const other = await createTestUser(db, 'Unassigned member')
     const team = await createTestTeam(db, [
       { user: host, role: 'member' },
       { user: admin, role: 'admin' },
+      { user: owner, role: 'owner' },
       { user: other, role: 'member' },
     ])
     const id = await createFixtures(db).booking(team.id, [host.id], start, end)
@@ -214,8 +221,9 @@ describe.skipIf(!serverUrl)('host booking routing detail over REST', () => {
     principals.set('routed-admin-key', team.as(admin))
     principals.set('routed-unassigned-member', team.as(other))
     const hostSession = await session('routed-browser-host', host, team.as(host).organization)
-    const adminSession = await session('routed-admin', admin, team.as(admin).organization)
-    return { id, team, host, admin, hostSession, adminSession }
+    await session('routed-admin', admin, team.as(admin).organization)
+    await session('routed-owner', owner, team.as(owner).organization)
+    return { id, team, host, hostSession }
   }
 
   it('preserves the exact ordinary detail response bytes and status codes', async () => {
@@ -295,32 +303,31 @@ describe.skipIf(!serverUrl)('host booking routing detail over REST', () => {
       })
       expect(body).toHaveProperty('routing', routing)
     }
-    expect(await okBody(await get(routed.id, 'routed-admin'))).toEqual({ id: routed.id, routing })
   })
 
-  it('checks the live host, organization and administrator authority on each detail read', async () => {
-    for (const credential of [
-      'routed-host-in-personal-space',
-      'routed-admin-key',
-      'routed-unassigned-member',
-    ]) {
+  it.each(['routed-admin', 'routed-owner', 'routed-admin-key'])(
+    'denies host detail to the non-host caller %s',
+    async (credential) => {
+      await notFound(await get(routed.id, credential))
+    },
+  )
+
+  it('checks live host and organization authority on each detail read', async () => {
+    for (const credential of ['routed-host-in-personal-space', 'routed-unassigned-member']) {
       await notFound(await get(routed.id, credential))
     }
 
     // The resolver still supplies the original principal after the session switches spaces.
-    for (const [credential, sessionId, user] of [
-      ['routed-browser-host', routed.hostSession, routed.host],
-      ['routed-admin', routed.adminSession, routed.admin],
-    ] as const) {
-      const liveSession = () => db.updateTable('auth.session').where('id', '=', sessionId)
-      await liveSession().set({ activeOrganizationId: user.principal.organization.id }).execute()
-      try {
-        await notFound(await get(routed.id, credential))
-      } finally {
-        await liveSession().set({ activeOrganizationId: routed.team.id }).execute()
-      }
-      await okBody(await get(routed.id, credential))
+    const liveSession = () => db.updateTable('auth.session').where('id', '=', routed.hostSession)
+    await liveSession()
+      .set({ activeOrganizationId: routed.host.principal.organization.id })
+      .execute()
+    try {
+      await notFound(await get(routed.id, 'routed-browser-host'))
+    } finally {
+      await liveSession().set({ activeOrganizationId: routed.team.id }).execute()
     }
+    await okBody(await get(routed.id, 'routed-browser-host'))
 
     await db
       .updateTable('auth.user')
@@ -348,18 +355,6 @@ describe.skipIf(!serverUrl)('host booking routing detail over REST', () => {
     } finally {
       await db.insertInto('auth.member').values(hostMembership).execute()
     }
-
-    const adminMembership = () =>
-      db
-        .updateTable('auth.member')
-        .where('userId', '=', routed.admin.id)
-        .where('organizationId', '=', routed.team.id)
-    await adminMembership().set({ role: 'member' }).execute()
-    try {
-      await notFound(await get(routed.id, 'routed-admin'))
-    } finally {
-      await adminMembership().set({ role: 'admin' }).execute()
-    }
   })
 
   it('lets a personal host read from the effective personal session space', async () => {
@@ -384,19 +379,27 @@ describe.skipIf(!serverUrl)('host booking routing detail over REST', () => {
     await notFound(await get(id, credential))
   })
 
-  it('keeps routing provenance out of the host list and team administrator list and detail', async () => {
-    for (const [credential, base] of [
-      ['routed-host', path],
-      ['routed-admin', teamPath],
-    ]) {
-      const page = await okBody(await get('', credential, base))
+  it('keeps routing provenance out of the host list', async () => {
+    const page = await okBody(await get('', 'routed-host'))
+    expect(page).toHaveProperty('data', [expect.objectContaining({ id: routed.id })])
+    expect(page).not.toHaveProperty('data.0.routing')
+  })
+
+  it('keeps team booking list and detail within the administrator field whitelist', async () => {
+    for (const credential of ['routed-admin', 'routed-owner']) {
+      const page = await okBody(await get('', credential, teamPath))
       expect(page).toHaveProperty('data', [expect.objectContaining({ id: routed.id })])
-      expect(page).not.toHaveProperty('data.0.routing')
+      const parsedPage = TeamAdminBookingListPageSchema.parse(page)
+      expect(parsedPage).toEqual(page)
+      expect(parsedPage.data[0]).not.toHaveProperty('routing')
+      expect(parsedPage.data[0]).not.toHaveProperty('responses')
+
+      const detail = await okBody(await get(routed.id, credential, teamPath))
+      expect(detail).toMatchObject({ id: routed.id })
+      expect(TeamAdminBookingListItemSchema.parse(detail)).toEqual(detail)
+      expect(detail).not.toHaveProperty('routing')
+      expect(detail).not.toHaveProperty('responses')
     }
-    const teamDetail = await okBody(await get(routed.id, 'routed-admin', teamPath))
-    expect(teamDetail).toMatchObject({ id: routed.id })
-    expect(teamDetail).not.toHaveProperty('routing')
-    expect(teamDetail).not.toHaveProperty('responses')
   })
 
   it('captures the existing minimal webhook payload for a booking with routing provenance', async () => {
@@ -449,10 +452,7 @@ it('documents routing only in the host detail response schema', async () => {
   )
   const response = document.paths[`${path}/{id}`]?.get?.responses['200']
   expect(response?.content?.['application/json']?.schema).toEqual({
-    anyOf: [
-      { $ref: '#/components/schemas/HostBooking' },
-      { $ref: '#/components/schemas/TeamBookingRoutingDetail' },
-    ],
+    $ref: '#/components/schemas/HostBooking',
   })
   const schemas = document.components.schemas
   expect(schemas.HostBooking).toMatchObject({
@@ -464,13 +464,6 @@ it('documents routing only in the host detail response schema', async () => {
         },
       },
     ],
-  })
-  expect(schemas.TeamBookingRoutingDetail).toMatchObject({
-    properties: {
-      id: { type: 'string', format: 'uuid' },
-      routing: { $ref: '#/components/schemas/BookingRouting' },
-    },
-    required: ['id', 'routing'],
   })
   expect(schemas.Booking).not.toHaveProperty('properties.routing')
   expect(schemas.TeamAdminBooking).not.toHaveProperty('properties.routing')

@@ -2,10 +2,13 @@ import { randomUUID } from 'node:crypto'
 import type { TeamSsoCapabilities } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import { type AuditAction, auditActor, writeAuditEvent } from '@hourmere/db/audit'
-import { teamWriteTransaction } from '@hourmere/db/team-write'
+import { recordTeamWriteOrganizationLock, teamWriteTransaction } from '@hourmere/db/team-write'
 import type { ServiceContext } from '@hourmere/scheduling'
 import { DomainError } from '@hourmere/scheduling/errors'
-import { requireWorkflowsImplemented } from '@hourmere/workflows/hard-off'
+import {
+  requireWorkflowsEnabled,
+  type WorkflowSettings,
+} from '@hourmere/workflows/operator-settings'
 import { z } from 'zod'
 import { encryptWebhookSecret, newWebhookSecret } from './crypto.ts'
 import type { WebhookPrivateTarget } from './private-targets.ts'
@@ -35,7 +38,7 @@ export const WebhookUpdateInput = z.strictObject({
   events: z.array(z.enum(WEBHOOK_EVENTS)).optional(),
   isActive: z.boolean().optional(),
 })
-export interface WebhookSettings {
+export interface WebhookSettings extends WorkflowSettings {
   enabled: boolean
   publicUrl?: string | undefined
   encryptionKey?: string | undefined
@@ -112,6 +115,7 @@ export async function lockAuthorizationParents(
     .where('id', '=', ctx.principal.organization.id)
   organization = exclusiveOrganization ? organization.forUpdate() : organization.forKeyShare()
   if (!(await organization.executeTakeFirst())) throw insufficientRole()
+  recordTeamWriteOrganizationLock(trx, ctx.principal.organization.id)
 }
 
 function requireEnabled(settings: WebhookSettings): string {
@@ -126,9 +130,13 @@ function eventsOf(events: unknown): WebhookEventType[] {
   return [...parsed.data].sort()
 }
 
-function requireWorkflowSubscription(events: readonly string[], previous: readonly string[] = []) {
+function requireWorkflowSubscription(
+  settings: WorkflowSettings,
+  events: readonly string[],
+  previous: readonly string[] = [],
+) {
   if (events.includes('workflow.executed') && !previous.includes('workflow.executed'))
-    requireWorkflowsImplemented()
+    requireWorkflowsEnabled(settings)
 }
 
 const view = (row: {
@@ -197,7 +205,7 @@ export async function createWebhook(
   const parsed = WebhookCreateInput.safeParse(input)
   if (!parsed.success) throw invalid()
   const events = eventsOf(parsed.data.events)
-  requireWorkflowSubscription(events)
+  requireWorkflowSubscription(settings, events)
   const url = webhookUrl(parsed.data.url, settings.privateTargets)
   if (!url) throw destinationNotAllowed(settings)
   const encryptionKey = requireEnabled(settings)
@@ -271,7 +279,7 @@ export async function updateWebhook(
   ctx: WebhookServiceContext,
   id: unknown,
   input: unknown,
-  settings: Pick<WebhookSettings, 'privateTargets'> = {},
+  settings: Pick<WebhookSettings, 'privateTargets' | 'workflowsEnabled'> = {},
 ) {
   const parsed = WebhookUpdateInput.safeParse(input)
   if (!parsed.success || Object.keys(parsed.data).length === 0) throw invalid()
@@ -279,7 +287,7 @@ export async function updateWebhook(
   const pauseOnly = parsed.data.isActive === false && parsed.data.events === undefined
   return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     const row = await lockedWebhook(trx, ctx, id)
-    if (events) requireWorkflowSubscription(events, row.events)
+    if (events) requireWorkflowSubscription(settings, events, row.events)
     // Pausing must remain available after an operator revokes a destination. Every
     // other update rechecks syntax/policy only: resolving here would expose an
     // internal-host existence oracle to callers.

@@ -1,5 +1,5 @@
 // Booking workflows: definition services, lifecycle capture, the contract and timer rules
-// behind the hard-off constant (docs/workflows.md). Nothing sends mail or posts webhooks yet.
+// and execution (docs/workflows.md).
 
 export {
   WORKFLOW_AUDIT_EVENTS,
@@ -55,6 +55,7 @@ export {
   dispatchWorkflowRuns,
   lockWorkflowWebhookRun,
   repairWorkflowWakes,
+  shouldRunWorkflowJobs,
   type WorkflowDispatchContext,
   type WorkflowWakePort,
   workflowJobs,
@@ -66,6 +67,7 @@ export {
   type WorkflowEmailAction,
   type WorkflowEmailInput,
 } from './email.ts'
+export { executeWorkflowClaim } from './execution.ts'
 export {
   requireWorkflowsImplemented,
   WORKFLOWS_IMPLEMENTED,
@@ -74,6 +76,12 @@ export {
   workflowOperation,
 } from './hard-off.ts'
 export * from './limits.ts'
+export {
+  requireWorkflowsEnabled,
+  requireWorkflowUpdateAllowed,
+  type WorkflowSettings,
+  workflowsEnabled,
+} from './operator-settings.ts'
 export {
   isWorkflowBooking,
   isWorkflowEventType,

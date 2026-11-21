@@ -334,14 +334,11 @@ describe.skipIf(!databaseUrl)('SSO fresh proof', () => {
     await owned?.drop()
   })
 
-  it.each([
-    { name: 'OIDC enabled without enforcement', capabilities: ON },
-    { name: 'OIDC disabled with stored enforcement', capabilities: SAML_ONLY },
-  ])('keeps mailbox proof and one-time retry with $name', async ({ capabilities }) => {
+  it('keeps mailbox proof and one-time retry without enforcement', async () => {
+    const capabilities = ON
     const h = harness(real, capabilities)
-    const team = capabilities.ssoOidcEnabled ? f.team : f.otherTeam
-    const user = capabilities.ssoOidcEnabled ? f.owner : f.otherOwner
-    const who = browser(f.sessions[user])
+    const team = f.team
+    const who = browser()
     const before = await count('fresh_proof_test_writes')
     const a = await required(await write(h, who, { name: 'draft' }, team))
     expect(a.proofMethods).toEqual(['mailbox'])
@@ -519,7 +516,7 @@ describe.skipIf(!databaseUrl)('SSO fresh proof', () => {
     const who = browser(f.sessions[f.otherOwner])
     const before = await count('fresh_proof_test_writes')
     const mailboxOnly = await required(
-      await write(harness(real, SAML_ONLY), who, { name: 'draft' }, f.otherTeam),
+      await write(harness(real, ON, 'mailbox'), who, { name: 'draft' }, f.otherTeam),
     )
     expect(mailboxOnly.proofMethods).toEqual(['mailbox'])
     await prove(mailboxOnly.attemptId)
@@ -552,20 +549,31 @@ describe.skipIf(!databaseUrl)('SSO fresh proof', () => {
     ).toBe(200)
   })
 
-  it('continues to accept mailbox proof when enforcement has no active OIDC provider', async () => {
+  it('does not substitute mailbox proof when an enforced team has no active OIDC provider', async () => {
     const h = harness()
     const who = browser(f.sessions[f.otherOwner])
     await client.query('UPDATE sso_providers SET enabled=false WHERE id=$1', [f.otherProvider.id])
     try {
       const a = await required(await write(h, who, { name: 'draft' }, f.otherTeam))
-      expect(a.proofMethods).toEqual(['mailbox'])
-      await prove(a.attemptId)
-      expect(
-        (await write(h, who, { name: 'draft', proofAttemptId: a.attemptId }, f.otherTeam)).status,
-      ).toBe(200)
+      expect(a.proofMethods).toEqual(['sso'])
+      expect((await row(a.attemptId)).requires_mailbox).toBe(false)
     } finally {
       await client.query('UPDATE sso_providers SET enabled=true WHERE id=$1', [f.otherProvider.id])
     }
+  })
+
+  it('refuses fresh administration on an enforced team while OIDC is unavailable', async () => {
+    const h = harness(real, SAML_ONLY)
+    const attempts = await count('sso_attempts')
+    const response = await write(
+      h,
+      browser(f.sessions[f.otherOwner]),
+      { name: 'draft' },
+      f.otherTeam,
+    )
+    expect(response.status).toBe(404)
+    expect(await response.json()).toEqual({ error: 'sso_disabled' })
+    expect(await count('sso_attempts')).toBe(attempts)
   })
 
   it('is off before any attempt or operation write and ships no route', async () => {

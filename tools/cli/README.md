@@ -630,6 +630,9 @@ exits `1` with `workflows_disabled` on stderr.
 
 ## Manage meeting polls
 
+The [meeting poll API guide](../../docs/meeting-polls-api.md) maps every command to
+its REST route and MCP tool and shows a stdin invocation.
+
 Use `hourmere polls <command> --input -` with a key for the poll's organization.
 `hourmere --help` separates host management from public voting commands.
 Personal event owners and current team owners or admins can manage polls. Reads allow
@@ -657,11 +660,11 @@ Invitation queues email only to supplied addresses, subject to mail and admissio
 An exact invite retry returns current outcomes without sending again. Bulk removal removes
 unverified public enrollments and preserves host invitations.
 
-`list` accepts `{}` or a `limit` from 1 to 100 and an `after` cursor from `nextAfter`.
+`list` accepts an empty JSON object or a `limit` from 1 to 100 and an `after` cursor
+from `nextAfter`.
 `get` and `results` take `id`. Results include the current revisions and advisory
 candidate availability. `close`, `cancel` and `delete` take `id` and
-`expectedHostRevision`. Deletion returns `{ "deleted": true }` and preserves any
-linked booking.
+`expectedHostRevision`. Deletion returns a true `deleted` field and preserves any linked booking.
 
 `finalize` takes `id`, `slotId`, `bookerVoterId`, `attendeeVoterIds` (including the
 booker), `expectedResultsRevision`, `expectedBallotRevisions` keyed by selected voter
@@ -695,7 +698,7 @@ needs a `read`, `bookings` or `full` API key; writes need `bookings` or `full`.
 The CLI uses authenticated MCP. The public REST endpoints also permit no-login access.
 Public commands act on existing polls. A host key cannot replace a voter's own token or consent.
 
-`view` accepts a public-link, verification or voting token in `{ "token": "…" }`.
+`view` accepts a public-link, verification or voting credential in the `token` field.
 `verify` takes the emailed token. `join` uses `publicToken`, `name`, `email`,
 `timeZone` and optional `locale`. `recover` needs only `pollId` and `email`, without a
 valid token, and returns the same accepted response for unknown mailboxes. `vote` takes

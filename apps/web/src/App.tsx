@@ -15,12 +15,14 @@ import {
   Navigate,
   Route,
   useLocation,
+  useMatch,
   useNavigate,
   useOutletContext,
   useRoutes,
 } from 'react-router'
 import { api } from './api/client.ts'
 import { AdminLoading } from './components/AdminLoading.tsx'
+import type { AppShellContext } from './components/AppShell.tsx'
 import { PageSkeleton } from './components/PageSkeleton.tsx'
 import { RouteErrorBoundary } from './components/RouteErrorBoundary.tsx'
 import { embedQueryLanguage } from './embed/language.ts'
@@ -63,6 +65,7 @@ import {
   SessionLayout,
   SettingsPage,
   SignInPage,
+  SsoSetupPage,
   TeamBookingPage,
   TeamBookingsPage,
   TroubleshootPage,
@@ -125,6 +128,10 @@ export const appRoutes = createRoutesFromElements(
           <Route path="api-keys" element={<ApiKeysPage />} />
           <Route path="audit-log" element={<AuditLogPage />} />
           <Route path="settings" element={<SettingsPage />} />
+          <Route path={PATHS.sso} element={<SsoSetupRoute />}>
+            {/* The shared setup page selects the pane and keeps the team inventory across routes. */}
+            <Route path={PATHS.ssoDomainSettings} element={null} />
+          </Route>
           <Route path="teams/new" element={<CreateTeamPage />} />
           <Route path="*" element={<AppNotFoundPage />} />
         </Route>
@@ -154,6 +161,14 @@ export const appRoutes = createRoutesFromElements(
     <Route path="*" element={<NotFoundPage />} />
   </>,
 )
+
+function SsoSetupRoute() {
+  const { ssoOidcEnabled, ssoSamlEnabled } = useOutletContext<AppShellContext>()
+  const isDomains = useMatch(PATHS.ssoDomainSettings) !== null
+  if (ssoOidcEnabled === undefined || ssoSamlEnabled === undefined) return <PageSkeleton />
+  if (!ssoOidcEnabled && !(isDomains && ssoSamlEnabled)) return <AppNotFoundPage />
+  return <SsoSetupPage />
+}
 
 function WorkflowRoute({ view = 'list' }: { view?: 'list' | 'editor' | 'history' }) {
   const { workflowsEnabled, followUpHostNotesEnabled } = useOutletContext<{

@@ -150,13 +150,14 @@ conflict. Read-only and server-owned attributes (`id`, `meta`, `groups`,
 `manager.displayName`) are ignored, as are the RFC 7643 attributes Hourmere does not map,
 `password` included, which is never stored or recorded; an unknown attribute or extension
 gets 400 `invalidValue`, a nonempty `roles` or `entitlements` gets 403 `mutability`, and a
-`manager` must name a live entry of the same connection. `active` may only be true until the
-lifecycle step enables its writes. The work address is chosen from `emails` in this order:
+`manager` must name a live entry of the same connection. `active` defaults to true. An
+inactive create stores the directory entry and its `scim_user.created` audit event without
+starting a claim or sending an invitation. The work address is chosen from `emails` in this order:
 the primary `work` email, the first `work` email, a primary email without `type`, then the
 only email when it has no `type` (an empty `type` counts as none); a nonempty `emails` that
 none of these selects, or that marks more than one address primary, gets 400 `invalidValue`
 rather than losing the address.
-When the User has a work address, the same transaction records a pending claim and issues
+When an active User has a work address, the same transaction records a pending claim and issues
 its invitation through the existing invitation service, with the same address rules,
 member-role invitation, mail admission limits, pending cap and delivery queue as an
 invitation sent from the app: the earliest current owner of the organization whose email
@@ -189,6 +190,8 @@ verified address is the invitation's, rechecked after the acceptance's locks. An
 same-email personal account accepts the same way, in its own session, and nothing else links
 it; the create's answer and the invitation are the same whether or not that account exists.
 After the organization and invitation locks, acceptance locks the claim and then its entry.
+A live inactive entry pauses acceptance of its SCIM-issued invitation. Reactivation leaves
+the original invitation usable until its normal expiration.
 A SCIM-issued invitation never clears an admission blocker: while a live local or SCIM
 suspension or removal names the accepting account or the proven mailbox, admission is refused
 with the acceptance's uniform 403 `TEAM_MANAGEMENT_ACCESS_DENIED` and nothing is written.
@@ -215,9 +218,10 @@ Omitted or null optional profile attributes and an empty `emails` array clear th
 The response is 200 with the current representation. The server preserves the resource
 ID, scope, creation time and account and membership links. It ignores supplied read-only
 attributes, including `id`, `meta`, `groups` and `manager.displayName`, and refuses
-nonempty roles or entitlements. Omit `active` or echo its current value until the lifecycle
-step enables changes. A profile replacement never changes a personal account, a global
-email, or an organization's membership or role.
+nonempty roles or entitlements. Omitted or null `active` preserves its current value. A
+boolean sets the desired lifecycle state in the same transaction as the profile. Profile
+fields belong to the directory entry. The linked account, email and role are managed through
+ordinary team administration.
 
 A different normalized work address, or clearing the address, invalidates any unfinished
 claim atomically with the profile change. An existing invitation can still be accepted
@@ -259,9 +263,10 @@ primary work address. A filtered replace or remove without a work
 address returns `noTarget`. A filtered add can supply the missing address. Read-only
 attributes and removal of required `userName` return 400 `mutability`.
 
-Until the lifecycle step, a boolean or string boolean `active` echo is accepted. Removing
-`active`, assigning null or setting a different value returns 403 `mutability`, even when a later
-operation would restore the original value. User PATCH has no Group operations.
+PATCH accepts a boolean or the documented string boolean for `active`. The last assignment
+sets the committed state. Any `active:false` operation on a current owner or admin returns
+403 `mutability`, including when a later operation would restore the original value.
+Removing `active` or assigning null also returns 403 `mutability`.
 
 Implement RFC ordered, atomic `Operations` with add, replace and remove. Validate the
 whole document before committing and roll back all operations on any failure. Support
@@ -334,20 +339,41 @@ same transaction. Persist revocation work before success if an existing integrat
 needs an outbox. Every REST/MCP/native auth path must check current membership/suspension;
 a previously issued token or cached proof must not keep granting access.
 
-Authorization uses the live SCIM suspension for the account and team. A browser session
-in a suspended team resolves to its personal space, and native team selection refuses the
-suspended team. Existing team API keys, SSO delegation and browser proofs, and MCP OAuth
-tokens lose authorization for that team. Personal and other-team access continues. SSO JIT
-admission also checks live blockers for the proven mailbox under the team lock. Authorization
-and credential revocation are separate steps in the implementation plan below.
+Authorization uses the live SCIM suspension for the account and team. Existing team API
+keys, SSO delegation and MCP OAuth tokens lose authorization for that team. REST and
+MCP check the blocker when resolving the caller. A credential resolved before suspension
+can finish a read. Team writes in SCIM-managed organizations take the team lock and
+check suspension on the committing connection. SSO JIT admission checks live blockers
+for the proven mailbox under the team lock. Authorization and credential revocation are
+separate steps in the implementation plan below.
 
-Sessions are account-wide today. Delete sessions whose active organization is the affected
-team and invalidate team-scoped proofs on all others; shared personal sessions can remain
-usable for personal/other-team work but cannot reselect the suspended team. Do not delete
-global social sign-in accounts, calendar connections, personal bookings or credentials for
-other organizations. Preserve historical bookings and attribution. Existing departure and
-booking-host handling policy must be reused: suspend eligibility for new team work and
-surface outstanding-booking handling to authorized admins; do not silently cancel meetings.
+The shared suspension write locks the organization row `FOR UPDATE` first, before
+locking or deleting sessions, browser proofs, API keys or OAuth grants. A concurrent
+team write takes its organization lock before checking live authority on the writing
+connection. If the write holds the lock first, it can commit before suspension. A write
+that waits for suspension to commit must recheck and refuse the suspended member.
+
+The suspension transaction records the blocker, deletes the account's sessions whose
+active organization is that team and removes that team's browser proofs on surviving sessions.
+Personal and other-team sessions stay usable, and team selection refuses the suspended
+team. Rolling refresh only updates an existing session, so it cannot recreate a deleted
+one. Team selection and proof issuance check the blocker under the same team lock.
+The transaction also deletes the member's API keys assigned to the team and their team's
+MCP OAuth grants, including the matching provider consents, token rows and delegation
+bindings. Keys and grants in personal space and other teams, and those of other team
+members, are retained. A session-bound OAuth access token still depends on its issuing
+session. Clearing the blocker during later reactivation cannot restore deleted keys or
+grants. The member must create a new key or authorize a new OAuth grant. Reactivation clears
+only the SCIM suspension recorded for the linked User, and requires the linked account
+to have a current membership and the account and verified mailbox to have no local blocker. Otherwise
+it returns 403 `mutability`. On an unlinked User, `active:true` changes only the directory
+entry. It does not make a new invitation or claim.
+
+Production still registers no SCIM resource handler. Preserve global social sign-in
+accounts, calendar connections, personal bookings, historical bookings and attribution.
+Existing departure and booking-host handling policy must be reused: suspend eligibility for
+new team work and surface outstanding-booking handling to authorized admins; do not silently
+cancel meetings.
 
 DELETE performs the same revocation and permanently tombstones this SCIM resource;
 every subsequent operation on that resource, including repeated DELETE, returns 404
@@ -365,7 +391,8 @@ Serialize the role check with native role/departure writes under the organizatio
 Reject each forbidden change atomically with HTTP 403 and a SCIM Error containing
 `status: "403"`, `scimType: "mutability"` and safe detail explaining that privileged
 membership must be changed through ordinary administration first. The same 403 error
-applies to attempts to grant either role through any mapped field or PATCH form.
+applies to attempts to grant either role through any mapped field or PATCH form. A write of
+an empty or unassigned role list on a linked owner or admin is also refused.
 Ordinary administration retains its last-owner protection. Provisioning tokens are not
 recovery credentials.
 
@@ -583,16 +610,20 @@ accepting person's session like the `membership.accepted` event beside it, in th
 transaction. Profile replacement records `scim_user.updated` on the resource ID with the
 same token attribution as creation, in the profile transaction. PUT leaves details empty.
 PATCH records only the ordered operation types, normalized to lowercase.
+The shared suspension write records `scim_user.credentials_revoked`. Each active state
+transition records `scim_user.deactivated` or `scim_user.reactivated`. These events have
+empty details and identify the SCIM resource and the provisioning token actor. The profile,
+active state, blocker, credential deletions and corresponding audit rows commit or roll back
+together. Repeating a write with the same state adds no lifecycle audit row.
 Token foundation must never claim full audit coverage. SCIM action names follow the journal's
 one-dot form `<resource>.<past-tense verb>`, as `scim_user.created` does, because the action
 check allows exactly one dot. Required future actions:
 `scim_connection.authentication_failed` and `scim_connection.rate_limited` (bounded
-aggregation); `scim_user.deactivated`,
-`scim_user.reactivated`, `scim_user.deleted`; `scim_group.created`, `scim_group.updated`,
+aggregation); `scim_user.deleted`; `scim_group.created`, `scim_group.updated`,
 `scim_group.deleted`; `scim_group.member_added`, `scim_group.member_removed`;
 `scim_mapping.linked`, `scim_mapping.unlinked`; `scim_user.conflicted`;
 `scim_user.privileged_member_blocked`; `scim_user.last_owner_blocked`;
-`scim_user.membership_suspended`; `scim_user.credentials_revoked`.
+`scim_user.membership_suspended`.
 Record organization/connection, safe credential ID or human actor, target opaque ID,
 request correlation ID, result and time; omit bearer, digest, attribute values and bodies.
 Transactional lifecycle audit integration is a release prerequisite for Users/Groups.
@@ -636,6 +667,8 @@ and its implemented linking contract.
 
 **Resource test flag** means code-only dependency injection in the test harness. It is
 not an environment setting, operator setting, public parameter or production-build option.
+The harness also passes `scimResourcesEnabled: true` to `createAuth` so native team API key
+writes serialize with suspension even when a connection is created concurrently.
 Users, Groups and discovery handlers remain unregistered in production code until all
 Users, Groups, conformance and release acceptance rows are complete. Every intermediate
 main commit can be released safely: `SCIM_PROVISIONING_ENABLED` enables credential

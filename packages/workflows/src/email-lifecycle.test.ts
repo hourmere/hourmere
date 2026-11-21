@@ -22,8 +22,13 @@ import { alignSmtpDateNowWithDatabase } from '../../notifications/src/testing-cl
 import { captureBookingWorkflows } from './capture.ts'
 import { createWorkflowDefinition } from './creates.ts'
 import { deleteWorkflowDefinition } from './deletes.ts'
-import { claimDueWorkflowRuns, type WorkflowRunClaim } from './dispatcher.ts'
-import { attemptWorkflowEmail } from './email-attempt.ts'
+import {
+  claimDueWorkflowRuns,
+  repairWorkflowWakes,
+  shouldRunWorkflowJobs,
+  type WorkflowRunClaim,
+} from './dispatcher.ts'
+import { attemptWorkflowEmail, markWorkflowEmailAttempt } from './email-attempt.ts'
 import { updateWorkflowDefinition } from './updates.ts'
 
 // Keep the scheduled wake within pg-boss retention on the real database clock.
@@ -318,6 +323,29 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow email lifecycle', () => {
       workflow,
     }
   }
+
+  it('starts repair while off for an interrupted SMTP attempt on a retired run', async () => {
+    const settings = { workflowsEnabled: false }
+    expect(await shouldRunWorkflowJobs(db, settings)).toBe(false)
+    const s = await fixture()
+    const claim = await s.claim()
+    expect(
+      await markWorkflowEmailAttempt(s.execution(), claim, (await s.recipient()).id),
+    ).toHaveProperty('message')
+    await cancelHostBooking({ ...s.ctx(), notify: s.notify }, s.bookingId)
+    expect(await s.run()).toMatchObject({ state: 'retired' })
+    expect(await s.recipient()).toMatchObject({ state: 'dispatching' })
+    expect(await shouldRunWorkflowJobs(db, settings)).toBe(true)
+    const ensureWake = vi.fn(async () => {})
+    await repairWorkflowWakes(
+      { db, now: () => s.now().add({ minutes: 2 }), ...settings },
+      { ensureWake },
+    )
+    expect(await s.recipient()).toMatchObject({ state: 'delivery_unknown' })
+    expect(ensureWake).not.toHaveBeenCalled()
+    expect(smtp.received.connections).toBe(0)
+    expect(await shouldRunWorkflowJobs(db, settings)).toBe(false)
+  })
 
   it('gives an overlapping booker intent to the core reminder and still sends to a non-overlapping guest', async () => {
     await alignSmtpDateNowWithDatabase(db)

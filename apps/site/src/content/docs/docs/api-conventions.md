@@ -36,8 +36,8 @@ See [branding](/docs/branding) for size limits, caching and email compatibility.
 Additions include the reschedule-request events, `booking.attendee_no_show_changed` and
 `workflow.executed`. Regenerate clients from the current OpenAPI document, update closed
 validators and ignore unknown event types. New kinds require explicit subscription.
-Workflows are hard-off, so attempts to add `workflow.executed` return
-`404 workflows_disabled`.
+While workflows are off, attempts to add `workflow.executed` return
+`404 workflows_disabled`. Keeping or removing an existing subscription is allowed.
 
 ### Booking activity no-show counts
 
@@ -1502,17 +1502,18 @@ not whether older retained history exists beyond that bound.
 
 ## Public meeting polls
 
-Meeting-poll public transports use POST bodies at `/api/v1/public/meeting-polls/`
+Public meeting-poll REST operations use POST bodies at `/api/v1/public/meeting-polls/`
 (`read`, `enroll`, `recover`, `verify`, `vote`, `withdraw`, `reminder-opt-out`). They are
 available without a feature switch or login; any supplied API key must still be valid and
 have the operation's scope. Capabilities never belong in query strings or paths. Responses
 are private/no-store, no-referrer and noindex. Recovery accepts `pollId` and `email` without
 requiring a valid capability and answers uniform 202, including unknown IDs/mailboxes.
 Enrollment answers uniform 202 except poll-level closure/capacity and request limits.
-Public reads reveal only the holder's ballot; aggregate visibility additionally exposes
-counts to verified voters, never a roster. Public capability reads do not verify a mailbox.
+Public reads reveal only the holder's ballot. Aggregate visibility also exposes counts to
+verified voters who are still participating, with no roster. Public capability reads do not
+verify a mailbox. See [host REST operations](/docs/rest#manage-meeting-polls) for management.
 
-中文：公共投票接口均使用 POST 正文，无开关且无需登录；提供 API 密钥时仍验证其有效性与
-权限。能力凭据不可放入路径或查询参数。找回仅需 `pollId` 和 `email`，未知投票或邮箱也
-统一返回 202。读取不会验证邮箱，只返回持有者自己的选票；汇总可见模式仅向已验证投票人
-提供计数，不提供名单。主办方接口及网页由后续步骤提供。
+中文：公开投票 REST 接口均使用 POST 正文，无需开启开关或登录。提供 API 密钥时仍会验证
+密钥的有效性和权限。凭证不可放入路径或查询参数。找回仅需 `pollId` 和 `email`，遇到未知
+投票或邮箱也统一返回 202。读取不会验证邮箱，只返回持有者自己的选票。共享汇总模式仅向
+已验证且仍在参与的投票人提供票数，不提供名单。主持人操作见[管理投票的 REST 接口](/docs/rest#manage-meeting-polls)。

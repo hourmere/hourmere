@@ -1144,15 +1144,23 @@ booking and email delivery. See the SMS guide for inbound webhook setup and limi
 
 ## Meeting poll credentials and recovery
 
-The public meeting-poll REST operations are enabled without a feature switch. Host creation
-and the voter web page are not available yet. MCP and CLI expose the same public operations
-through their usual API-key authentication; REST capabilities need no account.
+The host dashboard, voter page and REST, MCP and CLI operations are available without a
+meeting-poll feature switch. Public voter REST requests need no account. MCP and CLI require
+their usual authentication in addition to the voter’s poll credential where applicable.
+
+Set `PUBLIC_URL` to the public HTTPS origin that voters can reach. Configure `SMTP_URL`
+and `MAIL_FROM`, run a `worker` or `all` process, and check delivery with a test invitation
+before sharing a real poll. The poll worker skips messages without SMTP. It does not
+write usable links to the development log mailer. See [email configuration](/docs/configuration#email-and-registration)
+and [running workers separately](/docs/self-hosting#run-workers-separately).
 
 Meeting polls use `BETTER_AUTH_SECRET` for mailbox/IP digests and encrypted mail credentials.
 Back up this secret with the database and use the same value on every web and worker process.
-Startup checks the stored key fingerprint before serving polls; every public operation also
-checks it. Changing this secret while voters or mailbox counters exist fails closed with
+Startup checks the stored key fingerprint before allowing the process to start; every public
+poll operation also checks it. Changing this secret while voters or mailbox counters exist fails closed with
 `meeting_poll_key_mismatch`. Never delete the fingerprint row to bypass this protection.
+Replacing the instance secret also affects sessions, waitlists and mail accounting. See
+the [configuration reference](/docs/configuration#server-and-database) before proceeding.
 
 To recover, stop all application and worker processes and choose one procedure:
 
@@ -1168,18 +1176,32 @@ To recover, stop all application and worker processes and choose one procedure:
    Polls without those rows remain. There is no dedicated invalidation CLI command.
 
 Do not rotate live instances one process at a time. The shared request budget stores only
-keyed IP digests with 60-second windows and expires old windows during requests. Reads allow
+keyed digests with 60-second windows and expires old windows during requests. Reads allow
 120 requests per minute; enrollment, recovery and verification share 10; voting, withdrawal
-and reminder opt-out share 30. REST and MCP share these PostgreSQL counters across processes.
+and reminder opt-out share 30. These public limits are per trusted client IP. Host creation,
+invitation and resend separately share 10 per minute per organization and per known trusted
+client IP. REST and MCP share these PostgreSQL counters across processes.
 Keep proxy trust settings correct; IPv6 addresses within a /64 share one budget.
 
-中文：公共投票 REST 接口直接可用，无功能开关；主办方创建及投票网页尚未提供。
-MCP/CLI 仍需通常的 API 密钥，REST 能力凭据无需登录。投票使用 `BETTER_AUTH_SECRET`
-生成邮箱/IP 摘要并加密邮件凭据，所有网页及工作进程必须使用同一值，并与数据库一起备份。
-有投票人或邮箱计数记录时更换密钥会在启动及每次公共操作中拒绝服务。
-恢复时先停掉所有应用及工作进程：恢复旧密钥可保留全部数据；若旧密钥丢失或泄露，
-先备份数据库，再由运维在事务中删除所有拥有投票人或邮箱计数记录的投票，利用级联删除
-清除凭据、选票及待发邮件，然后统一设置新密钥并重启。普通预约保留；没有投票人及邮箱
-计数的投票保留。不得删除密钥指纹绕过检查，也不要逐台在线轮换。没有专用失效 CLI 命令。
-每分钟读取限 120 次，报名/找回/验证共享 10 次，投票/撤回/提醒退订共享 30 次；
-REST 与 MCP 跨进程共享数据库限额，IPv6 /64 共用计数，需正确设置可信代理。
+The hourly cleanup records deadline closure and removes expired unverified public sign-ups.
+An hourly expiry job erases expired encrypted credentials. Digest-only voting credentials
+can still authorize read-only access while the poll is retained. Mailbox counters for resends,
+reminder opt-out and removals stay for the poll’s lifetime. There is no automatic terminal-poll
+expiry in the current deployment. Delete the poll to remove its private data while keeping its
+booking. Deleting the linked booking or organization also removes the poll. Minimal pseudonymous
+replay records remain for 90 days after poll deletion and are then eligible for hourly cleanup.
+Those records contain no poll or booking references. Organization deletion removes them immediately.
+
+### 中文说明
+
+管理端、投票网页及 REST、MCP、CLI 操作均可用，无需开启会议投票开关。投票人调用公开 REST 接口无需登录。MCP 和 CLI 仍需各自的常规认证，且相关操作须提供投票人自己的凭证。
+
+将 `PUBLIC_URL` 设为投票人可访问的 HTTPS 地址，配置 `SMTP_URL` 和 `MAIL_FROM`，并运行 `worker` 或 `all` 进程。分享真实投票前，请先发送测试邀请并确认能收到邮件。未配置 SMTP 时，工作进程会跳过投票邮件，开发日志不会输出可用的投票链接。请参阅[邮件配置](/docs/configuration#email-and-registration)和[独立运行工作进程](/docs/self-hosting#run-workers-separately)。
+
+所有网页和工作进程必须使用相同的 `BETTER_AUTH_SECRET`，并将其与数据库一起备份。此密钥用于生成投票相关摘要和加密邮件凭证。存在投票人或邮箱计数记录时，密钥不一致会阻止进程启动，公开投票操作也会拒绝请求。更换实例密钥还会影响会话、候补名单和邮件用量计数。请先查阅[配置参考](/docs/configuration#server-and-database)。
+
+恢复时先停止所有应用和工作进程。恢复旧密钥可保留全部投票数据。若旧密钥丢失或泄露，请先备份数据库，再由运维人员在事务中删除所有含投票人或邮箱计数记录的投票，同时清除关联凭证、选票及待发邮件。普通预约及没有这两类记录的投票会保留。然后在所有进程上设置同一个新密钥并重启。请勿删除密钥指纹来绕过检查，也不要逐台在线更换。目前没有专用的 CLI 命令用来使受影响的投票失效。
+
+按可信客户端 IP 计，每分钟最多读取 120 次，报名、找回和验证共用 10 次，投票、撤回和取消提醒共用 30 次。主持人创建、邀请和重发共用独立的限额，每个组织和每个已知的可信客户端 IP 每分钟各 10 次。REST 和 MCP 跨进程共用 PostgreSQL 计数。IPv6 地址按 `/64` 共用限额，请正确设置可信代理。
+
+后台任务每小时记录到期关闭状态、移除已过期的未验证公开报名，并清除已过期凭证的密文。投票仍保留期间，可继续用只保留摘要的投票凭证读取允许查看的历史信息。重发、取消提醒及移除相关的邮箱计数随投票保留。已结束的投票没有自动删除期限。删除投票会清除其私密数据并保留预约。删除关联预约或所属空间也会删除投票。删除投票后，最少量的防重放记录会保留 90 天，之后由每小时清理任务移除。这类记录不再引用投票或预约。删除组织时，其防重放记录立即清除。

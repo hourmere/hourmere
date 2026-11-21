@@ -5,6 +5,7 @@ import {
   type Slot,
 } from '@hourmere/core'
 import type { Db } from '@hourmere/db'
+import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { type Expression, sql } from 'kysely'
 import {
   activeGroupBookings,
@@ -212,7 +213,8 @@ async function checkBatch(
           selectFrom('auth.member as m')
             .select('m.id')
             .whereRef('m.userId', '=', 'u.id')
-            .whereRef('m.organizationId', '=', 'et.organization_id'),
+            .whereRef('m.organizationId', '=', 'et.organization_id')
+            .where((eb) => eb.not(scimSuspended(eb.ref('m.organizationId'), eb.ref('m.userId')))),
         ).as('is_member'),
       )
       .where('et.id', '=', eventTypeId)

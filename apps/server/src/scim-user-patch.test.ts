@@ -457,15 +457,6 @@ describe.skipIf(!databaseUrl)('SCIM User PATCH normalization', () => {
       code: 'mutability',
     },
     {
-      name: 'active false even when restored later',
-      operations: [
-        { op: 'replace', path: 'active', value: 'False' },
-        { op: 'replace', path: 'active', value: true },
-      ],
-      status: 403,
-      code: 'mutability',
-    },
-    {
       name: 'active removal',
       operations: [{ op: 'remove', path: 'active' }],
       status: 403,
@@ -558,17 +549,16 @@ describe.skipIf(!databaseUrl)('SCIM User PATCH normalization', () => {
     },
   )
 
-  it('checks the locked inactive state and scoped identifier uniqueness', async () => {
+  it('rolls back reactivation when a scoped identifier conflicts', async () => {
     await seed({ user_name: 'Occupied', external_id: 'Taken' })
     const id = await seed({ active: false })
     const before = await stored(id)
-    await expectError(
-      await patch(id, document([{ op: 'replace', value: { active: true } }])),
-      403,
-      'mutability',
-    )
     for (const value of [{ userName: ' OcCuPiEd ' }, { externalId: 'Taken' }])
-      await expectError(await patch(id, document([{ op: 'replace', value }])), 409, 'uniqueness')
+      await expectError(
+        await patch(id, document([{ op: 'replace', value: { ...value, active: true } }])),
+        409,
+        'uniqueness',
+      )
     expect(await stored(id)).toEqual(before)
     expect(await updates(id)).toEqual([])
   })

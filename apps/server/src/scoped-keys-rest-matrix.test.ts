@@ -190,6 +190,7 @@ const classes = {
     'DELETE /api/v1/team/sso/providers/{providerId}',
     'POST /api/v1/team/sso/providers/{providerId}/test',
     'POST /api/v1/team/sso/providers/{providerId}/activation',
+    'PUT /api/v1/team/sso/policy',
     'POST /api/v1/team/sso/providers/{providerId}/link',
     'DELETE /api/v1/team/sso/providers/{providerId}/link',
     'DELETE /api/v1/team/sso/providers/{providerId}/links/{linkId}',
@@ -197,6 +198,7 @@ const classes = {
     'DELETE /api/v1/team/sso/delegations/{bindingId}',
     'POST /api/v1/team/sso/recovery',
     'POST /api/v1/team/sso/recovery/{enrollmentId}/accept',
+    'POST /api/v1/team/sso/recovery/use',
     'GET /api/v1/organizations/{organizationId}/provisioning-tokens',
     'POST /api/v1/organizations/{organizationId}/provisioning-tokens',
     'POST /api/v1/organizations/{organizationId}/provisioning-tokens/{id}/rotate',
@@ -508,6 +510,16 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
       if (template === '/api/v1/bookings/export.csv') path += `?from=${start}&to=${end}`
       if (kind === 'session_only') {
+        if (template === '/api/v1/team/sso/policy') {
+          headers.origin = publicUrl
+          headers['X-Expected-Organization-Id'] = teamId
+          payload = { expectedRevision: 1, requireSso: true, admission: 'invitation_only' }
+        }
+        if (template === '/api/v1/team/sso/recovery/use') {
+          headers.origin = publicUrl
+          headers['X-Expected-Organization-Id'] = teamId
+          payload = { expectedRevision: 1 }
+        }
         path = path
           .replaceAll('{id}', randomUUID())
           .replaceAll('{providerId}', randomUUID())
@@ -964,10 +976,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
           expectedStatus = 204
         }
       } else if (template.startsWith('/api/v1/workflows')) {
-        // Booking workflows are hard-off: an allowed key gets 404 workflows_disabled.
-        if (template === '/api/v1/workflows') path += `?ownerKind=team&ownerId=${teamId}`
-        id = randomUUID()
-        expectedStatus = 404
+        // Operator-off permits authorized recovery and rejects creation, preview and edits.
+        if (operation === 'GET /api/v1/workflows') {
+          path += `?ownerKind=team&ownerId=${teamId}`
+        } else {
+          id = randomUUID()
+          expectedStatus = 404
+          if (method === 'DELETE') payload = { expectedRevision: 1 }
+        }
       } else if (operation === 'GET /api/v1/analytics/bookings')
         path += `?startDate=${date}&endDate=${date}&timeZone=UTC`
       else if (operation === 'PUT /api/v1/profile')
@@ -1036,14 +1052,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 187-operation contract and all 561 scope combinations', () => {
+    it('covers the exact 189-operation contract and all 567 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(187)
-      expect(new Set(ids).size).toBe(187)
+      expect(ids).toHaveLength(189)
+      expect(new Set(ids).size).toBe(189)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(561)
+      expect(cases).toHaveLength(567)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
@@ -1101,8 +1117,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
           } else if (operation === 'GET /api/v1/bookings/export.csv') {
             expect(response.headers.get('content-type')).toBe('text/csv; charset=utf-8')
             expect(await response.text()).toMatch(/^id,event_type_id,event_type,title,/)
+          } else if (operation === 'GET /api/v1/workflows') {
+            expect(await response.json()).toEqual({ data: [], nextCursor: null })
           } else if (operation.includes(' /api/v1/workflows')) {
-            expect(await response.json()).toEqual({ error: 'workflows_disabled' })
+            const error =
+              fixture.method === 'GET' || fixture.method === 'DELETE'
+                ? 'workflow_not_found'
+                : 'workflows_disabled'
+            expect(await response.json()).toMatchObject({ error })
           } else if (operation === 'POST /api/v1/meeting-polls') {
             expect(await response.json()).toEqual({ error: 'event_type_not_found' })
           } else if (operation.includes('/meeting-polls/') && response.status === 404) {

@@ -17,7 +17,7 @@ import {
   type TeamManagementError,
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
-import { scimSuspended } from '@hourmere/db/scim-suspension'
+import { scimProvisioned, scimSuspended } from '@hourmere/db/scim-suspension'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import {
   getSelfReadiness,
@@ -364,6 +364,7 @@ describe.skipIf(!process.env.DATABASE_URL)('booking readiness real authenticatio
           ensurePersonalOrganization,
           parsePersistedApiKeyMetadata,
           isUuid: (id: string) => z.uuid().safeParse(id).success,
+          scimProvisioned,
           scimSuspended,
           sql,
           ssoDelegationStatus,

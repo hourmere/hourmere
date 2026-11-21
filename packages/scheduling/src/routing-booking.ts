@@ -27,22 +27,17 @@ export interface RoutingBookingSnapshot {
   answers: RoutingAnswers
 }
 
-type RoutingBookingRead =
-  | { access: 'host'; routing: RoutingBookingSnapshot | null }
-  | { access: 'team_admin'; routing: RoutingBookingSnapshot }
-
 /** Read provenance and current authorization from the same database snapshot. */
 export async function readBookingRoutingSnapshot(
   { db, principal }: ServiceContext,
   bookingId: string,
-  allowTeamAdmin: boolean,
-): Promise<RoutingBookingRead | undefined> {
+): Promise<RoutingBookingSnapshot | null | undefined> {
   const { id: userId } = principal.user
   const { id: organizationId } = principal.organization
-  const row = await db
+  let query = db
     .selectFrom('auth.member as member')
     .innerJoin('auth.user as actor', 'actor.id', 'member.userId')
-    .leftJoin(resolvedBookingHosts(db).as('host'), (join) =>
+    .innerJoin(resolvedBookingHosts(db).as('host'), (join) =>
       join.on('host.booking_id', '=', bookingId).onRef('host.user_id', '=', 'member.userId'),
     )
     .leftJoin('booking_routing as routing', (join) =>
@@ -51,7 +46,6 @@ export async function readBookingRoutingSnapshot(
         .onRef('routing.organization_id', '=', 'member.organizationId'),
     )
     .select([
-      'host.user_id as hostId',
       'routing.form_id as formId',
       'routing.version_id as versionId',
       'routing.version_number as versionNumber',
@@ -64,74 +58,51 @@ export async function readBookingRoutingSnapshot(
     .where('member.userId', '=', userId)
     .where('actor.emailVerified', '=', true)
     .where((eb) => eb.not(scimSuspended(organizationId, userId)))
-    .where((eb) => {
-      const host = eb('host.user_id', 'is not', null)
-      if (principal.kind !== 'session') return host
+
+  if (principal.kind === 'session') {
+    const { sessionId } = principal
+    query = query.where((eb) => {
       const session = eb
         .selectFrom('auth.session as session')
         .select('session.id')
-        .where('session.id', '=', principal.sessionId)
+        .where('session.id', '=', sessionId)
         .whereRef('session.userId', '=', 'member.userId')
         .where('session.expiresAt', '>', sql<Date>`clock_timestamp()`)
       const activeOrganization = sql<string>`lower(${sql.ref('session.activeOrganizationId')})`
       if (principal.organization.personal) {
         // Session resolution falls back to personal space when there is no effective active team.
-        return eb.and([
-          host,
-          eb.exists(
-            session.where((eb) =>
-              eb.or([
-                eb(activeOrganization, '=', organizationId.toLowerCase()),
-                eb.not(
-                  eb.exists(
-                    eb
-                      .selectFrom('auth.member as active')
-                      .select('active.userId')
-                      .whereRef('active.userId', '=', 'session.userId')
-                      .where((eb) =>
-                        eb(
-                          sql<string>`${eb.ref('active.organizationId')}::text`,
-                          '=',
-                          activeOrganization,
-                        ),
-                      )
-                      .where((eb) =>
-                        eb.not(scimSuspended(eb.ref('active.organizationId'), userId)),
+        return eb.exists(
+          session.where((eb) =>
+            eb.or([
+              eb(activeOrganization, '=', organizationId.toLowerCase()),
+              eb.not(
+                eb.exists(
+                  eb
+                    .selectFrom('auth.member as active')
+                    .select('active.userId')
+                    .whereRef('active.userId', '=', 'session.userId')
+                    .where((eb) =>
+                      eb(
+                        sql<string>`${eb.ref('active.organizationId')}::text`,
+                        '=',
+                        activeOrganization,
                       ),
-                  ),
+                    )
+                    .where((eb) => eb.not(scimSuspended(eb.ref('active.organizationId'), userId))),
                 ),
-              ]),
-            ),
+              ),
+            ]),
           ),
-        ])
+        )
       }
-      const activeTeamSession = eb.exists(
-        session.where(activeOrganization, '=', organizationId.toLowerCase()),
-      )
-      if (!allowTeamAdmin) return eb.and([activeTeamSession, host])
-      const personal = eb.exists(
-        eb
-          .selectFrom('personal_organizations')
-          .select('organization_id')
-          .whereRef('organization_id', '=', 'member.organizationId'),
-      )
-      // Better Auth stores exact role tokens in a comma-separated string.
-      const teamAdmin = sql<boolean>`${eb.ref('member.role')} ~ '(^|,)[[:space:]]*(owner|admin)[[:space:]]*(,|$)'`
-      return eb.and([
-        activeTeamSession,
-        eb.or([
-          host,
-          eb.and([eb('routing.booking_id', 'is not', null), teamAdmin, eb.not(personal)]),
-        ]),
-      ])
+      return eb.exists(session.where(activeOrganization, '=', organizationId.toLowerCase()))
     })
-    .executeTakeFirst()
+  }
+
+  const row = await query.executeTakeFirst()
   if (!row) return undefined
-  const { hostId, ...snapshot } = row
   // Both JSON fields were validated when the immutable snapshot was written.
-  const routing = snapshot.formId === null ? null : (snapshot as RoutingBookingSnapshot)
-  if (hostId !== null) return { access: 'host', routing }
-  if (routing) return { access: 'team_admin', routing }
+  return row.formId === null ? null : (row as RoutingBookingSnapshot)
 }
 
 /** Read answer labels only, for a booking already resolved through the invitee's token. */

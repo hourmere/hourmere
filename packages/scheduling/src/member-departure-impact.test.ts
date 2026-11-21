@@ -8,6 +8,7 @@ import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
+import { suspendScimMember } from '../../db/src/scim-suspension-fixtures.ts'
 import { bookingPageQuery, encodeBookingCursor } from './booking-page.ts'
 import { checkedCatalogPage } from './catalog-page.ts'
 import type { ServiceContext } from './context.ts'
@@ -646,6 +647,15 @@ describe.skipIf(!serverUrl)('member departure impact', () => {
       (await getTeamMemberDepartureImpact(f.hostCtx, input(f, { memberUserId: f.host.id })))
         .bookings.totalCount,
     ).toBe(0)
+  })
+
+  it('still reports the outstanding booking handling to admins after SCIM suspension', async () => {
+    const f = await setup()
+    const id = await booking(f)
+    await suspendScimMember(db, f.team.id, f.member.id)
+    const { bookings } = await getTeamMemberDepartureImpact(f.adminCtx, input(f))
+    expect(bookings.totalCount).toBe(1)
+    expect(bookings.data).toMatchObject([{ id, handling: 'coordinate_cancellation' }])
   })
 
   it('excludes personal data, other teams and other hosts from both lists and counts', () =>

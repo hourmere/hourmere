@@ -2,28 +2,39 @@ import type { Db } from '@hourmere/db'
 import { auditActor, type SsoAuditReason, writeSsoAuditEvent } from '@hourmere/db/audit'
 import { sql } from 'kysely'
 import type { SsoProviderRevision } from './sso-configuration.ts'
-import { lockOidcTestActor, OidcAttemptRefused, type OidcTestActor } from './sso-oidc-attempt.ts'
+import {
+  type consumeOidcAttempt,
+  lockOidcTestActor,
+  OidcAttemptRefused,
+} from './sso-oidc-attempt.ts'
 
 const action = 'sso_provider.tested'
 
 /** A receipt only applies to the revision whose sealed configuration was tested. */
-export const currentSsoProviderTestStatus = sql<string>`coalesce((
-  SELECT details->>'outcome' FROM audit_events
-  WHERE organization_id = sso_providers.organization_id
-    AND action = ${action} AND target_id = sso_providers.id::text
-    AND details->'revision' = to_jsonb(sso_providers.revision)
-  ORDER BY occurred_at DESC, id DESC LIMIT 1
-), 'unknown')`
+export function providerTestStatus(ownerOnly: boolean, lock = false) {
+  return sql<string>`coalesce((
+    SELECT details->>'outcome' FROM audit_events
+    WHERE organization_id = sso_providers.organization_id
+      AND action = ${action} AND target_id = sso_providers.id::text
+      AND details->'revision' = to_jsonb(sso_providers.revision)
+      ${ownerOnly ? sql`AND target_type = 'sso_provider_owner_test'` : sql``}
+    ORDER BY occurred_at DESC, id DESC LIMIT 1
+    ${lock ? sql`FOR SHARE` : sql``}
+  ), 'unknown')`
+}
+
+export const currentSsoProviderTestStatus = providerTestStatus(false)
 
 export async function recordOidcProviderTest(
   db: Db,
   provider: SsoProviderRevision,
-  actor: OidcTestActor,
-  attempt: { id: string; expiresAt: Date },
+  attempt: Awaited<ReturnType<typeof consumeOidcAttempt>>,
   reason?: SsoAuditReason,
 ) {
+  if (!attempt.test) throw new OidcAttemptRefused()
+  const { actor, recovery } = attempt.test
   await db.transaction().execute(async (trx) => {
-    const role = await lockOidcTestActor(trx, provider, actor)
+    const role = await lockOidcTestActor(trx, provider, actor, recovery)
     const { live } = await trx
       .selectNoFrom(sql<boolean>`${attempt.expiresAt}::timestamptz > clock_timestamp()`.as('live'))
       .executeTakeFirstOrThrow()

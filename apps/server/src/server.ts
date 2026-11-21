@@ -105,6 +105,7 @@ import {
   verifyWaitlist,
 } from '@hourmere/scheduling'
 import {
+  captureWorkflowWebhook,
   type WebhookQueue,
   type WebhookSettings,
   webhookAttendeeNoShowNotifier,
@@ -112,7 +113,14 @@ import {
   webhookCleanupJob,
   webhookDeliveryJob,
 } from '@hourmere/webhooks'
-import { captureWorkflowBooking } from '@hourmere/workflows'
+import {
+  captureWorkflowBooking,
+  executeWorkflowClaim,
+  shouldRunWorkflowJobs,
+  type WorkflowSettings,
+  type WorkflowWakePort,
+  workflowJobs,
+} from '@hourmere/workflows'
 import { sql } from 'kysely'
 import { type AppDeps, createApp } from './app.ts'
 import { type Config, loadConfig } from './config.ts'
@@ -172,6 +180,7 @@ import { ssoDelegationRoutes } from './routes/sso-delegation.ts'
 import { ssoDomainRoutes } from './routes/sso-domains.ts'
 import { ssoDraftRoutes } from './routes/sso-drafts.ts'
 import { ssoIdentityRecoveryRoutes } from './routes/sso-link-recovery.ts'
+import { ssoPolicyRoutes } from './routes/sso-policy.ts'
 import { ssoRecoveryEnrollmentRoutes } from './routes/sso-recovery-enrollment.ts'
 import { teamBookingRoutes } from './routes/team-bookings.ts'
 import { teamInvitationRoutes } from './routes/team-invitations.ts'
@@ -188,6 +197,7 @@ import {
   mailboxProofRoutes,
 } from './sso-mailbox-proof.ts'
 import { type OidcProviderTestDeps, oidcSignInRoutes } from './sso-oidc-sign-in.ts'
+import { ssoOperatorRecoveryEmailJob } from './sso-operator-recovery.ts'
 import {
   type SsoRecoveryEnrollmentQueue,
   ssoRecoveryEnrollmentEmailJob,
@@ -253,6 +263,7 @@ export function productRoutes({
   routingSecret,
   routingBookingReceiptNow,
   workflowRunCursorSecret,
+  workflowsEnabled,
   smtpConfigured,
   recurringBookingsEnabled,
   auditLogRetentionDays = null,
@@ -308,7 +319,8 @@ export function productRoutes({
   zoomWebhookClientId?: string | undefined
   enqueueCalendarSync?: CalendarDeps['enqueueSync']
   enqueueCalendarWritebackRecovery?: CalendarDeps['enqueueWritebackRecovery']
-} & RecurringBookingAdmissionDeps): RouteModule[] {
+} & RecurringBookingAdmissionDeps &
+  WorkflowSettings): RouteModule[] {
   return [
     mcpOAuthRoutes({
       auth: mcpAuth,
@@ -332,6 +344,7 @@ export function productRoutes({
       ssoOidcEnabled: oidcEnabled,
       ssoSamlEnabled: samlEnabled,
       routingFormsEnabled: routingEnabled,
+      workflowsEnabled,
     }),
     calendarRoutes({
       db,
@@ -351,10 +364,15 @@ export function productRoutes({
     provisioningTokenRoutes({ db, enabled: scimProvisioningEnabled }),
     profileRoutes({ db }),
     scheduleRoutes({ db }),
-    webhookRoutes({ db, ...webhooks }),
+    webhookRoutes({ db, ...webhooks, workflowsEnabled }),
     brandingRoutes({ db }),
     auditLogRoutes({ db, auditLogRetentionDays }),
     ssoRoutes({ db, capabilities: { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled } }),
+    ssoPolicyRoutes({
+      db,
+      publicUrl,
+      capabilities: { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled },
+    }),
     ssoDomainRoutes({
       db,
       publicUrl,
@@ -464,11 +482,12 @@ export function productRoutes({
     }),
     analyticsRoutes({ db }),
     readinessRoutes({ db, automaticMeet, automaticZoom }),
-    // Registered while hard-off: every operation answers 404 workflows_disabled.
+    // Recovery operations stay available when the operator pauses workflows.
     workflowRoutes({
       db,
       followUpHostNotesEnabled,
       workflowRunCursorSecret,
+      workflowsEnabled,
     }),
   ]
 }
@@ -488,6 +507,7 @@ export function productTools({
   routingFormsEnabled: routingEnabled = routingFormsEnabled,
   followUpHostNotesEnabled,
   workflowRunCursorSecret,
+  workflowsEnabled,
   smsRemindersAvailable = false,
   successRedirectPolicy,
   notify,
@@ -525,7 +545,7 @@ export function productTools({
   googleCalendar?: CalendarDeps['google']
   caldavCalendar?: CalendarDeps['caldav']
   zoomConference?: ConferenceDeps['zoom']
-}): Tool[] {
+} & WorkflowSettings): Tool[] {
   return [
     whoamiTool,
     ...bookingTools({
@@ -555,7 +575,7 @@ export function productTools({
     }),
     ...oneTimeLinkTools({ db, publicUrl }),
     ...slackDestinationTools({ db, ...webhooks, queue: webhookQueue }),
-    ...webhookTools({ db, ...webhooks }),
+    ...webhookTools({ db, ...webhooks, workflowsEnabled }),
     ...(slotSnippetsEnabled
       ? openTimeSnippetTools({ db, publicUrl, slotSnippetsEnabled, automaticMeet, automaticZoom })
       : []),
@@ -575,11 +595,12 @@ export function productTools({
       smsRemindersAvailable,
     }),
     ...waitlistTools({ db, secret: waitlistSecret, publicUrl, smtpConfigured }),
-    // Always in the catalog; hidden from tools/list and refused while workflows are off.
+    // Known workflow tools stay callable for recovery when hidden by operator-off.
     ...workflowTools({
       db,
       followUpHostNotesEnabled,
       workflowRunCursorSecret,
+      workflowsEnabled,
     }),
     ...ssoReadTools({ db, capabilities: { ssoOidcEnabled, ssoSamlEnabled } }),
     ...routingFormConfigurationTools({
@@ -654,6 +675,7 @@ export function productionAppOptions({
   ssoRecoveryEnrollmentQueue,
   recurringBookingsEnabled,
 }: ProductionAppDeps): AppDeps {
+  const workflowsEnabled = config.WORKFLOWS_ENABLED
   // All configuration transports and public booking routes share the instance policy.
   const successRedirectPolicy = {
     publicUrl: config.PUBLIC_URL,
@@ -741,6 +763,7 @@ export function productionAppOptions({
       enqueueCalendarWritebackRecovery,
       routingSecret: config.BETTER_AUTH_SECRET,
       workflowRunCursorSecret: config.BETTER_AUTH_SECRET,
+      workflowsEnabled,
     }),
     mcp: mcpEndpoint({
       ...(config.MCP_OAUTH_ENABLED
@@ -774,6 +797,7 @@ export function productionAppOptions({
         webhookQueue,
         routingSecret: config.BETTER_AUTH_SECRET,
         workflowRunCursorSecret: config.BETTER_AUTH_SECRET,
+        workflowsEnabled,
       }),
     }),
   }
@@ -861,6 +885,8 @@ async function start(
   restoreConsole: () => void,
 ): Promise<RunningServer> {
   const config = loadConfig(env)
+  const workflowsEnabled = config.WORKFLOWS_ENABLED
+  const role = config.HOURMERE_ROLE
   if (config.WEBHOOK_PRIVATE_TARGETS.length)
     console.warn(
       'WEBHOOK_PRIVATE_TARGETS permits operator-trusted private webhook destinations. Self-hosting only; Hourmere Cloud must never enable this setting.',
@@ -874,9 +900,13 @@ async function start(
     if (applied.length) console.log(`migrations applied: ${applied.join(', ')}`)
   }
 
+  let runWorkflowJobs = false
   try {
     await db.transaction().execute((trx) => ensureWaitlistKey(trx, config.BETTER_AUTH_SECRET))
     await db.transaction().execute((trx) => ensureMeetingPollKey(trx, config.BETTER_AUTH_SECRET))
+    // A paused worker still skips due runs from an earlier opt-in. A fresh default
+    // install has no workflow schedule or worker, and web roles never consume wakes.
+    runWorkflowJobs = role !== 'web' && (await shouldRunWorkflowJobs(db, { workflowsEnabled }))
   } catch (error) {
     await db.destroy()
     throw error
@@ -915,7 +945,6 @@ async function start(
     },
   }
 
-  const role = config.HOURMERE_ROLE
   // A worker serves only /api/health, for the container health check: no sign-in, no API.
   const authPool =
     role === 'worker' ? undefined : createAuthPool(config.DATABASE_URL, config.signup, poolOptions)
@@ -1003,6 +1032,7 @@ async function start(
   const webhookSettings = {
     publicUrl: config.PUBLIC_URL,
     enabled: config.WEBHOOKS_ENABLED,
+    workflowsEnabled,
     encryptionKey: config.WEBHOOK_ENCRYPTION_KEY,
     privateTargets: config.WEBHOOK_PRIVATE_TARGETS,
     ssoCapabilities: { ssoOidcEnabled, ssoSamlEnabled },
@@ -1079,9 +1109,22 @@ async function start(
     smtpConfigured: Boolean(config.SMTP_URL && config.MAIL_FROM),
     log: (line) => console.info(line),
   })
+  const workflowWorker = { db, now: () => Temporal.Now.instant(), workflowsEnabled }
+  const workflowWakePort: WorkflowWakePort = {
+    async ensureWake(trx, runId) {
+      await jobs.enqueue(
+        'workflow-dispatch-v1',
+        { runId },
+        { singletonKey: runId, transaction: trx },
+      )
+    },
+  }
   const jobs = createJobs({
     connectionString: config.DATABASE_URL,
-    disabledSchedules: ssoOidcEnabled || ssoSamlEnabled ? [] : [SSO_DOMAIN_RECHECK_JOB],
+    disabledSchedules: [
+      ...(ssoOidcEnabled || ssoSamlEnabled ? [] : [SSO_DOMAIN_RECHECK_JOB]),
+      ...(role !== 'web' && !runWorkflowJobs ? ['workflow-repair-v1'] : []),
+    ],
     definitions: [
       ssoDomainRecheckJob({
         db,
@@ -1157,6 +1200,7 @@ async function start(
         publicUrl: config.PUBLIC_URL,
         mailer,
       }),
+      ssoOperatorRecoveryEmailJob(db, config.SMTP_URL && config.MAIL_FROM ? mailer : undefined),
       bookingNotificationJob(notificationDeps),
       rescheduleRequestExpiryJob({
         db,
@@ -1181,6 +1225,31 @@ async function start(
       conferenceMirrorDispatchJob(calendarDeps, (id) => enqueueBookingCalendar(id)),
       webhookDeliveryJob({ db, ...webhookSettings }),
       webhookCleanupJob(db),
+      ...(runWorkflowJobs
+        ? workflowJobs(
+            workflowWorker,
+            workflowWakePort,
+            (): Promise<string | null> =>
+              jobs.enqueue('workflow-retention-v1', {}, { singletonKey: 'retention' }),
+            (claim) =>
+              executeWorkflowClaim(
+                {
+                  ...workflowWorker,
+                  mailer,
+                  budget: {
+                    secret: config.BETTER_AUTH_SECRET,
+                    mailMaxPerHour: config.MAIL_MAX_PER_HOUR,
+                    workflowMailMaxPerHour: config.WORKFLOW_MAIL_MAX_PER_HOUR,
+                    workflowOwnerMailMaxPerHour: config.WORKFLOW_OWNER_MAIL_MAX_PER_HOUR,
+                  },
+                  followUpHostNotesEnabled: () => config.FOLLOW_UP_HOST_NOTES_ENABLED,
+                  captureWebhook: (trx, input, now): Promise<boolean> =>
+                    captureWorkflowWebhook(jobs, webhookSettings, trx, input, now),
+                },
+                claim,
+              ),
+          )
+        : []),
       ...(caldavSyncDeps && caldavWriteDeps
         ? [
             calDavSyncJob(caldavSyncDeps),
@@ -1247,6 +1316,13 @@ async function start(
     throw err
   }
   if (role !== 'web') {
+    if (runWorkflowJobs) {
+      try {
+        await jobs.enqueue('workflow-repair-v1', {}, { singletonKey: 'startup' })
+      } catch {
+        console.error('ERROR workflow-repair: startup_repair_unavailable')
+      }
+    }
     try {
       await scanWaitlists(waitlistDeps)
       await jobs.enqueue('waitlist-email-v1', {}, { singletonKey: 'delivery' })
@@ -1290,7 +1366,7 @@ async function start(
       if (caldavCalendar && !('requestId' in event)) await caldavNotifier(trx, event)
       await webhookNotifier(trx, event, now)
       // Core notification intents precede workflow capture in the booking's transaction.
-      await captureWorkflowBooking(trx, event, now, config.BETTER_AUTH_SECRET)
+      await captureWorkflowBooking(trx, event, now, config.BETTER_AUTH_SECRET, { workflowsEnabled })
     }
     const auth = createAuth(
       productionAuthOptions({

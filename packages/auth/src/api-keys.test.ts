@@ -1,9 +1,28 @@
+import { apiKey } from '@better-auth/api-key'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { mayHoldApiKeys } from './api-keys.ts'
+import { mayHoldApiKeys, nativeApiKey } from './api-keys.ts'
 
 const serverUrl = process.env.DATABASE_URL
+
+it('preserves Better Auth API key update endpoint registration and validation metadata', () => {
+  const options = { enableMetadata: true }
+  const upstream = apiKey(options).endpoints.updateApiKey
+  const wrapped = nativeApiKey(options).endpoints.updateApiKey
+
+  // Dispatch reads the enumerable path and options off the callable. Revisit the
+  // wrapper if Better Auth changes how it attaches either part of that contract.
+  expect(typeof upstream).toBe('function')
+  expect(Object.keys(upstream).sort()).toEqual(['options', 'path'])
+  expect(upstream.path).toBe('/api-key/update')
+  expect(upstream.options.method).toBe('POST')
+  expect(Object.keys(wrapped).sort()).toEqual(Object.keys(upstream).sort())
+  expect(wrapped.path).toBe(upstream.path)
+  expect(wrapped.options.method).toBe(upstream.options.method)
+  expect(wrapped.options.body.safeParse({ keyId: 'test-key', enabled: false }).success).toBe(true)
+  expect(wrapped.options.body.safeParse({ enabled: false }).success).toBe(false)
+})
 
 describe.skipIf(!serverUrl)('mayHoldApiKeys', () => {
   let testDb: TestDatabase

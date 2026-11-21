@@ -118,6 +118,8 @@ function toAuthInfo(
   trustedIp: string | undefined,
   ssoTeamReads: SsoTeamReadDeps | undefined,
 ): AuthInfo {
+  // The transport principal is shared by every call in this HTTP request.
+  // Writes still recheck authorization in their own transactions.
   const check = ssoTeamReads && teamReadAccess(ssoTeamReads, caller)
   const checkTeamRead: ToolCall['checkTeamRead'] =
     check &&

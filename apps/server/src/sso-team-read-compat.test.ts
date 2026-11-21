@@ -322,21 +322,24 @@ describe.skipIf(!serverUrl)('SSO team read compatibility', () => {
         },
         {
           name: 'API key',
+          extraQueries: 0,
           request: (app: App) => rest(app, '/event-types', teamKey),
           example: eventTypeId,
         },
         {
           name: 'MCP API key',
+          extraQueries: 0,
           request: (app: App) => mcpCall(app, teamKey),
           example: bookingId,
         },
         {
           name: 'MCP OAuth',
+          extraQueries: 0,
           request: (app: App) => mcpCall(app, oauth),
           example: bookingId,
         },
       ]
-      for (const { name, request, example } of routes) {
+      for (const { name, request, example, extraQueries = 1 } of routes) {
         statements.length = 0
         const before = await capture(await request(legacy))
         const previousQueryCount = statements.length
@@ -346,8 +349,7 @@ describe.skipIf(!serverUrl)('SSO team read compatibility', () => {
         expect(new TextDecoder().decode(after.bytes), name).toContain(example)
         expect(after, name).toEqual(before)
         expect(policyStatements(), name).toHaveLength(1)
-        const machine = name === 'API key' || name.startsWith('MCP')
-        expect(statements, name).toHaveLength(previousQueryCount + (machine ? 0 : 1))
+        expect(statements, name).toHaveLength(previousQueryCount + extraQueries)
         expect(
           statements.some((statement) => statement.includes('sso_delegation_bindings')),
           name,
@@ -460,7 +462,7 @@ describe.skipIf(!serverUrl)('SSO team read compatibility', () => {
     expect(policyStatements()).toHaveLength(1)
   })
 
-  it('answers workflows_disabled before the team proof check on workflow reads', async () => {
+  it('requires team proof for workflow recovery reads while workflows are off', async () => {
     const { teamId, teamKey } = await seedTeam()
     await db
       .insertInto('sso_policies')
@@ -470,10 +472,9 @@ describe.skipIf(!serverUrl)('SSO team read compatibility', () => {
     for (const path of [`/workflows/${id}`, `/workflows/${id}/runs`]) {
       statements.length = 0
       const response = await app.request(`/api/v1${path}`, { headers: teamKey })
-      expect(response.status, path).toBe(404)
-      expect(await response.json(), path).toMatchObject({ error: 'workflows_disabled' })
-      // The only match is the API-key lookup, which carries the delegation status;
-      // no separate team proof lookup runs before workflows_disabled.
+      expect(response.status, path).toBe(403)
+      expect(await response.json(), path).toMatchObject({ error: 'sso_required' })
+      // The API-key lookup carries the delegation status without a second policy lookup.
       expect(policyStatements(), path).toHaveLength(1)
     }
     for (const tool of ['get_workflow', 'list_workflow_runs']) {
@@ -481,7 +482,7 @@ describe.skipIf(!serverUrl)('SSO team read compatibility', () => {
       const response = await mcpCall(app, teamKey, tool, { id })
       expect(mcpResult(await response.text()), tool).toMatchObject({
         isError: true,
-        content: [{ type: 'text', text: expect.stringContaining('"workflows_disabled"') }],
+        content: [{ type: 'text', text: '{"error":"sso_required"}' }],
       })
       expect(policyStatements(), tool).toHaveLength(1)
     }

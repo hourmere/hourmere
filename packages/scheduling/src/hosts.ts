@@ -1,4 +1,6 @@
 import type { Db } from '@hourmere/db'
+import { scimSuspended } from '@hourmere/db/scim-suspension'
+import { recordTeamWriteOrganizationLock } from '@hourmere/db/team-write'
 import { DomainError } from './errors.ts'
 
 const invalidHosts = () =>
@@ -42,15 +44,15 @@ export function eligibleHostIds(
   return ids.filter((id) => verified.has(id) && membership.has(id))
 }
 
-/** Hold current membership and verification until a host assignment or booking commits. */
-export async function assertHosts(
+/** Read current team eligibility. A locking caller already holds the organization lock. */
+export async function readEligibleHostIds(
   db: Db,
   organizationId: string,
   userIds: readonly string[],
   lock = false,
-): Promise<void> {
+): Promise<string[]> {
   const ids = [...new Set(userIds)].sort()
-  if (!ids.length || ids.length > 8) throw invalidHosts()
+  if (!ids.length || ids.length > 8) return []
   let users = db
     .selectFrom('auth.user')
     .select(['id', 'emailVerified'])
@@ -63,11 +65,21 @@ export async function assertHosts(
     .select(['userId', 'organizationId'])
     .where('organizationId', '=', organizationId)
     .where('userId', 'in', ids)
+    .where((eb) => eb.not(scimSuspended(eb.ref('organizationId'), eb.ref('userId'))))
     .orderBy('userId')
   if (lock) members = members.forShare()
-  const current = await members.execute()
-  if (eligibleHostIds(organizationId, ids, verified, current).length !== ids.length)
-    throw invalidHosts()
+  return eligibleHostIds(organizationId, ids, verified, await members.execute())
+}
+
+/** Hold current membership and verification until a host assignment or booking commits. */
+export async function assertHosts(
+  db: Db,
+  organizationId: string,
+  userIds: readonly string[],
+  lock = false,
+): Promise<void> {
+  const included = await readEligibleHostIds(db, organizationId, userIds, lock)
+  if (!included.length || included.length !== new Set(userIds).size) throw invalidHosts()
 }
 
 /**
@@ -161,4 +173,5 @@ export async function lockOrganization(db: Db, id: string): Promise<void> {
     .forShare()
     .executeTakeFirst()
   if (!row) throw new DomainError('not_found', 'event_type_not_found', 'No such event type')
+  recordTeamWriteOrganizationLock(db, id)
 }

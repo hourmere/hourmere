@@ -2,9 +2,11 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { runWithTransaction, tryGetCurrentAuthEndpointContext } from '@better-auth/core/context'
 import type { Database } from '@hourmere/db'
 import { writeAuditEvent, writeSsoAuditEvent } from '@hourmere/db/audit'
+import { scimSuspended } from '@hourmere/db/scim-suspension'
 import type { BetterAuthPlugin } from 'better-auth'
 import type { DBTransactionAdapter } from 'better-auth/adapters'
 import {
+  APIError,
   createAuthMiddleware,
   getSessionFromCtx,
   revokeOtherSessions,
@@ -14,6 +16,11 @@ import {
 } from 'better-auth/api'
 import { sql, type Transaction } from 'kysely'
 import { z } from 'zod'
+import {
+  API_KEY_ORGANIZATION_CHANGED_MESSAGE,
+  API_KEY_ORGANIZATION_MEMBERSHIP_MESSAGE,
+} from './api-key-errors.ts'
+import { isUuid } from './organizations.ts'
 
 const transactions = new AsyncLocalStorage<{
   trx: Transaction<Database>
@@ -54,8 +61,17 @@ const sameId = (left: unknown, right: unknown) =>
   typeof right === 'string' &&
   left.toLowerCase() === right.toLowerCase()
 
+function keyOrganization(row: Row | undefined) {
+  const raw = row?.metadata
+  const metadata = typeof raw === 'string' ? JSON.parse(raw) : raw
+  const organizationId = metadata?.organizationId
+  return typeof organizationId === 'string' && isUuid(organizationId)
+    ? organizationId.toLowerCase()
+    : undefined
+}
+
 /** Audit native persistence, never a response hook: failures roll back the changed row. */
-export function authAuditRecords(): BetterAuthPlugin {
+export function authAuditRecords(scimResourcesEnabled = false): BetterAuthPlugin {
   const sessionEndpoints = {
     revokeSession: Object.assign((context: Parameters<typeof revokeSession>[0]) => {
       if (!context?.context) return revokeSession(context)
@@ -215,6 +231,41 @@ export function authAuditRecords(): BetterAuthPlugin {
                 }
               }
               let before = method === 'create' ? [] : await selectedRows()
+              // When resource handlers are enabled, a lifecycle write can revoke keys even
+              // for a team whose SCIM connection first appears during this request.
+              const lockKeyOrganizations = scimResourcesEnabled && request.model === 'apikey'
+              const proposedKey = lockKeyOrganizations
+                ? ((request.data ?? request.update) as Row | undefined)
+                : undefined
+              const keyTarget = keyOrganization(proposedKey)
+              const keyOrganizations = new Set<string>()
+              if (lockKeyOrganizations) {
+                if (keyTarget) keyOrganizations.add(keyTarget)
+                for (const row of before) {
+                  const source = keyOrganization(row)
+                  if (source) keyOrganizations.add(source)
+                }
+                if (keyOrganizations.size) {
+                  // A move touches both teams. Lock them in ID order before the key row,
+                  // matching SCIM suspension and SSO delegation changes.
+                  await trx
+                    .selectFrom('auth.organization')
+                    .select('id')
+                    .where('id', 'in', [...keyOrganizations])
+                    .where(({ not, exists, selectFrom }) =>
+                      not(
+                        exists(
+                          selectFrom('personal_organizations')
+                            .select('organization_id')
+                            .whereRef('organization_id', '=', 'auth.organization.id'),
+                        ),
+                      ),
+                    )
+                    .orderBy('id')
+                    .forKeyShare()
+                    .execute()
+                }
+              }
               if (before.length) {
                 // Lock every candidate, then recheck selectors after concurrent mutations.
                 await sql`SELECT id FROM ${sql.table(`auth.${request.model}`)}
@@ -222,6 +273,47 @@ export function authAuditRecords(): BetterAuthPlugin {
                 ORDER BY id FOR UPDATE`.execute(trx)
                 const lockedIds = new Set(before.map((row) => row.id))
                 before = (await selectedRows()).filter((row) => lockedIds.has(row.id))
+              }
+              if (lockKeyOrganizations) {
+                for (const row of before) {
+                  const source = keyOrganization(row)
+                  if (source && !keyOrganizations.has(source))
+                    throw new APIError('CONFLICT', {
+                      message: API_KEY_ORGANIZATION_CHANGED_MESSAGE,
+                    })
+                }
+                if (keyTarget) {
+                  const owner =
+                    method === 'create' ? proposedKey?.referenceId : before[0]?.referenceId
+                  // The membership hook ran before the lock. Take a fresh snapshot so a
+                  // key cannot be created or moved into a team during its suspension.
+                  if (typeof owner === 'string' && isUuid(owner)) {
+                    const { suspended } = await trx
+                      .selectNoFrom(scimSuspended(keyTarget, owner).as('suspended'))
+                      .executeTakeFirstOrThrow()
+                    if (suspended)
+                      throw new APIError('FORBIDDEN', {
+                        message: API_KEY_ORGANIZATION_MEMBERSHIP_MESSAGE,
+                      })
+                  }
+                }
+              }
+              const presented =
+                refreshFamily && endpoint ? presentedRefreshTokens.get(endpoint) : undefined
+              if (
+                endpoint &&
+                presented &&
+                where.some(
+                  (condition) =>
+                    condition.field === 'clientId' && condition.value === presented.clientId,
+                ) &&
+                !before.some((row) => sameId(row.id, presented.id))
+              ) {
+                // SCIM removed the presented token while the provider was using it.
+                // The provider will refuse it, but its fallback family deletion
+                // would also revoke tokens for the client's surviving grants.
+                deferredFamilyAccessTokens.delete(endpoint)
+                return 0
               }
               // Bind mutation to the locked snapshot. A session created concurrently after
               // that snapshot must not be deleted without its own audit event.
@@ -249,7 +341,6 @@ export function authAuditRecords(): BetterAuthPlugin {
               const result = await (original as (r: unknown) => Promise<unknown>)(actualRequest)
               if (refreshFamily) {
                 if (!before.length) return result
-                const presented = endpoint ? presentedRefreshTokens.get(endpoint) : undefined
                 if (!presented) throw new Error('OAuth family audit requires the presented token')
                 const clientId = String(before[0]?.clientId)
                 // Better Auth wipes the presenting client's family even when the revoked token
