@@ -21,18 +21,21 @@ const input = (user: TestUser, extra: Record<string, unknown> = {}) => ({
   ...extra,
 })
 const revision = { expectedRevision: 1 }
-describe('workflow delete hard-off', () => {
-  it('refuses before reading context or input', async () => {
-    const ctx = new Proxy(
-      {},
-      {
-        get() {
-          throw new Error('context read')
+describe('workflow recovery deletion', () => {
+  it('conceals a malformed workflow ID before touching the database', async () => {
+    const ctx = {
+      principal: { kind: 'session' },
+      db: new Proxy(
+        {},
+        {
+          get: () => {
+            throw new Error('database read')
+          },
         },
-      },
-    ) as WorkflowDeleteContext
-    await expect(deleteWorkflow(ctx, 'invalid', null)).rejects.toMatchObject({
-      code: 'workflows_disabled',
+      ),
+    } as WorkflowDeleteContext
+    await expect(deleteWorkflow(ctx, 'invalid', revision)).rejects.toMatchObject({
+      code: 'workflow_not_found',
     })
   })
 })

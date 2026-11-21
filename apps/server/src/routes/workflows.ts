@@ -39,15 +39,14 @@ import {
 } from '../team-management.ts'
 import { workflowsEnabledGuard, workflowsGuard, workflowUpdateGuard } from '../workflows.ts'
 
-// Booking workflow definitions (docs/workflows.md). Workflows are not available
-// yet: every operation answers 404 workflows_disabled until they are enabled. The read
-// representation is the stored current revision's definition (the definition contract's
+// Booking workflow definitions (docs/workflows.md). The read representation
+// is the stored current revision's definition (the definition contract's
 // canonical form) with its identity, owner, current revision, live enabled flag and times.
 // Response objects stay open for additive v1 fields.
 
 /** Shown on every workflow operation, in OpenAPI and MCP discovery alike. */
-export const WORKFLOWS_NOT_AVAILABLE =
-  'Booking workflows are not available yet: this operation answers 404 workflows_disabled until they are enabled on this instance.'
+export const WORKFLOWS_AVAILABILITY =
+  'The operator can enable booking workflows with WORKFLOWS_ENABLED=true. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available.'
 
 const triggerTypes = (option: 'delayMinutes' | 'offsetMinutes') =>
   WorkflowTriggerSchema.options
@@ -245,16 +244,16 @@ export const CreateWorkflowInput = CreateWorkflowInputSchema.openapi('CreateWork
 
 export const WorkflowPreview = WorkflowPreviewSchema.openapi('WorkflowPreview')
 
-export const WORKFLOW_PREVIEW_DESCRIPTION = `${WORKFLOWS_NOT_AVAILABLE} Requires full API-key scope and current personal ownership or team owner/admin access in the active organization. Supply owner, the candidate definition fields and optional synthetic example values. Returns the match outcome, rendered email text and escaped HTML, and static estimates. Preview uses synthetic booking data and makes no deliveries.`
+export const WORKFLOW_PREVIEW_DESCRIPTION = `${WORKFLOWS_AVAILABILITY} Requires full API-key scope and current personal ownership or team owner/admin access in the active organization. Supply owner, the candidate definition fields and optional synthetic example values. Returns the match outcome, rendered email text and escaped HTML, and static estimates. Preview uses synthetic booking data and makes no deliveries.`
 
 const errors = {
   list: errorResponses({
     400: 'invalid_request or invalid_cursor',
     403: 'insufficient_role: the owner is not the personal owner or a team the caller owns or administers in the organization it acts in',
-    404: 'workflows_disabled: workflows are not available on this instance',
+    404: 'workflows_disabled only if the workflow implementation is disabled in this build',
   }),
   get: errorResponses({
-    404: 'workflows_disabled: workflows are not available on this instance; workflow_not_found: no such workflow of the owner the caller acts as',
+    404: 'workflow_not_found for an unknown or inaccessible workflow. workflows_disabled only if the workflow implementation is disabled in this build',
   }),
 }
 
@@ -320,7 +319,7 @@ export function workflowRoutes({
         tags: ['Workflows'],
         operationId: 'createWorkflow',
         summary: 'Create a booking workflow',
-        description: `${WORKFLOWS_NOT_AVAILABLE} Requires full API-key scope. Name your personal owner or a team you currently own or administer in the active organization. Retain idempotencyKey for retries: the same normalized request returns the stored definition, while changed input conflicts. IDs are server-generated; caller-supplied IDs and unknown fields are rejected. Webhook actions are not available yet. Creation does not send mail.`,
+        description: `${WORKFLOWS_AVAILABILITY} Requires full API-key scope. Name your personal owner or a team you currently own or administer in the active organization. Retain idempotencyKey for retries: the same normalized request returns the stored definition, while changed input conflicts. IDs are server-generated; caller-supplied IDs and unknown fields are rejected. Webhook actions require an active endpoint in the acting organization subscribed to workflow.executed. Creation does not send mail.`,
         security: authenticated,
         middleware: enabledMiddleware,
         request: {
@@ -401,7 +400,7 @@ export function workflowRoutes({
         tags: ['Workflows'],
         operationId: 'updateWorkflow',
         summary: 'Edit, enable or disable a booking workflow',
-        description: `${WORKFLOWS_NOT_AVAILABLE} Requires full API-key scope. Supply expectedRevision and the fields to change. Content edits append an immutable revision; changing only enabled preserves the revision. A stale revision conflicts. Missing, foreign and mismatched owner contexts return workflow_not_found. Disabling or enabling changes no existing booking enrollment or execution. Webhook actions are not available yet.`,
+        description: `${WORKFLOWS_AVAILABILITY} Requires full API-key scope. Supply expectedRevision and the fields to change. Content edits append an immutable revision; changing only enabled preserves the revision. A stale revision conflicts. Missing, foreign and mismatched owner contexts return workflow_not_found. Disabling or enabling changes no existing booking enrollment or execution. Webhook actions require an active endpoint in the acting organization subscribed to workflow.executed.`,
         security: authenticated,
         middleware: updateMiddleware,
         request: {
@@ -442,7 +441,7 @@ export function workflowRoutes({
         tags: ['Workflows'],
         operationId: 'deleteWorkflow',
         summary: 'Delete a booking workflow',
-        description: `${WORKFLOWS_NOT_AVAILABLE} Requires full API-key scope and expectedRevision. Tombstones the definition and retires its pending runs. Repeated authorized deletion is safe. Missing, foreign and mismatched owner contexts return workflow_not_found. Revisions and creation keys remain with the tombstone; existing minimal history follows retention.`,
+        description: `${WORKFLOWS_AVAILABILITY} Requires full API-key scope and expectedRevision. Tombstones the definition and retires its pending runs. Repeated authorized deletion is safe. Missing, foreign and mismatched owner contexts return workflow_not_found. Revisions and creation keys remain with the tombstone; existing minimal history follows retention.`,
         security: authenticated,
         middleware,
         request: {
@@ -460,7 +459,7 @@ export function workflowRoutes({
           ...errorResponses({
             400: 'invalid_request',
             403: 'insufficient_scope or cross-origin session write',
-            404: 'workflows_disabled or workflow_not_found',
+            404: 'workflow_not_found for an unknown or inaccessible workflow. workflows_disabled only if the workflow implementation is disabled in this build',
             409: 'workflow_revision_conflict or organization_context_changed',
           }),
         },
@@ -482,7 +481,7 @@ export function workflowRoutes({
         tags: ['Workflows'],
         operationId: 'listWorkflows',
         summary: 'List the booking workflows of the owner the caller acts as',
-        description: `${WORKFLOWS_NOT_AVAILABLE} Requires full or read API-key scope. Name the owner explicitly: ownerKind=personal with your user ID in your personal organization, or ownerKind=team with the team ID while acting in that team as a current owner or admin. Any other owner, existing or not, gets the same 403 insufficient_role. Deleted workflows are not listed. Oldest first, by time-ordered ID; pass nextCursor as cursor with the same owner for the next page.`,
+        description: `${WORKFLOWS_AVAILABILITY} Requires full or read API-key scope. Name the owner explicitly: ownerKind=personal with your user ID in your personal organization, or ownerKind=team with the team ID while acting in that team as a current owner or admin. Any other owner, existing or not, gets the same 403 insufficient_role. Deleted workflows are not listed. Oldest first, by time-ordered ID; pass nextCursor as cursor with the same owner for the next page.`,
         security: authenticated,
         middleware,
         request: { query: ListWorkflowsQuery },
@@ -510,7 +509,7 @@ export function workflowRoutes({
         tags: ['Workflows'],
         operationId: 'getWorkflow',
         summary: 'Read one booking workflow',
-        description: `${WORKFLOWS_NOT_AVAILABLE} Requires full or read API-key scope. Returns a workflow of the owner the caller acts as in its current organization: its own personal workflow, or a team workflow while it is a current owner or admin of that team. A missing, deleted or malformed ID, another owner's workflow and a workflow of another organization all get the same 404 workflow_not_found.`,
+        description: `${WORKFLOWS_AVAILABILITY} Requires full or read API-key scope. Returns a workflow of the owner the caller acts as in its current organization: its own personal workflow, or a team workflow while it is a current owner or admin of that team. A missing, deleted or malformed ID, another owner's workflow and a workflow of another organization all get the same 404 workflow_not_found.`,
         security: authenticated,
         middleware,
         request: { params: z.object({ id: z.string() }) },
@@ -530,7 +529,7 @@ export function workflowRoutes({
         tags: ['Workflows'],
         operationId: 'listWorkflowRuns',
         summary: 'List finished runs of a booking workflow',
-        description: `${WORKFLOWS_NOT_AVAILABLE} Requires full or read API-key scope and personal ownership or current team owner/admin access in the active organization. Returns metadata and aggregate outcomes only, newest first. Pass nextCursor as cursor with the same workflow for the next page. Missing, deleted, malformed and inaccessible workflow IDs return workflow_not_found.`,
+        description: `${WORKFLOWS_AVAILABILITY} Requires full or read API-key scope and personal ownership or current team owner/admin access in the active organization. Returns metadata and aggregate outcomes only, newest first. Pass nextCursor as cursor with the same workflow for the next page. Missing, deleted, malformed and inaccessible workflow IDs return workflow_not_found.`,
         security: authenticated,
         middleware,
         request: { params: z.object({ id: z.string() }), query: ListWorkflowRunsQuery },

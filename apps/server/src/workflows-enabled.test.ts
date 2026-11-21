@@ -1,6 +1,4 @@
-// The workflow definition paths through REST, MCP and the CLI. This file replaces the hard-off
-// module so the tests can exercise the injected operator setting with implementation available.
-// Scope, role, privacy and response schema checks still run in the actual transports and services.
+// Scope, role, privacy and response checks for the workflow transports and operator switch.
 import { randomUUID } from 'node:crypto'
 import '@hono/zod-openapi'
 import type { ApiKeyScope, CallerResolver, Principal } from '@hourmere/auth'
@@ -21,7 +19,6 @@ import {
   createWorkflow,
   updateWorkflow,
   validateWorkflowDefinition,
-  WORKFLOWS_IMPLEMENTED,
   workflowJobs,
 } from '../../../packages/workflows/src/index.ts'
 import { listWorkflowDefinitions } from '../../../packages/workflows/src/reads.ts'
@@ -33,21 +30,13 @@ import {
 } from '../../../packages/workflows/src/testing.ts'
 import { runCli } from '../../../tools/cli/src/cli.ts'
 import { createApp } from './app.ts'
+import { loadConfig } from './config.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
 import { workflowTools } from './mcp/workflows.ts'
 import { instanceRoutes } from './routes/instance.ts'
 import { webhookRoutes } from './routes/webhooks.ts'
 import { Workflow, WorkflowPage, WorkflowPreview, workflowRoutes } from './routes/workflows.ts'
 import { productRoutes, productTools } from './server.ts'
-
-// The implemented build's guards, for this file only.
-vi.mock('../../../packages/workflows/src/hard-off.ts', () => ({
-  WORKFLOWS_IMPLEMENTED: true,
-  requireWorkflowsImplemented: () => {},
-  workflowOperation: (operation: unknown) => operation,
-  workflowCapture: (capture: unknown) => capture,
-  workflowExecution: (execute: unknown) => execute,
-}))
 
 const serverUrl = process.env.DATABASE_URL
 const URL = 'http://localhost:4188'
@@ -320,10 +309,6 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
         else expect(toolError(result)).toMatchObject({ error: 'invalid_workflow' })
       }
     }
-  })
-
-  it('uses the enabled guards in this file only', () => {
-    expect(WORKFLOWS_IMPLEMENTED).toBe(true)
   })
 
   it('returns only safe history metadata for personal and team runs and preserves webhook booking IDs', async () => {
@@ -1624,8 +1609,15 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
     const organizationId = user.principal.organization.id
     const fixtures = createFixtures(db)
     const eventTypeId = await fixtures.eventType(organizationId, user.id)
-    const on = { workflowsEnabled: true }
-    const off = { workflowsEnabled: false }
+    const setting = (value: string) => ({
+      workflowsEnabled: loadConfig({
+        DATABASE_URL: owned.url,
+        BETTER_AUTH_SECRET: workflowRunCursorSecret,
+        WORKFLOWS_ENABLED: value,
+      }).WORKFLOWS_ENABLED,
+    })
+    const on = setting('true')
+    const off = setting('')
     const context = { db, principal: user.principal, ...on }
     const definition = await createWorkflow(context, {
       owner: { kind: 'personal', id: user.id },
@@ -1676,10 +1668,12 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
         wakes.add(id)
       },
     }
-    const offJobs = workflowJobs({ db, now: () => now, ...off }, port)
-    const onJobs = workflowJobs({ db, now: () => now, ...on }, port)
+    const enqueueRetention = vi.fn(async () => {})
+    const offJobs = workflowJobs({ db, now: () => now, ...off }, port, enqueueRetention)
+    const onJobs = workflowJobs({ db, now: () => now, ...on }, port, enqueueRetention)
     const job = { id: randomUUID(), attempt: 1, signal: new AbortController().signal }
     await offJobs[1].handler({}, job)
+    expect(enqueueRetention).toHaveBeenCalledOnce()
     expect(wakes.has(due.id)).toBe(true)
     expect(wakes.has(future.id)).toBe(false)
     await offJobs[0].handler({ runId: future.id }, job)

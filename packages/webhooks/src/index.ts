@@ -1,5 +1,6 @@
 export { webhookSignature } from './crypto.ts'
 export {
+  captureWorkflowWebhook,
   deliverWebhook,
   WEBHOOK_DELIVERY_JOB,
   WebhookDeliveryPayload,

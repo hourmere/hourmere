@@ -1,6 +1,4 @@
-// The definition reads behind the hard-off guard (docs/workflows.md, step 4), called directly
-// with injected dependencies as hard-off.ts prescribes: the guarded operations refuse while
-// off, and the internal services decide who reads what. A caller reads only the owner it acts
+// Workflow definition reads (docs/workflows.md, step 4). A caller reads only the owner it acts
 // as in its current organization, its personal workflows there or a team's as a current owner
 // or admin there. Everything else reveals nothing: a list of any other owner gets the same
 // insufficient_role, and a lookup of anything it may not read gets the same
@@ -26,7 +24,7 @@ import {
   WORKFLOW_PAGE,
   type WorkflowView,
 } from './reads.ts'
-import { candidate, ids, personalContext, teamContext } from './testing.ts'
+import { candidate, personalContext, teamContext } from './testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
 
@@ -70,8 +68,8 @@ const forbidden = {
     'Only the personal owner, or a team owner or admin acting in that team, can read its workflows',
 }
 
-describe('workflow definition reads while workflows are off', () => {
-  it('refuse through the guarded operations before touching their context', async () => {
+describe('workflow recovery reads', () => {
+  it('reject invalid input before touching their context', async () => {
     const untouchable = new Proxy(
       {},
       {
@@ -80,15 +78,12 @@ describe('workflow definition reads while workflows are off', () => {
         },
       },
     ) as Parameters<typeof listWorkflows>[0]
-    for (const read of [
-      () => listWorkflows(untouchable, { owner: { kind: 'personal', id: ids.user } }),
-      () => getWorkflow(untouchable, ids.event),
-    ])
-      expect(await refusal(read)).toEqual({
-        kind: 'not_found',
-        code: 'workflows_disabled',
-        detail: undefined,
-      })
+    await expect(
+      listWorkflows(untouchable, { owner: { kind: 'personal', id: 'invalid' } }),
+    ).rejects.toMatchObject({ code: 'invalid_workflow_owner' })
+    await expect(getWorkflow(untouchable, 'invalid')).rejects.toMatchObject({
+      code: 'workflow_not_found',
+    })
   })
 })
 
