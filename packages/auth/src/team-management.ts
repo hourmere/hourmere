@@ -35,7 +35,9 @@ const contextChanged = () => new TeamManagementError('organization_context_chang
 export const teamRoles = (role: string | null | undefined): string[] =>
   role?.split(',').map((token) => token.trim()) ?? []
 
-type TeamSession = Extract<Principal, { kind: 'session' }>
+type TeamSession = Pick<Extract<Principal, { kind: 'session' }>, 'sessionId'> & {
+  user: { id: string }
+}
 
 /** First lock in every team write, including target-bound invitation acceptance. */
 export async function teamSessionUser(db: Db, principal: TeamSession, lock: boolean) {

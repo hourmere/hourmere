@@ -419,6 +419,7 @@ describe.skipIf(!databaseUrl)('SCIM User retirement', () => {
         .execute()
     }
     const before = await entry(f.id)
+    await expectScimError(await f.send('DELETE', undefined, undefined, { 'If-Match': '*' }), 412)
     await expectScimError(await f.send('DELETE'), 403, 'mutability')
     expect(await entry(f.id)).toEqual(before)
     expect(await blocks(f.id)).toEqual([])

@@ -106,7 +106,9 @@ already belongs to a member or another pending invitation holds it; it never set
 account or membership link. Claim completion, which only test harnesses wire into invitation
 acceptance, sets both links of the claim's entry when its invitation is accepted, together with
 the claim's `completed_at`; it reads live blockers, by account and by mailbox, and refuses
-admission while one exists, but never writes or clears them. User replacement, also available
+admission while one exists. The test-only re-admission confirmation can complete a claim
+without an invitation for a retained ordinary member and clear that account's matching
+retired SCIM suspension in the same organization transaction. User replacement, also available
 only in test harnesses, updates the mapped profile and its timestamp in the existing row.
 When the normalized work address changes, it sets the unfinished claim's `invalidated_at`
 in the same transaction. The claim's mailbox and invitation reference are retained.

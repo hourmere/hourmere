@@ -25,6 +25,7 @@ import { serializeOrganizationContext } from './organization-context.ts'
 import { organizationOperationRecords } from './organization-operations.ts'
 import { ensurePersonalOrganization, organizationGuards } from './organizations.ts'
 import type { ScimClaimCompletion } from './scim-claims.ts'
+import { scimReadmission } from './scim-readmission.ts'
 import { hasAccount, maySignUp, type SignupPolicy, signupConnectionOptions } from './signup.ts'
 import type { SsoAdmissionRemoval } from './sso-admission-blocks.ts'
 import { nativeTeamTransactions, teamTransactionAdapter } from './team-native-atomicity.ts'
@@ -553,6 +554,7 @@ export function createAuth({
       ),
       memberReadPrivacy(db),
       teamSso.plugin,
+      ...(scimResourcesEnabled && scimClaims ? [scimReadmission(db)] : []),
       nativeApiKey({
         defaultPrefix: API_KEY_PREFIX,
         enableMetadata: true,
