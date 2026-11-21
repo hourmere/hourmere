@@ -2395,6 +2395,8 @@ export const admin = {
   'Remove time {time}': '移除时间：{time}',
   // Workflow audit
   Workflows: '工作流',
+  'Check provider test result': '查看身份提供方测试结果',
+  'Provider test status is unavailable.': '当前无法查看身份提供方的测试状态。',
 
   // SSO recovery enrollment
   'This team must retain at least one recovery owner while SSO is enforced.':
@@ -2884,6 +2886,57 @@ export const admin = {
   'This SSO link request is unavailable. Start again.': '此单点登录关联请求不可用。请重新发起。',
   'Verify your Hourmere email before unlinking this sign-in method.':
     '请先验证你的 Hourmere 账户邮箱，再解除此登录方式的关联。',
+  // SSO recovery
+  'SSO recovery': '单点登录恢复',
+  'Loading SSO recovery…': '正在加载单点登录恢复设置…',
+  'Could not load SSO recovery.': '无法加载单点登录恢复设置。',
+  'SSO recovery is unavailable in this team.': '此团队当前无法使用单点登录恢复。',
+  'Recover access to your team': '恢复团队访问',
+  'Recovery owners can verify by email to inspect SSO settings, repair a provider or stop requiring SSO. Each change needs a new verification.':
+    '恢复所有者可通过邮箱验证查看单点登录设置、修复身份提供方，或关闭强制单点登录。每次更改均需重新验证。',
+  'Start recovery': '开始恢复',
+  'Verify again to continue recovery': '重新验证并继续恢复',
+  'Could not start SSO recovery. Try again.': '无法启动单点登录恢复。请重试。',
+  'Recovery verification expired. Verify by email again to continue.':
+    '本次恢复验证已失效。请重新验证邮箱后继续。',
+  'Could not complete this recovery action. Verify again before retrying.':
+    '无法完成此恢复操作。请重新验证后再试。',
+  'Repair identity providers': '修复身份提供方',
+  'Save the repair, test the current revision and enable it. Verify by email again before each subsequent change.':
+    '先保存修复，再测试并启用当前版本。后续每一步操作前均需重新验证邮箱。',
+  'Provider saved. Verify again to test the current revision.':
+    '已保存身份提供方。请重新验证邮箱，再测试当前版本。',
+  'Finish the provider test in the new tab, then return here to continue.':
+    '请在新标签页中完成身份提供方测试，然后返回此处继续。',
+  'The current provider revision is enabled.': '已启用身份提供方的当前版本。',
+  'Single sign-on is now optional for this team.': '此团队已关闭强制单点登录。',
+
+  // SSO recovery enrollment
+  'Nominate {name} for SSO recovery': '提名{name}负责单点登录恢复',
+  'Nominate a recovery owner': '提名恢复所有者',
+  'Nominate {name} to become a recovery owner.': '提名{name}担任恢复所有者。',
+  'The nominee has 72 hours to accept using their Hourmere email.':
+    '被提名者须在 72 小时内验证自己的 Hourmere 账户邮箱并接受提名。',
+  'Send nomination': '发送提名',
+  'Recovery nomination sent.': '恢复提名已发送。',
+  'The nomination expires on {date}.': '此提名将于{date}到期。',
+  'Accept recovery nomination': '接受恢复提名',
+  'Accept nomination': '接受提名',
+  'Use your Hourmere email to accept the nomination within 72 hours.':
+    '请在 72 小时内验证你的 Hourmere 账户邮箱并接受提名。',
+  'You are now a recovery owner for this team.': '你已成为此团队的恢复所有者。',
+  'Switch to the nominated team, then reopen the link from your email.':
+    '请先切换到发出提名的团队，再打开邮件中的链接。',
+  'Loading recovery nomination…': '正在加载恢复提名…',
+  'Could not load the recovery nomination.': '无法加载恢复提名。',
+  'This recovery nomination is unavailable. Ask a team owner to send a new one.':
+    '此恢复提名不可用。请联系团队所有者重新发送提名。',
+  'Could not complete the recovery nomination. Try again.': '无法完成恢复提名。请重试。',
+
+  // SSO recovery team discovery
+  'SSO recovery for {name}': '{name}的单点登录恢复',
+  'Team to recover': '要恢复的团队',
+  'Choose a team': '选择团队',
 
   // SCIM managed membership
   'This resource is managed by your identity provider.': '此资源由你的身份提供方管理。',

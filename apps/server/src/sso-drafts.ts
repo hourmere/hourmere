@@ -11,8 +11,7 @@ import { lockSsoDomain } from './sso-domains.ts'
 import { type FreshProofDeps, runWithFreshProof } from './sso-fresh-proof.ts'
 import { currentSsoProviderTestStatus } from './sso-oidc-test-receipts.ts'
 import { authorizeSsoRead } from './sso-reads.ts'
-import { providerRecoveryAuthority } from './sso-recovery-use.ts'
-import { EXPECTED_ORGANIZATION_HEADER, organizationContextAccess } from './team-management.ts'
+import { providerRecoveryAuthority, ssoWriteContextAccess } from './sso-recovery-use.ts'
 
 export interface SsoDraftDeps extends FreshProofDeps {
   configurationKey?: Buffer | undefined
@@ -155,14 +154,15 @@ function enabled(deps: SsoDraftDeps, principal: Principal, input: unknown, requi
   if (requiresOidc) requireSsoEnabled(deps.capabilities, 'oidc')
   return principal
 }
-async function authorize(deps: SsoDraftDeps, db: Db, principal: Principal, headers: Headers) {
+async function authorize(
+  deps: SsoDraftDeps,
+  db: Db,
+  principal: Extract<Principal, { kind: 'session' }>,
+  headers: Headers,
+  recoveryRequired = false,
+) {
   await authorizeSsoRead({ ...deps, db }, principal)
-  await organizationContextAccess(
-    principal,
-    headers.get(EXPECTED_ORGANIZATION_HEADER) ?? undefined,
-    true,
-    true,
-  )(db, principal.organization.id)
+  await ssoWriteContextAccess(db, principal, headers, recoveryRequired)
 }
 async function audit(
   db: Db,
@@ -212,7 +212,7 @@ export async function createSsoProvider(
     {
       consumeRecovery: providerRecoveryAuthority(p, recoveryRequired),
       authorize: async (db) => {
-        await authorize(deps, db, p, headers)
+        await authorize(deps, db, p, headers, recoveryRequired)
         const parsed = CreateSsoProviderInput.parse(input)
         await checkDomains(db, p.organization.id, parsed.domainIds)
       },
@@ -343,7 +343,7 @@ export async function activateSsoProvider(
       changesAuthority: !input.enabled,
       consumeRecovery: providerRecoveryAuthority(p, recoveryRequired),
       authorize: async (db) => {
-        await authorize(deps, db, p, headers)
+        await authorize(deps, db, p, headers, recoveryRequired)
         const member = await db
           .selectFrom('auth.member')
           .select('role')
@@ -426,7 +426,7 @@ export async function updateSsoProvider(
       changesAuthority: true,
       consumeRecovery: providerRecoveryAuthority(p, recoveryRequired),
       authorize: async (db) => {
-        await authorize(deps, db, p, headers)
+        await authorize(deps, db, p, headers, recoveryRequired)
         const row = await provider(db, p.organization.id, providerId)
         if (row.retired_at) throw missing()
         if (row.protocol !== 'oidc') throw new DomainError('not_found', 'sso_disabled')

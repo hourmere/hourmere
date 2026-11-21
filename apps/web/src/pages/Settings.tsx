@@ -24,7 +24,13 @@ import { ProvisioningTokens } from './ProvisioningTokens.tsx'
 import { ScimTeamMappings } from './ScimTeamMappings.tsx'
 import { SlackIntegrations } from './SlackIntegrations.tsx'
 import { oidcAttemptId } from './sso/member-protocol.ts'
+import {
+  hasRecoveryNomination,
+  parseRecoveryNomination,
+  type RecoveryNomination,
+} from './sso/recovery-nomination.ts'
 import { SsoMemberSettings } from './sso/SsoMemberSettings.tsx'
+import { SsoRecoveryAcceptance } from './sso/SsoRecoveryEnrollment.tsx'
 import { TeamMembers } from './TeamMembers.tsx'
 
 export function SettingsPage() {
@@ -36,12 +42,26 @@ export function SettingsPage() {
   const { refresh, confirmReload } = useSession()
   const location = useLocation()
   const navigate = useNavigate()
+  const heading = useRef<HTMLHeadingElement>(null)
+  const organizationId = me.organization.id
+  const userId = me.user.id
+  const personal = me.organization.personal
+  const recoveryEnabled =
+    me.principal.kind === 'session' &&
+    (shell?.ssoOidcEnabled === true || shell?.ssoSamlEnabled === true)
   // RequireSession resets this state when the account or active space changes.
   const [linkCallback, setLinkCallback] = useState<string | null | undefined>()
+  const [nomination, setNomination] = useState<RecoveryNomination | null | undefined>()
   const fragment = new URLSearchParams(location.hash.slice(1))
   const isLinkCallback = fragment.has('sso-link')
   const callbackAttemptId =
     isLinkCallback && fragment.size === 1 ? oidcAttemptId(fragment.get('sso-link')) : null
+  const hasNomination = recoveryEnabled && !isLinkCallback && hasRecoveryNomination(location.hash)
+  const incomingNomination = hasNomination ? parseRecoveryNomination(location.hash) : null
+  // Leave a valid link in place until the recipient enters the nominated space.
+  const clearNomination =
+    hasNomination && (!incomingNomination || incomingNomination.organizationId === organizationId)
+  const activeNomination = hasNomination ? incomingNomination : nomination
   const dismissLinkCallback = useCallback(() => setLinkCallback(undefined), [])
   // Keep the creation response through a failed read in this view. Consume history state
   // afterwards so reloading cannot replay an old membership as current confirmation.
@@ -60,28 +80,36 @@ export function SettingsPage() {
       location.state &&
       typeof location.state === 'object' &&
       Object.hasOwn(location.state, 'createdMember')
-    if (!isLinkCallback && !hasCreatedMember) return
+    if (!isLinkCallback && !hasCreatedMember && !clearNomination) return
     // Keep the opaque completion handle in memory, never in history state.
     if (isLinkCallback) setLinkCallback(callbackAttemptId)
+    if (clearNomination) setNomination(parseRecoveryNomination(location.hash))
     const state = hasCreatedMember ? { ...location.state } : location.state
     if (hasCreatedMember) delete state.createdMember
     navigate(
       {
         pathname: location.pathname,
         search: location.search,
-        hash: isLinkCallback ? '' : location.hash,
+        hash: isLinkCallback || clearNomination ? '' : location.hash,
       },
       { replace: true, state: hasCreatedMember && !Object.keys(state).length ? null : state },
     )
-  }, [callbackAttemptId, isLinkCallback, location, navigate])
+  }, [callbackAttemptId, clearNomination, isLinkCallback, location, navigate])
   const [profile, reload] = useLoad(loadProfile)
-  const organizationId = me.organization.id
-  const userId = me.user.id
-  const personal = me.organization.personal
   const loadRole = useCallback(
     async (signal: AbortSignal) => {
       if (personal) return null
-      const member = await getActiveOrganizationMember(signal)
+      const member = await getActiveOrganizationMember(signal).catch((cause) => {
+        if (
+          cause instanceof RequestError &&
+          cause.status === 403 &&
+          cause.code === 'SSO_REQUIRED'
+        ) {
+          return { requiresSso: true as const, message: errorMessage(cause) }
+        }
+        throw cause
+      })
+      if ('requiresSso' in member) return member
       if (member.organizationId !== organizationId || member.userId !== userId || !member.role) {
         throw new Error('Membership does not match the displayed account and organization')
       }
@@ -89,11 +117,59 @@ export function SettingsPage() {
     },
     [organizationId, userId, personal],
   )
-  const [role, reloadRole] = useLoad(loadRole)
+  const [membership, reloadRole] = useLoad(loadRole)
+  const role: Loaded<string | null> =
+    membership.status === 'ready'
+      ? typeof membership.data === 'object' && membership.data !== null
+        ? { status: 'error', message: membership.data.message }
+        : { status: 'ready', data: membership.data }
+      : membership
+  const roles =
+    role.status === 'ready' ? (role.data?.split(',').map((value) => value.trim()) ?? []) : []
+  const currentOwner =
+    roles.includes('owner') && roles.every((value) => ['owner', 'admin', 'member'].includes(value))
+  const canStartRecovery = recoveryEnabled && (currentOwner || Boolean(me.ssoRecoveryTeams?.length))
+  const blockedBySso =
+    membership.status === 'ready' && typeof membership.data === 'object' && membership.data !== null
+  const acceptanceAccess =
+    activeNomination && (personal || activeNomination.organizationId !== organizationId)
+      ? 'other-team'
+      : currentOwner || blockedBySso
+        ? 'ready'
+        : role.status === 'ready'
+          ? 'denied'
+          : role.status
+
+  function dismissNomination() {
+    setNomination(undefined)
+    if (hasNomination)
+      navigate(
+        { pathname: location.pathname, search: location.search },
+        { replace: true, state: location.state },
+      )
+    heading.current?.focus()
+  }
 
   return (
     <>
-      <PageHeader title={t('Settings')} lede={t('Manage your profile and booking defaults.')} />
+      <PageHeader
+        headingRef={heading}
+        title={t('Settings')}
+        lede={t('Manage your profile and booking defaults.')}
+      />
+      {recoveryEnabled && activeNomination !== undefined && (
+        <SsoRecoveryAcceptance
+          key={
+            activeNomination
+              ? `${activeNomination.enrollmentId}:${activeNomination.expectedRevision}:${acceptanceAccess}`
+              : 'invalid'
+          }
+          nomination={activeNomination}
+          access={acceptanceAccess}
+          onDismiss={dismissNomination}
+          onReload={reloadRole}
+        />
+      )}
       <section className="panel" aria-labelledby="profile-heading">
         <h2 id="profile-heading">{t('Profile')}</h2>
         {profile.status === 'loading' && <PageSkeleton label="Loading your profile…" />}
@@ -169,29 +245,37 @@ export function SettingsPage() {
           onDismissCallback={dismissLinkCallback}
         />
       )}
-      {shell?.showSsoSettings && (
+      {(shell?.showSsoSettings || canStartRecovery) && (
         <section className="panel" aria-labelledby="sso-settings-heading">
           <h2 id="sso-settings-heading">{t('Single sign-on')}</h2>
           <div className="form-actions">
-            {shell.ssoOidcEnabled && (
+            {shell?.showSsoSettings && shell.ssoOidcEnabled && (
               <Link className="button" to={PATHS.sso}>
                 {t('Identity providers')}
               </Link>
             )}
-            <Link className="button" to={PATHS.ssoDomainSettings}>
-              {t('SSO domains')}
-            </Link>
+            {shell?.showSsoSettings && (
+              <Link className="button" to={PATHS.ssoDomainSettings}>
+                {t('SSO domains')}
+              </Link>
+            )}
+            {canStartRecovery && (
+              <Link className="button" to={PATHS.ssoRecovery}>
+                {t('SSO recovery')}
+              </Link>
+            )}
           </div>
         </section>
       )}
       {!personal && (
         <TeamMembers
-          key={organizationId}
+          key={`team-members-${organizationId}`}
           organizationId={organizationId}
           role={role.status === 'ready' ? role.data : null}
           currentUserId={userId}
           onLeft={() => void refresh({ fresh: true })}
           onReload={confirmReload}
+          canNominateRecoveryOwner={recoveryEnabled && currentOwner}
         />
       )}
     </>

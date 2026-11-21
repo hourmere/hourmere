@@ -273,7 +273,7 @@ function ProviderActivation({
   )
 }
 
-function ProviderForm({
+export function ProviderForm({
   organizationId,
   domains,
   busy,

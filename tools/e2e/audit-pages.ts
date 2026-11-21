@@ -49,6 +49,13 @@ import {
   ssoMemberAuditPages,
 } from './sso-member-audit.ts'
 import {
+  isSsoRecoveryAuditPage,
+  leaveSsoRecoveryAudit,
+  openSsoRecoveryAuditPage,
+  type SsoRecoveryAuditPageId,
+  ssoRecoveryAuditPages,
+} from './sso-recovery-audit.ts'
+import {
   isSsoSetupAuditPage,
   leavePendingSsoSetupAudit,
   openSsoSetupAuditPage,
@@ -107,6 +114,7 @@ export const auditPages = [
   ...workflowRunHistoryAuditPages,
   ...ssoSetupAuditPages,
   ...ssoMemberAuditPages,
+  ...ssoRecoveryAuditPages,
   ...scimMappingAuditPages,
   { id: 'host', title: 'Public host' },
   { id: 'booking', title: 'Public booking' },
@@ -309,6 +317,7 @@ export async function openAuditPage(
     await leavePendingWorkflowRunHistoryAudit(page, app.url)
     await leavePendingSsoSetupAudit(page, app.url)
     await leaveSsoMemberAudit(page, app.url)
+    await leaveSsoRecoveryAudit(page, app.url)
     await leavePendingScimMappingAudit(page, app.url)
     // Earlier audit states create real bookings; pin the calendar and list filters
     // before navigation so later pages never inherit wall-clock-dependent rows.
@@ -336,6 +345,15 @@ export async function openAuditPage(
       await app.auditSignIn(true, locale, 'team')
       await page.addInitScript(prepareAuditLocale, locale)
       const path = await openSsoSetupAuditPage(page, app, id, locale === 'zh-CN' ? locale : 'en')
+      verifyAuditPath(page.url(), path)
+      await page.evaluate(() => window.scrollTo(0, 0))
+      await page.evaluate(settleAuditLayout)
+      return
+    }
+    if (isSsoRecoveryAuditPage(id)) {
+      await app.auditSignIn(true, locale, 'team')
+      await page.addInitScript(prepareAuditLocale, locale)
+      const path = await openSsoRecoveryAuditPage(page, app, id, locale === 'zh-CN' ? locale : 'en')
       verifyAuditPath(page.url(), path)
       await page.evaluate(() => window.scrollTo(0, 0))
       await page.evaluate(settleAuditLayout)
@@ -418,6 +436,7 @@ export async function openAuditPage(
         | RoutingFormManagerAuditPageId
         | ScimMappingAuditPageId
         | SsoMemberAuditPageId
+        | SsoRecoveryAuditPageId
         | SsoSetupAuditPageId
         | WorkflowAuditPageId
         | WorkflowEditorAuditPageId

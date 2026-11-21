@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Link, MemoryRouter, useLocation } from 'react-router'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { App } from '../../App.tsx'
 import { goTo, replaceWith } from '../../browser.ts'
 import { PATHS } from '../../paths.ts'
@@ -27,12 +27,24 @@ const send = 'POST /api/auth/sso/mailbox-proof/send'
 const consume = 'POST /api/auth/sso/mailbox-proof/consume'
 const complete = 'POST /api/auth/sso/oidc/complete'
 
+afterEach(() => sessionStorage.clear())
+
 function instance(ssoOidcEnabled = true) {
   return json(200, {
     ssoOidcEnabled,
     ssoSamlEnabled: false,
     signIn: { email: true, google: true, microsoft: false },
   })
+}
+
+function redirectedTo(path: string) {
+  const response = new Response('<html></html>', { headers: { 'content-type': 'text/html' } })
+  // Fetch follows Location but removes its fragment before exposing the response URL.
+  Object.defineProperties(response, {
+    redirected: { value: true },
+    url: { value: new URL(path.split('#')[0] ?? '', window.location.origin).href },
+  })
+  return response
 }
 
 function FragmentIndicator() {
@@ -231,7 +243,11 @@ describe('SSO mailbox proof', () => {
     expect(api.to(consume)).toEqual([])
   })
 
-  it('confirms a link opened in another tab without completing sign-in', async () => {
+  it.each([
+    ['/app/bookings?tab=upcoming#recent', '/app/bookings?tab=upcoming#recent'],
+    ['/app/bookings?tab=past', '/app/bookings?tab=past'],
+  ])('completes to %s only from the originating tab', async (serverPath, destination) => {
+    const requested = '/app/bookings?tab=upcoming#recent'
     const subscribers = new Map<string, Set<ProofChannel>>()
     class ProofChannel {
       readonly name: string
@@ -255,15 +271,41 @@ describe('SSO mailbox proof', () => {
     }
     vi.stubGlobal('BroadcastChannel', ProofChannel)
     const api = fakeApi({
+      ...signedOut,
       'GET /api/v1/instance': () => instance(),
+      [start]: () => json(200, { redirect: true, url: authorization }),
+      [send]: () => json(202, { status: 'queued' }),
       [consume]: () => json(200, { status: 'proven' }),
+      [complete]: () => redirectedTo(serverPath),
     })
+    const user = userEvent.setup()
+    const login = renderApp(
+      `${PATHS.signIn}?sso=${providerId}&next=${encodeURIComponent(requested)}`,
+    )
+    await user.click(await screen.findByRole('button', { name: 'Sign in with single sign-on' }))
+    await waitFor(() => expect(goTo).toHaveBeenCalledWith(authorization))
+    expect(api.to(start).at(-1)?.body).toEqual({
+      providerId,
+      intent: 'sign_in',
+      returnTo: requested,
+    })
+    login.unmount()
+
     const original = within(renderApp(proof).container)
-    await original.findByRole('button', { name: sendEmail })
+    await user.click(await original.findByRole('button', { name: sendEmail }))
+    await original.findByLabelText('Email verification link')
     const email = within(renderApp(emailedLink).container)
-    await userEvent.click(await email.findByRole('button', { name: verify }))
-    expect(await original.findByRole('button', { name: 'Continue' })).toBeDefined()
+    await user.click(await email.findByRole('button', { name: verify }))
+    const next = await original.findByRole('button', { name: 'Continue' })
+    expect(email.queryByRole('button', { name: 'Continue' })).toBeNull()
+    expect(original.getByTestId('location').textContent).toBe(PATHS.mailboxProof)
+    expect(email.getByTestId('location').textContent).toBe(PATHS.mailboxProof)
     expect(api.to(complete)).toEqual([])
+    expect(replaceWith).not.toHaveBeenCalled()
+
+    await user.click(next)
+    await waitFor(() => expect(replaceWith).toHaveBeenCalledWith(destination))
+    expect(api.to(complete).map(({ body }) => body)).toEqual([{ attemptId }])
   })
 
   it('keeps the emailed link usable in the original tab when cross-tab messaging is unavailable', async () => {
@@ -345,11 +387,6 @@ describe('SSO mailbox proof', () => {
 
   it('preserves a proven attempt after a rate limit and navigates after a successful retry', async () => {
     const destination = '/app/bookings?tab=upcoming'
-    const response = new Response('<html></html>', { headers: { 'content-type': 'text/html' } })
-    Object.defineProperties(response, {
-      redirected: { value: true },
-      url: { value: window.location.origin + destination },
-    })
     const finish = vi
       .fn<() => Response>()
       .mockReturnValueOnce(
@@ -358,7 +395,7 @@ describe('SSO mailbox proof', () => {
           headers: { 'content-type': 'application/json', 'Retry-After': '1' },
         }),
       )
-      .mockReturnValueOnce(response)
+      .mockReturnValueOnce(redirectedTo(destination))
     const api = fakeApi({
       'GET /api/v1/instance': () => instance(),
       [send]: () => json(202, { status: 'queued' }),

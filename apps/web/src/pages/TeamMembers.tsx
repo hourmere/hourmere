@@ -19,6 +19,7 @@ import {
 import { useI18n } from '../i18n/runtime.tsx'
 import type { MessageKey, UiText } from '../i18n/translate.ts'
 import { PATHS } from '../paths.ts'
+import { SsoRecoveryNomination } from './sso/SsoRecoveryEnrollment.tsx'
 import { TeamInvitations } from './TeamInvitations.tsx'
 
 const PAGE_SIZE = 20
@@ -106,12 +107,14 @@ export function TeamMembers({
   currentUserId,
   onLeft = () => {},
   onReload = () => {},
+  canNominateRecoveryOwner = false,
 }: {
   organizationId: string
   role: string | null
   currentUserId?: string
   onLeft?: () => void
   onReload?: () => void
+  canNominateRecoveryOwner?: boolean
 }) {
   const { t } = useI18n()
   const { hash, key } = useLocation()
@@ -131,7 +134,16 @@ export function TeamMembers({
   const [selectedMember, setSelectedMember] = useState<ListedOrganizationMember | null>(null)
   const [reviewOpen, setReviewOpen] = useState(false)
   const [roleReviewOpen, setRoleReviewOpen] = useState(false)
+  const [nomineeId, setNomineeId] = useState<string | null>(null)
   const removalOpener = useRef<HTMLButtonElement | null>(null)
+  const nominationOpener = useRef<HTMLButtonElement | null>(null)
+  const nominating = canNominateRecoveryOwner && nomineeId !== null
+  useEffect(() => {
+    if (!nominating && nominationOpener.current) {
+      nominationOpener.current.focus()
+      nominationOpener.current = null
+    }
+  }, [nominating])
   const load = useCallback(
     (signal: AbortSignal) => listOrganizationMembers(organizationId, offset, PAGE_SIZE, signal),
     [organizationId, offset],
@@ -290,7 +302,9 @@ export function TeamMembers({
                       member={member}
                       role={role}
                       currentUserId={currentUserId}
-                      disabled={reviewOpen || selectedMember !== null || roleReviewOpen}
+                      disabled={
+                        reviewOpen || selectedMember !== null || roleReviewOpen || nominating
+                      }
                       scimSuspended={blockers.includes('scim_suspension')}
                       onReviewChange={setRoleReviewOpen}
                       onChanged={(updated) =>
@@ -307,12 +321,43 @@ export function TeamMembers({
                       member={member}
                       role={role}
                       currentUserId={currentUserId}
-                      disabled={reviewOpen || selectedMember !== null || roleReviewOpen}
+                      disabled={
+                        reviewOpen || selectedMember !== null || roleReviewOpen || nominating
+                      }
                       onSelect={(target, opener) => {
                         removalOpener.current = opener
                         setSelectedMember(target)
                       }}
                     />
+                    {canNominateRecoveryOwner &&
+                      member.role.split(',').some((value) => value.trim() === 'owner') && (
+                        <div className="form-actions">
+                          <button
+                            type="button"
+                            className="button button-small button-wrap user-content"
+                            disabled={
+                              reviewOpen || selectedMember !== null || roleReviewOpen || nominating
+                            }
+                            onClick={(event) => {
+                              nominationOpener.current = event.currentTarget
+                              setNomineeId(member.userId)
+                            }}
+                          >
+                            {t('Nominate {name} for SSO recovery', {
+                              name: member.user.name.trim() || t('Unnamed team member'),
+                            })}
+                          </button>
+                        </div>
+                      )}
+                    {nominating && nomineeId === member.userId && (
+                      <SsoRecoveryNomination
+                        nominee={{
+                          userId: member.userId,
+                          name: member.user.name.trim() || t('Unnamed team member'),
+                        }}
+                        onClose={() => setNomineeId(null)}
+                      />
+                    )}
                     <MemberReadiness
                       health={
                         readiness.status === 'ready' ? readiness.data.get(member.id) : undefined
@@ -339,7 +384,7 @@ export function TeamMembers({
             <button
               type="button"
               className="button button-small"
-              disabled={state.status === 'loading' || roleReviewOpen}
+              disabled={state.status === 'loading' || roleReviewOpen || nominating}
               onClick={() => setOffset((value) => Math.max(0, value - PAGE_SIZE))}
             >
               {t('Previous members page')}
@@ -349,7 +394,7 @@ export function TeamMembers({
             <button
               type="button"
               className="button button-small"
-              disabled={roleReviewOpen}
+              disabled={roleReviewOpen || nominating}
               onClick={() => setOffset((value) => value + PAGE_SIZE)}
             >
               {t('Next members page')}

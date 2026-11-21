@@ -400,7 +400,7 @@ describe.skipIf(!process.env.DATABASE_URL)('SSO provider drafts', () => {
   })
   it('source-copy mutation kills removal of the transaction-time role check', async () => {
     const mutant2 = await sourceCopy([
-      'await authorize(deps, db, p, headers)',
+      'await authorize(deps, db, p, headers, recoveryRequired)',
       '// removed authority check',
     ])
     async function assertion(M: typeof real) {

@@ -204,7 +204,8 @@ export async function lockOidcTestActor(
       .where('userId', '=', actor.userId)
       .forShare()
       .executeTakeFirst()
-    if (session?.activeOrganizationId !== provider.organizationId) throw refused()
+    if (!session || (!recovery && session.activeOrganizationId !== provider.organizationId))
+      throw refused()
     const { live } = await trx
       .selectNoFrom(sql<boolean>`${session.expiresAt}::timestamptz > clock_timestamp()`.as('live'))
       .executeTakeFirstOrThrow()

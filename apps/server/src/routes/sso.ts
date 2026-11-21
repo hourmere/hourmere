@@ -3,7 +3,7 @@ import type { MiddlewareHandler } from 'hono'
 import type { CallerEnv } from '../caller.ts'
 import { authenticated, errorResponses, json, type RouteModule } from '../openapi.ts'
 import { requireSsoEnabled } from '../sso.ts'
-import { isSsoRecoveryRead, restTeamReadAccess } from '../sso-read-routes.ts'
+import { restTeamReadAccess, ssoRecoveryReadPrincipal } from '../sso-read-routes.ts'
 import { authorizeSsoRead, getSsoPolicy, listSsoProviders, type SsoReadDeps } from '../sso-reads.ts'
 import { EXPECTED_ORGANIZATION_HEADER, organizationContextAccess } from '../team-management.ts'
 import { queryLimit } from './audit-log.ts'
@@ -49,6 +49,11 @@ export const SsoPolicy = z
     trustGeneration: z.number().int(),
   })
   .openapi('SsoPolicy')
+const recoveryReadHeaders = z.object({
+  'X-Expected-Organization-Id': z.string().optional().openapi({
+    description: 'Identifies the active team or the team of a live browser recovery grant.',
+  }),
+})
 
 export function ssoRoutes(deps: SsoReadDeps): RouteModule {
   const enabled: MiddlewareHandler<CallerEnv> = async (_c, next) => {
@@ -74,6 +79,7 @@ export function ssoRoutes(deps: SsoReadDeps): RouteModule {
         security: authenticated,
         middleware: [enabled, caller] as const,
         request: {
+          headers: recoveryReadHeaders,
           query: z.object({ cursor: z.string().optional(), limit: z.string().optional() }),
         },
         responses: {
@@ -82,17 +88,20 @@ export function ssoRoutes(deps: SsoReadDeps): RouteModule {
         },
       }),
       async (c) => {
-        await authorizeSsoRead(deps, c.var.principal)
-        await organizationContextAccess(
-          c.var.principal,
-          c.req.header(EXPECTED_ORGANIZATION_HEADER),
-        )(deps.db, c.var.principal.organization.id)
+        const recovery = ssoRecoveryReadPrincipal(c)
+        const principal = recovery ?? c.var.principal
+        await authorizeSsoRead(deps, principal)
+        if (principal === c.var.principal)
+          await organizationContextAccess(principal, c.req.header(EXPECTED_ORGANIZATION_HEADER))(
+            deps.db,
+            principal.organization.id,
+          )
         const query = c.req.valid('query')
         return c.json(
-          await listSsoProviders(deps, c.var.principal, {
+          await listSsoProviders(deps, principal, {
             ...query,
             limit: queryLimit(query.limit),
-            includeRecoveryLinks: !c.req.raw.headers.has('authorization') && !isSsoRecoveryRead(c),
+            includeRecoveryLinks: !c.req.raw.headers.has('authorization') && !recovery,
           }),
           200,
         )
@@ -109,19 +118,22 @@ export function ssoRoutes(deps: SsoReadDeps): RouteModule {
           'Owner/admin only; read/full API key or authorized MCP OAuth. An unconfigured team has invitation-only admission and no SSO requirement. SSO is being built and is not available yet.',
         security: authenticated,
         middleware: [enabled, caller] as const,
+        request: { headers: recoveryReadHeaders },
         responses: {
           200: { description: 'The team policy', content: json(SsoPolicy) },
           ...responses,
         },
       }),
       async (c) => {
-        await authorizeSsoRead(deps, c.var.principal)
-        await organizationContextAccess(
-          c.var.principal,
-          c.req.header(EXPECTED_ORGANIZATION_HEADER),
-        )(deps.db, c.var.principal.organization.id)
+        const principal = ssoRecoveryReadPrincipal(c) ?? c.var.principal
+        await authorizeSsoRead(deps, principal)
+        if (principal !== c.var.principal) return c.json(await getSsoPolicy(deps, principal), 200)
+        await organizationContextAccess(principal, c.req.header(EXPECTED_ORGANIZATION_HEADER))(
+          deps.db,
+          principal.organization.id,
+        )
         const access = await restTeamReadAccess(c)?.()
-        return c.json(await getSsoPolicy(deps, c.var.principal, access?.policy), 200)
+        return c.json(await getSsoPolicy(deps, principal, access?.policy), 200)
       },
     )
   }

@@ -1,9 +1,11 @@
-import type { CallerResolver, Principal } from '@hourmere/auth'
+import type { CallerResolver, Principal, SsoRecoveryTeam } from '@hourmere/auth'
 import { createMiddleware } from 'hono/factory'
 import { withClientIpHeader } from './client-ip.ts'
 import { credentialMiddleware, requireRestApiKeyOperation } from './rest-scopes.ts'
 
-export type CallerEnv = { Variables: { principal: Principal } }
+export type CallerEnv = {
+  Variables: { principal: Principal; ssoRecoveryTeams?: SsoRecoveryTeam[] }
+}
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 
@@ -31,10 +33,16 @@ function requestOrigin(headers: Headers): string | undefined {
  */
 export function requireCaller(
   resolveCaller: CallerResolver,
-  { allowedOrigin }: { allowedOrigin: string },
+  {
+    allowedOrigin,
+    includeSsoRecoveryTeams = false,
+  }: { allowedOrigin: string; includeSsoRecoveryTeams?: boolean },
 ) {
   const middleware = createMiddleware<CallerEnv>(async (c, next) => {
-    const result = await resolveCaller(withClientIpHeader(c.req.raw.headers, c.var.clientIp))
+    const headers = withClientIpHeader(c.req.raw.headers, c.var.clientIp)
+    const result = await (includeSsoRecoveryTeams
+      ? resolveCaller(headers, { includeSsoRecoveryTeams })
+      : resolveCaller(headers))
     // Better Auth may extend the session (sliding expiry) or clear a dead cookie.
     for (const cookie of result.setCookie) c.header('Set-Cookie', cookie, { append: true })
     if (!result.ok) {
@@ -61,6 +69,12 @@ export function requireCaller(
     }
     requireRestApiKeyOperation(c, result.principal)
     c.set('principal', result.principal)
+    if (
+      includeSsoRecoveryTeams &&
+      result.principal.kind === 'session' &&
+      !headers.has('authorization')
+    )
+      c.set('ssoRecoveryTeams', result.ssoRecoveryTeams)
     await next()
   })
   return credentialMiddleware(middleware)

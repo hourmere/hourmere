@@ -25,6 +25,7 @@ import {
   mailboxToken,
   oidcAttemptId,
   openMailboxProofChannel,
+  takeOidcReturnFragment,
 } from './member-protocol.ts'
 
 const unavailable = 'Identity verification is unavailable.'
@@ -219,9 +220,10 @@ function MailboxAttempt({
         return null
       })
       if (signal.aborted) return
-      if (result?.kind === 'redirect') {
+      const destination = takeOidcReturnFragment(result?.kind === 'redirect' ? result.path : null)
+      if (destination) {
         setPhase('redirecting')
-        replaceWith(result.path)
+        replaceWith(destination)
       } else {
         setPhase('finished')
       }

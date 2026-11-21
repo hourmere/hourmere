@@ -1,6 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link, NavLink, useMatch, useOutletContext } from 'react-router'
-import { api, type Schemas, unwrap } from '../../api/client.ts'
 import { isOrganizationContextChanged, RequestError } from '../../api/errors.ts'
 import type { AppShellContext } from '../../components/AppShell.tsx'
 import { PageHeader } from '../../components/PageHeader.tsx'
@@ -16,30 +15,13 @@ import { SsoEnforcement } from './SsoEnforcement.tsx'
 import { SsoFreshProof } from './SsoFreshProof.tsx'
 import { SsoProviderSetup } from './SsoProviderSetup.tsx'
 import {
+  loadSsoProviders,
   type SsoDomain,
   type SsoMutation,
   type SsoProofChallenge,
   SsoProofRequired,
   type SsoProvider,
 } from './setup.ts'
-
-async function loadProviders(organizationId: string, signal: AbortSignal) {
-  const providers: SsoProvider[] = []
-  let cursor: string | null = null
-  do {
-    const page: Schemas['SsoProviderPage'] = await unwrap(
-      api.GET('/api/v1/team/sso/providers', {
-        headers: { 'X-Expected-Organization-Id': organizationId },
-        params: { query: { limit: '100', ...(cursor ? { cursor } : {}) } },
-        signal,
-        cache: 'no-store',
-      }),
-    )
-    providers.push(...page.data)
-    cursor = page.nextCursor
-  } while (cursor)
-  return providers
-}
 
 const unavailable: MessageKey = 'SSO settings are unavailable in this team.'
 const loadError: MessageKey = 'Could not load SSO settings.'
@@ -146,7 +128,7 @@ function SsoInventory({
   // biome-ignore lint/correctness/useExhaustiveDependencies: version explicitly reloads the inventory
   useEffect(() => {
     const controller = new AbortController()
-    void loadProviders(organizationId, controller.signal).then(
+    void loadSsoProviders(organizationId, controller.signal).then(
       (providers) => {
         if (controller.signal.aborted) return
         setRemembered((previous) => {
