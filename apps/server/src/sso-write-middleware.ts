@@ -23,9 +23,10 @@ export async function withTeamWriteAccess<T>(
   // An enabled resource handler can provision and suspend during the request,
   // even when resolution found no existing SCIM connection.
   const scimTeam =
-    !principal.organization.personal && (principal.scimProvisioned || deps.scimResourcesEnabled)
+    !principal.organization.personal &&
+    (principal.scimProvisioned === true || deps.scimResourcesEnabled === true)
   return access.policy || machineWithPolicy || scimTeam
-    ? withTeamWriteCheck(teamWriteCheck(deps, principal), write)
+    ? withTeamWriteCheck(teamWriteCheck(deps, principal, scimTeam), write)
     : write()
 }
 

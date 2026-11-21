@@ -24,7 +24,7 @@ export async function suspendScimMember(
         .executeTakeFirstOrThrow()
     }
     const target = await prepareScimSuspension(trx, organizationId, userId)
-    if (revoke) return suspendScimMembership(trx, target)
+    if (revoke) return suspendScimMembership(trx, target, { type: 'system' })
     return trx
       .insertInto('scim_membership_blocks')
       .values({

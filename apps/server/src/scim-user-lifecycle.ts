@@ -1,0 +1,89 @@
+import { teamRoles } from '@hourmere/auth'
+import type { Database } from '@hourmere/db'
+import { suspendScimMembership } from '@hourmere/db/scim-suspension'
+import { sql, type Transaction } from 'kysely'
+import { immutableScimPrivileges, refuse } from './scim-user-write.ts'
+
+interface LifecycleWrite {
+  active: boolean | undefined
+  deactivationRequested: boolean
+  roleWrite: boolean
+}
+
+interface LifecycleEntry {
+  id: string
+  organization_id: string
+  connection_id: string
+  linked_user_id: string | null
+  active: boolean
+}
+
+const locallyBlocked = () =>
+  refuse(
+    403,
+    'This membership must be restored through ordinary team administration.',
+    'mutability',
+  )
+
+/** The caller holds the organization update lock and the live resource row lock. */
+export async function applyScimUserLifecycle(
+  trx: Transaction<Database>,
+  entry: LifecycleEntry,
+  { active, deactivationRequested, roleWrite }: LifecycleWrite,
+  actor: { type: 'scim_token'; id: string },
+) {
+  const userId = entry.linked_user_id
+  if (userId === null || (active === undefined && !roleWrite)) return
+  const organizationId = entry.organization_id
+  // Inspect the account's current membership, even when the original membership link
+  // was cleared by removal. Local role writes already serialize on the organization row.
+  const memberships = await trx
+    .selectFrom('auth.user as account')
+    .leftJoin('auth.member as member', (join) =>
+      join
+        .onRef('member.userId', '=', 'account.id')
+        .on('member.organizationId', '=', organizationId),
+    )
+    .select(['member.id as memberId', 'member.role', 'account.email', 'account.emailVerified'])
+    .where('account.id', '=', userId)
+    .execute()
+  if (
+    (deactivationRequested || roleWrite) &&
+    memberships.some(({ role }) => teamRoles(role).some((r) => r === 'owner' || r === 'admin'))
+  )
+    throw immutableScimPrivileges()
+
+  if (active === true) {
+    // The account link is the proof. The provisioned work address is only profile data.
+    const account = memberships[0]
+    const mailbox = account?.emailVerified ? account.email.trim().toLowerCase() : null
+    const localBlock = await trx
+      .selectFrom('scim_membership_blocks')
+      .select('id')
+      .where('organization_id', '=', organizationId)
+      .where('source', '=', 'local')
+      .where('cleared_at', 'is', null)
+      .where((eb) => eb.or([eb('user_id', '=', userId), eb('identity_email', '=', mailbox)]))
+      .executeTakeFirst()
+    if (localBlock || !memberships.some(({ memberId }) => memberId !== null)) throw locallyBlocked()
+    if (!entry.active) {
+      await trx
+        .updateTable('scim_membership_blocks')
+        .set({ cleared_at: sql<Date>`clock_timestamp()` })
+        .where('organization_id', '=', organizationId)
+        .where('connection_id', '=', entry.connection_id)
+        .where('scim_user_id', '=', entry.id)
+        .where('user_id', '=', userId)
+        .where('source', '=', 'scim')
+        .where('kind', '=', 'suspension')
+        .where('cleared_at', 'is', null)
+        .execute()
+    }
+  } else if (active === false && entry.active) {
+    await suspendScimMembership(
+      trx,
+      { organizationId, userId, connectionId: entry.connection_id, scimUserId: entry.id },
+      actor,
+    )
+  }
+}

@@ -269,9 +269,9 @@ describe.skipIf(!serverUrl)('SSO proof on team writes', () => {
     expect(await currentTitle()).toBe('Before writing')
   })
 
-  it('adds one memoized request lookup and leaves the no-policy committing SQL and locks identical', async () => {
+  it.each([true, false])('pins no-policy write SQL with SSO enabled=%s', async (enabled) => {
     async function trace(enforce: boolean, title: string, authorization?: string) {
-      const app = instance({ enforce, enabled: false })
+      const app = instance({ enforce, enabled })
       statements.length = 0
       const response = authorization
         ? await writeAsKey(app, authorization, title)
@@ -424,7 +424,7 @@ describe.skipIf(!serverUrl)('SSO proof on team writes', () => {
         ])
         await db.transaction().execute(async (trx) => {
           const { rows } = await sql<{ pid: number }>`SELECT pg_backend_pid() AS pid`.execute(trx)
-          await suspendScimMembership(trx, target)
+          await suspendScimMembership(trx, target, { type: 'system' })
           release()
           await Promise.race([
             waitForBlocked(rows[0]?.pid),
@@ -464,7 +464,12 @@ describe.skipIf(!serverUrl)('SSO proof on team writes', () => {
     try {
       await db.transaction().execute(async (trx) => {
         const { rows } = await sql<{ pid: number }>`SELECT pg_backend_pid() AS pid`.execute(trx)
-        await suspendScimMembership(trx, target)
+        await trx
+          .selectFrom('auth.organization')
+          .select('id')
+          .where('id', '=', fixture.team)
+          .forUpdate()
+          .executeTakeFirstOrThrow()
         pending = Promise.resolve(
           app.request(new URL(`/api/v1/bookings/${bookingId}/cancel`, publicUrl), {
             method: 'POST',
@@ -478,6 +483,7 @@ describe.skipIf(!serverUrl)('SSO proof on team writes', () => {
         // Request admission still sees the pre-commit membership. Its actual write
         // waits for the team lock and must recheck suspension before committing.
         await waitForBlocked(rows[0]?.pid)
+        await suspendScimMembership(trx, target, { type: 'system' })
       })
       if (!pending) throw new Error('Expected a pending cancellation')
       await expectRefused(await pending)

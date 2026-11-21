@@ -3,10 +3,13 @@ import { readFileSync } from 'node:fs'
 import { createRequire, stripTypeScriptTypes } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { createDb, type Db } from '@hourmere/db'
+import { suspendScimMembership } from '@hourmere/db/scim-suspension'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import pg from 'pg'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { mcpOAuthBroker } from '../../../apps/server/src/mcp/oauth.ts'
+import { prepareScimSuspension } from '../../db/src/scim-suspension-fixtures.ts'
 import { type Auth, createAuth, createAuthPool } from './index.ts'
 import { ensurePersonalOrganization } from './organizations.ts'
 
@@ -67,7 +70,7 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
     await pool?.end()
     await owned?.drop()
   })
-  function instance(factory = createAuth) {
+  function instance(factory = createAuth, options?: { scimResourcesEnabled: true }) {
     return factory({
       pool,
       db,
@@ -76,6 +79,7 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
       signup: { mode: 'open', allowedDomains: [] },
       mailer: { send: async () => {} },
       mcpOAuth: true,
+      ...options,
     })
   }
   async function account() {
@@ -136,6 +140,127 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
       >`SELECT * FROM audit_events WHERE organization_id=${organizationId} ORDER BY id`.execute(db)
     ).rows
   }
+
+  async function addMember(organizationId: string, userId: string) {
+    await db
+      .insertInto('auth.member')
+      .values({ userId, organizationId, role: 'member', createdAt: new Date() })
+      .execute()
+  }
+
+  async function raceSuspension(
+    organizationId: string,
+    userId: string,
+    request: () => Promise<Response>,
+  ) {
+    const target = await db
+      .transaction()
+      .execute((trx) => prepareScimSuspension(trx, organizationId, userId))
+    let pending: Promise<Response> | undefined
+    try {
+      await db.transaction().execute(async (trx) => {
+        const { pid } = await trx
+          .selectNoFrom(sql<number>`pg_backend_pid()`.as('pid'))
+          .executeTakeFirstOrThrow()
+        await suspendScimMembership(trx, target, { type: 'system' })
+        pending = request()
+        void pending.catch(() => {})
+        await expect
+          .poll(
+            async () => {
+              const { rows } = await owned.pool.query<{ blocked: boolean }>(
+                `SELECT EXISTS (SELECT FROM pg_stat_activity
+                  WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))) AS blocked`,
+                [pid],
+              )
+              return rows[0]?.blocked
+            },
+            { timeout: 3000 },
+          )
+          .toBe(true)
+      })
+    } finally {
+      await Promise.allSettled([pending])
+    }
+    if (!pending) throw new Error('Expected a request racing suspension')
+    return pending
+  }
+
+  it.each(['create', 'move'] as const)(
+    'rejects a native API key %s that would finish after SCIM suspension',
+    async (action) => {
+      const auth = instance(createAuth, { scimResourcesEnabled: true }),
+        actor = await account()
+      const team = await db
+        .insertInto('auth.organization')
+        .values({ name: 'Managed team', slug: randomUUID(), createdAt: new Date() })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      await addMember(team.id, actor.user.id)
+      const existing =
+        action === 'move' ? await post(auth, '/api-key/create', {}, actor) : undefined
+      if (existing) expect(existing.status).toBe(200)
+      const keyId = existing ? ((await existing.json()) as { id: string }).id : undefined
+      const response = await raceSuspension(team.id, actor.user.id, () =>
+        post(
+          auth,
+          keyId ? '/api-key/update' : '/api-key/create',
+          { ...(keyId && { keyId }), metadata: { organizationId: team.id } },
+          actor,
+        ),
+      )
+      expect(response.status).toBe(403)
+      const keys = await db
+        .selectFrom('auth.apikey')
+        .select(['id', sql<string>`metadata::jsonb ->> 'organizationId'`.as('organizationId')])
+        .where('referenceId', '=', actor.user.id)
+        .execute()
+      expect(keys).toEqual(keyId ? [{ id: keyId, organizationId: actor.organizationId }] : [])
+      expect((await events(team.id)).map((event) => event.action)).not.toContain('api_key.created')
+      expect((await events(actor.organizationId)).map((event) => event.action)).toEqual(
+        keyId ? ['api_key.created'] : [],
+      )
+    },
+  )
+
+  it('keeps the PostgreSQL statement counts for team API key writes with resources disabled', async () => {
+    const auth = instance()
+    const actor = await account()
+    const team = await db
+      .insertInto('auth.organization')
+      .values({ name: 'Team without SCIM', slug: randomUUID(), createdAt: new Date() })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await addMember(team.id, actor.user.id)
+
+    const queries = vi.spyOn(pg.Client.prototype, 'query')
+    const writeStatements = () =>
+      queries.mock.calls.filter(([statement]) => {
+        // Better Auth starts instance-wide expiry cleanup in the background on a timer.
+        return !/^delete from "apikey" where .*"expiresAt"/i.test(statement)
+      }).length
+    try {
+      const metadata = { organizationId: team.id }
+      const created = await post(auth, '/api-key/create', { metadata }, actor)
+      expect(created.status).toBe(200)
+      const { id: keyId } = (await created.json()) as { id: string }
+      const create = writeStatements()
+
+      queries.mockClear()
+      const updated = await post(auth, '/api-key/update', { keyId, metadata }, actor)
+      expect(updated.status).toBe(200)
+      const update = writeStatements()
+
+      queries.mockClear()
+      expect((await post(auth, '/api-key/delete', { keyId }, actor)).status).toBe(200)
+      const remove = writeStatements()
+
+      expect({ create, update, remove }).toEqual({ create: 10, update: 14, remove: 11 })
+    } finally {
+      queries.mockRestore()
+    }
+  })
+
   async function expiry(
     factory = createAuth,
     operation: 'create' | 'update' | 'delete' = 'create',
@@ -438,7 +563,7 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
   })
   type FamilyPath = 'revoke' | 'token'
   /** One client, one user, two grants in two organizations, each with refresh and access tokens. */
-  async function familySetup() {
+  async function familySetup(presentActiveTeam = false) {
     const actor = await account(),
       clientId = randomUUID()
     const team = await db
@@ -455,7 +580,10 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
       })
       .execute()
     const grants = []
-    for (const organizationId of [actor.organizationId, team.id])
+    const organizations = presentActiveTeam
+      ? [team.id, actor.organizationId]
+      : [actor.organizationId, team.id]
+    for (const organizationId of organizations)
       grants.push(
         await db
           .insertInto('mcp_oauth_grants')
@@ -492,7 +620,7 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
           createdAt: new Date(),
           expiresAt: new Date(Date.now() + 86400000),
           // Presenting an already revoked refresh token is native reuse detection.
-          revoked: index === 0 ? new Date(Date.now() - 60000) : null,
+          revoked: !presentActiveTeam && index === 0 ? new Date(Date.now() - 60000) : null,
         })
         .returning('id')
         .executeTakeFirstOrThrow()
@@ -534,12 +662,12 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
     return {
       refresh: await db
         .selectFrom('auth.oauthRefreshToken')
-        .select('id')
+        .select(['id', 'referenceId'])
         .where('clientId', '=', clientId)
         .execute(),
       access: await db
         .selectFrom('auth.oauthAccessToken')
-        .select('id')
+        .select(['id', 'referenceId'])
         .where('clientId', '=', clientId)
         .execute(),
     }
@@ -590,6 +718,20 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
     family())
   it('records refresh-token reuse at the token endpoint like revocation reuse', () =>
     family(createAuth, 'token'))
+  it('preserves another grant for the OAuth client when its native revoke races SCIM suspension', async () => {
+    const auth = instance(),
+      { actor, clientId, presented, sibling, token } = await familySetup(true)
+    await addMember(presented.organization_id, actor.user.id)
+    const response = await raceSuspension(presented.organization_id, actor.user.id, () =>
+      presentRevoked(auth, 'revoke', clientId, token),
+    )
+    expect(response.status).toBe(400)
+    expect(await familyTokens(clientId)).toEqual({
+      refresh: [expect.objectContaining({ referenceId: sibling.id })],
+      access: [expect.objectContaining({ referenceId: sibling.id })],
+    })
+    expect(await events(sibling.organization_id)).toEqual([])
+  })
   it.each(['revoke', 'token'] as const)(
     'deletes the %s family access tokens before its refresh tokens when nothing cascades',
     async (path) => {

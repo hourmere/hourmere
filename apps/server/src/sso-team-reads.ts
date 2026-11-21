@@ -4,6 +4,7 @@ import {
   lockTeamSsoProof,
   memoizeTeamSsoAccess,
   type Principal,
+  requireActiveApiKey,
   type TeamReadPolicy,
   type TeamSsoDeps,
   type TeamSsoSession,
@@ -78,29 +79,46 @@ export function requireTeamRead(access: TeamReadAccess): void {
   if (!access.allowed) missingProof()
 }
 
-export function teamWriteCheck(deps: SsoTeamReadDeps, principal: Principal) {
+export function teamWriteCheck(deps: SsoTeamReadDeps, principal: Principal, scimTeam: boolean) {
   const { organization, user } = principal
   const actor = { organizationId: organization.id, userId: user.id }
   return {
     organizationId: organization.id,
     identity: sessionIdentity(principal),
     expired: missingProof,
-    lockProof: (db: Db) => {
+    lockProof: async (db: Db) => {
       if (principal.kind === 'api_key') {
-        return lockSsoDelegation(
+        const deadline = await lockSsoDelegation(
           db,
           deps.capabilities,
           { ...actor, kind: 'api_key', credentialId: principal.apiKeyId },
           missingProof,
         )
+        // Reactivation can clear the block, but an in-flight write still has to
+        // present a credential that survived revocation under the same team lock.
+        if (scimTeam) await requireActiveApiKey(db, principal, Date.now)
+        return deadline
       }
       if (principal.kind === 'oauth' && principal.oauthGrantId) {
-        return lockSsoDelegation(
+        const deadline = await lockSsoDelegation(
           db,
           deps.capabilities,
           { ...actor, kind: 'oauth_grant', credentialId: principal.oauthGrantId },
           missingProof,
         )
+        if (scimTeam) {
+          const grant = await db
+            .selectFrom('mcp_oauth_grants')
+            .select('id')
+            .where('id', '=', principal.oauthGrantId)
+            .where('organization_id', '=', organization.id)
+            .where('user_id', '=', user.id)
+            .where('client_id', '=', principal.clientId)
+            .forKeyShare()
+            .executeTakeFirst()
+          if (!grant) missingProof()
+        }
+        return deadline
       }
       return lockTeamSsoProof(deps, db, sessionIdentity(principal), organization.id, missingProof)
     },

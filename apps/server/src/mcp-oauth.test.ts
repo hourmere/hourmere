@@ -687,7 +687,7 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
           .select('id')
           .where('id', '=', grant.id)
           .executeTakeFirst(),
-      ).toEqual(grant)
+      ).toBeUndefined()
     },
   )
 

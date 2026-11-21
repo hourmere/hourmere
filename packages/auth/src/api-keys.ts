@@ -1,8 +1,12 @@
+import { apiKey } from '@better-auth/api-key'
 import type { Db } from '@hourmere/db'
 import type { BetterAuthPlugin } from 'better-auth'
 import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/api'
 import { sql } from 'kysely'
-import { API_KEY_ORGANIZATION_MEMBERSHIP_MESSAGE } from './api-key-errors.ts'
+import {
+  API_KEY_ORGANIZATION_CHANGED_MESSAGE,
+  API_KEY_ORGANIZATION_MEMBERSHIP_MESSAGE,
+} from './api-key-errors.ts'
 import {
   type ApiKeyScope,
   isApiKeyScope,
@@ -18,6 +22,27 @@ import type { TeamSsoCapabilities } from './team-sso.ts'
  * product's API limits, which belong in the API layer.
  */
 export const API_KEY_RATE_LIMIT = { timeWindow: 60_000, maxRequests: 600 } as const
+
+export function nativeApiKey(options: Parameters<typeof apiKey>[0]) {
+  const plugin = apiKey(options)
+  const update = plugin.endpoints.updateApiKey
+  plugin.endpoints.updateApiKey = Object.assign(async (context: Parameters<typeof update>[0]) => {
+    try {
+      return await update(context)
+    } catch (error) {
+      // The native update catches persistence exceptions and wraps them as 500s.
+      // Restore these two deliberate refusals after the audit transaction rolls back.
+      if (error instanceof APIError && error.status === 'INTERNAL_SERVER_ERROR') {
+        if (error.message === API_KEY_ORGANIZATION_MEMBERSHIP_MESSAGE)
+          throw new APIError('FORBIDDEN', { message: error.message })
+        if (error.message === API_KEY_ORGANIZATION_CHANGED_MESSAGE)
+          throw new APIError('CONFLICT', { message: error.message })
+      }
+      throw error
+    }
+  }, update) as typeof update
+  return plugin
+}
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v)

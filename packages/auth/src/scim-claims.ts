@@ -90,12 +90,13 @@ export const scimClaimCompletion: ScimClaimCompletion = {
     // The resource, after its claim.
     const entry = await trx
       .selectFrom('scim_users')
-      .select(['id', 'linked_user_id', 'retired_at'])
+      .select(['id', 'active', 'linked_user_id', 'retired_at'])
       .where('organization_id', '=', proof.organizationId)
       .where('connection_id', '=', claim.connection_id)
       .where('id', '=', claim.scim_user_id)
       .forUpdate()
       .executeTakeFirst()
+    if (entry?.retired_at === null && !entry.active) return { refused: true }
     // An expired claim is not completed even when an administrator resent its invitation:
     // the person is admitted by that invitation alone and the entry stays unlinked.
     if (
