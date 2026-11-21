@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, Navigate, useLocation, useNavigate } from 'react-router'
 import { api, unwrap } from '../api/client.ts'
 import { errorMessage, RequestError } from '../api/errors.ts'
@@ -16,6 +16,7 @@ import { msg } from '../i18n/translate.ts'
 import { signInPath } from '../next-path.ts'
 import { PATHS } from '../paths.ts'
 import { PageStatus, useSession } from '../session.tsx'
+import { SsoDelegation } from './sso/SsoDelegation.tsx'
 
 // The authorization URL comes from the connecting app; schema details are not useful
 // guidance here. Reuse the localized restart message without changing API error handling.
@@ -232,6 +233,23 @@ export function ConnectedAppsPage() {
 
   usePageTitle('Connected apps')
   const [connections, reload] = useLoad(loadConnections)
+  const delegationCredentials = useMemo(
+    () =>
+      connections.status === 'ready'
+        ? connections.data.data.flatMap((connection) =>
+            connection.credentialId
+              ? [
+                  {
+                    id: connection.credentialId,
+                    label: `${connection.clientName} (${connection.organizationName})`,
+                    ssoDelegation: connection.ssoDelegation,
+                  },
+                ]
+              : [],
+          )
+        : [],
+    [connections],
+  )
   const [busy, setBusy] = useState<string | null>(null),
     [error, setError] = useState<UiText>('')
   async function revoke(id: string) {
@@ -301,6 +319,7 @@ export function ConnectedAppsPage() {
             <p>{t('Connect an AI app from its MCP settings, or use an API key.')}</p>
           </EmptyState>
         ))}
+      <SsoDelegation kind="oauth_grant" credentials={delegationCredentials} reload={reload} />
     </>
   )
 }

@@ -78,6 +78,30 @@ const sendEmail = 'POST /api/auth/sso/mailbox-proof/send'
 const consumeEmail = 'POST /api/auth/sso/mailbox-proof/consume'
 const stepUp = 'POST /api/auth/sign-in/sso'
 const proofAttemptId = '00000000-0000-7000-8000-000000000057'
+const ownLinkId = '00000000-0000-7000-8000-000000000058'
+const memberLinkId = '00000000-0000-7000-8000-000000000059'
+const removeLink = `DELETE ${collection}/${enabled.id}/links/${memberLinkId}`
+const linkInventory = {
+  ...enabled,
+  links: [
+    { id: ownLinkId, generation: 1 },
+    { id: memberLinkId, generation: 4 },
+  ],
+}
+const linkedMe: Schemas['Me'] = {
+  ...me,
+  sso: {
+    requireSso: false,
+    attempts: [],
+    providers: [enabled],
+    proofs: [],
+    links: [{ id: ownLinkId, providerId: enabled.id, generation: 1 }],
+  },
+}
+const adminRole: Routes = {
+  'GET /api/auth/organization/get-active-member': () =>
+    json(200, { id: 'membership-1', organizationId: team.id, userId: me.user.id, role: 'admin' }),
+}
 const token = 'test-only-mailbox-token'
 const idpUrl = 'https://oidc.example.com/authorize?state=example'
 const proofHeading = 'Confirm your identity before changing SSO settings.'
@@ -226,13 +250,7 @@ describe('SSO provider activation', () => {
   it('lets an administrator test a draft without offering owner-only activation or enforcement', async () => {
     const { requests } = showSso({
       [getProviders]: () => page({ ...draft, testStatus: 'passed' }, enabled),
-      'GET /api/auth/organization/get-active-member': () =>
-        json(200, {
-          id: 'membership-1',
-          organizationId: team.id,
-          userId: me.user.id,
-          role: 'admin',
-        }),
+      ...adminRole,
     })
 
     await screen.findByRole('button', { name: `Test provider ${draft.displayName}` })
@@ -283,6 +301,7 @@ describe('Team SSO enforcement', () => {
     const controls = /require sso|requiring sso/i
     expect(screen.getByText('Loading SSO enforcement…').getAttribute('role')).toBe('status')
     expect(screen.queryByRole('button', { name: controls })).toBeNull()
+    expect(screen.queryByLabelText('Admission policy')).toBeNull()
     expect(screen.queryByText(/recovery enrollment|pass a test/i)).toBeNull()
 
     await pending.answer(json(status, { error: 'not_available', message: 'Internal details' }))
@@ -292,9 +311,127 @@ describe('Team SSO enforcement', () => {
         : 'Could not load SSO enforcement.'
     expect(screen.getByText(message).getAttribute('role')).toBe('status')
     expect(screen.queryByRole('button', { name: controls })).toBeNull()
+    expect(screen.queryByLabelText('Admission policy')).toBeNull()
     expect(screen.queryByText(/recovery enrollment|pass a test/i)).toBeNull()
     expect(screen.queryByText('Internal details')).toBeNull()
     expect(requests.to(putPolicy)).toHaveLength(0)
+  })
+
+  it('lets an administrator change admission after fresh proof, preserving enforcement', async () => {
+    const expected = {
+      expectedRevision: policy.policyRevision,
+      requireSso: false,
+      admission: 'invitation_only',
+    }
+    const { requests, user } = showSso({
+      ...adminRole,
+      [putPolicy]: ({ body }) =>
+        Object.hasOwn(body as object, 'proofAttemptId')
+          ? json(200, {
+              ...policy,
+              admission: expected.admission,
+              policyRevision: policy.policyRevision + 1,
+            })
+          : challenge('mailbox'),
+      [sendEmail]: () => json(202, { status: 'queued' }),
+      [consumeEmail]: () => json(200, { status: 'proven' }),
+    })
+
+    const admission = await screen.findByLabelText<HTMLSelectElement>('Admission policy')
+    const save = screen.getByRole<HTMLButtonElement>('button', { name: 'Save admission policy' })
+    expect(save.disabled).toBe(true)
+    await user.selectOptions(admission, expected.admission)
+    expect(requests.to(putPolicy)).toHaveLength(0)
+    await user.click(save)
+    const next = await verifyEmail(user, await openMailboxPrompt(user))
+    await user.click(next)
+    await screen.findByText('Admission policy saved.')
+    expect(admission.value).toBe(expected.admission)
+    expect(save.disabled).toBe(true)
+    expect(screen.queryByRole('button', { name: 'Require SSO' })).toBeNull()
+    expectTeamWrites(requests.to(putPolicy), [expected, { ...expected, proofAttemptId }])
+  })
+
+  it('preserves a future admission mode without offering policy writes', async () => {
+    const { requests } = showSso({
+      [getPolicy]: () => json(200, { ...policy, admission: 'future_mode' }),
+    })
+    await screen.findByText('The team’s admission policy is unavailable.')
+    expect(screen.queryByLabelText('Admission policy')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Require SSO' })).toBeNull()
+    expect(requests.to(putPolicy)).toHaveLength(0)
+  })
+
+  it('shows the verified-domain requirement when enabling just-in-time admission is refused', async () => {
+    const { requests, user } = showSso({
+      [getPolicy]: () => json(200, { ...policy, admission: 'invitation_only' }),
+      [putPolicy]: () => json(409, { error: 'sso_domain_unverified' }),
+    })
+    await user.selectOptions(await screen.findByLabelText('Admission policy'), 'jit')
+    await user.click(screen.getByRole('button', { name: 'Save admission policy' }))
+    await screen.findByText('Verify a team domain before enabling just-in-time admission.')
+    expectTeamWrites(requests.to(putPolicy), [
+      { expectedRevision: policy.policyRevision, requireSso: false, admission: 'jit' },
+    ])
+  })
+})
+
+describe('Team identity link retirement', () => {
+  it('retires only the selected link generation after consent and fresh proof', async () => {
+    const expected = { expectedLinkGeneration: 4 }
+    const { requests, user } = showSso(
+      {
+        [getProviders]: () => page(linkInventory),
+        [removeLink]: ({ body }) =>
+          Object.hasOwn(body as object, 'proofAttemptId')
+            ? new Response(null, { status: 204 })
+            : challenge('mailbox'),
+        [sendEmail]: () => json(202, { status: 'queued' }),
+        [consumeEmail]: () => json(200, { status: 'proven' }),
+      },
+      linkedMe,
+    )
+    const selection = await screen.findByLabelText('Identity link')
+    expect(within(selection).queryByRole('option', { name: ownLinkId })).toBeNull()
+    await user.selectOptions(selection, memberLinkId)
+    expect(requests.to(removeLink)).toHaveLength(0)
+    await confirm(user, 'Retire identity link', 'Retire this identity link?')
+    const next = await verifyEmail(user, await openMailboxPrompt(user))
+    await user.click(next)
+    await screen.findByText('Identity link retired.')
+    expect(screen.queryByRole('option', { name: memberLinkId })).toBeNull()
+    expect(screen.getByText(/To link again after retirement/)).toBeDefined()
+    expectTeamWrites(requests.to(removeLink), [expected, { ...expected, proofAttemptId }])
+  })
+
+  it('explains a denied owner-link retirement without leaking the server message', async () => {
+    const { requests, user } = showSso(
+      {
+        ...adminRole,
+        [getProviders]: () => page(linkInventory),
+        [removeLink]: () =>
+          json(403, { error: 'team_management_access_denied', message: 'Private target details' }),
+      },
+      linkedMe,
+    )
+    await user.selectOptions(await screen.findByLabelText('Identity link'), memberLinkId)
+    await confirm(user, 'Retire identity link', 'Retire this identity link?')
+    await screen.findByText(
+      'Could not retire this identity link. Only another team owner can retire an owner’s identity link.',
+    )
+    expect(screen.queryByText('Private target details')).toBeNull()
+    expect(screen.queryByText('Identity link retired.')).toBeNull()
+    expect(screen.queryByLabelText('Identity link')).toBeNull()
+    expect(screen.queryByRole('heading', { name: proofHeading })).toBeNull()
+    expectTeamWrites(requests.to(removeLink), [{ expectedLinkGeneration: 4 }])
+  })
+
+  it('keeps the link state unknown when a scoped summary is absent', async () => {
+    const { requests } = showSso({ [getProviders]: () => page(enabled) }, linkedMe)
+    await screen.findByText('Identity links are unavailable.')
+    expect(screen.queryByLabelText('Identity link')).toBeNull()
+    expect(screen.queryByText('There are no other identity links for this provider.')).toBeNull()
+    expect(requests.to(removeLink)).toHaveLength(0)
   })
 })
 

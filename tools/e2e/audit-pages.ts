@@ -34,6 +34,12 @@ import {
   usesTeamRoutingFormManagerAuditSpace,
 } from './routing-form-manager-audit.ts'
 import {
+  isSsoDelegationAuditPage,
+  openSsoDelegationAuditPage,
+  type SsoDelegationAuditPageId,
+  ssoDelegationAuditPages,
+} from './sso-delegation-audit.ts'
+import {
   isSsoMemberAuditPage,
   isSsoMemberSettingsAuditPage,
   leaveSsoMemberAudit,
@@ -106,6 +112,7 @@ export const auditPages = [
   ...workflowEditorAuditPages,
   ...workflowRunHistoryAuditPages,
   ...ssoSetupAuditPages,
+  ...ssoDelegationAuditPages,
   ...ssoMemberAuditPages,
   ...ssoRecoveryAuditPages,
   { id: 'host', title: 'Public host' },
@@ -323,10 +330,13 @@ export async function openAuditPage(
       await page.evaluate(settleAuditLayout)
       return
     }
-    if (isSsoSetupAuditPage(id)) {
+    if (isSsoSetupAuditPage(id) || isSsoDelegationAuditPage(id)) {
       await app.auditSignIn(true, locale, 'team')
       await page.addInitScript(prepareAuditLocale, locale)
-      const path = await openSsoSetupAuditPage(page, app, id, locale === 'zh-CN' ? locale : 'en')
+      const language = locale === 'zh-CN' ? locale : 'en'
+      const path = isSsoSetupAuditPage(id)
+        ? await openSsoSetupAuditPage(page, app, id, language)
+        : await openSsoDelegationAuditPage(page, app, id, language)
       verifyAuditPath(page.url(), path)
       await page.evaluate(() => window.scrollTo(0, 0))
       await page.evaluate(settleAuditLayout)
@@ -416,6 +426,7 @@ export async function openAuditPage(
         | PollAuditPageId
         | RoutingFormAuditPageId
         | RoutingFormManagerAuditPageId
+        | SsoDelegationAuditPageId
         | SsoMemberAuditPageId
         | SsoRecoveryAuditPageId
         | SsoSetupAuditPageId

@@ -215,8 +215,19 @@ it('covers every requested real page and limits en-GB to the booking page', () =
     'sso-setup-conflict',
     'sso-provider-enable',
     'sso-enforcement-recovery-required',
+    'sso-enforcement-admission',
+    'sso-enforcement-forbidden',
+    'sso-enforcement-error',
+    'sso-identity-retire',
+    'sso-identity-retire-forbidden',
+    'sso-identity-unavailable',
     'sso-proof-mailbox',
     'sso-proof-step-up',
+    'sso-delegation-active',
+    'sso-delegation-api-key',
+    'sso-delegation-revoke',
+    'sso-delegation-step-up',
+    'sso-delegation-forbidden',
     'sso-sign-in',
     'sso-mailbox-send',
     'sso-mailbox-link',
@@ -385,6 +396,7 @@ const workflowRunHistoryAuditUrl = pathToFileURL(
   resolve('tools/e2e/workflow-run-history-audit.ts'),
 ).href
 const ssoSetupAuditUrl = pathToFileURL(resolve('tools/e2e/sso-setup-audit.ts')).href
+const ssoDelegationAuditUrl = pathToFileURL(resolve('tools/e2e/sso-delegation-audit.ts')).href
 const ssoMemberAuditUrl = pathToFileURL(resolve('tools/e2e/sso-member-audit.ts')).href
 const ssoRecoveryAuditUrl = pathToFileURL(resolve('tools/e2e/sso-recovery-audit.ts')).href
 const visualSource = readFileSync('tools/e2e/specs/visual.spec.ts', 'utf8')
@@ -462,6 +474,7 @@ function sourceCopyResult(
       .replace("'./workflow-editor-audit.ts'", JSON.stringify(workflowEditorAuditUrl))
       .replace("'./workflow-run-history-audit.ts'", JSON.stringify(workflowRunHistoryAuditUrl))
       .replace("'./sso-setup-audit.ts'", JSON.stringify(ssoSetupAuditUrl))
+      .replace("'./sso-delegation-audit.ts'", JSON.stringify(ssoDelegationAuditUrl))
       .replace("'./sso-member-audit.ts'", JSON.stringify(ssoMemberAuditUrl))
       .replace("'./sso-recovery-audit.ts'", JSON.stringify(ssoRecoveryAuditUrl)),
   )
@@ -700,8 +713,19 @@ const expected={
   'sso-setup-conflict':{path:'/app/settings/sso',public:false,space:'team',wait:'button:Reload settings'},
   'sso-provider-enable':{path:'/app/settings/sso',public:false,space:'team',wait:'button:Enable provider'},
   'sso-enforcement-recovery-required':{path:'/app/settings/sso',public:false,space:'team',wait:'A current owner must accept recovery enrollment before you can require SSO.'},
+  'sso-enforcement-admission':{path:'/app/settings/sso',public:false,space:'team',wait:'button:Save admission policy'},
+  'sso-enforcement-forbidden':{path:'/app/settings/sso',public:false,space:'team',wait:'SSO enforcement is unavailable in this team.'},
+  'sso-enforcement-error':{path:'/app/settings/sso',public:false,space:'team',wait:'Could not load SSO enforcement.'},
+  'sso-identity-retire':{path:'/app/settings/sso',public:false,space:'team',wait:'group:Retire this identity link? button:Retire identity link'},
+  'sso-identity-retire-forbidden':{path:'/app/settings/sso',public:false,space:'team',wait:'Could not retire this identity link. Only another team owner can retire an owner’s identity link.'},
+  'sso-identity-unavailable':{path:'/app/settings/sso',public:false,space:'team',wait:'Identity links are unavailable.'},
   'sso-proof-mailbox':{path:'/app/settings/sso',public:false,space:'team',wait:'label:Email verification link'},
   'sso-proof-step-up':{path:'/app/settings/sso',public:false,space:'team',wait:'link:Open identity provider (opens in a new tab)'},
+  'sso-delegation-active':{path:'/app/connected-apps',public:false,space:'team',wait:'time[datetime='},
+  'sso-delegation-api-key':{path:'/app/api-keys',public:false,space:'team',wait:'time[datetime='},
+  'sso-delegation-revoke':{path:'/app/connected-apps',public:false,space:'team',wait:'group:Revoke this SSO delegation? button:Revoke SSO delegation'},
+  'sso-delegation-step-up':{path:'/app/connected-apps',public:false,space:'team',wait:'button:Start SSO verification'},
+  'sso-delegation-forbidden':{path:'/app/connected-apps',public:false,space:'team',wait:'Could not verify this team’s SSO policy.'},
   'sso-sign-in':{path:'/sign-in',public:true,wait:'button:Sign in with single sign-on'},
   'sso-mailbox-send':{path:'/app/mailbox-proof',public:true,wait:'button:Send verification email'},
   'sso-mailbox-link':{path:'/app/mailbox-proof',public:true,wait:'label:Email verification link'},

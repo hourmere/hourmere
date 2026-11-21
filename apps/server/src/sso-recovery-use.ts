@@ -88,7 +88,7 @@ export async function useSsoRecovery(
             .executeTakeFirst()
           if ((policy?.policy_revision ?? 1) !== input.expectedRevision)
             throw new DomainError('conflict', 'sso_configuration_changed')
-          if (target && !policy?.require_sso) throw denied()
+          if (!policy?.require_sso) throw denied()
         },
         mutate: async (trx, _input, _binding, _mailbox, attemptId) => {
           // The gate has consumed the mailbox attempt. Retain it as the only live grant

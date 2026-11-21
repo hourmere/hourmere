@@ -1,7 +1,8 @@
-import { useEffect, useId, useState } from 'react'
+import { type FormEvent, useEffect, useId, useState } from 'react'
 import { api, type Schemas, unwrap } from '../../api/client.ts'
 import { isOrganizationContextChanged, RequestError } from '../../api/errors.ts'
 import { ConfirmAction } from '../../components/ConfirmAction.tsx'
+import { Field } from '../../components/forms.tsx'
 import { useI18n } from '../../i18n/runtime.tsx'
 import type { MessageKey } from '../../i18n/translate.ts'
 import { useSession } from '../../session.tsx'
@@ -19,6 +20,12 @@ const enforcementErrors = {
 type PolicyLoad =
   | { status: 'loading' | 'error' | 'unavailable' | 'team-changed' }
   | { status: 'ready'; data: Schemas['SsoPolicy'] }
+
+type Admission = 'invitation_only' | 'jit'
+
+function isAdmission(value: string): value is Admission {
+  return value === 'invitation_only' || value === 'jit'
+}
 
 const statusText = {
   loading: 'Loading SSO enforcement…',
@@ -43,7 +50,10 @@ export function SsoEnforcement({
   const { t } = useI18n()
   const { confirmReload } = useSession()
   const heading = useId()
+  const admissionId = useId()
   const [policy, setPolicy] = useState<PolicyLoad>({ status: 'loading' })
+  const [selectedAdmission, setSelectedAdmission] = useState<Admission | null>(null)
+  const [savedAdmission, setSavedAdmission] = useState(false)
   const [version, setVersion] = useState(0)
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: version explicitly reloads the policy
@@ -78,30 +88,50 @@ export function SsoEnforcement({
   }, [organizationId, version])
 
   const data = policy.status === 'ready' ? policy.data : null
+  const currentAdmission = data && isAdmission(data.admission) ? data.admission : null
+  const admission = selectedAdmission ?? currentAdmission
   const requireSso = data?.requireSso === true
   const changeLabel = requireSso ? 'Stop requiring SSO' : 'Require SSO'
 
-  function changePolicy() {
+  function changePolicy(nextRequirement: boolean, nextAdmission: Admission) {
     if (!data) return Promise.resolve()
-    const { policyRevision, admission } = data
-    if (admission !== 'invitation_only' && admission !== 'jit') return Promise.resolve()
     return mutate(
       (signal, proofAttemptId) =>
         unwrapSsoWrite(
           api.PUT('/api/v1/team/sso/policy', {
             params: { header: { 'X-Expected-Organization-Id': organizationId } },
             body: {
-              expectedRevision: policyRevision,
-              admission,
-              requireSso: !requireSso,
+              expectedRevision: data.policyRevision,
+              admission: nextAdmission,
+              requireSso: nextRequirement,
               proofAttemptId,
             },
             signal,
           }),
         ),
-      reload,
-      enforcementErrors,
+      (updated) => {
+        if (nextRequirement !== requireSso) reload()
+        else {
+          setPolicy({ status: 'ready', data: updated })
+          setSelectedAdmission(null)
+          setSavedAdmission(true)
+        }
+      },
+      nextRequirement === requireSso
+        ? {
+            sso_domain_unverified: 'Verify a team domain before enabling just-in-time admission.',
+            sso_disabled: 'Could not save SSO settings.',
+          }
+        : enforcementErrors,
     )
+  }
+
+  function saveAdmission(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!busy && currentAdmission && admission && admission !== currentAdmission) {
+      setSavedAdmission(false)
+      void changePolicy(requireSso, admission)
+    }
   }
 
   return (
@@ -116,34 +146,71 @@ export function SsoEnforcement({
                 : 'Single sign-on is optional for this team.',
             )}
           </p>
-          {owner &&
-            (policy.data.admission === 'invitation_only' || policy.data.admission === 'jit' ? (
-              <>
-                {!requireSso && (
-                  <p className="hint">
-                    {t(
-                      'Before requiring SSO, have an owner test the OIDC draft, then enable that revision with a verified domain. A current owner must also accept recovery enrollment.',
-                    )}
-                  </p>
-                )}
+          {currentAdmission && admission ? (
+            <>
+              {owner && (
+                <>
+                  {!requireSso && (
+                    <p className="hint">
+                      {t(
+                        'Before requiring SSO, have an owner test the OIDC draft, then enable that revision with a verified domain. A current owner must also accept recovery enrollment.',
+                      )}
+                    </p>
+                  )}
+                  <fieldset className="form-fieldset" disabled={busy}>
+                    <ConfirmAction
+                      label={changeLabel}
+                      prompt={
+                        requireSso
+                          ? 'Stop requiring single sign-on for this team?'
+                          : 'Require single sign-on for this team?'
+                      }
+                      confirmLabel={changeLabel}
+                      busyLabel="Saving…"
+                      failure="Could not save SSO settings."
+                      onConfirm={() => changePolicy(!requireSso, currentAdmission)}
+                    />
+                  </fieldset>
+                </>
+              )}
+              <form onSubmit={saveAdmission}>
                 <fieldset className="form-fieldset" disabled={busy}>
-                  <ConfirmAction
-                    label={changeLabel}
-                    prompt={
-                      requireSso
-                        ? 'Stop requiring single sign-on for this team?'
-                        : 'Require single sign-on for this team?'
-                    }
-                    confirmLabel={changeLabel}
-                    busyLabel="Saving…"
-                    failure="Could not save SSO settings."
-                    onConfirm={changePolicy}
-                  />
+                  <Field
+                    id={admissionId}
+                    label={t('Admission policy')}
+                    hint={t(
+                      'Just-in-time admission lets eligible people join through SSO and requires a verified team domain.',
+                    )}
+                  >
+                    {(control) => (
+                      <select
+                        {...control}
+                        value={admission}
+                        onChange={(event) => {
+                          const value = event.currentTarget.value
+                          if (isAdmission(value)) setSelectedAdmission(value)
+                          setSavedAdmission(false)
+                        }}
+                      >
+                        <option value="invitation_only">{t('Invitation only')}</option>
+                        <option value="jit">{t('Just-in-time admission')}</option>
+                      </select>
+                    )}
+                  </Field>
+                  <button
+                    type="submit"
+                    className="button"
+                    disabled={admission === currentAdmission}
+                  >
+                    {t('Save admission policy')}
+                  </button>
                 </fieldset>
-              </>
-            ) : (
-              <p role="status">{t(statusText.unavailable)}</p>
-            ))}
+              </form>
+              {savedAdmission && <p role="status">{t('Admission policy saved.')}</p>}
+            </>
+          ) : (
+            <p role="status">{t('The team’s admission policy is unavailable.')}</p>
+          )}
         </>
       ) : (
         <>

@@ -1,3 +1,4 @@
+.sso-delegation .button,
 .sso-domain-form .button,
 .sso-enforcement .button,
 .sso-fresh-proof .button,
@@ -10,8 +11,16 @@
   text-align: center;
 }
 
-.sso-fresh-proof select {
+.sso-delegation select,
+.sso-enforcement select,
+.sso-fresh-proof select,
+.sso-link-retirement select {
   max-width: 100%;
+}
+
+.sso-delegation .field {
+  grid-template-columns: minmax(0, 1fr);
+  overflow-wrap: anywhere;
 }
 
 .sso-member-methods {
@@ -30,6 +39,11 @@
 .sso-member-methods p {
   min-width: 0;
   margin: 0;
+}
+
+.sso-link-reference {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .sso-member-methods .confirm {

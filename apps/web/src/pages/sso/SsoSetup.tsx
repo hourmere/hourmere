@@ -198,9 +198,11 @@ function SsoInventory({
         setPending(null)
         const code = error instanceof RequestError ? error.code : undefined
         const status = inventoryError(error)
-        if (status === 'unavailable' && code !== 'sso_disabled') setInventory({ status })
-        else if (code && messages && Object.hasOwn(messages, code))
-          setWriteError(messages[code] ?? null)
+        const message = code && messages && Object.hasOwn(messages, code) ? messages[code] : null
+        if (status === 'unavailable' && code !== 'sso_disabled') {
+          setInventory({ status })
+          setWriteError(message ?? null)
+        } else if (message) setWriteError(message)
         else if (status !== 'error') setInventory({ status })
         else if (code === 'sso_domain_unverified')
           setWriteError(
@@ -220,7 +222,12 @@ function SsoInventory({
   }
 
   if (inventory.status === 'loading') return <PageSkeleton label={loading} />
-  if (inventory.status === 'unavailable') return <SetupAlert message={unavailable} />
+  if (inventory.status === 'unavailable')
+    return writeError ? (
+      <SetupAlert message={writeError} action="Reload settings" onAction={reload} />
+    ) : (
+      <SetupAlert message={unavailable} />
+    )
   if (inventory.status === 'team-changed')
     return (
       <SetupAlert
