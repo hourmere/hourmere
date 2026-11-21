@@ -279,6 +279,15 @@ describe.skipIf(!serverUrl)('finalized meeting poll email outcomes', () => {
     expect(capture.sent.map(({ to }) => to).sort()).toEqual(
       [...selectedAddresses, unselected.email, invited.email].sort(),
     )
+    const manageFragment = MANAGE.exec(messageTo(booker.email).decoded)?.[0]
+    assert.ok(manageFragment)
+    const manageCapability = new URLSearchParams(manageFragment.slice(1)).get('token')
+    assert.ok(manageCapability)
+    for (const message of capture.sent) {
+      expect(message.decoded.includes(manageCapability), 'management capability audience').toBe(
+        message.to === booker.email,
+      )
+    }
     for (const email of selectedAddresses) {
       const message = messageTo(email)
       expect(message.ics).toContain('METHOD:REQUEST')
@@ -350,7 +359,8 @@ describe.skipIf(!serverUrl)('finalized meeting poll email outcomes', () => {
     const f = await setup()
     const booker = await f.addVoter()
     const other = await f.addVoter()
-    const result = await finalizeMeetingPoll(f.ctx, await f.input([booker]))
+    const input = await f.input([booker])
+    const result = await finalizeMeetingPoll(f.ctx, input)
     const request = await db
       .selectFrom('meeting_poll_deliveries')
       .select('id')
@@ -361,11 +371,21 @@ describe.skipIf(!serverUrl)('finalized meeting poll email outcomes', () => {
       id: f.poll.id,
       expectedHostRevision: result.poll.hostRevision,
     })
+    await expect(finalizeMeetingPoll(f.ctx, input)).rejects.toMatchObject({
+      code: 'poll_not_found',
+    })
     await deliverMeetingPollEmail(pollDeps(f), request)
     await createMeetingPollEmailWorker(pollDeps(f))()
     expect(capture.sent).toEqual([])
     await runBookingJob(result.booking.id, 'confirmed')
     expect(capture.sent.map(({ to }) => to).sort()).toEqual([booker.email, f.owner.email].sort())
+    expect(
+      await db
+        .selectFrom('bookings')
+        .select('status')
+        .where('id', '=', result.booking.id)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ status: 'confirmed' })
   })
 
   it('keeps automatic booking invitations gated while the conference is unready', async () => {
@@ -452,6 +472,24 @@ describe.skipIf(!serverUrl)('finalized meeting poll email outcomes', () => {
     }
     await runBookingJob(moved.booking.id, 'rescheduled')
     await run()
+    const rescheduleReplay = await finalizeMeetingPoll(f.ctx, input)
+    expect(rescheduleReplay).toMatchObject({
+      replayed: true,
+      booking: {
+        id: moved.booking.id,
+        start: moved.booking.start,
+        status: 'confirmed',
+        source: 'web',
+      },
+    })
+    expect(Object.keys(rescheduleReplay.booking).sort()).toEqual([
+      'end',
+      'eventTypeId',
+      'id',
+      'source',
+      'start',
+      'status',
+    ])
     await run()
     assertLifecycle('REQUEST', 1, 'Meeting rescheduled: Research review')
     capture.sent.length = 0
@@ -517,6 +555,8 @@ describe.skipIf(!serverUrl)('finalized meeting poll email outcomes', () => {
     await run()
     await run()
     const message = messageTo(other.email)
+    expect(message.decoded.includes(apiKeyId), 'outcome hides API key attribution').toBe(false)
+    expect(/\bmcp\b/i.test(message.decoded), 'outcome hides the booking source').toBe(false)
     expect(capture.sent).toHaveLength(1)
     expect(message.decoded).toContain('Meeting cancelled: Research review')
     expect(message.decoded).toContain('November 12, 2040')
