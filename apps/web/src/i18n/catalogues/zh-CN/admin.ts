@@ -2980,11 +2980,11 @@ export const admin = {
     '此成员须先验证其 Hourmere 登录邮箱，才能解除这项身份关联。',
   'SSO delegation': '单点登录委托',
   'Delegation changes apply to credentials in {team}. Switch teams to manage a credential from another team.':
-    '你可以管理 {team} 的凭据委托。要管理其他团队的凭据，请先切换团队。',
+    '你可以管理{team}的凭据委托。要管理其他团队的凭据，请先切换团队。',
   'Bind SSO delegation': '绑定单点登录委托',
   'Revoke SSO delegation': '撤销单点登录委托',
   'Revoke this SSO delegation?': '要撤销这项单点登录委托吗？',
-  'SSO delegation expires {when}.': '单点登录委托将于 {when} 到期。',
+  'SSO delegation expires {when}.': '单点登录委托将于{when}到期。',
   'SSO delegation bound.': '已绑定单点登录委托。',
   'SSO delegation revoked.': '已撤销单点登录委托。',
   'SSO delegation is unavailable for this credential.': '此凭据暂时无法使用单点登录委托。',
