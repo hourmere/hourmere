@@ -139,30 +139,6 @@ describe('host booking mail links', () => {
     },
   )
 
-  it('uses the existing team detail for a routing-only administrator response', async () => {
-    const api = server(team, {
-      [`GET /api/v1/bookings/${BOOKING_ID}`]: () =>
-        json(200, { id: BOOKING_ID, routing: { answers: { private: 'Saved answer' } } }),
-      [`GET /api/v1/team/bookings/${BOOKING_ID}`]: () =>
-        json(200, {
-          id: BOOKING_ID,
-          start: '2026-12-01T09:00:00Z',
-          end: '2026-12-01T09:30:00Z',
-          status: 'confirmed',
-          cancelledAt: null,
-          isRescheduled: false,
-          eventType: null,
-          hosts: [],
-          attendees: [],
-        }),
-    })
-    renderApp(emailLink)
-    await screen.findByRole('region', { name: 'Team booking details' })
-    expect(api.to(`GET /api/v1/bookings/${BOOKING_ID}/organization`)).toHaveLength(0)
-    expect(screen.queryByText('Saved answer')).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Reschedule…' })).toBeNull()
-  })
-
   it.each([ME, team])(
     'keeps a later deliberate space switch after opening from $organization.name',
     async (initial) => {

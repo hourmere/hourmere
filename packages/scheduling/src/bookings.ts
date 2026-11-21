@@ -2820,6 +2820,7 @@ export async function listHostBookings(
 function hostBookingDetailQuery(ctx: ServiceContext, id: string) {
   return ctx.db
     .selectFrom('bookings as b')
+    .innerJoin(resolvedBookingHosts(ctx.db).as('bh'), 'bh.booking_id', 'b.id')
     .leftJoin('event_types as et', (join) =>
       join.onRef('et.id', '=', 'b.event_type_id').on('et.deleted_at', 'is', null),
     )
@@ -2833,16 +2834,14 @@ function hostBookingDetailQuery(ctx: ServiceContext, id: string) {
         eb('b.payment_confirmed_at', 'is not', null),
       ]),
     )
+    .where('bh.user_id', '=', ctx.principal.user.id)
     .where('b.organization_id', '=', ctx.principal.organization.id)
 }
 
 /** A booking of the caller's organization that the caller hosts; else `booking_not_found`. */
 export async function getHostBooking(ctx: ServiceContext, id: string): Promise<Booking> {
   if (!UUID.test(id)) throw bookingNotFound()
-  const row = await hostBookingDetailQuery(ctx, id)
-    .innerJoin(resolvedBookingHosts(ctx.db).as('bh'), 'bh.booking_id', 'b.id')
-    .where('bh.user_id', '=', ctx.principal.user.id)
-    .executeTakeFirst()
+  const row = await hostBookingDetailQuery(ctx, id).executeTakeFirst()
   if (!row) throw bookingNotFound()
   const [booking] = await toBookings(ctx.db, [row], {
     userId: ctx.principal.user.id,
@@ -2851,48 +2850,23 @@ export async function getHostBooking(ctx: ServiceContext, id: string): Promise<B
   return booking as Booking
 }
 
-/** Explicit booking detail with private historical routing answers. */
-export function getHostBookingDetail(ctx: ServiceContext, id: string): Promise<HostBookingDetail>
-export function getHostBookingDetail(
-  ctx: ServiceContext,
-  id: string,
-  options: { allowTeamAdmin: true },
-): Promise<HostBookingDetail | { id: string; routing: RoutingBookingSnapshot }>
+/** Booking detail with private historical routing answers for a current host. */
 export async function getHostBookingDetail(
   ctx: ServiceContext,
   id: string,
-  options?: { allowTeamAdmin: true },
-): Promise<HostBookingDetail | { id: string; routing: RoutingBookingSnapshot }> {
+): Promise<HostBookingDetail> {
   if (!UUID.test(id)) throw bookingNotFound()
   const { db, principal } = ctx
-  const query = hostBookingDetailQuery(ctx, id).select('b.has_routing_snapshot')
-  const hosts = resolvedBookingHosts(db).as('bh')
-  const allowTeamAdmin =
-    options?.allowTeamAdmin === true &&
-    principal.kind === 'session' &&
-    !principal.organization.personal
-  const row = await (allowTeamAdmin
-    ? query
-        .leftJoin(hosts, (join) =>
-          join.onRef('bh.booking_id', '=', 'b.id').on('bh.user_id', '=', principal.user.id),
-        )
-        .where((eb) =>
-          eb.or([eb('bh.user_id', 'is not', null), eb('b.has_routing_snapshot', '=', true)]),
-        )
-    : query.innerJoin(hosts, 'bh.booking_id', 'b.id').where('bh.user_id', '=', principal.user.id)
-  ).executeTakeFirst()
+  const row = await hostBookingDetailQuery(ctx, id)
+    .select('b.has_routing_snapshot')
+    .executeTakeFirst()
   if (!row) throw bookingNotFound()
 
   // Ordinary detail keeps its existing statement count and response shape.
-  const snapshot = row.has_routing_snapshot
-    ? await readBookingRoutingSnapshot(ctx, row.id, allowTeamAdmin)
-    : null
-  if (snapshot === undefined) throw bookingNotFound()
-  if (snapshot?.access === 'team_admin') return { id: row.id, routing: snapshot.routing }
+  const routing = row.has_routing_snapshot ? await readBookingRoutingSnapshot(ctx, row.id) : null
+  if (routing === undefined) throw bookingNotFound()
   const [booking] = await toBookings(db, [row], { userId: principal.user.id, now: ctx.now })
-  return snapshot?.routing
-    ? { ...(booking as Booking), routing: snapshot.routing }
-    : (booking as Booking)
+  return routing ? { ...(booking as Booking), routing } : (booking as Booking)
 }
 
 /**

@@ -462,8 +462,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Read one booking with authorized host detail
-         * @description A current host in the booking organization can read the booking and any stored routing snapshot. A current owner or admin who does not host a routed team booking can read its ID and routing snapshot through a verified browser session in that team. API keys require read, bookings or full scope. Stored snapshots remain readable while routing forms are off.
+         * A booking the caller hosts
+         * @description A current host in the booking organization can read the booking and any stored routing snapshot. API keys require read, bookings or full scope. Stored snapshots remain readable while routing forms are off.
          */
         get: operations["getBooking"];
         put?: never;
@@ -8732,11 +8732,6 @@ export interface components {
         TeamBookingCancellation: {
             cancelled: boolean;
         };
-        TeamBookingRoutingDetail: {
-            /** Format: uuid */
-            id: string;
-            routing: components["schemas"]["BookingRouting"];
-        };
         TeamInvitationPage: {
             data: components["schemas"]["TeamInvitationSummary"][];
             nextCursor: string | null;
@@ -9686,13 +9681,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Host booking detail or the routing snapshot available to team managers */
+            /** @description The booking */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HostBooking"] | components["schemas"]["TeamBookingRoutingDetail"];
+                    "application/json": components["schemas"]["HostBooking"];
                 };
             };
             /** @description The id is not a UUID (`invalid_request`) */
@@ -9722,7 +9717,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description No such booking visible in the current organization (`booking_not_found`) */
+            /** @description No such booking among those the caller hosts in this organization (`booking_not_found`) */
             404: {
                 headers: {
                     [name: string]: unknown;

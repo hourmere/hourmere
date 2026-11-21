@@ -156,7 +156,7 @@ function BookingDetail({
   const closePanel = useCloseBookingPanel()
 
   const load = useCallback(
-    async (signal: AbortSignal): Promise<Loaded | 'missing' | 'resolve' | 'team_admin'> => {
+    async (signal: AbortSignal): Promise<Loaded | 'missing' | 'resolve'> => {
       const [booking, profile] = await Promise.all([
         unwrap(api.GET('/api/v1/bookings/{id}', { params: { path: { id } }, signal })).catch(
           (err: unknown) => {
@@ -175,7 +175,6 @@ function BookingDetail({
         loadProfile(signal),
       ])
       if (booking === 'missing' || booking === 'resolve') return booking
-      if (!('status' in booking)) return 'team_admin'
       let questions: Question[] = booking.questions ?? []
       if (booking.eventTypeId && !booking.questions) {
         // The event type may have been deleted since, or belong to another organization's
@@ -216,7 +215,6 @@ function BookingDetail({
   }
   if (state.data === 'resolve' && resolveSpace)
     return <BookingOrganization id={id} rememberSpace={rememberSpace} />
-  if (state.data === 'team_admin') return <TeamBookingDetailPage key={id} id={id} />
   if (state.data === 'missing' || state.data === 'resolve') {
     return (
       <MissingRecord
