@@ -9,7 +9,7 @@ import {
   cancelManagedBooking,
   exportBookingsCsv,
   getGroupOccurrenceAttendees,
-  getHostBooking,
+  getHostBookingDetail,
   getManagedBookingDetails,
   LOCATION_KINDS,
   listBookingAttendeeNoShows,
@@ -235,6 +235,39 @@ export const Booking = z
   })
   .openapi('Booking')
 
+// Historical question and option IDs use the full PostgreSQL UUID format.
+const StoredRoutingLabel = { id: z.guid(), label: z.string() }
+const StoredRoutingQuestion = z.discriminatedUnion('type', [
+  z.object({ ...StoredRoutingLabel, required: z.boolean(), type: z.enum(['short_text', 'email']) }),
+  z.object({
+    ...StoredRoutingLabel,
+    required: z.boolean(),
+    type: z.literal('select'),
+    options: z.array(z.object(StoredRoutingLabel)),
+  }),
+])
+
+const BookingRouting = z
+  .object({
+    formId: z.guid(),
+    versionId: z.guid(),
+    versionNumber: z.number().int().positive(),
+    matchedRuleId: z.union([z.guid(), z.literal('fallback')]),
+    resolvedRuleId: z.union([z.guid(), z.literal('fallback')]),
+    questions: z.array(StoredRoutingQuestion),
+    answers: z.record(z.string(), z.string()).openapi({
+      description:
+        'Original answers keyed by question UUID. Select answers are option UUIDs with labels in the stored questions.',
+    }),
+  })
+  .openapi('BookingRouting')
+
+export const HostBooking = Booking.extend({
+  routing: BookingRouting.optional().openapi({
+    description: 'The original stored routing provenance and question and answer snapshots.',
+  }),
+}).openapi('HostBooking')
+
 export const ManagedBooking = Booking.extend({
   branding: PublicBranding.optional(),
   eventType: z
@@ -251,6 +284,13 @@ export const ManagedBooking = Booking.extend({
   hosts: z.array(z.object({ name: z.string() })).openapi({
     description: "Who the invitee meets: each host's name",
   }),
+  routingAnswers: z
+    .array(z.object({ label: z.string(), answer: z.string() }))
+    .optional()
+    .openapi({
+      description:
+        'For a booking with stored routing provenance, the original answers in question order, using the saved question and selected option labels.',
+    }),
   rescheduleRequest: z
     .object({
       id: z.uuid(),
@@ -453,6 +493,7 @@ const invalidCancel = error(
 export interface BookingRoutesDeps {
   db: Db
   bookingExportMaxConcurrent?: number | undefined
+  routingFormsEnabled?: boolean | undefined
   bookingMaxInviteeReschedules?: number | undefined
   automaticMeet?: boolean | undefined
   smsRemindersAvailable?: boolean | undefined
@@ -476,6 +517,7 @@ export function bookingRoutes({
   db,
   bookingMaxInviteeReschedules,
   bookingExportMaxConcurrent,
+  routingFormsEnabled,
   now = () => Temporal.Now.instant(),
   notify,
   notifyAttendeeNoShow,
@@ -532,6 +574,7 @@ export function bookingRoutes({
       smsRemindersAvailable,
       automaticZoom,
       bookingExportMaxConcurrent,
+      routingFormsEnabled,
       authorizeOrganizationWrite: bookingWriteAccess(principal, expectedOrganizationId),
     })
 
@@ -825,7 +868,7 @@ export function bookingRoutes({
         request: { headers: ManageToken },
         responses: {
           200: {
-            description: 'The booking, with its event type and hosts',
+            description: 'The booking, with its event type, hosts and any saved routing answers',
             content: json(ManagedBooking),
           },
           404: manageNotFound,
@@ -1109,6 +1152,10 @@ export function bookingRoutes({
               hostUserId: z.uuid().optional(),
               expectedOrganizationId: z.uuid().optional(),
               bom: z.enum(['true', 'false']).optional(),
+              includeRoutingAnswers: z.enum(['true', 'false']).optional().openapi({
+                description:
+                  'Append routing provenance and saved answers to personal exports only. Requires routing forms to be enabled. False is equivalent to omitting the option.',
+              }),
             })
             .strict(),
         },
@@ -1117,10 +1164,15 @@ export function bookingRoutes({
             description: 'CSV download with RFC 4180 quoting and formula protection',
             content: { 'text/csv': { schema: z.string() } },
           },
-          400: error('Invalid export filters or range'),
+          400: error(
+            'Invalid export filters or range, or routing answers requested for a team (`invalid_request`)',
+          ),
           401: unauthorized,
           403: error(
             'Personal ownership or verified browser team-admin access required; team_management_access_denied for team agent credentials',
+          ),
+          404: error(
+            'Routing answers requested while routing forms are disabled (`routing_forms_disabled`)',
           ),
           409: error(
             'export_user_in_progress when this user already has an export in this process, export_busy when the process cap is reached, export_in_progress for an active organization export, or organization_context_changed',
@@ -1132,7 +1184,11 @@ export function bookingRoutes({
         const q = c.req.valid('query')
         const body = await exportBookingsCsv(
           context(c.var.principal),
-          { ...q, bom: q.bom === 'true' },
+          {
+            ...q,
+            bom: q.bom === 'true',
+            includeRoutingAnswers: q.includeRoutingAnswers === 'true',
+          },
           c.req.raw.signal,
         )
         return new Response(body, {
@@ -1189,12 +1245,15 @@ export function bookingRoutes({
       createRoute({
         method: 'get',
         path: '/api/v1/bookings/{id}',
+        operationId: 'getBooking',
         summary: 'A booking the caller hosts',
+        description:
+          'A current host in the booking organization can read the booking and any stored routing snapshot. API keys require read, bookings or full scope. Stored snapshots remain readable while routing forms are off.',
         security: authenticated,
         middleware: caller,
         request: { params: z.object({ id: z.uuid() }) },
         responses: {
-          200: { description: 'The booking', content: json(Booking) },
+          200: { description: 'The booking', content: json(HostBooking) },
           400: invalidId,
           401: unauthorized,
           404: hostNotFound,
@@ -1202,7 +1261,7 @@ export function bookingRoutes({
         },
       }),
       async (c) =>
-        c.json(await getHostBooking(context(c.var.principal), c.req.valid('param').id), 200),
+        c.json(await getHostBookingDetail(context(c.var.principal), c.req.valid('param').id), 200),
     )
 
     app.openapi(

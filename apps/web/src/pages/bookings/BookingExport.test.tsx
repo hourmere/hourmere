@@ -14,10 +14,11 @@ import {
 import { BookingExport } from './BookingExport.tsx'
 
 const TEAM = { ...ME, organization: { ...ME.organization, personal: false } }
-function setup(team = false, role = 'owner', path = '/app/bookings') {
+function setup(team = false, role = 'owner', path = '/app/bookings', routingFormsEnabled = false) {
   fakeApi({
     ...(team ? signedInAs(TEAM) : signedIn),
     ...profile(),
+    'GET /api/v1/instance': () => json(200, { routingFormsEnabled }),
     'GET /api/v1/bookings': () => json(200, { data: [], nextCursor: null }),
     'GET /api/v1/team/bookings': () => json(200, { data: [], nextCursor: null }),
     'GET /api/auth/organization/get-active-member': () =>
@@ -82,6 +83,27 @@ describe('CSV export action', () => {
     fireEvent.click(screen.getByLabelText('Include UTF-8 BOM for Excel'))
     expect((await download()).searchParams.get('bom')).toBe('false')
   })
+  it('keeps routing answers out of personal exports when routing is disabled', async () => {
+    setup()
+    await range()
+    expect(screen.queryByRole('checkbox', { name: 'Include routing form answers' })).toBeNull()
+    expect((await download()).searchParams.has('includeRoutingAnswers')).toBe(false)
+  })
+  it('requests routing answers only when selected in a personal space with routing enabled', async () => {
+    setup(false, 'owner', '/app/bookings', true)
+    await range()
+    const choice = await screen.findByRole<HTMLInputElement>('checkbox', {
+      name: 'Include routing form answers',
+    })
+    expect(choice.checked).toBe(false)
+    expect((await download()).searchParams.has('includeRoutingAnswers')).toBe(false)
+
+    fireEvent.click(choice)
+    expect((await download()).searchParams.get('includeRoutingAnswers')).toBe('true')
+
+    fireEvent.click(choice)
+    expect((await download()).searchParams.has('includeRoutingAnswers')).toBe(false)
+  })
   it.each([400, 409, 429])(
     'shows an in-app error and saves no file for HTTP %s',
     async (status) => {
@@ -139,16 +161,21 @@ describe('CSV export action', () => {
       true,
       role,
       '/app/team/bookings?tab=all&from=2030-03-02T12:00:00Z&to=2030-03-20T12:00:00Z&status=cancelled&endTo=2030-03-22T00:00:00Z&order=desc',
+      true,
     )
     await range()
-    expect(Object.fromEntries((await download()).searchParams)).toMatchObject({
+    await screen.findByRole('link', { name: 'Routing forms' })
+    expect(screen.queryByRole('checkbox', { name: 'Include routing form answers' })).toBeNull()
+    const params = (await download()).searchParams
+    expect(Object.fromEntries(params)).toMatchObject({
       from: '2030-03-02T12:00:00.000Z',
       to: '2030-03-20T12:00:00.000Z',
       status: 'cancelled',
       endTo: '2030-03-22T00:00:00.000Z',
       order: 'desc',
     })
-    expect((await download()).searchParams.has('limit')).toBe(false)
+    expect(params.has('limit')).toBe(false)
+    expect(params.has('includeRoutingAnswers')).toBe(false)
   })
   it('does not offer team export to members', async () => {
     setup(true, 'member', '/app/team/bookings')
@@ -162,11 +189,12 @@ describe('CSV export action', () => {
   })
   it('localizes the export controls and privacy notice in Chinese', async () => {
     chooseLanguage('zh-CN')
-    setup()
+    setup(false, 'owner', '/app/bookings', true)
     await screen.findByText('将预约导出为 CSV')
     expect(screen.getByText('此文件包含个人数据。请妥善保存并谨慎分享。')).toBeDefined()
     expect(screen.getByLabelText('预约开始时间不早于（UTC）')).toBeDefined()
     expect(screen.getByLabelText('包含 UTF-8 BOM，便于 Excel 读取')).toBeDefined()
+    expect(await screen.findByLabelText('包含分流表单答案')).toBeDefined()
   })
 })
 

@@ -1,10 +1,14 @@
 import type { Db } from '@hourmere/db'
+import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { sql } from 'kysely'
 import { findOneTimeEventType } from './availability.ts'
+import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
+import { resolvedBookingHosts } from './hosts.ts'
 import { isUuid, jsonb } from './internal.ts'
 import { InvalidStoredQuestionsError } from './questions.ts'
 import type { RoutingContinuationContext } from './routing-continuation.ts'
+import type { RoutingAnswers, RoutingQuestion } from './routing-form-config.ts'
 import { loadRoutingTargetEvents, routingTargetProblem } from './routing-form-targets.ts'
 import {
   isRoutingReceiptToken,
@@ -12,6 +16,118 @@ import {
   validateRoutingReceiptSnapshot,
 } from './routing-receipt.ts'
 import { openRoutingAnswers, routingTokenDigest } from './routing-receipt-crypto.ts'
+
+export interface RoutingBookingSnapshot {
+  formId: string
+  versionId: string
+  versionNumber: number
+  matchedRuleId: string
+  resolvedRuleId: string
+  questions: RoutingQuestion[]
+  answers: RoutingAnswers
+}
+
+/** Read provenance and current authorization from the same database snapshot. */
+export async function readBookingRoutingSnapshot(
+  { db, principal }: ServiceContext,
+  bookingId: string,
+): Promise<RoutingBookingSnapshot | null | undefined> {
+  const { id: userId } = principal.user
+  const { id: organizationId } = principal.organization
+  let query = db
+    .selectFrom('auth.member as member')
+    .innerJoin('auth.user as actor', 'actor.id', 'member.userId')
+    .innerJoin(resolvedBookingHosts(db).as('host'), (join) =>
+      join.on('host.booking_id', '=', bookingId).onRef('host.user_id', '=', 'member.userId'),
+    )
+    .leftJoin('booking_routing as routing', (join) =>
+      join
+        .on('routing.booking_id', '=', bookingId)
+        .onRef('routing.organization_id', '=', 'member.organizationId'),
+    )
+    .select([
+      'routing.form_id as formId',
+      'routing.version_id as versionId',
+      'routing.version_number as versionNumber',
+      'routing.matched_rule_id as matchedRuleId',
+      'routing.resolved_rule_id as resolvedRuleId',
+      'routing.questions',
+      'routing.answers',
+    ])
+    .where('member.organizationId', '=', organizationId)
+    .where('member.userId', '=', userId)
+    .where('actor.emailVerified', '=', true)
+    .where((eb) => eb.not(scimSuspended(organizationId, userId)))
+
+  if (principal.kind === 'session') {
+    const { sessionId } = principal
+    query = query.where((eb) => {
+      const session = eb
+        .selectFrom('auth.session as session')
+        .select('session.id')
+        .where('session.id', '=', sessionId)
+        .whereRef('session.userId', '=', 'member.userId')
+        .where('session.expiresAt', '>', sql<Date>`clock_timestamp()`)
+      const activeOrganization = sql<string>`lower(${sql.ref('session.activeOrganizationId')})`
+      if (principal.organization.personal) {
+        // Session resolution falls back to personal space when there is no effective active team.
+        return eb.exists(
+          session.where((eb) =>
+            eb.or([
+              eb(activeOrganization, '=', organizationId.toLowerCase()),
+              eb.not(
+                eb.exists(
+                  eb
+                    .selectFrom('auth.member as active')
+                    .select('active.userId')
+                    .whereRef('active.userId', '=', 'session.userId')
+                    .where((eb) =>
+                      eb(
+                        sql<string>`${eb.ref('active.organizationId')}::text`,
+                        '=',
+                        activeOrganization,
+                      ),
+                    )
+                    .where((eb) => eb.not(scimSuspended(eb.ref('active.organizationId'), userId))),
+                ),
+              ),
+            ]),
+          ),
+        )
+      }
+      return eb.exists(session.where(activeOrganization, '=', organizationId.toLowerCase()))
+    })
+  }
+
+  const row = await query.executeTakeFirst()
+  if (!row) return undefined
+  // Both JSON fields were validated when the immutable snapshot was written.
+  return row.formId === null ? null : (row as RoutingBookingSnapshot)
+}
+
+/** Read answer labels only, for a booking already resolved through the invitee's token. */
+export async function readManagedRoutingAnswers(db: Db, bookingId: string, organizationId: string) {
+  const row = await db
+    .selectFrom('booking_routing')
+    .select(['questions', 'answers'])
+    .where('booking_id', '=', bookingId)
+    .where('organization_id', '=', organizationId)
+    .executeTakeFirst()
+  if (!row) return undefined
+
+  // These fields were validated and stored together when the invitee booked.
+  const questions = row.questions as RoutingQuestion[]
+  const answers = row.answers as RoutingAnswers
+  return questions.flatMap((question) => {
+    const value = answers[question.id]
+    if (typeof value !== 'string') return []
+    const answer =
+      question.type === 'select'
+        ? question.options.find((option) => option.id === value)?.label
+        : value
+    return answer === undefined ? [] : [{ label: question.label, answer }]
+  })
+}
 
 export const routedBookingUnavailable = () => new DomainError('conflict', 'routing_unavailable')
 

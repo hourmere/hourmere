@@ -29,6 +29,7 @@ import {
 import type { PublicContext, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { bookingHostIds, resolvedBookingHosts } from './hosts.ts'
+import { readManagedRoutingAnswers } from './routing-booking.ts'
 
 /** The booking behind a manage token, with what the invitee needs to recognize it. */
 export interface ManagedBooking extends Booking {
@@ -37,6 +38,8 @@ export interface ManagedBooking extends Booking {
   eventType: { title: string; durationMinutes: number; allowedDurationsMinutes?: number[] } | null
   /** The people the invitee meets: each host's name (their handle if they have no name). */
   hosts: { name: string }[]
+  /** The invitee's original answers with the saved labels, in question order. */
+  routingAnswers?: { label: string; answer: string }[]
   /** Only for a reschedule request email's link: what became of that request. */
   rescheduleRequest?: { id: string; state: ManagedRescheduleRequestState }
   /**
@@ -77,11 +80,22 @@ export async function getManagedBookingDetails(
     typeof token !== 'object' ? managedLinkRescheduleRequest(at, token, booking.id) : undefined,
     ctx.db
       .selectFrom('bookings')
-      .select(['organization_id', 'reschedule_cutoff_minutes', 'cancel_cutoff_minutes'])
+      .select([
+        'organization_id',
+        'reschedule_cutoff_minutes',
+        'cancel_cutoff_minutes',
+        'has_routing_snapshot',
+      ])
       .where('id', '=', booking.id)
       .executeTakeFirstOrThrow(),
   ])
   const branding = await getPublicBranding(ctx.db, cutoffs.organization_id)
+  // Keep the same statements for ordinary bookings. Recurring member selectors have
+  // their own authority, including guest links, and do not carry routing answers.
+  const routingAnswers =
+    typeof token === 'string' && cutoffs.has_routing_snapshot
+      ? await readManagedRoutingAnswers(ctx.db, booking.id, cutoffs.organization_id)
+      : undefined
   const start = Temporal.Instant.from(booking.start)
   const instant = (minutes: number | null) => {
     const deadline = changeDeadline(start, minutes)
@@ -105,6 +119,7 @@ export async function getManagedBookingDetails(
       rescheduleBy: instant(effectiveRescheduleCutoff(cutoffsOf(cutoffs))),
       cancelBy: instant(cutoffs.cancel_cutoff_minutes),
     },
+    ...(routingAnswers && { routingAnswers }),
   }
 }
 

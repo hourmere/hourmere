@@ -142,6 +142,14 @@ not guests, notes or answers. It trims whitespace and accepts at most 100 UTF-16
 control characters are rejected. Case follows the database locale; accents are not folded.
 `%`, `_` and `\` are literal, not wildcards. Export does not accept `q`.
 
+Pass `{ "bookingId": "<booking UUID>" }` to `hourmere booking --input FILE` to read one
+booking you host in the key's organization with a `read`, `bookings` or `full` key.
+A saved `routing` snapshot is included when present, even while routing forms are
+disabled. Keep the output private because it can contain invitee answers.
+
+中文：`booking` 通过 `bookingId` 读取当前组织内由你主持的预约。已保存的 `routing` 快照在路由
+表单停用后仍可读取，输出可能包含受邀人的回答。
+
 ### Ask the invitee to choose another time
 
 Save a private input file and run `hourmere request-reschedule --input request.json`:
@@ -355,7 +363,7 @@ for editor/REST/MCP examples, HTTPS and local-host policy, sandbox behavior and 
 ## Commands
 
 `whoami`, `profile`, `catalog`, `event`, `create-event`, `duplicate-event`, `update-event`,
-`set-event-notifications`, `schedules`, `schedule`, `slots`, `open-time-snippet`, `book`, `list`, `reschedule`,
+`set-event-notifications`, `schedules`, `schedule`, `slots`, `open-time-snippet`, `book`, `list`, `booking`, `reschedule`,
 `cancel`, `request-reschedule`, `booking-attendees`, `set-no-show`, `retry-meeting`,
 `retry-calendar-copy`.
 
@@ -566,6 +574,11 @@ team owner/admin permissions. The MCP call returns a small pointer; the CLI stre
 its same-instance authenticated REST download without buffering the CSV in memory.
 Files contain attendee personal data; store and share them privately. See
 [CSV exports](https://hourmere.com/docs/booking-export) for columns and limitations.
+
+With routing forms enabled, set `"includeRoutingAnswers": true` in the JSON input or
+pass `--include-routing-answers true` to add saved routing answers to a personal export.
+Use `false` or omit the option for the standard columns. If routing forms are disabled,
+requesting the extra columns returns `routing_forms_disabled`.
 
 
 `update_workflow` / `workflows update` requires `full` scope and accepts `id`,

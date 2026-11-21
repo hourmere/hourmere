@@ -250,6 +250,55 @@ describe('MCP transport', () => {
     },
   )
 
+  it('advertises the optional routing projection only on the booking detail tool while off', async () => {
+    const a = appWith(bookingTools({ db: {} as Db, routingFormsEnabled: false }))
+    const { result } = await message(
+      await rpc({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, {}, a),
+    )
+    const tools = (
+      result as {
+        tools: {
+          name: string
+          inputSchema: unknown
+          outputSchema: {
+            properties: { data?: { items: { properties: Record<string, unknown> } } }
+            required?: string[]
+          }
+        }[]
+      }
+    ).tools
+    const detail = tools.find((tool) => tool.name === 'get_booking')
+    expect(detail).toMatchObject({
+      inputSchema: {
+        type: 'object',
+        properties: { bookingId: { type: 'string', format: 'uuid' } },
+        required: ['bookingId'],
+        additionalProperties: false,
+      },
+      outputSchema: {
+        type: 'object',
+        properties: {
+          routing: {
+            type: 'object',
+            properties: {
+              formId: expect.any(Object),
+              versionId: expect.any(Object),
+              versionNumber: expect.any(Object),
+              matchedRuleId: expect.any(Object),
+              resolvedRuleId: expect.any(Object),
+              questions: expect.any(Object),
+              answers: expect.any(Object),
+            },
+          },
+        },
+      },
+    })
+    expect(detail?.outputSchema.required).not.toContain('routing')
+    const list = tools.find((tool) => tool.name === 'list_bookings')
+    expect(list?.outputSchema.properties.data?.items.properties).toBeDefined()
+    expect(list?.outputSchema.properties.data?.items.properties).not.toHaveProperty('routing')
+  })
+
   it('uses the booking rate limit for routed calls even while routing is off', async () => {
     const a = appWith(
       bookingTools({

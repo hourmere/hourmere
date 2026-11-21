@@ -57,6 +57,8 @@ export interface ServiceContext extends RecurringBookingAdmissionDeps {
   automaticZoom?: boolean | undefined
   /** Per-process export capacity from validated server configuration; defaults to 2. */
   bookingExportMaxConcurrent?: number | undefined
+  /** Effective routing forms availability for opt-in CSV columns. */
+  routingFormsEnabled?: boolean | undefined
   principal: Principal
   /** The clock, injectable for tests. */
   now: () => Temporal.Instant

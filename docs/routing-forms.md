@@ -381,6 +381,20 @@ Deleting the organization deletes its receipts and snapshots with its bookings.
 | Webhooks | Keep existing immutable minimal whitelist: no routing answers, route IDs, contact data or capability. No submission webhook |
 | Email, ICS, provider calendar copies, embed messages, analytics | No new routing answer/provenance fields. Mapped ordinary answers keep existing surface-specific rules |
 
+The host booking detail shows the original routing form answers separately from the final
+booking answers. The invitee’s private booking management page shows their submitted routing
+question labels and answers, using the option labels saved at booking time. An empty submission
+adds no section to that page. The snapshot stays with the booking through rescheduling, and
+ordinary bookings have no routing answers section on either page.
+
+When routing is enabled, personal owners can select **Include routing form answers** in
+**Export bookings as CSV**. The choice is unchecked by default. REST and MCP
+accept `includeRoutingAnswers`, and the CLI accepts `--include-routing-answers true`.
+The five appended columns include the published version number and the original matched
+and resolved rules. `routing_answers` is a JSON object keyed by question ID. Each entry
+contains `label` and `answer`, plus `optionLabel` for a selected option. These labels come
+from the booking snapshot. A booking without provenance leaves all five cells empty.
+
 ## Scheduling interactions
 
 - Round-robin: target the whole activated pool. Routing creates no assignment or fairness
@@ -802,6 +816,37 @@ the manager addresses show the ordinary not-found page.
 
 如需从列表中移除表单，请打开该表单，选择「归档分流表单」，然后确认。归档后，表单停止接收新提交，既有预约快照会保留，表单地址在该空间内仍被占用。
 功能关闭时，导航栏隐藏该入口，直接访问管理地址会显示普通的页面未找到提示。
+
+### Publication and target repair
+
+Save the draft, then use sample answers to preview it. Choose **Review publication**
+to check the saved fallback before publishing a version. Publication uses the saved
+draft and leaves the form's enabled state as it was. To pause submissions and prevent
+pending booking links from working while the form is disabled, choose **Disable routing form**,
+acknowledge the effect and confirm. Re-enabling uses the current published version. These
+controls are available in enabled test fixtures. Production routing remains hard-off.
+
+Published target health describes the version currently in use. If a target is unavailable,
+use its repair button to jump to the matching rule or fallback in the draft. Choose a
+different destination or remove the rule, save, preview and publish the repair. If the
+rule is already gone from the draft, review and publish the updated draft. A status of
+unknown means the target's health could not be established.
+
+If another editor changes the form first, choose **Reload**. The editor fetches the latest
+revision and keeps in-progress edits in the tab. If both drafts changed the same fields,
+review your edits and confirm before saving them over the latest values.
+
+中文：保存草稿后，可用示例答案运行预览。选择「检查发布内容」，核对已保存的备用安排后发布版本。
+发布使用已保存的草稿，表单的启用状态保持原样。请选择「停用分流表单」，确认已了解影响后再停用。
+停用期间，表单不会接收新提交，尚未使用的预约链接也无法使用。重新启用时使用当前已发布的版本。
+这些操作只在开启了分流功能的测试环境中可用，生产环境中的分流功能仍处于硬关闭状态。
+
+已发布去向的状态反映当前发布版本。如果某个去向不可用，可用修复按钮跳到草稿中的对应规则或
+备用安排。更换去向或移除规则后，保存、预览并发布修复。如果草稿已移除该规则，检查更新后的
+草稿并发布即可。「状态未知」表示目前无法确定该去向是否可用。
+
+如果其他编辑者先更新了表单，请选择「重新加载」。编辑器会读取最新版本，并在当前标签页保留
+尚未保存的修改。如果双方都修改了同一部分，请先检查自己的修改，再确认是否覆盖最新内容。
 
 ## Implementation plan
 

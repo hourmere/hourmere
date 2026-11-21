@@ -49,6 +49,30 @@ describe('MCP export pointer', () => {
     ])
     expect(JSON.stringify(result).length).toBeLessThan(2000)
   })
+  it('treats explicit false as omission and rejects non-boolean routing inputs', async () => {
+    prepare.mockClear().mockResolvedValue({})
+    const ordinary = await runTool(tool, args, call(), () => {})
+    const explicitFalse = await runTool(
+      tool,
+      { ...args, includeRoutingAnswers: false },
+      call(),
+      () => {},
+    )
+    expect(ordinary.isError).not.toBe(true)
+    expect(explicitFalse).toEqual(ordinary)
+    expect(prepare).toHaveBeenCalledTimes(2)
+    const invalid = await runTool(
+      tool,
+      { ...args, includeRoutingAnswers: 'true' },
+      call(),
+      () => {},
+    )
+    expect(invalid.isError).toBe(true)
+    expect(JSON.parse((invalid.content[0] as { text: string }).text)).toMatchObject({
+      error: 'invalid_request',
+    })
+    expect(prepare).toHaveBeenCalledTimes(2)
+  })
   it('validates host UUIDs with the REST invalid_request code before querying', async () => {
     prepare.mockClear()
     const result = await runTool(tool, { ...args, hostUserId: 'bad' }, call(), () => {})

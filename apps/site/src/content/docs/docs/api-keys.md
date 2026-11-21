@@ -397,6 +397,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `cancel_booking` | `host` | `cancel` | `full, bookings` |
 | `cancel_booking` | `manageToken` | `cancel` | `full, bookings` |
 | `list_bookings` | — | `list` | `full, read, bookings` |
+| `get_booking` | — | `booking` | `full, read, bookings` |
 | `set_attendee_no_show` | — | `set-no-show` | `full, bookings` |
 | `get_booking_attendees` | — | `booking-attendees` | `full, read, bookings` |
 | `get_group_occurrence_attendees` | — | `group-attendees` | `full, read, bookings` |

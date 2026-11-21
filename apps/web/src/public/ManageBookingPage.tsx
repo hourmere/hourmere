@@ -918,6 +918,24 @@ function BookingSummary({
             : []),
         ]}
       />
+      {booking.routingAnswers && booking.routingAnswers.length > 0 && (
+        <section
+          className="manage-routing-answers user-content"
+          aria-labelledby="manage-routing-answers-heading"
+        >
+          <h2 id="manage-routing-answers-heading">{t('Your routing form answers')}</h2>
+          <dl className="booking-details">
+            {booking.routingAnswers.map(({ label, answer }, index) => (
+              // Snapshot labels and answers may repeat. The saved order is immutable.
+              // biome-ignore lint/suspicious/noArrayIndexKey: the snapshot carries no question IDs
+              <div key={index} className="details-row">
+                <dt>{label}</dt>
+                <dd className="multiline">{answer}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      )}
       {newToken && !cancelled && (
         <ManageLink
           booking={booking}

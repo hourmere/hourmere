@@ -144,6 +144,7 @@ const SHIPPED_SCHEMAS = [
   'RoutingContinuationSlots',
   'RoutedBookingInput',
   'RoutedBookingResult',
+  'BookingRouting',
 ]
 const SHIPPED_TAGS = ['Routing forms']
 
@@ -169,13 +170,17 @@ const LIFECYCLE = [
 const CONTINUATION_SERVICE = 'packages/scheduling/src/routing-continuation.ts'
 const ROUTED_BOOKING_SERVICE = 'packages/scheduling/src/routing-booking.ts'
 const SHARED_SERVICES = [...CONFIGURATION_SERVICES, CONTINUATION_SERVICE, ROUTED_BOOKING_SERVICE]
-const STORAGE_SERVICES = ['packages/db/src/routing-lifecycle.ts', ...SHARED_SERVICES]
+const STORAGE_SERVICES = [
+  'packages/db/src/routing-lifecycle.ts',
+  'packages/scheduling/src/booking-export.ts',
+  ...SHARED_SERVICES,
+]
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-// The one routing-named schema property a1b publishes: the effective routing state at
+// The effective routing state at
 // `GET /api/v1/instance` (always false until the operator setting exists).
 const INSTANCE_CAPABILITY = 'Instance.routingFormsEnabled'
 
@@ -673,18 +678,22 @@ describe('routing forms remain hard-off with configuration and public metadata i
     expect(properties.length).toBeGreaterThan(500)
     expect(properties).toContain('Slot.start')
     expect(
-      properties.filter((name) => {
-        const [owner, property] = name.split('.')
-        return SHIPPED_SCHEMAS.includes(owner ?? '')
-          ? isRoutingName(property ?? '')
-          : isRoutingName(name)
-      }),
+      properties
+        .filter((name) => {
+          const [owner, property] = name.split('.')
+          return SHIPPED_SCHEMAS.includes(owner ?? '')
+            ? isRoutingName(property ?? '')
+            : isRoutingName(name)
+        })
+        .sort(),
     ).toEqual([
+      'HostBooking.routing',
       INSTANCE_CAPABILITY,
-      'RoutingSubmissionResponse.routeToken',
+      'ManagedBooking.routingAnswers',
       'RoutedBookingInput.routeToken',
       'RoutingContinuationInput.routeToken',
       'RoutingContinuationSlotsInput.routeToken',
+      'RoutingSubmissionResponse.routeToken',
     ])
   })
 
@@ -1031,6 +1040,7 @@ describe('routing forms remain hard-off with configuration and public metadata i
       const names: string[] = message.result.tools.map(({ name }: { name: string }) => name)
       expect(names.length).toBeGreaterThan(20)
       expect(names).toContain('create_booking')
+      expect(names).toContain('export_bookings')
       for (const tool of MCP_TOOLS) expect(names).not.toContain(tool)
       expect(names.filter(isRoutingName)).toEqual([])
     } finally {
