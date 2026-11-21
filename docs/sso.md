@@ -473,12 +473,10 @@ provider takes three ceremonies. A test callback can finish only its already-bou
 intent, and grants no wider access. Read-only inspection does not consume authority but
 observes its expiry.
 
-If every recovery owner's mailbox is lost, an instance operator runs the offline
-recovery maintenance command against that instance (maintenance commands run as
-described under domain retirement). It only turns the named team's enforcement off,
-which increments `trustGeneration`, records a `system` audit event and notifies the
-team's owners. It ships with its runbook in the Operator recovery step, before any
-operator setting can enable a protocol. No global public bypass secret.
+If every recovery owner's mailbox is lost, an instance operator can turn off the
+affected team's enforcement using the [operator recovery runbook](#operator-recovery-runbook).
+This invalidates the team's current SSO proofs and delegations, records a `system`
+audit event and queues notices to the team's owners.
 
 ### Delegated clients
 
@@ -1198,8 +1196,9 @@ proofAttemptId?}`, verifies that the current team member owns the credential and
 that it belongs to the current team, and returns `201` with `{id, expiresAt}`.
 `revokeSsoDelegation` accepts an owned binding ID and returns `204` without a
 response body. A current team browser session can withdraw its own delegation
-without a live SSO browser proof or a fresh proof challenge. Both writes require
-the exact origin and `X-Expected-Organization-Id` for the current team.
+without a live SSO browser proof or a fresh proof challenge. On an enforced team,
+if OIDC is off while another protocol is on, revocation returns `403 sso_required`.
+Both writes require the exact origin and `X-Expected-Organization-Id` for the current team.
 
 The owner's API-key list (`GET /api/auth/api-key/list`) and OAuth connection list
 (`GET /api/v1/mcp-oauth/connections`) can include `ssoDelegation: {id, expiresAt}`
@@ -1547,7 +1546,7 @@ its negative/cryptographic corpus (OIDC verifier and OIDC step-up, or SAML verif
 SAML timing and replay and SAML step-up, plus Transport's egress negatives) and its
 Keycloak acceptance.
 `setSsoPolicy` with `requireSso: true` is therefore never reachable through an operator
-setting before `useSsoRecovery` and the operator recovery command exist.
+setting before `useSsoRecovery` and the [operator recovery command](#operator-recovery-runbook) exist.
 
 **Published catalogues.** From Draft reads on, each row that adds SSO REST operations,
 MCP tools or CLI commands registers them in `packages/auth/src/api-key-operations.ts`,
@@ -1748,6 +1747,50 @@ OIDC 与 SAML 仍在代码中关闭，生产环境不调度或执行域名复查
 为旧团队所有者保存通知。发送失败时只重试 `notify`；命令不显示收件人地址。
 退役不转移账号、身份、成员关系或策略。请求团队仍须在协议可用后完成普通域名验证。
 
+## Operator recovery runbook
+
+Use this procedure when every recovery owner's mailbox is unavailable. Confirm the
+affected instance and the team's immutable organization UUID before running the
+command. Use the deployed server container's database configuration. The command is
+available while both protocols are hard-off and in every subsequent protocol state.
+For email delivery, configure `SMTP_URL` and `MAIL_FROM` and start the background
+worker before running recovery.
+
+1. From the deployment's Compose project, run the command with the confirmed team UUID.
+
+   ```sh
+   docker compose exec app node apps/server/src/sso-operator-recovery-cli.ts TEAM_UUID
+   ```
+
+2. `SSO enforcement disabled. Owner notifications queued.` means the change, audit
+   event (`sso_maintenance.enforcement_disabled`, actor `system`) and owner notices
+   committed together. The command sets `requireSso` to `false` and advances
+   `policyRevision` and `trustGeneration`. The new trust generation invalidates the
+   team's existing SSO proofs and delegations. Admission, providers, domains,
+   memberships and recovery enrollment remain as configured. Concurrent policy
+   writes use the same organization lock, and a stale revision is refused.
+3. `SSO enforcement is already off. No changes made.` is a successful no-op, including
+   for teams without a stored SSO policy. A repeat creates no audit event or notice.
+   `Unknown team` returns exit code 1 for an unknown UUID or a personal organization.
+   If the command fails, verify the instance, UUID and background job configuration
+   before retrying the same invocation.
+4. The normal background worker sends and retries the notices to verified mailboxes
+   of current team owners. Each notice uses the recipient's saved language, with
+   English as the fallback. Check worker logs for delivery failures, including SMTP
+   unavailable or retries exhausted. If delivery exhausts its retries, inform the
+   affected owners through your incident response process.
+
+### 运维恢复
+
+所有恢复所有者的邮箱均无法使用时，由实例运维人员确认实例及受影响团队的 UUID，在部署
+目录中执行上述 `docker compose exec` 命令。命令使用服务器容器的数据库配置，在 OIDC 和
+SAML 均关闭时也可执行。
+
+首次关闭强制 SSO 时，团队策略版本与信任代次各递增一次，现有 SSO 证明和委托随即失效。
+同一事务会写入系统审计并将所有者通知加入队列。重复执行会提示强制 SSO 已关闭，不会再
+写审计或发通知。未知团队 UUID 或个人组织返回退出码 1。配置 SMTP 并保持后台工作进程运行，
+以便将通知按各所有者的语言偏好发送到其已验证邮箱，缺省为英语。
+
 ## Implementation sequence
 
 Every row is approximately one working day; if a release gate needs an upstream fix,
@@ -1804,7 +1847,7 @@ behaviour keeps available stay available.
 | Enforcement policy | `setSsoPolicy`; no MCP/CLI writes; owner checks without recovery bypass yet | Provider activation | OIDC hard-off; SAML hard-off | Enforcement needs a verified domain, an enabled tested OIDC provider (a seeded SAML-only provider is refused with `sso_disabled` even if SAML is enabled), an owner test of the exact revision and a usable recovery owner; a pending nomination, a demoted former recovery owner and a demoted-then-re-promoted owner without a new acceptance each leave enforcement refused with `sso_recovery_required`; refused with `sso_domain_unverified` after a failed recheck or expiry; `trustGeneration` increments on enforcement off, never on enforcement on, admission or membership changes, so a binding made before enforcement keeps working; once enforced, every fresh-administration write requires OIDC step-up; audit events. Off: `sso_disabled` |
 | Recovery use | `useSsoRecovery`; recovery-authority checks on `listSsoProviders`, `getSsoPolicy` and `setSsoPolicy` with `requireSso: false`; no MCP/CLI writes | Enforcement policy | OIDC hard-off; SAML hard-off | Fresh mailbox proof by a usable recovery owner; single-use race; reads do not consume authority and observe expiry; `setSsoPolicy {requireSso: false}` consumes it; cannot enable JIT, alter membership, bind delegations, change recovery owners or read team data; expired, non-owner, demoted and non-recovery-owner refusal. Off: `sso_disabled` |
 | Recovery repair | Recovery-authority checks on `createSsoProvider`, `updateSsoProvider`, `testSsoProvider` and `activateSsoProvider`; no MCP/CLI writes | Recovery use | OIDC hard-off; SAML hard-off | Update, test and re-activation of a broken provider take three ceremonies; `createSsoProvider` consumes one; a test callback finishes only its bound intent; each write still checks owner, session, Origin and expected team; a second write on one ceremony refused. Off: `sso_disabled` |
-| Operator recovery | Offline recovery maintenance command that turns one team's enforcement off, and its runbook; no product operations | Recovery repair | OIDC hard-off; SAML hard-off | Runs only in the server container against the instance database; unknown team refused; changes only `requireSso`, increments `trustGeneration`, writes a `system` audit event and notifies owners; idempotent; race with concurrent `setSsoPolicy`. Off: only removes trust, so it runs in every state |
+| Operator recovery | Offline recovery maintenance command that turns one team's enforcement off, and its [runbook](#operator-recovery-runbook); no product operations | Recovery repair | OIDC hard-off; SAML hard-off | Runs only in the server container against the instance database; unknown team refused; changes only `requireSso`, increments `trustGeneration` and `policyRevision`, writes a `system` audit event and notifies owners; idempotent; race with concurrent `setSsoPolicy`. Off: only removes trust, so it runs in every state |
 | Provider setup UI | Provider and domain forms using prior endpoints; no new operations | Operator recovery | OIDC hard-off; SAML hard-off | en/zh-CN admin strings; jsdom revisions and conflicts, secret replacement without echo, domain challenge display once, neutral loading/error/403. Off: no navigation entry; settings routes show not-found; no SSO request |
 | Activation UI | Provider test and activation controls and the fresh-proof prompt (mailbox and step-up) using prior endpoints; no new operations | Provider setup UI | OIDC hard-off; SAML hard-off | en/zh-CN admin strings; jsdom test intent, activation prerequisites, `sso_reauthentication_required` retry for both methods, neutral loading/error/403. Off: no activation control reachable; no SSO request |
 | Member UI | Sign-in, explicit self-link/unlink and mailbox confirmation using Mailbox proof, OIDC self-link and Identity recovery endpoints; no new operations | Activation UI | OIDC hard-off; SAML hard-off | en/zh-CN sign-in; shipped public locales where applicable; jsdom consent, email proof send/consume, stale intent, generic same-email outcome, personal-account coexistence. Off: sign-in page shows no SSO option |

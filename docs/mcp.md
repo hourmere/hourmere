@@ -625,6 +625,10 @@ not whether older retained history exists beyond that bound.
 
 ## Create and manage meeting polls
 
+See the [meeting poll API guide](meeting-polls-api.md) for the full operation map and
+example calls, and the [host dashboard guide](https://hourmere.com/docs/meeting-polls)
+for event eligibility and finalization.
+
 In `tools/list`, a `read` key sees the host list, metadata and results tools plus
 `read_meeting_poll` for voters. A `bookings` or `full` key also sees poll writes. Host
 results include private voter details and the revisions for `finalize_meeting_poll`.
@@ -644,6 +648,14 @@ and `expectedHostRevision`. Resend requires an idempotency key. Bulk
 `remove_unverified_meeting_poll_voters` preserves host invitations and takes the host
 revision. `rotate_meeting_poll_link` takes the host revision and a new key, immediately
 invalidates the old public link and discloses the replacement once.
+
+Use `list_meeting_polls` to paginate within the acting organization, `get_meeting_poll`
+for metadata and `get_meeting_poll_results` for the roster and ballot revisions.
+`close_meeting_poll`, `cancel_meeting_poll` and `delete_meeting_poll` take `id` and
+`expectedHostRevision`. Closing stops voting and keeps the poll available for
+finalization. Deleting preserves its booking. Use the results and selected ballot
+revisions to finalize, and save the original input and idempotency key for an exact
+replay if the response is lost.
 
 中文：个人活动所有者或当前团队所有者和管理员可使用 `bookings` 或 `full` 密钥
 创建投票、邀请、重发、移除投票者及轮换链接。请保留创建、邀请、重发和轮换使用的
@@ -671,11 +683,11 @@ It answers uniformly with `accepted: true`, except that a full poll answers `pol
 for every mailbox. Recovery needs only `pollId` and `email`. After validation and rate-limit
 checks, it answers accepted without revealing delivery. It sends the unchanged credential
 only to an eligible existing voter under cooldowns and caps.
-Verification explicitly consumes a verification token; a replacement `votingToken` is
-returned once and sent by email. Reads never verify or vote.
+Verification explicitly consumes a verification token when replacing it. The replacement
+`votingToken` is returned once and queued for email. Reads never verify or vote.
 
 Voting takes `token`, all candidate `votes` (`slotId`, `value`: `yes`, `if_need_be`, `no`),
-`consent: true`, optional question `responses` and `expectedBallotRevision` (initially 0).
+`consent: true`, optional question `responses` and the current `expectedBallotRevision`.
 Withdraw takes the token and revision. On `poll_changed`, read and reconcile before a new
 submission; never automatically retry a lost response. Reminder opt-out takes the separate
 mail opt-out token and cannot access ballots. Admission requests share 10 per minute per

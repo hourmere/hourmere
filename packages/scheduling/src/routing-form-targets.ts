@@ -7,7 +7,6 @@
 // books one invitee per booking (`booking_mode = 'individual'`) with a known host mode, and
 // requires no payment. Listed and hidden events qualify alike.
 import type { Db } from '@hourmere/db'
-import { isUuid } from './internal.ts'
 import { parseQuestions, type Question } from './questions.ts'
 import {
   type RoutingFormConfig,
@@ -16,6 +15,7 @@ import {
   type RoutingTarget,
   RoutingValidationError,
 } from './routing-form-config.ts'
+import { isUuid } from './uuid.ts'
 
 /** Host modes a routing target keeps as they are; any other mode fails closed. */
 export const ROUTING_SCHEDULING_TYPES: readonly string[] = [

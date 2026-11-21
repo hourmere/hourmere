@@ -860,7 +860,7 @@ describe('routing forms remain hard-off with configuration and public metadata i
     expect(built.length).toBeGreaterThan(50)
     // The `${prefix}/…` idiom of the MCP OAuth consent routes.
     expect(built).toContain('{}/consent')
-    expect(built.filter(isRoutingName)).toEqual([])
+    expect(built.filter(isRoutingName).sort()).toEqual(['{}/routing-forms', '{}/routing-forms/new'])
   }, 30_000)
 
   it('folds built paths so a routing path cannot hide in a template or concatenation', () => {

@@ -1752,11 +1752,37 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
       resolvedRuleId: 'fallback',
       target: { kind: 'message', message: 'Thanks' },
     })
+    const activated = await client.PATCH('/api/v1/routing-forms/{id}', {
+      params: { path: { id } },
+      body: { expectedRevision: 3, enabled: true },
+    })
+    expect(activated.data?.draftRevision).toBe(4)
+    const submit = () =>
+      application.request(
+        `/api/v1/public/-/routing/${routingOwnerHandle}/${created.data?.slug}/route`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ versionId: published.data?.version.id, answers: {} }),
+        },
+      )
+    const beforeArchive = await submit()
+    expect(beforeArchive.status).toBe(200)
+    expect(await beforeArchive.json()).toEqual({ kind: 'message', message: 'Thanks' })
+
     const archived = await client.DELETE('/api/v1/routing-forms/{id}', {
       params: { path: { id } },
-      body: { expectedRevision: 3 },
+      body: { expectedRevision: 4 },
     })
     expect(archived.response.status).toBe(204)
+    const afterArchive = await client.GET('/api/v1/routing-forms', {
+      params: { query: { limit: 100 } },
+    })
+    expect(afterArchive.response.status).toBe(200)
+    expect(afterArchive.data?.data).not.toContainEqual(expect.objectContaining({ id }))
+    const rejected = await submit()
+    expect(rejected.status).toBe(404)
+    expect(await rejected.json()).toEqual({ error: 'routing_form_not_found' })
   })
 
   it('fences session writes by Origin/Referer and the expected organization', async () => {

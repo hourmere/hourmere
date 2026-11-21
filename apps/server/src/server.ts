@@ -197,6 +197,7 @@ import {
   mailboxProofRoutes,
 } from './sso-mailbox-proof.ts'
 import { type OidcProviderTestDeps, oidcSignInRoutes } from './sso-oidc-sign-in.ts'
+import { ssoOperatorRecoveryEmailJob } from './sso-operator-recovery.ts'
 import {
   type SsoRecoveryEnrollmentQueue,
   ssoRecoveryEnrollmentEmailJob,
@@ -1198,6 +1199,7 @@ async function start(
         publicUrl: config.PUBLIC_URL,
         mailer,
       }),
+      ssoOperatorRecoveryEmailJob(db, config.SMTP_URL && config.MAIL_FROM ? mailer : undefined),
       bookingNotificationJob(notificationDeps),
       rescheduleRequestExpiryJob({
         db,

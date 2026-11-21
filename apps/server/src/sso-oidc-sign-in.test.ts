@@ -259,6 +259,8 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
 
   function instance({
     enabled = true,
+    samlEnabled = false,
+    enforceTeamSso = true,
     expiresIn,
     signupPolicy = signup,
     scimClaims = false,
@@ -266,13 +268,15 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     nativeAuth,
   }: {
     enabled?: boolean
+    samlEnabled?: boolean
+    enforceTeamSso?: boolean
     expiresIn?: number
     signupPolicy?: SignupPolicy
     scimClaims?: boolean
     failRecoveryNotification?: boolean
     nativeAuth?: typeof auth
   } = {}) {
-    const capabilities = { ssoOidcEnabled: enabled, ssoSamlEnabled: false }
+    const capabilities = { ssoOidcEnabled: enabled, ssoSamlEnabled: samlEnabled }
     const authentication = nativeAuth ?? (scimClaims ? scimAuth : auth)
     return createApp({
       checkDb: async () => {},
@@ -318,7 +322,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
           send: idp.send,
         }),
       ],
-      ssoTeamReads: { db, capabilities },
+      ssoTeamReads: enforceTeamSso ? { db, capabilities } : undefined,
       ssoMailboxProof: mailboxProofRoutes({
         db,
         capabilities,
@@ -1188,8 +1192,8 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     )
   }
 
-  function revokeDelegation(cookie: string, bindingId: string) {
-    return app.request(new URL(`${delegationsPath}/${bindingId}`, publicUrl), {
+  function revokeDelegation(cookie: string, bindingId: string, request = app) {
+    return request.request(new URL(`${delegationsPath}/${bindingId}`, publicUrl), {
       method: 'DELETE',
       headers: { origin: publicUrl, cookie, 'X-Expected-Organization-Id': fixture.team },
     })
@@ -1443,6 +1447,12 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     const binding = await bindingResponse(await prepared.submit())
     await db.deleteFrom('sso_browser_proofs').where('session_id', '=', id).execute()
     await expectSsoRequired(cookie)
+    const samlOnly = instance({ enabled: false, samlEnabled: true })
+    for (const attempt of [binding.id, randomUUID()]) {
+      const response = await revokeDelegation(cookie, attempt, samlOnly)
+      expect(response.status).toBe(403)
+      expect(await response.json()).toEqual({ error: 'sso_required' })
+    }
     for (const response of [
       await revokeDelegation(other.cookie, binding.id),
       await revokeDelegation(cookie, randomUUID()),
@@ -1674,6 +1684,25 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
         .execute(),
     ).toEqual([])
     expect(await audit()).toEqual([])
+    expect(recoveryJobs).toEqual([])
+  })
+
+  it('refuses administrative link retirement without OIDC step-up on an enforced team', async () => {
+    const f = await stepUpFixture()
+    const target = await recoveryTarget(f, fixture.member)
+    await enforceSso()
+    // Exercise the route's fresh-proof gate independently of the outer team gate.
+    const samlOnly = instance({ enabled: false, samlEnabled: true, enforceTeamSso: false })
+    const response = await recoveryRequest(
+      removeLinkPath(f.providerId, target.link.id),
+      f.owner.cookie,
+      {},
+      { request: samlOnly },
+    )
+    expect(response.status).toBe(403)
+    expect(await response.json()).toEqual({ error: 'sso_required' })
+    expect(await storedLink(target.link.id)).toEqual(target.link)
+    expect((await audit()).some(({ action }) => action === 'sso_link.unlinked')).toBe(false)
     expect(recoveryJobs).toEqual([])
   })
 
@@ -2091,6 +2120,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       expect(binding).toBeDefined()
       const code = idp.issue(attempt, { sub: 'test-only-recovery-subject' })
       const beforeCallback = await effects()
+      const beforeTestAudit = await audit()
       for (const cookie of [
         owner.cookie,
         `${otherSession.cookie}; ${binding}`,
@@ -2099,10 +2129,15 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       ])
         await refusal(await callback(attempt, code, { cookie }))
       await refusal(await callback(attempt, code, { providerId: other.providerId }))
+      for (const state of ['', 'bad-state', `${attempt.id}.forged`, `${other.providerId}.forged`])
+        await refusal(await callback(attempt, code, { state }))
       expect((await attemptRow(attempt)).consumed_at).toBeNull()
       expect(idp.exchange).not.toHaveBeenCalled()
+      expect(await audit()).toEqual(beforeTestAudit)
       await expectProviderTestRedirect(await callback(attempt, code))
+      const afterTestAudit = await audit()
       await refusal(await callback(attempt, code))
+      expect(await audit()).toEqual(afterTestAudit)
       expect(idp.exchange).toHaveBeenCalledTimes(1)
       expect(await effects()).toEqual(beforeCallback)
       await expectWriteError(
@@ -2235,10 +2270,11 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
         .execute()
       await trx.insertInto('sso_recovery_owners').values(recoveryOwnerValues(fixture)).execute()
     })
+    const beforeTestAudit = await audit()
     await refusal(await callback(attempt, idp.issue(attempt, { sub: 'old-recovery-test' })))
     expect(idp.exchange).not.toHaveBeenCalled()
     expect((await attemptRow(attempt)).consumed_at).toBeNull()
-    expect((await audit()).some(({ action }) => action === testedAction)).toBe(false)
+    expect(await audit()).toEqual(beforeTestAudit)
   })
 
   it('keeps a replacement recovery grant available when provider discovery was already running', async () => {
@@ -2706,6 +2742,16 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     expect(idp.exchange).toHaveBeenCalledTimes(1)
     const events = await audit()
     expect(events.filter((event) => event.action === signInAction)).toHaveLength(1)
+    expect(events.filter((event) => event.action === failureAction)).toContainEqual(
+      expect.objectContaining({
+        details: {
+          method: 'oidc',
+          providerId: f.providerId,
+          revision: 1,
+          reason: 'attempt_invalid',
+        },
+      }),
+    )
     expect(events.filter((event) => event.action === replayAction)).toEqual([
       expect.objectContaining({
         details: {
@@ -2810,7 +2856,18 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       const after = await effects()
       expect(after.sessions).toBe(before.sessions)
       expect(after.proofs).toBe(before.proofs)
-      expect((await audit()).map(({ action }) => action)).toEqual([failureAction])
+      const reason = {
+        membership: 'mailbox_unproven',
+        'SCIM suspension': 'scim_suspended',
+        link: 'mailbox_unproven',
+        domain: 'domain_unverified',
+      }[authority]
+      expect(await audit()).toEqual([
+        expect.objectContaining({
+          action: failureAction,
+          details: expect.objectContaining({ reason }),
+        }),
+      ])
     },
   )
 

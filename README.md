@@ -87,8 +87,8 @@ Signed-in pages live under `/app` (`/app/event-types`, `/app/availability`, `/ap
 Public meeting-poll pages live at `/poll` and `/poll/voter`, with private credentials
 in URL fragments and POST bodies. They support verification, voting and read-only closed
 ballots without login. Personal event owners and current team owners or admins can
-create and manage polls in [Meeting polls](docs/meeting-polls.md#create-and-manage-a-poll-in-the-app)
-or through [REST](https://hourmere.com/docs/rest#manage-meeting-polls), MCP and CLI.
+create and manage polls in the [host dashboard](https://hourmere.com/docs/meeting-polls)
+or through [REST, MCP and CLI](docs/meeting-polls-api.md).
 See the [voter guide](https://hourmere.com/docs/meeting-poll-voting) for
 recovery, withdrawal, reminder opt-out and privacy.
 
@@ -465,10 +465,14 @@ and linked operating guides before deploying:
 - [Booking limits](https://hourmere.com/docs/booking-limits) apply per event type and actual host, across
   all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
   Lowering a limit does not cancel existing bookings.
-- Public booking and sign-in pages have no CAPTCHA; invitee/guest addresses remain unverified.
+- Public booking and sign-in pages have no CAPTCHA; ordinary booking invitee and guest
+  addresses remain unverified.
   [Email abuse limits](https://hourmere.com/docs/notifications#email-abuse-controls) apply per
-  instance/database; separate instances do not share budgets. Per-IP request limits remain
-  in process memory, except the additional durable booking-waitlist admission limits.
+  instance/database; separate instances do not share budgets. Public meeting-poll
+  enrollment verifies mailbox possession.
+- [Meeting polls](https://hourmere.com/docs/meeting-polls) support one confirmed booking per
+  poll. Group event types and one-time booking links are unsupported. Terminal polls are
+  kept until explicit poll, linked-booking or organization deletion.
 - Microsoft Calendar lists calendars only; no busy-time sync or event writes. Microsoft sign-in and
   calendar connections have not had real-account acceptance.
 - Automatic Zoom supports personal event types and individual team event types with one
@@ -484,8 +488,9 @@ and linked operating guides before deploying:
   Bundled Caddy additionally requires ports 80/443, an HTTPS host name without a port,
   and an IPv4-only ingress network.
 - Rate limiting uses in-process memory at the transport layer; multiple web replicas multiply the limits.
-  Booking waitlists additionally enforce durable mailbox, event and trusted-IP admission
-  budgets in PostgreSQL across replicas. Run a single web process; a separate worker is supported.
+  Booking waitlists enforce additional durable admission budgets across replicas. Meeting
+  polls also share PostgreSQL request budgets across web replicas and REST/MCP. Run a
+  single web process; a separate worker is supported.
 - [Public booking pages and emails](https://hourmere.com/docs/interface-languages) support English,
   Simplified Chinese, German, French, Spanish and Brazilian Portuguese. Account and sign-in interfaces support English and
   Simplified Chinese. Missing translations fall back to English; dates follow the active locale.

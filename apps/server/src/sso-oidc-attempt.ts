@@ -486,6 +486,48 @@ function openState(configurationKey: Buffer, aad: string, envelope: string) {
   }
 }
 
+/** Classify a refused callback for auditing without authorizing or consuming the test. */
+export async function isOidcTestCallback(
+  db: Db,
+  browser: OriginatingBrowser,
+  state: string | undefined,
+  readActor: () => Promise<OidcTestActor | null | undefined>,
+) {
+  const id = state && state.length <= maxStateLength ? statePattern.exec(state)?.[1] : undefined
+  // An exact stored state identifies the intent even with a different provider, browser or
+  // session. Preserve sign-in auditing if a browser is also running a test.
+  if (state && id) {
+    const attempt = await db
+      .selectFrom('sso_attempts')
+      .select(['kind', 'operation'])
+      .where('id', '=', id)
+      .where('input_digest', '=', sha256(state))
+      .executeTakeFirst()
+    if (attempt) return attempt.kind === 'test' && attempt.operation === TEST_SSO_PROVIDER
+  }
+
+  // A corrupted state may be unrecognizable. Require the initiating session and browser
+  // for that fallback, and scope it to a pending test for the callback's provider.
+  const binding = browserBindingDigest(browser.browserBinding)
+  if (!binding) return false
+  const actor = await readActor()
+  if (!actor) return false
+  const bound = await db
+    .selectFrom('sso_attempts')
+    .select('id')
+    .where('kind', '=', 'test')
+    .where('operation', '=', TEST_SSO_PROVIDER)
+    .where('organization_id', '=', browser.organizationId)
+    .where('provider_id', '=', browser.providerId)
+    .where('user_id', '=', actor.userId)
+    .where('session_id', '=', actor.id)
+    .where('browser_binding_digest', '=', binding)
+    .where('consumed_at', 'is', null)
+    .limit(1)
+    .executeTakeFirst()
+  return bound !== undefined
+}
+
 /**
  * Consumes matching state before returning the verifier to an eventual token exchange.
  * The transaction commits first, so even a failed exchange can never make this state usable again.

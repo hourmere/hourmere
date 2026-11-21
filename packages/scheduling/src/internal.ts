@@ -3,6 +3,8 @@
 import { AvailabilityInputError, validateTimeZone } from '@hourmere/core'
 import { DomainError } from './errors.ts'
 
+export { isUuid } from './uuid.ts'
+
 /** SQLSTATE codes services map to DomainErrors. */
 export const SQLSTATE = {
   uniqueViolation: '23505',
@@ -24,15 +26,6 @@ export function isConstraintViolation(
   const { code, constraint: name } = error as { code?: unknown; constraint?: unknown }
   return code === sqlState && name === constraint
 }
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
-/**
- * Ids from requests are checked before they reach a uuid column: Postgres rejects a
- * malformed one with an error, and no row can have it anyway.
- */
-export const isUuid = (value: unknown): value is string =>
-  typeof value === 'string' && UUID.test(value)
 
 /**
  * The parameter for a jsonb column. node-postgres would send a JavaScript array as a

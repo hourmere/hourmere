@@ -1,5 +1,5 @@
 import { advanceSsoRecoveryRevision, type Principal, teamRoles } from '@hourmere/auth'
-import { localeCodes, resolveAdminLanguage } from '@hourmere/core/language'
+import { interfaceLanguage, localeCodes } from '@hourmere/core/language'
 import type { Db } from '@hourmere/db'
 import { auditActor, writeSsoAuditEvent } from '@hourmere/db/audit'
 import { scimSuspended } from '@hourmere/db/scim-suspension'
@@ -94,8 +94,8 @@ export function ssoRecoveryEnrollmentEmailJob({
           }).toString()
         }
         if (notice.kind === 'used') {
-          const owner = await teamOwnerIds(db, notice.organizationId)
-            .where('userId', '=', notice.userId)
+          const owner = await ssoRecoveryTeamOwners(db, notice.organizationId)
+            .where('auth.member.userId', '=', notice.userId)
             .executeTakeFirst()
           if (!owner) return
           await mailer.send(ssoRecoveryUseEmail(user.email, notice.language), { signal })
@@ -143,10 +143,24 @@ async function notify(deps: SsoRecoveryEnrollmentDeps, trx: Db, notice: Notice) 
   if (!id) throw new Error('SSO recovery enrollment email could not be queued')
 }
 
-function teamOwnerIds(db: Db, organizationId: string) {
+export function ssoRecoveryNoticeLanguage(locale: string | null | undefined) {
+  return interfaceLanguage(locale) ?? 'en'
+}
+
+async function recipientLanguage(db: Db, userId: string) {
+  const profile = await db
+    .selectFrom('profiles')
+    .select('locale')
+    .where('user_id', '=', userId)
+    .executeTakeFirst()
+  return ssoRecoveryNoticeLanguage(profile?.locale)
+}
+
+export function ssoRecoveryTeamOwners(db: Db, organizationId: string) {
   return db
     .selectFrom('auth.member')
-    .select('userId')
+    .leftJoin('profiles', 'profiles.user_id', 'auth.member.userId')
+    .select(['auth.member.userId', 'profiles.locale'])
     .where('organizationId', '=', organizationId)
     .where((eb) => eb.not(scimSuspended(organizationId, eb.ref('userId'))))
     .where(sql<boolean>`EXISTS (
@@ -159,15 +173,15 @@ export async function notifySsoRecoveryUse(
   deps: SsoRecoveryEnrollmentDeps,
   trx: Db,
   organizationId: string,
-  headers: Headers,
 ) {
-  const language = resolveAdminLanguage({
-    cookie: headers.get('cookie') ?? undefined,
-    acceptLanguage: headers.get('accept-language') ?? undefined,
-  })
-  const owners = await teamOwnerIds(trx, organizationId).execute()
-  for (const { userId } of owners)
-    await notify(deps, trx, { kind: 'used', userId, organizationId, language })
+  const owners = await ssoRecoveryTeamOwners(trx, organizationId).execute()
+  for (const { userId, locale } of owners)
+    await notify(deps, trx, {
+      kind: 'used',
+      userId,
+      organizationId,
+      language: ssoRecoveryNoticeLanguage(locale),
+    })
 }
 
 type EnrollmentActor = {
@@ -175,7 +189,6 @@ type EnrollmentActor = {
   organizationId: string
   userId: string
   memberId: string
-  language: z.infer<typeof recipient.language>
 }
 
 async function withRecoveryOwnerProof<T, R>(
@@ -202,10 +215,6 @@ async function withRecoveryOwnerProof<T, R>(
     true,
     true,
   )
-  const language = resolveAdminLanguage({
-    cookie: headers.get('cookie') ?? undefined,
-    acceptLanguage: headers.get('accept-language') ?? undefined,
-  })
   let authorized: { actor: EnrollmentActor; target: T }
   try {
     return await runWithFreshProof(
@@ -224,7 +233,7 @@ async function withRecoveryOwnerProof<T, R>(
           await access(trx, organizationId)
           const memberId = await currentOwner(trx, organizationId, userId)
           if (!memberId) throw denied()
-          const actor = { principal: session, organizationId, userId, memberId, language }
+          const actor = { principal: session, organizationId, userId, memberId }
           const target = await authorize(trx, actor)
           const policy = await trx
             .selectFrom('sso_policies')
@@ -286,7 +295,7 @@ export function configureSsoRecovery(
       if (existing) throw changed()
       return memberId
     },
-    async (trx, { principal, organizationId, userId, language }, memberId, nextRevision) => {
+    async (trx, { principal, organizationId, userId }, memberId, nextRevision) => {
       await nominations(trx, organizationId, ownerUserId).execute()
       const now = await databaseClock(trx)
       const pending = await trx
@@ -312,7 +321,7 @@ export function configureSsoRecovery(
       await notify(deps, trx, {
         kind: 'nominated',
         userId: ownerUserId,
-        language,
+        language: await recipientLanguage(trx, ownerUserId),
         organizationId,
         enrollmentId: pending.id,
         revision: nextRevision,
@@ -358,7 +367,7 @@ export function acceptSsoRecoveryEnrollment(
         throw missing()
       return pending.nominated_by_user_id
     },
-    async (trx, { principal, organizationId, userId, memberId, language }, nominatorId) => {
+    async (trx, { principal, organizationId, userId, memberId }, nominatorId) => {
       const pending = await nominations(trx, organizationId, userId)
         .where('id', '=', enrollmentId)
         .where('expires_at', '>', sql<Date>`${await clock(trx)}::timestamptz`)
@@ -386,8 +395,12 @@ export function acceptSsoRecoveryEnrollment(
         action: 'sso_recovery.enrolled',
         details: {},
       })
-      for (const recipient of new Set([userId, nominatorId]))
-        await notify(deps, trx, { kind: 'enrolled', userId: recipient, language })
+      for (const recipientId of new Set([userId, nominatorId]))
+        await notify(deps, trx, {
+          kind: 'enrolled',
+          userId: recipientId,
+          language: await recipientLanguage(trx, recipientId),
+        })
     },
   )
 }

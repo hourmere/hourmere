@@ -44,6 +44,15 @@ export interface FreshProofRequest {
   schema: z.ZodObject
 }
 
+export function requireSsoStepUpAvailable(
+  capabilities: SsoCapabilities,
+  proofMode: FreshProofRequest['proofMode'],
+) {
+  if (proofMode === 'trust_reduction' && !capabilities.ssoOidcEnabled)
+    throw new DomainError('forbidden', 'sso_required')
+  requireSsoEnabled(capabilities, 'oidc')
+}
+
 export type FreshProofResult<T> =
   | {
       status: 'proof_required'
@@ -224,11 +233,7 @@ export async function runWithFreshProof<T>(
       const policy = policies[0]
       const needsSso = delegatedSso || (!independentMailbox && policy?.require_sso === true)
       const trustGeneration = needsSso ? (policy?.trust_generation ?? 1) : null
-      if (needsSso) {
-        if (request.proofMode === 'trust_reduction' && !deps.capabilities.ssoOidcEnabled)
-          throw new DomainError('forbidden', 'sso_required')
-        requireSsoEnabled(deps.capabilities, 'oidc')
-      }
+      if (needsSso) requireSsoStepUpAvailable(deps.capabilities, request.proofMode)
       const needsMailbox = !needsSso
       if (proofAttemptId) {
         const { rows } = await sql<{

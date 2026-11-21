@@ -18871,7 +18871,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description team_management_access_denied */
+            /** @description team_management_access_denied or sso_required */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -20049,7 +20049,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description team_management_access_denied or sso_reauthentication_required; retry the exact input after completing fresh proof sso_required: This team requires a current SSO proof. */
+            /** @description team_management_access_denied, sso_required or sso_reauthentication_required; retry a proof challenge with the exact input after completing fresh proof sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;

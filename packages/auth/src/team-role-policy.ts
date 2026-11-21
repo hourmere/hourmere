@@ -281,6 +281,7 @@ export function createTeamRolePolicy(
       session ? { sessionId: session.session.id, userId: session.user.id } : null,
       organizationId,
       nativeSsoRequired,
+      { organizationLocked: true },
     )
   }
 

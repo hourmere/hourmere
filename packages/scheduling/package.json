@@ -9,6 +9,8 @@
     "./text": "./src/text.ts",
     "./conferences": "./src/conferences.ts",
     "./notification-settings": "./src/notification-settings.ts",
+    "./routing-form-config": "./src/routing-form-config.ts",
+    "./routing-form-targets": "./src/routing-form-targets.ts",
     "./sealed-secret": "./src/sealed-secret.ts",
     "./series-confirmation": "./src/series-confirmation.ts",
     "./testing": "./src/testing.ts",

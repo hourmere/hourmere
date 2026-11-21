@@ -56,6 +56,7 @@ const DATA_OWNERS: Readonly<Record<string, readonly string[]>> = {
     'sso_domains',
     'sso_provider_domains',
   ],
+  'apps/server/src/sso-operator-recovery.ts': ['sso_policies'],
   'apps/server/src/sso-mailbox-proof.ts': ['sso_attempts', 'sso_mailbox_tokens', 'sso_providers'],
   'apps/server/src/sso-me.ts': ['sso_attempts', 'sso_identity_links', 'sso_providers'],
   'packages/auth/src/team-sso.ts': [
@@ -148,6 +149,7 @@ const DATA_OWNERS: Readonly<Record<string, readonly string[]>> = {
     'sso_policies',
     'sso_providers',
   ],
+  'packages/db/src/scim-suspension.ts': ['sso_browser_proofs'],
 }
 // A table name as a whole identifier in any case (PostgreSQL folds unquoted identifiers),
 // its generated row type, or the storage test support. `sso_providers_guard` or

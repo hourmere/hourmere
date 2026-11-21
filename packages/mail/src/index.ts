@@ -506,6 +506,13 @@ export function ssoRecoveryUseEmail(to: string, language: InterfaceLanguage): Ma
   return { to, subject, text: `Hourmere\n\n${message}\n`, sensitive: true }
 }
 
+/** Security notice after an instance operator turns off team SSO enforcement. */
+export function ssoOperatorRecoveryEmail(to: string, language: InterfaceLanguage): MailMessage {
+  const subject = mailMessage(language, 'ssoRecovery.operator.subject')
+  const message = mailMessage(language, 'ssoRecovery.operator.message')
+  return { to, subject, text: `Hourmere\n\n${message}\n`, sensitive: true }
+}
+
 export function magicLinkEmail({
   to,
   url,

@@ -75,6 +75,8 @@
   "ssoRecovery.enrolled.message": "Uma pessoa proprietária da equipe aceitou uma indicação para a recuperação do login único. Se você não esperava essa alteração, entre em contato com quem administra sua equipe.",
   "ssoRecovery.used.subject": "A recuperação do login único foi usada",
   "ssoRecovery.used.message": "Uma pessoa proprietária da equipe confirmou seu e-mail e iniciou a recuperação do login único. Se você não esperava essa atividade, fale com a administração da equipe.",
+  "ssoRecovery.operator.subject": "A exigência de login único foi desativada",
+  "ssoRecovery.operator.message": "A administração da instância desativou a exigência de login único para sua equipe. As comprovações de login único e os vínculos delegados da equipe perderam a validade. Se você não esperava essa mudança, fale com a administração da instância.",
   "teamInvitation.defaultTeam": "Sua equipe",
   "teamInvitation.defaultInviter": "Um membro da equipe",
   "teamInvitation.subject": "Convite para participar de {team}",

@@ -138,21 +138,28 @@ select this policy. See [configuration](/docs/configuration#email-and-registrati
 
 ## Meeting poll deadlines
 
-While voting is open, an eligible nonresponder can receive one reminder per poll and
-mailbox. It becomes due 24 hours before the deadline if the poll already existed at
-that time. The reminder includes a voting link and a separate link to stop reminders.
-The opt-out page asks for confirmation and works without signing in. The recipient's
-ballot stays intact.
+While voting is open, a host invitee or verified public-link voter who has yet to vote
+can receive one reminder per poll and mailbox. It becomes due 24 hours before the deadline
+if that instant is strictly after the poll was created. The reminder includes a voting link and a separate
+link to stop reminders. The opt-out page asks for confirmation and works without signing in.
+The recipient's ballot stays intact.
 
 The hourly cleanup records closure at the voting deadline and queues a notice for the
 creator if they still manage the event. The notice contains the deadline, response count
-and an authenticated results link. Closing a poll early does not send the notice.
-Hosts can create polls and invite voters through REST, MCP and CLI without a feature flag.
-An accepted invitation queues mail to the supplied mailbox. Delivery still depends on
-eligibility and the existing instance and recipient mail budgets.
+and an authenticated results link. Closing a poll early does not send the notice. An
+accepted invitation queues mail to the supplied mailbox. Delivery still depends on
+the worker, SMTP, eligibility and shared mail budgets.
 
-See the [meeting poll design](https://github.com/hourmere/hourmere/blob/main/docs/meeting-polls.md#notifications-abuse-and-time-zones)
-for eligibility, mail budgets and privacy rules.
+When a poll is scheduled, selected attendees receive ordinary booking confirmation.
+Eligible non-selected voters instead receive an informational outcome without an ICS
+attachment, join link or booking management link. Later booking changes use ordinary
+booking messages for attendees and informational updates for eligible non-selected voters.
+Hourmere sends no cancellation email for a poll that was never scheduled.
+See [managing meeting polls](/docs/meeting-polls) for the host actions.
+
+中文：投票开放期间，尚未投票的受邀者或已验证的公开报名者，每场投票每个邮箱最多收到一次提醒。只有在截止前超过 24 小时创建的投票，才会在截止前 24 小时将提醒加入待发流程。点击退订链接后须确认，退订只会停止提醒，原选票保留。到期时，系统会向仍有权限的创建者发送截止通知，附上需登录查看的结果链接。提前结束不会发送这封通知。
+
+入选者通过普通预约邮件接收确认及后续变更。符合条件的未入选者会收到结果及后续变更通知，其中不含日历附件、参会链接或预约管理链接。取消尚未排定的投票只会更新投票状态，不会发送取消邮件。能否送达取决于后台工作进程、SMTP、收件资格及邮件限额。
 
 ## Jobs
 
@@ -1096,16 +1103,15 @@ number across the instance under the same transaction fence as send reservations
 START/UNSTOP re-enables it. SMS jobs and failures are separate from booking and email
 delivery. See the SMS guide for inbound webhook setup, replay protection and limitations.
 
-## Internal meeting-poll credential mail
+## Meeting-poll credential mail
 
-Meeting polls have internal delivery workers, but no public or host transport yet.
 `meeting-poll-email-v1` scans durable invitation, verification and recovery intents every
 minute in `worker` and `all` roles. Messages use the voter's saved language and time zone,
 with complete English, Simplified Chinese, German, French, Spanish and Brazilian Portuguese
 copy. They never look up account membership or include other voters, ballots, booking
 management links, conference links or calendar files. Links carry credentials only in
-fragments and target the later voter and reminder opt-out pages; opening a link itself
-neither verifies nor votes. Host creation remains unavailable until those pages land.
+fragments and open the voter and reminder opt-out pages. Opening a link itself neither
+verifies an address nor votes.
 
 Each transaction checks the meeting-poll key fence before locks or ciphertext access.
 Internal workers use `BETTER_AUTH_SECRET` for the poll key. Claims lock the poll before
@@ -1114,9 +1120,9 @@ lease, consumes an attempt and reserves the shared notification instance/hour an
 recipient/hour/day budget atomically. Defaults remain 100 instance messages/hour and
 5 recipient messages/hour, 20/day; configured limits apply. These reservations share
 booking-mail recipient accounting. Failed, interrupted and uncertain sends conservatively
-consume budget, so concurrent workers cannot exceed a last available slot. Public request
-and host actor/organization admission wiring belongs to the later transport steps;
-existing poll/mailbox recovery and resend cooldowns and caps remain unchanged.
+consume budget, so concurrent workers cannot exceed a last available slot. The shared
+mail budgets apply in addition to request limits and the poll’s per-mailbox recovery
+and resend limits. See [self-hosting and poll limits](/docs/self-hosting#meeting-poll-credentials-and-recovery).
 
 Temporary failures retry after 1, 2, 4 and 8 minutes, with at most five attempts including
 crashed claims. Permanent failures and missing SMTP configuration stop delivery. Terminal
@@ -1136,4 +1142,6 @@ is skipped rather than sent to the development log mailer.
 `meeting-poll-capability-expiry-v1` clears expired capability ciphertext hourly in batches
 of at most 500, skipping locked polls and capabilities. It retains digest-only credentials
 for permitted read-only history. Poll/voter deletion and the existing cleanup cascades
-continue to remove their dependent private data. No migration or feature flag is added.
+remove their dependent private data.
+
+中文：工作进程每分钟检查待发的邀请、验证和找回邮件。邮件使用投票人保存的语言和时区，链接凭证放在 `#` 后。投票邮件与普通预约邮件共用每实例、每收件人的发送限额，重发和找回另有冷却时间及次数上限。找回只重发当前有效凭证，不延长有效期。未配置 SMTP 时会跳过发送，开发日志不会输出可用链接。后台任务每小时清除到期的凭证密文，并保留用于获准只读查看历史记录的凭证摘要。

@@ -332,7 +332,10 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
       .execute()
     expect((await resolve(scoped)).ok).toBe(false)
   })
-  function app(trustedProxies: readonly string[] = []) {
+  function app(
+    trustedProxies: readonly string[] = [],
+    resolveOAuth = createMcpOAuthResolver({ auth, db, publicUrl: BASE, ssoCapabilities }),
+  ) {
     return createApp({
       checkDb: async () => {},
       authHandler: auth.handler,
@@ -344,7 +347,7 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
       mcp: mcpEndpoint({
         tools: [whoamiTool],
         oauth: {
-          resolve: createMcpOAuthResolver({ auth, db, publicUrl: BASE, ssoCapabilities }),
+          resolve: resolveOAuth,
           handler: auth.handler,
         },
       }),
@@ -575,7 +578,7 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
       }),
     )
 
-  it('keeps the existing refresh and MCP query counts for a team without an SSO policy', async () => {
+  it('keeps existing refresh and MCP caller query counts', async () => {
     const s = await session(),
       team = await createTestTeam(db, [{ user: s.user, role: 'owner' }]),
       tokens = await connected(s, team.id)
@@ -599,34 +602,76 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
     expect(statements).toHaveLength(2)
   })
 
-  it('refuses a suspended team for a previously issued MCP OAuth token', async () => {
-    const s = await session()
-    const owner = await createTestUser(db)
-    const team = await createTestTeam(db, [
-      { user: owner, role: 'owner' },
-      { user: s.user, role: 'member' },
-    ])
-    const otherTeam = await createTestTeam(db, [{ user: s.user, role: 'owner' }])
-    const personal = s.user.principal.organization.id
-    const teamToken = await connected(s, team.id)
-    const personalToken = await connected(s, personal)
-    const otherTeamToken = await connected(s, otherTeam.id)
-    const application = app()
-    const whoami = (token: typeof teamToken) => application.request(mcpRequest(token.access_token))
-    async function expectAccess(token: typeof teamToken, organizationId: string) {
-      const response = await whoami(token)
-      expect(response.status).toBe(200)
-      expect(await response.text()).toContain(organizationId)
-    }
+  it.each([false, true])(
+    'refuses a suspended team for a previously issued MCP OAuth token (delegated: %s)',
+    async (delegated) => {
+      const s = await session()
+      const owner = await createTestUser(db)
+      const team = await createTestTeam(db, [
+        { user: owner, role: 'owner' },
+        { user: s.user, role: 'member' },
+      ])
+      const otherTeam = await createTestTeam(db, [{ user: s.user, role: 'owner' }])
+      const personal = s.user.principal.organization.id
+      const teamToken = await connected(s, team.id)
+      const personalToken = await connected(s, personal)
+      const otherTeamToken = await connected(s, otherTeam.id)
+      const grant = await db
+        .selectFrom('mcp_oauth_grants')
+        .select('id')
+        .where('user_id', '=', s.user.id)
+        .where('organization_id', '=', team.id)
+        .executeTakeFirstOrThrow()
+      if (delegated) {
+        await enforce(team.id)
+        await bind(await delegationFixture(s, team.id), grant.id)
+      }
+      const application = app()
+      const whoami = (token: typeof teamToken) =>
+        application.request(mcpRequest(token.access_token))
+      async function expectAccess(token: typeof teamToken, organizationId: string) {
+        const response = await whoami(token)
+        expect(response.status).toBe(200)
+        expect(await response.text()).toContain(organizationId)
+      }
 
-    await expectAccess(teamToken, team.id)
-    await suspendScimMember(db, team.id, s.user.id)
-    const denied = await whoami(teamToken)
-    expect(denied.status).toBe(401)
-    expect(await denied.json()).toEqual({ error: 'invalid_token' })
-    await expectAccess(personalToken, personal)
-    await expectAccess(otherTeamToken, otherTeam.id)
-  })
+      await expectAccess(teamToken, team.id)
+      const resolve = createMcpOAuthResolver({ auth, db, publicUrl: BASE, ssoCapabilities })
+      const resolved = Promise.withResolvers<Awaited<ReturnType<typeof resolve>>>()
+      const release = Promise.withResolvers<void>()
+      const paused = app([], async (request) => {
+        const decision = await resolve(request)
+        resolved.resolve(decision)
+        await release.promise
+        return decision
+      })
+      const pending = paused.request(mcpRequest(teamToken.access_token))
+      try {
+        expect(await resolved.promise).toMatchObject({
+          ok: true,
+          principal: { ssoDelegationStatus: delegated ? 'valid' : null },
+        })
+        await suspendScimMember(db, team.id, s.user.id, { revoke: true })
+      } finally {
+        release.resolve()
+      }
+      const inFlight = await pending
+      expect(inFlight.status).toBe(200)
+      expect(await inFlight.text()).toContain(team.id)
+      const denied = await whoami(teamToken)
+      expect(denied.status).toBe(401)
+      expect(await denied.json()).toEqual({ error: 'invalid_token' })
+      await expectAccess(personalToken, personal)
+      await expectAccess(otherTeamToken, otherTeam.id)
+      expect(
+        await db
+          .selectFrom('mcp_oauth_grants')
+          .select('id')
+          .where('id', '=', grant.id)
+          .executeTakeFirst(),
+      ).toEqual(grant)
+    },
+  )
 
   it('resumes the same consent after team proof and binding and checks the grant again on exchange', async () => {
     const s = await session(),
@@ -787,6 +832,9 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
       await withConnection(async (writer) => {
         await writer.query('BEGIN')
         try {
+          const { rows: blocker } = await writer.query<{ pid: number }>(
+            'SELECT pg_backend_pid() AS pid',
+          )
           await writer.query('SELECT id FROM auth.organization WHERE id = $1 FOR UPDATE', [team.id])
           await writer.query('UPDATE sso_providers SET enabled = false WHERE id = $1', [
             reliance.provider_id,
@@ -800,7 +848,8 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
             async () => {
               const { rows } = await owned.pool.query(
                 `SELECT 1 FROM pg_stat_activity WHERE datname = current_database()
-               AND wait_event_type = 'Lock' AND query ILIKE '%auth%organization%for share%'`,
+                 AND $1 = ANY(pg_blocking_pids(pid)) AND query ILIKE '%auth%organization%'`,
+                [blocker[0]?.pid],
               )
               expect(rows).toHaveLength(1)
             },
