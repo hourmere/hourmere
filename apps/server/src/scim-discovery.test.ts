@@ -491,7 +491,7 @@ describe('SCIM discovery representations', () => {
     }
   })
 
-  it('keeps discovery and User resource modules out of production imports', () => {
+  it('keeps resource test modules out of production imports', () => {
     const root = fileURLToPath(new URL('.', import.meta.url))
     const sources = (directory: string): string[] =>
       readdirSync(directory).flatMap((entry) => {
@@ -512,6 +512,8 @@ describe('SCIM discovery representations', () => {
       'scim-user-retirement',
       'scim-user-retirement-claims',
       'scim-user-write',
+      'scim-team-hierarchy',
+      'scim-team-hierarchy-proof',
     ]
     expect(files.some((file) => file.endsWith('server.ts'))).toBe(true)
     for (const name of flagged) expect(files).toContain(join(root, `${name}.ts`))

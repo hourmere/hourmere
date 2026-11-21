@@ -1270,6 +1270,64 @@ export interface ScimProvisioningTokens {
   token_hash: string | null;
 }
 
+export interface ScimTeamLinkGenerations {
+  child_organization_id: string;
+  generation: Generated<number>;
+}
+
+export interface ScimTeamLinkRoles {
+  mapping_id: string;
+  organization_id: string;
+  side: string;
+}
+
+export interface ScimTeamManagedMemberships {
+  child_organization_id: string;
+  mapping_id: string;
+  member_id: string;
+  user_id: string;
+}
+
+export interface ScimTeamMappingConsents {
+  approved_at: Timestamp;
+  expires_at: Timestamp;
+  intent_id: string;
+  member_id: string;
+  organization_id: string;
+  owner_id: string;
+  proof_context: Json;
+  proof_kind: string;
+  session_id: string;
+}
+
+export interface ScimTeamMappingIntents {
+  action: string;
+  allow_group_retirement: boolean | null;
+  child_organization_id: string;
+  connection_id: string;
+  consumed_at: Timestamp | null;
+  created_at: Generated<Timestamp>;
+  external_id: string | null;
+  id: Generated<string>;
+  link_generation: number | null;
+  mapping_id: string | null;
+  parent_organization_id: string;
+}
+
+export interface ScimTeamMappings {
+  child_organization_id: string;
+  connection_id: string;
+  created_at: Generated<Timestamp>;
+  external_id: string;
+  id: Generated<string>;
+  live_child_organization_id: Generated<string | null>;
+  live_connection_id: Generated<string | null>;
+  live_parent_organization_id: Generated<string | null>;
+  parent_organization_id: string;
+  retired_at: Timestamp | null;
+  suspended_at: Timestamp | null;
+}
+
 export interface ScimTokenConnections {
   connection_id: string;
   organization_id: string;
@@ -1878,6 +1936,12 @@ export interface DB {
   scim_connections: ScimConnections;
   scim_membership_blocks: ScimMembershipBlocks;
   scim_provisioning_tokens: ScimProvisioningTokens;
+  scim_team_link_generations: ScimTeamLinkGenerations;
+  scim_team_link_roles: ScimTeamLinkRoles;
+  scim_team_managed_memberships: ScimTeamManagedMemberships;
+  scim_team_mapping_consents: ScimTeamMappingConsents;
+  scim_team_mapping_intents: ScimTeamMappingIntents;
+  scim_team_mappings: ScimTeamMappings;
   scim_token_connections: ScimTokenConnections;
   scim_user_claims: ScimUserClaims;
   scim_users: ScimUsers;
