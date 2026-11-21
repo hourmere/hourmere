@@ -4,14 +4,17 @@ import { fileURLToPath } from 'node:url'
 import { runInNewContext } from 'node:vm'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
+import { parse } from 'yaml'
+import { isRoutingName } from '../../../scripts/routing-forms-names.ts'
 
 const root = process.env.HOURMERE_DOCS_ROOT ?? fileURLToPath(new URL('../../../', import.meta.url))
 const read = (path: string) => readFileSync(join(root, path), 'utf8')
 const siteDocs = 'apps/site/src/content/docs/docs'
-const pages = globSync('**/*.md', { cwd: join(root, siteDocs) }).map((path) => ({
-  path,
-  source: read(`${siteDocs}/${path}`),
-}))
+const pages = globSync('**/*.md', { cwd: join(root, siteDocs) }).map((path) => {
+  const source = read(`${siteDocs}/${path}`)
+  const frontmatter = source.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1] ?? ''
+  return { path, source, draft: parse(frontmatter)?.draft === true }
+})
 const githubDocs = 'https://github.com/hourmere/hourmere/blob/main/docs/'
 const normalize = (source: string) => source.replace(/\s+/g, ' ')
 const prose = (source: string) =>
@@ -638,13 +641,22 @@ describe('complete public documentation', () => {
 
   it('makes every published documentation page reachable from the sidebar', () => {
     const links = sidebarLinks()
-    for (const { path } of pages) {
+    for (const { path, draft } of pages) {
+      if (draft) continue
       const route = path === 'index.md' ? '/docs' : `/docs/${path.replace(/\.md$/, '')}`
       expect(
         links.filter((link) => link === route),
         route,
       ).toHaveLength(1)
     }
+  })
+
+  it('marks every routing guide as a draft', () => {
+    const routingPages = pages.filter(({ path }) => isRoutingName(path))
+    expect(routingPages.map(({ path }) => path)).toEqual(
+      expect.arrayContaining(['routing-forms.md', 'routing-forms-api.md']),
+    )
+    for (const { path, draft } of routingPages) expect(draft, path).toBe(true)
   })
 
   it.each(pages)('links Markdown file references in $path', ({ source }) => {
