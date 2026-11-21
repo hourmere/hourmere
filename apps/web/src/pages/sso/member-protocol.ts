@@ -3,6 +3,45 @@ import { requestError } from '../../api/errors.ts'
 import { safeNextPath } from '../../next-path.ts'
 import { PATHS } from '../../paths.ts'
 
+const signInReturnKey = 'hourmere.sso-sign-in-return'
+const signInLifetimeMs = 10 * 60 * 1000
+
+/** Fetch strips the fragment from Response.url. Keep it in the sign-in tab across the IdP visit. */
+export function rememberOidcReturnFragment(path: string) {
+  try {
+    if (path.includes('#')) {
+      sessionStorage.setItem(signInReturnKey, JSON.stringify([Date.now() + signInLifetimeMs, path]))
+    } else {
+      sessionStorage.removeItem(signInReturnKey)
+    }
+  } catch {
+    // Sign-in can still complete if the browser does not allow session storage.
+  }
+}
+
+/** Restore only the fragment of the destination the server accepted for this sign-in. */
+export function takeOidcReturnFragment(path: string | null): string | null {
+  try {
+    const saved = sessionStorage.getItem(signInReturnKey)
+    sessionStorage.removeItem(signInReturnKey)
+    if (!path || !saved) return path
+    const entry: unknown = JSON.parse(saved)
+    if (!Array.isArray(entry)) return path
+    const [expiresAt, destination] = entry
+    if (
+      typeof expiresAt === 'number' &&
+      expiresAt > Date.now() &&
+      typeof destination === 'string' &&
+      destination.startsWith(`${path}#`) &&
+      destination === safeNextPath(destination)
+    )
+      return destination
+  } catch {
+    // Storage may be disabled or its contents may have changed in another version.
+  }
+  return path
+}
+
 export function oidcAttemptId(value: string | null | undefined): string | null {
   return value &&
     /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)

@@ -21,6 +21,8 @@ import { AccountLanguage, useI18n } from './i18n/runtime.tsx'
 import type { UiText } from './i18n/translate.ts'
 import { msg, registerCatalog } from './i18n/translate.ts'
 import { signInPath } from './next-path.ts'
+import { parseRecoveryNomination } from './pages/sso/recovery-nomination.ts'
+import { PATHS } from './paths.ts'
 import {
   UnsavedChangesProvider,
   useConfirmLeave,
@@ -420,8 +422,12 @@ export function RequireSession() {
     )
   }
   if (state.status === 'signed-out') {
+    const { pathname, search, hash } = location
+    const nomination = pathname === PATHS.settings && parseRecoveryNomination(hash)
     const to =
-      state.reason === 'signed-out' ? '/sign-in' : signInPath(location.pathname + location.search)
+      state.reason === 'signed-out'
+        ? PATHS.signIn
+        : signInPath(pathname + search + (nomination ? hash : ''))
     return <Navigate to={to} replace />
   }
   // Pages keep state for the account and organization they started with (a key list, a key

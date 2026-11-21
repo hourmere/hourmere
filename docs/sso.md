@@ -1191,6 +1191,32 @@ current recovery ownership. Both protocols remain hard-off and the new route ret
 授权不能用于启用即时入组或访问其他团队数据。OIDC 和 SAML 均关闭时，接口返回
 `404 sso_disabled`。
 
+In the web app, a team owner nominates a current owner from **Settings → Team members**.
+The nominee opens the email link in the nominated team, selects **Accept nomination** and
+verifies their Hourmere mailbox within 72 hours. Opening the link alone does not accept it.
+
+For an enforced team, **Settings → Single sign-on → SSO recovery** starts a mailbox
+verification. The resulting grant lets the owner inspect the providers and make one change.
+Save the repair, verify again to test the saved revision, and complete the provider test in
+a new tab. Return to the recovery tab and verify again to enable the tested revision. The
+owner can also spend a grant to stop requiring SSO while keeping the team's admission mode.
+The browser must already be in the affected team and be able to read its current SSO policy
+to start recovery. If the session cannot enter that team or read the policy, this screen
+cannot start recovery.
+Both protocols remain hard-off, so these controls are hidden in production.
+
+在网页应用中，团队所有者可在**设置 → 团队成员**中提名当前所有者。受邀者在对应团队空间
+打开邮件中的链接，选择**接受提名**，并在 72 小时内验证自己的 Hourmere 邮箱。仅打开
+链接不会接受提名。
+
+在强制单点登录的团队中，可从**设置 → 单点登录 → 单点登录恢复**开始验证邮箱。验证后，
+所有者可查看身份提供方并进行一次更改。保存修复后，请重新验证邮箱，测试已保存的版本，
+并在新标签页完成测试。回到恢复页面，再次验证邮箱后启用通过测试的版本。所有者也可使用
+一次授权关闭强制单点登录，保留团队原有的入组方式。两种协议目前都在代码中关闭，生产环境
+不会显示这些操作。
+开始恢复前，浏览器会话须已进入受影响的团队，且能够读取当前的单点登录策略。无法读取策略
+或进入团队的会话无法从此页面启动恢复。
+
 `bindSsoDelegation` takes `{credentialKind, credentialId, expectedTrustGeneration,
 proofAttemptId?}`, verifies that the current team member owns the credential and
 that it belongs to the current team, and returns `201` with `{id, expiresAt}`.

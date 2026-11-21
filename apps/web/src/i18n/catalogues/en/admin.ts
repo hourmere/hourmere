@@ -2513,6 +2513,8 @@ export const admin = {
   'Remove time {time}': 'Remove time {time}',
   // Workflow audit
   Workflows: 'Workflows',
+  'Check provider test result': 'Check provider test result',
+  'Provider test status is unavailable.': 'Provider test status is unavailable.',
 
   // SSO recovery enrollment
   'This team must retain at least one recovery owner while SSO is enforced.':
@@ -2966,4 +2968,51 @@ export const admin = {
     'This SSO link request is unavailable. Start again.',
   'Verify your Hourmere email before unlinking this sign-in method.':
     'Verify your Hourmere email before unlinking this sign-in method.',
+  // SSO recovery
+  'SSO recovery': 'SSO recovery',
+  'Loading SSO recovery…': 'Loading SSO recovery…',
+  'Could not load SSO recovery.': 'Could not load SSO recovery.',
+  'SSO recovery is unavailable in this team.': 'SSO recovery is unavailable in this team.',
+  'Recover access to your team': 'Recover access to your team',
+  'Recovery owners can verify by email to inspect SSO settings, repair a provider or stop requiring SSO. Each change needs a new verification.':
+    'Recovery owners can verify by email to inspect SSO settings, repair a provider or stop requiring SSO. Each change needs a new verification.',
+  'Start recovery': 'Start recovery',
+  'Verify again to continue recovery': 'Verify again to continue recovery',
+  'Could not start SSO recovery. Try again.': 'Could not start SSO recovery. Try again.',
+  'Recovery verification expired. Verify by email again to continue.':
+    'Recovery verification expired. Verify by email again to continue.',
+  'Could not complete this recovery action. Verify again before retrying.':
+    'Could not complete this recovery action. Verify again before retrying.',
+  'Repair identity providers': 'Repair identity providers',
+  'Save the repair, test the current revision and enable it. Verify by email again before each subsequent change.':
+    'Save the repair, test the current revision and enable it. Verify by email again before each subsequent change.',
+  'Provider saved. Verify again to test the current revision.':
+    'Provider saved. Verify again to test the current revision.',
+  'Finish the provider test in the new tab, then return here to continue.':
+    'Finish the provider test in the new tab, then return here to continue.',
+  'The current provider revision is enabled.': 'The current provider revision is enabled.',
+  'Single sign-on is now optional for this team.': 'Single sign-on is now optional for this team.',
+
+  // SSO recovery enrollment
+  'Nominate {name} for SSO recovery': 'Nominate {name} for SSO recovery',
+  'Nominate a recovery owner': 'Nominate a recovery owner',
+  'Nominate {name} to become a recovery owner.': 'Nominate {name} to become a recovery owner.',
+  'The nominee has 72 hours to accept using their Hourmere email.':
+    'The nominee has 72 hours to accept using their Hourmere email.',
+  'Send nomination': 'Send nomination',
+  'Recovery nomination sent.': 'Recovery nomination sent.',
+  'The nomination expires on {date}.': 'The nomination expires on {date}.',
+  'Accept recovery nomination': 'Accept recovery nomination',
+  'Accept nomination': 'Accept nomination',
+  'Use your Hourmere email to accept the nomination within 72 hours.':
+    'Use your Hourmere email to accept the nomination within 72 hours.',
+  'You are now a recovery owner for this team.': 'You are now a recovery owner for this team.',
+  'Switch to the nominated team, then reopen the link from your email.':
+    'Switch to the nominated team, then reopen the link from your email.',
+  'Loading recovery nomination…': 'Loading recovery nomination…',
+  'Could not load the recovery nomination.': 'Could not load the recovery nomination.',
+  'This recovery nomination is unavailable. Ask a team owner to send a new one.':
+    'This recovery nomination is unavailable. Ask a team owner to send a new one.',
+  'Could not complete the recovery nomination. Try again.':
+    'Could not complete the recovery nomination. Try again.',
 } as const
