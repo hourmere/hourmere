@@ -133,6 +133,19 @@ self-hosted instances, and no environment setting enables it yet. Older servers 
 omit these fields; clients should treat absence as unknown, keep SSO entry points hidden and
 tolerate unknown response fields. No SSO operations are exposed in this release.
 
+`GET /api/v1/instance` also reports whether routing forms are effectively enabled
+as `routingFormsEnabled`. Routing is off by default. A self-hosted operator can set
+`ROUTING_FORMS_ENABLED=true` and restart the server. A legacy personal `route` handle
+can still keep the effective state off.
+
+## Use routing forms
+
+While routing is off, the routing endpoints remain in OpenAPI and return
+`404 routing_forms_disabled` after transport checks. When routing is on, invitees can
+read a published form and submit answers anonymously. A successful submission can
+show a message or issue a private `routeToken`. Send the token in a JSON body to
+resolve the selected event, find slots or book. See [routing forms REST examples](/docs/routing-forms-api).
+
 ## Create and manage event types
 
 Creation requires `slug`, `title` and `durationMinutes`. The web form's suggested booking

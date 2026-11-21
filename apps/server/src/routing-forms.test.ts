@@ -1,8 +1,5 @@
-// The routing-forms hard-off guard (docs/routing-forms.md, Rollout gating and step a1b): the
-// code constant in server composition, the shared REST guard and its order, the MCP
-// registration helper, the effective state at /instance, and that no environment setting
-// changes any of it. Every route and tool named `test-only-routing…` / `test_only_routing…`
-// is defined in this file only; production composition never registers one.
+// Routing REST and MCP guards, instance capability and the production entry point.
+// The test-only routing routes and tools below are never registered by production.
 import { spawn } from 'node:child_process'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
@@ -20,7 +17,6 @@ import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { callTool } from '../../../tools/cli/src/client.ts'
 import { createApp } from './app.ts'
 import { routeBodyLimit } from './body-limit.ts'
-import { loadConfig } from './config.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
 import { defineTool, type Tool } from './mcp/tools.ts'
 import { authenticated, json, type RouteModule } from './openapi.ts'
@@ -54,7 +50,7 @@ function nativeModule<T>(file: string): Promise<T> {
 
 afterEach(() => vi.unstubAllEnvs())
 
-// The operator setting e4c will introduce, and the option name, in the environment.
+// A route or tool must use its injected effective state, not read the environment directly.
 function stubRoutingEnvironment() {
   for (const name of ['ROUTING_FORMS_ENABLED', 'routingFormsEnabled']) vi.stubEnv(name, 'true')
 }
@@ -844,21 +840,9 @@ async function verifyInstance(
   }
 }
 
-describe('the hard-off constant', () => {
-  it('keeps production composition off and accepts only internal test injection', async () => {
+describe('routing discovery', () => {
+  it('defaults to off and accepts only the injected effective state', async () => {
     await verifyInstance()
-  })
-
-  it('detects flipping the production constant with real instance responses', async () => {
-    const control = await sourceCopy<typeof server>('./server.ts')
-    await verifyInstance(control.productRoutes)
-    const mutant = await sourceCopy<typeof server>('./server.ts', [
-      'const routingFormsEnabled = false',
-      'const routingFormsEnabled = true',
-    ])
-    await expect(verifyInstance(mutant.productRoutes)).rejects.toMatchObject({
-      name: 'AssertionError',
-    })
   })
 
   it('detects direct process environment reads in instance responses', async () => {
@@ -889,52 +873,6 @@ describe('the hard-off constant', () => {
       name: 'AssertionError',
     })
   })
-
-  it('has no configuration setting and keeps the production app options off', async () => {
-    const databaseUrl = 'postgres://routing-env@127.0.0.1:9/routing-env'
-    const config = loadConfig({
-      DATABASE_URL: databaseUrl,
-      BETTER_AUTH_SECRET: 'synthetic-routing-config-secret-at-least-32-characters',
-      PUBLIC_URL: 'http://localhost',
-      ROUTING_FORMS_ENABLED: 'true',
-      routingFormsEnabled: 'true',
-    })
-    expect(Object.keys(config).filter((key) => /routing/i.test(key))).toEqual([])
-    // Assembling the app touches no database; the pool is still closed explicitly.
-    const db = createDb(createPool(databaseUrl))
-    const unavailable = async (): Promise<never> => {
-      throw new Error('Route registration must not call a collaborator')
-    }
-    try {
-      const app = createApp(
-        server.productionAppOptions({
-          config,
-          db,
-          auth: { handler: unavailable },
-          resolveCaller: unavailable,
-          resolveMcpOAuth: unavailable,
-          checkDb: unavailable,
-          waitlist: { verify: unavailable, remove: unavailable },
-          invitationMailLimits: { secret: 'synthetic-routing-test-only-secret' },
-          webhookSettings: { enabled: config.WEBHOOKS_ENABLED },
-          webhookQueue: { enqueue: unavailable },
-          notify: unavailable,
-          notifyAttendeeNoShow: unavailable,
-          googleCalendar: undefined,
-          microsoftCalendar: undefined,
-          zoomConference: undefined,
-          enqueueCalendarSync: unavailable,
-          enqueueCalendarWritebackRecovery: unavailable,
-          mailboxProofQueue: { enqueue: unavailable },
-        }),
-      )
-      const response = await app.request('/api/v1/instance')
-      expect(response.status).toBe(200)
-      expect(await response.json()).toHaveProperty('routingFormsEnabled', false)
-    } finally {
-      await db.destroy()
-    }
-  })
 })
 
 // Evaluates the production module graph afresh with the setting already in the
@@ -953,7 +891,7 @@ async function freshProductionModules() {
 }
 
 describe('the environment', () => {
-  it('changes nothing when set before the server modules are evaluated', async () => {
+  it('does not override injected state when set before the server modules are evaluated', async () => {
     const fresh = await freshProductionModules()
     // One fresh graph for the guard, the app's DomainError handler and the MCP registry.
     await verifyInstance(fresh.server.productRoutes, fresh.app.createApp)
@@ -976,39 +914,8 @@ describe('the environment', () => {
   }, 60_000)
 })
 
-describe.skipIf(!process.env.DATABASE_URL)('production routing hard-off startup', () => {
-  it('ignores the environment, read at module scope or at startup, and serves no test route', async () => {
-    const { server: freshServer } = await freshProductionModules()
-    const owned = await createTestDatabase(process.env.DATABASE_URL as string, undefined, {
-      tag: 'routing_off',
-    })
-    try {
-      const running = await freshServer.startServer({
-        DATABASE_URL: owned.url,
-        BETTER_AUTH_SECRET: randomBytes(32).toString('base64url'),
-        PUBLIC_URL: 'http://localhost',
-        PORT: '0',
-        HOURMERE_ROLE: 'web',
-        ROUTING_FORMS_ENABLED: 'true',
-        routingFormsEnabled: 'true',
-      })
-      try {
-        const origin = `http://127.0.0.1:${running.port}`
-        const response = await fetch(`${origin}/api/v1/instance`)
-        expect(response.status).toBe(200)
-        expect(await response.json()).toHaveProperty('routingFormsEnabled', false)
-        const unknown = await fetch(`${origin}/api/v1/test-only-routing/known`)
-        expect(unknown.status).toBe(404)
-        expect(await unknown.json()).toEqual({ error: 'not_found' })
-      } finally {
-        await running.close()
-      }
-    } finally {
-      await owned.drop()
-    }
-  }, 60_000)
-
-  it('starts the real entry point with the setting on and still reports routing off', async () => {
+describe.skipIf(!process.env.DATABASE_URL)('production entry point', () => {
+  it('starts the real entry point with routing enabled', async () => {
     // index.ts is the composition root production runs (`npm start`, the Docker CMD). Only a
     // child process executes it, so module-scope reads and any override it passes into
     // startServer are observed exactly as production would observe them.
@@ -1030,7 +937,7 @@ describe.skipIf(!process.env.DATABASE_URL)('production routing hard-off startup'
       HOURMERE_ROLE: 'web',
       SIGNUP: 'closed',
       ROUTING_FORMS_ENABLED: 'true',
-      routingFormsEnabled: 'true',
+      routingFormsEnabled: 'false',
     })
     const child = spawn(process.execPath, [fileURLToPath(new URL('./index.ts', import.meta.url))], {
       cwd: fileURLToPath(new URL('../../../', import.meta.url)),
@@ -1080,7 +987,7 @@ describe.skipIf(!process.env.DATABASE_URL)('production routing hard-off startup'
       signal: AbortSignal.timeout(10_000),
     })
     expect(response.status).toBe(200)
-    expect(await response.json()).toHaveProperty('routingFormsEnabled', false)
+    expect(await response.json()).toHaveProperty('routingFormsEnabled', true)
     const unknown = await fetch(`${origin}/api/v1/test-only-routing/known`, {
       signal: AbortSignal.timeout(10_000),
     })

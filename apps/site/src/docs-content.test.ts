@@ -651,12 +651,16 @@ describe('complete public documentation', () => {
     }
   })
 
-  it('marks every routing guide as a draft', () => {
+  it('publishes the routing guides with instructions for enabling routing', () => {
     const routingPages = pages.filter(({ path }) => isRoutingName(path))
     expect(routingPages.map(({ path }) => path)).toEqual(
       expect.arrayContaining(['routing-forms.md', 'routing-forms-api.md']),
     )
-    for (const { path, draft } of routingPages) expect(draft, path).toBe(true)
+    for (const { path, source, draft } of routingPages) {
+      expect(draft, path).toBe(false)
+      expect(source, path).toContain('Routing forms are off by default.')
+      expect(normalize(source), path).toMatch(/`ROUTING_FORMS_ENABLED=true`.*?restart the server/)
+    }
   })
 
   it.each(pages)('links Markdown file references in $path', ({ source }) => {

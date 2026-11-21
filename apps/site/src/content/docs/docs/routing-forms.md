@@ -1,7 +1,6 @@
 ---
 title: Routing forms
 description: Publish a form that sends invitees to an event or shows a message based on their answers.
-draft: true
 ---
 
 A routing form asks questions before booking. It uses the answers to offer a booking for
@@ -10,13 +9,12 @@ Current team owners and admins manage forms in their team space.
 
 ## Availability and the operator setting
 
-Routing forms are hard-off in releases that precede the operator setting. Setting
-`ROUTING_FORMS_ENABLED` in those releases has no effect. After the setting ships,
-set `ROUTING_FORMS_ENABLED=true` on a self-hosted instance and restart the server to
-enable routing. When the setting first becomes available, an unset or empty value
-defaults to `false`. The setting accepts `true` or `false`. Other values fail startup.
-For Docker Compose, set it in your deployment environment or deployment `.env` file,
-then recreate the application service with the new configuration.
+Routing forms are off by default. Set `ROUTING_FORMS_ENABLED=true` in the server
+environment and restart the server to enable routing. An unset or empty value defaults
+to `false`. The setting accepts `true` or `false`. Other values fail startup.
+For Docker Compose, set it in your deployment environment or deployment `.env` file
+and run `./scripts/compose-up.sh -d --wait` to apply the new configuration.
+See the [configuration reference](/docs/configuration#server-and-database).
 
 Self-hosted Hourmere and Hourmere Cloud have the same routing features and limits, with no
 paid tier required. Hourmere operates the setting on Cloud. On either deployment,
@@ -25,8 +23,8 @@ steps below when it is `true`.
 
 ### Resolve a legacy handle collision
 
-In releases with the operator setting, a stored personal handle of `route` in any case
-keeps routing off and triggers a startup warning. Existing booking pages under that
+When the setting is `true`, a stored personal handle of `route` in any case keeps
+routing off and triggers a startup warning. Existing booking pages under that
 handle keep working until the owner renames it. Team slugs live under `/team/` and can
 keep the name `route`.
 
@@ -37,8 +35,8 @@ booking links and embeds to use the new handle. Restart the server and check
 
 ### Turn routing off
 
-In a release with the setting, set `ROUTING_FORMS_ENABLED=false` and restart the server
-or recreate the Compose service.
+Set `ROUTING_FORMS_ENABLED=false` and restart the server or apply the new Compose
+configuration.
 Forms, drafts, published versions and enabled states are kept. The app hides **Routing
 forms** and the public form links stop serving forms. Pending continuation tokens keep
 their original expiry and cannot be used while routing is off. An unexpired token can

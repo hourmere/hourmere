@@ -73,6 +73,12 @@ visible attendee details, answers or ready meeting links. Normal booking actions
 notifications and trigger configured integrations.
 
 Routing operations return `routing_forms_disabled` until an operator enables routing.
+On self-hosted Hourmere, routing is off by default. Set `ROUTING_FORMS_ENABLED=true`
+and restart the server to enable it. While routing is off, `tools/list` omits the
+eleven dedicated tools below, and direct calls to them return `routing_forms_disabled`.
+When routing is on, discovery still applies the credential's permissions.
+See [routing forms for agents](/docs/routing-forms-api) for submission, private handoff
+and booking examples.
 
 <!-- api-key-scope-table:start -->
 
