@@ -747,11 +747,13 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User reads over HTTP', () => {
     }
     for (const resource of [
       `Users/${own.alice}?attributes=badge`,
-      `Users/${randomUUID()}?attributes=badge`,
       'Users?excludedAttributes=members',
       `Users?attributes=${core}:schemas`,
     ])
       expect(await get(resource), resource).toMatchObject({ status: 400, body: invalidValue })
+    expect(await get(`Users/${randomUUID()}?attributes=badge`)).toEqual(
+      await get(`Users/${own.gone}?attributes=badge`),
+    )
     expect(await get(`Users?${query({ filter: 'groups eq "x"' })}`)).toMatchObject({
       status: 400,
       body: {

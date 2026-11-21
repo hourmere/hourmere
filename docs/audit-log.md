@@ -79,7 +79,7 @@ allow-lists and value checks.
 | Organization | `organization.created`, `organization.updated`, `organization.branding_updated` |
 | API keys | `api_key.created`, `api_key.updated`, `api_key.revoked`, `api_key.reenabled` |
 | SCIM provisioning tokens | `scim_token.created`, `scim_token.rotated`, `scim_token.revoked` |
-| SCIM Users | `scim_user.created`, `scim_user.claimed`, `scim_user.updated`, `scim_user.deactivated`, `scim_user.credentials_revoked`, `scim_user.reactivated` |
+| SCIM Users | `scim_user.created`, `scim_user.claimed`, `scim_user.updated`, `scim_user.deactivated`, `scim_user.credentials_revoked`, `scim_user.reactivated`, `scim_user.retired` |
 | Webhooks | `webhook.created`, `webhook.updated`, `webhook.paused`, `webhook.resumed`, `webhook.deleted`, `webhook.secret_rotated` |
 | Slack destinations | `slack_destination.created`, `slack_destination.updated`, `slack_destination.paused`, `slack_destination.resumed`, `slack_destination.tested`, `slack_destination.deleted` |
 | OAuth | `oauth.client_registered`, `oauth.consent_granted`, `oauth.token_revoked` |
@@ -200,6 +200,12 @@ the provisioning token as actor. Suspension of a linked account also records
 `scim_user.credentials_revoked`. The events store the resource ID and empty details.
 They commit with the state change, the team suspension or release, and any credential
 revocations. An identical retry creates no additional lifecycle event.
+
+SCIM User retirement (`DELETE /Users/{id}`, available through the resource test flag)
+records `scim_user.retired` with the provisioning token as actor and empty details. It
+commits with the resource tombstone, claim invalidation, any credential revocation and
+any pending invitation cancellation. The corresponding revocation and cancellation audit
+events use the same actor. A refused deletion or a retry of a retired ID writes no events.
 
 An event-type update records visibility and host changes without copying the
 configuration. Target IDs identify the affected entity by its stored ID, whatever UUID
