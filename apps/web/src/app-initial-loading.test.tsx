@@ -29,6 +29,7 @@ vi.mock('./lazy-pages.tsx', () => {
     'EventTypesPage',
     'HostMeetingPollRoute',
     'HostPage',
+    'MailboxProofPage',
     'ManageBookingPage',
     'McpAuthorizePage',
     'MeetingPollCreatePage',
@@ -76,6 +77,8 @@ describe('before route chunks are available', () => {
 
   it.each([
     '/ada',
+    '/app/mailbox-proof',
+    '/app/mailbox-proof/',
     '/book/pAtH_0123456789abcdefghijklmnopqrstuvwxyzAB',
     '/poll',
     '/poll/voter',

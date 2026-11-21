@@ -22,6 +22,8 @@ import { useUnsavedChanges } from '../unsaved-changes.tsx'
 import { BrandSettings } from './BrandSettings.tsx'
 import { ProvisioningTokens } from './ProvisioningTokens.tsx'
 import { SlackIntegrations } from './SlackIntegrations.tsx'
+import { oidcAttemptId } from './sso/member-protocol.ts'
+import { SsoMemberSettings } from './sso/SsoMemberSettings.tsx'
 import { TeamMembers } from './TeamMembers.tsx'
 
 export function SettingsPage() {
@@ -33,6 +35,13 @@ export function SettingsPage() {
   const { refresh, confirmReload } = useSession()
   const location = useLocation()
   const navigate = useNavigate()
+  // RequireSession resets this state when the account or active space changes.
+  const [linkCallback, setLinkCallback] = useState<string | null | undefined>()
+  const fragment = new URLSearchParams(location.hash.slice(1))
+  const isLinkCallback = fragment.has('sso-link')
+  const callbackAttemptId =
+    isLinkCallback && fragment.size === 1 ? oidcAttemptId(fragment.get('sso-link')) : null
+  const dismissLinkCallback = useCallback(() => setLinkCallback(undefined), [])
   // Keep the creation response through a failed read in this view. Consume history state
   // afterwards so reloading cannot replay an old membership as current confirmation.
   const [createdMember] = useState(() => {
@@ -46,19 +55,24 @@ export function SettingsPage() {
       : null
   })
   useEffect(() => {
-    if (
+    const hasCreatedMember =
       location.state &&
       typeof location.state === 'object' &&
       Object.hasOwn(location.state, 'createdMember')
-    ) {
-      const state = { ...location.state }
-      delete state.createdMember
-      navigate(
-        { pathname: location.pathname, search: location.search, hash: location.hash },
-        { replace: true, state: Object.keys(state).length ? state : null },
-      )
-    }
-  }, [location, navigate])
+    if (!isLinkCallback && !hasCreatedMember) return
+    // Keep the opaque completion handle in memory, never in history state.
+    if (isLinkCallback) setLinkCallback(callbackAttemptId)
+    const state = hasCreatedMember ? { ...location.state } : location.state
+    if (hasCreatedMember) delete state.createdMember
+    navigate(
+      {
+        pathname: location.pathname,
+        search: location.search,
+        hash: isLinkCallback ? '' : location.hash,
+      },
+      { replace: true, state: hasCreatedMember && !Object.keys(state).length ? null : state },
+    )
+  }, [callbackAttemptId, isLinkCallback, location, navigate])
   const [profile, reload] = useLoad(loadProfile)
   const organizationId = me.organization.id
   const userId = me.user.id
@@ -134,6 +148,12 @@ export function SettingsPage() {
           organizationId={organizationId}
           timeZone={profile.status === 'ready' ? profile.data?.timeZone : undefined}
           role={role.status === 'ready' ? role.data : null}
+        />
+      )}
+      {!personal && me.principal.kind === 'session' && shell?.ssoOidcEnabled === true && (
+        <SsoMemberSettings
+          callbackAttemptId={isLinkCallback ? undefined : linkCallback}
+          onDismissCallback={dismissLinkCallback}
         />
       )}
       {shell?.showSsoSettings && (

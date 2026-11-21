@@ -591,4 +591,16 @@ export const common = {
     'Öffnen Sie das ursprüngliche Formular, um einen neuen Buchungslink anzufordern.',
   // Invitee routing form answers
   'Your routing form answers': 'Ihre Antworten im Weiterleitungsformular',
+  // Team member single sign-on
+  'Sign in with single sign-on': 'Mit Single Sign-on anmelden',
+  'Opening single sign-on…': 'Single Sign-on wird geöffnet…',
+  'Single sign-on is unavailable. Try again or use another sign-in method.':
+    'Single Sign-on ist nicht verfügbar. Versuchen Sie es erneut oder wählen Sie eine andere Anmeldemethode.',
+  'Verify your email': 'E-Mail-Adresse bestätigen',
+  'To continue, sign in with your usual method or use a current team invitation.':
+    'Melden Sie sich mit Ihrer üblichen Methode an oder nutzen Sie eine gültige Teameinladung, um fortzufahren.',
+  'Return to the tab where you requested verification to continue.':
+    'Kehren Sie zum Tab zurück, in dem Sie die Bestätigung angefordert haben.',
+  'Copy the link from your email and paste it into the tab where you requested verification.':
+    'Kopieren Sie den Link aus Ihrer E-Mail und fügen Sie ihn in den Tab ein, in dem Sie die Bestätigung angefordert haben.',
 } as const

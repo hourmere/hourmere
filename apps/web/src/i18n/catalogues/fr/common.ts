@@ -584,4 +584,16 @@ export const common = {
     'Rouvrez le formulaire d’origine pour demander un nouveau lien de réservation.',
   // Invitee routing form answers
   'Your routing form answers': 'Vos réponses au formulaire de routage',
+  // Team member single sign-on
+  'Sign in with single sign-on': 'Se connecter avec l’authentification unique',
+  'Opening single sign-on…': 'Ouverture de l’authentification unique…',
+  'Single sign-on is unavailable. Try again or use another sign-in method.':
+    'L’authentification unique est indisponible. Réessayez ou utilisez une autre méthode de connexion.',
+  'Verify your email': 'Vérifiez votre adresse e-mail',
+  'To continue, sign in with your usual method or use a current team invitation.':
+    'Pour continuer, connectez-vous comme d’habitude ou utilisez une invitation d’équipe valide.',
+  'Return to the tab where you requested verification to continue.':
+    'Pour continuer, revenez à l’onglet dans lequel vous avez demandé la vérification.',
+  'Copy the link from your email and paste it into the tab where you requested verification.':
+    'Copiez le lien de votre e-mail et collez-le dans l’onglet où vous avez demandé la vérification.',
 } as const

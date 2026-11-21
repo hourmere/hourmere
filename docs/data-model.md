@@ -1830,12 +1830,14 @@ The phases within that organization boundary are:
   invitation. It locks no member row: the organization lock excludes membership changes while it
   reads the earliest owner who invites. When the address's pending invitation expires during
   one of those waits, it rolls back to the savepoint and runs the invitation service once more.
-- SCIM User replacement and PATCH take the organization update lock, the provisioning token key
-  share lock, and the live resource update lock. They read the linked account's current role and
-  local blockers under that organization lock, which serializes with role changes and departure.
-  The organization lock stays held through any claim invalidation, suspension or reactivation and
-  the audit write, so invitation acceptance cannot hold a claim lock while competing with that
-  replacement for the resource.
+- SCIM User replacement, PATCH and retirement take the organization update lock, the
+  provisioning token key share lock, and the live resource update lock. They read the linked
+  account's current role under the organization lock, which serializes with role changes and
+  departure. Reactivation reads local blockers under that lock too. The lock stays held through
+  claim invalidation, access changes and the audit write, so invitation acceptance cannot hold
+  a claim lock while competing with the SCIM writer for the resource. During retirement, this
+  includes credential revocation, any pending SCIM invitation cancellation and the resource
+  tombstone.
 - The internal SCIM suspension write holds the organization update lock through the
   blocker insert and bulk deletion of active-team sessions and remaining team browser
   proofs for that account. It takes the `hourmere.scim-session-revocation:<userId>`

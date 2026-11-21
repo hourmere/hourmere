@@ -2998,4 +2998,27 @@ export const admin = {
 
   // Booking CSV routing columns
   'Include routing form answers': 'Include routing form answers',
+  // Team member single sign-on
+  'Your team sign-in': 'Your team sign-in',
+  'Manage how you sign in to this team. You can still use your usual sign-in for your personal space.':
+    'Manage how you sign in to this team. You can still use your usual sign-in for your personal space.',
+  'Your team sign-in settings are unavailable.': 'Your team sign-in settings are unavailable.',
+  'No team sign-in methods are available.': 'No team sign-in methods are available.',
+  'Identity provider ({id})': 'Identity provider ({id})',
+  'Link account ({name})': 'Link account ({name})',
+  'Unlink account ({name})': 'Unlink account ({name})',
+  'Link account': 'Link account',
+  'Unlink account': 'Unlink account',
+  'Link this sign-in method?': 'Link this sign-in method?',
+  'Unlink this sign-in method?': 'Unlink this sign-in method?',
+  'Sign-in method linked.': 'Sign-in method linked.',
+  'Sign-in method unlinked.': 'Sign-in method unlinked.',
+  'Confirm your SSO link': 'Confirm your SSO link',
+  'Confirm link': 'Confirm link',
+  'Link {name} to your Hourmere account for this team?':
+    'Link {name} to your Hourmere account for this team?',
+  'This SSO link request is unavailable. Start again.':
+    'This SSO link request is unavailable. Start again.',
+  'Verify your Hourmere email before unlinking this sign-in method.':
+    'Verify your Hourmere email before unlinking this sign-in method.',
 } as const

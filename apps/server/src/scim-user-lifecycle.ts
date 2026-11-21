@@ -15,7 +15,6 @@ interface LifecycleEntry {
   organization_id: string
   connection_id: string
   linked_user_id: string | null
-  active: boolean
 }
 
 const locallyBlocked = () =>
@@ -25,35 +24,47 @@ const locallyBlocked = () =>
     'mutability',
   )
 
-/** The caller holds the organization update lock and the live resource row lock. */
-export async function applyScimUserLifecycle(
-  trx: Transaction<Database>,
-  entry: LifecycleEntry,
-  { active, deactivationRequested, roleWrite }: LifecycleWrite,
-  actor: { type: 'scim_token'; id: string },
-) {
-  const userId = entry.linked_user_id
-  if (userId === null || (active === undefined && !roleWrite)) return
-  const organizationId = entry.organization_id
-  // Inspect the account's current membership, even when the original membership link
-  // was cleared by removal. Local role writes already serialize on the organization row.
-  const memberships = await trx
+// Inspect the account's current membership even if removal cleared the original link.
+// Local role writes already serialize on the organization row.
+function linkedMemberships(trx: Transaction<Database>, entry: LifecycleEntry, userId: string) {
+  return trx
     .selectFrom('auth.user as account')
     .leftJoin('auth.member as member', (join) =>
       join
         .onRef('member.userId', '=', 'account.id')
-        .on('member.organizationId', '=', organizationId),
+        .on('member.organizationId', '=', entry.organization_id),
     )
     .select(['member.id as memberId', 'member.role', 'account.email', 'account.emailVerified'])
     .where('account.id', '=', userId)
     .execute()
-  if (
-    (deactivationRequested || roleWrite) &&
-    memberships.some(({ role }) => teamRoles(role).some((r) => r === 'owner' || r === 'admin'))
-  )
-    throw immutableScimPrivileges()
+}
 
-  if (active === true) {
+function rejectPrivilegedMembership(memberships: { role: string | null }[]) {
+  if (memberships.some(({ role }) => teamRoles(role).some((r) => r === 'owner' || r === 'admin')))
+    throw immutableScimPrivileges()
+}
+
+/** The caller holds the organization update lock and the live resource row lock. */
+export async function assertScimUserCanRetire(trx: Transaction<Database>, entry: LifecycleEntry) {
+  if (entry.linked_user_id !== null)
+    rejectPrivilegedMembership(await linkedMemberships(trx, entry, entry.linked_user_id))
+}
+
+/** The caller holds the organization update lock and the live resource row lock. */
+export async function applyScimUserLifecycle(
+  trx: Transaction<Database>,
+  entry: LifecycleEntry & { active: boolean },
+  { active, deactivationRequested, roleWrite }: LifecycleWrite,
+  actor: { type: 'scim_token'; id: string },
+) {
+  const userId = entry.linked_user_id
+  const reactivating = active === true && !entry.active
+  if (userId === null || (!reactivating && !deactivationRequested && !roleWrite)) return
+  const organizationId = entry.organization_id
+  const memberships = await linkedMemberships(trx, entry, userId)
+  if (deactivationRequested || roleWrite) rejectPrivilegedMembership(memberships)
+
+  if (reactivating) {
     // The account link is the proof. The provisioned work address is only profile data.
     const account = memberships[0]
     const mailbox = account?.emailVerified ? account.email.trim().toLowerCase() : null
@@ -66,19 +77,17 @@ export async function applyScimUserLifecycle(
       .where((eb) => eb.or([eb('user_id', '=', userId), eb('identity_email', '=', mailbox)]))
       .executeTakeFirst()
     if (localBlock || !memberships.some(({ memberId }) => memberId !== null)) throw locallyBlocked()
-    if (!entry.active) {
-      await trx
-        .updateTable('scim_membership_blocks')
-        .set({ cleared_at: sql<Date>`clock_timestamp()` })
-        .where('organization_id', '=', organizationId)
-        .where('connection_id', '=', entry.connection_id)
-        .where('scim_user_id', '=', entry.id)
-        .where('user_id', '=', userId)
-        .where('source', '=', 'scim')
-        .where('kind', '=', 'suspension')
-        .where('cleared_at', 'is', null)
-        .execute()
-    }
+    await trx
+      .updateTable('scim_membership_blocks')
+      .set({ cleared_at: sql<Date>`clock_timestamp()` })
+      .where('organization_id', '=', organizationId)
+      .where('connection_id', '=', entry.connection_id)
+      .where('scim_user_id', '=', entry.id)
+      .where('user_id', '=', userId)
+      .where('source', '=', 'scim')
+      .where('kind', '=', 'suspension')
+      .where('cleared_at', 'is', null)
+      .execute()
   } else if (active === false && entry.active) {
     await suspendScimMembership(
       trx,

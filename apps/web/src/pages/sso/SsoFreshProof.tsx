@@ -5,43 +5,12 @@ import { Field } from '../../components/forms.tsx'
 import { useI18n } from '../../i18n/runtime.tsx'
 import type { MessageKey } from '../../i18n/translate.ts'
 import { PATHS } from '../../paths.ts'
+import { mailboxToken, openMailboxProofChannel } from './member-protocol.ts'
 import { type SsoProofChallenge, ssoAuthorizationUrl } from './setup.ts'
 
 const unavailable: MessageKey = 'Identity verification is unavailable.'
 const startError: MessageKey = 'Could not start identity verification. Try again.'
 const linkError: MessageKey = 'Could not verify that link. Check the link or request a new email.'
-
-function parseAbsoluteUrl(value: string): URL | null {
-  try {
-    return new URL(value)
-  } catch {
-    return null
-  }
-}
-
-function mailboxToken(link: string, attemptId: string) {
-  const url = parseAbsoluteUrl(link.trim())
-  if (
-    !url ||
-    url.origin !== window.location.origin ||
-    url.pathname !== '/app/mailbox-proof' ||
-    url.search ||
-    url.username ||
-    url.password
-  )
-    return null
-  const params = new URLSearchParams(url.hash.slice(1))
-  const attempts = params.getAll('attempt')
-  const tokens = params.getAll('token')
-  const token = tokens[0]
-  return attempts.length === 1 &&
-    attempts[0] === attemptId &&
-    tokens.length === 1 &&
-    token &&
-    token.length <= 256
-    ? token
-    : null
-}
 
 export function SsoFreshProof({
   organizationId,
@@ -86,6 +55,7 @@ export function SsoFreshProof({
   const canRetry =
     canVerify && (!mailboxRequired || mailbox === 'proven') && (!stepUpRequired || !!stepUpUrl)
   const stepUpPending = stepUpRequired && submittedChallenge && submittedChallenge !== challenge
+  const { attemptId } = challenge
 
   useEffect(() => heading.current?.focus(), [])
   useEffect(() => {
@@ -105,6 +75,17 @@ export function SsoFreshProof({
     if (stepUpUrl) authorizationLink.current?.focus()
   }, [stepUpUrl])
   useLayoutEffect(() => () => activeRequest.current?.abort(), [])
+  useEffect(() => {
+    if (!mailboxRequired || expired) return
+    const channel = openMailboxProofChannel(attemptId)
+    if (!channel) return
+    channel.onmessage = ({ data }) => {
+      if (data !== 'proven') return
+      setError(null)
+      setMailbox('proven')
+    }
+    return () => channel.close()
+  }, [attemptId, expired, mailboxRequired])
   useEffect(() => {
     const remaining = Date.parse(challenge.expiresAt) - Date.now()
     const timer = window.setTimeout(
@@ -131,7 +112,6 @@ export function SsoFreshProof({
     }
   }
 
-  const { attemptId } = challenge
   const headers = { 'X-Expected-Organization-Id': organizationId }
   const sendEmail = () =>
     request(async (signal) => {
@@ -139,7 +119,7 @@ export function SsoFreshProof({
         api.POST('/api/auth/sso/mailbox-proof/send', { body: { attemptId }, headers, signal }),
       )
       if (status !== 'queued') throw new Error('Invalid mailbox send response')
-      if (!signal.aborted) setMailbox('queued')
+      if (!signal.aborted) setMailbox((state) => (state === 'proven' ? state : 'queued'))
     }, startError)
 
   function verifyEmail(event: FormEvent<HTMLFormElement>) {

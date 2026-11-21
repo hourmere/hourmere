@@ -2862,4 +2862,26 @@ export const admin = {
 
   // Booking CSV routing columns
   'Include routing form answers': '包含分流表单答案',
+  // Team member single sign-on
+  'Your team sign-in': '你的团队登录方式',
+  'Manage how you sign in to this team. You can still use your usual sign-in for your personal space.':
+    '在这里管理此团队的登录方式。你仍可用原来的方式登录个人空间。',
+  'Your team sign-in settings are unavailable.': '当前无法查看你的团队登录设置。',
+  'No team sign-in methods are available.': '此团队暂无可用的登录方式。',
+  'Identity provider ({id})': '身份提供方（{id}）',
+  'Link account ({name})': '关联账户（{name}）',
+  'Unlink account ({name})': '解除关联（{name}）',
+  'Link account': '关联账户',
+  'Unlink account': '解除关联',
+  'Link this sign-in method?': '要关联此登录方式吗？',
+  'Unlink this sign-in method?': '要解除此登录方式的关联吗？',
+  'Sign-in method linked.': '登录方式已关联。',
+  'Sign-in method unlinked.': '登录方式已解除关联。',
+  'Confirm your SSO link': '确认单点登录关联',
+  'Confirm link': '确认关联',
+  'Link {name} to your Hourmere account for this team?':
+    '要将此团队的{name}关联到你的 Hourmere 账户吗？',
+  'This SSO link request is unavailable. Start again.': '此单点登录关联请求不可用。请重新发起。',
+  'Verify your Hourmere email before unlinking this sign-in method.':
+    '请先验证你的 Hourmere 账户邮箱，再解除此登录方式的关联。',
 } as const

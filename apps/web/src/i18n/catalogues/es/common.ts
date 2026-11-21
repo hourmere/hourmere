@@ -583,4 +583,16 @@ export const common = {
     'Abra el formulario original para solicitar un nuevo enlace de reserva.',
   // Invitee routing form answers
   'Your routing form answers': 'Tus respuestas al formulario de enrutamiento',
+  // Team member single sign-on
+  'Sign in with single sign-on': 'Acceder con inicio de sesión único',
+  'Opening single sign-on…': 'Abriendo el inicio de sesión único…',
+  'Single sign-on is unavailable. Try again or use another sign-in method.':
+    'El inicio de sesión único no está disponible. Inténtelo de nuevo o utilice otro método de acceso.',
+  'Verify your email': 'Verifique su correo electrónico',
+  'To continue, sign in with your usual method or use a current team invitation.':
+    'Para continuar, inicie sesión con su método habitual o use una invitación de equipo vigente.',
+  'Return to the tab where you requested verification to continue.':
+    'Para continuar, vuelva a la pestaña donde solicitó la verificación.',
+  'Copy the link from your email and paste it into the tab where you requested verification.':
+    'Copie el enlace del correo y péguelo en la pestaña donde solicitó la verificación.',
 } as const
