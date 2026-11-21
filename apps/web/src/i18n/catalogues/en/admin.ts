@@ -2966,4 +2966,8 @@ export const admin = {
     'This SSO link request is unavailable. Start again.',
   'Verify your Hourmere email before unlinking this sign-in method.':
     'Verify your Hourmere email before unlinking this sign-in method.',
+
+  // SCIM managed membership
+  'This resource is managed by your identity provider.':
+    'This resource is managed by your identity provider.',
 } as const

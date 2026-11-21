@@ -8,18 +8,28 @@ interface AdmissionMember {
 
 export type SsoAdmissionRemoval = (trx: Db, member: AdmissionMember) => Promise<void>
 
+export const SCIM_MANAGED_RESOURCE_CODE = 'scim_managed_resource'
+export const SCIM_MANAGED_RESOURCE_MESSAGE = 'This resource is managed by your identity provider.'
+
 /**
  * The caller holds the organization lock through the membership deletion. Every removal or
  * departure records its tombstone while OIDC is on (docs/sso.md, "Leaving/removal creates a
  * team-local admission tombstone"), whether or not the team has configured a provider or JIT
  * yet, so a later configuration cannot readmit a person removed before it.
  */
-export const recordSsoAdmissionRemoval: SsoAdmissionRemoval = async (
-  trx,
-  { organizationId, userId },
-) => {
-  // Mailbox keys survive account deletion and avoid taking a target user lock under
-  // the organization lock. Keep the current local mailbox and each live link's last proof.
+export const recordSsoAdmissionRemoval: SsoAdmissionRemoval = (trx, member) =>
+  recordAdmissionRemoval(trx, member, false)
+
+/** Keep the account decision too, even if the account changes its mailbox after removal. */
+export const recordScimManagedRemoval: SsoAdmissionRemoval = (trx, member) =>
+  recordAdmissionRemoval(trx, member, true)
+
+async function recordAdmissionRemoval(
+  trx: Db,
+  { organizationId, userId }: AdmissionMember,
+  keepAccount: boolean,
+) {
+  // Keep the current local mailbox and each live link's last proof after account deletion.
   const { rows } = await sql<{ mailbox: string }>`
     SELECT mailbox
     FROM (
@@ -30,29 +40,40 @@ export const recordSsoAdmissionRemoval: SsoAdmissionRemoval = async (
     ) AS mailboxes
     WHERE char_length(mailbox) BETWEEN 1 AND 320
   `.execute(trx)
-  if (rows.length === 0) return
+  const mailboxes = rows.map(({ mailbox }) => mailbox)
+  if (!keepAccount && mailboxes.length === 0) return
 
   // A native invitation may have restored membership while leaving the old block active.
   // Preserve its history and date the new decision so an intervening invitation is stale.
-  await trx
+  const previous = trx
     .updateTable('scim_membership_blocks')
     .set({ cleared_at: sql`clock_timestamp()` })
     .where('organization_id', '=', organizationId)
-    .where(
-      'identity_email',
-      'in',
-      rows.map(({ mailbox }) => mailbox),
-    )
     .where('source', '=', 'local')
     .where('kind', '=', 'removal')
     .where('cleared_at', 'is', null)
-    .execute()
+  if (keepAccount) {
+    await previous
+      .where((eb) =>
+        eb.or([
+          eb('user_id', '=', userId),
+          ...(mailboxes.length > 0 ? [eb('identity_email', 'in', mailboxes)] : []),
+        ]),
+      )
+      .execute()
+  } else {
+    await previous.where('identity_email', 'in', mailboxes).execute()
+  }
+  const identity: { user_id: string | null; identity_email: string | null }[] = mailboxes.map(
+    (mailbox) => ({ user_id: null, identity_email: mailbox }),
+  )
+  if (keepAccount) identity.push({ user_id: userId, identity_email: null })
   await trx
     .insertInto('scim_membership_blocks')
     .values(
-      rows.map(({ mailbox }) => ({
+      identity.map((key) => ({
         organization_id: organizationId,
-        identity_email: mailbox,
+        ...key,
         source: 'local',
         kind: 'removal',
         created_at: sql`clock_timestamp()`,

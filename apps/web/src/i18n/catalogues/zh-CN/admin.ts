@@ -2830,4 +2830,7 @@ export const admin = {
   'This SSO link request is unavailable. Start again.': '此单点登录关联请求不可用。请重新发起。',
   'Verify your Hourmere email before unlinking this sign-in method.':
     '请先验证你的 Hourmere 账户邮箱，再解除此登录方式的关联。',
+
+  // SCIM managed membership
+  'This resource is managed by your identity provider.': '此资源由你的身份提供方管理。',
 } as const

@@ -495,6 +495,50 @@ describe.skipIf(!serverUrl)('SCIM suspension and credential-authorized writes', 
     })
   })
 
+  it('waits for a concurrent local suspension before deciding a SCIM reactivation', async () => {
+    const f = await fixture()
+    const user = await provision(f)
+    expect((await user.put({ active: false })).status).toBe(200)
+    const before = await user.entry()
+    const [scimBlock] = await user.blocks()
+    const events = await user.events()
+
+    let reactivation: Promise<Response> | undefined
+    try {
+      await db.transaction().execute(async (trx) => {
+        await trx
+          .selectFrom('auth.organization')
+          .select('id')
+          .where('id', '=', f.team.id)
+          .forUpdate()
+          .executeTakeFirstOrThrow()
+        await trx
+          .insertInto('scim_membership_blocks')
+          .values({
+            organization_id: f.team.id,
+            user_id: f.member.id,
+            source: 'local',
+            kind: 'suspension',
+          })
+          .execute()
+        reactivation = Promise.resolve(
+          user.patch({ op: 'replace', value: { active: true, title: 'Must roll back' } }),
+        )
+        await waitForOrganizationLock(await backend(trx), 'for update')
+      })
+    } finally {
+      await Promise.allSettled([reactivation])
+    }
+    if (!reactivation) throw new Error('Expected a SCIM reactivation request')
+    await expectScimError(await reactivation, 403, 'mutability')
+    expect(await user.entry()).toEqual(before)
+    expect(await user.events()).toEqual(events)
+    expect(await user.blocks()).toEqual([
+      scimBlock,
+      expect.objectContaining({ source: 'local', kind: 'suspension', cleared_at: null }),
+    ])
+  })
+
   it('reactivates access without restoring an old key or OAuth grant', async () => {
     const f = await fixture()
     const user = await provision(f)

@@ -5,12 +5,14 @@ import { stripTypeScriptTypes } from 'node:module'
 import { tryGetCurrentAuthEndpointContext } from '@better-auth/core/context'
 import { createDb, type Db, setRoutingTargetHealth } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
+import { scimManagedMember, scimProvisioned, scimSuspended } from '@hourmere/db/scim-suspension'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { createFixtures, createTestTeam, createTestUser } from '@hourmere/scheduling/testing'
 import { betterAuth } from 'better-auth'
 import { APIError, getSessionFromCtx } from 'better-auth/api'
 import { organization } from 'better-auth/plugins/organization'
+import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from '../../../apps/server/src/app.ts'
 import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
@@ -24,6 +26,12 @@ import {
 } from './member-departure.ts'
 import { organizationOperationRecords, recordTeamRoleChange } from './organization-operations.ts'
 import { isMember, isUuid, organizationGuards, personalOwner } from './organizations.ts'
+import {
+  checkSsoAdmissionBlocks,
+  recordScimManagedRemoval,
+  SCIM_MANAGED_RESOURCE_CODE,
+  SCIM_MANAGED_RESOURCE_MESSAGE,
+} from './sso-admission-blocks.ts'
 import {
   removeSsoRecoveryOwner,
   SsoRecoveryRequiredError,
@@ -77,6 +85,8 @@ function sourceCopy(replacement?: Replacement): Remove {
     nativeSsoRequired,
     ssoRecoveryOwner,
     removeSsoRecoveryOwner,
+    scimManagedMember,
+    recordScimManagedRemoval,
   }
   return guardCopy(
     new Function(...Object.keys(bindings), `${source}; return removeTeamMember`)(
@@ -105,6 +115,13 @@ function policySourceCopy(
     writeAuditEvent,
     AsyncLocalStorage,
     assertTeamOwnerRemains,
+    checkSsoAdmissionBlocks,
+    SCIM_MANAGED_RESOURCE_CODE,
+    SCIM_MANAGED_RESOURCE_MESSAGE,
+    scimManagedMember,
+    scimProvisioned,
+    scimSuspended,
+    sql,
     tryGetCurrentAuthEndpointContext,
     APIError,
     getSessionFromCtx,

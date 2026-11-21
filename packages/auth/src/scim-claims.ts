@@ -119,37 +119,43 @@ export const scimClaimCompletion: ScimClaimCompletion = {
       .where('retired_at', 'is', null)
       .executeTakeFirst()
     if (linked) return admitted
-    return {
-      refused: false,
-      finish: async (trx, member) => {
-        if (member.userId !== proof.userId || member.organizationId !== proof.organizationId)
-          throw new Error('The admitted member is not the proven account.')
-        // The account and its new membership only: no profile, address or sign-in method of
-        // the account changes, and the entry's own profile and timestamps stay as provisioned.
-        const link = await trx
-          .updateTable('scim_users')
-          .set({ linked_user_id: proof.userId, linked_member_id: member.id })
-          .where('id', '=', entry.id)
-          .where('linked_user_id', 'is', null)
-          .where('retired_at', 'is', null)
-          .executeTakeFirst()
-        const completion = await trx
-          .updateTable('scim_user_claims')
-          .set({ completed_at: sql<Date>`clock_timestamp()` })
-          .where('id', '=', claim.id)
-          .where('completed_at', 'is', null)
-          .where('invalidated_at', 'is', null)
-          .executeTakeFirst()
-        if (link.numUpdatedRows !== 1n || completion.numUpdatedRows !== 1n)
-          throw new Error('The SCIM claim changed while it was being completed.')
-        await writeAuditEvent(trx, {
-          organizationId: proof.organizationId,
-          ...proof.audit,
-          action: 'scim_user.claimed',
-          targetType: 'scim_user',
-          targetId: entry.id,
-        })
-      },
-    }
+    return { refused: false, finish: finishScimClaim(proof, entry.id, claim.id) }
   },
+}
+
+/** Attach the claim to a member after its admission has been checked under the team lock. */
+export function finishScimClaim(
+  proof: Pick<ScimInvitationProof, 'organizationId' | 'userId' | 'audit'>,
+  entryId: string,
+  claimId: string,
+): ScimClaimFinish {
+  return async (trx, member) => {
+    if (member.userId !== proof.userId || member.organizationId !== proof.organizationId)
+      throw new Error('The admitted member is not the proven account.')
+    // The account and its membership only: no profile, address or sign-in method of
+    // the account changes, and the entry's own profile and timestamps stay as provisioned.
+    const link = await trx
+      .updateTable('scim_users')
+      .set({ linked_user_id: proof.userId, linked_member_id: member.id })
+      .where('id', '=', entryId)
+      .where('linked_user_id', 'is', null)
+      .where('retired_at', 'is', null)
+      .executeTakeFirst()
+    const completion = await trx
+      .updateTable('scim_user_claims')
+      .set({ completed_at: sql<Date>`clock_timestamp()` })
+      .where('id', '=', claimId)
+      .where('completed_at', 'is', null)
+      .where('invalidated_at', 'is', null)
+      .executeTakeFirst()
+    if (link.numUpdatedRows !== 1n || completion.numUpdatedRows !== 1n)
+      throw new Error('The SCIM claim changed while it was being completed.')
+    await writeAuditEvent(trx, {
+      organizationId: proof.organizationId,
+      ...proof.audit,
+      action: 'scim_user.claimed',
+      targetType: 'scim_user',
+      targetId: entryId,
+    })
+  }
 }

@@ -1,9 +1,10 @@
 import { type Database, type Db, setRoutingTargetHealth } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
+import { scimManagedMember } from '@hourmere/db/scim-suspension'
 import type { Transaction } from 'kysely'
 import type { Principal } from './caller.ts'
 import { isUuid } from './organizations.ts'
-import type { SsoAdmissionRemoval } from './sso-admission-blocks.ts'
+import { recordScimManagedRemoval, type SsoAdmissionRemoval } from './sso-admission-blocks.ts'
 import { removeSsoRecoveryOwner, ssoRecoveryOwner } from './sso-recovery-membership.ts'
 import {
   checkTeamManagementAccess,
@@ -44,7 +45,11 @@ export async function teamMemberRemovalTarget(
     .where('organizationId', '=', actor.organizationId)
     .where('userId', '=', memberUserId)
   if (lock) query = query.forUpdate()
-  const member = await query.executeTakeFirst()
+  const member = await query
+    .$if(lock, (builder) =>
+      builder.select(scimManagedMember(actor.organizationId, memberUserId).as('scimManaged')),
+    )
+    .executeTakeFirst()
   const roles = teamRoles(member?.role)
   if (
     !member ||
@@ -130,7 +135,12 @@ async function removeTeamMemberInTransaction(
     new Date(),
   )
 
-  if (input.recordAdmissionRemoval) {
+  if (member.scimManaged) {
+    await recordScimManagedRemoval(trx, {
+      organizationId: actor.organizationId,
+      userId: member.userId,
+    })
+  } else if (input.recordAdmissionRemoval) {
     await input.recordAdmissionRemoval(trx, {
       organizationId: actor.organizationId,
       userId: member.userId,

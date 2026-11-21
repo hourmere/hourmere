@@ -1,5 +1,5 @@
 import { createRoute, z } from '@hono/zod-openapi'
-import { DISPLAY_NAME_MAX_LENGTH } from '@hourmere/auth'
+import { DISPLAY_NAME_MAX_LENGTH, SCIM_MANAGED_RESOURCE_CODE } from '@hourmere/auth'
 import {
   getProfile,
   HANDLE_MAX_LENGTH,
@@ -72,7 +72,7 @@ export function profileRoutes(deps: ServiceDeps): RouteModule {
         operationId: 'updateDisplayName',
         summary: "Update the caller's account display name",
         description:
-          'Works before creating a booking-page profile and across acting organizations. Only changes the caller’s name. Requests are limited to 4096 bytes.',
+          'Works before creating a booking-page profile. Only changes the caller’s name. A SCIM-managed membership cannot change the name while acting in that team. Requests are limited to 4096 bytes.',
         tags: ['Profile'],
         security: authenticated,
         middleware: callerWithBodyLimit(caller, 4096),
@@ -84,6 +84,7 @@ export function profileRoutes(deps: ServiceDeps): RouteModule {
             400: 'invalid_request or invalid_display_name',
             403: CROSS_ORIGIN_WRITE,
             404: 'user_not_found: the caller was deleted concurrently',
+            409: `${SCIM_MANAGED_RESOURCE_CODE}: the acting membership is managed by an identity provider`,
           }),
         },
       }),

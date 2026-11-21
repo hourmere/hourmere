@@ -168,10 +168,9 @@ again, and its delivery generation is queued only after commit. Existing same-em
 get the same claim flow: an address that already belongs to a member of the organization,
 that another administrator's, a legacy, a duplicated or a departed inviter's pending
 invitation holds, or whose pending invitation another entry's claim already holds, gets the
-same entry and a pending
-claim without an invitation, nothing is sent, and the answer is the same 201 as any other
-create; the SSO linking completion step proves the person's own account and links it. Only
-a duplicate live identity of the connection gets 409. Exhausted admission limits get 429 with
+same entry and a pending claim without an invitation, nothing is sent, and the answer is
+the same 201 as any other create. Linking proceeds through the applicable proof described
+below. Only a duplicate live identity of the connection gets 409. Exhausted admission limits get 429 with
 `Retry-After`. Sign-up
 policy is decided from the instance settings alone: a restricted instance (`SIGNUP` set to
 `closed` or `first-user`) refuses a work address whose domain is not in
@@ -208,9 +207,8 @@ replace that invitation: an expired claim is then never completed, while its sti
 invitation admits the person as an ordinary acceptance, the administrator's resend being the
 consent, and the entry stays unlinked. An account that
 another live entry of the connection already links is admitted the same way, without a second
-link. Claims without an invitation stay unlinked until the SSO linking completion step, and
-expire after 48 hours without renewal: acceptance never completes them, whichever invitation is
-accepted, and nothing links them by email. `ScimClaimCompletion` in
+link. Claims without an invitation expire after 48 hours without renewal. They require the
+retirement re-admission proof below or the planned SSO linking proof. `ScimClaimCompletion` in
 `packages/auth/src/scim-claims.ts` is the extension point where that step adds its proof.
 
 User profile replacement requires `userName` and replaces the mapped profile, including
@@ -380,7 +378,8 @@ cancel meetings.
 DELETE performs the same team-scoped revocation, keeps the membership blocked, and
 permanently tombstones the SCIM resource. Success returns 204 with an empty body.
 Every subsequent operation on that ID, including repeated DELETE, returns 404
-(RFC 7644 §3.6). Retirement invalidates unfinished claims and cancels pending invitations
+(RFC 7644 §3.6). DELETE on a live ID with `If-Match` returns 412 before the protected-role
+check, matching PUT and PATCH. Retirement invalidates unfinished claims and cancels pending invitations
 issued by SCIM for those claims. An invitation independently issued or renewed by a team
 administrator remains available for ordinary acceptance. Retirement, credential revocation
 and related audit events commit together. Account, membership, booking and authorship history
@@ -388,8 +387,23 @@ is retained.
 Retired tombstones never participate in userName or externalId uniqueness conflicts.
 A later POST with the same identifiers gets a fresh resource ID and requires explicit
 re-admission. It starts unlinked and leaves existing blockers and revoked credentials
-in place. Database retention and purge follow the eventual audited retention policy.
-The retirement handler is available only through the resource test flag.
+in place. For a retained ordinary member, an active POST that reuses the retired entry's
+normalized `userName` or `externalId` creates a pending claim without an invitation.
+The directory operator provides the new resource ID to the returning person, who signs in to
+the same Hourmere account with the verified work address on the claim and confirms it with
+`POST /api/auth/organization/complete-scim-readmission` using a browser session and JSON
+fields `organizationId` and `scimUserId` (the new ID). Confirmation returns 204.
+
+Under the organization lock, confirmation checks the current account, session, member
+role and unexpired claim for the active, unlinked User. It clears only the original
+account's SCIM suspension for the retired User of that connection, links the fresh
+entry to the retained membership and records `scim_user.claimed` in the same transaction.
+A live SCIM suspension, a local suspension or removal of the account or verified mailbox,
+or a claim from a different account refuses confirmation. Ordinary invitations and SSO JIT
+continue to check the same blockers. The person can select the team after confirmation
+subject to its usual SSO requirements. Revoked credentials stay revoked.
+Database retention and purge follow the eventual audited retention policy.
+Retirement and confirmation are available only through the resource test flag.
 
 SCIM never grants owner or admin, and never deactivates, deletes or demotes a member
 who currently has either role, even if other owners remain. This applies to User and
@@ -411,6 +425,18 @@ manual reactivation. Both controls must explicitly clear their own blocker befor
 returns. Existing management interfaces must display the managed state and refuse bypasses
 on the server, including native Better Auth routes. SSO JIT cannot recreate a suspended
 SCIM membership; SSO enforcement still requires a valid team proof after provisioning.
+
+The display name cannot be changed through a manual profile write while acting in the
+team where the account has a live SCIM-managed membership. The check uses the account
+link and does not infer management from the provisioned email address. Personal settings
+and edits in other teams continue to affect only the global account profile. Existing
+team administration can change local roles and remove a managed member subject to its
+ordinary owner and administrator rules. Removal and departure record a local decision for
+the account and its mailbox even when OIDC is off. Invitation issuance, renewal and
+cancellation retain their ordinary rules. Accepting an invitation or adding a member
+checks live admission blockers under the organization lock. A newer ordinary invitation
+can clear local removal. SCIM suspension and local suspension each require clearance by
+the authority that recorded them. SSO JIT uses the same blockers for the proven mailbox.
 
 The storage foundation retains local and SCIM blockers, including cleared history,
 after account deletion. `scim_membership_blocks.user_id` becomes null through its FK;
@@ -508,10 +534,8 @@ source) against the bounded wait and its retry.
   expire after 48 hours. The `INVITATION_*` limits can be raised.
 - User creation records an existing member's address, or one that another pending
   invitation or another entry's claim already holds, as an entry with a pending claim and no
-  invitation, and sends nothing. Those entries stay unlinked until the SSO linking completion
-  step proves and links those people; accepting an invitation never completes such a claim.
-  Such a claim lasts 48 hours, as an invitation does, and is not renewed, so most will have
-  expired by then.
+  invitation, and sends nothing. These claims expire after 48 hours and require either the
+  retained-member re-admission confirmation or the planned SSO linking proof.
 - A claim also lasts 48 hours when it has an invitation. An administrator who resends or
   replaces that invitation gives it a new lifetime but not the claim: once the claim has
   expired, accepting the invitation admits the person as an ordinary member and leaves the
@@ -703,7 +727,7 @@ operator-accessible.
 | Session authorization revocation | Suspension checks on authorization | Shared session and team-proof revocation; no new interface | Resource test flag only | Active-team sessions revoked, other sessions cannot reselect suspended team, transaction/lock races, bounded pools |
 | API-key and OAuth revocation | Session authorization revocation; audit log PR #246 | Organization API-key and MCP grant/binding revocation; no new interface | Resource test flag only | Both credential types revoked atomically or durable outbox persisted before success, other-team credentials preserved, audit atomicity |
 | User lifecycle: suspension and reactivation | API-key and OAuth revocation; audit log PR #246 | Enable active writes on POST/PUT/PATCH; no MCP/CLI | Resource test flag only | Every owner/admin deactivation or demotion and role grant returns 403 mutability, role-change races serialize, no key/grant resurrection, local blockers win, audit atomicity |
-| User lifecycle: retirement | User lifecycle: suspension and reactivation | DELETE Users/{id}; no MCP/CLI | Resource test flag only | Every owner/admin deletion returns 403 mutability, all subsequent operations on retired ID return 404, fresh POST reuses identifiers only with re-admission, history retained, audit atomicity |
+| User lifecycle: retirement and re-admission | User lifecycle: suspension and reactivation | DELETE Users/{id}; native POST /organization/complete-scim-readmission; no MCP/CLI | Resource test flag only | Unsupported If-Match returns 412, owner/admin deletion returns 403 mutability, retired IDs return 404, the original account can claim a fresh entry, live SCIM and local blockers deny re-admission, history retained, audit atomicity |
 | Managed membership server guards | User lifecycle: retirement; SSO design PR #247 and accepted linking implementation | Existing member/invitation/role management REST and native Better Auth writes and shared MCP services; no new operation/tool/command | Resource test flag only | Manual profile/membership changes cannot bypass management, local suspension wins, native/JIT and concurrent reactivation checks, protected owner/admin authority |
 | Managed membership UI | Managed membership server guards | Existing member-management UI; no new endpoint/tool/command | Resource test flag only | en/zh-CN managed status and blockers, forbidden manual actions explained, unknown readiness stays neutral, generated-client errors handled |
 | Hierarchy authorization design | Managed membership UI | No runtime interface; parent/child permission contract | Resources hard-off | Lead accepts scope, owner/admin recovery, explicit linking and existing-team conflicts |
@@ -718,10 +742,9 @@ operator-accessible.
 | Local lifecycle acceptance | Local Keycloak harness; audit log PR #246; SSO design PR #247 and accepted linking implementation | Local fixture scenarios; no new interface | Resources hard-off | Create/rename/deactivate/reactivate/delete/groups, owner/admin refusal, credential rotation/revocation, recovery, rate limits and audit acceptance |
 | Release documentation and registration | Local lifecycle acceptance | Operator/provider docs and production resource registration; no new protocol operation | Enable only after all prior acceptance; same feature for self-hosters | Tested-provider matrix, limitations, rollback drill documented, any intermediate release hard-off proven; complete Users/Groups/conformance before registering handlers; default of `SCIM_PROVISIONING_ENABLED` changed to on, and an install whose `.env` was copied from an earlier `.env.example` (empty value) is on after upgrade without editing `.env` |
 
-The design does not yet say how claims without an invitation are proven and linked: an existing
-member's address, and addresses held by another administrator's, a duplicate, a stale-role or a
-departed inviter's invitation or by another entry's claim. The SSO linking completion row
-settles that, with their 48-hour expiry, before it is built.
+The retirement flow above defines proof for a retained member's re-admission. The SSO linking
+completion row still needs to define how to prove the other claims without invitations and
+apply their 48-hour expiry.
 
 Mapping administration is ordinary product configuration, not credential minting, so it
 ships MCP and CLI parity rather than borrowing the browser-only exemption. Additional
