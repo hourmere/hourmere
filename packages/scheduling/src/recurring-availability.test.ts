@@ -4,6 +4,7 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { type RawBuilder, sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { suspendScimMember } from '../../db/src/scim-suspension-fixtures.ts'
 import { findSlots } from './availability.ts'
 import { activateRoundRobin, createEventType } from './event-types.ts'
 import { checkRecurringAvailability } from './recurring-availability.ts'
@@ -389,6 +390,15 @@ describe.skipIf(!serverUrl)('recurring availability on PostgreSQL', () => {
       canBook: false,
       hostUserIds: [],
       occurrences: [{ available: true }, { available: false }],
+    })
+  })
+
+  it('excludes a SCIM-suspended host from recurring candidates', async () => {
+    const { first, second, request } = await roundRobin()
+    await suspendScimMember(db, request.organizationId, second.id)
+    await expect(checkRecurringAvailability(db, request)).resolves.toMatchObject({
+      canBook: true,
+      hostUserIds: [first.id],
     })
   })
 

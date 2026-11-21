@@ -473,6 +473,7 @@ describe('matrix-derived report completeness', () => {
   it('partitions actual Playwright-selected shards without running browsers', async () => {
     const matrices: Awaited<ReturnType<typeof loadExpectedReports>>[] = []
     // Mirrors the e2e-layout matrix in .github/workflows/ui-checks.yml.
+    // Each shard spawns its own Playwright listing, so this takes over 30 s on CI runners.
     for (let shard = 1; shard <= 8; shard++)
       matrices.push(await loadExpectedReports('layout', `${shard}/8`))
     const allExpected = matrices[0]?.allExpected ?? []
@@ -486,7 +487,7 @@ describe('matrix-derived report completeness', () => {
     expect(new Set(selected.map(reportIdentity))).toEqual(new Set(allExpected.map(reportIdentity)))
     // Preparation tests occupy shard slots but do not write measurement reports.
     expect(new Set(matrices.map((matrix) => matrix.expected.length)).size).toBeGreaterThan(1)
-  }, 30_000)
+  }, 120_000)
 
   it('makes the terminal summary red for regression, loss, unreadable JSON and browser exit', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'hourmere-ui-gate-summary-'))

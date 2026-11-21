@@ -1,0 +1,6 @@
+{
+  "migration": "0178_scim_api_key_revocation_index.sql",
+  "objects": {
+    "index auth.apikey.apikey_scim_revocation_idx": "CREATE INDEX apikey_scim_revocation_idx ON auth.apikey USING btree (lower(\"referenceId\"), auth.scim_api_key_organization_id(metadata)) WHERE ((length(\"referenceId\") = 36) AND (length(auth.scim_api_key_organization_id(metadata)) = 36))"
+  }
+}

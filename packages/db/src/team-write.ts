@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { sql, type Transaction, type TransactionBuilder } from 'kysely'
-import type { Database } from './index.ts'
+import type { Database, Db } from './index.ts'
 
 type TeamTransaction = Transaction<Database>
 
@@ -14,8 +14,19 @@ export interface TeamWriteCheck {
 
 const activeCheck = new AsyncLocalStorage<TeamWriteCheck>()
 const checkedBeforeChange = new WeakMap<TeamTransaction, { deadline: string | undefined }>()
+const lockedOrganizations = new WeakMap<Db, string>()
 
-/** Only the authenticated team transport enters this scope after finding a stored policy. */
+/** Record a lock acquired by the service and held until its team write commits. */
+export function recordTeamWriteOrganizationLock(db: Db, organizationId: string) {
+  if (!db.isTransaction || !activeCheck.getStore()) return
+  lockedOrganizations.set(db, organizationId.toLowerCase())
+}
+
+export function hasTeamWriteOrganizationLock(db: Db, organizationId: string) {
+  return lockedOrganizations.get(db) === organizationId.toLowerCase()
+}
+
+/** The authenticated team transport enters this scope to recheck authority at commit. */
 export function withTeamWriteCheck<T>(check: TeamWriteCheck, write: () => Promise<T>): Promise<T> {
   return activeCheck.run(check, write)
 }
@@ -69,10 +80,14 @@ export function teamWriteTransaction<T>(
 }
 
 /** Use after the service's authorization locks and immediately before changing its own proof. */
-export async function checkTeamWriteBeforeAuthorityChange(trx: TeamTransaction) {
+export async function checkTeamWriteBeforeAuthorityChange(
+  trx: TeamTransaction,
+  lockedRecovery?: { deadline: string },
+) {
   const check = activeCheck.getStore()
   if (!check) return
-  const deadline = await check.lockProof(trx)
+  // A consumed recovery grant was verified under the same write locks as the policy change.
+  const deadline = lockedRecovery?.deadline ?? (await check.lockProof(trx))
   checkedBeforeChange.set(trx, { deadline })
   return deadline
 }

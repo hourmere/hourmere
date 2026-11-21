@@ -464,9 +464,10 @@ describe('workflow design numeric contracts', () => {
     expect(
       [...`\`workflow.created\`${recorded}`.matchAll(/`(workflow\.[a-z_]+)`/g)].map((m) => m[1]),
     ).toEqual([...WORKFLOW_AUDIT_EVENTS])
-    // Hard-off: the constant the rollout names is the false source constant.
-    expect(WORKFLOWS_IMPLEMENTED).toBe(false)
+    // The rollout documents the original guard and the completed implementation.
     expect(text).toContain('Step 1 introduces the source constant `WORKFLOWS_IMPLEMENTED = false`')
+    expect(WORKFLOWS_IMPLEMENTED).toBe(true)
+    expect(text).toContain('step 19b sets `WORKFLOWS_IMPLEMENTED = true`')
   })
 
   it('binds worst-case demand and the shared allowance formula to documented limits', () => {
@@ -606,7 +607,7 @@ describe('workflow design numeric contracts', () => {
       'Hard-off means behavior, not registration: every workflow operation returns `404 workflows_disabled`',
     )
     expect(rollout).toContain(
-      'MCP `tools/list` omits workflow tools while off; direct known-tool calls return the same `404 workflows_disabled`',
+      'MCP `tools/list` omits workflow tools while hard-off; direct known-tool calls return the same `404 workflows_disabled`',
     )
     expect(rollout).toContain('Build the parity inventory with the feature enabled')
     expect(rollout).toContain('scope-registry rows ship in each operation')
@@ -627,7 +628,9 @@ describe('workflow design numeric contracts', () => {
       'apps/server/src/mcp/scopes.test.ts',
       'apps/server/src/mcp/schema-contracts.test.ts',
     ]) {
-      expect(read(consumer)).toMatch(/productTools\(\{ db[^)]*slotSnippetsEnabled: true\b[^)]*\}\)/)
+      expect(read(consumer)).toMatch(
+        /productTools\(\{\s+db[^)]*slotSnippetsEnabled: true\b[^)]*\}\)/,
+      )
       expect(rollout).toContain(`\`${consumer}\``)
     }
   })

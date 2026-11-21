@@ -14,13 +14,13 @@ import {
   workflowMatches,
 } from './definition.ts'
 import { renderWorkflowEmail } from './email.ts'
-import { workflowOperation } from './hard-off.ts'
 import {
   WORKFLOW_MAIL_MAX_PER_HOUR,
   WORKFLOW_OWNER_MAIL_MAX_PER_HOUR,
   WORKFLOW_RECIPIENT_EMAILS_PER_DAY,
   WORKFLOW_RECIPIENT_EMAILS_PER_HOUR,
 } from './limits.ts'
+import { requireWorkflowsEnabled } from './operator-settings.ts'
 import {
   scopeSelectsEventType,
   uuidSchema,
@@ -224,7 +224,10 @@ function renderPreview(
   }
 }
 
-export const previewWorkflow = workflowOperation(
-  (ctx: Omit<Parameters<typeof previewWorkflowCandidate>[0], 'audit'>, input: unknown) =>
-    previewWorkflowCandidate({ ...ctx, audit: workflowAuditPort }, input),
-)
+export async function previewWorkflow(
+  ctx: Omit<Parameters<typeof previewWorkflowCandidate>[0], 'audit'>,
+  input: unknown,
+) {
+  requireWorkflowsEnabled(ctx)
+  return previewWorkflowCandidate({ ...ctx, audit: workflowAuditPort }, input)
+}

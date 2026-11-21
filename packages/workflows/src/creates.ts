@@ -10,8 +10,8 @@ import { sql } from 'kysely'
 import { z } from 'zod'
 import { type WorkflowAuditPort, workflowAuditActor, workflowAuditPort } from './audit.ts'
 import { assertWorkflowTextPolicy, WorkflowDefinitionSchema } from './definition.ts'
-import { workflowOperation } from './hard-off.ts'
 import { WORKFLOW_MAX_DEFINITIONS_PER_OWNER, WORKFLOW_MAX_ENABLED_PER_EVENT } from './limits.ts'
+import { requireWorkflowsEnabled, type WorkflowSettings } from './operator-settings.ts'
 import { type WorkflowOwner, WorkflowOwnerSelectorSchema } from './ownership.ts'
 import { type WorkflowView, workflowView } from './reads.ts'
 import { validateWorkflowWriteDefinition } from './write-definition.ts'
@@ -21,7 +21,7 @@ export const CreateWorkflowInputSchema = WorkflowDefinitionSchema.extend({
   idempotencyKey: z.string().regex(/^[\x21-\x7e]{1,255}$/),
 })
 export type CreateWorkflowInput = z.input<typeof CreateWorkflowInputSchema>
-export interface WorkflowCreateContext {
+export interface WorkflowCreateContext extends WorkflowSettings {
   followUpHostNotesEnabled?: boolean | undefined
   db: Db
   principal: Principal
@@ -258,7 +258,7 @@ export async function createWorkflowDefinition(
     return workflowView(owner, { ...row, definition: revision })
   })
 }
-export const createWorkflow = workflowOperation(
-  (ctx: Omit<WorkflowCreateContext, 'audit'>, input: unknown) =>
-    createWorkflowDefinition({ ...ctx, audit: workflowAuditPort }, input),
-)
+export async function createWorkflow(ctx: Omit<WorkflowCreateContext, 'audit'>, input: unknown) {
+  requireWorkflowsEnabled(ctx)
+  return createWorkflowDefinition({ ...ctx, audit: workflowAuditPort }, input)
+}

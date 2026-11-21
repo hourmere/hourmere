@@ -64,13 +64,13 @@ export async function lockOidcSignInContext(
   await lockOidcProvider(trx, provider)
   const member = await trx
     .selectFrom('auth.member')
-    .select('id')
+    .select(['id', scimSuspended(organizationId, user.id).as('suspended')])
     .where('organizationId', '=', organizationId)
     .where('userId', '=', user.id)
-    .where((eb) => eb.not(scimSuspended(organizationId, user.id)))
     .forShare()
     .executeTakeFirst()
   if (!member) return { reason: 'mailbox_unproven' } as const
+  if (member.suspended) return { reason: 'scim_suspended' } as const
   const links = trx
     .selectFrom('sso_identity_links')
     .select(['id', 'generation', 'proven_email'])
@@ -103,7 +103,13 @@ export async function lockOidcSignInContext(
     .forShare(['d', 'pd'])
     .executeTakeFirst()
   if (!claim) return { reason: 'domain_unverified' } as const
-  return { user, member, link, claim, trustGeneration: policy?.trust_generation ?? 1 }
+  return {
+    user,
+    member: { id: member.id },
+    link,
+    claim,
+    trustGeneration: policy?.trust_generation ?? 1,
+  }
 }
 
 type OidcSignInContext = Exclude<

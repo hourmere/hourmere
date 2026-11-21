@@ -347,6 +347,7 @@ it('classifies every production worker by its source of authority', () => {
     'seriesNotificationDispatchJob',
     'waitlistEmailJob',
     'waitlistMaintenanceJobs',
+    'workflowJobs',
   ]
   const system = [
     'auditLogRetentionJob',
@@ -367,6 +368,7 @@ it('classifies every production worker by its source of authority', () => {
     'ssoDomainRecheckJob',
     'ssoLinkRemovalEmailJob',
     'ssoRecoveryEnrollmentEmailJob',
+    'ssoOperatorRecoveryEmailJob',
     'webhookCleanupJob',
   ]
   expect(workerNames(definitions.value).sort()).toEqual(

@@ -145,7 +145,6 @@ const SHIPPED_SCHEMAS = [
   'RoutedBookingInput',
   'RoutedBookingResult',
   'BookingRouting',
-  'TeamBookingRoutingDetail',
 ]
 const SHIPPED_TAGS = ['Routing forms']
 
@@ -691,7 +690,6 @@ describe('routing forms remain hard-off with configuration and public metadata i
       'RoutingContinuationInput.routeToken',
       'RoutingContinuationSlotsInput.routeToken',
       'RoutingSubmissionResponse.routeToken',
-      'TeamBookingRoutingDetail.routing',
     ])
   })
 

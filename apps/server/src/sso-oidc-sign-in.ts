@@ -25,6 +25,7 @@ import {
 import { completeOidcAdmission, stageOidcAdmission } from './sso-oidc-admission.ts'
 import {
   consumeOidcAttempt,
+  isOidcTestCallback,
   LINK_SSO_ACCOUNT,
   OidcAttemptRefused,
   OidcStateReplay,
@@ -57,6 +58,7 @@ import {
 import { recordOidcProviderTest } from './sso-oidc-test-receipts.ts'
 import { verifyOidcIdToken } from './sso-oidc-verifier.ts'
 import { authorizeSsoRead } from './sso-reads.ts'
+import { providerRecoveryAuthority } from './sso-recovery-use.ts'
 import { EXPECTED_ORGANIZATION_HEADER, organizationContextAccess } from './team-management.ts'
 
 export const OIDC_SIGN_IN_PATH = '/api/auth/sign-in/sso'
@@ -72,7 +74,7 @@ declare module 'hono' {
 const errorPath = '/sign-in?error=unable_to_create_session'
 const testReturnPath = '/app/settings'
 const providerIdSchema = z.uuidv7()
-const startInput = z.discriminatedUnion('intent', [
+export const OidcSignInInput = z.discriminatedUnion('intent', [
   z.strictObject({
     providerId: providerIdSchema,
     intent: z.literal('sign_in'),
@@ -235,6 +237,7 @@ export async function testSsoProvider(
   headers: Headers,
   providerId: string,
   input: z.infer<typeof TestSsoProviderInput>,
+  recoveryRequired = false,
 ) {
   requireSsoEnabled(deps.capabilities, 'oidc')
   const denied = () => new DomainError('forbidden', 'team_management_access_denied')
@@ -249,12 +252,14 @@ export async function testSsoProvider(
     const provider = await findProvider(db, providerId, organizationId)
     if (!provider || provider.retiredAt) throw missing()
     if (provider.protocol !== 'oidc') throw new DomainError('not_found', 'sso_disabled')
-    if (provider.enabled) throw missing()
-    if (provider.revision !== input.expectedRevision) throw changed()
     return provider
   }
   let authorized: Provider | undefined
   let endpoints: Awaited<ReturnType<typeof providerEndpoints>> | undefined
+  const checkRevision = () => {
+    if (authorized?.revision !== input.expectedRevision) throw changed()
+  }
+  const spendRecovery = providerRecoveryAuthority(principal, recoveryRequired)
   return runWithFreshProof(
     deps,
     {
@@ -267,6 +272,11 @@ export async function testSsoProvider(
       schema: testInput.extend({ providerId: providerIdSchema }),
     },
     {
+      consumeRecovery: async (...args) => {
+        const recovery = await spendRecovery(...args)
+        if (recovery) checkRevision()
+        return recovery
+      },
       authorize: async (db) => {
         await authorizeSsoRead({ ...deps, db }, principal)
         await organizationContextAccess(
@@ -277,6 +287,10 @@ export async function testSsoProvider(
         )(db, organizationId)
         authorized = await draft(db)
       },
+      authorizeOrdinary: () => {
+        if (authorized?.enabled) throw missing()
+        checkRevision()
+      },
       prepare: async () => {
         if (!authorized || !configurationKey) throw missing()
         try {
@@ -285,7 +299,7 @@ export async function testSsoProvider(
           throw missing()
         }
       },
-      mutate: async (db, _input, browserBinding) => {
+      mutate: async (db, _input, browserBinding, _mailbox, _attemptId, recovery) => {
         const provider = authorized
         if (!provider || !configurationKey || !endpoints) throw missing()
         const parameters = await startOidcAttempt(
@@ -296,7 +310,17 @@ export async function testSsoProvider(
             returnPath: testReturnPath,
             endpointsDigest: endpoints.digest,
           },
-          { kind: 'test', actor },
+          {
+            kind: 'test',
+            actor,
+            ...(recovery && {
+              recovery: {
+                deadline: recovery.deadline,
+                acceptedAt: recovery.acceptedAt,
+                testProviderEnabled: provider.enabled,
+              },
+            }),
+          },
         )
         return {
           url: authorizationUrl(publicUrl, provider.providerId, endpoints, parameters),
@@ -307,7 +331,7 @@ export async function testSsoProvider(
     },
   ).catch((error) => {
     if (error instanceof HTTPException && error.status === 403) throw denied()
-    if (error instanceof OidcAttemptRefused) throw changed()
+    if (error instanceof OidcAttemptRefused || expiresDuringOidcWrite(error)) throw changed()
     throw error
   })
 }
@@ -514,7 +538,7 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
         if (c.req.method !== 'POST') return c.json({ error: 'method_not_allowed' }, 405)
         if (c.req.header('origin') !== origin || c.req.header('authorization') !== undefined)
           return c.json({ error: 'forbidden' }, 403)
-        const parsed = startInput.safeParse(await c.req.json().catch(() => null))
+        const parsed = OidcSignInInput.safeParse(await c.req.json().catch(() => null))
         if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
         const returnPath = oidcReturnDestination(parsed.data.returnTo ?? '/app')
         if (!returnPath) return c.json({ error: 'invalid_request' }, 400)
@@ -603,25 +627,29 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
           })
           return c.redirect(errorPath)
         }
-        if (provider.retiredAt) return fail('provider_disabled')
-        const testActor = provider.enabled ? undefined : await deps.readSession(c.req.raw.headers)
-        if (!provider.enabled && !testActor) return c.redirect(errorPath)
-        const refuseAttempt = () => (testActor ? c.redirect(errorPath) : fail('attempt_invalid'))
-
         const query = new URL(c.req.url).searchParams
         const states = query.getAll('state')
-        if (states.length !== 1) return refuseAttempt()
+        const browser = { ...provider, browserBinding: getCookie(c, cookie) }
+        const readActor = () => deps.readSession(c.req.raw.headers)
+        const testActor = !provider.enabled && !provider.retiredAt ? await readActor() : undefined
+        const quietTestRefusal = async () =>
+          testActor || (await isOidcTestCallback(db, browser, states[0], readActor))
+        const refuseAttempt = async (reason: SsoAuditReason) =>
+          (await quietTestRefusal()) ? c.redirect(errorPath) : fail(reason)
+        if (provider.retiredAt) return refuseAttempt('provider_disabled')
+        if (!provider.enabled && !testActor) return c.redirect(errorPath)
+        if (states.length !== 1) return refuseAttempt('attempt_invalid')
         let attempt: Awaited<ReturnType<typeof consumeOidcAttempt>>
         try {
           attempt = await consumeOidcAttempt(
             { db, configurationKey },
-            { ...provider, state: states[0] ?? null, browserBinding: getCookie(c, cookie) },
+            { ...browser, state: states[0] ?? null },
             testActor ? { kind: 'test', actor: testActor } : undefined,
-            () => deps.readSession(c.req.raw.headers),
+            readActor,
           )
         } catch (error) {
           if (error instanceof OidcStateReplay) {
-            if (testActor) return c.redirect(errorPath)
+            if (await quietTestRefusal()) return c.redirect(errorPath)
             await writeSsoSecurityFailure(db, {
               ...audit,
               action: 'sso_authentication.replay_rejected',
@@ -629,13 +657,13 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
             })
             return c.redirect(errorPath)
           }
-          if (error instanceof OidcAttemptRefused) return refuseAttempt()
+          if (error instanceof OidcAttemptRefused) return refuseAttempt('attempt_invalid')
           throw error
         }
         correlationId = attempt.id
-        const finishTest = async (actor: OidcTestActor, reason?: SsoAuditReason) => {
+        const finishTest = async (reason?: SsoAuditReason) => {
           try {
-            await recordOidcProviderTest(db, provider, actor, attempt, reason)
+            await recordOidcProviderTest(db, provider, attempt, reason)
             return c.redirect(attempt.returnPath)
           } catch (error) {
             if (error instanceof OidcAttemptRefused) return c.redirect(errorPath)
@@ -643,7 +671,7 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
           }
         }
         const failResponse = (reason: SsoAuditReason) =>
-          testActor ? finishTest(testActor, reason) : fail(reason)
+          attempt.test ? finishTest(reason) : fail(reason)
         if (query.has('error')) return failResponse('provider_error')
         const issuers = query.getAll('iss')
         if (issuers.length && (issuers.length !== 1 || issuers[0] !== provider.issuer))
@@ -707,7 +735,7 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
         } catch {
           return failResponse('response_malformed')
         }
-        if (testActor) return finishTest(testActor)
+        if (attempt.test) return finishTest()
         try {
           if (attempt.stepUp) {
             const browserBinding = getCookie(c, cookie)

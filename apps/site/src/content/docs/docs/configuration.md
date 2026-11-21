@@ -51,7 +51,7 @@ includes PostgreSQL 18.
 | `HOSTED_SIGNUP_URL` | `https://hourmere.com` | Hosted service destination for public attribution and confirmation links. Set the hosted sign-up page URL when available; HTTP(S), no credentials, query or fragment. Independent of this instance’s `PUBLIC_URL`; attribution cannot be disabled. |
 | `PRIVACY_POLICY_URL` | Unset | This instance operator's privacy policy. Absolute HTTP(S) URL, at most 2048 characters, without credentials, whitespace or control characters. Empty hides the privacy link. |
 | `TERMS_URL` | Unset | This instance operator's terms. Same URL rules as `PRIVACY_POLICY_URL`. Empty hides the terms link. |
-| `BETTER_AUTH_SECRET` | Required | At least 32 non-whitespace random characters. Signs sessions, protects sign-in tokens and derives the recipient mail-accounting HMAC key. Changing it signs people out, resets recipient mail counters and clears all waitlist entries (including contact details and pending work); instance counts remain. |
+| `BETTER_AUTH_SECRET` | Required | At least 32 non-whitespace random characters. Signs sessions, protects sign-in tokens and derives the recipient mail-accounting HMAC key. Changing it signs people out, resets recipient mail counters and clears all waitlist entries (including contact details and pending work); instance counts remain. Retained poll voters or mailbox counters block startup with a replacement secret. See [meeting poll backup and recovery](/docs/self-hosting#meeting-poll-credentials-and-recovery). |
 | `AUTO_MIGRATE` | `true` | Apply SQL/job migrations on startup. `false` requires manual migrations first; startup still needs database access. Forwarded by the default Compose file with a default of `true`. |
 | `WEB_DIST` | Unset | Built SPA directory. Not forwarded by the default Compose file: Docker sets `/app/apps/web/dist`; development uses Vite instead. |
 | `EMBED_ALLOWED_ORIGINS` | Unset | Up to 32 comma-separated exact HTTPS website origins permitted to embed public booking pages. Empty disables embedding; no wildcards or paths. Loopback HTTP is accepted for local development. The app's own origin also requires an explicit entry. This list is not secret: every signed-in account can read it, including any newly registered account when `SIGNUP=open`. Do not include hostnames you need to keep private. See [embed configuration visibility](/docs/embedding#copy-from-the-editor) for the endpoint and UI. |
@@ -188,8 +188,17 @@ for the planned transport rules.
 | `INVITATION_TEAM_MAX_PER_HOUR` | `50` | Maximum admitted invitation creations and explicit resends per team in a rolling hour, across its inviters. Positive integer. |
 | `INVITATION_TEAM_MAX_PER_DAY` | `200` | Same per-team admission limit over a rolling 24 hours. Positive integer. |
 | `MAIL_MAX_PER_HOUR` | `100` | Instance-wide booking notification/sign-in sends and team invitation attempt reservations in a rolling hour. `0` is unlimited. Invitee/guest/team invitation mail stops at this cap; host and sign-in mail may use up to 120% (rounded down), counting all these sends and reservations. |
+| `WORKFLOWS_ENABLED` | `false` | Set `true` to enable booking workflows, including on self-hosted instances without a paid plan. Only `true`, `false` and an empty value are accepted. Empty uses the server default. |
+| `WORKFLOW_MAIL_MAX_PER_HOUR` | `20` | Instance-wide workflow email attempts in a rolling hour, only while workflows are enabled. A positive `MAIL_MAX_PER_HOUR` further limits this cap to 20% of the shared budget, rounded down. `0` suppresses all workflow email. |
+| `WORKFLOW_OWNER_MAIL_MAX_PER_HOUR` | `5` | Workflow email attempts per personal owner or team in a rolling hour, only while workflows are enabled. `0` suppresses all workflow email. |
 | `SIGNUP` | `first-user` | `first-user`, `closed` or `open`; existing users can always sign in. |
 | `SIGNUP_ALLOWED_DOMAINS` | Unset | Comma-separated exact email domains, without `@` or wildcards. These domains may register even with `closed`. List subdomains separately. Invalid with `open`. |
+
+Compose forwards the three workflow settings with empty defaults. Apply the same values to
+every web process, worker and scheduler for the instance, and recreate the processes together
+after changing them. Set `WORKFLOWS_ENABLED=false` to stop new capture and delivery while
+keeping authorized recovery operations available. See the
+[booking workflow operating guide](https://github.com/hourmere/hourmere/blob/main/docs/workflows.md#operating-guide).
 
 For hosted Hourmere Cloud, explicitly set `FOLLOW_UP_HOST_NOTES_ENABLED=false` in the
 deployment environment before exposing notification writes to tenants. Apply the same value

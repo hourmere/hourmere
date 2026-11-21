@@ -36,6 +36,15 @@ const WIDE_PAGES: readonly string[] = NAV_ITEMS.map(({ to }) => to).filter(
   (to) => to !== PATHS.settings && to !== PATHS.workflows,
 )
 
+export type AppShellContext = {
+  workflowsEnabled: boolean | undefined
+  routingFormsEnabled: boolean | undefined
+  followUpHostNotesEnabled: boolean
+  ssoOidcEnabled: boolean | undefined
+  ssoSamlEnabled: boolean | undefined
+  showSsoSettings: boolean
+}
+
 function keepActiveVisible(list: HTMLUListElement) {
   const selected = list.querySelector('[aria-current="page"]')
   if (!selected) return
@@ -82,6 +91,14 @@ function Shell() {
       ? undefined
       : instance.status === 'ready' && instance.data?.routingFormsEnabled === true
   const managesTeam = teamAccess.status === 'ready' && teamAccess.role !== null
+  const ssoOidcEnabled =
+    instance.status === 'loading'
+      ? undefined
+      : instance.status === 'ready' && instance.data?.ssoOidcEnabled === true
+  const ssoSamlEnabled =
+    instance.status === 'loading'
+      ? undefined
+      : instance.status === 'ready' && instance.data?.ssoSamlEnabled === true
   const managesSpace = me.principal.kind === 'session' && (me.organization.personal || managesTeam)
   const showWorkflows = workflowsEnabled === true && managesSpace
   const showRoutingForms = routingFormsEnabled === true && managesSpace
@@ -253,12 +270,20 @@ function Shell() {
           )}
           <Suspense fallback={<PageSkeleton />}>
             <Outlet
-              context={{
-                workflowsEnabled,
-                routingFormsEnabled,
-                followUpHostNotesEnabled:
-                  instance.status === 'ready' && instance.data?.followUpHostNotesEnabled === true,
-              }}
+              context={
+                {
+                  workflowsEnabled,
+                  routingFormsEnabled,
+                  followUpHostNotesEnabled:
+                    instance.status === 'ready' && instance.data?.followUpHostNotesEnabled === true,
+                  ssoOidcEnabled,
+                  ssoSamlEnabled,
+                  showSsoSettings:
+                    (ssoOidcEnabled === true || ssoSamlEnabled === true) &&
+                    managesTeam &&
+                    me.principal.kind === 'session',
+                } satisfies AppShellContext
+              }
             />
           </Suspense>
         </main>

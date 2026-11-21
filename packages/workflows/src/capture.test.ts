@@ -597,7 +597,7 @@ describe.skipIf(!process.env.DATABASE_URL)('workflow confirmed creation capture'
       },
     }
   }
-  it('keeps production capture hard-off with live enabled definitions', async () => {
+  it('keeps production capture off by default with live enabled definitions', async () => {
     const { user, eventTypeId } = await setup()
     await define(user)
     const id = await booking(user, eventTypeId)

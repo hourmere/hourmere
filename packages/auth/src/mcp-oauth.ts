@@ -6,7 +6,7 @@ import { cimd } from '@better-auth/cimd'
 import { fetchClientMetadataResource } from '@better-auth/cimd/node'
 import { mcp } from '@better-auth/mcp'
 import type { Database, Db } from '@hourmere/db'
-import { scimSuspended } from '@hourmere/db/scim-suspension'
+import { scimProvisioned, scimSuspended } from '@hourmere/db/scim-suspension'
 import { APIError } from 'better-auth/api'
 import {
   createDpopReplayStore,
@@ -180,13 +180,6 @@ async function lockDelegation(
   authority: DelegationAuthority,
   denied = delegationRequired,
 ) {
-  // Authority writers lock the team before changing its provider and policy.
-  await trx
-    .selectFrom('auth.organization')
-    .select('id')
-    .where('id', '=', authority.organizationId)
-    .forShare()
-    .executeTakeFirst()
   await lockSsoDelegation(trx, capabilities, { ...authority, kind: 'oauth_grant' }, denied)
 }
 
@@ -556,6 +549,7 @@ export function createMcpOAuthResolver({
         'c.resources',
       ])
       .select(grantDelegationStatus(ssoCapabilities))
+      .select((eb) => scimProvisioned(eb.ref('o.id')).as('scimProvisioned'))
       .where('grant_row.id', '=', grantId)
       .where('grant_row.user_id', '=', payload.sub)
       .where('grant_row.organization_id', '=', organizationId)
@@ -584,6 +578,7 @@ export function createMcpOAuthResolver({
         oauthConsentId: row.id,
         oauthGrantId: grantId,
         ssoDelegationStatus: row.ssoDelegationStatus,
+        ...(row.scimProvisioned && { scimProvisioned: true }),
         clientId: payload.client_id,
         scopes,
         user: { id: row.userId, name: row.name, email: row.email },

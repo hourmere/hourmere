@@ -1,4 +1,4 @@
-// Workflow definition operations and creation capture stay behind the pinned hard-off guard.
+// Workflow operations and booking capture honor the operator switch.
 // This inventory admits only those interfaces and the exact data-access modules below.
 import { randomUUID } from 'node:crypto'
 import { readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
@@ -9,8 +9,8 @@ import { parse } from '@babel/parser'
 import type { CallerResolver, Principal } from '@hourmere/auth'
 import { createGoogleCalendarClient, createMicrosoftCalendarClient } from '@hourmere/calendars'
 import { createZoomClient } from '@hourmere/conferences'
-import { createDb, createPool } from '@hourmere/db'
-import { describe, expect, it } from 'vitest'
+import { createDb, createPool, type Db } from '@hourmere/db'
+import { describe, expect, it, vi } from 'vitest'
 import { createApp } from '../apps/server/src/app.ts'
 import { loadConfig } from '../apps/server/src/config.ts'
 import { prepareTools } from '../apps/server/src/mcp/tools.ts'
@@ -50,6 +50,10 @@ const SHIPPED = [
 ]
 const shipped = operations.filter(({ operationId }) => SHIPPED.includes(operationId))
 const absent = operations.filter(({ operationId }) => !SHIPPED.includes(operationId))
+const defaultOperatorValues = [
+  { label: 'unset', value: undefined },
+  { label: 'the empty Compose value', value: '' },
+]
 
 /** A Hono path such as `/api/v1/workflows/:id`, from an OpenAPI path. */
 const honoPath = (path: string) => path.replace(/\{(\w+)\}/g, ':$1')
@@ -105,7 +109,9 @@ const DATA_ACCESS = [
   'packages/workflows/src/deletes.ts',
   'packages/workflows/src/capture.ts',
   'packages/workflows/src/dispatcher.ts',
+  'packages/workflows/src/retention.ts',
   'packages/workflows/src/email-attempt.ts',
+  'packages/workflows/src/execution.ts',
   'packages/notifications/src/workflow-mail.ts',
 ]
 const DEFINITION_TABLES = ['workflow_definitions', 'workflow_revisions', 'workflow_creation_keys']
@@ -138,11 +144,17 @@ function productionSources(): string[] {
   return files.filter((file) => file !== WEBHOOK_DELIVERY_TEST_FIXTURE).sort()
 }
 
-// Frozen alongside the package hard-off module: availability and tool discovery must never
-// acquire a configuration, environment or caller-controlled escape hatch.
+// Pinned alongside the package hard-off module. An injected operator setting is evaluated
+// behind the implementation guard and cannot override it.
 const FROZEN_SERVER_GUARD_STATEMENTS = [
-  `import { DomainError } from '@hourmere/scheduling'`,
-  `import { requireWorkflowsImplemented, workflowOperation } from '@hourmere/workflows'`,
+  `import {
+  requireWorkflowsEnabled,
+  requireWorkflowsImplemented,
+  requireWorkflowUpdateAllowed,
+  type WorkflowSettings,
+  workflowOperation,
+  workflowsEnabled,
+} from '@hourmere/workflows'`,
   `import type { Context, Next } from 'hono'`,
   `import { createMiddleware } from 'hono/factory'`,
   `import type { CallerEnv } from './caller.ts'`,
@@ -152,17 +164,28 @@ const FROZEN_SERVER_GUARD_STATEMENTS = [
     await next()
   }),
 )`,
-  `export function workflowFeatureTools(tools: readonly Tool[]): Tool[] {
-  return tools.map((tool) => ({ ...tool, requireAvailable: requireWorkflowsImplemented }))
+  `export function workflowsEnabledGuard(settings: WorkflowSettings) {
+  return createMiddleware<CallerEnv>(async (_c, next) => {
+    requireWorkflowsEnabled(settings)
+    await next()
+  })
 }`,
-  `export function workflowsAvailable(): boolean {
-  try {
-    requireWorkflowsImplemented()
-    return true
-  } catch (error) {
-    if (error instanceof DomainError && error.code === 'workflows_disabled') return false
-    throw error
-  }
+  `export function workflowUpdateGuard(settings: WorkflowSettings) {
+  return createMiddleware<CallerEnv>(async (c, next) => {
+    if (!workflowsEnabled(settings))
+      requireWorkflowUpdateAllowed(settings, await c.req.json().catch(() => undefined))
+    await next()
+  })
+}`,
+  `export function workflowFeatureTools(tools: readonly Tool[], settings: WorkflowSettings): Tool[] {
+  return tools.map((tool) => ({
+    ...tool,
+    discoverable: () => workflowsEnabled(settings),
+    requireAvailable(args) {
+      requireWorkflowsImplemented()
+      return tool.requireAvailable?.(args)
+    },
+  }))
 }`,
 ]
 
@@ -272,10 +295,8 @@ const resolveCaller: CallerResolver = async (headers) => {
 }
 const bearer = (scope: keyof typeof keys) => `Bearer hm_workflows_off_${scope}`
 
-/** The production assembly, as scripts/routing-forms-off.test.ts builds it. */
-function productionApp(db: ReturnType<typeof createDb>, databaseUrl: string) {
-  // Every optional route group switched on; no handler that would contact the database runs.
-  const config = loadConfig({
+function workflowConfig(databaseUrl: string, operatorValue: string | undefined) {
+  return loadConfig({
     DATABASE_URL: databaseUrl,
     BETTER_AUTH_SECRET: 'workflows-off-secret-with-at-least-32-characters',
     PUBLIC_URL: 'http://localhost',
@@ -286,7 +307,13 @@ function productionApp(db: ReturnType<typeof createDb>, databaseUrl: string) {
     WEBHOOK_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
     ZOOM_WEBHOOK_SECRET_TOKEN: 'workflows-off-zoom-webhook-token',
     WEB_DIST: fileURLToPath(root),
+    ...(operatorValue === undefined ? {} : { WORKFLOWS_ENABLED: operatorValue }),
   })
+}
+
+/** The production assembly, as scripts/routing-forms-off.test.ts builds it. */
+function productionApp(db: Db, databaseUrl: string, operatorValue: string | undefined) {
+  const config = workflowConfig(databaseUrl, operatorValue)
   const credentials = { clientId: 'workflows-off', clientSecret: 'workflows-off' }
   const encryptionKey = Buffer.alloc(32, 1).toString('base64')
   return createApp(
@@ -393,7 +420,7 @@ describe('booking workflows are off and expose the shipped operations', () => {
     for (const { method, path, operationId } of shipped) {
       const operation = paths[path]?.[method.toLowerCase()] as Record<string, unknown>
       expect(operation?.operationId, operationId).toBe(operationId)
-      // Each says it is not available yet, as the design requires of every listed interface.
+      expect(String(operation?.description)).toContain('WORKFLOWS_ENABLED=true')
       expect(String(operation?.description)).toContain('404 workflows_disabled')
     }
     for (const { method, path, operationId } of absent) {
@@ -421,111 +448,133 @@ describe('booking workflows are off and expose the shipped operations', () => {
     expect(instance?.properties).toHaveProperty(['workflowsEnabled', 'type'], 'boolean')
   })
 
-  it('serves the shipped workflow routes, each refusing while off, and reports workflows off', async () => {
-    const databaseUrl = 'postgres://workflows-off@127.0.0.1:9/workflows-off'
-    const db = createDb(createPool(databaseUrl))
-    try {
-      const app = productionApp(db, databaseUrl)
-      const routes = app.routes.map(({ path }) => path)
-      for (const control of ['/api/v1/bookings/:id', '/api/v1/instance', '/mcp', '/assets/*'])
-        expect(routes, control).toContain(control)
-      const workflowRoutes = [
-        ...new Set(
-          app.routes
-            .filter(({ path }) => workflowSegment.test(path))
-            .map(({ method, path }) => `${method} ${path}`),
-        ),
-      ].sort()
-      expect(workflowRoutes).toEqual(
-        shipped.map(({ method, path }) => `${method} ${honoPath(path)}`).sort(),
-      )
-      // Every registered workflow route, not only today's, carries the workflow guard.
-      for (const route of workflowRoutes)
-        expect(
-          app.routes.some(
-            ({ method, path, handler }) =>
-              `${method} ${path}` === route && handler === workflowsGuard,
+  it.each(defaultOperatorValues)(
+    'honors operator-off on REST and MCP with $label',
+    async ({ value }) => {
+      const databaseUrl = 'postgres://workflows-off@127.0.0.1:9/workflows-off'
+      const pool = createPool(databaseUrl)
+      const connect = vi.spyOn(pool, 'connect')
+      const db = createDb(pool)
+      try {
+        const app = productionApp(db, databaseUrl, value)
+        const routes = app.routes.map(({ path }) => path)
+        for (const control of ['/api/v1/bookings/:id', '/api/v1/instance', '/mcp', '/assets/*'])
+          expect(routes, control).toContain(control)
+        const workflowRoutes = [
+          ...new Set(
+            app.routes
+              .filter(({ path }) => workflowSegment.test(path))
+              .map(({ method, path }) => `${method} ${path}`),
           ),
-          route,
-        ).toBe(true)
-      // Hard-off is behavior: every caller the scope allows gets 404 workflows_disabled, for
-      // any input, before validation or lookup (the pool's address refuses connections). The
-      // requests come from the registered routes, so a later route is checked the same way.
-      const urls = workflowRoutes.flatMap((route) => {
-        const [method, rawPath] = route.split(' ')
-        const path = (rawPath as string).replaceAll(':id', 'not-a-uuid')
-        return [
-          path,
-          `${path}?ownerKind=personal&ownerId=${keys.full.user.id}`,
-          `${path}?ownerKind=nobody&limit=0&cursor=x`,
-          path.replace('not-a-uuid', randomUUID()),
-        ].map((url) => ({ method, url }))
-      })
-      expect(urls.map(({ url }) => url)).toContain('/api/v1/workflows')
-      expect(urls.map(({ url }) => url)).toContain('/api/v1/workflows/not-a-uuid')
-      for (const { method, url } of urls) {
-        for (const scope of ['full', 'read'] as const) {
-          const res = await app.request(url, { method, headers: { authorization: bearer(scope) } })
-          const refusedScope =
-            (method === 'POST' || method === 'PATCH' || method === 'DELETE') && scope === 'read'
-          expect(res.status, `${scope} ${method} ${url}`).toBe(refusedScope ? 403 : 404)
-          expect(await res.json()).toMatchObject({
-            error: refusedScope ? 'insufficient_scope' : 'workflows_disabled',
-          })
-          expect(res.headers.get('cache-control')).toBe('no-store')
-        }
-        const bookings = await app.request(url, {
-          method,
-          headers: { authorization: bearer('bookings') },
-        })
-        expect(bookings.status, url).toBe(403)
-        expect(await bookings.json()).toMatchObject({ error: 'insufficient_scope' })
-        expect((await app.request(url, { method })).status, url).toBe(401)
-      }
-      const instance = await app.request('/api/v1/instance')
-      expect(instance.status).toBe(200)
-      expect(await instance.json()).toHaveProperty('workflowsEnabled', false)
-    } finally {
-      await db.destroy()
-    }
-  })
+        ].sort()
+        expect(workflowRoutes).toEqual(
+          shipped.map(({ method, path }) => `${method} ${honoPath(path)}`).sort(),
+        )
+        for (const route of workflowRoutes)
+          expect(
+            app.routes.some(
+              ({ method, path, handler }) =>
+                `${method} ${path}` === route && handler === workflowsGuard,
+            ),
+            route,
+          ).toBe(true)
 
-  it('catalogues the shipped tools, lists none of them and refuses direct calls', async () => {
-    // No handlers run and no connection opens; the pool is still closed explicitly.
-    const databaseUrl = 'postgres://workflows-off@127.0.0.1:9/workflows-off'
-    const db = createDb(createPool(databaseUrl))
-    try {
-      const names = prepareTools(productTools({ db, slotSnippetsEnabled: true })).map(
-        ({ tool }) => tool.name,
-      )
-      expect(names).toContain('create_booking')
-      for (const { tool } of absent) expect(names).not.toContain(tool)
-      expect(names.filter((name) => /workflow/i.test(name)).sort()).toEqual(
-        shipped.map(({ tool }) => tool).sort(),
-      )
-      const app = productionApp(db, databaseUrl)
-      for (const scope of ['full', 'read'] as const) {
-        const listed = (await mcp(app, scope, 'tools/list')).result?.tools?.map(({ name }) => name)
-        expect(listed).toContain('whoami')
-        expect(listed?.filter((name) => /workflow/i.test(name))).toEqual([])
-        for (const { tool, method } of shipped)
-          for (const args of [{}, { owner: { kind: 'personal', id: randomUUID() } }, { id: 'x' }])
+        const instance = await app.request('/api/v1/instance')
+        expect(instance.status).toBe(200)
+        expect(await instance.json()).toHaveProperty('workflowsEnabled', false)
+
+        const names = prepareTools(productTools({ db, slotSnippetsEnabled: true })).map(
+          ({ tool }) => tool.name,
+        )
+        expect(names).toContain('create_booking')
+        for (const { tool } of absent) expect(names).not.toContain(tool)
+        expect(names.filter((name) => /workflow/i.test(name)).sort()).toEqual(
+          shipped.map(({ tool }) => tool).sort(),
+        )
+        for (const scope of ['full', 'read'] as const) {
+          const listed = (await mcp(app, scope, 'tools/list')).result?.tools?.map(
+            ({ name }) => name,
+          )
+          expect(listed).toContain('whoami')
+          expect(listed?.filter((name) => /workflow/i.test(name))).toEqual([])
+        }
+
+        // Refused mutations stop before validation. Recovery operations reach validation or
+        // opaque ID checks, without any DB access for these malformed requests.
+        const outcomes: Record<string, [number, string, Record<string, unknown>]> = {
+          createWorkflow: [404, 'workflows_disabled', {}],
+          previewWorkflow: [404, 'workflows_disabled', {}],
+          updateWorkflow: [
+            404,
+            'workflows_disabled',
+            { id: 'invalid', expectedRevision: 1, enabled: true },
+          ],
+          deleteWorkflow: [404, 'workflow_not_found', { id: 'invalid', expectedRevision: 1 }],
+          getWorkflow: [404, 'workflow_not_found', { id: 'invalid' }],
+          listWorkflowRuns: [404, 'workflow_not_found', { id: 'invalid' }],
+          listWorkflows: [400, 'invalid_request', {}],
+        }
+        for (const { method, path, operationId, tool } of shipped) {
+          const [status, error, args] = outcomes[operationId] ?? []
+          if (!args) throw new Error(`Missing operator-off expectation for ${operationId}`)
+          const { id: _id, ...body } = args
+          const url = path.replace('{id}', 'invalid')
+          const request = (scope?: keyof typeof keys) =>
+            app.request(url, {
+              method,
+              headers: {
+                ...(scope && { authorization: bearer(scope) }),
+                ...(method !== 'GET' && { 'content-type': 'application/json' }),
+              },
+              ...(method !== 'GET' && { body: JSON.stringify(body) }),
+            })
+          for (const scope of ['full', 'read', 'bookings'] as const) {
+            const refusedScope = scope === 'bookings' || (method !== 'GET' && scope === 'read')
+            const expectedError = refusedScope ? 'insufficient_scope' : error
+            const response = await request(scope)
+            expect(response.status, `${scope} ${method} ${url}`).toBe(refusedScope ? 403 : status)
+            expect(await response.json()).toMatchObject({ error: expectedError })
             expect(
               toolError(await mcp(app, scope, 'tools/call', { name: tool, arguments: args })),
-            ).toMatchObject({
-              error:
-                method !== 'GET' && scope === 'read' ? 'insufficient_scope' : 'workflows_disabled',
-            })
+            ).toMatchObject({ error: expectedError })
+          }
+          expect((await request()).status, url).toBe(401)
+        }
+        expect(connect).not.toHaveBeenCalled()
+      } finally {
+        await db.destroy()
       }
-      // The API-key scope check keeps its precedence over the switch.
-      for (const { tool } of shipped)
-        expect(
-          toolError(await mcp(app, 'bookings', 'tools/call', { name: tool, arguments: {} })),
-        ).toMatchObject({ error: 'insufficient_scope' })
-    } finally {
-      await db.destroy()
-    }
-  })
+    },
+  )
+
+  it.each(defaultOperatorValues)(
+    'does not query the booking transaction with $label',
+    async ({ value }) => {
+      const config = workflowConfig('postgres://workflows-off@127.0.0.1:9/workflows-off', value)
+      const trx = new Proxy({} as Db, {
+        get: () => {
+          throw new Error('operator-off capture touched the transaction')
+        },
+      })
+      const now = Temporal.Instant.from('2030-01-01T12:00Z')
+      for (const type of [
+        'created',
+        'rescheduled',
+        'cancelled',
+        'reschedule_requested',
+        'reschedule_request_expired',
+      ] as const)
+        await expect(
+          workflows.captureWorkflowBooking(
+            trx,
+            { type, requestId: randomUUID(), bookingId: randomUUID(), start: now },
+            now,
+            config.BETTER_AUTH_SECRET,
+            { workflowsEnabled: config.WORKFLOWS_ENABLED },
+          ),
+        ).resolves.toBeUndefined()
+    },
+  )
 
   it('registers only the shipped workflow CLI commands and app paths', () => {
     const commands = [
@@ -653,13 +702,21 @@ describe('booking workflows are off and expose the shipped operations', () => {
           expect(source).toContain(table)
         for (const table of ['workflow_mail_reservations', 'workflow_creation_keys'])
           expect(source).not.toContain(table)
+      } else if (file === 'packages/workflows/src/retention.ts') {
+        const tables = ['workflow_runs', 'workflow_recipient_claims', 'workflow_run_history']
+        for (const table of tables) expect(source).toContain(table)
+        for (const table of STORAGE_TABLES.filter((name) => !tables.includes(name)))
+          expect(source).not.toContain(table)
       } else if (file === 'packages/notifications/src/workflow-mail.ts') {
         expect(source).toContain('workflow_mail_reservations')
         for (const table of STORAGE_TABLES.filter((name) => name !== 'workflow_mail_reservations'))
           expect(source).not.toContain(table)
-      } else if (file === 'packages/workflows/src/email-attempt.ts') {
+      } else if (
+        file === 'packages/workflows/src/email-attempt.ts' ||
+        file === 'packages/workflows/src/execution.ts'
+      ) {
         expect(source).toContain('workflow_recipient_claims')
-        expect(source).toContain('workflow_runs')
+        if (file.endsWith('/email-attempt.ts')) expect(source).toContain('workflow_runs')
         for (const table of STORAGE_TABLES.filter(
           (name) => name !== 'workflow_recipient_claims' && name !== 'workflow_runs',
         ))
@@ -671,7 +728,7 @@ describe('booking workflows are off and expose the shipped operations', () => {
     const loaders = sources.filter((file) => {
       const source = readFileSync(new URL(file, root), 'utf8')
       return (
-        /['"`](?:\.\/(?:reads|creates|updates|deletes|capture|dispatcher|email-attempt)|[^'"`]*workflows\/src\/(?:reads|creates|updates|deletes|preview|capture|dispatcher|email-attempt))(?:\.ts)?['"`]/.test(
+        /['"`](?:\.\/(?:reads|creates|updates|deletes|capture|dispatcher|retention|email-attempt)|[^'"`]*workflows\/src\/(?:reads|creates|updates|deletes|preview|capture|dispatcher|retention|email-attempt))(?:\.ts)?['"`]/.test(
           source,
         ) ||
         (file.startsWith('packages/workflows/src/') && /['"`]\.\/preview\.ts['"`]/.test(source))
@@ -680,20 +737,23 @@ describe('booking workflows are off and expose the shipped operations', () => {
     expect(loaders).toEqual([
       'packages/workflows/src/creates.ts',
       'packages/workflows/src/deletes.ts',
+      'packages/workflows/src/dispatcher.ts',
       'packages/workflows/src/email-attempt.ts',
+      'packages/workflows/src/execution.ts',
       'packages/workflows/src/index.ts',
       'packages/workflows/src/preview.ts',
+      'packages/workflows/src/reads.ts',
       'packages/workflows/src/updates.ts',
     ])
   })
 
-  it('lets only the internal attempt service stamp workflow mail while hard-off', () => {
+  it('lets only the internal attempt service stamp workflow mail', () => {
     const admission = 'packages/notifications/src/workflow-mail.ts'
     const callers = productionSources().filter((file) => {
       if (file === admission) return false
       const source = readFileSync(new URL(file, root), 'utf8')
       return /\b(?:admitWorkflowEmail|readmitWorkflowEmail|stampWorkflowEmail)\b|['"`][^'"`]*workflow-mail(?:\.ts)?['"`]/.test(
-        source,
+        source.replace(/^import type .*$/gm, ''),
       )
     })
     expect(callers).toEqual(['packages/workflows/src/email-attempt.ts'])
@@ -740,40 +800,47 @@ describe('booking workflows are off and expose the shipped operations', () => {
 
   it('wires only guarded lifecycle capture after core intents in the production notifier', () => {
     const server = readFileSync(new URL('apps/server/src/server.ts', root), 'utf8')
-    expect(server).toContain("import { captureWorkflowBooking } from '@hourmere/workflows'")
+    expect(server).toMatch(
+      /import \{[^}]*\bcaptureWorkflowBooking\b[^}]*\} from '@hourmere\/workflows'/,
+    )
     expect(server).toContain(
       'const notifyAttendeeNoShow = webhookAttendeeNoShowNotifier(jobs, webhookSettings)',
     )
     const notifier = server.slice(server.indexOf('const notify: BookingNotifier = async'))
     const core = notifier.indexOf('await emailNotifier(trx, event, now)')
     const capture = notifier.indexOf(
-      'await captureWorkflowBooking(trx, event, now, config.BETTER_AUTH_SECRET)',
+      'await captureWorkflowBooking(trx, event, now, config.BETTER_AUTH_SECRET, {',
     )
     expect(core).toBeGreaterThanOrEqual(0)
     expect(capture).toBeGreaterThan(core)
     const service = readFileSync(new URL('packages/workflows/src/capture.ts', root), 'utf8')
     expect(service).toContain(
-      'export const captureWorkflowBooking = workflowCapture((...args: CaptureArgs) =>\n' +
-        '  captureBookingWorkflows(...args, workflowAuditPort),',
+      'export const captureWorkflowBooking = guardedCapture(captureBookingWorkflows)',
     )
+    expect(service).toMatch(/function guardedCapture\([^)]*\)\s*{\s*return workflowCapture\(/)
   })
 
-  it('keeps dispatcher and repair handlers guarded and absent from production registration', () => {
+  it('keeps dispatch, repair and retention handlers guarded and limits production registration', () => {
     const service = readFileSync(new URL('packages/workflows/src/dispatcher.ts', root), 'utf8')
     expect(service).toContain('export const dispatchWorkflowRuns = workflowExecution(')
     expect(service).toContain(
-      'dispatchDueWorkflowRuns({ ...ctx, audit: workflowAuditPort }, options)',
+      '{ ...ctx, audit: workflowAuditPort, instanceDisabled: !workflowsEnabled(ctx) }',
     )
     expect(service).toContain('export const repairWorkflowWakes = workflowExecution(')
     expect(service).toContain(
       'repairWorkflowRunWakes({ ...ctx, audit: workflowAuditPort }, port, limit)',
     )
-    for (const file of productionSources().filter(
-      (file) => !file.startsWith('packages/workflows/src/'),
-    )) {
-      const source = readFileSync(new URL(file, root), 'utf8')
-      expect(source, file).not.toMatch(/\bworkflowJobs\b|workflow-dispatch-v1|workflow-repair-v1/)
-    }
+    expect(service).toMatch(
+      /name: 'workflow-retention-v1',[\s\S]*handler: workflowExecution\(async \(_, \{ signal \}\) => \{\s*if \(!signal\.aborted\) await purgeWorkflowHistory\(ctx\.db\)/,
+    )
+    const registrations = productionSources()
+      .filter((file) => !file.startsWith('packages/workflows/src/'))
+      .filter((file) =>
+        /\bworkflowJobs\b|workflow-(?:dispatch|repair|retention)-v1/.test(
+          readFileSync(new URL(file, root), 'utf8'),
+        ),
+      )
+    expect(registrations).toEqual(['apps/server/src/server.ts'])
   })
 
   it('keeps the retired audit port out of server, worker, CLI and script wiring', () => {
@@ -788,7 +855,7 @@ describe('booking workflows are off and expose the shipped operations', () => {
     }
   })
 
-  it('lets the shared webhook worker reach workflow sends only through the hard-off guard', () => {
+  it('lets the shared webhook worker reach sends only through the workflow availability guards', () => {
     const deliveryFile = 'packages/webhooks/src/delivery.ts'
     const eligibilityModules = [
       deliveryFile,
@@ -796,8 +863,9 @@ describe('booking workflows are off and expose the shipped operations', () => {
       'packages/workflows/src/index.ts',
     ]
     const service = readFileSync(new URL(deliveryFile, root), 'utf8')
+    expect(service).toContain('const guardedWorkflowWebhook = workflowExecution(')
     expect(service).toContain(
-      'const guardedWorkflowWebhook = workflowExecution(deliverWorkflowWebhook)',
+      '{ ...deps, enabled: deps.enabled && deps.workflowsEnabled === true }',
     )
     expect(service).toMatch(
       /if \(retry === 'workflow'\)\s+return guardedWorkflowWebhook\(deps, deliveryId, signal, jobAttempt\)/,
@@ -858,8 +926,7 @@ describe('booking workflows are off and expose the shipped operations', () => {
     expect(hasWorkflowMock("vi.importActual('@hourmere/workflows')", file)).toBe(false)
   })
 
-  it('lets exactly one test file replace the hard-off module', () => {
-    // The sanctioned seam for enabled definition operations; every other test sees the real guards.
+  it('runs all tests against the real workflow guards', () => {
     const mocking: string[] = []
     const walk = (directory: string) => {
       for (const entry of readdirSync(directory)) {
@@ -872,10 +939,10 @@ describe('booking workflows are off and expose the shipped operations', () => {
     }
     for (const group of ['apps', 'packages', 'scripts', 'tools'])
       walk(fileURLToPath(new URL(group, root)))
-    expect(mocking).toEqual(['apps/server/src/workflows-enabled.test.ts'])
+    expect(mocking).toEqual([])
   })
 
-  it('exports only guarded workflow operations, which refuse before touching their context', async () => {
+  it('exports only the shipped workflow operations', () => {
     const exported = Object.keys(workflows).filter((name) =>
       /^(?:list|get|create|update|delete|preview)Workflow/.test(name),
     )
@@ -888,28 +955,5 @@ describe('booking workflows are off and expose the shipped operations', () => {
       'previewWorkflow',
       'updateWorkflow',
     ])
-    const untouchable = new Proxy(
-      {},
-      {
-        get: () => {
-          throw new Error('a guarded operation must not touch its context while off')
-        },
-      },
-    ) as Parameters<typeof workflows.createWorkflow>[0]
-    for (const read of [
-      () => workflows.listWorkflows(untouchable, { owner: { kind: 'team', id: randomUUID() } }),
-      () => workflows.getWorkflow(untouchable, randomUUID()),
-      () =>
-        workflows.listWorkflowRuns(
-          untouchable as Parameters<typeof workflows.listWorkflowRuns>[0],
-          randomUUID(),
-          {},
-        ),
-      () => workflows.createWorkflow(untouchable, {} as never),
-      () => workflows.updateWorkflow(untouchable, randomUUID(), {} as never),
-      () => workflows.deleteWorkflow(untouchable, randomUUID(), {} as never),
-      () => workflows.previewWorkflow(untouchable, {}),
-    ])
-      await expect(read()).rejects.toMatchObject({ kind: 'not_found', code: 'workflows_disabled' })
   })
 })

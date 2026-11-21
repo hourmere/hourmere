@@ -1,6 +1,6 @@
 import { SCIM_URN, scimUserSchemas } from './scim-discovery.ts'
 import {
-  assertScimActiveUnchanged,
+  immutableScimPrivileges,
   invalidSyntax,
   invalidValue,
   parseScimUserProfile,
@@ -101,7 +101,7 @@ function applyField(
   path: string,
   value: unknown,
   op: Operation['op'],
-  current: { profile: ScimUserProfile; active: boolean },
+  profile: ScimUserProfile,
   pathless = false,
 ) {
   if (path.length > MAX_PATH_LENGTH || path !== path.trim()) throw invalidPath()
@@ -110,7 +110,7 @@ function applyField(
   if (target.startsWith(enterprise) && (target !== lower || (target === enterprise && !pathless)))
     throw invalidPath()
   if (workEmailPath.test(target)) {
-    if (op !== 'add' && current.profile.work_email === null) throw noTarget()
+    if (op !== 'add' && profile.work_email === null) throw noTarget()
     setField(
       draft,
       ['emails'],
@@ -126,21 +126,23 @@ function applyField(
     target.startsWith('groups[')
   )
     throw readOnly()
+  if (
+    /^(?:roles|entitlements)[.[]/.test(target) ||
+    (op === 'remove' && (target === 'roles' || target === 'entitlements'))
+  )
+    throw immutableScimPrivileges()
   if (!targets.has(target)) throw invalidPath()
   if (target === 'username' && op === 'remove')
     throw refuse(400, 'The userName attribute is required.', 'mutability')
   if (target === 'active') {
-    if (op === 'remove' || value === undefined) {
-      assertScimActiveUnchanged(null, current.active)
-      return
-    }
+    if (op === 'remove' || value === undefined)
+      throw refuse(403, 'The active attribute cannot be removed or unassigned.', 'mutability')
     const boolean =
       typeof value === 'string' && /^(?:true|false)$/i.test(value) && value === value.trim()
         ? value.toLowerCase() === 'true'
         : value
     if (typeof boolean !== 'boolean')
       throw invalidValue('The active attribute is not a valid value.')
-    assertScimActiveUnchanged(boolean, current.active)
     setField(draft, ['active'], boolean)
     return
   }
@@ -148,7 +150,7 @@ function applyField(
   if (complex.has(target) && value !== undefined) {
     const separator = target === enterprise ? ':' : '.'
     for (const [child, item] of scimAttributes(value, 'PATCH complex')) {
-      applyField(draft, target + separator + child, item, op, current)
+      applyField(draft, target + separator + child, item, op, profile)
     }
     return
   }
@@ -161,26 +163,30 @@ function applyField(
 }
 
 /** Applies the bounded operations in order to the write transaction's locked snapshot. */
-export function normalizeScimUserPatch(
-  entry: ScimUserProfile & { active: boolean },
-  operations: readonly Operation[],
-) {
+export function normalizeScimUserPatch(entry: ScimUserProfile, operations: readonly Operation[]) {
   let profile: ScimUserProfile = entry
+  let active: boolean | undefined
+  let deactivationRequested = false
+  let roleWrite = false
   const managers: string[] = []
   for (const { op, path, value } of operations) {
     const draft: ObjectValue = {}
-    const current = { profile, active: entry.active }
     if (path === undefined) {
       const fields = scimAttributes(value, 'PATCH value')
       if (fields.size === 0) throw invalidValue('A pathless PATCH value must name attributes.')
-      for (const [name, item] of fields) applyField(draft, name, item, op, current, true)
+      for (const [name, item] of fields) applyField(draft, name, item, op, profile, true)
     } else {
-      applyField(draft, path, value, op, current)
+      applyField(draft, path, value, op, profile)
     }
+    if (typeof draft.active === 'boolean') {
+      active = draft.active
+      deactivationRequested ||= !active
+    }
+    roleWrite ||= Object.hasOwn(draft, 'roles') || Object.hasOwn(draft, 'entitlements')
     profile = parseScimUserProfile(scimAttributes(draft, 'PATCH attributes'), profile, op === 'add')
     const extension = draft[enterprise]
     if (isObject(extension) && isObject(extension.manager) && profile.manager_id !== null)
       managers.push(profile.manager_id)
   }
-  return { profile, managers }
+  return { profile, managers, active, deactivationRequested, roleWrite }
 }

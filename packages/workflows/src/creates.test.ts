@@ -25,12 +25,13 @@ const input = (user: TestUser, overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 })
 
-describe('workflow creation hard-off', () => {
-  it('refuses before inspecting the context or input', async () => {
+describe('workflow creation while operator-off', () => {
+  it('refuses before inspecting the database or input', async () => {
     const ctx = new Proxy(
       {},
       {
-        get() {
+        get(_target, key) {
+          if (key === 'workflowsEnabled') return false
           throw new Error('context was read')
         },
       },

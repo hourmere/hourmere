@@ -25,6 +25,7 @@ import {
   at,
   claimedDomainValues,
   oidcProviderValues,
+  recoveryOwnerValues,
   type SsoFixture,
   samlProviderValues,
   ssoFixture,
@@ -37,6 +38,8 @@ import { ssoDelegationRoutes } from './routes/sso-delegation.ts'
 import { ssoDomainRoutes } from './routes/sso-domains.ts'
 import { ssoDraftRoutes } from './routes/sso-drafts.ts'
 import { ssoIdentityRecoveryRoutes } from './routes/sso-link-recovery.ts'
+import { ssoPolicyRoutes } from './routes/sso-policy.ts'
+import { ssoRecoveryEnrollmentRoutes } from './routes/sso-recovery-enrollment.ts'
 import { sealSsoProviderConfiguration, ssoProviderConfigurationAad } from './sso-configuration.ts'
 import { ssoLinkRemovalEmailJob } from './sso-link-recovery.ts'
 import {
@@ -56,6 +59,8 @@ const callbackPath = (providerId: string) => `/api/auth/sso/callback/${providerI
 const completePath = '/api/auth/sso/oidc/complete'
 const acceptInvitationPath = '/api/auth/organization/accept-invitation'
 const providersPath = '/api/v1/team/sso/providers'
+const policyPath = '/api/v1/team/sso/policy'
+const recoveryUsePath = '/api/v1/team/sso/recovery/use'
 const domainsPath = '/api/v1/team/sso/domains'
 const delegationsPath = '/api/v1/team/sso/delegations'
 const providerTestPath = (providerId: string) => `${providersPath}/${providerId}/test`
@@ -254,6 +259,8 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
 
   function instance({
     enabled = true,
+    samlEnabled = false,
+    enforceTeamSso = true,
     expiresIn,
     signupPolicy = signup,
     scimClaims = false,
@@ -261,13 +268,15 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     nativeAuth,
   }: {
     enabled?: boolean
+    samlEnabled?: boolean
+    enforceTeamSso?: boolean
     expiresIn?: number
     signupPolicy?: SignupPolicy
     scimClaims?: boolean
     failRecoveryNotification?: boolean
     nativeAuth?: typeof auth
   } = {}) {
-    const capabilities = { ssoOidcEnabled: enabled, ssoSamlEnabled: false }
+    const capabilities = { ssoOidcEnabled: enabled, ssoSamlEnabled: samlEnabled }
     const authentication = nativeAuth ?? (scimClaims ? scimAuth : auth)
     return createApp({
       checkDb: async () => {},
@@ -277,6 +286,18 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       routes: [
         eventTypeRoutes({ db }),
         ssoRoutes({ db, capabilities }),
+        ssoPolicyRoutes({ db, publicUrl, capabilities }),
+        ssoRecoveryEnrollmentRoutes({
+          db,
+          publicUrl,
+          capabilities,
+          notificationQueue: {
+            async enqueue(_name, _payload, options) {
+              expect(options.transaction).toMatchObject({ isTransaction: true })
+              return 'recovery-notice'
+            },
+          },
+        }),
         ssoDomainRoutes({ db, publicUrl, capabilities }),
         ssoDelegationRoutes({ db, publicUrl, capabilities, configurationKey }),
         ssoIdentityRecoveryRoutes({
@@ -301,7 +322,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
           send: idp.send,
         }),
       ],
-      ssoTeamReads: { db, capabilities },
+      ssoTeamReads: enforceTeamSso ? { db, capabilities } : undefined,
       ssoMailboxProof: mailboxProofRoutes({
         db,
         capabilities,
@@ -738,6 +759,10 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       expectedRevision: 1,
       proofAttemptId: challenge.id,
     })
+    return providerTestAttempt(providerId, challenge.cookie, response)
+  }
+
+  async function providerTestAttempt(providerId: string, cookie: string, response: Response) {
     expect(response.status).toBe(200)
     expect(response.headers.get('cache-control')).toBe('no-store')
     const { url, attemptId } = (await response.json()) as { url: string; attemptId: string }
@@ -752,8 +777,8 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       .getSetCookie()
       .find((value) => value.startsWith(`${bindingCookie}=`))
     expect(binding).toMatch(/; SameSite=Lax/i)
-    expect(challenge.cookie).toContain(binding?.split(';')[0])
-    return { id: attemptId, providerId, authorization, cookie: challenge.cookie }
+    expect(cookie).toContain(binding?.split(';')[0])
+    return { id: attemptId, providerId, authorization, cookie }
   }
 
   async function providerTestStatus(providerId: string, cookie: string) {
@@ -957,15 +982,22 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       .executeTakeFirstOrThrow()
   }
 
-  async function waitForBlocked(pid: number | undefined) {
+  async function waitForBlocked(pid: number | undefined, expected = 1) {
     expect(pid).toEqual(expect.any(Number))
     await vi.waitFor(
       async () => {
-        const { rows } = await owned.pool.query<{ blocked: boolean }>(
-          'SELECT EXISTS (SELECT FROM pg_stat_activity WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))) AS blocked',
+        const { rows } = await owned.pool.query<{ blocked: number }>(
+          `WITH RECURSIVE waiting(pid) AS (
+             SELECT $1::int
+             UNION
+             SELECT activity.pid FROM pg_stat_activity AS activity
+             JOIN waiting ON waiting.pid = ANY(pg_blocking_pids(activity.pid))
+             WHERE activity.datname = current_database() AND activity.wait_event_type = 'Lock'
+           )
+           SELECT count(*)::int - 1 AS blocked FROM waiting`,
           [pid],
         )
-        expect(rows[0]?.blocked).toBe(true)
+        expect(rows[0]?.blocked).toBeGreaterThanOrEqual(expected)
       },
       { timeout: 2500, interval: 10 },
     )
@@ -976,6 +1008,51 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       .insertInto('sso_policies')
       .values({ organization_id: fixture.team, require_sso: true })
       .execute()
+  }
+
+  async function enrollRecoveryOwner() {
+    await db.insertInto('sso_recovery_owners').values(recoveryOwnerValues(fixture)).execute()
+  }
+
+  function providerWrite(
+    method: 'POST' | 'PATCH',
+    path: string,
+    cookie: string,
+    body: Record<string, unknown>,
+    headers: Record<string, string> = {},
+    request = app,
+  ) {
+    return request.request(new URL(path, publicUrl), {
+      method,
+      headers: {
+        cookie,
+        origin: publicUrl,
+        'content-type': 'application/json',
+        'X-Expected-Organization-Id': fixture.team,
+        ...headers,
+      },
+      body: JSON.stringify(body),
+    })
+  }
+
+  async function recoveryGrant(cookie: string) {
+    const body = { expectedRevision: 1 }
+    const grant = await freshProofChallenge(
+      await providerWrite('POST', recoveryUsePath, cookie, body),
+      cookie,
+    )
+    await proveMailbox(grant)
+    const response = await providerWrite('POST', recoveryUsePath, grant.cookie, {
+      ...body,
+      proofAttemptId: grant.id,
+    })
+    expect(response.status).toBe(204)
+    return grant
+  }
+
+  async function expectWriteError(response: Response, status: number, error: string) {
+    expect(response.status).toBe(status)
+    expect(await response.json()).toMatchObject({ error })
   }
 
   function domainChallenge(cookie: string, body: Record<string, unknown>) {
@@ -1115,8 +1192,8 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     )
   }
 
-  function revokeDelegation(cookie: string, bindingId: string) {
-    return app.request(new URL(`${delegationsPath}/${bindingId}`, publicUrl), {
+  function revokeDelegation(cookie: string, bindingId: string, request = app) {
+    return request.request(new URL(`${delegationsPath}/${bindingId}`, publicUrl), {
       method: 'DELETE',
       headers: { origin: publicUrl, cookie, 'X-Expected-Organization-Id': fixture.team },
     })
@@ -1370,6 +1447,12 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     const binding = await bindingResponse(await prepared.submit())
     await db.deleteFrom('sso_browser_proofs').where('session_id', '=', id).execute()
     await expectSsoRequired(cookie)
+    const samlOnly = instance({ enabled: false, samlEnabled: true })
+    for (const attempt of [binding.id, randomUUID()]) {
+      const response = await revokeDelegation(cookie, attempt, samlOnly)
+      expect(response.status).toBe(403)
+      expect(await response.json()).toEqual({ error: 'sso_required' })
+    }
     for (const response of [
       await revokeDelegation(other.cookie, binding.id),
       await revokeDelegation(cookie, randomUUID()),
@@ -1604,6 +1687,25 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     expect(recoveryJobs).toEqual([])
   })
 
+  it('refuses administrative link retirement without OIDC step-up on an enforced team', async () => {
+    const f = await stepUpFixture()
+    const target = await recoveryTarget(f, fixture.member)
+    await enforceSso()
+    // Exercise the route's fresh-proof gate independently of the outer team gate.
+    const samlOnly = instance({ enabled: false, samlEnabled: true, enforceTeamSso: false })
+    const response = await recoveryRequest(
+      removeLinkPath(f.providerId, target.link.id),
+      f.owner.cookie,
+      {},
+      { request: samlOnly },
+    )
+    expect(response.status).toBe(403)
+    expect(await response.json()).toEqual({ error: 'sso_required' })
+    expect(await storedLink(target.link.id)).toEqual(target.link)
+    expect((await audit()).some(({ action }) => action === 'sso_link.unlinked')).toBe(false)
+    expect(recoveryJobs).toEqual([])
+  })
+
   it.each([
     ['provider draft', 201],
     ['domain challenge', 201],
@@ -1680,6 +1782,38 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       expect((await storedLink(target.link.id))?.retired_at).toBeInstanceOf(Date)
       expect(recoveryJobs).toHaveLength(1)
     }
+  })
+
+  it('turns enforcement off only after the owner completes a fresh OIDC step-up', async () => {
+    const f = await stepUpFixture()
+    await enforceSso()
+    const writePolicy = (cookie: string, proofAttemptId?: string) =>
+      app.request(new URL(policyPath, publicUrl), {
+        method: 'PUT',
+        headers: {
+          cookie,
+          origin: publicUrl,
+          'content-type': 'application/json',
+          'x-expected-organization-id': fixture.team,
+        },
+        body: JSON.stringify({
+          expectedRevision: 1,
+          requireSso: false,
+          admission: 'invitation_only',
+          proofAttemptId,
+        }),
+      })
+    const pending = await freshProofChallenge(await writePolicy(f.owner.cookie), f.owner.cookie, [
+      'sso',
+    ])
+    const attempt = await startStepUp(f.providerId, pending)
+    expectStepUpRedirect(
+      await callback(attempt, idp.issue(attempt, { ...f.claims, auth_time: await authTime() })),
+    )
+    const response = await writePolicy(pending.cookie, pending.id)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ requireSso: false })
+    expect((await attemptRow(pending)).consumed_at).toBeInstanceOf(Date)
   })
 
   it('adds mailbox proof to an OIDC step-up without signed auth_time', async () => {
@@ -1913,6 +2047,11 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
         'sso_configuration_changed',
       ],
       [await testRequest(enabled.providerId, owner.cookie), 404, 'sso_not_found'],
+      [
+        await testRequest(enabled.providerId, owner.cookie, { expectedRevision: 2 }),
+        404,
+        'sso_not_found',
+      ],
       [await testRequest(saml.id, owner.cookie), 404, 'sso_disabled'],
       [
         await testRequest(draft.providerId, owner.cookie, {
@@ -1935,6 +2074,229 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
         .execute(),
     ).toEqual([])
     expect(await audit()).toEqual([])
+  })
+
+  it.each([true, false])(
+    'spends separate recovery ceremonies to update, test and re-activate a broken provider (initially enabled: %s)',
+    async (enabled) => {
+      const { providerId } = await provider({ discovery: true, enabled })
+      const other = await provider()
+      const owner = await browserSession(fixture.owner)
+      const otherSession = await browserSession(fixture.owner)
+      const admin = await browserSession(fixture.admin)
+      await enrollRecoveryOwner()
+      await enforceSso()
+
+      const first = await recoveryGrant(owner.cookie)
+      const draftPath = `${providersPath}/${providerId}`
+      const updated = await providerWrite('PATCH', draftPath, first.cookie, {
+        expectedRevision: 1,
+        oidc: { algorithms: ['RS256'] },
+      })
+      expect(updated.status).toBe(200)
+      expect(await updated.json()).toMatchObject({
+        provider: { id: providerId, revision: 2, enabled, testStatus: 'unknown' },
+      })
+      await expectWriteError(
+        await testRequest(providerId, first.cookie, { expectedRevision: 2 }),
+        403,
+        'sso_required',
+      )
+
+      const second = await recoveryGrant(first.cookie)
+      const activation = { expectedRevision: 2, enabled: true }
+      const activationPath = `${draftPath}/activation`
+      await expectWriteError(
+        await providerWrite('POST', activationPath, second.cookie, activation),
+        409,
+        'sso_test_required',
+      )
+      const attempt = await providerTestAttempt(
+        providerId,
+        second.cookie,
+        await testRequest(providerId, second.cookie, { expectedRevision: 2 }),
+      )
+      const binding = second.cookie.split('; ').find((part) => part.startsWith(`${bindingCookie}=`))
+      expect(binding).toBeDefined()
+      const code = idp.issue(attempt, { sub: 'test-only-recovery-subject' })
+      const beforeCallback = await effects()
+      const beforeTestAudit = await audit()
+      for (const cookie of [
+        owner.cookie,
+        `${otherSession.cookie}; ${binding}`,
+        `${admin.cookie}; ${binding}`,
+        binding as string,
+      ])
+        await refusal(await callback(attempt, code, { cookie }))
+      await refusal(await callback(attempt, code, { providerId: other.providerId }))
+      for (const state of ['', 'bad-state', `${attempt.id}.forged`, `${other.providerId}.forged`])
+        await refusal(await callback(attempt, code, { state }))
+      expect((await attemptRow(attempt)).consumed_at).toBeNull()
+      expect(idp.exchange).not.toHaveBeenCalled()
+      expect(await audit()).toEqual(beforeTestAudit)
+      await expectProviderTestRedirect(await callback(attempt, code))
+      const afterTestAudit = await audit()
+      await refusal(await callback(attempt, code))
+      expect(await audit()).toEqual(afterTestAudit)
+      expect(idp.exchange).toHaveBeenCalledTimes(1)
+      expect(await effects()).toEqual(beforeCallback)
+      await expectWriteError(
+        await providerWrite('POST', activationPath, second.cookie, activation),
+        403,
+        'sso_required',
+      )
+
+      const third = await recoveryGrant(second.cookie)
+      const activated = await providerWrite('POST', activationPath, third.cookie, activation)
+      expect(activated.status).toBe(200)
+      expect(await activated.json()).toMatchObject({
+        provider: { id: providerId, revision: 2, enabled: true, testStatus: 'passed' },
+      })
+      await expectWriteError(
+        await providerWrite('POST', activationPath, third.cookie, activation),
+        403,
+        'sso_required',
+      )
+      await expectSsoRequired(third.cookie)
+      const events = await audit()
+      expect(events.filter(({ action }) => action === 'sso_recovery.used')).toHaveLength(3)
+      expect(events.filter(({ action }) => action === 'sso_provider.enabled')).toHaveLength(
+        enabled ? 0 : 1,
+      )
+      expect(events.filter(({ action }) => action === testedAction)).toMatchObject([
+        {
+          actor_id: fixture.owner,
+          credential_id: owner.id,
+          target_type: 'sso_provider_owner_test',
+          target_id: providerId,
+          details: { revision: 2, outcome: 'passed', correlationId: attempt.id },
+        },
+      ])
+    },
+  )
+
+  it('checks every repair route and grants only one concurrent provider creation', async () => {
+    const { providerId } = await provider({ enabled: false })
+    const owner = await browserSession(fixture.owner)
+    const otherSession = await browserSession(fixture.owner)
+    const admin = await browserSession(fixture.admin)
+    await enrollRecoveryOwner()
+    await enforceSso()
+    const grant = await recoveryGrant(owner.cookie)
+    const binding = grant.cookie.split('; ').find((part) => part.startsWith(`${bindingCookie}=`))
+    expect(binding).toBeDefined()
+    const create = { protocol: 'oidc', displayName: 'Recovery draft', domainIds: [], oidc: config }
+    const draftPath = `${providersPath}/${providerId}`
+    const off = instance({ enabled: false })
+    for (const [method, path, input] of [
+      ['POST', providersPath, create],
+      ['PATCH', draftPath, { expectedRevision: 1, displayName: 'Repair draft' }],
+      ['POST', providerTestPath(providerId), { expectedRevision: 1 }],
+      ['POST', `${draftPath}/activation`, { expectedRevision: 1, enabled: true }],
+    ] as const) {
+      const write = (cookie: string, headers: Record<string, string> = {}, request = app) =>
+        providerWrite(method, path, cookie, input, headers, request)
+      await expectWriteError(await write(grant.cookie, {}, off), 404, 'sso_disabled')
+      await expectWriteError(await write(binding as string), 403, 'team_management_access_denied')
+      await expectWriteError(await write(`${admin.cookie}; ${binding}`), 403, 'sso_required')
+      await expectWriteError(await write(`${otherSession.cookie}; ${binding}`), 403, 'sso_required')
+      await expectWriteError(
+        await write(grant.cookie, { origin: 'https://wrong.example.test' }),
+        403,
+        'team_management_access_denied',
+      )
+      await expectWriteError(
+        await write(grant.cookie, { 'X-Expected-Organization-Id': '' }),
+        409,
+        'organization_context_changed',
+      )
+    }
+    expect(idp.send).not.toHaveBeenCalled()
+    expect((await attemptRow(grant)).consumed_at).toBeInstanceOf(Date)
+
+    const blocker = await owned.pool.connect()
+    let writes: Promise<Response>[]
+    try {
+      await blocker.query('BEGIN')
+      const { rows } = await blocker.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+      await blocker.query('SELECT id FROM auth.organization WHERE id = $1 FOR UPDATE', [
+        fixture.team,
+      ])
+      writes = ['A', 'B'].map((suffix) =>
+        Promise.resolve(
+          providerWrite('POST', providersPath, grant.cookie, {
+            ...create,
+            displayName: `${create.displayName} ${suffix}`,
+          }),
+        ),
+      )
+      await waitForBlocked(rows[0]?.pid, 2)
+    } finally {
+      await blocker.query('ROLLBACK')
+      blocker.release()
+    }
+    const responses = await Promise.all(writes)
+    expect(responses.map(({ status }) => status).sort()).toEqual([201, 403])
+    const refused = responses.find(({ status }) => status === 403) as Response
+    await expectWriteError(refused, 403, 'sso_required')
+    const created = responses.find(({ status }) => status === 201) as Response
+    expect(await created.json()).toMatchObject({ provider: { enabled: false, revision: 1 } })
+    expect((await audit()).filter(({ action }) => action === 'sso_provider.created')).toHaveLength(
+      1,
+    )
+    await expectWriteError(
+      await providerWrite('POST', providersPath, grant.cookie, create),
+      403,
+      'sso_required',
+    )
+  })
+
+  it('refuses a recovery test callback after the initiating enrollment is replaced', async () => {
+    const { providerId } = await provider()
+    const owner = await browserSession(fixture.owner)
+    await enrollRecoveryOwner()
+    await enforceSso()
+    const grant = await recoveryGrant(owner.cookie)
+    const attempt = await providerTestAttempt(
+      providerId,
+      grant.cookie,
+      await testRequest(providerId, grant.cookie),
+    )
+    await db.transaction().execute(async (trx) => {
+      await trx
+        .deleteFrom('sso_recovery_owners')
+        .where('organization_id', '=', fixture.team)
+        .where('user_id', '=', fixture.owner)
+        .execute()
+      await trx.insertInto('sso_recovery_owners').values(recoveryOwnerValues(fixture)).execute()
+    })
+    const beforeTestAudit = await audit()
+    await refusal(await callback(attempt, idp.issue(attempt, { sub: 'old-recovery-test' })))
+    expect(idp.exchange).not.toHaveBeenCalled()
+    expect((await attemptRow(attempt)).consumed_at).toBeNull()
+    expect(await audit()).toEqual(beforeTestAudit)
+  })
+
+  it('keeps a replacement recovery grant available when provider discovery was already running', async () => {
+    const { providerId } = await provider({ discovery: true })
+    const owner = await browserSession(fixture.owner)
+    await enrollRecoveryOwner()
+    await enforceSso()
+    const grant = await recoveryGrant(owner.cookie)
+    let replacement: MailboxAttempt | undefined
+    idp.discovery.mockImplementationOnce(async () => {
+      replacement = await recoveryGrant(grant.cookie)
+      return json(metadata)
+    })
+    await expectWriteError(await testRequest(providerId, grant.cookie), 403, 'sso_required')
+    expect(replacement).toBeDefined()
+    expect((await attemptRow(replacement as MailboxAttempt)).consumed_at).toBeInstanceOf(Date)
+    const receipt = await providerTestAttempt(
+      providerId,
+      grant.cookie,
+      await testRequest(providerId, grant.cookie),
+    )
+    expect(await attemptRow(receipt)).toMatchObject({ kind: 'test', consumed_at: null })
   })
 
   it('records a one-time owner test only after mailbox proof and the initiating browser and session', async () => {
@@ -2380,6 +2742,16 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     expect(idp.exchange).toHaveBeenCalledTimes(1)
     const events = await audit()
     expect(events.filter((event) => event.action === signInAction)).toHaveLength(1)
+    expect(events.filter((event) => event.action === failureAction)).toContainEqual(
+      expect.objectContaining({
+        details: {
+          method: 'oidc',
+          providerId: f.providerId,
+          revision: 1,
+          reason: 'attempt_invalid',
+        },
+      }),
+    )
     expect(events.filter((event) => event.action === replayAction)).toEqual([
       expect.objectContaining({
         details: {
@@ -2484,7 +2856,18 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       const after = await effects()
       expect(after.sessions).toBe(before.sessions)
       expect(after.proofs).toBe(before.proofs)
-      expect((await audit()).map(({ action }) => action)).toEqual([failureAction])
+      const reason = {
+        membership: 'mailbox_unproven',
+        'SCIM suspension': 'scim_suspended',
+        link: 'mailbox_unproven',
+        domain: 'domain_unverified',
+      }[authority]
+      expect(await audit()).toEqual([
+        expect.objectContaining({
+          action: failureAction,
+          details: expect.objectContaining({ reason }),
+        }),
+      ])
     },
   )
 

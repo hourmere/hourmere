@@ -122,12 +122,11 @@ const protections = [
     after: 'a public link when rotate-link is requested',
   },
   {
-    name: 'host deadline results link works before full UI lands',
+    name: 'deadline notice follows the staged rollout and now opens the results page',
     pattern:
-      /B4 host deadline mail\s+targets the authenticated D1 results REST endpoint until D4a supplies the results page/,
-    before:
-      'targets the authenticated D1 results REST endpoint until D4a supplies the results page',
-    after: 'targets the unavailable D4a page from introduction',
+      /host deadline mail to link to the authenticated results REST\s+endpoint until the results page shipped\. Deadline mail now links to the authenticated\s+results page/,
+    before: 'to link to the authenticated results REST\nendpoint until the results page shipped',
+    after: 'to link to the unavailable results page from introduction',
   },
   {
     name: 'public-only pending expiry',
@@ -234,9 +233,9 @@ const protections = [
   {
     name: 'close then finalize against frozen results',
     pattern:
-      /Closure freezes every voter write, so a host facing\s+constant voter edits can always close with the host revision and then finalize/,
-    before: 'Closure freezes every voter write',
-    after: 'Closure still accepts voter writes',
+      /Closure stops voter writes that affect results,\s+so a host facing constant voter edits can always close with the host revision and then\s+finalize/,
+    before: 'Closure stops voter writes that affect results',
+    after: 'Closure still accepts voter writes that affect results',
   },
   {
     name: 'recovery never revokes a credential',
@@ -275,16 +274,16 @@ const protections = [
   },
   {
     name: 'resend counters persist across removal and re-invitation',
-    pattern: /Persist these counters across removal and re-invitation/,
-    before: 'Persist these counters across removal and re-invitation',
-    after: 'Persist these counters across expiry/removal/recreation',
+    pattern: /These counters persist across\s+removal and re-invitation/,
+    before: 'These counters persist across\nremoval and re-invitation',
+    after: 'These counters persist across expiry/removal/recreation',
   },
   {
     name: 'releases never expose creation before lifecycle',
     pattern:
-      /no release may let users create a poll that it cannot also close, cancel,\s+delete, remove voters from and finalize/,
-    before: 'no release may let users create a poll that it cannot also close',
-    after: 'a release may let users create a poll before it can close',
+      /every creation surface ship with the\s+ability to close, cancel, delete, remove voters from and finalize a poll/,
+    before: 'ability to close, cancel, delete, remove voters from and finalize a poll',
+    after: 'ability to close a poll later',
   },
   {
     name: 'a changed secret fails closed while keyed data exists',
@@ -376,7 +375,7 @@ describe('meeting poll design serialized writes', () => {
 
 function verifyNoInvitationExpiry(source: string) {
   expect(source).not.toMatch(/expired (invitations?|reservations)\b/)
-  expect(source).not.toMatch(/counters across expiry/)
+  expect(source).not.toMatch(/counters(?: persist)? across expiry/)
 }
 
 describe('meeting poll design invitation lifetime wording', () => {
@@ -388,8 +387,8 @@ describe('meeting poll design invitation lifetime wording', () => {
     ['resend cap reason', 'across removal and re-invitation |', 'across expired reservations |'],
     [
       'resend counter persistence',
-      'Persist these counters across removal and re-invitation',
-      'Persist these counters across expiry/removal/recreation',
+      'These counters persist across\nremoval and re-invitation',
+      'These counters persist across expiry/removal/recreation',
     ],
   ])('rejects a source-copy regression of the %s', (_name, before, after) => {
     verifyNoInvitationExpiry(document)
@@ -402,14 +401,15 @@ describe('meeting poll design invitation lifetime wording', () => {
 })
 
 function verifyRotateLinkError(source: string) {
-  const rotate = tableRow(source, 'POST `/meeting-polls/{id}/rotate-link`')[3]
+  const rotate = tableRow(source, 'POST `/api/v1/meeting-polls/{id}/rotate-link`')[3]
   expect(rotate).toContain('otherwise 409 poll_link_unavailable')
   expect(rotate).not.toContain('poll_event_unsupported')
   expect(tableRow(source, '409 `poll_link_unavailable`')[1]).toContain('invited-mode poll')
   const unsupported = tableRow(source, '400 `invalid_poll`')
   expect(unsupported[0]).toContain('`poll_event_unsupported`')
-  expect(unsupported[1]).toContain('unsupported group/one-time-link mode')
-  expect(source.match(/poll_event_unsupported/g), 'event-mode refusals only').toHaveLength(2)
+  expect(unsupported[1]).toContain('unsupported group event type')
+  expect(unsupported[1]).toContain('reject one-time-link fields outside the request schema')
+  expect(source.match(/poll_event_unsupported/g), 'event-mode refusals only').toHaveLength(1)
 }
 
 describe('meeting poll design link-rotation refusal', () => {
@@ -452,7 +452,7 @@ function verifyRateLimits(source: string, limits: PublicRateLimits) {
     `are per trusted IP per ${window} seconds: page/slots ${page.limit}, book ${book.limit}, manage ${manage.limit}.`,
   )
   expect(text).toContain(
-    `new admission bucket sized like \`book\`: ${book.limit} requests per ${window} seconds per trusted IP`,
+    `poll admission bucket sized like \`book\`: ${book.limit} requests per ${window} seconds per trusted IP`,
   )
   expect(text).toContain(`Read uses the page size, ${page.limit}, and`)
   expect(text).toContain(`ballot/withdraw/opt-out the manage size, ${manage.limit}.`)
@@ -700,23 +700,26 @@ describe('meeting poll day-sized implementation plan', () => {
 })
 
 const contractRevisions = [
-  ['POST `/meeting-polls`', []],
-  ['GET `/meeting-polls`, GET `/meeting-polls/{id}`', []],
-  ['GET `/meeting-polls/{id}/results`', []],
-  ['POST `/meeting-polls/{id}/invitations`', []],
-  ['POST `/meeting-polls/{id}/invitations/{voterId}/resend`', ['expectedHostRevision']],
-  ['DELETE `/meeting-polls/{id}/voters/{voterId}`', ['expectedHostRevision']],
-  ['POST `/meeting-polls/{id}/remove-unverified`', ['expectedHostRevision']],
-  ['DELETE `/meeting-polls/{id}`', ['expectedHostRevision']],
-  ['POST `/meeting-polls/{id}/close`, `/cancel`', ['expectedHostRevision']],
-  ['POST `/meeting-polls/{id}/finalize`', ['expectedResultsRevision']],
-  ['POST `/meeting-polls/{id}/rotate-link`', ['expectedHostRevision']],
-  ['POST `/public/meeting-polls/read`', []],
-  ['POST `/public/meeting-polls/enroll`, `/recover`', []],
-  ['POST `/public/meeting-polls/verify`', []],
-  ['POST `/public/meeting-polls/vote`', ['expectedBallotRevision']],
-  ['POST `/public/meeting-polls/reminder-opt-out`', []],
-  ['POST `/public/meeting-polls/withdraw`', ['expectedBallotRevision']],
+  ['POST `/api/v1/meeting-polls`', []],
+  ['GET `/api/v1/meeting-polls`', []],
+  ['GET `/api/v1/meeting-polls/{id}`', []],
+  ['GET `/api/v1/meeting-polls/{id}/results`', []],
+  ['POST `/api/v1/meeting-polls/{id}/invitations`', []],
+  ['POST `/api/v1/meeting-polls/{id}/invitations/{voterId}/resend`', ['expectedHostRevision']],
+  ['DELETE `/api/v1/meeting-polls/{id}/voters/{voterId}`', ['expectedHostRevision']],
+  ['POST `/api/v1/meeting-polls/{id}/remove-unverified`', ['expectedHostRevision']],
+  ['DELETE `/api/v1/meeting-polls/{id}`', ['expectedHostRevision']],
+  ['POST `/api/v1/meeting-polls/{id}/close`', ['expectedHostRevision']],
+  ['POST `/api/v1/meeting-polls/{id}/cancel`', ['expectedHostRevision']],
+  ['POST `/api/v1/meeting-polls/{id}/finalize`', ['expectedResultsRevision']],
+  ['POST `/api/v1/meeting-polls/{id}/rotate-link`', ['expectedHostRevision']],
+  ['POST `/api/v1/public/meeting-polls/read`', []],
+  ['POST `/api/v1/public/meeting-polls/enroll`', []],
+  ['POST `/api/v1/public/meeting-polls/recover`', []],
+  ['POST `/api/v1/public/meeting-polls/verify`', []],
+  ['POST `/api/v1/public/meeting-polls/vote`', ['expectedBallotRevision']],
+  ['POST `/api/v1/public/meeting-polls/reminder-opt-out`', []],
+  ['POST `/api/v1/public/meeting-polls/withdraw`', ['expectedBallotRevision']],
 ] as const
 
 function verifyRevisionContract(source: string) {

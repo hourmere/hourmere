@@ -1,12 +1,10 @@
-// The hard-off switch: the constant is false, every guarded entry point refuses, and nothing a
-// production process can do (an import, the environment, the configuration) turns it on.
+// The source implementation flag is separate from the runtime operator switch.
 import { spawnSync } from 'node:child_process'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parse } from '@babel/parser'
 import type { Db } from '@hourmere/db'
-import { DomainError } from '@hourmere/scheduling/errors'
 // The specifier production imports, not ./index.ts: what it resolves to is what runs.
 import * as workflows from '@hourmere/workflows'
 import { describe, expect, it } from 'vitest'
@@ -14,6 +12,7 @@ import { z } from 'zod'
 import { CreateWorkflowInputSchema, createWorkflow } from './creates.ts'
 import { DeleteWorkflowInputSchema, deleteWorkflow } from './deletes.ts'
 import * as hardOff from './hard-off.ts'
+import * as operatorSettings from './operator-settings.ts'
 import { PreviewWorkflowInputSchema, previewWorkflow, WorkflowPreviewSchema } from './preview.ts'
 import { UpdateWorkflowInputSchema, updateWorkflow } from './updates.ts'
 
@@ -68,13 +67,13 @@ const PACKAGE_EXPORTS = [
   'WorkflowRunHistoryEntrySchema',
   'WorkflowScopeSchema',
   'WorkflowTriggerSchema',
-  // Definition creation is workflowOperation-wrapped, so off while hard-off.
   'captureWorkflowBooking',
   'captureWorkflowCreation',
   'createWorkflow',
   'deleteWorkflow',
   'dispatchWorkflowRuns',
   'evaluateConditions',
+  'executeWorkflowClaim',
   // The definition reads (reads.ts): workflowOperation-wrapped, so off while hard-off.
   'getWorkflow',
   'isWorkflowBooking',
@@ -91,8 +90,11 @@ const PACKAGE_EXPORTS = [
   // Pure rendering has no delivery or other side effects.
   'renderWorkflowEmail',
   'repairWorkflowWakes',
+  'requireWorkflowUpdateAllowed',
+  'requireWorkflowsEnabled',
   'requireWorkflowsImplemented',
   'scopeSelectsEventType',
+  'shouldRunWorkflowJobs',
   'templatePlaceholders',
   'templateVariableProblem',
   'updateWorkflow',
@@ -111,16 +113,8 @@ const PACKAGE_EXPORTS = [
   'workflowTimerDueAt',
   // Read-only identity lookup for the shared webhook repair job's workflow rows.
   'workflowWebhookAuditIdentities',
+  'workflowsEnabled',
 ]
-
-async function disabled(run: () => Promise<unknown>) {
-  const error = await run().then(
-    () => undefined,
-    (thrown: unknown) => thrown,
-  )
-  expect(error).toBeInstanceOf(DomainError)
-  expect(error).toMatchObject({ kind: 'not_found', code: 'workflows_disabled' })
-}
 
 /**
  * The exact source of every statement in hard-off.ts: its import, the constant and the four
@@ -128,7 +122,7 @@ async function disabled(run: () => Promise<unknown>) {
  */
 const FROZEN_HARD_OFF_STATEMENTS = [
   "import { DomainError } from '@hourmere/scheduling/errors'",
-  'export const WORKFLOWS_IMPLEMENTED: boolean = false',
+  'export const WORKFLOWS_IMPLEMENTED: boolean = true',
   `export function requireWorkflowsImplemented(): void {
   if (WORKFLOWS_IMPLEMENTED !== true) throw new DomainError('not_found', 'workflows_disabled')
 }`,
@@ -158,48 +152,19 @@ const FROZEN_HARD_OFF_STATEMENTS = [
 }`,
 ]
 
-/** How each guarded entry point refuses while workflows are off; the inner call never runs. */
-const refusals: Record<string, () => Promise<void>> = {
-  requireWorkflowsImplemented: () => disabled(async () => hardOff.requireWorkflowsImplemented()),
-  workflowOperation: async () => {
-    let ran = false
-    const operation = hardOff.workflowOperation(async (value: string) => {
-      ran = true
-      return value
-    })
-    await disabled(() => operation('read'))
-    expect(ran).toBe(false)
-  },
-  workflowCapture: async () => {
-    let ran = false
-    const capture = hardOff.workflowCapture(async () => {
-      ran = true
-      throw new Error('capture must not run')
-    })
-    await expect(capture()).resolves.toBeUndefined()
-    expect(ran).toBe(false)
-  },
-  workflowExecution: async () => {
-    let ran = false
-    const execute = hardOff.workflowExecution(async () => {
-      ran = true
-      throw new Error('execution must not run')
-    })
-    await expect(execute()).resolves.toBeUndefined()
-    expect(ran).toBe(false)
-  },
-}
-
-describe('workflow hard-off', () => {
-  it('is off', () => {
-    expect(hardOff.WORKFLOWS_IMPLEMENTED).toBe(false)
-    expect(workflows.WORKFLOWS_IMPLEMENTED).toBe(false)
+describe('workflow implementation flag', () => {
+  it('uses the implemented build and still requires the operator setting for capture', () => {
+    expect(hardOff.WORKFLOWS_IMPLEMENTED).toBe(true)
+    expect(workflows.WORKFLOWS_IMPLEMENTED).toBe(true)
+    expect(workflows.workflowsEnabled({ workflowsEnabled: true })).toBe(true)
+    expect(workflows.workflowsEnabled({})).toBe(false)
+    expect(() => workflows.requireWorkflowsEnabled({})).toThrow('workflows_disabled')
   })
 
   it('captures nothing through the production entry before touching the booking transaction', async () => {
     const trx = new Proxy({} as Db, {
       get: () => {
-        throw new Error('hard-off capture touched the transaction')
+        throw new Error('operator-off capture touched the transaction')
       },
     })
     await expect(
@@ -212,6 +177,7 @@ describe('workflow hard-off', () => {
         },
         Temporal.Instant.from('2026-11-16T00:00Z'),
         'synthetic-capture-secret',
+        { workflowsEnabled: false },
       ),
     ).resolves.toBeUndefined()
     for (const type of [
@@ -232,50 +198,9 @@ describe('workflow hard-off', () => {
           },
           Temporal.Instant.from('2026-11-16T00:00Z'),
           'synthetic-capture-secret',
+          { workflowsEnabled: false },
         ),
       ).resolves.toBeUndefined()
-    }
-  })
-
-  it('dispatches and repairs nothing through public entries or replayed job handlers', async () => {
-    const untouched = new Proxy(
-      {},
-      {
-        get: () => {
-          throw new Error('hard-off execution touched a dependency')
-        },
-      },
-    )
-    const ctx = untouched as Parameters<typeof workflows.dispatchWorkflowRuns>[0]
-    const port = untouched as Parameters<typeof workflows.repairWorkflowWakes>[1]
-    await expect(workflows.dispatchWorkflowRuns(ctx)).resolves.toBeUndefined()
-    await expect(workflows.repairWorkflowWakes(ctx, port)).resolves.toBeUndefined()
-    const jobs = workflows.workflowJobs(ctx, port)
-    expect(jobs.map(({ name }) => name)).toEqual(['workflow-dispatch-v1', 'workflow-repair-v1'])
-    const run = { id: 'off-job', attempt: 1, signal: new AbortController().signal }
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      await expect(
-        jobs[0].handler({ runId: '10000000-0000-4000-8000-000000000001' }, { ...run, attempt }),
-      ).resolves.toBeUndefined()
-      await expect(jobs[1].handler({}, { ...run, attempt })).resolves.toBeUndefined()
-    }
-    expect(Object.keys(workflows)).not.toContain('claimDueWorkflowRuns')
-    expect(Object.keys(workflows)).not.toContain('dispatchClaimedWorkflowRun')
-    expect(Object.keys(workflows)).not.toContain('repairWorkflowRunWakes')
-  })
-
-  it('refuses at every guarded entry point', async () => {
-    const guards = Object.entries(hardOff)
-      .filter(([, value]) => typeof value === 'function')
-      .map(([name]) => name)
-      .sort()
-    // A new guard must say here how it refuses.
-    expect(guards).toEqual(Object.keys(refusals).sort())
-    for (const [name, refuse] of Object.entries(refusals)) {
-      await refuse()
-      expect((workflows as Record<string, unknown>)[name], name).toBe(
-        (hardOff as Record<string, unknown>)[name],
-      )
     }
   })
 
@@ -284,10 +209,17 @@ describe('workflow hard-off', () => {
     const manifest = JSON.parse(
       readFileSync(join(root, 'packages/workflows/package.json'), 'utf8'),
     ) as { exports?: unknown }
-    expect(manifest.exports).toEqual({ '.': './src/index.ts', './hard-off': './src/hard-off.ts' })
+    expect(manifest.exports).toEqual({
+      '.': './src/index.ts',
+      './hard-off': './src/hard-off.ts',
+      './operator-settings': './src/operator-settings.ts',
+    })
     expect(await import('@hourmere/workflows/hard-off')).toBe(hardOff)
+    expect(await import('@hourmere/workflows/operator-settings')).toBe(operatorSettings)
     // The constant and every guard, as production imports them, are hard-off.ts's own.
     for (const [name, value] of Object.entries(hardOff))
+      expect((workflows as Record<string, unknown>)[name], name).toBe(value)
+    for (const [name, value] of Object.entries(operatorSettings))
       expect((workflows as Record<string, unknown>)[name], name).toBe(value)
     expect(Object.keys(workflows).sort()).toEqual(PACKAGE_EXPORTS)
     expect(workflows.createWorkflow).toBe(createWorkflow)
@@ -344,21 +276,21 @@ describe('workflow hard-off', () => {
     ).toEqual(FROZEN_HARD_OFF_STATEMENTS)
   })
 
-  it('cannot be turned on by a production import or the environment', () => {
+  it('cannot be changed by a production import or the environment', () => {
     // A real Node process with the production module semantics, not the test runner's.
     const script = `
       const workflows = await import('@hourmere/workflows')
       const attempts = {}
       for (const [name, attempt] of Object.entries({
-        assign: () => { workflows.WORKFLOWS_IMPLEMENTED = true },
-        define: () => Object.defineProperty(workflows, 'WORKFLOWS_IMPLEMENTED', { value: true }),
+        assign: () => { workflows.WORKFLOWS_IMPLEMENTED = false },
+        define: () => Object.defineProperty(workflows, 'WORKFLOWS_IMPLEMENTED', { value: false }),
         remove: () => { delete workflows.WORKFLOWS_IMPLEMENTED },
       })) {
         try { attempt(); attempts[name] = 'allowed' } catch (error) { attempts[name] = error.name }
       }
-      attempts.reflect = Reflect.set(workflows, 'WORKFLOWS_IMPLEMENTED', true)
+      attempts.reflect = Reflect.set(workflows, 'WORKFLOWS_IMPLEMENTED', false)
       // Each wrapped function, called with no argument and with call-time arguments that a
-      // switch could read: none of them runs the inner function.
+      // switch could read: each executes the inner function in the implemented build.
       const calls = {}
       for (const [label, args] of Object.entries({ none: [], true: [true], whileOff: [{ whileOff: true }] }))
         for (const guard of ['workflowOperation', 'workflowCapture', 'workflowExecution']) {
@@ -375,30 +307,28 @@ describe('workflow hard-off', () => {
       encoding: 'utf8',
       env: {
         ...process.env,
-        WORKFLOWS_ENABLED: 'true',
-        WORKFLOWS_IMPLEMENTED: 'true',
-        HOURMERE_WORKFLOWS: 'true',
+        WORKFLOWS_ENABLED: 'false',
+        WORKFLOWS_IMPLEMENTED: 'false',
+        HOURMERE_WORKFLOWS: 'false',
       },
       timeout: 60_000,
     })
     expect(child.stderr).toBe('')
     expect(child.status).toBe(0)
-    const refused = { refused: 'workflows_disabled', ran: false }
-    const skipped = { resolved: null, ran: false }
     expect(JSON.parse(child.stdout)).toEqual({
       attempts: { assign: 'TypeError', define: 'TypeError', remove: 'TypeError', reflect: false },
-      value: false,
+      value: true,
       calls: Object.fromEntries(
         ['none', 'true', 'whileOff'].flatMap((label) => [
-          [`workflowOperation ${label}`, refused],
-          [`workflowCapture ${label}`, skipped],
-          [`workflowExecution ${label}`, skipped],
+          [`workflowOperation ${label}`, { resolved: 'ran', ran: true }],
+          [`workflowCapture ${label}`, { resolved: null, ran: true }],
+          [`workflowExecution ${label}`, { resolved: null, ran: true }],
         ]),
       ),
     })
   }, 60_000)
 
-  it('is declared once as a false literal and assigned nowhere in production code', () => {
+  it('is declared once as a true literal and assigned nowhere in production code', () => {
     const sources: string[] = []
     const walk = (directory: string) => {
       for (const entry of readdirSync(directory)) {
@@ -424,7 +354,6 @@ describe('workflow hard-off', () => {
     const mentions = sources.filter((file) =>
       readFileSync(join(root, file), 'utf8').includes('WORKFLOWS_IMPLEMENTED'),
     )
-    // Only the workflow package reads the constant; nothing else can shadow or wrap it.
     expect(mentions.every((file) => file.startsWith('packages/workflows/src/'))).toBe(true)
     const declarations: string[] = []
     const writes: string[] = []
@@ -463,10 +392,10 @@ describe('workflow hard-off', () => {
             stack.push(child)
       }
     }
-    expect(declarations).toEqual(['packages/workflows/src/hard-off.ts:false'])
+    expect(declarations).toEqual(['packages/workflows/src/hard-off.ts:true'])
     expect(writes).toEqual([])
     const declaration = readFileSync(join(root, 'packages/workflows/src/hard-off.ts'), 'utf8')
-    expect(declaration).toMatch(/^export const WORKFLOWS_IMPLEMENTED: boolean = false$/m)
+    expect(declaration).toMatch(/^export const WORKFLOWS_IMPLEMENTED: boolean = true$/m)
 
     // The package reads no environment, configuration or global state, and imports only the
     // pure modules it needs: no `node:process`, configuration or server module.
@@ -494,6 +423,7 @@ describe('workflow hard-off', () => {
       '@hourmere/notifications/workflow-mail',
       '@hourmere/scheduling/notification-settings',
     ])
+    const executionImports = new Set(['@hourmere/mail', '@hourmere/notifications/workflow-mail'])
     const captureImports = new Set([
       'node:crypto',
       'kysely',
@@ -526,6 +456,8 @@ describe('workflow hard-off', () => {
             !(file === 'packages/workflows/src/deletes.ts' && writeImports.has(specifier)) &&
             !(file === 'packages/workflows/src/preview.ts' && previewImports.has(specifier)) &&
             !(file === 'packages/workflows/src/reads.ts' && readImports.has(specifier)) &&
+            !(file === 'packages/workflows/src/retention.ts' && specifier === 'kysely') &&
+            !(file === 'packages/workflows/src/execution.ts' && executionImports.has(specifier)) &&
             !(file === 'packages/workflows/src/email.ts' && emailImports.has(specifier)) &&
             !(
               file === 'packages/workflows/src/email-attempt.ts' &&

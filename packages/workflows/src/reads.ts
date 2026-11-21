@@ -22,7 +22,7 @@ import {
   WorkflowTriggerSchema,
 } from './definition.ts'
 import { workflowOperation } from './hard-off.ts'
-import { WORKFLOW_HISTORY_DAYS, WORKFLOW_MAX_DEFINITIONS_PER_OWNER } from './limits.ts'
+import { WORKFLOW_MAX_DEFINITIONS_PER_OWNER } from './limits.ts'
 import {
   uuidSchema,
   type WorkflowOwner,
@@ -30,6 +30,7 @@ import {
   WorkflowOwnerSelectorSchema,
   workflowOwnerSelector,
 } from './ownership.ts'
+import { workflowHistoryCutoff } from './retention.ts'
 
 /** Page sizes of the definition list; a full page holds every definition an owner may keep. */
 export const WORKFLOW_PAGE = Object.freeze({
@@ -349,11 +350,7 @@ async function readWorkflowRuns(ctx: RunHistoryContext, id: string, input: RunHi
         ])
         .where('h.organization_id', '=', owner.organizationId)
         .where('h.workflow_id', '=', workflowId)
-        .where(
-          'h.finished_at',
-          '>=',
-          sql<Date>`transaction_timestamp() - make_interval(hours => ${24 * WORKFLOW_HISTORY_DAYS})`,
-        )
+        .where('h.finished_at', '>=', workflowHistoryCutoff)
         .orderBy('h.finished_at', 'desc')
         .orderBy('h.run_id', 'desc')
         .limit(limit + 1)

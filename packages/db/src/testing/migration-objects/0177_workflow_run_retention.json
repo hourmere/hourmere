@@ -1,0 +1,8 @@
+{
+  "migration": "0177_workflow_run_retention.sql",
+  "objects": {
+    "index public.webhook_deliveries.webhook_deliveries_workflow_run_pending": "CREATE INDEX webhook_deliveries_workflow_run_pending ON public.webhook_deliveries USING btree (workflow_run_id) WHERE ((status = 'pending'::text) AND (workflow_run_id IS NOT NULL))",
+    "index public.workflow_runs.workflow_runs_retention": "CREATE INDEX workflow_runs_retention ON public.workflow_runs USING btree (finished_at, id) WHERE (finished_at IS NOT NULL)",
+    "trigger public.workflow_runs.workflow_runs_guard": "CREATE TRIGGER workflow_runs_guard BEFORE INSERT OR DELETE OR UPDATE ON public.workflow_runs FOR EACH ROW EXECUTE FUNCTION guard_workflow_run() -- function SET search_path=public, pg_temp md5 2c48ab352c3efdc5b32451cec7c47518"
+  }
+}

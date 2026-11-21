@@ -157,7 +157,7 @@ function BookingDetail({
   const closePanel = useCloseBookingPanel()
 
   const load = useCallback(
-    async (signal: AbortSignal): Promise<Loaded | 'missing' | 'resolve' | 'team_admin'> => {
+    async (signal: AbortSignal): Promise<Loaded | 'missing' | 'resolve'> => {
       const [detail, profile] = await Promise.all([
         unwrap(api.GET('/api/v1/bookings/{id}', { params: { path: { id } }, signal })).catch(
           (err: unknown) => {
@@ -176,7 +176,6 @@ function BookingDetail({
         loadProfile(signal),
       ])
       if (detail === 'missing' || detail === 'resolve') return detail
-      if (!('status' in detail)) return 'team_admin'
       // Keep the original snapshot separate from the booking updated by mutation and list responses.
       const { routing, ...booking } = detail
       let questions: Question[] = booking.questions ?? []
@@ -219,7 +218,6 @@ function BookingDetail({
   }
   if (state.data === 'resolve' && resolveSpace)
     return <BookingOrganization id={id} rememberSpace={rememberSpace} />
-  if (state.data === 'team_admin') return <TeamBookingDetailPage key={id} id={id} />
   if (state.data === 'missing' || state.data === 'resolve') {
     return (
       <MissingRecord

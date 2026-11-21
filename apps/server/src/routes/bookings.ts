@@ -268,10 +268,6 @@ export const HostBooking = Booking.extend({
   }),
 }).openapi('HostBooking')
 
-const TeamBookingRoutingDetail = z
-  .object({ id: z.uuid(), routing: BookingRouting })
-  .openapi('TeamBookingRoutingDetail')
-
 export const ManagedBooking = Booking.extend({
   branding: PublicBranding.optional(),
   eventType: z
@@ -1234,30 +1230,22 @@ export function bookingRoutes({
         method: 'get',
         path: '/api/v1/bookings/{id}',
         operationId: 'getBooking',
-        summary: 'Read one booking with authorized host detail',
+        summary: 'A booking the caller hosts',
         description:
-          'A current host in the booking organization can read the booking and any stored routing snapshot. A current owner or admin who does not host a routed team booking can read its ID and routing snapshot through a verified browser session in that team. API keys require read, bookings or full scope. Stored snapshots remain readable while routing forms are off.',
+          'A current host in the booking organization can read the booking and any stored routing snapshot. API keys require read, bookings or full scope. Stored snapshots remain readable while routing forms are off.',
         security: authenticated,
         middleware: caller,
         request: { params: z.object({ id: z.uuid() }) },
         responses: {
-          200: {
-            description: 'Host booking detail or the routing snapshot available to team managers',
-            content: json(z.union([HostBooking, TeamBookingRoutingDetail])),
-          },
+          200: { description: 'The booking', content: json(HostBooking) },
           400: invalidId,
           401: unauthorized,
-          404: error('No such booking visible in the current organization (`booking_not_found`)'),
+          404: hostNotFound,
           429: keyRateLimited,
         },
       }),
       async (c) =>
-        c.json(
-          await getHostBookingDetail(context(c.var.principal), c.req.valid('param').id, {
-            allowTeamAdmin: true,
-          }),
-          200,
-        ),
+        c.json(await getHostBookingDetail(context(c.var.principal), c.req.valid('param').id), 200),
     )
 
     app.openapi(

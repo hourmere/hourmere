@@ -6,9 +6,11 @@ import { sql } from 'kysely'
 import { z } from 'zod'
 import { type WorkflowAuditPort, type WorkflowSkipReason, workflowAuditPort } from './audit.ts'
 import { WorkflowDefinitionSchema, type WorkflowTriggerType } from './definition.ts'
-import { workflowExecution } from './hard-off.ts'
+import { WORKFLOWS_IMPLEMENTED, workflowExecution } from './hard-off.ts'
 import { WORKFLOW_MAX_LATE_MINUTES } from './limits.ts'
+import { type WorkflowSettings, workflowsEnabled } from './operator-settings.ts'
 import type { WorkflowOwner } from './ownership.ts'
+import { purgeWorkflowHistory } from './retention.ts'
 import { workflowDispatchWindow, workflowTimerDueAt } from './timers.ts'
 
 export const WORKFLOW_DISPATCH_PAGE = 100
@@ -17,6 +19,7 @@ export interface WorkflowDispatchContext {
   db: Db
   now: () => Temporal.Instant
   audit?: WorkflowAuditPort | undefined
+  instanceDisabled?: boolean
 }
 export interface WorkflowRunClaim {
   runId: string
@@ -458,9 +461,21 @@ export async function claimDueWorkflowRuns(
       const recovered =
         run.state === 'claimed' && (await recoverWorkflowEmailMarker(trx, locked, now, ctx.audit))
       if (recovered && (await completeWorkflowEmailRun(trx, locked, now, ctx.audit))) return
-      const { reason } = await workflowRunEligibility(trx, locked)
+      const reason = ctx.instanceDisabled
+        ? 'instance_disabled'
+        : (await workflowRunEligibility(trx, locked)).reason
       const afterWait = ctx.now()
-      if (reason || workflowRunWindow(run, afterWait) === 'expired') {
+      const window = workflowRunWindow(run, afterWait)
+      if (reason || window === 'expired') {
+        // A concurrent attempt can defer the retry while this wake is waiting for the run lock.
+        if (
+          reason === 'instance_disabled' &&
+          window !== 'expired' &&
+          (await waitingForEmailRetry(trx, run.id, afterWait))
+        ) {
+          if (run.state === 'claimed') await releaseWorkflowRun(trx, run.id)
+          return
+        }
         await finishWorkflowRun(trx, locked, reason ?? 'expired', afterWait, ctx.audit)
         return
       }
@@ -501,11 +516,14 @@ export async function dispatchClaimedWorkflowRun(
       run.lease_until.getTime() <= ctx.now().epochMilliseconds
     )
       return 'stale'
-    const { reason } = await workflowRunEligibility(trx, locked)
+    const reason = ctx.instanceDisabled
+      ? 'instance_disabled'
+      : (await workflowRunEligibility(trx, locked)).reason
     const now = ctx.now()
     // Eligibility itself may wait on live parent rows, so fence and deadline are read again.
     if (run.lease_until.getTime() <= now.epochMilliseconds) return 'stale'
     const window = workflowRunWindow(run, now)
+    if (ctx.instanceDisabled && window === 'not_due') return 'stale'
     if (reason || window === 'expired') {
       // A rechecked ready claim cannot retire or skip an in-flight email marker.
       const marker = await trx
@@ -525,9 +543,12 @@ export async function dispatchClaimedWorkflowRun(
 export async function dispatchDueWorkflowRuns(
   ctx: WorkflowDispatchContext,
   options: WorkflowClaimOptions = {},
+  execute?: (claim: WorkflowRunClaim) => Promise<void>,
 ): Promise<void> {
-  for (const claim of await claimDueWorkflowRuns(ctx, options))
-    await dispatchClaimedWorkflowRun(ctx, claim)
+  for (const claim of await claimDueWorkflowRuns(ctx, options)) {
+    if (execute) await execute(claim)
+    else await dispatchClaimedWorkflowRun(ctx, claim)
+  }
 }
 
 const repairCursors = new WeakMap<WorkflowWakePort, string>()
@@ -584,19 +605,60 @@ export async function repairWorkflowRunWakes(
   }
 }
 
-type WorkflowWorkerContext = Omit<WorkflowDispatchContext, 'audit'>
+type WorkflowWorkerContext = Omit<WorkflowDispatchContext, 'audit' | 'instanceDisabled'> &
+  WorkflowSettings
+
+/** A paused install still needs a worker for work captured before the pause. */
+export async function shouldRunWorkflowJobs(db: Db, settings: WorkflowSettings): Promise<boolean> {
+  if (!WORKFLOWS_IMPLEMENTED) return false
+  if (workflowsEnabled(settings)) return true
+  const { needsRepair } = await db
+    .selectNoFrom((eb) =>
+      eb
+        .or([
+          eb.exists(
+            db
+              .selectFrom('workflow_runs')
+              .select('id')
+              .where('state', 'in', ['pending', 'claimed']),
+          ),
+          // An interrupted SMTP attempt can outlive retirement of its run.
+          eb.exists(
+            db
+              .selectFrom('workflow_recipient_claims')
+              .select('id')
+              .where('state', '=', 'dispatching'),
+          ),
+        ])
+        .as('needsRepair'),
+    )
+    .executeTakeFirstOrThrow()
+  return needsRepair === true
+}
 
 export const dispatchWorkflowRuns = workflowExecution(
-  (ctx: WorkflowWorkerContext, options?: WorkflowClaimOptions) =>
-    dispatchDueWorkflowRuns({ ...ctx, audit: workflowAuditPort }, options),
+  (
+    ctx: WorkflowWorkerContext,
+    options?: WorkflowClaimOptions,
+    execute?: (claim: WorkflowRunClaim) => Promise<void>,
+  ) =>
+    dispatchDueWorkflowRuns(
+      { ...ctx, audit: workflowAuditPort, instanceDisabled: !workflowsEnabled(ctx) },
+      options,
+      execute,
+    ),
 )
 export const repairWorkflowWakes = workflowExecution(
   (ctx: WorkflowWorkerContext, port: WorkflowWakePort, limit?: number) =>
     repairWorkflowRunWakes({ ...ctx, audit: workflowAuditPort }, port, limit),
 )
 
-/** Definitions are not installed in a production worker while workflows remain hard-off. */
-export function workflowJobs(ctx: WorkflowWorkerContext, port: WorkflowWakePort) {
+export function workflowJobs(
+  ctx: WorkflowWorkerContext,
+  port: WorkflowWakePort,
+  enqueueRetention: () => Promise<unknown>,
+  execute?: (claim: WorkflowRunClaim) => Promise<void>,
+) {
   return [
     defineJob({
       name: 'workflow-dispatch-v1',
@@ -605,7 +667,7 @@ export function workflowJobs(ctx: WorkflowWorkerContext, port: WorkflowWakePort)
       retry: { limit: 0 },
       expireInSeconds: 55,
       handler: async ({ runId }) => {
-        await dispatchWorkflowRuns(ctx, { runId })
+        await dispatchWorkflowRuns(ctx, { runId }, execute)
       },
     }),
     defineJob({
@@ -615,9 +677,21 @@ export function workflowJobs(ctx: WorkflowWorkerContext, port: WorkflowWakePort)
       retry: { limit: 0 },
       expireInSeconds: 55,
       schedule: { cron: '* * * * *', payload: {} },
-      handler: async () => {
+      handler: async (_, { signal }) => {
         await repairWorkflowWakes(ctx, port)
+        // Reuse the repair schedule; a disabled install has no retention cron to remove.
+        if (WORKFLOWS_IMPLEMENTED && !signal.aborted) await enqueueRetention()
       },
+    }),
+    defineJob({
+      name: 'workflow-retention-v1',
+      payload: z.strictObject({}),
+      policy: 'exclusive',
+      retry: { limit: 0 },
+      expireInSeconds: 55,
+      handler: workflowExecution(async (_, { signal }) => {
+        if (!signal.aborted) await purgeWorkflowHistory(ctx.db)
+      }),
     }),
   ] as const
 }

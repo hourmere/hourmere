@@ -11,6 +11,19 @@ const base = {
 }
 
 describe('loadConfig', () => {
+  it.each(['all', 'web', 'worker'])('parses workflow opt-in strictly in the %s role', (role) => {
+    const env = { ...base, HOURMERE_ROLE: role }
+    for (const value of [undefined, '', 'false']) {
+      expect(loadConfig({ ...env, WORKFLOWS_ENABLED: value }).WORKFLOWS_ENABLED).toBe(false)
+    }
+    expect(loadConfig({ ...env, WORKFLOWS_ENABLED: 'true' }).WORKFLOWS_ENABLED).toBe(true)
+    for (const value of ['yes', '0', '1', 'TRUE', ' ', ' true', 'false\n']) {
+      expect(() => loadConfig({ ...env, WORKFLOWS_ENABLED: value })).toThrow(
+        'WORKFLOWS_ENABLED must be true, false or empty',
+      )
+    }
+  })
+
   function verifyExportLimit(load: typeof loadConfig) {
     for (const HOURMERE_ROLE of ['all', 'web', 'worker']) {
       const env = { ...base, HOURMERE_ROLE }

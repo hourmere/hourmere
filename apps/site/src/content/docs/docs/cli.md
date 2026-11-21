@@ -639,6 +639,8 @@ Personal event owners and current team owners or admins can manage polls. Reads 
 `full`, `read` or `bookings`. Writes require `full` or `bookings`. All poll commands
 read JSON only from stdin and reject `--output`. Keep idempotency keys and invitation
 addresses out of shell history and process arguments.
+Voter commands also need the voter’s own poll credential where applicable. A host key
+does not act as a voter or supply their consent.
 
 `create` takes `eventTypeId`, offset-bearing `candidateStarts` and `deadlineAt`, an IANA
 `displayTimeZone`, and `admissionMode` of `public_link` or `invited`. The `visibility`
@@ -661,7 +663,8 @@ An exact retry reports current roster outcomes without sending again. Use the cu
 host invitations. Keep the original payload and random `idempotencyKey` for retries of
 create, invite, resend or rotation.
 
-`list` takes `{}` or a `limit` from 1 to 100 and an `after` cursor from `nextAfter`.
+`list` accepts an empty input object, an optional `limit` from 1 to 100 and an optional
+`after` cursor from `nextAfter`.
 `get` and `results` take `id`. `close`, `cancel` and `delete` take `id` and
 `expectedHostRevision`. `results` returns the current results and ballot revisions.
 Availability is advisory, and finalization checks it again. Include the booker in
@@ -670,18 +673,17 @@ Availability is advisory, and finalization checks it again. Include the booker i
 If the finalization response is lost, replay the exact input with the original key.
 The response contains safe booking metadata and `replayed`. A different key for an already
 scheduled poll returns `poll_already_scheduled` with the poll ID, booking ID, chosen slot ID,
-status and host revision. `delete` returns
-`{ "deleted": true }` and preserves any linked booking.
+status and host revision. `delete` confirms removal and preserves any linked booking.
 
-中文：管理端命令使用投票所在组织的密钥，权限限个人活动所有者及团队当前所有者或管理员。
-`hourmere --help` 分别列出主持人管理命令和公开投票命令。
-读取允许 `full`、`read` 或 `bookings`，写入需要 `full` 或 `bookings`。所有参数通过
-`--input -` 从标准输入读取，不支持 `--output`。创建公开投票和轮换链接时只在成功写入后返回一次
-`publicLink`。轮换立即使旧链接失效。仅限邀请的投票无法轮换。创建重试可取得 `pollId`，邀请重试
-返回当前名单状态且不会重发邮件。邀请最多 40 人，只向提交的地址发送。批量移除只处理未验证的公开报名，
-保留主持人发出的邀请。结果中的可用性仅供参考；最终确认会重新检查，并核对结果版本及每位
-所选参与者的选票版本。选择有条件参与者时须明确确认。响应丢失后，用原幂等键和完全相同的输入重试。
-换用新键时，`poll_already_scheduled` 会返回预约和候选时间的 ID 等安全信息。删除投票会保留关联预约。
+For public voter commands and working examples, see the
+[meeting-poll integration guide](https://github.com/hourmere/hourmere/blob/main/docs/meeting-polls-api.md).
+See the [host guide](/docs/meeting-polls) and [voter guide](/docs/meeting-poll-voting) for the web app.
+
+中文：管理命令使用投票所属组织的密钥，并要求调用者是个人活动的所有者或团队当前的所有者或管理员。`hourmere --help` 分别列出主持人管理命令和公开投票命令。读取接受 `full`、`read` 或 `bookings` 密钥，写入需要 `full` 或 `bookings`。所有投票命令通过 `--input -` 从标准输入读取 JSON，不支持 `--output`。相关投票操作还需要投票人自己的凭证和本人同意。
+
+创建公开投票或更换链接时，只有首次写入成功才返回 `publicLink`。更换后旧链接立即失效。仅限受邀者的投票没有公开链接。重试创建可查询 `pollId`，重试邀请会返回当前名单状态，不会重发邮件。每批最多邀请 40 人，邮件只发给本次提交的地址。批量移除未验证的公开报名会保留主持人发出的邀请。
+
+确认预约时，系统会再次检查可用性，并核对结果版本和每位入选者的选票版本。选择回答“必要时可以”的投票人时，须明确确认。若响应丢失，请用原幂等键和完全相同的输入重试。若改用新键，`poll_already_scheduled` 会返回预约 ID、候选时段 ID 等可公开给管理者的信息。删除投票会保留关联预约。公开投票命令及用法示例见[会议投票集成指南](https://github.com/hourmere/hourmere/blob/main/docs/meeting-polls-api.md)。网页操作请参阅[主持人指南](/docs/meeting-polls)和[投票人指南](/docs/meeting-poll-voting)。
 
 ## Record attendee no-shows
 

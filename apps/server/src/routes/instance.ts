@@ -1,8 +1,8 @@
 import { createRoute, z } from '@hono/zod-openapi'
+import { workflowsEnabled as areWorkflowsEnabled, type WorkflowSettings } from '@hourmere/workflows'
 import { createMiddleware } from 'hono/factory'
 import type { CallerEnv } from '../caller.ts'
 import { errorResponses, json, type RouteModule } from '../openapi.ts'
-import { workflowsAvailable } from '../workflows.ts'
 
 const PublicUrl = z.url().openapi({
   description: 'The public origin of this instance, configured by its operator',
@@ -88,6 +88,7 @@ export function instanceRoutes({
   ssoOidcEnabled = false,
   ssoSamlEnabled = false,
   routingFormsEnabled = false,
+  workflowsEnabled,
   hostedSignupUrl = 'https://hourmere.com',
   privacyPolicyUrl,
   termsUrl,
@@ -111,7 +112,7 @@ export function instanceRoutes({
   hostedSignupUrl?: string
   privacyPolicyUrl?: string
   termsUrl?: string
-}): RouteModule {
+} & WorkflowSettings): RouteModule {
   const body: z.infer<typeof Instance> = {
     publicUrl,
     hostedSignupUrl,
@@ -127,8 +128,7 @@ export function instanceRoutes({
     ssoSamlEnabled,
     // Reported as the guards decide it: only the boolean true is on.
     routingFormsEnabled: routingFormsEnabled === true,
-    // The workflow guard's own decision; no option or setting reports anything else.
-    workflowsEnabled: workflowsAvailable(),
+    workflowsEnabled: areWorkflowsEnabled({ workflowsEnabled }),
     scimProvisioningEnabled,
     signIn: {
       email: true,

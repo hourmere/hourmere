@@ -1,10 +1,11 @@
 import { explicitLanguage, interfaceLanguage, registeredLocales } from '@hourmere/core/language'
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router'
+import { Link, useLocation, useNavigate, useOutletContext } from 'react-router'
 import { getActiveOrganizationMember, type OrganizationMember } from '../api/auth.ts'
 import { api, unwrap } from '../api/client.ts'
 import { errorMessage, RequestError } from '../api/errors.ts'
 import { loadProfile, type Profile, updateDisplayName } from '../api/resources.ts'
+import type { AppShellContext } from '../components/AppShell.tsx'
 import { BreakableText } from '../components/BreakableText.tsx'
 import { ErrorSummary, Field, type FieldErrors } from '../components/forms.tsx'
 import { PageHeader } from '../components/PageHeader.tsx'
@@ -28,6 +29,7 @@ export function SettingsPage() {
 
   usePageTitle('Settings')
   const me = useMe()
+  const shell = useOutletContext<AppShellContext | null>()
   const { refresh, confirmReload } = useSession()
   const location = useLocation()
   const navigate = useNavigate()
@@ -133,6 +135,21 @@ export function SettingsPage() {
           timeZone={profile.status === 'ready' ? profile.data?.timeZone : undefined}
           role={role.status === 'ready' ? role.data : null}
         />
+      )}
+      {shell?.showSsoSettings && (
+        <section className="panel" aria-labelledby="sso-settings-heading">
+          <h2 id="sso-settings-heading">{t('Single sign-on')}</h2>
+          <div className="form-actions">
+            {shell.ssoOidcEnabled && (
+              <Link className="button" to={PATHS.sso}>
+                {t('Identity providers')}
+              </Link>
+            )}
+            <Link className="button" to={PATHS.ssoDomainSettings}>
+              {t('SSO domains')}
+            </Link>
+          </div>
+        </section>
       )}
       {!personal && (
         <TeamMembers
