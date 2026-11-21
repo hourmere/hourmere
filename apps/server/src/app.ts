@@ -35,6 +35,7 @@ import { requireCaller } from './caller.ts'
 import { clientIp, withClientIp } from './client-ip.ts'
 import { errorAliasFor } from './error-aliases.ts'
 import type { McpModule } from './mcp/endpoint.ts'
+import { scimTeamMappingTools } from './mcp/scim-team-mappings.ts'
 import { describeCaller, Me } from './me.ts'
 import {
   isOneTimeCapabilityPath,
@@ -45,6 +46,7 @@ import { authenticated, ErrorBody, json, type RouteModule } from './openapi.ts'
 import { pwaStatic } from './pwa-static.ts'
 import { createRateLimiter, rateLimit, routeRateLimits } from './rate-limit.ts'
 import { installRestApiKeyScopes } from './rest-scopes.ts'
+import { scimTeamMappingRoutes } from './routes/scim-team-mappings.ts'
 import { isPublicRoutingFormPath, privateRoutingApiPrefix } from './routing-form-privacy.ts'
 import { mountScim, type ScimOptions } from './scim.ts'
 import {
@@ -173,6 +175,7 @@ function isSsoTrustPath(path: string, method: string): boolean {
   return (
     (method === 'PUT' && /^\/api\/v1\/team\/sso\/policy\/?$/i.test(path)) ||
     /^\/api\/v1\/team\/sso\/(?:providers|domains|delegations|recovery)(?:\/|$)/i.test(path) ||
+    /^\/api\/v1\/scim\/team-mappings(?:\/|$)/i.test(path) ||
     /^\/api\/auth\/(?:sign-in\/sso|sso\/(?:callback|oidc\/complete))(?:\/|$)/i.test(path)
   )
 }
@@ -706,7 +709,12 @@ export function createApp({
       })
     }
   }
-  ssoMailboxProof?.mount({ app, resolveCaller, publicUrl })
+  ssoMailboxProof?.mount({
+    app,
+    resolveCaller,
+    publicUrl,
+    scimMappingConsentEnabled: scimResourcesEnabled,
+  })
   ssoOidcSignIn?.mountInvitationAcceptance(app, publicUrl)
   app.on(['GET', 'POST'], '/api/auth/*', (c) =>
     authHandler(withClientIp(c.req.raw, c.var.clientIp)),
@@ -761,7 +769,22 @@ export function createApp({
   })
 
   for (const register of routes) register({ app, caller, scimResourcesEnabled })
-  mcp?.mount({ app, resolveCaller, publicUrl, ssoTeamReads })
+  const scimMappingDeps = scimResourcesEnabled &&
+    scim && {
+      db: scim.db,
+      publicUrl,
+      capabilities: ssoTeamReads?.capabilities ?? { ssoOidcEnabled: false, ssoSamlEnabled: false },
+      resourcesEnabled: scimResourcesEnabled,
+      notices: scim.mappingNotices,
+    }
+  if (scimMappingDeps) scimTeamMappingRoutes(scimMappingDeps)({ app, caller, scimResourcesEnabled })
+  mcp?.mount({
+    app,
+    resolveCaller,
+    publicUrl,
+    ssoTeamReads,
+    ...(scimMappingDeps && { additionalTools: scimTeamMappingTools(scimMappingDeps) }),
+  })
   mountScim(app, scim, trustedProxies, publicUrl)
 
   // The product API is versioned under /api/v1 (agents depend on it for years);

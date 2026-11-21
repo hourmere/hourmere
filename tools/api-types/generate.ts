@@ -79,7 +79,7 @@ const authPaths = {
 } satisfies NonNullable<OpenAPI3['paths']>
 
 const out = new URL('../../apps/web/src/api/schema.d.ts', import.meta.url)
-const doc = (await openApiDocument()) as OpenAPI3
+const doc = (await openApiDocument({ scimResourcesEnabled: true })) as OpenAPI3
 const ast = await openapiTS(
   { ...doc, paths: { ...doc.paths, ...authPaths } },
   { alphabetize: true },

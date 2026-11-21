@@ -169,5 +169,9 @@
   "series.cancelled.member": "已取消",
   "series.manage": "管理系列预约",
   "series.view": "查看系列预约",
-  "series.repair": "如需重试生成会议链接，请在 Hourmere 中打开对应的预约。"
+  "series.repair": "如需重试生成会议链接，请在 Hourmere 中打开对应的预约。",
+  "scimMapping.subject": "SCIM 团队映射已更新",
+  "scimMapping.linked": "您的团队已批准 SCIM 映射 {mappingId}。目录配置该群组后，即可通过此映射管理子团队的名称以及由目录管理的成员。",
+  "scimMapping.unlinked": "SCIM 映射 {mappingId} 已解除。目录无法再通过此映射管理团队。",
+  "scimMapping.suspended": "通过 SCIM 映射 {mappingId} 进行的目录管理已暂停。现有成员关系和暂停状态保持不变。"
 }

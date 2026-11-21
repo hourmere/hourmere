@@ -1,7 +1,8 @@
-import { type Principal, teamRoles } from '@hourmere/auth'
+import { ApiKeyScopeError, MCP_OAUTH_SCOPE, type Principal, teamRoles } from '@hourmere/auth'
 import type { Database, Db } from '@hourmere/db'
+import { checkTeamWriteDeadline } from '@hourmere/db/team-write'
 import { DomainError } from '@hourmere/scheduling'
-import { type Selectable, sql } from 'kysely'
+import { type Selectable, sql, type Transaction } from 'kysely'
 import { z } from 'zod'
 import {
   captureMappingConsentProof,
@@ -9,11 +10,18 @@ import {
   lockMappingOwnerSession,
   type MappingOwnerIdentity,
   mappingDenied,
+  mappingMember,
   mappingUuid,
   recheckMappingConsentProof,
 } from './scim-team-hierarchy-proof.ts'
+import {
+  recordScimMappingChange,
+  type ScimMappingNoticeQueue,
+} from './scim-team-mapping-notices.ts'
+import { lockMappingTeams, retireScimTeamMapping } from './scim-team-mapping-retirement.ts'
 import { SCIM_MAPPING_CONSENT } from './sso.ts'
 import { type FreshProofDeps, runWithFreshProof } from './sso-fresh-proof.ts'
+import { teamReadAccess, teamWriteCheck } from './sso-team-reads.ts'
 import { EXPECTED_ORGANIZATION_HEADER } from './team-management.ts'
 
 const inputScope = {
@@ -42,16 +50,17 @@ const unlink = z.strictObject({
   action: z.literal('unlink'),
   mappingId: mappingUuid,
 })
-const approval = z.discriminatedUnion('action', [
+export const ScimTeamMappingApproval = z.discriminatedUnion('action', [
   link.extend({ proofAttemptId: mappingUuid.optional() }),
   unlink.extend({ proofAttemptId: mappingUuid.optional() }),
 ])
 
-export type ScimTeamMappingApprovalInput = z.input<typeof approval>
+export type ScimTeamMappingApprovalInput = z.input<typeof ScimTeamMappingApproval>
 
 export interface ScimTeamHierarchyDeps extends FreshProofDeps {
   /** No production registration. The SCIM resource test harness supplies this flag. */
   resourcesEnabled: boolean
+  notices?: ScimMappingNoticeQueue | undefined
 }
 
 type MappingIntent = Selectable<Database['scim_team_mapping_intents']>
@@ -59,17 +68,20 @@ type MappingConsent = Selectable<Database['scim_team_mapping_consents']>
 const clockTime = sql<Date>`clock_timestamp()`
 const topologyConflict = () => new DomainError('conflict', 'scim_mapping_topology_conflict')
 
-function mappingActor(deps: ScimTeamHierarchyDeps, principal: Principal): MappingOwnerIdentity {
+type MappingActor = Omit<MappingOwnerIdentity, 'sessionId'> & { sessionId: string | null }
+
+function mappingActor(deps: ScimTeamHierarchyDeps, principal: Principal): MappingActor {
   if (!deps.resourcesEnabled) throw new DomainError('not_found', 'scim_resources_disabled')
-  if (principal.kind !== 'session') throw mappingDenied()
   const organizationId = mappingUuid.safeParse(principal.organization.id)
   const userId = mappingUuid.safeParse(principal.user.id)
-  const sessionId = mappingUuid.safeParse(principal.sessionId)
+  const sessionId = mappingUuid
+    .nullable()
+    .safeParse(principal.kind === 'session' ? principal.sessionId : null)
   if (!organizationId.success || !userId.success || !sessionId.success) throw mappingDenied()
   return { organizationId: organizationId.data, userId: userId.data, sessionId: sessionId.data }
 }
 
-function intentInput(input: z.output<typeof approval>) {
+function intentInput(input: z.output<typeof ScimTeamMappingApproval>) {
   return {
     id: input.intentId,
     action: input.action,
@@ -112,8 +124,10 @@ export async function approveScimTeamMapping(
   headers: Headers,
   input: ScimTeamMappingApprovalInput,
 ) {
-  const actor = mappingActor(deps, principal)
-  const parsed = approval.safeParse(input)
+  const { sessionId, ...identity } = mappingActor(deps, principal)
+  if (sessionId === null) throw mappingDenied()
+  const actor = { ...identity, sessionId }
+  const parsed = ScimTeamMappingApproval.safeParse(input)
   if (!parsed.success) throw new DomainError('invalid', 'invalid_request')
   const agreed = parsed.data
   const intent = intentInput(agreed)
@@ -179,6 +193,18 @@ export async function approveScimTeamMapping(
           .onConflict((conflict) => conflict.columns(['intent_id', 'organization_id']).doNothing())
           .returning('organization_id')
           .executeTakeFirst()
+          .catch((error: unknown) => {
+            if (
+              error &&
+              typeof error === 'object' &&
+              'code' in error &&
+              error.code === '23514' &&
+              'constraint' in error &&
+              error.constraint === 'scim_team_mapping_consents_lifetime'
+            )
+              throw mappingDenied()
+            throw error
+          })
         if (!consent) throw mappingDenied()
         await assertLiveApprovals(trx, intent.id, actor.organizationId)
         return { intentId: intent.id }
@@ -195,11 +221,11 @@ function readApprovals(trx: Db, intentId: string) {
     .orderBy('organization_id')
 }
 
-function ownsApproval(actor: MappingOwnerIdentity, consent: MappingConsent) {
+function ownsApproval(actor: MappingActor, consent: MappingConsent) {
   return (
     actor.organizationId === consent.organization_id &&
     actor.userId === consent.owner_id &&
-    actor.sessionId === consent.session_id
+    (actor.sessionId === null || actor.sessionId === consent.session_id)
   )
 }
 
@@ -207,7 +233,7 @@ async function lockApprovedOwners(
   trx: Db,
   intent: MappingIntent,
   approvals: MappingConsent[],
-  actor: MappingOwnerIdentity,
+  actor: MappingActor,
   ssoOidcEnabled: boolean,
 ) {
   const teams = [intent.parent_organization_id, intent.child_organization_id]
@@ -220,13 +246,7 @@ async function lockApprovedOwners(
     .orderBy('id')
     .forShare()
     .execute()
-  const organizations = await trx
-    .selectFrom('auth.organization')
-    .select('id')
-    .where('id', 'in', teams)
-    .orderBy('id')
-    .forUpdate()
-    .execute()
+  const organizations = await lockMappingTeams(trx, teams)
   if (organizations.length !== teams.length) throw mappingDenied()
 
   const current = await trx
@@ -270,11 +290,13 @@ async function lockApprovedOwners(
     .orderBy('id')
     .forShare()
     .execute()
-  await lockMappingOwnerSession(trx, actor)
+  if (actor.sessionId !== null)
+    await lockMappingOwnerSession(trx, { ...actor, sessionId: actor.sessionId })
   for (const { identity, owner, consent } of owners) {
     await recheckMappingConsentProof(trx, identity, owner, consent, ssoOidcEnabled)
   }
   await assertLiveApprovals(trx, intent.id)
+  return consents
 }
 
 async function currentLinkGeneration(trx: Db, childOrganizationId: string) {
@@ -284,6 +306,64 @@ async function currentLinkGeneration(trx: Db, childOrganizationId: string) {
     .where('child_organization_id', '=', childOrganizationId)
     .executeTakeFirst()
   return generation?.generation ?? 0
+}
+
+export async function listScimTeamMappings(
+  deps: ScimTeamHierarchyDeps,
+  principal: Principal,
+  expectedOrganizationId?: string,
+) {
+  const { organizationId, sessionId, userId } = mappingActor(deps, principal)
+  if (
+    expectedOrganizationId !== undefined &&
+    mappingUuid.safeParse(expectedOrganizationId).data !== organizationId
+  )
+    throw mappingDenied()
+  return deps.db
+    .transaction()
+    .setIsolationLevel('repeatable read')
+    .execute(async (trx) => {
+      const member = await mappingMember(trx, { organizationId, userId }, false)
+      const roles = teamRoles(member?.role)
+      const owner = roles.includes('owner')
+      if (!owner && !roles.includes('admin')) throw mappingDenied()
+      if (sessionId !== null)
+        await lockMappingOwnerSession(trx, { organizationId, userId, sessionId }, false)
+      const access = await teamReadAccess({ ...deps, db: trx }, principal)()
+      if (!access.allowed) throw mappingDenied()
+      const mappings = await trx
+        .selectFrom('scim_team_mappings')
+        .select([
+          'id',
+          'parent_organization_id as parentOrganizationId',
+          'child_organization_id as childOrganizationId',
+          'connection_id as connectionId',
+          'external_id as externalId',
+          sql<
+            'pending' | 'suspended'
+          >`CASE WHEN suspended_at IS NULL THEN 'pending' ELSE 'suspended' END`.as('state'),
+        ])
+        .where((eb) =>
+          eb.or([
+            eb('live_parent_organization_id', '=', organizationId),
+            eb('live_child_organization_id', '=', organizationId),
+          ]),
+        )
+        .orderBy('id')
+        .execute()
+      const connection = owner
+        ? await trx
+            .selectFrom('scim_connections')
+            .select('id')
+            .where('organization_id', '=', organizationId)
+            .executeTakeFirst()
+        : undefined
+      return {
+        mappings,
+        connectionId: connection?.id ?? null,
+        linkGeneration: owner ? await currentLinkGeneration(trx, organizationId) : null,
+      }
+    })
 }
 
 async function linkTeams(trx: Db, intent: MappingIntent) {
@@ -322,7 +402,7 @@ async function linkTeams(trx: Db, intent: MappingIntent) {
   return id
 }
 
-async function unlinkTeams(trx: Db, intent: MappingIntent) {
+async function unlinkTeams(trx: Transaction<Database>, intent: MappingIntent) {
   const mapping = await trx
     .selectFrom('scim_team_mappings')
     .select('id')
@@ -334,32 +414,7 @@ async function unlinkTeams(trx: Db, intent: MappingIntent) {
     .executeTakeFirst()
   if (!mapping) throw mappingDenied()
 
-  // Native role changes lock the same child before editing the member, so a
-  // concurrent promotion that commits before retirement is seen by this read.
-  const roster = await trx
-    .selectFrom('scim_team_managed_memberships as source')
-    .innerJoin('auth.member as member', (join) =>
-      join
-        .onRef('member.id', '=', 'source.member_id')
-        .onRef('member.userId', '=', 'source.user_id')
-        .onRef('member.organizationId', '=', 'source.child_organization_id'),
-    )
-    .select('member.role')
-    .where('source.mapping_id', '=', mapping.id)
-    .where('source.child_organization_id', '=', intent.child_organization_id)
-    .execute()
-  if (
-    roster.some(({ role }) => teamRoles(role).some((item) => item === 'owner' || item === 'admin'))
-  )
-    throw new DomainError('forbidden', 'scim_mapping_privileged_member')
-  // The Group lifecycle steps will own roster departure and credential revocation.
-  if (roster.length > 0) throw new DomainError('conflict', 'scim_mapping_roster_requires_departure')
-
-  await trx
-    .updateTable('scim_team_mappings')
-    .set({ retired_at: clockTime })
-    .where('id', '=', mapping.id)
-    .execute()
+  await retireScimTeamMapping(trx, mapping.id, intent.child_organization_id)
   return mapping.id
 }
 
@@ -368,8 +423,15 @@ export async function commitScimTeamMapping(
   deps: ScimTeamHierarchyDeps,
   principal: Principal,
   intentId: string,
+  expectedAction?: { action: 'link' } | { action: 'unlink'; mappingId: string },
 ) {
   const actor = mappingActor(deps, principal)
+  if (principal.kind === 'api_key' && principal.apiKeyScope !== 'full') throw new ApiKeyScopeError()
+  if (
+    principal.kind === 'oauth' &&
+    (!principal.oauthGrantId || !principal.scopes.includes(MCP_OAUTH_SCOPE))
+  )
+    throw mappingDenied()
   const id = mappingUuid.safeParse(intentId)
   if (!id.success) throw mappingDenied()
   return deps.db
@@ -383,12 +445,34 @@ export async function commitScimTeamMapping(
         .where('id', '=', id.data)
         .where('consumed_at', 'is', null)
         .executeTakeFirst()
-      if (!intent) throw mappingDenied()
+      if (
+        !intent ||
+        (expectedAction && intent.action !== expectedAction.action) ||
+        (expectedAction?.action === 'unlink' &&
+          mappingUuid.safeParse(expectedAction.mappingId).data !== intent.mapping_id)
+      )
+        throw mappingDenied()
       const consents = await readApprovals(trx, intent.id).execute()
       if (consents.length !== 2 || !consents.some((consent) => ownsApproval(actor, consent)))
         throw mappingDenied()
 
-      await lockApprovedOwners(trx, intent, consents, actor, deps.capabilities.ssoOidcEnabled)
+      const current = await lockApprovedOwners(
+        trx,
+        intent,
+        consents,
+        actor,
+        deps.capabilities.ssoOidcEnabled,
+      )
+      const delegationDeadline =
+        principal.kind === 'session'
+          ? undefined
+          : await teamWriteCheck(deps, principal, true)
+              .lockProof(trx)
+              .catch((error: unknown) => {
+                if (error instanceof DomainError && error.code === 'sso_required')
+                  throw mappingDenied()
+                throw error
+              })
       const connection = await trx
         .selectFrom('scim_connections')
         .select('id')
@@ -401,12 +485,25 @@ export async function commitScimTeamMapping(
       const mappingId =
         intent.action === 'link' ? await linkTeams(trx, intent) : await unlinkTeams(trx, intent)
       const generation = await currentLinkGeneration(trx, intent.child_organization_id)
+      await recordScimMappingChange(
+        trx,
+        deps.notices,
+        mappingId,
+        intent.action === 'link' ? 'linked' : 'unlinked',
+        current.map(({ organization_id, owner_id }) => ({
+          organizationId: organization_id,
+          actor: { type: 'user', id: owner_id },
+        })),
+      )
       await trx
         .updateTable('scim_team_mapping_intents')
         .set({ consumed_at: clockTime })
         .where('id', '=', intent.id)
         .execute()
       await assertLiveApprovals(trx, intent.id)
+      await checkTeamWriteDeadline(trx, delegationDeadline, () => {
+        throw mappingDenied()
+      })
       return { mappingId, generation }
     })
 }

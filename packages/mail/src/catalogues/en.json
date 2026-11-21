@@ -169,5 +169,9 @@
   "series.cancelled.member": "Cancelled",
   "series.manage": "Manage series",
   "series.view": "View series",
-  "series.repair": "To retry a meeting link, open the affected booking in Hourmere."
+  "series.repair": "To retry a meeting link, open the affected booking in Hourmere.",
+  "scimMapping.subject": "SCIM team mapping updated",
+  "scimMapping.linked": "Your team approved SCIM mapping {mappingId}. The linked directory can manage the team name and its directory-managed roster once the group is provisioned.",
+  "scimMapping.unlinked": "SCIM mapping {mappingId} was detached from your team. The directory can no longer manage it through this mapping.",
+  "scimMapping.suspended": "Directory access through SCIM mapping {mappingId} was suspended. Existing memberships and suspension states are preserved."
 }

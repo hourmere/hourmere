@@ -43,6 +43,7 @@ export type AppShellContext = {
   ssoOidcEnabled: boolean | undefined
   ssoSamlEnabled: boolean | undefined
   showSsoSettings: boolean
+  scimResourcesEnabled: boolean
 }
 
 function keepActiveVisible(list: HTMLUListElement) {
@@ -278,6 +279,8 @@ function Shell() {
                     instance.status === 'ready' && instance.data?.followUpHostNotesEnabled === true,
                   ssoOidcEnabled,
                   ssoSamlEnabled,
+                  scimResourcesEnabled:
+                    instance.status === 'ready' && instance.data?.scimResourcesEnabled === true,
                   showSsoSettings:
                     (ssoOidcEnabled === true || ssoSamlEnabled === true) &&
                     managesTeam &&

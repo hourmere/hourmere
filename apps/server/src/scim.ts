@@ -4,6 +4,7 @@ import type { Db } from '@hourmere/db'
 import type { Context } from 'hono'
 import { clientIp } from './client-ip.ts'
 import { createRateLimiter, rateLimitKey } from './rate-limit.ts'
+import type { ScimMappingNoticeQueue } from './scim-team-mapping-notices.ts'
 
 export const SCIM_ERROR_SCHEMA = 'urn:ietf:params:scim:api:messages:2.0:Error'
 
@@ -115,6 +116,8 @@ export interface ScimOptions {
   db: Db
   enabled: boolean
   resources?: ScimResourceHandler | undefined
+  /** Required by mapping writes when the in-process resource test harness is enabled. */
+  mappingNotices?: ScimMappingNoticeQueue | undefined
 }
 
 /** Separate protocol boundary. Production registers no SCIM resource handlers yet. */

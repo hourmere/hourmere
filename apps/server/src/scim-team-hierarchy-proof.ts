@@ -32,7 +32,11 @@ export interface MappingOwnerIdentity {
   sessionId: string
 }
 
-export async function lockMappingOwner(trx: Db, { organizationId, userId }: MappingOwnerIdentity) {
+export async function mappingMember(
+  trx: Db,
+  { organizationId, userId }: Omit<MappingOwnerIdentity, 'sessionId'>,
+  lock: boolean,
+) {
   // The membership row version also invalidates consent after demotion followed by
   // re-promotion to owner, with no additional work on the native role-write path.
   const { rows } = await sql<{
@@ -53,16 +57,24 @@ export async function lockMappingOwner(trx: Db, { organizationId, userId }: Mapp
         WHERE b.organization_id = ${organizationId}::uuid AND b.cleared_at IS NULL
           AND (b.user_id = u.id OR b.identity_email = lower(btrim(u.email)))
       )
-    FOR SHARE OF m
+    ${lock ? sql`FOR SHARE OF m` : sql``}
   `.execute(trx)
-  const owner = rows[0]
+  return rows[0]
+}
+
+export async function lockMappingOwner(trx: Db, identity: Omit<MappingOwnerIdentity, 'sessionId'>) {
+  const owner = await mappingMember(trx, identity, true)
   if (!owner || !teamRoles(owner.role).includes('owner')) throw mappingDenied()
   return owner
 }
 
 type MappingOwner = Awaited<ReturnType<typeof lockMappingOwner>>
 
-export async function lockMappingOwnerSession(trx: Db, identity: MappingOwnerIdentity) {
+export async function lockMappingOwnerSession(
+  trx: Db,
+  identity: MappingOwnerIdentity,
+  lock = true,
+) {
   const { organizationId, sessionId, userId } = identity
   const session = await trx
     .selectFrom('auth.session')
@@ -70,7 +82,7 @@ export async function lockMappingOwnerSession(trx: Db, identity: MappingOwnerIde
     .where('id', '=', sessionId)
     .where('userId', '=', userId)
     .where('expiresAt', '>', sql<Date>`clock_timestamp()`)
-    .forShare()
+    .$if(lock, (query) => query.forShare())
     .executeTakeFirst()
   if (session?.activeOrganizationId?.toLowerCase() !== organizationId) throw mappingDenied()
 }

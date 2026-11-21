@@ -912,6 +912,68 @@ Mapping administration is ordinary product configuration, not credential minting
 ships MCP and CLI parity rather than borrowing the browser-only exemption. Additional
 writes discovered during implementation need their own row and interfaces before coding.
 
+## Mapping administration in the resource test harness
+
+Open **Settings → SCIM team mappings** from the team you administer. Owners and admins
+can see that team's live mappings. To link an existing team, the child owner privately
+shares the child Team ID and current link generation with the parent owner. The parent
+owner prepares the request using their team's provisioning connection and the directory's
+exact Group `externalId`. The request authorizes the directory to retire the Group and
+detach its managed roster. To unlink, prepare a request from an existing mapping instead.
+
+Share the exact request privately with the other owner's team. Each owner opens and
+reviews it in their own team's Settings and approves it with fresh proof. Both approvals
+are required even when one person owns both teams. Either approving owner then applies the
+request before both approvals expire. Prepare and approve a fresh request if it expires or
+the selected teams, mapping, Group identifier or generation change.
+
+REST exposes the acting team's live links at `GET /api/v1/scim/team-mappings`. To apply
+an approved request, send `{ "intentId": "…" }` to `POST /api/v1/scim/team-mappings` or
+`DELETE /api/v1/scim/team-mappings/{id}`. Browser sessions bind the request to their
+current team with `X-Expected-Organization-Id`. The matching MCP tools are
+`create_scim_team_mapping` and `delete_scim_team_mapping`. The latter takes `id` and
+`intentId`. The test CLI exposes `scim-team-mappings create` and
+`scim-team-mappings delete` with the same JSON inputs as MCP. Machine writes require
+the normal write scope and live delegation for an enforced team.
+
+### Offline mapping recovery runbook
+
+Use the resource test checkout and confirm the database, mapping UUID and both organization
+UUIDs. Prepare the database and background jobs schema with the usual migrations and
+use the harness's configured database connection. The resource-enabled harness passes its
+job queue to `createApp` as `scim.mappingNotices`. On its background worker, use
+`scimMappingResourceJobs` in place of the ordinary mailbox-proof job definitions so the
+same worker handles SSO proof, mapping proof, and mapping owner notices. Use the configured
+mailer for delivery. The offline script uses the existing queue without running migrations.
+
+```sh
+node scripts/scim-team-mapping-recovery.ts --resource-test suspend MAPPING_UUID PARENT_UUID CHILD_UUID
+node scripts/scim-team-mapping-recovery.ts --resource-test detach MAPPING_UUID PARENT_UUID CHILD_UUID
+```
+
+1. Suspend the mapping to stop its directory authority immediately. Existing membership
+   and suspension state stays in place. The mapping keeps its reserved external ID until
+   detachment. A successful suspension records `scim_mapping.suspended` in both journals.
+2. Detach when the managed roster can depart safely. If the command reports a conflict,
+   have the child team's authorized administrators resolve privileged roles, host
+   assignments and unfinished bookings through normal administration, then retry with
+   the same UUIDs. Detachment records `scim_mapping.unlinked` and releases the external
+   ID. A team with live links must detach them before any future supported team deletion.
+3. Both actions record a `system` actor and queue notices for verified current owners in
+   the same transaction. A retry of an applied action reports no changes. An incorrect
+   UUID combination is refused. Check the worker's delivery status after a successful
+   command. Owner notices use their saved language with the usual fallback.
+
+普通关联和解除关联可在团队的「设置 → SCIM 团队映射」中办理。关联前，子团队所有者应私下
+提供本团队 ID 和当前关联代次，父团队所有者再用本团队的配置连接及群组 `externalId` 准备
+请求。解除关联时，从已有映射准备请求。双方所有者在各自团队内核对并验证同一份请求，
+然后由任一批准人提交。即使同一人拥有两个团队，也要分别批准。批准过期后，须重新准备请求。
+
+需要离线恢复时，先核对测试数据库和三个 UUID，再用上述 `suspend` 命令暂停目录管理。现有
+成员关系和暂停状态会保留。若要解除映射，请运行 `detach`。如存在受保护的角色、主持安排或
+尚未结束的预约，请由子团队的授权管理员先通过常规管理流程处理，再重试。成功后，双方团队
+都会在审计日志中看到系统操作，后台任务会向当前所有者的已验证邮箱发送通知。
+
 ## Self-hosting and provider testing
 
 Use HTTPS with a stable PUBLIC_URL and a proxy that forwards `/scim/v2` unchanged.

@@ -110,6 +110,17 @@ export const COMMANDS = {
   'workflows runs': 'list_workflow_runs',
 } as const
 
+const SCIM_MAPPING_COMMANDS = {
+  'scim-team-mappings create': 'create_scim_team_mapping',
+  'scim-team-mappings delete': 'delete_scim_team_mapping',
+} as const
+const RESOURCE_TEST_COMMANDS = { ...COMMANDS, ...SCIM_MAPPING_COMMANDS }
+
+/** The executable uses the production registry. Resource tests may opt in in-process. */
+export function cliCommands(scimResourcesEnabled = false) {
+  return scimResourcesEnabled ? RESOURCE_TEST_COMMANDS : COMMANDS
+}
+
 export const REST_COMMANDS = { 'branding upload': 'POST /api/v1/branding/logo' } as const
 
 export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [--url ORIGIN]
@@ -266,7 +277,7 @@ See https://hourmere.com/docs/cli for complete usage.
 `
 
 interface Options {
-  command: keyof typeof COMMANDS | keyof typeof REST_COMMANDS
+  command: keyof typeof RESOURCE_TEST_COMMANDS | keyof typeof REST_COMMANDS
   file?: string
   contentType?: string
   input?: string
@@ -278,7 +289,7 @@ interface Options {
   clearSuccessRedirect?: boolean
 }
 
-function parse(argv: readonly string[]): Options {
+function parse(argv: readonly string[], scimResourcesEnabled: boolean | undefined): Options {
   const parts = [...argv]
   const first = parts.shift()
   const command =
@@ -293,13 +304,18 @@ function parse(argv: readonly string[]): Options {
           first === 'slack' ||
           first === 'workflows' ||
           first === 'routing-forms' ||
+          first === 'scim-team-mappings' ||
           first === 'audit-log'
         ? `${first} ${parts.shift() ?? ''}`
         : first
   const rest = parts
-  if (!command || (!Object.hasOwn(COMMANDS, command) && !Object.hasOwn(REST_COMMANDS, command)))
+  if (
+    !command ||
+    (!Object.hasOwn(cliCommands(scimResourcesEnabled), command) &&
+      !Object.hasOwn(REST_COMMANDS, command))
+  )
     throw new CliError('invalid_command')
-  const options: Options = { command: command as keyof typeof COMMANDS }
+  const options: Options = { command: command as Options['command'] }
   const seen = new Set<string>()
   for (let i = 0; i < rest.length; i += 1) {
     const flag = rest[i]
@@ -475,13 +491,19 @@ export async function runCli(options: {
   stdout: (text: string) => unknown | Promise<unknown>
   stderr: (text: string) => void
   fetch?: typeof fetch
+  /** In-process test capability; no environment variable or CLI switch enables it. */
+  scimResourcesEnabled?: boolean
 }): Promise<number> {
   if (options.argv.length === 1 && options.argv[0] === '--version') {
     options.stdout(`${version}\n`)
     return 0
   }
   if (options.argv.length === 0 || (options.argv.length === 1 && options.argv[0] === '--help')) {
-    options.stdout(HELP)
+    options.stdout(
+      options.scimResourcesEnabled
+        ? `${HELP}SCIM mappings (resource test): scim-team-mappings create | delete --input FILE|-\n`
+        : HELP,
+    )
     return 0
   }
   let output: Awaited<ReturnType<typeof open>> | undefined
@@ -491,7 +513,7 @@ export async function runCli(options: {
   let idempotencyKey: string | undefined
   const secrets = [options.env.HOURMERE_API_KEY ?? '']
   try {
-    const args = parse(options.argv)
+    const args = parse(options.argv, options.scimResourcesEnabled)
     command = args.command
     const url = endpoint(args.url ?? options.env.HOURMERE_URL)
     const key = options.env.HOURMERE_API_KEY ?? ''
@@ -609,7 +631,7 @@ export async function runCli(options: {
         : await callTool({
             url,
             key,
-            tool: COMMANDS[args.command],
+            tool: RESOURCE_TEST_COMMANDS[args.command],
             input,
             fetch: options.fetch,
           })
