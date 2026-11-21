@@ -867,6 +867,16 @@ export function createTeamRolePolicy(
           isUuid(organizationId) &&
           selects(request.where, { id: profileSession.user.id })
         ) {
+          // Better Auth can validate new additionalFields before calling this adapter.
+          // Refuse a mixed update until its new fields have an explicit write mapping.
+          if (
+            Object.keys(request.update).some((key) => !['name', 'image', 'updatedAt'].includes(key))
+          ) {
+            throw new APIError('BAD_REQUEST', {
+              code: 'UNSUPPORTED_USER_UPDATE_FIELDS',
+              message: 'This name update includes unsupported fields.',
+            })
+          }
           const { id: userId } = profileSession.user
           const currentDb = transactions.getStore() ?? db
           // The native name update and conflict check share one statement with the same

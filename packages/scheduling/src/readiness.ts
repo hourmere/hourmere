@@ -1,6 +1,6 @@
 import { validateTimeZone, validateWeeklyHours } from '@hourmere/core'
 import type { Db, EventTypeHosts, EventTypes, Schedules } from '@hourmere/db'
-import { scimSuspended } from '@hourmere/db/scim-suspension'
+import { scimManagedMember, scimSuspended } from '@hourmere/db/scim-suspension'
 import { type Selectable, sql } from 'kysely'
 import { z } from 'zod'
 import { assertCachedCalendarSync, servedHandle } from './availability.ts'
@@ -166,9 +166,17 @@ const MemberHealth = z.object({
   selectedCalendars: ReadinessStateSchema,
   conferenceAccounts: z.enum(['connected', 'attention_required', 'not_connected', 'check_failed']),
 })
+const MembershipBlocker = z.enum(['scim_suspension', 'local_suspension', 'local_removal'])
+const ManagedMembership = z
+  .object({ blockers: z.array(MembershipBlocker) })
+  .describe(
+    'Coarse admission blockers for a linked or directory-suspended member, under the SCIM resource test flag.',
+  )
 export const MemberReadinessPageSchema = z.object({
   organizationId: z.uuid(),
-  members: z.array(TeamMember.extend({ health: MemberHealth })),
+  members: z.array(
+    TeamMember.extend({ health: MemberHealth, managedMembership: ManagedMembership.optional() }),
+  ),
 })
 export type MemberReadinessPage = z.infer<typeof MemberReadinessPageSchema>
 export type SelfReadiness = z.infer<typeof SelfReadinessSchema>
@@ -221,6 +229,7 @@ export interface ReadinessTeamContext {
 export interface ReadinessMemberContext extends ReadinessTeamContext {
   userId: string
   role: 'owner' | 'admin' | 'member'
+  scimResourcesEnabled?: boolean
 }
 
 function checkedPage(input: ReadinessPageInput) {
@@ -421,6 +430,31 @@ export async function getTeamMemberReadiness(
     .where('m.organizationId', '=', actor.organizationId)
     .where('m.id', 'in', [...new Set(memberIds)])
     .$if(actor.role === 'member', (query) => query.where('m.userId', '=', actor.userId))
+    .$if(ctx.scimResourcesEnabled === true, (query) =>
+      query.select((eb) => {
+        const localBlocks = eb
+          .selectFrom('scim_membership_blocks as block')
+          .select('block.id')
+          .whereRef('block.organization_id', '=', 'm.organizationId')
+          .where('block.source', '=', 'local')
+          .where('block.cleared_at', 'is', null)
+          .where((eb) =>
+            eb.or([
+              eb('block.user_id', '=', eb.ref('m.userId')),
+              eb.and([
+                eb('u.emailVerified', '=', true),
+                eb('block.identity_email', '=', sql<string>`lower(btrim(${eb.ref('u.email')}))`),
+              ]),
+            ]),
+          )
+        return [
+          scimManagedMember(eb.ref('m.organizationId'), eb.ref('m.userId')).as('scimManaged'),
+          scimSuspended(eb.ref('m.organizationId'), eb.ref('m.userId')).as('scimSuspension'),
+          eb.exists(localBlocks.where('block.kind', '=', 'suspension')).as('localSuspension'),
+          eb.exists(localBlocks.where('block.kind', '=', 'removal')).as('localRemoval'),
+        ]
+      }),
+    )
     .orderBy('m.id')
     .execute()
   const facts = await loadFacts(ctx.db, actor.organizationId, [], members)
@@ -429,10 +463,15 @@ export async function getTeamMemberReadiness(
     organizationId: actor.organizationId,
     members: members.map((member) => {
       const view = evaluateMember(member, facts, now)
+      const blockers: z.infer<typeof MembershipBlocker>[] = []
+      if (member.scimSuspension) blockers.push('scim_suspension')
+      if (member.localSuspension) blockers.push('local_suspension')
+      if (member.localRemoval) blockers.push('local_removal')
       return {
         memberId: member.id,
         displayName: memberDisplayName(member),
         ...adminView(view),
+        ...((member.scimManaged || member.scimSuspension) && { managedMembership: { blockers } }),
         health: {
           defaultSchedule:
             view.signals.find((signal) => signal.id === 'default_schedule')?.state ?? 'not_checked',

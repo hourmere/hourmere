@@ -2887,4 +2887,12 @@ export const admin = {
 
   // SCIM managed membership
   'This resource is managed by your identity provider.': '此资源由你的身份提供方管理。',
+  'Managed by your identity provider': '由身份提供方管理',
+  'Your identity provider suspended this membership.': '身份提供方已暂停此成员资格。',
+  'A team administrator suspended this membership.': '团队管理员已暂停此成员资格。',
+  'A previous team removal is blocking readmission.': '此前的团队移除操作阻止重新加入。',
+  'Restore this membership in your identity provider before making this member an admin.':
+    '请先在身份提供方恢复此成员资格，再将此成员设为管理员。',
+  'Change your display name in your identity provider for this team.':
+    '请在此团队的身份提供方中更改你的显示名称。',
 } as const

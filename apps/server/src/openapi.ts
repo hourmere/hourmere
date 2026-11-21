@@ -66,7 +66,11 @@ export const callerWithBodyLimit = (
  *   (see checkBodyAsRead in body-limit.ts).
  * - Call the service layer and let its DomainErrors propagate; createApp maps them.
  */
-export type RouteModule = (shared: { app: OpenAPIHono; caller: CallerMiddleware }) => void
+export type RouteModule = (shared: {
+  app: OpenAPIHono
+  caller: CallerMiddleware
+  scimResourcesEnabled: boolean
+}) => void
 
 /** What a route module needs to call the service layer; server.ts provides it. */
 export interface ServiceDeps extends RecurringBookingAdmissionDeps {
