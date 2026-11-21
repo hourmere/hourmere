@@ -31,7 +31,9 @@ import { ssoIdentityRecoveryRoutes } from './routes/sso-link-recovery.ts'
 import { ssoPolicyRoutes } from './routes/sso-policy.ts'
 import { ssoRecoveryEnrollmentRoutes } from './routes/sso-recovery-enrollment.ts'
 import { teamBookingRoutes } from './routes/team-bookings.ts'
+import { USE_SSO_RECOVERY } from './sso.ts'
 import { SSO_DELEGATIONS_PATH } from './sso-delegation-proof.ts'
+import { runWithFreshProof } from './sso-fresh-proof.ts'
 import {
   bindingCookieName,
   cleanupSsoAttempts,
@@ -46,6 +48,7 @@ import {
   type SsoRecoveryEnrollmentQueue,
   ssoRecoveryEnrollmentEmailJob,
 } from './sso-recovery-enrollment.ts'
+import { UseSsoRecoveryInput } from './sso-recovery-use.ts'
 
 const databaseUrl = process.env.DATABASE_URL
 const publicUrl = 'https://recovery-enrollment.example.test'
@@ -585,6 +588,51 @@ describe.skipIf(!databaseUrl)('SSO recovery', () => {
     expect((await useRecovery(h, proof.cookie, proof.id)).status).toBe(204)
   })
 
+  it('refuses an unenforced active team even with valid mailbox proof', async () => {
+    const h = instance()
+    await addExistingOwner()
+    await db
+      .insertInto('sso_policies')
+      .values({ organization_id: fixture.team, policy_revision: recoveryRevision })
+      .execute()
+    const owner = await browser(fixture.owner)
+    // Prepare a mailbox attempt that predates the enforcement-required gate.
+    const issued = await runWithFreshProof(
+      { db, publicUrl, capabilities: h.capabilities },
+      {
+        headers: new Headers({ origin: publicUrl, cookie: owner.cookie }),
+        userId: fixture.owner,
+        sessionId: owner.id,
+        organizationId: fixture.team,
+        operation: USE_SSO_RECOVERY,
+        proofMode: 'mailbox',
+        input: { expectedRevision: recoveryRevision },
+        schema: UseSsoRecoveryInput.omit({ proofAttemptId: true }),
+      },
+      {
+        authorize: async () => {},
+        mutate: async () => expect.unreachable('Expected a proof challenge'),
+      },
+    )
+    if (issued.status !== 'proof_required' || !issued.setCookie)
+      throw new Error('Expected a mailbox proof challenge with a binding cookie')
+    const proof = {
+      id: issued.body.attemptId,
+      cookie: `${owner.cookie}; ${issued.setCookie.split(';')[0]}`,
+    }
+    await prove(h, proof, fixture.owner)
+
+    await checkError(
+      await useRecovery(h, proof.cookie, proof.id),
+      403,
+      'team_management_access_denied',
+    )
+    expect(await attemptUse(proof.id)).toEqual({ consumed_at: null })
+    expect(await journal()).toEqual([])
+    expect(h.notices).toEqual([])
+    await checkError(await useRecovery(h, owner.cookie), 403, 'team_management_access_denied')
+  })
+
   it('recovers an enforced team from the owner’s personal session without switching spaces', async () => {
     const h = instance(
       true,
@@ -795,6 +843,14 @@ describe.skipIf(!databaseUrl)('SSO recovery', () => {
       expect(statements.some((statement) => statement.includes('sso_recovery_owners'))).toBe(false)
     }
     expect(counts).toEqual({ [providersPath]: 11, [policyPath]: 10, 'policy fresh proof': 21 })
+
+    statements.length = 0
+    await checkError(
+      await write(h, recoveryUsePath, cookie, { expectedRevision: 1 }, headers),
+      403,
+      'team_management_access_denied',
+    )
+    expect(statements).toHaveLength(13)
   })
 
   it('refuses recovery if the owner is suspended after caller resolution', async () => {

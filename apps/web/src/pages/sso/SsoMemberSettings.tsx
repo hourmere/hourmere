@@ -347,9 +347,14 @@ export function SsoMemberSettings({
                     t('Identity provider ({id})', { id: link.providerId })
                   return (
                     <li key={link.id}>
-                      <p className="user-content">
-                        <BreakableText>{name}</BreakableText>
-                      </p>
+                      <div className="sso-link-reference">
+                        <p className="user-content">
+                          <BreakableText>{name}</BreakableText>
+                        </p>
+                        <p className="hint">
+                          {t('Identity link ID')} <code data-private>{link.id}</code>
+                        </p>
+                      </div>
                       {methodAction({ kind: 'unlink', providerId: link.providerId, link }, name)}
                     </li>
                   )

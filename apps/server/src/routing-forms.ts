@@ -10,8 +10,8 @@ import type { MiddlewareHandler } from 'hono'
 import type { Tool } from './mcp/tools.ts'
 import { featureGate } from './rest-scopes.ts'
 
-// The shared routing-forms switch (docs/routing-forms.md, Rollout gating). Production
-// composition passes the hard-off constant in server.ts; only tests inject `true`.
+// Production composition passes the effective ROUTING_FORMS_ENABLED state (see
+// docs/routing-forms.md, Rollout gating).
 
 /**
  * Throws `404 routing_forms_disabled` unless routing forms are enabled. Only the boolean

@@ -205,6 +205,7 @@ Waitlists: event-waitlist, set-event-waitlist, waitlist-entries, remove-waitlist
            join-waitlist, resend-waitlist-verification (arguments through JSON input).
 SSO: sso providers list (optional limit 1–100, cursor), sso policy. Team owner/admin only,
      with read/full scope. SSO is being built and is not available yet: sso_disabled.
+Routing forms are off by default. The server operator can enable them with ROUTING_FORMS_ENABLED=true.
 Pass id, expectedRevision and an optional requestId (UUID) as JSON to routing-forms publish.
 Publication requires full scope. Repeat the same input with the same requestId to recover its version.
 Pass id and answers (keyed by question ID) as JSON to routing-forms preview. Preview requires full scope.

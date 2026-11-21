@@ -585,7 +585,6 @@ export const admin = {
     '密钥创建后无法修改权限范围。如需更改，请创建新密钥并撤销旧密钥。',
   'Review the scope and expiration, create and test the new key, then revoke the old one.':
     '请检查权限范围和到期时间，创建并测试新密钥，然后撤销旧密钥。',
-  'Create replacement': '创建替代密钥',
   'Create a replacement for {0}': '为{0}创建替代密钥',
   'Cancel replacement': '取消替换',
   ' (replacement)': '（替换）',
@@ -3007,4 +3006,53 @@ export const admin = {
     '已记录你的批准。双方都批准后，任一方所有者均可执行此请求。',
   'SCIM team mapping linked.': '已建立 SCIM 团队关联。',
   'SCIM team mapping detached.': '已解除 SCIM 团队关联。',
+  // SSO enforcement, identity links and delegation
+  'Admission policy': '入组策略',
+  'Just-in-time admission': '即时入组',
+  'Just-in-time admission lets eligible people join through SSO and requires a verified team domain.':
+    '即时入组允许符合条件的用户通过单点登录加入团队。启用前须验证团队域名。',
+  'Save admission policy': '保存入组策略',
+  'Admission policy saved.': '已保存入组策略。',
+  'The team’s admission policy is unavailable.': '暂时无法读取此团队的入组策略。',
+  'Verify a team domain before enabling just-in-time admission.':
+    '请先验证团队域名，再启用即时入组。',
+  'Identity links': '身份关联',
+  'Identity link': '身份关联',
+  'Identity link ID': '身份关联 ID',
+  'Identity link retired.': '已解除身份关联。',
+  'Identity links are unavailable.': '暂时无法查看身份关联。',
+  'Only another team owner can retire an owner’s identity link.':
+    '只有其他团队所有者才能解除所有者的身份关联。',
+  'For your own link, use Your team sign-in in Settings. To link again after retirement, sign in with your usual method and choose the provider there.':
+    '如需解除自己的身份关联，请前往设置中的「你的团队登录方式」。解除后，可用原来的方式登录，再到这里选择身份提供方重新关联。',
+  'There are no other identity links for this provider.': '此身份提供方没有其他身份关联。',
+  'Verify the member’s request separately and match the exact link ID before retiring it.':
+    '解除关联前，请通过其他渠道核实成员的请求，并核对身份关联 ID。',
+  'Choose an identity link': '选择身份关联',
+  'Retire identity link': '解除身份关联',
+  'Retire this identity link?': '要解除这项身份关联吗？',
+  'Could not retire this identity link.': '无法解除这项身份关联。',
+  'Could not retire this identity link. Only another team owner can retire an owner’s identity link.':
+    '无法解除这项身份关联。只有其他团队所有者才能解除所有者的身份关联。',
+  'The member needs a verified Hourmere login email before this link can be retired.':
+    '此成员须先验证其 Hourmere 登录邮箱，才能解除这项身份关联。',
+  'SSO delegation': '单点登录委托',
+  'Delegation changes apply to credentials in {team}. Switch teams to manage a credential from another team.':
+    '你可以管理{team}的凭据委托。要管理其他团队的凭据，请先切换团队。',
+  'Bind SSO delegation': '绑定单点登录委托',
+  'Revoke SSO delegation': '撤销单点登录委托',
+  'Revoke this SSO delegation?': '要撤销这项单点登录委托吗？',
+  'SSO delegation expires {when}.': '单点登录委托将于{when}到期。',
+  'SSO delegation bound.': '已绑定单点登录委托。',
+  'SSO delegation revoked.': '已撤销单点登录委托。',
+  'SSO delegation is unavailable for this credential.': '此凭据暂时无法使用单点登录委托。',
+  'Could not verify this team’s SSO policy.': '无法确认此团队的单点登录策略。',
+  'Could not change SSO delegation. Try again.': '无法更改单点登录委托，请重试。',
+  'This credential or its delegation is unavailable. Check the active team and try again.':
+    '此凭据或委托不可用。请确认当前团队后重试。',
+  'The team’s SSO settings changed. Start again.': '团队的单点登录设置已变更，请重新操作。',
+  'Link a team sign-in method in Settings before binding a delegation.':
+    '请先在设置中关联团队登录方式，再绑定委托。',
+  'Could not verify your team sign-in settings.': '无法确认你的团队登录设置。',
+  'Create a replacement': '创建替代密钥',
 } as const

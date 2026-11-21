@@ -4,6 +4,7 @@ import { ConfirmAction } from '../../components/ConfirmAction.tsx'
 import { Field } from '../../components/forms.tsx'
 import { useI18n } from '../../i18n/runtime.tsx'
 import type { MessageKey } from '../../i18n/translate.ts'
+import { SsoLinkRetirement } from './SsoLinkRetirement.tsx'
 import {
   type SsoDomain,
   type SsoMutation,
@@ -125,6 +126,12 @@ export function SsoProviderSetup({
               />
             </div>
           </fieldset>
+          <SsoLinkRetirement
+            provider={provider}
+            organizationId={props.organizationId}
+            busy={props.busy || editing !== null}
+            mutate={props.mutate}
+          />
         </section>
       ))}
     </section>
