@@ -14,7 +14,12 @@ const KEYCLOAK_IMAGE =
 const run = promisify(execFile)
 const ownerLabel = 'com.hourmere.e2e.keycloak-owner'
 const containerId = /^[a-f0-9]{64}$/
-const personas = realm.users.map(({ id, username, email }) => ({ subject: id, username, email }))
+
+function persona(name: string) {
+  const user = realm.users.find((entry) => entry.username === name)
+  if (!user) throw new Error(`The Keycloak realm is missing the ${name} persona`)
+  return { subject: user.id, username: user.username, email: user.email }
+}
 
 async function command(program: string, action: string, args: string[], timeout = 15_000) {
   try {
@@ -67,9 +72,14 @@ export async function startKeycloak(redirectUri: string) {
     throw new Error('Keycloak requires one exact callback on an owned Hourmere loopback port')
 
   const client = realm.clients[0]
-  const linked = personas.find(({ username }) => username === 'linked')
-  if (!client || !linked)
-    throw new Error('The Keycloak realm must include its OIDC client and user')
+  if (!client) throw new Error('The Keycloak realm is missing its OIDC client')
+  const personas = {
+    linked: persona('linked'),
+    linkable: persona('linkable'),
+    sameEmail: persona('same-email'),
+    unverified: persona('unverified'),
+    invited: persona('invited'),
+  }
 
   const owner = randomUUID()
   const name = `hourmere-e2e-keycloak-${owner}`
@@ -208,8 +218,7 @@ export async function startKeycloak(redirectUri: string) {
           clientSecret,
           certificate,
           password,
-          linked,
-          personas,
+          ...personas,
           close,
         }
       await delay(250)

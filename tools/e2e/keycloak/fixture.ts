@@ -8,11 +8,18 @@ import { sql } from 'kysely'
 import { createApp } from '../../../apps/server/src/app.ts'
 import { productRoutes } from '../../../apps/server/src/server.ts'
 import { sealSsoProviderConfiguration } from '../../../apps/server/src/sso-configuration.ts'
+import {
+  deliverMailboxProof,
+  MAILBOX_PROOF_CONFIRM_PATH,
+  MailboxProofEmailPayload,
+  mailboxProofRoutes,
+} from '../../../apps/server/src/sso-mailbox-proof.ts'
 import { OIDC_CALLBACK_PATH, oidcSignInRoutes } from '../../../apps/server/src/sso-oidc-sign-in.ts'
 import {
   createAuth,
   createAuthPool,
   createCallerResolver,
+  type SignupPolicy,
 } from '../../../packages/auth/src/index.ts'
 import { createDb, type Db } from '../../../packages/db/src/index.ts'
 import { claimedDomainValues } from '../../../packages/db/src/sso-storage-fixtures.ts'
@@ -25,14 +32,30 @@ import { startKeycloak } from './keycloak.ts'
 
 type Keycloak = Awaited<ReturnType<typeof startKeycloak>>
 type TokenExchange = 'issued' | 'invalid_code' | 'failed'
+type Admission = 'invitation_only' | 'jit'
+
+interface AccountState {
+  userId: string | null
+  teamRole: string | null
+  linkedSubjects: string[]
+  sessionCount: number
+  personalSpace: boolean
+}
 
 export interface KeycloakFixture {
   url: string
   providerId: string
   idp: Keycloak
+  teamId: string
+  teamName: string
   linkedUserId: string
+  linkableUserId: string
+  invitationId: string
   personal: { email: string; userId: string }
+  account: (email: string) => Promise<AccountState>
+  invitationStatus: () => Promise<string>
   magicLink: (email: string) => Promise<URL>
+  mailboxLink: (email: string) => Promise<URL>
   tokenExchanges: () => readonly TokenExchange[]
 }
 
@@ -51,10 +74,19 @@ function tokenExchange(response: SsoResponse): TokenExchange {
   return 'failed'
 }
 
-async function seedSignIn(db: Db, providerId: string, idp: Keycloak, configurationKey: Buffer) {
+async function seedSignIn(
+  db: Db,
+  providerId: string,
+  idp: Keycloak,
+  configurationKey: Buffer,
+  admission: Admission,
+) {
   const fixtures = createFixtures(db)
-  const organizationId = await fixtures.organization('keycloak-team')
+  const teamName = 'keycloak-team'
+  const organizationId = await fixtures.organization(teamName)
+  // Seed the inviter first so its invitation qualifies under closed signup.
   const linked = await fixtures.host({ name: 'Keycloak Member', handle: 'keycloak-member' })
+  const linkable = await fixtures.host({ name: 'Linkable Member', handle: 'linkable-member' })
   const personal = await fixtures.host({ name: 'Personal Member', handle: 'personal-member' })
   const personalEmail = 'personal@example.test'
   await db
@@ -64,10 +96,33 @@ async function seedSignIn(db: Db, providerId: string, idp: Keycloak, configurati
     .execute()
   await db
     .updateTable('auth.user')
+    .set({ email: idp.linkable.email })
+    .where('id', '=', linkable.userId)
+    .execute()
+  await db
+    .updateTable('auth.user')
     .set({ email: personalEmail })
     .where('id', '=', personal.userId)
     .execute()
   await fixtures.member(linked.userId, organizationId, 'owner')
+  await fixtures.member(linkable.userId, organizationId)
+  const invitation = await db
+    .insertInto('auth.invitation')
+    .values({
+      organizationId,
+      inviterId: linked.userId,
+      role: 'member',
+      status: 'pending',
+      expiresAt: sql<Date>`clock_timestamp() + interval '1 hour'`,
+      email: idp.invited.email,
+    })
+    .returning('id')
+    .executeTakeFirstOrThrow()
+  if (admission === 'jit')
+    await db
+      .insertInto('sso_policies')
+      .values({ organization_id: organizationId, admission })
+      .execute()
 
   const { issuer, clientId, clientSecret } = idp
   const revision = 1
@@ -115,8 +170,108 @@ async function seedSignIn(db: Db, providerId: string, idp: Keycloak, configurati
     })
     .execute()
   return {
+    teamId: organizationId,
+    teamName,
     linkedUserId: linked.userId,
+    linkableUserId: linkable.userId,
+    invitationId: invitation.id,
     personal: { email: personalEmail, userId: personal.userId },
+  }
+}
+
+async function readAccount(
+  db: Db,
+  teamId: string,
+  providerId: string,
+  email: string,
+): Promise<AccountState> {
+  const user = await db
+    .selectFrom('auth.user')
+    .select('id')
+    .where('email', '=', email)
+    .executeTakeFirst()
+  if (!user)
+    return {
+      userId: null,
+      teamRole: null,
+      linkedSubjects: [],
+      sessionCount: 0,
+      personalSpace: false,
+    }
+
+  const [membership, links, sessions, personal] = await Promise.all([
+    db
+      .selectFrom('auth.member')
+      .select('role')
+      .where('userId', '=', user.id)
+      .where('organizationId', '=', teamId)
+      .executeTakeFirst(),
+    db
+      .selectFrom('sso_identity_links')
+      .select('subject')
+      .where('user_id', '=', user.id)
+      .where('provider_id', '=', providerId)
+      .where('retired_at', 'is', null)
+      .orderBy('subject')
+      .execute(),
+    db
+      .selectFrom('auth.session')
+      .select((eb) => eb.fn.countAll<string>().as('count'))
+      .where('userId', '=', user.id)
+      .executeTakeFirstOrThrow(),
+    db
+      .selectFrom('personal_organizations')
+      .select('user_id')
+      .where('user_id', '=', user.id)
+      .executeTakeFirst(),
+  ])
+  return {
+    userId: user.id,
+    teamRole: membership?.role ?? null,
+    linkedSubjects: links.map(({ subject }) => subject),
+    sessionCount: Number(sessions.count),
+    personalSpace: personal !== undefined,
+  }
+}
+
+/** Keep the queue and mail transport in memory while using the real proof delivery worker. */
+function mailboxProofSink(deps: Omit<Parameters<typeof deliverMailboxProof>[0], 'mailer'>) {
+  const queued: MailboxProofEmailPayload[] = []
+  const links = new Map<string, URL>()
+  const prefix = new URL(MAILBOX_PROOF_CONFIRM_PATH, deps.publicUrl).href
+  const routes = mailboxProofRoutes({
+    db: deps.db,
+    capabilities: deps.capabilities,
+    queue: {
+      async enqueue(_name, payload) {
+        queued.push(MailboxProofEmailPayload.parse(payload))
+        return 'fixture-mailbox-proof'
+      },
+    },
+  })
+  return {
+    routes,
+    async link(email: string) {
+      for (const payload of queued.splice(0))
+        await deliverMailboxProof(
+          {
+            ...deps,
+            mailer: {
+              async send({ to, text }) {
+                const link = text?.split('\n').find((line) => line.startsWith(`${prefix}#`))
+                if (!link || typeof to !== 'string')
+                  throw new Error('The mailbox proof message lacked its recipient or link')
+                links.set(to, new URL(link))
+              },
+            },
+          },
+          payload,
+        )
+      const link = links.get(email)
+      if (!link) throw new Error('No proof link in the fixture mail sink')
+      links.delete(email)
+      return link
+    },
   }
 }
 
@@ -170,12 +325,19 @@ async function releaseFixture(
   if (failures.length) throw new AggregateError(failures, 'Keycloak fixture cleanup failed')
 }
 
-export const test = base.extend<{ keycloak: KeycloakFixture; oidcEnabled: boolean }>({
+export const test = base.extend<{
+  keycloak: KeycloakFixture
+  oidcEnabled: boolean
+  admission: Admission
+  signupMode: SignupPolicy['mode']
+}>({
   oidcEnabled: [true, { option: true }],
+  admission: ['invitation_only', { option: true }],
+  signupMode: ['closed', { option: true }],
   // Chrome uses an isolated context and the route above restricts its destinations.
   ignoreHTTPSErrors: true,
   keycloak: [
-    async ({ context, oidcEnabled }, use) => {
+    async ({ context, oidcEnabled, admission, signupMode }, use) => {
       const bootstrap = process.env.HOURMERE_E2E_BOOTSTRAP_URL
       if (!bootstrap) throw new Error('Keycloak tests require HOURMERE_E2E_BOOTSTRAP_URL')
       const owned = await createTestDatabase(bootstrap, undefined, { tag: 'keycloak' })
@@ -195,8 +357,9 @@ export const test = base.extend<{ keycloak: KeycloakFixture; oidcEnabled: boolea
         )
         setDefaultCACertificates([...previousCAs, idp.certificate])
         const configurationKey = randomBytes(32)
-        const { linkedUserId, personal } = await seedSignIn(db, providerId, idp, configurationKey)
-        const signup = { mode: 'closed', allowedDomains: [] } as const
+        const seeded = await seedSignIn(db, providerId, idp, configurationKey, admission)
+        const { personal, teamId, invitationId } = seeded
+        const signup: SignupPolicy = { mode: signupMode, allowedDomains: [] }
         const secret = randomBytes(32).toString('base64')
         const personalCode = randomBytes(24).toString('base64url')
         const client = {
@@ -216,6 +379,7 @@ export const test = base.extend<{ keycloak: KeycloakFixture; oidcEnabled: boolea
         }
         const mail = new Map<string, string>()
         const capabilities = { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: false }
+        const mailbox = mailboxProofSink({ db, capabilities, publicUrl: url, secret })
         authPool = createAuthPool(owned.url, signup)
         const auth = createAuth({
           pool: authPool,
@@ -258,6 +422,7 @@ export const test = base.extend<{ keycloak: KeycloakFixture; oidcEnabled: boolea
             process.env.HOURMERE_E2E_WEB_DIST ??
             fileURLToPath(new URL('../../../apps/web/dist', import.meta.url)),
           ssoTeamReads: { db, capabilities },
+          ssoMailboxProof: mailbox.routes,
           ssoOidcSignIn: oidcSignInRoutes({
             db,
             capabilities,
@@ -285,7 +450,11 @@ export const test = base.extend<{ keycloak: KeycloakFixture; oidcEnabled: boolea
             invitationMailLimits: { secret },
             publicUrl: url,
             socialProviders,
-            ...(oidcEnabled && { ssoOidcEnabled: true }),
+            ...(oidcEnabled && {
+              ssoOidcEnabled: true,
+              ssoConfigurationKey: configurationKey,
+              ssoPrivateTargets: privateTargets,
+            }),
           }),
         })
         server.on('request', getRequestListener(app.fetch, { hostname: '127.0.0.1' }))
@@ -298,14 +467,23 @@ export const test = base.extend<{ keycloak: KeycloakFixture; oidcEnabled: boolea
           url,
           providerId,
           idp,
-          linkedUserId,
-          personal,
+          ...seeded,
+          account: (email) => readAccount(db, teamId, providerId, email),
+          invitationStatus: async () => {
+            const { status } = await db
+              .selectFrom('auth.invitation')
+              .select('status')
+              .where('id', '=', invitationId)
+              .executeTakeFirstOrThrow()
+            return status
+          },
           magicLink: async (email) => {
             const link = mail.get(email)
             if (!link) throw new Error('No sign-in link in the fixture mail sink')
             mail.delete(email)
             return new URL(link)
           },
+          mailboxLink: mailbox.link,
           tokenExchanges: () => [...exchanges],
         })
         checkBrowser()

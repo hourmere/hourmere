@@ -18,10 +18,9 @@ HOURMERE_E2E_BOOTSTRAP_URL=postgres://hourmere:hourmere@localhost:5432/hourmere 
 The PostgreSQL bootstrap connection creates and drops a disposable Hourmere database.
 Keycloak uses its own ephemeral database inside its container and a random loopback
 HTTPS port. The fixture generates a TLS certificate, an OIDC client secret and a password
-at startup. It imports [the synthetic realm](realm.json) with one exact callback, a
-verified persona, another subject with the same mailbox, an unverified persona and a
-disabled persona. The browser acceptance tests use the verified persona with a seeded
-identity link. Team personas use the reserved `company.example.com` domain to satisfy
+at startup. It imports [the synthetic realm](realm.json) with one exact callback and
+personas for linked sign-in, self-link, same-email sign-in and new account admission.
+Team personas use the reserved `company.example.com` domain to satisfy
 the team SSO validator's public DNS syntax. The fixture seeds the verified domain in
 PostgreSQL without a DNS query. Personal sign-in uses `example.test`, an in-memory mail
 sink and fake Google and Microsoft responses.
@@ -31,6 +30,15 @@ off case uses the same seeded realm and default capability, which is also the pr
 default. The browser spec checks that a changed state stops before the token exchange,
 a changed nonce is refused after Keycloak issues a signed token, and a used code is
 refused with both consumed and fresh state.
+
+The linking and admission cases use Hourmere's own mailbox verification with an in-memory
+mail sink. They cover explicit self-link, the generic mailbox verification flow for
+unlinked subjects, and refusal to sign an existing account in based on the IdP email.
+An eligible invitation allows admission with closed signup. The browser submits explicit
+acceptance through the existing invitation endpoint after mailbox verification. JIT
+admission requires instance signup eligibility and is refused with closed signup. With
+OIDC off, the sign-in and member-link controls are hidden and the link and admission
+requests are refused.
 
 PostgreSQL, the container and the browser context are disposable. Teardown
 removes the exact container created by this run and its private temporary files. Each

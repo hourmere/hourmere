@@ -51,6 +51,24 @@
       "enabled": true
     },
     {
+      "id": "8ca3f738-5a14-4ca4-9c4d-9606529c06cf",
+      "username": "linkable",
+      "firstName": "Linkable",
+      "lastName": "Fixture",
+      "email": "linkable@company.example.com",
+      "emailVerified": true,
+      "enabled": true
+    },
+    {
+      "id": "02ee1f08-7ec1-44d2-bf55-160ed1e78353",
+      "username": "invited",
+      "firstName": "Invited",
+      "lastName": "Fixture",
+      "email": "invited@company.example.com",
+      "emailVerified": true,
+      "enabled": true
+    },
+    {
       "id": "ed59ba0b-a858-493b-8bc1-61facf0d1eb4",
       "username": "disabled",
       "firstName": "Disabled",
