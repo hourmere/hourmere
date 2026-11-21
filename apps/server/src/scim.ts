@@ -3,6 +3,8 @@ import { authenticateScimToken } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import type { Context } from 'hono'
 import { clientIp } from './client-ip.ts'
+import type { Tool } from './mcp/tools.ts'
+import type { RouteModule } from './openapi.ts'
 import { createRateLimiter, rateLimitKey } from './rate-limit.ts'
 
 export const SCIM_ERROR_SCHEMA = 'urn:ietf:params:scim:api:messages:2.0:Error'
@@ -115,6 +117,8 @@ export interface ScimOptions {
   db: Db
   enabled: boolean
   resources?: ScimResourceHandler | undefined
+  /** Injected with resource handlers by the in-process test harness. */
+  mappingAdministration?: { route: RouteModule; tools: readonly Tool[] } | undefined
 }
 
 /** Separate protocol boundary. Production registers no SCIM resource handlers yet. */

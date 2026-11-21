@@ -514,15 +514,28 @@ describe('SCIM discovery representations', () => {
       'scim-user-write',
       'scim-team-hierarchy',
       'scim-team-hierarchy-proof',
+      'scim-team-mapping-notices',
+      'scim-team-mapping-recovery',
+      'scim-team-mapping-retirement',
+      'mcp/scim-team-mappings',
+      'routes/scim-team-mappings',
     ]
     expect(files.some((file) => file.endsWith('server.ts'))).toBe(true)
     for (const name of flagged) expect(files).toContain(join(root, `${name}.ts`))
     expect(
-      files.filter(
-        (file) =>
-          !flagged.some((name) => file === join(root, `${name}.ts`)) &&
-          flagged.some((name) => readFileSync(file, 'utf8').includes(name)),
-      ),
+      files.filter((file) => {
+        if (flagged.some((name) => file === join(root, `${name}.ts`))) return false
+        const source = readFileSync(file, 'utf8')
+        // Generated client types include the same mapping module as the resource harness.
+        const production =
+          file === join(root, 'openapi-document.ts')
+            ? source.replace(
+                /scimResourcesEnabled\s*&&\s*\(?await import\('\.\/mcp\/scim-team-mappings\.ts'\)\)?/,
+                '',
+              )
+            : source
+        return flagged.some((name) => production.includes(name))
+      }),
     ).toEqual([])
   })
 })

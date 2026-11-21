@@ -7,6 +7,20 @@ import { mailMessage } from './catalogue.ts'
 import { emailButton, emailLayout, emailLinkStyle, emailWrapStyle } from './layout.ts'
 import { emailText, escapeHtml, singleLine } from './text.ts'
 
+export function scimMappingEmail(
+  to: string,
+  language: InterfaceLanguage,
+  action: 'linked' | 'unlinked' | 'suspended',
+  mappingId: string,
+): MailMessage {
+  return {
+    sensitive: true,
+    to,
+    subject: mailMessage(language, 'scimMapping.subject'),
+    text: mailMessage(language, `scimMapping.${action}`, { mappingId }),
+  }
+}
+
 export * from './booking.ts'
 export * from './branding.ts'
 export * from './ics.ts'

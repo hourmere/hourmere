@@ -12,7 +12,7 @@ import { createDb, createPool, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import type { Mailer, MailMessage } from '@hourmere/mail'
 import { mailboxProofRecipientHash } from '@hourmere/notifications'
-import type pg from 'pg'
+import pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
   freshProofValues,
@@ -35,7 +35,7 @@ import {
 } from '../../../packages/db/src/sso-storage-fixtures.ts'
 import { createApp } from './app.ts'
 import type * as server from './server.ts'
-import type { SsoCapabilities } from './sso.ts'
+import { SCIM_MAPPING_CONSENT, type SsoCapabilities } from './sso.ts'
 import * as real from './sso-mailbox-proof.ts'
 
 type Module = typeof real
@@ -122,11 +122,13 @@ function harness(
     limits = {},
     delivery = {},
     database = db,
+    scimMappingConsentEnabled = false,
   }: {
     capabilities?: SsoCapabilities
     limits?: Partial<real.MailboxProofLimits>
     delivery?: Partial<real.MailboxProofDeliveryDeps>
     database?: Db
+    scimMappingConsentEnabled?: boolean
   } = {},
 ): Harness {
   const queued: Harness['queued'] = []
@@ -145,6 +147,9 @@ function harness(
     authHandler: async () => new Response(null, { status: 404 }),
     resolveCaller,
     publicUrl: PUBLIC_URL,
+    ...(scimMappingConsentEnabled && {
+      scim: { db: database, enabled: true, resources: () => undefined },
+    }),
     ssoMailboxProof: M.mailboxProofRoutes({
       capabilities,
       db: database,
@@ -171,6 +176,7 @@ function harness(
         await M.deliverMailboxProof(
           {
             capabilities,
+            scimMappingConsentEnabled,
             db: database,
             mailer,
             publicUrl: PUBLIC_URL,
@@ -351,22 +357,28 @@ const scenarios = {
     const who = browser()
     const a = await attempt('sign_in', who)
     const h = harness(M, { capabilities: OFF })
-    await M.deliverMailboxProof(
-      {
-        capabilities: OFF,
-        db,
-        mailer: { send: async (m) => void h.sent.push(m) },
-        publicUrl: PUBLIC_URL,
-        secret: SECRET,
-      },
-      real.MailboxProofEmailPayload.parse({
-        attemptId: a.id,
-        binding: real.sha256(who.binding),
-        sessionId: null,
-        userId: null,
-        language: 'en',
-      }),
-    )
+    const queries = vi.spyOn(pg.Client.prototype, 'query')
+    try {
+      await M.deliverMailboxProof(
+        {
+          capabilities: OFF,
+          db,
+          mailer: { send: async (m) => void h.sent.push(m) },
+          publicUrl: PUBLIC_URL,
+          secret: SECRET,
+        },
+        real.MailboxProofEmailPayload.parse({
+          attemptId: a.id,
+          binding: real.sha256(who.binding),
+          sessionId: null,
+          userId: null,
+          language: 'en',
+        }),
+      )
+      expect(queries.mock.calls).toHaveLength(0)
+    } finally {
+      queries.mockRestore()
+    }
     expect(h.sent).toEqual([])
     expect(await tokenOf(a.id)).toBeUndefined()
   },
@@ -1023,6 +1035,58 @@ describe.skipIf(!databaseUrl)('SSO mailbox proof', () => {
     expect(await tokenOf(a.id)).toBeUndefined()
   })
 
+  it.each([ON, OFF])(
+    'gates each attempt by its operation with mapping consent enabled (%j)',
+    async (capabilities) => {
+      const h = harness()
+      const mappingBrowser = browser(sessionOf('fresh_proof'))
+      const mapping = await attempt('fresh_proof', mappingBrowser, {
+        operation: SCIM_MAPPING_CONSENT,
+      })
+      const ssoBrowser = browser()
+      const sso = await attempt('sign_in', ssoBrowser)
+      const combined = harness(real, { capabilities, scimMappingConsentEnabled: true })
+      const mappingToken = await proofToken(combined, mapping, mappingBrowser)
+      if (capabilities.ssoOidcEnabled) {
+        await expectDenied(h, mapping, mappingToken, mappingBrowser)
+        const ssoToken = await proofToken(combined, sso, ssoBrowser)
+        await expectProven(combined, sso, ssoToken, ssoBrowser)
+      } else {
+        expect((await send(combined, sso.id, ssoBrowser)).status).toBe(202)
+        await combined.deliver()
+        expect(combined.sent).toHaveLength(1)
+        await expectDenied(combined, sso, 'unissued-token', ssoBrowser)
+      }
+      await expectProven(combined, mapping, mappingToken, mappingBrowser)
+    },
+  )
+
+  it('pins flag-off SSO mailbox proof responses and PostgreSQL statement counts', async () => {
+    const h = harness()
+    const who = browser()
+    const a = await attempt('sign_in', who)
+    const queries = vi.spyOn(pg.Client.prototype, 'query')
+    try {
+      const sent = await send(h, a.id, who)
+      expect([sent.status, await sent.text()]).toEqual([202, '{"status":"queued"}'])
+      const sendCount = queries.mock.calls.length
+      queries.mockClear()
+      await h.deliver()
+      const deliveryCount = queries.mock.calls.length
+      const { token } = linkOf(h.sent[0])
+      queries.mockClear()
+      const consumed = await consume(h, a.id, token, who)
+      expect([consumed.status, await consumed.text()]).toEqual([200, '{"status":"proven"}'])
+      expect({
+        send: sendCount,
+        delivery: deliveryCount,
+        consume: queries.mock.calls.length,
+      }).toEqual({ send: 0, delivery: 14, consume: 9 })
+    } finally {
+      queries.mockRestore()
+    }
+  })
+
   it('keeps the production composition off, also with the SSO settings in the environment', async () => {
     for (const name of ['SSO_OIDC_ENABLED', 'SSO_SAML_ENABLED']) vi.stubEnv(name, 'true')
     try {
@@ -1048,14 +1112,17 @@ describe.skipIf(!databaseUrl)('SSO mailbox proof', () => {
         'offEndpoints',
         'endpoint guard',
         [
-          "requireSsoEnabled(deps.capabilities)\n        c.header('Cache-Control', 'no-store')",
+          "if (!scimMappingConsentEnabled) requireSsoEnabled(deps.capabilities)\n        c.header('Cache-Control', 'no-store')",
           "c.header('Cache-Control', 'no-store')",
         ],
       ],
       [
         'offDelivery',
         'delivery guard',
-        ['    requireSsoEnabled(deps.capabilities)\n  } catch {', '  } catch {'],
+        [
+          '  if (!mailboxProofEnabled(deps.capabilities, deps.scimMappingConsentEnabled)) return',
+          '',
+        ],
       ],
       ['origin', 'exact Origin', ["c.req.header('origin') !== origin ||", 'false ||']],
       [

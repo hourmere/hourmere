@@ -149,6 +149,10 @@
   "poll.outcome.cancelled.subject": "会议已取消：{poll}",
   "poll.outcome.cancelled.body": "会议已取消。下方是取消前安排的时间。",
 
+  "scimMapping.subject": "SCIM 团队映射已更新",
+  "scimMapping.linked": "您的团队已批准 SCIM 映射 {mappingId}。目录配置该群组后，即可通过此映射管理子团队的名称以及由目录管理的成员。",
+  "scimMapping.unlinked": "SCIM 映射 {mappingId} 已解除。目录无法再通过此映射管理团队。",
+  "scimMapping.suspended": "通过 SCIM 映射 {mappingId} 进行的目录管理已暂停。现有成员关系和暂停状态保持不变。",
   "series.confirmed.subject": "系列预约已确认：{event}",
   "series.confirmed.booker": "你与{host}的系列会议已预约。",
   "series.confirmed.guest": "{invitee}邀请你参加与{host}的系列会议。",

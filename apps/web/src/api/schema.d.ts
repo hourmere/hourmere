@@ -4400,6 +4400,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/scim/team-mappings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List live mappings involving the current team
+         * @description Requires a current owner or administrator of the active team. Link preparation metadata describes the active team and is only returned to owners.
+         */
+        get: operations["listScimTeamMappings"];
+        put?: never;
+        /**
+         * Finalize a link approved by the owners on both sides
+         * @description Supply the approved link intent ID. Both approvals must still be live.
+         */
+        post: operations["createScimTeamMapping"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/scim/team-mappings/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Finalize an unlink approved by the owners on both sides
+         * @description Supply the approved unlink intent ID and the exact mapping ID.
+         */
+        delete: operations["deleteScimTeamMapping"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/scim/team-mappings/consent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve a mapping intent for the current team
+         * @description Requires a current verified owner browser session, the current team header and fresh administration proof. Each team approves the same intent independently.
+         */
+        post: operations["approveScimTeamMapping"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/slack-destinations": {
         parameters: {
             query?: never;
@@ -7228,6 +7292,8 @@ export interface components {
             routingFormsEnabled?: boolean;
             /** @description Whether administrators may manage SCIM provisioning tokens; resources are not available yet */
             scimProvisioningEnabled?: boolean;
+            /** @enum {boolean} */
+            scimResourcesEnabled?: true;
             /** @description The sign-in methods people can use on this instance */
             signIn: {
                 /** @description Sign-in links sent by email */
@@ -8713,6 +8779,30 @@ export interface components {
             revokedAt: string | null;
             rotatedAt: string | null;
             rotatedByUserId: string | null;
+        };
+        ScimTeamMapping: {
+            /** Format: uuid */
+            childOrganizationId: string;
+            /** Format: uuid */
+            connectionId: string;
+            externalId: string;
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            parentOrganizationId: string;
+            /** @enum {string} */
+            state: "pending" | "suspended";
+        };
+        ScimTeamMappingList: {
+            /** Format: uuid */
+            connectionId: string | null;
+            linkGeneration: number | null;
+            mappings: components["schemas"]["ScimTeamMapping"][];
+        };
+        ScimTeamMappingResult: {
+            generation: number;
+            /** Format: uuid */
+            mappingId: string;
         };
         /** @description Unknown required checks use not_checked with completeness=partial and checkedAt=null; attempted checks that fail use check_failed with a safe reason and attempt time. Neither means satisfied or no available slots. availability remains not_checked because no slot search is performed. */
         SelfReadinessPage: {
@@ -18426,6 +18516,315 @@ export interface operations {
                 };
             };
             /** @description setup_profile_required: profile or display name is missing; setup_default_schedule_required: existing schedules have no default */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listScimTeamMappings: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for browser writes and must match the active team. */
+                "x-expected-organization-id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Safe mapping metadata */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScimTeamMappingList"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description scim_mapping_access_denied. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    createScimTeamMapping: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for browser writes and must match the active team. */
+                "x-expected-organization-id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    intentId: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The linked mapping */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScimTeamMappingResult"];
+                };
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description scim_mapping_access_denied or scim_mapping_privileged_member. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description scim_mapping_topology_conflict, scim_mapping_generation_changed or guarded departure */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    deleteScimTeamMapping: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for browser writes and must match the active team. */
+                "x-expected-organization-id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    intentId: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The unlinked mapping */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScimTeamMappingResult"];
+                };
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description scim_mapping_access_denied or scim_mapping_privileged_member. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description scim_mapping_topology_conflict, scim_mapping_generation_changed or guarded departure */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    approveScimTeamMapping: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required for browser writes and must match the active team. */
+                "x-expected-organization-id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    action: "link";
+                    /** @enum {boolean} */
+                    allowGroupRetirement: true;
+                    /** Format: uuid */
+                    childOrganizationId: string;
+                    /** Format: uuid */
+                    connectionId: string;
+                    externalId: string;
+                    /** Format: uuid */
+                    intentId: string;
+                    linkGeneration: number;
+                    /** Format: uuid */
+                    parentOrganizationId: string;
+                    /** Format: uuid */
+                    proofAttemptId?: string;
+                } | {
+                    /** @enum {string} */
+                    action: "unlink";
+                    /** Format: uuid */
+                    childOrganizationId: string;
+                    /** Format: uuid */
+                    connectionId: string;
+                    /** Format: uuid */
+                    intentId: string;
+                    /** Format: uuid */
+                    mappingId: string;
+                    /** Format: uuid */
+                    parentOrganizationId: string;
+                    /** Format: uuid */
+                    proofAttemptId?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Consent recorded */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        intentId: string;
+                    };
+                };
+            };
+            /** @description invalid_request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description scim_mapping_access_denied or sso_reauthentication_required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoFreshProofChallenge"];
+                };
+            };
+            /** @description scim_mapping_topology_conflict, scim_mapping_generation_changed or guarded departure */
             409: {
                 headers: {
                     [name: string]: unknown;

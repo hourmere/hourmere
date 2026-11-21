@@ -47,6 +47,10 @@ const writeExceptions = new Set([
   'POST /api/v1/team/sso/recovery/use',
   // A current member can withdraw their own delegated authority without a live proof.
   'DELETE /api/v1/team/sso/delegations/{bindingId}',
+  // Mapping mutations recheck both teams' proofs with both team locks already held.
+  'POST /api/v1/scim/team-mappings',
+  'DELETE /api/v1/scim/team-mappings/{id}',
+  'POST /api/v1/scim/team-mappings/consent',
 ])
 
 /** New versioned writes inherit enforcement unless their operation has an exact exception. */

@@ -123,6 +123,37 @@ function affectedEventTypes(db: Db, input: MemberDepartureImpactInput) {
     .where('host.user_id', '=', input.memberUserId)
 }
 
+function unfinishedTeamBookings(db: Db, input: MemberDepartureImpactInput, now: string) {
+  return db
+    .selectFrom('bookings as booking')
+    .innerJoin(resolvedBookingHosts(db).as('host'), 'host.booking_id', 'booking.id')
+    .leftJoin('event_types as event', 'event.id', 'booking.event_type_id')
+    .where('booking.organization_id', '=', input.teamId)
+    .where('event.owner_user_id', 'is', null)
+    .where('host.user_id', '=', input.memberUserId)
+    .where('booking.status', '=', 'confirmed')
+    .where('booking.end_at', '>', sql<Date>`${now}::timestamptz`)
+}
+
+/** Call under the organization write lock. Only reports whether departure is blocked. */
+export async function hasTeamMemberDepartureImpact(db: Db, input: MemberDepartureImpactInput) {
+  const { blocked } = await db
+    .selectNoFrom((eb) =>
+      eb
+        .or([
+          eb.exists(affectedEventTypes(db, input).select('event.id')),
+          eb.exists(
+            unfinishedTeamBookings(db, input, Temporal.Now.instant().toString()).select(
+              'booking.id',
+            ),
+          ),
+        ])
+        .as('blocked'),
+    )
+    .executeTakeFirstOrThrow()
+  return blocked
+}
+
 async function readImpact(
   ctx: ServiceContext,
   input: MemberDepartureImpactInput,
@@ -160,16 +191,8 @@ async function readImpact(
     .execute()
   const eventPage = eventRows.slice(0, limit)
 
-  const bookingCount = await ctx.db
-    .selectFrom('bookings as booking')
-    .innerJoin(resolvedBookingHosts(ctx.db).as('host'), 'host.booking_id', 'booking.id')
-    .leftJoin('event_types as event', 'event.id', 'booking.event_type_id')
+  const bookingCount = await unfinishedTeamBookings(ctx.db, input, now.toString())
     .select((eb) => eb.fn.countAll<string>().as('count'))
-    .where('booking.organization_id', '=', input.teamId)
-    .where('event.owner_user_id', 'is', null)
-    .where('host.user_id', '=', input.memberUserId)
-    .where('booking.status', '=', 'confirmed')
-    .where('booking.end_at', '>', sql<Date>`${now.toString()}::timestamptz`)
     .executeTakeFirstOrThrow()
   const { data, nextCursor, startInstants } = await readTeamBookingPage(
     ctx,
