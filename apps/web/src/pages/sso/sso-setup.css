@@ -2,7 +2,8 @@
 .sso-enforcement .button,
 .sso-fresh-proof .button,
 .sso-member-settings .button,
-.sso-providers .button {
+.sso-providers .button,
+.sso-recovery-enrollment .button {
   max-width: 100%;
   white-space: normal;
   overflow-wrap: anywhere;

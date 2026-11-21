@@ -157,7 +157,7 @@ export function SsoRecoveryNomination({
   }
 
   return (
-    <section className="panel stack" aria-labelledby={heading}>
+    <section className="panel stack sso-recovery-enrollment" aria-labelledby={heading}>
       <h3 id={heading} ref={headingRef} tabIndex={-1}>
         {t('Nominate a recovery owner')}
       </h3>
@@ -265,7 +265,7 @@ export function SsoRecoveryAcceptance({
   }
 
   return (
-    <section className="panel stack" aria-labelledby={id}>
+    <section className="panel stack sso-recovery-enrollment" aria-labelledby={id}>
       <h2 id={id} ref={heading} tabIndex={-1}>
         {t('Accept recovery nomination')}
       </h2>
