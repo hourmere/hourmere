@@ -1,9 +1,17 @@
 import { z } from '@hono/zod-openapi'
-import { CommitScimTeamMapping, ScimTeamMappingResult } from '../routes/scim-team-mappings.ts'
+import {
+  CommitScimTeamMapping,
+  ScimTeamMappingResult,
+  scimTeamMappingRoutes,
+} from '../routes/scim-team-mappings.ts'
 import { commitScimTeamMapping, type ScimTeamHierarchyDeps } from '../scim-team-hierarchy.ts'
 import { defineTool, type Tool } from './tools.ts'
 
-export function scimTeamMappingTools(deps: ScimTeamHierarchyDeps): Tool[] {
+export function scimMappingAdministration(deps: ScimTeamHierarchyDeps) {
+  return { route: scimTeamMappingRoutes(deps), tools: scimTeamMappingTools(deps) }
+}
+
+function scimTeamMappingTools(deps: ScimTeamHierarchyDeps): Tool[] {
   if (!deps.resourcesEnabled) return []
   const shared = {
     output: ScimTeamMappingResult,

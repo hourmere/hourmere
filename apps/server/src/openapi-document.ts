@@ -19,14 +19,27 @@ export async function openApiRouteInventory({ scimResourcesEnabled = false } = {
   // Never connected: creating the route groups and answering the document use no database.
   const db = createDb(createPool('postgres://openapi@127.0.0.1:9/openapi'))
   try {
+    const publicUrl = 'http://localhost'
+    const capabilities = { ssoOidcEnabled: false, ssoSamlEnabled: false }
+    const mapping = scimResourcesEnabled && (await import('./mcp/scim-team-mappings.ts'))
     let scimMappingTools: readonly Tool[] = []
     const app = createApp({
       checkDb: async () => {},
       authHandler: async () => new Response(null, { status: 404 }),
       resolveCaller: async () => ({ ok: false, error: 'unauthorized', setCookie: [] }),
-      publicUrl: 'http://localhost',
-      ...(scimResourcesEnabled && {
-        scim: { db, enabled: true, resources: () => undefined },
+      publicUrl,
+      ...(mapping && {
+        scim: {
+          db,
+          enabled: true,
+          resources: () => undefined,
+          mappingAdministration: mapping.scimMappingAdministration({
+            db,
+            publicUrl,
+            capabilities,
+            resourcesEnabled: true,
+          }),
+        },
         mcp: {
           oauth: false,
           mount({ additionalTools }) {
@@ -34,7 +47,7 @@ export async function openApiRouteInventory({ scimResourcesEnabled = false } = {
           },
         },
       }),
-      ssoTeamReads: { db, capabilities: { ssoOidcEnabled: false, ssoSamlEnabled: false } },
+      ssoTeamReads: { db, capabilities },
       routes: productRoutes({
         db,
         socialProviders: {},

@@ -941,7 +941,8 @@ the normal write scope and live delegation for an enforced team.
 Use the resource test checkout and confirm the database, mapping UUID and both organization
 UUIDs. Prepare the database and background jobs schema with the usual migrations and
 use the harness's configured database connection. The resource-enabled harness passes its
-job queue to `createApp` as `scim.mappingNotices`. On its background worker, use
+job queue to `scimMappingAdministration` as `notices` and injects that module as
+`scim.mappingAdministration` in `createApp`. On its background worker, use
 `scimMappingResourceJobs` in place of the ordinary mailbox-proof job definitions so the
 same worker handles SSO proof, mapping proof, and mapping owner notices. Use the configured
 mailer for delivery. The offline script uses the existing queue without running migrations.

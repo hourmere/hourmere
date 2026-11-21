@@ -18,6 +18,7 @@ import { cliCommands, HELP, runCli } from '../../../tools/cli/src/cli.ts'
 import { callTool } from '../../../tools/cli/src/client.ts'
 import { type AppDeps, createApp } from './app.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
+import { scimMappingAdministration } from './mcp/scim-team-mappings.ts'
 import { whoamiTool } from './mcp/whoami.ts'
 import { openApiRouteInventory } from './openapi-document.ts'
 import { instanceRoutes } from './routes/instance.ts'
@@ -119,15 +120,24 @@ it('keeps every management interface unreachable with the production resource sw
     })
   const baseline = app()
   const production = app({ db, enabled: true })
+  const mappingAdministration = scimMappingAdministration({
+    db,
+    publicUrl,
+    capabilities,
+    resourcesEnabled: true,
+  })
+  const withoutResources = app({ db, enabled: true, mappingAdministration })
   for (const [method, url] of [
     ['GET', path],
     ['POST', path],
     ['DELETE', `${path}/${randomUUID()}`],
     ['POST', `${path}/consent`],
   ] as const) {
-    const result = await production.request(url, { method, headers: headers(key) })
-    expect(result.status).toBe(404)
-    expect(await result.json()).toEqual({ error: 'not_found' })
+    for (const server of [production, withoutResources]) {
+      const result = await server.request(url, { method, headers: headers(key) })
+      expect(result.status).toBe(404)
+      expect(await result.json()).toEqual({ error: 'not_found' })
+    }
   }
   const openApi = async (server: App) =>
     (await (await server.request('/api/v1/openapi.json')).json()) as {
@@ -136,12 +146,14 @@ it('keeps every management interface unreachable with the production resource sw
     }
   const published = await openApi(production)
   expect(published).toEqual(await openApi(baseline))
+  expect(published).toEqual(await openApi(withoutResources))
   expect(Object.keys(published.paths).filter((route) => route.startsWith(path))).toEqual([])
   expect(published.components.schemas.Instance.properties).not.toHaveProperty(
     'scimResourcesEnabled',
   )
   const listed = await rpc(production, 'tools/list')
   expect(listed).toEqual(await rpc(baseline, 'tools/list'))
+  expect(listed).toEqual(await rpc(withoutResources, 'tools/list'))
   expect(listed.result.tools.map(({ name }: { name: string }) => name)).toEqual(['whoami'])
   for (const name of tools) {
     const params = { name, arguments: { intentId: randomUUID() } }
@@ -220,7 +232,13 @@ describe.skipIf(!databaseUrl)('mapping administration transports', () => {
         db,
         enabled: true,
         resources: scimDiscovery,
-        mappingNotices: { enqueue: async () => randomUUID() },
+        mappingAdministration: scimMappingAdministration({
+          db,
+          publicUrl,
+          capabilities,
+          resourcesEnabled: true,
+          notices: { enqueue: async () => randomUUID() },
+        }),
       },
       ssoTeamReads: { db, capabilities },
       ssoMailboxProof: mailboxProofRoutes({

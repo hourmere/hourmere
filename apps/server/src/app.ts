@@ -35,7 +35,6 @@ import { requireCaller } from './caller.ts'
 import { clientIp, withClientIp } from './client-ip.ts'
 import { errorAliasFor } from './error-aliases.ts'
 import type { McpModule } from './mcp/endpoint.ts'
-import { scimTeamMappingTools } from './mcp/scim-team-mappings.ts'
 import { describeCaller, Me } from './me.ts'
 import {
   isOneTimeCapabilityPath,
@@ -46,7 +45,6 @@ import { authenticated, ErrorBody, json, type RouteModule } from './openapi.ts'
 import { pwaStatic } from './pwa-static.ts'
 import { createRateLimiter, rateLimit, routeRateLimits } from './rate-limit.ts'
 import { installRestApiKeyScopes } from './rest-scopes.ts'
-import { scimTeamMappingRoutes } from './routes/scim-team-mappings.ts'
 import { isPublicRoutingFormPath, privateRoutingApiPrefix } from './routing-form-privacy.ts'
 import { mountScim, type ScimOptions } from './scim.ts'
 import {
@@ -769,21 +767,14 @@ export function createApp({
   })
 
   for (const register of routes) register({ app, caller, scimResourcesEnabled })
-  const scimMappingDeps = scimResourcesEnabled &&
-    scim && {
-      db: scim.db,
-      publicUrl,
-      capabilities: ssoTeamReads?.capabilities ?? { ssoOidcEnabled: false, ssoSamlEnabled: false },
-      resourcesEnabled: scimResourcesEnabled,
-      notices: scim.mappingNotices,
-    }
-  if (scimMappingDeps) scimTeamMappingRoutes(scimMappingDeps)({ app, caller, scimResourcesEnabled })
+  const mappingAdministration = scimResourcesEnabled ? scim?.mappingAdministration : undefined
+  mappingAdministration?.route({ app, caller, scimResourcesEnabled })
   mcp?.mount({
     app,
     resolveCaller,
     publicUrl,
     ssoTeamReads,
-    ...(scimMappingDeps && { additionalTools: scimTeamMappingTools(scimMappingDeps) }),
+    ...(mappingAdministration && { additionalTools: mappingAdministration.tools }),
   })
   mountScim(app, scim, trustedProxies, publicUrl)
 
