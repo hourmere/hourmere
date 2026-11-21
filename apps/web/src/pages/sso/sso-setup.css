@@ -1,6 +1,7 @@
 .sso-domain-form .button,
 .sso-enforcement .button,
 .sso-fresh-proof .button,
+.sso-member-settings .button,
 .sso-providers .button {
   max-width: 100%;
   white-space: normal;
@@ -10,4 +11,26 @@
 
 .sso-fresh-proof select {
   max-width: 100%;
+}
+
+.sso-member-methods {
+  padding: 0;
+  list-style: none;
+}
+
+.sso-member-methods li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.sso-member-methods p {
+  min-width: 0;
+  margin: 0;
+}
+
+.sso-member-methods .confirm {
+  min-width: min(12rem, 100%);
 }

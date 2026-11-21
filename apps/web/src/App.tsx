@@ -49,6 +49,7 @@ import {
   EventTypesPage,
   HostMeetingPollRoute,
   HostPage,
+  MailboxProofPage,
   ManageBookingPage,
   McpAuthorizePage,
   MeetingPollCreatePage,
@@ -138,6 +139,7 @@ export const appRoutes = createRoutesFromElements(
       </Route>
     </Route>
     {/* Public pages, outside the session: they never ask who is signed in. */}
+    <Route path={PATHS.mailboxProof} element={<MailboxProofPage />} />
     <Route path="/book/:token?" element={<OneTimeBookingPage />} />
     <Route path="/embed/book/:token" element={<OneTimeBookingPage />} />
     <Route path="/embed/team/:teamSlug/:slug" element={<EmbeddedTeamBookingPage />} />
@@ -294,21 +296,24 @@ function PageDescription() {
  */
 export function App({ continuation }: { continuation?: RoutingContinuation | undefined }) {
   const { pathname } = useLocation()
-  useAdminPwa(pathname)
+  const mailboxProof = useMatch(PATHS.mailboxProof)
+  useAdminPwa(mailboxProof ? '/' : pathname)
   const admin = matchRoutes(appRoutes, pathname)?.some(
     ({ route }) => route.handle?.surface === 'admin',
   )
   return (
     <InterfaceScope surface={admin ? 'admin' : 'public'}>
-      <AppRoutes initialContinuation={continuation} />
+      <AppRoutes initialContinuation={continuation} publicMailbox={mailboxProof !== null} />
     </InterfaceScope>
   )
 }
 
 function AppRoutes({
   initialContinuation,
+  publicMailbox,
 }: {
   initialContinuation: RoutingContinuation | undefined
+  publicMailbox: boolean
 }) {
   const location = useLocation()
   const [visit, setVisit] = useState(
@@ -380,7 +385,8 @@ function AppRoutes({
       <RouteErrorBoundary>
         <Suspense
           fallback={
-            pathname === '/' || pathname === '/app' || pathname.startsWith('/app/') ? (
+            !publicMailbox &&
+            (pathname === '/' || pathname === '/app' || pathname.startsWith('/app/')) ? (
               <AdminLoading />
             ) : (
               <RouteLoadingStatus memoryOnly={privateVisit} />

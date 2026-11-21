@@ -208,6 +208,25 @@ it('covers every requested real page and limits en-GB to the booking page', () =
     'sso-enforcement-recovery-required',
     'sso-proof-mailbox',
     'sso-proof-step-up',
+    'sso-sign-in',
+    'sso-mailbox-send',
+    'sso-mailbox-link',
+    'sso-mailbox-confirm',
+    'sso-mailbox-confirmed',
+    'sso-mailbox-paste-fallback',
+    'sso-mailbox-proven',
+    'sso-mailbox-outcome',
+    'sso-mailbox-stale',
+    'sso-member-settings',
+    'sso-member-link',
+    'sso-member-unlink',
+    'sso-member-proof',
+    'sso-member-authorization',
+    'sso-member-confirm',
+    'sso-member-stale',
+    'sso-member-unavailable',
+    'sso-member-loading',
+    'sso-member-error',
     'host',
     'booking',
     'booking-form',
@@ -341,6 +360,7 @@ const workflowRunHistoryAuditUrl = pathToFileURL(
   resolve('tools/e2e/workflow-run-history-audit.ts'),
 ).href
 const ssoSetupAuditUrl = pathToFileURL(resolve('tools/e2e/sso-setup-audit.ts')).href
+const ssoMemberAuditUrl = pathToFileURL(resolve('tools/e2e/sso-member-audit.ts')).href
 const visualSource = readFileSync('tools/e2e/specs/visual.spec.ts', 'utf8')
 const fixtureSource = readFileSync('tools/e2e/fixtures.ts', 'utf8')
 const shellSource = readFileSync('apps/web/src/components/AppShell.tsx', 'utf8')
@@ -415,7 +435,8 @@ function sourceCopyResult(
       .replace("'./workflow-audit.ts'", JSON.stringify(workflowAuditUrl))
       .replace("'./workflow-editor-audit.ts'", JSON.stringify(workflowEditorAuditUrl))
       .replace("'./workflow-run-history-audit.ts'", JSON.stringify(workflowRunHistoryAuditUrl))
-      .replace("'./sso-setup-audit.ts'", JSON.stringify(ssoSetupAuditUrl)),
+      .replace("'./sso-setup-audit.ts'", JSON.stringify(ssoSetupAuditUrl))
+      .replace("'./sso-member-audit.ts'", JSON.stringify(ssoMemberAuditUrl)),
   )
   writeFileSync(join(directory, 'visual.spec.ts'), visual)
   writeFileSync(join(directory, 'fixtures.ts'), fixture)
@@ -645,6 +666,25 @@ const expected={
   'sso-enforcement-recovery-required':{path:'/app/settings/sso',public:false,space:'team',wait:'A current owner must accept recovery enrollment before you can require SSO.'},
   'sso-proof-mailbox':{path:'/app/settings/sso',public:false,space:'team',wait:'label:Email verification link'},
   'sso-proof-step-up':{path:'/app/settings/sso',public:false,space:'team',wait:'link:Open identity provider (opens in a new tab)'},
+  'sso-sign-in':{path:'/sign-in',public:true,wait:'button:Sign in with single sign-on'},
+  'sso-mailbox-send':{path:'/app/mailbox-proof',public:true,wait:'button:Send verification email'},
+  'sso-mailbox-link':{path:'/app/mailbox-proof',public:true,wait:'label:Email verification link'},
+  'sso-mailbox-confirm':{path:'/app/mailbox-proof',public:true,wait:'button:Verify email link'},
+  'sso-mailbox-confirmed':{path:'/app/mailbox-proof',public:true,wait:'Email verification complete.'},
+  'sso-mailbox-paste-fallback':{path:'/app/mailbox-proof',public:true,wait:'Copy the link from your email and paste it into the tab where you requested verification.'},
+  'sso-mailbox-proven':{path:'/app/mailbox-proof',public:true,wait:'Email verification complete.'},
+  'sso-mailbox-outcome':{path:'/app/mailbox-proof',public:true,wait:'To continue, sign in with your usual method or use a current team invitation.'},
+  'sso-mailbox-stale':{path:'/app/mailbox-proof',public:true,wait:'Could not verify that link. Check the link or request a new email.'},
+  'sso-member-settings':{path:'/app/settings',public:false,space:'team',wait:'heading:Your team sign-in'},
+  'sso-member-link':{path:'/app/settings',public:false,space:'team',wait:'button:Link account'},
+  'sso-member-unlink':{path:'/app/settings',public:false,space:'team',wait:'button:Unlink account'},
+  'sso-member-proof':{path:'/app/settings',public:false,space:'team',wait:'label:Email verification link'},
+  'sso-member-authorization':{path:'/app/settings',public:false,space:'team',wait:'link:Continue to identity provider'},
+  'sso-member-confirm':{path:'/app/settings',public:false,space:'team',wait:'button:Confirm link'},
+  'sso-member-stale':{path:'/app/settings',public:false,space:'team',wait:'This SSO link request is unavailable. Start again.'},
+  'sso-member-unavailable':{path:'/app/settings',public:false,space:'team',wait:'Your team sign-in settings are unavailable.'},
+  'sso-member-loading':{path:'/app/settings',public:false,space:'team',wait:'status:Loading SSO settings…'},
+  'sso-member-error':{path:'/app/settings',public:false,space:'team',wait:'Could not load SSO settings.'},
   'booking-form':{path:'/fixture-host/layout-audit',public:true,wait:'.details-step form input[type="email"]'},
   'booking-confirmation':{path:'/fixture-host/layout-audit',public:true,wait:'.confirmation .booking-details'},
   'booking-time-zone':{path:'/fixture-host/layout-audit',public:true,wait:'.tz-panel [role="listbox"]:visible'},

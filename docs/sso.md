@@ -1454,6 +1454,46 @@ JIT 的团队中以成员身份加入，前提是域名核验有效、团队仍�
 身份提供方或 JIT。OIDC 仍在代码中关闭，带待处理 SSO 结果的邀请接受请求返回
 `404 sso_disabled`。普通邀请继续使用现有登录会话流程。
 
+### Member sign-in and account settings
+
+When OIDC is available, open the sign-in link supplied by the team
+(`/sign-in?sso=<providerId>`) and select **Sign in with single sign-on**. The link
+identifies the team's provider. The sign-in page offers no email or domain lookup
+for SSO. Continue using your existing sign-in method for your personal space. If
+you are already signed in, sign out before using the team's SSO link.
+
+If prompted to verify your email, request a verification message. In the same
+browser, open the email link in another tab and explicitly verify it, then return
+to the tab where you started. You can also copy and paste the email link into
+the original tab. If the browser cannot confirm across tabs, paste the link into
+the original tab. Select **Continue** to finish verification. If sign-in cannot
+finish after verification, the page offers the same next steps regardless of the
+account lookup result. Use your usual sign-in method or ask your team for help.
+
+To link an existing account, sign in with your usual method, switch to the
+team's space and open **Settings**. Choose the provider under **Your team sign-in**,
+verify your Hourmere mailbox, and continue to the identity provider.
+When you return, confirm the link to finish. To unlink, use the same section in
+that team and independently verify your Hourmere mailbox again. An expired or
+cancelled request must be started again. Both protocols remain hard-off in
+production, so the sign-in and settings controls are hidden.
+
+#### 成员登录和账号设置
+
+OIDC 可用时，打开团队提供的登录链接（`/sign-in?sso=<providerId>`），选择
+**使用单点登录**。链接指定团队的身份提供方。登录页不会通过邮箱地址或域名查找单点登录
+提供方。个人空间仍可使用原有方式登录。如果你已经登录，请先退出，再使用团队的单点登录链接。
+
+如需验证邮箱，请先发送验证邮件。在同一浏览器的新标签页中打开邮件链接，确认验证后返回
+发起请求的标签页。也可以把邮件链接粘贴到原标签页验证。如果浏览器无法跨标签页确认，请将链接
+粘贴到原标签页。选择**继续**完成验证。如果验证后仍无法完成登录，无论该邮箱是否已有账号，
+页面都会提示相同的后续操作。请使用原有方式登录，或联系团队寻求帮助。
+
+如需关联已有账号，请用原有方式登录，切换到团队空间后打开**设置**。在**你的团队登录方式**
+下选择身份提供方，验证 Hourmere 邮箱后继续前往该提供方。返回时，确认关联以完成操作。
+解除关联也在同一团队的设置中进行，并需再次独立验证 Hourmere 邮箱。请求过期或取消后，
+请重新发起。目前生产环境的两种协议均保持关闭，登录页和设置页会隐藏相关选项。
+
 Ownership (all auth-protocol exceptions, no MCP/CLI surface): OIDC sign-in owns
 initiation and callback for linked identities; OIDC completion owns
 `POST /api/auth/sso/oidc/complete` for linked identities, with its wrong-browser,
