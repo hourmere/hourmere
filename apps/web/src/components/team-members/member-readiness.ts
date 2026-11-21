@@ -3,10 +3,16 @@ import type { ListedOrganizationMember } from '../../api/auth.ts'
 import { api, type Schemas, unwrap } from '../../api/client.ts'
 import { isOrganizationContextChanged, RequestError } from '../../api/errors.ts'
 
-export type MemberHealth = Schemas['MemberReadinessPage']['members'][number]['health']
+type MemberReadinessRow = Schemas['MemberReadinessPage']['members'][number]
+export type MemberHealth = MemberReadinessRow['health']
+export type ManagedMembership = NonNullable<MemberReadinessRow['managedMembership']>
 type State =
   | { status: 'loading' | 'error' | 'unavailable' }
-  | { status: 'ready'; data: Map<string, MemberHealth> }
+  | {
+      status: 'ready'
+      data: Map<string, MemberHealth>
+      managedMemberships: Map<string, ManagedMembership>
+    }
 
 export function useMemberReadiness(
   organizationId: string,
@@ -48,6 +54,7 @@ export function useMemberReadiness(
           }
           const requested = new Set(memberIds.split(','))
           const data = new Map<string, MemberHealth>()
+          const managedMemberships = new Map<string, ManagedMembership>()
           for (const member of page.members) {
             if (!requested.has(member.memberId)) continue
             // Keep only coarse health fields, even if the response gains private detail.
@@ -56,8 +63,11 @@ export function useMemberReadiness(
               selectedCalendars: member.health.selectedCalendars,
               conferenceAccounts: member.health.conferenceAccounts,
             })
+            if (Array.isArray(member.managedMembership?.blockers)) {
+              managedMemberships.set(member.memberId, member.managedMembership)
+            }
           }
-          setResult({ context, state: { status: 'ready', data } })
+          setResult({ context, state: { status: 'ready', data, managedMemberships } })
         },
         (error: unknown) => {
           if (signal.aborted) return

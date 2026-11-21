@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import type { ListedOrganizationMember } from '../api/auth.ts'
+import type { Schemas } from '../api/client.ts'
 import { InterfaceScope } from '../i18n/runtime.tsx'
 import { PATHS } from '../paths.ts'
 import {
@@ -23,6 +24,7 @@ const TEAM_ID = '00000000-0000-7000-8000-000000000010'
 const OTHER_TEAM_ID = '00000000-0000-7000-8000-000000000020'
 const SELF_ID = '00000000-0000-7000-8000-000000000001'
 const ROLE_ROUTE = 'POST /api/auth/organization/update-member-role'
+const READINESS_ROUTE = `GET /api/v1/teams/${TEAM_ID}/member-readiness`
 
 function member(number: number, name: string, role: string): ListedOrganizationMember {
   const userId = `00000000-0000-7000-8000-${String(number).padStart(12, '0')}`
@@ -45,8 +47,7 @@ function teamServer(routes: Routes = {}, members = [self, owner, admin, ordinary
   return fakeApi({
     'GET /api/auth/organization/list-members': () => json(200, { members, total: members.length }),
     'GET /api/v1/team/invitations': () => json(200, { data: [], nextCursor: null }),
-    [`GET /api/v1/teams/${TEAM_ID}/member-readiness`]: () =>
-      json(200, { organizationId: TEAM_ID, members: [] }),
+    [READINESS_ROUTE]: () => json(200, { organizationId: TEAM_ID, members: [] }),
     [`GET /api/v1/teams/${OTHER_TEAM_ID}/member-readiness`]: () =>
       json(200, { organizationId: OTHER_TEAM_ID, members: [] }),
     ...routes,
@@ -94,6 +95,104 @@ function noSuccess() {
 }
 
 describe('team role management in settings', () => {
+  it('explains directory management and each blocker in both languages without hiding allowed actions', async () => {
+    const user = userEvent.setup()
+    const readiness = later()
+    const active = member(5, 'Active managed member', 'member')
+    const api = teamServer(
+      {
+        ...signedInAs({
+          ...ME,
+          organization: {
+            id: TEAM_ID,
+            name: 'Example team',
+            slug: 'example-team',
+            personal: false,
+          },
+        }),
+        ...profile(PROFILE),
+        'GET /api/auth/organization/get-active-member': () => json(200, self),
+        [READINESS_ROUTE]: () => readiness.response,
+      },
+      [self, owner, ordinaryMember, active],
+    )
+    const managed = 'Managed by your identity provider'
+    const guidance =
+      'Restore this membership in your identity provider before making this member an admin.'
+    renderApp(PATHS.settings)
+    await screen.findByText('Checking member configuration…')
+    expect(screen.queryByText(managed)).toBeNull()
+    expect(screen.queryByText('No default schedule')).toBeNull()
+    const rows: Schemas['MemberReadinessPage']['members'] = [ordinaryMember, active, owner].map(
+      (target) => ({
+        memberId: target.id,
+        displayName: target.user.name,
+        summary: 'checks_passed',
+        completeness: 'complete',
+        evaluatedAt: '2026-10-27T10:00:00.000Z',
+        reasonCodes: [],
+        fixKinds: [],
+        health: {
+          defaultSchedule: 'satisfied',
+          selectedCalendars: 'not_applicable',
+          conferenceAccounts: 'not_connected',
+        },
+        ...(target !== owner && {
+          managedMembership: {
+            blockers:
+              target === active ? [] : ['scim_suspension', 'local_suspension', 'local_removal'],
+          },
+        }),
+      }),
+    )
+    await readiness.answer(
+      json(200, {
+        organizationId: TEAM_ID,
+        members: rows.map((row) =>
+          row.memberId === ordinaryMember.id
+            ? {
+                ...row,
+                managedMembership: {
+                  blockers: [...(row.managedMembership?.blockers ?? []), 'future_blocker'],
+                },
+              }
+            : row,
+        ),
+      }),
+    )
+    const blocked = memberRow(ordinaryMember.user.name)
+    const unblocked = memberRow(active.user.name)
+    expect(blocked.getByText(managed)).toBeDefined()
+    expect(blocked.getByText('Your identity provider suspended this membership.')).toBeDefined()
+    expect(blocked.getByText('A team administrator suspended this membership.')).toBeDefined()
+    expect(blocked.getByText('A previous team removal is blocking readmission.')).toBeDefined()
+    expect(blocked.queryByText('future_blocker')).toBeNull()
+    expect(blocked.getByText(guidance)).toBeDefined()
+    const deniedPromotion = blocked.getByRole('button', { name: 'Make admin: Team member' })
+    expect(deniedPromotion.matches(':disabled')).toBe(true)
+    await user.click(deniedPromotion)
+    expect(screen.queryByRole('heading', { name: 'Change team role' })).toBeNull()
+    expect(api.to(ROLE_ROUTE)).toHaveLength(0)
+    expect(
+      blocked.getByRole('button', { name: 'Remove member: Team member' }).matches(':disabled'),
+    ).toBe(false)
+    expect(unblocked.getByText(managed)).toBeDefined()
+    expect(unblocked.queryByText(guidance)).toBeNull()
+    expect(
+      unblocked
+        .getByRole('button', { name: 'Make admin: Active managed member' })
+        .matches(':disabled'),
+    ).toBe(false)
+    expect(memberRow(owner.user.name).queryByText(managed)).toBeNull()
+
+    await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    expect(blocked.getByText('由身份提供方管理')).toBeDefined()
+    expect(blocked.getByText('身份提供方已暂停此成员资格。')).toBeDefined()
+    expect(blocked.getByText('团队管理员已暂停此成员资格。')).toBeDefined()
+    expect(blocked.getByText('此前的团队移除操作阻止重新加入。')).toBeDefined()
+    expect(blocked.queryByText(guidance)).toBeNull()
+  })
+
   it('confirms the named member and waits for a bound server response before updating their row', async () => {
     const user = userEvent.setup()
     const response = later()
@@ -253,6 +352,12 @@ describe('team role management in settings', () => {
       status: 409,
       code: 'member_departure_owner_required',
       message: /at least one owner/i,
+    },
+    {
+      status: 409,
+      code: 'scim_managed_resource',
+      message:
+        /Restore this membership in your identity provider before making this member an admin\./,
     },
     { status: 503, code: 'INTERNAL_SERVER_ERROR', message: /wrong.*our side|try again/i },
   ])(
@@ -437,6 +542,7 @@ describe('team role management in settings', () => {
     },
     { status: 404, code: 'MEMBER_NOT_FOUND', message: /不再是.*成员/ },
     { status: 409, code: 'member_departure_owner_required', message: /保留至少.*所有者/ },
+    { status: 409, code: 'scim_managed_resource', message: /身份提供方.*管理员/ },
   ])(
     'translates confirmation and the $code response into Simplified Chinese',
     async ({ status, code, message }) => {

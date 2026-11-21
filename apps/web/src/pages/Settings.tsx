@@ -283,7 +283,13 @@ function DisplayNameForm({ name }: { name: string }) {
       setStatus('')
       if (err instanceof RequestError && err.code === 'invalid_display_name') {
         setErrors({ displayName: nameError })
-      } else setMessage(msg('Could not save your display name. {0}', { '0': errorMessage(err) }))
+      } else {
+        const reason =
+          err instanceof RequestError && err.code === 'scim_managed_resource'
+            ? msg('Change your display name in your identity provider for this team.')
+            : errorMessage(err)
+        setMessage(msg('Could not save your display name. {0}', { '0': reason }))
+      }
       setAttempt((n) => n + 1)
     }
     setSaving(false)

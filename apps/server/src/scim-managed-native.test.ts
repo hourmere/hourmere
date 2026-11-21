@@ -244,6 +244,35 @@ describe.skipIf(!databaseUrl)('SCIM managed memberships in native Better Auth', 
     ).toEqual(entry)
   })
 
+  it('refuses an unsupported field in the native name write rather than silently dropping it', async () => {
+    const f = await fixture()
+    const stored = () =>
+      db.selectFrom('auth.user').selectAll().where('id', '=', f.other.id).executeTakeFirstOrThrow()
+    const before = await stored()
+    const { internalAdapter } = await auth.$context
+    const original = internalAdapter.updateUser
+    // Simulate a future additional field that Better Auth already parsed for the adapter.
+    const update = vi
+      .spyOn(internalAdapter, 'updateUser')
+      .mockImplementation((id, data) => original(id, { ...data, futureField: 'New data' }))
+    try {
+      expect(
+        await response(
+          await post('update-user', f.memberSession, { name: 'New name', image: '/new.png' }),
+        ),
+      ).toEqual({
+        status: 400,
+        body: {
+          code: 'UNSUPPORTED_USER_UPDATE_FIELDS',
+          message: 'This name update includes unsupported fields.',
+        },
+      })
+      expect(await stored()).toEqual(before)
+    } finally {
+      update.mockRestore()
+    }
+  })
+
   it('does not elevate a suspended managed member and preserves ordinary owner authority', async () => {
     const f = await fixture()
     const entry = await f.entry({ active: false })

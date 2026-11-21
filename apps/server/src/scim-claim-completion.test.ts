@@ -1817,4 +1817,105 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
     expect(wired.claimed).toBe(1)
     expect(wired.entry?.linked_user_id).not.toBeNull()
   })
+
+  async function refuseReadmissionInOtherScope(
+    served: Served,
+    f: Awaited<ReturnType<typeof rehireFixture>>,
+    organizationId: string,
+    connectionId: string,
+  ) {
+    const entry = await db
+      .insertInto('scim_users')
+      .values({
+        organization_id: organizationId,
+        connection_id: connectionId,
+        user_name: f.identifiers.userName,
+        external_id: f.identifiers.externalId,
+        work_email: f.mailbox,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await db
+      .insertInto('scim_user_claims')
+      .values({
+        organization_id: organizationId,
+        connection_id: connectionId,
+        scim_user_id: entry.id,
+        work_email: f.mailbox,
+        expires_at: f.fresh.claim.expires_at,
+      })
+      .execute()
+
+    const before = await snapshot(organizationId)
+    const original = await snapshot(f.organization.id)
+    const blocks = await f.blockers()
+    expect(blocks).toEqual([
+      expect.objectContaining({
+        user_id: f.account,
+        connection_id: f.first.claim.connection_id,
+        scim_user_id: f.first.id,
+        cleared_at: null,
+      }),
+    ])
+
+    const refused = await confirmReadmission(
+      served,
+      f.survivingSession.cookie,
+      organizationId,
+      entry.id,
+    )
+    expect(refused.status).toBe(403)
+    expect(await refused.json()).toEqual(denied)
+    expect(await snapshot(organizationId)).toEqual(before)
+    expect(await snapshot(f.organization.id)).toEqual(original)
+    expect(await f.blockers()).toEqual(blocks)
+  }
+
+  it('refuses readmission using a retired suspension from a different organization', async () => {
+    const served = await instance()
+    const f = await rehireFixture(served)
+    const target = await team()
+    await db
+      .insertInto('auth.member')
+      .values({
+        organizationId: target.id,
+        userId: f.account,
+        role: 'member',
+        createdAt: new Date(),
+      })
+      .execute()
+    const connection = await db
+      .selectFrom('scim_connections')
+      .select('id')
+      .where('organization_id', '=', target.id)
+      .executeTakeFirstOrThrow()
+    await refuseReadmissionInOtherScope(served, f, target.id, connection.id)
+  })
+
+  it('refuses readmission using a retired suspension from a different connection', async () => {
+    const served = await instance()
+    const f = await rehireFixture(served)
+    // Allow a second connection in the fixture so the connection scope can be tested
+    // independently of the organization scope.
+    await sql`ALTER TABLE scim_connections DROP CONSTRAINT scim_connections_one_per_organization`.execute(
+      db,
+    )
+    try {
+      const connection = await db
+        .insertInto('scim_connections')
+        .values({ organization_id: f.organization.id })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      await refuseReadmissionInOtherScope(served, f, f.organization.id, connection.id)
+    } finally {
+      // SCIM entries may be deleted only with their organization. Cascade this fixture
+      // and restore the schema together before another case can use the database.
+      await db.transaction().execute(async (trx) => {
+        await trx.deleteFrom('auth.organization').where('id', '=', f.organization.id).execute()
+        await sql`ALTER TABLE scim_connections ADD CONSTRAINT scim_connections_one_per_organization UNIQUE (organization_id)`.execute(
+          trx,
+        )
+      })
+    }
+  })
 })

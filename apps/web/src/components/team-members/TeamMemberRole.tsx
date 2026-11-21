@@ -19,10 +19,14 @@ type RoleButtonProps = {
   role: string | null
   currentUserId?: string
   disabled?: boolean
+  scimSuspended?: boolean
   onChanged: (member: OrganizationMember) => void
   onReload: () => void
   onReviewChange?: (open: boolean) => void
 }
+
+const SCIM_PROMOTION_BLOCKED =
+  'Restore this membership in your identity provider before making this member an admin.'
 
 export function RoleManagementNotice() {
   const { t } = useI18n()
@@ -73,7 +77,8 @@ function RoleChangeError({ error, onReload }: { error: unknown; onReload: () => 
   const { t, ui } = useI18n()
   const request = error instanceof RequestError ? error : undefined
   let message = ui(errorMessage(error))
-  if (request?.code === 'member_departure_owner_required')
+  if (request?.code === 'scim_managed_resource') message = t(SCIM_PROMOTION_BLOCKED)
+  else if (request?.code === 'member_departure_owner_required')
     message = t(
       'The team must retain at least one owner. Ownership transfer is not available here.',
     )
@@ -115,6 +120,7 @@ function RoleChange({
   member,
   nextRole,
   disabled = false,
+  scimSuspended = false,
   onChanged,
   onReload,
   onReviewChange,
@@ -133,6 +139,8 @@ function RoleChange({
   observedRole.current = member.role
   const reviewId = useId()
   const headingId = useId()
+  const blockerId = useId()
+  const promotionBlocked = nextRole === 'admin' && scimSuspended
   const name = member.user.name.trim() || t('Unnamed team member')
   const oldRole = nextRole === 'admin' ? t('Member') : t('Admin')
   const newRole = nextRole === 'admin' ? t('Admin') : t('Member')
@@ -173,7 +181,7 @@ function RoleChange({
   }
 
   async function confirm() {
-    if (pending || active.current || requiresReload(error)) return
+    if (promotionBlocked || pending || active.current || requiresReload(error)) return
     const controller = new AbortController()
     const openingRole = member.role
     active.current = controller
@@ -212,7 +220,8 @@ function RoleChange({
         ref={button}
         type="button"
         className="button button-small"
-        disabled={disabled || open}
+        disabled={disabled || open || promotionBlocked}
+        aria-describedby={promotionBlocked ? blockerId : undefined}
         aria-expanded={open}
         aria-controls={open ? reviewId : undefined}
         aria-label={t(nextRole === 'admin' ? 'Make admin: {0}' : 'Make member: {0}', { '0': name })}
@@ -224,6 +233,11 @@ function RoleChange({
       >
         {t(nextRole === 'admin' ? 'Make admin' : 'Make member')}
       </button>
+      {promotionBlocked && (
+        <p className="hint" id={blockerId}>
+          {t(SCIM_PROMOTION_BLOCKED)}
+        </p>
+      )}
       {savedRole && (
         <p role="status">
           {t('{name} is now {role}.', {
@@ -291,7 +305,8 @@ function RoleChange({
             <button
               type="button"
               className="button button-small button-primary"
-              disabled={pending || requiresReload(error)}
+              disabled={pending || promotionBlocked || requiresReload(error)}
+              aria-describedby={promotionBlocked ? blockerId : undefined}
               onClick={() => void confirm()}
             >
               {t(pending ? 'Changing role…' : 'Confirm role change')}

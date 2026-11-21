@@ -42,7 +42,7 @@ const internalError = {
 
 /** Web-session projections of the shared cached readiness facts; never provider checks. */
 export function readinessRoutes(deps: ServiceDeps): RouteModule {
-  return ({ app, caller }) => {
+  return ({ app, caller, scimResourcesEnabled }) => {
     const sessionOnly = createMiddleware<CallerEnv>(async (c, next) => {
       if (c.var.principal.kind !== 'session')
         throw new DomainError('forbidden', 'readiness_access_denied')
@@ -104,7 +104,12 @@ export function readinessRoutes(deps: ServiceDeps): RouteModule {
             c.req.valid('param').teamId,
             async (db, actor) =>
               getTeamMemberReadiness(
-                { db, ...actor, now: deps.now ?? (() => Temporal.Now.instant()) },
+                {
+                  db,
+                  ...actor,
+                  scimResourcesEnabled,
+                  now: deps.now ?? (() => Temporal.Now.instant()),
+                },
                 c.req.valid('query').memberIds,
               ),
             c.req.valid('header')['x-expected-organization-id'],

@@ -64,7 +64,7 @@ const DisplayNameInput = z
   .openapi('DisplayNameInput')
 
 export function profileRoutes(deps: ServiceDeps): RouteModule {
-  return ({ app, caller }) => {
+  return ({ app, caller, scimResourcesEnabled }) => {
     app.openapi(
       createRoute({
         method: 'patch',
@@ -72,7 +72,7 @@ export function profileRoutes(deps: ServiceDeps): RouteModule {
         operationId: 'updateDisplayName',
         summary: "Update the caller's account display name",
         description:
-          'Works before creating a booking-page profile. Only changes the caller’s name. A SCIM-managed membership cannot change the name while acting in that team. Requests are limited to 4096 bytes.',
+          'Works before creating a booking-page profile. Only changes the caller’s name. When SCIM resources are enabled, a managed membership cannot change the name while acting in that team. Requests are limited to 4096 bytes.',
         tags: ['Profile'],
         security: authenticated,
         middleware: callerWithBodyLimit(caller, 4096),
@@ -90,7 +90,10 @@ export function profileRoutes(deps: ServiceDeps): RouteModule {
       }),
       async (c) =>
         c.json(
-          await updateDisplayName(serviceContext(deps, c.var.principal), c.req.valid('json').name),
+          await updateDisplayName(
+            { ...serviceContext(deps, c.var.principal), scimResourcesEnabled },
+            c.req.valid('json').name,
+          ),
           200,
         ),
     )

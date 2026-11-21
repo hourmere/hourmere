@@ -2970,4 +2970,15 @@ export const admin = {
   // SCIM managed membership
   'This resource is managed by your identity provider.':
     'This resource is managed by your identity provider.',
+  'Managed by your identity provider': 'Managed by your identity provider',
+  'Your identity provider suspended this membership.':
+    'Your identity provider suspended this membership.',
+  'A team administrator suspended this membership.':
+    'A team administrator suspended this membership.',
+  'A previous team removal is blocking readmission.':
+    'A previous team removal is blocking readmission.',
+  'Restore this membership in your identity provider before making this member an admin.':
+    'Restore this membership in your identity provider before making this member an admin.',
+  'Change your display name in your identity provider for this team.':
+    'Change your display name in your identity provider for this team.',
 } as const

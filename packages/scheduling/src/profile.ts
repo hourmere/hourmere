@@ -152,7 +152,7 @@ export async function updateDisplayName(
   }
   const { user, organization } = ctx.principal
   const update = { name, updatedAt: new Date(ctx.now().epochMilliseconds) }
-  if (organization.personal) {
+  if (!ctx.scimResourcesEnabled || organization.personal) {
     const row = await ctx.db
       .updateTable('auth.user')
       .set(update)

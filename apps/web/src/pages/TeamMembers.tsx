@@ -4,7 +4,10 @@ import { type ListedOrganizationMember, listOrganizationMembers } from '../api/a
 import { errorMessage, RequestError } from '../api/errors.ts'
 import { BreakableText } from '../components/BreakableText.tsx'
 import { MemberReadiness } from '../components/team-members/MemberReadiness.tsx'
-import { useMemberReadiness } from '../components/team-members/member-readiness.ts'
+import {
+  type ManagedMembership,
+  useMemberReadiness,
+} from '../components/team-members/member-readiness.ts'
 import {
   RemoveMemberButton,
   TeamMemberActions,
@@ -19,6 +22,12 @@ import { PATHS } from '../paths.ts'
 import { TeamInvitations } from './TeamInvitations.tsx'
 
 const PAGE_SIZE = 20
+
+const membershipBlockers: Record<ManagedMembership['blockers'][number], MessageKey> = {
+  scim_suspension: 'Your identity provider suspended this membership.',
+  local_suspension: 'A team administrator suspended this membership.',
+  local_removal: 'A previous team removal is blocking readmission.',
+}
 
 type PageState<T> =
   | { status: 'loading' | 'denied' }
@@ -220,83 +229,108 @@ export function TeamMembers({
             <p role="status">{t('{0} joined members', { '0': state.data.total })}</p>
             {state.data.members.length === 0 && <p>{t('No team members found.')}</p>}
             <ul className="stack">
-              {state.data.members.map((member) => (
-                <li key={member.id}>
-                  <div>
-                    <span className="user-content">
-                      <BreakableText>
-                        {member.user.name.trim() || t('Unnamed team member')}
-                      </BreakableText>
-                    </span>
-                    {member.userId === currentUserId && (
-                      <>
-                        {' · '}
-                        <span className="badge">{t('You')}</span>
-                      </>
-                    )}
-                    {' · '}
-                    <span className="user-content">
-                      <BreakableText>
-                        {member.role
-                          .split(',')
-                          .map((value) => {
-                            const role = value.trim()
-                            return Object.hasOwn(labels, role) ? labels[role] : role
-                          })
-                          .join(', ')}
-                      </BreakableText>
-                    </span>
-                  </div>
-                  {canManage && member.user.email && (
-                    <div className="hint user-content">
-                      <BreakableText>{member.user.email}</BreakableText>
+              {state.data.members.map((member) => {
+                const own = member.userId === currentUserId
+                const managedMembership =
+                  (own || canManage) && readiness.status === 'ready'
+                    ? readiness.managedMemberships.get(member.id)
+                    : undefined
+                const blockers =
+                  managedMembership?.blockers.filter((blocker) =>
+                    Object.hasOwn(membershipBlockers, blocker),
+                  ) ?? []
+                return (
+                  <li key={member.id}>
+                    <div>
+                      <span className="user-content">
+                        <BreakableText>
+                          {member.user.name.trim() || t('Unnamed team member')}
+                        </BreakableText>
+                      </span>
+                      {own && (
+                        <>
+                          {' · '}
+                          <span className="badge">{t('You')}</span>
+                        </>
+                      )}
+                      {' · '}
+                      <span className="user-content">
+                        <BreakableText>
+                          {member.role
+                            .split(',')
+                            .map((value) => {
+                              const role = value.trim()
+                              return Object.hasOwn(labels, role) ? labels[role] : role
+                            })
+                            .join(', ')}
+                        </BreakableText>
+                      </span>
+                      {managedMembership && (
+                        <>
+                          {' · '}
+                          <span className="badge">{t('Managed by your identity provider')}</span>
+                        </>
+                      )}
                     </div>
-                  )}
-                  <TeamMemberRoleButton
-                    key={`${organizationId}:${member.id}:${role}:${currentUserId}`}
-                    organizationId={organizationId}
-                    member={member}
-                    role={role}
-                    currentUserId={currentUserId}
-                    disabled={reviewOpen || selectedMember !== null || roleReviewOpen}
-                    onReviewChange={setRoleReviewOpen}
-                    onChanged={(updated) =>
-                      update((data) => ({
-                        ...data,
-                        members: data.members.map((item) =>
-                          item.id === updated.id ? { ...item, role: updated.role } : item,
-                        ),
-                      }))
-                    }
-                    onReload={onReload}
-                  />
-                  <RemoveMemberButton
-                    member={member}
-                    role={role}
-                    currentUserId={currentUserId}
-                    disabled={reviewOpen || selectedMember !== null || roleReviewOpen}
-                    onSelect={(target, opener) => {
-                      removalOpener.current = opener
-                      setSelectedMember(target)
-                    }}
-                  />
-                  <MemberReadiness
-                    health={
-                      readiness.status === 'ready' ? readiness.data.get(member.id) : undefined
-                    }
-                    status={readiness.status}
-                    own={member.userId === currentUserId}
-                    canManage={canManage}
-                  />
-                  {canManage && (
-                    <Link
-                      to={`${PATHS.eventTypes}?hostUserId=${encodeURIComponent(member.userId)}`}
-                    >
-                      {t('View hosted team events')}
-                    </Link>
-                  )}
-                </li>
-              ))}
+                    {canManage && member.user.email && (
+                      <div className="hint user-content">
+                        <BreakableText>{member.user.email}</BreakableText>
+                      </div>
+                    )}
+                    {blockers.length > 0 && (
+                      <ul className="hint">
+                        {blockers.map((blocker) => (
+                          <li key={blocker}>{t(membershipBlockers[blocker])}</li>
+                        ))}
+                      </ul>
+                    )}
+                    <TeamMemberRoleButton
+                      key={`${organizationId}:${member.id}:${role}:${currentUserId}`}
+                      organizationId={organizationId}
+                      member={member}
+                      role={role}
+                      currentUserId={currentUserId}
+                      disabled={reviewOpen || selectedMember !== null || roleReviewOpen}
+                      scimSuspended={blockers.includes('scim_suspension')}
+                      onReviewChange={setRoleReviewOpen}
+                      onChanged={(updated) =>
+                        update((data) => ({
+                          ...data,
+                          members: data.members.map((item) =>
+                            item.id === updated.id ? { ...item, role: updated.role } : item,
+                          ),
+                        }))
+                      }
+                      onReload={onReload}
+                    />
+                    <RemoveMemberButton
+                      member={member}
+                      role={role}
+                      currentUserId={currentUserId}
+                      disabled={reviewOpen || selectedMember !== null || roleReviewOpen}
+                      onSelect={(target, opener) => {
+                        removalOpener.current = opener
+                        setSelectedMember(target)
+                      }}
+                    />
+                    <MemberReadiness
+                      health={
+                        readiness.status === 'ready' ? readiness.data.get(member.id) : undefined
+                      }
+                      status={readiness.status}
+                      own={own}
+                      canManage={canManage}
+                    />
+                    {canManage && (
+                      <Link
+                        to={`${PATHS.eventTypes}?hostUserId=${encodeURIComponent(member.userId)}`}
+                      >
+                        {t('View hosted team events')}
+                      </Link>
+                    )}
+                  </li>
+                )
+              })}
             </ul>
           </>
         )}
