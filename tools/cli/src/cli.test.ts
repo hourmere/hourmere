@@ -582,7 +582,7 @@ describe('CLI transport and arguments', () => {
     ],
     [
       'boolean syntax',
-      ["value !== 'true' && value !== 'false'", 'false'],
+      ["if (value !== 'true' && value !== 'false') throw new CliError('invalid_options')", ''],
       (runner) =>
         verifyRedirectRejection(runner, [
           'update-event',
