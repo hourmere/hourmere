@@ -9,6 +9,7 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createTestTeam, createTestUser, type TestUser } from '@hourmere/scheduling/testing'
 import { sql } from 'kysely'
+import pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
 import { loadConfig } from './config.ts'
@@ -752,42 +753,58 @@ describe.skipIf(!databaseUrl)('SCIM Group resources', () => {
     expect(await updateEvents(original.id)).toHaveLength(1)
   })
 
-  it('refuses manual name collisions without exposing the other team and permits equal directory names', async () => {
-    const parent = await team('Name collision parent')
-    const child = await team('Collision subject')
-    const manual = await team('Private manual name')
+  it('renames to a shared name without consulting an unrelated tenant', async () => {
+    const parent = await team('Group name parent')
+    const child = await team('Mapped child')
+    const manualName = 'Private manual name'
+    const manual = await team(manualName)
     const sibling = await team('Mapped sibling')
     const token = await issue(parent.id)
-    const mapping = await reserve(token, child.id, 'name-collision')
+    const externalId = 'name-collision'
+    await reserve(token, child.id, externalId)
     await reserve(token, sibling.id, 'another-name')
-    const original = await create(token, groupBody('name-collision', 'Before name collision'))
+    const original = await create(token, groupBody(externalId, 'Before name collision'))
     await create(token, groupBody('another-name', 'Shared managed name'))
-    const path = `Groups/${original.id}`
-    const before = await scopedRows(mapping)
+    const path = `Groups/${original.id}?attributes=externalId`
 
-    const collision = '  pRiVaTe MaNuAl NaMe  '
-    const put = await call(app, token, path, {
-      method: 'PUT',
-      body: groupBody('name-collision', collision),
-    })
-    const patch = await call(app, token, path, {
-      method: 'PATCH',
-      body: patchBody({ op: 'replace', path: 'displayName', value: collision }),
-    })
-    const refused = await expectError(put, 409, 'uniqueness')
-    expect(await expectError(patch, 409, 'uniqueness')).toBe(refused)
-    expect(refused.toLowerCase()).not.toContain('private manual name')
-    expect(refused).not.toContain(manual.id)
-    expect(await storedName(manual.id)).toBe('Private manual name')
-    expect(await storedName(child.id)).toBe(original.displayName)
-    expect(await scopedRows(mapping)).toEqual(before)
-    expect(await updateEvents(original.id)).toEqual([])
+    async function rename(method: 'PUT' | 'PATCH', name: string) {
+      const value = `  ${name}  `
+      const body =
+        method === 'PUT'
+          ? groupBody(externalId, value)
+          : patchBody({ op: 'replace', path: 'displayName', value })
+      const queries = vi.spyOn(pg.Client.prototype, 'query')
+      try {
+        const response = await call(app, token, path, { method, body })
+        expect(response.status).toBe(200)
+        expect(response.headers.get('content-type')).toBe('application/scim+json')
+        expect(await response.json()).toEqual({
+          schemas: [GROUP],
+          id: original.id,
+          displayName: name,
+          externalId,
+        })
+        // The proposed name appears only in the write to the authorized child.
+        const nameStatements = queries.mock.calls.filter(
+          ([, parameters]: readonly unknown[]) =>
+            Array.isArray(parameters) && parameters.includes(name),
+        )
+        expect(nameStatements).toEqual([
+          ['update "auth"."organization" set "name" = $1 where "id" = $2', [name, child.id]],
+        ])
+        return queries.mock.calls.map(([statement]) => statement)
+      } finally {
+        queries.mockRestore()
+      }
+    }
 
-    const accepted = await call(app, token, path, {
-      method: 'PATCH',
-      body: patchBody({ op: 'replace', path: 'displayName', value: 'Shared managed name' }),
-    })
-    expect(accepted.status).toBe(200)
+    for (const method of ['PUT', 'PATCH'] as const) {
+      const shared = await rename(method, manualName)
+      expect(await storedName(child.id)).toBe(manualName)
+      expect(await rename(method, `Unused ${method} name`)).toEqual(shared)
+    }
+    expect(await storedName(manual.id)).toBe(manualName)
+    await rename('PATCH', 'Shared managed name')
     expect(await storedName(child.id)).toBe('Shared managed name')
     expect(await storedName(sibling.id)).toBe('Shared managed name')
   })

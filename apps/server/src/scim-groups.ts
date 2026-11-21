@@ -456,37 +456,6 @@ async function createGroup(db: Db, request: ScimResourceRequest): Promise<ScimRe
   }
 }
 
-async function checkManualName(db: Db, childId: string, displayName: string) {
-  const conflict = await db
-    .selectFrom('auth.organization as other_team')
-    .select('other_team.id')
-    .where('other_team.id', '!=', childId)
-    .where(sql<boolean>`lower(other_team.name) = lower(${displayName})`)
-    .where(({ not, exists, selectFrom }) =>
-      not(
-        exists(
-          selectFrom('personal_organizations')
-            .select('organization_id')
-            .whereRef('organization_id', '=', 'other_team.id'),
-        ),
-      ),
-    )
-    .where(({ not, exists, selectFrom }) =>
-      not(
-        exists(
-          selectFrom('scim_team_mappings as mapping')
-            .innerJoin('scim_groups as scim_group', 'scim_group.mapping_id', 'mapping.id')
-            .select('mapping.id')
-            .whereRef('mapping.live_child_organization_id', '=', 'other_team.id')
-            .where('mapping.suspended_at', 'is', null),
-        ),
-      ),
-    )
-    .limit(1)
-    .executeTakeFirst()
-  if (conflict) throw refuse(409, 'The requested Group name is unavailable.', 'uniqueness')
-}
-
 async function updateGroup(
   db: Db,
   request: ScimResourceRequest,
@@ -529,7 +498,6 @@ async function updateGroup(
             ? replacementName(body.value, request.base, row)
             : patchedName(body.value, row)
         if (name !== row.name) {
-          await checkManualName(trx, childId, name)
           await trx
             .updateTable('auth.organization')
             .set({ name })
