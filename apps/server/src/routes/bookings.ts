@@ -40,7 +40,6 @@ import { restTeamReadAccess } from '../sso-read-routes.ts'
 import { requireTeamRead } from '../sso-team-reads.ts'
 import { bookingWriteAccess, EXPECTED_ORGANIZATION_HEADER } from '../team-management.ts'
 import { PublicBranding } from './public-branding.ts'
-import { StoredRoutingFormQuestion } from './routing-forms.ts'
 
 // Schemas shared with the public routes (public.ts).
 
@@ -236,6 +235,18 @@ export const Booking = z
   })
   .openapi('Booking')
 
+// Historical question and option IDs use the full PostgreSQL UUID format.
+const StoredRoutingLabel = { id: z.guid(), label: z.string() }
+const StoredRoutingQuestion = z.discriminatedUnion('type', [
+  z.object({ ...StoredRoutingLabel, required: z.boolean(), type: z.enum(['short_text', 'email']) }),
+  z.object({
+    ...StoredRoutingLabel,
+    required: z.boolean(),
+    type: z.literal('select'),
+    options: z.array(z.object(StoredRoutingLabel)),
+  }),
+])
+
 const BookingRouting = z
   .object({
     formId: z.guid(),
@@ -243,7 +254,7 @@ const BookingRouting = z
     versionNumber: z.number().int().positive(),
     matchedRuleId: z.union([z.guid(), z.literal('fallback')]),
     resolvedRuleId: z.union([z.guid(), z.literal('fallback')]),
-    questions: z.array(StoredRoutingFormQuestion),
+    questions: z.array(StoredRoutingQuestion),
     answers: z.record(z.string(), z.string()).openapi({
       description:
         'Original answers keyed by question UUID. Select answers are option UUIDs with labels in the stored questions.',

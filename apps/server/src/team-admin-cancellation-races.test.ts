@@ -56,7 +56,6 @@ import * as rateLimit from './rate-limit.ts'
 import { publicBookingAuditOrigin } from './rest-scopes.ts'
 import { bookingRoutes } from './routes/bookings.ts'
 import { PublicBranding } from './routes/public-branding.ts'
-import { StoredRoutingFormQuestion } from './routes/routing-forms.ts'
 import { teamBookingRoutes } from './routes/team-bookings.ts'
 import * as management from './team-management.ts'
 
@@ -125,7 +124,6 @@ async function guestRoutesCopy(before: string, after: string): Promise<GuestRout
     {
       publicBookingAuditOrigin,
       PublicBranding,
-      StoredRoutingFormQuestion,
       createRoute,
       z,
       ...calendars,
