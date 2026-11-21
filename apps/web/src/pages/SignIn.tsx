@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useRef, useState } from 'react'
+import { type FormEvent, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Navigate, useSearchParams } from 'react-router'
 import { type SocialProvider, sendSignInLink, startSocialSignIn } from '../api/auth.ts'
 import { api, unwrap } from '../api/client.ts'
@@ -15,6 +15,8 @@ import { safeNextPath, signInPath } from '../next-path.ts'
 import { PATHS } from '../paths.ts'
 import { emailError } from '../public/validation.ts'
 import { PageStatus, useSession } from '../session.tsx'
+import { oidcAttemptId } from './sso/member-protocol.ts'
+import { ssoAuthorizationUrl } from './sso/setup.ts'
 
 const PROVIDERS: SocialProvider[] = ['google', 'microsoft']
 
@@ -100,17 +102,27 @@ export function SignInPage() {
   const { state } = useSession()
   const [params] = useSearchParams()
   const next = safeNextPath(params.get('next'))
+  const sso = params.getAll('sso')
+  const requestedProvider = sso.length === 1 ? oidcAttemptId(sso[0]) : null
   if (state.status === 'loading') return <PageStatus>{t('Loading…')}</PageStatus>
   if (state.status === 'signed-in') return <Navigate to={next} replace />
   const expired = state.status === 'signed-out' && state.reason === 'expired'
-  return <SignInForm next={next} expired={expired} />
+  return <SignInForm next={next} expired={expired} requestedProvider={requestedProvider} />
 }
 
 /**
  * `next`: where to land once signed in, already checked to be a path on this site.
  * `expired`: the session ended while the app was open (not on a first visit).
  */
-function SignInForm({ next, expired }: { next: string; expired: boolean }) {
+function SignInForm({
+  next,
+  expired,
+  requestedProvider,
+}: {
+  next: string
+  expired: boolean
+  requestedProvider: string | null
+}) {
   const { t, text, ui } = useI18n()
 
   const [params, setParams] = useSearchParams()
@@ -120,6 +132,14 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
   }))
   const [email, setEmail] = useState('')
   const [redirecting, setRedirecting] = useState<SocialProvider | null>(null)
+  const [openingSso, setOpeningSso] = useState(false)
+  const ssoRequest = useRef<{
+    controller: AbortController
+    providerId: string
+    next: string
+  } | null>(null)
+  const ssoButton = useRef<HTMLButtonElement>(null)
+  const restoreSsoFocus = useRef(false)
   const [resend, setResend] = useState<ResendState>('idle')
   const resendInFlight = useRef(false)
   const resendButton = useRef<HTMLButtonElement>(null)
@@ -130,6 +150,29 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
   const submitButton = useRef<HTMLButtonElement>(null)
   const restoreSubmitFocus = useRef(false)
   const focusEmail = useRef(false)
+
+  const ssoProvider =
+    instance.status === 'ready' && instance.data.ssoOidcEnabled === true ? requestedProvider : null
+
+  useLayoutEffect(() => () => ssoRequest.current?.controller.abort(), [])
+  useLayoutEffect(() => {
+    const pending = ssoRequest.current
+    if (!pending || (pending.providerId === ssoProvider && pending.next === next)) return
+    pending.controller.abort()
+    ssoRequest.current = null
+    setOpeningSso(false)
+  }, [next, ssoProvider])
+  useEffect(() => {
+    if (!ssoProvider) return
+    function restoreAfterProvider(event: PageTransitionEvent) {
+      if (!event.persisted || !ssoRequest.current) return
+      ssoRequest.current.controller.abort()
+      ssoRequest.current = null
+      setOpeningSso(false)
+    }
+    window.addEventListener('pageshow', restoreAfterProvider)
+    return () => window.removeEventListener('pageshow', restoreAfterProvider)
+  }, [ssoProvider])
 
   // The error was read into state above; take it out of the address bar so a reload or a
   // bookmark does not show it again.
@@ -161,6 +204,12 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
     if (document.activeElement === document.body) resendButton.current?.focus()
     restoreResendFocus.current = false
   }, [resend])
+
+  useEffect(() => {
+    if (openingSso || !restoreSsoFocus.current) return
+    if (document.activeElement === document.body) ssoButton.current?.focus()
+    restoreSsoFocus.current = false
+  }, [openingSso])
 
   // Better Auth comes back here (keeping `next`) when the link or the provider fails.
   const redirects = { callbackURL: next, errorCallbackURL: signInPath(next) }
@@ -202,6 +251,34 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
       setPhase({
         kind: 'form',
         error: msg('Could not start sign-in. {0}', { '0': errorMessage(err) }),
+      })
+    }
+  }
+
+  async function continueWithSso() {
+    if (!ssoProvider || ssoRequest.current) return
+    const controller = new AbortController()
+    ssoRequest.current = { controller, providerId: ssoProvider, next }
+    restoreSsoFocus.current = document.activeElement === ssoButton.current
+    setOpeningSso(true)
+    setPhase({ kind: 'form', error: null })
+    try {
+      const { url, redirect } = await unwrap(
+        api.POST('/api/auth/sign-in/sso', {
+          body: { providerId: ssoProvider, intent: 'sign_in', returnTo: next },
+          signal: controller.signal,
+        }),
+      )
+      if (controller.signal.aborted) return
+      if (redirect !== true) throw new Error('Invalid SSO sign-in response')
+      goTo(ssoAuthorizationUrl(url))
+    } catch {
+      if (controller.signal.aborted) return
+      ssoRequest.current = null
+      setOpeningSso(false)
+      setPhase({
+        kind: 'form',
+        error: msg('Single sign-on is unavailable. Try again or use another sign-in method.'),
       })
     }
   }
@@ -297,7 +374,7 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
     )
   }
 
-  const busy = phase.kind === 'sending' || redirecting !== null
+  const busy = phase.kind === 'sending' || redirecting !== null || openingSso
   return (
     <main className="centered">
       <div className="card">
@@ -353,7 +430,7 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
             {phase.kind === 'sending' ? t('Sending…') : t('Email me a sign-in link')}
           </button>
         </form>
-        {providers.length > 0 && (
+        {(providers.length > 0 || ssoProvider) && (
           <>
             <p className="divider">
               <span>{t('or')}</span>
@@ -368,6 +445,17 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
                   onClick={() => continueWith(p)}
                 />
               ))}
+              {ssoProvider && (
+                <button
+                  ref={ssoButton}
+                  type="button"
+                  className="button button-block button-wrap"
+                  disabled={busy}
+                  onClick={() => void continueWithSso()}
+                >
+                  {openingSso ? t('Opening single sign-on…') : t('Sign in with single sign-on')}
+                </button>
+              )}
             </div>
             {providers.includes('google') && (
               <p className="fine-print" id="google-sign-in-explanation">

@@ -43,6 +43,10 @@ export const SignInPage = page(
   () => import('./pages/SignIn.tsx'),
   (m) => m.SignInPage,
 )
+export const MailboxProofPage = page(
+  () => import('./pages/sso/MailboxProof.tsx'),
+  (module) => module.MailboxProofPage,
+)
 export const AcceptInvitationPage = page(
   () => import('./pages/AcceptInvitation.tsx'),
   (m) => m.AcceptInvitationPage,

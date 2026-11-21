@@ -548,4 +548,16 @@ export const common = {
     '请先完成团队 SSO 验证，再重试。如果你已批准此连接，请绑定其 SSO 委托后继续。',
   // Routing continuation booking
   'Open the original form to request a new booking link.': '请打开原表单，获取新的预约链接。',
+  // Team member single sign-on
+  'Sign in with single sign-on': '使用单点登录',
+  'Opening single sign-on…': '正在打开单点登录…',
+  'Single sign-on is unavailable. Try again or use another sign-in method.':
+    '暂时无法使用单点登录。请重试，或改用其他登录方式。',
+  'Verify your email': '验证你的邮箱',
+  'To continue, sign in with your usual method or use a current team invitation.':
+    '若要继续，请使用平时的方式登录，或通过仍有效的团队邀请加入。',
+  'Return to the tab where you requested verification to continue.':
+    '请返回发起验证的标签页继续操作。',
+  'Copy the link from your email and paste it into the tab where you requested verification.':
+    '请从邮件中复制验证链接，并粘贴到发起验证的标签页。',
 } as const

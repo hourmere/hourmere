@@ -33,6 +33,14 @@ import {
   usesTeamRoutingFormManagerAuditSpace,
 } from './routing-form-manager-audit.ts'
 import {
+  isSsoMemberAuditPage,
+  isSsoMemberSettingsAuditPage,
+  leaveSsoMemberAudit,
+  openSsoMemberAuditPage,
+  type SsoMemberAuditPageId,
+  ssoMemberAuditPages,
+} from './sso-member-audit.ts'
+import {
   isSsoSetupAuditPage,
   leavePendingSsoSetupAudit,
   openSsoSetupAuditPage,
@@ -90,6 +98,7 @@ export const auditPages = [
   ...workflowEditorAuditPages,
   ...workflowRunHistoryAuditPages,
   ...ssoSetupAuditPages,
+  ...ssoMemberAuditPages,
   { id: 'host', title: 'Public host' },
   { id: 'booking', title: 'Public booking' },
   { id: 'booking-form', title: 'Booking form' },
@@ -267,9 +276,20 @@ export async function openAuditPage(
     await leavePendingWorkflowEditorAudit(page, app.url)
     await leavePendingWorkflowRunHistoryAudit(page, app.url)
     await leavePendingSsoSetupAudit(page, app.url)
+    await leaveSsoMemberAudit(page, app.url)
     // Earlier audit states create real bookings; pin the calendar and list filters
     // before navigation so later pages never inherit wall-clock-dependent rows.
     await page.clock.setFixedTime(new Date(AUDIT_NOW))
+    if (isSsoMemberAuditPage(id)) {
+      const signedIn = isSsoMemberSettingsAuditPage(id)
+      await app.auditSignIn(signedIn, locale, signedIn ? 'team' : undefined)
+      await page.addInitScript(prepareAuditLocale, locale)
+      const path = await openSsoMemberAuditPage(page, app, id, locale === 'zh-CN' ? locale : 'en')
+      verifyAuditPath(page.url(), path)
+      await page.evaluate(() => window.scrollTo(0, 0))
+      await page.evaluate(settleAuditLayout)
+      return
+    }
     if (isSsoSetupAuditPage(id)) {
       await app.auditSignIn(true, locale, 'team')
       await page.addInitScript(prepareAuditLocale, locale)
@@ -354,6 +374,7 @@ export async function openAuditPage(
         | PollAuditPageId
         | RoutingFormAuditPageId
         | RoutingFormManagerAuditPageId
+        | SsoMemberAuditPageId
         | SsoSetupAuditPageId
         | WorkflowAuditPageId
         | WorkflowEditorAuditPageId

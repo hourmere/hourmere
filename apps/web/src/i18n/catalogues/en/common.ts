@@ -572,4 +572,16 @@ export const common = {
   // Routing continuation booking
   'Open the original form to request a new booking link.':
     'Open the original form to request a new booking link.',
+  // Team member single sign-on
+  'Sign in with single sign-on': 'Sign in with single sign-on',
+  'Opening single sign-on…': 'Opening single sign-on…',
+  'Single sign-on is unavailable. Try again or use another sign-in method.':
+    'Single sign-on is unavailable. Try again or use another sign-in method.',
+  'Verify your email': 'Verify your email',
+  'To continue, sign in with your usual method or use a current team invitation.':
+    'To continue, sign in with your usual method or use a current team invitation.',
+  'Return to the tab where you requested verification to continue.':
+    'Return to the tab where you requested verification to continue.',
+  'Copy the link from your email and paste it into the tab where you requested verification.':
+    'Copy the link from your email and paste it into the tab where you requested verification.',
 } as const
