@@ -46,6 +46,7 @@ import { createTestDatabase, type TestDatabase } from './testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const migration = '0073_scim_identity.sql'
+const dependentMigration = '0181_scim_team_hierarchy.sql'
 // Adverse order for the binding cleanup: the connection cascade before the token cascade.
 // No entry is optional, because the coverage run never runs this order.
 const bindingCleanupOrder = [
@@ -92,7 +93,7 @@ describe.skipIf(!serverUrl)('SCIM identity storage', () => {
     const directory = await mkdtemp(join(tmpdir(), 'hourmere-scim-identity-controls-'))
     try {
       for (const file of (await readdir(migrationsDir)).filter(
-        (f) => f.endsWith('.sql') && f !== migration,
+        (f) => f.endsWith('.sql') && f !== migration && f !== dependentMigration,
       ))
         await copyFile(join(migrationsDir, file), join(directory, file))
       database = await createTestDatabase(serverUrl as string, directory)
