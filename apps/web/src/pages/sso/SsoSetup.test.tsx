@@ -83,6 +83,9 @@ describe('SSO setup while hard-off', () => {
       ).toBeNull()
       expect(screen.queryByRole('button', { name: /single sign-on|sso/i })).toBeNull()
       expect(screen.queryByRole('button', { name: activationControl })).toBeNull()
+      expect(screen.queryByRole('heading', { name: 'SSO enforcement' })).toBeNull()
+      expect(screen.queryByLabelText('Admission policy')).toBeNull()
+      expect(screen.queryByLabelText('Identity link')).toBeNull()
       expect(ssoCalls()).toEqual([])
     },
   )

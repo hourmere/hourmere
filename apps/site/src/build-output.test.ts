@@ -4,7 +4,6 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { JSDOM } from 'jsdom'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { isRoutingName } from '../../../scripts/routing-forms-names.ts'
 import { attr, checkBuiltLinks, elements } from '../scripts/check-links.ts'
 import { site } from './site.ts'
 
@@ -38,10 +37,10 @@ beforeAll(() => {
 }, 120_000)
 
 describe('built website', () => {
-  it('keeps routing guides out of production pages and the sidebar', () => {
+  it('publishes both routing guides in production and links them in the sidebar', () => {
     const pages = globSync('docs/**/*.html', { cwd: output })
-    expect(pages).toContain('docs/api-keys.html')
-    expect(pages.filter(isRoutingName)).toEqual([])
+    expect(pages).toContain('docs/routing-forms.html')
+    expect(pages).toContain('docs/routing-forms-api.html')
 
     const dom = new JSDOM(readFileSync(join(output, 'docs.html'), 'utf8'), {
       url: 'https://hourmere.com/docs',
@@ -52,8 +51,34 @@ describe('built website', () => {
         sidebar?.querySelectorAll<HTMLAnchorElement>('a[href]') ?? [],
         (link) => link.pathname,
       )
-      expect(links).toContain('/docs/api-keys')
-      expect(links.filter(isRoutingName)).toEqual([])
+      expect(links).toContain('/docs/routing-forms')
+      expect(links).toContain('/docs/routing-forms-api')
+    } finally {
+      dom.window.close()
+    }
+  })
+
+  it.each([
+    ['docs.html', '/docs/routing-forms'],
+    ['docs.html', '/docs/routing-forms-api'],
+    ['docs/routing-forms.html', '/docs/routing-forms-api'],
+    ['docs/routing-forms-api.html', '/docs/routing-forms'],
+    ['docs/cli.html', '/docs/routing-forms-api'],
+    ['docs/mcp.html', '/docs/routing-forms-api'],
+    ['docs/rest.html', '/docs/routing-forms-api'],
+    ['docs/api-keys.html', '/docs/routing-forms-api'],
+    ['docs/configuration.html', '/docs/routing-forms'],
+    ['docs/after-booking.html', '/docs/routing-forms'],
+  ])('links %s to %s in the rendered guide content', (file, target) => {
+    const dom = new JSDOM(readFileSync(join(output, file), 'utf8'), {
+      url: 'https://hourmere.com/docs',
+    })
+    try {
+      const links = Array.from(
+        dom.window.document.querySelectorAll<HTMLAnchorElement>('.sl-markdown-content a[href]'),
+        (link) => link.pathname,
+      )
+      expect(links).toContain(target)
     } finally {
       dom.window.close()
     }

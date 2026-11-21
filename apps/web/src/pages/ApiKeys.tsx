@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useId, useRef, useState } from 'react'
+import { type FormEvent, useEffect, useId, useMemo, useRef, useState } from 'react'
 import {
   API_KEY_NAME_MAX_LENGTH,
   type ApiKey,
@@ -22,6 +22,7 @@ import { useI18n } from '../i18n/runtime.tsx'
 import { msg, type UiText } from '../i18n/translate.ts'
 import { type Me, useMe } from '../session.tsx'
 import { useConfirmLeave, useUnsavedChanges } from '../unsaved-changes.tsx'
+import { SsoDelegation } from './sso/SsoDelegation.tsx'
 
 const DAY = 24 * 60 * 60
 
@@ -166,6 +167,25 @@ export function ApiKeysPage() {
       ? keys.data.organizations
       : new Map([[me.organization.id, me.organization.name]])
   const publicUrl = instance.status === 'ready' ? instance.data.publicUrl : undefined
+  const organizationId = me.organization.id
+  const delegationCredentials = useMemo(
+    () =>
+      keys.status === 'ready'
+        ? keys.data.keys
+            .filter(
+              (key) =>
+                key.metadata?.organizationId?.toLowerCase() === organizationId &&
+                key.enabled !== false &&
+                (key.expiresAt === null || Date.parse(key.expiresAt) > Date.now()),
+            )
+            .map(({ id, name, start, ssoDelegation }) => ({
+              id,
+              label: start ? `${name || t('Unnamed')} (${start}…)` : name || t('Unnamed'),
+              ssoDelegation,
+            }))
+        : [],
+    [keys, organizationId, t],
+  )
 
   useEffect(() => {
     if (keys.status !== 'ready') return
@@ -286,6 +306,8 @@ export function ApiKeysPage() {
             />
           ))}
       </section>
+
+      <SsoDelegation kind="api_key" credentials={delegationCredentials} reload={reload} />
 
       <section aria-labelledby="usage-heading">
         <h2 id="usage-heading">{t('Using a key')}</h2>
@@ -815,7 +837,7 @@ function ReplacementButton({
         aria-describedby={hint ? hintId : undefined}
         onClick={() => onReplace(apiKey)}
       >
-        {t('Create replacement')}
+        {t('Create a replacement')}
       </button>
       {hint && (
         <p id={hintId} className="hint">

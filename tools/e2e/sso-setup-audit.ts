@@ -21,6 +21,12 @@ export const ssoSetupAuditPages = [
   { id: 'sso-setup-conflict', title: 'SSO settings revision conflict' },
   { id: 'sso-provider-enable', title: 'Confirm enabling a tested provider' },
   { id: 'sso-enforcement-recovery-required', title: 'SSO enforcement blocked by recovery' },
+  { id: 'sso-enforcement-admission', title: 'Edit team SSO admission as an administrator' },
+  { id: 'sso-enforcement-forbidden', title: 'SSO policy without permission' },
+  { id: 'sso-enforcement-error', title: 'SSO policy with unknown readiness' },
+  { id: 'sso-identity-retire', title: 'Confirm retiring an identity link' },
+  { id: 'sso-identity-retire-forbidden', title: 'Administrator cannot retire an owner’s link' },
+  { id: 'sso-identity-unavailable', title: 'Identity links without a current summary' },
   { id: 'sso-proof-mailbox', title: 'Fresh proof with a mailbox verification link' },
   { id: 'sso-proof-step-up', title: 'Fresh proof with an identity provider' },
 ] as const
@@ -73,14 +79,20 @@ const enabledProvider: Provider = {
   enabled: true,
   testStatus: 'passed',
 }
+const linkId = '72900000-0000-4000-8000-000000000006'
+const targetLink = { id: '72900000-0000-4000-8000-000000000007', generation: 3 }
+const providerWithLinks = { ...enabledProvider, links: [{ id: linkId, generation: 1 }, targetLink] }
 const providerStates: Partial<Record<SsoSetupAuditPageId, Provider[]>> = {
   'sso-providers-empty': [],
   'sso-provider-enable': [{ ...provider, testStatus: 'passed' }],
   'sso-enforcement-recovery-required': [enabledProvider],
+  'sso-enforcement-admission': [enabledProvider],
+  'sso-identity-retire': [providerWithLinks],
+  'sso-identity-retire-forbidden': [providerWithLinks],
+  'sso-identity-unavailable': [providerWithLinks],
   'sso-proof-step-up': [provider, enabledProvider],
 }
 const proofAttemptId = '72900000-0000-4000-8000-000000000005'
-const linkId = '72900000-0000-4000-8000-000000000006'
 const proofExpires = '2030-01-07T10:10:00.000Z'
 const authorizationUrl = 'https://identity.hourmere.invalid/authorize'
 const challengeDomain = 'synthetic-cross-organization-domain-verification.hourmere.invalid'
@@ -101,6 +113,7 @@ async function mockSsoSetupAudit(page: Page, app: FixtureApp, state: SsoSetupAud
   const { teamOrganizationId } = await app.auditState()
   const stepUp = state === 'sso-proof-step-up'
   const recoveryRequired = state === 'sso-enforcement-recovery-required'
+  const retirement = state.startsWith('sso-identity-retire')
   const instance: Schemas['Instance'] = {
     hostedSignupUrl: 'https://hourmere.com',
     publicUrl: app.url,
@@ -114,6 +127,8 @@ async function mockSsoSetupAudit(page: Page, app: FixtureApp, state: SsoSetupAud
     (await route.request().headerValue('x-expected-organization-id')) === teamOrganizationId
   const contextChanged = (route: Route) =>
     route.fulfill({ status: 409, json: { error: 'organization_context_changed' } })
+  const forbidden = (route: Route) =>
+    route.fulfill({ status: 403, json: { error: 'team_management_access_denied' } })
   const policy: Schemas['SsoPolicy'] = {
     requireSso: stepUp,
     admission: 'invitation_only',
@@ -125,8 +140,7 @@ async function mockSsoSetupAudit(page: Page, app: FixtureApp, state: SsoSetupAud
     if (!(await expectedOrganization(route))) return contextChanged(route)
     if (state === 'sso-setup-loading') return
     if (state === 'sso-setup-error') return route.abort()
-    if (state === 'sso-setup-forbidden')
-      return route.fulfill({ status: 403, json: { error: 'team_management_access_denied' } })
+    if (state === 'sso-setup-forbidden') return forbidden(route)
     return route.fulfill({
       json: {
         data: providerStates[state] ?? [provider],
@@ -150,7 +164,11 @@ async function mockSsoSetupAudit(page: Page, app: FixtureApp, state: SsoSetupAud
   const policies = async (route: Route) => {
     const request = route.request()
     if (!(await expectedOrganization(route))) return contextChanged(route)
-    if (request.method() === 'GET') return route.fulfill({ json: policy })
+    if (request.method() === 'GET') {
+      if (state === 'sso-enforcement-forbidden') return forbidden(route)
+      if (state === 'sso-enforcement-error') return route.abort()
+      return route.fulfill({ json: policy })
+    }
     if (request.method() !== 'PUT' || !recoveryRequired) return route.abort()
     const body =
       request.postDataJSON() as operations['setSsoPolicy']['requestBody']['content']['application/json']
@@ -192,7 +210,7 @@ async function mockSsoSetupAudit(page: Page, app: FixtureApp, state: SsoSetupAud
       json: {
         ...caller,
         sso: {
-          requireSso: true,
+          requireSso: policy.requireSso,
           providers: [{ id, displayName, revision }],
           links: [{ id: linkId, providerId: id, generation: 1 }],
           attempts: [],
@@ -227,7 +245,29 @@ async function mockSsoSetupAudit(page: Page, app: FixtureApp, state: SsoSetupAud
     [`${app.url}/api/auth/sign-in/sso`, signIn],
     [`${app.url}/api/auth/sso/mailbox-proof/send`, sendProof],
   ]
-  if (stepUp) mocks.push([`${app.url}/api/v1/me`, me])
+  if (stepUp || retirement) mocks.push([`${app.url}/api/v1/me`, me])
+  if (state === 'sso-identity-retire-forbidden' || state === 'sso-enforcement-admission') {
+    mocks.push([
+      `${app.url}/api/auth/organization/get-active-member`,
+      async (route) => {
+        const response = await route.fetch()
+        if (!response.ok()) return route.fulfill({ response })
+        return route.fulfill({ response, json: { ...(await response.json()), role: 'admin' } })
+      },
+    ])
+  }
+  if (state === 'sso-identity-retire-forbidden') {
+    mocks.push([
+      `${app.url}/api/v1/team/sso/providers/${enabledProvider.id}/links/${targetLink.id}`,
+      async (route) => {
+        if (route.request().method() !== 'DELETE') return route.abort()
+        if (!(await expectedOrganization(route))) return contextChanged(route)
+        if (route.request().postDataJSON().expectedLinkGeneration !== targetLink.generation)
+          return route.abort()
+        return forbidden(route)
+      },
+    ])
+  }
   for (const [url, handler] of mocks) await page.route(url, handler)
   return {
     collection,
@@ -336,6 +376,40 @@ export async function openSsoSetupAuditPage(
         await text(
           'A current owner must accept recovery enrollment before you can require SSO.',
         ).waitFor()
+        break
+      case 'sso-enforcement-admission':
+        await main.getByLabel(copy('Admission policy'), { exact: true }).selectOption('jit')
+        await button(copy('Save admission policy')).waitFor()
+        break
+      case 'sso-enforcement-forbidden':
+        await text('SSO enforcement is unavailable in this team.').waitFor()
+        break
+      case 'sso-enforcement-error':
+        await text('Could not load SSO enforcement.').waitFor()
+        break
+      case 'sso-identity-retire':
+      case 'sso-identity-retire-forbidden': {
+        await main.getByLabel(copy('Identity link'), { exact: true }).selectOption(targetLink.id)
+        await button(copy('Retire identity link')).press('Enter')
+        const confirm = main
+          .getByRole('group', { name: copy('Retire this identity link?'), exact: true })
+          .getByRole('button', { name: copy('Retire identity link'), exact: true })
+        await confirm.waitFor()
+        if (state === 'sso-identity-retire-forbidden') {
+          await confirm.press('Enter')
+          await main
+            .getByRole('alert')
+            .filter({
+              hasText: copy(
+                'Could not retire this identity link. Only another team owner can retire an owner’s identity link.',
+              ),
+            })
+            .waitFor()
+        }
+        break
+      }
+      case 'sso-identity-unavailable':
+        await text('Identity links are unavailable.').waitFor()
         break
       case 'sso-proof-mailbox':
       case 'sso-proof-step-up':

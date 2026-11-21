@@ -1188,8 +1188,9 @@ If another policy or recovery change intervenes, a stale revision returns
 
 An accepted recovery owner starts browser recovery with `POST /api/v1/team/sso/recovery/use`.
 Send the current `policyRevision` as `expectedRevision` and the recovery team's ID as
-`X-Expected-Organization-Id` from the instance origin. The team can differ from the
-active space. If the revision changes, the request returns `409 sso_configuration_changed`.
+`X-Expected-Organization-Id` from the instance origin. The team must require SSO and
+can differ from the active space. If the revision changes, the request returns
+`409 sso_configuration_changed`.
 Reload the current summary before starting again.
 Complete the mailbox challenge and retry with `proofAttemptId`. A successful `204` grants
 authority to that browser and session for the remainder of the mailbox proof window. It
@@ -1205,7 +1206,7 @@ current recovery ownership. Both protocols remain hard-off and the new route ret
 `404 sso_disabled`.
 
 已接受提名的恢复所有者可在浏览器会话中启动恢复。请求须以 `X-Expected-Organization-Id`
-指定恢复目标团队，并以 `expectedRevision` 传入当前策略版本。目标团队可以与当前空间不同。
+指定恢复目标团队，并以 `expectedRevision` 传入当前策略版本。目标团队必须启用强制单点登录，可以与当前空间不同。
 策略版本已变化时返回 `409 sso_configuration_changed`，请刷新摘要后重试。验证自己的
 邮箱后使用同一个证明重试。成功返回 `204`，记录审计事件并通知团队所有者。在其他空间
 恢复时，后续读写请求须带上同一个团队请求头。
@@ -1625,6 +1626,36 @@ Hourmere 会在提交时核验这些条件。
 提示框，再验证链接并选择**继续**来提交更改。如果需要通过单点登录验证身份，请在新标签页
 打开身份提供方，完成验证后返回原标签页并选择**继续**。部分提供方还需要通过邮箱验证。
 请在验证完成前保留原设置标签页，并留在同一个团队。
+
+### Set admission, retire links and manage delegations
+
+In **SSO enforcement**, owners and administrators can choose **Invitation only**
+or **Just-in-time admission**. Enabling just-in-time admission needs a verified
+team domain. Complete the identity verification the form requests before saving.
+
+Under a provider, **Identity links** lets an owner or administrator retire a member's
+link. Verify the request separately and match the link ID the member sees under
+**Settings → Your team sign-in**. Only another owner can retire an owner's link.
+Members use **Your team sign-in** to unlink their own account. To link again after
+retirement, sign in with the usual account method and choose the provider there.
+
+Use **API keys** or **Connected apps** in the credential's team space to manage
+SSO delegation. Binding needs the current trust generation from the team policy
+read and a fresh SSO verification. The existing policy read is available to owners
+and administrators. A session that cannot read it can still revoke its own existing
+delegation. The form displays the delegation expiration in local time.
+Both protocols remain hard-off in production, where these controls are hidden.
+
+在**强制单点登录**中，团队所有者和管理员可以选择**仅限受邀者**或**即时入组**。
+启用即时入组前须验证团队域名。保存更改前，请按界面提示完成身份验证。
+
+在身份提供方下的**身份关联**中，所有者和管理员可以解除成员的关联。请先通过其他渠道核实请求，
+再核对成员在**设置 → 你的团队登录方式**中看到的关联 ID。只有其他所有者可以解除所有者的关联。
+成员可以在**你的团队登录方式**中解除自己的关联。如需重新关联，请用原来的方式登录，再回到此处选择提供方。
+
+在凭据所属的团队空间中，打开 **API 密钥**或**已连接的应用**，管理单点登录委托。绑定需要从团队策略
+读取当前信任代数，并重新验证单点登录。现有策略接口仅向所有者和管理员开放。无法读取策略的会话仍可
+撤销本人已有的委托。页面以本地时间显示到期时间。两种协议在生产环境中均保持关闭，这些操作不会显示。
 
 ## Self-hosting and local acceptance
 

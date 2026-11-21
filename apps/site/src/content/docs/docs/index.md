@@ -33,6 +33,10 @@ The website at hourmere.com is separate from your Hourmere instance.
   parameter, privacy and embed permissions.
 - [One-time booking links](/docs/one-time-links): create, list and revoke private links
   through the editor, REST, MCP or CLI, with the booking URL shown once.
+- Use [routing forms](/docs/routing-forms) to ask questions and direct each invitee to a
+  booking or a message. Routing is off by default. Enable it with
+  `ROUTING_FORMS_ENABLED=true` and a server restart. For REST, MCP and CLI examples,
+  see [routing forms for agents](/docs/routing-forms-api).
 - [Reminders and follow-ups](/docs/reminders-and-follow-ups): choose email times, recipients
   and optional host notes, with delivery limits and configuration examples.
 - [Troubleshoot availability](/docs/availability-troubleshooting): see why a time cannot be

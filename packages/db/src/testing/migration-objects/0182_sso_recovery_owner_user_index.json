@@ -1,0 +1,6 @@
+{
+  "migration": "0182_sso_recovery_owner_user_index.sql",
+  "objects": {
+    "index public.sso_recovery_owners.sso_recovery_owners_user_id": "CREATE INDEX sso_recovery_owners_user_id ON public.sso_recovery_owners USING btree (user_id)"
+  }
+}

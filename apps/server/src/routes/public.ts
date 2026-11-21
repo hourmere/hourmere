@@ -364,7 +364,7 @@ export function publicRoutes({
         tags: ['Public'],
         summary: 'Book a slot through a routing continuation',
         description:
-          'Books the event selected by the private route capability. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key. Routing is currently hard-off. An exact committed replay with the same capability, Idempotency-Key and booking authority still succeeds after expiry or disablement.',
+          'Books the event selected by the private route capability. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key. New routed bookings require ROUTING_FORMS_ENABLED=true (off by default). An exact committed replay with the same capability, Idempotency-Key and booking authority still succeeds after expiry or disablement.',
         security: routedSecurity,
         middleware: [bookLimit, routeBodyLimit(BOOKING_BODY_LIMIT)],
         request: {

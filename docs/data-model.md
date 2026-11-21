@@ -1129,7 +1129,8 @@ and inserting a row again.
   accepted recovery status and audit the change in the membership transaction. Re-joining
   or regaining the owner role does not restore that status. A team enforcing SSO must
   retain one current recovery owner. Both records are immutable. A team has at most one
-  pending nomination per owner and one recovery record per owner.
+  pending nomination per owner and one recovery record per owner. The `user_id` index
+  supports finding a caller's accepted recovery teams across organizations.
 
 `sso-storage-coverage.test.ts` drops every constraint, index, trigger and NOT NULL column
 through `checkConstraintCoverage` (expectation file
