@@ -22,6 +22,7 @@ import {
   dispatchConferenceNotifications,
   sendBookingNotification,
 } from '../../packages/notifications/src/index.ts'
+import { deliverMeetingPollEmail } from '../../packages/notifications/src/meeting-polls.ts'
 import { deliverWaitlistEmail } from '../../packages/notifications/src/waitlist.ts'
 import { validateSuccessRedirect } from '../../packages/scheduling/src/success-redirect.ts'
 import { createFixtures } from '../../packages/scheduling/src/testing.ts'
@@ -63,6 +64,7 @@ export interface FixtureApp {
   waitlistState: () => Promise<{ states: string[]; acceptedEmails: number; messages: number }>
   auditState: () => Promise<AuditFixtureState>
   auditPollState: (state: PollAuditState) => ReturnType<typeof seedPollAuditData>
+  meetingPollVerificationLink: (email: string) => Promise<URL>
   screenshotState: () => Promise<ScreenshotFixtureState>
   auditSignIn: (signedIn: boolean, locale?: string, space?: 'team') => Promise<void>
   auditOAuthQuery: () => Promise<string>
@@ -529,6 +531,33 @@ export const test = base.extend<{
             title: AUDIT_TITLE,
           })
           return seedPollAuditData(db, pollHost, eventTypeId, authSecret, state)
+        },
+        meetingPollVerificationLink: async (email) => {
+          const delivery = await db
+            .selectFrom('meeting_poll_deliveries as delivery')
+            .innerJoin('meeting_poll_voters as voter', 'voter.id', 'delivery.voter_id')
+            .select('delivery.id')
+            .where('voter.email', '=', email)
+            .where('delivery.kind', '=', 'verification')
+            .where('delivery.state', '=', 'pending')
+            .executeTakeFirstOrThrow()
+          await deliverMeetingPollEmail(
+            {
+              db,
+              secret: authSecret,
+              meetingPollSecret: authSecret,
+              publicUrl: url,
+              smtpConfigured: true,
+              mailer: { send: async (message) => void sent.push(message) },
+            },
+            { id: delivery.id },
+          )
+          const link = sent
+            .filter((message) => message.to === email)
+            .flatMap((message) => message.text.split('\n'))
+            .find((line) => line.startsWith(`${url}/poll/voter#`))
+          if (!link) throw new Error('Expected a poll verification link in the fixture mail sink')
+          return new URL(link)
         },
         setEmbedSnippet: (snippet) => {
           embedSnippet = snippet
