@@ -11,6 +11,7 @@ import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const migration = '0066_scim_provisioning_tokens.sql'
+const dependentMigrations = ['0073_scim_identity.sql', '0181_scim_team_hierarchy.sql']
 async function records(pool: pg.Pool) {
   const tables = (
     await pool.query<{ schema: string; name: string }>(
@@ -27,15 +28,15 @@ async function records(pool: pg.Pool) {
   return result
 }
 // The predecessor is every other migration in the current set, including later ones such as
-// 0070: deployed instances apply 0066 out of order. 0073 explicitly depends on 0066,
-// so apply it only after 0066 is installed, then compare with a complete fresh install.
+// 0070: deployed instances apply 0066 out of order. Apply the dependent SCIM
+// migrations after 0066, then compare with a complete fresh install.
 async function predecessor() {
   const directory = await mkdtemp(join(tmpdir(), 'hourmere-scim-predecessor-'))
   const early = await mkdtemp(join(tmpdir(), 'hourmere-scim-early-'))
   let database: TestDatabase | undefined
   try {
     for (const f of (await readdir(migrationsDir)).filter(
-      (f) => f.endsWith('.sql') && f !== migration && f !== '0073_scim_identity.sql',
+      (f) => f.endsWith('.sql') && f !== migration && !dependentMigrations.includes(f),
     )) {
       await copyFile(join(migrationsDir, f), join(directory, f))
       if (f.slice(0, 4) <= '0012') await copyFile(join(migrationsDir, f), join(early, f))
@@ -67,11 +68,10 @@ describe.skipIf(!serverUrl)('SCIM token migration', () => {
       expect(await records(database.pool)).toEqual(before)
       expect(await runMigrations(database.pool, directory)).toEqual([])
       expect(await records(database.pool)).toEqual(before)
-      await copyFile(
-        join(migrationsDir, '0073_scim_identity.sql'),
-        join(directory, '0073_scim_identity.sql'),
-      )
-      await runMigrations(database.pool, directory)
+      for (const file of dependentMigrations) {
+        await copyFile(join(migrationsDir, file), join(directory, file))
+      }
+      expect(await runMigrations(database.pool, directory)).toEqual(dependentMigrations)
       fresh = await createTestDatabase(serverUrl as string)
       expect(await snapshotSchema(database.pool)).toEqual(await snapshotSchema(fresh.pool))
       await expect(

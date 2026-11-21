@@ -63,6 +63,11 @@ export function MailboxProofPage() {
   const read = useRef(hash)
   const heading = useRef<HTMLHeadingElement>(null)
   const oidcAvailable = instance.status === 'ready' && instance.data.ssoOidcEnabled === true
+  const confirmationAvailable =
+    oidcAvailable ||
+    (instance.status === 'ready' &&
+      instance.data.scimResourcesEnabled === true &&
+      !!visit.entry?.token)
   usePageTitle('Verify your email')
 
   useLayoutEffect(() => {
@@ -93,11 +98,11 @@ export function MailboxProofPage() {
         </h1>
         {hash || instance.status === 'loading' ? (
           <p role="status">{t('Loading…')}</p>
-        ) : oidcAvailable && visit.entry ? (
+        ) : confirmationAvailable && visit.entry ? (
           <MailboxAttempt key={visit.number} entry={visit.entry} heading={heading} />
         ) : (
           <>
-            <p role="status">{t(oidcAvailable ? invalidLink : unavailable)}</p>
+            <p role="status">{t(confirmationAvailable ? invalidLink : unavailable)}</p>
             <Link to={PATHS.signIn}>{t('Sign in')}</Link>
           </>
         )}

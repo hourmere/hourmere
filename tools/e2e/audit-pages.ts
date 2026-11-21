@@ -34,6 +34,13 @@ import {
   usesTeamRoutingFormManagerAuditSpace,
 } from './routing-form-manager-audit.ts'
 import {
+  isScimMappingAuditPage,
+  leavePendingScimMappingAudit,
+  openScimMappingAuditPage,
+  type ScimMappingAuditPageId,
+  scimMappingAuditPages,
+} from './scim-mapping-audit.ts'
+import {
   isSsoMemberAuditPage,
   isSsoMemberSettingsAuditPage,
   leaveSsoMemberAudit,
@@ -100,6 +107,7 @@ export const auditPages = [
   ...workflowRunHistoryAuditPages,
   ...ssoSetupAuditPages,
   ...ssoMemberAuditPages,
+  ...scimMappingAuditPages,
   { id: 'host', title: 'Public host' },
   { id: 'booking', title: 'Public booking' },
   { id: 'booking-form', title: 'Booking form' },
@@ -301,9 +309,19 @@ export async function openAuditPage(
     await leavePendingWorkflowRunHistoryAudit(page, app.url)
     await leavePendingSsoSetupAudit(page, app.url)
     await leaveSsoMemberAudit(page, app.url)
+    await leavePendingScimMappingAudit(page, app.url)
     // Earlier audit states create real bookings; pin the calendar and list filters
     // before navigation so later pages never inherit wall-clock-dependent rows.
     await page.clock.setFixedTime(new Date(AUDIT_NOW))
+    if (isScimMappingAuditPage(id)) {
+      await app.auditSignIn(true, locale, 'team')
+      await page.addInitScript(prepareAuditLocale, locale)
+      const path = await openScimMappingAuditPage(page, app, id, locale === 'zh-CN' ? locale : 'en')
+      verifyAuditPath(page.url(), path)
+      await page.evaluate(() => window.scrollTo(0, 0))
+      await page.evaluate(settleAuditLayout)
+      return
+    }
     if (isSsoMemberAuditPage(id)) {
       const signedIn = isSsoMemberSettingsAuditPage(id)
       await app.auditSignIn(signedIn, locale, signedIn ? 'team' : undefined)
@@ -398,6 +416,7 @@ export async function openAuditPage(
         | PollAuditPageId
         | RoutingFormAuditPageId
         | RoutingFormManagerAuditPageId
+        | ScimMappingAuditPageId
         | SsoMemberAuditPageId
         | SsoSetupAuditPageId
         | WorkflowAuditPageId

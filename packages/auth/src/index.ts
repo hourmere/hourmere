@@ -47,6 +47,7 @@ export {
   type ApiKeyRestOperation,
   apiKeyOperation,
   type ClassifiedApiKeyOperation,
+  SCIM_MAPPING_SCOPE_OPERATIONS,
 } from './api-key-operations.ts'
 export { InvalidApiKeyError, requireActiveApiKey } from './api-key-principal.ts'
 export {
@@ -490,6 +491,7 @@ export function createAuth({
         enqueueInvitationEmail,
         ssoCapabilities,
         teamSso.before,
+        scimResourcesEnabled,
       ),
     },
     plugins: [

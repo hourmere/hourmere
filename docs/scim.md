@@ -560,29 +560,183 @@ source) against the bounded wait and its retry.
   pending invitations.
 
 
-## Groups to teams: required schema decision
+## Groups to teams hierarchy authorization
 
-Today a Hourmere team **is an `auth.organization`**, not a child object inside one.
-Therefore an organization token cannot safely create arbitrary sibling organizations or
-claim existing teams by `displayName`. Calling a roster subset a team would be misleading.
+### Decisions
 
-**Decision to confirm before Groups implementation:** introduce an explicit parent/child
-organization hierarchy and connection-to-child management relation. A parent provisioning
-connection may govern only child team organizations explicitly linked beneath its scope,
-never unrelated sibling or personal organizations. Define inherited administration,
-parent/child owner recovery, data visibility, billing-independent membership and removal
-semantics before exposing Groups. This prerequisite does not broaden current token scope.
+- The hierarchy has one level of child teams. Each team remains a separate
+  `auth.organization` with its own members, data and administration. Permissions never inherit.
+- One explicit mapping authorizes a parent's SCIM connection to manage a child's name and
+  directory-managed roster. Both teams' current owners approve each ordinary link or unlink
+  using fresh proof for their own team.
+- Local owners and admins retain their own roles and recovery paths. An instance operator
+  can stop directory authority for one mapping offline and detach it when departure is safe.
+- Existing manual memberships stay manual. Group retirement and unlink preserve the teams
+  and their history. Team deletion requires all affected links to be detached first.
 
-Each SCIM Group then owns one explicitly created/linked child team, identified by a stable
-mapping ID. Names are labels, never authority: collision with a manual team returns 409;
-no automatic adoption. Linking a pre-existing eligible child requires explicit owner
-approval through the future mapping controls. Mark team name and managed membership as
-SCIM-owned; reject conflicting manual changes while keeping unrelated team settings under
-ordinary administration. Retain local owner/admin recovery access separately; no Group operation may
-deactivate, delete or demote either role. Deleting a group detaches managed memberships
-and archives its managed mapping, preserving team bookings/history and requiring the
-privileged-member/departure checks. Nested Groups and indirect/transitive membership are
-unsupported: reject Group-as-member references. Group membership never grants owner or admin.
+SCIM resources remain hard-off during design.
+
+### Scope and topology
+
+A parent can link multiple children. A child has at most one live parent and one live Group
+mapping, including while the mapping awaits Group creation. The link and mapping have the
+same lifetime and bind the immutable parent and child organization IDs to the parent's stable
+provisioning connection. Reject a personal organization on either side, a self-link, a cycle,
+a child acting as a parent, and a parent with live children becoming a child. The maximum
+depth is one edge. A child already linked to any parent or connection, including the requested
+one, cannot take another mapping. Reparenting requires a completed unlink and a new link
+with new consent and a new mapping ID. Reject topology conflicts atomically.
+
+Each team authorizes access using its own current membership, role, session or credential,
+and applicable SSO proof. A parent role grants no access to child team data, bookings, member
+lists, audit history, settings or administrative actions. The same holds from child to parent
+and between siblings. A hierarchy link changes neither billing nor membership eligibility.
+The only cross-team authority is the mapped connection's SCIM Group authority over the
+approved child name and managed roster. The bearer still authenticates to the exact parent URL.
+It cannot use the child's SCIM URL or manage its credentials, SSO policy, invitations, roles,
+bookings or other team settings. A credential rotated on the same connection retains that
+connection's live mappings. Child admins continue to administer their own team subject to the
+managed membership guards.
+
+### Linking and unlinking
+
+Each ordinary change requires an explicit approval from a current verified owner of each
+team. A single person who owns both approves separately in each team. A browser-only
+approval consumes that owner's [fresh administration proof](sso.md#fresh-proof) with the
+existing Origin and session checks and records consent on the server. Without enforcement,
+require mailbox proof. Mapping-only mailbox proof follows the SCIM resource gate even
+when both SSO protocols are off. Under enforcement, require that team's own SSO step-up
+with the documented mailbox fallback. Admins, SCIM tokens, delegated clients and SSO
+recovery authority cannot approve either side.
+
+Both owners approve one intent bound to the exact action, direction, organization IDs and
+connection. A link intent includes the reserved Group `externalId`, authority for the
+connection to retire the Group and detach its managed roster, the expected absence
+of a live mapping and the child's current link generation. Each link or unlink advances
+that generation. An unlink intent includes the exact live mapping ID. Each consent is
+bound to the approving owner, their current membership and browser session, and has the
+same deadline as the fresh proof that produced it. At commit, recheck both deadlines,
+roles, sessions, blockers and applicable team proof and policy. An approved input change
+or loss of owner authority invalidates consent.
+
+One of the two approving owners finalizes through mapping administration. REST, MCP and
+CLI use the same server-side consent records and consume both once in the mutation
+transaction. MCP and CLI also require ordinary write scope and, for an enforced team, a
+live delegation for the submitting owner's team. They never receive the original browser
+proofs. Stale consent requires new approval. A replay cannot apply a second change.
+
+Mapping reads expose only safe link metadata to current owners and admins authorized in their
+own team. Before consent, do not expose a candidate team's private metadata or roster. Use a
+uniform denial for an unauthorized or unknown target and report topology conflicts only to
+authorized parties. Record `scim_mapping.linked` or `scim_mapping.unlinked` in each team's
+[audit journal](audit-log.md) on the same opaque mapping ID. Attribute an ordinary change to
+that team's approving owner and identify the action and time. Keep foreign user, credential
+and session IDs, mailboxes, proof values and request bodies out of the events and notices.
+Queue a notice to each side's current owners at their verified mailboxes in the same
+transaction, using the existing notification worker and locale fallback. Rollback and
+no-op retries produce no duplicate event or notice.
+
+### Existing teams and Group writes
+
+Owners can choose an existing eligible team or create one through ordinary team creation,
+which establishes its local owner before any mapping. Each exact, case-sensitive
+`externalId` has at most one live reservation per connection, including pending and
+suspended mappings. Retired reservations release the identifier. Group POST can activate
+only the unused mapping that reserves that identifier. The selector stays fixed for the life of
+the mapping. Group POST cannot create an organization, grant an owner role or adopt a
+team by display name. An absent or unavailable reservation gets a generic 409 that reveals
+no unrelated team or name. Once created, the Group has its own non-reusable resource ID.
+Group reads and writes stay within live mappings of that connection that still allow
+directory authority. Ordinary team name constraints apply to the mapped child. Reject
+Group-as-member references and all indirect or transitive membership.
+
+Activation makes the child name directory-managed. Existing manual members, owners and
+admins keep their membership and roles. Group `members` contains only the memberships
+created by that mapping. Resolve additions to an active User in the same connection whose
+account link was independently proven. If the account already has a manual membership or a
+membership from another source in the child, refuse the entire Group write with 409. A
+child membership has one source and cannot be adopted or converted by a directory write.
+Full replacement and removal operate only on the mapped roster, and responses never
+disclose manual membership details. Refuse conflicting manual changes to the mapped name
+or roster while directory authority is active. Child-side role management,
+authorized local suspension and removal continue through ordinary administration.
+
+New Group membership grants only the child member role. Check the child's current admission
+blockers for the linked account and its verified mailbox. Local suspension or removal in the
+child wins over directory writes. A parent team's local blocker affects only the parent.
+On a mapping with directory authority, deactivating its source User suspends that User's
+retained managed child memberships. Retiring the User removes those memberships through
+the managed departure checks below. Revoke the affected child credentials in either case.
+The directory suspension follows the retained membership source and ends if the source
+is removed. Reactivation lifts only this source's suspension on retained memberships.
+A child's own blockers still deny access there and do not decide access in the parent or
+siblings. Reactivation does not recreate removed memberships or revoked credentials.
+Following User retirement, a new explicitly claimed User needs a new Group member add
+for child access. No membership change clears local blockers or blockers from another source.
+The Group membership step applies the child lifecycle checks atomically with the source
+User write. Refuse the entire SCIM write with 403 `mutability` if it would grant a
+privileged role or suspend, delete or demote a current owner or admin on either side.
+
+### Recovery and retirement
+
+Both teams keep their own last-owner protection. The last owner cannot depart, be removed
+or be demoted through a link, managed lifecycle operation or ordinary membership change.
+Each enforced team also keeps its own last accepted recovery owner under the
+[SSO recovery rules](sso.md#recovery). A counterpart or parent owner has no recovery
+authority in the affected team. Owners recover through that team's existing owner and SSO
+flows, then resume ordinary administration. If the IdP or recovery mailbox is unavailable,
+an instance operator can use the [SSO recovery runbook](sso.md#operator-recovery-runbook)
+for the affected team. Turning off its enforcement gives no membership or mapping authority.
+
+When consent is unavailable, an instance operator can target the exact mapping ID and
+both organization IDs offline against the instance database. The operator can stop
+directory authority on the mapping while preserving existing membership and suspension
+state. This blocks Group reads and writes and any directory User changes to that child's
+managed access, even while booking or privileged-role guards prevent detachment. The
+child's administrators regain manual control of its name immediately and can still use
+ordinary local security and departure controls. Managed membership guards still apply.
+Record `scim_mapping.suspended` as a `system` action in both journals and queue owner
+notices in the same transaction. Directory authority can return only after detachment and
+a new link with both owners' approval.
+
+The operator can also detach the mapping offline using the normal unlink transaction and
+its privileged-member and departure guards. If a guard refuses, the affected team's
+authorized administrators resolve the departure impact through ordinary administration
+before retrying. Record the unlink as a `system` action in both journals and queue owner
+notices. Repeating an already applied offline action is a no-op. Offline authority permits
+only suspension and detachment of the identified mapping. It grants no product permissions,
+owner appointments, new links or clearance of admission blockers.
+
+Group DELETE and authorized unlink both retire the mapping, end its hierarchy link and
+retire any live Group resource ID. Group DELETE requires the scoped credential and a live
+mapping with directory authority. Both owners authorize Group retirement as part of the
+original link consent. Record the Group deletion and mapping unlink with the token actor
+in the parent journal. Record the mapping unlink with the `system` actor in the child
+journal, with no foreign token ID. Queue the same owner notices as for manual unlink.
+The retirement transaction removes only the mapping's managed child memberships, using the
+existing privileged-role and safe-departure checks for current host assignments and
+unfinished bookings. Refuse the whole operation if a guard fails. Revoke credentials whose
+child authority ends. Keep the child team, its local memberships and blockers, its current name
+under manual control, and all booking and audit history. Retired Group IDs return the scoped
+404 and cannot be reused. A new mapping needs new owner consent even if it uses the same
+`externalId`. Ordinary team deletion, if available, is refused while either side has a live
+link. There is no cascade removal of the other team, its memberships or its history.
+
+### Transaction order
+
+Follow the [team membership and host lock order](data-model.md#team-membership-and-host-lock-order).
+Acquire every affected organization row `FOR UPDATE` in ascending organization ID order
+before locking credentials, consent, hierarchy, Group, membership or booking rows. Any
+existing actor identity share locks keep their place in the order. Re-read topology, roles,
+blocking decisions, connection authority, approvals and departure impact under the locks
+before committing. Pre-read the affected IDs for a write that spans more than one child.
+If a recheck finds another affected team, restart with the new sorted set. Never acquire
+an additional organization lock after locking a dependent row. Link, unlink, retirement and
+native team changes must serialize on these organization locks, including role changes,
+local suspension, mapping edits, team deletion and owner departure.
+For bulk credential revocation, acquire the existing per-account SCIM revocation advisory
+locks in ascending account ID order, after the organization rows and before the credential
+rows they protect.
 
 ## Credential foundation and security
 
@@ -661,7 +815,7 @@ check allows exactly one dot. Required future actions:
 `scim_connection.authentication_failed` and `scim_connection.rate_limited` (bounded
 aggregation); `scim_user.deleted`; `scim_group.created`, `scim_group.updated`,
 `scim_group.deleted`; `scim_group.member_added`, `scim_group.member_removed`;
-`scim_mapping.linked`, `scim_mapping.unlinked`; `scim_user.conflicted`;
+`scim_mapping.linked`, `scim_mapping.suspended`, `scim_mapping.unlinked`; `scim_user.conflicted`;
 `scim_user.privileged_member_blocked`; `scim_user.last_owner_blocked`;
 `scim_user.membership_suspended`.
 Record organization/connection, safe credential ID or human actor, target opaque ID,
@@ -738,12 +892,12 @@ operator-accessible.
 | User lifecycle: retirement and re-admission | User lifecycle: suspension and reactivation | DELETE Users/{id}; native POST /organization/complete-scim-readmission; no MCP/CLI | Resource test flag only | Unsupported If-Match returns 412, owner/admin deletion returns 403 mutability, retired IDs return 404, the original account can claim a fresh entry, live SCIM and local blockers deny re-admission, history retained, audit atomicity |
 | Managed membership server guards | User lifecycle: retirement; SSO design PR #247 and accepted linking implementation | Existing member/invitation/role management REST and native Better Auth writes and shared MCP services; no new operation/tool/command | Resource test flag only | Manual profile/membership changes cannot bypass management, local suspension wins, native/JIT and concurrent reactivation checks, protected owner/admin authority |
 | Managed membership UI | Managed membership server guards | Existing member-management UI; no new endpoint/tool/command | Resource test flag only | en/zh-CN managed status and blockers, forbidden manual actions explained, unknown readiness stays neutral, generated-client errors handled |
-| Hierarchy authorization design | Managed membership UI | No runtime interface; parent/child permission contract | Resources hard-off | Lead accepts scope, owner/admin recovery, explicit linking and existing-team conflicts |
+| [Hierarchy authorization design](#groups-to-teams-hierarchy-authorization) | Managed membership UI | No runtime interface; parent/child permission contract | Resources hard-off | Lead accepts scope, owner/admin recovery, explicit linking and existing-team conflicts |
 | Hierarchy storage and guards | Hierarchy authorization design | Parent/child/mapping tables and guards; no new public interface | Resource test flag only | Predecessor preservation, cycle/cross-parent prevention, no sibling authority, privileged-member races |
-| Mapping administration | Hierarchy storage and guards; audit log PR #246 | GET/POST `/api/v1/scim/team-mappings`, DELETE `/api/v1/scim/team-mappings/{id}`; MCP `create_scim_team_mapping`, `delete_scim_team_mapping`; CLI `scim-team-mappings create`, `scim-team-mappings delete` | Resource test flag only | REST/MCP/CLI parity, explicit parent/child owner authority, safe metadata, en/zh-CN generated-client UI, audit |
+| Mapping administration | Hierarchy storage and guards; audit log PR #246 | GET/POST `/api/v1/scim/team-mappings`, DELETE `/api/v1/scim/team-mappings/{id}`; MCP `create_scim_team_mapping`, `delete_scim_team_mapping`; CLI `scim-team-mappings create`, `scim-team-mappings delete`; browser consent and offline operator recovery | Resource test flag only | REST/MCP/CLI parity, independent owner approvals, safe metadata, en/zh-CN generated-client UI, audited suspension and detachment |
 | Group reads and creation | Mapping administration | GET Groups, GET Groups/{id}, POST Groups; discovery adds Group; no SCIM MCP/CLI | Resource test flag only | Managed child only, name collisions, externalId matching, members projection, no nested groups |
 | Group name and replacement | Group reads and creation; audit log PR #246 | PUT Groups/{id}, PATCH Groups/{id} nonmember fields; no MCP/CLI | Resource test flag only | Manual conflicts, replacement, any owner/admin demotion/removal or role grant returns 403 mutability, transactional audit |
-| Group membership changes | Group name and replacement | PATCH Groups/{id} member operations; no MCP/CLI | Resource test flag only | Entra removal forms, same-connection users, replay, blockers, concurrent replacement, owner/admin access cannot be removed |
+| Group membership changes | Group name and replacement | PATCH Groups/{id} member operations; no MCP/CLI | Resource test flag only | Entra removal forms, same-connection Users, replay, blockers, concurrent replacement, source User lifecycle checks across managed memberships, owner/admin access cannot be removed |
 | Group retirement | Group membership changes | DELETE Groups/{id}; no MCP/CLI | Resource test flag only | Managed access removed, team history retained, privileged-member and booking checks, subsequent operations 404, retired uniqueness excluded |
 | RFC and provider corpus | Group retirement | No new endpoint/tool/command | Resources hard-off | RFC errors/filters/PATCH, Okta PUT/Entra variants, source-copy controls, bounded Postgres pools |
 | Local Keycloak harness | RFC and provider corpus | Pinned local image/plugin fixture and synthetic identities; no new interface | Resources hard-off | Document actual SCIM capability, deterministic startup/cleanup, no live third-party calls, reproducible protocol capture without secrets |
@@ -757,6 +911,69 @@ apply their 48-hour expiry.
 Mapping administration is ordinary product configuration, not credential minting, so it
 ships MCP and CLI parity rather than borrowing the browser-only exemption. Additional
 writes discovered during implementation need their own row and interfaces before coding.
+
+## Mapping administration in the resource test harness
+
+Open **Settings → SCIM team mappings** from the team you administer. Owners and admins
+can see that team's live mappings. To link an existing team, the child owner privately
+shares the child Team ID and current link generation with the parent owner. The parent
+owner prepares the request using their team's provisioning connection and the directory's
+exact Group `externalId`. The request authorizes the directory to retire the Group and
+detach its managed roster. To unlink, prepare a request from an existing mapping instead.
+
+Share the exact request privately with the other owner's team. Each owner opens and
+reviews it in their own team's Settings and approves it with fresh proof. Both approvals
+are required even when one person owns both teams. Either approving owner then applies the
+request before both approvals expire. Prepare and approve a fresh request if it expires or
+the selected teams, mapping, Group identifier or generation change.
+
+REST exposes the acting team's live links at `GET /api/v1/scim/team-mappings`. To apply
+an approved request, send `{ "intentId": "…" }` to `POST /api/v1/scim/team-mappings` or
+`DELETE /api/v1/scim/team-mappings/{id}`. Browser sessions bind the request to their
+current team with `X-Expected-Organization-Id`. The matching MCP tools are
+`create_scim_team_mapping` and `delete_scim_team_mapping`. The latter takes `id` and
+`intentId`. The test CLI exposes `scim-team-mappings create` and
+`scim-team-mappings delete` with the same JSON inputs as MCP. Machine writes require
+the normal write scope and live delegation for an enforced team.
+
+### Offline mapping recovery runbook
+
+Use the resource test checkout and confirm the database, mapping UUID and both organization
+UUIDs. Prepare the database and background jobs schema with the usual migrations and
+use the harness's configured database connection. The resource-enabled harness passes its
+job queue to `scimMappingAdministration` as `notices` and injects that module as
+`scim.mappingAdministration` in `createApp`. On its background worker, use
+`scimMappingResourceJobs` in place of the ordinary mailbox-proof job definitions so the
+same worker handles SSO proof, mapping proof, and mapping owner notices. Use the configured
+mailer for delivery. The offline script uses the existing queue without running migrations.
+
+```sh
+node scripts/scim-team-mapping-recovery.ts --resource-test suspend MAPPING_UUID PARENT_UUID CHILD_UUID
+node scripts/scim-team-mapping-recovery.ts --resource-test detach MAPPING_UUID PARENT_UUID CHILD_UUID
+```
+
+1. Suspend the mapping to stop its directory authority immediately. Existing membership
+   and suspension state stays in place. The mapping keeps its reserved external ID until
+   detachment. A successful suspension records `scim_mapping.suspended` in both journals.
+2. Detach when the managed roster can depart safely. If the command reports a conflict,
+   have the child team's authorized administrators resolve privileged roles, host
+   assignments and unfinished bookings through normal administration, then retry with
+   the same UUIDs. Detachment records `scim_mapping.unlinked` and releases the external
+   ID. A team with live links must detach them before any future supported team deletion.
+3. Both actions record a `system` actor and queue notices for verified current owners in
+   the same transaction. A retry of an applied action reports no changes. An incorrect
+   UUID combination is refused. Check the worker's delivery status after a successful
+   command. Owner notices use their saved language with the usual fallback.
+
+普通关联和解除关联可在团队的「设置 → SCIM 团队映射」中办理。关联前，子团队所有者应私下
+提供本团队 ID 和当前关联代次，父团队所有者再用本团队的配置连接及群组 `externalId` 准备
+请求。解除关联时，从已有映射准备请求。双方所有者在各自团队内核对并验证同一份请求，
+然后由任一批准人提交。即使同一人拥有两个团队，也要分别批准。批准过期后，须重新准备请求。
+
+需要离线恢复时，先核对测试数据库和三个 UUID，再用上述 `suspend` 命令暂停目录管理。现有
+成员关系和暂停状态会保留。若要解除映射，请运行 `detach`。如存在受保护的角色、主持安排或
+尚未结束的预约，请由子团队的授权管理员先通过常规管理流程处理，再重试。成功后，双方团队
+都会在审计日志中看到系统操作，后台任务会向当前所有者的已验证邮箱发送通知。
 
 ## Self-hosting and provider testing
 

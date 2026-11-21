@@ -113,6 +113,23 @@ only in test harnesses, updates the mapped profile and its timestamp in the exis
 When the normalized work address changes, it sets the unfinished claim's `invalidated_at`
 in the same transaction. The claim's mailbox and invitation reference are retained.
 
+Migration `0181_scim_team_hierarchy.sql` adds storage for the
+[SCIM Groups-to-teams hierarchy](scim.md#groups-to-teams-hierarchy-authorization).
+Each live `scim_team_mappings` row is both a hierarchy edge and a reservation for
+one exact external ID on the parent's connection. Pending and suspended mappings
+retain those reservations. Retirement releases them and keeps the mapping ID and
+endpoints. Live references prevent deleting either linked organization. Endpoint
+roles prevent a team with live child mappings from also becoming a child, and
+each link and retirement advances the child's persisted generation.
+
+Mapping intents freeze the approved action and inputs. Each team's consent records
+the approving owner, membership, session and proof deadline so the internal service
+can recheck both approvals before consuming the intent in the link or unlink
+transaction. Managed child membership provenance is scoped to the live mapping
+and the child's own member row. Hierarchy storage is exercised through the SCIM
+resource test flag. Team authorization continues to use the acting team's own
+memberships and credentials.
+
 The [paid-booking design](payments.md) describes pending-payment holds, bounded slot
 occupancy, terminal transitions and the future Stripe/refund integration. Checkout is not
 available in this foundation release.

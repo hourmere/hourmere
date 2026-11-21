@@ -19,6 +19,7 @@ export function SsoFreshProof({
   busy,
   onRetry,
   onCancel,
+  title = 'Confirm your identity before changing SSO settings.',
 }: {
   organizationId: string
   challenge: SsoProofChallenge
@@ -26,6 +27,7 @@ export function SsoFreshProof({
   busy: boolean
   onRetry: () => void
   onCancel: () => void
+  title?: MessageKey
 }) {
   const { locale, t } = useI18n()
   const id = useId()
@@ -165,7 +167,7 @@ export function SsoFreshProof({
   return (
     <section className="panel stack sso-fresh-proof" aria-labelledby={`${id}-heading`}>
       <h2 id={`${id}-heading`} ref={heading} tabIndex={-1}>
-        {t('Confirm your identity before changing SSO settings.')}
+        {t(title)}
       </h2>
       {expired ? (
         <p className="alert alert-error" role="alert">

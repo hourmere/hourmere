@@ -2895,4 +2895,63 @@ export const admin = {
     '请先在身份提供方恢复此成员资格，再将此成员设为管理员。',
   'Change your display name in your identity provider for this team.':
     '请在此团队的身份提供方中更改你的显示名称。',
+
+  // SCIM team mappings
+  'SCIM team mappings': 'SCIM 团队映射',
+  'Loading SCIM team mappings…': '正在加载 SCIM 团队映射…',
+  'SCIM team mappings are unavailable in this team.': '当前无法查看此团队的 SCIM 映射。',
+  'Could not load SCIM team mappings.': '无法加载 SCIM 团队映射。',
+  'No SCIM team mappings yet.': '暂无 SCIM 团队映射。',
+  'SCIM mapping ID': 'SCIM 映射 ID',
+  'Parent team ID': '父团队 ID',
+  'Child team ID': '子团队 ID',
+  'Group external ID': '目录组的外部 ID',
+  'Directory authority suspended': '目录管理权限已暂停',
+  'Awaiting directory Group': '等待创建目录组',
+  'Prepare unlink request': '准备解除关联的请求',
+  'This team’s ID': '当前团队 ID',
+  'This team’s link generation': '当前团队的关联版本',
+  'To link this team as a child, share its ID and link generation with the parent team’s owner.':
+    '要将当前团队关联为子团队，请把团队 ID 和关联版本发给父团队的所有者。',
+  'Prepare link request': '准备关联请求',
+  'Open shared approval request': '打开共享的审批请求',
+  'Child team link generation': '子团队的关联版本',
+  'Enter the exact external ID supplied by the identity provider.':
+    '请输入身份提供方给出的外部 ID，保持大小写一致。',
+  'Review request': '查看请求',
+  'Shared approval request': '共享的审批请求',
+  'Review SCIM link request': '核对 SCIM 关联请求',
+  'Review SCIM unlink request': '核对解除 SCIM 关联的请求',
+  'Directory connection ID': '目录连接 ID',
+  'Linking allows this directory to manage the child team’s name and directory-managed members, retire the Group, and remove memberships it manages.':
+    '关联后，此目录可以管理子团队的名称和来自目录的成员资格，也可以停用目录组并移除由它管理的成员资格。',
+  'Detaching ends directory authority for this mapping and removes any memberships it manages.':
+    '解除关联会终止此映射的目录管理权限，并移除由此映射管理的成员资格。',
+  'Confirm your identity to approve this SCIM mapping request.':
+    '请验证身份以批准此 SCIM 映射请求。',
+  'Shareable approval request': '可共享的审批请求',
+  'Send this exact request privately to the other team’s owner. Each owner approves from their own team.':
+    '请私下将这份请求原样发给另一团队的所有者。双方所有者需各自在自己的团队中批准。',
+  'Copy approval request': '复制审批请求',
+  'Approve for this team': '代表当前团队批准',
+  'Apply link': '确认关联',
+  'Apply unlink': '确认解除关联',
+  'Check the team IDs, link generation, and Group external ID.':
+    '请核对团队 ID、关联版本和目录组的外部 ID。',
+  'Check that the approval request is complete and includes this team.':
+    '请确认审批请求完整，并且包含当前团队。',
+  'This link conflicts with current team mappings. Check the team details and prepare a new request.':
+    '此关联与当前的团队映射冲突。请核对团队信息，然后准备新请求。',
+  'The child team must resolve its managed memberships before detaching this mapping.':
+    '子团队须先处理由此映射管理的成员资格，才能解除关联。',
+  'Could not apply this request. Both owners must approve the same request before their verification expires.':
+    '无法执行此请求。双方所有者必须在各自的身份验证有效期内批准同一份请求。',
+  'Could not record your approval. Verify your identity and try again.':
+    '无法记录你的批准。请验证身份后重试。',
+  'Could not update SCIM team mappings. Check the mapping list before trying again.':
+    '无法更新 SCIM 团队映射。请先查看映射列表，再重试。',
+  'Your approval is recorded. Either approving owner can apply the request once both have approved.':
+    '已记录你的批准。双方都批准后，任一方所有者均可执行此请求。',
+  'SCIM team mapping linked.': '已建立 SCIM 团队关联。',
+  'SCIM team mapping detached.': '已解除 SCIM 团队关联。',
 } as const

@@ -1,8 +1,8 @@
 import { execFileSync } from 'node:child_process'
 import { createDb, createPool } from '@hourmere/db'
-import { openApiDocument } from '../apps/server/src/openapi-document.ts'
+import { openApiRouteInventory } from '../apps/server/src/openapi-document.ts'
 import { productTools } from '../apps/server/src/server.ts'
-import { COMMANDS, REST_COMMANDS } from '../tools/cli/src/cli.ts'
+import { cliCommands, REST_COMMANDS } from '../tools/cli/src/cli.ts'
 
 const METHODS = ['get', 'head', 'options', 'trace', 'post', 'put', 'patch', 'delete'] as const
 export type HttpMethod = (typeof METHODS)[number]
@@ -107,16 +107,18 @@ export function restOperations(document: unknown): RestOperation[] {
 
 /** Read the same route/tool/command registries used at runtime; never execute handlers. */
 export async function loadInterfaceInventory(): Promise<InterfaceInventory> {
-  const rest = restOperations(await openApiDocument())
+  // Inventory the actual interfaces with in-process resource test registrations present.
+  const { document, scimMappingTools } = await openApiRouteInventory({ scimResourcesEnabled: true })
   // Neither constructing the tool registry nor ending this pool opens a connection.
   const db = createDb(createPool('postgres://interface-parity@127.0.0.1:9/interface-parity'))
   try {
     return {
-      rest,
-      mcp: productTools({ db, slotSnippetsEnabled: true, routingFormsEnabled: true }).map(
-        (tool) => tool.name,
-      ),
-      cli: COMMANDS,
+      rest: restOperations(document),
+      mcp: [
+        ...productTools({ db, slotSnippetsEnabled: true, routingFormsEnabled: true }),
+        ...scimMappingTools,
+      ].map((tool) => tool.name),
+      cli: cliCommands(true),
       restCli: REST_COMMANDS,
     }
   } finally {

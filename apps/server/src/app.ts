@@ -173,6 +173,7 @@ function isSsoTrustPath(path: string, method: string): boolean {
   return (
     (method === 'PUT' && /^\/api\/v1\/team\/sso\/policy\/?$/i.test(path)) ||
     /^\/api\/v1\/team\/sso\/(?:providers|domains|delegations|recovery)(?:\/|$)/i.test(path) ||
+    /^\/api\/v1\/scim\/team-mappings(?:\/|$)/i.test(path) ||
     /^\/api\/auth\/(?:sign-in\/sso|sso\/(?:callback|oidc\/complete))(?:\/|$)/i.test(path)
   )
 }
@@ -706,7 +707,12 @@ export function createApp({
       })
     }
   }
-  ssoMailboxProof?.mount({ app, resolveCaller, publicUrl })
+  ssoMailboxProof?.mount({
+    app,
+    resolveCaller,
+    publicUrl,
+    scimMappingConsentEnabled: scimResourcesEnabled,
+  })
   ssoOidcSignIn?.mountInvitationAcceptance(app, publicUrl)
   app.on(['GET', 'POST'], '/api/auth/*', (c) =>
     authHandler(withClientIp(c.req.raw, c.var.clientIp)),
@@ -761,7 +767,15 @@ export function createApp({
   })
 
   for (const register of routes) register({ app, caller, scimResourcesEnabled })
-  mcp?.mount({ app, resolveCaller, publicUrl, ssoTeamReads })
+  const mappingAdministration = scimResourcesEnabled ? scim?.mappingAdministration : undefined
+  mappingAdministration?.route({ app, caller, scimResourcesEnabled })
+  mcp?.mount({
+    app,
+    resolveCaller,
+    publicUrl,
+    ssoTeamReads,
+    ...(mappingAdministration && { additionalTools: mappingAdministration.tools }),
+  })
   mountScim(app, scim, trustedProxies, publicUrl)
 
   // The product API is versioned under /api/v1 (agents depend on it for years);
