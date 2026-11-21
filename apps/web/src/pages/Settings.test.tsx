@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Schemas } from '../api/client.ts'
 import {
+  emptyTeamLists,
   fakeApi,
   json,
   later,
@@ -12,6 +13,7 @@ import {
   profile,
   renderApp,
   signedIn,
+  signedInAs,
 } from '../test/fake-api.tsx'
 import { LEAVE_WITH_UNSAVED_CHANGES } from '../unsaved-changes.tsx'
 import { suggestHandle } from './Settings.tsx'
@@ -410,6 +412,38 @@ describe('display name settings', () => {
     )
     expect(screen.queryByText('Display name saved.')).toBeNull()
     expect(leaving()).toBe(true)
+  })
+
+  it('explains a managed-name conflict from the profile API and keeps the unsaved name', async () => {
+    const user = userEvent.setup()
+    const api = fakeApi({
+      ...signedInAs({
+        ...ME,
+        organization: {
+          id: '00000000-0000-7000-8000-000000000010',
+          name: 'Example team',
+          slug: 'example-team',
+          personal: false,
+        },
+      }),
+      ...profile(PROFILE),
+      ...emptyTeamLists,
+      'PATCH /api/v1/profile/name': () =>
+        json(409, { error: 'scim_managed_resource', message: 'Untranslated server text' }),
+    })
+    renderApp('/app/settings')
+    await user.type(await screen.findByLabelText('Display name'), ' new')
+    await user.click(screen.getByRole('button', { name: 'Save display name' }))
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain(
+      'Change your display name in your identity provider for this team.',
+    )
+    expect(alert.textContent).not.toContain('Untranslated server text')
+    expect(screen.queryByText('Display name saved.')).toBeNull()
+    expect(input('Display name').value).toBe('Ada new')
+    expect(leaving()).toBe(true)
+    expect(api.to('PATCH /api/v1/profile/name')).toHaveLength(1)
+    expect(api.to('GET /api/v1/me')).toHaveLength(1)
   })
 
   it('locks the name through the save and refresh while keeping it protected', async () => {

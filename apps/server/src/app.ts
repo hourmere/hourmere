@@ -431,9 +431,10 @@ export function createApp({
   ssoTeamReads: ssoTeamReadOptions,
 }: AppDeps) {
   const app = new OpenAPIHono({ defaultHook: validationHook })
+  const scimResourcesEnabled = Boolean(scim?.enabled && scim.resources)
   const ssoTeamReads = ssoTeamReadOptions && {
     ...ssoTeamReadOptions,
-    scimResourcesEnabled: Boolean(scim?.enabled && scim.resources),
+    scimResourcesEnabled,
   }
   // Generate correlation IDs locally; caller headers may contain private or forged values.
   app.use('*', async (_c, next) => withAuditRequest(randomUUID(), next))
@@ -759,7 +760,7 @@ export function createApp({
     return c.json(sso ? { ...identity, sso } : identity, 200)
   })
 
-  for (const register of routes) register({ app, caller })
+  for (const register of routes) register({ app, caller, scimResourcesEnabled })
   mcp?.mount({ app, resolveCaller, publicUrl, ssoTeamReads })
   mountScim(app, scim, trustedProxies, publicUrl)
 

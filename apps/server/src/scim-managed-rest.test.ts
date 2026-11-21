@@ -16,6 +16,7 @@ import { memberLeaveRoutes } from './routes/member-leave.ts'
 import { memberRemovalRoutes } from './routes/member-removal.ts'
 import { profileRoutes } from './routes/profile.ts'
 import { teamInvitationRoutes } from './routes/team-invitations.ts'
+import { scimDiscovery } from './scim-discovery.ts'
 
 const databaseUrl = process.env.DATABASE_URL
 const publicUrl = 'https://hourmere.example.test'
@@ -27,24 +28,32 @@ describe.skipIf(!databaseUrl)('SCIM-managed memberships on existing REST routes'
   let db: Db
   let authPool: ReturnType<typeof createAuthPool>
   let app: ReturnType<typeof createApp>
+  let resourceApp: ReturnType<typeof createApp>
 
   beforeAll(async () => {
     owned = await createTestDatabase(databaseUrl as string, undefined, { tag: 'scim_rest_guards' })
     db = createDb(owned.pool)
     authPool = createAuthPool(owned.url, signup)
+    app = buildApp(false)
+    resourceApp = buildApp(true)
+  })
+
+  function buildApp(scimResourcesEnabled: boolean) {
     const auth = createAuth({
       db,
       pool: authPool,
       baseURL: publicUrl,
       secret,
       signup,
+      scimResourcesEnabled,
       mailer: { send: async () => expect.unreachable('No mail should be sent by these routes') },
     })
-    app = createApp({
+    return createApp({
       publicUrl,
       checkDb: async () => {},
       authHandler: auth.handler,
       resolveCaller: createCallerResolver({ auth, db }),
+      scim: { db, enabled: true, resources: scimResourcesEnabled ? scimDiscovery : undefined },
       ssoTeamReads: { db, capabilities: { ssoOidcEnabled: false, ssoSamlEnabled: false } },
       routes: [
         profileRoutes({ db }),
@@ -53,7 +62,7 @@ describe.skipIf(!databaseUrl)('SCIM-managed memberships on existing REST routes'
         teamInvitationRoutes({ db, invitationMailLimits: { secret } }),
       ],
     })
-  })
+  }
 
   afterAll(async () => {
     try {
@@ -63,7 +72,7 @@ describe.skipIf(!databaseUrl)('SCIM-managed memberships on existing REST routes'
     }
   })
 
-  async function browser(userId: string, organizationId: string) {
+  async function browser(userId: string, organizationId: string, activeApp = app) {
     const session = await db.transaction().execute((trx) =>
       createBrowserSession(
         trx,
@@ -78,7 +87,7 @@ describe.skipIf(!databaseUrl)('SCIM-managed memberships on existing REST routes'
     )
     const cookie = session.cookie.split(';')[0] as string
     return (method: string, path: string, body: object) =>
-      app.request(`${publicUrl}${path}`, {
+      activeApp.request(`${publicUrl}${path}`, {
         method,
         headers: {
           cookie,
@@ -90,7 +99,7 @@ describe.skipIf(!databaseUrl)('SCIM-managed memberships on existing REST routes'
       })
   }
 
-  async function fixture() {
+  async function fixture(activeApp = app) {
     const owner = await createTestUser(db, 'Team owner')
     const member = await createTestUser(db, 'Original account name')
     const team = await createTestTeam(db, [
@@ -104,7 +113,7 @@ describe.skipIf(!databaseUrl)('SCIM-managed memberships on existing REST routes'
       .where('userId', '=', member.id)
       .executeTakeFirstOrThrow()
     const manage = await browser(owner.id, team.id)
-    const self = await browser(member.id, team.id)
+    const self = await browser(member.id, team.id, activeApp)
     const personalId = member.principal.organization.id
     return {
       owner,
@@ -113,6 +122,7 @@ describe.skipIf(!databaseUrl)('SCIM-managed memberships on existing REST routes'
       memberId: memberRow.id,
       personalId,
       name: (name: string) => self('PATCH', '/api/v1/profile/name', { name }),
+      nativeName: (name: string) => self('POST', '/api/auth/update-user', { name }),
       remove: () =>
         manage('POST', `/api/v1/team/members/${member.id}/removal`, { teamId: team.id }),
       leave: () => self('POST', `/api/v1/teams/${team.id}/leave`, {}),
@@ -184,13 +194,16 @@ describe.skipIf(!databaseUrl)('SCIM-managed memberships on existing REST routes'
   })
 
   // Counts measured with the same fixtures and app composition on main.
-  it('preserves the ordinary team display-name update response and statement count', async () => {
-    const f = await fixture()
-    expect(await counted(() => f.name(' Ordinary name '), 4)).toEqual({
-      status: 200,
-      body: { name: 'Ordinary name' },
-    })
-  })
+  it.each([false, true])(
+    'preserves the ordinary team display-name update response and statement count with resources %s',
+    async (enabled) => {
+      const f = await fixture(enabled ? resourceApp : app)
+      expect(await counted(() => f.name(' Ordinary name '), 4)).toEqual({
+        status: 200,
+        body: { name: 'Ordinary name' },
+      })
+    },
+  )
 
   it('preserves the ordinary team leave response and statement count', async () => {
     const f = await fixture()
@@ -220,8 +233,34 @@ describe.skipIf(!databaseUrl)('SCIM-managed memberships on existing REST routes'
     expect(await counted(cancel, 28)).toEqual({ status: 200, body: cancelled(row) })
   })
 
-  it('refuses managed display-name changes in REST and the shared service', async () => {
+  it('keeps both name update paths available with only provisioning tokens enabled', async () => {
     const f = await fixture()
+    const entry = await managedEntry(f)
+    expect(await counted(() => f.name('REST account name'), 4)).toEqual({
+      status: 200,
+      body: { name: 'REST account name' },
+    })
+    const native = await f.nativeName('Native account name')
+    expect(native.status).toBe(200)
+    expect(await native.json()).toEqual({ status: true })
+    expect(
+      await db
+        .selectFrom('auth.user')
+        .select('name')
+        .where('id', '=', f.member.id)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ name: 'Native account name' })
+    expect(
+      await db
+        .selectFrom('scim_users')
+        .selectAll()
+        .where('id', '=', entry.id)
+        .executeTakeFirstOrThrow(),
+    ).toEqual(entry)
+  })
+
+  it('refuses managed display-name changes in REST and the shared service with resources enabled', async () => {
+    const f = await fixture(resourceApp)
     const entry = await managedEntry(f)
     const response = await f.name('Manual name')
     expect(response.status).toBe(409)
@@ -231,7 +270,12 @@ describe.skipIf(!databaseUrl)('SCIM-managed memberships on existing REST routes'
     })
     await expect(
       updateDisplayName(
-        { db, principal: f.team.as(f.member), now: Temporal.Now.instant },
+        {
+          db,
+          principal: f.team.as(f.member),
+          now: Temporal.Now.instant,
+          scimResourcesEnabled: true,
+        },
         'API key name',
       ),
     ).rejects.toMatchObject({ kind: 'conflict', code: 'scim_managed_resource' })
@@ -243,7 +287,7 @@ describe.skipIf(!databaseUrl)('SCIM-managed memberships on existing REST routes'
         .executeTakeFirstOrThrow()
     expect(await currentName()).toEqual({ name: f.member.name })
 
-    const personal = await browser(f.member.id, f.personalId)
+    const personal = await browser(f.member.id, f.personalId, resourceApp)
     const personalResponse = await personal('PATCH', '/api/v1/profile/name', {
       name: 'Personal name',
     })

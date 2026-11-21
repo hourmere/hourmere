@@ -3097,7 +3097,7 @@ export interface paths {
         head?: never;
         /**
          * Update the caller's account display name
-         * @description Works before creating a booking-page profile. Only changes the caller’s name. A SCIM-managed membership cannot change the name while acting in that team. Requests are limited to 4096 bytes.
+         * @description Works before creating a booking-page profile. Only changes the caller’s name. When SCIM resources are enabled, a managed membership cannot change the name while acting in that team. Requests are limited to 4096 bytes.
          */
         patch: operations["updateDisplayName"];
         trace?: never;
@@ -7633,6 +7633,10 @@ export interface components {
                     defaultSchedule: "satisfied" | "not_applicable" | "configuration_blocker" | "dependency_unavailable" | "not_checked" | "check_failed";
                     /** @enum {string} */
                     selectedCalendars: "satisfied" | "not_applicable" | "configuration_blocker" | "dependency_unavailable" | "not_checked" | "check_failed";
+                };
+                /** @description Coarse admission blockers for a linked or directory-suspended member, under the SCIM resource test flag. */
+                managedMembership?: {
+                    blockers: ("scim_suspension" | "local_suspension" | "local_removal")[];
                 };
                 /** Format: uuid */
                 memberId: string;
