@@ -75,6 +75,7 @@ export const COMMANDS = {
   'troubleshoot-availability': 'troubleshoot_availability',
   book: 'create_booking',
   list: 'list_bookings',
+  booking: 'get_booking',
   export: 'export_bookings',
   reschedule: 'reschedule_booking',
   'request-reschedule': 'request_reschedule',
@@ -155,9 +156,11 @@ Commands: whoami, profile, catalog, event, create-event, duplicate-event, update
           set-event-notifications, schedules, schedule, slots, open-time-snippet,
           troubleshoot-availability,
           schedule-availability, save-availability,
-          book, list, reschedule, request-reschedule, cancel, set-no-show, booking-attendees, group-attendees, cancel-group,
+          book, list, booking, reschedule, request-reschedule, cancel, set-no-show, booking-attendees, group-attendees, cancel-group,
           booking-activity, retry-meeting, retry-calendar-copy
           one-time-links create|list|revoke
+Read booking details with booking --input FILE|- and JSON {bookingId}.
+Requires a full, read or bookings key with access to the booking.
 Meeting polls
   Every poll command requires JSON on stdin (--input -). Input files and --output are refused.
   Keep tokens, invitation addresses and idempotency keys out of command arguments and shell history.
@@ -234,8 +237,11 @@ After booking: create-event/update-event accept --success-redirect-url URL,
                --success-redirect-include-invitee-personal-data true|false,
                --success-redirect-allow-embed-parent true|false, or --clear-success-redirect.
 Invitee name/email become visible to the target website and its analytics when enabled.
-Export: export --input FILE|- [--output FILE] streams CSV to a new private file or stdout.
+Export: export --input FILE|- [--output FILE] [--include-routing-answers true|false].
 Requires read/full scope; input: from, to (maximum 366 days), timeZone, optional filters and bom.
+Streams CSV to a new private file or stdout. Set includeRoutingAnswers in JSON or use the flag.
+Routing answers are available for personal exports. When routing forms are off, requesting them
+returns routing_forms_disabled.
 Arguments: JSON object in --input (MCP tool arguments; default {}). Use - for stdin.
 Configuration: HOURMERE_URL (HTTPS origin or loopback HTTP), HOURMERE_API_KEY.
 Secrets are never accepted as command-line flags. No .env or credential store is read.
@@ -267,6 +273,7 @@ interface Options {
   output?: string
   url?: string
   durationMinutes?: number
+  includeRoutingAnswers?: boolean
   successRedirect?: Record<string, unknown>
   clearSuccessRedirect?: boolean
 }
@@ -307,6 +314,7 @@ function parse(argv: readonly string[]): Options {
         '--url',
         '--yes',
         '--duration-minutes',
+        '--include-routing-answers',
         '--success-redirect-url',
         '--success-redirect-parameters',
         '--success-redirect-include-invitee-personal-data',
@@ -351,6 +359,11 @@ function parse(argv: readonly string[]): Options {
       if (!/^[0-9]+$/.test(value) || durationMinutes < 1 || durationMinutes > 1440)
         throw new CliError('invalid_request')
       options.durationMinutes = durationMinutes
+    }
+    if (flag === '--include-routing-answers') {
+      if (command !== 'export' || (value !== 'true' && value !== 'false'))
+        throw new CliError('invalid_options')
+      options.includeRoutingAnswers = value === 'true'
     }
     if (redirectFlag) {
       options.successRedirect ??= {}
@@ -506,6 +519,14 @@ export async function runCli(options: {
       if (Object.hasOwn(input, 'durationMinutes') && input.durationMinutes !== args.durationMinutes)
         throw new CliError('invalid_duration')
       input.durationMinutes = args.durationMinutes
+    }
+    if (args.includeRoutingAnswers !== undefined) {
+      if (
+        Object.hasOwn(input, 'includeRoutingAnswers') &&
+        input.includeRoutingAnswers !== args.includeRoutingAnswers
+      )
+        throw new CliError('invalid_request')
+      input.includeRoutingAnswers = args.includeRoutingAnswers
     }
     if (args.clearSuccessRedirect) {
       if (Object.hasOwn(input, 'successRedirect') && input.successRedirect !== null)

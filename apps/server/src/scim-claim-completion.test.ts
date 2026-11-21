@@ -338,6 +338,20 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
     }
     return { status: response.status, body: body as Json }
   }
+
+  function confirmReadmission(
+    served: { url: string },
+    cookie: string,
+    organizationId: string,
+    scimUserId: string,
+    headers: Record<string, string> = {},
+  ) {
+    return fetch(`${served.url}/api/auth/organization/complete-scim-readmission`, {
+      method: 'POST',
+      headers: { origin, cookie, 'content-type': 'application/json', ...headers },
+      body: JSON.stringify({ organizationId, scimUserId }),
+    })
+  }
   /** An invitation sent from the app by an owner or administrator. */
   async function appInvitation(organization: Team, userId: string, email: string, extra = {}) {
     const { sessionId } = await signIn(userId, organization.id)
@@ -1137,7 +1151,7 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
       'A second or concurrent acceptance of the invitation is refused as before, so a claim completes once.',
       'An expired invitation admits nobody and completes nothing.',
       'an expired claim is then never completed, while its still-valid invitation admits the person as an ordinary acceptance',
-      'Claims without an invitation stay unlinked until the SSO linking completion step, and expire after 48 hours without renewal',
+      'Claims without an invitation expire after 48 hours without renewal',
       "No address is marked verified, and neither the account's profile, address or sign-in methods nor the entry's provisioned profile or timestamps change.",
       '| Claim completion through invitation acceptance | User creation and claim intent | Existing invitation acceptance; no new operation/tool/command | Resource test flag only |',
       '| Claim completion through SSO linking | Claim completion through invitation acceptance; SSO design PR #247 and accepted linking implementation | SSO linking completion; no new operation/tool/command | Resource test flag only |',
@@ -1158,6 +1172,173 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
     verifyExpiredClaim(await instance()))
   it('refuses admission while a local or SCIM blocker exists', async () =>
     verifyTombstones(await instance()))
+
+  async function rehireFixture(served: Served) {
+    const organization = await team()
+    const mailbox = `rehire-${unique()}@example.com`
+    const account = await person(mailbox)
+    const identifiers = { userName: `rehire-${unique()}`, externalId: unique() }
+    const first = await provision(served, organization, mailbox, identifiers)
+    const firstLogin = await signIn(account)
+    expect(
+      (await accept(served, firstLogin.cookie, first.claim.invitation_id as string)).status,
+    ).toBe(200)
+    const survivingSession = await signIn(account)
+    const lifecycle = (method: 'DELETE' | 'PUT', id: string, body?: Json) =>
+      fetch(`${served.url}/scim/v2/${organization.id}/Users/${id}`, {
+        method,
+        headers: {
+          authorization: `Bearer ${organization.secret}`,
+          'content-type': 'application/scim+json',
+        },
+        ...(body && { body: JSON.stringify(body) }),
+      })
+    expect((await lifecycle('DELETE', first.id)).status).toBe(204)
+    const fresh = await provision(served, organization, mailbox, identifiers)
+    expect(fresh.id).not.toBe(first.id)
+    expect(fresh.claim).toMatchObject({ invitation_id: null, completed_at: null })
+    const blockers = () =>
+      db
+        .selectFrom('scim_membership_blocks')
+        .selectAll()
+        .where('organization_id', '=', organization.id)
+        .orderBy('id')
+        .execute()
+    const confirm = (headers?: Record<string, string>) =>
+      confirmReadmission(served, survivingSession.cookie, organization.id, fresh.id, headers)
+    return {
+      organization,
+      mailbox,
+      account,
+      identifiers,
+      first,
+      fresh,
+      firstLogin,
+      survivingSession,
+      lifecycle,
+      blockers,
+      confirm,
+    }
+  }
+
+  it('readmits the same account to its retained membership by confirming the fresh claim', async () => {
+    const served = await instance()
+    const f = await rehireFixture(served)
+    const before = await snapshot(f.organization.id)
+    expect(await f.blockers()).toEqual([
+      expect.objectContaining({ user_id: f.account, scim_user_id: f.first.id, cleared_at: null }),
+    ])
+    expect(before.entries.find(({ id }) => id === f.fresh.id)?.linked_user_id).toBeNull()
+    const selectTeam = () =>
+      fetch(`${served.url}/api/auth/organization/set-active`, {
+        method: 'POST',
+        headers: { origin, cookie: f.survivingSession.cookie, 'content-type': 'application/json' },
+        body: JSON.stringify({ organizationId: f.organization.id }),
+      })
+    expect((await selectTeam()).status).toBe(403)
+    expect((await f.confirm({ origin: 'https://other.example' })).status).toBe(403)
+    expect((await f.confirm({ authorization: 'Bearer rejected' })).status).toBe(403)
+
+    const replies = await Promise.all([f.confirm(), f.confirm()])
+    expect(replies.map(({ status }) => status).sort()).toEqual([204, 403])
+    const after = await snapshot(f.organization.id)
+    const member = before.members.find(({ userId }) => userId === f.account)
+    expect(member?.role).toBe('member')
+    expect(after.members).toEqual(before.members)
+    expect(after.entries.find(({ id }) => id === f.first.id)).toEqual(
+      before.entries.find(({ id }) => id === f.first.id),
+    )
+    expect(after.entries.find(({ id }) => id === f.fresh.id)).toMatchObject({
+      linked_user_id: f.account,
+      linked_member_id: member?.id,
+    })
+    expect(after.claims.find(({ id }) => id === f.fresh.claim.id)?.completed_at).toEqual(
+      expect.any(Date),
+    )
+    expect(claimed(after.events).filter(({ target_id }) => target_id === f.fresh.id)).toEqual([
+      expect.objectContaining({ actor_id: f.account, credential_type: 'session' }),
+    ])
+    expect(await f.blockers()).toEqual([
+      expect.objectContaining({ scim_user_id: f.first.id, cleared_at: expect.any(Date) }),
+    ])
+    expect((await selectTeam()).status).toBe(200)
+    expect(
+      await db
+        .selectFrom('auth.session')
+        .select('id')
+        .where('id', '=', f.firstLogin.sessionId)
+        .execute(),
+    ).toEqual([])
+
+    // The new link is immediately governed by normal directory lifecycle writes.
+    expect(
+      (
+        await f.lifecycle('PUT', f.fresh.id, {
+          schemas: [SCIM_URN.user],
+          ...f.identifiers,
+          active: false,
+        })
+      ).status,
+    ).toBe(200)
+    expect(await f.blockers()).toContainEqual(
+      expect.objectContaining({ scim_user_id: f.fresh.id, cleared_at: null }),
+    )
+  })
+
+  it.each(['local suspension', 'local removal', 'live SCIM suspension'] as const)(
+    'keeps the original and fresh entries unchanged in the presence of %s',
+    async (kind) => {
+      const served = await instance()
+      const f = await rehireFixture(served)
+      await db
+        .insertInto('scim_membership_blocks')
+        .values({
+          organization_id: f.organization.id,
+          identity_email: f.mailbox,
+          ...(kind === 'live SCIM suspension'
+            ? {
+                source: 'scim',
+                kind: 'suspension',
+                connection_id: f.fresh.claim.connection_id,
+                scim_user_id: f.fresh.id,
+              }
+            : { source: 'local', kind: kind === 'local removal' ? 'removal' : 'suspension' }),
+        })
+        .execute()
+      const before = await snapshot(f.organization.id)
+      const blocks = await f.blockers()
+      const refused = await f.confirm()
+      expect(refused.status).toBe(403)
+      expect(await refused.json()).toEqual(denied)
+      expect(await snapshot(f.organization.id)).toEqual(before)
+      expect(await f.blockers()).toEqual(blocks)
+    },
+  )
+
+  it('refuses re-admission by a different verified team member who now owns the mailbox', async () => {
+    const served = await instance()
+    const f = await rehireFixture(served)
+    // Account deletion retains the retired decision keyed only to the mailbox.
+    await db.deleteFrom('auth.user').where('id', '=', f.account).execute()
+    const replacement = f.organization.people.member
+    await db
+      .updateTable('auth.user')
+      .set({ email: f.mailbox })
+      .where('id', '=', replacement)
+      .execute()
+    const session = await signIn(replacement)
+    const before = await snapshot(f.organization.id)
+    const blocks = await f.blockers()
+    expect(blocks).toEqual([
+      expect.objectContaining({ user_id: null, identity_email: f.mailbox, cleared_at: null }),
+    ])
+    const refused = await confirmReadmission(served, session.cookie, f.organization.id, f.fresh.id)
+    expect(refused.status).toBe(403)
+    expect(await refused.json()).toEqual(denied)
+    expect(await snapshot(f.organization.id)).toEqual(before)
+    expect(await f.blockers()).toEqual(blocks)
+  })
+
   it('leaves a pending claim unusable until its User is active again', async () => {
     const served = await instance()
     const organization = await team()
@@ -1376,7 +1557,8 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
     verifyLinkedElsewhere(await instance()))
   it('completes once under repeated and concurrent acceptance', async () =>
     verifyReplay(await instance()))
-  it('never completes a claim without an invitation', async () => verifyUntouched(await instance()))
+  it('never completes an uninvited claim through invitation acceptance', async () =>
+    verifyUntouched(await instance()))
   it('commits the link, completion, membership and events together', async () =>
     verifyAtomicity(await instance()))
   it(
@@ -1432,13 +1614,10 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
         'atomicity',
         [
           [
-            '        await writeAuditEvent(trx, {',
-            `        await (globalThis as any).${apart}.transaction().execute((apart: any) => writeAuditEvent(apart, {`,
+            '    await writeAuditEvent(trx, {',
+            `    await (globalThis as any).${apart}.transaction().execute((apart: any) => writeAuditEvent(apart, {`,
           ],
-          [
-            '          targetId: entry.id,\n        })\n',
-            '          targetId: entry.id,\n        }))\n',
-          ],
+          ['      targetId: entryId,\n    })\n', '      targetId: entryId,\n    }))\n'],
         ],
       ],
       // The account's profile, or its verified address, overwritten from the entry.
@@ -1446,8 +1625,8 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
         'completion',
         [
           [
-            '        await writeAuditEvent(trx, {',
-            "        await trx.updateTable('auth.user').set({ name: 'Provisioned Person' }).where('id', '=', proof.userId).execute()\n        await writeAuditEvent(trx, {",
+            '    await writeAuditEvent(trx, {',
+            "    await trx.updateTable('auth.user').set({ name: 'Provisioned Person' }).where('id', '=', proof.userId).execute()\n    await writeAuditEvent(trx, {",
           ],
         ],
       ],
@@ -1455,8 +1634,8 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
         'completion',
         [
           [
-            '        await writeAuditEvent(trx, {',
-            "        await trx.updateTable('auth.user').set((eb) => ({ email: eb.selectFrom('scim_users').select('work_email').where('id', '=', entry.id), emailVerified: true })).where('id', '=', proof.userId).execute()\n        await writeAuditEvent(trx, {",
+            '    await writeAuditEvent(trx, {',
+            "    await trx.updateTable('auth.user').set((eb) => ({ email: eb.selectFrom('scim_users').select('work_email').where('id', '=', entryId), emailVerified: true })).where('id', '=', proof.userId).execute()\n    await writeAuditEvent(trx, {",
           ],
         ],
       ],
@@ -1486,8 +1665,8 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
       completion: [
         ['      claim.completed_at !== null ||\n', ''],
         ['      entry.linked_user_id !== null ||\n', ''],
-        ["          .where('linked_user_id', 'is', null)\n", ''],
-        ["          .where('completed_at', 'is', null)\n", ''],
+        ["      .where('linked_user_id', 'is', null)\n", ''],
+        ["      .where('completed_at', 'is', null)\n", ''],
       ] as [string, string][],
       policy: [
         ["||\n    stored.status !== 'pending'\n", '\n'],
@@ -1594,7 +1773,9 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
     const mailbox = `production-${unique()}@example.com`
     const { id, claim } = await provision(harness, organization, mailbox)
     const pat = await person(mailbox)
-    const answer = await accept({ url }, (await signIn(pat)).cookie, claim.invitation_id as string)
+    const { cookie } = await signIn(pat)
+    const answer = await accept({ url }, cookie, claim.invitation_id as string)
+    expect((await confirmReadmission({ url }, cookie, organization.id, id)).status).toBe(404)
     const after = await snapshot(organization.id)
     return {
       options,

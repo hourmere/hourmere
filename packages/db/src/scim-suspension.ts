@@ -162,6 +162,20 @@ export function scimProvisioned(organizationId: Expression<string>) {
   )`
 }
 
+/** Match a live directory link to a current member, including after local readmission. */
+export function scimManagedMember(
+  organizationId: Expression<string> | string,
+  userId: Expression<string> | string,
+) {
+  return sql<boolean>`EXISTS (
+    SELECT 1 FROM scim_users AS managed
+    JOIN auth.member AS membership ON membership."organizationId" = managed.organization_id
+      AND membership."userId" = managed.linked_user_id
+    WHERE managed.organization_id = ${organizationId}::uuid
+      AND managed.linked_user_id = ${userId}::uuid AND managed.retired_at IS NULL
+  )`
+}
+
 /** Embed the account's live team suspension in an existing authorization statement. */
 export function scimSuspended(
   organizationId: Expression<string> | string,

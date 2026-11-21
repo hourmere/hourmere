@@ -5,6 +5,7 @@ import { common as englishCommon } from '../../apps/web/src/i18n/catalogues/en/c
 import { admin as chineseAdmin } from '../../apps/web/src/i18n/catalogues/zh-CN/admin.ts'
 import { common as chineseCommon } from '../../apps/web/src/i18n/catalogues/zh-CN/common.ts'
 import { PATHS, routingFormPath } from '../../apps/web/src/paths.ts'
+import { spaceCjkBoundaries } from '../../packages/core/src/language.ts'
 import { AUDIT_NOW } from './audit-data.ts'
 import type { FixtureApp } from './fixtures.ts'
 
@@ -56,16 +57,42 @@ export const routingFormManagerAuditPages = [
     title: 'Routing booking field error and stale preview',
   },
   { id: 'routing-manager-rules-invalid-mapping', title: 'Routing answer mapping validation error' },
+  { id: 'routing-manager-publication-review', title: 'Saved routing fallback review' },
+  { id: 'routing-manager-publication-pending', title: 'Routing publication in progress' },
+  { id: 'routing-manager-publication-published', title: 'Routing publication confirmation' },
+  { id: 'routing-manager-publication-disable', title: 'Acknowledge disabling the routing form' },
+  {
+    id: 'routing-manager-publication-disabled',
+    title: 'Routing form disabled and re-enable review',
+  },
+  { id: 'routing-manager-publication-repair', title: 'Published routing target health and repair' },
+  { id: 'routing-manager-publication-conflict', title: 'Routing publication revision conflict' },
+  { id: 'routing-manager-publication-denied', title: 'Routing publication without permission' },
+  { id: 'routing-manager-publication-error', title: 'Unconfirmed routing publication' },
 ] as const
 
 export type RoutingFormManagerAuditPageId = (typeof routingFormManagerAuditPages)[number]['id']
+type PublicationAuditPageId = Extract<
+  RoutingFormManagerAuditPageId,
+  `routing-manager-publication-${string}`
+>
+type RoutingRecord = components['schemas']['RoutingForm']
+type Translate = (key: keyof typeof english & keyof typeof chinese, number?: number) => string
 
 export function isRoutingFormManagerAuditPage(id: string): id is RoutingFormManagerAuditPageId {
   return routingFormManagerAuditPages.some((entry) => entry.id === id)
 }
 
+function isPublicationAuditPage(id: RoutingFormManagerAuditPageId): id is PublicationAuditPageId {
+  return id.startsWith('routing-manager-publication-')
+}
+
 export function usesTeamRoutingFormManagerAuditSpace(id: RoutingFormManagerAuditPageId) {
-  return id === 'routing-manager-team-list' || id.startsWith('routing-manager-rules')
+  return (
+    id === 'routing-manager-team-list' ||
+    id.startsWith('routing-manager-rules') ||
+    isPublicationAuditPage(id)
+  )
 }
 
 const activeMocks = new WeakMap<Page, () => Promise<void>>()
@@ -106,9 +133,27 @@ const firstRuleId = '72100000-0000-4000-8000-000000000006'
 const secondRuleId = '72100000-0000-4000-8000-000000000007'
 const hiddenEventId = '72100000-0000-4000-8000-000000000008'
 const listedEventId = '72100000-0000-4000-8000-000000000009'
+const publishedVersionId = '72100000-0000-4000-8000-000000000012'
+const removedEventId = '72100000-0000-4000-8000-000000000013'
+const unavailableSummary = {
+  ...summary,
+  enabled: true,
+  publishedVersionId,
+  publishedVersionNumber: 1,
+  health: 'unavailable',
+} as const
+const unknownHealthSummary = {
+  ...unavailableSummary,
+  id: '72100000-0000-4000-8000-000000000014',
+  title: 'Appointment follow-up / 预约后续安排',
+  slug: 'appointment-follow-up',
+  publishedVersionId: '72100000-0000-4000-8000-000000000015',
+  health: 'unknown',
+} as const
 const topicQuestionLabel = 'What would you like to discuss? / 你希望讨论什么？'
+const listedEventTitle = 'Support with the coordinator / 由协调员提供支持'
 
-const draft: components['schemas']['RoutingForm'] = {
+const draft: RoutingRecord = {
   ...summary,
   description: 'Tell us what you would like to discuss. / 请告诉我们你希望讨论什么。',
   questions: [
@@ -133,8 +178,8 @@ const draft: components['schemas']['RoutingForm'] = {
   fallback: { kind: 'message', message: 'Please contact the office. / 请联系办公室。' },
 }
 
-function rulesDraft(id: RoutingFormManagerAuditPageId): components['schemas']['RoutingForm'] {
-  const firstRule: components['schemas']['RoutingForm']['rules'][number] = {
+function rulesDraft(id: RoutingFormManagerAuditPageId): RoutingRecord {
+  const firstRule: RoutingRecord['rules'][number] = {
     id: firstRuleId,
     conditions: [{ questionId: topicQuestionId, operator: 'equals', value: newProjectId }],
     target: {
@@ -174,6 +219,58 @@ function rulesDraft(id: RoutingFormManagerAuditPageId): components['schemas']['R
           ]
         : [firstRule],
   }
+}
+
+function publishedRecord(record: RoutingRecord, enabled: boolean): RoutingRecord {
+  const targets: NonNullable<RoutingRecord['health']>['targets'] = [
+    ...record.rules.map(({ id, target }) => ({ id, target })),
+    { id: 'fallback', target: record.fallback },
+  ].map(({ id, target }) => {
+    const unavailable = target.kind === 'event' && target.eventTypeId === removedEventId
+    return {
+      ruleId: id,
+      eventTypeId: target.kind === 'event' ? target.eventTypeId : null,
+      health: unavailable ? 'unavailable' : 'ok',
+      reason: unavailable ? 'not_found' : null,
+    }
+  })
+  return {
+    ...record,
+    enabled,
+    draftRevision: record.draftRevision + 1,
+    publishedVersionId,
+    publishedVersionNumber: 1,
+    health: {
+      versionId: publishedVersionId,
+      status: targets.some(({ health }) => health === 'unavailable') ? 'unavailable' : 'ok',
+      targets,
+    },
+  }
+}
+
+function publicationDraft(id: PublicationAuditPageId): RoutingRecord {
+  const record = rulesDraft(id)
+  if (id === 'routing-manager-publication-disable' || id === 'routing-manager-publication-disabled')
+    return publishedRecord(record, true)
+  if (id === 'routing-manager-publication-repair') {
+    const fallback: RoutingRecord['fallback'] = {
+      kind: 'event',
+      eventTypeId: removedEventId,
+      mappings: [],
+    }
+    return publishedRecord(
+      {
+        ...record,
+        rules: record.rules.map((rule) => ({ ...rule, target: fallback })),
+        fallback,
+      },
+      true,
+    )
+  }
+  if (id === 'routing-manager-publication-review') {
+    return { ...record, fallback: { kind: 'event', eventTypeId: listedEventId, mappings: [] } }
+  }
+  return record
 }
 
 function auditEventTypes(organizationId: string): components['schemas']['EventType'][] {
@@ -229,7 +326,7 @@ function auditEventTypes(organizationId: string): components['schemas']['EventTy
     {
       ...hidden,
       id: listedEventId,
-      title: 'Support with the coordinator / 由协调员提供支持',
+      title: listedEventTitle,
       slug: 'coordinator-support',
       hosts: [{ userId: '72100000-0000-4000-8000-000000000011' }],
       isHidden: false,
@@ -241,7 +338,7 @@ function auditEventTypes(organizationId: string): components['schemas']['EventTy
 
 function previewResult(
   id: RoutingFormManagerAuditPageId,
-  record: components['schemas']['RoutingForm'],
+  record: RoutingRecord,
 ): components['schemas']['RoutingFormPreview'] {
   const fallback = id === 'routing-manager-rules-targets-empty'
   const matched = record.rules.find(({ id }) => id === firstRuleId)
@@ -262,20 +359,121 @@ function previewResult(
   }
 }
 
+async function openPublicationState(page: Page, id: PublicationAuditPageId, t: Translate) {
+  const main = page.getByRole('main')
+  const panel = main.getByTestId('routing-publication')
+  const status = panel.getByRole('status')
+  if (id === 'routing-manager-publication-repair') {
+    const health = panel.getByTestId('routing-published-health')
+    await health
+      .getByRole('button', {
+        name: t('Repair rule {number}', 1),
+        exact: true,
+      })
+      .waitFor()
+    await health.getByRole('button', { name: t('Repair fallback'), exact: true }).press('Enter')
+    await main.locator('[id="fallback.kind"]:focus').waitFor()
+    return
+  }
+  if (
+    id === 'routing-manager-publication-disable' ||
+    id === 'routing-manager-publication-disabled'
+  ) {
+    await panel.getByRole('button', { name: t('Disable routing form'), exact: true }).press('Enter')
+    const confirmation = panel.getByTestId('routing-disable-confirmation')
+    const acknowledgement = confirmation.getByRole('checkbox', {
+      name: t(
+        'I understand that while this form is disabled, submissions and pending booking links are blocked.',
+      ),
+    })
+    await acknowledgement.waitFor()
+    if (id === 'routing-manager-publication-disabled') {
+      await acknowledgement.press('Space')
+      await confirmation
+        .getByRole('button', { name: t('Disable form'), exact: true })
+        .press('Enter')
+      await status.getByText(t('Routing form disabled.'), { exact: true }).waitFor()
+      await panel
+        .getByRole('button', { name: t('Re-enable routing form'), exact: true })
+        .press('Enter')
+      await panel.getByTestId('routing-enable-confirmation').waitFor()
+    }
+    return
+  }
+
+  if (id === 'routing-manager-publication-published') {
+    await main.getByLabel(topicQuestionLabel, { exact: true }).selectOption(newProjectId)
+    await main.getByRole('button', { name: t('Run preview'), exact: true }).press('Enter')
+    await main.getByTestId('routing-preview-result').waitFor()
+  }
+  await panel.getByRole('button', { name: t('Review publication'), exact: true }).press('Enter')
+  const review = panel.getByTestId('routing-publication-review')
+  await review.waitFor()
+  if (id === 'routing-manager-publication-review') {
+    await review.getByText(listedEventTitle, { exact: true }).waitFor()
+    return
+  }
+  await review.getByRole('button', { name: t('Publish version'), exact: true }).press('Enter')
+  switch (id) {
+    case 'routing-manager-publication-pending':
+      await panel
+        .getByTestId('routing-publication-pending')
+        .getByText(t('Publishing…'), { exact: true })
+        .waitFor()
+      break
+    case 'routing-manager-publication-published':
+      await status.getByText(t('Published version {number}.', 1), { exact: true }).waitFor()
+      break
+    case 'routing-manager-publication-conflict':
+      await main.getByRole('button', { name: t('Reload'), exact: true }).waitFor()
+      break
+    case 'routing-manager-publication-denied':
+      await main.getByText(t("You don't have permission to do that."), { exact: true }).waitFor()
+      break
+    case 'routing-manager-publication-error':
+      await main
+        .getByText(
+          t('Could not confirm publication. Try publishing again to recover the result.'),
+          { exact: true },
+        )
+        .waitFor()
+      break
+  }
+}
+
 export async function openRoutingFormManagerAuditPage(
   page: Page,
   app: FixtureApp,
   id: RoutingFormManagerAuditPageId,
   locale: 'en' | 'zh-CN',
 ) {
-  const t = (key: keyof typeof english & keyof typeof chinese) =>
-    locale === 'zh-CN' ? chinese[key] : english[key]
+  const t: Translate = (key, number) => {
+    const template = locale === 'zh-CN' ? chinese[key] : english[key]
+    if (number === undefined) return template
+    return template.replace('{number}', (placeholder, start: number) =>
+      locale === 'zh-CN'
+        ? spaceCjkBoundaries(
+            template.slice(0, start),
+            String(number),
+            template.slice(start + placeholder.length),
+          )
+        : String(number),
+    )
+  }
   const fixture = await app.auditState()
   const rules = id.startsWith('routing-manager-rules')
-  const record = rules ? rulesDraft(id) : draft
+  const publication = isPublicationAuditPage(id)
+  const withEvents = rules || publication
+  const record = publication ? publicationDraft(id) : rules ? rulesDraft(id) : draft
   const list = id.includes('-list') || id === 'routing-manager-off'
+  const summaries =
+    id === 'routing-manager-team-list'
+      ? [unavailableSummary, unknownHealthSummary]
+      : id.endsWith('-empty')
+        ? []
+        : [summary]
   const creating = id === 'routing-manager-new' || id === 'routing-manager-creation-retry'
-  const loading = !rules && id.endsWith('-loading')
+  const loading = !withEvents && id.endsWith('-loading')
   const pending = loading || id === 'routing-manager-saving' || id === 'routing-manager-archiving'
   const pendingRules = rules && id.endsWith('-loading')
   const dirty = id === 'routing-manager-invalid' || id === 'routing-manager-creation-retry'
@@ -283,16 +481,18 @@ export async function openRoutingFormManagerAuditPage(
     ? PATHS.routingForms
     : creating
       ? PATHS.newRoutingForm
-      : routingFormPath(record.id, rules ? fixture.teamOrganizationId : fixture.organizationId)
+      : routingFormPath(record.id, withEvents ? fixture.teamOrganizationId : fixture.organizationId)
   const apiPath = `/api/v1/routing-forms${list || creating ? '' : `/${record.id}`}`
   const matchesDraft = (url: URL) => url.origin === app.url && url.pathname === apiPath
   const matchesPreview = (url: URL) =>
     url.origin === app.url && url.pathname === `${apiPath}/preview`
+  const matchesPublish = (url: URL) =>
+    url.origin === app.url && url.pathname === `${apiPath}/publish`
   const handleDraft = async (route: Route) => {
     const method = route.request().method()
     if (method === 'GET') {
       if (loading) return
-      if (!rules && id.endsWith('-denied'))
+      if (!withEvents && id.endsWith('-denied'))
         return route.fulfill({ status: 403, json: { error: 'team_management_access_denied' } })
       if (id.endsWith('-missing'))
         return route.fulfill({ status: 404, json: { error: 'routing_form_not_found' } })
@@ -301,7 +501,7 @@ export async function openRoutingFormManagerAuditPage(
       if (id.endsWith('-error') && (id.includes('-list') || id.includes('-edit')))
         return route.abort()
       return route.fulfill({
-        json: list ? { data: id.endsWith('-empty') ? [] : [summary], nextCursor: null } : record,
+        json: list ? { data: summaries, nextCursor: null } : record,
       })
     }
     if (pending) return
@@ -309,9 +509,16 @@ export async function openRoutingFormManagerAuditPage(
       return route.fulfill({ json: { ...record, draftRevision: record.draftRevision + 1 } })
     if (id === 'routing-manager-stale')
       return route.fulfill({ status: 409, json: { error: 'routing_revision_conflict' } })
+    if (id === 'routing-manager-publication-disabled' && method === 'PATCH') {
+      const body = route.request().postDataJSON()
+      if (body.expectedRevision === record.draftRevision && body.enabled === false)
+        return route.fulfill({
+          json: { ...record, enabled: false, draftRevision: record.draftRevision + 1 },
+        })
+    }
     return route.abort()
   }
-  const events = rules ? auditEventTypes(fixture.teamOrganizationId) : []
+  const events = withEvents ? auditEventTypes(fixture.teamOrganizationId) : []
   const eventListUrl = `${app.url}/api/v1/event-types`
   const matchesEventDetail = (url: URL) =>
     url.origin === app.url &&
@@ -340,6 +547,36 @@ export async function openRoutingFormManagerAuditPage(
     if (id === 'routing-manager-rules-targets-error') return route.abort()
     return route.fulfill({ json: previewResult(id, record) })
   }
+  const handlePublish = async (route: Route) => {
+    const request = route.request()
+    if (
+      request.method() !== 'POST' ||
+      request.headers()['x-expected-organization-id'] !== fixture.teamOrganizationId ||
+      request.postDataJSON()?.expectedRevision !== record.draftRevision
+    )
+      return route.abort()
+    if (id === 'routing-manager-publication-pending') return
+    if (id === 'routing-manager-publication-conflict')
+      return route.fulfill({ status: 409, json: { error: 'routing_revision_conflict' } })
+    if (id === 'routing-manager-publication-denied') return denied(route)
+    if (id === 'routing-manager-publication-error')
+      return route.fulfill({ status: 503, json: { error: 'service_unavailable' } })
+    return route.fulfill({
+      status: 201,
+      json: {
+        form: publishedRecord(record, record.enabled),
+        version: {
+          id: publishedVersionId,
+          formId: record.id,
+          versionNumber: 1,
+          questions: record.questions,
+          rules: record.rules,
+          fallback: record.fallback,
+          publishedAt: AUDIT_NOW,
+        },
+      } satisfies components['schemas']['RoutingFormPublication'],
+    })
+  }
   const instanceUrl = `${app.url}/api/v1/instance`
   const handleInstance = (route: Route) =>
     route.fulfill({
@@ -353,22 +590,25 @@ export async function openRoutingFormManagerAuditPage(
   const release = async () => {
     await page.unroute(instanceUrl, handleInstance)
     await page.unroute(matchesDraft, handleDraft)
-    if (rules) {
+    if (withEvents) {
       await page.unroute(eventListUrl, handleEventList)
       await page.unroute(matchesEventDetail, handleEventDetail)
       await page.unroute(matchesPreview, handlePreview)
     }
+    if (publication) await page.unroute(matchesPublish, handlePublish)
   }
 
   try {
     await page.route(instanceUrl, handleInstance)
     await page.route(matchesDraft, handleDraft)
-    if (rules) {
+    if (withEvents) {
       await page.route(eventListUrl, handleEventList)
       await page.route(matchesEventDetail, handleEventDetail)
       await page.route(matchesPreview, handlePreview)
     }
-    if (pending || dirty || pendingRules) activeMocks.set(page, release)
+    if (publication) await page.route(matchesPublish, handlePublish)
+    if (pending || dirty || pendingRules || id === 'routing-manager-publication-pending')
+      activeMocks.set(page, release)
     await Promise.all([
       loading && page.waitForRequest((request) => matchesDraft(new URL(request.url()))),
       page.goto(app.url + path),
@@ -381,11 +621,16 @@ export async function openRoutingFormManagerAuditPage(
       await main.getByText(t('Your team context changed. Reload before making changes.')).waitFor()
     } else if (list || loading || id.includes('-edit-')) {
       await main.getByTestId(`${prefix}-${id.split('-').at(-1)}`).waitFor()
+      if (id === 'routing-manager-team-list') {
+        await main.getByText(t('Health unknown'), { exact: false }).waitFor()
+      }
     } else {
       const editor = main.getByTestId('routing-form-editor')
       await editor.waitFor()
       const save = editor.getByRole('button', { name: t('Save draft'), exact: true })
-      if (rules) {
+      if (publication) {
+        await openPublicationState(page, id, t)
+      } else if (rules) {
         if (id.includes('-targets-')) {
           await editor.getByTestId(`routing-event-types-${id.split('-').at(-1)}`).waitFor()
         } else if (id.includes('-fields-')) {

@@ -2,6 +2,7 @@ import { routingTargetProblem } from '@hourmere/scheduling/routing-form-targets'
 import { useEffect, useRef, useState } from 'react'
 import { api, type Schemas, unwrap } from '../../api/client.ts'
 import { RequestError } from '../../api/errors.ts'
+import type { useI18n } from '../../i18n/runtime.tsx'
 
 type EventType = Schemas['EventType']
 type Target = Schemas['RoutingForm']['fallback']
@@ -15,6 +16,18 @@ export interface RoutingTargetEvents {
   bookingFields(id: string): EventRead<EventType>
   eventTitle(id: string): string | undefined
   retry(): void
+}
+
+export function routingEventLabels(events: EventType[], t: ReturnType<typeof useI18n>['t']) {
+  const counts = new Map<string, number>()
+  for (const event of events) counts.set(event.title, (counts.get(event.title) ?? 0) + 1)
+  return new Map(
+    events.map(({ id, title, slug, isHidden }) => {
+      const name =
+        (counts.get(title) ?? 0) > 1 ? t('{event} ({slug})', { event: title, slug }) : title
+      return [id, isHidden ? t('{event} (hidden)', { event: name }) : name]
+    }),
+  )
 }
 
 const loading = { status: 'loading' } as const

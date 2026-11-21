@@ -8,7 +8,11 @@ import type { Schemas } from '../../api/client.ts'
 import { Field, FieldError, type FieldErrors } from '../../components/forms.tsx'
 import { useI18n } from '../../i18n/runtime.tsx'
 import type { MessageKey } from '../../i18n/translate.ts'
-import type { EventRead, RoutingTargetEvents } from './routing-target-events.ts'
+import {
+  type EventRead,
+  type RoutingTargetEvents,
+  routingEventLabels,
+} from './routing-target-events.ts'
 import { routingEventMappingErrors } from './routing-target-mappings.ts'
 
 type Target = Schemas['RoutingForm']['fallback']
@@ -139,9 +143,8 @@ function EventDestination({
       </>
     )
 
-  const titles = new Map<string, number>()
-  for (const event of list.data) titles.set(event.title, (titles.get(event.title) ?? 0) + 1)
-  const selected = list.data.some((event) => event.id === target.eventTypeId)
+  const labels = routingEventLabels(list.data, t)
+  const selected = labels.has(target.eventTypeId)
   const detail = bookingFields(target.eventTypeId)
   const mappings = routingEventMappingErrors(events, questions, [{ path, target }])
 
@@ -174,17 +177,11 @@ function EventDestination({
                 {t('This event type is unavailable.')}
               </option>
             )}
-            {list.data.map((event) => {
-              const name =
-                (titles.get(event.title) ?? 0) > 1
-                  ? t('{event} ({slug})', { event: event.title, slug: event.slug })
-                  : event.title
-              return (
-                <option key={event.id} value={event.id}>
-                  {event.isHidden ? t('{event} (hidden)', { event: name }) : name}
-                </option>
-              )
-            })}
+            {[...labels].map(([id, label]) => (
+              <option key={id} value={id}>
+                {label}
+              </option>
+            ))}
           </select>
         )}
       </Field>

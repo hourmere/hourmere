@@ -109,6 +109,74 @@ function manageServer(
 }
 
 describe('the invitee’s manage page', () => {
+  const routingAnswers = [
+    { label: '<strong>Appointment topic</strong>', answer: '<img src=x> & planning' },
+    { label: 'Support tier', answer: 'Individual consultation' },
+  ]
+
+  it('renders the existing booking summary when there is no routing provenance', async () => {
+    manageServer()
+    const { container } = renderApp(`/booking#token=${TOKEN}`)
+    await screen.findByRole('heading', { name: 'Your booking' })
+    expect(container.querySelector('.manage')?.outerHTML).toMatchSnapshot()
+  })
+
+  it.each([
+    ['en', 'Your routing form answers'],
+    ['de', 'Ihre Antworten im Weiterleitungsformular'],
+    ['es', 'Tus respuestas al formulario de enrutamiento'],
+    ['fr', 'Vos réponses au formulaire de routage'],
+    ['pt-BR', 'Suas respostas ao formulário de roteamento'],
+    ['zh-CN', '你的分流表单答案'],
+  ])('shows the saved labels and answers as text in %s', async (language, heading) => {
+    const user = userEvent.setup()
+    manageServer({ ...managed({ responses: { topic: 'Final booking answer' } }), routingAnswers })
+    renderApp(`/booking#token=${TOKEN}`)
+    await screen.findByRole('heading', { name: 'Your booking' })
+    if (language !== 'en') await selectPublicLanguage(user, language)
+    const section = screen.getByRole('region', { name: heading })
+    expect(within(section).getByRole('heading', { name: heading, level: 2 })).toBeDefined()
+    expect([...section.querySelectorAll('dt')].map((term) => term.textContent)).toEqual(
+      routingAnswers.map(({ label }) => label),
+    )
+    expect([...section.querySelectorAll('dd')].map((definition) => definition.textContent)).toEqual(
+      routingAnswers.map(({ answer }) => answer),
+    )
+    expect(section.querySelector('img, strong')).toBeNull()
+    expect(screen.queryByText('Final booking answer')).toBeNull()
+  })
+
+  it('keeps the existing loading and error states while the answer snapshot is unknown', async () => {
+    const waiting = later()
+    manageServer(managed(), { more: { 'GET /api/v1/bookings/manage': () => waiting.response } })
+    renderApp(`/booking#token=${TOKEN}`)
+    expect(within(screen.getByRole('main')).getByRole('status').textContent).toBe(
+      'Loading your booking…',
+    )
+    expect(screen.queryByRole('region', { name: 'Your routing form answers' })).toBeNull()
+    await waiting.answer(json(500, { error: 'internal_error' }))
+    await screen.findByRole('heading', { name: 'Your booking could not be loaded' })
+    expect(screen.queryByRole('region', { name: 'Your routing form answers' })).toBeNull()
+  })
+
+  it('keeps the original routing answers visible after moving the booking', async () => {
+    const user = userEvent.setup()
+    const api = manageServer({ ...managed(), routingAnswers })
+    renderApp(`/booking#token=${TOKEN}`)
+    const title = 'Your routing form answers'
+    await screen.findByRole('region', { name: title })
+    await user.click(screen.getByRole('button', { name: 'Reschedule' }))
+    await user.click(await screen.findByRole('button', { name: 'Tuesday, November 3, available' }))
+    await user.click(screen.getByRole('button', { name: '10:00 AM' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm new time' }))
+    await screen.findByText('Your booking is moved to the new time.')
+    expect(
+      within(screen.getByRole('region', { name: title })).getByText('Support tier'),
+    ).toBeDefined()
+    expect(screen.getByText('Individual consultation')).toBeDefined()
+    expect(api.to('GET /api/v1/bookings/manage')).toHaveLength(1)
+  })
+
   it.each(['cancel', 'reschedule'] as const)(
     'answers the displayed request generation when choosing %s',
     async (action) => {

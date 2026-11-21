@@ -14,6 +14,7 @@ import {
 } from '@hourmere/auth'
 import { decryptCredential } from '@hourmere/calendars'
 import { createDb, type Db } from '@hourmere/db'
+import { suspendScimMembership } from '@hourmere/db/scim-suspension'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import type { Mailer, MailMessage } from '@hourmere/mail'
 import type { SsoRequest, SsoResponse } from '@hourmere/outbound/sso'
@@ -21,7 +22,10 @@ import { createFixtures } from '@hourmere/scheduling/testing'
 import { exportJWK, generateKeyPair, type JWTPayload, SignJWT } from 'jose'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { suspendScimMember } from '../../../packages/db/src/scim-suspension-fixtures.ts'
+import {
+  prepareScimSuspension,
+  suspendScimMember,
+} from '../../../packages/db/src/scim-suspension-fixtures.ts'
 import {
   at,
   claimedDomainValues,
@@ -3172,27 +3176,66 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     expect(idp.exchange).toHaveBeenCalledOnce()
   })
 
-  it('refuses JIT admission for a mailbox with a retained SCIM suspension', async () => {
+  it('waits on the organization before JIT admission and sees a committed SCIM suspension', async () => {
     const f = await enrollment()
     await selectJit()
     const { pending } = await pendingAdmission(f)
     await proveMailbox(pending)
-    const block = await suspendScimMember(db, fixture.team, fixture.member)
-    await db.deleteFrom('auth.user').where('id', '=', fixture.member).execute()
+    const target = await db
+      .transaction()
+      .execute((trx) => prepareScimSuspension(trx, fixture.team, fixture.member))
+    let completion: Promise<Response> | undefined
+    let blockId: string
+    try {
+      blockId = await db.transaction().execute(async (trx) => {
+        // The suspension service locks the organization first. Deleting the account in the
+        // same transaction models the mailbox being carried forward as a tombstone.
+        const block = await suspendScimMembership(trx, target, { type: 'system' })
+        await trx.deleteFrom('auth.user').where('id', '=', fixture.member).execute()
+        const { pid } = await trx
+          .selectNoFrom(sql<number>`pg_backend_pid()`.as('pid'))
+          .executeTakeFirstOrThrow()
+        completion = Promise.resolve(complete(pending))
+        await vi.waitFor(
+          async () => {
+            const waiting = await owned.pool.query<{ blocked: boolean }>(
+              `SELECT EXISTS (SELECT FROM pg_stat_activity
+               WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))
+                 AND query LIKE '%"auth"."organization"%for update%') AS blocked`,
+              [pid],
+            )
+            expect(waiting.rows[0]?.blocked).toBe(true)
+          },
+          { timeout: 3000, interval: 20 },
+        )
+        return block.id
+      })
+    } finally {
+      await Promise.allSettled([completion])
+    }
     expect(
       await db
         .selectFrom('scim_membership_blocks')
         .select(['user_id', 'identity_email', 'cleared_at'])
-        .where('id', '=', block.id)
+        .where('id', '=', blockId)
         .executeTakeFirstOrThrow(),
     ).toEqual({ user_id: null, identity_email: f.email, cleared_at: null })
 
-    const before = await effects()
-    const denied = await complete(pending)
+    if (!completion) throw new Error('Expected a JIT admission request')
+    const denied = await completion
     expect(denied.status).toBe(403)
     expect(await denied.json()).toEqual({ error: 'team_management_access_denied' })
     expect(denied.headers.getSetCookie()).toEqual([])
-    expect(await effects()).toEqual(before)
+    expect(
+      await db.selectFrom('auth.user').select('id').where('email', '=', f.email).execute(),
+    ).toEqual([])
+    expect(
+      await db
+        .selectFrom('sso_identity_links')
+        .select('id')
+        .where('provider_id', '=', f.providerId)
+        .execute(),
+    ).toEqual([])
     expect((await attemptRow(pending)).consumed_at).toBeNull()
   })
 

@@ -1,5 +1,5 @@
 import type { Db } from '@hourmere/db'
-import { scimSuspended } from '@hourmere/db/scim-suspension'
+import { scimManagedMember, scimSuspended } from '@hourmere/db/scim-suspension'
 import { sql } from 'kysely'
 import type { Principal } from './caller.ts'
 import { isMember } from './organizations.ts'
@@ -14,6 +14,7 @@ export interface TeamManager {
 interface TeamReader extends Omit<TeamManager, 'role'> {
   role: 'owner' | 'admin' | 'member'
   recoveryOwner?: true
+  scimManaged?: true
 }
 
 const uuid = (id: string) =>
@@ -34,7 +35,9 @@ const contextChanged = () => new TeamManagementError('organization_context_chang
 export const teamRoles = (role: string | null | undefined): string[] =>
   role?.split(',').map((token) => token.trim()) ?? []
 
-type TeamSession = Extract<Principal, { kind: 'session' }>
+type TeamSession = Pick<Extract<Principal, { kind: 'session' }>, 'sessionId'> & {
+  user: { id: string }
+}
 
 /** First lock in every team write, including target-bound invitation acceptance. */
 export async function teamSessionUser(db: Db, principal: TeamSession, lock: boolean) {
@@ -77,6 +80,7 @@ export async function checkTeamManagementAccess(
     expectedOrganizationId: string
     allowPersonal: boolean
     includeRecoveryOwner?: boolean
+    includeScimManaged?: boolean
   },
   allowMemberRead = false,
 ): Promise<TeamReader> {
@@ -127,6 +131,7 @@ export async function checkTeamManagementAccess(
     context?.allowPersonal,
     allowMemberRead,
     context?.includeRecoveryOwner,
+    context?.includeScimManaged,
   )
   const { personal, role } = membership
 
@@ -156,6 +161,7 @@ export async function checkTeamManagementAccess(
     organizationId: organization.id,
     role,
     ...(membership.recoveryOwner && { recoveryOwner: true }),
+    ...(membership.scimManaged && { scimManaged: true }),
   }
 }
 
@@ -168,6 +174,7 @@ export async function checkTeamManagementMembership(
   allowPersonal = false,
   allowMemberRead = false,
   includeRecoveryOwner = false,
+  includeScimManaged = false,
 ): Promise<TeamReader & { personal: boolean }> {
   const personal = await db
     .selectFrom('personal_organizations')
@@ -186,6 +193,9 @@ export async function checkTeamManagementMembership(
   if (lock) memberQuery = memberQuery.forShare()
   const member = await memberQuery
     .$if(includeRecoveryOwner, (query) => query.select(ssoRecoveryOwner))
+    .$if(includeScimManaged, (query) =>
+      query.select(scimManagedMember(teamId, userId).as('scimManaged')),
+    )
     .executeTakeFirst()
   // Better Auth can store multiple roles. Only these exact known tokens grant management.
   const roles = teamRoles(member?.role)
@@ -204,5 +214,6 @@ export async function checkTeamManagementMembership(
     role,
     personal: Boolean(personal),
     ...(member?.recoveryOwner && { recoveryOwner: true }),
+    ...(member?.scimManaged && { scimManaged: true }),
   }
 }

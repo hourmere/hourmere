@@ -96,6 +96,7 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 | `open-time-snippet` | `generate_open_time_snippet` | exactly one of `eventTypeId`, `slug`; `from`, `to`; optional `count`, `locale`, `displayTimeZone`, `durationMinutes` |
 | `book` | `create_booking` | `handle` or `teamSlug`, `slug`, `start`, `invitee`, **`idempotencyKey`**; optional `durationMinutes`, `responses`, `guests` |
 | `list` | `list_bookings` | optional `from`, `to`, `status` (`cancelled` for the cancelled view), `q` (search), `order`, `limit`, `cursor` |
+| `booking` | `get_booking` | `bookingId`; single hosted booking in the key's organization; accepts `read`, `bookings` or `full` |
 | `reschedule` | `reschedule_booking` | `start` and exactly one of `bookingId`, `manageToken`; optional `durationMinutes` |
 | `cancel` | `cancel_booking` | exactly one of `bookingId`, `manageToken`; optional `reason` |
 | `group-attendees` | `get_group_occurrence_attendees` | `occurrenceId`; private hosted occurrence roster |
@@ -233,6 +234,14 @@ in the same organization that the caller also hosts, or null when none is availa
 returned even when the successor falls outside the current page or filters. Public/manage
 responses omit it. The predecessor's `status` remains `cancelled`; `rescheduledToId`
 distinguishes a reschedule, while `rescheduledFromId` points back to the predecessor.
+
+Pass `{ "bookingId": "<booking UUID>" }` to `hourmere booking --input FILE` to read one
+booking you host in the key's organization. A saved `routing` snapshot is included when
+present, even while routing forms are disabled. Keep the output private because it can
+contain invitee answers. See [MCP booking detail](/docs/mcp#read-one-booking).
+
+中文：`booking` 通过 `bookingId` 读取当前组织内由你主持的预约。已保存的 `routing` 快照在路由
+表单停用后仍可读取，输出可能包含受邀人的回答。
 
 ## Manage booking webhooks
 

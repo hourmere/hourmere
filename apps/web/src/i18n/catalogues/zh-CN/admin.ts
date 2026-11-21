@@ -2681,6 +2681,53 @@ export const admin = {
   'Workflow was disabled': '工作流当时已禁用',
   'Workflows were disabled on this instance': '此实例当时已禁用工作流',
 
+  // Routing form publication and repair
+  Publication: '发布',
+  'No version published yet.': '尚未发布任何版本。',
+  'Published version {number}': '当前发布版本为第{number}版',
+  'Published version {number}.': '已发布第{number}版。',
+  'Review publication': '检查发布内容',
+  'Saved fallback': '已保存的备用安排',
+  'Publishing uses the saved draft and keeps the form’s current enabled status.':
+    '发布将使用已保存的草稿，表单的启用状态保持不变。',
+  'Publish version': '发布版本',
+  'Publishing…': '正在发布……',
+  'Save your changes before publishing.': '请先保存更改，再发布。',
+  'Disable routing form': '停用分流表单',
+  'I understand that while this form is disabled, submissions and pending booking links are blocked.':
+    '我了解，停用期间表单将停止接收提交，尚未完成的预约链接也暂时无法使用。',
+  'Disable form': '停用表单',
+  'Disabling…': '正在停用……',
+  'Routing form disabled.': '已停用分流表单。',
+  'Re-enable routing form': '重新启用分流表单',
+  'Re-enable the current published version to accept submissions.':
+    '重新启用后，当前发布版本将恢复接收提交。',
+  'Re-enable form': '重新启用表单',
+  'Re-enabling…': '正在重新启用……',
+  'Routing form re-enabled.': '已重新启用分流表单。',
+  'Published target health': '已发布的去向状态',
+  Available: '可用',
+  'Health unknown': '状态未知',
+  'Repair fallback': '修复备用安排',
+  'Repair rule {number}': '修复规则{number}',
+  'Publish without this rule to remove it from the current version.':
+    '发布不含此规则的草稿，即可从当前版本移除该规则。',
+  'Save and publish your draft to update the published destinations.':
+    '保存并发布草稿即可更新已发布的去向。',
+  'Could not publish the routing form.': '未能发布分流表单。',
+  'Could not confirm publication. Try publishing again to recover the result.':
+    '暂时无法确认发布结果。请重试发布以获取结果。',
+  'Could not disable the routing form.': '未能停用分流表单。',
+  'Could not re-enable the routing form.': '未能重新启用分流表单。',
+  'Review the highlighted destination before publishing.': '请检查标出的去向，再发布。',
+  'The draft was reloaded. Your unsaved edits are still here.':
+    '已重新加载草稿，未保存的更改已保留。',
+  'The latest draft changed some of the same fields. Review your edits before saving.':
+    '最新草稿也更改了你编辑的部分字段。请核对更改后再保存。',
+  'Save your edits over the fields that also changed in the latest draft?':
+    '要保存你的更改，并覆盖最新草稿中改动过的相同字段吗？',
+  'Routing form reloaded.': '已重新加载分流表单。',
+  'Saved fallback event name unavailable.': '暂时无法显示已保存的备用活动名称。',
   // Single sign-on provider and domain setup
   'Single sign-on': '单点登录',
   'SSO domains': '单点登录域名',
@@ -2810,6 +2857,13 @@ export const admin = {
   'Could not confirm your SSO sign-in. Finish signing in or start SSO verification again.':
     '无法确认单点登录。请完成登录，或重新发起单点登录验证。',
 
+  // Booking routing answers
+  'Original routing answers': '原始分流表单答案',
+  'Final booking answers': '最终预约答案',
+  'No routing answers were submitted.': '未提交分流表单答案。',
+
+  // Booking CSV routing columns
+  'Include routing form answers': '包含分流表单答案',
   // Team member single sign-on
   'Your team sign-in': '你的团队登录方式',
   'Manage how you sign in to this team. You can still use your usual sign-in for your personal space.':
@@ -2883,4 +2937,7 @@ export const admin = {
   'SSO recovery for {name}': '{name}的单点登录恢复',
   'Team to recover': '要恢复的团队',
   'Choose a team': '选择团队',
+
+  // SCIM managed membership
+  'This resource is managed by your identity provider.': '此资源由你的身份提供方管理。',
 } as const

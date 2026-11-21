@@ -4,6 +4,7 @@ import {
   lockSharedTeamSsoProof,
   MemberDepartureBlockedError,
   MemberDepartureOwnerRequiredError,
+  recordScimManagedRemoval,
   removeSsoRecoveryOwner,
   type SsoAdmissionRemoval,
   ssoHardOff,
@@ -64,6 +65,7 @@ export async function leaveTeamMember(
           expectedOrganizationId: input.expectedOrganizationId,
           allowPersonal: false,
           includeRecoveryOwner: true,
+          includeScimManaged: true,
         },
         true,
       )
@@ -112,7 +114,12 @@ export async function leaveTeamMember(
       const deadline = check
         ? await checkTeamWriteBeforeAuthorityChange(trx)
         : await lockSharedTeamSsoProof(trx, ssoCapabilities, identity, actor.organizationId, denied)
-      if (recordAdmissionRemoval) {
+      if (actor.scimManaged) {
+        await recordScimManagedRemoval(trx, {
+          organizationId: actor.organizationId,
+          userId: actor.userId,
+        })
+      } else if (recordAdmissionRemoval) {
         await recordAdmissionRemoval(trx, {
           organizationId: actor.organizationId,
           userId: actor.userId,

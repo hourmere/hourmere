@@ -34,9 +34,9 @@ async function retire(db: Db, request: ScimResourceRequest, id: string): Promise
           .forUpdate()
           .executeTakeFirst()
         if (!entry) return scimUserNotFound
-        await assertScimUserCanRetire(trx, entry)
         if (request.hasWritePrecondition)
           return { status: 412, body: scimError(412, 'Conditional writes are not supported.') }
+        await assertScimUserCanRetire(trx, entry)
 
         const actor = { type: 'scim_token', id: principal.tokenId } as const
         const scope = { organizationId, connectionId, scimUserId: entry.id }

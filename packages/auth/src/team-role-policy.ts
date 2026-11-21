@@ -2,9 +2,10 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { tryGetCurrentAuthEndpointContext } from '@better-auth/core/context'
 import type { Database, Db } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
+import { scimManagedMember, scimProvisioned, scimSuspended } from '@hourmere/db/scim-suspension'
 import type { DBTransactionAdapter, Where } from 'better-auth/adapters'
 import { APIError, getSessionFromCtx } from 'better-auth/api'
-import { type Insertable, sql, type Transaction } from 'kysely'
+import { type Expression, type Insertable, type RawBuilder, sql, type Transaction } from 'kysely'
 import type { AuthMiddlewareContext } from './api-keys.ts'
 import type { Principal } from './caller.ts'
 import {
@@ -14,7 +15,12 @@ import {
 import { recordTeamRoleChange } from './organization-operations.ts'
 import { isMember, isUuid } from './organizations.ts'
 import type { ScimClaimCompletion, ScimClaimFinish } from './scim-claims.ts'
-import type { SsoAdmissionRemoval } from './sso-admission-blocks.ts'
+import {
+  checkSsoAdmissionBlocks,
+  SCIM_MANAGED_RESOURCE_CODE,
+  SCIM_MANAGED_RESOURCE_MESSAGE,
+  type SsoAdmissionRemoval,
+} from './sso-admission-blocks.ts'
 import {
   removeSsoRecoveryOwner,
   SsoRecoveryRequiredError,
@@ -35,6 +41,7 @@ import { lockTeamSsoProof, ssoHardOff, type TeamSsoCapabilities } from './team-s
 import { nativeSsoRequired, trustedAddMember } from './team-sso-native.ts'
 
 const changeRole = '/organization/update-member-role'
+const updateUser = '/update-user'
 const accept = '/organization/accept-invitation'
 /** Pinned alongside the native organization plugin's membership limit. */
 export const teamMembershipLimit = 100
@@ -69,6 +76,34 @@ export const recipientAlreadyMember = () =>
     code: 'INVITATION_RECIPIENT_ALREADY_MEMBER',
     message: 'The recipient already belongs to this team.',
   })
+
+const managedResource = () =>
+  new APIError('CONFLICT', {
+    code: SCIM_MANAGED_RESOURCE_CODE,
+    message: SCIM_MANAGED_RESOURCE_MESSAGE,
+  })
+
+/** After the organization lock, find a live account or proven mailbox admission decision. */
+function managedAdmissionBlock(
+  organizationId: string,
+  userId: string,
+  mailbox: string | Expression<string>,
+  invitationWithClaimCompletion?: string,
+) {
+  return sql<boolean>`CASE WHEN ${scimProvisioned(sql<string>`${organizationId}`)} THEN EXISTS (
+    SELECT 1 FROM scim_membership_blocks AS block
+    WHERE block.organization_id = ${organizationId}::uuid AND block.cleared_at IS NULL
+      AND (block.user_id = ${userId}::uuid OR block.identity_email = ${mailbox})
+  ) ${
+    invitationWithClaimCompletion
+      ? sql`AND NOT EXISTS (
+          SELECT 1 FROM scim_user_claims
+          WHERE organization_id = ${organizationId}::uuid
+            AND invitation_id = ${invitationWithClaimCompletion}::uuid
+        )`
+      : sql``
+  } ELSE false END`
+}
 
 /** Requests can assign one fixed role; legacy actor/target role strings are parsed separately. */
 export function fixedTeamRole(value: unknown): 'admin' | 'member' | undefined {
@@ -158,10 +193,14 @@ export async function lockTeamInvitationAcceptance(
     userId: string
     email: string
   },
+  admissionBlock?: RawBuilder<boolean>,
 ) {
   const stored = await trx
     .selectFrom('auth.invitation')
     .selectAll()
+    .$if(admissionBlock !== undefined, (query) =>
+      query.select(sql<boolean>`${admissionBlock}`.as('managedBlock')),
+    )
     .where('id', '=', invitationId)
     .where('organizationId', '=', organizationId)
     .forUpdate()
@@ -223,7 +262,11 @@ export async function lockTeamInvitationAcceptance(
       message: 'Organization membership limit reached',
     })
   }
-  return { stored, checkedAt: validity.now }
+  return {
+    stored,
+    checkedAt: validity.now,
+    managedBlock: stored.managedBlock === true,
+  }
 }
 
 /** Commit the invitation transition in the same transaction as membership and session. */
@@ -267,13 +310,19 @@ export function createTeamRolePolicy(
   scimClaims?: ScimClaimCompletion,
   recordAdmissionRemoval?: SsoAdmissionRemoval,
   ssoCapabilities = ssoHardOff,
+  scimResourcesEnabled = false,
 ) {
   const requests = new AsyncLocalStorage<{ ctx?: AuthMiddlewareContext }>()
   const transactions = new AsyncLocalStorage<Transaction<Database>>()
   // A claim the acceptance decided to complete, finished once its member row exists.
   const claimFinishes = new WeakMap<Transaction<Database>, ScimClaimFinish>()
 
-  const requireProof = (trx: Db, ctx: AuthMiddlewareContext, organizationId: string) => {
+  const requireProof = (
+    trx: Db,
+    ctx: AuthMiddlewareContext,
+    organizationId: string,
+    admissionUserId?: string,
+  ) => {
     const session = ctx.context.session
     return lockTeamSsoProof(
       { capabilities: ssoCapabilities },
@@ -281,7 +330,23 @@ export function createTeamRolePolicy(
       session ? { sessionId: session.session.id, userId: session.user.id } : null,
       organizationId,
       nativeSsoRequired,
-      { organizationLocked: true },
+      {
+        organizationLocked: true,
+        ...(scimResourcesEnabled &&
+          admissionUserId && {
+            admission: {
+              blocked: managedAdmissionBlock(
+                organizationId,
+                admissionUserId,
+                sql<string>`(SELECT lower(btrim(email)) FROM auth."user"
+                WHERE id = ${admissionUserId}::uuid AND "emailVerified" IS TRUE)`,
+              ),
+              denied: () => {
+                throw teamRoleDenied()
+              },
+            },
+          }),
+      },
     )
   }
 
@@ -295,7 +360,9 @@ export function createTeamRolePolicy(
       return endpoint as AuthMiddlewareContext
     if (
       !endpoint ||
-      (!selfDeparturePaths.has(endpoint.path ?? '') && !protectedPaths.has(endpoint.path ?? '')) ||
+      (!selfDeparturePaths.has(endpoint.path ?? '') &&
+        !protectedPaths.has(endpoint.path ?? '') &&
+        !(scimResourcesEnabled && endpoint.path === updateUser)) ||
       !endpoint.context.session?.session?.id ||
       (endpoint.path === remove && !endpoint.body?.memberIdOrEmail) ||
       (endpoint.path === changeRole && !endpoint.body?.memberId)
@@ -387,9 +454,16 @@ export function createTeamRolePolicy(
       .where('id', '=', memberId)
       .where('organizationId', '=', facts.organizationId)
     if (lock) targetQuery = targetQuery.forUpdate()
-    const target = await targetQuery.executeTakeFirst()
+    const target = await targetQuery
+      .$if(scimResourcesEnabled && lock && role === 'admin', (query) =>
+        query.select(({ ref }) =>
+          scimSuspended(facts.organizationId, ref('auth.member.userId')).as('scimBlocked'),
+        ),
+      )
+      .executeTakeFirst()
     if (!target || target.userId === facts.userId || teamRoles(target.role).includes('owner'))
       throw teamRoleDenied()
+    if (target.scimBlocked && !teamRoles(target.role).includes('admin')) throw managedResource()
     if (lock && teamRoles(target.role).includes('owner')) {
       await assertTeamOwnerRemains(targetDb, facts.organizationId, target.userId)
     }
@@ -419,20 +493,43 @@ export function createTeamRolePolicy(
     // Native session activation writes this row before commit. Reserve that mode now
     // so concurrent trusted acceptances cannot both take SHARE and deadlock upgrading.
     await teamSession(trx, actor, 'no-key-update')
-    const { stored, checkedAt } = await lockTeamInvitationAcceptance(trx, {
-      invitationId,
-      organizationId: organization.id,
-      userId: actor.user.id,
-      email: user.email,
-    })
+    const mailbox = user.email.trim().toLowerCase()
+    const { stored, checkedAt, managedBlock } = await lockTeamInvitationAcceptance(
+      trx,
+      {
+        invitationId,
+        organizationId: organization.id,
+        userId: actor.user.id,
+        email: user.email,
+      },
+      // A bound SCIM invitation runs its own blocker check in claim completion.
+      scimResourcesEnabled
+        ? managedAdmissionBlock(
+            organization.id,
+            actor.user.id,
+            mailbox,
+            scimClaims ? invitationId : undefined,
+          )
+        : undefined,
+    )
     await requireProof(trx, ctx, organization.id)
+    if (
+      managedBlock &&
+      !(await checkSsoAdmissionBlocks(trx, {
+        organizationId: organization.id,
+        userId: actor.user.id,
+        mailbox,
+        invitationId: stored.id,
+      }))
+    )
+      throw teamRoleDenied()
     // A SCIM-issued invitation's claim, after the organization and invitation locks: a live
     // admission blocker refuses, and a completable claim is finished with the member row.
     const claim = await scimClaims?.invitation(trx, {
       organizationId: organization.id,
       invitationId: stored.id,
       userId: actor.user.id,
-      mailbox: user.email.trim().toLowerCase(),
+      mailbox,
       checkedAt,
       audit: auditActor(actor),
     })
@@ -470,7 +567,12 @@ export function createTeamRolePolicy(
     /** Run before native lookups so denied targets never reveal whether they exist. */
     async before(ctx: AuthMiddlewareContext) {
       const state = requests.getStore()
-      if (state && (protectedPaths.has(ctx.path) || selfDeparturePaths.has(ctx.path)))
+      if (
+        state &&
+        (protectedPaths.has(ctx.path) ||
+          selfDeparturePaths.has(ctx.path) ||
+          (scimResourcesEnabled && ctx.path === updateUser))
+      )
         state.ctx = ctx
       if (!protectedPaths.has(ctx.path)) return
       if (!(await getSessionFromCtx(ctx))) return
@@ -558,8 +660,14 @@ export function createTeamRolePolicy(
           trustedAddMember(ctx as { operationId?: string }) &&
           request.model === 'member'
         ) {
-          const organizationId = (request.data as Record<string, unknown>).organizationId
-          if (typeof organizationId !== 'string' || !isUuid(organizationId)) throw teamRoleDenied()
+          const { organizationId, userId } = request.data as Record<string, unknown>
+          if (
+            typeof organizationId !== 'string' ||
+            !isUuid(organizationId) ||
+            typeof userId !== 'string' ||
+            !isUuid(userId)
+          )
+            throw teamRoleDenied()
           return write(async (trx) => {
             await trx
               .selectFrom('auth.organization')
@@ -568,7 +676,9 @@ export function createTeamRolePolicy(
               .forUpdate()
               .executeTakeFirstOrThrow()
             const member = await create<T, R>(request)
-            await requireProof(trx, ctx, organizationId)
+            // The native insert and this fresh read use the same transaction. A blocker
+            // committed while addMember waited for the organization rolls the insert back.
+            await requireProof(trx, ctx, organizationId, userId)
             return member
           })
         }
@@ -743,6 +853,49 @@ export function createTeamRolePolicy(
       }
       adapter.update = async <T>(request: Parameters<DBTransactionAdapter['update']>[0]) => {
         const ctx = operationContext()
+        const name = request.update.name
+        const profileSession =
+          ctx?.path === updateUser
+            ? (tryGetCurrentAuthEndpointContext()?.context.session ?? ctx.context.session)
+            : null
+        const organizationId = profileSession?.session.activeOrganizationId
+        if (
+          request.model === 'user' &&
+          name !== undefined &&
+          profileSession &&
+          typeof organizationId === 'string' &&
+          isUuid(organizationId) &&
+          selects(request.where, { id: profileSession.user.id })
+        ) {
+          const { id: userId } = profileSession.user
+          const currentDb = transactions.getStore() ?? db
+          // The native name update and conflict check share one statement with the same
+          // write lock as the ordinary account update. The managed profile itself is local.
+          const result = await currentDb
+            .with('managed', (db) =>
+              db.selectNoFrom(scimManagedMember(organizationId, userId).as('blocked')),
+            )
+            .with('updated', (db) =>
+              db
+                .updateTable('auth.user')
+                .set({
+                  name: name as string,
+                  image: request.update.image as string | null | undefined,
+                  updatedAt: new Date(),
+                })
+                .where('id', '=', userId)
+                .where((eb) => eb(eb.selectFrom('managed').select('blocked'), '=', false))
+                .returningAll(),
+            )
+            .selectFrom('managed')
+            .leftJoin('updated', (join) => join.onTrue())
+            .select('managed.blocked')
+            .selectAll('updated')
+            .executeTakeFirstOrThrow()
+          const { blocked, ...user } = result
+          if (blocked) throw managedResource()
+          return user.id === null ? null : (user as T)
+        }
         if (
           ctx?.path === setActiveOrganization &&
           request.model === 'session' &&

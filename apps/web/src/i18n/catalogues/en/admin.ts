@@ -2810,6 +2810,54 @@ export const admin = {
   'Workflow was disabled': 'Workflow was disabled',
   'Workflows were disabled on this instance': 'Workflows were disabled on this instance',
 
+  // Routing form publication and repair
+  Publication: 'Publication',
+  'No version published yet.': 'No version published yet.',
+  'Published version {number}': 'Published version {number}',
+  'Published version {number}.': 'Published version {number}.',
+  'Review publication': 'Review publication',
+  'Saved fallback': 'Saved fallback',
+  'Publishing uses the saved draft and keeps the form’s current enabled status.':
+    'Publishing uses the saved draft and keeps the form’s current enabled status.',
+  'Publish version': 'Publish version',
+  'Publishing…': 'Publishing…',
+  'Save your changes before publishing.': 'Save your changes before publishing.',
+  'Disable routing form': 'Disable routing form',
+  'I understand that while this form is disabled, submissions and pending booking links are blocked.':
+    'I understand that while this form is disabled, submissions and pending booking links are blocked.',
+  'Disable form': 'Disable form',
+  'Disabling…': 'Disabling…',
+  'Routing form disabled.': 'Routing form disabled.',
+  'Re-enable routing form': 'Re-enable routing form',
+  'Re-enable the current published version to accept submissions.':
+    'Re-enable the current published version to accept submissions.',
+  'Re-enable form': 'Re-enable form',
+  'Re-enabling…': 'Re-enabling…',
+  'Routing form re-enabled.': 'Routing form re-enabled.',
+  'Published target health': 'Published target health',
+  Available: 'Available',
+  'Health unknown': 'Health unknown',
+  'Repair fallback': 'Repair fallback',
+  'Repair rule {number}': 'Repair rule {number}',
+  'Publish without this rule to remove it from the current version.':
+    'Publish without this rule to remove it from the current version.',
+  'Save and publish your draft to update the published destinations.':
+    'Save and publish your draft to update the published destinations.',
+  'Could not publish the routing form.': 'Could not publish the routing form.',
+  'Could not confirm publication. Try publishing again to recover the result.':
+    'Could not confirm publication. Try publishing again to recover the result.',
+  'Could not disable the routing form.': 'Could not disable the routing form.',
+  'Could not re-enable the routing form.': 'Could not re-enable the routing form.',
+  'Review the highlighted destination before publishing.':
+    'Review the highlighted destination before publishing.',
+  'The draft was reloaded. Your unsaved edits are still here.':
+    'The draft was reloaded. Your unsaved edits are still here.',
+  'The latest draft changed some of the same fields. Review your edits before saving.':
+    'The latest draft changed some of the same fields. Review your edits before saving.',
+  'Save your edits over the fields that also changed in the latest draft?':
+    'Save your edits over the fields that also changed in the latest draft?',
+  'Routing form reloaded.': 'Routing form reloaded.',
+  'Saved fallback event name unavailable.': 'Saved fallback event name unavailable.',
   // Single sign-on provider and domain setup
   'Single sign-on': 'Single sign-on',
   'SSO domains': 'SSO domains',
@@ -2945,6 +2993,13 @@ export const admin = {
   'Could not confirm your SSO sign-in. Finish signing in or start SSO verification again.':
     'Could not confirm your SSO sign-in. Finish signing in or start SSO verification again.',
 
+  // Booking routing answers
+  'Original routing answers': 'Original routing answers',
+  'Final booking answers': 'Final booking answers',
+  'No routing answers were submitted.': 'No routing answers were submitted.',
+
+  // Booking CSV routing columns
+  'Include routing form answers': 'Include routing form answers',
   // Team member single sign-on
   'Your team sign-in': 'Your team sign-in',
   'Manage how you sign in to this team. You can still use your usual sign-in for your personal space.':
@@ -3020,4 +3075,8 @@ export const admin = {
   'SSO recovery for {name}': 'SSO recovery for {name}',
   'Team to recover': 'Team to recover',
   'Choose a team': 'Choose a team',
+
+  // SCIM managed membership
+  'This resource is managed by your identity provider.':
+    'This resource is managed by your identity provider.',
 } as const
