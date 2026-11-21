@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { JSDOM } from 'jsdom'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { isRoutingName } from '../../../scripts/routing-forms-names.ts'
 import { attr, checkBuiltLinks, elements } from '../scripts/check-links.ts'
 import { site } from './site.ts'
 
@@ -28,7 +29,8 @@ beforeAll(() => {
     ],
     {
       cwd: siteRoot,
-      env: { ...process.env, ASTRO_TELEMETRY_DISABLED: '1' },
+      // Vitest's MODE shadows the build mode Astro exposes to Starlight.
+      env: { ...process.env, MODE: undefined, ASTRO_TELEMETRY_DISABLED: '1' },
       stdio: 'pipe',
       timeout: 90_000,
     },
@@ -36,6 +38,27 @@ beforeAll(() => {
 }, 120_000)
 
 describe('built website', () => {
+  it('keeps routing guides out of production pages and the sidebar', () => {
+    const pages = globSync('docs/**/*.html', { cwd: output })
+    expect(pages).toContain('docs/api-keys.html')
+    expect(pages.filter(isRoutingName)).toEqual([])
+
+    const dom = new JSDOM(readFileSync(join(output, 'docs.html'), 'utf8'), {
+      url: 'https://hourmere.com/docs',
+    })
+    try {
+      const sidebar = dom.window.document.querySelector('#starlight__sidebar')
+      const links = Array.from(
+        sidebar?.querySelectorAll<HTMLAnchorElement>('a[href]') ?? [],
+        (link) => link.pathname,
+      )
+      expect(links).toContain('/docs/api-keys')
+      expect(links.filter(isRoutingName)).toEqual([])
+    } finally {
+      dom.window.close()
+    }
+  })
+
   it('publishes the unlisted device test page with its widget markup and loader', () => {
     const dom = new JSDOM(readFileSync(join(output, 'embed-test/index.html'), 'utf8'))
     try {

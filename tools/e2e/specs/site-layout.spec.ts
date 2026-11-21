@@ -1,20 +1,25 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import type { Page } from '@playwright/test'
+import { parse } from 'yaml'
 import { expect, test } from '../site-fixtures.ts'
 
 // Real-browser geometry belongs to CI. Local runs need an explicitly escalated shell.
 test.skip(!process.env.CI, 'Static-site rendering regression runs in CI')
 
-// Every documentation page whose Markdown holds a table, so a new page is covered as soon as
-// it is written. The route drops the extension; index.md is the /docs landing page.
+// Every published documentation page whose Markdown holds a table. The route drops the
+// extension, and index.md is the /docs landing page.
 function pagesWithTables() {
   const directory = fileURLToPath(
     new URL('../../../apps/site/src/content/docs/docs/', import.meta.url),
   )
   return readdirSync(directory)
     .filter((file) => file.endsWith('.md'))
-    .filter((file) => /^\|[\s:-]*-[\s:|-]*\|\s*$/m.test(readFileSync(directory + file, 'utf8')))
+    .filter((file) => {
+      const source = readFileSync(directory + file, 'utf8')
+      const frontmatter = source.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1] ?? ''
+      return parse(frontmatter)?.draft !== true && /^\|[\s:-]*-[\s:|-]*\|\s*$/m.test(source)
+    })
     .map((file) => (file === 'index.md' ? '/docs' : `/docs/${file.slice(0, -3)}`))
     .sort()
 }
