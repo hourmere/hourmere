@@ -8,6 +8,11 @@ import { Outlet } from 'react-router'
 const page = <M,>(load: () => Promise<M>, pick: (module: M) => ComponentType) =>
   lazy(() => load().then((module) => ({ default: pick(module) })))
 
+export const SsoSetupPage = page(
+  () => import('./pages/sso/SsoSetup.tsx'),
+  (module) => module.SsoSetupPage,
+)
+
 // The signed-in app.
 /** SessionProvider around the signed-in routes (and sign-in), as a layout route. */
 export const SessionLayout = page(
@@ -29,6 +34,10 @@ export const RequireSession = page(
 export const AppShell = page(
   () => import('./components/AppShell.tsx'),
   (m) => m.AppShell,
+)
+export const RequireRoutingForms = page(
+  () => import('./components/AppShell.tsx'),
+  (m) => m.RequireRoutingForms,
 )
 export const SignInPage = page(
   () => import('./pages/SignIn.tsx'),
@@ -91,6 +100,10 @@ export const HostMeetingPollRoute = page(
   () => import('./pages/meeting-polls/HostMeetingPollRoute.tsx'),
   (m) => m.HostMeetingPollRoute,
 )
+const routingManager = () => import('./pages/routing-forms/RoutingForms.tsx')
+export const RoutingFormsPage = page(routingManager, (m) => m.RoutingFormsPage)
+export const NewRoutingFormPage = page(routingManager, (m) => m.NewRoutingFormPage)
+export const EditRoutingFormPage = page(routingManager, (m) => m.EditRoutingFormPage)
 export const TeamBookingsPage = page(
   () => import('./pages/team-bookings/TeamBookings.tsx'),
   (m) => m.TeamBookingsPage,

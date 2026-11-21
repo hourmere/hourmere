@@ -139,6 +139,7 @@ describe.skipIf(!serverUrl)('SSO proof on team writes', () => {
         meetingPollSecret: secret,
         routingFormsEnabled: true,
         routingSecret: secret,
+        workflowsEnabled: true,
         scimProvisioningEnabled: true,
         ssoOidcEnabled: enabled,
         ssoConfigurationKey: Buffer.alloc(32),
@@ -263,13 +264,7 @@ describe.skipIf(!serverUrl)('SSO proof on team writes', () => {
         if (key === 'domainId') return String(fixture.domain.id)
         return eventId
       })
-      const response = await send(app, method, path, {})
-      if (path.startsWith('/api/v1/workflows')) {
-        expect(response.status, operation).toBe(404)
-        expect(await response.json(), operation).toMatchObject({ error: 'workflows_disabled' })
-      } else {
-        await expectRefused(response, operation)
-      }
+      await expectRefused(await send(app, method, path, {}), operation)
     }
     expect(await currentTitle()).toBe('Before writing')
   })

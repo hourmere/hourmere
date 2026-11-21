@@ -74,7 +74,7 @@ declare module 'hono' {
 const errorPath = '/sign-in?error=unable_to_create_session'
 const testReturnPath = '/app/settings'
 const providerIdSchema = z.uuidv7()
-const startInput = z.discriminatedUnion('intent', [
+export const OidcSignInInput = z.discriminatedUnion('intent', [
   z.strictObject({
     providerId: providerIdSchema,
     intent: z.literal('sign_in'),
@@ -538,7 +538,7 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
         if (c.req.method !== 'POST') return c.json({ error: 'method_not_allowed' }, 405)
         if (c.req.header('origin') !== origin || c.req.header('authorization') !== undefined)
           return c.json({ error: 'forbidden' }, 403)
-        const parsed = startInput.safeParse(await c.req.json().catch(() => null))
+        const parsed = OidcSignInInput.safeParse(await c.req.json().catch(() => null))
         if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
         const returnPath = oidcReturnDestination(parsed.data.returnTo ?? '/app')
         if (!returnPath) return c.json({ error: 'invalid_request' }, 400)

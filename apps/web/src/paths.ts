@@ -15,6 +15,8 @@ export const PATHS = {
   bookings: `${APP_BASE}/bookings`,
   meetingPolls: `${APP_BASE}/meeting-polls`,
   newMeetingPoll: `${APP_BASE}/meeting-polls/new`,
+  routingForms: `${APP_BASE}/routing-forms`,
+  newRoutingForm: `${APP_BASE}/routing-forms/new`,
   workflows: `${APP_BASE}/workflows`,
   newWorkflow: `${APP_BASE}/workflows/new`,
   teamBookings: `${APP_BASE}/team/bookings`,
@@ -25,6 +27,8 @@ export const PATHS = {
   apiKeys: `${APP_BASE}/api-keys`,
   auditLog: `${APP_BASE}/audit-log`,
   settings: `${APP_BASE}/settings`,
+  sso: '/app/settings/sso',
+  ssoDomainSettings: '/app/settings/sso/domains',
   newTeam: `${APP_BASE}/teams/new`,
   signIn: '/sign-in',
 } as const
@@ -37,6 +41,8 @@ export const workflowRunHistoryPath = (id: string) =>
   `${PATHS.workflows}/${encodeURIComponent(id)}/runs`
 export const meetingPollPath = (id: string, organizationId: string) =>
   `${PATHS.meetingPolls}/${encodeURIComponent(id)}?${new URLSearchParams({ organizationId })}`
+export const routingFormPath = (id: string, organizationId: string) =>
+  `${PATHS.routingForms}/${encodeURIComponent(id)}?${new URLSearchParams({ organizationId })}`
 
 /** The public booking page of a personal event type, as a full URL to share. */
 export const publicPageUrl = (handle: string, slug: string) =>

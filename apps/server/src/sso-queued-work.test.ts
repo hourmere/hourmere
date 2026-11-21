@@ -347,6 +347,7 @@ it('classifies every production worker by its source of authority', () => {
     'seriesNotificationDispatchJob',
     'waitlistEmailJob',
     'waitlistMaintenanceJobs',
+    'workflowJobs',
   ]
   const system = [
     'auditLogRetentionJob',

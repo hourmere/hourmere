@@ -15,12 +15,14 @@ import {
   Navigate,
   Route,
   useLocation,
+  useMatch,
   useNavigate,
   useOutletContext,
   useRoutes,
 } from 'react-router'
 import { api } from './api/client.ts'
 import { AdminLoading } from './components/AdminLoading.tsx'
+import type { AppShellContext } from './components/AppShell.tsx'
 import { PageSkeleton } from './components/PageSkeleton.tsx'
 import { RouteErrorBoundary } from './components/RouteErrorBoundary.tsx'
 import { embedQueryLanguage } from './embed/language.ts'
@@ -40,6 +42,7 @@ import {
   ConferencesPage,
   ConnectedAppsPage,
   CreateTeamPage,
+  EditRoutingFormPage,
   EmbeddedBookingPage,
   EmbeddedTeamBookingPage,
   EventTypeEditorPage,
@@ -51,14 +54,18 @@ import {
   MeetingPollCreatePage,
   MeetingPollPage,
   MeetingPollsPage,
+  NewRoutingFormPage,
   OneTimeBookingPage,
+  RequireRoutingForms,
   RequireSession,
   RoutingContinuationPage,
   RoutingFormPage,
+  RoutingFormsPage,
   ScheduleEditorPage,
   SessionLayout,
   SettingsPage,
   SignInPage,
+  SsoSetupPage,
   TeamBookingPage,
   TeamBookingsPage,
   TroubleshootPage,
@@ -103,6 +110,11 @@ export const appRoutes = createRoutesFromElements(
           <Route path="meeting-polls" element={<MeetingPollsPage />} />
           <Route path="meeting-polls/new" element={<MeetingPollCreatePage />} />
           <Route path="meeting-polls/:id" element={<HostMeetingPollRoute />} />
+          <Route element={<RequireRoutingForms />}>
+            <Route path="routing-forms" element={<RoutingFormsPage />} />
+            <Route path="routing-forms/new" element={<NewRoutingFormPage />} />
+            <Route path="routing-forms/:id" element={<EditRoutingFormPage />} />
+          </Route>
           <Route path={PATHS.workflows} element={<WorkflowRoute />} />
           <Route path={PATHS.newWorkflow} element={<WorkflowRoute view="editor" />} />
           <Route path={`${PATHS.workflows}/:id/edit`} element={<WorkflowRoute view="editor" />} />
@@ -116,6 +128,10 @@ export const appRoutes = createRoutesFromElements(
           <Route path="api-keys" element={<ApiKeysPage />} />
           <Route path="audit-log" element={<AuditLogPage />} />
           <Route path="settings" element={<SettingsPage />} />
+          <Route path={PATHS.sso} element={<SsoSetupRoute />}>
+            {/* The shared setup page selects the pane and keeps the team inventory across routes. */}
+            <Route path={PATHS.ssoDomainSettings} element={null} />
+          </Route>
           <Route path="teams/new" element={<CreateTeamPage />} />
           <Route path="*" element={<AppNotFoundPage />} />
         </Route>
@@ -145,6 +161,14 @@ export const appRoutes = createRoutesFromElements(
     <Route path="*" element={<NotFoundPage />} />
   </>,
 )
+
+function SsoSetupRoute() {
+  const { ssoOidcEnabled, ssoSamlEnabled } = useOutletContext<AppShellContext>()
+  const isDomains = useMatch(PATHS.ssoDomainSettings) !== null
+  if (ssoOidcEnabled === undefined || ssoSamlEnabled === undefined) return <PageSkeleton />
+  if (!ssoOidcEnabled && !(isDomains && ssoSamlEnabled)) return <AppNotFoundPage />
+  return <SsoSetupPage />
+}
 
 function WorkflowRoute({ view = 'list' }: { view?: 'list' | 'editor' | 'history' }) {
   const { workflowsEnabled, followUpHostNotesEnabled } = useOutletContext<{

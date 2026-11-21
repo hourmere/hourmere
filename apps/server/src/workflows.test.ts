@@ -1,8 +1,5 @@
-// The transports of booking workflows while they are off (docs/workflows.md, "Rollout and
-// limitations"): REST answers 404 workflows_disabled after the caller and its API-key scope
-// and before input validation or any lookup; MCP leaves the tools out of tools/list and
-// answers a direct call after the scope check and before the arguments are read; the CLI
-// reports the same code. No database is reachable here, so any lookup would fail loudly.
+// Operator-off transport behavior. Recovery operations still validate input and preserve
+// opaque ID refusals. The other operations stop after caller and scope checks.
 import { randomUUID } from 'node:crypto'
 import '@hono/zod-openapi'
 import type { ApiKeyScope, CallerResolver, Principal } from '@hourmere/auth'
@@ -59,12 +56,13 @@ const denial = {
   error: 'insufficient_scope',
   message: 'This API key does not allow this operation.',
 }
-const fullOnlyTools = ['create_workflow', 'update_workflow', 'delete_workflow', 'preview_workflow']
+const guardedTools = ['create_workflow', 'update_workflow', 'preview_workflow']
+const fullOnlyTools = [...guardedTools, 'delete_workflow']
 
 /** An app whose database refuses every connection: a lookup would answer 500. */
 function appWith(tools?: readonly Tool[]) {
   const db = createDb(createPool('postgres://workflows-off@127.0.0.1:9/workflows-off'))
-  const settings = { workflowsEnabled: true }
+  const settings = { workflowsEnabled: false }
   const app = createApp({
     publicUrl: URL,
     checkDb: async () => {},
@@ -103,29 +101,63 @@ async function rpc(app: ReturnType<typeof appWith>['app'], authorization: string
 }
 
 describe('workflow REST operations while off', () => {
-  it('answer 404 workflows_disabled after the caller and scope, before validation', async () => {
+  it('publishes the operator switch and recovery operations in OpenAPI and MCP', async () => {
     const { app, db } = appWith()
     try {
-      const urls = [
-        '/api/v1/workflows',
-        `/api/v1/workflows?ownerKind=personal&ownerId=${user.id}`,
-        `/api/v1/workflows?ownerKind=team&ownerId=${organization.id}&limit=100&cursor=abc`,
-        '/api/v1/workflows?ownerKind=robot&ownerId=1&limit=-1&extra=%00',
-        `/api/v1/workflows/${randomUUID()}`,
-        '/api/v1/workflows/not-a-uuid',
-        `/api/v1/workflows/${'9'.repeat(300)}`,
-        `/api/v1/workflows/${randomUUID()}/runs?limit=1&cursor=abc`,
-        '/api/v1/workflows/not-a-uuid/runs?limit=0&cursor=bad&extra=%00',
-      ]
-      for (const url of urls) {
+      const response = await app.request('/api/v1/openapi.json')
+      expect(response.status).toBe(200)
+      const { paths } = (await response.json()) as {
+        paths: Record<string, Record<string, { description: string }>>
+      }
+      const tools = workflowTools({ db, workflowsEnabled: true })
+      for (const [path, method, name] of [
+        ['/api/v1/workflows', 'post', 'create_workflow'],
+        ['/api/v1/workflows/{id}', 'patch', 'update_workflow'],
+        ['/api/v1/workflows/{id}', 'delete', 'delete_workflow'],
+        ['/api/v1/workflows/preview', 'post', 'preview_workflow'],
+        ['/api/v1/workflows', 'get', 'list_workflows'],
+        ['/api/v1/workflows/{id}', 'get', 'get_workflow'],
+        ['/api/v1/workflows/{id}/runs', 'get', 'list_workflow_runs'],
+      ] as const) {
+        for (const description of [
+          paths[path]?.[method]?.description,
+          tools.find((tool) => tool.name === name)?.description,
+        ]) {
+          expect(description, name).toContain('WORKFLOWS_ENABLED=true')
+          expect(description, name).toContain(
+            'creation, preview, enabling and other edits return 404 workflows_disabled',
+          )
+          expect(description, name).toContain('reads, disable-only updates and deletion')
+        }
+      }
+    } finally {
+      await db.destroy()
+    }
+  })
+
+  it('preserves recovery validation and opaque IDs after caller and scope checks', async () => {
+    const { app, db } = appWith()
+    try {
+      for (const [url, status, error] of [
+        ['/api/v1/workflows', 400, 'invalid_request'],
+        [
+          `/api/v1/workflows?ownerKind=personal&ownerId=${user.id}&cursor=abc`,
+          400,
+          'invalid_cursor',
+        ],
+        ['/api/v1/workflows/not-a-uuid', 404, 'workflow_not_found'],
+        [`/api/v1/workflows/${'9'.repeat(300)}`, 404, 'workflow_not_found'],
+        ['/api/v1/workflows/not-a-uuid/runs', 404, 'workflow_not_found'],
+        ['/api/v1/workflows/not-a-uuid/runs?limit=0', 400, 'invalid_request'],
+      ] as const) {
         for (const headers of [
           { authorization: 'Bearer hm_full' },
           { authorization: 'Bearer hm_read' },
           { cookie: 'session=valid' },
         ]) {
           const res = await app.request(url, { headers })
-          expect(res.status, `${JSON.stringify(headers)} ${url}`).toBe(404)
-          expect(await res.json()).toEqual(disabled)
+          expect(res.status, `${JSON.stringify(headers)} ${url}`).toBe(status)
+          expect(await res.json()).toMatchObject({ error })
           expect(res.headers.get('cache-control')).toBe('no-store')
         }
         const bookings = await app.request(url, {
@@ -133,11 +165,10 @@ describe('workflow REST operations while off', () => {
         })
         expect(bookings.status, url).toBe(403)
         expect(await bookings.json()).toEqual(denial)
-        // Missing or unknown credentials are refused before the switch.
         for (const headers of [{}, { authorization: 'Bearer hm_unknown' }]) {
           const res = await app.request(url, { headers })
           expect(res.status, url).toBe(401)
-          expect(await res.json()).toEqual({ error: 'unauthorized' })
+          expect(await res.json()).toMatchObject({ error: 'unauthorized' })
         }
       }
     } finally {
@@ -147,35 +178,41 @@ describe('workflow REST operations while off', () => {
 })
 
 describe('workflow POST, PATCH and DELETE routes while off', () => {
-  it('checks caller and write scope before the switch, and the switch before JSON validation', async () => {
+  it('checks caller and write scope before allowing recovery writes or blocking other changes', async () => {
     const { app, db } = appWith()
     try {
-      for (const [token, status, body] of [
-        ['hm_full', 404, disabled],
-        ['hm_read', 403, denial],
-        ['hm_bookings', 403, denial],
-        ['hm_unknown', 401, { error: 'unauthorized' }],
-      ] as const) {
-        for (const [method, path] of [
-          ['POST', '/api/v1/workflows'],
-          ['POST', '/api/v1/workflows/preview'],
-          ['PATCH', '/api/v1/workflows/not-a-uuid'],
-          ['DELETE', '/api/v1/workflows/not-a-uuid'],
+      const methodCases = [
+        ['POST', '/api/v1/workflows', '{}', 'workflows_disabled'],
+        ['POST', '/api/v1/workflows/preview', '{}', 'workflows_disabled'],
+        ['PATCH', '/api/v1/workflows/not-a-uuid', '{}', 'workflows_disabled'],
+        [
+          'PATCH',
+          '/api/v1/workflows/not-a-uuid',
+          '{"expectedRevision":1,"enabled":true}',
+          'workflows_disabled',
+        ],
+        [
+          'PATCH',
+          '/api/v1/workflows/not-a-uuid',
+          '{"expectedRevision":1,"enabled":false}',
+          'workflow_not_found',
+        ],
+        ['DELETE', '/api/v1/workflows/not-a-uuid', '{"expectedRevision":1}', 'workflow_not_found'],
+      ] as const
+      for (const [method, path, input, error] of methodCases) {
+        for (const [token, status, body] of [
+          ['hm_full', 404, { error }],
+          ['hm_read', 403, denial],
+          ['hm_bookings', 403, denial],
+          ['hm_unknown', 401, { error: 'unauthorized' }],
         ] as const) {
-          for (const input of [
-            '{',
-            '{}',
-            '{"expectedRevision":1,"enabled":false}',
-            JSON.stringify({ id: randomUUID(), actions: [{ type: 'webhook' }] }),
-          ]) {
-            const response = await app.request(path, {
-              method,
-              headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-              body: input,
-            })
-            expect(response.status, `${method} ${path}`).toBe(status)
-            expect(await response.json()).toEqual(body)
-          }
+          const response = await app.request(path, {
+            method,
+            headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+            body: input,
+          })
+          expect(response.status, `${token} ${method} ${path}`).toBe(status)
+          expect(await response.json()).toMatchObject(body)
         }
       }
     } finally {
@@ -206,33 +243,43 @@ describe('workflow MCP tools while off', () => {
         idempotentHint: tool.name !== 'update_workflow',
         openWorldHint: false,
       })
-      expect(() => tool.requireAvailable?.()).toThrow(
-        expect.objectContaining({ code: 'workflows_disabled', kind: 'not_found' }),
-      )
-      expect(tool.description).toContain('workflows_disabled')
+      const check = () => tool.requireAvailable?.()
+      if (guardedTools.includes(tool.name))
+        expect(check).toThrow(
+          expect.objectContaining({ code: 'workflows_disabled', kind: 'not_found' }),
+        )
+      else expect(check).not.toThrow()
     }
-    expect(workflowsEnabled({ workflowsEnabled: true })).toBe(false)
+    expect(workflowsEnabled({ workflowsEnabled: false })).toBe(false)
   })
 
-  it('are left out of tools/list and refused on a direct call for every caller', async () => {
+  it('are hidden from discovery and apply operator-off rules to direct calls', async () => {
     const { app, db } = appWith()
     try {
       for (const authorization of ['Bearer hm_full', 'Bearer hm_read', 'Bearer oauth']) {
         const listed = await rpc(app, authorization, { method: 'tools/list', params: {} })
         expect(listed.result.tools).toEqual([])
-        for (const [name, args] of [
-          ['create_workflow', {}],
-          ['update_workflow', {}],
-          ['update_workflow', { id: randomUUID(), expectedRevision: 1, enabled: false }],
-          ['delete_workflow', {}],
-          ['preview_workflow', { example: { bookingId: randomUUID() } }],
-          ['list_workflows', {}],
-          ['list_workflows', { owner: { kind: 'personal', id: user.id } }],
-          ['list_workflows', 'not an object'],
-          ['get_workflow', { id: randomUUID() }],
-          ['get_workflow', { id: 'x', extra: '\u0000' }],
-          ['list_workflow_runs', { id: randomUUID() }],
-          ['list_workflow_runs', { id: 'x', cursor: '\u0000', limit: 0 }],
+        for (const [name, args, error] of [
+          ['create_workflow', {}, 'workflows_disabled'],
+          ['update_workflow', {}, 'workflows_disabled'],
+          [
+            'update_workflow',
+            { id: 'invalid', expectedRevision: 1, enabled: false },
+            'workflow_not_found',
+          ],
+          ['delete_workflow', { id: 'invalid', expectedRevision: 1 }, 'workflow_not_found'],
+          ['preview_workflow', { example: { bookingId: randomUUID() } }, 'workflows_disabled'],
+          ['list_workflows', {}, 'invalid_request'],
+          [
+            'list_workflows',
+            { owner: { kind: 'personal', id: user.id }, cursor: 'abc' },
+            'invalid_cursor',
+          ],
+          ['list_workflows', 'not an object', 'invalid_request'],
+          ['get_workflow', { id: 'invalid' }, 'workflow_not_found'],
+          ['get_workflow', { id: 'x', extra: '\u0000' }, 'invalid_request'],
+          ['list_workflow_runs', { id: 'invalid' }, 'workflow_not_found'],
+          ['list_workflow_runs', { id: 'x', cursor: '\u0000', limit: 0 }, 'invalid_request'],
         ] as const) {
           const called = await rpc(app, authorization, {
             method: 'tools/call',
@@ -244,8 +291,8 @@ describe('workflow MCP tools while off', () => {
             continue
           }
           expect(called.result.isError, `${authorization} ${name}`).toBe(true)
-          expect(textOf(called.result)).toEqual(
-            fullOnlyTools.includes(name) && authorization === 'Bearer hm_read' ? denial : disabled,
+          expect(textOf(called.result)).toMatchObject(
+            fullOnlyTools.includes(name) && authorization === 'Bearer hm_read' ? denial : { error },
           )
         }
       }
@@ -268,7 +315,9 @@ describe('workflow MCP tools while off', () => {
   })
 
   it('checks availability after the scope and before the arguments, in runTool itself', async () => {
-    for (const original of workflowTools({ db: {} as never })) {
+    for (const original of workflowTools({ db: {} as never }).filter(({ name }) =>
+      guardedTools.includes(name),
+    )) {
       const run = vi.fn(async () => ({}))
       const tool = { ...original, run } as Tool
       for (const args of [{}, { id: randomUUID() }, { owner: '\u0000' }, null]) {
@@ -355,16 +404,26 @@ describe('workflow MCP tools while off', () => {
 
 describe('workflow CLI commands while off', () => {
   it.each([
-    ['list', 'list_workflows', { owner: { kind: 'team', id: organization.id }, limit: 5 }],
-    ['get', 'get_workflow', { id: randomUUID() }],
-    ['runs', 'list_workflow_runs', { id: randomUUID(), limit: 1, cursor: 'abc' }],
-    ['create', 'create_workflow', {}],
-    ['update', 'update_workflow', { id: randomUUID(), expectedRevision: 1, enabled: false }],
-    ['delete', 'delete_workflow', {}],
-    ['preview', 'preview_workflow', {}],
+    [
+      'list',
+      'list_workflows',
+      { owner: { kind: 'team', id: organization.id }, cursor: 'abc' },
+      'invalid_cursor',
+    ],
+    ['get', 'get_workflow', { id: 'invalid' }, 'workflow_not_found'],
+    ['runs', 'list_workflow_runs', { id: 'invalid' }, 'workflow_not_found'],
+    ['create', 'create_workflow', {}, 'workflows_disabled'],
+    [
+      'update',
+      'update_workflow',
+      { id: 'invalid', expectedRevision: 1, enabled: true },
+      'workflows_disabled',
+    ],
+    ['delete', 'delete_workflow', { id: 'invalid', expectedRevision: 1 }, 'workflow_not_found'],
+    ['preview', 'preview_workflow', {}, 'workflows_disabled'],
   ] as const)(
-    'workflows %s calls %s and reports workflows_disabled',
-    async (command, tool, input) => {
+    'workflows %s calls %s and reports the operator-off outcome',
+    async (command, tool, input, error) => {
       const { app, db } = appWith()
       try {
         let stdout = ''
@@ -389,7 +448,7 @@ describe('workflow CLI commands while off', () => {
         expect(sent.params).toMatchObject({ name: tool, arguments: input })
         expect(code).toBe(1)
         expect(stdout).toBe('')
-        expect(JSON.parse(stderr)).toEqual({ ...disabled, outcomeMayBeUnknown: true })
+        expect(JSON.parse(stderr)).toMatchObject({ error, outcomeMayBeUnknown: true })
       } finally {
         await db.destroy()
       }

@@ -411,8 +411,10 @@ export interface MailboxProofModule {
   mount(shared: { app: OpenAPIHono; resolveCaller: CallerResolver; publicUrl: string }): void
 }
 
-const SendInput = z.strictObject({ attemptId: z.uuid() })
-const ConsumeInput = z.strictObject({ attemptId: z.uuid(), token: z.string().min(1).max(256) })
+export const MailboxProofSendInput = z.strictObject({ attemptId: z.uuid() })
+export const MailboxProofConsumeInput = MailboxProofSendInput.extend({
+  token: z.string().min(1).max(256),
+})
 
 /**
  * The two endpoints. createApp mounts them ahead of Better Auth's `/api/auth/*`, in every
@@ -490,7 +492,7 @@ export function mailboxProofRoutes(deps: {
       }
 
       app.all(MAILBOX_PROOF_SEND_PATH, async (c) => {
-        const admitted = await admit(c, sends, SendInput)
+        const admitted = await admit(c, sends, MailboxProofSendInput)
         if (admitted instanceof Response) return admitted
         const { input, presenter, language } = admitted
         // No attempt lookup here: the worker decides, so every answer is the same.
@@ -503,7 +505,7 @@ export function mailboxProofRoutes(deps: {
       })
 
       app.all(MAILBOX_PROOF_CONSUME_PATH, async (c) => {
-        const admitted = await admit(c, consumes, ConsumeInput)
+        const admitted = await admit(c, consumes, MailboxProofConsumeInput)
         if (admitted instanceof Response) return admitted
         const proven = await consumeMailboxProof(
           { capabilities: deps.capabilities, db: deps.db, limits, now: deps.now, guesses },

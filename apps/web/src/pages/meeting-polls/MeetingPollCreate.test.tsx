@@ -323,4 +323,26 @@ describe('Create a meeting poll', () => {
       '2030-11-03T06:30:00.000Z',
     ])
   })
+
+  it('resolves deadlines around the Los Angeles spring change and Lord Howe half-hour changes', () => {
+    const losAngeles = 'America/Los_Angeles'
+    expect(pollDeadlineInstants('2030-03-10T01:59', losAngeles)).toEqual([
+      '2030-03-10T09:59:00.000Z',
+    ])
+    expect(pollDeadlineInstants('2030-03-10T02:00', losAngeles)).toEqual([])
+    expect(pollDeadlineInstants('2030-03-10T02:59', losAngeles)).toEqual([])
+    expect(pollDeadlineInstants('2030-03-10T03:00', losAngeles)).toEqual([
+      '2030-03-10T10:00:00.000Z',
+    ])
+
+    const lordHowe = 'Australia/Lord_Howe'
+    expect(pollDeadlineInstants('2030-10-06T01:59', lordHowe)).toEqual(['2030-10-05T15:29:00.000Z'])
+    expect(pollDeadlineInstants('2030-10-06T02:00', lordHowe)).toEqual([])
+    expect(pollDeadlineInstants('2030-10-06T02:29', lordHowe)).toEqual([])
+    expect(pollDeadlineInstants('2030-10-06T02:30', lordHowe)).toEqual(['2030-10-05T15:30:00.000Z'])
+    expect(pollDeadlineInstants('2030-04-07T01:45', lordHowe)).toEqual([
+      '2030-04-06T14:45:00.000Z',
+      '2030-04-06T15:15:00.000Z',
+    ])
+  })
 })

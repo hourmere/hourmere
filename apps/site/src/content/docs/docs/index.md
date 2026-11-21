@@ -217,12 +217,10 @@ not grant host rescheduling or reschedule-request authority through REST, MCP or
   Self-hosters can install its local package; downstream effects need durable idempotency.
 - [Zapier](/docs/zapier) is not yet published in the Zapier directory. The source app
   can be deployed privately with your own Zapier account.
-- Booking workflows are hard-off, including on self-hosted instances. The
-  [operating guide](https://github.com/hourmere/hourmere/blob/main/docs/workflows.md) covers
-  the app and the published REST, MCP and CLI operations. These operations return
-  `workflows_disabled` for otherwise authorized calls. Operator opt-in is unavailable,
-  and internal Compose forwards have no effect while hard-off. Existing reminders,
-  follow-ups and signed booking webhooks continue to work.
+- Booking workflows are available and off by default. Self-hosted operators can opt in
+  without a paid plan. Existing reminders, follow-ups and signed booking webhooks continue
+  to work. See the [configuration reference](/docs/configuration#email-and-registration)
+  and [workflow operating guide](https://github.com/hourmere/hourmere/blob/main/docs/workflows.md#operating-guide).
 - [Cal.com imports](/docs/calcom-import#known-limitations) create inactive drafts and read-only
   local busy records. Same-owner incremental completion is unavailable; group-slot overlaps
   block the batch, while daily/weekly/monthly limit differences are reported as warnings.
