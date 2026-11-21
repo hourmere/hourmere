@@ -1,5 +1,5 @@
-// The product API (/api/v1), typed from the server's OpenAPI document: `npm run api:types`
-// regenerates schema.d.ts after a route changes.
+// The product API and supported SSO authentication ceremonies, typed from server contracts.
+// Run `npm run api:types` to regenerate the declarations after a contract change.
 import createClient, { type Middleware } from 'openapi-fetch'
 import { requestError } from './errors.ts'
 import type { components, paths } from './schema.d.ts'
@@ -31,7 +31,7 @@ const watchSession: Middleware = {
 
 /**
  * `api.GET('/api/v1/me')` and so on: paths, parameters and bodies are checked against the
- * OpenAPI document. Requests are same-origin, so the session cookie goes along and writes
+ * generated declarations. Requests are same-origin, so the session cookie goes along and writes
  * carry the app's Origin (the server's CSRF check).
  */
 export const api = createClient<paths>({

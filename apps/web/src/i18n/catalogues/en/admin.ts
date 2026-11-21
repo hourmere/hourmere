@@ -2743,4 +2743,67 @@ export const admin = {
     'Retiring {domain} ends its use for single sign-on.',
   'Retire domain': 'Retire domain',
   'Domain retired.': 'Domain retired.',
+
+  // SSO activation
+  'Test provider': 'Test provider',
+  'Test provider {name}': 'Test provider {name}',
+  'Continue to identity provider': 'Continue to identity provider',
+  'Current revision passed its test.': 'Current revision passed its test.',
+  'Current revision failed its test.': 'Current revision failed its test.',
+  'No test result for the current revision.': 'No test result for the current revision.',
+  'Enable provider': 'Enable provider',
+  'Disable provider': 'Disable provider',
+  'Enable provider {name}': 'Enable provider {name}',
+  'Disable provider {name}': 'Disable provider {name}',
+  'Enable this provider?': 'Enable this provider?',
+  'Disable this provider?': 'Disable this provider?',
+  'Enabling provider…': 'Enabling provider…',
+  'Disabling provider…': 'Disabling provider…',
+  'Pass a test of this provider’s current revision before enabling it.':
+    'Pass a test of this provider’s current revision before enabling it.',
+  'Verify an associated domain before enabling this provider.':
+    'Verify an associated domain before enabling this provider.',
+  'Enable another usable OIDC provider before disabling this provider.':
+    'Enable another usable OIDC provider before disabling this provider.',
+  'SSO enforcement': 'SSO enforcement',
+  'Loading SSO enforcement…': 'Loading SSO enforcement…',
+  'Could not load SSO enforcement.': 'Could not load SSO enforcement.',
+  'SSO enforcement is unavailable in this team.': 'SSO enforcement is unavailable in this team.',
+  'This team requires single sign-on.': 'This team requires single sign-on.',
+  'Single sign-on is optional for this team.': 'Single sign-on is optional for this team.',
+  'Require SSO': 'Require SSO',
+  'Stop requiring SSO': 'Stop requiring SSO',
+  'Require single sign-on for this team?': 'Require single sign-on for this team?',
+  'Stop requiring single sign-on for this team?': 'Stop requiring single sign-on for this team?',
+  'Before requiring SSO, have an owner test the OIDC draft, then enable that revision with a verified domain. A current owner must also accept recovery enrollment.':
+    'Before requiring SSO, have an owner test the OIDC draft, then enable that revision with a verified domain. A current owner must also accept recovery enrollment.',
+  'A current owner must accept recovery enrollment before you can require SSO.':
+    'A current owner must accept recovery enrollment before you can require SSO.',
+  'A team owner must pass a test of the current version of an enabled OIDC provider.':
+    'A team owner must pass a test of the current version of an enabled OIDC provider.',
+  'An enabled OIDC provider with a verified domain is required.':
+    'An enabled OIDC provider with a verified domain is required.',
+  'Could not change the team’s SSO enforcement.': 'Could not change the team’s SSO enforcement.',
+  'Verify by email': 'Verify by email',
+  'Send verification email': 'Send verification email',
+  'Check your Hourmere email. Copy the verification link and paste it here.':
+    'Check your Hourmere email. Copy the verification link and paste it here.',
+  'Email verification link': 'Email verification link',
+  'Verify email link': 'Verify email link',
+  'Email verification complete.': 'Email verification complete.',
+  'Verify with single sign-on': 'Verify with single sign-on',
+  'Identity provider': 'Identity provider',
+  'Start SSO verification': 'Start SSO verification',
+  'Open identity provider': 'Open identity provider',
+  'After signing in, return to this tab and select Continue.':
+    'After signing in, return to this tab and select Continue.',
+  'Could not start identity verification. Try again.':
+    'Could not start identity verification. Try again.',
+  'Could not verify that link. Check the link or request a new email.':
+    'Could not verify that link. Check the link or request a new email.',
+  'Identity verification is unavailable.': 'Identity verification is unavailable.',
+  'This verification request expired. Start again.':
+    'This verification request expired. Start again.',
+  'Could not confirm your SSO sign-in. Finish signing in or start SSO verification again.':
+    'Could not confirm your SSO sign-in. Finish signing in or start SSO verification again.',
 } as const

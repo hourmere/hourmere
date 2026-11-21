@@ -1479,8 +1479,7 @@ value, and publish them in DNS before choosing **Verify domain**. The TXT record
 shown once and disappears on dismissal, navigation or reload. Generating a new
 challenge rotates the value and resets verification. The domain list shows domains
 linked to providers plus those added during the current visit. Associate a new domain
-with a provider to find it on a later visit. Writes that require fresh proof show the
-verification requirement. The fresh-proof prompt is part of Activation UI.
+with a provider to find it on a later visit.
 
 生产环境仍关闭 OIDC 和 SAML。注入 OIDC 测试能力后，当前团队的所有者或管理员可在
 **设置 → 单点登录**中创建、编辑或停用提供方，并管理关联域名。创建后，签发者网址和客户端
@@ -1490,8 +1489,46 @@ ID 固定。如需更换密钥，请选择**替换客户端密钥**并输入新�
 在**单点登录域名**中为确切域名生成挑战，复制 TXT 记录名称和值并将其添加到 DNS，然后选择
 **验证域名**。TXT 记录仅显示一次，关闭记录、离开页面或重新加载后即消失。重新生成挑战会
 更换记录值并重置验证状态。列表包含已关联到提供方的域名，以及本次访问期间新增的域名。
-将新域名关联到提供方后，下次访问时仍可找到它。需要新鲜证明的写入会提示验证身份，验证流程
-由启用界面提供。
+将新域名关联到提供方后，下次访问时仍可找到它。
+
+### Test a provider and require SSO
+
+In **Identity providers**, choose **Test provider** on an OIDC draft. After verifying
+your identity, continue to the identity provider in the same browser. When the test
+returns you to Settings, reopen **Identity providers** to see the result for the
+current revision. A team owner can enable the provider after that revision passes
+and an associated domain is verified. Editing the provider creates a new revision.
+
+In **SSO enforcement**, a team owner can require SSO or stop requiring it. To require
+SSO, a current owner must have accepted recovery enrollment. An enabled OIDC provider
+needs a verified domain and a passing test for its current revision by a team owner.
+Have the owner test the draft before enabling it.
+Hourmere checks these conditions when you submit. If the team requires SSO, Hourmere
+also checks that a usable OIDC provider remains before disabling the current provider.
+
+When Hourmere asks for email verification, send the verification email and paste the
+link from your Hourmere inbox into the prompt in the original tab. Verify the link
+and choose **Continue** to submit your change. If Hourmere asks you to verify with
+SSO, open the identity provider in the new tab, then return to the original tab and
+choose **Continue**. Some identity providers also require the email step. Finish
+verification while your original settings tab is open and your team context stays
+the same.
+
+在**身份提供方**中，选择 OIDC 草稿上的**测试提供方**。验证身份后，在同一浏览器中前往
+身份提供方。测试完成后，浏览器会返回设置页。重新打开**身份提供方**即可查看当前版本的
+测试结果。当前版本通过测试，且至少有一个关联域名已验证后，团队所有者可以启用该提供方。
+编辑提供方会产生新版本。
+
+在**强制单点登录**中，团队所有者可以启用或停止强制单点登录。启用前，须有一位当前团队
+所有者接受恢复登记，且至少有一个已启用的 OIDC 提供方关联了已验证的域名，
+其当前版本也已通过团队所有者的测试。请先由所有者测试草稿，再启用该提供方。
+Hourmere 会在提交时核验这些条件。
+团队强制使用单点登录期间，停用提供方前，Hourmere 会确认仍有其他可用的 OIDC 提供方。
+
+如果 Hourmere 要求验证邮箱，请发送验证邮件，将 Hourmere 邮箱收到的链接粘贴到原标签页中的
+提示框，再验证链接并选择**继续**来提交更改。如果需要通过单点登录验证身份，请在新标签页
+打开身份提供方，完成验证后返回原标签页并选择**继续**。部分提供方还需要通过邮箱验证。
+请在验证完成前保留原设置标签页，并留在同一个团队。
 
 ## Self-hosting and local acceptance
 

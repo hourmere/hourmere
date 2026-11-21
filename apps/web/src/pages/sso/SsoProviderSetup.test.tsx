@@ -1,6 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
+import type { Schemas } from '../../api/client.ts'
 import { PATHS } from '../../paths.ts'
 import {
   fakeApi,
@@ -43,6 +44,13 @@ const detail = `${list}/${provider.id}`
 const providerPage = (...data: SsoProvider[]) => json(200, { data, nextCursor: null })
 const base: Routes = {
   ...signedInAs({ ...ME, organization }),
+  'GET /api/v1/team/sso/policy': () =>
+    json(200, {
+      admission: 'invitation_only',
+      policyRevision: 1,
+      requireSso: false,
+      trustGeneration: 1,
+    } satisfies Schemas['SsoPolicy']),
   'GET /api/v1/instance': () =>
     json(200, {
       ssoOidcEnabled: true,
@@ -251,14 +259,23 @@ describe('SSO provider setup', () => {
     ['team_management_access_denied', 'SSO settings are unavailable in this team.', false],
     ['sso_reauthentication_required', 'Confirm your identity before changing SSO settings.', true],
   ] as const)(
-    'handles %s without exposing server details or retaining the entered secret',
+    'handles %s without exposing server details or keeping the secret in the form',
     async (code, message, canEdit) => {
       const secret = 'synthetic-denied-secret'
       const raw = 'synthetic server details'
       const requests = fakeApi({
         ...base,
         [`GET ${list}`]: () => providerPage(provider),
-        [`PATCH ${detail}`]: () => json(403, { error: code, message: `${raw}: ${secret}` }),
+        [`PATCH ${detail}`]: () =>
+          json(403, {
+            error: code,
+            message: `${raw}: ${secret}`,
+            ...(code === 'sso_reauthentication_required' && {
+              attemptId: '00000000-0000-7000-8000-000000000015',
+              proofMethods: ['mailbox'],
+              expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+            }),
+          }),
       })
       const user = userEvent.setup()
       renderApp(PATHS.sso)

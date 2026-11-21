@@ -19,6 +19,10 @@ export const ssoSetupAuditPages = [
   { id: 'sso-setup-forbidden', title: 'SSO settings without permission' },
   { id: 'sso-setup-error', title: 'SSO settings load error' },
   { id: 'sso-setup-conflict', title: 'SSO settings revision conflict' },
+  { id: 'sso-provider-enable', title: 'Confirm enabling a tested provider' },
+  { id: 'sso-enforcement-recovery-required', title: 'SSO enforcement blocked by recovery' },
+  { id: 'sso-proof-mailbox', title: 'Fresh proof with a mailbox verification link' },
+  { id: 'sso-proof-step-up', title: 'Fresh proof with an identity provider' },
 ] as const
 
 export type SsoSetupAuditPageId = (typeof ssoSetupAuditPages)[number]['id']
@@ -62,6 +66,23 @@ const provider: Provider = {
   testStatus: 'not_tested',
   domains: [domain],
 }
+const enabledProvider: Provider = {
+  ...provider,
+  id: '72900000-0000-4000-8000-000000000004',
+  displayName: 'SyntheticLinkedIdentityProvider'.repeat(3),
+  enabled: true,
+  testStatus: 'passed',
+}
+const providerStates: Partial<Record<SsoSetupAuditPageId, Provider[]>> = {
+  'sso-providers-empty': [],
+  'sso-provider-enable': [{ ...provider, testStatus: 'passed' }],
+  'sso-enforcement-recovery-required': [enabledProvider],
+  'sso-proof-step-up': [provider, enabledProvider],
+}
+const proofAttemptId = '72900000-0000-4000-8000-000000000005'
+const linkId = '72900000-0000-4000-8000-000000000006'
+const proofExpires = '2030-01-07T10:10:00.000Z'
+const authorizationUrl = 'https://identity.hourmere.invalid/authorize'
 const challengeDomain = 'synthetic-cross-organization-domain-verification.hourmere.invalid'
 const challenge: Challenge = {
   domain: {
@@ -78,6 +99,8 @@ const challenge: Challenge = {
 /** Supply synthetic responses through the browser client while the fixture server stays hard-off. */
 async function mockSsoSetupAudit(page: Page, app: FixtureApp, state: SsoSetupAuditPageId) {
   const { teamOrganizationId } = await app.auditState()
+  const stepUp = state === 'sso-proof-step-up'
+  const recoveryRequired = state === 'sso-enforcement-recovery-required'
   const instance: Schemas['Instance'] = {
     hostedSignupUrl: 'https://hourmere.com',
     publicUrl: app.url,
@@ -89,25 +112,31 @@ async function mockSsoSetupAudit(page: Page, app: FixtureApp, state: SsoSetupAud
     url.origin === app.url && url.pathname === '/api/v1/team/sso/providers'
   const expectedOrganization = async (route: Route) =>
     (await route.request().headerValue('x-expected-organization-id')) === teamOrganizationId
+  const contextChanged = (route: Route) =>
+    route.fulfill({ status: 409, json: { error: 'organization_context_changed' } })
+  const policy: Schemas['SsoPolicy'] = {
+    requireSso: stepUp,
+    admission: 'invitation_only',
+    policyRevision: 2,
+    trustGeneration: 1,
+  }
   const list = async (route: Route) => {
     if (route.request().method() !== 'GET') return route.abort()
-    if (!(await expectedOrganization(route)))
-      return route.fulfill({ status: 409, json: { error: 'organization_context_changed' } })
+    if (!(await expectedOrganization(route))) return contextChanged(route)
     if (state === 'sso-setup-loading') return
     if (state === 'sso-setup-error') return route.abort()
     if (state === 'sso-setup-forbidden')
       return route.fulfill({ status: 403, json: { error: 'team_management_access_denied' } })
     return route.fulfill({
       json: {
-        data: state === 'sso-providers-empty' ? [] : [provider],
+        data: providerStates[state] ?? [provider],
         nextCursor: null,
       } satisfies Schemas['SsoProviderPage'],
     })
   }
   const patches = async (route: Route) => {
     if (route.request().method() !== 'PATCH' || state !== 'sso-setup-conflict') return route.abort()
-    if (!(await expectedOrganization(route)))
-      return route.fulfill({ status: 409, json: { error: 'organization_context_changed' } })
+    if (!(await expectedOrganization(route))) return contextChanged(route)
     return route.fulfill({ status: 409, json: { error: 'sso_configuration_changed' } })
   }
   const challenges = async (route: Route) => {
@@ -118,12 +147,87 @@ async function mockSsoSetupAudit(page: Page, app: FixtureApp, state: SsoSetupAud
       return route.abort()
     return route.fulfill({ status: 201, headers: { 'cache-control': 'no-store' }, json: challenge })
   }
+  const policies = async (route: Route) => {
+    const request = route.request()
+    if (!(await expectedOrganization(route))) return contextChanged(route)
+    if (request.method() === 'GET') return route.fulfill({ json: policy })
+    if (request.method() !== 'PUT' || !recoveryRequired) return route.abort()
+    const body =
+      request.postDataJSON() as operations['setSsoPolicy']['requestBody']['content']['application/json']
+    if (
+      !body.requireSso ||
+      body.expectedRevision !== policy.policyRevision ||
+      body.admission !== policy.admission
+    )
+      return route.abort()
+    return route.fulfill({ status: 409, json: { error: 'sso_recovery_required' } })
+  }
+  const testProvider = async (route: Route) => {
+    const request = route.request()
+    if (request.method() !== 'POST' || (!stepUp && state !== 'sso-proof-mailbox'))
+      return route.abort()
+    if (!(await expectedOrganization(route))) return contextChanged(route)
+    const body =
+      request.postDataJSON() as operations['testSsoProvider']['requestBody']['content']['application/json']
+    if (body.expectedRevision !== provider.revision || body.proofAttemptId) return route.abort()
+    return route.fulfill({
+      status: 403,
+      json: {
+        error: 'sso_reauthentication_required',
+        attemptId: proofAttemptId,
+        expiresAt: proofExpires,
+        proofMethods: [stepUp ? 'sso' : 'mailbox'],
+      } satisfies Schemas['SsoFreshProofChallenge'],
+    })
+  }
+  const me = async (route: Route) => {
+    if (route.request().method() !== 'GET') return route.abort()
+    const response = await route.fetch()
+    if (!response.ok()) return route.fulfill({ response })
+    const caller = (await response.json()) as Schemas['Me']
+    if (caller.organization.id !== teamOrganizationId) return contextChanged(route)
+    const { id, displayName, revision } = enabledProvider
+    return route.fulfill({
+      response,
+      json: {
+        ...caller,
+        sso: {
+          requireSso: true,
+          providers: [{ id, displayName, revision }],
+          links: [{ id: linkId, providerId: id, generation: 1 }],
+          attempts: [],
+          proofs: [],
+        },
+      } satisfies Schemas['Me'],
+    })
+  }
+  const signIn = async (route: Route) => {
+    const request = route.request()
+    if (request.method() !== 'POST' || !stepUp) return route.abort()
+    if (!(await expectedOrganization(route))) return contextChanged(route)
+    const { providerId, intent, attemptId } = request.postDataJSON()
+    if (providerId !== enabledProvider.id || intent !== 'step_up' || attemptId !== proofAttemptId)
+      return route.abort()
+    return route.fulfill({ json: { url: authorizationUrl, redirect: true } })
+  }
+  const sendProof = async (route: Route) => {
+    const request = route.request()
+    if (request.method() !== 'POST' || state !== 'sso-proof-mailbox') return route.abort()
+    if (!(await expectedOrganization(route))) return contextChanged(route)
+    if (request.postDataJSON().attemptId !== proofAttemptId) return route.abort()
+    return route.fulfill({ status: 202, json: { status: 'queued' } })
+  }
   const mocks: [string | ((url: URL) => boolean), (route: Route) => Promise<void>][] = [
     [`${app.url}/api/v1/instance`, (route) => route.fulfill({ json: instance })],
     [collection, list],
     [`${app.url}/api/v1/team/sso/providers/${provider.id}`, patches],
     [`${app.url}/api/v1/team/sso/domains`, challenges],
+    [`${app.url}/api/v1/team/sso/policy`, policies],
+    [`${app.url}/api/v1/team/sso/providers/${provider.id}/test`, testProvider],
+    [`${app.url}/api/auth/sign-in/sso`, signIn],
+    [`${app.url}/api/auth/sso/mailbox-proof/send`, sendProof],
   ]
+  if (stepUp) mocks.push([`${app.url}/api/v1/me`, me])
   for (const [url, handler] of mocks) await page.route(url, handler)
   return {
     collection,
@@ -213,6 +317,46 @@ export async function openSsoSetupAuditPage(
           .getByRole('group', { name: copy('Retire domain?'), exact: true })
           .getByRole('button', { name: copy('Retire domain'), exact: true })
           .waitFor()
+        break
+      case 'sso-provider-enable':
+        await button(copy('Enable provider {name}').replace('{name}', provider.displayName)).press(
+          'Enter',
+        )
+        await main
+          .getByRole('group', { name: copy('Enable this provider?'), exact: true })
+          .getByRole('button', { name: copy('Enable provider'), exact: true })
+          .waitFor()
+        break
+      case 'sso-enforcement-recovery-required':
+        await button(copy('Require SSO')).press('Enter')
+        await main
+          .getByRole('group', { name: copy('Require single sign-on for this team?'), exact: true })
+          .getByRole('button', { name: copy('Require SSO'), exact: true })
+          .press('Enter')
+        await text(
+          'A current owner must accept recovery enrollment before you can require SSO.',
+        ).waitFor()
+        break
+      case 'sso-proof-mailbox':
+      case 'sso-proof-step-up':
+        await button(copy('Test provider {name}').replace('{name}', provider.displayName)).press(
+          'Enter',
+        )
+        await heading('Confirm your identity before changing SSO settings.').waitFor()
+        if (state === 'sso-proof-mailbox') {
+          await button(copy('Send verification email')).press('Enter')
+          await main.getByLabel(copy('Email verification link'), { exact: true }).waitFor()
+        } else {
+          await button(copy('Start SSO verification')).press('Enter')
+          await main
+            .getByRole('link', {
+              name: [copy('Open identity provider'), copy('(opens in a new tab)')].join(
+                locale === 'zh-CN' ? '' : ' ',
+              ),
+              exact: true,
+            })
+            .waitFor()
+        }
         break
     }
     return path

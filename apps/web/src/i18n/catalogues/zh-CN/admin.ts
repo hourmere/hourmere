@@ -2617,4 +2617,65 @@ export const admin = {
   'Retiring {domain} ends its use for single sign-on.': '停用后，“{domain}”将无法用于单点登录。',
   'Retire domain': '停用域名',
   'Domain retired.': '域名已停用。',
+
+  // SSO activation
+  'Test provider': '测试提供方',
+  'Test provider {name}': '测试提供方“{name}”',
+  'Continue to identity provider': '前往身份提供方',
+  'Current revision passed its test.': '当前版本已通过测试。',
+  'Current revision failed its test.': '当前版本未通过测试。',
+  'No test result for the current revision.': '当前版本暂无测试结果。',
+  'Enable provider': '启用提供方',
+  'Disable provider': '停用提供方',
+  'Enable provider {name}': '启用提供方“{name}”',
+  'Disable provider {name}': '停用提供方“{name}”',
+  'Enable this provider?': '要启用此提供方吗？',
+  'Disable this provider?': '要停用此提供方吗？',
+  'Enabling provider…': '正在启用提供方…',
+  'Disabling provider…': '正在停用提供方…',
+  'Pass a test of this provider’s current revision before enabling it.':
+    '请先测试此提供方的当前版本，通过后再启用。',
+  'Verify an associated domain before enabling this provider.':
+    '请先验证一个关联域名，再启用此提供方。',
+  'Enable another usable OIDC provider before disabling this provider.':
+    '请先启用另一个可用的 OIDC 提供方，再停用此提供方。',
+  'SSO enforcement': '强制单点登录',
+  'Loading SSO enforcement…': '正在加载强制单点登录设置…',
+  'Could not load SSO enforcement.': '无法加载强制单点登录设置。',
+  'SSO enforcement is unavailable in this team.': '当前无法访问此团队的强制单点登录设置。',
+  'This team requires single sign-on.': '此团队要求使用单点登录。',
+  'Single sign-on is optional for this team.': '此团队可选择使用单点登录。',
+  'Require SSO': '强制使用单点登录',
+  'Stop requiring SSO': '停止强制单点登录',
+  'Require single sign-on for this team?': '要为此团队强制启用单点登录吗？',
+  'Stop requiring single sign-on for this team?': '要停止为此团队强制启用单点登录吗？',
+  'Before requiring SSO, have an owner test the OIDC draft, then enable that revision with a verified domain. A current owner must also accept recovery enrollment.':
+    '强制使用单点登录前，请由团队所有者测试 OIDC 草稿，再启用通过测试且已关联验证域名的版本。还须有一位当前所有者接受恢复登记。',
+  'A current owner must accept recovery enrollment before you can require SSO.':
+    '须有一位当前团队所有者接受恢复登记，才能强制使用单点登录。',
+  'A team owner must pass a test of the current version of an enabled OIDC provider.':
+    '须由团队所有者测试已启用的 OIDC 提供方，且当前版本必须通过测试。',
+  'An enabled OIDC provider with a verified domain is required.':
+    '需要一个已启用且关联了已验证域名的 OIDC 提供方。',
+  'Could not change the team’s SSO enforcement.': '无法更改此团队的强制单点登录设置。',
+  'Verify by email': '通过邮箱验证',
+  'Send verification email': '发送验证邮件',
+  'Check your Hourmere email. Copy the verification link and paste it here.':
+    '请查收发送到 Hourmere 账户邮箱的邮件，复制验证链接并粘贴到此处。',
+  'Email verification link': '邮箱验证链接',
+  'Verify email link': '验证邮箱链接',
+  'Email verification complete.': '邮箱验证已完成。',
+  'Verify with single sign-on': '通过单点登录验证',
+  'Identity provider': '身份提供方',
+  'Start SSO verification': '开始单点登录验证',
+  'Open identity provider': '打开身份提供方',
+  'After signing in, return to this tab and select Continue.':
+    '完成登录后，请返回此标签页并选择“继续”。',
+  'Could not start identity verification. Try again.': '无法开始身份验证。请重试。',
+  'Could not verify that link. Check the link or request a new email.':
+    '无法验证此链接。请检查链接，或重新发送验证邮件。',
+  'Identity verification is unavailable.': '当前无法验证身份。',
+  'This verification request expired. Start again.': '此验证请求已过期。请重新发起验证。',
+  'Could not confirm your SSO sign-in. Finish signing in or start SSO verification again.':
+    '无法确认单点登录。请完成登录，或重新发起单点登录验证。',
 } as const

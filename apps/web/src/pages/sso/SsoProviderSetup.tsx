@@ -1,9 +1,16 @@
 import { type FormEvent, useEffect, useId, useRef, useState } from 'react'
-import { api, unwrap } from '../../api/client.ts'
+import { api } from '../../api/client.ts'
 import { ConfirmAction } from '../../components/ConfirmAction.tsx'
 import { Field } from '../../components/forms.tsx'
 import { useI18n } from '../../i18n/runtime.tsx'
-import type { SsoDomain, SsoMutation, SsoProvider } from './setup.ts'
+import type { MessageKey } from '../../i18n/translate.ts'
+import {
+  type SsoDomain,
+  type SsoMutation,
+  type SsoProvider,
+  ssoAuthorizationUrl,
+  unwrapSsoWrite,
+} from './setup.ts'
 
 interface ProviderProps {
   organizationId: string
@@ -21,8 +28,9 @@ const endpointFields = [
 
 export function SsoProviderSetup({
   providers,
+  owner,
   ...props
-}: ProviderProps & { providers: SsoProvider[] }) {
+}: ProviderProps & { providers: SsoProvider[]; owner: boolean }) {
   const { t } = useI18n()
   const heading = useId()
   const [editing, setEditing] = useState<'new' | SsoProvider | null>(null)
@@ -72,6 +80,12 @@ export function SsoProviderSetup({
             {t('Revision {revision}', { revision: provider.revision })} ·{' '}
             {t(provider.enabled ? 'Enabled' : 'Disabled')}
           </p>
+          <ProviderActivation
+            {...props}
+            busy={props.busy || editing !== null}
+            provider={provider}
+            owner={owner}
+          />
           <fieldset className="form-fieldset" disabled={props.busy || editing !== null}>
             <div className="form-actions">
               <button
@@ -94,15 +108,15 @@ export function SsoProviderSetup({
                 failure="Could not save SSO settings."
                 onConfirm={() =>
                   props.mutate(
-                    (signal) =>
-                      unwrap(
+                    (signal, proofAttemptId) =>
+                      unwrapSsoWrite(
                         api.DELETE('/api/v1/team/sso/providers/{providerId}', {
                           signal,
                           params: {
                             path: { providerId: provider.id },
                             header: { 'X-Expected-Organization-Id': props.organizationId },
                           },
-                          body: { expectedRevision: provider.revision },
+                          body: { expectedRevision: provider.revision, proofAttemptId },
                         }),
                       ),
                     props.reload,
@@ -114,6 +128,148 @@ export function SsoProviderSetup({
         </section>
       ))}
     </section>
+  )
+}
+
+const activationErrors = {
+  sso_test_required: 'Pass a test of this provider’s current revision before enabling it.',
+  sso_domain_unverified: 'Verify an associated domain before enabling this provider.',
+  sso_last_provider: 'Enable another usable OIDC provider before disabling this provider.',
+} as const satisfies Record<string, MessageKey>
+
+function ProviderActivation({
+  provider,
+  organizationId,
+  busy,
+  mutate,
+  reload,
+  owner,
+}: Pick<ProviderProps, 'organizationId' | 'busy' | 'mutate' | 'reload'> & {
+  provider: SsoProvider
+  owner: boolean
+}) {
+  const { t } = useI18n()
+  const [testUrl, setTestUrl] = useState<string | null>(null)
+  const testLink = useRef<HTMLAnchorElement>(null)
+  const statusId = useId()
+  const canEnable =
+    provider.testStatus === 'passed' && provider.domains.some(({ status }) => status === 'verified')
+  const domainCheckUnknown = provider.domains.some(
+    ({ status }) => !['pending', 'verified', 'failed', 'expired'].includes(status),
+  )
+  const enabling = !provider.enabled
+  const params = {
+    path: { providerId: provider.id },
+    header: { 'X-Expected-Organization-Id': organizationId },
+  }
+
+  useEffect(() => {
+    if (testUrl) testLink.current?.focus()
+  }, [testUrl])
+
+  function startTest() {
+    setTestUrl(null)
+    void mutate(async (signal, proofAttemptId) => {
+      const { url } = await unwrapSsoWrite(
+        api.POST('/api/v1/team/sso/providers/{providerId}/test', {
+          params,
+          body: { expectedRevision: provider.revision, proofAttemptId },
+          signal,
+        }),
+      )
+      return ssoAuthorizationUrl(url)
+    }, setTestUrl)
+  }
+
+  function changeActivation() {
+    return mutate(
+      (signal, proofAttemptId) =>
+        unwrapSsoWrite(
+          api.POST('/api/v1/team/sso/providers/{providerId}/activation', {
+            params,
+            body: { expectedRevision: provider.revision, enabled: enabling, proofAttemptId },
+            signal,
+          }),
+        ),
+      reload,
+      activationErrors,
+    )
+  }
+
+  return (
+    <div>
+      <p id={statusId}>
+        {t(
+          provider.testStatus === 'passed'
+            ? 'Current revision passed its test.'
+            : provider.testStatus === 'failed'
+              ? 'Current revision failed its test.'
+              : 'No test result for the current revision.',
+        )}
+        {owner && enabling && provider.testStatus === 'passed' && !canEnable && (
+          <>
+            {' '}
+            {t(
+              domainCheckUnknown ? 'Verification unknown' : activationErrors.sso_domain_unverified,
+            )}
+          </>
+        )}
+      </p>
+      <fieldset className="form-fieldset" disabled={busy}>
+        <div className="form-actions">
+          {enabling && (
+            <>
+              <button
+                type="button"
+                className="button button-small"
+                aria-label={t('Test provider {name}', { name: provider.displayName })}
+                onClick={startTest}
+              >
+                {t('Test provider')}
+              </button>
+              {testUrl && !busy && (
+                <a
+                  ref={testLink}
+                  className="button button-small"
+                  href={testUrl}
+                  rel="noreferrer"
+                  data-private
+                >
+                  {t('Continue to identity provider')}
+                </a>
+              )}
+            </>
+          )}
+          {owner &&
+            (enabling && !canEnable ? (
+              <button
+                type="button"
+                className="button button-small"
+                aria-label={t('Enable provider {name}', { name: provider.displayName })}
+                aria-describedby={statusId}
+                disabled
+              >
+                {t('Enable provider')}
+              </button>
+            ) : (
+              <ConfirmAction
+                label={enabling ? 'Enable provider' : 'Disable provider'}
+                accessibleLabel={t(
+                  enabling ? 'Enable provider {name}' : 'Disable provider {name}',
+                  {
+                    name: provider.displayName,
+                  },
+                )}
+                prompt={enabling ? 'Enable this provider?' : 'Disable this provider?'}
+                confirmLabel={enabling ? 'Enable provider' : 'Disable provider'}
+                busyLabel={enabling ? 'Enabling provider…' : 'Disabling provider…'}
+                failure="Could not save SSO settings."
+                onConfirm={changeActivation}
+              />
+            ))}
+        </div>
+      </fieldset>
+    </div>
   )
 }
 
@@ -159,14 +315,15 @@ function ProviderForm({
     if (provider) {
       const oidc = { ...overrides, ...(replaceSecret && { clientSecret }) }
       await mutate(
-        (signal) =>
-          unwrap(
+        (signal, proofAttemptId) =>
+          unwrapSsoWrite(
             api.PATCH('/api/v1/team/sso/providers/{providerId}', {
               signal,
               params: { path: { providerId: provider.id }, header },
               body: {
                 displayName,
                 expectedRevision: provider.revision,
+                proofAttemptId,
                 ...(domainsChanged && { domainIds }),
                 ...(Object.keys(oidc).length > 0 && { oidc }),
               },
@@ -176,8 +333,8 @@ function ProviderForm({
       )
     } else {
       await mutate(
-        (signal) =>
-          unwrap(
+        (signal, proofAttemptId) =>
+          unwrapSsoWrite(
             api.POST('/api/v1/team/sso/providers', {
               signal,
               params: { header },
@@ -185,6 +342,7 @@ function ProviderForm({
                 displayName,
                 domainIds,
                 protocol: 'oidc',
+                proofAttemptId,
                 oidc: {
                   ...overrides,
                   issuer: value('issuer').trim(),

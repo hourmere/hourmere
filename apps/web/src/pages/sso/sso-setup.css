@@ -1,6 +1,13 @@
-.sso-domain-form .button {
+.sso-domain-form .button,
+.sso-enforcement .button,
+.sso-fresh-proof .button,
+.sso-providers .button {
   max-width: 100%;
   white-space: normal;
   overflow-wrap: anywhere;
   text-align: center;
+}
+
+.sso-fresh-proof select {
+  max-width: 100%;
 }

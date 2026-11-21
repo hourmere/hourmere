@@ -1,12 +1,12 @@
 import { type FormEvent, type Ref, useEffect, useId, useRef, useState } from 'react'
-import { api, unwrap } from '../../api/client.ts'
+import { api } from '../../api/client.ts'
 import type { operations } from '../../api/schema.d.ts'
 import { CopyButton } from '../../components/CopyButton.tsx'
 import { Field } from '../../components/forms.tsx'
 import { browserTimeZone, zoned } from '../../format.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import type { MessageKey } from '../../i18n/translate.ts'
-import type { SsoDomain, SsoMutation } from './setup.ts'
+import { type SsoDomain, type SsoMutation, unwrapSsoWrite } from './setup.ts'
 import './sso-setup.css'
 
 type DnsChallenge =
@@ -74,9 +74,13 @@ export function SsoDomainSetup({
     setRetired(false)
     const visit = challengeVisit.current
     return mutate(
-      (signal) =>
-        unwrap(
-          api.POST('/api/v1/team/sso/domains', { params: { header }, body: { domain }, signal }),
+      (signal, proofAttemptId) =>
+        unwrapSsoWrite(
+          api.POST('/api/v1/team/sso/domains', {
+            params: { header },
+            body: { domain, proofAttemptId },
+            signal,
+          }),
         ),
       (result) => {
         rememberDomain(result.domain)
@@ -106,11 +110,11 @@ export function SsoDomainSetup({
     setRetired(false)
     setConfirmation(null)
     void mutate(
-      (signal) =>
-        unwrap(
+      (signal, proofAttemptId) =>
+        unwrapSsoWrite(
           api.POST('/api/v1/team/sso/domains/{domainId}/verify', {
             params: { header, path: { domainId: domain.id } },
-            body: { expectedGeneration: domain.generation },
+            body: { expectedGeneration: domain.generation, proofAttemptId },
             signal,
           }),
         ),
@@ -127,11 +131,11 @@ export function SsoDomainSetup({
     setRetired(false)
     setChallenge(null)
     void mutate(
-      (signal) =>
-        unwrap(
+      (signal, proofAttemptId) =>
+        unwrapSsoWrite(
           api.DELETE('/api/v1/team/sso/domains/{domainId}', {
             params: { header, path: { domainId: domain.id } },
-            body: { expectedGeneration: domain.generation },
+            body: { expectedGeneration: domain.generation, proofAttemptId },
             signal,
           }),
         ),

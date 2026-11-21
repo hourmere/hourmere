@@ -12,8 +12,16 @@ import { PATHS } from '../../paths.ts'
 import { useMe, useSession } from '../../session.tsx'
 import { useTeamManagementAccess } from '../../team-management.tsx'
 import { SsoDomainSetup } from './SsoDomainSetup.tsx'
+import { SsoEnforcement } from './SsoEnforcement.tsx'
+import { SsoFreshProof } from './SsoFreshProof.tsx'
 import { SsoProviderSetup } from './SsoProviderSetup.tsx'
-import type { SsoDomain, SsoMutation, SsoProvider } from './setup.ts'
+import {
+  type SsoDomain,
+  type SsoMutation,
+  type SsoProofChallenge,
+  SsoProofRequired,
+  type SsoProvider,
+} from './setup.ts'
 
 async function loadProviders(organizationId: string, signal: AbortSignal) {
   const providers: SsoProvider[] = []
@@ -75,6 +83,7 @@ export function SsoSetupPage() {
           <SsoInventory
             key={me.organization.id}
             organizationId={me.organization.id}
+            owner={access.role === 'owner'}
             showDomains={showDomains}
           />
         </>
@@ -104,12 +113,15 @@ function inventoryError(error: unknown): InventoryError {
 
 function SsoInventory({
   organizationId,
+  owner,
   showDomains,
 }: {
   organizationId: string
+  owner: boolean
   showDomains: boolean
 }) {
   const { t } = useI18n()
+  const me = useMe()
   const { confirmReload } = useSession()
   const [inventory, setInventory] = useState<Inventory>({ status: 'loading' })
   const [version, setVersion] = useState(0)
@@ -119,6 +131,11 @@ function SsoInventory({
   const [writeError, setWriteError] = useState<MessageKey | null>(null)
   const activeWrite = useRef<AbortController | null>(null)
   const [busy, setBusy] = useState(false)
+  const [pending, setPending] = useState<{
+    challenge: SsoProofChallenge
+    retry: (attemptId: string) => Promise<void>
+  } | null>(null)
+  const proofOpener = useRef<HTMLElement | null>(null)
 
   function reload() {
     setWriteError(null)
@@ -151,34 +168,73 @@ function SsoInventory({
     return () => controller.abort()
   }, [organizationId, version])
 
-  useLayoutEffect(() => () => activeWrite.current?.abort(), [])
-
-  const mutate: SsoMutation = async (write, onSuccess) => {
-    if (activeWrite.current || inventory.status !== 'ready') return
-    const controller = new AbortController()
-    activeWrite.current = controller
-    setBusy(true)
-    setWriteError(null)
-    try {
-      const result = await write(controller.signal)
-      if (!controller.signal.aborted) onSuccess(result)
-    } catch (error) {
-      if (controller.signal.aborted) return
-      if (error instanceof RequestError && error.code === 'sso_reauthentication_required') {
-        setWriteError('Confirm your identity before changing SSO settings.')
-        return
-      }
-      const status = inventoryError(error)
-      if (status !== 'error') setInventory({ status })
-      else if (error instanceof RequestError && error.code === 'sso_domain_unverified')
-        setWriteError(
-          'Could not verify this domain. Check the TXT record or generate a new challenge.',
-        )
-      else setWriteError('Could not save SSO settings.')
-    } finally {
+  // Proof belongs to this team and settings pane. Keep the retry inputs in memory
+  // only, and discard them when leaving the pane or restoring a page snapshot.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: showDomains changes the settings pane
+  useLayoutEffect(() => {
+    function reset() {
+      activeWrite.current?.abort()
       activeWrite.current = null
-      if (!controller.signal.aborted) setBusy(false)
+      proofOpener.current = null
+      setPending(null)
+      setBusy(false)
+      setWriteError(null)
     }
+    reset()
+    window.addEventListener('pagehide', reset)
+    return () => {
+      activeWrite.current?.abort()
+      window.removeEventListener('pagehide', reset)
+    }
+  }, [showDomains, owner])
+
+  useEffect(() => {
+    if (!busy && !pending && proofOpener.current) {
+      proofOpener.current.focus()
+      proofOpener.current = null
+    }
+  }, [busy, pending])
+
+  const mutate: SsoMutation = (write, onSuccess, messages) => {
+    async function run(proofAttemptId?: string) {
+      if (activeWrite.current || inventory.status !== 'ready') return
+      const controller = new AbortController()
+      activeWrite.current = controller
+      setBusy(true)
+      setWriteError(null)
+      try {
+        const result = await write(controller.signal, proofAttemptId)
+        if (controller.signal.aborted) return
+        setPending(null)
+        onSuccess(result)
+      } catch (error) {
+        if (controller.signal.aborted) return
+        if (error instanceof SsoProofRequired) {
+          setPending({ challenge: error.challenge, retry: run })
+          return
+        }
+        setPending(null)
+        const code = error instanceof RequestError ? error.code : undefined
+        const status = inventoryError(error)
+        if (status === 'unavailable' && code !== 'sso_disabled') setInventory({ status })
+        else if (code && messages && Object.hasOwn(messages, code))
+          setWriteError(messages[code] ?? null)
+        else if (status !== 'error') setInventory({ status })
+        else if (code === 'sso_domain_unverified')
+          setWriteError(
+            'Could not verify this domain. Check the TXT record or generate a new challenge.',
+          )
+        else setWriteError('Could not save SSO settings.')
+      } finally {
+        if (activeWrite.current === controller) {
+          activeWrite.current = null
+          setBusy(false)
+        }
+      }
+    }
+    if (pending || activeWrite.current) return Promise.resolve()
+    if (document.activeElement instanceof HTMLElement) proofOpener.current = document.activeElement
+    return run()
   }
 
   if (inventory.status === 'loading') return <PageSkeleton label={loading} />
@@ -221,7 +277,16 @@ function SsoInventory({
     ...provider,
     domains: provider.domains.flatMap(({ id }) => visibleDomains.get(id) ?? []),
   }))
-  const paneProps = { organizationId, domains: [...visibleDomains.values()], busy, mutate }
+  const ownedLinks = new Set(me.sso?.links.map(({ providerId }) => providerId))
+  const stepUpProviders = providers.filter(
+    ({ id, enabled, protocol }) => enabled && protocol === 'oidc' && ownedLinks.has(id),
+  )
+  const paneProps = {
+    organizationId,
+    domains: [...visibleDomains.values()],
+    busy: busy || pending !== null,
+    mutate,
+  }
 
   return (
     <>
@@ -230,16 +295,38 @@ function SsoInventory({
           {t(writeError)}
         </p>
       )}
-      {showDomains ? (
-        <SsoDomainSetup
-          {...paneProps}
-          rememberDomain={(domain) =>
-            setRemembered((previous) => new Map(previous).set(domain.id, domain))
-          }
+      {pending && (
+        <SsoFreshProof
+          key={pending.challenge.attemptId}
+          challenge={pending.challenge}
+          organizationId={organizationId}
+          stepUpProviders={stepUpProviders}
+          busy={busy}
+          onRetry={() => void pending.retry(pending.challenge.attemptId)}
+          onCancel={() => setPending(null)}
         />
-      ) : (
-        <SsoProviderSetup {...paneProps} providers={providers} reload={reload} />
       )}
+      <div className="sso-setup-pane" inert={pending !== null}>
+        {showDomains ? (
+          <SsoDomainSetup
+            {...paneProps}
+            rememberDomain={(domain) =>
+              setRemembered((previous) => new Map(previous).set(domain.id, domain))
+            }
+          />
+        ) : (
+          <>
+            <SsoProviderSetup {...paneProps} providers={providers} owner={owner} reload={reload} />
+            <SsoEnforcement
+              organizationId={organizationId}
+              owner={owner}
+              busy={paneProps.busy}
+              mutate={mutate}
+              reload={reload}
+            />
+          </>
+        )}
+      </div>
     </>
   )
 }

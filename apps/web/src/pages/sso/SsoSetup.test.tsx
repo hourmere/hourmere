@@ -25,11 +25,23 @@ const TEAM: Schemas['Me'] = {
   },
 }
 const INVENTORY = 'GET /api/v1/team/sso/providers'
+const POLICY = 'GET /api/v1/team/sso/policy'
+const policy = () =>
+  json(200, {
+    admission: 'invitation_only',
+    policyRevision: 1,
+    requireSso: false,
+    trustGeneration: 1,
+  } satisfies Schemas['SsoPolicy'])
 const ENABLED = { ssoOidcEnabled: true, ssoSamlEnabled: false }
 const EMPTY = { data: [], nextCursor: null }
 const TERMS = 'https://example.test/terms'
 
 afterEach(() => vi.unstubAllEnvs())
+
+const activationControl =
+  /test provider|enable provider|disable provider|requiring sso|require sso/i
+const ssoPath = /(?:^|\/)sso(?:\/|\?|$)/
 
 describe('SSO setup while hard-off', () => {
   it.each([PATHS.settings, PATHS.eventTypes, PATHS.sso, PATHS.ssoDomainSettings, PATHS.signIn])(
@@ -46,7 +58,8 @@ describe('SSO setup while hard-off', () => {
       })
       renderApp(path)
       await waitFor(() => expect(api.to('GET /api/v1/instance').length).toBeGreaterThan(0))
-      const ssoCalls = () => api.calls.filter(({ path }) => /(?:^|\/)sso(?:\/|$)/.test(path))
+      const ssoCalls = () => api.calls.filter(({ path }) => ssoPath.test(path))
+      expect(screen.queryByRole('button', { name: activationControl })).toBeNull()
       expect(ssoCalls()).toEqual([])
       await instance.answer(
         json(200, {
@@ -69,6 +82,7 @@ describe('SSO setup while hard-off', () => {
         screen.queryByRole('link', { name: /single sign-on|identity providers|sso domains/i }),
       ).toBeNull()
       expect(screen.queryByRole('button', { name: /single sign-on|sso/i })).toBeNull()
+      expect(screen.queryByRole('button', { name: activationControl })).toBeNull()
       expect(ssoCalls()).toEqual([])
     },
   )
@@ -82,7 +96,8 @@ describe('SSO setup while hard-off', () => {
       })
       renderApp(PATHS.sso)
       await screen.findByRole('heading', { name: 'Page not found', level: 1 })
-      expect(api.calls.some(({ path }) => path.includes('/team/sso/'))).toBe(false)
+      expect(screen.queryByRole('button', { name: activationControl })).toBeNull()
+      expect(api.calls.filter(({ path }) => ssoPath.test(path))).toEqual([])
     },
   )
 })
@@ -94,10 +109,12 @@ describe('SSO setup in an enabled test instance', () => {
       ...emptyTeamLists,
       'GET /api/v1/instance': () => json(200, ENABLED),
       [INVENTORY]: () => json(200, EMPTY),
+      [POLICY]: policy,
     })
     renderApp(PATHS.settings)
     const region = await screen.findByRole('region', { name: 'Single sign-on' })
     expect(api.to(INVENTORY)).toHaveLength(0)
+    expect(api.to(POLICY)).toHaveLength(0)
     await userEvent.click(within(region).getByRole('link', { name: 'Identity providers' }))
     await screen.findByRole('heading', { name: 'Single sign-on', level: 1 })
     await screen.findByRole('button', { name: 'Add provider' })
@@ -139,6 +156,7 @@ describe('SSO setup in an enabled test instance', () => {
         ...signedInAs(TEAM),
         'GET /api/v1/instance': () => json(200, ENABLED),
         [INVENTORY]: () => pending.response,
+        [POLICY]: policy,
       })
       renderApp(PATHS.sso)
       await screen.findByRole('status', { name: 'Loading SSO settings…' })
@@ -164,6 +182,7 @@ describe('SSO setup in an enabled test instance', () => {
       'GET /api/v1/instance': () => json(200, ENABLED),
       [INVENTORY]: ({ path }) =>
         path.includes('cursor=') ? second.response : json(200, { ...EMPTY, nextCursor: 'next' }),
+      [POLICY]: policy,
     })
     renderApp(PATHS.sso)
     await waitFor(() => expect(api.to(INVENTORY)).toHaveLength(2))

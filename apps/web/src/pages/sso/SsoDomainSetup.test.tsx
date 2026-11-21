@@ -47,6 +47,13 @@ function renderDomains(routes: Routes = {}) {
   const api = fakeApi({
     ...signedInAs({ ...ME, organization: team }),
     'GET /api/v1/instance': () => json(200, { ssoOidcEnabled: true, ssoSamlEnabled: false }),
+    'GET /api/v1/team/sso/policy': () =>
+      json(200, {
+        admission: 'invitation_only',
+        policyRevision: 1,
+        requireSso: false,
+        trustGeneration: 1,
+      }),
     [providerList]: () => json(200, { data: [], nextCursor: null }),
     [generateChallenge]: () => json(201, record),
     ...routes,
