@@ -2807,4 +2807,7 @@ export const admin = {
   'This verification request expired. Start again.': '此验证请求已过期。请重新发起验证。',
   'Could not confirm your SSO sign-in. Finish signing in or start SSO verification again.':
     '无法确认单点登录。请完成登录，或重新发起单点登录验证。',
+
+  // SCIM managed membership
+  'This resource is managed by your identity provider.': '此资源由你的身份提供方管理。',
 } as const

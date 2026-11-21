@@ -1856,7 +1856,11 @@ The phases within that organization boundary are:
   the claim's completion and the audit event follow that insert in the same transaction. A
   SCIM writer that takes the organization lock first therefore waits for, or is waited on by,
   the acceptance, and never holds the claim or entry while the acceptance waits for the
-  organization.
+  organization. Native admission checks current SCIM and local blockers after acquiring
+  the organization lock, using the account ID and any independently verified mailbox.
+  JIT takes the organization update lock before checking blockers on the proven mailbox.
+  Managed member removal or departure records its local blockers before deleting the member
+  on the same connection, so a waiting reactivation reads the committed decision.
 - Event-type configuration takes the organization lock before the event-type lock and
   host eligibility checks. Browser configuration also takes the shared management actor
   locks first. Host eligibility locks verified users before their member rows, both in

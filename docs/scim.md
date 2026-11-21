@@ -412,6 +412,18 @@ returns. Existing management interfaces must display the managed state and refus
 on the server, including native Better Auth routes. SSO JIT cannot recreate a suspended
 SCIM membership; SSO enforcement still requires a valid team proof after provisioning.
 
+The display name cannot be changed through a manual profile write while acting in the
+team where the account has a live SCIM-managed membership. The check uses the account
+link and does not infer management from the provisioned email address. Personal settings
+and edits in other teams continue to affect only the global account profile. Existing
+team administration can change local roles and remove a managed member subject to its
+ordinary owner and administrator rules. Removal and departure record a local decision for
+the account and its mailbox even when OIDC is off. Invitation issuance, renewal and
+cancellation retain their ordinary rules. Accepting an invitation or adding a member
+checks live admission blockers under the organization lock. A newer ordinary invitation
+can clear local removal. SCIM suspension and local suspension each require clearance by
+the authority that recorded them. SSO JIT uses the same blockers for the proven mailbox.
+
 The storage foundation retains local and SCIM blockers, including cleared history,
 after account deletion. `scim_membership_blocks.user_id` becomes null through its FK;
 the account-deletion trigger first captures the account's normalized mailbox in

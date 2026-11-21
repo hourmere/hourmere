@@ -1,6 +1,10 @@
 // The caller's profile: the public handle in their booking URLs (/{handle}/{slug}), their
 // time zone and locale. It belongs to the user, not to an organization.
-import { DISPLAY_NAME_MAX_LENGTH } from '@hourmere/auth'
+import {
+  DISPLAY_NAME_MAX_LENGTH,
+  SCIM_MANAGED_RESOURCE_CODE,
+  SCIM_MANAGED_RESOURCE_MESSAGE,
+} from '@hourmere/auth'
 import {
   CLAIM_RESERVED_HANDLES,
   isClaimReservedHandle,
@@ -8,6 +12,7 @@ import {
   RESERVED_NAMES,
 } from '@hourmere/core'
 import type { Db } from '@hourmere/db'
+import { scimManagedMember } from '@hourmere/db/scim-suspension'
 import { sql } from 'kysely'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
@@ -145,14 +150,41 @@ export async function updateDisplayName(
       `Name must be a single line of text between 1 and ${DISPLAY_NAME_MAX_LENGTH} characters.`,
     )
   }
+  const { user, organization } = ctx.principal
+  const update = { name, updatedAt: new Date(ctx.now().epochMilliseconds) }
+  if (organization.personal) {
+    const row = await ctx.db
+      .updateTable('auth.user')
+      .set(update)
+      .where('id', '=', user.id)
+      .returning('name')
+      .executeTakeFirst()
+    if (!row) throw new DomainError('not_found', 'user_not_found')
+    return row
+  }
+
+  // Classify a live management conflict separately from concurrent account deletion in
+  // the same database statement. Personal name changes cannot edit the directory profile.
   const row = await ctx.db
-    .updateTable('auth.user')
-    .set({ name, updatedAt: new Date(ctx.now().epochMilliseconds) })
-    .where('id', '=', ctx.principal.user.id)
-    .returning('name')
-    .executeTakeFirst()
-  if (!row) throw new DomainError('not_found', 'user_not_found')
-  return row
+    .with('managed', (db) =>
+      db.selectNoFrom(scimManagedMember(organization.id, user.id).as('blocked')),
+    )
+    .with('changed', (db) =>
+      db
+        .updateTable('auth.user')
+        .set(update)
+        .where('id', '=', user.id)
+        .where((eb) => eb(eb.selectFrom('managed').select('blocked'), '=', false))
+        .returning('name'),
+    )
+    .selectFrom('managed')
+    .leftJoin('changed', (join) => join.onTrue())
+    .select(['changed.name', 'managed.blocked'])
+    .executeTakeFirstOrThrow()
+  if (row.blocked)
+    throw new DomainError('conflict', SCIM_MANAGED_RESOURCE_CODE, SCIM_MANAGED_RESOURCE_MESSAGE)
+  if (row.name === null) throw new DomainError('not_found', 'user_not_found')
+  return { name: row.name }
 }
 
 /** A stored personal handle equal to a claim-reserved name; see findLegacyHandleCollisions. */

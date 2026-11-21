@@ -12,6 +12,7 @@ import {
   lockSharedTeamSsoProof,
   MemberDepartureBlockedError,
   MemberDepartureOwnerRequiredError,
+  recordScimManagedRemoval,
   removeSsoRecoveryOwner,
   SsoRecoveryRequiredError,
   ssoHardOff,
@@ -20,7 +21,7 @@ import {
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
-import { scimSuspended } from '@hourmere/db/scim-suspension'
+import { scimManagedMember, scimSuspended } from '@hourmere/db/scim-suspension'
 import {
   checkTeamWriteBeforeAuthorityChange,
   checkTeamWriteDeadline,
@@ -89,9 +90,10 @@ function managementCopy(replacement?: Replacement) {
     'sql',
     'ssoRecoveryOwner',
     'isMember',
+    'scimManagedMember',
     'scimSuspended',
     `${source}; return { checkTeamManagementAccess, TeamManagementError }`,
-  )(sql, ssoRecoveryOwner, isMember, scimSuspended) as {
+  )(sql, ssoRecoveryOwner, isMember, scimManagedMember, scimSuspended) as {
     checkTeamManagementAccess: typeof checkTeamManagementAccess
     TeamManagementError: typeof TeamManagementError
   }
@@ -119,6 +121,7 @@ function serviceCopy(
     teamWriteCheckFor,
     teamWriteTransaction,
     lockSharedTeamSsoProof,
+    recordScimManagedRemoval,
     removeSsoRecoveryOwner,
     ssoHardOff,
     ensurePersonalOrganization,

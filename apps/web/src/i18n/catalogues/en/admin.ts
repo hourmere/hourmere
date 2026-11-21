@@ -2942,4 +2942,8 @@ export const admin = {
     'This verification request expired. Start again.',
   'Could not confirm your SSO sign-in. Finish signing in or start SSO verification again.':
     'Could not confirm your SSO sign-in. Finish signing in or start SSO verification again.',
+
+  // SCIM managed membership
+  'This resource is managed by your identity provider.':
+    'This resource is managed by your identity provider.',
 } as const

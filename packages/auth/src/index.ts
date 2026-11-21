@@ -118,7 +118,10 @@ export {
 } from './signup.ts'
 export {
   checkSsoAdmissionBlocks,
+  recordScimManagedRemoval,
   recordSsoAdmissionRemoval,
+  SCIM_MANAGED_RESOURCE_CODE,
+  SCIM_MANAGED_RESOURCE_MESSAGE,
   type SsoAdmissionRemoval,
 } from './sso-admission-blocks.ts'
 export {
@@ -324,6 +327,7 @@ export function createAuth({
     scimClaims,
     recordAdmissionRemoval,
     ssoCapabilities,
+    scimResourcesEnabled,
   )
   const teamSso = nativeTeamSso(db, ssoCapabilities)
   const auth = betterAuth({

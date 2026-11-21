@@ -1,7 +1,7 @@
 import type { Db } from '@hourmere/db'
 import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { hasTeamWriteOrganizationLock, teamWriteCheckFor } from '@hourmere/db/team-write'
-import { sql } from 'kysely'
+import { type Expression, sql } from 'kysely'
 import { jsonObjectFrom } from 'kysely/helpers/postgres'
 
 export interface TeamSsoCapabilities {
@@ -110,6 +110,7 @@ export async function lockTeamSsoPolicy(
   organizationId: string,
   userId: string | undefined,
   organizationLocked = false,
+  admissionBlock?: Expression<boolean>,
 ) {
   if (!organizationLocked && !hasTeamWriteOrganizationLock(db, organizationId)) {
     await db
@@ -129,6 +130,9 @@ export async function lockTeamSsoPolicy(
       jsonObjectFrom(lockedPolicy).as('policy'),
       (userId ? scimSuspended(organizationId, userId) : sql<boolean>`false`).as('suspended'),
     ])
+    .$if(admissionBlock !== undefined, (query) =>
+      query.select(sql<boolean>`${admissionBlock}`.as('admissionBlocked')),
+    )
     .executeTakeFirstOrThrow()
 }
 
@@ -139,15 +143,20 @@ export async function lockTeamSsoProof(
   identity: TeamSsoSession | null,
   organizationId: string,
   denied: () => never,
-  options?: { organizationLocked: true },
+  options?: {
+    organizationLocked: true
+    admission?: { blocked: Expression<boolean>; denied: () => never }
+  },
 ): Promise<string | undefined> {
-  const { policy, suspended } = await lockTeamSsoPolicy(
+  const { policy, suspended, admissionBlocked } = await lockTeamSsoPolicy(
     db,
     organizationId,
     identity?.userId,
     options?.organizationLocked,
+    options?.admission?.blocked,
   )
   if (suspended) denied()
+  if (admissionBlocked) options?.admission?.denied()
   if (!policy?.require_sso) return
   if (!identity || !(capabilities.ssoOidcEnabled || capabilities.ssoSamlEnabled)) denied()
   // Management can remove a membership before updating the session. Follow its
