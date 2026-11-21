@@ -258,11 +258,11 @@ export async function readScimUser(db: Db, request: ScimResourceRequest, id: str
 }
 
 async function readUser(db: Db, request: ScimResourceRequest, id: string): Promise<ScimReply> {
-  const parsed = parseScimProjection(request.query, scimUserQuery)
-  if (!parsed.ok) return parsed.reply
   if (!UUID.test(id)) return notFound
   const row = await scopedUser(db, request, id)
   if (!row) return notFound
+  const parsed = parseScimProjection(request.query, scimUserQuery)
+  if (!parsed.ok) return parsed.reply
   return {
     status: 200,
     body: projectScimResource(scimUserQuery, representation(row, request.base), parsed.value),

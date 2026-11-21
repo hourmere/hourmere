@@ -15,6 +15,7 @@ step completes a claim when its invitation is accepted, through a dependency tha
 harnesses pass to `createAuth`; production acceptance completes none.
 The User profile replacement step adds `PUT /Users/{id}` under the resource test flag.
 The User PATCH normalization step adds `PATCH /Users/{id}` under that same flag.
+The User retirement step adds `DELETE /Users/{id}` under the resource test flag.
 `SCIM_PROVISIONING_ENABLED` defaults to off (an empty value means "use the default"). Enabling
 it permits credential creation and rotation, not user provisioning. Listing and revocation remain
 available while it is off, and every `/scim/v2` resource remains unavailable either way.
@@ -366,8 +367,9 @@ session. Clearing the blocker during later reactivation cannot restore deleted k
 grants. The member must create a new key or authorize a new OAuth grant. Reactivation clears
 only the SCIM suspension recorded for the linked User, and requires the linked account
 to have a current membership and the account and verified mailbox to have no local blocker. Otherwise
-it returns 403 `mutability`. On an unlinked User, `active:true` changes only the directory
-entry. It does not make a new invitation or claim.
+it returns 403 `mutability`. An unchanged `active:true` echo updates only the directory profile
+and preserves any local removal or suspension. On an unlinked User, `active:true` changes only
+the directory entry. It does not make a new invitation or claim.
 
 Production still registers no SCIM resource handler. Preserve global social sign-in
 accounts, calendar connections, personal bookings, historical bookings and attribution.
@@ -375,13 +377,19 @@ Existing departure and booking-host handling policy must be reused: suspend elig
 new team work and surface outstanding-booking handling to authorized admins; do not silently
 cancel meetings.
 
-DELETE performs the same revocation and permanently tombstones this SCIM resource;
-every subsequent operation on that resource, including repeated DELETE, returns 404
-(RFC 7644 §3.6). Retired tombstones never participate in userName or externalId uniqueness
-conflicts. A later POST with the same identifiers gets a fresh resource ID and requires
-explicit re-admission. Database retention/purge follows the eventual
-audited retention policy, not an IdP's DELETE command. `active:true` never resurrects
-revoked keys/grants or overrides a local suspension/removal tombstone.
+DELETE performs the same team-scoped revocation, keeps the membership blocked, and
+permanently tombstones the SCIM resource. Success returns 204 with an empty body.
+Every subsequent operation on that ID, including repeated DELETE, returns 404
+(RFC 7644 §3.6). Retirement invalidates unfinished claims and cancels pending invitations
+issued by SCIM for those claims. An invitation independently issued or renewed by a team
+administrator remains available for ordinary acceptance. Retirement, credential revocation
+and related audit events commit together. Account, membership, booking and authorship history
+is retained.
+Retired tombstones never participate in userName or externalId uniqueness conflicts.
+A later POST with the same identifiers gets a fresh resource ID and requires explicit
+re-admission. It starts unlinked and leaves existing blockers and revoked credentials
+in place. Database retention and purge follow the eventual audited retention policy.
+The retirement handler is available only through the resource test flag.
 
 SCIM never grants owner or admin, and never deactivates, deletes or demotes a member
 who currently has either role, even if other owners remain. This applies to User and
