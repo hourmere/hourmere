@@ -387,6 +387,14 @@ question labels and answers, using the option labels saved at booking time. An e
 adds no section to that page. The snapshot stays with the booking through rescheduling, and
 ordinary bookings have no routing answers section on either page.
 
+When routing is enabled, personal owners can select **Include routing form answers** in
+**Export bookings as CSV**. The choice is unchecked by default. REST and MCP
+accept `includeRoutingAnswers`, and the CLI accepts `--include-routing-answers true`.
+The five appended columns include the published version number and the original matched
+and resolved rules. `routing_answers` is a JSON object keyed by question ID. Each entry
+contains `label` and `answer`, plus `optionLabel` for a selected option. These labels come
+from the booking snapshot. A booking without provenance leaves all five cells empty.
+
 ## Scheduling interactions
 
 - Round-robin: target the whole activated pool. Routing creates no assignment or fairness

@@ -10282,6 +10282,8 @@ export interface operations {
                 /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
                 from: string;
                 hostUserId?: string;
+                /** @description Append routing provenance and saved answers to personal exports only. Requires routing forms to be enabled. False is equivalent to omitting the option. */
+                includeRoutingAnswers?: "true" | "false";
                 /** @description Order by start time and id: asc (default) or desc. Keep unchanged between pages. */
                 order?: "asc" | "desc";
                 /** @description Only bookings with this status. cancelled includes bookings replaced by a reschedule; their rescheduledToId tells them apart. */
@@ -10305,7 +10307,7 @@ export interface operations {
                     "text/csv": string;
                 };
             };
-            /** @description Invalid export filters or range */
+            /** @description Invalid export filters or range, or routing answers requested for a team (`invalid_request`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10325,6 +10327,15 @@ export interface operations {
             };
             /** @description Personal ownership or verified browser team-admin access required; team_management_access_denied for team agent credentials. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Routing answers requested while routing forms are disabled (`routing_forms_disabled`) */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

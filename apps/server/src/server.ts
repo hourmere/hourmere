@@ -442,6 +442,7 @@ export function productRoutes({
     availabilityTroubleshootingRoutes({ db, automaticMeet, automaticZoom }),
     bookingRoutes({
       db,
+      routingFormsEnabled: routingEnabled,
       smsRemindersAvailable,
       notify,
       notifyAttendeeNoShow,

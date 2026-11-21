@@ -1,5 +1,5 @@
 import { type RefObject, useCallback, useEffect, useId, useRef, useState } from 'react'
-import { Link, useSearchParams } from 'react-router'
+import { Link, useOutletContext, useSearchParams } from 'react-router'
 import { isReadOnlyBooking } from '../../api/booking-policy.ts'
 import { api, unwrap } from '../../api/client.ts'
 import { errorMessage, isOrganizationContextChanged } from '../../api/errors.ts'
@@ -267,6 +267,8 @@ function BookingList({
 }) {
   const { t, ui, formatLocale: displayLocale } = useI18n()
   const me = useMe()
+  const routingFormsEnabled = useOutletContext<{ routingFormsEnabled?: boolean } | undefined>()
+    ?.routingFormsEnabled
   const panel = useBookingPanel()
   // Writes stay bound to the organization this list opened in.
   const [expectedOrganizationId] = useState(me.organization.id)
@@ -421,6 +423,7 @@ function BookingList({
             filters={filters}
             timeZone={timeZone}
             expectedOrganizationId={me.organization.id}
+            routingFormsEnabled={routingFormsEnabled === true}
           />
         ))}
       <OrganizationContextConflict error={conflict} />

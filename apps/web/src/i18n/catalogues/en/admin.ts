@@ -2861,4 +2861,7 @@ export const admin = {
   'Original routing answers': 'Original routing answers',
   'Final booking answers': 'Final booking answers',
   'No routing answers were submitted.': 'No routing answers were submitted.',
+
+  // Booking CSV routing columns
+  'Include routing form answers': 'Include routing form answers',
 } as const

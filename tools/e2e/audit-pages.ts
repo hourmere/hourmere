@@ -100,6 +100,7 @@ export const auditPages = [
   { id: 'event-type-editor-expanded', title: 'Event-type editor with all settings expanded' },
   { id: 'availability-editor', title: 'Availability editor' },
   { id: 'bookings', title: 'Bookings list' },
+  { id: 'bookings-routing-export', title: 'Booking CSV export with routing answers' },
   { id: 'booking-detail', title: 'Booking detail' },
   { id: 'booking-detail-routing-answers', title: 'Host routing and booking answers' },
   { id: 'team-bookings', title: 'Team administrator bookings' },
@@ -216,6 +217,14 @@ async function verifyAuditContent(page: Page, id: AuditPageId) {
     case 'bookings':
       await page.getByText(AUDIT_EMAIL, { exact: true }).waitFor()
       break
+    case 'bookings-routing-export': {
+      const panel = page.locator('.booking-export')
+      const label = /^(Include routing form answers|包含分流表单答案)$/
+      await panel.locator('summary').press('Enter')
+      await panel.getByRole('checkbox', { name: label, checked: false }).press('Space')
+      await panel.getByRole('checkbox', { name: label, checked: true }).waitFor()
+      break
+    }
     case 'team-bookings':
       await page.locator('.team-bookings-list').getByText(AUDIT_TITLE, { exact: true }).waitFor()
       await page.locator('main').getByText(AUDIT_TEAM_NAME, { exact: true }).waitFor()
@@ -374,6 +383,7 @@ export async function openAuditPage(
       'event-type-editor-expanded': `/app/event-types/${fixture.eventTypeId}`,
       'availability-editor': `/app/availability/${fixture.scheduleId}`,
       bookings: '/app/bookings',
+      'bookings-routing-export': '/app/bookings',
       'booking-detail': `/app/bookings/${fixture.bookingId}`,
       'booking-detail-routing-answers': `/app/bookings/${fixture.bookingId}`,
       'team-bookings': '/app/team/bookings',
@@ -394,6 +404,21 @@ export async function openAuditPage(
           : paths[id]
     if (id === 'manage-routing-answers' || id === 'booking-detail-routing-answers') {
       await mockBookingRoutingAnswers(page, app.url, fixture.bookingId, id)
+    }
+    if (id === 'bookings-routing-export') {
+      await page.route(
+        `${app.url}/api/v1/instance`,
+        async (route) => {
+          const response = await route.fetch({ maxRedirects: 0 })
+          if (!response.ok()) return route.fulfill({ response })
+          const instance: components['schemas']['Instance'] = await response.json()
+          return route.fulfill({
+            json: { ...instance, routingFormsEnabled: true },
+            headers: { 'cache-control': 'no-store' },
+          })
+        },
+        { times: 1 },
+      )
     }
     await page.goto(app.url + navigationPath)
     if (id === 'manage' || id === 'manage-routing-answers' || id === 'manage-reschedule') {

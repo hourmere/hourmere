@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import type { Principal } from '@hourmere/auth'
-import { createDb, type Db } from '@hourmere/db'
+import { createDb, type Database, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createFixtures, createTestTeam, createTestUser } from '@hourmere/scheduling/testing'
+import { Kysely, PostgresDialect } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { runTool } from '../mcp/tools.ts'
+import { productRoutes, productTools } from '../server.ts'
 import { openApiDocument, productApp, syntheticSessionCookie } from './test-app.ts'
 
 const query = '?from=2026-01-01T00%3A00%3A00Z&to=2027-01-01T00%3A00%3A00Z'
@@ -11,9 +14,22 @@ const path = '/api/v1/bookings/export.csv'
 describe('booking export OpenAPI', () => {
   it('publishes CSV download and authorization failures', async () => {
     const doc = await openApiDocument(productApp({} as Db))
-    expect(doc.paths[path]?.get?.responses['200']?.content?.['text/csv']).toBeTruthy()
-    expect(doc.paths[path]?.get?.responses['403']).toBeTruthy()
-    expect(doc.paths[path]?.get?.responses['409']).toBeTruthy()
+    const operation = doc.paths[path]?.get
+    expect(operation?.responses['200']?.content?.['text/csv']).toBeTruthy()
+    expect(operation?.responses['403']).toBeTruthy()
+    expect(operation?.responses['409']).toBeTruthy()
+    expect(operation?.responses['404']).toMatchObject({
+      description: expect.stringContaining('routing_forms_disabled'),
+    })
+    expect(operation?.parameters).toContainEqual(
+      expect.objectContaining({
+        name: 'includeRoutingAnswers',
+        in: 'query',
+        required: false,
+        schema: expect.objectContaining({ type: 'string', enum: ['true', 'false'] }),
+        description: expect.stringContaining('Requires routing forms to be enabled'),
+      }),
+    )
   })
 })
 describe.skipIf(!process.env.DATABASE_URL)('booking export REST', () => {
@@ -31,6 +47,120 @@ describe.skipIf(!process.env.DATABASE_URL)('booking export REST', () => {
   })
   const get = (token: string, suffix = query) =>
     app.request(path + suffix, { headers: { authorization: `Bearer ${token}` } })
+  const composed = (db: Db, routingFormsEnabled?: boolean) =>
+    productApp(
+      db,
+      principals,
+      productRoutes({
+        db,
+        socialProviders: {},
+        invitationMailLimits: { secret: 'synthetic-route-test-only' },
+        ...(routingFormsEnabled === undefined ? {} : { routingFormsEnabled }),
+      }),
+    )
+
+  it('serves routing CSV through the existing REST route and MCP pointer only when enabled', async () => {
+    const user = await createTestUser(db)
+    const read = {
+      ...user.principal,
+      kind: 'api_key',
+      apiKeyId: randomUUID(),
+      apiKeyScope: 'read',
+    } as const
+    const full = { ...read, apiKeyScope: 'full' } as const
+    const bookings = { ...read, apiKeyScope: 'bookings' } as const
+    for (const principal of [read, full, bookings]) principals.set(principal.apiKeyScope, principal)
+    await createFixtures(db).booking(
+      user.principal.organization.id,
+      [user.id],
+      '2026-05-01T00:00:00Z',
+      '2026-05-01T01:00:00Z',
+    )
+
+    const statements: string[] = []
+    const observed = new Kysely<Database>({
+      dialect: new PostgresDialect({ pool: owned.pool }),
+      log(event) {
+        if (event.level === 'query') statements.push(event.query.sql)
+      },
+    })
+    const off = composed(observed)
+    const on = composed(observed, true)
+    const headers = { authorization: 'Bearer read' }
+    const args = { from: '2026-01-01T00:00:00Z', to: '2027-01-01T00:00:00Z' }
+    const disabled = await off.request(`${path}${query}&includeRoutingAnswers=true`, { headers })
+    expect(disabled.status).toBe(404)
+    expect(await disabled.json()).toEqual({ error: 'routing_forms_disabled' })
+    expect(statements).toEqual([])
+
+    const ordinary = await off.request(path + query, { headers })
+    expect(ordinary.status).toBe(200)
+    const bytes = new Uint8Array(await ordinary.arrayBuffer())
+    const ordinaryStatements = statements.splice(0)
+    expect(ordinaryStatements).not.toEqual([])
+    expect(ordinaryStatements.join('\n')).not.toContain('booking_routing')
+    const omitted = await off.request(`${path}${query}&includeRoutingAnswers=false`, { headers })
+    expect(omitted.status).toBe(200)
+    expect(new Uint8Array(await omitted.arrayBuffer())).toEqual(bytes)
+    expect(statements.splice(0)).toEqual(ordinaryStatements)
+
+    const tool = (routingFormsEnabled?: true) => {
+      const found = productTools({ db: observed, routingFormsEnabled }).find(
+        (item) => item.name === 'export_bookings',
+      )
+      if (!found) throw new Error('Missing export_bookings')
+      return found
+    }
+    const call = (caller: typeof read | typeof bookings | typeof full = read) => ({
+      caller,
+      rateLimit() {},
+    })
+    const offResult = await runTool(
+      tool(),
+      { ...args, includeRoutingAnswers: true },
+      call(),
+      () => {},
+    )
+    expect(offResult).toMatchObject({
+      isError: true,
+      content: [{ type: 'text', text: '{"error":"routing_forms_disabled"}' }],
+    })
+    expect(statements).toEqual([])
+    const pointer = await runTool(
+      tool(true),
+      { ...args, includeRoutingAnswers: true },
+      call(full),
+      () => {},
+    )
+    expect(pointer.isError).not.toBe(true)
+    const { downloadPath } = pointer.structuredContent as { downloadPath: string }
+    expect(downloadPath).toContain('includeRoutingAnswers=true')
+
+    for (const scope of ['read', 'full']) {
+      const response = await on.request(downloadPath, {
+        headers: { authorization: `Bearer ${scope}` },
+      })
+      expect(response.status).toBe(200)
+      const [header, row] = (await response.text()).split('\r\n')
+      expect(header).toMatch(
+        /,routing_form_id,routing_form_version,routing_matched_rule_id,routing_resolved_rule_id,routing_answers$/,
+      )
+      expect(row).toMatch(/,,,,,$/)
+    }
+    const denied = await on.request(downloadPath, { headers: { authorization: 'Bearer bookings' } })
+    expect(denied.status).toBe(403)
+    expect(await denied.json()).toMatchObject({ error: 'insufficient_scope' })
+    const deniedTool = await runTool(
+      tool(true),
+      { ...args, includeRoutingAnswers: true },
+      call(bookings),
+      () => {},
+    )
+    expect(deniedTool).toMatchObject({
+      isError: true,
+      content: [{ type: 'text', text: expect.stringContaining('insufficient_scope') }],
+    })
+  })
   it('sets private download headers and optional UTF-8 BOM and enforces scope', async () => {
     const user = await createTestUser(db)
     for (const scope of ['full', 'read', 'bookings'] as const)
@@ -144,6 +274,20 @@ describe.skipIf(!process.env.DATABASE_URL)('booking export REST', () => {
         expect(body).toContain(id)
         expect(body).not.toMatch(/PRIVATE_|answers|location_option|source|created_at/)
         expect(body).not.toContain(member.email)
+
+        const browser = { cookie: syntheticSessionCookie(`team-${label}`) }
+        const omitted = await app.request(`${path}${query}&includeRoutingAnswers=false`, {
+          headers: browser,
+        })
+        expect(omitted.status).toBe(200)
+        expect(await omitted.text()).toBe(body)
+        const optInPath = `${path}${query}&includeRoutingAnswers=true`
+        const off = await app.request(optInPath, { headers: browser })
+        expect(off.status).toBe(404)
+        expect(await off.json()).toEqual({ error: 'routing_forms_disabled' })
+        const on = await composed(db, true).request(optInPath, { headers: browser })
+        expect(on.status).toBe(400)
+        expect(await on.json()).toMatchObject({ error: 'invalid_request' })
       } else expect(JSON.parse(body).error).toBe('team_management_access_denied')
       for (const scope of ['read', 'full'] as const) {
         principals.set(`team-${label}-${scope}`, {
@@ -172,6 +316,7 @@ describe.skipIf(!process.env.DATABASE_URL)('booking export REST', () => {
     for (const suffix of [
       '',
       `${query}&bom=yes`,
+      `${query}&includeRoutingAnswers=yes`,
       `${query}&timeZone=invalid`,
       `${query}&extra=1`,
       query.replace('2027-01-01', '2028-01-01'),

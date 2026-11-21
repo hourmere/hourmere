@@ -20,11 +20,13 @@ export function BookingExport({
   timeZone,
   expectedOrganizationId,
   disabled = false,
+  routingFormsEnabled = false,
 }: {
   filters: ExportFilters
   timeZone: string
   expectedOrganizationId: string
   disabled?: boolean
+  routingFormsEnabled?: boolean
 }) {
   const { t } = useI18n()
   const me = useMe()
@@ -32,6 +34,7 @@ export function BookingExport({
   const [from, setFrom] = useState(() => filters.from?.replace(/Z$/, '') ?? '')
   const [to, setTo] = useState(() => filters.to?.replace(/Z$/, '') ?? '')
   const [bom, setBom] = useState(true)
+  const [includeRoutingAnswers, setIncludeRoutingAnswers] = useState(false)
   const [downloading, setDownloading] = useState(false)
   const [failed, setFailed] = useState(false)
   const [userBusy, setUserBusy] = useState(false)
@@ -47,7 +50,9 @@ export function BookingExport({
     end > start &&
     end - start <= 366 * 86_400_000
   const blocked = disabled || me.organization.id !== expectedOrganizationId
+  const offerRoutingAnswers = routingFormsEnabled && me.organization.personal
   const query = new URLSearchParams({ timeZone, expectedOrganizationId, bom: String(bom) })
+  if (offerRoutingAnswers && includeRoutingAnswers) query.set('includeRoutingAnswers', 'true')
   for (const key of [
     'endAfter',
     'endTo',
@@ -157,6 +162,17 @@ export function BookingExport({
           />
           {t('Include UTF-8 BOM for Excel')}
         </label>
+        {offerRoutingAnswers && (
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              checked={includeRoutingAnswers}
+              disabled={blocked}
+              onChange={(event) => setIncludeRoutingAnswers(event.target.checked)}
+            />
+            {t('Include routing form answers')}
+          </label>
+        )}
         {failed && (
           <p className="alert alert-error" role="alert">
             {userBusy

@@ -2731,4 +2731,7 @@ export const admin = {
   'Original routing answers': '原始分流表单答案',
   'Final booking answers': '最终预约答案',
   'No routing answers were submitted.': '未提交分流表单答案。',
+
+  // Booking CSV routing columns
+  'Include routing form answers': '包含分流表单答案',
 } as const

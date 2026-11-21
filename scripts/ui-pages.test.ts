@@ -218,6 +218,7 @@ it('covers every requested real page and limits en-GB to the booking page', () =
     'event-type-editor-expanded',
     'availability-editor',
     'bookings',
+    'bookings-routing-export',
     'booking-detail',
     'booking-detail-routing-answers',
     'team-bookings',
@@ -639,6 +640,7 @@ const expected={
   'oauth-consent':{path:'/oauth/consent',public:false,wait:'Synthetic audit connector'},
   'manage-reschedule':{path:'/booking',public:true,wait:'.reschedule-summary .event-title'},
   'event-type-editor-expanded':{path:'/app/event-types/synthetic-event',public:false,wait:'h1'},
+  'bookings-routing-export':{path:'/app/bookings',public:false,wait:'Include routing form answers'},
   'team-bookings':{path:'/app/team/bookings',public:false,space:'team',wait:'.team-bookings-list'},
   'team-booking-detail':{path:'/app/bookings/synthetic-team-booking',public:false,space:'team',wait:'.team-booking-detail'},
 }
@@ -696,6 +698,10 @@ for(const [id,state] of Object.entries(expected)) {
   }
   if(id==='booking-time-zone')
     assert.ok(calls.some(call=>call[0]==='press'&&call[1]==='.tz-toggle'&&call[2]==='Enter'),'Time-zone panel must open')
+  if(id==='bookings-routing-export') {
+    assert.ok(calls.some(call=>call[0]==='press'&&call[1]==='.booking-export summary'&&call[2]==='Enter'),'Export panel must open with the keyboard')
+    assert.ok(calls.some(call=>call[0]==='press'&&call[1].includes('Include routing form answers')&&call[2]==='Space'),'Routing answers must be selected with the keyboard')
+  }
   if(id==='team-booking-detail')
     assert.ok(calls.some(call=>call[0]==='press'&&call[1]==='.team-bookings-list button'&&call[2]==='Enter'),'Team booking detail must open with the keyboard')
   if(id==='embedded-booking') {

@@ -575,6 +575,11 @@ its same-instance authenticated REST download without buffering the CSV in memor
 Files contain attendee personal data; store and share them privately. See
 [CSV exports](https://hourmere.com/docs/booking-export) for columns and limitations.
 
+With routing forms enabled, set `"includeRoutingAnswers": true` in the JSON input or
+pass `--include-routing-answers true` to add saved routing answers to a personal export.
+Use `false` or omit the option for the standard columns. If routing forms are disabled,
+requesting the extra columns returns `routing_forms_disabled`.
+
 
 `update_workflow` / `workflows update` requires `full` scope and accepts `id`,
 `expectedRevision` and changed definition fields. REST uses `PATCH /api/v1/workflows/{id}`

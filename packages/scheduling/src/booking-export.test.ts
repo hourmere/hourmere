@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import type { Principal } from '@hourmere/auth'
-import { createDb, type Db } from '@hourmere/db'
+import { createDb, type Database, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
-import { sql } from 'kysely'
+import { Kysely, PostgresDialect, sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { groupFixture, occupiedSlot } from '../../db/src/group-seats-fixtures.ts'
 import {
@@ -127,6 +127,199 @@ describe.skipIf(!process.env.DATABASE_URL)('booking CSV database stream', () => 
       sessionId: row.id,
     }
   }
+  it.each(['personal', 'team'] as const)(
+    'preserves main’s %s CSV bytes and SQL statement count while routing is off',
+    async (scope) => {
+      const owner = await createTestUser(db)
+      const principal =
+        scope === 'personal'
+          ? owner.principal
+          : await session((await createTestTeam(db, [{ user: owner, role: 'owner' }])).as(owner))
+      const { id } = await db
+        .insertInto('bookings')
+        .values({
+          organization_id: principal.organization.id,
+          start_at: '2026-05-01T10:00:00Z',
+          end_at: '2026-05-01T11:00:00Z',
+          source: 'api',
+          created_at: '2026-04-01T12:00:00Z',
+          title: '预约, "Review"',
+          responses: JSON.stringify({ q: '原答案' }),
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      const statements: string[] = []
+      const observed = new Kysely<Database>({
+        dialect: new PostgresDialect({ pool: owned.pool }),
+        log(event) {
+          if (event.level === 'query') statements.push(event.query.sql)
+        },
+      })
+      const times =
+        '2026-05-01T10:00:00+00:00,2026-05-01T11:00:00+00:00,2026-05-01T10:00:00Z,2026-05-01T11:00:00Z'
+      const expected =
+        scope === 'personal'
+          ? '\uFEFFid,event_type_id,event_type,title,start,end,start_utc,end_utc,status,invitee_name,invitee_email,guests_count,hosts,location_option,answers,source,created_at,cancelled_at,time_zone\r\n' +
+            `${id},,,"预约, ""Review""",${times},confirmed,,,0,[],,"{""q"":""原答案""}",api,2026-04-01T12:00:00.000Z,,UTC\r\n`
+          : '\uFEFFid,event_type_id,event_type,start,end,start_utc,end_utc,status,invitee_name,invitee_email,guests_count,hosts,cancelled_at,time_zone\r\n' +
+            `${id},,,${times},confirmed,,,0,[],,UTC\r\n`
+      for (const optIn of [{}, { includeRoutingAnswers: false }]) {
+        const stream = await exportBookingsCsv(testContext(observed, principal), {
+          ...range,
+          bom: true,
+          ...optIn,
+        })
+        expect(Buffer.from(await new Response(stream).arrayBuffer())).toEqual(Buffer.from(expected))
+        expect(statements).toHaveLength(scope === 'personal' ? 9 : 14)
+        expect(statements.join('\n')).not.toMatch(/booking_routing|has_routing_snapshot/u)
+        statements.length = 0
+      }
+    },
+  )
+  it('refuses the routing opt-in while off before starting an export or looking up its team', async () => {
+    const owner = await createTestUser(db)
+    const team = await createTestTeam(db, [{ user: owner, role: 'owner' }])
+    const teamSession = await session(team.as(owner))
+    const input = { ...range, includeRoutingAnswers: true }
+    const connect = vi.spyOn(owned.pool, 'connect')
+    try {
+      for (const principal of [owner.principal, teamSession]) {
+        const ctx = { ...testContext(db, principal), routingFormsEnabled: false }
+        await expect(prepareBookingExport(ctx, input)).rejects.toMatchObject({
+          code: 'routing_forms_disabled',
+        })
+        await expect(
+          exportBookingsCsv(ctx, input).then((stream) => stream.cancel()),
+        ).rejects.toMatchObject({ code: 'routing_forms_disabled' })
+      }
+      expect(connect).not.toHaveBeenCalled()
+    } finally {
+      connect.mockRestore()
+    }
+  })
+  it('refuses the enabled routing opt-in on team exports even with a personal principal hint', async () => {
+    const owner = await createTestUser(db)
+    const team = await createTestTeam(db, [{ user: owner, role: 'owner' }])
+    const principal = await session(team.as(owner))
+    const ctx = {
+      ...testContext(db, {
+        ...principal,
+        organization: { ...principal.organization, personal: true },
+      }),
+      routingFormsEnabled: true,
+    }
+    const input = { ...range, includeRoutingAnswers: true }
+    await expect(prepareBookingExport(ctx, input)).rejects.toMatchObject({
+      kind: 'invalid',
+      code: 'invalid_request',
+    })
+    await expect(
+      exportBookingsCsv(ctx, input).then((stream) => stream.cancel()),
+    ).rejects.toMatchObject({
+      kind: 'invalid',
+      code: 'invalid_request',
+    })
+  })
+  it('exports only the owner’s immutable routing labels and answers with safe CSV and JSON', async () => {
+    const owner = await createTestUser(db)
+    const outsider = await createTestUser(db)
+    const org = owner.principal.organization.id
+    const otherOrg = outsider.principal.organization.id
+    const fixtures = createFixtures(db)
+    const routed = await fixtures.booking(
+      org,
+      [owner.id],
+      '2026-05-01T10:00:00Z',
+      '2026-05-01T11:00:00Z',
+    )
+    const ordinary = await fixtures.booking(
+      org,
+      [owner.id],
+      '2026-05-02T10:00:00Z',
+      '2026-05-02T11:00:00Z',
+    )
+    const privateBooking = await fixtures.booking(
+      otherOrg,
+      [outsider.id],
+      '2026-05-01T10:00:00Z',
+      '2026-05-01T11:00:00Z',
+    )
+    const formId = randomUUID()
+    const matchedRuleId = randomUUID()
+    const textId = randomUUID(),
+      selectId = randomUUID(),
+      optionId = randomUUID()
+    const label = '+标签，"显示"\n下一行, +FORMULA'
+    const answer = '=部署,"quoted"\n下一行;@other'
+    const selectLabel = '-问题，"显示"\n下一行'
+    const optionLabel = '@选项;=literal, "quoted"\n下一行'
+    const snapshot = {
+      form_id: formId,
+      version_id: randomUUID(),
+      version_number: 3,
+      matched_rule_id: matchedRuleId,
+      resolved_rule_id: 'fallback',
+    }
+    await db
+      .insertInto('booking_routing')
+      .values([
+        {
+          ...snapshot,
+          booking_id: routed,
+          organization_id: org,
+          questions: JSON.stringify([
+            { id: textId, type: 'short_text', label, required: true },
+            {
+              id: selectId,
+              type: 'select',
+              label: selectLabel,
+              required: true,
+              options: [{ id: optionId, label: optionLabel }],
+            },
+            { id: randomUUID(), type: 'short_text', label: 'Skipped', required: false },
+          ]),
+          answers: JSON.stringify({ [textId]: answer, [selectId]: optionId }),
+        },
+        {
+          ...snapshot,
+          form_id: randomUUID(),
+          booking_id: privateBooking,
+          organization_id: otherOrg,
+          questions: JSON.stringify([
+            { id: textId, type: 'short_text', label: 'Other label', required: true },
+          ]),
+          answers: JSON.stringify({ [textId]: 'Another workspace answer' }),
+        },
+      ])
+      .execute()
+    const input = { ...range, includeRoutingAnswers: true }
+    const ctx = { ...testContext(db, owner.principal), routingFormsEnabled: true }
+    const rows = await read(await exportBookingsCsv(ctx, input))
+    expect(rows[0]).toEqual([
+      ...BOOKING_EXPORT_COLUMNS,
+      'routing_form_id',
+      'routing_form_version',
+      'routing_matched_rule_id',
+      'routing_resolved_rule_id',
+      'routing_answers',
+    ])
+    expect(rows.slice(1).map((row) => row[0])).toEqual([routed, ordinary])
+    expect(rows[1]?.slice(-5, -1)).toEqual([formId, '3', matchedRuleId, 'fallback'])
+    expect(rows[2]?.slice(-5)).toEqual(['', '', '', '', ''])
+    const json = rows[1]?.at(-1) ?? ''
+    expect(json.startsWith("'{")).toBe(true)
+    expect(json).not.toContain(';')
+    expect(JSON.parse(json.slice(1))).toEqual({
+      [textId]: { label, answer },
+      [selectId]: { label: selectLabel, answer: optionId, optionLabel },
+    })
+    const wrongOwner = { ...outsider.principal, organization: owner.principal.organization }
+    await expect(exportBookingsCsv({ ...ctx, principal: wrongOwner }, input)).rejects.toMatchObject(
+      {
+        code: 'insufficient_role',
+      },
+    )
+  })
   it('rejects invalid limits, zones, IDs and stale organization contexts', async () => {
     const user = await createTestUser(db)
     const ctx = testContext(db, user.principal)
@@ -731,7 +924,7 @@ describe.skipIf(!process.env.DATABASE_URL)('booking CSV database stream', () => 
     await new Promise((resolve) => setTimeout(resolve, 20))
     await (await exportBookingsCsv(ctx, range)).cancel()
   })
-  it('streams over 10k rows with bounded pages, stable keysets and a consistent cancellation snapshot', async () => {
+  it('streams over 10k rows with routing enabled, bounded pages, stable keysets and a consistent cancellation snapshot', async () => {
     const user = await createTestUser(db)
     const org = user.principal.organization.id
     let largestPage = 0
@@ -743,12 +936,19 @@ describe.skipIf(!process.env.DATABASE_URL)('booking CSV database stream', () => 
         return result
       },
     })
-    const ctx = testContext(observed, user.principal)
+    const ctx = { ...testContext(observed, user.principal), routingFormsEnabled: true }
     await sql`INSERT INTO bookings (organization_id,start_at,end_at,title,source,manage_token_hash)
       SELECT ${org}::uuid,'2026-06-01T10:00:00Z'::timestamptz + n * interval '1 microsecond','2026-06-01T11:00:00Z'::timestamptz,'row-' || n,'api',decode(md5(n::text),'hex') FROM generate_series(1,10005) n`.execute(
       db,
     )
-    const reader = (await exportBookingsCsv(ctx, range)).getReader()
+    const formId = randomUUID()
+    await sql`INSERT INTO booking_routing (
+      booking_id,organization_id,form_id,version_id,version_number,matched_rule_id,resolved_rule_id,questions,answers
+    ) SELECT id,organization_id,${formId},${randomUUID()},1,'fallback','fallback','[]','{}' FROM bookings
+      WHERE organization_id = ${org} AND title IN ('row-1','row-10005')`.execute(db)
+    const reader = (
+      await exportBookingsCsv(ctx, { ...range, includeRoutingAnswers: true })
+    ).getReader()
     await reader.read()
     const before = process.memoryUsage().heapUsed
     let maximum = before
@@ -756,7 +956,9 @@ describe.skipIf(!process.env.DATABASE_URL)('booking CSV database stream', () => 
     const ids = new Set<string>()
     const first = await reader.read()
     expect(first.done).toBe(false)
-    ids.add(parseCsv(new TextDecoder().decode(first.value))[0]?.[0] ?? '')
+    const firstRow = parseCsv(new TextDecoder().decode(first.value))[0]
+    expect(firstRow?.slice(-5)).toEqual([formId, '1', 'fallback', 'fallback', '{}'])
+    ids.add(firstRow?.[0] ?? '')
     count++
     await db
       .updateTable('bookings')
@@ -768,6 +970,8 @@ describe.skipIf(!process.env.DATABASE_URL)('booking CSV database stream', () => 
       if (next.done) break
       const row = parseCsv(new TextDecoder().decode(next.value))[0] ?? []
       expect(row[8]).toBe('confirmed')
+      if (row[3] === 'row-10005')
+        expect(row.slice(-5)).toEqual([formId, '1', 'fallback', 'fallback', '{}'])
       expect(ids.has(row[0] ?? '')).toBe(false)
       ids.add(row[0] ?? '')
       count++

@@ -5,6 +5,7 @@ import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { resolvedBookingHosts } from './hosts.ts'
 import { isUuid, validTimeZone } from './internal.ts'
+import type { RoutingAnswers, RoutingQuestion } from './routing-form-config.ts'
 
 export const MAX_EXPORT_DAYS = 366
 export const EXPORT_PAGE_SIZE = 100
@@ -25,6 +26,7 @@ export interface BookingExportInput {
   endTo?: string | undefined
   order?: 'asc' | 'desc' | undefined
   expectedOrganizationId?: string | undefined
+  includeRoutingAnswers?: boolean | undefined
 }
 
 /**
@@ -63,6 +65,14 @@ export const BOOKING_EXPORT_COLUMNS = [
   'time_zone',
 ] as const
 
+const ROUTING_BOOKING_EXPORT_COLUMNS = [
+  'routing_form_id',
+  'routing_form_version',
+  'routing_matched_rule_id',
+  'routing_resolved_rule_id',
+  'routing_answers',
+] as const
+
 /** The existing team-admin read whitelist; private host-only fields never become CSV columns. */
 export const TEAM_BOOKING_EXPORT_COLUMNS = [
   'id',
@@ -81,7 +91,13 @@ export const TEAM_BOOKING_EXPORT_COLUMNS = [
   'time_zone',
 ] as const
 
+function checkRoutingExportEnabled(ctx: ServiceContext, input: BookingExportInput): void {
+  if (input.includeRoutingAnswers === true && ctx.routingFormsEnabled !== true)
+    throw new DomainError('not_found', 'routing_forms_disabled')
+}
+
 export async function prepareBookingExport(ctx: ServiceContext, input: BookingExportInput) {
+  checkRoutingExportEnabled(ctx, input)
   const timeZone = validTimeZone(input.timeZone ?? 'UTC')
   try {
     const from = Temporal.Instant.from(input.from)
@@ -135,6 +151,12 @@ export async function prepareBookingExport(ctx: ServiceContext, input: BookingEx
         'Only personal owners may export their bookings',
       )
   } else {
+    if (input.includeRoutingAnswers === true)
+      throw new DomainError(
+        'invalid',
+        'invalid_request',
+        'Routing answers require a personal export',
+      )
     try {
       await checkTeamManagementAccess(ctx.db, ctx.principal, ctx.principal.organization.id, false, {
         expectedOrganizationId: ctx.principal.organization.id,
@@ -156,6 +178,19 @@ function exportJson(value: unknown): string {
   return JSON.stringify(value).replaceAll(';', '\\u003b')
 }
 
+function routingAnswersJson(questions: RoutingQuestion[], answers: RoutingAnswers): string {
+  const labelled = questions.flatMap((question) => {
+    const answer = answers[question.id]
+    if (typeof answer !== 'string') return []
+    const optionLabel =
+      question.type === 'select'
+        ? question.options.find((option) => option.id === answer)?.label
+        : undefined
+    return [[question.id, { label: question.label, answer, optionLabel }]] as const
+  })
+  return exportJson(Object.fromEntries(labelled))
+}
+
 function locationMetadata(value: unknown): string {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return ''
   const obj = value as Record<string, unknown>
@@ -174,6 +209,7 @@ export async function exportBookingsCsv(
   input: BookingExportInput,
   signal?: AbortSignal,
 ): Promise<ReadableStream<Uint8Array>> {
+  checkRoutingExportEnabled(ctx, input)
   // Reserve synchronously before acquiring any connection, including for permission checks.
   const userId = ctx.principal.user.id
   if (exportingUsers.has(userId))
@@ -236,7 +272,12 @@ export async function exportBookingsCsv(
       await sql`SET LOCAL statement_timeout = '30s'`.execute(trx)
       const encoder = new TextEncoder()
       async function* rows() {
-        const columns = options.teamScope ? TEAM_BOOKING_EXPORT_COLUMNS : BOOKING_EXPORT_COLUMNS
+        const includeRouting = options.includeRoutingAnswers === true && !options.teamScope
+        const columns = options.teamScope
+          ? TEAM_BOOKING_EXPORT_COLUMNS
+          : includeRouting
+            ? [...BOOKING_EXPORT_COLUMNS, ...ROUTING_BOOKING_EXPORT_COLUMNS]
+            : BOOKING_EXPORT_COLUMNS
         yield `${options.bom ? '\uFEFF' : ''}${columns.join(',')}\r\n`
         let cursor: string | undefined
         do {
@@ -287,6 +328,36 @@ export async function exportBookingsCsv(
               sql<string>`to_char(timezone('UTC', b.end_at), 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`.as(
                 'end_utc',
               ),
+            )
+            .$if(includeRouting, (q) =>
+              q
+                .leftJoinLateral(
+                  (eb) =>
+                    eb
+                      .selectFrom('booking_routing')
+                      .select([
+                        'form_id',
+                        'version_number',
+                        'matched_rule_id',
+                        'resolved_rule_id',
+                        'questions',
+                        'answers',
+                      ])
+                      .whereRef('booking_id', '=', 'b.id')
+                      .whereRef('organization_id', '=', 'b.organization_id')
+                      .where('b.has_routing_snapshot', '=', true)
+                      .limit(1)
+                      .as('routing'),
+                  (join) => join.onTrue(),
+                )
+                .select([
+                  'routing.form_id as routing_form_id',
+                  'routing.version_number as routing_form_version',
+                  'routing.matched_rule_id as routing_matched_rule_id',
+                  'routing.resolved_rule_id as routing_resolved_rule_id',
+                  'routing.questions as routing_questions',
+                  'routing.answers as routing_answers',
+                ]),
             )
             .limit(EXPORT_PAGE_SIZE)
             .execute()
@@ -339,6 +410,16 @@ export async function exportBookingsCsv(
               created_at: row.created_at.toISOString(),
               cancelled_at: row.cancelled_at?.toISOString(),
               time_zone: options.timeZone,
+            }
+            if (row.routing_form_id) {
+              values.routing_form_id = row.routing_form_id
+              values.routing_form_version = row.routing_form_version
+              values.routing_matched_rule_id = row.routing_matched_rule_id
+              values.routing_resolved_rule_id = row.routing_resolved_rule_id
+              values.routing_answers = routingAnswersJson(
+                row.routing_questions as RoutingQuestion[],
+                row.routing_answers as RoutingAnswers,
+              )
             }
             yield `${columns
               .map((column) => values[column])

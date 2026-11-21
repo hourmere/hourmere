@@ -171,7 +171,11 @@ const LIFECYCLE = [
 const CONTINUATION_SERVICE = 'packages/scheduling/src/routing-continuation.ts'
 const ROUTED_BOOKING_SERVICE = 'packages/scheduling/src/routing-booking.ts'
 const SHARED_SERVICES = [...CONFIGURATION_SERVICES, CONTINUATION_SERVICE, ROUTED_BOOKING_SERVICE]
-const STORAGE_SERVICES = ['packages/db/src/routing-lifecycle.ts', ...SHARED_SERVICES]
+const STORAGE_SERVICES = [
+  'packages/db/src/routing-lifecycle.ts',
+  'packages/scheduling/src/booking-export.ts',
+  ...SHARED_SERVICES,
+]
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -1038,6 +1042,7 @@ describe('routing forms remain hard-off with configuration and public metadata i
       const names: string[] = message.result.tools.map(({ name }: { name: string }) => name)
       expect(names.length).toBeGreaterThan(20)
       expect(names).toContain('create_booking')
+      expect(names).toContain('export_bookings')
       for (const tool of MCP_TOOLS) expect(names).not.toContain(tool)
       expect(names.filter(isRoutingName)).toEqual([])
     } finally {

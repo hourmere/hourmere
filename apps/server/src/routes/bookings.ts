@@ -497,6 +497,7 @@ const invalidCancel = error(
 export interface BookingRoutesDeps {
   db: Db
   bookingExportMaxConcurrent?: number | undefined
+  routingFormsEnabled?: boolean | undefined
   bookingMaxInviteeReschedules?: number | undefined
   automaticMeet?: boolean | undefined
   smsRemindersAvailable?: boolean | undefined
@@ -520,6 +521,7 @@ export function bookingRoutes({
   db,
   bookingMaxInviteeReschedules,
   bookingExportMaxConcurrent,
+  routingFormsEnabled,
   now = () => Temporal.Now.instant(),
   notify,
   notifyAttendeeNoShow,
@@ -576,6 +578,7 @@ export function bookingRoutes({
       smsRemindersAvailable,
       automaticZoom,
       bookingExportMaxConcurrent,
+      routingFormsEnabled,
       authorizeOrganizationWrite: bookingWriteAccess(principal, expectedOrganizationId),
     })
 
@@ -1153,6 +1156,10 @@ export function bookingRoutes({
               hostUserId: z.uuid().optional(),
               expectedOrganizationId: z.uuid().optional(),
               bom: z.enum(['true', 'false']).optional(),
+              includeRoutingAnswers: z.enum(['true', 'false']).optional().openapi({
+                description:
+                  'Append routing provenance and saved answers to personal exports only. Requires routing forms to be enabled. False is equivalent to omitting the option.',
+              }),
             })
             .strict(),
         },
@@ -1161,10 +1168,15 @@ export function bookingRoutes({
             description: 'CSV download with RFC 4180 quoting and formula protection',
             content: { 'text/csv': { schema: z.string() } },
           },
-          400: error('Invalid export filters or range'),
+          400: error(
+            'Invalid export filters or range, or routing answers requested for a team (`invalid_request`)',
+          ),
           401: unauthorized,
           403: error(
             'Personal ownership or verified browser team-admin access required; team_management_access_denied for team agent credentials',
+          ),
+          404: error(
+            'Routing answers requested while routing forms are disabled (`routing_forms_disabled`)',
           ),
           409: error(
             'export_user_in_progress when this user already has an export in this process, export_busy when the process cap is reached, export_in_progress for an active organization export, or organization_context_changed',
@@ -1176,7 +1188,11 @@ export function bookingRoutes({
         const q = c.req.valid('query')
         const body = await exportBookingsCsv(
           context(c.var.principal),
-          { ...q, bom: q.bom === 'true' },
+          {
+            ...q,
+            bom: q.bom === 'true',
+            includeRoutingAnswers: q.includeRoutingAnswers === 'true',
+          },
           c.req.raw.signal,
         )
         return new Response(body, {
