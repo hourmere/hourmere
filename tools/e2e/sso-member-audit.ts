@@ -96,6 +96,13 @@ async function mockMemberSso(page: Page, app: FixtureApp, id: SsoMemberAuditPage
     id === 'sso-member-unavailable' || id === 'sso-member-loading' || id === 'sso-member-error'
   let refuseLink = false
   if (teamOrganizationId) {
+    // Read the seeded team session before intercepting /me. A page focus refresh can be
+    // cancelled while navigating between audit states, so its route must be handled immediately.
+    const response = await page.request.get(`${app.url}/api/v1/me`)
+    if (!response.ok()) throw new Error('Could not read the synthetic audit member')
+    const me = (await response.json()) as Schemas['Me']
+    if (me.organization.id !== teamOrganizationId)
+      throw new Error('Synthetic audit member was outside the fixture team')
     const attempts: MeSso['attempts'] =
       id === 'sso-member-confirm'
         ? [
@@ -108,38 +115,32 @@ async function mockMemberSso(page: Page, app: FixtureApp, id: SsoMemberAuditPage
             },
           ]
         : []
+    const member = {
+      ...me,
+      sso: {
+        providers: [provider, linkedProvider],
+        links: [link],
+        attempts,
+        proofs: [],
+        requireSso: false,
+      },
+    } satisfies Schemas['Me']
     routes.push([
       '/api/v1/me',
       async (route) => {
         if (refuseLink && id === 'sso-member-loading') return
         if (refuseLink && id === 'sso-member-error') return route.abort()
-        const response = await route.fetch()
-        if (!response.ok()) return route.fulfill({ response })
-        const me = (await response.json()) as Schemas['Me']
-        if (me.organization.id !== teamOrganizationId) return route.abort()
-        return route.fulfill({
-          response,
-          json: {
-            ...me,
-            sso: {
-              providers: [provider, linkedProvider],
-              links: [link],
-              attempts,
-              proofs: [],
-              requireSso: false,
-            },
-          } satisfies Schemas['Me'],
-        })
+        return route.fulfill({ json: member })
       },
     ])
     if (linkProof || denied) {
       routes.push([
         `/api/v1/team/sso/providers/${provider.id}/link`,
-        async (route) => {
+        (route) => {
           const request = route.request()
           if (
             request.method() !== 'POST' ||
-            (await request.headerValue('x-expected-organization-id')) !== teamOrganizationId
+            request.headers()['x-expected-organization-id'] !== teamOrganizationId
           )
             return route.abort()
           if (denied) {
@@ -167,13 +168,13 @@ async function mockMemberSso(page: Page, app: FixtureApp, id: SsoMemberAuditPage
   if (linkProof || ['sso-mailbox-link', 'sso-mailbox-proven', 'sso-mailbox-outcome'].includes(id))
     routes.push([
       '/api/auth/sso/mailbox-proof/send',
-      async (route) => {
+      (route) => {
         const request = route.request()
         if (
           request.method() !== 'POST' ||
           request.postDataJSON()?.attemptId !== attemptId ||
           (teamOrganizationId &&
-            (await request.headerValue('x-expected-organization-id')) !== teamOrganizationId)
+            request.headers()['x-expected-organization-id'] !== teamOrganizationId)
         )
           return route.abort()
         return route.fulfill({ status: 202, json: { status: 'queued' } })
@@ -187,12 +188,12 @@ async function mockMemberSso(page: Page, app: FixtureApp, id: SsoMemberAuditPage
   )
     routes.push([
       '/api/auth/sso/mailbox-proof/consume',
-      async (route) => {
+      (route) => {
         const request = route.request()
         if (
           request.method() !== 'POST' ||
           (teamOrganizationId &&
-            (await request.headerValue('x-expected-organization-id')) !== teamOrganizationId)
+            request.headers()['x-expected-organization-id'] !== teamOrganizationId)
         )
           return route.abort()
         const body = request.postDataJSON()
@@ -204,7 +205,7 @@ async function mockMemberSso(page: Page, app: FixtureApp, id: SsoMemberAuditPage
   if (id === 'sso-mailbox-outcome')
     routes.push([
       '/api/auth/sso/oidc/complete',
-      async (route) => {
+      (route) => {
         const request = route.request()
         if (request.method() !== 'POST' || request.postDataJSON()?.attemptId !== attemptId)
           return route.abort()

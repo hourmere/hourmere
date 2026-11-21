@@ -719,6 +719,7 @@ for(const [id,state] of Object.entries(expected)) {
   const page={
     clock:{setFixedTime:async(date)=>calls.push(['clock',date.toISOString()])},
     addInitScript:async()=>{},goto:async(url)=>{path=new URL(url).pathname;query=new URL(url).search;calls.push(['goto',path])},
+    request:{get:async(url)=>{assert.equal(new URL(url).pathname,'/api/v1/me');return {ok:()=>true,json:async()=>({organization:{id:'synthetic-team-org'}})}}},
     route:async()=>{},unroute:async()=>{},waitForRequest:async()=>{},
     locator,getByRole:(role,options)=>locator(role+':'+(options?.name ?? '')),
     getByLabel:(label)=>locator('label:'+label),getByText:(text)=>locator(text),
