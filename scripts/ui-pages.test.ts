@@ -227,6 +227,19 @@ it('covers every requested real page and limits en-GB to the booking page', () =
     'sso-member-unavailable',
     'sso-member-loading',
     'sso-member-error',
+    'sso-recovery-start',
+    'sso-recovery-loading',
+    'sso-recovery-forbidden',
+    'sso-recovery-error',
+    'sso-recovery-mailbox',
+    'sso-recovery-repair',
+    'sso-recovery-edit',
+    'sso-recovery-test',
+    'sso-recovery-nominate',
+    'sso-recovery-nominated',
+    'sso-recovery-accept',
+    'sso-recovery-accepted',
+    'sso-recovery-nomination-unavailable',
     'host',
     'booking',
     'booking-form',
@@ -361,6 +374,7 @@ const workflowRunHistoryAuditUrl = pathToFileURL(
 ).href
 const ssoSetupAuditUrl = pathToFileURL(resolve('tools/e2e/sso-setup-audit.ts')).href
 const ssoMemberAuditUrl = pathToFileURL(resolve('tools/e2e/sso-member-audit.ts')).href
+const ssoRecoveryAuditUrl = pathToFileURL(resolve('tools/e2e/sso-recovery-audit.ts')).href
 const visualSource = readFileSync('tools/e2e/specs/visual.spec.ts', 'utf8')
 const fixtureSource = readFileSync('tools/e2e/fixtures.ts', 'utf8')
 const shellSource = readFileSync('apps/web/src/components/AppShell.tsx', 'utf8')
@@ -436,7 +450,8 @@ function sourceCopyResult(
       .replace("'./workflow-editor-audit.ts'", JSON.stringify(workflowEditorAuditUrl))
       .replace("'./workflow-run-history-audit.ts'", JSON.stringify(workflowRunHistoryAuditUrl))
       .replace("'./sso-setup-audit.ts'", JSON.stringify(ssoSetupAuditUrl))
-      .replace("'./sso-member-audit.ts'", JSON.stringify(ssoMemberAuditUrl)),
+      .replace("'./sso-member-audit.ts'", JSON.stringify(ssoMemberAuditUrl))
+      .replace("'./sso-recovery-audit.ts'", JSON.stringify(ssoRecoveryAuditUrl)),
   )
   writeFileSync(join(directory, 'visual.spec.ts'), visual)
   writeFileSync(join(directory, 'fixtures.ts'), fixture)
