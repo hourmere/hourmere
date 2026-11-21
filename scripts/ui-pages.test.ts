@@ -209,6 +209,7 @@ it('covers every requested real page and limits en-GB to the booking page', () =
     'embedded-booking',
     'team-booking',
     'manage',
+    'manage-routing-answers',
     'manage-reschedule',
     'sign-in',
     'oauth-consent',
@@ -218,6 +219,7 @@ it('covers every requested real page and limits en-GB to the booking page', () =
     'availability-editor',
     'bookings',
     'booking-detail',
+    'booking-detail-routing-answers',
     'team-bookings',
     'team-booking-detail',
     'analytics',
@@ -764,8 +766,8 @@ describe('source-copy coverage mutations', () => {
       'Missing content verification: manage-reschedule',
     ],
     [
-      "? '.reschedule-summary' : '.booking-details'",
-      "? '.reschedule-header' : '.booking-details'",
+      "? '.reschedule-summary' : '.manage > .booking-details'",
+      "? '.reschedule-header' : '.manage > .booking-details'",
       'Missing current booking summary readiness',
     ],
     [
