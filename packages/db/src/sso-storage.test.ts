@@ -59,6 +59,8 @@ describe.skipIf(!serverUrl)('SSO configuration storage', () => {
     // Every rule a guard raises names itself as the error's constraint.
     const rules = [...source.matchAll(/CONSTRAINT = '([a-z_]+)'/g)].map(([, rule]) => rule)
     const objects = [...new Set([...constraints, ...indexes, ...triggers, ...rules])].sort()
+    // Migration 0182 owns this index and tests its definition and removal separately.
+    const recoveryOwnerUserIndex = 'sso_recovery_owners_user_id'
     expect(constraints.length).toBeGreaterThan(60)
     expect(indexes).toEqual([
       'sso_domains_active_name',
@@ -66,10 +68,16 @@ describe.skipIf(!serverUrl)('SSO configuration storage', () => {
       'sso_provider_domains_domain_id',
       'sso_recovery_nominations_member_id',
       'sso_recovery_owners_member_id',
+      recoveryOwnerUserIndex,
     ])
     expect(triggers).toHaveLength(5)
     expect(new Set(rules).size).toBe(22)
-    const covered = [...new Set(Object.values(ssoProtections).flatMap(({ objects }) => objects))]
+    const covered = [
+      ...new Set([
+        ...Object.values(ssoProtections).flatMap(({ objects }) => objects),
+        recoveryOwnerUserIndex,
+      ]),
+    ]
     expect(covered.sort()).toEqual(objects)
     for (const [name, { mutants }] of Object.entries(ssoProtections))
       expect(mutants.length, name).toBeGreaterThan(0)
