@@ -1,8 +1,26 @@
-import { type Schemas, unwrap } from '../../api/client.ts'
+import { api, type Schemas, unwrap } from '../../api/client.ts'
 import type { MessageKey } from '../../i18n/translate.ts'
 
 export type SsoProvider = Schemas['SsoProviderPage']['data'][number]
 export type SsoDomain = SsoProvider['domains'][number]
+
+export async function loadSsoProviders(organizationId: string, signal: AbortSignal) {
+  const providers: SsoProvider[] = []
+  let cursor: string | null = null
+  do {
+    const page: Schemas['SsoProviderPage'] = await unwrap(
+      api.GET('/api/v1/team/sso/providers', {
+        headers: { 'X-Expected-Organization-Id': organizationId },
+        params: { query: { limit: '100', ...(cursor ? { cursor } : {}) } },
+        signal,
+        cache: 'no-store',
+      }),
+    )
+    providers.push(...page.data)
+    cursor = page.nextCursor
+  } while (cursor)
+  return providers
+}
 
 export type SsoProofChallenge = Required<
   Pick<Schemas['SsoFreshProofChallenge'], 'attemptId' | 'proofMethods' | 'expiresAt'>

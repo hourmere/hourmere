@@ -10,8 +10,7 @@ import { lockSsoDomain } from './sso-domains.ts'
 import { type FreshProofDeps, runWithFreshProof } from './sso-fresh-proof.ts'
 import { providerTestStatus } from './sso-oidc-test-receipts.ts'
 import { authorizeSsoRead, ssoPolicySummary } from './sso-reads.ts'
-import { consumeSsoRecoveryAuthority } from './sso-recovery-use.ts'
-import { EXPECTED_ORGANIZATION_HEADER, organizationContextAccess } from './team-management.ts'
+import { consumeSsoRecoveryAuthority, ssoWriteContextAccess } from './sso-recovery-use.ts'
 
 const policyInput = z.strictObject({
   expectedRevision: z.int().min(1).max(2_147_483_646),
@@ -88,12 +87,6 @@ export async function setSsoPolicy(
   requireSsoEnabled(deps.capabilities)
   if (principal.kind !== 'session' || principal.organization.personal) throw denied()
   const organizationId = principal.organization.id
-  const access = organizationContextAccess(
-    principal,
-    headers.get(EXPECTED_ORGANIZATION_HEADER) ?? undefined,
-    true,
-    true,
-  )
   let before: ReturnType<typeof ssoPolicySummary>
   let domains: ReturnType<typeof policyDomains> | undefined
   let eligibleForRecovery = false
@@ -116,7 +109,7 @@ export async function setSsoPolicy(
       changesAuthority: true,
       authorize: async (trx) => {
         await authorizeSsoRead({ ...deps, db: trx }, principal)
-        await access(trx, organizationId)
+        await ssoWriteContextAccess(trx, principal, headers, recoveryRequired)
         const stored = await trx
           .selectFrom('sso_policies')
           .select(['require_sso', 'admission', 'policy_revision', 'trust_generation'])

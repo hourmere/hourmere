@@ -66,6 +66,7 @@ import {
   SessionLayout,
   SettingsPage,
   SignInPage,
+  SsoRecoveryPage,
   SsoSetupPage,
   TeamBookingPage,
   TeamBookingsPage,
@@ -133,6 +134,7 @@ export const appRoutes = createRoutesFromElements(
             {/* The shared setup page selects the pane and keeps the team inventory across routes. */}
             <Route path={PATHS.ssoDomainSettings} element={null} />
           </Route>
+          <Route path={PATHS.ssoRecovery} element={<SsoRecoveryRoute />} />
           <Route path="teams/new" element={<CreateTeamPage />} />
           <Route path="*" element={<AppNotFoundPage />} />
         </Route>
@@ -170,6 +172,13 @@ function SsoSetupRoute() {
   if (ssoOidcEnabled === undefined || ssoSamlEnabled === undefined) return <PageSkeleton />
   if (!ssoOidcEnabled && !(isDomains && ssoSamlEnabled)) return <AppNotFoundPage />
   return <SsoSetupPage />
+}
+
+function SsoRecoveryRoute() {
+  const { ssoOidcEnabled, ssoSamlEnabled } = useOutletContext<AppShellContext>()
+  if (ssoOidcEnabled === undefined || ssoSamlEnabled === undefined) return <PageSkeleton />
+  if (!ssoOidcEnabled && !ssoSamlEnabled) return <AppNotFoundPage />
+  return <SsoRecoveryPage />
 }
 
 function WorkflowRoute({ view = 'list' }: { view?: 'list' | 'editor' | 'history' }) {

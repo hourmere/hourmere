@@ -23,6 +23,12 @@ const headers = z.object({
     description: 'Required for writes and must match the current team.',
   }),
 })
+const recoveryTargetHeader = z.object({
+  'X-Expected-Organization-Id': z.string().optional().openapi({
+    description:
+      'Required. Identifies the team to recover, which can differ from the active space.',
+  }),
+})
 const responses = {
   ...errorResponses({
     400: 'invalid_request',
@@ -51,12 +57,15 @@ export function ssoRecoveryEnrollmentRoutes(deps: SsoRecoveryEnrollmentDeps): Ro
         path: `${path}/use`,
         operationId: USE_SSO_RECOVERY,
         tags: ['SSO'],
-        summary: 'Start SSO recovery for the current team',
+        summary: 'Start SSO recovery for the specified team',
         description:
           'Requires an enrolled owner’s browser session and fresh mailbox proof. Permits inspecting SSO configuration and one provider repair write or one write turning off enforcement. SSO remains unavailable.',
         security: [{ session: [] }],
         middleware: [...middleware] as const,
-        request: { headers, body: { required: true, content: json(UseSsoRecoveryInput) } },
+        request: {
+          headers: recoveryTargetHeader,
+          body: { required: true, content: json(UseSsoRecoveryInput) },
+        },
         responses: {
           ...errorResponses({
             400: 'invalid_request',

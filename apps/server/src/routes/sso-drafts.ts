@@ -22,7 +22,7 @@ import {
   TestSsoProviderInput,
   testSsoProvider,
 } from '../sso-oidc-sign-in.ts'
-import { isSsoRecoveryWrite } from '../sso-write-middleware.ts'
+import { ssoRecoveryWritePrincipal } from '../sso-write-middleware.ts'
 import { teamManagementSessionCaller } from '../team-management.ts'
 
 export const SsoProviderDraft = z
@@ -40,6 +40,11 @@ export const SsoProviderDraft = z
   })
   .openapi('SsoProviderDraft')
 const ProviderResult = z.object({ provider: SsoProviderDraft })
+const repairHeaders = z.object({
+  'X-Expected-Organization-Id': z.string().optional().openapi({
+    description: 'Required. Identifies the active team or the team of a live recovery grant.',
+  }),
+})
 export const FreshProofChallenge = ErrorBody.extend({
   attemptId: z.uuid().optional(),
   proofMethods: z.array(z.string()).optional(),
@@ -129,12 +134,7 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
         security: [{ session: [] }],
         middleware: [...middleware] as const,
         request: {
-          headers: z.object({
-            'X-Expected-Organization-Id': z.string().optional().openapi({
-              description:
-                'Required for writes; must match the current team. Missing or stale context returns 409.',
-            }),
-          }),
+          headers: repairHeaders,
           body: { required: true, content: json(CreateSsoProviderInput) },
         },
         responses: {
@@ -143,12 +143,13 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
         },
       }),
       async (c) => {
+        const recovery = ssoRecoveryWritePrincipal(c)
         const result = await createSsoProvider(
           deps,
-          c.var.principal,
+          recovery ?? c.var.principal,
           c.req.raw.headers,
           c.req.valid('json'),
-          isSsoRecoveryWrite(c),
+          recovery !== undefined,
         )
         if (result.setCookie) c.header('Set-Cookie', result.setCookie, { append: true })
         if (result.status === 'proof_required') return c.json(result.body, 403)
@@ -167,12 +168,7 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
         security: [{ session: [] }],
         middleware: [oidcEnabled, ...sessionMiddleware] as const,
         request: {
-          headers: z.object({
-            'X-Expected-Organization-Id': z.string().optional().openapi({
-              description:
-                'Required for writes; must match the current team. Missing or stale context returns 409.',
-            }),
-          }),
+          headers: repairHeaders,
           params: z.object({ providerId: z.uuidv7() }),
           body: { required: true, content: json(TestSsoProviderInput) },
         },
@@ -185,13 +181,14 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
         },
       }),
       async (c) => {
+        const recovery = ssoRecoveryWritePrincipal(c)
         const result = await testSsoProvider(
           deps,
-          c.var.principal,
+          recovery ?? c.var.principal,
           c.req.raw.headers,
           c.req.valid('param').providerId,
           c.req.valid('json'),
-          isSsoRecoveryWrite(c),
+          recovery !== undefined,
         )
         if (result.status === 'proof_required') {
           if (result.setCookie) c.header('Set-Cookie', result.setCookie, { append: true })
@@ -214,11 +211,7 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
         security: [{ session: [] }],
         middleware: [activationEnabled, ...sessionMiddleware] as const,
         request: {
-          headers: z.object({
-            'X-Expected-Organization-Id': z.string().optional().openapi({
-              description: 'Required for writes and must match the current team.',
-            }),
-          }),
+          headers: repairHeaders,
           params: z.object({ providerId: z.uuid() }),
           body: { required: true, content: json(ActivateSsoProviderInput) },
         },
@@ -233,13 +226,14 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
         },
       }),
       async (c) => {
+        const recovery = ssoRecoveryWritePrincipal(c)
         const result = await activateSsoProvider(
           deps,
-          c.var.principal,
+          recovery ?? c.var.principal,
           c.req.raw.headers,
           c.req.valid('param').providerId,
           c.req.valid('json'),
-          isSsoRecoveryWrite(c),
+          recovery !== undefined,
         )
         if (result.setCookie) c.header('Set-Cookie', result.setCookie, { append: true })
         if (result.status === 'proof_required') return c.json(result.body, 403)
@@ -308,12 +302,7 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
         security: [{ session: [] }],
         middleware: [...middleware] as const,
         request: {
-          headers: z.object({
-            'X-Expected-Organization-Id': z.string().optional().openapi({
-              description:
-                'Required for writes; must match the current team. Missing or stale context returns 409.',
-            }),
-          }),
+          headers: repairHeaders,
           params: z.object({ providerId: z.uuid() }),
           body: { required: true, content: json(UpdateSsoProviderInput) },
         },
@@ -323,13 +312,14 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
         },
       }),
       async (c) => {
+        const recovery = ssoRecoveryWritePrincipal(c)
         const result = await updateSsoProvider(
           deps,
-          c.var.principal,
+          recovery ?? c.var.principal,
           c.req.raw.headers,
           c.req.valid('param').providerId,
           c.req.valid('json'),
-          isSsoRecoveryWrite(c),
+          recovery !== undefined,
         )
         if (result.setCookie) c.header('Set-Cookie', result.setCookie, { append: true })
         if (result.status === 'proof_required') return c.json(result.body, 403)

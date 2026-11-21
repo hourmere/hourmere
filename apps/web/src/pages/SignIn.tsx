@@ -15,7 +15,7 @@ import { safeNextPath, signInPath } from '../next-path.ts'
 import { PATHS } from '../paths.ts'
 import { emailError } from '../public/validation.ts'
 import { PageStatus, useSession } from '../session.tsx'
-import { oidcAttemptId } from './sso/member-protocol.ts'
+import { oidcAttemptId, rememberOidcReturnFragment } from './sso/member-protocol.ts'
 import { ssoAuthorizationUrl } from './sso/setup.ts'
 
 const PROVIDERS: SocialProvider[] = ['google', 'microsoft']
@@ -271,7 +271,9 @@ function SignInForm({
       )
       if (controller.signal.aborted) return
       if (redirect !== true) throw new Error('Invalid SSO sign-in response')
-      goTo(ssoAuthorizationUrl(url))
+      const destination = ssoAuthorizationUrl(url)
+      rememberOidcReturnFragment(next)
+      goTo(destination)
     } catch {
       if (controller.signal.aborted) return
       ssoRequest.current = null
