@@ -336,7 +336,6 @@ describe.skipIf(!databaseUrl)('SCIM User profile replacement and PATCH', () => {
       ['{', 400, 'invalidSyntax'],
       [{ schemas: [core] }, 400, 'invalidValue'],
       [profile('x', { active: 'false' }), 400, 'invalidValue'],
-      [profile('x', { active: false }), 403, 'mutability'],
       [profile('x', { roles: [{ value: 'owner' }] }), 403, 'mutability'],
       [profile('x', { entitlements: [{ value: 'admin' }] }), 403, 'mutability'],
       [profile('x', { 'name.givenName': 'bypass' }), 400, 'invalidValue'],
@@ -364,11 +363,9 @@ describe.skipIf(!databaseUrl)('SCIM User profile replacement and PATCH', () => {
     const inactive = await put(organization, id, profile('still-inactive', { active: false }))
     expect(inactive.status).toBe(200)
     expect(await inactive.json()).toMatchObject({ active: false, userName: 'still-inactive' })
-    await expectError(
-      await put(organization, id, profile('active', { active: true })),
-      403,
-      'mutability',
-    )
+    const reactivated = await put(organization, id, profile('active', { active: true }))
+    expect(reactivated.status).toBe(200)
+    expect(await reactivated.json()).toMatchObject({ active: true, userName: 'active' })
   })
 
   it('uses the same not-found for unknown, retired, intrinsic and foreign IDs', async () => {

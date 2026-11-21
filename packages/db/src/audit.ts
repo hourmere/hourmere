@@ -46,6 +46,8 @@ export const auditDetails = {
   'scim_user.created': [],
   'scim_user.claimed': [],
   'scim_user.updated': ['operations'],
+  'scim_user.deactivated': [],
+  'scim_user.reactivated': [],
   'scim_user.credentials_revoked': [],
   'webhook.created': ['events'],
   'webhook.updated': ['events'],

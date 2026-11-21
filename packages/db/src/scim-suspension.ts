@@ -85,9 +85,13 @@ export async function suspendScimMembership(
     )
     .execute()
 
-  // A missing organization in key metadata falls back to personal space.
+  // Match 0178's index, including mixed-case IDs. Missing organization metadata
+  // falls back to personal space and does not match this team.
   await trx
     .deleteFrom('auth.apikey')
+    .where(
+      sql<boolean>`length("referenceId") = 36 AND length(metadata::jsonb ->> 'organizationId') = 36`,
+    )
     .where(sql<string>`lower("referenceId")`, '=', userId.toLowerCase())
     .where(
       sql<string>`lower(metadata::jsonb ->> 'organizationId')`,

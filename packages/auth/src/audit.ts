@@ -71,7 +71,7 @@ function keyOrganization(row: Row | undefined) {
 }
 
 /** Audit native persistence, never a response hook: failures roll back the changed row. */
-export function authAuditRecords(): BetterAuthPlugin {
+export function authAuditRecords(scimResourcesEnabled = false): BetterAuthPlugin {
   const sessionEndpoints = {
     revokeSession: Object.assign((context: Parameters<typeof revokeSession>[0]) => {
       if (!context?.context) return revokeSession(context)
@@ -231,13 +231,15 @@ export function authAuditRecords(): BetterAuthPlugin {
                 }
               }
               let before = method === 'create' ? [] : await selectedRows()
-              const proposedKey =
-                request.model === 'apikey'
-                  ? ((request.data ?? request.update) as Row | undefined)
-                  : undefined
+              // When resource handlers are enabled, a lifecycle write can revoke keys even
+              // for a team whose SCIM connection first appears during this request.
+              const lockKeyOrganizations = scimResourcesEnabled && request.model === 'apikey'
+              const proposedKey = lockKeyOrganizations
+                ? ((request.data ?? request.update) as Row | undefined)
+                : undefined
               const keyTarget = keyOrganization(proposedKey)
               const keyOrganizations = new Set<string>()
-              if (request.model === 'apikey') {
+              if (lockKeyOrganizations) {
                 if (keyTarget) keyOrganizations.add(keyTarget)
                 for (const row of before) {
                   const source = keyOrganization(row)
@@ -272,7 +274,7 @@ export function authAuditRecords(): BetterAuthPlugin {
                 const lockedIds = new Set(before.map((row) => row.id))
                 before = (await selectedRows()).filter((row) => lockedIds.has(row.id))
               }
-              if (request.model === 'apikey') {
+              if (lockKeyOrganizations) {
                 for (const row of before) {
                   const source = keyOrganization(row)
                   if (source && !keyOrganizations.has(source))

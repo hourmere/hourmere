@@ -1,4 +1,4 @@
-import { generateKeyPairSync, randomBytes } from 'node:crypto'
+import { createHash, generateKeyPairSync, randomBytes } from 'node:crypto'
 import {
   createAuth,
   createAuthPool,
@@ -21,6 +21,9 @@ import { bookingTools } from './mcp/bookings.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
 import { whoamiTool } from './mcp/whoami.ts'
 import { bookingRoutes } from './routes/bookings.ts'
+import { SCIM_ERROR_SCHEMA } from './scim.ts'
+import { SCIM_URN } from './scim-discovery.ts'
+import { scimUserReplacement } from './scim-user-replace.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const publicUrl = 'https://hourmere.example.test'
@@ -54,6 +57,7 @@ describe.skipIf(!serverUrl)('SCIM suspension and credential-authorized writes', 
       secret,
       signup,
       mcpOAuth: true,
+      scimResourcesEnabled: true,
       mailer: { send: async () => expect.unreachable('This test uses synthetic sessions') },
       mcpMetadataFetcher: async () => new Response(null, { status: 404 }),
     })
@@ -82,12 +86,12 @@ describe.skipIf(!serverUrl)('SCIM suspension and credential-authorized writes', 
     await owned?.drop()
   })
 
-  async function fixture() {
+  async function fixture(role = 'member') {
     const owner = await createTestUser(db, 'Team owner')
     const member = await createTestUser(db, 'Booking host')
     const team = await createTestTeam(db, [
       { user: owner, role: 'owner' },
-      { user: member, role: 'member' },
+      { user: member, role },
     ])
     const start = Temporal.Now.instant().add({ hours: 24 })
     const booking = (offset = 0) =>
@@ -99,7 +103,7 @@ describe.skipIf(!serverUrl)('SCIM suspension and credential-authorized writes', 
       )
     const prepare = () =>
       db.transaction().execute((trx) => prepareScimSuspension(trx, team.id, member.id))
-    return { member, team, booking, prepare }
+    return { owner, member, team, booking, prepare }
   }
 
   type Fixture = Awaited<ReturnType<typeof fixture>>
@@ -145,13 +149,14 @@ describe.skipIf(!serverUrl)('SCIM suspension and credential-authorized writes', 
       .sign(signer.privateKey)
   }
 
-  function app(notify?: BookingNotifier, teamWriteAccess = true) {
+  function app(notify?: BookingNotifier, teamWriteAccess = true, scimResources = false) {
     return createApp({
       checkDb: async () => {},
       authHandler: auth.handler,
       resolveCaller: createCallerResolver({ auth, db, ssoCapabilities: capabilities }),
       publicUrl,
       routes: [bookingRoutes({ db, notify })],
+      ...(scimResources && { scim: { db, enabled: true, resources: scimUserReplacement(db) } }),
       ssoTeamReads: teamWriteAccess ? { db, capabilities } : undefined,
       mcp: mcpEndpoint({
         tools: [whoamiTool, ...bookingTools({ db, notify })],
@@ -217,6 +222,75 @@ describe.skipIf(!serverUrl)('SCIM suspension and credential-authorized writes', 
   const bookingState = (id: string) =>
     db.selectFrom('bookings').select('status').where('id', '=', id).executeTakeFirstOrThrow()
 
+  async function provision(f: Fixture) {
+    const target = await f.prepare()
+    await db
+      .updateTable('scim_users')
+      .set({ active: true })
+      .where('id', '=', target.scimUserId)
+      .execute()
+    const bearer = `scim_${randomBytes(32).toString('base64url')}`
+    const { id: tokenId } = await db
+      .insertInto('scim_provisioning_tokens')
+      .values({
+        organization_id: f.team.id,
+        name: 'Synthetic IdP',
+        token_hash: createHash('sha256').update(bearer).digest('base64url'),
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    const instance = app(undefined, true, true)
+    const request = (method: 'PUT' | 'PATCH', body: unknown) =>
+      instance.request(`${publicUrl}/scim/v2/${f.team.id}/Users/${target.scimUserId}`, {
+        method,
+        headers: { authorization: `Bearer ${bearer}`, 'content-type': 'application/scim+json' },
+        body: JSON.stringify(body),
+      })
+    return {
+      ...target,
+      tokenId,
+      instance,
+      put: (attributes: Record<string, unknown>) =>
+        request('PUT', { schemas: [SCIM_URN.user], userName: f.member.email, ...attributes }),
+      patch: (...operations: unknown[]) =>
+        request('PATCH', {
+          schemas: ['urn:ietf:params:scim:api:messages:2.0:PatchOp'],
+          Operations: operations,
+        }),
+      entry: () =>
+        db
+          .selectFrom('scim_users')
+          .selectAll()
+          .where('id', '=', target.scimUserId)
+          .executeTakeFirstOrThrow(),
+      blocks: () =>
+        db
+          .selectFrom('scim_membership_blocks')
+          .selectAll()
+          .where('organization_id', '=', f.team.id)
+          .orderBy('id')
+          .execute(),
+      events: () =>
+        db
+          .selectFrom('audit_events')
+          .select(['action', 'actor_type', 'actor_id', 'details'])
+          .where('target_id', '=', target.scimUserId)
+          .orderBy('id')
+          .execute(),
+    }
+  }
+
+  async function expectScimError(response: Response, status: number, scimType?: string) {
+    expect(response.status).toBe(status)
+    expect(response.headers.get('content-type')).toBe('application/scim+json')
+    expect(await response.json()).toEqual({
+      schemas: [SCIM_ERROR_SCHEMA],
+      status: String(status),
+      detail: expect.any(String),
+      ...(scimType ? { scimType } : {}),
+    })
+  }
+
   const backend = async (connection: Db) =>
     (
       await connection
@@ -238,6 +312,255 @@ describe.skipIf(!serverUrl)('SCIM suspension and credential-authorized writes', 
       { timeout: 3000, interval: 20 },
     )
   }
+
+  it.each(['owner', 'admin', 'member, admin'])(
+    'refuses SCIM deactivation and demotion of %s',
+    async (role) => {
+      const f = await fixture(role)
+      const user = await provision(f)
+      const before = await user.entry()
+      for (const response of [
+        await user.put({ active: false, title: 'Must roll back' }),
+        await user.put({ roles: [] }),
+        await user.patch({ op: 'replace', value: { active: 'False' } }),
+        await user.patch(
+          { op: 'replace', path: 'active', value: false },
+          { op: 'replace', path: 'active', value: true },
+        ),
+        await user.patch({ op: 'replace', path: 'roles', value: [] }),
+        await user.patch({ op: 'remove', path: 'roles[value eq "admin"]' }),
+      ])
+        await expectScimError(response, 403, 'mutability')
+      expect(await user.entry()).toEqual(before)
+      expect(await user.blocks()).toEqual([])
+      expect(await user.events()).toEqual([])
+    },
+  )
+
+  it.each([
+    ['member', 'admin', 403],
+    ['admin', 'member', 200],
+  ] as const)(
+    'waits on the organization for a local %s → %s role change',
+    async (from, to, status) => {
+      const f = await fixture(from)
+      const user = await provision(f)
+      const { linked_member_id: memberId } = await user.entry()
+      if (!memberId) throw new Error('Expected the membership link')
+      const ownerSession = await db.transaction().execute((trx) =>
+        createBrowserSession(
+          trx,
+          { publicUrl, secret },
+          {
+            userId: f.owner.id,
+            organizationId: f.team.id,
+            now: new Date().toISOString(),
+            headers: new Headers(),
+          },
+        ),
+      )
+      const stalled = await owned.pool.connect()
+      let local: Promise<Response> | undefined
+      let remote: Promise<Response> | undefined
+      try {
+        await stalled.query('BEGIN')
+        const blocker = await stalled.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+        // Stall the native role writer after it has acquired the organization lock.
+        await stalled.query('SELECT id FROM auth.member WHERE id=$1 FOR UPDATE', [memberId])
+        local = Promise.resolve(
+          user.instance.request(`${publicUrl}/api/auth/organization/update-member-role`, {
+            method: 'POST',
+            headers: {
+              origin: publicUrl,
+              cookie: ownerSession.cookie.split(';')[0] as string,
+              'content-type': 'application/json',
+              'x-expected-organization-id': f.team.id,
+            },
+            body: JSON.stringify({ organizationId: f.team.id, memberId, role: to }),
+          }),
+        )
+        const nativePid = await vi.waitFor(
+          async () => {
+            const waiting = await owned.pool.query<{ pid: number }>(
+              `SELECT pid FROM pg_stat_activity WHERE datname = current_database()
+            AND $1 = ANY(pg_blocking_pids(pid)) AND query LIKE '%"auth"."member"%'`,
+              [blocker.rows[0]?.pid],
+            )
+            expect(waiting.rows).toHaveLength(1)
+            return waiting.rows[0]?.pid as number
+          },
+          { timeout: 3000, interval: 20 },
+        )
+        remote = Promise.resolve(user.put({ active: false }))
+        await waitForOrganizationLock(nativePid, 'for update')
+      } finally {
+        await stalled.query('ROLLBACK')
+        stalled.release()
+        await Promise.allSettled([local, remote])
+      }
+      expect((await local)?.status).toBe(200)
+      const response = await remote
+      if (!response) throw new Error('Expected a SCIM request')
+      expect(response.status).toBe(status)
+      if (status === 403) await expectScimError(response, 403, 'mutability')
+      expect((await user.entry()).active).toBe(status === 403)
+      expect(await user.blocks()).toHaveLength(status === 403 ? 0 : 1)
+    },
+  )
+
+  it.each(['linked account suspension', 'verified mailbox removal', 'removed membership'] as const)(
+    'honors a local %s on reactivation',
+    async (blocker) => {
+      const f = await fixture()
+      const user = await provision(f)
+      expect((await user.put({ active: false })).status).toBe(200)
+      if (blocker === 'removed membership') {
+        await db
+          .deleteFrom('auth.member')
+          .where('userId', '=', f.member.id)
+          .where('organizationId', '=', f.team.id)
+          .execute()
+      } else {
+        await db
+          .insertInto('scim_membership_blocks')
+          .values({
+            organization_id: f.team.id,
+            source: 'local',
+            ...(blocker === 'linked account suspension'
+              ? { user_id: f.member.id, kind: 'suspension' }
+              : { identity_email: f.member.email, kind: 'removal' }),
+          })
+          .execute()
+      }
+      const before = await user.entry()
+      const blocks = await user.blocks()
+      const events = await user.events()
+      await expectScimError(
+        await user.patch({ op: 'replace', value: { active: 'True', title: 'Must roll back' } }),
+        403,
+        'mutability',
+      )
+      expect(await user.entry()).toEqual(before)
+      expect(await user.blocks()).toEqual(blocks)
+      expect(await user.events()).toEqual(events)
+      if (blocker === 'removed membership') expect(before.linked_member_id).toBeNull()
+    },
+  )
+
+  it('reactivates the linked account after local reinstatement and blocker clearance', async () => {
+    const f = await fixture()
+    const user = await provision(f)
+    expect((await user.put({ active: false })).status).toBe(200)
+    const membership = await db
+      .deleteFrom('auth.member')
+      .where('userId', '=', f.member.id)
+      .where('organizationId', '=', f.team.id)
+      .returning(['userId', 'organizationId', 'role', 'createdAt'])
+      .executeTakeFirstOrThrow()
+    const local = await db
+      .insertInto('scim_membership_blocks')
+      .values({
+        organization_id: f.team.id,
+        identity_email: f.member.email,
+        source: 'local',
+        kind: 'removal',
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    // Model a local administrator explicitly restoring membership and clearing its own blocker.
+    const restored = await db
+      .insertInto('auth.member')
+      .values(membership)
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await expectScimError(await user.put({ active: true }), 403, 'mutability')
+    await db
+      .updateTable('scim_membership_blocks')
+      .set({ cleared_at: sql`clock_timestamp()` })
+      .where('id', '=', local.id)
+      .execute()
+    expect((await user.put({ active: true })).status).toBe(200)
+    expect(
+      await db
+        .selectFrom('auth.member')
+        .select('id')
+        .where('userId', '=', f.member.id)
+        .where('organizationId', '=', f.team.id)
+        .execute(),
+    ).toEqual([restored])
+    expect(await user.entry()).toMatchObject({
+      active: true,
+      linked_user_id: f.member.id,
+      linked_member_id: null,
+    })
+  })
+
+  it('reactivates access without restoring an old key or OAuth grant', async () => {
+    const f = await fixture()
+    const user = await provision(f)
+    const key = await issueKey(f)
+    const grant = await issueGrant(f)
+    const keyStatus = async (token: string) => (await me(user.instance, token)).status
+    const oauthOrganization = async (token: string) =>
+      (await mcpResult(await mcp(user.instance, token, 'whoami'))).structuredContent?.organization
+
+    expect(await keyStatus(key)).toBe(200)
+    expect(await oauthOrganization(grant)).toMatchObject({ id: f.team.id })
+    const deactivated = await user.patch({ op: 'Replace', value: { active: 'False' } })
+    expect(deactivated.status).toBe(200)
+    expect(await deactivated.json()).toMatchObject({ active: false })
+    const inactive = await user.entry()
+    expect((await user.put({ active: false })).status).toBe(200)
+    expect(await user.entry()).toEqual(inactive)
+
+    const reactivated = await user.put({ active: true })
+    expect(reactivated.status).toBe(200)
+    expect(await reactivated.json()).toMatchObject({ active: true })
+    expect(await user.blocks()).toEqual([
+      expect.objectContaining({ source: 'scim', cleared_at: expect.anything() }),
+    ])
+    const oauthStatus = async (token: string) => (await mcp(user.instance, token, 'whoami')).status
+    expect(await Promise.all([keyStatus(key), oauthStatus(grant)])).toEqual([401, 401])
+    expect(await keyStatus(await issueKey(f))).toBe(200)
+    expect(await oauthOrganization(await issueGrant(f))).toMatchObject({ id: f.team.id })
+    expect(await user.events()).toEqual(
+      ['scim_user.credentials_revoked', 'scim_user.deactivated', 'scim_user.reactivated'].map(
+        (action) => ({
+          action,
+          actor_type: 'scim_token',
+          actor_id: user.tokenId,
+          details: {},
+        }),
+      ),
+    )
+  })
+
+  it.each([false, true])('rolls back active=%s when its lifecycle audit fails', async (active) => {
+    const f = await fixture()
+    const user = await provision(f)
+    const key = await issueKey(f)
+    if (active) expect((await user.put({ active: false })).status).toBe(200)
+    const entry = await user.entry()
+    const blocks = await user.blocks()
+    const events = await user.events()
+    const action = active ? 'scim_user.reactivated' : 'scim_user.deactivated'
+    await sql`CREATE FUNCTION refuse_lifecycle_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN RAISE EXCEPTION 'injected lifecycle audit failure'; END $$`.execute(db)
+    try {
+      await sql`CREATE TRIGGER refuse_lifecycle_audit BEFORE INSERT ON audit_events
+        FOR EACH ROW WHEN (NEW.action = ${sql.lit(action)}) EXECUTE FUNCTION refuse_lifecycle_audit()`.execute(
+        db,
+      )
+      await expectScimError(await user.put({ active, title: 'Must roll back' }), 500)
+      expect(await user.entry()).toEqual(entry)
+      expect(await user.blocks()).toEqual(blocks)
+      expect(await user.events()).toEqual(events)
+      expect((await me(user.instance, key)).status).toBe(active ? 401 : 200)
+    } finally {
+      await sql`DROP TRIGGER IF EXISTS refuse_lifecycle_audit ON audit_events`.execute(db)
+      await sql`DROP FUNCTION refuse_lifecycle_audit()`.execute(db)
+    }
+  })
 
   it.each([
     ['api_key', false],

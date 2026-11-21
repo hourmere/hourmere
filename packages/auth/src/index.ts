@@ -277,6 +277,8 @@ export interface AuthConfig {
    * setting reaches it. The SSO linking completion step extends the same dependency.
    */
   scimClaims?: ScimClaimCompletion | undefined
+  /** Set alongside SCIM resource handlers in the test harness, even before the first connection. */
+  scimResourcesEnabled?: boolean | undefined
   /** Optional SSO tombstone write in the existing administrative removal transaction. */
   recordAdmissionRemoval?: SsoAdmissionRemoval | undefined
   /** Test-only protocol capabilities. A stored policy is checked even when both are off. */
@@ -309,6 +311,7 @@ export function createAuth({
   mcpMetadataFetcher,
   leaveTeamMember,
   scimClaims,
+  scimResourcesEnabled = false,
   recordAdmissionRemoval,
   ssoCapabilities = ssoHardOff,
 }: AuthConfig) {
@@ -520,7 +523,7 @@ export function createAuth({
         },
       },
       ...(mcpOAuth ? mcpOAuthPlugins(db, baseURL, mcpMetadataFetcher, ssoCapabilities) : []),
-      authAuditRecords(),
+      authAuditRecords(scimResourcesEnabled),
       organizationOperationRecords(),
       {
         id: 'team-role-policy',

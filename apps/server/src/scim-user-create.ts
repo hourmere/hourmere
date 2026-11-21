@@ -97,7 +97,7 @@ async function create(
     queued?: { invitationId: string; generation: number }
   }
   try {
-    const { profile: entry } = parseScimUserWrite(body.value, 'POST')
+    const { profile: entry, active = true } = parseScimUserWrite(body.value)
     if (entry.work_email !== null && !signupAdmits(deps.signup, entry.work_email))
       throw refuse(403, "This instance's sign-up policy does not admit this work email address.")
     created = await deps.db
@@ -111,6 +111,7 @@ async function create(
           .insertInto('scim_users')
           .values({
             ...entry,
+            active,
             organization_id: principal.organizationId,
             connection_id: connection,
           })
@@ -124,7 +125,7 @@ async function create(
           targetId: id,
         })
         let queued: { invitationId: string; generation: number } | undefined
-        if (entry.work_email !== null) {
+        if (active && entry.work_email !== null) {
           const mailbox = entry.work_email.toLowerCase()
           // The earliest current owner with a verified address invites: the organization's
           // authority, whichever token or person set provisioning up, and one the invitation

@@ -6,7 +6,8 @@ import { createDb, type Db } from '@hourmere/db'
 import { suspendScimMembership } from '@hourmere/db/scim-suspension'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import pg from 'pg'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { mcpOAuthBroker } from '../../../apps/server/src/mcp/oauth.ts'
 import { prepareScimSuspension } from '../../db/src/scim-suspension-fixtures.ts'
 import { type Auth, createAuth, createAuthPool } from './index.ts'
@@ -69,7 +70,7 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
     await pool?.end()
     await owned?.drop()
   })
-  function instance(factory = createAuth) {
+  function instance(factory = createAuth, options?: { scimResourcesEnabled: true }) {
     return factory({
       pool,
       db,
@@ -78,6 +79,7 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
       signup: { mode: 'open', allowedDomains: [] },
       mailer: { send: async () => {} },
       mcpOAuth: true,
+      ...options,
     })
   }
   async function account() {
@@ -187,7 +189,7 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
   it.each(['create', 'move'] as const)(
     'rejects a native API key %s that would finish after SCIM suspension',
     async (action) => {
-      const auth = instance(),
+      const auth = instance(createAuth, { scimResourcesEnabled: true }),
         actor = await account()
       const team = await db
         .insertInto('auth.organization')
@@ -220,6 +222,44 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
       )
     },
   )
+
+  it('keeps the PostgreSQL statement counts for team API key writes with resources disabled', async () => {
+    const auth = instance()
+    const actor = await account()
+    const team = await db
+      .insertInto('auth.organization')
+      .values({ name: 'Team without SCIM', slug: randomUUID(), createdAt: new Date() })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await addMember(team.id, actor.user.id)
+
+    const queries = vi.spyOn(pg.Client.prototype, 'query')
+    const writeStatements = () =>
+      queries.mock.calls.filter(([statement]) => {
+        // Better Auth starts instance-wide expiry cleanup in the background on a timer.
+        return !/^delete from "apikey" where .*"expiresAt"/i.test(statement)
+      }).length
+    try {
+      const metadata = { organizationId: team.id }
+      const created = await post(auth, '/api-key/create', { metadata }, actor)
+      expect(created.status).toBe(200)
+      const { id: keyId } = (await created.json()) as { id: string }
+      const create = writeStatements()
+
+      queries.mockClear()
+      const updated = await post(auth, '/api-key/update', { keyId, metadata }, actor)
+      expect(updated.status).toBe(200)
+      const update = writeStatements()
+
+      queries.mockClear()
+      expect((await post(auth, '/api-key/delete', { keyId }, actor)).status).toBe(200)
+      const remove = writeStatements()
+
+      expect({ create, update, remove }).toEqual({ create: 10, update: 14, remove: 11 })
+    } finally {
+      queries.mockRestore()
+    }
+  })
 
   async function expiry(
     factory = createAuth,

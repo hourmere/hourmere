@@ -20,10 +20,12 @@ export const refuse = (
 ) => new ScimWriteRefusal({ status, body: scimError(status, detail, scimType), headers })
 export const invalidSyntax = (detail: string) => refuse(400, detail, 'invalidSyntax')
 export const invalidValue = (detail: string) => refuse(400, detail, 'invalidValue')
-export function assertScimActiveUnchanged(active: boolean | null | undefined, current: boolean) {
-  if (active !== undefined && active !== current)
-    throw refuse(403, 'Changing the active attribute is not supported yet.', 'mutability')
-}
+export const immutableScimPrivileges = () =>
+  refuse(
+    403,
+    'Roles and entitlements are not provisioned. Change membership roles through ordinary team administration.',
+    'mutability',
+  )
 const unauthorized = () =>
   refuse(401, 'A valid provisioning token is required.', undefined, {
     'WWW-Authenticate': 'Bearer',
@@ -180,19 +182,11 @@ function workEmail(value: unknown, existing?: string | null): string | null {
 function noPrivileges(value: unknown) {
   if (value === undefined) return
   if (!Array.isArray(value)) throw invalidValue('The roles attribute is not a valid value.')
-  if (value.length > 0)
-    throw refuse(
-      403,
-      'Roles and entitlements are not provisioned. Change membership roles through ordinary team administration.',
-      'mutability',
-    )
+  if (value.length > 0) throw immutableScimPrivileges()
 }
 
 /** RFC 7643 sections 4.1 and 4.3, as docs/scim.md maps them; server-owned fields ignored. */
-export function parseScimUserWrite(
-  body: unknown,
-  method: 'POST' | 'PUT',
-): { profile: ScimUserProfile; active: boolean | undefined } {
+export function parseScimUserWrite(body: unknown) {
   if (typeof body !== 'object' || body === null || Array.isArray(body))
     throw invalidSyntax('The request body must be a User object.')
   const user = scimAttributes(body, 'User')
@@ -229,10 +223,11 @@ export function parseScimUserWrite(
   const active = user.get('active')
   if (active !== undefined && typeof active !== 'boolean')
     throw invalidValue('The active attribute is not a valid value.')
-  // A new entry is active and awaits its claim. PUT checks the current state under lock.
-  if (method === 'POST' && active === false)
-    throw invalidValue('Creating an inactive User is not supported yet.')
-  return { profile: parseScimUserProfile(user), active }
+  return {
+    profile: parseScimUserProfile(user),
+    active,
+    roleWrite: user.has('roles') || user.has('entitlements'),
+  }
 }
 
 type AttributeGroup = Map<string, unknown> | null | undefined
