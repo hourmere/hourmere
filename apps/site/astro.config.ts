@@ -98,6 +98,7 @@ export default defineConfig({
             { label: 'Reschedule and cancel deadlines', link: '/docs/change-deadlines' },
             { label: 'One-time booking links', link: '/docs/one-time-links' },
             { label: 'Booking waitlists', link: '/docs/booking-waitlist' },
+            { label: 'Create and manage meeting polls', link: '/docs/meeting-polls' },
             { label: 'Voting in a meeting poll', link: '/docs/meeting-poll-voting' },
             { label: 'Open-time snippets', link: '/docs/open-time-snippets' },
             { label: 'Troubleshoot availability', link: '/docs/availability-troubleshooting' },

@@ -1136,6 +1136,8 @@ results include private voter details and the revisions for `finalize_meeting_po
 Availability in results is advisory. Finalize rechecks it and returns booking metadata
 without a booking management link or token. Public tools act on existing polls and
 cannot create one. A host key cannot replace a voter's own capability or consent.
+Public poll reads show aggregate counts only to verified voters who are still
+participating. An enabled OAuth connection uses the same organization and role checks.
 
 Call `create_meeting_poll` with the event type ID, offered candidate starts, deadline,
 display time zone, admission mode and an `idempotencyKey`. A `bookings` or `full` key
@@ -1151,14 +1153,15 @@ and `expectedHostRevision`. Resend requires an idempotency key. Bulk
 revision. `rotate_meeting_poll_link` takes the host revision and a new key, immediately
 invalidates the old public link and discloses the replacement once.
 
-中文：个人活动所有者或当前团队所有者和管理员可使用 `bookings` 或 `full` 密钥
-创建投票、邀请、重发、移除投票者及轮换链接。请保留创建、邀请、重发和轮换使用的
-幂等键。邀请重试只返回本次提交的邮箱的当前状态。公开链接只在创建或轮换首次成功时
-返回，轮换后旧链接立即失效。受邀投票没有公开链接。
-`read` 密钥在 `tools/list` 中可见管理端的列表、详情和结果工具，以及投票者的读取工具。
-`bookings` 或 `full` 密钥还可看到写入工具。主持人结果包含投票者的私人信息及最终确认所需的版本。
-候选时间的可用性仅供参考，最终确认会重新检查并返回预约元数据，不含预约管理链接或令牌。
-公开工具仅用于现有投票，不能创建投票。密钥不能替代投票者的专用令牌或本人同意。
+See the [meeting-poll integration guide](https://github.com/hourmere/hourmere/blob/main/docs/meeting-polls-api.md)
+for tool inputs, examples and the matching REST and CLI operations. See the
+[host guide](/docs/meeting-polls) and [voter guide](/docs/meeting-poll-voting) for the web app.
+
+中文：个人活动的所有者或团队当前的所有者或管理员，可使用 `bookings` 或 `full` 密钥创建投票、发送或重发邀请、移除投票人及更换公开链接。请保留这些操作所需的幂等键。重试邀请时，只返回本次提交的邮箱的当前状态。公开链接只在创建或更换首次成功时返回，更换后旧链接立即失效。仅限受邀者的投票没有公开链接。
+
+使用 `read` 密钥时，`tools/list` 会列出管理端的列表、详情和结果工具，以及投票人读取工具。`bookings` 或 `full` 密钥还可使用写入工具。主持人查询结果会包含投票人的私密信息及确认预约所需的版本。确认预约时会再次检查所选时段是否可用。返回的预约信息不含预约管理链接或令牌。公开工具只处理已有的投票，汇总票数只向已验证且仍在参与的投票人显示。密钥不能替代投票人自己的凭证或本人同意。已启用的 OAuth 连接同样受组织和角色权限约束。
+
+工具参数、调用示例及对应的 REST 和 CLI 操作见[会议投票集成指南](https://github.com/hourmere/hourmere/blob/main/docs/meeting-polls-api.md)。网页操作请参阅[主持人指南](/docs/meeting-polls)和[投票人指南](/docs/meeting-poll-voting)。
 
 ## Duplicate an event type
 

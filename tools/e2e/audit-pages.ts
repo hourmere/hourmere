@@ -25,6 +25,14 @@ import {
   routingFormAuditPages,
 } from './routing-form-audit.ts'
 import {
+  isRoutingFormManagerAuditPage,
+  leaveRoutingFormManagerAudit,
+  openRoutingFormManagerAuditPage,
+  type RoutingFormManagerAuditPageId,
+  routingFormManagerAuditPages,
+  usesTeamRoutingFormManagerAuditSpace,
+} from './routing-form-manager-audit.ts'
+import {
   isSsoSetupAuditPage,
   leavePendingSsoSetupAudit,
   openSsoSetupAuditPage,
@@ -38,6 +46,7 @@ import {
   type WorkflowAuditPageId,
   workflowAuditPages,
 } from './workflow-audit.ts'
+
 import {
   isWorkflowEditorAuditPage,
   leavePendingWorkflowEditorAudit,
@@ -76,6 +85,7 @@ export const auditPages = [
   ...pollAuditPages,
   ...hostPollAuditPages,
   ...routingFormAuditPages,
+  ...routingFormManagerAuditPages,
   ...workflowAuditPages,
   ...workflowEditorAuditPages,
   ...workflowRunHistoryAuditPages,
@@ -251,6 +261,7 @@ export async function openAuditPage(
 ): Promise<void> {
   try {
     await leavePendingRoutingFormAudit(page, app.url)
+    await leaveRoutingFormManagerAudit(page, app.url)
     await leavePendingHostPollAudit(page, app.url)
     await leavePendingWorkflowAudit(page, app.url)
     await leavePendingWorkflowEditorAudit(page, app.url)
@@ -264,6 +275,24 @@ export async function openAuditPage(
       await page.addInitScript(prepareAuditLocale, locale)
       const path = await openSsoSetupAuditPage(page, app, id, locale === 'zh-CN' ? locale : 'en')
       verifyAuditPath(page.url(), path)
+      await page.evaluate(() => window.scrollTo(0, 0))
+      await page.evaluate(settleAuditLayout)
+      return
+    }
+    if (isRoutingFormManagerAuditPage(id)) {
+      await app.auditSignIn(
+        true,
+        locale,
+        usesTeamRoutingFormManagerAuditSpace(id) ? 'team' : undefined,
+      )
+      await page.addInitScript(prepareAuditLocale, locale)
+      const path = await openRoutingFormManagerAuditPage(
+        page,
+        app,
+        id,
+        locale === 'zh-CN' ? locale : 'en',
+      )
+      verifyAuditPath(page.url(), new URL(path, app.url).pathname)
       await page.evaluate(() => window.scrollTo(0, 0))
       await page.evaluate(settleAuditLayout)
       return
@@ -324,6 +353,7 @@ export async function openAuditPage(
         | HostPollAuditPageId
         | PollAuditPageId
         | RoutingFormAuditPageId
+        | RoutingFormManagerAuditPageId
         | SsoSetupAuditPageId
         | WorkflowAuditPageId
         | WorkflowEditorAuditPageId

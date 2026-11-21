@@ -2,7 +2,7 @@ import type { Db } from '@hourmere/db'
 import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { type Expression, sql } from 'kysely'
 import { MCP_OAUTH_CONSENT_LIFETIME_MS, MCP_OAUTH_SCOPE } from './mcp-oauth.ts'
-import type { TeamSsoCapabilities } from './team-sso.ts'
+import { lockTeamSsoPolicy, type TeamSsoCapabilities } from './team-sso.ts'
 
 type CredentialKind = 'api_key' | 'oauth_grant'
 export type SsoDelegationStatus = 'unenforced' | 'required' | 'valid' | null
@@ -126,12 +126,8 @@ export async function lockSsoDelegation(
   }: { organizationId: string; userId: string; kind: CredentialKind; credentialId: string },
   denied: () => never,
 ): Promise<string | undefined> {
-  const policy = await db
-    .selectFrom('sso_policies')
-    .select(['require_sso', 'trust_generation'])
-    .where('organization_id', '=', organizationId)
-    .forShare()
-    .executeTakeFirst()
+  const { policy, suspended } = await lockTeamSsoPolicy(db, organizationId, userId)
+  if (suspended) denied()
   if (!policy?.require_sso) return
   if (!(capabilities.ssoOidcEnabled || capabilities.ssoSamlEnabled)) denied()
   const lease = forCredential(

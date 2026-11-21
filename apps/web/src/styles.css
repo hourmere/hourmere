@@ -1983,6 +1983,21 @@ input[type="radio"] {
   }
 }
 
+.routing-rules-editor .button {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.routing-preview-result {
+  margin-block-start: var(--space-4);
+}
+
+.routing-preview-message {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* Time zone picker (combobox) */
 
 .combobox {

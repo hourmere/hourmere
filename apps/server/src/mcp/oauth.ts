@@ -188,6 +188,7 @@ export function mcpOAuthBroker({ auth, db, publicUrl, ssoCapabilities = ssoHardO
       { sessionId: p.sessionId, userId: p.user.id },
       organizationId,
       ssoRequired,
+      { organizationLocked: true },
     )
   }
   async function hasDelegation(trx: Db, p: Session, organizationId: string, credentialId: string) {
