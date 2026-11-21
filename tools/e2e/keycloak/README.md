@@ -5,8 +5,9 @@ image digest `sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eab
 from `quay.io/keycloak/keycloak`. The pin supports Linux AMD64 and ARM64.
 
 Install the repository dependencies, Docker, OpenSSL and Google Chrome. Build the web
-app first. Run Playwright in an escalated shell locally. CI runs this spec in the
-required browser suite.
+app first. Run Playwright in an escalated shell locally. The required CI browser suite
+discovers this spec. The fixture pulls the pinned image when it is absent from Docker's
+cache.
 
 ```sh
 npm run build --workspace @hourmere/web

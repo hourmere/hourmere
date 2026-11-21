@@ -8,7 +8,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { promisify } from 'node:util'
 import realm from './realm.json' with { type: 'json' }
 
-export const KEYCLOAK_IMAGE =
+const KEYCLOAK_IMAGE =
   'quay.io/keycloak/keycloak:26.8.2@sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3'
 
 const run = promisify(execFile)
