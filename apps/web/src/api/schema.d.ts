@@ -3111,7 +3111,7 @@ export interface paths {
         };
         /**
          * Read a public personal routing form
-         * @description Routing forms are not available yet: this operation returns routing_forms_disabled until enabled on this instance. Reads the current published version and its ordered questions for an enabled form. Anonymous access is allowed. A supplied bearer must be a valid read, bookings or full API key.
+         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Reads the current published version and its ordered questions for an enabled form. Anonymous access is allowed. A supplied bearer must be a valid read, bookings or full API key.
          */
         get: operations["getPublicRoutingForm"];
         put?: never;
@@ -3133,7 +3133,7 @@ export interface paths {
         put?: never;
         /**
          * Submit answers to a public personal routing form
-         * @description Routing forms are not available yet: this operation returns routing_forms_disabled until enabled on this instance. Routes answers for the specified published version and returns a message or an expiring continuation with its private URL. Fetch the current public form again after routing_form_changed. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key.
+         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Routes answers for the specified published version and returns a message or an expiring continuation with its private URL. Fetch the current public form again after routing_form_changed. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key.
          */
         post: operations["routeLead"];
         delete?: never;
@@ -3151,7 +3151,7 @@ export interface paths {
         };
         /**
          * Read a public team routing form
-         * @description Routing forms are not available yet: this operation returns routing_forms_disabled until enabled on this instance. Reads the current published version and its ordered questions for an enabled form. Anonymous access is allowed. A supplied bearer must be a valid read, bookings or full API key.
+         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Reads the current published version and its ordered questions for an enabled form. Anonymous access is allowed. A supplied bearer must be a valid read, bookings or full API key.
          */
         get: operations["getPublicTeamRoutingForm"];
         put?: never;
@@ -3173,7 +3173,7 @@ export interface paths {
         put?: never;
         /**
          * Submit answers to a public team routing form
-         * @description Routing forms are not available yet: this operation returns routing_forms_disabled until enabled on this instance. Routes answers for the specified published version and returns a message or an expiring continuation with its private URL. Fetch the current public form again after routing_form_changed. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key.
+         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Routes answers for the specified published version and returns a message or an expiring continuation with its private URL. Fetch the current public form again after routing_form_changed. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key.
          */
         post: operations["routeTeamLead"];
         delete?: never;
@@ -3963,7 +3963,7 @@ export interface paths {
         put?: never;
         /**
          * Book a slot through a routing continuation
-         * @description Books the event selected by the private route capability. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key. Routing is currently hard-off. An exact committed replay with the same capability, Idempotency-Key and booking authority still succeeds after expiry or disablement.
+         * @description Books the event selected by the private route capability. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key. New routed bookings require ROUTING_FORMS_ENABLED=true (off by default). An exact committed replay with the same capability, Idempotency-Key and booking authority still succeeds after expiry or disablement.
          */
         post: operations["createRoutedBooking"];
         delete?: never;
@@ -3983,7 +3983,7 @@ export interface paths {
         put?: never;
         /**
          * Resolve a routing continuation
-         * @description Routing forms are not available yet: this operation returns routing_forms_disabled until enabled on this instance. Reads the selected event's current booking fields and editable prefill. The capability expires 30 minutes after issuance. Reads do not consume or renew it. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key.
+         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Reads the selected event's current booking fields and editable prefill. The capability expires 30 minutes after issuance. Reads do not consume or renew it. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key.
          */
         post: operations["resolveRoutingContinuation"];
         delete?: never;
@@ -4003,7 +4003,7 @@ export interface paths {
         put?: never;
         /**
          * Find slots for the selected event
-         * @description Routing forms are not available yet: this operation returns routing_forms_disabled until enabled on this instance. Offers ordinary availability in the given instant range for the event selected by the capability. Availability may change. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key.
+         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Offers ordinary availability in the given instant range for the event selected by the capability. Availability may change. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key.
          */
         post: operations["findRoutedSlots"];
         delete?: never;
@@ -4021,13 +4021,13 @@ export interface paths {
         };
         /**
          * List routing forms
-         * @description Routing forms are not available yet: this operation returns routing_forms_disabled until enabled on this instance. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
+         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
          */
         get: operations["listRoutingForms"];
         put?: never;
         /**
          * Create a routing form
-         * @description Routing forms are not available yet: this operation returns routing_forms_disabled until enabled on this instance. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
+         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
          */
         post: operations["createRoutingForm"];
         delete?: never;
@@ -4045,21 +4045,21 @@ export interface paths {
         };
         /**
          * Get a routing form
-         * @description Routing forms are not available yet: this operation returns routing_forms_disabled until enabled on this instance. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
+         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
          */
         get: operations["getRoutingForm"];
         put?: never;
         post?: never;
         /**
          * Archive a routing form
-         * @description Routing forms are not available yet: this operation returns routing_forms_disabled until enabled on this instance. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
+         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
          */
         delete: operations["archiveRoutingForm"];
         options?: never;
         head?: never;
         /**
          * Update a routing form
-         * @description Routing forms are not available yet: this operation returns routing_forms_disabled until enabled on this instance. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
+         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
          */
         patch: operations["updateRoutingForm"];
         trace?: never;
@@ -4075,7 +4075,7 @@ export interface paths {
         put?: never;
         /**
          * Preview a routing form draft
-         * @description Routing forms are not available yet: this operation returns routing_forms_disabled until enabled on this instance. Personal owners and current team owners/admins can preview the current draft in their active organization. API keys require full scope. Supply answers keyed by question UUID. Returns the draft revision, rule and condition matches, and any target eligibility failures. Preview is read-only, with no stored answers, route capabilities or notifications. Session requests require a same-origin Origin/Referer.
+         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins can preview the current draft in their active organization. API keys require full scope. Supply answers keyed by question UUID. Returns the draft revision, rule and condition matches, and any target eligibility failures. Preview is read-only, with no stored answers, route capabilities or notifications. Session requests require a same-origin Origin/Referer.
          */
         post: operations["previewRoutingForm"];
         delete?: never;
@@ -4095,7 +4095,7 @@ export interface paths {
         put?: never;
         /**
          * Publish a routing form
-         * @description Routing forms are not available yet: this operation returns routing_forms_disabled until enabled on this instance. Personal owners and current team owners/admins can publish forms in their active organization. API keys require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Supply the last-read expectedRevision. Publication leaves enabled unchanged and revalidates all targets and mappings. Unsupported targets, including group and payment-required events, and invalid mappings return invalid_routing_target. Reuse the optional requestId UUID with identical input to return the original version and the current form. Changed input with the same key returns idempotency_key_reused.
+         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins can publish forms in their active organization. API keys require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Supply the last-read expectedRevision. Publication leaves enabled unchanged and revalidates all targets and mappings. Unsupported targets, including group and payment-required events, and invalid mappings return invalid_routing_target. Reuse the optional requestId UUID with identical input to return the original version and the current form. Changed input with the same key returns idempotency_key_reused.
          */
         post: operations["publishRoutingForm"];
         delete?: never;
@@ -7224,7 +7224,7 @@ export interface components {
              * @description The public origin of this instance, configured by its operator
              */
             publicUrl: string;
-            /** @description Whether routing forms are enabled; absent when unknown */
+            /** @description Effective state of routing forms. ROUTING_FORMS_ENABLED defaults to false. A legacy route handle keeps routing forms off. Absent when unknown. */
             routingFormsEnabled?: boolean;
             /** @description Whether administrators may manage SCIM provisioning tokens; resources are not available yet */
             scimProvisioningEnabled?: boolean;
@@ -10558,7 +10558,7 @@ export interface operations {
                 /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
                 from: string;
                 hostUserId?: string;
-                /** @description Append routing provenance and saved answers to personal exports only. Requires routing forms to be enabled. False is equivalent to omitting the option. */
+                /** @description Append routing provenance and saved answers to personal exports only. Requires routing forms to be enabled (ROUTING_FORMS_ENABLED=true, off by default). False is equivalent to omitting the option. */
                 includeRoutingAnswers?: "true" | "false";
                 /** @description Order by start time and id: asc (default) or desc. Keep unchanged between pages. */
                 order?: "asc" | "desc";

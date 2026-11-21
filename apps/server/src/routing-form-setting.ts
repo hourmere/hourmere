@@ -25,7 +25,7 @@ export async function resolveRoutingFormsEnabled({
   warn?: (message: string) => void
 }): Promise<boolean> {
   const collisions = await findLegacyHandleCollisions(db)
-  if (collisions.length === 0) return routingFormsEnabled
+  if (!collisions.some(({ handle }) => handle.toLowerCase() === 'route')) return routingFormsEnabled
 
   warn(
     'Routing forms are disabled because a legacy personal handle uses the reserved name "route". Coordinate a rename with the owner in Settings > Profile, then restart Hourmere.',
