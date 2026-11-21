@@ -7,6 +7,8 @@ export type Schedule = Schemas['Schedule']
 export type EventType = Schemas['EventType']
 export type Booking = Schemas['Booking']
 
+export const loadInstance = (signal: AbortSignal) => unwrap(api.GET('/api/v1/instance', { signal }))
+
 /** The caller's profile, or null before they have created one (404 profile_not_found). */
 export async function loadProfile(signal: AbortSignal): Promise<Profile | null> {
   const { data, error, response } = await api.GET('/api/v1/profile', { signal })

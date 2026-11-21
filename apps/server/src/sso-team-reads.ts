@@ -18,7 +18,7 @@ export interface TeamReadAccess {
   /** A machine decision carries only the authorization result. Fetch policy fields on demand. */
   policy: TeamReadPolicy | null | undefined
 }
-export type SsoTeamReadDeps = TeamSsoDeps
+export type SsoTeamReadDeps = TeamSsoDeps & { scimResourcesEnabled?: boolean }
 
 type Scope = Pick<Principal['organization'], 'id' | 'personal'>
 
@@ -61,9 +61,10 @@ export function teamReadAccess(deps: SsoTeamReadDeps, principal: Principal) {
       principal.ssoDelegationStatus !== undefined &&
       scope.id === principal.organization.id
     ) {
+      const status = principal.ssoDelegationStatus
       return Promise.resolve({
-        allowed: principal.ssoDelegationStatus !== 'required',
-        policy: principal.ssoDelegationStatus === null ? null : undefined,
+        allowed: status !== 'required',
+        policy: status === null ? null : undefined,
       })
     }
     return decision(scope.id)
