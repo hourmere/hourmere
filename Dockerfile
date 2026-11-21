@@ -25,6 +25,7 @@ RUN npm ci --ignore-scripts \
 
 FROM base AS runtime
 ENV NODE_ENV=production \
+    HOURMERE_SERVER_CONTAINER=1 \
     PORT=3000 \
     WEB_DIST=/app/apps/web/dist
 COPY --from=build /app/package.json ./

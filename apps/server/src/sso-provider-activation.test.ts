@@ -38,6 +38,8 @@ import {
   type MailboxProofEmailPayload,
   mailboxProofRoutes,
 } from './sso-mailbox-proof.ts'
+import { disableSsoEnforcement } from './sso-operator-recovery.ts'
+import type { SsoPolicyDeps } from './sso-policy.ts'
 
 const databaseUrl = process.env.DATABASE_URL
 const publicUrl = 'https://sso-activation.example.test'
@@ -98,7 +100,7 @@ describe.skipIf(!databaseUrl)('SSO provider activation', () => {
     owner = await browser(fixture.owner)
   })
 
-  function instance(capabilities = on) {
+  function instance(capabilities = on, policyClock?: SsoPolicyDeps['now']) {
     return createApp({
       checkDb: async () => {},
       authHandler: auth.handler,
@@ -106,7 +108,7 @@ describe.skipIf(!databaseUrl)('SSO provider activation', () => {
       publicUrl,
       routes: [
         ssoDraftRoutes({ db, capabilities, publicUrl, configurationKey }),
-        ssoPolicyRoutes({ db, capabilities, publicUrl }),
+        ssoPolicyRoutes({ db, capabilities, publicUrl, now: policyClock }),
         ssoDomainRoutes({ db, capabilities, publicUrl }),
         ssoRecoveryEnrollmentRoutes({
           db,
@@ -889,6 +891,49 @@ describe.skipIf(!databaseUrl)('SSO provider activation', () => {
     await serve(provider.id, expired.id)
     await error(await setPolicy(enforce), 409, 'sso_domain_unverified')
     expect(await policy()).toBeUndefined()
+  })
+
+  it('serializes operator recovery behind setSsoPolicy when enforcement has no stored row yet', async () => {
+    await testedEnabledProvider()
+    await db.insertInto('sso_recovery_owners').values(recoveryOwnerValues(fixture)).execute()
+    const proof = await mailbox(await setPolicy(enforce))
+    // Recovery ownership alone does not install a policy; a missing parent lock would let
+    // maintenance incorrectly report that enforcement is off before the enable commits.
+    expect(await policy()).toBeUndefined()
+
+    const entered = Promise.withResolvers<number>()
+    const resume = Promise.withResolvers<void>()
+    const target = instance(on, async (trx) => {
+      entered.resolve(await blockerPid(trx))
+      await resume.promise
+      return databaseClock(trx)
+    })
+    const change = Promise.resolve(
+      setPolicy({ ...enforce, proofAttemptId: proof.id }, { ...proof, target }),
+    )
+    let recovery: ReturnType<typeof disableSsoEnforcement> | undefined
+    try {
+      const blocker = await Promise.race([
+        entered.promise,
+        change.then((response) => {
+          throw new Error(
+            `Policy write exited before reaching the lock barrier (${response.status})`,
+          )
+        }),
+      ])
+      recovery = disableSsoEnforcement(
+        db,
+        { enqueue: async () => 'synthetic-notice' },
+        fixture.team,
+      )
+      await waitForBlocked(blocker)
+    } finally {
+      resume.resolve()
+      await Promise.allSettled([change, recovery])
+    }
+    expect((await change).status).toBe(200)
+    await expect(recovery).resolves.toBe('disabled')
+    expect(await policy()).toEqual({ require_sso: false, trust_generation: 2, policy_revision: 3 })
   })
 
   it('keeps the earlier delegation usable across enforcement, admission and membership changes', async () => {

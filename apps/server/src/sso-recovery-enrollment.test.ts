@@ -226,6 +226,18 @@ describe.skipIf(!databaseUrl)('SSO recovery', () => {
     ).email
   }
 
+  async function setProfileLocale(userId: string, locale: string) {
+    await db
+      .insertInto('profiles')
+      .values({
+        user_id: userId,
+        handle: `sso-${randomUUID().slice(0, 8)}`,
+        time_zone: 'UTC',
+        locale,
+      })
+      .execute()
+  }
+
   async function prove(h: Instance, proof: Attempt, userId: string) {
     const response = await write(h, MAILBOX_PROOF_SEND_PATH, proof.cookie, { attemptId: proof.id })
     expect(response.status).toBe(202)
@@ -484,6 +496,7 @@ describe.skipIf(!databaseUrl)('SSO recovery', () => {
 
   it('consumes a fresh mailbox ceremony once even with two concurrent retries', async () => {
     const h = instance()
+    await setProfileLocale(fixture.coOwner, 'zh-CN')
     await enforceSso()
     const owner = await browser(fixture.owner)
     const proof = await recoveryProof(h, owner.cookie)
@@ -507,18 +520,27 @@ describe.skipIf(!databaseUrl)('SSO recovery', () => {
     ])
     expect(h.notices).toHaveLength(2)
     expect(h.notices).toEqual(
-      expect.arrayContaining(
-        [fixture.owner, fixture.coOwner].map((userId) => ({
+      expect.arrayContaining([
+        {
           kind: 'used',
-          userId,
+          userId: fixture.owner,
           organizationId: fixture.team,
-          language: expect.any(String),
-        })),
-      ),
+          language: 'en',
+        },
+        {
+          kind: 'used',
+          userId: fixture.coOwner,
+          organizationId: fixture.team,
+          language: 'zh-CN',
+        },
+      ]),
     )
     const delivered = await deliverNotices(h)
-    expect(delivered.map(({ to }) => to).sort()).toEqual(
-      (await Promise.all([email(fixture.owner), email(fixture.coOwner)])).sort(),
+    expect(delivered.map(({ to, subject }) => ({ to, subject }))).toEqual(
+      expect.arrayContaining([
+        { to: await email(fixture.owner), subject: 'Single sign-on recovery was used' },
+        { to: await email(fixture.coOwner), subject: '已使用单点登录恢复' },
+      ]),
     )
     expect(delivered.every(({ sensitive, text }) => sensitive && !text.includes(proof.id))).toBe(
       true,
@@ -878,6 +900,8 @@ describe.skipIf(!databaseUrl)('SSO recovery', () => {
 
   it('nominates without granting access, then adds the nominee and audits and notifies both owners', async () => {
     const h = instance()
+    await setProfileLocale(fixture.owner, 'fr')
+    await setProfileLocale(fixture.coOwner, 'zh-CN')
     const priorOwner = await addExistingOwner()
     const nominator = await browser(fixture.owner)
     const nominee = await browser(fixture.coOwner)
@@ -901,13 +925,17 @@ describe.skipIf(!databaseUrl)('SSO recovery', () => {
         organizationId: fixture.team,
         enrollmentId: enrollment.enrollmentId,
         revision: enrollment.policyRevision,
-        language: expect.any(String),
+        language: 'zh-CN',
       },
     ])
 
     const delivered = await deliverNotices(h)
-    expect(delivered.map(({ to, sensitive }) => ({ to, sensitive }))).toEqual([
-      { to: await email(fixture.coOwner), sensitive: true },
+    expect(delivered.map(({ to, subject, sensitive }) => ({ to, subject, sensitive }))).toEqual([
+      {
+        to: await email(fixture.coOwner),
+        subject: '您已获提名单点登录恢复所有者',
+        sensitive: true,
+      },
     ])
     const link = delivered[0]?.text.match(/https:\/\/[^\s]+/)?.[0]
     if (!link) throw new Error('Expected an inert app link in the nomination notice')
@@ -961,13 +989,20 @@ describe.skipIf(!databaseUrl)('SSO recovery', () => {
     expect(h.notices.slice(1)).toHaveLength(2)
     expect(h.notices.slice(1)).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ kind: 'enrolled', userId: fixture.owner }),
-        expect.objectContaining({ kind: 'enrolled', userId: fixture.coOwner }),
+        { kind: 'enrolled', userId: fixture.owner, language: 'fr' },
+        { kind: 'enrolled', userId: fixture.coOwner, language: 'zh-CN' },
       ]),
     )
     const confirmations = await deliverNotices(h)
-    expect(confirmations.map(({ to }) => to).sort()).toEqual(
-      (await Promise.all([email(fixture.owner), email(fixture.coOwner)])).sort(),
+    expect(confirmations).toHaveLength(2)
+    expect(confirmations.map(({ to, subject }) => ({ to, subject }))).toEqual(
+      expect.arrayContaining([
+        {
+          to: await email(fixture.owner),
+          subject: 'Proposition de récupération de l’authentification unique acceptée',
+        },
+        { to: await email(fixture.coOwner), subject: '单点登录恢复提名已接受' },
+      ]),
     )
     expect(
       confirmations.every(

@@ -25,6 +25,7 @@ import {
 import { completeOidcAdmission, stageOidcAdmission } from './sso-oidc-admission.ts'
 import {
   consumeOidcAttempt,
+  isOidcTestCallback,
   LINK_SSO_ACCOUNT,
   OidcAttemptRefused,
   OidcStateReplay,
@@ -626,25 +627,29 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
           })
           return c.redirect(errorPath)
         }
-        if (provider.retiredAt) return fail('provider_disabled')
-        const testActor = provider.enabled ? undefined : await deps.readSession(c.req.raw.headers)
-        if (!provider.enabled && !testActor) return c.redirect(errorPath)
-        const refuseAttempt = () => (testActor ? c.redirect(errorPath) : fail('attempt_invalid'))
-
         const query = new URL(c.req.url).searchParams
         const states = query.getAll('state')
-        if (states.length !== 1) return refuseAttempt()
+        const browser = { ...provider, browserBinding: getCookie(c, cookie) }
+        const readActor = () => deps.readSession(c.req.raw.headers)
+        const testActor = !provider.enabled && !provider.retiredAt ? await readActor() : undefined
+        const quietTestRefusal = async () =>
+          testActor || (await isOidcTestCallback(db, browser, states[0], readActor))
+        const refuseAttempt = async (reason: SsoAuditReason) =>
+          (await quietTestRefusal()) ? c.redirect(errorPath) : fail(reason)
+        if (provider.retiredAt) return refuseAttempt('provider_disabled')
+        if (!provider.enabled && !testActor) return c.redirect(errorPath)
+        if (states.length !== 1) return refuseAttempt('attempt_invalid')
         let attempt: Awaited<ReturnType<typeof consumeOidcAttempt>>
         try {
           attempt = await consumeOidcAttempt(
             { db, configurationKey },
-            { ...provider, state: states[0] ?? null, browserBinding: getCookie(c, cookie) },
+            { ...browser, state: states[0] ?? null },
             testActor ? { kind: 'test', actor: testActor } : undefined,
-            () => deps.readSession(c.req.raw.headers),
+            readActor,
           )
         } catch (error) {
           if (error instanceof OidcStateReplay) {
-            if (testActor) return c.redirect(errorPath)
+            if (await quietTestRefusal()) return c.redirect(errorPath)
             await writeSsoSecurityFailure(db, {
               ...audit,
               action: 'sso_authentication.replay_rejected',
@@ -652,7 +657,7 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
             })
             return c.redirect(errorPath)
           }
-          if (error instanceof OidcAttemptRefused) return refuseAttempt()
+          if (error instanceof OidcAttemptRefused) return refuseAttempt('attempt_invalid')
           throw error
         }
         correlationId = attempt.id
