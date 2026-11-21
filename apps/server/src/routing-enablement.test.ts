@@ -304,7 +304,27 @@ describe.skipIf(!databaseUrl)('routing enablement in the running server', () => 
     })
   }, 60_000)
 
-  it('warns and forces routing off when a legacy personal handle collides', async () => {
+  it('enables routing without a collision warning for a legacy poll handle', async ({
+    onTestFinished,
+  }) => {
+    const db = createDb(owned.pool)
+    const { userId } = await createFixtures(db).host({ handle: 'poll' })
+    onTestFinished(async () => {
+      await db.deleteFrom('profiles').where('user_id', '=', userId).execute()
+    })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      await withServer('true', async (origin) => {
+        const response = await fetch(`${origin}/api/v1/instance`)
+        expect(await response.json()).toHaveProperty('routingFormsEnabled', true)
+        expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('Routing forms are disabled'))
+      })
+    } finally {
+      warn.mockRestore()
+    }
+  }, 60_000)
+
+  it('warns and forces routing off for a legacy route handle', async () => {
     await createFixtures(createDb(owned.pool)).host({ handle: 'route' })
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
@@ -316,7 +336,7 @@ describe.skipIf(!databaseUrl)('routing enablement in the running server', () => 
         expect(await form.text()).toBe(disabled)
         expect(warn).toHaveBeenCalledWith(
           expect.stringMatching(
-            /legacy personal handle.*"route".*rename with the owner.*restart Hourmere/,
+            /legacy personal handle.*"route".*rename with the owner in Settings > Profile.*restart Hourmere/,
           ),
         )
       })
