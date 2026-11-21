@@ -14,6 +14,8 @@ for (const theme of ['light', 'dark'] as const) {
     test.describe(`${theme} ${locale}`, () => {
       test.use({ locale, colorScheme: theme })
       test('scan serious and critical WCAG violations', async ({ page, app }) => {
+        // A full locale and theme run includes every SCIM mapping state in the registry.
+        test.setTimeout(540_000)
         const viewport = page.viewportSize()
         if (!viewport) throw new Error('UI audit requires a CSS viewport')
         await page.emulateMedia({ colorScheme: theme })

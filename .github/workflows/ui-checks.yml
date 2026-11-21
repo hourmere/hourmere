@@ -104,7 +104,7 @@ jobs:
 
   e2e-a11y:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 40
     services:
       postgres:
         image: postgres:18-alpine
