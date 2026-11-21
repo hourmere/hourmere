@@ -5,10 +5,14 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { createRequire, stripTypeScriptTypes } from 'node:module'
 import { pathToFileURL } from 'node:url'
+import { createDb } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs, routingRetentionJob } from '@hourmere/jobs'
+import { createFixtures, createTestUser } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { startServer } from './server.ts'
+import { productApp } from './routes/test-app.ts'
+import { parseRoutingFormsEnabled, resolveRoutingFormsEnabled } from './routing-form-setting.ts'
+import { productRoutes, startServer } from './server.ts'
 
 const databaseUrl = process.env.DATABASE_URL
 const queueName = 'routing-retention-v1'
@@ -119,36 +123,86 @@ describe.skipIf(!databaseUrl)('routing retention in server composition', () => {
     })
   })
 
-  it('purges expired answers and unreferenced versions in the production worker', async () => {
+  it('keeps target invalidation and retention running after routing is turned off', async () => {
+    const db = createDb(owned.pool)
+    const host = await createTestUser(db)
+    const org = host.principal.organization.id
+    const key = await db
+      .insertInto('auth.apikey')
+      .values({
+        configId: 'default',
+        referenceId: host.id,
+        key: randomUUID(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        metadata: JSON.stringify({ scope: 'full', organizationId: org }),
+        enabled: true,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    const token = 'synthetic-routing-retention-key'
+    const principals = new Map([
+      [
+        token,
+        {
+          ...host.principal,
+          kind: 'api_key' as const,
+          apiKeyId: key.id,
+          apiKeyScope: 'full' as const,
+        },
+      ],
+    ])
+    async function app(setting: 'true' | 'false') {
+      const routingFormsEnabled = await resolveRoutingFormsEnabled({
+        db,
+        routingFormsEnabled: parseRoutingFormsEnabled(setting),
+      })
+      return productApp(
+        db,
+        principals,
+        productRoutes({
+          db,
+          socialProviders: {},
+          invitationMailLimits: { secret: 'synthetic-routing-retention-test' },
+          routingFormsEnabled,
+        }),
+      )
+    }
+    const on = await app('true')
+    async function request(server: typeof on, method: string, path: string, body?: object) {
+      const response = await server.request(`/api/v1${path}`, {
+        method,
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        ...(body !== undefined && { body: JSON.stringify(body) }),
+      })
+      return { status: response.status, body: await response.json() }
+    }
+    const eventTypeId = await createFixtures(db).eventType(org, host.id)
+    const created = await request(on, 'POST', '/routing-forms', {
+      slug: 'qualify',
+      title: 'Qualification',
+      fallback: { kind: 'event', eventTypeId, mappings: [] },
+    })
+    expect(created.status).toBe(201)
+    const { id: form, draftRevision } = created.body as { id: string; draftRevision: number }
+    const formPath = `/routing-forms/${form}`
+    async function publish(expectedRevision: number) {
+      const publication = await request(on, 'POST', `${formPath}/publish`, { expectedRevision })
+      expect(publication.status).toBe(201)
+      return (publication.body as { version: { id: string } }).version.id
+    }
+    const old = await publish(draftRevision)
+    const consumedVersion = await publish(draftRevision + 1)
+    const current = await publish(draftRevision + 2)
+    expect(
+      await request(on, 'PATCH', formPath, { expectedRevision: draftRevision + 3, enabled: true }),
+    ).toMatchObject({
+      status: 200,
+      body: { enabled: true, health: { status: 'ok' } },
+    })
+
     const insert = async (sql: string, params: unknown[]) =>
       (await owned.pool.query<{ id: string }>(sql, params)).rows[0]?.id as string
-    const user = await insert(
-      `INSERT INTO auth."user" (name, email, "emailVerified") VALUES ('Host', $1, true) RETURNING id`,
-      [`routing-${randomUUID()}@example.test`],
-    )
-    const org = await insert(
-      `INSERT INTO auth.organization (name, slug, "createdAt") VALUES ('Team', $1, now()) RETURNING id`,
-      [`routing-${randomUUID()}`],
-    )
-    const form = await insert(
-      `INSERT INTO routing_forms (organization_id, slug, created_by_user_id, draft)
-       VALUES ($1, 'qualify', $2, '{}') RETURNING id`,
-      [org, user],
-    )
-    const version = (number: number) =>
-      insert(
-        `INSERT INTO routing_form_versions (organization_id, form_id, version_number, questions,
-           rules, fallback, published_by_user_id)
-         VALUES ($1, $2, $3, '[]', '[]', '{"kind":"message","message":"Thanks"}', $4) RETURNING id`,
-        [org, form, number, user],
-      )
-    const old = await version(1)
-    const consumedVersion = await version(2)
-    const current = await version(3)
-    await owned.pool.query('UPDATE routing_forms SET published_version_id = $1 WHERE id = $2', [
-      current,
-      form,
-    ])
     const booking = await insert(
       `INSERT INTO bookings (organization_id, start_at, end_at, title, source, status)
        VALUES ($1, '2030-01-01T09:00Z', '2030-01-01T09:30Z', 'Routed', 'web', 'confirmed')
@@ -167,6 +221,25 @@ describe.skipIf(!databaseUrl)('routing retention in server composition', () => {
       )
     const expired = await receipt(current, null)
     const evidence = await receipt(consumedVersion, booking)
+
+    const off = await app('false')
+    expect(await request(off, 'GET', formPath)).toEqual({
+      status: 404,
+      body: { error: 'routing_forms_disabled' },
+    })
+    expect(
+      await request(off, 'PATCH', `/event-types/${eventTypeId}`, { isActive: false }),
+    ).toMatchObject({
+      status: 200,
+      body: { isActive: false },
+    })
+    const dependencies = await db
+      .selectFrom('routing_target_dependencies')
+      .select(['rule_id', 'health_code'])
+      .where('version_id', '=', current)
+      .execute()
+    expect(dependencies).toEqual([{ rule_id: 'fallback', health_code: 'unavailable' }])
+
     const producer = createJobs({
       connectionString: owned.url,
       definitions: [
@@ -182,25 +255,29 @@ describe.skipIf(!databaseUrl)('routing retention in server composition', () => {
     })
     try {
       await producer.start()
-      await withServer('worker', startServer, async () => {
-        // Its own key, so that a scheduled run queued at this moment cannot absorb it.
-        const id = await producer.enqueue(queueName, {}, { singletonKey: 'composition-test' })
-        expect(id).not.toBeNull()
-        const deadline = Date.now() + 8000
-        let state: string | undefined
-        do {
-          const result = await owned.pool.query<{ state: string }>(
-            'SELECT state FROM pgboss.job WHERE id=$1',
-            [id],
+      await withServer(
+        'worker',
+        (env) => startServer({ ...env, ROUTING_FORMS_ENABLED: 'false' }),
+        async () => {
+          // Its own key, so that a scheduled run queued at this moment cannot absorb it.
+          const id = await producer.enqueue(queueName, {}, { singletonKey: 'composition-test' })
+          expect(id).not.toBeNull()
+          const deadline = Date.now() + 8000
+          let state: string | undefined
+          do {
+            const result = await owned.pool.query<{ state: string }>(
+              'SELECT state FROM pgboss.job WHERE id=$1',
+              [id],
+            )
+            state = result.rows[0]?.state
+            if (state === 'completed') break
+            await new Promise((resolve) => setTimeout(resolve, 50))
+          } while (Date.now() < deadline)
+          expect(state, 'the registered retention handler completes jobs in the worker').toBe(
+            'completed',
           )
-          state = result.rows[0]?.state
-          if (state === 'completed') break
-          await new Promise((resolve) => setTimeout(resolve, 50))
-        } while (Date.now() < deadline)
-        expect(state, 'the registered retention handler completes jobs in the worker').toBe(
-          'completed',
-        )
-      })
+        },
+      )
     } finally {
       await producer.stop()
     }

@@ -1,8 +1,15 @@
 import { randomUUID } from 'node:crypto'
 import '@hono/zod-openapi'
 import type { ApiKeyScope, CallerResolver, Principal } from '@hourmere/auth'
-import { createDb, type Db } from '@hourmere/db'
+import { createDb, type Db, purgeExpiredRoutingReceipts } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import type { Mailer } from '@hourmere/mail'
+import {
+  BOOKING_NOTIFICATION_JOB,
+  bookingNotifier,
+  type NotificationQueue,
+  sendBookingNotification,
+} from '@hourmere/notifications'
 import {
   createFixtures,
   createTestTeam,
@@ -10,6 +17,7 @@ import {
   type TestUser,
   testContext,
 } from '@hourmere/scheduling/testing'
+import { sql } from 'kysely'
 import createClient from 'openapi-fetch'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
@@ -17,6 +25,7 @@ import {
   validateRoutingAnswers,
 } from '../../../packages/scheduling/src/routing-form-config.ts'
 import {
+  archiveRoutingForm,
   createRoutingForm,
   publishRoutingForm,
   type RoutingForm,
@@ -31,6 +40,7 @@ import { mcpEndpoint } from './mcp/endpoint.ts'
 import { BOOKING_BODY_LIMIT, publicRoutes } from './routes/public.ts'
 import { routingContinuationRoutes } from './routes/routing-continuations.ts'
 import { escapedJson, openApiDocument } from './routes/test-app.ts'
+import { parseRoutingFormsEnabled, resolveRoutingFormsEnabled } from './routing-form-setting.ts'
 import { productRoutes, productTools } from './server.ts'
 
 const paymentRequired = vi.hoisted(() => new Set<string>())
@@ -248,7 +258,11 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
       ? { ok: true, principal, setCookie: [] }
       : { ok: false, error: 'unauthorized', setCookie: [] }
   }
-  function app(enabled = true, routingBookingReceiptNow?: () => Temporal.Instant) {
+  function app(
+    enabled = true,
+    routingBookingReceiptNow?: () => Temporal.Instant,
+    notifyBooking?: ReturnType<typeof bookingNotifier>,
+  ) {
     return createApp({
       publicUrl,
       checkDb: async () => {},
@@ -256,7 +270,7 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
       resolveCaller,
       routes: productRoutes({
         db,
-        notify,
+        notify: notifyBooking ?? notify,
         publicUrl,
         socialProviders: {},
         invitationMailLimits: { secret: routingSecret },
@@ -267,7 +281,7 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
       mcp: mcpEndpoint({
         tools: productTools({
           db,
-          notify,
+          notify: notifyBooking ?? notify,
           publicUrl,
           routingFormsEnabled: enabled,
           routingSecret,
@@ -442,12 +456,16 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
   const versions = (id: string) =>
     db.selectFrom('routing_form_versions').select('id').where('form_id', '=', id).execute()
 
-  async function bookingReceipt(eventTypeId: string) {
+  async function bookingReceipt(
+    eventTypeId: string,
+    topic?: { id: string; label: string; answer: string },
+  ) {
     const principal = credentials.get(await credential(owner))
     if (!principal) throw Error('Expected a persisted fixture key')
     const context = testContext(db, principal)
     const form = await createRoutingForm(context, {
       ...draft(),
+      ...(topic && { questions: [{ id: topic.id, label: topic.label, type: 'short_text' }] }),
       fallback: { kind: 'event', eventTypeId, mappings: [] },
     })
     const publication = await publishRoutingForm(context, form.id, {
@@ -460,7 +478,7 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
     const receipt = await submitRoutingForm(
       { db, routingFormsEnabled: true, routingSecret },
       { organizationId: owner.principal.organization.id, formId: form.id },
-      { versionId: publication.version.id, answers: {} },
+      { versionId: publication.version.id, answers: topic ? { [topic.id]: topic.answer } : {} },
     )
     if (receipt.kind !== 'continuation') throw Error('Expected a booking capability')
     return receipt
@@ -471,6 +489,9 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
     const monday = nextWeek.add({ days: (8 - nextWeek.dayOfWeek) % 7 })
     return `${monday}T${time}:00Z`
   }
+
+  const effectiveSetting = (configured: string) =>
+    resolveRoutingFormsEnabled({ db, routingFormsEnabled: parseRoutingFormsEnabled(configured) })
 
   it('books a hidden target and authorizes only exact routed replay after expiry and disablement', async () => {
     const fixtures = createFixtures(db)
@@ -505,10 +526,10 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
       start: bookingStart('10:00'),
       invitee: { name: 'Routed invitee', email: 'routed@example.test', timeZone: 'UTC' },
     }
-    const enabled = app()
+    const enabled = app(await effectiveSetting('true'))
     const expiry = () => Temporal.Instant.from(receipt.expiresAt).add({ seconds: 1 })
     const expired = app(true, expiry)
-    const off = app(false, expiry)
+    const off = app(await effectiveSetting('false'), expiry)
     const rest = async (
       application: ReturnType<typeof app>,
       args = input,
@@ -597,6 +618,135 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
         .where('event_type_id', '=', eventTypeId)
         .execute(),
     ).toHaveLength(1)
+  })
+
+  it('keeps routed confirmations, manage links and booking changes available after disabling routing', async () => {
+    const fixtures = createFixtures(db)
+    const scheduleId = await fixtures.schedule(owner.id, { timeZone: 'UTC', isDefault: false })
+    const eventTypeId = await fixtures.eventType(owner.principal.organization.id, owner.id, {
+      title: 'Routing consultation',
+      hosts: [{ userId: owner.id, scheduleId }],
+    })
+    const topic = { id: randomUUID(), label: 'Call topic', answer: 'Discuss the handoff' }
+    const receipt = await bookingReceipt(eventTypeId, topic)
+    const enqueue = vi.fn<NotificationQueue['enqueue']>(async () => null)
+    const notifier = bookingNotifier({ enqueue })
+    const on = app(await effectiveSetting('true'), undefined, notifier)
+    const client = (application: ReturnType<typeof app>) =>
+      createClient<paths>({
+        baseUrl: publicUrl,
+        fetch: async (request) => application.request(request),
+      })
+    const invitee = { name: 'Fixture invitee', email: 'handoff@example.test', timeZone: 'UTC' }
+    const start = bookingStart('15:00')
+    const { data: created, response } = await client(on).POST(routedBookingPath, {
+      body: { routeToken: receipt.routeToken, start, invitee },
+    })
+    expect(response.status).toBe(201)
+    expect(created?.booking.status).toBe('confirmed')
+    if (!created) throw new Error('Expected a completed routed booking')
+    const { id } = created.booking
+
+    const off = app(await effectiveSetting('false'), undefined, notifier)
+    const hostHeaders = { authorization: `Bearer ${await credential(owner, 'read')}` }
+    const detail = async (application: ReturnType<typeof app>) => {
+      const result = await application.request(`/api/v1/bookings/${id}`, { headers: hostHeaders })
+      expect(result.status).toBe(200)
+      return result.json()
+    }
+    const hostDetail = await detail(on)
+    expect(hostDetail).toMatchObject({
+      id,
+      status: 'confirmed',
+      routing: {
+        questions: [{ id: topic.id, label: topic.label }],
+        answers: { [topic.id]: topic.answer },
+      },
+    })
+    expect(await detail(off)).toEqual(hostDetail)
+
+    // Deliver the confirmation queued before shutdown after composing the disabled app.
+    expect(enqueue).toHaveBeenCalledWith(
+      BOOKING_NOTIFICATION_JOB,
+      { bookingId: id, kind: 'confirmed' },
+      expect.any(Object),
+    )
+    const send = vi.fn<Mailer['send']>(async () => {})
+    await sendBookingNotification(
+      { db, mailer: { send }, secret: routingSecret, publicUrl },
+      id,
+      'confirmed',
+    )
+    const confirmation = send.mock.calls.find(([message]) => message.to === invitee.email)?.[0]
+    expect(confirmation?.subject).toMatch(/^Confirmed: Routing consultation/)
+    const emailToken = confirmation?.text?.match(
+      /#token=([A-Za-z0-9_-]{43})&action=reschedule/,
+    )?.[1]
+    if (!emailToken) throw new Error('Expected the confirmation to contain a manage link')
+    expect(confirmation?.text).toContain(`${publicUrl}/booking#token=${emailToken}&action=cancel`)
+
+    const managed = async (application: ReturnType<typeof app>, token: string) => {
+      const result = await application.request('/api/v1/bookings/manage', {
+        headers: { 'x-manage-token': token },
+      })
+      expect(result.status).toBe(200)
+      return result.json()
+    }
+    const routingAnswers = [{ label: topic.label, answer: topic.answer }]
+    const inviteeDetail = await managed(on, emailToken)
+    expect(inviteeDetail).toMatchObject({ id, status: 'confirmed', routingAnswers })
+    expect(inviteeDetail).not.toHaveProperty('routing')
+    expect(await managed(off, emailToken)).toEqual(inviteeDetail)
+
+    const query = new URLSearchParams({
+      from: start,
+      to: Temporal.Instant.from(start).add({ hours: 3 }).toString(),
+      eventTypeId,
+    })
+    const exportPath = `/api/v1/bookings/export.csv?${query}`
+    const csv = async (application: ReturnType<typeof app>, suffix = '') => {
+      const result = await application.request(exportPath + suffix, { headers: hostHeaders })
+      expect(result.status).toBe(200)
+      return result.text()
+    }
+    const withAnswers = '&includeRoutingAnswers=true'
+    const routingCsv = await csv(on, withAnswers)
+    expect(routingCsv).toContain('routing_answers')
+    expect(routingCsv).toContain(topic.answer)
+    const refused = await off.request(exportPath + withAnswers, { headers: hostHeaders })
+    expect(refused.status).toBe(404)
+    expect(await refused.json()).toEqual({ error: 'routing_forms_disabled' })
+    const ordinaryCsv = await csv(off)
+    expect(ordinaryCsv).toContain(invitee.email)
+    expect(ordinaryCsv).not.toContain('routing_answers')
+    expect(ordinaryCsv).not.toContain(topic.answer)
+    expect(await csv(on)).toBe(ordinaryCsv)
+    expect(await csv(off, '&includeRoutingAnswers=false')).toBe(ordinaryCsv)
+
+    const params = { header: { 'x-manage-token': emailToken } }
+    const offClient = client(off)
+    const moved = await offClient.POST('/api/v1/bookings/manage/reschedule', {
+      params,
+      body: { start: bookingStart('16:00') },
+    })
+    expect(moved.response.status).toBe(200)
+    expect(moved.data?.booking).toMatchObject({ rescheduledFromId: id, status: 'confirmed' })
+    expect(await managed(off, emailToken)).toMatchObject({
+      id: moved.data?.booking.id,
+      status: 'confirmed',
+      routingAnswers,
+    })
+    const cancelled = await offClient.POST('/api/v1/bookings/manage/cancel', {
+      params,
+      body: { reason: 'Fixture cancellation' },
+    })
+    expect(cancelled.response.status).toBe(200)
+    expect(cancelled.data).toMatchObject({ id: moved.data?.booking.id, status: 'cancelled' })
+    expect(await managed(off, emailToken)).toMatchObject({
+      id: moved.data?.booking.id,
+      status: 'cancelled',
+      routingAnswers,
+    })
   })
 
   it.each(['group', 'paid'] as const)(
@@ -734,6 +884,265 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
     const tooBig = await send(BOOKING_BODY_LIMIT + 1)
     expect(tooBig.status).toBe(413)
     expect(await tooBig.json()).toEqual({ error: 'payload_too_large' })
+  })
+
+  it('preserves stored forms and restores published links when routing is re-enabled', async () => {
+    const token = await credential(owner)
+    const principal = credentials.get(token)
+    if (!principal) throw new Error('Expected a persisted fixture key')
+    const context = testContext(db, principal)
+    const eventTypeId = await createFixtures(db).eventType(
+      context.principal.organization.id,
+      owner.id,
+    )
+    const active = await createRoutingForm(context, {
+      ...draft(),
+      fallback: { kind: 'event', eventTypeId, mappings: [] },
+    })
+    const activeVersion = await publishRoutingForm(context, active.id, {
+      expectedRevision: active.draftRevision,
+    })
+    const edited = await updateRoutingForm(context, active.id, {
+      expectedRevision: activeVersion.form.draftRevision,
+      enabled: true,
+      questions: [{ id: randomUUID(), type: 'short_text', label: 'Unpublished draft question' }],
+    })
+    const draftOnly = await createRoutingForm(context, draft())
+    const archived = await createRoutingForm(context, draft())
+    const archivedVersion = await publishRoutingForm(context, archived.id, {
+      expectedRevision: archived.draftRevision,
+    })
+    await archiveRoutingForm(context, archived.id, {
+      expectedRevision: archivedVersion.form.draftRevision,
+    })
+
+    const ids = [active.id, draftOnly.id, archived.id]
+    const storedForms = () =>
+      Promise.all([
+        db.selectFrom('routing_forms').selectAll().where('id', 'in', ids).orderBy('id').execute(),
+        db
+          .selectFrom('routing_form_versions')
+          .selectAll()
+          .where('form_id', 'in', ids)
+          .orderBy('id')
+          .execute(),
+      ])
+    const before = await storedForms()
+    expect(before[0]).toHaveLength(3)
+    expect(before[1]).toHaveLength(2)
+    const address = (slug: string) => `/api/v1/public/-/routing/${routingOwnerHandle}/${slug}`
+    const publicForm = async (assembly: ReturnType<typeof app>, slug: string) => {
+      const response = await assembly.request(address(slug))
+      expect(response.headers.get('location')).toBeNull()
+      return { status: response.status, body: await response.json() }
+    }
+
+    const enabled = await effectiveSetting('true')
+    const liveMetadata = await publicForm(app(enabled), active.slug)
+    expect(liveMetadata).toEqual({
+      status: 200,
+      body: { title: active.title, versionId: activeVersion.version.id, questions: [] },
+    })
+    const liveForm = await call('rest', token, 'get', { id: active.id }, enabled)
+    const liveDraft = await call('rest', token, 'get', { id: draftOnly.id }, enabled)
+    expect(liveForm.status).toBe(200)
+    expect(liveDraft.status).toBe(200)
+
+    const disabled = await effectiveSetting('false')
+    const off = app(disabled)
+    expect(await publicForm(off, active.slug)).toEqual({
+      status: 404,
+      body: { error: 'routing_forms_disabled' },
+    })
+    const submit = (assembly: ReturnType<typeof app>, versionId: string) =>
+      assembly.request(`${address(active.slug)}/route`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ versionId, answers: {} }),
+      })
+    const refused = await submit(off, activeVersion.version.id)
+    expect(refused.status).toBe(404)
+    expect(refused.headers.get('location')).toBeNull()
+    expect(await refused.json()).toEqual({ error: 'routing_forms_disabled' })
+    expect(await call('rest', token, 'list', {}, disabled)).toMatchObject({
+      status: 404,
+      body: { error: 'routing_forms_disabled' },
+    })
+    expect(
+      await call(
+        'rest',
+        token,
+        'archive',
+        {
+          id: active.id,
+          expectedRevision: edited.draftRevision,
+        },
+        disabled,
+      ),
+    ).toMatchObject({ status: 404, body: { error: 'routing_forms_disabled' } })
+    expect(await storedForms()).toEqual(before)
+
+    const restored = await effectiveSetting('true')
+    const onAgain = app(restored)
+    expect(await publicForm(onAgain, active.slug)).toEqual(liveMetadata)
+    for (const unavailable of [draftOnly, archived]) {
+      expect(await publicForm(onAgain, unavailable.slug)).toEqual({
+        status: 404,
+        body: { error: 'routing_form_not_found' },
+      })
+    }
+    expect(await call('rest', token, 'get', { id: active.id }, restored)).toEqual(liveForm)
+    expect(await call('rest', token, 'get', { id: draftOnly.id }, restored)).toEqual(liveDraft)
+    const submitted = await submit(onAgain, activeVersion.version.id)
+    expect(submitted.status).toBe(200)
+    expect(submitted.headers.get('location')).toBeNull()
+    expect(await submitted.json()).toMatchObject({
+      kind: 'continuation',
+      continuationUrl: expect.stringMatching(/\/route\/continue#token=/),
+    })
+    expect(await storedForms()).toEqual(before)
+
+    const stale = await submit(onAgain, randomUUID())
+    expect(stale.status).toBe(409)
+    expect(await stale.json()).toEqual({ error: 'routing_form_changed' })
+    await db
+      .updateTable('event_types')
+      .set({ is_active: false })
+      .where('id', '=', eventTypeId)
+      .execute()
+    const unavailable = await submit(onAgain, activeVersion.version.id)
+    expect(unavailable.status).toBe(409)
+    expect(unavailable.headers.get('location')).toBeNull()
+    expect(await unavailable.json()).toEqual({ error: 'routing_unavailable' })
+  })
+
+  it('keeps the original continuation expiry and purges expired answers while routing is off', async () => {
+    const principal = credentials.get(await credential(owner))
+    if (!principal) throw new Error('Expected a persisted fixture key')
+    const context = testContext(db, principal)
+    const organizationId = context.principal.organization.id
+    const eventTypeId = await createFixtures(db).eventType(organizationId, owner.id)
+    const questionId = randomUUID()
+    const form = await createRoutingForm(context, {
+      ...draft(),
+      questions: [{ id: questionId, type: 'short_text', label: 'Name' }],
+      fallback: {
+        kind: 'event',
+        eventTypeId,
+        mappings: [{ questionId, destination: { kind: 'inviteeName' } }],
+      },
+    })
+    const publication = await publishRoutingForm(context, form.id, {
+      expectedRevision: form.draftRevision,
+    })
+    await updateRoutingForm(context, form.id, {
+      expectedRevision: publication.form.draftRevision,
+      enabled: true,
+    })
+
+    // Base the simulated downtime on PostgreSQL's clock, which the real purge uses.
+    const { timestamp } = await db
+      .selectNoFrom(sql<Date>`statement_timestamp()`.as('timestamp'))
+      .executeTakeFirstOrThrow()
+    const now = Temporal.Instant.fromEpochMilliseconds(timestamp.getTime())
+    let checkedAt = now.subtract({ minutes: 10 })
+    const restart = async (setting: string) => {
+      const routingFormsEnabled = await effectiveSetting(setting)
+      return createApp({
+        publicUrl,
+        checkDb: async () => {},
+        authHandler: async () => new Response(null, { status: 404 }),
+        resolveCaller,
+        routes: [
+          routingContinuationRoutes({
+            db,
+            now: () => checkedAt,
+            receiptNow: () => checkedAt,
+            routingFormsEnabled,
+            routingSecret,
+          }),
+        ],
+      })
+    }
+    const on = await restart('true')
+    const issue = async (issuedAt: Temporal.Instant) => {
+      const outcome = await submitRoutingForm(
+        {
+          db,
+          routingFormsEnabled: await effectiveSetting('true'),
+          routingSecret,
+          now: () => issuedAt,
+        },
+        { organizationId, formId: form.id },
+        { versionId: publication.version.id, answers: { [questionId]: 'Original invitee name' } },
+      )
+      if (outcome.kind !== 'continuation')
+        throw new Error('Expected a pending routing continuation')
+      expect(outcome.expiresAt).toBe(issuedAt.add({ minutes: 30 }).toString())
+      return outcome
+    }
+    const expiresDuringDowntime = await issue(now.subtract({ minutes: 35 }))
+    const survivesDowntime = await issue(checkedAt)
+    const resolve = async (application: ReturnType<typeof app>, routeToken: string) => {
+      const response = await application.request('/api/v1/routing-continuations/resolve', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ routeToken }),
+      })
+      return { status: response.status, body: await response.json() }
+    }
+    const readReceipt = (routeToken: string) =>
+      db
+        .selectFrom('routing_receipts')
+        .selectAll()
+        .where('token_hash', '=', routingTokenDigest(routingSecret, 'continuation', routeToken))
+        .executeTakeFirst()
+    const expiredBefore = await readReceipt(expiresDuringDowntime.routeToken)
+    const liveBefore = await readReceipt(survivesDowntime.routeToken)
+    expect(expiredBefore).toMatchObject({
+      answers_ciphertext: expect.any(Buffer),
+      consumed_booking_id: null,
+    })
+    expect(liveBefore).toMatchObject({
+      answers_ciphertext: expect.any(Buffer),
+      consumed_booking_id: null,
+    })
+    expect((await resolve(on, expiresDuringDowntime.routeToken)).status).toBe(200)
+    expect((await resolve(on, survivesDowntime.routeToken)).status).toBe(200)
+
+    const off = await restart('false')
+    for (const token of [expiresDuringDowntime.routeToken, survivesDowntime.routeToken]) {
+      expect(await resolve(off, token)).toEqual({
+        status: 404,
+        body: { error: 'routing_forms_disabled' },
+      })
+    }
+    checkedAt = now
+    expect(await resolve(off, expiresDuringDowntime.routeToken)).toEqual({
+      status: 404,
+      body: { error: 'routing_forms_disabled' },
+    })
+    expect(await readReceipt(expiresDuringDowntime.routeToken)).toEqual(expiredBefore)
+    expect(await readReceipt(survivesDowntime.routeToken)).toEqual(liveBefore)
+
+    const onAgain = await restart('true')
+    // A restart can precede the next worker sweep. The stored token is already unusable.
+    expect(await resolve(onAgain, expiresDuringDowntime.routeToken)).toEqual({
+      status: 409,
+      body: { error: 'routing_unavailable' },
+    })
+    expect(await readReceipt(expiresDuringDowntime.routeToken)).toEqual(expiredBefore)
+
+    await purgeExpiredRoutingReceipts(db)
+    expect(await readReceipt(expiresDuringDowntime.routeToken)).toBeUndefined()
+    expect(await resolve(onAgain, survivesDowntime.routeToken)).toMatchObject({
+      status: 200,
+      body: {
+        expiresAt: survivesDowntime.expiresAt,
+        prefill: { inviteeName: 'Original invitee name' },
+      },
+    })
+    expect(await readReceipt(survivesDowntime.routeToken)).toEqual(liveBefore)
   })
 
   it('resolves only the selected event over REST, MCP and CLI and refuses every token while off', async () => {
