@@ -1,4 +1,5 @@
 import { type Expression, sql, type Transaction } from 'kysely'
+import { writeAuditEvent } from './audit.ts'
 import type { Database } from './index.ts'
 
 interface ScimMembershipSuspension {
@@ -8,10 +9,11 @@ interface ScimMembershipSuspension {
   scimUserId: string
 }
 
-/** Persist a suspension and end its session authorization in the caller's READ COMMITTED transaction. */
+/** Persist a suspension and revoke team credentials in the caller's READ COMMITTED transaction. */
 export async function suspendScimMembership(
   trx: Transaction<Database>,
   { organizationId, userId, connectionId, scimUserId }: ScimMembershipSuspension,
+  actor: { type: 'scim_token'; id: string } | { type: 'system' },
 ) {
   // Team selection and proof issuance take the corresponding team lock before
   // checking suspension. They can finish before revocation or see the committed block.
@@ -82,6 +84,55 @@ export async function suspendScimMembership(
         .where('userId', '=', userId),
     )
     .execute()
+
+  // Match 0178's index, including mixed-case IDs. Missing organization metadata
+  // falls back to personal space and does not match this team.
+  const keyOrganization = sql<string>`auth.scim_api_key_organization_id(metadata)`
+  await trx
+    .deleteFrom('auth.apikey')
+    .where(sql<boolean>`length("referenceId") = 36 AND length(${keyOrganization}) = 36`)
+    .where(sql<string>`lower("referenceId")`, '=', userId.toLowerCase())
+    .where(keyOrganization, '=', organizationId.toLowerCase())
+    .execute()
+
+  const grantReferences = trx
+    .selectFrom('mcp_oauth_grants')
+    .select(sql<string>`id::text`.as('referenceId'))
+    .where('user_id', '=', userId)
+    .where('organization_id', '=', organizationId)
+
+  // Scope the provider rows by grant, since one client may have consent in several spaces.
+  await trx
+    .deleteFrom('auth.oauthAccessToken')
+    .where('userId', '=', userId)
+    .where('referenceId', 'in', grantReferences)
+    .execute()
+  await trx
+    .deleteFrom('auth.oauthRefreshToken')
+    .where('userId', '=', userId)
+    .where('referenceId', 'in', grantReferences)
+    .execute()
+  await trx
+    .deleteFrom('auth.oauthConsent')
+    .where('userId', '=', userId)
+    .where('referenceId', 'in', grantReferences)
+    .execute()
+  // Deleting the key or grant cascades to its SSO delegation binding. Codes, intents
+  // and JWTs issued against the deleted grant cannot authorize against a new grant ID.
+  await trx
+    .deleteFrom('mcp_oauth_grants')
+    .where('user_id', '=', userId)
+    .where('organization_id', '=', organizationId)
+    .execute()
+
+  await writeAuditEvent(trx, {
+    organizationId,
+    actor: actor.type === 'system' ? { type: 'system', id: 'scim' } : actor,
+    credential: { type: 'none' },
+    action: 'scim_user.credentials_revoked',
+    targetType: 'scim_user',
+    targetId: scimUserId,
+  })
 
   return block
 }

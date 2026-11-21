@@ -11,7 +11,7 @@ import {
   type Json,
 } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
-import { teamWriteTransaction } from '@hourmere/db/team-write'
+import { recordTeamWriteOrganizationLock, teamWriteTransaction } from '@hourmere/db/team-write'
 import { sql, type Transaction } from 'kysely'
 import { parsePhoneNumberFromString } from 'libphonenumber-js/max'
 import { z } from 'zod'
@@ -1147,6 +1147,7 @@ async function lockCancellationOrganization(trx: Db, organizationId: string): Pr
     .forKeyShare()
     .executeTakeFirst()
   if (!row) throw bookingNotFound()
+  recordTeamWriteOrganizationLock(trx, organizationId)
 }
 
 function assertChangeable(row: { status: string; start_at: Date }, now: Temporal.Instant): void {

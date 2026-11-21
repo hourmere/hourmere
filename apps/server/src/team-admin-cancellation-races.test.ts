@@ -12,6 +12,7 @@ import {
 import * as calendars from '@hourmere/calendars'
 import { createDb, type Db, importedBookingIds, isImportedBooking } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
+import { recordTeamWriteOrganizationLock, teamWriteTransaction } from '@hourmere/db/team-write'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs } from '@hourmere/jobs'
 import type { MailMessage } from '@hourmere/mail'
@@ -91,6 +92,8 @@ async function guestRoutesCopy(before: string, after: string): Promise<GuestRout
     {
       auditActor,
       writeAuditEvent,
+      recordTeamWriteOrganizationLock,
+      teamWriteTransaction,
       parsePersistedApiKeyMetadata,
       createHash,
       randomBytes,

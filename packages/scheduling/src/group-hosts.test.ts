@@ -1,4 +1,5 @@
 import { createDb, type Db } from '@hourmere/db'
+import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { groupFixture, occupiedSlot } from '../../db/src/group-seats-fixtures.ts'
@@ -19,9 +20,11 @@ function sourceCopy(omitSeats = false): HostModule {
     )
   }
   source = stripTypeScriptTypes(source.replace(/^import .*\n/gm, '')).replace(/\bexport /g, '')
-  return new Function('DomainError', `${source}; return { resolvedBookingHosts, bookingHostIds }`)(
-    DomainError,
-  ) as HostModule
+  return new Function(
+    'DomainError',
+    'scimSuspended',
+    `${source}; return { resolvedBookingHosts, bookingHostIds }`,
+  )(DomainError, scimSuspended) as HostModule
 }
 
 describe.skipIf(!serverUrl)('slot and seat host resolution', () => {

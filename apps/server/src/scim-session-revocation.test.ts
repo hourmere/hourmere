@@ -13,6 +13,8 @@ import pg from 'pg'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { prepareScimSuspension } from '../../../packages/db/src/scim-suspension-fixtures.ts'
 import {
+  apiKey,
+  bindingValues,
   type IdentityFixture,
   identityFixture,
   link,
@@ -169,7 +171,7 @@ describe.skipIf(!databaseUrl)('SCIM session authorization revocation', () => {
     const target = await db
       .transaction()
       .execute((trx) => prepareScimSuspension(trx, organizationId, fixture.member))
-    return (trx: Transaction<Database>) => suspendScimMembership(trx, target)
+    return (trx: Transaction<Database>) => suspendScimMembership(trx, target, { type: 'system' })
   }
 
   const teamProofs = (connection = db, team = fixture.team) =>
@@ -331,6 +333,174 @@ describe.skipIf(!databaseUrl)('SCIM session authorization revocation', () => {
     expect(response.status).toBe(401)
     expect(await session(active.id)).toBeUndefined()
     await expectSignedOut(active.cookie)
+  })
+
+  it('commits only the suspended membership’s credential revocation and its audit', async () => {
+    await joinOtherTeam()
+    const target = await db
+      .transaction()
+      .execute((trx) => prepareScimSuspension(trx, fixture.team, fixture.member))
+    const { id: tokenId } = await db
+      .insertInto('scim_provisioning_tokens')
+      .values({
+        organization_id: fixture.team,
+        name: 'Synthetic provisioner',
+        token_hash: randomBytes(32).toString('base64url'),
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    const clientId = randomUUID()
+    await db
+      .insertInto('auth.oauthClient')
+      .values({ clientId, redirectUris: JSON.stringify(['https://client.example.test/callback']) })
+      .execute()
+
+    const client = await owned.pool.connect()
+    const credentialSets: {
+      keyId: string
+      grantId: string
+      consentId: string
+      refreshId: string
+      accessId: string
+    }[] = []
+    const bindingIds: string[] = []
+    try {
+      for (const [organizationId, userId] of [
+        [fixture.team, fixture.member],
+        [fixture.otherTeam, fixture.member],
+        [personal, fixture.member],
+        [fixture.team, fixture.owner],
+      ] as const) {
+        const keyId = await apiKey(
+          client,
+          userId,
+          organizationId === personal ? null : organizationId.toUpperCase(),
+        )
+        const { id: grantId } = await db
+          .insertInto('mcp_oauth_grants')
+          .values({ organization_id: organizationId, user_id: userId, client_id: clientId })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+        const native = {
+          clientId,
+          userId,
+          referenceId: grantId,
+          scopes: JSON.stringify(['mcp:tools', 'offline_access']),
+          createdAt: new Date(),
+        }
+        const { id: consentId } = await db
+          .insertInto('auth.oauthConsent')
+          .values({ ...native, updatedAt: native.createdAt })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+        const expiresAt = new Date(Date.now() + 300_000)
+        const { id: refreshId } = await db
+          .insertInto('auth.oauthRefreshToken')
+          .values({ ...native, expiresAt, token: randomBytes(32).toString('base64url') })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+        const { id: accessId } = await db
+          .insertInto('auth.oauthAccessToken')
+          .values({ ...native, expiresAt, refreshId, token: randomBytes(32).toString('base64url') })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+        credentialSets.push({ keyId, grantId, consentId, refreshId, accessId })
+        if (organizationId === fixture.team && userId === fixture.member) {
+          for (const credential of [{ api_key_id: keyId }, { oauth_grant_id: grantId }]) {
+            const binding = await insert(
+              client,
+              'sso_delegation_bindings',
+              bindingValues(fixture, credential),
+            )
+            bindingIds.push(String(binding.id))
+          }
+        }
+      }
+    } finally {
+      client.release()
+    }
+
+    const suspend = () =>
+      db
+        .transaction()
+        .execute((trx) => suspendScimMembership(trx, target, { type: 'scim_token', id: tokenId }))
+    const readAudit = () =>
+      db
+        .selectFrom('audit_events')
+        .select(['organization_id', 'actor_type', 'actor_id', 'credential_type', 'details'])
+        .where('action', '=', 'scim_user.credentials_revoked')
+        .where('target_type', '=', 'scim_user')
+        .where('target_id', '=', target.scimUserId)
+        .execute()
+    const blocker = () =>
+      db
+        .selectFrom('scim_membership_blocks')
+        .select('id')
+        .where('scim_user_id', '=', target.scimUserId)
+        .execute()
+    async function expectCredentialRows(revoked: boolean) {
+      const survivors = credentialSets.slice(revoked ? 1 : 0)
+      for (const [table, field] of [
+        ['auth.apikey', 'keyId'],
+        ['mcp_oauth_grants', 'grantId'],
+        ['auth.oauthConsent', 'consentId'],
+        ['auth.oauthRefreshToken', 'refreshId'],
+        ['auth.oauthAccessToken', 'accessId'],
+      ] as const) {
+        const ids = await db
+          .selectFrom(table)
+          .select('id')
+          .where(
+            'id',
+            'in',
+            credentialSets.map((credentials) => credentials[field]),
+          )
+          .orderBy('id')
+          .execute()
+        expect(
+          ids.map(({ id }) => id),
+          table,
+        ).toEqual(survivors.map((credentials) => credentials[field]).sort())
+      }
+      const bindings = await db
+        .selectFrom('sso_delegation_bindings')
+        .select('id')
+        .where('id', 'in', bindingIds)
+        .execute()
+      expect(bindings).toHaveLength(revoked ? 0 : 2)
+    }
+
+    await sql`CREATE FUNCTION reject_scim_revocation_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.action = 'scim_user.credentials_revoked' THEN
+          RAISE EXCEPTION 'synthetic revocation audit failure';
+        END IF;
+        RETURN NEW;
+      END $$`.execute(db)
+    await sql`CREATE TRIGGER reject_scim_revocation_audit BEFORE INSERT ON audit_events
+      FOR EACH ROW EXECUTE FUNCTION reject_scim_revocation_audit()`.execute(db)
+    try {
+      await expect(suspend()).rejects.toThrow('synthetic revocation audit failure')
+      expect(await blocker()).toEqual([])
+      expect(await readAudit()).toEqual([])
+      await expectCredentialRows(false)
+    } finally {
+      await sql`DROP TRIGGER reject_scim_revocation_audit ON audit_events`.execute(db)
+      await sql`DROP FUNCTION reject_scim_revocation_audit()`.execute(db)
+    }
+
+    const block = await suspend()
+    expect(await blocker()).toEqual([block])
+    await expectCredentialRows(true)
+    expect(await readAudit()).toEqual([
+      {
+        organization_id: fixture.team,
+        actor_type: 'scim_token',
+        actor_id: tokenId,
+        credential_type: 'none',
+        details: {},
+      },
+    ])
   })
 
   it.each(['HTTP', 'trusted'] as const)(
