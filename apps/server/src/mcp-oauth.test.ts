@@ -1,3 +1,4 @@
+import '@hono/zod-openapi'
 import {
   createHash,
   createHmac,
@@ -28,10 +29,13 @@ import {
   insert,
   oidcProviderValues,
 } from '../../../packages/db/src/sso-storage-fixtures.ts'
+import { createFinalizeFixture } from '../../../packages/scheduling/src/meeting-poll-finalize-fixture.ts'
 import { createApp } from './app.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
+import { meetingPollHostTools } from './mcp/meeting-poll-host.ts'
 import { mcpOAuthCleanupJob, mcpOAuthRoutes } from './mcp/oauth.ts'
 import { whoamiTool } from './mcp/whoami.ts'
+import { meetingPollHostRoutes } from './routes/meeting-poll-host.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const BASE = 'http://localhost:4197'
@@ -95,8 +99,11 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
     await auth.$context
   })
   afterAll(async () => {
-    await pool?.end()
-    await owned?.drop()
+    try {
+      await pool?.end()
+    } finally {
+      await owned?.drop()
+    }
   })
   const request = (path: string, init?: RequestInit) => {
     // Each independent synthetic flow has its own transport address. Rate-limit behavior
@@ -332,17 +339,22 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
       .execute()
     expect((await resolve(scoped)).ok).toBe(false)
   })
-  function app(trustedProxies: readonly string[] = []) {
+  function app(trustedProxies: readonly string[] = [], meetingPollSecret?: string) {
+    const polls =
+      meetingPollSecret === undefined ? [] : [{ db, publicUrl: BASE, meetingPollSecret }]
     return createApp({
       checkDb: async () => {},
       authHandler: auth.handler,
       resolveCaller: createCallerResolver({ auth, db }),
       publicUrl: BASE,
       trustedProxies,
-      routes: [mcpOAuthRoutes({ auth, db, publicUrl: BASE, ssoCapabilities })],
+      routes: [
+        mcpOAuthRoutes({ auth, db, publicUrl: BASE, ssoCapabilities }),
+        ...polls.map(meetingPollHostRoutes),
+      ],
       ssoTeamReads: { db, capabilities: ssoCapabilities },
       mcp: mcpEndpoint({
-        tools: [whoamiTool],
+        tools: [whoamiTool, ...polls.flatMap(meetingPollHostTools)],
         oauth: {
           resolve: createMcpOAuthResolver({ auth, db, publicUrl: BASE, ssoCapabilities }),
           handler: auth.handler,
@@ -437,7 +449,12 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
     expect(response.status).toBe(200)
     return (await response.json()) as { access_token: string; refresh_token: string }
   }
-  const mcpRequest = (token?: string, extra: Record<string, string> = {}, path = '/mcp') =>
+  const mcpRequest = (
+    token?: string,
+    extra: Record<string, string> = {},
+    path = '/mcp',
+    tool: { name: string; input: object } = { name: 'whoami', input: {} },
+  ) =>
     new Request(`${BASE}${path}`, {
       method: 'POST',
       headers: {
@@ -445,7 +462,7 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
         accept: 'application/json, text/event-stream',
         'MCP-Protocol-Version': '2026-07-28',
         'Mcp-Method': 'tools/call',
-        'Mcp-Name': 'whoami',
+        'Mcp-Name': tool.name,
         ...(token ? { authorization: `Bearer ${token}` } : {}),
         ...extra,
       },
@@ -454,8 +471,8 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
         id: 1,
         method: 'tools/call',
         params: {
-          name: 'whoami',
-          arguments: {},
+          name: tool.name,
+          arguments: tool.input,
           _meta: {
             'io.modelcontextprotocol/protocolVersion': '2026-07-28',
             'io.modelcontextprotocol/clientCapabilities': {},
@@ -1419,6 +1436,98 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
     expect((await app().request(mcpRequest(again.access_token))).status).toBe(200)
     expect((await app().request(mcpRequest(tokens.access_token))).status).toBe(401)
     expect((await exchange(pending, oldCode)).status >= 400).toBe(true)
+  })
+  it('binds meeting poll finalization and replay to a current mcp:tools grant', async () => {
+    const poll = await createFinalizeFixture(db)
+    const s = await session(poll.owner)
+    const unsupported = authorization()
+    unsupported.query.set('scope', 'offline_access')
+    const refused = await request(`/api/auth/oauth2/authorize?${unsupported.query}`, {
+      headers: s.headers,
+    })
+    expect(refused.status).toBe(302)
+    const selection = new URL(refused.headers.get('location') as string, BASE)
+    expect(selection.pathname === '/oauth/authorize', 'offline-only authorization URL').toBe(true)
+    expect((await api('request', s, { oauthQuery: queryOf(selection) })).status).toBe(400)
+    const tokens = await connected(s, poll.organizationId)
+    const foreign = await connected(s)
+    const application = app([], poll.ctx.meetingPollSecret)
+    const input = await poll.input([await poll.addVoter()])
+    const finalize = (token: string) =>
+      application.request(mcpRequest(token, {}, '/mcp', { name: 'finalize_meeting_poll', input }))
+    const inRest = await application.request(
+      `${BASE}/api/v1/meeting-polls/${poll.poll.id}/results`,
+      {
+        headers: { authorization: `Bearer ${tokens.access_token}` },
+      },
+    )
+    expect(inRest.status).toBe(401)
+    const wrongOrganization = await finalize(foreign.access_token)
+    expect(wrongOrganization.status).toBe(200)
+    expect((await wrongOrganization.text()).includes('poll_not_found')).toBe(true)
+
+    const { referenceId: grantId, id: consentId } = await db
+      .selectFrom('auth.oauthConsent')
+      .innerJoin('mcp_oauth_grants as g', (join) =>
+        join.on(sql<boolean>`g.id::text = "oauthConsent"."referenceId"`),
+      )
+      .select(['auth.oauthConsent.referenceId', 'auth.oauthConsent.id'])
+      .where('g.organization_id', '=', poll.organizationId)
+      .executeTakeFirstOrThrow()
+    const accepted = await finalize(tokens.access_token)
+    expect(accepted.status).toBe(200)
+    function expectPrivateResponse(raw: string) {
+      expect(
+        /"(?:manageToken|manageUrl|oauthConsentId)"\s*:/.test(raw),
+        'MCP finalization must omit booking and OAuth credentials',
+      ).toBe(false)
+      for (const privateValue of [
+        tokens.access_token,
+        tokens.refresh_token,
+        grantId,
+        consentId,
+        input.idempotencyKey,
+      ]) {
+        if (privateValue) expect(raw.includes(privateValue)).toBe(false)
+      }
+    }
+    const firstResponse = await accepted.text()
+    expectPrivateResponse(firstResponse)
+    const data = firstResponse.split('\n').find((line) => line.startsWith('data: '))
+    expect(JSON.parse(data ? data.slice(6) : firstResponse).result.structuredContent).toMatchObject(
+      {
+        booking: { status: 'confirmed', source: 'mcp' },
+        poll: { status: 'scheduled' },
+        replayed: false,
+      },
+    )
+    const bookings = () =>
+      db
+        .selectFrom('bookings')
+        .select(['api_key_id', 'oauth_consent_id', 'source'])
+        .where('event_type_id', '=', poll.eventTypeId)
+        .execute()
+    expect(await bookings()).toEqual([
+      { api_key_id: null, oauth_consent_id: consentId, source: 'mcp' },
+    ])
+    const replay = await finalize(tokens.access_token)
+    expect(replay.status).toBe(200)
+    const replayResponse = await replay.text()
+    expectPrivateResponse(replayResponse)
+    expect(replayResponse.includes('"replayed":true')).toBe(true)
+
+    // Model a consent that no longer includes scheduling while the signed token still does.
+    await db
+      .updateTable('auth.oauthConsent')
+      .set({ scopes: JSON.stringify(['offline_access']) })
+      .where('id', '=', consentId)
+      .execute()
+    const deniedReplay = await finalize(tokens.access_token)
+    expect(deniedReplay.status).toBe(401)
+    const deniedResponse = await deniedReplay.text()
+    expectPrivateResponse(deniedResponse)
+    expect(JSON.parse(deniedResponse)).toEqual({ error: 'invalid_token' })
+    expect(await bookings()).toHaveLength(1)
   })
   it('disables native consent mutation endpoints so they cannot bypass grant revocation', async () => {
     const s = await session(),
