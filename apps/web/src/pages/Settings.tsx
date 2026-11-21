@@ -37,6 +37,10 @@ export function SettingsPage() {
   const navigate = useNavigate()
   // RequireSession resets this state when the account or active space changes.
   const [linkCallback, setLinkCallback] = useState<string | null | undefined>()
+  const fragment = new URLSearchParams(location.hash.slice(1))
+  const isLinkCallback = fragment.has('sso-link')
+  const callbackAttemptId =
+    isLinkCallback && fragment.size === 1 ? oidcAttemptId(fragment.get('sso-link')) : null
   const dismissLinkCallback = useCallback(() => setLinkCallback(undefined), [])
   // Keep the creation response through a failed read in this view. Consume history state
   // afterwards so reloading cannot replay an old membership as current confirmation.
@@ -51,17 +55,13 @@ export function SettingsPage() {
       : null
   })
   useEffect(() => {
-    const fragment = new URLSearchParams(location.hash.slice(1))
-    const isLinkCallback = fragment.has('sso-link')
     const hasCreatedMember =
       location.state &&
       typeof location.state === 'object' &&
       Object.hasOwn(location.state, 'createdMember')
     if (!isLinkCallback && !hasCreatedMember) return
     // Keep the opaque completion handle in memory, never in history state.
-    if (isLinkCallback) {
-      setLinkCallback(fragment.size === 1 ? oidcAttemptId(fragment.get('sso-link')) : null)
-    }
+    if (isLinkCallback) setLinkCallback(callbackAttemptId)
     const state = hasCreatedMember ? { ...location.state } : location.state
     if (hasCreatedMember) delete state.createdMember
     navigate(
@@ -72,7 +72,7 @@ export function SettingsPage() {
       },
       { replace: true, state: hasCreatedMember && !Object.keys(state).length ? null : state },
     )
-  }, [location, navigate])
+  }, [callbackAttemptId, isLinkCallback, location, navigate])
   const [profile, reload] = useLoad(loadProfile)
   const organizationId = me.organization.id
   const userId = me.user.id
@@ -152,7 +152,7 @@ export function SettingsPage() {
       )}
       {!personal && me.principal.kind === 'session' && shell?.ssoOidcEnabled === true && (
         <SsoMemberSettings
-          callbackAttemptId={linkCallback}
+          callbackAttemptId={isLinkCallback ? undefined : linkCallback}
           onDismissCallback={dismissLinkCallback}
         />
       )}
