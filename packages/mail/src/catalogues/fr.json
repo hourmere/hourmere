@@ -169,5 +169,9 @@
   "series.cancelled.member": "Annulée",
   "series.manage": "Gérer la série",
   "series.view": "Voir la série",
-  "series.repair": "Pour relancer la création du lien de réunion, ouvrez la réservation concernée dans Hourmere."
+  "series.repair": "Pour relancer la création du lien de réunion, ouvrez la réservation concernée dans Hourmere.",
+  "scimMapping.subject": "Association d’équipe SCIM mise à jour",
+  "scimMapping.linked": "Votre équipe a approuvé l’association SCIM {mappingId}. Une fois le groupe provisionné, l’annuaire associé pourra gérer le nom de l’équipe enfant et ses membres gérés par l’annuaire.",
+  "scimMapping.unlinked": "L’association SCIM {mappingId} a été supprimée pour votre équipe. L’annuaire ne peut plus gérer l’équipe par cette association.",
+  "scimMapping.suspended": "L’accès de l’annuaire par l’association SCIM {mappingId} a été suspendu. Les appartenances et les états de suspension existants sont conservés."
 }

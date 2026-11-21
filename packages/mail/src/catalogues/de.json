@@ -169,5 +169,9 @@
   "series.cancelled.member": "Storniert",
   "series.manage": "Terminserie verwalten",
   "series.view": "Terminserie ansehen",
-  "series.repair": "Öffnen Sie die betroffene Buchung in Hourmere, um die Erstellung des Meetinglinks erneut zu versuchen."
+  "series.repair": "Öffnen Sie die betroffene Buchung in Hourmere, um die Erstellung des Meetinglinks erneut zu versuchen.",
+  "scimMapping.subject": "SCIM-Teamzuordnung aktualisiert",
+  "scimMapping.linked": "Ihr Team hat die SCIM-Zuordnung {mappingId} genehmigt. Sobald die Gruppe bereitgestellt ist, kann das verknüpfte Verzeichnis den Namen des untergeordneten Teams und dessen verzeichnisverwaltete Mitglieder verwalten.",
+  "scimMapping.unlinked": "Die SCIM-Zuordnung {mappingId} wurde für Ihr Team aufgehoben. Das Verzeichnis kann das Team über diese Zuordnung nicht mehr verwalten.",
+  "scimMapping.suspended": "Der Verzeichniszugriff über die SCIM-Zuordnung {mappingId} wurde ausgesetzt. Bestehende Mitgliedschaften und Sperrstatus bleiben erhalten."
 }
