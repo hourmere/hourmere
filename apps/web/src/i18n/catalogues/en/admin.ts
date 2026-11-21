@@ -597,7 +597,6 @@ export const admin = {
     'Scope cannot be changed after creation. To change it, create a new key and revoke the old one.',
   'Review the scope and expiration, create and test the new key, then revoke the old one.':
     'Review the scope and expiration, create and test the new key, then revoke the old one.',
-  'Create replacement': 'Create replacement',
   'Create a replacement for {0}': 'Create a replacement for {0}',
   'Cancel replacement': 'Cancel replacement',
   ' (replacement)': ' (replacement)',
@@ -3090,4 +3089,56 @@ export const admin = {
     'Restore this membership in your identity provider before making this member an admin.',
   'Change your display name in your identity provider for this team.':
     'Change your display name in your identity provider for this team.',
+
+  // SSO enforcement, identity links and delegation
+  'Admission policy': 'Admission policy',
+  'Just-in-time admission': 'Just-in-time admission',
+  'Just-in-time admission lets eligible people join through SSO and requires a verified team domain.':
+    'Just-in-time admission lets eligible people join through SSO and requires a verified team domain.',
+  'Save admission policy': 'Save admission policy',
+  'Admission policy saved.': 'Admission policy saved.',
+  'The team’s admission policy is unavailable.': 'The team’s admission policy is unavailable.',
+  'Verify a team domain before enabling just-in-time admission.':
+    'Verify a team domain before enabling just-in-time admission.',
+  'Identity links': 'Identity links',
+  'Identity link': 'Identity link',
+  'Identity link ID': 'Identity link ID',
+  'Identity link retired.': 'Identity link retired.',
+  'Identity links are unavailable.': 'Identity links are unavailable.',
+  'Only another team owner can retire an owner’s identity link.':
+    'Only another team owner can retire an owner’s identity link.',
+  'For your own link, use Your team sign-in in Settings. To link again after retirement, sign in with your usual method and choose the provider there.':
+    'For your own link, use Your team sign-in in Settings. To link again after retirement, sign in with your usual method and choose the provider there.',
+  'There are no other identity links for this provider.':
+    'There are no other identity links for this provider.',
+  'Verify the member’s request separately and match the exact link ID before retiring it.':
+    'Verify the member’s request separately and match the exact link ID before retiring it.',
+  'Choose an identity link': 'Choose an identity link',
+  'Retire identity link': 'Retire identity link',
+  'Retire this identity link?': 'Retire this identity link?',
+  'Could not retire this identity link.': 'Could not retire this identity link.',
+  'Could not retire this identity link. Only another team owner can retire an owner’s identity link.':
+    'Could not retire this identity link. Only another team owner can retire an owner’s identity link.',
+  'The member needs a verified Hourmere login email before this link can be retired.':
+    'The member needs a verified Hourmere login email before this link can be retired.',
+  'SSO delegation': 'SSO delegation',
+  'Delegation changes apply to credentials in {team}. Switch teams to manage a credential from another team.':
+    'Delegation changes apply to credentials in {team}. Switch teams to manage a credential from another team.',
+  'Bind SSO delegation': 'Bind SSO delegation',
+  'Revoke SSO delegation': 'Revoke SSO delegation',
+  'Revoke this SSO delegation?': 'Revoke this SSO delegation?',
+  'SSO delegation expires {when}.': 'SSO delegation expires {when}.',
+  'SSO delegation bound.': 'SSO delegation bound.',
+  'SSO delegation revoked.': 'SSO delegation revoked.',
+  'SSO delegation is unavailable for this credential.':
+    'SSO delegation is unavailable for this credential.',
+  'Could not verify this team’s SSO policy.': 'Could not verify this team’s SSO policy.',
+  'Could not change SSO delegation. Try again.': 'Could not change SSO delegation. Try again.',
+  'This credential or its delegation is unavailable. Check the active team and try again.':
+    'This credential or its delegation is unavailable. Check the active team and try again.',
+  'The team’s SSO settings changed. Start again.': 'The team’s SSO settings changed. Start again.',
+  'Link a team sign-in method in Settings before binding a delegation.':
+    'Link a team sign-in method in Settings before binding a delegation.',
+  'Could not verify your team sign-in settings.': 'Could not verify your team sign-in settings.',
+  'Create a replacement': 'Create a replacement',
 } as const
