@@ -1,4 +1,5 @@
 import type { Db } from '@hourmere/db'
+import { recordTeamWriteOrganizationLock } from '@hourmere/db/team-write'
 import { DomainError } from './errors.ts'
 
 const invalidHosts = () =>
@@ -161,4 +162,5 @@ export async function lockOrganization(db: Db, id: string): Promise<void> {
     .forShare()
     .executeTakeFirst()
   if (!row) throw new DomainError('not_found', 'event_type_not_found', 'No such event type')
+  recordTeamWriteOrganizationLock(db, id)
 }

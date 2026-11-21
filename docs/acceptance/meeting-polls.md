@@ -2,7 +2,7 @@
 
 The [meeting poll implementation plan](../meeting-polls.md#implementation-plan-and-acceptance-checks) calls for acceptance with fake providers and multiple time zones. These tests use migrated throwaway PostgreSQL databases, fake Google Calendar and captured mail. They exercise America/Los_Angeles, Asia/Shanghai and Europe/London, with an additional half-hour transition in Australia/Lord_Howe.
 
-The targeted Vitest run passed 112 tests. The focused deadline run passed its three selected tests, including the source-copy check. Playwright passed both the desktop and mobile projects at 320 px.
+The targeted Vitest run passed 113 tests. The focused deadline run passed its three selected tests, including the source-copy check. Playwright passed both the desktop and mobile projects at 320 px.
 
 ## Workflow and privacy
 

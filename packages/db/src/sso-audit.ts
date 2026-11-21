@@ -116,7 +116,10 @@ export const ssoAuditDetails = {
   'sso_link.conflicted': providerEvent,
   // Sign-in and step-up ceremonies.
   'sso_authentication.succeeded': providerEvent,
-  'sso_authentication.failed': providerRefusal,
+  'sso_authentication.failed': {
+    ...providerRefusal,
+    reasons: [...SSO_AUDIT_REASONS, 'scim_suspended'],
+  },
   'sso_authentication.replay_rejected': providerEvent,
   // Just-in-time admission.
   'sso_jit.admitted': providerEvent,
@@ -262,7 +265,7 @@ export function redactSsoSecurityFailure(
   if (validValue.revision(failure.revision, spec)) details.revision = failure.revision as number
   if (spec.required.includes('reason'))
     details.reason = validValue.reason(failure.reason, spec)
-      ? (failure.reason as SsoAuditReason)
+      ? (failure.reason as string)
       : 'unclassified'
   if (validValue.correlationId(failure.correlationId, spec))
     details.correlationId = failure.correlationId as string
