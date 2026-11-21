@@ -95,6 +95,8 @@ import {
   findRoutingBookingReplayEvidence,
   lockRoutingBookingReceipt,
   type RoutingBookingClaim,
+  type RoutingBookingSnapshot,
+  readBookingRoutingSnapshot,
   routedBookingUnavailable,
   routingBookingTokenDigest,
 } from './routing-booking.ts'
@@ -178,6 +180,10 @@ export interface BookingWithToken {
    * keeping the invitee's link private and usable. Idempotent creation replays return null.
    */
   manageToken: string | null
+}
+
+export interface HostBookingDetail extends Booking {
+  routing?: RoutingBookingSnapshot
 }
 
 export const MAX_GUESTS = 10
@@ -2812,10 +2818,8 @@ export async function listHostBookings(
   }
 }
 
-/** A booking of the caller's organization that the caller hosts; else `booking_not_found`. */
-export async function getHostBooking(ctx: ServiceContext, id: string): Promise<Booking> {
-  if (!UUID.test(id)) throw bookingNotFound()
-  const row = await ctx.db
+function hostBookingDetailQuery(ctx: ServiceContext, id: string) {
+  return ctx.db
     .selectFrom('bookings as b')
     .innerJoin(resolvedBookingHosts(ctx.db).as('bh'), 'bh.booking_id', 'b.id')
     .leftJoin('event_types as et', (join) =>
@@ -2833,13 +2837,37 @@ export async function getHostBooking(ctx: ServiceContext, id: string): Promise<B
     )
     .where('bh.user_id', '=', ctx.principal.user.id)
     .where('b.organization_id', '=', ctx.principal.organization.id)
-    .executeTakeFirst()
+}
+
+/** A booking of the caller's organization that the caller hosts; else `booking_not_found`. */
+export async function getHostBooking(ctx: ServiceContext, id: string): Promise<Booking> {
+  if (!UUID.test(id)) throw bookingNotFound()
+  const row = await hostBookingDetailQuery(ctx, id).executeTakeFirst()
   if (!row) throw bookingNotFound()
   const [booking] = await toBookings(ctx.db, [row], {
     userId: ctx.principal.user.id,
     now: ctx.now,
   })
   return booking as Booking
+}
+
+/** Booking detail with private historical routing answers for a current host. */
+export async function getHostBookingDetail(
+  ctx: ServiceContext,
+  id: string,
+): Promise<HostBookingDetail> {
+  if (!UUID.test(id)) throw bookingNotFound()
+  const { db, principal } = ctx
+  const row = await hostBookingDetailQuery(ctx, id)
+    .select('b.has_routing_snapshot')
+    .executeTakeFirst()
+  if (!row) throw bookingNotFound()
+
+  // Ordinary detail keeps its existing statement count and response shape.
+  const routing = row.has_routing_snapshot ? await readBookingRoutingSnapshot(ctx, row.id) : null
+  if (routing === undefined) throw bookingNotFound()
+  const [booking] = await toBookings(db, [row], { userId: principal.user.id, now: ctx.now })
+  return routing ? { ...(booking as Booking), routing } : (booking as Booking)
 }
 
 /**

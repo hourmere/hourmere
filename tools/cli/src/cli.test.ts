@@ -582,7 +582,7 @@ describe('CLI transport and arguments', () => {
     ],
     [
       'boolean syntax',
-      ["value !== 'true' && value !== 'false'", 'false'],
+      ["if (value !== 'true' && value !== 'false') throw new CliError('invalid_options')", ''],
       (runner) =>
         verifyRedirectRejection(runner, [
           'update-event',
@@ -915,6 +915,32 @@ describe('CLI transport and arguments', () => {
       expect(fetcher).toHaveBeenCalledTimes(1)
     },
   )
+
+  it('reads one booking and preserves its optional routing snapshot as JSON', async () => {
+    const bookingId = '019a0000-0000-7000-8000-000000000001'
+    const questionId = '019a0000-0000-7000-8000-000000000002'
+    const routing = {
+      formId: '019a0000-0000-7000-8000-000000000003',
+      versionId: '019a0000-0000-7000-8000-000000000004',
+      versionNumber: 7,
+      matchedRuleId: 'fallback',
+      resolvedRuleId: 'fallback',
+      questions: [{ id: questionId, type: 'short_text', label: 'Company', required: true }],
+      answers: { [questionId]: 'Original answer' },
+    }
+    for (const booking of [{ id: bookingId }, { id: bookingId, routing }]) {
+      const fetcher = vi.fn<typeof fetch>(async () => response(booking))
+      const result = await run(['booking', '--input', '-'], { bookingId }, { fetch: fetcher })
+      expect(result.code).toBe(0)
+      expect(result.stderr).toBe('')
+      expect(JSON.parse(result.stdout)).toEqual(booking)
+      expect(fetcher).toHaveBeenCalledTimes(1)
+      expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body)).params).toMatchObject({
+        name: 'get_booking',
+        arguments: { bookingId },
+      })
+    }
+  })
 
   it('forwards workflow history pagination and prints the history page as JSON', async () => {
     const id = '019a0000-0000-7000-8000-000000000001'

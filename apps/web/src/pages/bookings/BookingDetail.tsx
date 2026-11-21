@@ -48,6 +48,7 @@ type Question = Schemas['Question']
 
 interface Loaded {
   booking: Booking
+  routing: Schemas['BookingRouting'] | undefined
   /** The event type's questions, for labelling answers; [] if it is gone. */
   questions: Question[]
   timeZone: string
@@ -157,7 +158,7 @@ function BookingDetail({
 
   const load = useCallback(
     async (signal: AbortSignal): Promise<Loaded | 'missing' | 'resolve'> => {
-      const [booking, profile] = await Promise.all([
+      const [detail, profile] = await Promise.all([
         unwrap(api.GET('/api/v1/bookings/{id}', { params: { path: { id } }, signal })).catch(
           (err: unknown) => {
             // A malformed id is a 400 invalid_request: as missing as an unknown one.
@@ -174,7 +175,9 @@ function BookingDetail({
         ),
         loadProfile(signal),
       ])
-      if (booking === 'missing' || booking === 'resolve') return booking
+      if (detail === 'missing' || detail === 'resolve') return detail
+      // Keep the original snapshot separate from the booking updated by mutation and list responses.
+      const { routing, ...booking } = detail
       let questions: Question[] = booking.questions ?? []
       if (booking.eventTypeId && !booking.questions) {
         // The event type may have been deleted since, or belong to another organization's
@@ -190,7 +193,7 @@ function BookingDetail({
           if (signal.aborted) throw err
         }
       }
-      return { booking, questions, ...hostZone(profile) }
+      return { booking, routing, questions, ...hostZone(profile) }
     },
     [id],
   )
@@ -237,6 +240,7 @@ function BookingDetail({
 
 function BookingView({
   booking: initial,
+  routing,
   questions,
   timeZone,
   fromProfile,
@@ -523,8 +527,9 @@ function BookingView({
         </dl>
       </section>
 
+      {routing && <RoutingAnswers routing={routing} />}
       <section className="panel" aria-labelledby="answers-heading">
-        <h2 id="answers-heading">{t('Answers')}</h2>
+        <h2 id="answers-heading">{t(routing ? 'Final booking answers' : 'Answers')}</h2>
         {answerIds.length === 0 ? (
           <p className="muted">{t('No answers to extra questions.')}</p>
         ) : (
@@ -545,6 +550,36 @@ function BookingView({
         )}
       </section>
     </>
+  )
+}
+
+function RoutingAnswers({ routing }: { routing: Schemas['BookingRouting'] }) {
+  const { t } = useI18n()
+  const answers = routing.questions.flatMap((question) => {
+    if (!Object.hasOwn(routing.answers, question.id)) return []
+    const value = routing.answers[question.id]
+    const answer =
+      question.type === 'select'
+        ? (question.options.find((option) => option.id === value)?.label ?? value)
+        : value
+    return [{ id: question.id, label: question.label, answer }]
+  })
+  return (
+    <section className="panel user-content" aria-labelledby="routing-answers-heading">
+      <h2 id="routing-answers-heading">{t('Original routing answers')}</h2>
+      {answers.length === 0 ? (
+        <p className="muted">{t('No routing answers were submitted.')}</p>
+      ) : (
+        <dl className="details details-stacked">
+          {answers.map(({ id, label, answer }) => (
+            <div key={id} className="detail-pair">
+              <dt>{label}</dt>
+              <dd className="multiline">{answer}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </section>
   )
 }
 

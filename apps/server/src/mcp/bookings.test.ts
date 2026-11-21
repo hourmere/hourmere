@@ -161,6 +161,91 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
     }
   }
 
+  it('reads retained routing details with current host access while routing forms are off', async () => {
+    const organizationId = await f.organization()
+    await f.member(ada.userId, organizationId)
+    await f.member(agent.userId, organizationId, 'admin')
+    const bookingId = await f.booking(
+      organizationId,
+      [ada.userId],
+      '2026-12-01T12:00:00Z',
+      '2026-12-01T12:30:00Z',
+    )
+    const args = { bookingId }
+    const keys = []
+    for (const scope of ['full', 'read', 'bookings'] as const) {
+      keys.push(
+        await auth.api.createApiKey({
+          body: { userId: ada.userId, metadata: { scope, organizationId } },
+        }),
+      )
+    }
+    for (const { key } of keys) {
+      const detail = ok(await call('get_booking', args, key))
+      expect(detail).toMatchObject({ id: bookingId })
+      expect(detail).not.toHaveProperty('routing')
+    }
+
+    const questionId = '415bd292-8c4e-09a8-088f-367017c5399a'
+    const optionId = 'c71e5848-c074-0ef8-0f29-d46433ab9585'
+    const routing = {
+      formId: randomUUID(),
+      versionId: randomUUID(),
+      versionNumber: 7,
+      matchedRuleId: randomUUID(),
+      resolvedRuleId: 'fallback',
+      questions: [
+        {
+          id: questionId,
+          type: 'select',
+          label: 'Original question',
+          required: true,
+          options: [{ id: optionId, label: 'Original answer' }],
+        },
+      ],
+      answers: { [questionId]: optionId },
+    }
+    await db
+      .insertInto('booking_routing')
+      .values({
+        booking_id: bookingId,
+        organization_id: organizationId,
+        form_id: routing.formId,
+        version_id: routing.versionId,
+        version_number: routing.versionNumber,
+        matched_rule_id: routing.matchedRuleId,
+        resolved_rule_id: routing.resolvedRuleId,
+        questions: JSON.stringify(routing.questions),
+        answers: JSON.stringify(routing.answers),
+        replay_fingerprint: Buffer.alloc(32, 1),
+      })
+      .execute()
+    for (const { key } of keys) {
+      const detail = ok<{ routing: unknown }>(await call('get_booking', args, key))
+      expect(detail.routing).toEqual(routing)
+
+      const rest = await app.request(`/api/v1/bookings/${bookingId}`, {
+        headers: { authorization: `Bearer ${key}` },
+      })
+      expect(rest.status).toBe(200)
+      expect(detail).toEqual(await rest.json())
+
+      const page = ok<{ data: { id: string }[] }>(await call('list_bookings', {}, key))
+      const listed = page.data.find((booking) => booking.id === bookingId)
+      expect(listed).toBeDefined()
+      expect(listed).not.toHaveProperty('routing')
+    }
+
+    const admin = await createKey(agent.userId, 'non-host-admin', organizationId)
+    const missing = errorOf(await call('get_booking', { bookingId: randomUUID() }, admin.key))
+    expect(missing.error).toBe('booking_not_found')
+    expect(errorOf(await call('get_booking', args, admin.key))).toEqual(missing)
+    expect(errorOf(await call('get_booking', args, adaKey.key))).toEqual(missing)
+    expect(errorOf(await call('get_booking', { bookingId: 'invalid' }, admin.key)).error).toBe(
+      'invalid_request',
+    )
+  })
+
   it('passes an invitee location choice and phone to the shared booking service', async () => {
     const host = await f.host({ handle: `choice-${randomUUID().slice(0, 8)}` })
     await f.schedule(host.userId)

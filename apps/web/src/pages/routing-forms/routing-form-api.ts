@@ -62,6 +62,35 @@ export function saveRoutingForm(
   )
 }
 
+export function setRoutingFormEnabled(
+  organizationId: string,
+  id: string,
+  expectedRevision: number,
+  enabled: boolean,
+) {
+  return unwrap(
+    api.PATCH(record, {
+      cache: 'no-store',
+      params: { header: organizationHeader(organizationId), path: { id } },
+      body: { expectedRevision, enabled },
+    }),
+  )
+}
+
+export function publishRoutingForm(
+  organizationId: string,
+  id: string,
+  body: Schemas['PublishRoutingForm'],
+) {
+  return unwrap(
+    api.POST('/api/v1/routing-forms/{id}/publish', {
+      cache: 'no-store',
+      params: { header: organizationHeader(organizationId), path: { id } },
+      body,
+    }),
+  )
+}
+
 export function previewRoutingForm(
   organizationId: string,
   id: string,

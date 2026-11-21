@@ -2,7 +2,7 @@ import {
   RoutingValidationError,
   validateRoutingFormConfig,
 } from '@hourmere/scheduling/routing-form-config'
-import { type FormEvent, useRef, useState } from 'react'
+import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import type { Schemas } from '../../api/client.ts'
 import { isOrganizationContextChanged, RequestError } from '../../api/errors.ts'
@@ -14,16 +14,20 @@ import { useI18n } from '../../i18n/runtime.tsx'
 import type { MessageKey } from '../../i18n/translate.ts'
 import { PATHS, routingFormPath } from '../../paths.ts'
 import { randomKey } from '../../public/api.ts'
-import { useConfirmLeave, useUnsavedChanges } from '../../unsaved-changes.tsx'
+import { useUnsavedChanges } from '../../unsaved-changes.tsx'
 import { RoutingFormPreview } from './RoutingFormPreview.tsx'
+import { RoutingFormPublication, type RoutingPublicationAction } from './RoutingFormPublication.tsx'
 import { RoutingQuestionsEditor } from './RoutingQuestionsEditor.tsx'
 import { RoutingRulesEditor } from './RoutingRulesEditor.tsx'
 import {
   archiveRoutingForm,
   createRoutingForm,
+  getRoutingForm,
+  publishRoutingForm,
   type RoutingDraft,
   type RoutingForm,
   saveRoutingForm,
+  setRoutingFormEnabled,
 } from './routing-form-api.ts'
 import { useRoutingTargetEvents } from './routing-target-events.ts'
 import { routingEventMappingErrors } from './routing-target-mappings.ts'
@@ -40,6 +44,11 @@ const unavailableMessage = 'This routing form is unavailable.'
 const deniedMessage = "You don't have permission to do that."
 const saveFailure = 'Could not save the routing form.'
 const archiveFailure = 'Could not archive the routing form.'
+const publicationFailures = {
+  publish: 'Could not publish the routing form.',
+  disable: 'Could not disable the routing form.',
+  enable: 'Could not re-enable the routing form.',
+} as const
 
 function targetFields(target: RoutingForm['fallback']): RoutingForm['fallback'] {
   if (target.kind === 'message') return { kind: target.kind, message: target.message }
@@ -82,6 +91,21 @@ function fieldsFrom(form: RoutingForm): RoutingDraft {
     })),
     fallback: targetFields(form.fallback),
   }
+}
+
+function sameValue(left: unknown, right: unknown) {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
+function reconcileDraft(draft: RoutingDraft, baseline: RoutingDraft, latest: RoutingDraft) {
+  const next = { ...latest }
+  let overlap = false
+  for (const key of Object.keys(baseline) as (keyof RoutingDraft)[]) {
+    if (sameValue(draft[key], baseline[key])) continue
+    overlap ||= !sameValue(latest[key], baseline[key]) && !sameValue(draft[key], latest[key])
+    Object.assign(next, { [key]: draft[key] })
+  }
+  return { next, overlap }
 }
 
 function validate(draft: RoutingDraft): FieldErrors {
@@ -130,7 +154,8 @@ type WriteIssue =
 function writeIssue(error: unknown, fallback: MessageKey): WriteIssue {
   if (isOrganizationContextChanged(error)) return { context: error }
   if (error instanceof RequestError) {
-    if (error.status === 403) return { message: deniedMessage, blocked: true }
+    if (error.status === 401 || error.status === 403)
+      return { message: deniedMessage, blocked: true }
     if (error.code === 'routing_revision_conflict') return { message: staleMessage, reload: true }
     if (error.status === 404) return { message: unavailableMessage, reload: true }
     if (/^(?:rules|fallback)(?:\.|$)/.test(error.field ?? ''))
@@ -145,23 +170,24 @@ export function RoutingFormEditor({
   form,
   organizationId,
   personalOwnerId,
-  reload,
 }: {
   form?: RoutingForm
   organizationId: string
   personalOwnerId: string | null
-  reload?: () => void
 }) {
   const { t } = useI18n()
   const navigate = useNavigate()
   const mounted = useMounted()
-  const confirmLeave = useConfirmLeave()
   const inFlight = useRef(false)
+  const reloadRequest = useRef<AbortController | null>(null)
+  useEffect(() => () => reloadRequest.current?.abort(), [])
   const defaultFallback = {
     kind: 'message' as const,
     message: t('No appointment is available for these answers.'),
   }
-  const [busy, setBusy] = useState<'save' | 'archive' | null>(null)
+  const [busy, setBusy] = useState<'save' | 'archive' | 'reload' | RoutingPublicationAction | null>(
+    null,
+  )
   const [current, setCurrent] = useState(form)
   const [draft, setDraft] = useState<RoutingDraft>(() =>
     form
@@ -181,8 +207,15 @@ export function RoutingFormEditor({
   const [attempt, setAttempt] = useState(0)
   const [saved, setSaved] = useState(false)
   const [pending, setPending] = useState<Schemas['CreateRoutingForm'] | null>(null)
+  const [pendingPublication, setPendingPublication] = useState<
+    Schemas['PublishRoutingForm'] | null
+  >(null)
+  const [publicationStatus, setPublicationStatus] = useState<RoutingPublicationAction | null>(null)
+  const [publishedNumber, setPublishedNumber] = useState<number | null>(null)
+  const [reloaded, setReloaded] = useState(false)
+  const [overlap, setOverlap] = useState(false)
   const blocked = Boolean(issue && ('context' in issue || issue.reload || issue.blocked))
-  const dirty = JSON.stringify(draft) !== JSON.stringify(baseline)
+  const dirty = !sameValue(draft, baseline)
   useUnsavedChanges(dirty)
   const targets = [
     ...draft.rules.map((rule, index) => ({ path: `rules.${index}.target`, target: rule.target })),
@@ -199,14 +232,23 @@ export function RoutingFormEditor({
     setErrors({})
     setIssue(null)
     setSaved(false)
+    setReloaded(false)
   }
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (inFlight.current || blocked) return
+    if (
+      overlap &&
+      dirty &&
+      !window.confirm(t('Save your edits over the fields that also changed in the latest draft?'))
+    )
+      return
     setAttempt((value) => value + 1)
     setIssue(null)
     setSaved(false)
+    setReloaded(false)
+    setPublicationStatus(null)
     const problems = validate(draft)
     const { questions, rules } = draft
     const fallback = current ? draft.fallback : defaultFallback
@@ -252,6 +294,8 @@ export function RoutingFormEditor({
         setCurrent(updated)
         setDraft(next)
         setBaseline(next)
+        setOverlap(false)
+        setPendingPublication(null)
         setSaved(true)
       }
     } catch (error) {
@@ -278,6 +322,126 @@ export function RoutingFormEditor({
     } finally {
       inFlight.current = false
       if (mounted.current) setBusy(null)
+    }
+  }
+
+  async function reloadCurrent() {
+    if (!current || inFlight.current) return
+    const request = new AbortController()
+    reloadRequest.current = request
+    inFlight.current = true
+    setBusy('reload')
+    setAttempt((value) => value + 1)
+    setSaved(false)
+    setReloaded(false)
+    setPublicationStatus(null)
+    try {
+      const latest = await getRoutingForm(organizationId, current.id, request.signal)
+      if (!mounted.current) return
+      const nextBaseline = fieldsFrom(latest)
+      const merged = reconcileDraft(draft, baseline, nextBaseline)
+      setCurrent(latest)
+      setBaseline(nextBaseline)
+      setDraft(merged.next)
+      setOverlap(overlap || merged.overlap)
+      setErrors({})
+      setIssue(null)
+      events.retry()
+      if (latest.draftRevision !== current.draftRevision) setPendingPublication(null)
+      setReloaded(true)
+    } catch (error) {
+      if (!mounted.current) return
+      const failure = writeIssue(error, 'Could not load this routing form.')
+      setIssue('context' in failure ? failure : { ...failure, reload: true })
+    } finally {
+      reloadRequest.current = null
+      inFlight.current = false
+      if (mounted.current) setBusy(null)
+    }
+  }
+
+  async function changePublication(action: RoutingPublicationAction) {
+    if (!current || inFlight.current || blocked || (action === 'publish' && dirty)) return
+    const body =
+      action === 'publish'
+        ? (pendingPublication ?? {
+            expectedRevision: current.draftRevision,
+            requestId: randomKey(),
+          })
+        : null
+    inFlight.current = true
+    setBusy(action)
+    setAttempt((value) => value + 1)
+    setErrors({})
+    setIssue(null)
+    setSaved(false)
+    setReloaded(false)
+    setPublicationStatus(null)
+    try {
+      const publication = body ? await publishRoutingForm(organizationId, current.id, body) : null
+      const updated = publication
+        ? publication.form
+        : await setRoutingFormEnabled(
+            organizationId,
+            current.id,
+            current.draftRevision,
+            action === 'enable',
+          )
+      if (!mounted.current) return
+      setCurrent(updated)
+      setPendingPublication(null)
+      if (publication) {
+        const next = fieldsFrom(updated)
+        setDraft(next)
+        setBaseline(next)
+        setOverlap(false)
+      }
+      setPublishedNumber(publication?.version.versionNumber ?? null)
+      setPublicationStatus(action)
+    } catch (error) {
+      if (!mounted.current) return
+      const uncertain =
+        !(error instanceof RequestError) ||
+        error.status >= 500 ||
+        error.status === 408 ||
+        (pendingPublication !== null && error.status === 429)
+      if (body) setPendingPublication(uncertain ? body : null)
+      if (
+        action === 'publish' &&
+        error instanceof RequestError &&
+        error.code === 'invalid_routing_target'
+      ) {
+        events.retry()
+        const target = targets.find(
+          ({ path }) => error.field === path || error.field?.startsWith(`${path}.`),
+        )
+        if (target) {
+          setErrors({ [`${target.path}.kind`]: 'Check the routing rule or fallback.' })
+          setIssue({ message: 'Review the highlighted destination before publishing.' })
+        } else {
+          setIssue({ message: publicationFailures.publish })
+        }
+      } else {
+        setIssue(
+          writeIssue(
+            error,
+            uncertain && body
+              ? 'Could not confirm publication. Try publishing again to recover the result.'
+              : publicationFailures[action],
+          ),
+        )
+      }
+    } finally {
+      inFlight.current = false
+      if (mounted.current) setBusy(null)
+    }
+  }
+
+  function repair(ruleId: string) {
+    const index = draft.rules.findIndex((rule) => rule.id === ruleId)
+    if (ruleId === 'fallback' || index !== -1) {
+      const path = ruleId === 'fallback' ? 'fallback' : `rules.${index}.target`
+      document.getElementById(`${path}.kind`)?.focus()
     }
   }
 
@@ -308,12 +472,27 @@ export function RoutingFormEditor({
         ) : (
           <ErrorSummary errors={errors} message={issue?.message} attempt={attempt} />
         )}
-        {issue && 'reload' in issue && issue.reload && reload && (
+        {issue && 'reload' in issue && issue.reload && current && (
           <div className="form-actions">
-            <button type="button" className="button" onClick={() => confirmLeave() && reload()}>
+            <button type="button" className="button" disabled={!!busy} onClick={reloadCurrent}>
               {t('Reload')}
             </button>
           </div>
+        )}
+        {busy === 'reload' && <p role="status">{t('Loading routing form…')}</p>}
+        {reloaded && (
+          <p role="status" data-testid="routing-form-reloaded">
+            {dirty
+              ? t('The draft was reloaded. Your unsaved edits are still here.')
+              : t('Routing form reloaded.')}
+          </p>
+        )}
+        {overlap && dirty && (
+          <p className="alert">
+            {t(
+              'The latest draft changed some of the same fields. Review your edits before saving.',
+            )}
+          </p>
         )}
         <fieldset className="form-fieldset" disabled={!!busy || blocked || !!pending}>
           <div className="panel">
@@ -395,13 +574,28 @@ export function RoutingFormEditor({
           dirty={dirty}
           disabled={!!busy || blocked}
           eventTitle={events.eventTitle}
-          reload={reload}
+          reload={reloadCurrent}
+        />
+      )}
+      {current && (
+        <RoutingFormPublication
+          form={current}
+          draft={draft}
+          dirty={dirty}
+          disabled={!!busy || blocked}
+          busy={busy === 'publish' || busy === 'disable' || busy === 'enable' ? busy : null}
+          status={publicationStatus}
+          publishedNumber={publishedNumber}
+          events={events.list}
+          onPublish={() => changePublication('publish')}
+          onSetEnabled={(enabled) => changePublication(enabled ? 'enable' : 'disable')}
+          onRepair={repair}
         />
       )}
       {current && (
         <fieldset
           className="form-fieldset"
-          disabled={busy === 'save' || blocked}
+          disabled={(!!busy && busy !== 'archive') || blocked}
           data-testid="routing-form-archive"
         >
           <ConfirmAction

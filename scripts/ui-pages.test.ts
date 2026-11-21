@@ -149,6 +149,15 @@ it('covers every requested real page and limits en-GB to the booking page', () =
     'routing-manager-rules-fields-denied',
     'routing-manager-rules-fields-error',
     'routing-manager-rules-invalid-mapping',
+    'routing-manager-publication-review',
+    'routing-manager-publication-pending',
+    'routing-manager-publication-published',
+    'routing-manager-publication-disable',
+    'routing-manager-publication-disabled',
+    'routing-manager-publication-repair',
+    'routing-manager-publication-conflict',
+    'routing-manager-publication-denied',
+    'routing-manager-publication-error',
     'workflows',
     'team-workflows',
     'workflows-empty',
@@ -235,6 +244,7 @@ it('covers every requested real page and limits en-GB to the booking page', () =
     'embedded-booking',
     'team-booking',
     'manage',
+    'manage-routing-answers',
     'manage-reschedule',
     'sign-in',
     'oauth-consent',
@@ -243,7 +253,9 @@ it('covers every requested real page and limits en-GB to the booking page', () =
     'event-type-editor-expanded',
     'availability-editor',
     'bookings',
+    'bookings-routing-export',
     'booking-detail',
+    'booking-detail-routing-answers',
     'team-bookings',
     'team-booking-detail',
     'analytics',
@@ -633,6 +645,15 @@ const expected={
   'routing-manager-rules-fields-denied':{path:routingEditorPath,public:false,space:'team',wait:'testid:routing-booking-fields-denied'},
   'routing-manager-rules-fields-error':{path:routingEditorPath,public:false,space:'team',wait:'testid:routing-booking-fields-error',preview:'stale'},
   'routing-manager-rules-invalid-mapping':{path:routingEditorPath,public:false,space:'team',wait:'rules.0.target.mappings.0.options-error'},
+  'routing-manager-publication-review':{path:routingEditorPath,public:false,space:'team',wait:'testid:routing-publication-review Support with the coordinator'},
+  'routing-manager-publication-pending':{path:routingEditorPath,public:false,space:'team',wait:'testid:routing-publication-pending Publishing…'},
+  'routing-manager-publication-published':{path:routingEditorPath,public:false,space:'team',wait:'Published version 1.',preview:'result'},
+  'routing-manager-publication-disable':{path:routingEditorPath,public:false,space:'team',wait:'checkbox:I understand that while this form is disabled, submissions and pending booking links are blocked.'},
+  'routing-manager-publication-disabled':{path:routingEditorPath,public:false,space:'team',wait:'testid:routing-enable-confirmation'},
+  'routing-manager-publication-repair':{path:routingEditorPath,public:false,space:'team',wait:'[id="fallback.kind"]:focus'},
+  'routing-manager-publication-conflict':{path:routingEditorPath,public:false,space:'team',wait:'button:Reload'},
+  'routing-manager-publication-denied':{path:routingEditorPath,public:false,space:'team',wait:"You don't have permission to do that."},
+  'routing-manager-publication-error':{path:routingEditorPath,public:false,space:'team',wait:'Could not confirm publication.'},
   'workflows':{path:'/app/workflows',public:false,wait:'SyntheticAppointmentFollowUp'},
   'team-workflows':{path:'/app/workflows',public:false,space:'team',wait:'SyntheticAppointmentFollowUp'},
   'workflows-empty':{path:'/app/workflows',public:false,wait:'No workflows yet.'},
@@ -693,6 +714,7 @@ const expected={
   'oauth-consent':{path:'/oauth/consent',public:false,wait:'Synthetic audit connector'},
   'manage-reschedule':{path:'/booking',public:true,wait:'.reschedule-summary .event-title'},
   'event-type-editor-expanded':{path:'/app/event-types/synthetic-event',public:false,wait:'h1'},
+  'bookings-routing-export':{path:'/app/bookings',public:false,wait:'Include routing form answers'},
   'team-bookings':{path:'/app/team/bookings',public:false,space:'team',wait:'.team-bookings-list'},
   'team-booking-detail':{path:'/app/bookings/synthetic-team-booking',public:false,space:'team',wait:'.team-booking-detail'},
 }
@@ -735,7 +757,7 @@ for(const [id,state] of Object.entries(expected)) {
   assert.equal(signedIn,!state.public,'Wrong authentication state: '+id)
   assert.equal(space,state.space,'Wrong organization space: '+id)
   assert.ok(calls.some(call=>call[0]==='wait'&&call[1].includes(state.wait)),'Missing content verification: '+id)
-  if(id.startsWith('routing-manager-rules'))
+  if(id.startsWith('routing-manager-rules')||id.startsWith('routing-manager-publication'))
     assert.equal(new URLSearchParams(query).get('organizationId'),'synthetic-team-org','Editor must be pinned to the team space')
   if(state.preview) {
     assert.ok(calls.some(call=>call[0]==='press'&&call[1].includes('Run preview')&&call[2]==='Enter'),'Preview must submit answers with the keyboard')
@@ -751,6 +773,10 @@ for(const [id,state] of Object.entries(expected)) {
   }
   if(id==='booking-time-zone')
     assert.ok(calls.some(call=>call[0]==='press'&&call[1]==='.tz-toggle'&&call[2]==='Enter'),'Time-zone panel must open')
+  if(id==='bookings-routing-export') {
+    assert.ok(calls.some(call=>call[0]==='press'&&call[1]==='.booking-export summary'&&call[2]==='Enter'),'Export panel must open with the keyboard')
+    assert.ok(calls.some(call=>call[0]==='press'&&call[1].includes('Include routing form answers')&&call[2]==='Space'),'Routing answers must be selected with the keyboard')
+  }
   if(id==='team-booking-detail')
     assert.ok(calls.some(call=>call[0]==='press'&&call[1]==='.team-bookings-list button'&&call[2]==='Enter'),'Team booking detail must open with the keyboard')
   if(id==='embedded-booking') {
@@ -821,8 +847,8 @@ describe('source-copy coverage mutations', () => {
       'Missing content verification: manage-reschedule',
     ],
     [
-      "? '.reschedule-summary' : '.booking-details'",
-      "? '.reschedule-header' : '.booking-details'",
+      "? '.reschedule-summary' : '.manage > .booking-details'",
+      "? '.reschedule-header' : '.manage > .booking-details'",
       'Missing current booking summary readiness',
     ],
     [

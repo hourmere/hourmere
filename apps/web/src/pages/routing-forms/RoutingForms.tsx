@@ -190,6 +190,12 @@ function RoutingFormList({ organizationId }: { organizationId: string }) {
                   </Link>
                 </h2>
                 <p className="muted user-content">{form.slug}</p>
+                {form.publishedVersionId && form.health !== 'ok' && (
+                  <p className="muted">
+                    {t('Published target health')} ·{' '}
+                    {form.health === 'unavailable' ? t('Unavailable') : t('Health unknown')}
+                  </p>
+                )}
               </div>
             </li>
           ))}
@@ -224,14 +230,11 @@ function RoutingFormEdit({
     return <LoadFailure list={false} error={state.data.error} retry={reload} />
   }
 
-  const form = state.data.value
   return (
     <RoutingFormEditor
-      key={form.draftRevision}
       organizationId={organizationId}
       personalOwnerId={personalOwnerId}
-      form={form}
-      reload={reload}
+      form={state.data.value}
     />
   )
 }

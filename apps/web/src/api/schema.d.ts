@@ -707,74 +707,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** A booking the caller hosts */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description The booking */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Booking"];
-                    };
-                };
-                /** @description The id is not a UUID (`invalid_request`) */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description Forbidden. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description No such booking among those the caller hosts in this organization (`booking_not_found`) */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up (`rate_limited`); see Retry-After */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-            };
-        };
+        /**
+         * A booking the caller hosts
+         * @description A current host in the booking organization can read the booking and any stored routing snapshot. API keys require read, bookings or full scope. Stored snapshots remain readable while routing forms are off.
+         */
+        get: operations["getBooking"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1151,7 +1088,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description The booking, with its event type and hosts */
+                /** @description The booking, with its event type, hosts and any saved routing answers */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -6147,6 +6084,40 @@ export interface components {
             /** @description Pass as `cursor` to get the next page; null on the last page */
             nextCursor: string | null;
         };
+        /** @description The original stored routing provenance and question and answer snapshots. */
+        BookingRouting: {
+            /** @description Original answers keyed by question UUID. Select answers are option UUIDs with labels in the stored questions. */
+            answers: {
+                [key: string]: string;
+            };
+            /** Format: uuid */
+            formId: string;
+            matchedRuleId: string | "fallback";
+            questions: ({
+                /** Format: uuid */
+                id: string;
+                label: string;
+                required: boolean;
+                /** @enum {string} */
+                type: "short_text" | "email";
+            } | {
+                /** Format: uuid */
+                id: string;
+                label: string;
+                options: {
+                    /** Format: uuid */
+                    id: string;
+                    label: string;
+                }[];
+                required: boolean;
+                /** @enum {string} */
+                type: "select";
+            })[];
+            resolvedRuleId: string | "fallback";
+            /** Format: uuid */
+            versionId: string;
+            versionNumber: number;
+        };
         BookingWithToken: {
             booking: components["schemas"]["Booking"];
             /** @description The invitee's own manage token, sent as X-Manage-Token to /api/v1/bookings/manage. Returned once on creation or an invitee reschedule; creation replays and host reschedules return null. A host reschedule transfers the existing hash to the successor so the invitee's original token keeps working; an invitee reschedule leaves the old token on the cancelled booking. Emails carry their own tokens that follow the chain. */
@@ -7228,6 +7199,9 @@ export interface components {
             /** @enum {string} */
             status: "ok" | "degraded";
         };
+        HostBooking: components["schemas"]["Booking"] & {
+            routing?: components["schemas"]["BookingRouting"];
+        };
         Instance: {
             automaticGoogleMeet?: boolean;
             automaticZoom?: boolean;
@@ -7334,6 +7308,11 @@ export interface components {
                  */
                 state: "pending" | "expired" | "replaced" | "rescheduled" | "cancelled";
             };
+            /** @description For a booking with stored routing provenance, the original answers in question order, using the saved question and selected option labels. */
+            routingAnswers?: {
+                answer: string;
+                label: string;
+            }[];
         };
         /** @description The enrollment view for a session without the required team proof keeps the active organization ID and omits its metadata by returning empty name and slug strings. */
         Me: {
@@ -9942,6 +9921,73 @@ export interface operations {
             };
         };
     };
+    getBooking: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The booking */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostBooking"];
+                };
+            };
+            /** @description The id is not a UUID (`invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such booking among those the caller hosts in this organization (`booking_not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up (`rate_limited`); see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     getBookingAttendees: {
         parameters: {
             query?: never;
@@ -10501,6 +10547,8 @@ export interface operations {
                 /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
                 from: string;
                 hostUserId?: string;
+                /** @description Append routing provenance and saved answers to personal exports only. Requires routing forms to be enabled. False is equivalent to omitting the option. */
+                includeRoutingAnswers?: "true" | "false";
                 /** @description Order by start time and id: asc (default) or desc. Keep unchanged between pages. */
                 order?: "asc" | "desc";
                 /** @description Only bookings with this status. cancelled includes bookings replaced by a reschedule; their rescheduledToId tells them apart. */
@@ -10524,7 +10572,7 @@ export interface operations {
                     "text/csv": string;
                 };
             };
-            /** @description Invalid export filters or range */
+            /** @description Invalid export filters or range, or routing answers requested for a team (`invalid_request`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10544,6 +10592,15 @@ export interface operations {
             };
             /** @description Personal ownership or verified browser team-admin access required; team_management_access_denied for team agent credentials. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Routing answers requested while routing forms are disabled (`routing_forms_disabled`) */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

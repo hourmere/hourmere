@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test'
+import type { components } from '../../apps/web/src/api/schema.d.ts'
 import {
   AUDIT_CONFIRMATION_EMAIL,
   AUDIT_EMAIL,
@@ -107,6 +108,7 @@ export const auditPages = [
   { id: 'embedded-booking', title: 'Embedded booking' },
   { id: 'team-booking', title: 'Team booking' },
   { id: 'manage', title: 'Manage booking' },
+  { id: 'manage-routing-answers', title: 'Invitee routing answers' },
   { id: 'manage-reschedule', title: 'Manage reschedule' },
   { id: 'sign-in', title: 'Sign in' },
   { id: 'oauth-consent', title: 'OAuth consent' },
@@ -115,7 +117,9 @@ export const auditPages = [
   { id: 'event-type-editor-expanded', title: 'Event-type editor with all settings expanded' },
   { id: 'availability-editor', title: 'Availability editor' },
   { id: 'bookings', title: 'Bookings list' },
+  { id: 'bookings-routing-export', title: 'Booking CSV export with routing answers' },
   { id: 'booking-detail', title: 'Booking detail' },
+  { id: 'booking-detail-routing-answers', title: 'Host routing and booking answers' },
   { id: 'team-bookings', title: 'Team administrator bookings' },
   { id: 'team-booking-detail', title: 'Team administrator booking detail' },
   { id: 'analytics', title: 'Analytics' },
@@ -142,6 +146,7 @@ const publicPages = new Set<AuditPageId>([
   'embedded-booking',
   'team-booking',
   'manage',
+  'manage-routing-answers',
   'manage-reschedule',
   'sign-in',
   'not-found',
@@ -194,6 +199,17 @@ async function verifyAuditContent(page: Page, id: AuditPageId) {
     case 'manage':
       await page.locator('.booking-details').getByText(AUDIT_TITLE, { exact: true }).waitFor()
       break
+    case 'manage-routing-answers':
+      await page
+        .getByRole('heading', { name: /^(Your routing form answers|你的分流表单答案)$/ })
+        .waitFor()
+      break
+    case 'booking-detail-routing-answers':
+      await page
+        .getByRole('heading', { name: /^(Original routing answers|原始分流表单答案)$/ })
+        .waitFor()
+      await page.getByRole('heading', { name: /^(Final booking answers|最终预约答案)$/ }).waitFor()
+      break
     case 'manage-reschedule':
       await page
         .locator('.reschedule-summary .event-title')
@@ -218,6 +234,14 @@ async function verifyAuditContent(page: Page, id: AuditPageId) {
     case 'bookings':
       await page.getByText(AUDIT_EMAIL, { exact: true }).waitFor()
       break
+    case 'bookings-routing-export': {
+      const panel = page.locator('.booking-export')
+      const label = /^(Include routing form answers|包含分流表单答案)$/
+      await panel.locator('summary').press('Enter')
+      await panel.getByRole('checkbox', { name: label, checked: false }).press('Space')
+      await panel.getByRole('checkbox', { name: label, checked: true }).waitFor()
+      break
+    }
     case 'team-bookings':
       await page.locator('.team-bookings-list').getByText(AUDIT_TITLE, { exact: true }).waitFor()
       await page.locator('main').getByText(AUDIT_TEAM_NAME, { exact: true }).waitFor()
@@ -390,6 +414,7 @@ export async function openAuditPage(
       'embedded-booking': `/embed${fixture.bookingPath}`,
       'team-booking': fixture.teamBookingPath,
       manage: '/booking',
+      'manage-routing-answers': '/booking',
       'manage-reschedule': '/booking',
       'sign-in': '/sign-in',
       'oauth-consent': '/oauth/consent',
@@ -398,7 +423,9 @@ export async function openAuditPage(
       'event-type-editor-expanded': `/app/event-types/${fixture.eventTypeId}`,
       'availability-editor': `/app/availability/${fixture.scheduleId}`,
       bookings: '/app/bookings',
+      'bookings-routing-export': '/app/bookings',
       'booking-detail': `/app/bookings/${fixture.bookingId}`,
+      'booking-detail-routing-answers': `/app/bookings/${fixture.bookingId}`,
       'team-bookings': '/app/team/bookings',
       'team-booking-detail': '/app/team/bookings',
       analytics: '/app/analytics',
@@ -415,8 +442,26 @@ export async function openAuditPage(
         : id === 'embedded-booking'
           ? `${paths[id]}?${new URLSearchParams({ parentOrigin: app.parentUrl, embedId: 'synthetic-layout-audit' })}`
           : paths[id]
+    if (id === 'manage-routing-answers' || id === 'booking-detail-routing-answers') {
+      await mockBookingRoutingAnswers(page, app.url, fixture.bookingId, id)
+    }
+    if (id === 'bookings-routing-export') {
+      await page.route(
+        `${app.url}/api/v1/instance`,
+        async (route) => {
+          const response = await route.fetch({ maxRedirects: 0 })
+          if (!response.ok()) return route.fulfill({ response })
+          const instance: components['schemas']['Instance'] = await response.json()
+          return route.fulfill({
+            json: { ...instance, routingFormsEnabled: true },
+            headers: { 'cache-control': 'no-store' },
+          })
+        },
+        { times: 1 },
+      )
+    }
     await page.goto(app.url + navigationPath)
-    if (id === 'manage' || id === 'manage-reschedule') {
+    if (id === 'manage' || id === 'manage-routing-answers' || id === 'manage-reschedule') {
       await page.locator('h1').waitFor()
       await page.evaluate(
         ({ token, reschedule }) => {
@@ -428,7 +473,7 @@ export async function openAuditPage(
         { token: fixture.manageToken, reschedule: id === 'manage-reschedule' },
       )
       await page
-        .locator(id === 'manage-reschedule' ? '.reschedule-summary' : '.booking-details')
+        .locator(id === 'manage-reschedule' ? '.reschedule-summary' : '.manage > .booking-details')
         .waitFor()
       await page.waitForFunction(() => window.location.hash === '')
     } else await page.locator('h1').waitFor()
@@ -498,6 +543,7 @@ export async function openAuditPage(
         'embedded-booking',
         'team-booking',
         'manage',
+        'manage-routing-answers',
         'manage-reschedule',
       ].includes(id)
     ) {
@@ -523,6 +569,60 @@ export async function openAuditPage(
     // This intentionally drops their message/cause while retaining a useful state id.
     throw new Error(`Could not prepare synthetic audit state: ${id}`)
   }
+}
+
+const sampleRoutingLabel = 'What would you like to discuss? / 你想讨论哪些内容？'
+const sampleRoutingAnswer = `Synthetic appointment planning / 示例预约规划 ${'unbrokenroutinganswer'.repeat(12)}`
+const sampleRoutingQuestionId = '72000000-0000-4000-8000-000000000011'
+const sampleRouting: components['schemas']['BookingRouting'] = {
+  formId: '72000000-0000-4000-8000-000000000012',
+  versionId: '72000000-0000-4000-8000-000000000013',
+  versionNumber: 2,
+  matchedRuleId: 'fallback',
+  resolvedRuleId: 'fallback',
+  questions: [
+    { id: sampleRoutingQuestionId, label: sampleRoutingLabel, type: 'short_text', required: true },
+  ],
+  answers: { [sampleRoutingQuestionId]: sampleRoutingAnswer },
+}
+
+/** Decorate one authorized fixture response without enabling routing or changing other scans. */
+async function mockBookingRoutingAnswers(
+  page: Page,
+  origin: string,
+  bookingId: string,
+  id: 'manage-routing-answers' | 'booking-detail-routing-answers',
+) {
+  const invitee = id === 'manage-routing-answers'
+  await page.route(
+    `${origin}/api/v1/bookings/${invitee ? 'manage' : bookingId}`,
+    async (route) => {
+      const response = await route.fetch({ maxRedirects: 0 })
+      if (!response.ok()) return route.fulfill({ response })
+      const booking: components['schemas']['Booking'] = await response.json()
+      const json = invitee
+        ? {
+            ...booking,
+            routingAnswers: [{ label: sampleRoutingLabel, answer: sampleRoutingAnswer }],
+          }
+        : {
+            ...booking,
+            responses: { ...booking.responses, topic: 'Updated booking topic / 更新后的预约主题' },
+            questions: [
+              ...(booking.questions ?? []),
+              {
+                id: 'topic',
+                label: 'Meeting topic / 会谈主题',
+                type: 'short_text',
+                required: false,
+              },
+            ],
+            routing: sampleRouting,
+          }
+      return route.fulfill({ json, headers: { 'cache-control': 'no-store' } })
+    },
+    { times: 1 },
+  )
 }
 
 /** Populate synthetic rows and hand capabilities to the page only through its fragment. */

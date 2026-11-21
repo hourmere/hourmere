@@ -126,6 +126,7 @@ check(
         'get_group_occurrence_attendees',
         'group-attendees',
       ],
+      ['exportBookingsCsv', '/api/v1/bookings/export.csv', 'export_bookings', 'export'],
       ['getSsoPolicy', '/api/v1/team/sso/policy', 'get_sso_policy', 'sso policy'],
       ['listWebhooks', '/api/v1/webhooks', 'list_webhooks', 'webhooks list'],
       [
