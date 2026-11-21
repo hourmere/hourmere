@@ -8,6 +8,11 @@ import { Outlet } from 'react-router'
 const page = <M,>(load: () => Promise<M>, pick: (module: M) => ComponentType) =>
   lazy(() => load().then((module) => ({ default: pick(module) })))
 
+export const SsoSetupPage = page(
+  () => import('./pages/sso/SsoSetup.tsx'),
+  (module) => module.SsoSetupPage,
+)
+
 // The signed-in app.
 /** SessionProvider around the signed-in routes (and sign-in), as a layout route. */
 export const SessionLayout = page(

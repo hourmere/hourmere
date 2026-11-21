@@ -506,6 +506,7 @@ describe('SCIM discovery representations', () => {
       'scim-query',
       'scim-users',
       'scim-user-create',
+      'scim-user-lifecycle',
       'scim-user-replace',
       'scim-user-patch',
       'scim-user-write',

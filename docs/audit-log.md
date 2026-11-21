@@ -79,7 +79,7 @@ allow-lists and value checks.
 | Organization | `organization.created`, `organization.updated`, `organization.branding_updated` |
 | API keys | `api_key.created`, `api_key.updated`, `api_key.revoked`, `api_key.reenabled` |
 | SCIM provisioning tokens | `scim_token.created`, `scim_token.rotated`, `scim_token.revoked` |
-| SCIM Users | `scim_user.created`, `scim_user.claimed`, `scim_user.updated` |
+| SCIM Users | `scim_user.created`, `scim_user.claimed`, `scim_user.updated`, `scim_user.deactivated`, `scim_user.credentials_revoked`, `scim_user.reactivated` |
 | Webhooks | `webhook.created`, `webhook.updated`, `webhook.paused`, `webhook.resumed`, `webhook.deleted`, `webhook.secret_rotated` |
 | Slack destinations | `slack_destination.created`, `slack_destination.updated`, `slack_destination.paused`, `slack_destination.resumed`, `slack_destination.tested`, `slack_destination.deleted` |
 | OAuth | `oauth.client_registered`, `oauth.consent_granted`, `oauth.token_revoked` |
@@ -194,6 +194,12 @@ completes the claim and records `scim_user.claimed` on the resource ID, beside t
 They are written in the acceptance transaction, with the new membership and the link, so a
 refused or failed acceptance records neither. An acceptance that admits without completing a
 claim (an expired claim, or a claim without an invitation) records only `membership.accepted`.
+
+SCIM active state changes record `scim_user.deactivated` or `scim_user.reactivated` with
+the provisioning token as actor. Suspension of a linked account also records
+`scim_user.credentials_revoked`. The events store the resource ID and empty details.
+They commit with the state change, the team suspension or release, and any credential
+revocations. An identical retry creates no additional lifecycle event.
 
 An event-type update records visibility and host changes without copying the
 configuration. Target IDs identify the affected entity by its stored ID, whatever UUID

@@ -1148,11 +1148,6 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
         syntax('An attribute is named more than once.'),
       ],
       [user(secret, { 'urn:example:custom:2.0:User': { badge: secret } }), 400, unknown],
-      [
-        user(secret, { active: false }),
-        400,
-        value('Creating an inactive User is not supported yet.'),
-      ],
       [user(secret, { active: 'True' }), 400, value('The active attribute is not a valid value.')],
       [
         user(secret, { emails: `${secret}@example.com` }),
@@ -1742,6 +1737,25 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
 
   it('creates an entry with a pending claim and one invitation, admitting nobody', () =>
     verifyCreation(scimUserCreation))
+  it('stores an inactive User without an invitation, claim or membership change', async () => {
+    const organization = await team()
+    const before = await accounts()
+    const result = await client(scimUserCreation, organization).post(
+      user(`inactive-${unique()}`, {
+        active: false,
+        ...work(`inactive-${unique()}@example.com`),
+      }),
+    )
+    expect(result.status).toBe(201)
+    expect(result.body).toMatchObject({ active: false })
+    const state = await written(organization.id)
+    expect(state.entries).toHaveLength(1)
+    expect(state.claims).toEqual([])
+    expect(state.invitations).toEqual([])
+    expect(state.deliveries).toEqual([])
+    expect(state.events.map(({ action }) => action)).toEqual(['scim_user.created'])
+    expect(await accounts()).toEqual(before)
+  })
   it('accepts the documented Okta and Entra request shapes', () =>
     verifyProviderShapes(scimUserCreation))
   it('refuses live duplicates in the connection with 409 uniqueness', () =>
@@ -1908,14 +1922,13 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
       ],
       // Admission limits ignored.
       ['limits', ['          { reserve: deps.reserve },\n', '          {},\n']],
-      // A retired manager accepted or an inactive entry created.
+      // A retired manager accepted.
       [
         'refusals',
         ["    .where('retired_at', 'is', null)\n    .execute()", '    .execute()'],
         sharedSource,
       ],
-      ['refusals', ["  if (method === 'POST' && active === false)", '  if (false)'], sharedSource],
-      ['refusals', ['  if (value.length > 0)\n', '  if (false)\n'], sharedSource],
+      ['refusals', ['  if (value.length > 0)', '  if (false)'], sharedSource],
       // The work address read from the wrong entry: any type as work, the primary work
       // email not preferred, typeless primary or single emails dropped, two primaries let
       // through.

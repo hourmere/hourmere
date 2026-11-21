@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { suspendScimMember } from '../../db/src/scim-suspension-fixtures.ts'
 import { createPublicTeamBooking } from './bookings.ts'
 import { activateRoundRobin, createEventType, updateEventType } from './event-types.ts'
 import { createFixtures, createTestTeam, createTestUser, testContext } from './testing.ts'
@@ -22,6 +23,67 @@ describe.skipIf(!serverUrl)('host eligibility transaction locks', () => {
   })
   afterAll(async () => {
     await owned?.drop()
+  })
+
+  it('excludes a suspended member from new bookings and preserves an existing booking', async () => {
+    const owner = await createTestUser(db, 'Team owner')
+    const host = await createTestUser(db, 'Assigned host')
+    const team = await createTestTeam(db, [
+      { user: owner, role: 'owner' },
+      { user: host, role: 'member' },
+    ])
+    const ctx = testContext(db, team.as(owner), now)
+    const fixtures = createFixtures(db)
+    await fixtures.schedule(owner.id, { timeZone: 'UTC' })
+    await fixtures.schedule(host.id, { timeZone: 'UTC' })
+    const individual = await createEventType(ctx, {
+      slug: 'individual',
+      title: 'Individual meeting',
+      durationMinutes: 30,
+      schedulingType: 'individual',
+      hosts: [{ userId: host.id }],
+    })
+    const roundRobin = await createEventType(ctx, {
+      slug: 'round-robin',
+      title: 'Round robin meeting',
+      durationMinutes: 30,
+      schedulingType: 'round_robin',
+      hosts: [{ userId: owner.id }, { userId: host.id }],
+    })
+    await activateRoundRobin(ctx, roundRobin.id)
+    const book = (slug: string, start: string) =>
+      createPublicTeamBooking(
+        { db, now },
+        {
+          handle: ctx.principal.organization.slug,
+          slug,
+          start: Temporal.Instant.from(start),
+          invitee: { name: 'Invitee', email: 'invitee@example.com', timeZone: 'UTC' },
+        },
+      )
+    const existing = await book(individual.slug, '2026-11-02T09:00Z')
+    await suspendScimMember(db, team.id, host.id)
+
+    await expect(book(individual.slug, '2026-11-02T10:00Z')).rejects.toMatchObject({
+      code: 'event_type_not_found',
+    })
+    // Even when the scheduler would normally pick this host next, their assignment is skipped.
+    await db
+      .updateTable('event_type_hosts')
+      .set({ last_assigned_sequence: '1' })
+      .where('event_type_id', '=', roundRobin.id)
+      .where('user_id', '=', owner.id)
+      .execute()
+    const newBooking = await book(roundRobin.slug, '2026-11-02T11:00Z')
+    expect(newBooking.booking.assignedHost?.name).toBe(owner.name)
+    expect(
+      await db
+        .selectFrom('bookings as booking')
+        .innerJoin('booking_hosts as host', 'host.booking_id', 'booking.id')
+        .select(['booking.status', 'host.user_id'])
+        .where('booking.id', '=', existing.booking.id)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ status: 'confirmed', user_id: host.id })
   })
 
   async function blockedBy(waiter: number, blocker: number): Promise<boolean> {
