@@ -8,7 +8,7 @@ import { type SsoMutation, type SsoProvider, unwrapSsoWrite } from './setup.ts'
 
 const denied = 'Only another team owner can retire an owner’s identity link.'
 
-export function SsoIdentityLinks({
+export function SsoLinkRetirement({
   provider,
   organizationId,
   busy,
@@ -65,7 +65,7 @@ export function SsoIdentityLinks({
   }
 
   return (
-    <div className="sso-identity-links">
+    <div className="sso-link-retirement">
       <h4 ref={heading} tabIndex={-1}>
         {t('Identity links')}
       </h4>

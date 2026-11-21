@@ -14,7 +14,7 @@
 .sso-delegation select,
 .sso-enforcement select,
 .sso-fresh-proof select,
-.sso-identity-links select {
+.sso-link-retirement select {
   max-width: 100%;
 }
 
