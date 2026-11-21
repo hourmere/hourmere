@@ -1,8 +1,9 @@
 import { type MouseEvent, Suspense, useEffect, useRef, useState } from 'react'
-import { Link, NavLink, Outlet, useLocation } from 'react-router'
+import { Link, NavLink, Outlet, useLocation, useOutletContext } from 'react-router'
 import { errorMessage } from '../api/errors.ts'
 import { LanguageSwitcher, useI18n } from '../i18n/runtime.tsx'
 import { msg, type UiText } from '../i18n/translate.ts'
+import { AppNotFoundPage } from '../pages/NotFound.tsx'
 import { PATHS } from '../paths.ts'
 import { useMe, useSession } from '../session.tsx'
 import { TeamManagementProvider, useTeamManagementAccess } from '../team-management.tsx'
@@ -29,6 +30,8 @@ export const NAV_ITEMS = [
   { to: PATHS.settings, label: 'Settings' },
 ] as const
 
+const ROUTING_FORM_NAV = { to: PATHS.routingForms, label: 'Routing forms' } as const
+
 const WIDE_PAGES: readonly string[] = NAV_ITEMS.map(({ to }) => to).filter(
   (to) => to !== PATHS.settings && to !== PATHS.workflows,
 )
@@ -54,23 +57,34 @@ export function AppShell() {
   )
 }
 
+/** Use the shell's instance discovery, before mounting anything that can request a form. */
+export function RequireRoutingForms() {
+  const enabled = useOutletContext<{ routingFormsEnabled?: boolean } | undefined>()
+    ?.routingFormsEnabled
+  if (enabled === undefined) return <PageSkeleton />
+  return enabled === true ? <Outlet /> : <AppNotFoundPage />
+}
+
 function Shell() {
   const { locale, t, ui } = useI18n()
   const teamAccess = useTeamManagementAccess()
 
   const me = useMe()
   // The shell already discovers instance policies. Use the same response for navigation
-  // and the route gate so disabled and older instances make no additional request.
+  // and the route gates so disabled and older instances make no additional request.
   const instance = useInstance()
   const workflowsEnabled =
     instance.status === 'loading'
       ? undefined
       : instance.status === 'ready' && instance.data?.workflowsEnabled === true
+  const routingFormsEnabled =
+    instance.status === 'loading'
+      ? undefined
+      : instance.status === 'ready' && instance.data?.routingFormsEnabled === true
   const managesTeam = teamAccess.status === 'ready' && teamAccess.role !== null
-  const showWorkflows =
-    workflowsEnabled === true &&
-    me.principal.kind === 'session' &&
-    (me.organization.personal || managesTeam)
+  const managesSpace = me.principal.kind === 'session' && (me.organization.personal || managesTeam)
+  const showWorkflows = workflowsEnabled === true && managesSpace
+  const showRoutingForms = routingFormsEnabled === true && managesSpace
   const { signOut, notice, setNotice } = useSession()
   const [signOutError, setSignOutError] = useState<UiText | null>(null)
   const [spaceError, setSpaceError] = useState<UiText | null>(null)
@@ -98,7 +112,7 @@ function Shell() {
   }, [pathname, locale])
 
   // Fade only the edges that hide more navigation, including after zoom or a locale change.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: workflow discovery can add an item after mount
+  // biome-ignore lint/correctness/useExhaustiveDependencies: instance discovery can add navigation items after mount
   useEffect(() => {
     const list = nav.current?.querySelector('ul')
     if (!list) return
@@ -126,7 +140,7 @@ function Shell() {
       window.removeEventListener('resize', updateLayout)
       observer?.disconnect()
     }
-  }, [showWorkflows])
+  }, [showWorkflows, showRoutingForms])
 
   // A notice belongs to one page: drop it once the person is elsewhere, also when it arrives
   // after they left. (Not on the page starting over in place, which is what it explains.)
@@ -203,21 +217,23 @@ function Shell() {
           data-scroll-end={navEdges.end}
         >
           <ul data-layout-scroll="horizontal">
-            {NAV_ITEMS.filter(({ to }) => {
-              if (to === PATHS.teamBookings) return managesTeam
-              if (to === PATHS.meetingPolls) return me.organization.personal || managesTeam
-              if (to === PATHS.workflows) return showWorkflows
-              if (to === PATHS.auditLog)
-                return (
-                  teamAccess.status === 'ready' &&
-                  teamAccess.roles?.some((role) => role === 'owner' || role === 'admin') === true
-                )
-              return true
-            }).map((item) => (
-              <li key={item.to}>
-                <NavLink to={item.to}>{ui(item.label)}</NavLink>
-              </li>
-            ))}
+            {(showRoutingForms ? [...NAV_ITEMS, ROUTING_FORM_NAV] : NAV_ITEMS)
+              .filter(({ to }) => {
+                if (to === PATHS.teamBookings) return managesTeam
+                if (to === PATHS.meetingPolls) return me.organization.personal || managesTeam
+                if (to === PATHS.workflows) return showWorkflows
+                if (to === PATHS.auditLog)
+                  return (
+                    teamAccess.status === 'ready' &&
+                    teamAccess.roles?.some((role) => role === 'owner' || role === 'admin') === true
+                  )
+                return true
+              })
+              .map((item) => (
+                <li key={item.to}>
+                  <NavLink to={item.to}>{ui(item.label)}</NavLink>
+                </li>
+              ))}
           </ul>
         </nav>
         <main
@@ -239,6 +255,7 @@ function Shell() {
             <Outlet
               context={{
                 workflowsEnabled,
+                routingFormsEnabled,
                 followUpHostNotesEnabled:
                   instance.status === 'ready' && instance.data?.followUpHostNotesEnabled === true,
               }}

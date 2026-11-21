@@ -284,7 +284,6 @@ for (const viewport of layoutViewports) {
           hasTouch: mobileViewport,
         })
         test('measure every page', async ({ page, app }) => {
-          test.setTimeout(240_000)
           await page.emulateMedia({ colorScheme: theme })
           const reports: AuditReport[] = []
           for (const state of auditPages) {

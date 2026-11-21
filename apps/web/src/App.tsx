@@ -40,6 +40,7 @@ import {
   ConferencesPage,
   ConnectedAppsPage,
   CreateTeamPage,
+  EditRoutingFormPage,
   EmbeddedBookingPage,
   EmbeddedTeamBookingPage,
   EventTypeEditorPage,
@@ -51,10 +52,13 @@ import {
   MeetingPollCreatePage,
   MeetingPollPage,
   MeetingPollsPage,
+  NewRoutingFormPage,
   OneTimeBookingPage,
+  RequireRoutingForms,
   RequireSession,
   RoutingContinuationPage,
   RoutingFormPage,
+  RoutingFormsPage,
   ScheduleEditorPage,
   SessionLayout,
   SettingsPage,
@@ -103,6 +107,11 @@ export const appRoutes = createRoutesFromElements(
           <Route path="meeting-polls" element={<MeetingPollsPage />} />
           <Route path="meeting-polls/new" element={<MeetingPollCreatePage />} />
           <Route path="meeting-polls/:id" element={<HostMeetingPollRoute />} />
+          <Route element={<RequireRoutingForms />}>
+            <Route path="routing-forms" element={<RoutingFormsPage />} />
+            <Route path="routing-forms/new" element={<NewRoutingFormPage />} />
+            <Route path="routing-forms/:id" element={<EditRoutingFormPage />} />
+          </Route>
           <Route path={PATHS.workflows} element={<WorkflowRoute />} />
           <Route path={PATHS.newWorkflow} element={<WorkflowRoute view="editor" />} />
           <Route path={`${PATHS.workflows}/:id/edit`} element={<WorkflowRoute view="editor" />} />

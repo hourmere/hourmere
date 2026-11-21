@@ -25,12 +25,21 @@ import {
   routingFormAuditPages,
 } from './routing-form-audit.ts'
 import {
+  isRoutingFormManagerAuditPage,
+  leaveRoutingFormManagerAudit,
+  openRoutingFormManagerAuditPage,
+  type RoutingFormManagerAuditPageId,
+  routingFormManagerAuditPages,
+  usesTeamRoutingFormManagerAuditSpace,
+} from './routing-form-manager-audit.ts'
+import {
   isWorkflowAuditPage,
   leavePendingWorkflowAudit,
   openWorkflowAuditPage,
   type WorkflowAuditPageId,
   workflowAuditPages,
 } from './workflow-audit.ts'
+
 import {
   isWorkflowEditorAuditPage,
   leavePendingWorkflowEditorAudit,
@@ -69,6 +78,7 @@ export const auditPages = [
   ...pollAuditPages,
   ...hostPollAuditPages,
   ...routingFormAuditPages,
+  ...routingFormManagerAuditPages,
   ...workflowAuditPages,
   ...workflowEditorAuditPages,
   ...workflowRunHistoryAuditPages,
@@ -243,6 +253,7 @@ export async function openAuditPage(
 ): Promise<void> {
   try {
     await leavePendingRoutingFormAudit(page, app.url)
+    await leaveRoutingFormManagerAudit(page, app.url)
     await leavePendingHostPollAudit(page, app.url)
     await leavePendingWorkflowAudit(page, app.url)
     await leavePendingWorkflowEditorAudit(page, app.url)
@@ -250,6 +261,24 @@ export async function openAuditPage(
     // Earlier audit states create real bookings; pin the calendar and list filters
     // before navigation so later pages never inherit wall-clock-dependent rows.
     await page.clock.setFixedTime(new Date(AUDIT_NOW))
+    if (isRoutingFormManagerAuditPage(id)) {
+      await app.auditSignIn(
+        true,
+        locale,
+        usesTeamRoutingFormManagerAuditSpace(id) ? 'team' : undefined,
+      )
+      await page.addInitScript(prepareAuditLocale, locale)
+      const path = await openRoutingFormManagerAuditPage(
+        page,
+        app,
+        id,
+        locale === 'zh-CN' ? locale : 'en',
+      )
+      verifyAuditPath(page.url(), new URL(path, app.url).pathname)
+      await page.evaluate(() => window.scrollTo(0, 0))
+      await page.evaluate(settleAuditLayout)
+      return
+    }
     if (
       isWorkflowAuditPage(id) ||
       isWorkflowEditorAuditPage(id) ||
@@ -306,6 +335,7 @@ export async function openAuditPage(
         | HostPollAuditPageId
         | PollAuditPageId
         | RoutingFormAuditPageId
+        | RoutingFormManagerAuditPageId
         | WorkflowAuditPageId
         | WorkflowEditorAuditPageId
         | WorkflowRunHistoryAuditPageId
