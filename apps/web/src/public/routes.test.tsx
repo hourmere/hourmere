@@ -168,7 +168,7 @@ describe('routing continuation handoff in the browser', () => {
     expect(window.location.hash).toBe('')
     expect(router.state.location.hash).toBe('')
     expect(JSON.stringify(window.history.state ?? null)).not.toContain('fixture')
-    render(<RouterProvider router={router} />)
+    return render(<RouterProvider router={router} />)
   }
 
   afterEach(() => {
@@ -224,6 +224,33 @@ describe('routing continuation handoff in the browser', () => {
     // The data router reads its own view-transition metadata (pathname only).
     expect(storageRead.mock.calls.filter(([key]) => key !== 'remix-router-transitions')).toEqual([])
     expect(storageWrite).not.toHaveBeenCalled()
+  })
+
+  it('requires the original link to resume after reopening a tab that visited while off', async () => {
+    const event = { ...EVENT, handle: 'route', slug: 'continue' }
+    let routingFormsEnabled = false
+    const api = fakeApi({
+      ...eventRoutes(event, []),
+      'GET /api/v1/instance': () => json(200, { routingFormsEnabled }),
+      [resolve]: () => json(404, { error: 'routing_unavailable' }),
+    })
+    const disabled = open(fixtureLink)
+    await screen.findByRole('heading', { level: 1, name: 'Intro call' })
+    const clearedLink = window.location.pathname + window.location.hash
+    disabled.unmount()
+    router?.dispose()
+
+    routingFormsEnabled = true
+    const reopened = open(clearedLink)
+    await screen.findByRole('heading', { level: 1, name: 'Intro call' })
+    expect(api.to(resolve)).toHaveLength(0)
+    reopened.unmount()
+    router?.dispose()
+
+    open(fixtureLink)
+    await waitFor(() =>
+      expect(api.to(resolve)[0]?.body).toEqual({ routeToken: 'fixture-capability' }),
+    )
   })
 
   it('clears a fresh fragment-only link opened on the same page', async () => {
