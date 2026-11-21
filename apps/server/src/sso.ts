@@ -1,6 +1,7 @@
 import { DomainError } from '@hourmere/scheduling'
 
 export const USE_SSO_RECOVERY = 'useSsoRecovery'
+export const SCIM_MAPPING_CONSENT = 'approveScimTeamMapping'
 
 export interface SsoCapabilities {
   readonly ssoOidcEnabled: boolean

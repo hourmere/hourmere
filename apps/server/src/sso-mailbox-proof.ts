@@ -25,7 +25,12 @@ import { sql } from 'kysely'
 import { z } from 'zod'
 import { withClientIpHeader } from './client-ip.ts'
 import { createRateLimiter, type RateLimiter, rateLimitKey } from './rate-limit.ts'
-import { requireSsoEnabled, type SsoCapabilities, USE_SSO_RECOVERY } from './sso.ts'
+import {
+  requireSsoEnabled,
+  SCIM_MAPPING_CONSENT,
+  type SsoCapabilities,
+  USE_SSO_RECOVERY,
+} from './sso.ts'
 import { ssoStorageDiagnostic } from './sso-storage-errors.ts'
 
 /** The auth-protocol endpoints (outside /api/v1 and the interface-parity inventory). */
@@ -137,6 +142,7 @@ interface AttemptState {
   id: string
   organization_id: string
   kind: string
+  operation: string
   mailbox: string | null
   user_id: string | null
   session_id: string | null
@@ -152,7 +158,7 @@ interface AttemptState {
 /** Locks the attempt and reports what eligibility needs, all at the instant `now`. */
 async function lockAttempt(trx: Db, attemptId: string, now: string) {
   const { rows } = await sql<AttemptState>`
-    SELECT a.id, a.organization_id, a.kind, a.mailbox, a.user_id, a.session_id,
+    SELECT a.id, a.organization_id, a.kind, a.operation, a.mailbox, a.user_id, a.session_id,
       a.browser_binding_digest,
       (a.expires_at > ${now}::timestamptz AND a.consumed_at IS NULL AND a.requires_mailbox
         AND a.mailbox IS NOT NULL AND a.mailbox_proven_at IS NULL) AS awaiting,
@@ -193,6 +199,8 @@ function jobError(error: unknown, label: string): Error {
 
 export interface MailboxProofDeliveryDeps {
   capabilities: SsoCapabilities
+  /** Only the SCIM resource test harness enables mailbox proof for mapping consent. */
+  scimMappingConsentEnabled?: boolean
   db: Db
   mailer: Mailer
   publicUrl: string
@@ -219,7 +227,7 @@ export async function deliverMailboxProof(
   try {
     requireSsoEnabled(deps.capabilities)
   } catch {
-    return
+    if (!deps.scimMappingConsentEnabled) return
   }
   const limits = { ...MAILBOX_PROOF_LIMITS, ...deps.limits }
   const clock = deps.now ?? databaseClock
@@ -229,6 +237,11 @@ export async function deliverMailboxProof(
       const presenter = payload
       const attempt = await lockAttempt(trx, payload.attemptId, await clock(trx))
       if (!attempt || !usable(attempt, presenter)) return
+      if (
+        (attempt.operation === SCIM_MAPPING_CONSENT) !==
+        (deps.scimMappingConsentEnabled ?? false)
+      )
+        return
       const now = await clock(trx)
       const { rows: cooling } = await sql<{ cooling: boolean }>`
         SELECT issued_at > ${now}::timestamptz - make_interval(secs => ${limits.resendCooldownSeconds})
@@ -298,6 +311,8 @@ export async function deliverMailboxProof(
 
 export interface MailboxProofConsumeDeps {
   capabilities: SsoCapabilities
+  /** Only the SCIM resource test harness enables mailbox proof for mapping consent. */
+  scimMappingConsentEnabled?: boolean
   db: Db
   limits?: Partial<MailboxProofLimits> | undefined
   now?: MailboxProofClock | undefined
@@ -315,7 +330,7 @@ export async function consumeMailboxProof(
   input: { attemptId: string; token: string },
   presenter: Presenter,
 ): Promise<boolean> {
-  requireSsoEnabled(deps.capabilities)
+  if (!deps.scimMappingConsentEnabled) requireSsoEnabled(deps.capabilities)
   const clock = deps.now ?? databaseClock
   return deps.db.transaction().execute(async (trx) => {
     // Take the row locks first (a delivery may hold the attempt through SMTP), then read the
@@ -328,6 +343,8 @@ export async function consumeMailboxProof(
     const now = await clock(trx)
     const attempt = await lockAttempt(trx, input.attemptId, now)
     if (!attempt || !usable(attempt, presenter)) return false
+    if ((attempt.operation === SCIM_MAPPING_CONSENT) !== (deps.scimMappingConsentEnabled ?? false))
+      return false
     const { rows } = await sql<{ token_digest: string; live: boolean }>`
       SELECT token_digest, (consumed_at IS NULL AND expires_at > ${now}::timestamptz) AS live
       FROM sso_mailbox_tokens WHERE attempt_id = ${attempt.id}::uuid FOR UPDATE`.execute(trx)

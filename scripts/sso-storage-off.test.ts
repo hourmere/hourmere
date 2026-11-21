@@ -35,7 +35,7 @@ const STORAGE_LAYER =
   /^packages\/db\/(migrations\/|src\/tables\.ts$|src\/sso-(storage|identity)-[^/]+\.ts$)/
 // Recognises the tables in database errors for the error log; never reads or writes them.
 const ERROR_RECOGNISER = 'apps/server/src/sso-storage-errors.ts'
-// The production modules that own SSO data access, each with the only tables it may name.
+// The modules that own SSO data access, each with the only tables it may name.
 const DATA_OWNERS: Readonly<Record<string, readonly string[]>> = {
   'apps/server/src/sso-domains.ts': ['sso_domains'],
   'apps/server/src/sso-domain-recheck.ts': ['sso_domains'],
@@ -68,6 +68,13 @@ const DATA_OWNERS: Readonly<Record<string, readonly string[]>> = {
     'sso_providers',
   ],
   'apps/server/src/sso-fresh-proof.ts': [
+    'sso_attempts',
+    'sso_identity_links',
+    'sso_policies',
+    'sso_providers',
+  ],
+  // The SCIM resource test gate only reads evidence for hierarchy consent.
+  'apps/server/src/scim-team-hierarchy-proof.ts': [
     'sso_attempts',
     'sso_identity_links',
     'sso_policies',
