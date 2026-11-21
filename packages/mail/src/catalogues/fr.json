@@ -149,6 +149,10 @@
   "poll.outcome.cancelled.subject": "Réunion annulée : {poll}",
   "poll.outcome.cancelled.body": "La réunion a été annulée. Le dernier créneau prévu est indiqué ci-dessous.",
 
+  "scimMapping.subject": "Association d’équipe SCIM mise à jour",
+  "scimMapping.linked": "Votre équipe a approuvé l’association SCIM {mappingId}. Une fois le groupe provisionné, l’annuaire associé pourra gérer le nom de l’équipe enfant et ses membres gérés par l’annuaire.",
+  "scimMapping.unlinked": "L’association SCIM {mappingId} a été supprimée pour votre équipe. L’annuaire ne peut plus gérer l’équipe par cette association.",
+  "scimMapping.suspended": "L’accès de l’annuaire par l’association SCIM {mappingId} a été suspendu. Les appartenances et les états de suspension existants sont conservés.",
   "series.confirmed.subject": "Série de réunions confirmée : {event}",
   "series.confirmed.booker": "Votre série de réunions avec {host} est réservée.",
   "series.confirmed.guest": "{invitee} vous invite à participer à une série de réunions avec {host}.",
@@ -169,9 +173,5 @@
   "series.cancelled.member": "Annulée",
   "series.manage": "Gérer la série",
   "series.view": "Voir la série",
-  "series.repair": "Pour relancer la création du lien de réunion, ouvrez la réservation concernée dans Hourmere.",
-  "scimMapping.subject": "Association d’équipe SCIM mise à jour",
-  "scimMapping.linked": "Votre équipe a approuvé l’association SCIM {mappingId}. Une fois le groupe provisionné, l’annuaire associé pourra gérer le nom de l’équipe enfant et ses membres gérés par l’annuaire.",
-  "scimMapping.unlinked": "L’association SCIM {mappingId} a été supprimée pour votre équipe. L’annuaire ne peut plus gérer l’équipe par cette association.",
-  "scimMapping.suspended": "L’accès de l’annuaire par l’association SCIM {mappingId} a été suspendu. Les appartenances et les états de suspension existants sont conservés."
+  "series.repair": "Pour relancer la création du lien de réunion, ouvrez la réservation concernée dans Hourmere."
 }
