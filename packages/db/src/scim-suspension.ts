@@ -87,17 +87,12 @@ export async function suspendScimMembership(
 
   // Match 0178's index, including mixed-case IDs. Missing organization metadata
   // falls back to personal space and does not match this team.
+  const keyOrganization = sql<string>`auth.scim_api_key_organization_id(metadata)`
   await trx
     .deleteFrom('auth.apikey')
-    .where(
-      sql<boolean>`length("referenceId") = 36 AND length(metadata::jsonb ->> 'organizationId') = 36`,
-    )
+    .where(sql<boolean>`length("referenceId") = 36 AND length(${keyOrganization}) = 36`)
     .where(sql<string>`lower("referenceId")`, '=', userId.toLowerCase())
-    .where(
-      sql<string>`lower(metadata::jsonb ->> 'organizationId')`,
-      '=',
-      organizationId.toLowerCase(),
-    )
+    .where(keyOrganization, '=', organizationId.toLowerCase())
     .execute()
 
   const grantReferences = trx

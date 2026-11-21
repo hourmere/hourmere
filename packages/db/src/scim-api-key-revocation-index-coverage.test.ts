@@ -63,6 +63,20 @@ async function seed(pool: pg.Pool) {
      FROM generate_series(1, 200)`,
     [userId],
   )
+  // Simulate corrupted storage without removing the normal API-key metadata invariant.
+  await pool.query('ALTER TABLE auth.apikey DISABLE TRIGGER api_key_scope_guard')
+  try {
+    await pool.query(
+      `INSERT INTO auth.apikey
+         (name, "configId", "referenceId", key, "createdAt", "updatedAt", metadata)
+       VALUES ('Corrupt JSON', 'default', $1, 'synthetic-corrupt-hash', now(), now(), $2),
+         ('Numeric overflow', 'default', $1, 'synthetic-overflow-hash', now(), now(), '{"number":1e1000000}')`,
+      [userId, JSON.stringify({ scope: 'full', organizationId })],
+    )
+    await pool.query("UPDATE auth.apikey SET metadata = '{' WHERE name = 'Corrupt JSON'")
+  } finally {
+    await pool.query('ALTER TABLE auth.apikey ENABLE TRIGGER api_key_scope_guard')
+  }
 }
 
 async function keyRows(pool: pg.Pool) {
@@ -105,12 +119,14 @@ async function assertRevocationIndex(pool: pg.Pool) {
   expect(plan.join('\n')).toContain(index)
   const condition = plan.find((line) => line.includes('Index Cond:'))
   expect(condition).toContain('lower("referenceId")')
-  expect(condition).toContain("metadata)::jsonb ->> 'organizationId'")
+  expect(condition).toContain('auth.scim_api_key_organization_id(metadata)')
   expect(
     (await pool.query('SELECT name FROM auth.apikey WHERE name IS NOT NULL ORDER BY name')).rows,
   ).toEqual([
+    { name: 'Corrupt JSON' },
     { name: 'Legacy organization' },
     { name: 'Legacy personal' },
+    { name: 'Numeric overflow' },
     { name: 'Other member' },
     { name: 'Other team' },
   ])
@@ -142,7 +158,7 @@ describe.skipIf(!serverUrl)('SCIM API key revocation index', () => {
       upgraded = await createTestDatabase(serverUrl as string, directory, { tag: 'scim_key_up' })
       await seed(upgraded.pool)
       const before = await keyRows(upgraded.pool)
-      expect(before).toHaveLength(5)
+      expect(before).toHaveLength(7)
       await copyFile(join(migrationsDir, migration), join(directory, migration))
       await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([migration])
       fresh = await createTestDatabase(serverUrl as string, directory, { tag: 'scim_key_new' })
