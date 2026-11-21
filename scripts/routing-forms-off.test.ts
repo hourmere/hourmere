@@ -686,6 +686,7 @@ describe('routing forms remain hard-off with configuration and public metadata i
     ).toEqual([
       'HostBooking.routing',
       INSTANCE_CAPABILITY,
+      'ManagedBooking.routingAnswers',
       'RoutedBookingInput.routeToken',
       'RoutingContinuationInput.routeToken',
       'RoutingContinuationSlotsInput.routeToken',

@@ -134,6 +134,30 @@ export async function readBookingRoutingSnapshot(
   if (routing) return { access: 'team_admin', routing }
 }
 
+/** Read answer labels only, for a booking already resolved through the invitee's token. */
+export async function readManagedRoutingAnswers(db: Db, bookingId: string, organizationId: string) {
+  const row = await db
+    .selectFrom('booking_routing')
+    .select(['questions', 'answers'])
+    .where('booking_id', '=', bookingId)
+    .where('organization_id', '=', organizationId)
+    .executeTakeFirst()
+  if (!row) return undefined
+
+  // These fields were validated and stored together when the invitee booked.
+  const questions = row.questions as RoutingQuestion[]
+  const answers = row.answers as RoutingAnswers
+  return questions.flatMap((question) => {
+    const value = answers[question.id]
+    if (typeof value !== 'string') return []
+    const answer =
+      question.type === 'select'
+        ? question.options.find((option) => option.id === value)?.label
+        : value
+    return answer === undefined ? [] : [{ label: question.label, answer }]
+  })
+}
+
 export const routedBookingUnavailable = () => new DomainError('conflict', 'routing_unavailable')
 
 export function routingBookingTokenDigest(secret: string | undefined, token: string) {

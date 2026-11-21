@@ -288,6 +288,13 @@ export const ManagedBooking = Booking.extend({
   hosts: z.array(z.object({ name: z.string() })).openapi({
     description: "Who the invitee meets: each host's name",
   }),
+  routingAnswers: z
+    .array(z.object({ label: z.string(), answer: z.string() }))
+    .optional()
+    .openapi({
+      description:
+        'For a booking with stored routing provenance, the original answers in question order, using the saved question and selected option labels.',
+    }),
   rescheduleRequest: z
     .object({
       id: z.uuid(),
@@ -862,7 +869,7 @@ export function bookingRoutes({
         request: { headers: ManageToken },
         responses: {
           200: {
-            description: 'The booking, with its event type and hosts',
+            description: 'The booking, with its event type, hosts and any saved routing answers',
             content: json(ManagedBooking),
           },
           404: manageNotFound,

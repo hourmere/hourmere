@@ -842,7 +842,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description The booking, with its event type and hosts */
+                /** @description The booking, with its event type, hosts and any saved routing answers */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -7038,6 +7038,11 @@ export interface components {
                  */
                 state: "pending" | "expired" | "replaced" | "rescheduled" | "cancelled";
             };
+            /** @description For a booking with stored routing provenance, the original answers in question order, using the saved question and selected option labels. */
+            routingAnswers?: {
+                answer: string;
+                label: string;
+            }[];
         };
         /** @description The enrollment view for a session without the required team proof keeps the active organization ID and omits its metadata by returning empty name and slug strings. */
         Me: {

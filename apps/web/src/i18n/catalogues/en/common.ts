@@ -572,4 +572,6 @@ export const common = {
   // Routing continuation booking
   'Open the original form to request a new booking link.':
     'Open the original form to request a new booking link.',
+  // Invitee routing form answers
+  'Your routing form answers': 'Your routing form answers',
 } as const

@@ -589,4 +589,6 @@ export const common = {
   // Routing continuation booking
   'Open the original form to request a new booking link.':
     'Öffnen Sie das ursprüngliche Formular, um einen neuen Buchungslink anzufordern.',
+  // Invitee routing form answers
+  'Your routing form answers': 'Ihre Antworten im Weiterleitungsformular',
 } as const

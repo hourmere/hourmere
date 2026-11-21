@@ -633,7 +633,8 @@
 }
 
 .public .add-to-calendar h2,
-.public .manage-link h2 {
+.public .manage-link h2,
+.public .manage-routing-answers h2 {
   margin-top: var(--space-5);
   font-size: 1.05rem;
 }

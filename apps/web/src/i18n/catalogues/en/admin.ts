@@ -2856,4 +2856,9 @@ export const admin = {
     'Save your edits over the fields that also changed in the latest draft?',
   'Routing form reloaded.': 'Routing form reloaded.',
   'Saved fallback event name unavailable.': 'Saved fallback event name unavailable.',
+
+  // Booking routing answers
+  'Original routing answers': 'Original routing answers',
+  'Final booking answers': 'Final booking answers',
+  'No routing answers were submitted.': 'No routing answers were submitted.',
 } as const

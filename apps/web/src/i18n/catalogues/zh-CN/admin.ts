@@ -2726,4 +2726,9 @@ export const admin = {
     '要保存你的更改，并覆盖最新草稿中改动过的相同字段吗？',
   'Routing form reloaded.': '已重新加载分流表单。',
   'Saved fallback event name unavailable.': '暂时无法显示已保存的备用活动名称。',
+
+  // Booking routing answers
+  'Original routing answers': '原始分流表单答案',
+  'Final booking answers': '最终预约答案',
+  'No routing answers were submitted.': '未提交分流表单答案。',
 } as const

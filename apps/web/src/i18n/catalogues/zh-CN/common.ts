@@ -548,4 +548,6 @@ export const common = {
     '请先完成团队 SSO 验证，再重试。如果你已批准此连接，请绑定其 SSO 委托后继续。',
   // Routing continuation booking
   'Open the original form to request a new booking link.': '请打开原表单，获取新的预约链接。',
+  // Invitee routing form answers
+  'Your routing form answers': '你的分流表单答案',
 } as const

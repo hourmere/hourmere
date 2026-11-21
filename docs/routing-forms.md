@@ -381,6 +381,12 @@ Deleting the organization deletes its receipts and snapshots with its bookings.
 | Webhooks | Keep existing immutable minimal whitelist: no routing answers, route IDs, contact data or capability. No submission webhook |
 | Email, ICS, provider calendar copies, embed messages, analytics | No new routing answer/provenance fields. Mapped ordinary answers keep existing surface-specific rules |
 
+The host booking detail shows the original routing form answers separately from the final
+booking answers. The invitee’s private booking management page shows their submitted routing
+question labels and answers, using the option labels saved at booking time. An empty submission
+adds no section to that page. The snapshot stays with the booking through rescheduling, and
+ordinary bookings have no routing answers section on either page.
+
 ## Scheduling interactions
 
 - Round-robin: target the whole activated pool. Routing creates no assignment or fairness

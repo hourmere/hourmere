@@ -1,0 +1,12 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`preserves the host detail markup for an ordinary booking 1`] = `
+[
+  "<p class="breadcrumb"><a href="/app/bookings" data-discover="true">Bookings</a></p>",
+  "<header class="page-intro"><div class="page-header"><h1>Intro call</h1></div><p class="lede">Review meeting details and manage this booking.</p></header>",
+  "<p class="flash" role="status" tabindex="-1"></p>",
+  "<section class="panel user-content" aria-labelledby="when-heading"><h2 id="when-heading">When</h2><p class="when"><time datetime="2020-03-04T09:00:00Z">Wednesday, March 4, 2020</time><br>10:00 AM – 10:30 AM<span class="muted"> (Europe/Berlin)</span></p><dl class="details"><dt>Location</dt><dd>Phone call: <a href="tel:+14155550123" target="_blank" rel="noreferrer">+14155550123</a></dd><dt>Booked</dt><dd>Mar 1, 2020, 10:00 AM, through the booking page</dd></dl></section>",
+  "<section class="panel user-content" aria-labelledby="people-heading"><h2 id="people-heading">People</h2><dl class="details"><dt>Invitee</dt><dd>Grace Hopper<br><a href="mailto:grace@example.com">grace@<wbr>example.<wbr>com</a><br><span class="muted">Time zone: America/New York (Mar 4, 2020, 4:00 AM – Mar 4, 2020, 4:30 AM there)</span></dd><dt>Guests</dt><dd><ul class="plain-list"><li>Alan Turing<span class="muted"> (alan@example.com)</span></li></ul></dd></dl></section>",
+  "<section class="panel" aria-labelledby="answers-heading"><h2 id="answers-heading">Answers</h2><dl class="details details-stacked"><div class="detail-pair"><dt>topic</dt><dd class="multiline">Planning</dd></div></dl></section>",
+]
+`;
