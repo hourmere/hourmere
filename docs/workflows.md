@@ -135,7 +135,7 @@ sub-caps below, rather than unchangeable product capacity limits.
 | `WORKFLOW_OWNER_MAIL_MAX_PER_HOUR` | 5 | Default workflow email attempts per personal owner or team in a sliding hour, across all its event types and workflows. |
 | `WORKFLOW_RECIPIENT_EMAILS_PER_HOUR` | 1 | Workflow email attempts per normalized address across the instance in a sliding hour, including hosts. |
 | `WORKFLOW_RECIPIENT_EMAILS_PER_DAY` | 3 | Workflow email attempts per normalized address across the instance in a sliding 24 hours, including hosts. |
-| `WORKFLOW_HISTORY_DAYS` | 30 | Window for visible history, measured from finish time. Older history and eligible terminal runs are removed in background batches. |
+| `WORKFLOW_HISTORY_DAYS` | 30 | Window for visible history, measured from finish time. Older history and eligible terminal runs are removed in background batches while workflow jobs run; on an instance switched off with no unfinished work they stay until workflows are enabled again. |
 
 ## Triggers, conditions and snapshots
 
