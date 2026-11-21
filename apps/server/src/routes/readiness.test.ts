@@ -36,11 +36,15 @@ import {
 } from '@hourmere/scheduling/testing'
 import { createMiddleware } from 'hono/factory'
 import { sql } from 'kysely'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import pg from 'pg'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { isMember } from '../../../../packages/auth/src/organizations.ts'
 import { ssoRecoveryTeamsFor } from '../../../../packages/auth/src/sso-recovery-membership.ts'
 import { signTestMcpAccessToken } from '../../../../packages/auth/src/testing.ts'
-import { suspendScimMember } from '../../../../packages/db/src/scim-suspension-fixtures.ts'
+import {
+  prepareScimSuspension,
+  suspendScimMember,
+} from '../../../../packages/db/src/scim-suspension-fixtures.ts'
 import { createApp } from '../app.ts'
 import { ErrorBody, errorResponses, json, serviceContext } from '../openapi.ts'
 import type { teamManagementAccess } from '../team-management.ts'
@@ -1178,22 +1182,26 @@ describe.skipIf(!process.env.DATABASE_URL)('team readiness with real authenticat
     await owned?.drop()
   })
 
-  async function manager(role: string) {
-    const user = await createTestUser(db)
-    const team = await createTestTeam(db, [{ user, role }])
+  async function browserCookie(userId: string, teamId: string) {
     const token = randomBytes(24).toString('base64url')
     await db
       .insertInto('auth.session')
       .values({
-        userId: user.id,
+        userId,
         token,
-        activeOrganizationId: team.id,
+        activeOrganizationId: teamId,
         expiresAt: new Date(Date.now() + 3_600_000),
         updatedAt: new Date(),
       })
       .execute()
     const signature = createHmac('sha256', secret).update(token).digest('base64')
-    const cookie = `better-auth.session_token=${encodeURIComponent(`${token}.${signature}`)}`
+    return `better-auth.session_token=${encodeURIComponent(`${token}.${signature}`)}`
+  }
+
+  async function manager(role: string) {
+    const user = await createTestUser(db)
+    const team = await createTestTeam(db, [{ user, role }])
+    const cookie = await browserCookie(user.id, team.id)
     const key = await auth.api.createApiKey({
       body: { userId: user.id, metadata: { organizationId: team.id } },
     })
@@ -1254,6 +1262,115 @@ describe.skipIf(!process.env.DATABASE_URL)('team readiness with real authenticat
     expect(await response.json()).toEqual(denial)
     expect(response.headers.has('www-authenticate')).toBe(false)
   }
+
+  it('projects only coarse managed membership state to authorized rows under the resource flag', async () => {
+    const owner = await createTestUser(db)
+    const managed = await createTestUser(db)
+    const team = await createTestTeam(db, [
+      { user: owner, role: 'owner' },
+      { user: managed, role: 'member' },
+    ])
+    const otherTeam = await createTestTeam(db, [{ user: managed, role: 'member' }])
+    const membershipId = async (userId: string, organizationId: string) =>
+      (
+        await db
+          .selectFrom('auth.member')
+          .select('id')
+          .where('userId', '=', userId)
+          .where('organizationId', '=', organizationId)
+          .executeTakeFirstOrThrow()
+      ).id
+    const ownerId = await membershipId(owner.id, team.id)
+    const managedId = await membershipId(managed.id, team.id)
+    const otherId = await membershipId(managed.id, otherTeam.id)
+    const ownerCookie = await browserCookie(owner.id, team.id)
+    const memberCookie = await browserCookie(managed.id, team.id)
+    const now = Temporal.Now.instant()
+    const harness = (flag: boolean) =>
+      createApp({
+        publicUrl: origin,
+        checkDb: async () => {},
+        authHandler: auth.handler,
+        resolveCaller: createCallerResolver({ auth, db }),
+        scim: { db, enabled: true, resources: flag ? () => undefined : undefined },
+        routes: [readinessRoutes({ db, now: () => now })],
+      })
+    const off = harness(false)
+    const on = harness(true)
+    const read = async (application: typeof app, cookie = ownerCookie) => {
+      const response = await application.request(
+        memberPath(team.id, [ownerId, managedId, otherId]),
+        {
+          headers: { cookie, 'X-Expected-Organization-Id': team.id },
+        },
+      )
+      expect(response.status).toBe(200)
+      const body = await response.json()
+      const rows = MemberReadinessPageSchema.parse(body).members
+      expect(body).toEqual({ organizationId: team.id, members: rows })
+      return rows
+    }
+
+    await read(off) // Allow any session refresh before comparing database statement counts.
+    const queries = vi.spyOn(pg.Client.prototype, 'query')
+    try {
+      const ordinaryRows = await read(off)
+      const ordinaryCount = queries.mock.calls.length
+      expect(ordinaryCount).toBeGreaterThan(0)
+      queries.mockClear()
+      expect(await read(on)).toEqual(ordinaryRows)
+      expect(queries).toHaveBeenCalledTimes(ordinaryCount)
+    } finally {
+      queries.mockRestore()
+    }
+
+    const { connectionId, scimUserId } = await db
+      .transaction()
+      .execute((trx) => prepareScimSuspension(trx, team.id, managed.id))
+    expect(await read(on, memberCookie)).toMatchObject([
+      { memberId: managedId, managedMembership: { blockers: [] } },
+    ])
+
+    await db
+      .insertInto('scim_membership_blocks')
+      .values([
+        { organization_id: team.id, user_id: managed.id, source: 'local', kind: 'suspension' },
+        {
+          organization_id: team.id,
+          identity_email: managed.email,
+          source: 'local',
+          kind: 'removal',
+        },
+      ])
+      .execute()
+    const rows = await read(on)
+    expect(rows.map((row) => row.memberId).sort()).toEqual([ownerId, managedId].sort())
+    expect(rows.find((row) => row.memberId === ownerId)).not.toHaveProperty('managedMembership')
+    expect(rows.find((row) => row.memberId === managedId)?.managedMembership).toEqual({
+      blockers: ['local_suspension', 'local_removal'],
+    })
+
+    await db
+      .updateTable('scim_users')
+      .set({ retired_at: new Date() })
+      .where('id', '=', scimUserId)
+      .execute()
+    await db
+      .insertInto('scim_membership_blocks')
+      .values({
+        organization_id: team.id,
+        user_id: managed.id,
+        source: 'scim',
+        kind: 'suspension',
+        connection_id: connectionId,
+        scim_user_id: scimUserId,
+      })
+      .execute()
+    expect((await read(on)).find((row) => row.memberId === managedId)?.managedMembership).toEqual({
+      blockers: ['scim_suspension', 'local_suspension', 'local_removal'],
+    })
+    for (const row of await read(off)) expect(row).not.toHaveProperty('managedMembership')
+  })
 
   it.each(['owner', 'admin'])(
     'denies Authorization before granting the valid %s cookie any team readiness access',

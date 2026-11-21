@@ -49,6 +49,8 @@ export interface ServiceContext extends RecurringBookingAdmissionDeps {
   smsRemindersAvailable?: boolean | undefined
   /** Host-written follow-up body text; enabled unless the operator explicitly disables it. */
   followUpHostNotesEnabled?: boolean | undefined
+  /** In-process SCIM resource capability. Defaults off. */
+  scimResourcesEnabled?: boolean | undefined
   successRedirectPolicy?: SuccessRedirectPolicy | undefined
   /** Explicit instance capability; defaults off. */
   automaticMeet?: boolean | undefined
