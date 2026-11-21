@@ -29,6 +29,7 @@ export const PATHS = {
   settings: `${APP_BASE}/settings`,
   sso: '/app/settings/sso',
   ssoDomainSettings: '/app/settings/sso/domains',
+  ssoRecovery: '/app/settings/sso/recovery',
   mailboxProof: `${APP_BASE}/mailbox-proof`,
   newTeam: `${APP_BASE}/teams/new`,
   signIn: '/sign-in',

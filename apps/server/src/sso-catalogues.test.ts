@@ -222,15 +222,21 @@ function expectNoUnguardedSsoRoutes(paths: string[]) {
   )
 }
 
-// The web setup routes return not-found while hard-off. Their runtime gate and absence
-// of SSO network requests are exercised through the app router in SsoSetup.test.tsx.
-const GUARDED_SSO_WEB_PATHS = ['/app/settings/sso', '/app/settings/sso/domains'] as const
+// The web settings routes return not-found while hard-off. SsoSetup.test.tsx and
+// SsoRecovery.test.tsx exercise the runtime gate and absence of SSO network requests.
+const GUARDED_SSO_WEB_PATHS = [
+  '/app/settings/sso',
+  '/app/settings/sso/domains',
+  '/app/settings/sso/recovery',
+] as const
 const guardedSsoWebNames: ReadonlySet<string> = new Set([
   ...GUARDED_SSO_WEB_PATHS.map((path) => `'${path}'`),
   'sso',
   'ssoDomainSettings',
+  'ssoRecovery',
   '<Route path={PATHS.sso} element={<SsoSetupRoute />}>',
   '<Route path={PATHS.ssoDomainSettings} element={null} />',
+  '<Route path={PATHS.ssoRecovery} element={<SsoRecoveryRoute />} />',
 ])
 
 // The createApp and createAuth options exactly as startServer assembles them
@@ -1096,7 +1102,7 @@ describe('SSO hard-off excludes only SSO from the published catalogues', () => {
     )
   })
 
-  it('declares only the guarded SSO setup web routes and shared paths', async () => {
+  it('declares only the guarded SSO settings web routes and shared paths', async () => {
     const [app, paths] = await Promise.all([
       readFile(new URL('../../web/src/App.tsx', import.meta.url), 'utf8'),
       readFile(new URL('../../web/src/paths.ts', import.meta.url), 'utf8'),

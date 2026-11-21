@@ -26,6 +26,8 @@ const linkSent = () => json(200, { status: true })
 const resendStatus = () => within(screen.getByRole('main')).getByRole('status')
 const invitationPath = '/app/join?invitationId=00000000-0000-7000-8000-000000000005'
 const invitationSignIn = `/sign-in?next=${encodeURIComponent(invitationPath)}`
+const recoveryPath =
+  '/app/settings#ssoRecoveryEnrollment=00000000-0000-7000-8000-000000000006&organizationId=00000000-0000-7000-8000-000000000007&expectedRevision=42'
 const invitationGuidance =
   'Sign in with the email address that received this invitation. Signing in does not join the team.'
 const signInFailures = [
@@ -114,6 +116,37 @@ describe('the sign-in page', () => {
     expect(api.to('GET /api/auth/organization/get-invitation')).toHaveLength(0)
     expect(api.to('POST /api/auth/organization/accept-invitation')).toHaveLength(0)
     expect(location()).toBe(invitationSignIn)
+  })
+
+  it('returns a signed-out recovery nominee to the email fragment after native sign-in', async () => {
+    const api = fakeApi({
+      ...signedOut,
+      'GET /api/v1/instance': () =>
+        json(200, {
+          ssoOidcEnabled: true,
+          ssoSamlEnabled: false,
+          signIn: { email: true, google: false, microsoft: false },
+        }),
+      'POST /api/auth/sign-in/magic-link': linkSent,
+    })
+    const user = userEvent.setup()
+    renderApp(recoveryPath)
+    await heading()
+    const signIn = `/sign-in?next=${encodeURIComponent(recoveryPath)}`
+    expect(location()).toBe(signIn)
+    await user.type(screen.getByLabelText('Email'), 'ada@example.com')
+    await user.click(screen.getByRole('button', { name: 'Email me a sign-in link' }))
+    await screen.findByRole('heading', { name: 'Check your email' })
+    expect(api.to('POST /api/auth/sign-in/magic-link').map(({ body }) => body)).toEqual([
+      { email: 'ada@example.com', callbackURL: recoveryPath, errorCallbackURL: signIn },
+    ])
+  })
+
+  it('drops a malformed recovery fragment from the sign-in destination', async () => {
+    fakeApi(signedOut)
+    renderApp(`${recoveryPath}&extra=ignored`)
+    await heading()
+    expect(location()).toBe('/sign-in?next=%2Fapp%2Fsettings')
   })
 
   it.each([

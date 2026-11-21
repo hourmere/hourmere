@@ -1,4 +1,9 @@
-import { currentSsoRecoveryOwner, type Principal } from '@hourmere/auth'
+import {
+  checkTeamManagementAccess,
+  currentSsoRecoveryOwner,
+  type Principal,
+  TeamManagementError,
+} from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import { auditActor, writeSsoAuditEvent } from '@hourmere/db/audit'
 import { scimSuspended } from '@hourmere/db/scim-suspension'
@@ -15,14 +20,40 @@ import { EXPECTED_ORGANIZATION_HEADER, organizationContextAccess } from './team-
 const recoveryInput = z.strictObject({ expectedRevision: z.int().min(1).max(2_147_483_646) })
 export const UseSsoRecoveryInput = recoveryInput.extend({ proofAttemptId: z.uuid().optional() })
 const denied = () => new DomainError('forbidden', 'team_management_access_denied')
+type Browser = Extract<Principal, { kind: 'session' }>
+
+/** Scope a recovery operation to the explicit target without switching the browser's space. */
+export function otherSsoRecoveryTeam(principal: Principal, headers: Headers): Browser | undefined {
+  if (principal.kind !== 'session' || headers.has('authorization')) return
+  const target = z.uuid().safeParse(headers.get(EXPECTED_ORGANIZATION_HEADER))
+  if (!target.success) return
+  const id = target.data.toLowerCase()
+  if (id === principal.organization.id.toLowerCase()) return
+  return { ...principal, organization: { id, personal: false, name: '', slug: '' } }
+}
+
+/** Only a recovery-required route may defer context authorization to the live grant check. */
+export async function ssoWriteContextAccess(
+  db: Db,
+  principal: Browser,
+  headers: Headers,
+  recoveryRequired: boolean,
+) {
+  const expected = headers.get(EXPECTED_ORGANIZATION_HEADER) ?? undefined
+  if (recoveryRequired && expected?.toLowerCase() === principal.organization.id.toLowerCase())
+    return
+  await organizationContextAccess(principal, expected, true, true)(db, principal.organization.id)
+}
 
 export async function useSsoRecovery(
   deps: SsoRecoveryEnrollmentDeps,
-  principal: Principal,
+  caller: Principal,
   headers: Headers,
   input: z.infer<typeof UseSsoRecoveryInput>,
 ) {
   requireSsoEnabled(deps.capabilities)
+  const target = otherSsoRecoveryTeam(caller, headers)
+  const principal = target ?? caller
   if (principal.kind !== 'session' || principal.organization.personal) throw denied()
   const organizationId = principal.organization.id
   const userId = principal.user.id
@@ -47,15 +78,17 @@ export async function useSsoRecovery(
       },
       {
         authorize: async (trx) => {
-          await access(trx, organizationId)
+          if (target) await checkTeamManagementAccess(trx, target, organizationId, true)
+          else await access(trx, organizationId)
           if (!(await currentSsoRecoveryOwner(trx, organizationId, userId))) throw denied()
           const policy = await trx
             .selectFrom('sso_policies')
-            .select('policy_revision')
+            .select(['policy_revision', 'require_sso'])
             .where('organization_id', '=', organizationId)
             .executeTakeFirst()
           if ((policy?.policy_revision ?? 1) !== input.expectedRevision)
             throw new DomainError('conflict', 'sso_configuration_changed')
+          if (target && !policy?.require_sso) throw denied()
         },
         mutate: async (trx, _input, _binding, _mailbox, attemptId) => {
           // The gate has consumed the mailbox attempt. Retain it as the only live grant
@@ -74,12 +107,14 @@ export async function useSsoRecovery(
       },
     )
   } catch (error) {
-    if (error instanceof HTTPException && error.status === 403) throw denied()
+    if (
+      error instanceof TeamManagementError ||
+      (error instanceof HTTPException && error.status === 403)
+    )
+      throw denied()
     throw error
   }
 }
-
-type Browser = Extract<Principal, { kind: 'session' }>
 
 function recoveryAttempts(db: Db, principal: Browser) {
   return db
@@ -100,6 +135,7 @@ async function liveRecoveryAuthority(db: Db, principal: Browser, binding: string
     FROM sso_attempts a
     JOIN auth.session s ON s.id = a.session_id AND s."userId" = a.user_id
     JOIN auth."user" u ON u.id = a.user_id
+    JOIN sso_policies p ON p.organization_id = a.organization_id AND p.require_sso
     JOIN sso_recovery_owners r ON r.organization_id = a.organization_id AND r.user_id = a.user_id
     JOIN auth.member m ON m.id = r.member_id AND m."organizationId" = r.organization_id
       AND m."userId" = r.user_id
@@ -108,7 +144,7 @@ async function liveRecoveryAuthority(db: Db, principal: Browser, binding: string
       AND a.kind = 'fresh_proof' AND a.operation = ${USE_SSO_RECOVERY}
       AND a.consumed_at IS NOT NULL AND r.accepted_at <= a.consumed_at
       AND a.browser_binding_digest = ${binding} AND a.mailbox = lower(btrim(u.email))
-      AND u."emailVerified" AND lower(s."activeOrganizationId") = a.organization_id::text
+      AND u."emailVerified"
       AND NOT ${scimSuspended(sql.ref('a.organization_id'), sql.ref('a.user_id'))}
       AND a.mailbox_proof_expires_at > ${observedAt} AND a.expires_at > ${observedAt}
       AND s."expiresAt" > ${observedAt}

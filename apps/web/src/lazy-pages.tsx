@@ -12,6 +12,10 @@ export const SsoSetupPage = page(
   () => import('./pages/sso/SsoSetup.tsx'),
   (module) => module.SsoSetupPage,
 )
+export const SsoRecoveryPage = page(
+  () => import('./pages/sso/SsoRecovery.tsx'),
+  (module) => module.SsoRecoveryPage,
+)
 
 // The signed-in app.
 /** SessionProvider around the signed-in routes (and sign-in), as a layout route. */

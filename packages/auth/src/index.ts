@@ -634,6 +634,7 @@ export {
   currentSsoRecoveryOwner,
   removeSsoRecoveryOwner,
   SsoRecoveryRequiredError,
+  type SsoRecoveryTeam,
 } from './sso-recovery-membership.ts'
 export {
   liveBrowserProofQuery,

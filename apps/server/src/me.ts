@@ -32,7 +32,16 @@ export const CallerDescription = z.object({
   }),
 })
 
-export const Me = CallerDescription.extend({ sso: MeSso.optional() }).openapi('Me', {
+export const Me = CallerDescription.extend({
+  sso: MeSso.optional(),
+  ssoRecoveryTeams: z
+    .array(z.object({ id: z.uuid(), displayName: z.string(), policyRevision: z.int().positive() }))
+    .optional()
+    .openapi({
+      description:
+        'Teams requiring SSO for which this browser caller is an accepted, current recovery owner. Each revision is the expectedRevision for useSsoRecovery.',
+    }),
+}).openapi('Me', {
   description:
     'The enrollment view for a session without the required team proof keeps the active organization ID and omits its metadata by returning empty name and slug strings.',
 })

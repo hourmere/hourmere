@@ -1,6 +1,8 @@
 import type { Database, Db } from '@hourmere/db'
 import { auditActor, writeSsoAuditEvent } from '@hourmere/db/audit'
+import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { sql, type Transaction } from 'kysely'
+import { jsonArrayFrom } from 'kysely/helpers/postgres'
 import type { Principal } from './caller.ts'
 
 export class SsoRecoveryRequiredError extends Error {
@@ -16,7 +18,7 @@ export const ssoRecoveryOwner = sql<boolean>`EXISTS (
   SELECT 1 FROM sso_recovery_owners WHERE member_id = "member".id
 )`.as('recoveryOwner')
 
-function currentRecoveryOwners(db: Db, organizationId: string) {
+function currentRecoveryOwners(db: Db) {
   return db
     .selectFrom('sso_recovery_owners as recovery')
     .innerJoin('auth.member as member', (join) =>
@@ -25,16 +27,50 @@ function currentRecoveryOwners(db: Db, organizationId: string) {
         .onRef('member.organizationId', '=', 'recovery.organization_id')
         .onRef('member.userId', '=', 'recovery.user_id'),
     )
-    .select('recovery.member_id')
-    .where('recovery.organization_id', '=', organizationId)
     .where(sql<boolean>`'owner' = ANY (
       SELECT btrim(token) FROM unnest(string_to_array("member".role, ',')) AS roles(token)
     )`)
 }
 
+function recoveryOwnersInOrganization(db: Db, organizationId: string) {
+  return currentRecoveryOwners(db)
+    .select('recovery.member_id')
+    .where('recovery.organization_id', '=', organizationId)
+}
+
+export interface SsoRecoveryTeam {
+  id: string
+  displayName: string
+  policyRevision: number
+}
+
+/** Project the caller's recovery targets in the existing membership SELECT. */
+export function ssoRecoveryTeamsFor(db: Db, userId: string, sessionId: string) {
+  return jsonArrayFrom(
+    currentRecoveryOwners(db)
+      .innerJoin('sso_policies as policy', 'policy.organization_id', 'recovery.organization_id')
+      .innerJoin('auth.organization as team', 'team.id', 'recovery.organization_id')
+      .select(['team.id', 'team.name as displayName', 'policy.policy_revision as policyRevision'])
+      .where('recovery.user_id', '=', userId)
+      .where('policy.require_sso', '=', true)
+      .where((eb) => eb.not(scimSuspended(eb.ref('team.id'), userId)))
+      .where((eb) =>
+        eb.exists(
+          eb
+            .selectFrom('auth.session as session')
+            .select('session.id')
+            .where('session.id', '=', sessionId)
+            .where('session.userId', '=', userId)
+            .where('session.expiresAt', '>', sql<Date>`statement_timestamp()`),
+        ),
+      )
+      .orderBy('team.id'),
+  )
+}
+
 /** Use under the organization write lock, which also serializes changes to owner standing. */
 export function currentSsoRecoveryOwner(db: Db, organizationId: string, userId?: string) {
-  const owners = currentRecoveryOwners(db, organizationId)
+  const owners = recoveryOwnersInOrganization(db, organizationId)
   return (userId === undefined ? owners : owners.where('recovery.user_id', '=', userId))
     .limit(1)
     .executeTakeFirst()
@@ -42,7 +78,7 @@ export function currentSsoRecoveryOwner(db: Db, organizationId: string, userId?:
 
 /** Better Auth has already refused the departure. Classify its early sole-owner response. */
 export function soleOwnerDepartureFlags(db: Db, organizationId: string, userId: string) {
-  const owners = currentRecoveryOwners(db, organizationId)
+  const owners = recoveryOwnersInOrganization(db, organizationId)
   return db
     .selectNoFrom((eb) => [
       eb
@@ -114,7 +150,7 @@ export async function removeSsoRecoveryOwner(
     .executeTakeFirst()
   await checkProof()
   if (isOwner && policy?.require_sso) {
-    const replacement = await currentRecoveryOwners(trx, organizationId)
+    const replacement = await recoveryOwnersInOrganization(trx, organizationId)
       .where('recovery.user_id', '!=', userId)
       .limit(1)
       .executeTakeFirst()
