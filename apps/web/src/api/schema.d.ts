@@ -5201,7 +5201,7 @@ export interface paths {
         };
         /**
          * Read the current team SSO policy
-         * @description Owner/admin only; read/full API key or authorized MCP OAuth. An unconfigured team has invitation-only admission and no SSO requirement. SSO is being built and is not available yet.
+         * @description Owner/admin only; read/full API key or authorized MCP OAuth. An unconfigured team has invitation-only admission and no SSO requirement. OIDC SSO is off unless the operator sets SSO_OIDC_ENABLED=true; while off, this read still answers for stored configuration.
          */
         get: operations["getSsoPolicy"];
         /**
@@ -5225,7 +5225,7 @@ export interface paths {
         };
         /**
          * List safe SSO provider drafts for the current team
-         * @description Owner/admin only; read/full API key or authorized MCP OAuth. SSO is being built and is not available yet. Follow nextCursor for all providers. Opaque links and generations are only returned to browser sessions. Configuration, secrets, raw metadata and identity claims are never returned. Objects and status strings may gain values.
+         * @description Owner/admin only; read/full API key or authorized MCP OAuth. OIDC SSO is off unless the operator sets SSO_OIDC_ENABLED=true; while off, this read still answers for stored configuration. Follow nextCursor for all providers. Opaque links and generations are only returned to browser sessions. Configuration, secrets, raw metadata and identity claims are never returned. Objects and status strings may gain values.
          */
         get: operations["listSsoProviders"];
         put?: never;
@@ -7238,9 +7238,9 @@ export interface components {
             /** @description Whether hosts may copy open times; enable only after direct-slot pages are live */
             slotSnippetsEnabled?: boolean;
             smsRemindersAvailable?: boolean;
-            /** @description Whether OIDC SSO is enabled; absent when unknown */
+            /** @description The effective SSO_OIDC_ENABLED operator setting (off by default); absent when unknown */
             ssoOidcEnabled?: boolean;
-            /** @description Whether SAML SSO is enabled; absent when unknown */
+            /** @description Whether SAML SSO is enabled: always false for now; absent when unknown */
             ssoSamlEnabled?: boolean;
             /**
              * Format: uri

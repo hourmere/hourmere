@@ -6,7 +6,7 @@ import type { Auth } from './index.ts'
 import { ensurePersonalOrganization, isUuid } from './organizations.ts'
 import { type SsoDelegationStatus, ssoDelegationStatus } from './sso-delegation-access.ts'
 import { type SsoRecoveryTeam, ssoRecoveryTeamsFor } from './sso-recovery-membership.ts'
-import { ssoHardOff, type TeamSsoCapabilities } from './team-sso.ts'
+import { ssoHardOff, ssoRetained, type TeamSsoCapabilities } from './team-sso.ts'
 
 /** Every API key starts with this, so leaked keys are recognizable (e.g. by secret scanners). */
 export const API_KEY_PREFIX = 'hm_'
@@ -261,7 +261,7 @@ export function createCallerResolver({
         ? session.session.activeOrganizationId
         : undefined
     const membershipOptions =
-      includeSsoRecoveryTeams && (ssoCapabilities.ssoOidcEnabled || ssoCapabilities.ssoSamlEnabled)
+      includeSsoRecoveryTeams && ssoRetained(ssoCapabilities)
         ? { recoverySessionId: session.session.id }
         : undefined
     // A session without effective membership in its active organization acts in the personal one.

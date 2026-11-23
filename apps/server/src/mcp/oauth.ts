@@ -10,6 +10,7 @@ import {
   mcpOAuthUrls,
   type Principal,
   ssoHardOff,
+  ssoRetained,
   type TeamSsoCapabilities,
   withMcpOAuthIntent,
 } from '@hourmere/auth'
@@ -468,7 +469,7 @@ export function mcpOAuthBroker({ auth, db, publicUrl, ssoCapabilities = ssoHardO
         .where('g.user_id', '=', p.user.id)
         .whereRef('c.userId', '=', 'g.user_id')
         .whereRef('c.clientId', '=', 'g.client_id')
-        .$if(ssoCapabilities.ssoOidcEnabled || ssoCapabilities.ssoSamlEnabled, (query) =>
+        .$if(ssoRetained(ssoCapabilities), (query) =>
           query.select(
             sql<string | null>`CASE WHEN EXISTS (
               SELECT FROM auth.member m

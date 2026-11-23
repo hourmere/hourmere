@@ -6,8 +6,13 @@ import { getRequestListener } from '@hono/node-server'
 import type { BrowserContext } from '@playwright/test'
 import { sql } from 'kysely'
 import { createApp } from '../../../apps/server/src/app.ts'
+import { loadConfig } from '../../../apps/server/src/config.ts'
 import { mcpEndpoint } from '../../../apps/server/src/mcp/endpoint.ts'
-import { productRoutes, productTools } from '../../../apps/server/src/server.ts'
+import {
+  productionSsoCapabilities,
+  productRoutes,
+  productTools,
+} from '../../../apps/server/src/server.ts'
 import { sealSsoProviderConfiguration } from '../../../apps/server/src/sso-configuration.ts'
 import {
   deliverMailboxProof,
@@ -422,7 +427,16 @@ export const test = base.extend<{
           }),
         }
         const mail = new Map<string, string>()
-        const capabilities = { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: false }
+        // The operator setting, parsed and derived exactly as the running server does it;
+        // nothing is injected. Empty is what a new install's .env and Compose pass.
+        const config = loadConfig({
+          DATABASE_URL: owned.url,
+          BETTER_AUTH_SECRET: secret,
+          SSO_OIDC_ENABLED: oidcEnabled ? 'true' : '',
+          SSO_ENCRYPTION_KEY: configurationKey.toString('base64'),
+        })
+        const capabilities = productionSsoCapabilities(config)
+        const ssoConfigurationKey = Buffer.from(config.SSO_ENCRYPTION_KEY ?? '', 'base64')
         const mailbox = mailboxProofSink({ db, capabilities, publicUrl: url, secret })
         authPool = createAuthPool(owned.url, signup)
         const auth = createAuth({
@@ -433,7 +447,7 @@ export const test = base.extend<{
           signup,
           socialProviders,
           socialProviderOptions: { google: vouching, microsoft: vouching },
-          ...(oidcEnabled && { ssoCapabilities: capabilities }),
+          ssoCapabilities: capabilities,
           mailer: {
             async send() {
               throw new Error('Keycloak fixture sign-in mail must use the in-memory queue')
@@ -469,11 +483,13 @@ export const test = base.extend<{
             fileURLToPath(new URL('../../../apps/web/dist', import.meta.url)),
           ssoTeamReads: { db, capabilities },
           ssoMailboxProof: mailbox.routes,
-          mcp: mcpEndpoint({ tools: productTools({ db, publicUrl: url }) }),
+          mcp: mcpEndpoint({
+            tools: productTools({ db, publicUrl: url, ssoCapabilities: capabilities }),
+          }),
           ssoOidcSignIn: oidcSignInRoutes({
             db,
             capabilities,
-            configurationKey,
+            configurationKey: ssoConfigurationKey,
             privateTargets,
             signup,
             session: { secret },
@@ -503,16 +519,14 @@ export const test = base.extend<{
             invitationMailLimits: { secret },
             publicUrl: url,
             socialProviders,
-            ...(oidcEnabled && {
-              ssoOidcEnabled: true,
-              ssoConfigurationKey: configurationKey,
-              ssoPrivateTargets: privateTargets,
-              ssoRecoveryEnrollmentQueue: {
-                async enqueue() {
-                  return 'fixture-sso-recovery-notice'
-                },
+            ...capabilities,
+            ssoConfigurationKey,
+            ssoPrivateTargets: privateTargets,
+            ssoRecoveryEnrollmentQueue: {
+              async enqueue() {
+                return 'fixture-sso-recovery-notice'
               },
-            }),
+            },
           }),
         })
         server.on('request', getRequestListener(app.fetch, { hostname: '127.0.0.1' }))

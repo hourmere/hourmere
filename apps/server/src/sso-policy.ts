@@ -5,7 +5,7 @@ import { DomainError } from '@hourmere/scheduling'
 import { HTTPException } from 'hono/http-exception'
 import { sql } from 'kysely'
 import { z } from 'zod'
-import { requireSsoEnabled, type SsoCapabilities } from './sso.ts'
+import { requireSsoEnabled, requireSsoRetained, type SsoCapabilities } from './sso.ts'
 import { lockSsoDomain } from './sso-domains.ts'
 import { type FreshProofDeps, runWithFreshProof } from './sso-fresh-proof.ts'
 import { providerTestStatus } from './sso-oidc-test-receipts.ts'
@@ -84,7 +84,7 @@ export async function setSsoPolicy(
   input: z.infer<typeof SetSsoPolicyInput>,
   recoveryRequired = false,
 ) {
-  requireSsoEnabled(deps.capabilities)
+  requireSsoRetained(deps.capabilities)
   if (principal.kind !== 'session' || principal.organization.personal) throw denied()
   const organizationId = principal.organization.id
   let before: ReturnType<typeof ssoPolicySummary>
@@ -133,6 +133,8 @@ export async function setSsoPolicy(
           throw new DomainError('conflict', 'sso_configuration_changed')
         const enablesEnforcement = input.requireSso && !before.requireSso
         if (!enablesEnforcement && !enablesJit) return
+        // Both add trust: refused while every protocol is off, whatever is stored.
+        requireSsoEnabled(deps.capabilities)
         const testedProviders = enablesEnforcement
           ? await getTestedProviders(trx, deps.capabilities, organizationId)
           : undefined

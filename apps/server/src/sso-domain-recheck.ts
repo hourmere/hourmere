@@ -5,7 +5,7 @@ import { defineJob } from '@hourmere/jobs'
 import { resolveSsoDomainTxt, SSO_TRANSPORT_LIMITS } from '@hourmere/outbound/sso'
 import { sql } from 'kysely'
 import { z } from 'zod'
-import type { SsoCapabilities } from './sso.ts'
+import { type SsoCapabilities, ssoRetained } from './sso.ts'
 import { SSO_DOMAIN_LIMITS, ssoDomainChallengeDigest } from './sso-domains.ts'
 import { databaseClock } from './sso-mailbox-proof.ts'
 
@@ -18,8 +18,7 @@ export interface DomainRecheckDeps {
   now?: ((db: Db) => Promise<string>) | undefined
   resolveTxt?: ((name: string) => Promise<string[][]>) | undefined
 }
-const enabled = (deps: DomainRecheckDeps) =>
-  deps.capabilities.ssoOidcEnabled || deps.capabilities.ssoSamlEnabled
+const enabled = (deps: DomainRecheckDeps) => ssoRetained(deps.capabilities)
 
 /** Injected trusted resolvers obey the production resolver's absolute time budget too. */
 async function lookup(deps: DomainRecheckDeps, name: string) {

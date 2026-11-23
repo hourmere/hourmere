@@ -386,7 +386,7 @@ describe.skipIf(!process.env.DATABASE_URL)('SSO draft reads', () => {
         },
       ],
       [
-        ['  requireSsoEnabled(deps.capabilities)', '  // removed guard'],
+        ['  requireSsoRetained(deps.capabilities)', '  // removed guard'],
         async (m) => {
           await expect(
             m.getSsoPolicy({ db, capabilities: OFF }, principal()),

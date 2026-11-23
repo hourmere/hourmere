@@ -214,15 +214,45 @@ describe('SSO credential delegation', () => {
     'issues no SSO requests at %s while instance status is unknown or off',
     async (path) => {
       const instance = later()
-      const { requests } = showCredentials(path, {
-        'GET /api/v1/instance': () => instance.response,
-        [getKeys]: () => json(200, { apiKeys: [{ ...key, ssoDelegation: binding }], total: 1 }),
-        [getConnections]: () => json(200, { data: [{ ...connection, ssoDelegation: binding }] }),
-      })
+      // Off, the server sends no SSO summary for a team without stored SSO state.
+      const { sso: _sso, ...withoutSso } = viewer
+      const { requests } = showCredentials(
+        path,
+        {
+          'GET /api/v1/instance': () => instance.response,
+          [getKeys]: () => json(200, { apiKeys: [{ ...key, ssoDelegation: binding }], total: 1 }),
+          [getConnections]: () => json(200, { data: [{ ...connection, ssoDelegation: binding }] }),
+        },
+        withoutSso,
+      )
       await screen.findByText(path === PATHS.apiKeys ? (key.name as string) : connection.clientName)
       expect(screen.queryByRole('region', { name: 'SSO delegation' })).toBeNull()
       await instance.answer(json(200, { ssoOidcEnabled: false, ssoSamlEnabled: false }))
       expect(screen.queryByRole('region', { name: 'SSO delegation' })).toBeNull()
+      expect(requests.calls.filter(({ path }) => path.includes('/sso'))).toEqual([])
+    },
+  )
+
+  it.each([PATHS.apiKeys, PATHS.connectedApps])(
+    'offers only revocation at %s while the setting is off for a team with stored SSO state',
+    async (path) => {
+      const bound = path === PATHS.apiKeys
+      const { requests } = showCredentials(path, {
+        'GET /api/v1/instance': () => json(200, { ssoOidcEnabled: false, ssoSamlEnabled: false }),
+        // One credential still has a suspended delegation; the other has none to revoke.
+        [getKeys]: () =>
+          json(200, {
+            apiKeys: [{ ...key, ssoDelegation: bound ? binding : undefined }],
+            total: 1,
+          }),
+        [getConnections]: () => json(200, { data: [connection] }),
+      })
+      await screen.findByText(bound ? (key.name as string) : connection.clientName)
+      if (bound) {
+        const region = await screen.findByRole('region', { name: 'SSO delegation' })
+        expect(within(region).getByRole('button', { name: 'Revoke SSO delegation' })).toBeDefined()
+        expect(within(region).queryByRole('button', { name: 'Bind SSO delegation' })).toBeNull()
+      } else expect(screen.queryByRole('region', { name: 'SSO delegation' })).toBeNull()
       expect(requests.calls.filter(({ path }) => path.includes('/sso'))).toEqual([])
     },
   )

@@ -3,7 +3,7 @@ import { DomainError } from '@hourmere/scheduling'
 import type { MiddlewareHandler } from 'hono'
 import type { CallerEnv } from '../caller.ts'
 import { ErrorBody, errorResponses, json, type RouteModule } from '../openapi.ts'
-import { requireSsoEnabled } from '../sso.ts'
+import { requireSsoEnabled, requireSsoRetained } from '../sso.ts'
 import {
   ActivateSsoProviderInput,
   activateSsoProvider,
@@ -53,23 +53,27 @@ export const FreshProofChallenge = ErrorBody.extend({
 
 /** Browser-only trust changes; no corresponding machine tools or commands exist. */
 export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): RouteModule {
-  const enabled: MiddlewareHandler<CallerEnv> = async (c, next) => {
-    requireSsoEnabled(deps.capabilities)
-    let input: unknown
-    try {
-      input = await c.req.json()
-    } catch (error) {
-      // Let session authorization precede ordinary malformed-body validation.
-      if (!(error instanceof SyntaxError)) throw error
+  // Creating and updating add trust through OIDC; deletion stays available while it is off.
+  const draft =
+    (addsTrust: boolean): MiddlewareHandler<CallerEnv> =>
+    async (c, next) => {
+      requireSsoRetained(deps.capabilities)
+      let input: unknown
+      try {
+        input = await c.req.json()
+      } catch (error) {
+        // Let session authorization precede ordinary malformed-body validation.
+        if (!(error instanceof SyntaxError)) throw error
+      }
+      if (
+        input &&
+        typeof input === 'object' &&
+        (('protocol' in input && input.protocol === 'saml') || 'saml' in input)
+      )
+        throw new DomainError('not_found', 'sso_disabled')
+      if (addsTrust) requireSsoEnabled(deps.capabilities, 'oidc')
+      await next()
     }
-    if (
-      input &&
-      typeof input === 'object' &&
-      (('protocol' in input && input.protocol === 'saml') || 'saml' in input)
-    )
-      throw new DomainError('not_found', 'sso_disabled')
-    await next()
-  }
   const oidcEnabled: MiddlewareHandler<CallerEnv> = async (c, next) => {
     c.header('Cache-Control', 'no-store')
     c.header('Referrer-Policy', 'no-referrer')
@@ -79,7 +83,7 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
   const activationEnabled: MiddlewareHandler<CallerEnv> = async (c, next) => {
     c.header('Cache-Control', 'no-store')
     c.header('Referrer-Policy', 'no-referrer')
-    requireSsoEnabled(deps.capabilities)
+    requireSsoRetained(deps.capabilities)
     if (!deps.capabilities.ssoOidcEnabled) {
       let input: unknown
       try {
@@ -121,7 +125,8 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
       teamManagementSessionCaller(caller),
       sessionOnly,
     ] as const
-    const middleware = [enabled, ...sessionMiddleware] as const
+    const middleware = [draft(true), ...sessionMiddleware] as const
+    const deleteMiddleware = [draft(false), ...sessionMiddleware] as const
     app.openapi(
       createRoute({
         method: 'post',
@@ -336,7 +341,7 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
         description:
           'Verified team owner/admin browser session with fresh proof and expected revision. An enforced team must keep a usable provider. An authorized repeat retirement is idempotent. SSO remains unavailable.',
         security: [{ session: [] }],
-        middleware: [...middleware] as const,
+        middleware: [...deleteMiddleware] as const,
         request: {
           headers: z.object({
             'X-Expected-Organization-Id': z.string().optional().openapi({

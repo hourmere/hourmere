@@ -2,6 +2,7 @@ import { z } from '@hono/zod-openapi'
 import type { Principal } from '@hourmere/auth'
 import { parse } from 'hono/utils/cookie'
 import { sql } from 'kysely'
+import { ssoRetained } from './sso.ts'
 import { bindingCookieName, browserBindingDigest } from './sso-mailbox-proof.ts'
 import { LINK_SSO_ACCOUNT, OIDC_COMPLETE_LINK } from './sso-oidc-link.ts'
 import { liveBrowserProofs, type SsoTeamReadDeps, type TeamReadPolicy } from './sso-team-reads.ts'
@@ -39,9 +40,14 @@ export async function readSsoMe(
   headers: Headers,
   publicUrl: string,
   policy: TeamReadPolicy | null,
+  /** While every protocol's setting is off: whether the team has stored SSO state. */
+  stored = false,
 ): Promise<z.infer<typeof MeSso> | undefined> {
+  // While every protocol's setting is off, only a team with stored SSO state has a summary:
+  // its members keep their links and its administrators the trust-reducing views.
+  const on = capabilities.ssoOidcEnabled || capabilities.ssoSamlEnabled
   if (
-    !capabilities.ssoOidcEnabled ||
+    !(on || (ssoRetained(capabilities) && stored)) ||
     principal.kind !== 'session' ||
     principal.organization.personal ||
     headers.has('authorization')
@@ -69,6 +75,7 @@ export async function readSsoMe(
         FROM sso_providers p
         WHERE p.organization_id = c.organization_id
           AND p.protocol = 'oidc' AND p.enabled AND p.retired_at IS NULL
+          AND ${capabilities.ssoOidcEnabled}::boolean
         ORDER BY p.id
       )) AS providers,
       to_json(ARRAY(
@@ -87,6 +94,7 @@ export async function readSsoMe(
         WHERE a.organization_id = c.organization_id AND a.user_id = c.user_id
           AND a.session_id = c.session_id AND a.browser_binding_digest = ${binding}
           AND a.consumed_at IS NULL AND a.expires_at > c.observed_at
+          AND ${capabilities.ssoOidcEnabled}::boolean
           AND (a.mailbox_proven_at IS NULL OR a.mailbox_proof_expires_at > c.observed_at)
           AND (
             (a.kind = 'fresh_proof' AND a.operation = ${LINK_SSO_ACCOUNT})

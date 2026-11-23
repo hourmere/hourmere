@@ -3,7 +3,7 @@ import { DomainError } from '@hourmere/scheduling'
 import type { MiddlewareHandler } from 'hono'
 import type { CallerEnv } from '../caller.ts'
 import { ErrorBody, errorResponses, json, type RouteModule } from '../openapi.ts'
-import { requireSsoEnabled } from '../sso.ts'
+import { requireSsoEnabled, requireSsoRetained, type SsoCapabilities } from '../sso.ts'
 import {
   CreateSsoDomainChallengeInput,
   createSsoDomainChallenge,
@@ -42,11 +42,14 @@ const FreshProofChallenge = ErrorBody.extend({
 
 /** Browser-only trust changes; no corresponding machine tools or commands exist. */
 export function ssoDomainRoutes(deps: SsoDomainDeps): RouteModule {
-  const enabled: MiddlewareHandler<CallerEnv> = async (c, next) => {
-    c.header('Cache-Control', 'no-store')
-    requireSsoEnabled(deps.capabilities)
-    await next()
-  }
+  // Claiming and verifying add trust; retiring a claim stays available while the setting is off.
+  const guard =
+    (require: (capabilities: SsoCapabilities) => void): MiddlewareHandler<CallerEnv> =>
+    async (c, next) => {
+      c.header('Cache-Control', 'no-store')
+      require(deps.capabilities)
+      await next()
+    }
   const exactOrigin: MiddlewareHandler<CallerEnv> = async (c, next) => {
     if (c.req.header('origin') !== new URL(deps.publicUrl).origin)
       throw new DomainError('forbidden', 'team_management_access_denied')
@@ -71,12 +74,9 @@ export function ssoDomainRoutes(deps: SsoDomainDeps): RouteModule {
     },
   }
   return ({ app, caller }) => {
-    const middleware = [
-      enabled,
-      exactOrigin,
-      teamManagementSessionCaller(caller),
-      sessionOnly,
-    ] as const
+    const session = [exactOrigin, teamManagementSessionCaller(caller), sessionOnly] as const
+    const middleware = [guard(requireSsoEnabled), ...session] as const
+    const deleteMiddleware = [guard(requireSsoRetained), ...session] as const
     app.openapi(
       createRoute({
         method: 'post',
@@ -166,7 +166,7 @@ export function ssoDomainRoutes(deps: SsoDomainDeps): RouteModule {
         description:
           'Verified team owner/admin browser session with fresh proof and expected generation. SSO remains unavailable.',
         security: [{ session: [] }],
-        middleware: [...middleware] as const,
+        middleware: [...deleteMiddleware] as const,
         request: {
           headers: z.object({
             'X-Expected-Organization-Id': z.string().optional().openapi({

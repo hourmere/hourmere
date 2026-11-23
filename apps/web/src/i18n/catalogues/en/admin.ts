@@ -3141,4 +3141,7 @@ export const admin = {
     'Link a team sign-in method in Settings before binding a delegation.',
   'Could not verify your team sign-in settings.': 'Could not verify your team sign-in settings.',
   'Create a replacement': 'Create a replacement',
+  // Single sign-on turned off by the operator
+  'Single sign-on is turned off on this instance. You can review and remove existing settings, but nothing new can be added.':
+    'Single sign-on is turned off on this instance. You can review and remove existing settings, but nothing new can be added.',
 } as const

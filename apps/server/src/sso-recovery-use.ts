@@ -11,7 +11,7 @@ import { DomainError } from '@hourmere/scheduling'
 import { HTTPException } from 'hono/http-exception'
 import { sql } from 'kysely'
 import { z } from 'zod'
-import { requireSsoEnabled, USE_SSO_RECOVERY } from './sso.ts'
+import { requireSsoRetained, USE_SSO_RECOVERY } from './sso.ts'
 import { type RecoveryProofContext, runWithFreshProof } from './sso-fresh-proof.ts'
 import { bindingCookieName, browserBindingDigest, readBindingCookie } from './sso-mailbox-proof.ts'
 import { notifySsoRecoveryUse, type SsoRecoveryEnrollmentDeps } from './sso-recovery-enrollment.ts'
@@ -51,7 +51,7 @@ export async function useSsoRecovery(
   headers: Headers,
   input: z.infer<typeof UseSsoRecoveryInput>,
 ) {
-  requireSsoEnabled(deps.capabilities)
+  requireSsoRetained(deps.capabilities)
   const target = otherSsoRecoveryTeam(caller, headers)
   const principal = target ?? caller
   if (principal.kind !== 'session' || principal.organization.personal) throw denied()

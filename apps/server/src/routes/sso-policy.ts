@@ -3,7 +3,7 @@ import { DomainError } from '@hourmere/scheduling'
 import type { MiddlewareHandler } from 'hono'
 import type { CallerEnv } from '../caller.ts'
 import { errorResponses, json, type RouteModule } from '../openapi.ts'
-import { requireSsoEnabled } from '../sso.ts'
+import { requireSsoRetained } from '../sso.ts'
 import { SetSsoPolicyInput, type SsoPolicyDeps, setSsoPolicy } from '../sso-policy.ts'
 import { ssoRecoveryWritePrincipal } from '../sso-write-middleware.ts'
 import { teamManagementSessionCaller } from '../team-management.ts'
@@ -13,7 +13,7 @@ import { FreshProofChallenge } from './sso-drafts.ts'
 export function ssoPolicyRoutes(deps: SsoPolicyDeps): RouteModule {
   const guard: MiddlewareHandler<CallerEnv> = async (c, next) => {
     c.header('Cache-Control', 'no-store')
-    requireSsoEnabled(deps.capabilities)
+    requireSsoRetained(deps.capabilities)
     if (c.req.header('origin') !== new URL(deps.publicUrl).origin)
       throw new DomainError('forbidden', 'team_management_access_denied')
     await next()

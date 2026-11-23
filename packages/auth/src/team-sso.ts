@@ -7,6 +7,17 @@ import { jsonObjectFrom } from 'kysely/helpers/postgres'
 export interface TeamSsoCapabilities {
   readonly ssoOidcEnabled: boolean
   readonly ssoSamlEnabled: boolean
+  /** Set by the running server: a protocol that is off keeps recovery of stored state. */
+  readonly ssoOperatorSetting?: boolean | undefined
+}
+
+/** True unless every protocol is hard-off: stored SSO state can be read, recovered and reduced. */
+export function ssoRetained(capabilities: TeamSsoCapabilities): boolean {
+  return (
+    capabilities.ssoOidcEnabled ||
+    capabilities.ssoSamlEnabled ||
+    capabilities.ssoOperatorSetting === true
+  )
 }
 
 export const ssoHardOff: TeamSsoCapabilities = { ssoOidcEnabled: false, ssoSamlEnabled: false }
@@ -32,6 +43,8 @@ export interface TeamReadAccess {
   allowed: boolean
   policy: TeamReadPolicy | null
   suspended?: true
+  /** Only while every protocol's setting is off: the team has stored SSO state. */
+  stored?: boolean
 }
 
 /** Shared by enforcement and the caller's own proof summary. */
@@ -79,16 +92,36 @@ export async function teamSsoAccess(
     .select(['require_sso', 'admission', 'policy_revision', 'trust_generation'])
     .select(sql<boolean>`CASE WHEN require_sso THEN ${hasProof} ELSE true END`.as('allowed'))
     .where('policy.organization_id', '=', organizationId)
+  // Read with the policy, so that a team without SSO costs no further statement while off.
+  const settingOff =
+    capabilities.ssoOperatorSetting === true &&
+    !capabilities.ssoOidcEnabled &&
+    !capabilities.ssoSamlEnabled
+  const stored = settingOff
+    ? sql<boolean>`(
+        EXISTS (SELECT 1 FROM sso_policies WHERE organization_id = ${organizationId}::uuid
+          AND (require_sso OR admission = 'jit'))
+        OR EXISTS (SELECT 1 FROM sso_providers WHERE organization_id = ${organizationId}::uuid
+          AND retired_at IS NULL)
+        OR EXISTS (SELECT 1 FROM sso_domains WHERE organization_id = ${organizationId}::uuid
+          AND retired_at IS NULL)
+      )`
+    : sql<boolean>`false`
   const access = await db
     .selectNoFrom([
       jsonObjectFrom(policy).as('policy'),
       (identity ? scimSuspended(organizationId, identity.userId) : sql<boolean>`false`).as(
         'suspended',
       ),
+      stored.as('stored'),
     ])
     .executeTakeFirstOrThrow()
   if (access.suspended) return { allowed: false, policy: access.policy, suspended: true }
-  return { allowed: access.policy?.allowed ?? true, policy: access.policy }
+  return {
+    allowed: access.policy?.allowed ?? true,
+    policy: access.policy,
+    ...(settingOff && { stored: access.stored }),
+  }
 }
 
 export function memoizeTeamSsoAccess(deps: TeamSsoDeps, identity: TeamSsoSession | null) {

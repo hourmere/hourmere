@@ -209,15 +209,16 @@ addresses, or authorize sending passwords to another origin. Use a certificate t
 by the process; there is no “ignore certificate errors” option. Apply narrow egress
 rules and, when configuration is introduced, keep web and worker policy consistent.
 
-## Private identity providers (reserved)
+## Private identity providers
 
-Organization SSO is not available yet. `SSO_PRIVATE_TARGETS` is reserved for identity
+Organization OIDC sign-in is off unless you set `SSO_OIDC_ENABLED=true`; see
+[single sign-on](/docs/sso). `SSO_PRIVATE_TARGETS` lists identity
 providers on a private network or on a port other than 443, and is empty by default; leave
-it empty unless you prepare for a later release. It accepts only exact `host:port` entries
+it empty unless your identity provider needs it. It accepts only exact `host:port` entries
 and permits private routing for exactly those entries, or a public non-default port for an
 entry with a public DNS name (never a single label such as `keycloak` or a special-use name
 such as `idp.internal`), but never plain HTTP. It is separate from
-`WEBHOOK_PRIVATE_TARGETS`. An invalid value stops startup; a valid one changes nothing yet.
+`WEBHOOK_PRIVATE_TARGETS`. An invalid value stops startup; a valid one routes nothing while OIDC is off.
 See the [configuration reference](/docs/configuration#private-identity-providers).
 
 ## Proxy behavior and an existing proxy

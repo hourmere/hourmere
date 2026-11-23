@@ -2997,4 +2997,7 @@ export const admin = {
     '请先在设置中关联团队登录方式，再绑定委托。',
   'Could not verify your team sign-in settings.': '无法确认你的团队登录设置。',
   'Create a replacement': '创建替代密钥',
+  // Single sign-on turned off by the operator
+  'Single sign-on is turned off on this instance. You can review and remove existing settings, but nothing new can be added.':
+    '此实例已关闭单点登录。你可以查看和移除已有设置，但无法新增。',
 } as const

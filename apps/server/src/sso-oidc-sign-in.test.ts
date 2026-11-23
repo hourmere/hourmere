@@ -271,9 +271,12 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     scimClaims = false,
     failRecoveryNotification = false,
     nativeAuth,
+    operatorSetting,
   }: {
     enabled?: boolean
     samlEnabled?: boolean
+    /** As the running server passes it: an off protocol keeps Setting-off behaviour. */
+    operatorSetting?: boolean
     enforceTeamSso?: boolean
     expiresIn?: number
     signupPolicy?: SignupPolicy
@@ -281,7 +284,11 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     failRecoveryNotification?: boolean
     nativeAuth?: typeof auth
   } = {}) {
-    const capabilities = { ssoOidcEnabled: enabled, ssoSamlEnabled: samlEnabled }
+    const capabilities = {
+      ssoOidcEnabled: enabled,
+      ssoSamlEnabled: samlEnabled,
+      ssoOperatorSetting: operatorSetting,
+    }
     const authentication = nativeAuth ?? (scimClaims ? scimAuth : auth)
     return createApp({
       checkDb: async () => {},
@@ -1453,11 +1460,14 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     await db.deleteFrom('sso_browser_proofs').where('session_id', '=', id).execute()
     await expectSsoRequired(cookie)
     const samlOnly = instance({ enabled: false, samlEnabled: true })
-    for (const attempt of [binding.id, randomUUID()]) {
-      const response = await revokeDelegation(cookie, attempt, samlOnly)
-      expect(response.status).toBe(403)
-      expect(await response.json()).toEqual({ error: 'sso_required' })
-    }
+    // Stored enforcement is kept while the OIDC setting is off, and nothing satisfies it.
+    const settingOff = instance({ enabled: false, operatorSetting: true })
+    for (const off of [samlOnly, settingOff])
+      for (const attempt of [binding.id, randomUUID()]) {
+        const response = await revokeDelegation(cookie, attempt, off)
+        expect(response.status).toBe(403)
+        expect(await response.json()).toEqual({ error: 'sso_required' })
+      }
     for (const response of [
       await revokeDelegation(other.cookie, binding.id),
       await revokeDelegation(cookie, randomUUID()),
@@ -1477,6 +1487,47 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       { action: 'sso_delegation.revoked', target_id: binding.id },
     ])
     expect(entries[1]?.details).toEqual({ method: 'oidc', providerId: f.providerId, revision: 1 })
+  })
+
+  it('revokes a suspended delegation on an unenforced team while the OIDC setting is off', async () => {
+    const f = await linked()
+    await enforceSso()
+    const { id, cookie } = await browserSession(fixture.member)
+    await delegationBrowserProof(f, id)
+    const key = await delegationKey(fixture.member, fixture.team)
+    const prepared = await prepareDelegation(f, cookie, key)
+    const binding = await bindingResponse(await prepared.submit())
+    await db
+      .updateTable('sso_policies')
+      .set({
+        require_sso: false,
+        policy_revision: sql`policy_revision + 1`,
+        trust_generation: sql`trust_generation + 1`,
+      })
+      .where('organization_id', '=', fixture.team)
+      .execute()
+    const settingOff = instance({ enabled: false, operatorSetting: true })
+    // Binding adds trust: refused before the caller or the input is read.
+    const bind = await settingOff.request(new URL(delegationsPath, publicUrl), {
+      method: 'POST',
+      headers: { origin: publicUrl, cookie, 'X-Expected-Organization-Id': fixture.team },
+      body: '{invalid-json',
+    })
+    expect(bind.status).toBe(404)
+    expect(await bind.json()).toEqual({ error: 'sso_disabled' })
+    // Hard-off, which only tests assemble, still refuses the revocation itself.
+    const hardOff = await revokeDelegation(cookie, binding.id, instance({ enabled: false }))
+    expect(hardOff.status).toBe(404)
+    expect(await hardOff.json()).toEqual({ error: 'sso_disabled' })
+    const revoked = await revokeDelegation(cookie, binding.id, settingOff)
+    expect(revoked.status).toBe(204)
+    expect(
+      await db
+        .selectFrom('sso_delegation_bindings')
+        .select('id')
+        .where('id', '=', binding.id)
+        .execute(),
+    ).toEqual([])
   })
 
   it.each([true, false])(

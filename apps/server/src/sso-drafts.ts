@@ -5,7 +5,7 @@ import { DomainError } from '@hourmere/scheduling'
 import { HTTPException } from 'hono/http-exception'
 import { sql } from 'kysely'
 import { z } from 'zod'
-import { requireSsoEnabled, type SsoCapabilities } from './sso.ts'
+import { requireSsoEnabled, requireSsoRetained, type SsoCapabilities } from './sso.ts'
 import { openSsoProviderConfiguration, sealSsoProviderConfiguration } from './sso-configuration.ts'
 import { lockSsoDomain } from './sso-domains.ts'
 import { type FreshProofDeps, runWithFreshProof } from './sso-fresh-proof.ts'
@@ -143,7 +143,7 @@ async function changeTrust(db: Db, organizationId: string) {
     .execute()
 }
 function enabled(deps: SsoDraftDeps, principal: Principal, input: unknown, requiresOidc = true) {
-  requireSsoEnabled(deps.capabilities)
+  requireSsoRetained(deps.capabilities)
   if (principal.kind !== 'session' || principal.organization.personal) throw denied()
   if (
     input &&

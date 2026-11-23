@@ -42,6 +42,11 @@ export type AppShellContext = {
   followUpHostNotesEnabled: boolean
   ssoOidcEnabled: boolean | undefined
   ssoSamlEnabled: boolean | undefined
+  /**
+   * The setting is off, but the server still reports stored SSO state for this session:
+   * the read, recovery and trust-reducing views stay available. Undefined while loading.
+   */
+  ssoStored: boolean | undefined
   showSsoSettings: boolean
 }
 
@@ -99,6 +104,12 @@ function Shell() {
     instance.status === 'loading'
       ? undefined
       : instance.status === 'ready' && instance.data?.ssoSamlEnabled === true
+  const ssoStored =
+    ssoOidcEnabled === undefined || ssoSamlEnabled === undefined
+      ? undefined
+      : !ssoOidcEnabled &&
+        !ssoSamlEnabled &&
+        (me.sso !== undefined || Boolean(me.ssoRecoveryTeams?.length))
   const managesSpace = me.principal.kind === 'session' && (me.organization.personal || managesTeam)
   const showWorkflows = workflowsEnabled === true && managesSpace
   const showRoutingForms = routingFormsEnabled === true && managesSpace
@@ -278,8 +289,11 @@ function Shell() {
                     instance.status === 'ready' && instance.data?.followUpHostNotesEnabled === true,
                   ssoOidcEnabled,
                   ssoSamlEnabled,
+                  ssoStored,
                   showSsoSettings:
-                    (ssoOidcEnabled === true || ssoSamlEnabled === true) &&
+                    (ssoOidcEnabled === true ||
+                      ssoSamlEnabled === true ||
+                      (ssoStored === true && me.sso !== undefined)) &&
                     managesTeam &&
                     me.principal.kind === 'session',
                 } satisfies AppShellContext

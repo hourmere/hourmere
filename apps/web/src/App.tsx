@@ -167,17 +167,20 @@ export const appRoutes = createRoutesFromElements(
 )
 
 function SsoSetupRoute() {
-  const { ssoOidcEnabled, ssoSamlEnabled } = useOutletContext<AppShellContext>()
+  const { ssoOidcEnabled, ssoSamlEnabled, ssoStored, showSsoSettings } =
+    useOutletContext<AppShellContext>()
   const isDomains = useMatch(PATHS.ssoDomainSettings) !== null
   if (ssoOidcEnabled === undefined || ssoSamlEnabled === undefined) return <PageSkeleton />
-  if (!ssoOidcEnabled && !(isDomains && ssoSamlEnabled)) return <AppNotFoundPage />
+  // With the setting off, a team that still has SSO state keeps its settings pages.
+  const stored = ssoStored === true && showSsoSettings
+  if (!ssoOidcEnabled && !(isDomains && ssoSamlEnabled) && !stored) return <AppNotFoundPage />
   return <SsoSetupPage />
 }
 
 function SsoRecoveryRoute() {
-  const { ssoOidcEnabled, ssoSamlEnabled } = useOutletContext<AppShellContext>()
+  const { ssoOidcEnabled, ssoSamlEnabled, ssoStored } = useOutletContext<AppShellContext>()
   if (ssoOidcEnabled === undefined || ssoSamlEnabled === undefined) return <PageSkeleton />
-  if (!ssoOidcEnabled && !ssoSamlEnabled) return <AppNotFoundPage />
+  if (!ssoOidcEnabled && !ssoSamlEnabled && !ssoStored) return <AppNotFoundPage />
   return <SsoRecoveryPage />
 }
 

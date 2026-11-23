@@ -31,7 +31,7 @@ export function SsoSetupPage() {
   const { t } = useI18n()
   const me = useMe()
   const access = useTeamManagementAccess()
-  const { ssoOidcEnabled } = useOutletContext<AppShellContext>()
+  const { ssoOidcEnabled, ssoStored } = useOutletContext<AppShellContext>()
   const showDomains = useMatch(PATHS.ssoDomainSettings) !== null
   const title = showDomains ? 'SSO domains' : 'Single sign-on'
   usePageTitle(title)
@@ -52,8 +52,15 @@ export function SsoSetupPage() {
         <SetupAlert message={unavailable} />
       ) : (
         <>
+          {ssoStored && (
+            <p className="alert notice" role="status">
+              {t(
+                'Single sign-on is turned off on this instance. You can review and remove existing settings, but nothing new can be added.',
+              )}
+            </p>
+          )}
           <nav className="form-actions" aria-label={t('Single sign-on')}>
-            {ssoOidcEnabled && (
+            {(ssoOidcEnabled || ssoStored) && (
               <NavLink to={PATHS.sso} end className="button">
                 {t('Identity providers')}
               </NavLink>
@@ -67,6 +74,7 @@ export function SsoSetupPage() {
             organizationId={me.organization.id}
             owner={access.role === 'owner'}
             showDomains={showDomains}
+            addsTrust={ssoStored !== true}
           />
         </>
       )}
@@ -97,10 +105,13 @@ function SsoInventory({
   organizationId,
   owner,
   showDomains,
+  addsTrust,
 }: {
   organizationId: string
   owner: boolean
   showDomains: boolean
+  /** False while the operator setting is off: only trust-reducing controls are offered. */
+  addsTrust: boolean
 }) {
   const { t } = useI18n()
   const me = useMe()
@@ -299,14 +310,22 @@ function SsoInventory({
         {showDomains ? (
           <SsoDomainSetup
             {...paneProps}
+            addsTrust={addsTrust}
             rememberDomain={(domain) =>
               setRemembered((previous) => new Map(previous).set(domain.id, domain))
             }
           />
         ) : (
           <>
-            <SsoProviderSetup {...paneProps} providers={providers} owner={owner} reload={reload} />
+            <SsoProviderSetup
+              {...paneProps}
+              providers={providers}
+              owner={owner}
+              reload={reload}
+              addsTrust={addsTrust}
+            />
             <SsoEnforcement
+              addsTrust={addsTrust}
               organizationId={organizationId}
               owner={owner}
               busy={paneProps.busy}
