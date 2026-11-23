@@ -72,18 +72,47 @@ export async function signInWithEmail(page: Page, app: KeycloakFixture, email: s
   await clickPrivate(button(page, 'Sign in to Hourmere'))
 }
 
+/** Say where a sign-in stopped without printing query strings, cookies or form values. */
+async function describeStrandedPage(page: Page, app: KeycloakFixture) {
+  const url = new URL(page.url())
+  const site = url.origin === app.url ? 'Hourmere' : 'the identity provider'
+  const feedback = await page
+    .locator('#input-error, #kc-error-message, .pf-m-error, [role="alert"]')
+    .first()
+    .textContent({ timeout: 500 })
+    .catch(() => null)
+  const form = await page
+    .locator('input[name="password"]')
+    .isVisible()
+    .catch(() => false)
+  const heading = await page
+    .locator('h1, #kc-page-title')
+    .first()
+    .textContent({ timeout: 500 })
+    .catch(() => null)
+  const clip = (text: string | null) =>
+    text ? text.replace(/\s+/g, ' ').trim().slice(0, 120) : 'none'
+  return `${site} ${url.pathname}; heading: ${clip(heading)}; feedback: ${clip(feedback)}; password field: ${form}`
+}
+
 export async function expectSession(
   page: Page,
   app: KeycloakFixture,
   userId: string,
   personal: boolean,
 ) {
-  await expect
-    .poll(() => {
-      const url = new URL(page.url())
-      return url.origin === app.url && url.pathname === returnPath
-    })
-    .toBe(true)
+  try {
+    await expect
+      .poll(() => {
+        const url = new URL(page.url())
+        return url.origin === app.url && url.pathname === returnPath
+      })
+      .toBe(true)
+  } catch {
+    throw new Error(
+      `The browser did not return to Hourmere: ${await describeStrandedPage(page, app)}`,
+    )
+  }
   await expect(button(page, 'Sign out')).toBeVisible()
   const response = await page.request.get(`${app.url}/api/v1/me`)
   expect(response.status()).toBe(200)
