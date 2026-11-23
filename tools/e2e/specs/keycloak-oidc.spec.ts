@@ -2,6 +2,7 @@ import type { Page } from '@playwright/test'
 import {
   button,
   clickPrivate,
+  describeStrandedPage,
   emailLinkLabel,
   expectSession,
   expectSignedOut,
@@ -28,7 +29,13 @@ const genericOutcome =
 const personalSignInLabels = ['Continue with Google', 'Sign in with Microsoft']
 
 async function expectRefusal(page: Page, app: KeycloakFixture) {
-  await expect(page.getByRole('alert')).toHaveText('You could not be signed in. Please try again.')
+  try {
+    await expect(page.getByRole('alert')).toHaveText(
+      'You could not be signed in. Please try again.',
+    )
+  } catch {
+    throw new Error(`The sign-in refusal did not appear: ${await describeStrandedPage(page, app)}`)
+  }
   const url = new URL(page.url())
   expect(url.origin === app.url && url.pathname === '/sign-in').toBe(true)
   await expectSignedOut(page, app)

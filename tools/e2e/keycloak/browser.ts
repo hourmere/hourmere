@@ -1,5 +1,7 @@
 import type { Locator, Page } from '@playwright/test'
-import { expect, type KeycloakFixture } from './fixture.ts'
+import { describeStrandedPage, expect, type KeycloakFixture } from './fixture.ts'
+
+export { describeStrandedPage }
 
 export const returnPath = '/app/event-types'
 export const ssoLabel = 'Sign in with single sign-on'
@@ -78,12 +80,18 @@ export async function expectSession(
   userId: string,
   personal: boolean,
 ) {
-  await expect
-    .poll(() => {
-      const url = new URL(page.url())
-      return url.origin === app.url && url.pathname === returnPath
-    })
-    .toBe(true)
+  try {
+    await expect
+      .poll(() => {
+        const url = new URL(page.url())
+        return url.origin === app.url && url.pathname === returnPath
+      })
+      .toBe(true)
+  } catch {
+    throw new Error(
+      `The browser did not return to Hourmere: ${await describeStrandedPage(page, app)}`,
+    )
+  }
   await expect(button(page, 'Sign out')).toBeVisible()
   const response = await page.request.get(`${app.url}/api/v1/me`)
   expect(response.status()).toBe(200)
