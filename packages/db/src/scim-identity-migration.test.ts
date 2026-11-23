@@ -11,7 +11,7 @@ import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const migration = '0073_scim_identity.sql'
-const hierarchyMigration = '0181_scim_team_hierarchy.sql'
+const dependentMigrations = ['0181_scim_team_hierarchy.sql', '0183_scim_groups.sql']
 
 async function records(pool: pg.Pool, tables?: { schema: string; name: string }[]) {
   const selected =
@@ -41,9 +41,9 @@ async function predecessor() {
   let database: TestDatabase | undefined
   try {
     // Keep modeling the out-of-order upgrade from an instance with later independent
-    // migrations. The hierarchy references tables and keys created by 0073.
+    // migrations. The hierarchy and Group source references need keys created by 0073.
     for (const file of (await readdir(migrationsDir)).filter(
-      (f) => f.endsWith('.sql') && f !== migration && f !== hierarchyMigration,
+      (f) => f.endsWith('.sql') && f !== migration && !dependentMigrations.includes(f),
     )) {
       await copyFile(join(migrationsDir, file), join(directory, file))
       if (file.slice(0, 4) <= '0012') await copyFile(join(migrationsDir, file), join(early, file))
@@ -124,8 +124,10 @@ describe.skipIf(!serverUrl)('SCIM identity migration', () => {
       const upgraded = await records(database.pool)
       expect(await runMigrations(database.pool, directory)).toEqual([])
       expect(await records(database.pool)).toEqual(upgraded)
-      await copyFile(join(migrationsDir, hierarchyMigration), join(directory, hierarchyMigration))
-      expect(await runMigrations(database.pool, directory)).toEqual([hierarchyMigration])
+      for (const file of dependentMigrations) {
+        await copyFile(join(migrationsDir, file), join(directory, file))
+      }
+      expect(await runMigrations(database.pool, directory)).toEqual(dependentMigrations)
       fresh = await createTestDatabase(serverUrl as string)
       expect(await snapshotSchema(database.pool)).toEqual(await snapshotSchema(fresh.pool))
     } finally {
