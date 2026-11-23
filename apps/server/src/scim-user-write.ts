@@ -90,6 +90,9 @@ function text(value: unknown, name: string, max: number): string | null {
     throw invalidValue(`The ${name} attribute is not a valid value.`)
   return value
 }
+
+export { only as onlyScimAttributes, text as scimText }
+
 const LOCALE = /^[A-Za-z]{2,8}(?:[-_][A-Za-z0-9]{1,8})*$/
 function locale(value: unknown): string | null {
   const stored = text(value, 'locale', 64)
@@ -322,11 +325,15 @@ const LIVE_IDENTIFIERS = ['scim_users_live_username', 'scim_users_live_external_
 
 /** Turn expected write refusals and scoped uniqueness violations into redacted SCIM replies. */
 export function scimUserWriteError(error: unknown): ScimReply | undefined {
-  if (error instanceof ScimWriteRefusal) return error.reply
+  const reply = scimWriteRefusal(error)
+  if (reply) return reply
   const database = error as { code?: unknown; constraint?: unknown }
   if (database?.code === '23505' && LIVE_IDENTIFIERS.includes(String(database.constraint)))
     return identifierTaken().reply
 }
+
+export const scimWriteRefusal = (error: unknown) =>
+  error instanceof ScimWriteRefusal ? error.reply : undefined
 
 export async function lockScimWriteConnection(
   trx: Db,
@@ -339,6 +346,15 @@ export async function lockScimWriteConnection(
     .where('id', '=', principal.organizationId)
     .forUpdate()
     .executeTakeFirst()
+  if (!organization) throw unauthorized()
+  return lockScimTokenConnection(trx, principal)
+}
+
+/** The calling write already holds the update locks for all of its organizations. */
+export async function lockScimTokenConnection(
+  trx: Db,
+  principal: ScimResourceRequest['principal'],
+): Promise<string> {
   // A token revoked since authentication is refused here, and a revocation that starts
   // later waits for this write (its organization lock already makes it wait). A
   // rotation keeps the token row, so a request authenticated before it still completes.
@@ -357,7 +373,7 @@ export async function lockScimWriteConnection(
     .where('token_id', '=', principal.tokenId)
     .where('organization_id', '=', principal.organizationId)
     .executeTakeFirst()
-  if (!organization || !token || !binding) throw unauthorized()
+  if (!token || !binding) throw unauthorized()
   return binding.connection_id
 }
 

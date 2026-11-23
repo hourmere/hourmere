@@ -130,6 +130,13 @@ and the child's own member row. Hierarchy storage is exercised through the SCIM
 resource test flag. Team authorization continues to use the acting team's own
 memberships and credentials.
 
+Migration `0183_scim_groups.sql` stores a distinct Group ID and timestamps for each
+activated mapping. The Group row survives suspension and retirement. The mapping
+continues to own the exact external ID and directory authority, and the child
+organization holds the display name. Managed memberships created by Group POST
+retain the originating SCIM User ID, so a different SCIM User linked to the same
+account cannot take over that membership.
+
 The [paid-booking design](payments.md) describes pending-payment holds, bounded slot
 occupancy, terminal transitions and the future Stripe/refund integration. Checkout is not
 available in this foundation release.

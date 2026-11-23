@@ -16,6 +16,8 @@ harnesses pass to `createAuth`; production acceptance completes none.
 The User profile replacement step adds `PUT /Users/{id}` under the resource test flag.
 The User PATCH normalization step adds `PATCH /Users/{id}` under that same flag.
 The User retirement step adds `DELETE /Users/{id}` under the resource test flag.
+The Group reads and creation step adds `GET /Groups`, `GET /Groups/{id}`, `POST /Groups`
+and the Group discovery entries under the same test flag.
 `SCIM_PROVISIONING_ENABLED` defaults to off (an empty value means "use the default"). Enabling
 it permits credential creation and rotation, not user provisioning. Listing and revocation remain
 available while it is off, and every `/scim/v2` resource remains unavailable either way.
@@ -650,6 +652,23 @@ Group reads and writes stay within live mappings of that connection that still a
 directory authority. Ordinary team name constraints apply to the mapped child. Reject
 Group-as-member references and all indirect or transitive membership.
 
+Group list and read return only activated mappings that still have directory authority.
+Pending, suspended, retired and out-of-scope mappings do not appear in lists, and a read
+by Group ID returns the same 404 as an unknown ID. Lists use stable Group ID ordering
+and the same pagination and projection rules as Users. `displayName eq` compares
+case-insensitively and can match multiple Groups. Team names can repeat. The child is
+selected solely by its approved `externalId` reservation, and its public address stays
+the same when the Group is created. The required display name is trimmed and must be a
+nonempty single line of at most 200 UTF-16 code units.
+
+Group POST returns 201, a Group representation and an absolute Location. It changes the
+approved child's name and assigns a distinct Group ID, and can add an initial list of
+ordinary members. Each member names a SCIM User by ID. If supplied, its `$ref` must
+match the User's location or `/Users/{id}`. An absent, used or unavailable reservation
+returns the same 409 `uniqueness`. A nested Group request returns 400 `invalidValue`. The activation, child
+name, initial roster and parent journal's `scim_group.created` event commit together.
+The event identifies the token and opaque Group ID without recording request attributes.
+
 Activation makes the child name directory-managed. Existing manual members, owners and
 admins keep their membership and roles. Group `members` contains only the memberships
 created by that mapping. Resolve additions to an active User in the same connection whose
@@ -813,7 +832,7 @@ Token foundation must never claim full audit coverage. SCIM action names follow 
 one-dot form `<resource>.<past-tense verb>`, as `scim_user.created` does, because the action
 check allows exactly one dot. Required future actions:
 `scim_connection.authentication_failed` and `scim_connection.rate_limited` (bounded
-aggregation); `scim_user.deleted`; `scim_group.created`, `scim_group.updated`,
+aggregation); `scim_user.deleted`; `scim_group.updated`,
 `scim_group.deleted`; `scim_group.member_added`, `scim_group.member_removed`;
 `scim_mapping.linked`, `scim_mapping.suspended`, `scim_mapping.unlinked`; `scim_user.conflicted`;
 `scim_user.privileged_member_blocked`; `scim_user.last_owner_blocked`;

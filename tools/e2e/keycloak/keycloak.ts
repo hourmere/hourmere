@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { get } from 'node:https'
+import { createServer as createNetServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -55,6 +56,22 @@ function discoveryStatus(issuer: string, ca: string): Promise<string> {
       },
     )
     request.once('error', () => resolve('HTTPS connection unavailable'))
+  })
+}
+
+/** Reserve a loopback port for a container that shares the host network. */
+function freeLoopbackPort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const probe = createNetServer()
+    probe.once('error', reject)
+    probe.listen(0, '127.0.0.1', () => {
+      const address = probe.address()
+      probe.close(() =>
+        typeof address === 'object' && address
+          ? resolve(address.port)
+          : reject(new Error('Unable to reserve a loopback port')),
+      )
+    })
   })
 }
 
@@ -248,6 +265,11 @@ export async function startKeycloak(
       [importPath, certificatePath, privateKeyPath].map((path) => chmod(path, 0o644)),
     )
     const certificate = await readFile(certificatePath, 'utf8')
+    // A bridge network adds and removes a host interface for every container. Chrome on the same
+    // Linux host then aborts whatever navigation is in flight ("Your connection was interrupted"),
+    // in this test or in the one running beside it. Host networking changes no interface.
+    const hostPort = process.platform === 'linux' ? await freeLoopbackPort() : undefined
+    const plainPort = hostPort ? await freeLoopbackPort() : undefined
     creating = true
     const idFromDocker = await command(
       'docker',
@@ -266,8 +288,7 @@ export async function startKeycloak(
         // These short-lived JVMs run side by side with Chrome and PostgreSQL in CI.
         '--env',
         'JAVA_OPTS_APPEND=-XX:ActiveProcessorCount=2 -XX:TieredStopAtLevel=1',
-        '--publish',
-        '127.0.0.1::8443',
+        ...(hostPort ? ['--network', 'host'] : ['--publish', '127.0.0.1::8443']),
         '--mount',
         `type=bind,src=${importPath},dst=/opt/keycloak/data/import/${realm.realm}-realm.json,readonly`,
         '--mount',
@@ -280,16 +301,22 @@ export async function startKeycloak(
         '--import-realm',
         '--https-certificate-file=/opt/keycloak/conf/fixture.crt',
         '--https-certificate-key-file=/opt/keycloak/conf/fixture.key',
+        ...(hostPort
+          ? [
+              '--http-host=127.0.0.1',
+              `--https-port=${hostPort}`,
+              // Development mode keeps a plain HTTP listener; give it its own loopback port too.
+              `--http-port=${plainPort}`,
+            ]
+          : []),
       ],
     )
     if (!containerId.test(idFromDocker)) throw new Error('Docker did not return a container ID')
     id = idFromDocker
     await command('docker', 'start the owned Keycloak container', ['start', id])
-    const mapping = await command('docker', 'read the owned Keycloak port', [
-      'port',
-      id,
-      '8443/tcp',
-    ])
+    const mapping = hostPort
+      ? `127.0.0.1:${hostPort}`
+      : await command('docker', 'read the owned Keycloak port', ['port', id, '8443/tcp'])
     const port = /^127\.0\.0\.1:([0-9]+)$/.exec(mapping)?.[1]
     if (!port || [3000, 3998].includes(Number(port)))
       throw new Error('Docker must publish Keycloak on an unused loopback port')

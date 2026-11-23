@@ -6,7 +6,7 @@
 // and total: it returns a parsed query or a 400 SCIM Error whose detail is fixed text that
 // never echoes the request. Production imports none of this yet; see ScimResources in scim.ts.
 import { type ScimReply, scimError } from './scim.ts'
-import { SCIM_URN, scimUserSchemas } from './scim-discovery.ts'
+import { SCIM_URN, scimGroupSchemas, scimUserSchemas } from './scim-discovery.ts'
 
 /** Offset pagination default and cap; ServiceProviderConfig advertises it as maxResults. */
 export const SCIM_PAGE_SIZE = 100
@@ -183,6 +183,11 @@ export const scimUserQuery = scimQueryResource(
   ['userName', 'externalId'],
   rfc7643User,
 )
+
+/** Groups: the same query syntax, with equality on displayName or externalId. */
+export const scimGroupQuery = scimQueryResource(scimGroupSchemas, ['displayName', 'externalId'], {
+  [SCIM_URN.group]: { displayName: [], members: multiValued },
+})
 
 // RFC 7643 sections 3 and 3.1: attributes of every resource, outside any schema. No ETags,
 // so meta has no version.
@@ -526,7 +531,7 @@ function walker(always: Set<string>, mode: ScimProjection['mode']): Visit {
 /**
  * Applies a projection to a full representation (RFC 7643 section 2.4, RFC 7644 section 3.9).
  * attributes keeps the named attributes; excludedAttributes removes them; neither ever hides
- * an attribute returned "always" (schemas, id and userName for Users). A complex or
+ * an attribute returned "always" (schemas, id and the required User or Group name). A complex or
  * multi-valued attribute left empty is omitted, and schemas then names only the core schema
  * and the extensions whose objects remain.
  */

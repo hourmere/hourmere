@@ -1,13 +1,14 @@
 // SCIM discovery (RFC 7644 section 4; representations from RFC 7643 sections 5–7).
 // docs/scim.md is the source for every value here: the capabilities its
-// ServiceProviderConfig row names, the User resource type only (Groups are deferred), and
-// exactly the User and enterprise fields of its mapping table. Production registers no
-// handler yet; see ScimResources in scim.ts.
-import { type ScimReply, type ScimResources, scimError } from './scim.ts'
+// ServiceProviderConfig row names and exactly the mapped User, enterprise and Group
+// fields. Group discovery is injected with the Group resource handler. Production
+// registers no handler yet; see ScimResources in scim.ts.
+import { type ScimReply, type ScimResourceRequest, type ScimResources, scimError } from './scim.ts'
 
 export const SCIM_URN = {
   user: 'urn:ietf:params:scim:schemas:core:2.0:User',
   enterpriseUser: 'urn:ietf:params:scim:schemas:extension:enterprise:2.0:User',
+  group: 'urn:ietf:params:scim:schemas:core:2.0:Group',
   serviceProviderConfig: 'urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig',
   resourceType: 'urn:ietf:params:scim:schemas:core:2.0:ResourceType',
   schema: 'urn:ietf:params:scim:schemas:core:2.0:Schema',
@@ -16,13 +17,14 @@ export const SCIM_URN = {
 
 interface ScimAttribute {
   name: string
-  type: 'string' | 'boolean' | 'complex'
+  type: 'string' | 'boolean' | 'complex' | 'reference'
   multiValued: boolean
   description: string
   required: boolean
   canonicalValues?: string[]
+  referenceTypes?: string[]
   caseExact: boolean
-  mutability: 'readOnly' | 'readWrite'
+  mutability: 'readOnly' | 'readWrite' | 'immutable'
   returned: 'always' | 'default'
   uniqueness: 'none' | 'server'
   subAttributes?: ScimAttribute[]
@@ -130,6 +132,16 @@ const resourceTypes = (base: string) => [
   },
 ]
 
+const groupResourceType = (base: string) => ({
+  schemas: [SCIM_URN.resourceType],
+  id: 'Group',
+  name: 'Group',
+  endpoint: '/Groups',
+  description: 'Directory-managed child team',
+  schema: SCIM_URN.group,
+  meta: { resourceType: 'ResourceType', location: `${base}/ResourceTypes/Group` },
+})
+
 /** The User schema, then its enterprise extension; the query parser projects these fields. */
 export const scimUserSchemas = [
   { id: SCIM_URN.user, name: 'User', description: 'User Account', attributes: userAttributes },
@@ -141,8 +153,35 @@ export const scimUserSchemas = [
   },
 ]
 
-const schemas = (base: string) =>
-  scimUserSchemas.map((schema) => ({
+const groupAttributes: ScimAttribute[] = [
+  attribute('displayName', 'The mapped child team name.', {
+    required: true,
+    returned: 'always',
+  }),
+  attribute('members', 'User memberships managed by this mapping.', {
+    type: 'complex',
+    multiValued: true,
+    subAttributes: [
+      attribute('value', 'The User resource ID.', { caseExact: true, mutability: 'immutable' }),
+      attribute('$ref', 'The User resource location.', {
+        type: 'reference',
+        referenceTypes: ['User'],
+        mutability: 'immutable',
+      }),
+      attribute('type', 'The member resource type.', {
+        canonicalValues: ['User'],
+        mutability: 'immutable',
+      }),
+    ],
+  }),
+]
+
+export const scimGroupSchemas = [
+  { id: SCIM_URN.group, name: 'Group', description: 'Group', attributes: groupAttributes },
+]
+
+const schemas = (base: string, includeGroups: boolean) =>
+  [...scimUserSchemas, ...(includeGroups ? scimGroupSchemas : [])].map((schema) => ({
     schemas: [SCIM_URN.schema],
     ...schema,
     meta: { resourceType: 'Schema', location: `${base}/Schemas/${schema.id}` },
@@ -150,7 +189,10 @@ const schemas = (base: string) =>
 
 const ok = (body: unknown): ScimReply => ({ status: 200, body })
 
-export const scimDiscovery: ScimResources = ({ method, path, query, base }) => {
+function discover(
+  { method, path, query, base }: ScimResourceRequest,
+  includeGroups: boolean,
+): ScimReply | undefined {
   const match = /^\/(ServiceProviderConfig|ResourceTypes|Schemas)(?:\/([^/]+))?$/.exec(path)
   const [, endpoint, id] = match ?? []
   if (!endpoint || (endpoint === 'ServiceProviderConfig' && id !== undefined)) return undefined
@@ -162,7 +204,9 @@ export const scimDiscovery: ScimResources = ({ method, path, query, base }) => {
     return { status: 403, body: scimError(403, 'Discovery endpoints do not support filtering.') }
   if (endpoint === 'ServiceProviderConfig') return ok(serviceProviderConfig(base))
   const resources: { id: string }[] =
-    endpoint === 'ResourceTypes' ? resourceTypes(base) : schemas(base)
+    endpoint === 'ResourceTypes'
+      ? [...resourceTypes(base), ...(includeGroups ? [groupResourceType(base)] : [])]
+      : schemas(base, includeGroups)
   if (id === undefined)
     return ok({
       schemas: [SCIM_URN.listResponse],
@@ -179,3 +223,8 @@ export const scimDiscovery: ScimResources = ({ method, path, query, base }) => {
   const resource = resources.find((candidate) => candidate.id === decoded)
   return resource ? ok(resource) : { status: 404, body: scimError(404, 'Resource not found.') }
 }
+
+export const scimDiscovery: ScimResources = (request) => discover(request, false)
+
+/** Discovery for test harnesses that also inject the Group resource handler. */
+export const scimDiscoveryWithGroups: ScimResources = (request) => discover(request, true)
