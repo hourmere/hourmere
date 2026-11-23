@@ -7,9 +7,10 @@ import {
   type ScimResourceRequest,
   scimError,
 } from './scim.ts'
+import { parseScimPatch } from './scim-patch.ts'
 import { parseScimProjection, projectScimResource, scimUserQuery } from './scim-query.ts'
 import { applyScimUserLifecycle } from './scim-user-lifecycle.ts'
-import { normalizeScimUserPatch, parseScimUserPatch } from './scim-user-patch.ts'
+import { normalizeScimUserPatch } from './scim-user-patch.ts'
 import {
   invalidSyntax,
   lockScimWriteConnection,
@@ -55,7 +56,7 @@ async function replace(
         if (!body.ok) return body.reply
         const write =
           method === 'PATCH'
-            ? { method, operations: parseScimUserPatch(body.value) }
+            ? { method, operations: parseScimPatch(body.value, 'User') }
             : { method, ...parseScimUserWrite(body.value) }
         const normalized =
           write.method === 'PATCH'

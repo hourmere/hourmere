@@ -51,6 +51,7 @@ export const auditDetails = {
   'scim_user.retired': [],
   'scim_user.credentials_revoked': [],
   'scim_group.created': [],
+  'scim_group.updated': [],
   'scim_mapping.linked': [],
   'scim_mapping.unlinked': [],
   'scim_mapping.suspended': [],
