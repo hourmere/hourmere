@@ -192,12 +192,18 @@ export function scimSuspended(
   organizationId: Expression<string> | string,
   userId: Expression<string> | string,
 ) {
-  return sql<boolean>`CASE WHEN EXISTS (
+  // A mapped child has no connection of its own. Its suspension follows the roster
+  // source, so it is stored with the managed membership and ends with it.
+  return sql<boolean>`(CASE WHEN EXISTS (
     SELECT 1 FROM scim_membership_blocks AS block
     WHERE block.organization_id = ${organizationId}::uuid AND block.user_id = ${userId}::uuid
       AND block.source = 'scim' AND block.kind = 'suspension' AND block.cleared_at IS NULL
   ) THEN NOT EXISTS (
     SELECT 1 FROM personal_organizations AS personal
     WHERE personal.organization_id = ${organizationId}::uuid
-  ) ELSE false END`
+  ) ELSE false END OR EXISTS (
+    SELECT 1 FROM scim_team_managed_memberships AS managed_source
+    WHERE managed_source.child_organization_id = ${organizationId}::uuid
+      AND managed_source.user_id = ${userId}::uuid AND managed_source.suspended_at IS NOT NULL
+  ))`
 }

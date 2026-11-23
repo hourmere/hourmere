@@ -2,6 +2,12 @@ import { teamRoles } from '@hourmere/auth'
 import type { Database } from '@hourmere/db'
 import { suspendScimMembership } from '@hourmere/db/scim-suspension'
 import { sql, type Transaction } from 'kysely'
+import {
+  rejectPrivilegedChildMembership,
+  resumeManagedChildMemberships,
+  sourcedChildMemberships,
+  suspendManagedChildMemberships,
+} from './scim-managed-child-memberships.ts'
 import { immutableScimPrivileges, refuse } from './scim-user-write.ts'
 
 interface LifecycleWrite {
@@ -50,16 +56,35 @@ export async function assertScimUserCanRetire(trx: Transaction<Database>, entry:
     rejectPrivilegedMembership(await linkedMemberships(trx, entry, entry.linked_user_id))
 }
 
-/** The caller holds the organization update lock and the live resource row lock. */
+/**
+ * The caller holds the update locks of the organization and of the child teams in which
+ * this User sources a managed membership, and the live resource row lock.
+ */
 export async function applyScimUserLifecycle(
   trx: Transaction<Database>,
   entry: LifecycleEntry & { active: boolean },
   { active, deactivationRequested, roleWrite }: LifecycleWrite,
   actor: { type: 'scim_token'; id: string },
 ) {
-  const userId = entry.linked_user_id
   const reactivating = active === true && !entry.active
-  if (userId === null || (!reactivating && !deactivationRequested && !roleWrite)) return
+  if (!reactivating && !deactivationRequested && !roleWrite) return
+  // Child access follows the roster source, so check it before any state changes.
+  const sourced = deactivationRequested ? await sourcedChildMemberships(trx, entry) : []
+  rejectPrivilegedChildMembership(sourced)
+  await applyParentLifecycle(trx, entry, { active, deactivationRequested, roleWrite }, actor)
+  if (reactivating) await resumeManagedChildMemberships(trx, entry)
+  else if (active === false && entry.active) await suspendManagedChildMemberships(trx, sourced)
+}
+
+async function applyParentLifecycle(
+  trx: Transaction<Database>,
+  entry: LifecycleEntry & { active: boolean },
+  { active, deactivationRequested, roleWrite }: LifecycleWrite,
+  actor: { type: 'scim_token'; id: string },
+) {
+  const userId = entry.linked_user_id
+  if (userId === null) return
+  const reactivating = active === true && !entry.active
   const organizationId = entry.organization_id
   const memberships = await linkedMemberships(trx, entry, userId)
   if (deactivationRequested || roleWrite) rejectPrivilegedMembership(memberships)

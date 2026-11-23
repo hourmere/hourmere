@@ -5,6 +5,10 @@ import { writeAuditEvent } from '@hourmere/db/audit'
 import { sql } from 'kysely'
 import type { ScimReply, ScimResourceHandler, ScimResourceRequest } from './scim.ts'
 import { SCIM_URN } from './scim-discovery.ts'
+import {
+  removeManagedChildMemberships,
+  rosterMemberships,
+} from './scim-managed-child-memberships.ts'
 import { invalidPath, parseScimPatch, SCIM_PATCH_PATH_LIMIT } from './scim-patch.ts'
 import {
   parseScimListQuery,
@@ -38,7 +42,10 @@ const immutableRoster = () =>
   refuse(403, 'This Group write cannot change memberships or roles.', 'mutability')
 const immutableExternalId = () =>
   refuse(400, 'The approved Group externalId cannot be changed or removed.', 'mutability')
+const invalidMemberFilter = () =>
+  refuse(400, 'A members filter must compare value with one User ID.', 'invalidFilter')
 const groupSchema = SCIM_URN.group.toLowerCase()
+const MEMBER_FILTER = /^members\[\s*value\s+eq\s+"([^"\\]*)"\s*\]$/i
 const groupFields = ['schemas', 'id', 'meta', 'externalid', 'displayname', 'members']
 
 // The binding scopes both reservations and activated Groups to the authenticated parent.
@@ -69,6 +76,7 @@ function selectGroups(query: VisibleGroups) {
       'scim_group.id',
       'scim_group.created_at',
       'scim_group.updated_at',
+      'mapping.id as mapping_id',
       'mapping.external_id',
       'child.name',
     ])
@@ -223,7 +231,7 @@ function parseGroup(body: unknown, base: string) {
   return { externalId, displayName, members: parseMembers(group.get('members'), base) }
 }
 
-function checkExternalId(value: unknown, row: Row) {
+function checkExternalId(value: unknown, row: Pick<Row, 'external_id'>) {
   if (scimText(value, 'externalId', 256) !== row.external_id) throw immutableExternalId()
 }
 
@@ -243,26 +251,68 @@ function replacementName(body: unknown, base: string, row: Row) {
   return groupDisplayName(group.get('displayname'))
 }
 
-function patchedName(body: unknown, row: Row) {
+// A single member object is the same as a list of one (RFC 7644 section 3.5.2.1).
+function patchMembers(value: unknown, base: string) {
+  if (value === undefined) throw invalidValue('The members attribute is not a valid value.')
+  return parseMembers(Array.isArray(value) ? value : [value], base)
+}
+
+/**
+ * Apply the operations in order to the name and the mapped roster. `mentioned` lists
+ * every User an add or replace names, whatever the roster was when it was read.
+ */
+function patchedGroup(
+  body: unknown,
+  base: string,
+  row: Pick<Row, 'name' | 'external_id' | 'member_ids'>,
+) {
   let name = row.name
+  let roster = new Set(row.member_ids)
+  const mentioned = new Set<string>()
   for (const operation of parseScimPatch(body, 'Group')) {
     const { op, path, value } = operation
+    const hasValue = Object.hasOwn(operation, 'value')
     const fields =
       path === undefined ? scimAttributes(value, 'PATCH value') : new Map([[path, value]])
     if (fields.size === 0) throw invalidValue('A pathless PATCH value must name attributes.')
     const seen = new Set<string>()
     for (const [field, item] of fields) {
       if (field.length > SCIM_PATCH_PATH_LIMIT || field !== field.trim()) throw invalidPath()
-      const lower = field.toLowerCase()
-      const target = lower.startsWith(`${groupSchema}:`)
-        ? lower.slice(groupSchema.length + 1)
-        : lower
+      const local = field.toLowerCase().startsWith(`${groupSchema}:`)
+        ? field.slice(groupSchema.length + 1)
+        : field
+      const target = local.toLowerCase()
       if (seen.has(target)) throw invalidSyntax('A PATCH attribute is named more than once.')
       seen.add(target)
-      if (/^(?:members|role|roles|entitlements)(?:$|[.[])/.test(target)) throw immutableRoster()
-      if (op === 'remove' && Object.hasOwn(operation, 'value'))
+      if (/^(?:role|roles|entitlements)(?:$|[.[])|^members(?:\[.*\])?\.roles?$/.test(target))
+        throw immutableRoster()
+      if (target === 'members') {
+        if (op === 'remove') {
+          // Entra names the members to remove in the value. Only an operation that
+          // carries no value at all clears the mapped roster.
+          if (hasValue) for (const id of patchMembers(item, base)) roster.delete(id)
+          else roster.clear()
+          continue
+        }
+        const members = patchMembers(item, base)
+        if (op === 'replace') roster = new Set(members)
+        for (const id of members) {
+          roster.add(id)
+          mentioned.add(id)
+        }
+        continue
+      }
+      if (op === 'remove' && hasValue)
         throw invalidValue('A Group remove operation takes only a path.')
-      if (target === 'externalid') {
+      if (target.startsWith('members[')) {
+        const id = MEMBER_FILTER.exec(local)?.[1]
+        if (id === undefined) throw invalidPath()
+        if (!RESOURCE_ID.test(id)) throw invalidMemberFilter()
+        // Members are added and replaced as whole values, never through a filter.
+        if (op !== 'remove') throw invalidPath()
+        // Removing a User that is not on the roster is a repeat of a completed removal.
+        roster.delete(id)
+      } else if (target === 'externalid') {
         checkExternalId(item, row)
       } else if (target === 'displayname') {
         if (op === 'remove')
@@ -275,7 +325,9 @@ function patchedName(body: unknown, row: Row) {
       }
     }
   }
-  return name
+  if (roster.size > teamMembershipLimit)
+    throw invalidValue('The members attribute is not a valid value.')
+  return { name, members: [...roster].sort(), mentioned: [...mentioned] }
 }
 
 function availableMapping(db: Db, principal: Principal, externalId: string) {
@@ -473,11 +525,44 @@ async function updateGroup(
       .setIsolationLevel('read committed')
       .execute(async (trx) => {
         const group = visibleGroups(trx, principal).where('scim_group.id', '=', id)
-        const candidate = await group.select('child.id as childId').executeTakeFirst()
+        const candidate = await selectGroups(group)
+          .select(['child.id as childId', 'mapping.connection_id as connectionId'])
+          .executeTakeFirst()
         if (!candidate) return notFound
         const { childId } = candidate
 
-        // Match creation: ordered organization locks, then credential and mapping.
+        // Match creation: account identity locks for the Users a PATCH may admit,
+        // ordered organization locks, then credential and mapping.
+        let accounts: string[] = []
+        if (method === 'PATCH' && body?.ok) {
+          let mentioned: string[] = []
+          try {
+            mentioned = patchedGroup(body.value, request.base, candidate).mentioned
+          } catch (error) {
+            // Report it below, once the Group is known to be live under its locks.
+            if (!scimWriteRefusal(error)) throw error
+          }
+          if (mentioned.length > 0) {
+            const linked = await trx
+              .selectFrom('scim_users')
+              .select('linked_user_id')
+              .where('organization_id', '=', organizationId)
+              .where('connection_id', '=', candidate.connectionId)
+              .where('id', 'in', mentioned)
+              .where('linked_user_id', 'is not', null)
+              .$narrowType<{ linked_user_id: string }>()
+              .execute()
+            accounts = linked.map((user) => user.linked_user_id)
+          }
+          if (accounts.length > 0)
+            await trx
+              .selectFrom('auth.user')
+              .select('id')
+              .where('id', 'in', accounts)
+              .orderBy('id')
+              .forShare()
+              .execute()
+        }
         const teams = await lockMappingTeams(trx, [organizationId, childId])
         if (teams.length !== 2) return notFound
         const connectionId = await lockScimTokenConnection(trx, principal)
@@ -493,16 +578,30 @@ async function updateGroup(
         if (!body) return invalidSyntax('The request body is required.').reply
         if (!body.ok) return body.reply
 
-        const name =
+        const { name, members } =
           method === 'PUT'
-            ? replacementName(body.value, request.base, row)
-            : patchedName(body.value, row)
-        if (name !== row.name) {
-          await trx
-            .updateTable('auth.organization')
-            .set({ name })
-            .where('id', '=', childId)
-            .execute()
+            ? { name: replacementName(body.value, request.base, row), members: row.member_ids }
+            : patchedGroup(body.value, request.base, row)
+        const removed = row.member_ids.filter((member) => !members.includes(member))
+        const added = members.filter((member) => !row.member_ids.includes(member))
+        if (removed.length > 0)
+          await removeManagedChildMemberships(
+            trx,
+            await rosterMemberships(trx, row.mapping_id, childId, removed),
+          )
+        if (added.length > 0) {
+          const users = await linkedUsers(trx, organizationId, connectionId, added)
+          // An account linked after the identity locks were taken is not admitted.
+          if (users.some((user) => !accounts.includes(user.linked_user_id))) throw invalidMember()
+          await insertRoster(trx, row.mapping_id, childId, users)
+        }
+        if (name !== row.name || removed.length > 0 || added.length > 0) {
+          if (name !== row.name)
+            await trx
+              .updateTable('auth.organization')
+              .set({ name })
+              .where('id', '=', childId)
+              .execute()
           const { updated_at } = await trx
             .updateTable('scim_groups')
             .set({ updated_at: sql<Date>`greatest(updated_at, clock_timestamp())` })
@@ -519,6 +618,7 @@ async function updateGroup(
           })
           row.name = name
           row.updated_at = updated_at
+          row.member_ids = members
         }
         return {
           status: 200,
