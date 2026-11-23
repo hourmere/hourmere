@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { promisify } from 'node:util'
+import { sendSsoRequest } from '../../../packages/outbound/src/sso.ts'
 import realm from './realm.json' with { type: 'json' }
 
 const KEYCLOAK_IMAGE =
@@ -14,6 +15,7 @@ const KEYCLOAK_IMAGE =
 const run = promisify(execFile)
 const ownerLabel = 'com.hourmere.e2e.keycloak-owner'
 const containerId = /^[a-f0-9]{64}$/
+const adminClientId = 'fixture-key-rotation'
 
 function persona(name: string) {
   const user = realm.users.find((entry) => entry.username === name)
@@ -56,8 +58,65 @@ function discoveryStatus(issuer: string, ca: string): Promise<string> {
   })
 }
 
+async function addSigningKey(origin: string, adminSecret: string) {
+  const { hostname, port } = new URL(origin)
+  const privateTargets = [{ host: hostname, port: Number(port) }]
+  const adminRealm = `${origin}/admin/realms/${realm.realm}`
+  try {
+    const token = await sendSsoRequest({
+      url: `${origin}/realms/master/protocol/openid-connect/token`,
+      privateTargets,
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'client_credentials',
+        client_id: adminClientId,
+        client_secret: adminSecret,
+      }).toString(),
+    })
+    if (token.status !== 200) throw new Error()
+    const { access_token: accessToken } = JSON.parse(token.body.toString('utf8'))
+    if (typeof accessToken !== 'string' || !accessToken) throw new Error()
+    const authorization = `Bearer ${accessToken}`
+    const metadata = await sendSsoRequest({
+      url: adminRealm,
+      privateTargets,
+      headers: { authorization },
+    })
+    if (metadata.status !== 200) throw new Error()
+    const { id: parentId } = JSON.parse(metadata.body.toString('utf8'))
+    if (typeof parentId !== 'string' || !parentId) throw new Error()
+    const created = await sendSsoRequest({
+      url: `${adminRealm}/components`,
+      privateTargets,
+      method: 'POST',
+      headers: { authorization, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'rotated-fixture-signing-key',
+        parentId,
+        providerId: 'rsa-generated',
+        providerType: 'org.keycloak.keys.KeyProvider',
+        config: {
+          priority: ['200'],
+          enabled: ['true'],
+          active: ['true'],
+          algorithm: ['RS256'],
+          keySize: ['2048'],
+        },
+      }),
+    })
+    if (created.status !== 201) throw new Error()
+  } catch {
+    // The admin response may contain private credentials or key configuration.
+    throw new Error('Unable to rotate the owned Keycloak realm signing key')
+  }
+}
+
 /** Start one disposable, loopback-only IdP for a single Hourmere callback. */
-export async function startKeycloak(redirectUri: string) {
+export async function startKeycloak(
+  redirectUri: string,
+  { keyRotation }: { keyRotation: boolean },
+) {
   const callback = new URL(redirectUri)
   if (
     callback.protocol !== 'http:' ||
@@ -95,10 +154,12 @@ export async function startKeycloak(redirectUri: string) {
 
   const clientSecret = randomBytes(32).toString('base64url')
   const password = randomBytes(32).toString('base64url')
+  const adminSecret = keyRotation ? randomBytes(32).toString('base64url') : undefined
   const directory = await mkdtemp(join(tmpdir(), 'hourmere-keycloak-'))
   const importPath = join(directory, 'realm.json')
   const certificatePath = join(directory, 'tls.crt')
   const privateKeyPath = join(directory, 'tls.key')
+  const adminEnvironment = join(directory, 'admin.env')
   let creating = false
   let id: string | undefined
   const findOwnedContainer = async () => {
@@ -145,6 +206,12 @@ export async function startKeycloak(redirectUri: string) {
     // The host directory is private. Mount each file individually so Keycloak's
     // unprivileged container user can read it without access to the host directory.
     await writeFile(importPath, JSON.stringify(importedRealm))
+    if (adminSecret)
+      await writeFile(
+        adminEnvironment,
+        `KC_BOOTSTRAP_ADMIN_CLIENT_ID=${adminClientId}\nKC_BOOTSTRAP_ADMIN_CLIENT_SECRET=${adminSecret}\n`,
+        { mode: 0o600 },
+      )
     await command('openssl', 'generate the Keycloak TLS certificate', [
       'req',
       '-x509',
@@ -180,6 +247,7 @@ export async function startKeycloak(redirectUri: string) {
         label,
         '--log-driver',
         'none',
+        ...(adminSecret ? ['--env-file', adminEnvironment] : []),
         // These short-lived JVMs run side by side with Chrome and PostgreSQL in CI.
         '--env',
         'JAVA_OPTS_APPEND=-XX:ActiveProcessorCount=2 -XX:TieredStopAtLevel=1',
@@ -226,6 +294,18 @@ export async function startKeycloak(redirectUri: string) {
           certificate,
           password,
           ...personas,
+          async rotateSigningKey() {
+            if (!adminSecret) throw new Error('This fixture did not enable Keycloak key rotation')
+            await addSigningKey(origin, adminSecret)
+          },
+          async stop() {
+            await command('docker', 'stop the owned Keycloak container', [
+              'stop',
+              '--time',
+              '0',
+              idFromDocker,
+            ])
+          },
           close,
         }
       await delay(250)

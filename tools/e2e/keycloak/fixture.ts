@@ -6,7 +6,8 @@ import { getRequestListener } from '@hono/node-server'
 import type { BrowserContext } from '@playwright/test'
 import { sql } from 'kysely'
 import { createApp } from '../../../apps/server/src/app.ts'
-import { productRoutes } from '../../../apps/server/src/server.ts'
+import { mcpEndpoint } from '../../../apps/server/src/mcp/endpoint.ts'
+import { productRoutes, productTools } from '../../../apps/server/src/server.ts'
 import { sealSsoProviderConfiguration } from '../../../apps/server/src/sso-configuration.ts'
 import {
   deliverMailboxProof,
@@ -44,6 +45,8 @@ interface AccountState {
 
 export interface KeycloakFixture {
   url: string
+  db: Db
+  databaseUrl: string
   providerId: string
   idp: Keycloak
   teamId: string
@@ -57,6 +60,8 @@ export interface KeycloakFixture {
   magicLink: (email: string) => Promise<URL>
   mailboxLink: (email: string) => Promise<URL>
   tokenExchanges: () => readonly TokenExchange[]
+  signingKeyIds: () => readonly string[]
+  jwksRequests: () => number
 }
 
 function tokenExchange(response: SsoResponse): TokenExchange {
@@ -74,12 +79,27 @@ function tokenExchange(response: SsoResponse): TokenExchange {
   return 'failed'
 }
 
+function readSigningKeyId(response: SsoResponse): string {
+  try {
+    const { id_token: token } = JSON.parse(response.body.toString('utf8'))
+    const { kid } = JSON.parse(Buffer.from(token.split('.')[0], 'base64url').toString('utf8'))
+    if (typeof kid === 'string' && kid.length > 0) return kid
+  } catch {
+    // Keep raw token data out of failures.
+  }
+  throw new Error('The Keycloak ID token did not identify its signing key')
+}
+
 async function seedSignIn(
   db: Db,
   providerId: string,
   idp: Keycloak,
   configurationKey: Buffer,
-  admission: Admission,
+  {
+    admission,
+    enforced,
+    brokenProvider,
+  }: { admission: Admission; enforced: boolean; brokenProvider: boolean },
 ) {
   const fixtures = createFixtures(db)
   const teamName = 'keycloak-team'
@@ -118,10 +138,10 @@ async function seedSignIn(
     })
     .returning('id')
     .executeTakeFirstOrThrow()
-  if (admission === 'jit')
+  if (admission === 'jit' || enforced)
     await db
       .insertInto('sso_policies')
-      .values({ organization_id: organizationId, admission })
+      .values({ organization_id: organizationId, admission, require_sso: enforced })
       .execute()
 
   const { issuer, clientId, clientSecret } = idp
@@ -138,7 +158,11 @@ async function seedSignIn(
       configuration: sealSsoProviderConfiguration(
         configurationKey,
         { providerId, organizationId, revision },
-        JSON.stringify({ issuer, clientId, clientSecret }),
+        JSON.stringify({
+          issuer,
+          clientId,
+          clientSecret: brokenProvider ? randomBytes(32).toString('base64url') : clientSecret,
+        }),
       ),
       enabled: true,
     })
@@ -169,6 +193,12 @@ async function seedSignIn(
       email_proven_at: new Date(),
     })
     .execute()
+  if (brokenProvider)
+    await db
+      .updateTable('sso_providers')
+      .set({ enabled: false })
+      .where('id', '=', providerId)
+      .execute()
   return {
     teamId: organizationId,
     teamName,
@@ -330,14 +360,23 @@ export const test = base.extend<{
   oidcEnabled: boolean
   admission: Admission
   signupMode: SignupPolicy['mode']
+  enforced: boolean
+  brokenProvider: boolean
+  keyRotation: boolean
 }>({
   oidcEnabled: [true, { option: true }],
   admission: ['invitation_only', { option: true }],
   signupMode: ['closed', { option: true }],
+  enforced: [false, { option: true }],
+  brokenProvider: [false, { option: true }],
+  keyRotation: [false, { option: true }],
   // Chrome uses an isolated context and the route above restricts its destinations.
   ignoreHTTPSErrors: true,
   keycloak: [
-    async ({ context, oidcEnabled, admission, signupMode }, use) => {
+    async (
+      { context, oidcEnabled, admission, signupMode, enforced, brokenProvider, keyRotation },
+      use,
+    ) => {
       const bootstrap = process.env.HOURMERE_E2E_BOOTSTRAP_URL
       if (!bootstrap) throw new Error('Keycloak tests require HOURMERE_E2E_BOOTSTRAP_URL')
       const owned = await createTestDatabase(bootstrap, undefined, { tag: 'keycloak' })
@@ -354,10 +393,15 @@ export const test = base.extend<{
           .executeTakeFirstOrThrow()
         idp = await startKeycloak(
           new URL(OIDC_CALLBACK_PATH.replace(':providerId', providerId), url).href,
+          { keyRotation },
         )
         setDefaultCACertificates([...previousCAs, idp.certificate])
         const configurationKey = randomBytes(32)
-        const seeded = await seedSignIn(db, providerId, idp, configurationKey, admission)
+        const seeded = await seedSignIn(db, providerId, idp, configurationKey, {
+          admission,
+          enforced,
+          brokenProvider,
+        })
         const { personal, teamId, invitationId } = seeded
         const signup: SignupPolicy = { mode: signupMode, allowedDomains: [] }
         const secret = randomBytes(32).toString('base64')
@@ -411,8 +455,10 @@ export const test = base.extend<{
           }
         const issuer = new URL(idp.issuer)
         const privateTargets = [{ host: issuer.hostname, port: Number(issuer.port) }]
-        const tokenEndpoint = `${idp.issuer}/protocol/openid-connect/token`
+        const oidcEndpoint = `${idp.issuer}/protocol/openid-connect`
         const exchanges: TokenExchange[] = []
+        const signingKeyIds: string[] = []
+        let jwksRequests = 0
         const app = createApp({
           publicUrl: url,
           checkDb: async () => {},
@@ -423,6 +469,7 @@ export const test = base.extend<{
             fileURLToPath(new URL('../../../apps/web/dist', import.meta.url)),
           ssoTeamReads: { db, capabilities },
           ssoMailboxProof: mailbox.routes,
+          mcp: mcpEndpoint({ tools: productTools({ db, publicUrl: url }) }),
           ssoOidcSignIn: oidcSignInRoutes({
             db,
             capabilities,
@@ -441,7 +488,13 @@ export const test = base.extend<{
               if (new URL(request.url).origin !== issuer.origin)
                 throw new Error('Keycloak fixture transport refused an unowned origin')
               const response = await sendSsoRequest(request)
-              if (request.url === tokenEndpoint) exchanges.push(tokenExchange(response))
+              if (request.url === `${oidcEndpoint}/certs`) jwksRequests++
+              if (request.url === `${oidcEndpoint}/token`) {
+                const exchange = tokenExchange(response)
+                exchanges.push(exchange)
+                if (keyRotation && exchange === 'issued')
+                  signingKeyIds.push(readSigningKeyId(response))
+              }
               return response
             },
           }),
@@ -454,6 +507,11 @@ export const test = base.extend<{
               ssoOidcEnabled: true,
               ssoConfigurationKey: configurationKey,
               ssoPrivateTargets: privateTargets,
+              ssoRecoveryEnrollmentQueue: {
+                async enqueue() {
+                  return 'fixture-sso-recovery-notice'
+                },
+              },
             }),
           }),
         })
@@ -465,6 +523,8 @@ export const test = base.extend<{
         })
         await use({
           url,
+          db,
+          databaseUrl: owned.url,
           providerId,
           idp,
           ...seeded,
@@ -485,6 +545,8 @@ export const test = base.extend<{
           },
           mailboxLink: mailbox.link,
           tokenExchanges: () => [...exchanges],
+          signingKeyIds: () => [...signingKeyIds],
+          jwksRequests: () => jwksRequests,
         })
         checkBrowser()
       } finally {
