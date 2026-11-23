@@ -1,5 +1,7 @@
 import type { Locator, Page } from '@playwright/test'
-import { expect, type KeycloakFixture } from './fixture.ts'
+import { describeStrandedPage, expect, type KeycloakFixture } from './fixture.ts'
+
+export { describeStrandedPage }
 
 export const returnPath = '/app/event-types'
 export const ssoLabel = 'Sign in with single sign-on'
@@ -70,29 +72,6 @@ export async function signInWithEmail(page: Page, app: KeycloakFixture, email: s
   await expect(page.getByRole('heading', { name: 'Check your email' })).toBeVisible()
   await openPrivateLink(page, await app.magicLink(email))
   await clickPrivate(button(page, 'Sign in to Hourmere'))
-}
-
-/** Say where a sign-in stopped without printing query strings, cookies or form values. */
-export async function describeStrandedPage(page: Page, app: KeycloakFixture) {
-  const url = new URL(page.url())
-  const site = url.origin === app.url ? 'Hourmere' : 'the identity provider'
-  const feedback = await page
-    .locator('#input-error, #kc-error-message, .pf-m-error, [role="alert"]')
-    .first()
-    .textContent({ timeout: 500 })
-    .catch(() => null)
-  const form = await page
-    .locator('input[name="password"]')
-    .isVisible()
-    .catch(() => false)
-  const heading = await page
-    .locator('h1, #kc-page-title')
-    .first()
-    .textContent({ timeout: 500 })
-    .catch(() => null)
-  const clip = (text: string | null) =>
-    text ? text.replace(/\s+/g, ' ').trim().slice(0, 120) : 'none'
-  return `${site} ${url.pathname}; heading: ${clip(heading)}; feedback: ${clip(feedback)}; password field: ${form}`
 }
 
 export async function expectSession(
