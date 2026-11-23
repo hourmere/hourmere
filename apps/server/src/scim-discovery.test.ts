@@ -506,6 +506,7 @@ describe('SCIM discovery representations', () => {
       'scim-patch',
       'scim-query',
       'scim-groups',
+      'scim-group-retirement',
       'scim-managed-child-memberships',
       'scim-users',
       'scim-user-create',

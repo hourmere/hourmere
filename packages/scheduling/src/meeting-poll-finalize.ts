@@ -141,7 +141,10 @@ export async function finalizeMeetingPoll(
     const resolve = async (db: Db, options?: { lock?: boolean }) => {
       let current: Awaited<ReturnType<typeof findOneTimeEventType>>
       try {
-        current = await findOneTimeEventType(db, poll.event_type_id, options)
+        current = await findOneTimeEventType(db, poll.event_type_id, {
+          ...options,
+          scimResourcesEnabled: ctx.scimResourcesEnabled,
+        })
       } catch (error) {
         if (error instanceof DomainError && error.code === 'booking_changed') throw eventChanged()
         throw error

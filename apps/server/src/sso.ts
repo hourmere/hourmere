@@ -6,6 +6,8 @@ export const SCIM_MAPPING_CONSENT = 'approveScimTeamMapping'
 export interface SsoCapabilities {
   readonly ssoOidcEnabled: boolean
   readonly ssoSamlEnabled: boolean
+  /** The in-process SCIM resource capability; see TeamSsoCapabilities. Defaults off. */
+  readonly scimResourcesEnabled?: boolean | undefined
 }
 
 /**

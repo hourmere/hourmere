@@ -94,7 +94,11 @@ export function ssoRecoveryEnrollmentEmailJob({
           }).toString()
         }
         if (notice.kind === 'used') {
-          const owner = await ssoRecoveryTeamOwners(db, notice.organizationId)
+          const owner = await ssoRecoveryTeamOwners(
+            db,
+            notice.organizationId,
+            capabilities.scimResourcesEnabled === true,
+          )
             .where('auth.member.userId', '=', notice.userId)
             .executeTakeFirst()
           if (!owner) return
@@ -156,13 +160,17 @@ async function recipientLanguage(db: Db, userId: string) {
   return ssoRecoveryNoticeLanguage(profile?.locale)
 }
 
-export function ssoRecoveryTeamOwners(db: Db, organizationId: string) {
+export function ssoRecoveryTeamOwners(
+  db: Db,
+  organizationId: string,
+  scimResourcesEnabled = false,
+) {
   return db
     .selectFrom('auth.member')
     .leftJoin('profiles', 'profiles.user_id', 'auth.member.userId')
     .select(['auth.member.userId', 'profiles.locale'])
     .where('organizationId', '=', organizationId)
-    .where((eb) => eb.not(scimSuspended(organizationId, eb.ref('userId'))))
+    .where((eb) => eb.not(scimSuspended(organizationId, eb.ref('userId'), scimResourcesEnabled)))
     .where(sql<boolean>`EXISTS (
       SELECT 1 FROM unnest(string_to_array(role, ',')) AS roles(token)
       WHERE btrim(token) = 'owner'
@@ -174,7 +182,11 @@ export async function notifySsoRecoveryUse(
   trx: Db,
   organizationId: string,
 ) {
-  const owners = await ssoRecoveryTeamOwners(trx, organizationId).execute()
+  const owners = await ssoRecoveryTeamOwners(
+    trx,
+    organizationId,
+    deps.capabilities.scimResourcesEnabled === true,
+  ).execute()
   for (const { userId, locale } of owners)
     await notify(deps, trx, {
       kind: 'used',

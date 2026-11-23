@@ -78,6 +78,7 @@ export interface ServiceDeps extends RecurringBookingAdmissionDeps {
   successRedirectPolicy?: ServiceContext['successRedirectPolicy']
   smsRemindersAvailable?: ServiceContext['smsRemindersAvailable']
   followUpHostNotesEnabled?: ServiceContext['followUpHostNotesEnabled']
+  scimResourcesEnabled?: ServiceContext['scimResourcesEnabled']
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
   /** The clock; defaults to the real one. */
@@ -94,6 +95,7 @@ export function serviceContext(
     successRedirectPolicy,
     smsRemindersAvailable,
     followUpHostNotesEnabled,
+    scimResourcesEnabled,
     recurringBookingsEnabled,
   }: ServiceDeps,
   principal: Principal,
@@ -108,6 +110,8 @@ export function serviceContext(
     smsRemindersAvailable,
     followUpHostNotesEnabled,
     recurringBookingsEnabled,
+    // A resolver holding the SCIM resource capability marks the callers it resolves.
+    ...((scimResourcesEnabled || principal.scimResourcesEnabled) && { scimResourcesEnabled: true }),
   }
 }
 

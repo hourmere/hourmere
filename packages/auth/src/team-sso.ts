@@ -7,9 +7,22 @@ import { jsonObjectFrom } from 'kysely/helpers/postgres'
 export interface TeamSsoCapabilities {
   readonly ssoOidcEnabled: boolean
   readonly ssoSamlEnabled: boolean
+  /**
+   * The in-process SCIM resource capability, carried with the protocol capabilities so
+   * every proof and delegation check reads a managed child suspension. Defaults off.
+   */
+  readonly scimResourcesEnabled?: boolean | undefined
 }
 
 export const ssoHardOff: TeamSsoCapabilities = { ssoOidcEnabled: false, ssoSamlEnabled: false }
+
+/** Off returns the same object, so nothing downstream changes without the test flag. */
+export function withScimResources(
+  capabilities: TeamSsoCapabilities,
+  scimResourcesEnabled: boolean | undefined,
+): TeamSsoCapabilities {
+  return scimResourcesEnabled ? { ...capabilities, scimResourcesEnabled: true } : capabilities
+}
 
 export interface TeamSsoDeps {
   capabilities: TeamSsoCapabilities
@@ -39,7 +52,7 @@ export function liveBrowserProofQuery(
   identity: TeamSsoSession,
   organizationId: string,
   trustGeneration: number | ReturnType<typeof sql<number>>,
-  { ssoOidcEnabled, ssoSamlEnabled }: TeamSsoCapabilities,
+  { ssoOidcEnabled, ssoSamlEnabled, scimResourcesEnabled }: TeamSsoCapabilities,
 ) {
   return sql`
     SELECT b.id, b.provider_id,
@@ -56,7 +69,7 @@ export function liveBrowserProofQuery(
       AND pd.domain_id = b.domain_id AND pd.provider_id = b.provider_id
     WHERE b.session_id = ${identity.sessionId}::uuid AND b.user_id = ${identity.userId}::uuid
       AND b.organization_id = ${organizationId}::uuid AND b.trust_generation = ${trustGeneration}
-      AND NOT (${scimSuspended(organizationId, identity.userId)})
+      AND NOT (${scimSuspended(organizationId, identity.userId, scimResourcesEnabled === true)})
       AND b.expires_at > statement_timestamp() AND s."expiresAt" > statement_timestamp()
       AND l.retired_at IS NULL AND p.enabled AND p.retired_at IS NULL
       AND ((${ssoOidcEnabled} AND p.protocol = 'oidc') OR (${ssoSamlEnabled} AND p.protocol = 'saml'))
@@ -82,9 +95,10 @@ export async function teamSsoAccess(
   const access = await db
     .selectNoFrom([
       jsonObjectFrom(policy).as('policy'),
-      (identity ? scimSuspended(organizationId, identity.userId) : sql<boolean>`false`).as(
-        'suspended',
-      ),
+      (identity
+        ? scimSuspended(organizationId, identity.userId, capabilities.scimResourcesEnabled === true)
+        : sql<boolean>`false`
+      ).as('suspended'),
     ])
     .executeTakeFirstOrThrow()
   if (access.suspended) return { allowed: false, policy: access.policy, suspended: true }
@@ -111,6 +125,7 @@ export async function lockTeamSsoPolicy(
   userId: string | undefined,
   organizationLocked = false,
   admissionBlock?: Expression<boolean>,
+  scimResourcesEnabled = false,
 ) {
   if (!organizationLocked && !hasTeamWriteOrganizationLock(db, organizationId)) {
     await db
@@ -128,7 +143,10 @@ export async function lockTeamSsoPolicy(
   return db
     .selectNoFrom([
       jsonObjectFrom(lockedPolicy).as('policy'),
-      (userId ? scimSuspended(organizationId, userId) : sql<boolean>`false`).as('suspended'),
+      (userId
+        ? scimSuspended(organizationId, userId, scimResourcesEnabled)
+        : sql<boolean>`false`
+      ).as('suspended'),
     ])
     .$if(admissionBlock !== undefined, (query) =>
       query.select(sql<boolean>`${admissionBlock}`.as('admissionBlocked')),
@@ -154,6 +172,7 @@ export async function lockTeamSsoProof(
     identity?.userId,
     options?.organizationLocked,
     options?.admission?.blocked,
+    capabilities.scimResourcesEnabled === true,
   )
   if (suspended) denied()
   if (admissionBlocked) options?.admission?.denied()

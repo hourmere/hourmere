@@ -1,5 +1,6 @@
 import { teamRoles } from '@hourmere/auth'
 import type { Database } from '@hourmere/db'
+import { writeAuditEvent } from '@hourmere/db/audit'
 import { suspendScimMembership } from '@hourmere/db/scim-suspension'
 import { sql, type Transaction } from 'kysely'
 import {
@@ -80,10 +81,20 @@ export async function applyScimUserLifecycle(
     actor,
   )
   if (blocked) {
-    // The parent's own blocker decides only parent access. The caller commits the child
-    // resume with this refusal and applies nothing else from the request.
-    if (resumed > 0) return blocked.reply
-    throw blocked
+    if (resumed === 0) throw blocked
+    // The parent's own blocker decides only parent access. This is the one refusal that
+    // commits a change: the User itself is left exactly as it was (RFC 7644 section
+    // 3.5.2), nothing else from the request is applied, and the child resume it carries
+    // is journaled so that the refused request never changes access silently.
+    await writeAuditEvent(trx, {
+      organizationId: entry.organization_id,
+      actor,
+      credential: { type: 'none' },
+      action: 'scim_user.child_access_resumed',
+      targetType: 'scim_user',
+      targetId: entry.id,
+    })
+    return blocked.reply
   }
   // The entry stays inactive after a refused reactivation, so a repeated deactivation
   // suspends again whatever that reactivation resumed.

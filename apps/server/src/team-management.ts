@@ -162,7 +162,11 @@ export function bookingWriteAccess(principal: Principal, expectedOrganizationId?
       .select('id')
       .where('userId', '=', principal.user.id)
       .where('organizationId', '=', organizationId)
-      .where((eb) => eb.not(scimSuspended(organizationId, principal.user.id)))
+      .where((eb) =>
+        eb.not(
+          scimSuspended(organizationId, principal.user.id, principal.scimResourcesEnabled === true),
+        ),
+      )
       .forShare()
       .executeTakeFirst()
     const session = await db
@@ -187,7 +191,15 @@ export function bookingWriteAccess(principal: Principal, expectedOrganizationId?
             .select('id')
             .where('userId', '=', principal.user.id)
             .where('organizationId', '=', session.activeOrganizationId)
-            .where((eb) => eb.not(scimSuspended(eb.ref('organizationId'), eb.ref('userId'))))
+            .where((eb) =>
+              eb.not(
+                scimSuspended(
+                  eb.ref('organizationId'),
+                  eb.ref('userId'),
+                  principal.scimResourcesEnabled === true,
+                ),
+              ),
+            )
             .executeTakeFirst()
         : undefined
     const personal = activeMember

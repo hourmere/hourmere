@@ -30,7 +30,7 @@ import { hasAccount, maySignUp, type SignupPolicy, signupConnectionOptions } fro
 import type { SsoAdmissionRemoval } from './sso-admission-blocks.ts'
 import { nativeTeamTransactions, teamTransactionAdapter } from './team-native-atomicity.ts'
 import { createTeamRolePolicy, teamMembershipLimit } from './team-role-policy.ts'
-import { ssoHardOff, type TeamSsoCapabilities } from './team-sso.ts'
+import { ssoHardOff, type TeamSsoCapabilities, withScimResources } from './team-sso.ts'
 import { nativeTeamSso } from './team-sso-native.ts'
 
 export { type ApiKeyScope, parsePersistedApiKeyMetadata } from './api-key-metadata.ts'
@@ -318,8 +318,9 @@ export function createAuth({
   scimClaims,
   scimResourcesEnabled = false,
   recordAdmissionRemoval,
-  ssoCapabilities = ssoHardOff,
+  ssoCapabilities: protocolCapabilities = ssoHardOff,
 }: AuthConfig) {
+  const ssoCapabilities = withScimResources(protocolCapabilities, scimResourcesEnabled)
   const lockPool = (pool as Partial<AuthPool>).organizationLocks
   if (!lockPool) throw new Error('createAuth requires a pool created by createAuthPool')
   const { google, microsoft } = socialProviders
@@ -650,4 +651,5 @@ export {
   type TeamSsoDeps,
   type TeamSsoSession,
   teamSsoAccess,
+  withScimResources,
 } from './team-sso.ts'

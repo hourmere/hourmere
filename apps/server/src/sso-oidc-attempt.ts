@@ -64,6 +64,7 @@ export class OidcStateReplay extends OidcAttemptRefused {
 interface AttemptDependencies {
   db: Db
   configurationKey: Buffer
+  scimResourcesEnabled?: boolean | undefined
 }
 
 type OriginatingBrowser = SsoProviderRevision & { browserBinding: string | undefined }
@@ -169,6 +170,7 @@ export async function lockOidcTestActor(
   provider: SsoProviderRevision,
   actor: OidcTestActor,
   recovery?: RecoveryTestBinding,
+  scimResourcesEnabled = false,
 ) {
   const user = await trx
     .selectFrom('auth.user')
@@ -185,6 +187,11 @@ export async function lockOidcTestActor(
       actor.userId,
       provider.organizationId,
       true,
+      false,
+      false,
+      false,
+      false,
+      scimResourcesEnabled,
     )
     if (recovery) {
       if (member.role !== 'owner') throw refused()
@@ -534,7 +541,7 @@ export async function isOidcTestCallback(
  * The transaction commits first, so even a failed exchange can never make this state usable again.
  */
 export async function consumeOidcAttempt(
-  { db, configurationKey }: AttemptDependencies,
+  { db, configurationKey, scimResourcesEnabled }: AttemptDependencies,
   browser: OriginatingBrowser & { state: string | null },
   test: BoundTest | undefined = undefined,
   readActor?: () => Promise<OidcTestActor | null | undefined>,
@@ -567,7 +574,13 @@ export async function consumeOidcAttempt(
 
   const attempt = await db.transaction().execute(async (trx) => {
     if (ceremony.kind === 'test')
-      await lockOidcTestActor(trx, browser, ceremony.actor, ceremony.recovery)
+      await lockOidcTestActor(
+        trx,
+        browser,
+        ceremony.actor,
+        ceremony.recovery,
+        scimResourcesEnabled === true,
+      )
     else if (ceremony.kind === 'step_up') await lockBoundStepUp(trx, browser, ceremony)
     else await lockOidcProvider(trx, browser)
     const query = trx

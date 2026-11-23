@@ -163,7 +163,7 @@ export async function findPublicEventType(
   db: Db,
   handle: string,
   slug: string,
-  options: { lock?: boolean } = {},
+  options: { lock?: boolean; scimResourcesEnabled?: boolean | undefined } = {},
 ): Promise<PublicEventTypeRecord | undefined> {
   const h = servedHandle(handle)
   const s = slug.toLowerCase()
@@ -174,7 +174,7 @@ export async function findPublicEventType(
 async function findPersonalEventType(
   db: Db,
   identity: { handle: string; slug: string } | { id: string },
-  options: { lock?: boolean } = {},
+  options: { lock?: boolean; scimResourcesEnabled?: boolean | undefined } = {},
 ): Promise<PublicEventTypeRecord | undefined> {
   let query = db
     .selectFrom('profiles as p')
@@ -221,7 +221,13 @@ async function findPersonalEventType(
   if ('id' in identity) {
     if (servedHandle(row.handle) === undefined) return undefined
     try {
-      await assertHosts(db, row.organization_id, [row.user_id], options.lock)
+      await assertHosts(
+        db,
+        row.organization_id,
+        [row.user_id],
+        options.lock,
+        options.scimResourcesEnabled,
+      )
     } catch (error) {
       if (error instanceof DomainError && error.code === 'invalid_hosts') return undefined
       throw error
@@ -272,7 +278,7 @@ export async function findPublicTeamEventType(
   db: Db,
   teamSlug: string,
   slug: string,
-  options: { lock?: boolean } = {},
+  options: { lock?: boolean; scimResourcesEnabled?: boolean | undefined } = {},
 ): Promise<PublicEventTypeRecord | undefined> {
   const s = slug.toLowerCase()
   if (!isPublicTeamSlug(teamSlug) || !SLUG.test(s)) return undefined
@@ -282,7 +288,7 @@ export async function findPublicTeamEventType(
 async function findTeamEventType(
   db: Db,
   identity: { teamSlug: string; slug: string } | { id: string },
-  options: { lock?: boolean; explain?: boolean } = {},
+  options: { lock?: boolean; explain?: boolean; scimResourcesEnabled?: boolean | undefined } = {},
 ): Promise<PublicEventTypeRecord | undefined> {
   let query = db
     .selectFrom('auth.organization as o')
@@ -347,6 +353,7 @@ async function findTeamEventType(
       row.organization_id,
       hostUserIds,
       options.lock,
+      options.scimResourcesEnabled,
     )
     if (!eligibleHostUserIds.length && !options.explain) return undefined
     if (options.lock) {
@@ -361,7 +368,13 @@ async function findTeamEventType(
     }
   } else {
     try {
-      await assertHosts(db, row.organization_id, hostUserIds, options.lock)
+      await assertHosts(
+        db,
+        row.organization_id,
+        hostUserIds,
+        options.lock,
+        options.scimResourcesEnabled,
+      )
     } catch (error) {
       if (error instanceof DomainError && error.code === 'invalid_hosts') return undefined
       throw error
@@ -408,7 +421,7 @@ async function findTeamEventType(
 export async function findOneTimeEventType(
   db: Db,
   eventTypeId: string,
-  options: { lock?: boolean } = {},
+  options: { lock?: boolean; scimResourcesEnabled?: boolean | undefined } = {},
 ): Promise<PublicEventTypeRecord | undefined> {
   const event = await db
     .selectFrom('event_types')
@@ -445,7 +458,9 @@ export async function getOneTimeBookingPage(
   token: string | undefined,
 ): Promise<OneTimeBookingPage> {
   const link = await resolveOneTimeBookingLink(ctx, token)
-  const eventType = await findOneTimeEventType(ctx.db, link.eventTypeId)
+  const eventType = await findOneTimeEventType(ctx.db, link.eventTypeId, {
+    scimResourcesEnabled: ctx.scimResourcesEnabled,
+  })
   if (!eventType) throw new DomainError('not_found', 'one_time_link_not_found')
   const page = publicEventType(
     { ...eventType, waitlistEnabled: false },
@@ -511,7 +526,9 @@ export async function getPublicEventType(
   ctx: PublicContext,
   { handle, slug }: { handle: string; slug: string },
 ): Promise<PublicEventType> {
-  const event = await findPublicEventType(ctx.db, handle, slug)
+  const event = await findPublicEventType(ctx.db, handle, slug, {
+    scimResourcesEnabled: ctx.scimResourcesEnabled,
+  })
   if (!event) throw eventTypeNotFound()
   const page = publicEventType(event, ctx.smtpConfigured, ctx.smsRemindersAvailable)
   const branding = await getPublicBranding(ctx.db, event.organizationId)
@@ -522,7 +539,9 @@ export async function getPublicTeamEventType(
   ctx: PublicContext,
   { handle, slug }: { handle: string; slug: string },
 ): Promise<PublicEventType> {
-  const event = await findPublicTeamEventType(ctx.db, handle, slug)
+  const event = await findPublicTeamEventType(ctx.db, handle, slug, {
+    scimResourcesEnabled: ctx.scimResourcesEnabled,
+  })
   if (!event) throw eventTypeNotFound()
   const page = publicEventType(event, ctx.smtpConfigured, ctx.smsRemindersAvailable)
   const branding = await getPublicBranding(ctx.db, event.organizationId)
@@ -778,7 +797,9 @@ async function publicSlots(
   resolve: typeof findPublicEventType,
 ): Promise<SlotView[]> {
   checkSlotRange(input.start, input.end)
-  const et = await resolve(ctx.db, input.handle, input.slug)
+  const et = await resolve(ctx.db, input.handle, input.slug, {
+    scimResourcesEnabled: ctx.scimResourcesEnabled,
+  })
   if (!et) throw eventTypeNotFound()
   return eventSlots(ctx, input, et)
 }
@@ -794,7 +815,9 @@ export async function listOneTimeBookingSlots(
   },
 ): Promise<SlotView[]> {
   const link = await resolveOneTimeBookingLink(ctx, input.token)
-  const et = await findOneTimeEventType(ctx.db, link.eventTypeId)
+  const et = await findOneTimeEventType(ctx.db, link.eventTypeId, {
+    scimResourcesEnabled: ctx.scimResourcesEnabled,
+  })
   if (!et) throw new DomainError('not_found', 'one_time_link_not_found')
   checkSlotRange(input.start, input.end)
   return eventSlots(ctx, input, et)
@@ -1708,8 +1731,16 @@ export async function explainEventAvailability(
   if (!identity) throw eventTypeNotFound()
   const et =
     identity.owner_user_id === null
-      ? await findTeamEventType(ctx.db, { id: query.eventTypeId }, { explain: true })
-      : await findPersonalEventType(ctx.db, { id: query.eventTypeId })
+      ? await findTeamEventType(
+          ctx.db,
+          { id: query.eventTypeId },
+          { explain: true, scimResourcesEnabled: ctx.scimResourcesEnabled },
+        )
+      : await findPersonalEventType(
+          ctx.db,
+          { id: query.eventTypeId },
+          { scimResourcesEnabled: ctx.scimResourcesEnabled },
+        )
   if (!et) throw eventTypeNotFound()
   const durationMinutes = query.durationMinutes ?? et.durationMinutes
   if (!Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 1440)

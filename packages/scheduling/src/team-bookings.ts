@@ -254,10 +254,14 @@ async function enrichTeamBookings(
       events.map(async (event) => {
         const publicEvent =
           event.owner_user_id === null
-            ? await findPublicTeamEventType(ctx.db, event.team_slug, event.slug)
+            ? await findPublicTeamEventType(ctx.db, event.team_slug, event.slug, {
+                scimResourcesEnabled: ctx.scimResourcesEnabled,
+              })
             : event.handle === null
               ? undefined
-              : await findPublicEventType(ctx.db, event.handle, event.slug)
+              : await findPublicEventType(ctx.db, event.handle, event.slug, {
+                  scimResourcesEnabled: ctx.scimResourcesEnabled,
+                })
         const path =
           publicEvent?.id === event.id
             ? event.owner_user_id === null
