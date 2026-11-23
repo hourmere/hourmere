@@ -481,6 +481,7 @@ export function mcpOAuthBroker({ auth, db, publicUrl, ssoCapabilities = ssoHardO
         )
         .orderBy('c.createdAt', 'desc')
         .execute()
+      const bindable = ssoCapabilities.ssoOidcEnabled || ssoCapabilities.ssoSamlEnabled
       const summaries = await liveSsoDelegationSummaries(
         db,
         ssoCapabilities,
@@ -491,11 +492,14 @@ export function mcpOAuthBroker({ auth, db, publicUrl, ssoCapabilities = ssoHardO
       return {
         data: rows.map(({ credentialId, ...r }) => {
           const ssoDelegation = credentialId ? summaries.get(credentialId) : undefined
+          // While every protocol's setting is off nothing can be bound: the credential is
+          // named only with a delegation that can still be revoked.
+          const named = bindable || ssoDelegation !== undefined
           return {
             ...r,
             clientName: r.clientName?.slice(0, 200) ?? r.clientId.slice(0, 200),
             createdAt: new Date(r.createdAt).toISOString(),
-            ...(credentialId ? { credentialId } : {}),
+            ...(credentialId && named ? { credentialId } : {}),
             ...(ssoDelegation ? { ssoDelegation } : {}),
           }
         }),
