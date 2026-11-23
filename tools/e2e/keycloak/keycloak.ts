@@ -209,6 +209,9 @@ export async function startKeycloak(
   try {
     const importedRealm = {
       ...realm,
+      // The password is random and lives only for this container. Keycloak's default Argon2
+      // hashing is slow in the throttled fixture JVM and delayed sign-in under parallel workers.
+      passwordPolicy: 'hashAlgorithm(pbkdf2-sha256) and hashIterations(1)',
       clients: [{ ...client, secret: clientSecret, redirectUris: [callback.href] }],
       users: realm.users.map((user) => ({
         ...user,
