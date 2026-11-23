@@ -127,6 +127,7 @@ export function beforeHook(
   enqueueInvitationEmail?: EnqueueInvitationEmail,
   ssoCapabilities = ssoHardOff,
   teamSso = nativeTeamSso(db, ssoCapabilities).before,
+  scimResourcesEnabled = false,
 ) {
   return createAuthMiddleware(async (ctx) => {
     apiKeyCredentialBoundary(ctx)
@@ -158,7 +159,7 @@ export function beforeHook(
       ssoCapabilities,
     )
     if (invitation) return invitation
-    await organizationContext(ctx, db)
+    await organizationContext(ctx, db, scimResourcesEnabled)
     const cancellation = await invitationCancellationRules(ctx, db, ssoCapabilities)
     if (cancellation) return cancellation
     await teamRolePolicy(ctx)

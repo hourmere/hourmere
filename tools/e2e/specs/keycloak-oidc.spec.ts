@@ -143,13 +143,12 @@ async function openMemberSettings(page: Page, app: KeycloakFixture) {
   await space.click()
   await page.getByRole('menuitemradio', { name: app.teamName, exact: true }).click()
   await expect(space).toContainText(app.teamName)
-  const [instance] = await Promise.all([
-    page.waitForResponse((response) => response.url() === `${app.url}/api/v1/instance`),
-    page.goto(`${app.url}/app/settings`),
-  ])
+  await page.goto(`${app.url}/app/settings`)
+  await expect(page.getByRole('heading', { name: 'Account', exact: true })).toBeVisible()
+  // Read the capabilities directly: the page's own response body is discarded on navigation.
+  const instance = await page.request.get(`${app.url}/api/v1/instance`)
   expect(instance.status()).toBe(200)
   const capabilities = await instance.json()
-  await expect(page.getByRole('heading', { name: 'Account', exact: true })).toBeVisible()
   return capabilities
 }
 

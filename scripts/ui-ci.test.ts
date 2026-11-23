@@ -200,7 +200,7 @@ describe('UI measurement CI contract', () => {
     ['cli-compatibility', 'e6baff5e1cbf2e5b3339c961747ed5be373cc5d0b7874200d54b903f13a3e194'],
     // Shards preserve the fixture and privacy gates; the stable required job aggregates them.
     ['e2e', '64426cc5d9fc305079bc1aa63370b1a9a6926173a169e82ee18053e7c2ef3618'],
-    ['e2e-shard', '8fc33ea788e61cc91c79d7b1e525624ce0120c5c4ce50def5ccf14e3dd6cb43e'],
+    ['e2e-shard', '5ec12675b7971bde3283f69176bcd88a818be470c7b3ca34b5811b44ad42def6'],
     ['docker', '2594f351267b97c37981b7889ae22495076c653543f5cd8ee11825ac4ed63d9a'],
   ])('preserves required job %s and its behavior', (id, digest) => {
     expect(requiredWorkflow.jobs[id ?? '']).toBeDefined()
@@ -453,7 +453,7 @@ describe('required browser shards', () => {
     })
   })
 
-  it('runs four complete shards on pull requests and merge groups without fail-fast cancellation', () => {
+  it('runs six complete shards on pull requests and merge groups without fail-fast cancellation', () => {
     expect(Object.keys(requiredWorkflow.on).sort()).toEqual([
       'merge_group',
       'pull_request',
@@ -467,7 +467,7 @@ describe('required browser shards', () => {
     expect(job?.if).toBeUndefined()
     expect(job?.['continue-on-error']).toBeUndefined()
     expect(job?.['timeout-minutes']).toBe(12)
-    expect(job?.strategy).toEqual({ 'fail-fast': false, matrix: { shard: [1, 2, 3, 4] } })
+    expect(job?.strategy).toEqual({ 'fail-fast': false, matrix: { shard: [1, 2, 3, 4, 5, 6] } })
     expect(job?.services?.postgres.options).not.toContain('max_connections')
     const browser = job?.steps.find(
       (step) => step.name === 'Build a disposable site fixture and run browser regressions',
@@ -478,7 +478,7 @@ describe('required browser shards', () => {
     expect(browser?.run).toContain('trap restore_legal_source EXIT')
     expect(browser?.run?.split('\n').filter((line) => line.includes('npm run test'))).toEqual([
       // biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub Actions expression is literal.
-      'npm run test --workspace @hourmere/e2e -- --shard=${{ matrix.shard }}/4',
+      'npm run test --workspace @hourmere/e2e -- --shard=${{ matrix.shard }}/6',
     ])
     expect(job?.steps.filter((step) => step.run === 'npm run test:e2e:privacy')).toHaveLength(1)
     expect(
@@ -525,7 +525,7 @@ describe('required browser shards', () => {
       (step) => step.run?.split('\n').filter((line) => line.includes('--shard=')) ?? [],
     )
     expect(commands).toEqual([
-      `${rootPackage.scripts['test:e2e']} -- --shard=\${{ matrix.shard }}/4`,
+      `${rootPackage.scripts['test:e2e']} -- --shard=\${{ matrix.shard }}/6`,
     ])
   })
 

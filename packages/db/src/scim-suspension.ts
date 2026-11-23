@@ -36,9 +36,7 @@ export async function suspendScimMembership(
 
   // Sessions can carry proofs for several teams. Serialize suspensions of this account
   // so two teams cannot each delete a session whose proofs the other needs to remove.
-  await sql`SELECT pg_advisory_xact_lock(hashtextextended(${`hourmere.scim-session-revocation:${userId.toLowerCase()}`}, 0))`.execute(
-    trx,
-  )
+  await lockScimCredentialRevocation(trx, userId)
 
   // Retirement also revokes credentials for a User that was already suspended, keeping
   // that User's original blocker and its attribution intact.
@@ -80,6 +78,30 @@ export async function suspendScimMembership(
       .returning('id')
       .executeTakeFirstOrThrow())
 
+  await revokeScimTeamCredentials(trx, organizationId, userId)
+  await writeAuditEvent(trx, {
+    organizationId,
+    actor: actor.type === 'system' ? { type: 'system', id: 'scim' } : actor,
+    credential: { type: 'none' },
+    action: 'scim_user.credentials_revoked',
+    targetType: 'scim_user',
+    targetId: scimUserId,
+  })
+  return block
+}
+
+export async function lockScimCredentialRevocation(trx: Transaction<Database>, userId: string) {
+  await sql`SELECT pg_advisory_xact_lock(hashtextextended(${`hourmere.scim-session-revocation:${userId.toLowerCase()}`}, 0))`.execute(
+    trx,
+  )
+}
+
+/** The caller holds the organization write lock and the account revocation advisory lock. */
+export async function revokeScimTeamCredentials(
+  trx: Transaction<Database>,
+  organizationId: string,
+  userId: string,
+) {
   // Delete by indexed account ID in one batch. A simultaneous rolling refresh only
   // updates the existing row, so it either completes before deletion or finds no session.
   await trx
@@ -142,17 +164,6 @@ export async function suspendScimMembership(
     .where('user_id', '=', userId)
     .where('organization_id', '=', organizationId)
     .execute()
-
-  await writeAuditEvent(trx, {
-    organizationId,
-    actor: actor.type === 'system' ? { type: 'system', id: 'scim' } : actor,
-    credential: { type: 'none' },
-    action: 'scim_user.credentials_revoked',
-    targetType: 'scim_user',
-    targetId: scimUserId,
-  })
-
-  return block
 }
 
 /** Project whether the team already has SCIM storage without a separate lookup. */

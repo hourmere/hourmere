@@ -395,5 +395,17 @@
   "optOutMeetingPollReminder": {
     "mcp": "opt_out_meeting_poll_reminder",
     "cli": "polls reminder-opt-out"
+  },
+  "createScimTeamMapping": {
+    "mcp": "create_scim_team_mapping",
+    "cli": "scim-team-mappings create"
+  },
+  "deleteScimTeamMapping": {
+    "mcp": "delete_scim_team_mapping",
+    "cli": "scim-team-mappings delete"
+  },
+  "approveScimTeamMapping": {
+    "exemption": "browser-session-only",
+    "reason": "Each team owner must record independent consent with fresh browser administration proof."
   }
 }

@@ -80,9 +80,14 @@ const changed = () =>
  * Trusted server APIs and target-bound create/switch/accept/reject operations retain their
  * existing semantics, as do global profile, calendar and API-key operations.
  */
-export async function organizationContext(ctx: AuthMiddlewareContext, db: Db) {
+export async function organizationContext(
+  ctx: AuthMiddlewareContext,
+  db: Db,
+  scimResourcesEnabled = false,
+) {
   // Launch limits also apply to trusted auth.api calls, before any native cascade.
   if (ctx.path === '/organization/delete') {
+    if (scimResourcesEnabled && (await ownsLiveMapping(ctx, db))) throw scimMappingDetachRequired()
     throw new APIError('FORBIDDEN', {
       code: 'TEAM_OPERATION_NOT_SUPPORTED',
       message: 'Deleting a team is not supported.',
@@ -262,3 +267,47 @@ export async function organizationContext(ctx: AuthMiddlewareContext, db: Db) {
     if (!invitation) throw changed()
   }
 }
+
+async function ownsLiveMapping(ctx: AuthMiddlewareContext, db: Db) {
+  const id = (ctx.body as { organizationId?: unknown } | undefined)?.organizationId
+  if (typeof id !== 'string' || !isUuid(id)) return false
+  const session = await getSessionFromCtx(ctx)
+  if (!session) return false
+  try {
+    const actor = await checkTeamManagementAccess(
+      db,
+      {
+        kind: 'session',
+        sessionId: session.session.id,
+        user: session.user,
+        organization: { id, name: '', slug: '', personal: false },
+      },
+      id,
+      false,
+      { expectedOrganizationId: id, allowPersonal: false },
+    )
+    if (actor.role !== 'owner') return false
+  } catch (error) {
+    if (error instanceof TeamManagementError) return false
+    throw error
+  }
+  return Boolean(
+    await db
+      .selectFrom('scim_team_mappings')
+      .select('id')
+      .where((eb) =>
+        eb.or([
+          eb('live_parent_organization_id', '=', id),
+          eb('live_child_organization_id', '=', id),
+        ]),
+      )
+      .limit(1)
+      .executeTakeFirst(),
+  )
+}
+
+export const scimMappingDetachRequired = () =>
+  new APIError('CONFLICT', {
+    code: 'SCIM_MAPPING_DETACH_REQUIRED',
+    message: 'Detach the team’s SCIM mapping links before deleting it.',
+  })
