@@ -272,7 +272,18 @@ it.skipIf(!serverUrl)(
       await runMigrations(pool, directory)
       await seedLater(pool)
       const db = createDb(pool)
-      const { ctx, oneWebhook } = await writeJournal(db)
+      // Current team authorization also reads the managed roster suspension added long after
+      // this historical schema. Bridge only the application's writes with an empty stand-in,
+      // then restore the exact predecessor before testing 0080.
+      await sql`CREATE TABLE scim_team_managed_memberships
+        (child_organization_id uuid, user_id uuid, suspended_at timestamptz)`.execute(db)
+      let journal: Awaited<ReturnType<typeof writeJournal>>
+      try {
+        journal = await writeJournal(db)
+      } finally {
+        await sql`DROP TABLE scim_team_managed_memberships`.execute(db)
+      }
+      const { ctx, oneWebhook } = journal
       // One row per change above: all six webhook and all six Slack destination actions.
       expect(
         (
