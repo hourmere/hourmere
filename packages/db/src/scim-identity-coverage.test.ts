@@ -1,4 +1,8 @@
+import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { migrationsDir } from './migrate.ts'
 import { assertScimIdentityProtections } from './scim-identity-protections.ts'
 import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
 
@@ -24,15 +28,28 @@ const allowList: Record<string, string> = {
 
 describe.skipIf(!serverUrl)('SCIM identity constraint coverage', () => {
   it('fails a protection assertion when any object created by 0073 is dropped', async () => {
-    const report = await checkConstraintCoverage({
-      serverUrl: serverUrl as string,
-      migration: '0073_scim_identity.sql',
-      assertions: assertScimIdentityProtections,
-      allowList,
-    })
-    expect(report.problems).toEqual([])
-    expect(report.results.filter((result) => result.status === 'covered')).toHaveLength(
-      report.objects.length - Object.keys(allowList).length,
-    )
+    const directory = await mkdtemp(join(tmpdir(), 'hourmere-scim-identity-coverage-'))
+    try {
+      // Drop 0073's User primary key without its later Group source foreign key.
+      // The release schema tests that foreign key in the Group migration's coverage suite.
+      for (const file of await readdir(migrationsDir)) {
+        if (file.endsWith('.sql') && file !== '0183_scim_groups.sql') {
+          await copyFile(join(migrationsDir, file), join(directory, file))
+        }
+      }
+      const report = await checkConstraintCoverage({
+        serverUrl: serverUrl as string,
+        migration: '0073_scim_identity.sql',
+        migrationsDirectory: directory,
+        assertions: assertScimIdentityProtections,
+        allowList,
+      })
+      expect(report.problems).toEqual([])
+      expect(report.results.filter((result) => result.status === 'covered')).toHaveLength(
+        report.objects.length - Object.keys(allowList).length,
+      )
+    } finally {
+      await rm(directory, { recursive: true })
+    }
   }, 600_000)
 })

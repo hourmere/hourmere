@@ -1242,6 +1242,13 @@ export interface ScimConnections {
   organization_id: string;
 }
 
+export interface ScimGroups {
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  mapping_id: string;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface ScimMembershipBlocks {
   cleared_at: Timestamp | null;
   connection_id: string | null;
@@ -1285,6 +1292,7 @@ export interface ScimTeamManagedMemberships {
   child_organization_id: string;
   mapping_id: string;
   member_id: string;
+  scim_user_id: string | null;
   user_id: string;
 }
 
@@ -1934,6 +1942,7 @@ export interface DB {
   schedule_overrides: ScheduleOverrides;
   schedules: Schedules;
   scim_connections: ScimConnections;
+  scim_groups: ScimGroups;
   scim_membership_blocks: ScimMembershipBlocks;
   scim_provisioning_tokens: ScimProvisioningTokens;
   scim_team_link_generations: ScimTeamLinkGenerations;

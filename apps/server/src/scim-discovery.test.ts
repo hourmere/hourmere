@@ -504,6 +504,7 @@ describe('SCIM discovery representations', () => {
     const flagged = [
       'scim-discovery',
       'scim-query',
+      'scim-groups',
       'scim-users',
       'scim-user-create',
       'scim-user-lifecycle',

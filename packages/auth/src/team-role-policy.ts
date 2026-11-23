@@ -994,6 +994,22 @@ export function createTeamRolePolicy(
               logo?: string | null
               metadata?: string | null
             }
+            if (scimResourcesEnabled && patch.name !== undefined) {
+              const managedName = await trx
+                .selectFrom('scim_team_mappings as mapping')
+                .innerJoin('scim_groups as group', 'group.mapping_id', 'mapping.id')
+                .innerJoin(
+                  'auth.organization as child',
+                  'child.id',
+                  'mapping.live_child_organization_id',
+                )
+                .select('group.id')
+                .where('child.id', '=', facts.organizationId)
+                .where('child.name', '!=', patch.name)
+                .where('mapping.suspended_at', 'is', null)
+                .executeTakeFirst()
+              if (managedName) throw managedResource()
+            }
             const updated = await trx
               .updateTable('auth.organization')
               .set(patch)

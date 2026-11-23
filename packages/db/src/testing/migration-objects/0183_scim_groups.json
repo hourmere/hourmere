@@ -1,0 +1,14 @@
+{
+  "migration": "0183_scim_groups.sql",
+  "objects": {
+    "constraint public.scim_groups.scim_groups_mapping_id_fkey": "FOREIGN KEY (mapping_id) REFERENCES scim_team_mappings(id)",
+    "constraint public.scim_groups.scim_groups_mapping_id_key": "UNIQUE (mapping_id)",
+    "constraint public.scim_groups.scim_groups_pkey": "PRIMARY KEY (id)",
+    "constraint public.scim_groups.scim_groups_timestamp_order": "CHECK ((updated_at >= created_at))",
+    "constraint public.scim_team_managed_memberships.scim_team_managed_memberships_scim_user_fkey": "FOREIGN KEY (scim_user_id) REFERENCES scim_users(id)",
+    "not_null public.scim_groups.created_at": "NOT NULL DEFAULT statement_timestamp()",
+    "not_null public.scim_groups.mapping_id": "NOT NULL",
+    "not_null public.scim_groups.updated_at": "NOT NULL DEFAULT statement_timestamp()",
+    "trigger public.scim_groups.scim_groups_guard": "CREATE TRIGGER scim_groups_guard BEFORE INSERT OR DELETE OR UPDATE ON public.scim_groups FOR EACH ROW EXECUTE FUNCTION scim_guard_group() -- function SET search_path=public, pg_catalog md5 7b94af2d19844a06413ac50616034aeb"
+  }
+}

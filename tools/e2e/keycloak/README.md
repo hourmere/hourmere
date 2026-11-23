@@ -17,7 +17,8 @@ HOURMERE_E2E_BOOTSTRAP_URL=postgres://hourmere:hourmere@localhost:5432/hourmere 
 
 The PostgreSQL bootstrap connection creates and drops a disposable Hourmere database.
 Keycloak uses an in-memory database inside its container and a random loopback
-HTTPS port. The fixture generates a TLS certificate, an OIDC client secret and a password
+HTTPS port. On Linux the container shares the host network and binds only to loopback,
+because adding and removing a bridge interface interrupts Chrome navigations in flight. The fixture generates a TLS certificate, an OIDC client secret and a password
 at startup. It imports [the synthetic realm](realm.json) with one exact callback and
 personas for linked sign-in, self-link, same-email sign-in and new account admission.
 Team personas use the reserved `company.example.com` domain to satisfy
