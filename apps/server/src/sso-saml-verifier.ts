@@ -9,6 +9,17 @@ import { SignedXml } from 'xml-crypto'
 // back to the caller is read from a strict parse of exactly those bytes, never from the
 // submitted document. Time bounds and replay belong to the next step: timestamps are returned
 // as the signed strings and are not interpreted here.
+//
+// Contract for the steps that will call this:
+// - `assertion.*` is always authenticated. `response.*` is authenticated only when
+//   `response.signed` is true; otherwise its ID, IssueInstant, Destination and Status came from
+//   the unsigned wrapper. Replay and time checks must therefore key on `assertion.*` only.
+// - InResponseTo is only checked for internal agreement (response and bearer confirmation).
+//   The ACS step must compare `assertion.subjectConfirmation.inResponseTo` with the pending
+//   attempt of the same provider.
+// - A missing NotBefore or NotOnOrAfter is returned as null; the timing step must refuse null.
+// - NameID and attribute values are returned exactly as signed, untrimmed. They must not be
+//   trimmed, case-folded or otherwise normalised before identity matching.
 
 const SAMLP = 'urn:oasis:names:tc:SAML:2.0:protocol'
 const SAML = 'urn:oasis:names:tc:SAML:2.0:assertion'
@@ -93,7 +104,10 @@ const reject = (reason: SamlRejection) => new SamlVerificationError(reason)
 export type VerifiedSamlResponse = {
   response: {
     id: string
-    /** Whether the Response element itself carried a (verified) signature. */
+    /**
+     * Whether the Response element itself carried a (verified) signature. When false, the
+     * other fields of `response` are unauthenticated: never use them for replay or timing.
+     */
     signed: boolean
     issueInstant: string
     inResponseTo: string
@@ -123,6 +137,7 @@ export type VerifiedSamlResponse = {
       sessionIndex: string | null
       sessionNotOnOrAfter: string | null
     }[]
+    /** A null-prototype object: a name the assertion does not carry reads as undefined. */
     attributes: Record<string, string[]>
   }
 }
@@ -131,6 +146,8 @@ export const samlMaximumResponseBytes = 262_144
 const MAX_DEPTH = 24
 const MAX_NODES = 5_000
 const MAX_CERTIFICATES = 4
+// No real response has a long run of white space; libraries need not be asked to chew on one.
+const MAX_WHITESPACE_RUN = 4_096
 const XML_ID = /^[A-Za-z_][A-Za-z0-9._-]{0,255}$/
 const ENCRYPTED = new Set([
   'EncryptedAssertion',
@@ -144,7 +161,10 @@ const ELEMENT_NAMESPACES = new Set([SAMLP, SAML, DSIG, EXC_C14N])
 // ---------------------------------------------------------------------------------------
 // Strict parsing
 
-const XML_DECLARATION = /^﻿?<\?xml version="1\.0"(?: encoding="(?:UTF-8|utf-8)")?\s*\?>/
+// Anchored, and the only processing-instruction-like text accepted: version 1.0, UTF-8 only,
+// optional standalone, either quote style.
+const XML_DECLARATION =
+  /^<\?xml[ \t\r\n]+version[ \t\r\n]*=[ \t\r\n]*(?:"1\.0"|'1\.0')(?:[ \t\r\n]+encoding[ \t\r\n]*=[ \t\r\n]*(?:"[Uu][Tt][Ff]-8"|'[Uu][Tt][Ff]-8'))?(?:[ \t\r\n]+standalone[ \t\r\n]*=[ \t\r\n]*(?:"(?:yes|no)"|'(?:yes|no)'))?[ \t\r\n]*\?>/
 const ENTITY_REFERENCE = /&([^;&<\s]*;?)/g
 // Anything outside the XML 1.0 Char production, plus the noncharacters U+FFFE and U+FFFF.
 const isXmlChar = (code: number) =>
@@ -155,6 +175,8 @@ const isXmlChar = (code: number) =>
   (code >= 0xe000 && code <= 0xfffd) ||
   (code >= 0x10000 && code <= 0x10ffff)
 
+const isWhitespace = (code: number) => code === 0x20 || code === 0x9 || code === 0xa || code === 0xd
+
 /**
  * Parses a document that has no DTD, no entity beyond the five predefined ones, no comment,
  * no CDATA section and no processing instruction. `<!` and `<?` cannot occur in well-formed
@@ -163,10 +185,22 @@ const isXmlChar = (code: number) =>
  */
 function parseStrict(xml: string): Element {
   if (Buffer.byteLength(xml) > samlMaximumResponseBytes) throw reject('too_large')
-  for (const character of xml)
-    if (!isXmlChar(character.codePointAt(0) ?? 0)) throw reject('malformed_xml')
-  // White space around the root element is not part of the document's content.
-  const body = xml.replace(XML_DECLARATION, '').replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, '')
+  let run = 0
+  for (const character of xml) {
+    const code = character.codePointAt(0) ?? 0
+    if (!isXmlChar(code)) throw reject('malformed_xml')
+    run = isWhitespace(code) ? run + 1 : 0
+    if (run > MAX_WHITESPACE_RUN) throw reject('too_large')
+  }
+  // One leading UTF-8 byte order mark is accepted; the declaration, when present, comes next.
+  const declared = (xml.startsWith('\uFEFF') ? xml.slice(1) : xml).replace(XML_DECLARATION, '')
+  // White space around the root element is not part of the document's content. Index scans,
+  // not a regular expression: an alternation anchored at both ends is quadratic here.
+  let start = 0
+  let end = declared.length
+  while (start < end && isWhitespace(declared.charCodeAt(start))) start += 1
+  while (end > start && isWhitespace(declared.charCodeAt(end - 1))) end -= 1
+  const body = declared.slice(start, end)
   if (body.includes('<!') || body.includes('<?')) throw reject('forbidden_markup')
   for (const [, reference = ''] of body.matchAll(ENTITY_REFERENCE)) {
     if (/^(?:lt|gt|amp|quot|apos);$/.test(reference)) continue
@@ -213,7 +247,12 @@ function checkTree(root: Element) {
     if (ENCRYPTED.has(element.localName ?? '')) throw reject('encrypted_unsupported')
     if (!ELEMENT_NAMESPACES.has(element.namespaceURI ?? '')) throw reject('unexpected_namespace')
     for (const attribute of Array.from(element.attributes)) {
-      if (attribute.name === 'xmlns' || attribute.prefix === 'xmlns') continue
+      if (attribute.name === 'xmlns') continue
+      if (attribute.prefix === 'xmlns') {
+        // A prefix named like an ID attribute could be mistaken for one by an ID lookup.
+        if (attribute.localName?.toLowerCase() === 'id') throw reject('unexpected_structure')
+        continue
+      }
       if (attribute.namespaceURI) {
         const typed =
           attribute.namespaceURI === XSI &&
@@ -412,12 +451,13 @@ function signatureProfile(signature: Element, ownerId: string, trust: Trust) {
   const digest = text(digestValue).replace(/\s+/g, '')
   if (!/^[A-Za-z0-9+/]{43}=$/.test(digest)) throw reject('unexpected_structure')
 
-  // KeyInfo is never a source of trust; only inline X.509 data is tolerated as a hint, and
-  // anything that points elsewhere (RetrievalMethod and the like) is refused.
+  // KeyInfo is never a source of trust and never read: inline X509Data, KeyName and KeyValue
+  // are ignored, and anything that points elsewhere (RetrievalMethod and the like) is refused.
   if (keyInfo)
     for (const child of children(keyInfo)) {
       if (is(child, DSIG, 'RetrievalMethod')) throw reject('external_reference')
-      if (!is(child, DSIG, 'X509Data')) throw reject('unexpected_structure')
+      const ignored = ['X509Data', 'KeyName', 'KeyValue'].some((name) => is(child, DSIG, name))
+      if (!ignored) throw reject('unexpected_structure')
     }
   return { hash, digest: Buffer.from(digest, 'base64') }
 }
@@ -558,7 +598,8 @@ function readAssertion(assertion: Element, trust: Trust): VerifiedSamlResponse['
   if (restrictions === 0) throw reject('audience_mismatch')
 
   const authnStatements: VerifiedSamlResponse['assertion']['authnStatements'] = []
-  const attributes = new Map<string, string[]>()
+  // No prototype: `attributes.constructor` and the like are undefined, not inherited values.
+  const attributes: Record<string, string[]> = Object.create(null)
   for (const statement of parts) {
     if (is(statement, SAML, 'AuthnStatement')) {
       authnStatements.push({
@@ -571,14 +612,16 @@ function readAssertion(assertion: Element, trust: Trust): VerifiedSamlResponse['
         if (!is(attribute, SAML, 'Attribute')) throw reject('unexpected_structure')
         const name = required(attribute, 'Name')
         // The same name twice, in one statement or across statements, has no single reading.
-        if (attributes.has(name)) throw reject('ambiguous_attribute')
-        attributes.set(
-          name,
-          children(attribute).map((value) => {
+        if (Object.hasOwn(attributes, name)) throw reject('ambiguous_attribute')
+        Object.defineProperty(attributes, name, {
+          value: children(attribute).map((value) => {
             if (!is(value, SAML, 'AttributeValue')) throw reject('unexpected_structure')
             return text(value)
           }),
-        )
+          enumerable: true,
+          writable: true,
+          configurable: true,
+        })
       }
     } else throw reject('unexpected_structure')
   }
@@ -606,7 +649,7 @@ function readAssertion(assertion: Element, trust: Trust): VerifiedSamlResponse['
     },
     audiences,
     authnStatements,
-    attributes: Object.fromEntries(attributes),
+    attributes,
   }
 }
 

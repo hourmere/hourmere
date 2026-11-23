@@ -97,6 +97,8 @@ type AssertionOptions = {
   recipient?: string | null
   inResponseTo?: string
   conditions?: string
+  conditionsAttributes?: string
+  confirmationNotOnOrAfter?: string | null
   statements?: string
 }
 
@@ -107,13 +109,15 @@ function assertionXml(options: AssertionOptions = {}) {
     nameId = 'ada@acme.example',
     recipient = ACS,
     inResponseTo = REQUEST,
+    conditionsAttributes = ' NotBefore="2026-06-12T11:59:00Z" NotOnOrAfter="2026-06-12T12:05:00Z"',
+    confirmationNotOnOrAfter = '2026-06-12T12:05:00Z',
     conditions = `<saml:AudienceRestriction><saml:Audience>${SP}</saml:Audience></saml:AudienceRestriction>`,
     statements = `<saml:AuthnStatement AuthnInstant="2026-06-12T11:59:58Z" SessionIndex="_session-1"><saml:AuthnContext><saml:AuthnContextClassRef>urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport</saml:AuthnContextClassRef></saml:AuthnContext></saml:AuthnStatement><saml:AttributeStatement><saml:Attribute Name="email"><saml:AttributeValue>ada@acme.example</saml:AttributeValue></saml:Attribute><saml:Attribute Name="groups"><saml:AttributeValue>staff</saml:AttributeValue><saml:AttributeValue>owners</saml:AttributeValue></saml:Attribute></saml:AttributeStatement>`,
   } = options
   const subject =
     options.subject ??
-    `<saml:NameID Format="urn:oasis:names:tc:SAML:2.0:nameid-format:persistent">${nameId}</saml:NameID><saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer"><saml:SubjectConfirmationData InResponseTo="${inResponseTo}" NotOnOrAfter="2026-06-12T12:05:00Z"${recipient === null ? '' : ` Recipient="${recipient}"`}/></saml:SubjectConfirmation>`
-  return `<saml:Assertion xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="${id}" IssueInstant="2026-06-12T12:00:00Z" Version="2.0"><saml:Issuer>${issuer}</saml:Issuer><saml:Subject>${subject}</saml:Subject><saml:Conditions NotBefore="2026-06-12T11:59:00Z" NotOnOrAfter="2026-06-12T12:05:00Z">${conditions}</saml:Conditions>${statements}</saml:Assertion>`
+    `<saml:NameID Format="urn:oasis:names:tc:SAML:2.0:nameid-format:persistent">${nameId}</saml:NameID><saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer"><saml:SubjectConfirmationData InResponseTo="${inResponseTo}"${confirmationNotOnOrAfter === null ? '' : ` NotOnOrAfter="${confirmationNotOnOrAfter}"`}${recipient === null ? '' : ` Recipient="${recipient}"`}/></saml:SubjectConfirmation>`
+  return `<saml:Assertion xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="${id}" IssueInstant="2026-06-12T12:00:00Z" Version="2.0"><saml:Issuer>${issuer}</saml:Issuer><saml:Subject>${subject}</saml:Subject><saml:Conditions${conditionsAttributes}>${conditions}</saml:Conditions>${statements}</saml:Assertion>`
 }
 
 type ResponseOptions = {
@@ -143,6 +147,7 @@ type SignOptions = {
   canonicalization?: string
   transforms?: string[]
   emptyUri?: boolean
+  inclusivePrefixes?: string[]
 }
 
 /** Adds an enveloped signature to the first `Assertion` or `Response` element. */
@@ -155,6 +160,7 @@ function sign(xml: string, target: 'Assertion' | 'Response', options: SignOption
     canonicalization = EXC_C14N,
     transforms = [ENVELOPED, canonicalization],
     emptyUri = false,
+    inclusivePrefixes,
   } = options
   const signer = new SignedXml({
     privateKey: by.privateKey,
@@ -168,6 +174,7 @@ function sign(xml: string, target: 'Assertion' | 'Response', options: SignOption
     transforms,
     digestAlgorithm,
     isEmptyUri: emptyUri,
+    inclusiveNamespacesPrefixList: inclusivePrefixes,
   })
   signer.computeSignature(xml, {
     prefix: 'ds',
@@ -374,14 +381,14 @@ describe('SAML negative corpus: duplicate IDs', () => {
 describe('SAML negative corpus: signature wrapping', () => {
   // In each case the genuine signed assertion is still present and its signature still
   // verifies; the forged assertion sits where a careless consumer would read it.
-  const cases: [string, () => string, SamlRejection[]][] = [
+  const cases: [string, () => string, SamlRejection][] = [
     [
       'XSW3: forged assertion placed before the signed one',
       () => {
         const { before, assertion, after } = parts(valid())
         return before + forged() + assertion + after
       },
-      ['multiple_assertions', 'assertion_signature_required'],
+      'multiple_assertions',
     ],
     [
       'forged assertion placed after the signed one',
@@ -389,7 +396,7 @@ describe('SAML negative corpus: signature wrapping', () => {
         const { before, assertion, after } = parts(valid())
         return before + assertion + forged() + after
       },
-      ['multiple_assertions'],
+      'multiple_assertions',
     ],
     [
       'XSW4: forged assertion wrapping the signed one',
@@ -397,7 +404,7 @@ describe('SAML negative corpus: signature wrapping', () => {
         const { before, assertion, after } = parts(valid())
         return `${before}${forged().replace('</saml:Assertion>', `${assertion}</saml:Assertion>`)}${after}`
       },
-      ['multiple_assertions', 'unexpected_structure'],
+      'multiple_assertions',
     ],
     [
       'XSW5: forged assertion carrying the copied signature, original appended unsigned',
@@ -406,7 +413,7 @@ describe('SAML negative corpus: signature wrapping', () => {
         const carrier = forged().replace('<saml:Subject>', `${signature}<saml:Subject>`)
         return before + carrier + unsignedAssertion + after
       },
-      ['multiple_assertions', 'signature_reference_mismatch'],
+      'multiple_assertions',
     ],
     [
       'XSW6: forged assertion whose signature contains the original assertion',
@@ -415,7 +422,7 @@ describe('SAML negative corpus: signature wrapping', () => {
         const nest = signature.replace('</ds:Signature>', `${unsignedAssertion}</ds:Signature>`)
         return before + forged().replace('<saml:Subject>', `${nest}<saml:Subject>`) + after
       },
-      ['multiple_assertions', 'unexpected_structure'],
+      'multiple_assertions',
     ],
     [
       'XSW7: forged assertion inside Extensions before the signed one',
@@ -423,7 +430,7 @@ describe('SAML negative corpus: signature wrapping', () => {
         const { before, assertion, after } = parts(valid())
         return `${before.replace('<samlp:Status>', `<samlp:Extensions>${forged()}</samlp:Extensions><samlp:Status>`)}${assertion}${after}`
       },
-      ['unexpected_structure', 'multiple_assertions'],
+      'unexpected_structure',
     ],
     [
       'XSW8: forged assertion whose signature holds the original inside ds:Object',
@@ -435,7 +442,7 @@ describe('SAML negative corpus: signature wrapping', () => {
         )
         return before + forged().replace('<saml:Subject>', `${nest}<saml:Subject>`) + after
       },
-      ['multiple_assertions', 'unexpected_structure'],
+      'multiple_assertions',
     ],
     [
       'signed assertion hidden inside the forged SubjectConfirmationData',
@@ -447,7 +454,7 @@ describe('SAML negative corpus: signature wrapping', () => {
         )
         return before + carrier + after
       },
-      ['multiple_assertions', 'assertion_signature_required'],
+      'multiple_assertions',
     ],
     [
       'XSW1: forged response wrapping the signed response, signature kept on the forgery',
@@ -461,7 +468,7 @@ describe('SAML negative corpus: signature wrapping', () => {
           .replace('<samlp:Status>', `${signature}<samlp:Status>`)
           .replace('</samlp:Response>', `${inner}</samlp:Response>`)
       },
-      ['unexpected_structure', 'multiple_assertions', 'assertion_signature_required'],
+      'unexpected_structure',
     ],
     [
       'XSW2: forged response wrapping the intact signed response',
@@ -472,12 +479,12 @@ describe('SAML negative corpus: signature wrapping', () => {
           `${original}</samlp:Response>`,
         )
       },
-      ['unexpected_structure', 'multiple_assertions', 'assertion_signature_required'],
+      'unexpected_structure',
     ],
     [
       'forged content appended inside the signed assertion element',
       () => valid().replace('</saml:Assertion>', `${forgedBody(forged())}</saml:Assertion>`),
-      ['signature_invalid', 'unexpected_structure'],
+      'signature_invalid',
     ],
     [
       'signature moved from the assertion to a forged assertion with another ID',
@@ -485,16 +492,16 @@ describe('SAML negative corpus: signature wrapping', () => {
         const { before, after, signature } = parts(valid())
         return before + forged().replace('<saml:Subject>', `${signature}<saml:Subject>`) + after
       },
-      ['signature_reference_mismatch'],
+      'signature_reference_mismatch',
     ],
   ]
 
-  it.each(cases)('%s', (_name, build, reasons) => {
+  it.each(cases)('%s', (_name, build, reason) => {
     const document = build()
     // The crafted document is well-formed and really contains the forgery.
     expect(new DOMParser().parseFromString(document, 'text/xml').documentElement).toBeTruthy()
     expect(document).toContain('mallory@evil.example')
-    expect(reasons).toContain(rejection(document))
+    expect(rejection(document)).toBe(reason)
   })
 
   it('refuses a comment that would truncate the signed NameID for a careless reader', () => {
@@ -921,6 +928,201 @@ describe('SAML negative corpus: structure, namespaces and input limits', () => {
     ]
     for (const override of settings)
       expect(rejection(valid(), { ...config, ...override })).toBe('invalid_configuration')
+  })
+})
+
+describe('SAML verifier: review hardening', () => {
+  const elapsed = (run: () => void) => {
+    const start = performance.now()
+    run()
+    return performance.now() - start
+  }
+
+  it('refuses long white space runs quickly instead of stalling on them', () => {
+    const spaces = ' '.repeat(250_000)
+    let reason: string | undefined
+    expect(
+      elapsed(() => {
+        reason = rejection(`<a>${spaces}x</a>`)
+      }),
+    ).toBeLessThan(500)
+    expect(reason).toBe('too_large')
+    // A validly signed response padded in its unsigned wrapper, in the middle or at either end.
+    for (const padded of [
+      valid().replace('<samlp:Status>', `<samlp:Status>${' '.repeat(240_000)}`),
+      `${' '.repeat(240_000)}${valid()}`,
+      `${valid()}${'\n'.repeat(240_000)}`,
+    ]) {
+      expect(elapsed(() => (reason = rejection(padded)))).toBeLessThan(500)
+      expect(reason).toBe('too_large')
+    }
+    // Ordinary indentation, also a generous amount of it, is accepted and fast.
+    const indented = valid().replace('<samlp:Status>', `${' '.repeat(4_096)}<samlp:Status>`)
+    expect(elapsed(() => (reason = rejection(indented)))).toBeLessThan(500)
+    expect(reason).toBe('accepted')
+    // Other pathological text is refused quickly too.
+    for (const hostile of [
+      `<a>${'&'.repeat(200_000)}</a>`,
+      `<a>${'&#'.repeat(100_000)}</a>`,
+      `<?xml version="1.0"${' \n'.repeat(100_000)}x?><a/>`,
+      `<a ${'b '.repeat(100_000)}/>`,
+    ])
+      expect(elapsed(() => rejection(hostile))).toBeLessThan(500)
+    const base64Padding = `${' \r\n'.repeat(150_000)}${encode(valid())}`
+    expect(elapsed(() => verifySamlResponse(config, base64Padding))).toBeLessThan(500)
+  })
+
+  it('ignores KeyName and KeyValue in KeyInfo and still refuses RetrievalMethod', () => {
+    // KeyInfo is outside SignedInfo, so adding to it leaves the signature valid.
+    const keycloakStyle = valid()
+      .replace('<ds:KeyInfo>', '<ds:KeyInfo><ds:KeyName>idp-signing-key-1</ds:KeyName>')
+      .replace(
+        '</ds:KeyInfo>',
+        '<ds:KeyValue><ds:RSAKeyValue><ds:Modulus>AQAB</ds:Modulus><ds:Exponent>AQAB</ds:Exponent></ds:RSAKeyValue></ds:KeyValue></ds:KeyInfo>',
+      )
+    expect(keycloakStyle).toContain('<ds:KeyName>')
+    expect(keycloakStyle).toContain('<ds:KeyValue>')
+    expect(rejection(keycloakStyle)).toBe('accepted')
+    // The attacker's own public key in KeyValue is not a source of trust.
+    const forgedKey = responseXml({
+      assertion: signedAssertion(undefined, { by: attacker }),
+    }).replace(
+      '</ds:KeyInfo>',
+      '<ds:KeyValue><ds:RSAKeyValue><ds:Modulus>AQAB</ds:Modulus><ds:Exponent>AQAB</ds:Exponent></ds:RSAKeyValue></ds:KeyValue></ds:KeyInfo>',
+    )
+    expect(rejection(forgedKey)).toBe('signature_invalid')
+    const withRetrieval = keycloakStyle.replace(
+      '</ds:KeyInfo>',
+      '<ds:RetrievalMethod URI="https://evil.example/key.pem"/></ds:KeyInfo>',
+    )
+    expect(rejection(withRetrieval)).toBe('external_reference')
+    const unknown = valid().replace('</ds:KeyInfo>', '<ds:MgmtData>x</ds:MgmtData></ds:KeyInfo>')
+    expect(rejection(unknown)).toBe('unexpected_structure')
+  })
+
+  it('accepts the usual XML declarations and one UTF-8 byte order mark, nothing wider', () => {
+    for (const declaration of [
+      '<?xml version="1.0" encoding="UTF-8" standalone="no"?>',
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+      "<?xml version='1.0' encoding='utf-8'?>",
+      "<?xml version='1.0' standalone='no' ?>",
+      '<?xml version = "1.0" encoding = "UTF-8"?>\n',
+      '﻿<?xml version="1.0" encoding="UTF-8"?>',
+      '﻿',
+    ])
+      expect(rejection(`${declaration}${valid()}`)).toBe('accepted')
+    for (const declaration of [
+      '<?xml version="1.1"?>',
+      '<?xml version="1.0" encoding="UTF-16"?>',
+      '<?xml version="1.0" encoding="ISO-8859-1"?>',
+      '<?xml version="1.0" standalone="maybe"?>',
+      '<?xml version="1.0" encoding="UTF-8"?><?xml version="1.0"?>',
+      '<?xml version="1.0"?><?pi x?>',
+      ' <?xml version="1.0"?>',
+      '<?xml-stylesheet href="x"?>',
+    ])
+      expect(rejection(`${declaration}${valid()}`)).toBe('forbidden_markup')
+    // A second byte order mark is text before the root element.
+    expect(rejection(`﻿﻿${valid()}`)).toBe('malformed_xml')
+    // The mark is accepted as real UTF-8 bytes as well.
+    const bytes = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(valid(), 'utf8')])
+    expect(verifySamlResponse(config, bytes.toString('base64')).assertion.id).toBe('_assertion-a1')
+  })
+
+  it('returns attributes without inherited names', () => {
+    const statements = `<saml:AuthnStatement AuthnInstant="2026-06-12T11:59:58Z"/><saml:AttributeStatement>${[
+      'email',
+      '__proto__',
+      'constructor',
+      'hasOwnProperty',
+    ]
+      .map(
+        (name) =>
+          `<saml:Attribute Name="${name}"><saml:AttributeValue>${name}-value</saml:AttributeValue></saml:Attribute>`,
+      )
+      .join('')}</saml:AttributeStatement>`
+    const { attributes } = verifySamlResponse(config, encode(valid({ statements }))).assertion
+    expect(Object.getPrototypeOf(attributes)).toBeNull()
+    expect(Object.keys(attributes)).toEqual(['email', '__proto__', 'constructor', 'hasOwnProperty'])
+    expect(attributes.constructor).toEqual(['constructor-value'])
+    expect(Reflect.get(attributes, '__proto__')).toEqual(['__proto__-value'])
+    const plain = verifySamlResponse(config, encode(valid())).assertion.attributes
+    expect(plain.constructor).toBeUndefined()
+    expect(plain.toString).toBeUndefined()
+    expect(Reflect.get(plain, '__proto__')).toBeUndefined()
+  })
+
+  it('refuses a namespace prefix named like an ID attribute', () => {
+    for (const name of ['ID', 'Id', 'id']) {
+      const document = valid().replace(
+        '<samlp:Status>',
+        `<samlp:Status xmlns:${name}="_assertion-a1">`,
+      )
+      expect(rejection(document)).toBe('unexpected_structure')
+    }
+  })
+
+  it('binds an InclusiveNamespaces prefix list and the ancestor declarations it pulls in', () => {
+    const withPrefix = responseXml().replace(
+      '<samlp:Response ',
+      '<samlp:Response xmlns:xs="http://www.w3.org/2001/XMLSchema" ',
+    )
+    const document = sign(withPrefix, 'Assertion', { inclusivePrefixes: ['xs'] })
+    expect(document).toContain('PrefixList="xs"')
+    expect(rejection(document)).toBe('accepted')
+    // The signed bytes include the ancestor's declaration: rebinding the prefix breaks them.
+    const rebound = document.replace(
+      'xmlns:xs="http://www.w3.org/2001/XMLSchema"',
+      'xmlns:xs="urn:evil:schema"',
+    )
+    expect(rebound).not.toBe(document)
+    expect(rejection(rebound)).toBe('signature_invalid')
+    // A prefix list injected after signing, or changed, is covered by the signature as well.
+    const injected = valid().replace(
+      `<ds:Transform Algorithm="${EXC_C14N}"/>`,
+      `<ds:Transform Algorithm="${EXC_C14N}"><ec:InclusiveNamespaces xmlns:ec="${EXC_C14N}" PrefixList="samlp"/></ds:Transform>`,
+    )
+    expect(injected).toContain('PrefixList="samlp"')
+    expect(rejection(injected)).toBe('signature_invalid')
+    expect(rejection(document.replace('PrefixList="xs"', 'PrefixList="xs samlp"'))).toBe(
+      'signature_invalid',
+    )
+  })
+
+  it('refuses a response-signed document whose assertion was altered afterwards', () => {
+    const both = sign(valid(), 'Response')
+    const altered = both.replace(
+      '>ada@acme.example</saml:NameID>',
+      '>mallory@evil.example</saml:NameID>',
+    )
+    expect(altered).not.toBe(both)
+    expect(rejection(altered)).toBe('signature_invalid')
+    // Re-signing only the assertion with another key under the genuine response signature.
+    const { before, after } = parts(both)
+    const resigned =
+      before + signedAssertion({ nameId: 'mallory@evil.example' }, { by: attacker }) + after
+    expect(rejection(resigned)).toBe('signature_invalid')
+  })
+
+  it('passes absent time bounds through as null for the timing step to refuse', () => {
+    const { assertion } = verifySamlResponse(
+      config,
+      encode(valid({ conditionsAttributes: '', confirmationNotOnOrAfter: null })),
+    )
+    expect(assertion.conditions).toEqual({ notBefore: null, notOnOrAfter: null })
+    expect(assertion.subjectConfirmation.notBefore).toBeNull()
+    expect(assertion.subjectConfirmation.notOnOrAfter).toBeNull()
+  })
+
+  it('returns NameID and attribute values exactly as signed, untrimmed', () => {
+    const statements =
+      '<saml:AuthnStatement AuthnInstant="2026-06-12T11:59:58Z"/><saml:AttributeStatement><saml:Attribute Name="email"><saml:AttributeValue> Ada@Acme.example\n</saml:AttributeValue></saml:Attribute></saml:AttributeStatement>'
+    const { assertion } = verifySamlResponse(
+      config,
+      encode(valid({ nameId: ' Ada@Acme.example ', statements })),
+    )
+    expect(assertion.nameId.value).toBe(' Ada@Acme.example ')
+    expect(assertion.attributes.email).toEqual([' Ada@Acme.example\n'])
   })
 })
 

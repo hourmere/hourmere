@@ -139,11 +139,20 @@ source imports `@better-auth/sso`.
   @xmldom/xmldom, the two libraries under samlify, directly and does not import samlify.
   samlify's `verifySignature` returns after the first signature it selects, uses only the
   first configured certificate when the message has no KeyInfo, hands back a re-serialized
-  node rather than the digested bytes, and gives no way to narrow the algorithms its
-  `SignedXml` instance knows; importing it would also ship its decryption stack, which this
-  release refuses to use. The verifier reads every returned value from the canonical bytes
+  node rather than the digested bytes, and its `allowedSignatureAlgorithms` option only
+  pre-checks the signature and digest methods: it does not cover canonicalization or
+  transforms and does not prune the algorithm tables of its `SignedXml` instance; importing
+  it would also ship its decryption stack, which this release refuses to use. The verifier reads every returned value from the canonical bytes
   that xml-crypto's `getSignedReferences()` reports as digested, after re-hashing them
   against the signed DigestValue in constant time.
+  Contract for the steps that call the verifier: `assertion.*` is always authenticated, but
+  when the Response element is unsigned (`response.signed` is false) its ID, IssueInstant,
+  Destination and Status come from the unsigned wrapper, so replay and time checks key only
+  on `assertion.*`. The verifier checks only that the response and bearer InResponseTo
+  agree; the ACS step compares `assertion.subjectConfirmation.inResponseTo` with the pending
+  attempt. An absent NotBefore or NotOnOrAfter is returned as null and the timing step
+  refuses null. NameID and attribute values are returned exactly as signed, untrimmed, and
+  are not normalised before identity matching.
 - Retained: Better Auth's session and account machinery (`internalAdapter.createSession`,
   as `handleOAuthUserInfo` uses it) and Hourmere's existing session database hooks.
 - Not exposed and not replaced: provider management (`/sso/register`, `/sso/providers`,
