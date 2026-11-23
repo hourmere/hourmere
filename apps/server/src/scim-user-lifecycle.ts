@@ -58,7 +58,8 @@ export async function assertScimUserCanRetire(trx: Transaction<Database>, entry:
 
 /**
  * The caller holds the update locks of the organization and of the child teams in which
- * this User sources a managed membership, and the live resource row lock.
+ * this User sources a managed membership, and the live resource row lock. A returned
+ * reply is a refusal whose child changes the caller must still commit.
  */
 export async function applyScimUserLifecycle(
   trx: Transaction<Database>,
@@ -71,9 +72,22 @@ export async function applyScimUserLifecycle(
   // Child access follows the roster source, so check it before any state changes.
   const sourced = deactivationRequested ? await sourcedChildMemberships(trx, entry) : []
   rejectPrivilegedChildMembership(sourced)
-  await applyParentLifecycle(trx, entry, { active, deactivationRequested, roleWrite }, actor)
-  if (reactivating) await resumeManagedChildMemberships(trx, entry)
-  else if (active === false && entry.active) await suspendManagedChildMemberships(trx, sourced)
+  const resumed = reactivating ? await resumeManagedChildMemberships(trx, entry) : 0
+  const blocked = await applyParentLifecycle(
+    trx,
+    entry,
+    { active, deactivationRequested, roleWrite },
+    actor,
+  )
+  if (blocked) {
+    // The parent's own blocker decides only parent access. The caller commits the child
+    // resume with this refusal and applies nothing else from the request.
+    if (resumed > 0) return blocked.reply
+    throw blocked
+  }
+  // The entry stays inactive after a refused reactivation, so a repeated deactivation
+  // suspends again whatever that reactivation resumed.
+  if (active === false) await suspendManagedChildMemberships(trx, sourced)
 }
 
 async function applyParentLifecycle(
@@ -101,7 +115,8 @@ async function applyParentLifecycle(
       .where('cleared_at', 'is', null)
       .where((eb) => eb.or([eb('user_id', '=', userId), eb('identity_email', '=', mailbox)]))
       .executeTakeFirst()
-    if (localBlock || !memberships.some(({ memberId }) => memberId !== null)) throw locallyBlocked()
+    if (localBlock || !memberships.some(({ memberId }) => memberId !== null))
+      return locallyBlocked()
     await trx
       .updateTable('scim_membership_blocks')
       .set({ cleared_at: sql<Date>`clock_timestamp()` })

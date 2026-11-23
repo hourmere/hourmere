@@ -139,8 +139,9 @@ account cannot take over that membership.
 
 Migration `0184_scim_group_members.sql` adds `suspended_at` to managed child membership
 provenance. Deactivating the source SCIM User sets it and reactivation clears it, so the
-suspension ends with the membership row. Team authorization treats it like a SCIM
-suspension of that team. The migration also indexes the provenance rows by source User
+suspension ends with the membership row. The shared SCIM suspension check reads it only
+for callers that pass the resource test flag, so production authorization statements are
+unchanged. The migration also indexes the provenance rows by source User
 and, for suspended rows, by child team and account.
 
 The [paid-booking design](payments.md) describes pending-payment holds, bounded slot

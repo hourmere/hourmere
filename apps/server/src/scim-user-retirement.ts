@@ -12,6 +12,7 @@ import {
   removeManagedChildMemberships,
   scimUserWriteTransaction,
   sourcedChildMemberships,
+  touchSourcedGroups,
 } from './scim-managed-child-memberships.ts'
 import { assertScimUserCanRetire } from './scim-user-lifecycle.ts'
 import { retireScimUserClaims } from './scim-user-retirement-claims.ts'
@@ -39,6 +40,7 @@ async function retire(db: Db, request: ScimResourceRequest, id: string): Promise
         return { status: 412, body: scimError(412, 'Conditional writes are not supported.') }
       await assertScimUserCanRetire(trx, entry)
       // Retirement ends the child access this User sourced, or refuses as a whole.
+      await touchSourcedGroups(trx, entry)
       await removeManagedChildMemberships(trx, await sourcedChildMemberships(trx, entry))
 
       const actor = { type: 'scim_token', id: principal.tokenId } as const

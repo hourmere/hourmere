@@ -65,7 +65,8 @@ async function replace(
       const { profile, managers, active = entry.active } = normalized
       await validateScimManager(trx, organizationId, connectionId, ...managers)
       const actor = { type: 'scim_token', id: principal.tokenId } as const
-      await applyScimUserLifecycle(trx, entry, normalized, actor)
+      const refused = await applyScimUserLifecycle(trx, entry, normalized, actor)
+      if (refused) return refused
       const fields = Object.keys(profile) as (keyof typeof profile)[]
       const profileChanged = fields.some((field) => profile[field] !== entry[field])
       const activeChanged = active !== entry.active

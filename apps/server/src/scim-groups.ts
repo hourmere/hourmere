@@ -259,7 +259,8 @@ function patchMembers(value: unknown, base: string) {
 
 /**
  * Apply the operations in order to the name and the mapped roster. `mentioned` lists
- * every User an add or replace names, whatever the roster was when it was read.
+ * every User an add or replace names, whatever the roster was when it was read. No
+ * refusal here depends on the roster, so the pass before the locks reports the same ones.
  */
 function patchedGroup(
   body: unknown,
@@ -325,8 +326,6 @@ function patchedGroup(
       }
     }
   }
-  if (roster.size > teamMembershipLimit)
-    throw invalidValue('The members attribute is not a valid value.')
   return { name, members: [...roster].sort(), mentioned: [...mentioned] }
 }
 
@@ -554,14 +553,17 @@ async function updateGroup(
               .execute()
             accounts = linked.map((user) => user.linked_user_id)
           }
-          if (accounts.length > 0)
-            await trx
+          if (accounts.length > 0) {
+            // Only an account that is locked here can be admitted below.
+            const locked = await trx
               .selectFrom('auth.user')
               .select('id')
               .where('id', 'in', accounts)
               .orderBy('id')
               .forShare()
               .execute()
+            accounts = locked.map((account) => account.id)
+          }
         }
         const teams = await lockMappingTeams(trx, [organizationId, childId])
         if (teams.length !== 2) return notFound
@@ -582,6 +584,8 @@ async function updateGroup(
           method === 'PUT'
             ? { name: replacementName(body.value, request.base, row), members: row.member_ids }
             : patchedGroup(body.value, request.base, row)
+        if (members.length > teamMembershipLimit)
+          throw invalidValue('The members attribute is not a valid value.')
         const removed = row.member_ids.filter((member) => !members.includes(member))
         const added = members.filter((member) => !row.member_ids.includes(member))
         if (removed.length > 0)

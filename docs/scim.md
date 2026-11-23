@@ -716,10 +716,19 @@ admission blocker, so the User can be added again. Any refusal rolls back the wh
 The source User's lifecycle follows its managed memberships on mappings with directory
 authority. `active:false` keeps the child memberships and suspends them, and revokes the
 child credentials. The suspension is stored on the membership's provenance row
-(`scim_team_managed_memberships.suspended_at`) and denies authorization in the child
-wherever a SCIM suspension of the parent would. Reactivation lifts it. `DELETE
-/Users/{id}` removes those child memberships through the same departure checks as a Group
-removal. A User write that would suspend or remove a current owner or admin of a child
+(`scim_team_managed_memberships.suspended_at`). The shared suspension check reads it only
+when its caller passes the resource test flag; without the flag the authorization
+statements are the same as before and read no Group storage. In the resource test
+harness the flag reaches REST and MCP caller resolution, API-key writes, admin role
+changes and readiness. The remaining callers of the check (native team selection and
+membership checks, SSO proofs and delegations, MCP OAuth grants, host eligibility and
+booking routing) still need it before release. Reactivation lifts the suspension. A
+parent team's own blocker affects only the parent: when it refuses the reactivation
+with 403 `mutability`, the child memberships are resumed anyway, the directory entry
+stays inactive and nothing else in the request is applied. A later `active:false`
+suspends them again. `DELETE /Users/{id}` removes those child memberships through the
+same departure checks as a Group removal, and advances `meta.lastModified` of every
+Group whose roster listed the User. A User write that would suspend or remove a current owner or admin of a child
 returns 403 `mutability`, and a retirement that would strand hosted event types or
 unfinished bookings returns 409. In both cases nothing changes in the parent either. A
 mapping whose directory authority was stopped keeps its memberships and suspensions
@@ -741,7 +750,8 @@ PATCH 可用 `add`、`replace` 和 `remove` 更改映射成员：`remove` 可带
 也可用 `members[value eq "<id>"]` 路径，只移除列出的用户。重复的添加或移除不产生变化，也不写审计事件。
 新成员必须是同一连接中已关联且启用的用户，否则返回 400 `invalidValue`。子团队当前的所有者或管理员不能被移除，
 返回 403 `mutability`。仍主持活动类型或有未完成预约的成员返回 409，需由子团队管理员先行交接。
-来源用户停用时，其受管子团队成员资格保留并暂停，重新启用后恢复，删除来源用户会移除这些成员资格。
+来源用户停用时，其受管子团队成员资格保留并暂停，重新启用后恢复，删除来源用户会移除这些成员资格并更新相关群组的 `meta.lastModified`。
+父团队自身的拦截只影响父团队：重新启用因此被拒绝（403 `mutability`）时，子团队成员资格仍会恢复。
 成功返回 200 及按请求投影的群组，不支持的写入前置条件返回 412。名称变更与父团队审计事件
 `scim_group.updated` 在同一事务提交（成员变更同样记录），事件仅记录令牌和群组 ID 等审计元数据。
 原样重试保留 `meta.lastModified`，也不增加审计事件。

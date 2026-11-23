@@ -76,7 +76,7 @@ describe.skipIf(!databaseUrl)('SCIM Group membership changes', () => {
       publicUrl,
       checkDb: async () => {},
       authHandler: auth.handler,
-      resolveCaller: createCallerResolver({ auth, db }),
+      resolveCaller: createCallerResolver({ auth, db, scimResourcesEnabled: true }),
       scim: {
         db,
         enabled: true,
@@ -238,7 +238,7 @@ describe.skipIf(!databaseUrl)('SCIM Group membership changes', () => {
   const suspended = async (organizationId: string, user: TestUser) =>
     (
       await db
-        .selectNoFrom(scimSuspended(organizationId, user.id).as('suspended'))
+        .selectNoFrom(scimSuspended(organizationId, user.id, true).as('suspended'))
         .executeTakeFirstOrThrow()
     ).suspended
   const entry = (id: string) =>
@@ -595,6 +595,12 @@ describe.skipIf(!databaseUrl)('SCIM Group membership changes', () => {
     expect(await f.roster()).toEqual([...f.ids].sort())
     expect(await member(f.child.id, source)).toMatchObject({ role: 'member' })
     expect((await keyAccess(key.key)).status).toBe(401)
+    // A credential issued during the suspension is refused, and without the resource
+    // capability the statement does not read the child suspension at all.
+    await expect(issueKey(source.id, f.child.id)).rejects.toMatchObject({ status: 'FORBIDDEN' })
+    await expect(
+      db.selectNoFrom(scimSuspended(f.child.id, source.id).as('suspended')).executeTakeFirst(),
+    ).resolves.toEqual({ suspended: false })
     expect((await keyAccess(otherKey.key)).status).toBe(200)
     // A replayed deactivation keeps the original suspension.
     const original = await managed(f.child.id)
@@ -616,8 +622,15 @@ describe.skipIf(!databaseUrl)('SCIM Group membership changes', () => {
     // Reactivation restores no revoked credential.
     expect((await keyAccess(key.key)).status).toBe(401)
 
+    const beforeRetirement = await f.read()
     const retired = await call(f.token, `Users/${sourceId}`, 'DELETE')
     expect(retired.status).toBe(204)
+    // Leaving the roster changes the Group, so its version moves with the same commit.
+    const afterRetirement = await f.read()
+    expect(Date.parse(afterRetirement.meta.lastModified)).toBeGreaterThan(
+      Date.parse(beforeRetirement.meta.lastModified),
+    )
+    expect(await updateEvents(f.group.id)).toHaveLength(1)
     expect(await entry(sourceId)).toMatchObject({ active: false, retired_at: expect.any(Date) })
     expect(await member(f.child.id, source)).toBeUndefined()
     expect(await member(second.child.id, source)).toMatchObject({ role: 'member' })
@@ -678,6 +691,54 @@ describe.skipIf(!databaseUrl)('SCIM Group membership changes', () => {
     expect((await setActive(f.token, hostId, false)).status).toBe(200)
     expect(await suspended(f.child.id, host)).toBe(true)
     expect(await suspended(f.child.id, promoted)).toBe(false)
+  })
+
+  it('resumes child access when only the parent blocks the reactivation', async () => {
+    const f = await directory(1)
+    const [sourceId] = f.ids as [string]
+    const [source] = f.people as [TestUser]
+    await applied(await f.patch({ op: 'add', path: 'members', value: values(sourceId) }), f.ids)
+    expect((await setActive(f.token, sourceId, false)).status).toBe(200)
+    expect(await suspended(f.child.id, source)).toBe(true)
+    await db
+      .insertInto('scim_membership_blocks')
+      .values({
+        organization_id: f.parent.id,
+        user_id: source.id,
+        source: 'local',
+        kind: 'suspension',
+      })
+      .execute()
+
+    // The parent's own blocker refuses the parent and applies nothing else of the request.
+    const reactivation = () =>
+      call(
+        f.token,
+        `Users/${sourceId}`,
+        'PATCH',
+        patchBody(
+          { op: 'replace', path: 'active', value: true },
+          { op: 'replace', path: 'displayName', value: 'Not applied' },
+        ),
+      )
+    await expectError(await reactivation(), 403, 'mutability')
+    expect(await suspended(f.child.id, source)).toBe(false)
+    expect(await suspended(f.parent.id, source)).toBe(true)
+    expect(await entry(sourceId)).toEqual({ active: false, retired_at: null })
+    expect(
+      await db
+        .selectFrom('scim_users')
+        .select('display_name')
+        .where('id', '=', sourceId)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ display_name: source.name })
+    // With nothing left to resume, the same refusal changes nothing.
+    await expectError(await reactivation(), 403, 'mutability')
+    expect(await suspended(f.child.id, source)).toBe(false)
+
+    // The entry is still inactive, and a repeated deactivation suspends the child again.
+    expect((await setActive(f.token, sourceId, false)).status).toBe(200)
+    expect(await suspended(f.child.id, source)).toBe(true)
   })
 
   it('takes the child team lock before a source User write changes child access', async () => {
