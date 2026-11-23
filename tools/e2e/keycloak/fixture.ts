@@ -3,7 +3,7 @@ import { createServer } from 'node:http'
 import { getCACertificates, setDefaultCACertificates } from 'node:tls'
 import { fileURLToPath } from 'node:url'
 import { getRequestListener } from '@hono/node-server'
-import type { BrowserContext } from '@playwright/test'
+import type { BrowserContext, Page } from '@playwright/test'
 import { sql } from 'kysely'
 import { createApp } from '../../../apps/server/src/app.ts'
 import { mcpEndpoint } from '../../../apps/server/src/mcp/endpoint.ts'
@@ -355,6 +355,29 @@ async function releaseFixture(
   if (failures.length) throw new AggregateError(failures, 'Keycloak fixture cleanup failed')
 }
 
+/** Say where a sign-in stopped without printing query strings, cookies or form values. */
+export async function describeStrandedPage(page: Page, app: { url: string }) {
+  const url = new URL(page.url())
+  const site = url.origin === app.url ? 'Hourmere' : 'the identity provider'
+  const feedback = await page
+    .locator('#input-error, #kc-error-message, .pf-m-error, [role="alert"]')
+    .first()
+    .textContent({ timeout: 500 })
+    .catch(() => null)
+  const form = await page
+    .locator('input[name="password"]')
+    .isVisible()
+    .catch(() => false)
+  const heading = await page
+    .locator('h1, #kc-page-title')
+    .first()
+    .textContent({ timeout: 500 })
+    .catch(() => null)
+  const clip = (text: string | null) =>
+    text ? text.replace(/\s+/g, ' ').trim().slice(0, 120) : 'none'
+  return `${site} ${url.pathname}; heading: ${clip(heading)}; feedback: ${clip(feedback)}; password field: ${form}`
+}
+
 export const test = base.extend<{
   keycloak: KeycloakFixture
   oidcEnabled: boolean
@@ -374,8 +397,9 @@ export const test = base.extend<{
   ignoreHTTPSErrors: true,
   keycloak: [
     async (
-      { context, oidcEnabled, admission, signupMode, enforced, brokenProvider, keyRotation },
+      { context, page, oidcEnabled, admission, signupMode, enforced, brokenProvider, keyRotation },
       use,
+      testInfo,
     ) => {
       const bootstrap = process.env.HOURMERE_E2E_BOOTSTRAP_URL
       if (!bootstrap) throw new Error('Keycloak tests require HOURMERE_E2E_BOOTSTRAP_URL')
@@ -548,6 +572,9 @@ export const test = base.extend<{
           signingKeyIds: () => [...signingKeyIds],
           jwksRequests: () => jwksRequests,
         })
+        // A failed sign-in round trip otherwise reports only a timeout. Name where it stopped.
+        if (testInfo.status !== testInfo.expectedStatus)
+          console.log(`Keycloak test stopped at: ${await describeStrandedPage(page, { url })}`)
         checkBrowser()
       } finally {
         try {
