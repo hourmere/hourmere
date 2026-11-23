@@ -47,7 +47,8 @@ export function ssoDelegationRoutes(deps: SsoDelegationDeps): RouteModule {
         operationId: BIND_SSO_DELEGATION,
         tags: ['SSO'],
         summary: 'Bind delegated SSO proof to an owned team credential',
-        description: 'Requires fresh SSO step-up in the current team. SSO remains unavailable.',
+        description:
+          'Requires fresh SSO step-up in the current team. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.',
         security: [{ session: [] }],
         middleware: [...middleware] as const,
         request: { headers, body: { required: true, content: json(BindSsoDelegationInput) } },
@@ -91,7 +92,8 @@ export function ssoDelegationRoutes(deps: SsoDelegationDeps): RouteModule {
         operationId: REVOKE_SSO_DELEGATION,
         tags: ['SSO'],
         summary: 'Revoke the caller’s exact SSO delegation',
-        description: 'Requires a current team browser session. SSO remains unavailable.',
+        description:
+          'Requires a current team browser session. Stays available while SSO_OIDC_ENABLED is off.',
         security: [{ session: [] }],
         middleware: [...revokeMiddleware] as const,
         request: { headers, params: z.object({ bindingId: z.uuid() }) },

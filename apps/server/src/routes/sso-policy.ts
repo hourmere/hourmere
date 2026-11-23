@@ -3,7 +3,7 @@ import { DomainError } from '@hourmere/scheduling'
 import type { MiddlewareHandler } from 'hono'
 import type { CallerEnv } from '../caller.ts'
 import { errorResponses, json, type RouteModule } from '../openapi.ts'
-import { requireSsoRetained } from '../sso.ts'
+import { requireSsoEnabled, requireSsoRetained } from '../sso.ts'
 import { SetSsoPolicyInput, type SsoPolicyDeps, setSsoPolicy } from '../sso-policy.ts'
 import { ssoRecoveryWritePrincipal } from '../sso-write-middleware.ts'
 import { teamManagementSessionCaller } from '../team-management.ts'
@@ -14,6 +14,23 @@ export function ssoPolicyRoutes(deps: SsoPolicyDeps): RouteModule {
   const guard: MiddlewareHandler<CallerEnv> = async (c, next) => {
     c.header('Cache-Control', 'no-store')
     requireSsoRetained(deps.capabilities)
+    if (!deps.capabilities.ssoOidcEnabled && !deps.capabilities.ssoSamlEnabled) {
+      // Requiring SSO and JIT admission add trust: refused from the body alone while every
+      // protocol is off, before the caller or the database is consulted.
+      let input: unknown
+      try {
+        input = await c.req.json()
+      } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error
+      }
+      if (
+        input &&
+        typeof input === 'object' &&
+        (('requireSso' in input && input.requireSso === true) ||
+          ('admission' in input && input.admission === 'jit'))
+      )
+        requireSsoEnabled(deps.capabilities)
+    }
     if (c.req.header('origin') !== new URL(deps.publicUrl).origin)
       throw new DomainError('forbidden', 'team_management_access_denied')
     await next()
@@ -27,7 +44,7 @@ export function ssoPolicyRoutes(deps: SsoPolicyDeps): RouteModule {
         tags: ['SSO'],
         summary: 'Set the current team SSO policy',
         description:
-          'Requires a verified team owner or administrator browser session and fresh administration proof. An enrolled owner can spend recovery authority to turn off enforcement without enabling JIT. SSO remains unavailable.',
+          'Requires a verified team owner or administrator browser session and fresh administration proof. An enrolled owner can spend recovery authority to turn off enforcement without enabling JIT. While SSO_OIDC_ENABLED is off, requiring SSO or JIT admission returns 404 sso_disabled; turning the requirement off stays available.',
         security: [{ session: [] }],
         middleware: [guard, teamManagementSessionCaller(caller)] as const,
         request: {

@@ -5167,7 +5167,7 @@ export interface paths {
         put?: never;
         /**
          * Bind delegated SSO proof to an owned team credential
-         * @description Requires fresh SSO step-up in the current team. SSO remains unavailable.
+         * @description Requires fresh SSO step-up in the current team. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.
          */
         post: operations["bindSsoDelegation"];
         delete?: never;
@@ -5188,7 +5188,7 @@ export interface paths {
         post?: never;
         /**
          * Revoke the caller’s exact SSO delegation
-         * @description Requires a current team browser session. SSO remains unavailable.
+         * @description Requires a current team browser session. Stays available while SSO_OIDC_ENABLED is off.
          */
         delete: operations["revokeSsoDelegation"];
         options?: never;
@@ -5207,7 +5207,7 @@ export interface paths {
         put?: never;
         /**
          * Create or rotate a DNS domain challenge
-         * @description Verified team owner/admin browser session with fresh proof only. The TXT challenge is returned once; only its digest is stored. OIDC and SAML are being built and remain unavailable.
+         * @description Verified team owner/admin browser session with fresh proof only. The TXT challenge is returned once; only its digest is stored. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.
          */
         post: operations["createSsoDomainChallenge"];
         delete?: never;
@@ -5228,7 +5228,7 @@ export interface paths {
         post?: never;
         /**
          * Retire a domain claim
-         * @description Verified team owner/admin browser session with fresh proof and expected generation. SSO remains unavailable.
+         * @description Verified team owner/admin browser session with fresh proof and expected generation. Stays available while SSO_OIDC_ENABLED is off.
          */
         delete: operations["deleteSsoDomain"];
         options?: never;
@@ -5247,7 +5247,7 @@ export interface paths {
         put?: never;
         /**
          * Verify an exact domain through trusted DNS
-         * @description Verified team owner/admin browser session with fresh proof and expected generation. DNS errors return unknown status. SSO remains unavailable.
+         * @description Verified team owner/admin browser session with fresh proof and expected generation. DNS errors return unknown status. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.
          */
         post: operations["verifySsoDomain"];
         delete?: never;
@@ -5270,7 +5270,7 @@ export interface paths {
         get: operations["getSsoPolicy"];
         /**
          * Set the current team SSO policy
-         * @description Requires a verified team owner or administrator browser session and fresh administration proof. An enrolled owner can spend recovery authority to turn off enforcement without enabling JIT. SSO remains unavailable.
+         * @description Requires a verified team owner or administrator browser session and fresh administration proof. An enrolled owner can spend recovery authority to turn off enforcement without enabling JIT. While SSO_OIDC_ENABLED is off, requiring SSO or JIT admission returns 404 sso_disabled; turning the requirement off stays available.
          */
         put: operations["setSsoPolicy"];
         post?: never;
@@ -5295,7 +5295,7 @@ export interface paths {
         put?: never;
         /**
          * Create a disabled SSO provider draft
-         * @description Verified team owner/admin browser session with fresh proof. An enrolled owner can spend one recovery grant on an enforced team. Secrets are write-only. OIDC and SAML are being built and remain unavailable.
+         * @description Verified team owner/admin browser session with fresh proof. An enrolled owner can spend one recovery grant on an enforced team. Secrets are write-only. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.
          */
         post: operations["createSsoProvider"];
         delete?: never;
@@ -5316,14 +5316,14 @@ export interface paths {
         post?: never;
         /**
          * Retire an SSO provider
-         * @description Verified team owner/admin browser session with fresh proof and expected revision. An enforced team must keep a usable provider. An authorized repeat retirement is idempotent. SSO remains unavailable.
+         * @description Verified team owner/admin browser session with fresh proof and expected revision. An enforced team must keep a usable provider. An authorized repeat retirement is idempotent. Stays available while SSO_OIDC_ENABLED is off.
          */
         delete: operations["deleteSsoProvider"];
         options?: never;
         head?: never;
         /**
          * Update an SSO provider draft
-         * @description Verified team owner/admin browser session with fresh proof and expected revision. An enrolled owner can spend one recovery grant on an enforced team. Omitted secrets are preserved; replacements are never returned. SSO remains unavailable.
+         * @description Verified team owner/admin browser session with fresh proof and expected revision. An enrolled owner can spend one recovery grant on an enforced team. Omitted secrets are preserved; replacements are never returned. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.
          */
         patch: operations["updateSsoProvider"];
         trace?: never;
@@ -5339,7 +5339,7 @@ export interface paths {
         put?: never;
         /**
          * Enable or disable an SSO provider
-         * @description Verified team owner browser session with fresh administration proof. An enrolled owner can spend one recovery grant on an enforced team. Enabling requires a passed test of the current revision and a positively rechecked, unexpired linked domain. An enforced team must keep a usable provider. SSO remains unavailable.
+         * @description Verified team owner browser session with fresh administration proof. An enrolled owner can spend one recovery grant on an enforced team. Enabling requires a passed test of the current revision and a positively rechecked, unexpired linked domain. An enforced team must keep a usable provider. While SSO_OIDC_ENABLED is off, enabling returns 404 sso_disabled and disabling stays available.
          */
         post: operations["activateSsoProvider"];
         delete?: never;
@@ -5359,12 +5359,12 @@ export interface paths {
         put?: never;
         /**
          * Start explicit linking of the caller’s OIDC identity
-         * @description Current team member browser session with independent mailbox proof. Follow the authorization URL in the same browser and explicitly complete the pending link. SSO remains unavailable.
+         * @description Current team member browser session with independent mailbox proof. Follow the authorization URL in the same browser and explicitly complete the pending link. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.
          */
         post: operations["linkSsoAccount"];
         /**
          * Retire the caller’s exact SSO identity link
-         * @description Current team member browser session with independent mailbox proof and the link ID and generation from /me. SSO remains unavailable.
+         * @description Current team member browser session with independent mailbox proof and the link ID and generation from /me. Stays available while SSO_OIDC_ENABLED is off.
          */
         delete: operations["unlinkSsoAccount"];
         options?: never;
@@ -5384,7 +5384,7 @@ export interface paths {
         post?: never;
         /**
          * Retire another member’s exact SSO identity link
-         * @description Team owner/admin browser session with fresh administration proof and the link generation from the provider inventory. Another owner must retire an owner’s link. SSO remains unavailable.
+         * @description Team owner/admin browser session with fresh administration proof and the link generation from the provider inventory. Another owner must retire an owner’s link. Stays available while SSO_OIDC_ENABLED is off.
          */
         delete: operations["removeSsoIdentityLink"];
         options?: never;
@@ -5403,7 +5403,7 @@ export interface paths {
         put?: never;
         /**
          * Start a browser-bound OIDC provider test
-         * @description Verified team owner/admin browser session with fresh proof and expected revision. An enrolled owner can spend one recovery grant on an enforced team to test a provider, including an enabled provider. Follow the authorization URL in the same browser and check the provider inventory for the result. SSO remains unavailable.
+         * @description Verified team owner/admin browser session with fresh proof and expected revision. An enrolled owner can spend one recovery grant on an enforced team to test a provider, including an enabled provider. Follow the authorization URL in the same browser and check the provider inventory for the result. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.
          */
         post: operations["testSsoProvider"];
         delete?: never;
@@ -5423,7 +5423,7 @@ export interface paths {
         put?: never;
         /**
          * Nominate a current team owner for SSO recovery
-         * @description Requires a team owner browser session and fresh administration proof. SSO remains unavailable.
+         * @description Requires a team owner browser session and fresh administration proof. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.
          */
         post: operations["configureSsoRecovery"];
         delete?: never;
@@ -5443,7 +5443,7 @@ export interface paths {
         put?: never;
         /**
          * Accept the caller’s SSO recovery nomination
-         * @description Requires the nominated owner’s browser session and independent mailbox proof. SSO remains unavailable.
+         * @description Requires the nominated owner’s browser session and independent mailbox proof. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.
          */
         post: operations["acceptSsoRecoveryEnrollment"];
         delete?: never;
@@ -5463,7 +5463,7 @@ export interface paths {
         put?: never;
         /**
          * Start SSO recovery for the specified team
-         * @description Requires an enrolled owner’s browser session and fresh mailbox proof. Permits inspecting SSO configuration and one provider repair write or one write turning off enforcement. SSO remains unavailable.
+         * @description Requires an enrolled owner’s browser session and fresh mailbox proof. Permits inspecting SSO configuration and one provider repair write or one write turning off enforcement. Stays available while SSO_OIDC_ENABLED is off.
          */
         post: operations["useSsoRecovery"];
         delete?: never;

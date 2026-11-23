@@ -176,7 +176,10 @@ export function SsoEnforcement({
                   </fieldset>
                 </>
               )}
-              <form onSubmit={saveAdmission} hidden={!addsTrust && currentAdmission !== 'jit'}>
+              <form
+                onSubmit={saveAdmission}
+                hidden={!addsTrust && (requireSso || currentAdmission !== 'jit')}
+              >
                 <fieldset className="form-fieldset" disabled={busy}>
                   <Field
                     id={admissionId}

@@ -790,6 +790,22 @@ describe('SSO setting-off excludes only SSO from the published catalogues', () =
         expect(response.status).toBe(404)
         expect(await response.json()).toEqual({ error: 'sso_disabled' })
       }
+      // Requiring SSO and JIT admission add trust: also refused from the body alone.
+      for (const body of [
+        '{"requireSso":true}',
+        '{"admission":"jit"}',
+        '{"expectedRevision":1,"requireSso":false,"admission":"jit"}',
+        '{"expectedRevision":1,"requireSso":true,"admission":"invitation_only"}',
+      ])
+        for (const headers of [{}, { origin: 'http://localhost', cookie: 'a=b' }]) {
+          const response = await app.request('/api/v1/team/sso/policy', {
+            method: 'PUT',
+            headers,
+            body,
+          })
+          expect(response.status, body).toBe(404)
+          expect(await response.json()).toEqual({ error: 'sso_disabled' })
+        }
       for (const write of GUARDED_SSO_WRITES.filter(
         (write) => !RETAINED_SSO_WRITES.includes(write.operationId),
       ))

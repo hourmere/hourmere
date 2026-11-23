@@ -85,7 +85,7 @@ export function ssoDomainRoutes(deps: SsoDomainDeps): RouteModule {
         tags: ['SSO'],
         summary: 'Create or rotate a DNS domain challenge',
         description:
-          'Verified team owner/admin browser session with fresh proof only. The TXT challenge is returned once; only its digest is stored. OIDC and SAML are being built and remain unavailable.',
+          'Verified team owner/admin browser session with fresh proof only. The TXT challenge is returned once; only its digest is stored. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.',
         security: [{ session: [] }],
         middleware: [...middleware] as const,
         request: {
@@ -122,7 +122,7 @@ export function ssoDomainRoutes(deps: SsoDomainDeps): RouteModule {
         tags: ['SSO'],
         summary: 'Verify an exact domain through trusted DNS',
         description:
-          'Verified team owner/admin browser session with fresh proof and expected generation. DNS errors return unknown status. SSO remains unavailable.',
+          'Verified team owner/admin browser session with fresh proof and expected generation. DNS errors return unknown status. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.',
         security: [{ session: [] }],
         middleware: [...middleware] as const,
         request: {
@@ -164,7 +164,7 @@ export function ssoDomainRoutes(deps: SsoDomainDeps): RouteModule {
         tags: ['SSO'],
         summary: 'Retire a domain claim',
         description:
-          'Verified team owner/admin browser session with fresh proof and expected generation. SSO remains unavailable.',
+          'Verified team owner/admin browser session with fresh proof and expected generation. Stays available while SSO_OIDC_ENABLED is off.',
         security: [{ session: [] }],
         middleware: [...deleteMiddleware] as const,
         request: {

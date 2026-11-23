@@ -557,6 +557,24 @@ describe.skipIf(!databaseUrl)('SSO recovery', () => {
     expect(await policy()).toEqual({ require_sso: true, policy_revision: 7, trust_generation: 1 })
   })
 
+  it('notifies every owner when recovery is used while the OIDC setting is off', async () => {
+    const h = instance('setting-off')
+    await enforceSso()
+    const owner = await browser(fixture.owner)
+    const proof = await recoveryProof(h, owner.cookie)
+    expect((await useRecovery(h, proof.cookie, proof.id)).status).toBe(204)
+    expect(h.notices.map(({ kind }) => kind)).toEqual(['used', 'used'])
+    const delivered = await deliverNotices(h)
+    expect(delivered.map(({ to }) => to).sort()).toEqual(
+      [await email(fixture.owner), await email(fixture.coOwner)].sort(),
+    )
+    // Enrollment adds trust: a notice queued before the setting was turned off is dropped,
+    // and hard-off, which only tests assemble, delivers nothing at all.
+    h.notices.push({ kind: 'enrolled', userId: fixture.owner, language: 'en' })
+    expect(await deliverNotices(h)).toHaveLength(2)
+    expect(await deliverNotices({ ...h, capabilities: instance(false).capabilities })).toEqual([])
+  })
+
   it('binds recovery use to its expected revision, browser session and origin', async () => {
     const h = instance()
     await enforceSso()
