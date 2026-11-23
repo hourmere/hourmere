@@ -304,7 +304,7 @@ printing the actual token strings.
 The required checks are `check`, `e2e`, `docker` and `sign-off`; `cli-compatibility`
 and the standalone `n8n-compatibility` and `zapier-compatibility` jobs are not required.
 The reusable [CI workflow](.github/workflows/ci.yml) runs the first three alongside those
-jobs, and the [DCO workflow](.github/workflows/dco.yml) runs `sign-off`. Four `e2e-shard` jobs run the
+jobs, and the [DCO workflow](.github/workflows/dco.yml) runs `sign-off`. Six `e2e-shard` jobs run the
 complete functional browser suite in parallel; the `e2e` aggregator succeeds only
 when every shard succeeds, including on merge-queue runs. Each shard builds its own
 web and disposable site fixture and retains the browser-artifact privacy check. The separate
