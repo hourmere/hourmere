@@ -260,6 +260,20 @@ it('covers every requested real page and limits en-GB to the booking page', () =
     'sso-recovery-accept',
     'sso-recovery-accepted',
     'sso-recovery-nomination-unavailable',
+    'scim-mapping-loading',
+    'scim-mapping-unavailable',
+    'scim-mapping-load-error',
+    'scim-mapping-empty',
+    'scim-mapping-list',
+    'scim-mapping-link-form',
+    'scim-mapping-shared',
+    'scim-mapping-link-review',
+    'scim-mapping-unlink-review',
+    'scim-mapping-mailbox-proof',
+    'scim-mapping-sso-proof',
+    'scim-mapping-approval',
+    'scim-mapping-denial',
+    'scim-mapping-applied',
     'host',
     'booking',
     'booking-form',
@@ -399,6 +413,7 @@ const ssoSetupAuditUrl = pathToFileURL(resolve('tools/e2e/sso-setup-audit.ts')).
 const ssoDelegationAuditUrl = pathToFileURL(resolve('tools/e2e/sso-delegation-audit.ts')).href
 const ssoMemberAuditUrl = pathToFileURL(resolve('tools/e2e/sso-member-audit.ts')).href
 const ssoRecoveryAuditUrl = pathToFileURL(resolve('tools/e2e/sso-recovery-audit.ts')).href
+const scimMappingAuditUrl = pathToFileURL(resolve('tools/e2e/scim-mapping-audit.ts')).href
 const visualSource = readFileSync('tools/e2e/specs/visual.spec.ts', 'utf8')
 const fixtureSource = readFileSync('tools/e2e/fixtures.ts', 'utf8')
 const shellSource = readFileSync('apps/web/src/components/AppShell.tsx', 'utf8')
@@ -476,7 +491,8 @@ function sourceCopyResult(
       .replace("'./sso-setup-audit.ts'", JSON.stringify(ssoSetupAuditUrl))
       .replace("'./sso-delegation-audit.ts'", JSON.stringify(ssoDelegationAuditUrl))
       .replace("'./sso-member-audit.ts'", JSON.stringify(ssoMemberAuditUrl))
-      .replace("'./sso-recovery-audit.ts'", JSON.stringify(ssoRecoveryAuditUrl)),
+      .replace("'./sso-recovery-audit.ts'", JSON.stringify(ssoRecoveryAuditUrl))
+      .replace("'./scim-mapping-audit.ts'", JSON.stringify(scimMappingAuditUrl)),
   )
   writeFileSync(join(directory, 'visual.spec.ts'), visual)
   writeFileSync(join(directory, 'fixtures.ts'), fixture)
@@ -745,6 +761,20 @@ const expected={
   'sso-member-unavailable':{path:'/app/settings',public:false,space:'team',wait:'Your team sign-in settings are unavailable.'},
   'sso-member-loading':{path:'/app/settings',public:false,space:'team',wait:'status:Loading SSO settings…'},
   'sso-member-error':{path:'/app/settings',public:false,space:'team',wait:'Could not load SSO settings.'},
+  'scim-mapping-loading':{path:'/app/settings',public:false,space:'team',wait:'status:Loading SCIM team mappings…'},
+  'scim-mapping-unavailable':{path:'/app/settings',public:false,space:'team',wait:'SCIM team mappings are unavailable in this team.'},
+  'scim-mapping-load-error':{path:'/app/settings',public:false,space:'team',wait:'Could not load SCIM team mappings.'},
+  'scim-mapping-empty':{path:'/app/settings',public:false,space:'team',wait:'No SCIM team mappings yet.'},
+  'scim-mapping-list':{path:'/app/settings',public:false,space:'team',wait:'Directory authority suspended'},
+  'scim-mapping-link-form':{path:'/app/settings',public:false,space:'team',wait:'label:Child team ID'},
+  'scim-mapping-shared':{path:'/app/settings',public:false,space:'team',wait:'label:Shared approval request'},
+  'scim-mapping-link-review':{path:'/app/settings',public:false,space:'team',wait:'heading:Review SCIM link request'},
+  'scim-mapping-unlink-review':{path:'/app/settings',public:false,space:'team',wait:'heading:Review SCIM unlink request'},
+  'scim-mapping-mailbox-proof':{path:'/app/settings',public:false,space:'team',wait:'label:Email verification link'},
+  'scim-mapping-sso-proof':{path:'/app/settings',public:false,space:'team',wait:'a[data-private]'},
+  'scim-mapping-approval':{path:'/app/settings',public:false,space:'team',wait:'Your approval is recorded.'},
+  'scim-mapping-denial':{path:'/app/settings',public:false,space:'team',wait:'Could not apply this request.'},
+  'scim-mapping-applied':{path:'/app/settings',public:false,space:'team',wait:'SCIM team mapping linked.'},
   'booking-form':{path:'/fixture-host/layout-audit',public:true,wait:'.details-step form input[type="email"]'},
   'booking-confirmation':{path:'/fixture-host/layout-audit',public:true,wait:'.confirmation .booking-details'},
   'booking-time-zone':{path:'/fixture-host/layout-audit',public:true,wait:'.tz-panel [role="listbox"]:visible'},

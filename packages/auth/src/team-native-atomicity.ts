@@ -9,6 +9,7 @@ import type {
 } from 'better-auth/plugins/organization'
 import { sql, type Transaction } from 'kysely'
 import { withAuthAuditTransaction } from './audit.ts'
+import { scimMappingDetachRequired } from './organization-context.ts'
 
 const AUTH_TRANSACTION = Symbol.for('hourmere.auth-transaction')
 
@@ -64,6 +65,27 @@ export function nativeTeamTransactions<O extends OrganizationOptions>(
     },
     setActiveOrganization,
   ) as typeof setActiveOrganization
+  const deleteOrganization = plugin.endpoints.deleteOrganization
+  plugin.endpoints.deleteOrganization = Object.assign(
+    async (context: Parameters<typeof deleteOrganization>[0]) => {
+      try {
+        return await deleteOrganization(context)
+      } catch (error) {
+        // The FK is the final check if a link is created between a preflight and the cascade.
+        if (
+          databaseErrorCode(error) === '23503' &&
+          error &&
+          typeof error === 'object' &&
+          'constraint' in error &&
+          (error.constraint === 'scim_team_mappings_live_child_fkey' ||
+            error.constraint === 'scim_team_mappings_live_connection_scope')
+        )
+          throw scimMappingDetachRequired()
+        throw error
+      }
+    },
+    deleteOrganization,
+  ) as typeof deleteOrganization
   return plugin
 }
 

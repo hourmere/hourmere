@@ -5,6 +5,7 @@ import {
   type CallerResolver,
   type Principal,
   requireApiKeyOperation,
+  SCIM_MAPPING_SCOPE_OPERATIONS,
 } from '@hourmere/auth'
 import { auditActor } from '@hourmere/db/audit'
 import type { BookingOrigin } from '@hourmere/scheduling'
@@ -94,7 +95,12 @@ export function featureGate(check: () => void): MiddlewareHandler {
 // These native protocols authenticate through their own state/signature, or are public
 // operational metadata. A new unclassified product route never inherits an exemption.
 const nativeProtocols = new Set(API_KEY_NATIVE_REST_BOUNDARIES)
-const restPolicies = new Map(API_KEY_REST_OPERATIONS.map((operation) => [operation.id, operation]))
+const restPolicies = new Map(
+  [...API_KEY_REST_OPERATIONS, ...SCIM_MAPPING_SCOPE_OPERATIONS.rest].map((operation) => [
+    operation.id,
+    operation,
+  ]),
+)
 // These browser-only routes recheck and consume recovery authority inside their write transaction.
 const recoveryWrites = new Set([
   'PUT /api/v1/team/sso/policy',

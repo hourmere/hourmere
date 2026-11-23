@@ -72,6 +72,8 @@ export interface McpModule {
     /** PUBLIC_URL: the only origin browsers may send requests from. */
     publicUrl: string
     ssoTeamReads?: SsoTeamReadDeps | undefined
+    /** Tools for in-process resource tests, supplied only while those resources are mounted. */
+    additionalTools?: readonly Tool[]
   }): void
 }
 
@@ -290,33 +292,43 @@ export interface McpEndpointOptions {
  */
 export function mcpEndpoint({ tools, oauth }: McpEndpointOptions): McpModule {
   const prepared = prepareTools(tools)
-  const handler = createMcpHandler(
-    ({ authInfo }) => {
-      const caller = callerOf(authInfo)
-      const server = new McpServer(SERVER_INFO, {
-        // The tools never change while the server runs, so there is nothing to subscribe to.
-        capabilities: { tools: { listChanged: false } },
-        instructions: instructionsFor(caller),
-      })
-      registerTools(
-        server,
-        prepared,
-        caller,
-        (what, detail) => logLine('ERROR', `POST ${MCP_PATH} tools/call ${what}`, detail),
-        typeof authInfo?.extra?.trustedIp === 'string' ? authInfo.extra.trustedIp : undefined,
-        authInfo?.extra?.checkTeamRead as ToolCall['checkTeamRead'],
-        authInfo?.extra?.runTeamWrite as ToolCall['runTeamWrite'],
-      )
-      return server
-    },
-    {
-      maxRequestBodySize: MCP_BODY_LIMIT,
-      // Requests the SDK refused (e.g. bad protocol headers) and its own failures.
-      onerror: (err) => logLine('WARN', `POST ${MCP_PATH}: `, err.message),
-    },
-  )
+  const makeHandler = (prepared: ReturnType<typeof prepareTools>) =>
+    createMcpHandler(
+      ({ authInfo }) => {
+        const caller = callerOf(authInfo)
+        const server = new McpServer(SERVER_INFO, {
+          // The tools never change while the server runs, so there is nothing to subscribe to.
+          capabilities: { tools: { listChanged: false } },
+          instructions: instructionsFor(caller),
+        })
+        registerTools(
+          server,
+          prepared,
+          caller,
+          (what, detail) => logLine('ERROR', `POST ${MCP_PATH} tools/call ${what}`, detail),
+          typeof authInfo?.extra?.trustedIp === 'string' ? authInfo.extra.trustedIp : undefined,
+          authInfo?.extra?.checkTeamRead as ToolCall['checkTeamRead'],
+          authInfo?.extra?.runTeamWrite as ToolCall['runTeamWrite'],
+        )
+        return server
+      },
+      {
+        maxRequestBodySize: MCP_BODY_LIMIT,
+        // Requests the SDK refused (e.g. bad protocol headers) and its own failures.
+        onerror: (err) => logLine('WARN', `POST ${MCP_PATH}: `, err.message),
+      },
+    )
 
-  const mount: McpModule['mount'] = ({ app, resolveCaller, publicUrl, ssoTeamReads }) => {
+  const mount: McpModule['mount'] = ({
+    app,
+    resolveCaller,
+    publicUrl,
+    ssoTeamReads,
+    additionalTools,
+  }) => {
+    const handler = makeHandler(
+      additionalTools?.length ? prepareTools([...tools, ...additionalTools]) : prepared,
+    )
     if (oauth) {
       for (const path of [
         '/.well-known/oauth-protected-resource',

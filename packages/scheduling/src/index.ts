@@ -261,6 +261,7 @@ export {
 } from './meeting-polls.ts'
 export {
   getTeamMemberDepartureImpact,
+  hasTeamMemberDepartureImpact,
   MemberDepartureBookingSchema,
   MemberDepartureEventTypeSchema,
   type MemberDepartureImpact,

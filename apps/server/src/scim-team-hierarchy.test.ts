@@ -8,15 +8,29 @@ import {
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
-import { createTestTeam, createTestUser, type TestUser } from '@hourmere/scheduling/testing'
+import { createJobs } from '@hourmere/jobs'
+import type { MailMessage } from '@hourmere/mail'
+import {
+  createFixtures,
+  createTestTeam,
+  createTestUser,
+  type TestUser,
+} from '@hourmere/scheduling/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
 import {
   approveScimTeamMapping,
   commitScimTeamMapping,
+  listScimTeamMappings,
   type ScimTeamMappingApprovalInput,
 } from './scim-team-hierarchy.ts'
+import {
+  type ScimMappingNoticeQueue,
+  scimMappingNoticeJob,
+  scimMappingNoticeQueue,
+} from './scim-team-mapping-notices.ts'
+import { recoverScimTeamMapping } from './scim-team-mapping-recovery.ts'
 import {
   bindingCookieName,
   consumeMailboxProof,
@@ -73,7 +87,13 @@ describe.skipIf(!databaseUrl)('SCIM team hierarchy transactions', () => {
     }
   })
 
-  const deps = () => ({ db, publicUrl, capabilities, resourcesEnabled: true })
+  const notices: ScimMappingNoticeQueue = {
+    enqueue: async (_name, _payload, options) => {
+      expect(options.transaction).toBeTruthy()
+      return 'synthetic-job'
+    },
+  }
+  const deps = () => ({ db, publicUrl, capabilities, resourcesEnabled: true, notices })
 
   async function browser(
     user: TestUser,
@@ -211,6 +231,250 @@ describe.skipIf(!databaseUrl)('SCIM team hierarchy transactions', () => {
       .execute()
   const mapping = (id: string) =>
     db.selectFrom('scim_team_mappings').selectAll().where('id', '=', id).executeTakeFirstOrThrow()
+
+  it('lists only live link metadata within the acting team', async () => {
+    const parent = await team()
+    const child = await team()
+    const unrelated = await team()
+    const input = link(parent, child)
+    await both(parent, child, input)
+    const { mappingId } = await commit(parent.owner, input)
+    const metadata = {
+      id: mappingId,
+      parentOrganizationId: parent.id,
+      childOrganizationId: child.id,
+      connectionId: parent.connectionId,
+      externalId: input.externalId,
+      state: 'pending',
+    }
+    await expect(listScimTeamMappings(deps(), child.owner.principal)).resolves.toEqual({
+      mappings: [metadata],
+      connectionId: child.connectionId,
+      linkGeneration: 1,
+    })
+    await expect(listScimTeamMappings(deps(), parent.admin.principal)).resolves.toEqual({
+      mappings: [metadata],
+      connectionId: null,
+      linkGeneration: null,
+    })
+    const stranger = unrelated.owner.principal
+    await expect(listScimTeamMappings(deps(), stranger)).resolves.toMatchObject({ mappings: [] })
+    for (const target of [child.id, randomUUID()])
+      await expect(listScimTeamMappings(deps(), stranger, target)).rejects.toMatchObject({
+        code: 'scim_mapping_access_denied',
+      })
+  })
+
+  it('denies consent if insertion reaches the fresh proof deadline', async () => {
+    const parent = await team()
+    const child = await team()
+    const input = link(parent, child)
+    const challenge = await approve(parent.owner, input)
+    if (challenge.status !== 'proof_required') throw new Error('Expected a proof challenge')
+    const proofAttemptId = challenge.body.attemptId
+    await mailbox(parent.owner, proofAttemptId)
+
+    // Force the exact deadline at consent persistence, after the proof has passed
+    // validation and been consumed inside the transaction.
+    await sql`CREATE FUNCTION test_force_scim_consent_deadline() RETURNS trigger AS $$
+      BEGIN NEW.approved_at := NEW.expires_at; RETURN NEW; END;
+      $$ LANGUAGE plpgsql`.execute(db)
+    try {
+      await sql`CREATE TRIGGER test_force_scim_consent_deadline BEFORE INSERT
+        ON scim_team_mapping_consents FOR EACH ROW
+        EXECUTE FUNCTION test_force_scim_consent_deadline()`.execute(db)
+      await expect(approve(parent.owner, { ...input, proofAttemptId })).rejects.toMatchObject({
+        code: 'scim_mapping_access_denied',
+      })
+      expect(await consentRows(input.intentId)).toEqual([])
+      expect(
+        await db
+          .selectFrom('sso_attempts')
+          .select('consumed_at')
+          .where('id', '=', proofAttemptId)
+          .executeTakeFirst(),
+      ).toEqual({ consumed_at: null })
+    } finally {
+      await sql`DROP FUNCTION test_force_scim_consent_deadline() CASCADE`.execute(db)
+    }
+  })
+
+  it('suspends and detaches offline with exact scope, guarded departure, and transactional notices', async () => {
+    const parent = await team()
+    const child = await team()
+    const input = link(parent, child)
+    await both(parent, child, input)
+    const jobs = createJobs({
+      connectionString: owned.url,
+      definitions: [scimMappingNoticeQueue],
+      work: false,
+      migrate: true,
+      log: () => {},
+    })
+    const sent: MailMessage[] = []
+    try {
+      await jobs.start()
+      const { mappingId } = await commitScimTeamMapping(
+        { ...deps(), notices: jobs },
+        parent.owner.principal,
+        input.intentId,
+      )
+      const target = { mappingId, parentOrganizationId: parent.id, childOrganizationId: child.id }
+      const member = await db
+        .selectFrom('auth.member')
+        .select('id')
+        .where('organizationId', '=', child.id)
+        .where('userId', '=', child.member.id)
+        .executeTakeFirstOrThrow()
+      await db
+        .insertInto('scim_team_managed_memberships')
+        .values({
+          member_id: member.id,
+          mapping_id: mappingId,
+          child_organization_id: child.id,
+          user_id: child.member.id,
+        })
+        .execute()
+      const eventId = await createFixtures(db).eventType(child.id, null, {
+        hosts: [{ userId: child.member.id }],
+      })
+
+      await expect(
+        recoverScimTeamMapping(db, jobs, false, { ...target, action: 'detach' }),
+      ).rejects.toMatchObject({ code: 'scim_resources_disabled' })
+      await expect(
+        recoverScimTeamMapping(db, jobs, true, {
+          ...target,
+          childOrganizationId: randomUUID(),
+          action: 'suspend',
+        }),
+      ).rejects.toMatchObject({ code: 'scim_mapping_access_denied' })
+      let enqueued = 0
+      const failQueue: ScimMappingNoticeQueue = {
+        enqueue: async (...args) => (++enqueued === 1 ? jobs.enqueue(...args) : null),
+      }
+      await expect(
+        recoverScimTeamMapping(db, failQueue, true, { ...target, action: 'suspend' }),
+      ).rejects.toThrow('could not be queued')
+      expect((await mapping(mappingId)).suspended_at).toBeNull()
+      await expect(
+        recoverScimTeamMapping(db, jobs, true, { ...target, action: 'suspend' }),
+      ).resolves.toBe('suspended')
+      await expect(
+        recoverScimTeamMapping(db, jobs, true, { ...target, action: 'suspend' }),
+      ).resolves.toBe('unchanged')
+      await expect(listScimTeamMappings(deps(), child.owner.principal)).resolves.toMatchObject({
+        mappings: [{ state: 'suspended' }],
+      })
+      await expect(
+        recoverScimTeamMapping(db, jobs, true, { ...target, action: 'detach' }),
+      ).rejects.toMatchObject({ code: 'scim_mapping_roster_requires_departure' })
+      expect(
+        await db
+          .selectFrom('auth.member')
+          .select('id')
+          .where('id', '=', member.id)
+          .executeTakeFirst(),
+      ).toEqual(member)
+
+      await db
+        .updateTable('event_types')
+        .set({ deleted_at: new Date(), is_active: false })
+        .where('id', '=', eventId)
+        .execute()
+      await expect(
+        recoverScimTeamMapping(db, jobs, true, { ...target, action: 'detach' }),
+      ).resolves.toBe('detached')
+      await expect(
+        recoverScimTeamMapping(db, jobs, true, { ...target, action: 'detach' }),
+      ).resolves.toBe('unchanged')
+      expect(
+        await db
+          .selectFrom('auth.member')
+          .select('id')
+          .where('id', '=', member.id)
+          .executeTakeFirst(),
+      ).toBeUndefined()
+      expect(
+        await db
+          .selectFrom('auth.member')
+          .select('role')
+          .where('organizationId', '=', child.id)
+          .orderBy('role')
+          .execute(),
+      ).toEqual([{ role: 'admin' }, { role: 'owner' }])
+      expect((await mapping(mappingId)).retired_at).toBeTruthy()
+      await expect(listScimTeamMappings(deps(), parent.owner.principal)).resolves.toMatchObject({
+        mappings: [],
+      })
+
+      const journal = await db
+        .selectFrom('audit_events')
+        .select([
+          'action',
+          'organization_id',
+          'actor_type',
+          'actor_id',
+          'credential_type',
+          'details',
+        ])
+        .where('target_id', '=', mappingId)
+        .orderBy('action')
+        .orderBy('organization_id')
+        .execute()
+      const teams = [parent, child].sort((a, b) => a.id.localeCompare(b.id))
+      expect(journal).toEqual(
+        ['linked', 'suspended', 'unlinked'].flatMap((action) =>
+          teams.map((item) => ({
+            action: `scim_mapping.${action}`,
+            organization_id: item.id,
+            actor_type: action === 'linked' ? 'user' : 'system',
+            actor_id: action === 'linked' ? item.owner.principal.user.id : 'scim-mapping-recovery',
+            credential_type: 'none',
+            details: {},
+          })),
+        ),
+      )
+      const { rows } = await sql<{
+        data: unknown
+      }>`SELECT data FROM pgboss.job WHERE name = ${scimMappingNoticeQueue.name}`.execute(db)
+      expect(rows).toHaveLength(6)
+      const worker = scimMappingNoticeJob(db, {
+        send: async (message) => {
+          sent.push(message)
+        },
+      })
+      for (const row of rows) {
+        const notice = scimMappingNoticeQueue.payload.parse(row.data)
+        expect(Object.keys(notice).sort()).toEqual([
+          'action',
+          'language',
+          'mappingId',
+          'organizationId',
+          'userId',
+        ])
+        await worker.handler(notice, {
+          signal: new AbortController().signal,
+          id: 'job',
+          attempt: 1,
+        })
+      }
+      expect(sent.map(({ to }) => to).sort()).toEqual(
+        teams.flatMap((item) => Array(3).fill(item.owner.principal.user.email)).sort(),
+      )
+      expect(
+        sent.every(
+          ({ text }) =>
+            text.includes(mappingId) &&
+            teams.every(
+              (item) => !text.includes(item.id) && !text.includes(item.owner.principal.user.email),
+            ),
+        ),
+      ).toBe(true)
+    } finally {
+      await jobs.stop()
+    }
+  })
 
   it('requires separate bound proof from both current owners and commits each intent once', async () => {
     const sameOwner = await createTestUser(db)
@@ -402,6 +666,18 @@ describe.skipIf(!databaseUrl)('SCIM team hierarchy transactions', () => {
     expect(
       (await consentRows(input.intentId)).find((item) => item.organization_id === child.id),
     ).toMatchObject({ proof_kind: 'sso', expires_at: deadline })
+
+    const ownerKey: Principal = {
+      kind: 'api_key',
+      apiKeyId: randomUUID(),
+      apiKeyScope: 'full',
+      user: child.owner.principal.user,
+      organization: child.owner.principal.organization,
+    }
+    for (const id of [input.intentId, randomUUID()])
+      await expect(commitScimTeamMapping(enforcingDeps, ownerKey, id)).rejects.toMatchObject({
+        code: 'scim_mapping_access_denied',
+      })
 
     // A provider revision can change without a trust generation change, for example
     // when updating display metadata. An earlier approval keeps its captured revision.

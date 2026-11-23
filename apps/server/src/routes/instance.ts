@@ -70,6 +70,12 @@ const Instance = z
       .openapi({ description: 'The sign-in methods people can use on this instance' }),
   })
   .openapi('Instance')
+const ResourceTestInstance = z
+  .object({
+    ...Instance.shape,
+    scimResourcesEnabled: z.literal(true).optional(),
+  })
+  .openapi('Instance')
 
 /**
  * What this instance offers, for clients deciding what to show before anyone signs in (the
@@ -142,7 +148,7 @@ export function instanceRoutes({
     publicUrl,
     ...(embedAllowedOrigins !== undefined && { embedAllowedOrigins: [...embedAllowedOrigins] }),
   }
-  return ({ app, caller }) => {
+  return ({ app, caller, scimResourcesEnabled }) => {
     const privateHeaders = createMiddleware(async (c, next) => {
       c.header('Cache-Control', 'private, no-store')
       c.header('Vary', 'Cookie, Authorization')
@@ -160,10 +166,13 @@ export function instanceRoutes({
         summary: 'What this instance offers, such as its sign-in methods',
         tags: ['Instance'],
         responses: {
-          200: { description: "The instance's features", content: json(Instance) },
+          200: {
+            description: "The instance's features",
+            content: json(scimResourcesEnabled ? ResourceTestInstance : Instance),
+          },
         },
       }),
-      (c) => c.json(body, 200),
+      (c) => c.json({ ...body, ...(scimResourcesEnabled && { scimResourcesEnabled: true }) }, 200),
     )
     app.openapi(
       createRoute({

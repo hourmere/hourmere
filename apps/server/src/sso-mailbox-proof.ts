@@ -29,6 +29,7 @@ import {
   requireSsoRetained,
   SCIM_MAPPING_CONSENT,
   type SsoCapabilities,
+  ssoRetained,
   USE_SSO_RECOVERY,
 } from './sso.ts'
 import { ssoStorageDiagnostic } from './sso-storage-errors.ts'
@@ -214,6 +215,23 @@ export interface MailboxProofDeliveryDeps {
   log?: ((line: string) => void) | undefined
 }
 
+// Recovery and trust-reducing operations keep their mailbox proof while a setting is off.
+function mailboxProofEnabled(capabilities: SsoCapabilities, mappingEnabled?: boolean) {
+  return mappingEnabled || ssoRetained(capabilities)
+}
+
+function attemptEnabled(
+  attempt: AttemptState,
+  {
+    capabilities,
+    scimMappingConsentEnabled,
+  }: Pick<MailboxProofDeliveryDeps, 'capabilities' | 'scimMappingConsentEnabled'>,
+) {
+  return attempt.operation === SCIM_MAPPING_CONSENT
+    ? scimMappingConsentEnabled === true
+    : mailboxProofEnabled(capabilities)
+}
+
 /**
  * Delivers one queued proof email. Only here is the attempt read: an ineligible request ends
  * silently, so the send answer never depends on it. Rotation deletes the attempt's previous
@@ -224,11 +242,7 @@ export async function deliverMailboxProof(
   payload: MailboxProofEmailPayload,
   signal?: AbortSignal,
 ): Promise<void> {
-  try {
-    requireSsoRetained(deps.capabilities)
-  } catch {
-    if (!deps.scimMappingConsentEnabled) return
-  }
+  if (!mailboxProofEnabled(deps.capabilities, deps.scimMappingConsentEnabled)) return
   const limits = { ...MAILBOX_PROOF_LIMITS, ...deps.limits }
   const clock = deps.now ?? databaseClock
   let diagnostic: string | undefined
@@ -236,12 +250,7 @@ export async function deliverMailboxProof(
     diagnostic = await deps.db.transaction().execute(async (trx) => {
       const presenter = payload
       const attempt = await lockAttempt(trx, payload.attemptId, await clock(trx))
-      if (!attempt || !usable(attempt, presenter)) return
-      if (
-        (attempt.operation === SCIM_MAPPING_CONSENT) !==
-        (deps.scimMappingConsentEnabled ?? false)
-      )
-        return
+      if (!attempt || !usable(attempt, presenter) || !attemptEnabled(attempt, deps)) return
       const now = await clock(trx)
       const { rows: cooling } = await sql<{ cooling: boolean }>`
         SELECT issued_at > ${now}::timestamptz - make_interval(secs => ${limits.resendCooldownSeconds})
@@ -342,9 +351,7 @@ export async function consumeMailboxProof(
       FOR UPDATE`.execute(trx)
     const now = await clock(trx)
     const attempt = await lockAttempt(trx, input.attemptId, now)
-    if (!attempt || !usable(attempt, presenter)) return false
-    if ((attempt.operation === SCIM_MAPPING_CONSENT) !== (deps.scimMappingConsentEnabled ?? false))
-      return false
+    if (!attempt || !usable(attempt, presenter) || !attemptEnabled(attempt, deps)) return false
     const { rows } = await sql<{ token_digest: string; live: boolean }>`
       SELECT token_digest, (consumed_at IS NULL AND expires_at > ${now}::timestamptz) AS live
       FROM sso_mailbox_tokens WHERE attempt_id = ${attempt.id}::uuid FOR UPDATE`.execute(trx)
@@ -425,7 +432,12 @@ export function mailboxProofJobs(deps: MailboxProofDeliveryDeps) {
 }
 
 export interface MailboxProofModule {
-  mount(shared: { app: OpenAPIHono; resolveCaller: CallerResolver; publicUrl: string }): void
+  mount(shared: {
+    app: OpenAPIHono
+    resolveCaller: CallerResolver
+    publicUrl: string
+    scimMappingConsentEnabled?: boolean
+  }): void
 }
 
 export const MailboxProofSendInput = z.strictObject({ attemptId: z.uuid() })
@@ -453,7 +465,7 @@ export function mailboxProofRoutes(deps: {
   // An attempt lives at most authenticationAttemptLifetime (600 seconds).
   const guesses = createRateLimiter({ limit: limits.guessesPerAttempt - 1, windowSeconds: 600 })
   return {
-    mount({ app, resolveCaller, publicUrl }) {
+    mount({ app, resolveCaller, publicUrl, scimMappingConsentEnabled = false }) {
       const origin = new URL(publicUrl).origin
       const cookie = bindingCookieName(publicUrl)
 
@@ -464,7 +476,7 @@ export function mailboxProofRoutes(deps: {
         schema: z.ZodType<T>,
       ): Promise<Response | { input: T; presenter: Presenter; language: InterfaceLanguage }> {
         // While every protocol is off: before Origin, input, rate limits or any lookup.
-        requireSsoRetained(deps.capabilities)
+        if (!scimMappingConsentEnabled) requireSsoRetained(deps.capabilities)
         c.header('Cache-Control', 'no-store')
         if (c.req.method !== 'POST') return c.json({ error: 'method_not_allowed' }, 405)
         // A protocol endpoint, not a product write: exact Origin, never a Referer or a key.
@@ -525,7 +537,7 @@ export function mailboxProofRoutes(deps: {
         const admitted = await admit(c, consumes, MailboxProofConsumeInput)
         if (admitted instanceof Response) return admitted
         const proven = await consumeMailboxProof(
-          { capabilities: deps.capabilities, db: deps.db, limits, now: deps.now, guesses },
+          { ...deps, scimMappingConsentEnabled, limits, guesses },
           admitted.input,
           admitted.presenter,
         )

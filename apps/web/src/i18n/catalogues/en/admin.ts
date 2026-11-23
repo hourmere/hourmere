@@ -3090,6 +3090,65 @@ export const admin = {
   'Change your display name in your identity provider for this team.':
     'Change your display name in your identity provider for this team.',
 
+  // SCIM team mappings
+  'SCIM team mappings': 'SCIM team mappings',
+  'Loading SCIM team mappings…': 'Loading SCIM team mappings…',
+  'SCIM team mappings are unavailable in this team.':
+    'SCIM team mappings are unavailable in this team.',
+  'Could not load SCIM team mappings.': 'Could not load SCIM team mappings.',
+  'No SCIM team mappings yet.': 'No SCIM team mappings yet.',
+  'SCIM mapping ID': 'SCIM mapping ID',
+  'Parent team ID': 'Parent team ID',
+  'Child team ID': 'Child team ID',
+  'Group external ID': 'Group external ID',
+  'Directory authority suspended': 'Directory authority suspended',
+  'Awaiting directory Group': 'Awaiting directory Group',
+  'Prepare unlink request': 'Prepare unlink request',
+  'This team’s ID': 'This team’s ID',
+  'This team’s link generation': 'This team’s link generation',
+  'To link this team as a child, share its ID and link generation with the parent team’s owner.':
+    'To link this team as a child, share its ID and link generation with the parent team’s owner.',
+  'Prepare link request': 'Prepare link request',
+  'Open shared approval request': 'Open shared approval request',
+  'Child team link generation': 'Child team link generation',
+  'Enter the exact external ID supplied by the identity provider.':
+    'Enter the exact external ID supplied by the identity provider.',
+  'Review request': 'Review request',
+  'Shared approval request': 'Shared approval request',
+  'Review SCIM link request': 'Review SCIM link request',
+  'Review SCIM unlink request': 'Review SCIM unlink request',
+  'Directory connection ID': 'Directory connection ID',
+  'Linking allows this directory to manage the child team’s name and directory-managed members, retire the Group, and remove memberships it manages.':
+    'Linking allows this directory to manage the child team’s name and directory-managed members, retire the Group, and remove memberships it manages.',
+  'Detaching ends directory authority for this mapping and removes any memberships it manages.':
+    'Detaching ends directory authority for this mapping and removes any memberships it manages.',
+  'Confirm your identity to approve this SCIM mapping request.':
+    'Confirm your identity to approve this SCIM mapping request.',
+  'Shareable approval request': 'Shareable approval request',
+  'Send this exact request privately to the other team’s owner. Each owner approves from their own team.':
+    'Send this exact request privately to the other team’s owner. Each owner approves from their own team.',
+  'Copy approval request': 'Copy approval request',
+  'Approve for this team': 'Approve for this team',
+  'Apply link': 'Apply link',
+  'Apply unlink': 'Apply unlink',
+  'Check the team IDs, link generation, and Group external ID.':
+    'Check the team IDs, link generation, and Group external ID.',
+  'Check that the approval request is complete and includes this team.':
+    'Check that the approval request is complete and includes this team.',
+  'This link conflicts with current team mappings. Check the team details and prepare a new request.':
+    'This link conflicts with current team mappings. Check the team details and prepare a new request.',
+  'The child team must resolve its managed memberships before detaching this mapping.':
+    'The child team must resolve its managed memberships before detaching this mapping.',
+  'Could not apply this request. Both owners must approve the same request before their verification expires.':
+    'Could not apply this request. Both owners must approve the same request before their verification expires.',
+  'Could not record your approval. Verify your identity and try again.':
+    'Could not record your approval. Verify your identity and try again.',
+  'Could not update SCIM team mappings. Check the mapping list before trying again.':
+    'Could not update SCIM team mappings. Check the mapping list before trying again.',
+  'Your approval is recorded. Either approving owner can apply the request once both have approved.':
+    'Your approval is recorded. Either approving owner can apply the request once both have approved.',
+  'SCIM team mapping linked.': 'SCIM team mapping linked.',
+  'SCIM team mapping detached.': 'SCIM team mapping detached.',
   // SSO enforcement, identity links and delegation
   'Admission policy': 'Admission policy',
   'Just-in-time admission': 'Just-in-time admission',

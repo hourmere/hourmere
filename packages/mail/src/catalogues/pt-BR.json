@@ -149,6 +149,10 @@
   "poll.outcome.cancelled.subject": "Reunião cancelada: {poll}",
   "poll.outcome.cancelled.body": "A reunião foi cancelada. O horário abaixo é o último que estava agendado.",
 
+  "scimMapping.subject": "Mapeamento de equipe SCIM atualizado",
+  "scimMapping.linked": "Sua equipe aprovou o mapeamento SCIM {mappingId}. Assim que o grupo for provisionado, o diretório vinculado poderá gerenciar o nome da equipe filha e os membros que ele administra.",
+  "scimMapping.unlinked": "O mapeamento SCIM {mappingId} foi desvinculado da sua equipe. O diretório não pode mais gerenciar a equipe por meio desse mapeamento.",
+  "scimMapping.suspended": "O acesso do diretório pelo mapeamento SCIM {mappingId} foi suspenso. Os vínculos de membros e os estados de suspensão existentes foram preservados.",
   "series.confirmed.subject": "Série de reuniões confirmada: {event}",
   "series.confirmed.booker": "Sua série de reuniões com {host} está agendada.",
   "series.confirmed.guest": "{invitee} convidou você para uma série de reuniões com {host}.",

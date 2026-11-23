@@ -542,10 +542,12 @@ export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.free
   mcp('list_workflow_runs', 'other_read', ['GET /api/v1/workflows/{id}/runs']),
 ])
 
-function cli(command: string, tool: string): ApiKeyCliOperation {
-  const policy = API_KEY_MCP_OPERATIONS.find(
-    (operation) => operation.tool === tool && operation.mode === undefined,
-  )
+function cli(
+  command: string,
+  tool: string,
+  tools: readonly ApiKeyMcpOperation[] = API_KEY_MCP_OPERATIONS,
+): ApiKeyCliOperation {
+  const policy = tools.find((operation) => operation.tool === tool && operation.mode === undefined)
   if (!policy) throw new Error(`CLI scope policy references missing MCP tool: ${tool}`)
   return Object.freeze({
     id: `cli:${command}`,
@@ -666,7 +668,34 @@ export const API_KEY_OPERATIONS: readonly ClassifiedApiKeyOperation[] = Object.f
   ...API_KEY_CLI_OPERATIONS,
 ])
 
-const operations = new Map(API_KEY_OPERATIONS.map((operation) => [operation.id, operation]))
+const mappingTools = Object.freeze([
+  mcp('create_scim_team_mapping', 'other_write', ['POST /api/v1/scim/team-mappings']),
+  mcp('delete_scim_team_mapping', 'other_write', ['DELETE /api/v1/scim/team-mappings/{id}']),
+])
+
+/** Scope classifications for the in-process resource test only. */
+export const SCIM_MAPPING_SCOPE_OPERATIONS = Object.freeze({
+  rest: Object.freeze([
+    rest('GET', '/api/v1/scim/team-mappings', 'other_read', 'key'),
+    rest('POST', '/api/v1/scim/team-mappings', 'other_write', 'key'),
+    rest('DELETE', '/api/v1/scim/team-mappings/{id}', 'other_write', 'key'),
+    rest('POST', '/api/v1/scim/team-mappings/consent', 'session_only', 'session_only'),
+  ]),
+  mcp: mappingTools,
+  cli: Object.freeze([
+    cli('scim-team-mappings create', 'create_scim_team_mapping', mappingTools),
+    cli('scim-team-mappings delete', 'delete_scim_team_mapping', mappingTools),
+  ]),
+})
+
+const operations = new Map(
+  [
+    ...API_KEY_OPERATIONS,
+    ...SCIM_MAPPING_SCOPE_OPERATIONS.rest,
+    ...SCIM_MAPPING_SCOPE_OPERATIONS.mcp,
+    ...SCIM_MAPPING_SCOPE_OPERATIONS.cli,
+  ].map((operation) => [operation.id, operation]),
+)
 
 /** Exact stable IDs only: HTTP verbs, prefixes and MCP hints never grant authority. */
 export function apiKeyOperation(operationId: string): ClassifiedApiKeyOperation | undefined {

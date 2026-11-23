@@ -21,6 +21,7 @@ import { type Me, useMe, useSession } from '../session.tsx'
 import { useUnsavedChanges } from '../unsaved-changes.tsx'
 import { BrandSettings } from './BrandSettings.tsx'
 import { ProvisioningTokens } from './ProvisioningTokens.tsx'
+import { ScimTeamMappings } from './ScimTeamMappings.tsx'
 import { SlackIntegrations } from './SlackIntegrations.tsx'
 import { oidcAttemptId } from './sso/member-protocol.ts'
 import {
@@ -224,6 +225,18 @@ export function SettingsPage() {
           organizationId={organizationId}
           timeZone={profile.status === 'ready' ? profile.data?.timeZone : undefined}
           role={role.status === 'ready' ? role.data : null}
+        />
+      )}
+      {!personal && me.principal.kind === 'session' && shell?.scimResourcesEnabled === true && (
+        <ScimTeamMappings
+          key={`${organizationId}:${location.key}`}
+          organizationId={organizationId}
+          role={role.status === 'ready' ? role.data : null}
+          stepUpProviders={
+            me.sso?.providers.filter(({ id }) =>
+              me.sso?.links.some(({ providerId }) => providerId === id),
+            ) ?? []
+          }
         />
       )}
       {!personal &&
