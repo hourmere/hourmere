@@ -288,6 +288,11 @@ describe('SAML verifier: accepted responses', () => {
       '$1\r\n',
     )
     expect(verifySamlResponse(config, wrapped).assertion.nameId.value).toBe('ada@acme.example')
+    // White space around the root element, as IdPs commonly emit it.
+    expect(rejection(`<?xml version="1.0" encoding="UTF-8"?>\n${valid()}\n`)).toBe('accepted')
+    expect(rejection(`\n  ${valid()}\r\n`)).toBe('accepted')
+    // Indentation added to the unsigned wrapper after signing changes nothing that is signed.
+    expect(rejection(valid().replace('<samlp:Status>', '\n  <samlp:Status>'))).toBe('accepted')
   })
 })
 

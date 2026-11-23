@@ -165,7 +165,8 @@ function parseStrict(xml: string): Element {
   if (Buffer.byteLength(xml) > samlMaximumResponseBytes) throw reject('too_large')
   for (const character of xml)
     if (!isXmlChar(character.codePointAt(0) ?? 0)) throw reject('malformed_xml')
-  const body = xml.replace(XML_DECLARATION, '')
+  // White space around the root element is not part of the document's content.
+  const body = xml.replace(XML_DECLARATION, '').replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, '')
   if (body.includes('<!') || body.includes('<?')) throw reject('forbidden_markup')
   for (const [, reference = ''] of body.matchAll(ENTITY_REFERENCE)) {
     if (/^(?:lt|gt|amp|quot|apos);$/.test(reference)) continue
