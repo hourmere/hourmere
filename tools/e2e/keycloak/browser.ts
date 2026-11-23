@@ -73,7 +73,7 @@ export async function signInWithEmail(page: Page, app: KeycloakFixture, email: s
 }
 
 /** Say where a sign-in stopped without printing query strings, cookies or form values. */
-async function describeStrandedPage(page: Page, app: KeycloakFixture) {
+export async function describeStrandedPage(page: Page, app: KeycloakFixture) {
   const url = new URL(page.url())
   const site = url.origin === app.url ? 'Hourmere' : 'the identity provider'
   const feedback = await page
