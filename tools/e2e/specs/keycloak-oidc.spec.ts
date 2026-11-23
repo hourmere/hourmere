@@ -143,14 +143,13 @@ async function openMemberSettings(page: Page, app: KeycloakFixture) {
   await space.click()
   await page.getByRole('menuitemradio', { name: app.teamName, exact: true }).click()
   await expect(space).toContainText(app.teamName)
-  const [instance] = await Promise.all([
-    page.waitForResponse((response) => response.url() === `${app.url}/api/v1/instance`),
-    page.goto(`${app.url}/app/settings`),
-  ])
-  expect(instance.status()).toBe(200)
-  const capabilities = await instance.json()
+  await page.goto(`${app.url}/app/settings`)
   await expect(page.getByRole('heading', { name: 'Account', exact: true })).toBeVisible()
-  return capabilities
+  // Asked directly: a response observed during the navigation can belong to the page being
+  // left, whose body is gone once the new document loads.
+  const instance = await page.request.get(`${app.url}/api/v1/instance`)
+  expect(instance.status()).toBe(200)
+  return instance.json()
 }
 
 async function beginAdmission(page: Page, app: KeycloakFixture, username: string) {
