@@ -58,6 +58,18 @@ function discoveryStatus(issuer: string, ca: string): Promise<string> {
   })
 }
 
+/** Fetch one Keycloak page and discard it. Used only to warm a freshly started container. */
+function warm(url: string, ca: string): Promise<void> {
+  return new Promise((resolve) => {
+    const request = get(url, { ca, signal: AbortSignal.timeout(10_000) }, (response) => {
+      response.resume()
+      response.once('error', () => resolve())
+      response.once('end', () => resolve())
+    })
+    request.once('error', () => resolve())
+  })
+}
+
 async function addSigningKey(origin: string, adminSecret: string) {
   const { hostname, port } = new URL(origin)
   const privateTargets = [{ host: hostname, port: Number(port) }]
@@ -285,7 +297,20 @@ export async function startKeycloak(
     let discovery = 'not checked'
     while (Date.now() < deadline) {
       discovery = await discoveryStatus(issuer, certificate)
-      if (discovery === 'ready')
+      if (discovery === 'ready') {
+        // Discovery answers before the login path is loaded. Render the sign-in form and read the
+        // signing keys once, so the first browser round trip is not the container's cold start.
+        const authorize = new URL(`${issuer}/protocol/openid-connect/auth`)
+        authorize.search = new URLSearchParams({
+          client_id: client.clientId,
+          redirect_uri: callback.href,
+          response_type: 'code',
+          scope: 'openid',
+        }).toString()
+        await Promise.all([
+          warm(authorize.href, certificate),
+          warm(`${issuer}/protocol/openid-connect/certs`, certificate),
+        ])
         return {
           origin,
           issuer,
@@ -308,6 +333,7 @@ export async function startKeycloak(
           },
           close,
         }
+      }
       await delay(250)
     }
     const state = await command(
