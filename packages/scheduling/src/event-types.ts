@@ -385,7 +385,7 @@ async function writeWaitlistSettings(
     'id' | 'scheduling_type' | 'organization_id' | 'owner_user_id' | 'waitlist_enabled'
   >,
   settings: WaitlistSettings,
-  scimResourcesEnabled = false,
+  scimResourcesEnabled: boolean,
 ) {
   if (settings.enabled) {
     const hosts = await db
@@ -759,7 +759,13 @@ async function createEventTypeWrite(
           })),
         )
         .execute()
-      if (waitlist) await writeWaitlistSettings(trx, await loadEventType(trx, id), waitlist)
+      if (waitlist)
+        await writeWaitlistSettings(
+          trx,
+          await loadEventType(trx, id),
+          waitlist,
+          ctx.scimResourcesEnabled === true,
+        )
       await auditEventType(ctx, trx, id, 'event_type.created')
       return toEventType(await loadEventType(trx, id), ctx.smsRemindersAvailable)
     }),
@@ -943,7 +949,13 @@ export async function updateEventType(
           .where('event_type_id', '=', row.id)
           .execute()
       }
-      if (waitlist) await writeWaitlistSettings(trx, await loadEventType(trx, row.id), waitlist)
+      if (waitlist)
+        await writeWaitlistSettings(
+          trx,
+          await loadEventType(trx, row.id),
+          waitlist,
+          ctx.scimResourcesEnabled === true,
+        )
       // Routing targets on this event type follow its updated row, disabling included.
       await refreshRoutingTargetHealth(
         trx,

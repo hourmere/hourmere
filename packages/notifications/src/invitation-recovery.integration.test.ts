@@ -358,7 +358,7 @@ describe.skipIf(!serverUrl)('invitation generation recovery with PostgreSQL', ()
   it('detects a removed preclaim authority check through real attempt and budget assertions', async () => {
     const copy = await sourceCopy(
       new URL('./invitation-sender.ts', import.meta.url),
-      '      (await invitationAuthorizationIsCurrent(trx, invitation, authorizedByUserId)) &&\n',
+      '      (await invitationAuthorizationIsCurrent(trx, deps, invitation, authorizedByUserId)) &&\n',
       '',
     )
     await expectKilled(copy, (module) =>
@@ -369,7 +369,7 @@ describe.skipIf(!serverUrl)('invitation generation recovery with PostgreSQL', ()
   it('detects a removed pre-SMTP authority check through a real mailer assertion', async () => {
     const copy = await sourceCopy(
       new URL('./invitation-sender.ts', import.meta.url),
-      'if (!(await invitationAuthorizationIsCurrent(trx, invitation, authorizedByUserId))) {',
+      'if (!(await invitationAuthorizationIsCurrent(trx, deps, invitation, authorizedByUserId))) {',
       'if (false) {',
     )
     await expectKilled(copy, (module) =>
@@ -955,8 +955,8 @@ describe.skipIf(!serverUrl)('invitation generation recovery with PostgreSQL', ()
   it.each([
     [
       'authority',
-      'await checkTeamManagementMembership(db, authorizedByUserId, invitation.organizationId)',
-      'await checkTeamManagementMembership(db, invitation.inviterId, invitation.organizationId)',
+      'db,\n      authorizedByUserId,\n      invitation.organizationId,',
+      'db,\n      invitation.inviterId,\n      invitation.organizationId,',
     ],
     [
       'mail attribution',

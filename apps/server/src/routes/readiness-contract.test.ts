@@ -120,7 +120,7 @@ const detail = z.strictObject({
         checkConflicts: z.boolean(),
         lastSyncedAt: z.iso.datetime().nullable(),
         syncError: z
-          .enum(['provider_unavailable', 'needs_reauth', 'permissions_missing'])
+          .enum(['provider_unavailable', 'needs_reauth', 'permissions_missing', 'calendar_removed'])
           .nullable(),
         status: z.string(),
       }),
@@ -332,33 +332,39 @@ describe.skipIf(!process.env.DATABASE_URL)('readiness strict wire projection', (
     },
   )
 
-  it('reports a failed selected Microsoft snapshot as an unavailable dependency', async () => {
-    const f = await fixture()
-    await t.db
-      .updateTable('calendar_connections')
-      .set({ provider: 'microsoft' })
-      .where('id', '=', f.connectionId)
-      .execute()
-    await t.db
-      .updateTable('calendars')
-      .set({ sync_error: 'provider_unavailable' })
-      .where('id', '=', f.calendarId)
-      .execute()
-    const response = await t.as(f.own).get(selfPath)
-    expect(response.status).toBe(200)
-    const { member } = selfContract.parse(response.body)
-    expect(member.summary).toBe('dependency_unavailable')
-    expect(member.signals).toContainEqual(
-      expect.objectContaining({ id: 'conflict_calendar_selection', state: 'satisfied' }),
-    )
-    expect(member.signals).toContainEqual(
-      expect.objectContaining({
-        id: 'selected_calendar_sync',
-        state: 'dependency_unavailable',
-        reasonCode: 'calendar_attention_required',
-      }),
-    )
-  })
+  it.each(['provider_unavailable', 'calendar_removed'] as const)(
+    'reports a selected Microsoft calendar with %s as an unavailable dependency',
+    async (syncError) => {
+      const f = await fixture()
+      await t.db
+        .updateTable('calendar_connections')
+        .set({ provider: 'microsoft' })
+        .where('id', '=', f.connectionId)
+        .execute()
+      await t.db
+        .updateTable('calendars')
+        .set({ sync_error: syncError })
+        .where('id', '=', f.calendarId)
+        .execute()
+      const response = await t.as(f.own).get(selfPath)
+      expect(response.status).toBe(200)
+      const { member } = selfContract.parse(response.body)
+      expect(member.summary).toBe('dependency_unavailable')
+      expect(member.details.calendars).toContainEqual(
+        expect.objectContaining({ id: f.calendarId, syncError }),
+      )
+      expect(member.signals).toContainEqual(
+        expect.objectContaining({ id: 'conflict_calendar_selection', state: 'satisfied' }),
+      )
+      expect(member.signals).toContainEqual(
+        expect.objectContaining({
+          id: 'selected_calendar_sync',
+          state: 'dependency_unavailable',
+          reasonCode: 'calendar_attention_required',
+        }),
+      )
+    },
+  )
 
   it.each(['self', 'self_calendar', 'team'] as const)(
     'detects an added private %s field in a source-copy response',

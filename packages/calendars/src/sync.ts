@@ -373,6 +373,7 @@ export async function configureCalendar(
         'cc.status',
         'c.access_role',
         'c.check_conflicts',
+        'c.sync_error',
       ])
       .where('c.id', '=', id)
       .where('cc.user_id', '=', principal.user.id)
@@ -380,6 +381,8 @@ export async function configureCalendar(
       .executeTakeFirst()
     if (!row) throw new DomainError('not_found', 'calendar_not_found')
     const microsoft = row.provider === 'microsoft'
+    if (checkConflicts && microsoft && row.sync_error === 'calendar_removed')
+      throw new DomainError('conflict', 'microsoft_calendar_removed')
     if (checkConflicts && microsoft && !deps.microsoft)
       throw new DomainError('conflict', 'microsoft_calendar_disabled')
     if (checkConflicts && !row.check_conflicts) {
@@ -479,6 +482,18 @@ export async function syncOwnedCalendar(deps: CalendarDeps, principal: Principal
     if (microsoft) await syncMicrosoftCalendar(deps, id, undefined, principal)
     else await syncGoogleCalendar(deps, id, undefined, principal)
   } catch (error) {
+    if (
+      microsoft &&
+      error instanceof CalendarProviderError &&
+      error.code === 'permissions_missing' &&
+      error.status === 403
+    )
+      throw new DomainError(
+        'conflict',
+        'calendar_events_unreadable',
+        'Microsoft denied event access to this calendar.',
+        { cause: error },
+      )
     if (error instanceof CalendarProviderError)
       throw new DomainError(
         'conflict',

@@ -710,49 +710,38 @@ describe.skipIf(!databaseUrl)('SCIM Group retirement', () => {
     ])
   })
 
-  it('journals the child resume that a refused reactivation commits', async () => {
+  it('keeps the User, child suspension and audit journal unchanged without a parent membership', async () => {
     const f = await directory(1)
     const [sourceId] = f.ids as [string]
     const [source] = f.people as [TestUser]
     expect((await setActive(f.token, sourceId, false)).status).toBe(200)
     await db
-      .insertInto('scim_membership_blocks')
-      .values({
-        organization_id: f.parent.id,
-        user_id: source.id,
-        source: 'local',
-        kind: 'suspension',
-      })
+      .deleteFrom('auth.member')
+      .where('organizationId', '=', f.parent.id)
+      .where('userId', '=', source.id)
       .execute()
-    const resumes = () =>
+    const events = () =>
       db
         .selectFrom('audit_events')
-        .select(['organization_id', 'actor_type', 'actor_id', 'target_type', 'details'])
-        .where('action', '=', 'scim_user.child_access_resumed')
+        .select('id')
         .where('target_id', '=', sourceId)
+        .orderBy('id')
         .execute()
     const user = () =>
       db.selectFrom('scim_users').selectAll().where('id', '=', sourceId).executeTakeFirstOrThrow()
 
-    // The refusal leaves the User itself untouched and records the one change it carries.
-    const before = await user()
+    const [before, beforeEvents] = await Promise.all([user(), events()])
+    expect(before).toMatchObject({
+      active: false,
+      linked_user_id: source.id,
+      linked_member_id: null,
+    })
     await expectError(await setActive(f.token, sourceId, true), 403, 'mutability')
     expect(await user()).toEqual(before)
-    expect(before).toMatchObject({ active: false })
-    expect(await suspended(f.child.id, source)).toBe(false)
+    expect(await suspended(f.child.id, source)).toBe(true)
     expect(await suspended(f.parent.id, source)).toBe(true)
-    expect(await resumes()).toEqual([
-      {
-        organization_id: f.parent.id,
-        actor_type: 'scim_token',
-        actor_id: f.token.id,
-        target_type: 'scim_user',
-        details: {},
-      },
-    ])
-    // With nothing left to resume the same refusal commits nothing and records nothing.
     await expectError(await setActive(f.token, sourceId, true), 403, 'mutability')
-    expect(await resumes()).toHaveLength(1)
+    expect(await events()).toEqual(beforeEvents)
   })
 
   it('refuses a directory-suspended child member on the server paths that hold the capability', async () => {

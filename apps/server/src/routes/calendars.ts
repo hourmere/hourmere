@@ -179,7 +179,7 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
             400: 'invalid_request',
             403: `${CROSS_ORIGIN_WRITE} or session_required when the browser session becomes invalid during the request`,
             404: 'calendar_not_found',
-            409: 'google_calendar_permissions_missing, microsoft_calendar_permissions_missing, microsoft_calendar_disabled or calendar_events_unreadable',
+            409: 'google_calendar_permissions_missing, microsoft_calendar_permissions_missing, microsoft_calendar_disabled, microsoft_calendar_removed or calendar_events_unreadable',
           }),
         },
       }),
@@ -209,7 +209,7 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
           ...errorResponses({
             403: `${CROSS_ORIGIN_WRITE} or session_required when the browser session becomes invalid during the request`,
             404: 'calendar_not_found',
-            409: 'calendar_sync_disabled, google_calendar_provider_unavailable, microsoft_calendar_provider_unavailable, microsoft_calendar_needs_reauth, microsoft_calendar_permissions_missing or microsoft_calendar_disabled',
+            409: 'calendar_sync_disabled, calendar_events_unreadable, google_calendar_provider_unavailable, microsoft_calendar_provider_unavailable, microsoft_calendar_needs_reauth, microsoft_calendar_permissions_missing, microsoft_calendar_disabled or microsoft_calendar_removed',
           }),
         },
       }),

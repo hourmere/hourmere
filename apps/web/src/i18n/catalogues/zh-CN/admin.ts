@@ -3057,4 +3057,8 @@ export const admin = {
   // Microsoft Calendar conflict checks
   'Microsoft will ask for your account identity, continuing access and permission to read basic calendar details. Hourmere lists your calendars and checks busy times on the calendars you select. Booking event writes are unavailable. Connecting is separate from signing in.':
     'Microsoft 会请求你的账户身份、持续访问权限，以及读取基本日历信息的权限。Hourmere 会列出你的日历，并检查所选日历的忙碌时段。暂不支持写入预约事件。连接日历与登录是分开的操作。',
+  'Microsoft no longer lists this calendar. Booking times stay unavailable while it is selected. Refresh the calendar list or clear the selection.':
+    'Microsoft 已不再列出此日历。只要它仍被选中，就无法提供可预约时段。请刷新日历列表或取消选中。',
+  'Microsoft denied access to this calendar. Booking times stay unavailable until access is restored.':
+    'Microsoft 拒绝访问此日历。恢复访问权限后才会提供可预约时段。',
 } as const

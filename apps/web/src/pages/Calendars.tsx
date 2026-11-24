@@ -635,43 +635,61 @@ export function CalendarsPage() {
                               />
                               {t('Check this calendar for conflicts')}
                             </label>
-                            {calendar.checkConflicts && (
-                              <>
-                                <p>
-                                  {calendar.syncError || calendar.available === false
-                                    ? t(
-                                        'Synchronization failed. Booking times stay unavailable until synchronization recovers.',
-                                      )
-                                    : calendar.lastSyncedAt
-                                      ? t('Last synchronized: {0}', {
-                                          '0': new Date(calendar.lastSyncedAt).toLocaleString(
-                                            displayLocale,
-                                            { calendar: 'gregory' },
-                                          ),
-                                        })
-                                      : t(
-                                          'Synchronization is not ready yet. Booking times stay unavailable until it completes.',
-                                        )}
-                                </p>
-                                <button
-                                  type="button"
-                                  className="button button-small"
-                                  disabled={
-                                    connection.status !== 'active' ||
-                                    calendar.available === false ||
-                                    !providerEnabled ||
-                                    !connection.syncAuthorized ||
-                                    reconnect ||
-                                    (connection.lastError === 'permissions_missing' &&
-                                      calendar.syncError === 'permissions_missing')
-                                  }
-                                  onClick={() => calendarAction(calendar.id, 'sync')}
-                                >
-                                  {calendar.syncError || calendar.available === false
-                                    ? t('Retry synchronization')
-                                    : t('Sync now')}
-                                </button>
-                              </>
+                            {calendar.syncError === 'calendar_removed' ? (
+                              <p>
+                                {calendar.checkConflicts
+                                  ? t(
+                                      'Microsoft no longer lists this calendar. Booking times stay unavailable while it is selected. Refresh the calendar list or clear the selection.',
+                                    )
+                                  : t(
+                                      'This calendar is no longer available. Refresh the calendar list.',
+                                    )}
+                              </p>
+                            ) : (
+                              calendar.checkConflicts && (
+                                <>
+                                  <p>
+                                    {connection.provider === 'microsoft' &&
+                                    !reconnect &&
+                                    calendar.syncError === 'permissions_missing'
+                                      ? t(
+                                          'Microsoft denied access to this calendar. Booking times stay unavailable until access is restored.',
+                                        )
+                                      : calendar.syncError || calendar.available === false
+                                        ? t(
+                                            'Synchronization failed. Booking times stay unavailable until synchronization recovers.',
+                                          )
+                                        : calendar.lastSyncedAt
+                                          ? t('Last synchronized: {0}', {
+                                              '0': new Date(calendar.lastSyncedAt).toLocaleString(
+                                                displayLocale,
+                                                { calendar: 'gregory' },
+                                              ),
+                                            })
+                                          : t(
+                                              'Synchronization is not ready yet. Booking times stay unavailable until it completes.',
+                                            )}
+                                  </p>
+                                  <button
+                                    type="button"
+                                    className="button button-small"
+                                    disabled={
+                                      connection.status !== 'active' ||
+                                      calendar.available === false ||
+                                      !providerEnabled ||
+                                      !connection.syncAuthorized ||
+                                      reconnect ||
+                                      (connection.lastError === 'permissions_missing' &&
+                                        calendar.syncError === 'permissions_missing')
+                                    }
+                                    onClick={() => calendarAction(calendar.id, 'sync')}
+                                  >
+                                    {calendar.syncError || calendar.available === false
+                                      ? t('Retry synchronization')
+                                      : t('Sync now')}
+                                  </button>
+                                </>
+                              )
                             )}
                             {connection.provider !== 'microsoft' &&
                               (calendar.accessRole === 'owner' ||
