@@ -159,9 +159,11 @@ describe.skipIf(!serverUrl)('meeting poll finalize uses current event policy', (
   it('refuses a candidate when a mirrored calendar conflict appeared after voting', async () => {
     const fixture = await createFinalizeFixture(db)
     const request = await fixture.input([await fixture.addVoter()])
-    const { calendarId } = await fixture.fixtures.calendarBusy(fixture.owner.id, [
-      [fixture.start.toString(), fixture.start.add({ minutes: 15 }).toString()],
-    ])
+    const { calendarId } = await fixture.fixtures.calendarBusy(
+      fixture.owner.id,
+      [[fixture.start.toString(), fixture.start.add({ minutes: 15 }).toString()]],
+      { now: fixture.ctx.now() },
+    )
 
     await expectsRefusal(fixture, request, 'slot_unavailable')
     await db.deleteFrom('calendar_busy').where('calendar_id', '=', calendarId).execute()

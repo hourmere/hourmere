@@ -764,8 +764,8 @@ configured, the series transaction pins each member's eligible destinations and 
 jobs. Each worker reconciles the occurrence's booking chain using its existing UID and
 retry policy. Google uses `<root_booking_id>@hourmere` and CalDAV uses the root booking ID.
 Tail cancellation queues reconciliation for the affected occurrences. Provider copies are
-independent events with no recurring master. Microsoft Calendar continues to list calendars
-only. If Microsoft write-back is added, it follows the same per-occurrence model.
+independent events with no recurring master. Microsoft Calendar supports busy-time checks.
+If Microsoft write-back is added, it follows the same per-occurrence model.
 No shared Zoom/Meet recurring meeting is introduced.
 
 If a provider write fails after commit, the series stays booked. The existing job and

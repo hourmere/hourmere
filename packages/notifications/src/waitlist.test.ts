@@ -1067,15 +1067,10 @@ describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
     const [candidate] = await s.open()
     await deliverWaitlistEmail(s.deps, { kind: 'notification', id: candidate?.id as string })
     const { calendarId } = await f.calendarBusy(s.userId, [])
-    const calendar = await db
-      .selectFrom('calendars')
-      .select('connection_id')
-      .where('id', '=', calendarId)
-      .executeTakeFirstOrThrow()
     await db
-      .updateTable('calendar_connections')
-      .set({ provider: 'google' })
-      .where('id', '=', calendar.connection_id)
+      .updateTable('calendars')
+      .set({ last_synced_at: null, sync_state: null })
+      .where('id', '=', calendarId)
       .execute()
     const worker = factory(s.deps)
     for (let run = 0; run < 5; run++) await worker()

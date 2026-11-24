@@ -188,10 +188,14 @@ describe.skipIf(!serverUrl)('group slot availability', () => {
   it('omits only the mapped provider copy, retaining simultaneous unrelated busy events', async () => {
     const f = await fixture()
     const { slot } = await occupiedSlot(f)
-    const calendar = await createFixtures(db).calendarBusy(f.host, [
-      [f.start, f.end],
-      [f.start, f.end],
-    ])
+    const calendar = await createFixtures(db).calendarBusy(
+      f.host,
+      [
+        [f.start, f.end],
+        [f.start, f.end],
+      ],
+      { now: query(f).now },
+    )
     await owned.pool.query(
       `INSERT INTO group_slot_calendar_events(group_slot_id,calendar_id,external_event_id,count_revision)
        VALUES ($1,$2,$3,1)`,
@@ -260,10 +264,14 @@ describe.skipIf(!serverUrl)('group slot availability', () => {
   it('detects excluding unrelated provider copies and restores the original source', async () => {
     const f = await fixture()
     const { slot } = await occupiedSlot(f)
-    const calendar = await createFixtures(db).calendarBusy(f.host, [
-      [f.start, f.end],
-      [f.start, f.end],
-    ])
+    const calendar = await createFixtures(db).calendarBusy(
+      f.host,
+      [
+        [f.start, f.end],
+        [f.start, f.end],
+      ],
+      { now: query(f).now },
+    )
     await owned.pool.query(
       `INSERT INTO group_slot_calendar_events(group_slot_id,calendar_id,external_event_id,count_revision)
        VALUES ($1,$2,$3,1)`,
