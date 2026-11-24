@@ -211,10 +211,11 @@ not grant host rescheduling or reschedule-request authority through REST, MCP or
   the deployed image; see [conversion steps](/docs/self-hosting#turn-off-app-installation).
 - [SCIM](/docs/scim) provides provisioning-token administration only; creation/rotation is disabled by default.
   Users, Groups, discovery and IdP synchronization are not available yet.
-- Organization OIDC/SAML SSO is being built and is not available yet. The
+- Organization [OIDC single sign-on](/docs/sso) is off by default: the operator turns it
+  on with `SSO_OIDC_ENABLED=true`, on every instance and without a paid-plan requirement.
+  SAML is being built and is not available yet. The
   [SSO design](https://github.com/hourmere/hourmere/blob/main/docs/sso.md) covers
-  self-hosting, linking, enforcement and the planned implementation sequence.
-  Planned SSO is available to every instance without a paid-plan requirement.
+  self-hosting, linking, enforcement and the remaining implementation sequence.
 - [Make](/docs/make) recipes require manual assembly; no import-verified blueprint or native
   Hourmere Make app is shipped. Verify signed webhooks before any downstream action.
 - The [n8n community node](/docs/n8n) is not yet published to npm or available on n8n Cloud.

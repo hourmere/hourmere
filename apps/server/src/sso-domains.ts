@@ -9,7 +9,7 @@ import { HTTPException } from 'hono/http-exception'
 import { sql } from 'kysely'
 import { parse } from 'tldts'
 import { z } from 'zod'
-import { requireSsoEnabled } from './sso.ts'
+import { requireSsoEnabled, requireSsoRetained } from './sso.ts'
 import { type FreshProofDeps, runWithFreshProof } from './sso-fresh-proof.ts'
 import { databaseClock } from './sso-mailbox-proof.ts'
 import { authorizeSsoRead } from './sso-reads.ts'
@@ -100,8 +100,9 @@ function uniformDenial(error: unknown): never {
   if (error instanceof HTTPException && error.status === 403) throw denied()
   throw error
 }
-function enabled(deps: SsoDomainDeps, principal: Principal) {
-  requireSsoEnabled(deps.capabilities)
+function enabled(deps: SsoDomainDeps, principal: Principal, addsTrust = true) {
+  if (addsTrust) requireSsoEnabled(deps.capabilities)
+  else requireSsoRetained(deps.capabilities)
   if (principal.kind !== 'session' || principal.organization.personal) throw denied()
   return principal
 }
@@ -395,7 +396,7 @@ export async function deleteSsoDomain(
   domainId: string,
   input: unknown,
 ) {
-  const p = enabled(deps, principal)
+  const p = enabled(deps, principal, false)
   return runWithFreshProof(
     deps,
     {

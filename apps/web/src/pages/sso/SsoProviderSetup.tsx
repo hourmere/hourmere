@@ -30,8 +30,9 @@ const endpointFields = [
 export function SsoProviderSetup({
   providers,
   owner,
+  addsTrust = true,
   ...props
-}: ProviderProps & { providers: SsoProvider[]; owner: boolean }) {
+}: ProviderProps & { providers: SsoProvider[]; owner: boolean; addsTrust?: boolean }) {
   const { t } = useI18n()
   const heading = useId()
   const [editing, setEditing] = useState<'new' | SsoProvider | null>(null)
@@ -48,19 +49,21 @@ export function SsoProviderSetup({
   return (
     <section className="sso-providers" aria-labelledby={heading}>
       <h2 id={heading}>{t('Identity providers')}</h2>
-      <div className="form-actions">
-        <button
-          type="button"
-          className="button button-primary"
-          disabled={props.busy || editing !== null}
-          onClick={(event) => {
-            opener.current = event.currentTarget
-            setEditing('new')
-          }}
-        >
-          {t('Add provider')}
-        </button>
-      </div>
+      {addsTrust && (
+        <div className="form-actions">
+          <button
+            type="button"
+            className="button button-primary"
+            disabled={props.busy || editing !== null}
+            onClick={(event) => {
+              opener.current = event.currentTarget
+              setEditing('new')
+            }}
+          >
+            {t('Add provider')}
+          </button>
+        </div>
+      )}
       {editing && (
         <ProviderForm
           {...props}
@@ -86,20 +89,23 @@ export function SsoProviderSetup({
             busy={props.busy || editing !== null}
             provider={provider}
             owner={owner}
+            addsTrust={addsTrust}
           />
           <fieldset className="form-fieldset" disabled={props.busy || editing !== null}>
             <div className="form-actions">
-              <button
-                type="button"
-                className="button button-small"
-                aria-label={t('Edit {name}', { name: provider.displayName })}
-                onClick={(event) => {
-                  opener.current = event.currentTarget
-                  setEditing(provider)
-                }}
-              >
-                {t('Edit')}
-              </button>
+              {addsTrust && (
+                <button
+                  type="button"
+                  className="button button-small"
+                  aria-label={t('Edit {name}', { name: provider.displayName })}
+                  onClick={(event) => {
+                    opener.current = event.currentTarget
+                    setEditing(provider)
+                  }}
+                >
+                  {t('Edit')}
+                </button>
+              )}
               <ConfirmAction
                 label="Retire provider"
                 accessibleLabel={t('Retire provider {name}', { name: provider.displayName })}
@@ -151,9 +157,11 @@ function ProviderActivation({
   mutate,
   reload,
   owner,
+  addsTrust,
 }: Pick<ProviderProps, 'organizationId' | 'busy' | 'mutate' | 'reload'> & {
   provider: SsoProvider
   owner: boolean
+  addsTrust: boolean
 }) {
   const { t } = useI18n()
   const [testUrl, setTestUrl] = useState<string | null>(null)
@@ -222,60 +230,63 @@ function ProviderActivation({
           </>
         )}
       </p>
-      <fieldset className="form-fieldset" disabled={busy}>
-        <div className="form-actions">
-          {enabling && (
-            <>
-              <button
-                type="button"
-                className="button button-small"
-                aria-label={t('Test provider {name}', { name: provider.displayName })}
-                onClick={startTest}
-              >
-                {t('Test provider')}
-              </button>
-              {testUrl && !busy && (
-                <a
-                  ref={testLink}
+      {/* Testing and enabling add trust; with the setting off only disabling remains. */}
+      {(addsTrust || !enabling) && (
+        <fieldset className="form-fieldset" disabled={busy}>
+          <div className="form-actions">
+            {enabling && (
+              <>
+                <button
+                  type="button"
                   className="button button-small"
-                  href={testUrl}
-                  rel="noreferrer"
-                  data-private
+                  aria-label={t('Test provider {name}', { name: provider.displayName })}
+                  onClick={startTest}
                 >
-                  {t('Continue to identity provider')}
-                </a>
-              )}
-            </>
-          )}
-          {owner &&
-            (enabling && !canEnable ? (
-              <button
-                type="button"
-                className="button button-small"
-                aria-label={t('Enable provider {name}', { name: provider.displayName })}
-                aria-describedby={statusId}
-                disabled
-              >
-                {t('Enable provider')}
-              </button>
-            ) : (
-              <ConfirmAction
-                label={enabling ? 'Enable provider' : 'Disable provider'}
-                accessibleLabel={t(
-                  enabling ? 'Enable provider {name}' : 'Disable provider {name}',
-                  {
-                    name: provider.displayName,
-                  },
+                  {t('Test provider')}
+                </button>
+                {testUrl && !busy && (
+                  <a
+                    ref={testLink}
+                    className="button button-small"
+                    href={testUrl}
+                    rel="noreferrer"
+                    data-private
+                  >
+                    {t('Continue to identity provider')}
+                  </a>
                 )}
-                prompt={enabling ? 'Enable this provider?' : 'Disable this provider?'}
-                confirmLabel={enabling ? 'Enable provider' : 'Disable provider'}
-                busyLabel={enabling ? 'Enabling provider…' : 'Disabling provider…'}
-                failure="Could not save SSO settings."
-                onConfirm={changeActivation}
-              />
-            ))}
-        </div>
-      </fieldset>
+              </>
+            )}
+            {owner &&
+              (enabling && !canEnable ? (
+                <button
+                  type="button"
+                  className="button button-small"
+                  aria-label={t('Enable provider {name}', { name: provider.displayName })}
+                  aria-describedby={statusId}
+                  disabled
+                >
+                  {t('Enable provider')}
+                </button>
+              ) : (
+                <ConfirmAction
+                  label={enabling ? 'Enable provider' : 'Disable provider'}
+                  accessibleLabel={t(
+                    enabling ? 'Enable provider {name}' : 'Disable provider {name}',
+                    {
+                      name: provider.displayName,
+                    },
+                  )}
+                  prompt={enabling ? 'Enable this provider?' : 'Disable this provider?'}
+                  confirmLabel={enabling ? 'Enable provider' : 'Disable provider'}
+                  busyLabel={enabling ? 'Enabling provider…' : 'Disabling provider…'}
+                  failure="Could not save SSO settings."
+                  onConfirm={changeActivation}
+                />
+              ))}
+          </div>
+        </fieldset>
+      )}
     </div>
   )
 }

@@ -9,7 +9,7 @@ import { DomainError } from '@hourmere/scheduling'
 import { HTTPException } from 'hono/http-exception'
 import { sql } from 'kysely'
 import { z } from 'zod'
-import { requireSsoEnabled, type SsoCapabilities } from './sso.ts'
+import { requireSsoEnabled, type SsoCapabilities, ssoRetained } from './sso.ts'
 import { type FreshProofDeps, runWithFreshProof } from './sso-fresh-proof.ts'
 import { databaseClock } from './sso-mailbox-proof.ts'
 import { EXPECTED_ORGANIZATION_HEADER, organizationContextAccess } from './team-management.ts'
@@ -66,7 +66,10 @@ export function ssoRecoveryEnrollmentEmailJob({
     payload,
     retry: { limit: 3, delaySeconds: 5, backoff: true, maxDelaySeconds: 60 },
     handler: async (notice, { signal }) => {
-      if (!capabilities.ssoOidcEnabled && !capabilities.ssoSamlEnabled) return
+      // Recovery use stays available while every setting is off, and its notice with it.
+      // Enrollment adds trust: its notices are dropped unless a protocol is on.
+      const on = capabilities.ssoOidcEnabled || capabilities.ssoSamlEnabled
+      if (notice.kind === 'used' ? !ssoRetained(capabilities) : !on) return
       try {
         const user = await db
           .selectFrom('auth.user')

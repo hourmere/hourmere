@@ -37,7 +37,10 @@ export function SsoDomainSetup({
   mutate,
   organizationId,
   rememberDomain,
+  addsTrust = true,
 }: {
+  /** False while the operator setting is off: claims can only be retired. */
+  addsTrust?: boolean
   domains: SsoDomain[]
   busy: boolean
   mutate: SsoMutation
@@ -150,7 +153,7 @@ export function SsoDomainSetup({
 
   return (
     <>
-      <section className="panel" aria-labelledby={formId}>
+      <section className="panel" aria-labelledby={formId} hidden={!addsTrust}>
         <h2 id={formId}>{t('DNS verification')}</h2>
         <form className="stack sso-domain-form" onSubmit={submit}>
           <Field
@@ -207,27 +210,31 @@ export function SsoDomainSetup({
             <h3 className="user-content">{domain.name}</h3>
             <p aria-live="polite">{t(statusLabels.get(domain.status) ?? 'Verification unknown')}</p>
             <div className="form-actions">
-              <button
-                className="button button-small"
-                type="button"
-                disabled={busy}
-                aria-label={t('Verify domain {domain}', { domain: domain.name })}
-                onClick={() => verify(domain)}
-              >
-                {t('Verify domain')}
-              </button>
-              <button
-                className="button button-small"
-                type="button"
-                disabled={busy}
-                aria-label={t('Rotate challenge for {domain}', { domain: domain.name })}
-                onClick={(event) => {
-                  actionButton.current = event.currentTarget
-                  setConfirmation({ kind: 'rotate', domain })
-                }}
-              >
-                {t('Rotate challenge')}
-              </button>
+              {addsTrust && (
+                <>
+                  <button
+                    className="button button-small"
+                    type="button"
+                    disabled={busy}
+                    aria-label={t('Verify domain {domain}', { domain: domain.name })}
+                    onClick={() => verify(domain)}
+                  >
+                    {t('Verify domain')}
+                  </button>
+                  <button
+                    className="button button-small"
+                    type="button"
+                    disabled={busy}
+                    aria-label={t('Rotate challenge for {domain}', { domain: domain.name })}
+                    onClick={(event) => {
+                      actionButton.current = event.currentTarget
+                      setConfirmation({ kind: 'rotate', domain })
+                    }}
+                  >
+                    {t('Rotate challenge')}
+                  </button>
+                </>
+              )}
               <button
                 className="button button-small"
                 type="button"

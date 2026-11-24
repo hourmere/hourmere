@@ -64,8 +64,13 @@ it('never schedules or accesses storage/DNS while hard-off, including queued rep
   })
   expect(await recheckSsoDomains(options)).toBe(0)
   expect(resolveTxt).not.toHaveBeenCalled()
+  // A setting turned off keeps the worker scheduled and running, so verification stays current.
+  const settingOff = { ...options, capabilities: { ...OFF, ssoOperatorSetting: true } }
+  expect(ssoDomainRecheckJob(settingOff).schedule).toEqual({ cron: '*/5 * * * *', payload: {} })
+  await expect(recheckSsoDomains(settingOff)).rejects.toThrow('storage accessed')
   const server = await readFile(new URL('./server.ts', import.meta.url), 'utf8')
-  expect(server).toContain('...(ssoOidcEnabled || ssoSamlEnabled ? [] : [SSO_DOMAIN_RECHECK_JOB])')
+  // The running server always passes its operator setting, so the schedule stays on.
+  expect(server).toContain('...(ssoRetained(sso) ? [] : [SSO_DOMAIN_RECHECK_JOB])')
   expect(server).toContain('ssoDomainRecheckJob({')
 })
 

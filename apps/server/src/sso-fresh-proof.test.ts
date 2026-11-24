@@ -587,7 +587,7 @@ describe.skipIf(!databaseUrl)('SSO fresh proof', () => {
         "from './sso-fresh-proof.ts'",
       )
     const production = readFileSync(new URL('./server.ts', import.meta.url), 'utf8')
-    expect(production).toContain('const ssoOidcEnabled = false')
+    expect(production).toContain('ssoOidcEnabled: config.SSO_OIDC_ENABLED,')
     expect(production).toContain('const ssoSamlEnabled = false')
   })
   it('expires mailbox proof at its exact fresh-administration deadline', () => expiryScenario(real))
