@@ -101,7 +101,6 @@ export {
   type HostBookingDetail,
   type InviteeInput,
   type ListBookingsInput,
-  latestBookingId,
   listHostBookings,
   MAX_GUESTS,
   MAX_PAGE_SIZE,

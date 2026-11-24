@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { Db } from '@hourmere/db'
-import { latestBookingId } from '@hourmere/scheduling'
+import { latestBookingId } from '@hourmere/scheduling/booking-chain'
 import { sql } from 'kysely'
 import { z } from 'zod'
 import { type CalendarDeps, getMicrosoftCalendarToken } from './index.ts'

@@ -12,7 +12,7 @@ import {
 } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import { recordTeamWriteOrganizationLock, teamWriteTransaction } from '@hourmere/db/team-write'
-import { type Expression, sql, type Transaction } from 'kysely'
+import { sql, type Transaction } from 'kysely'
 import { parsePhoneNumberFromString } from 'libphonenumber-js/max'
 import { z } from 'zod'
 import {
@@ -29,6 +29,7 @@ import {
   toInstant,
   toIso,
 } from './availability.ts'
+import { latestBookingId } from './booking-chain.ts'
 import { bookingPageQuery, encodeBookingCursor, type ListBookingsInput } from './booking-page.ts'
 import {
   assertInviteeChangeOpen,
@@ -362,25 +363,6 @@ async function resolveManagedTarget(db: Db, hash: Buffer): Promise<ManagedTarget
 async function latestInChain(db: Db, id: string): Promise<string> {
   const row = await db.selectNoFrom(latestBookingId(id).as('id')).executeTakeFirst()
   return row?.id ?? id
-}
-
-/** A scalar subquery, so callers can read the current booking in the same snapshot. */
-export function latestBookingId(id: string | Expression<string>, organizationId?: string) {
-  return sql<string>`(SELECT id FROM ${latestBookingInChain(id, organizationId)} AS latest)`
-}
-
-export function latestBookingInChain(id: string | Expression<string>, organizationId?: string) {
-  const scope =
-    organizationId === undefined ? sql`` : sql`WHERE b.organization_id = ${organizationId}`
-  return sql<{ id: string; depth: number }>`(
-    WITH RECURSIVE chain (id, depth) AS (
-      SELECT ${id}::uuid, 0
-      UNION ALL
-      SELECT b.id, c.depth + 1
-        FROM bookings b JOIN chain c ON b.rescheduled_from_id = c.id
-        ${scope}
-    ) CYCLE id SET is_cycle USING path
-    SELECT id, depth FROM chain WHERE NOT is_cycle ORDER BY depth DESC, id LIMIT 1)`
 }
 
 /**
