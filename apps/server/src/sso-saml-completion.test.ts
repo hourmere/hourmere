@@ -5,6 +5,8 @@ import {
   createAuthPool,
   createBrowserSession,
   createCallerResolver,
+  recordSsoAdmissionRemoval,
+  type SignupPolicy,
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
@@ -28,6 +30,7 @@ import { ssoRecoveryEnrollmentRoutes } from './routes/sso-recovery-enrollment.ts
 import { productionSsoCapabilities } from './server.ts'
 import type { SsoCapabilities } from './sso.ts'
 import { sealSsoProviderConfiguration } from './sso-configuration.ts'
+import * as mailboxProofModule from './sso-mailbox-proof.ts'
 import {
   databaseClock,
   deliverMailboxProof,
@@ -48,6 +51,7 @@ const idpOrigin = 'https://login.example.com'
 const ssoEndpoint = `${idpOrigin}/saml`
 const startPath = '/api/auth/sign-in/sso'
 const completePath = '/api/auth/sso/saml2/complete'
+const acceptInvitationPath = '/api/auth/organization/accept-invitation'
 const providersPath = '/api/v1/team/sso/providers'
 const recoveryUsePath = '/api/v1/team/sso/recovery/use'
 const errorPath = '/sign-in?error=unable_to_create_session'
@@ -163,8 +167,9 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
   function instance(
     capabilities: SsoCapabilities = samlOnly,
     mailboxJobs?: MailboxProofEmailPayload[],
+    signupPolicy: SignupPolicy = signup,
   ) {
-    const deps = { db, capabilities, configurationKey, session: { secret } }
+    const deps = { db, capabilities, configurationKey, session: { secret }, signup: signupPolicy }
     const readSession = async (headers: Headers) =>
       (
         await auth.api.getSession({
@@ -209,7 +214,6 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
         ...deps,
         privateTargets: [],
         send: async () => expect.unreachable('The IdP uses a local signed fixture'),
-        signup,
         readSession: async () => expect.unreachable('Sign-in does not read a session'),
       }),
       ssoSamlSignIn: samlSignInRoutes({ ...deps, readSession }),
@@ -548,9 +552,13 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
     }
   }
 
-  function management(organizationId = team.team, capabilities: SsoCapabilities = samlOnly) {
+  function management(
+    organizationId = team.team,
+    capabilities: SsoCapabilities = samlOnly,
+    signupPolicy: SignupPolicy = signup,
+  ) {
     const jobs: MailboxProofEmailPayload[] = []
-    const request = instance(capabilities, jobs)
+    const request = instance(capabilities, jobs, signupPolicy)
     const json = (
       path: string,
       cookies: string[],
@@ -633,7 +641,7 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
       }
     }
 
-    return { request, json, deliverProof, consumeProof, mailboxProof, withMailbox }
+    return { request, json, jobs, deliverProof, consumeProof, mailboxProof, withMailbox }
   }
 
   const receipts = (id: string) =>
@@ -684,6 +692,78 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
       attempt,
       'link',
     )
+  }
+
+  async function stageMailbox(request: App, provider: Provider, options?: SignedResponseOptions) {
+    const attempt = await readStart(provider, await signIn(provider.id, request))
+    const signed = await signedResponse(attempt, options)
+    const response = await acs(provider.id, signed.encoded, attempt.relayState, request)
+    expect(response.status).toBe(303)
+    const location = new URL(response.headers.get('location') ?? '', publicUrl)
+    expect(location.origin + location.pathname).toBe(`${publicUrl}/app/mailbox-proof`)
+    expect(location.search).toBe('')
+    const fragment = new URLSearchParams(location.hash.slice(1))
+    const id = fragment.get('attempt')
+    if (!id) throw new Error('Missing pending mailbox attempt')
+    expect([...fragment.keys()].sort()).toEqual(['attempt', 'saml'])
+    expect(fragment.get('saml')).toBe('1')
+    expect(response.headers.getSetCookie()).toHaveLength(1)
+    const cookies = mergeCookies(attempt.cookies, cookiesFrom(response))
+    return { id, location, cookies, response }
+  }
+
+  type PendingMailbox = Awaited<ReturnType<typeof stageMailbox>>
+
+  async function proveMailbox(
+    { deliverProof, consumeProof }: ReturnType<typeof management>,
+    { id, cookies }: PendingMailbox,
+  ) {
+    const { token } = await deliverProof(id, cookies)
+    expect((await consumeProof(id, cookies, token)).status).toBe(200)
+  }
+
+  function acceptInvitation(
+    request: App,
+    pending: PendingMailbox,
+    invitationId: string,
+    cookies = pending.cookies,
+  ) {
+    return request.request(new URL(acceptInvitationPath, publicUrl), {
+      method: 'POST',
+      headers: {
+        origin: publicUrl,
+        'content-type': 'application/json',
+        'X-Hourmere-Sso-Attempt': pending.id,
+        cookie: cookies.filter((cookie) => !cookie.includes('hourmere.saml_return.')).join('; '),
+      },
+      body: JSON.stringify({ invitationId }),
+    })
+  }
+
+  async function invite(
+    fixture: SsoFixture,
+    email: string,
+    changes: {
+      organizationId?: string
+      inviterId?: string
+      expiresAt?: string
+      role?: string
+    } = {},
+  ) {
+    const { id } = await db
+      .insertInto('auth.invitation')
+      .values({
+        organizationId: fixture.team,
+        inviterId: fixture.owner,
+        role: 'member',
+        status: 'pending',
+        expiresAt: at(300),
+        email,
+        ...changes,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    return id
   }
 
   it('requires independent mailbox proof and explicit consent in the original SAML linking browser and session', async () => {
@@ -1438,11 +1518,10 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
     expect(await identityEffects()).toEqual(before)
   })
 
-  it('refuses a different subject, NameID scope or asserted mailbox', async () => {
+  it('refuses an unstable subject, a different NameID scope or an unverified mailbox domain', async () => {
     const provider = await linkedProvider()
     const before = await identityEffects()
     for (const options of [
-      { subject: `unlinked-${randomUUID()}` },
       { subjectFormat: transient },
       { nameQualifier: 'https://other-idp.example.com' },
       { spNameQualifier: 'https://other-sp.example.com' },
@@ -1471,20 +1550,7 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
       db.updateTable('auth.user').set({ email }).where('id', '=', fixture.otherOwner).execute()
 
     async function changedMailbox() {
-      const attempt = await readStart(provider, await signIn(provider.id, request))
-      const signed = await signedResponse(attempt, { mailbox: assertedMailbox })
-      const response = await acs(provider.id, signed.encoded, attempt.relayState, request)
-      expect(response.status).toBe(303)
-      const location = new URL(response.headers.get('location') ?? '', publicUrl)
-      expect(location.origin + location.pathname).toBe(`${publicUrl}/app/mailbox-proof`)
-      expect(location.search).toBe('')
-      const fragment = new URLSearchParams(location.hash.slice(1))
-      const id = fragment.get('attempt')
-      if (!id) throw new Error('Missing pending mailbox attempt')
-      expect([...fragment.keys()].sort()).toEqual(['attempt', 'saml'])
-      expect(fragment.get('saml')).toBe('1')
-      expect(response.headers.getSetCookie()).toHaveLength(1)
-      const staged = { id, location, cookies: mergeCookies(attempt.cookies, cookiesFrom(response)) }
+      const staged = await stageMailbox(request, provider, { mailbox: assertedMailbox })
       expect(await identityEffects()).toEqual(before)
       expect(await storedLinks(provider)).toEqual(oldLink)
       await expectRefusedCompletion(await complete(staged, { request }))
@@ -1532,6 +1598,414 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
     await expectRefusedCompletion(await complete(free, { request }))
   })
 
+  it.each(['before the pending insert', 'during the pending insert'])(
+    'classifies a changed SAML mailbox deadline hit %s as attempt_expired',
+    async (phase) => {
+      const provider = await linkedProvider()
+      const attempt = await start(provider)
+      const signed = await signedResponse(attempt, {
+        mailbox: `deadline-${randomUUID()}@${verifiedDomain}`,
+        sessionLifetime: phase === 'during the pending insert' ? 2 : 60,
+      })
+      const before = await identityEffects()
+      const state = await protocolEffects(provider.id)
+      if (phase === 'before the pending insert') {
+        if (!signed.sessionDeadline) expect.unreachable('Expected a signed session deadline')
+        vi.spyOn(mailboxProofModule, 'databaseClock').mockResolvedValueOnce(
+          signed.sessionDeadline.toString(),
+        )
+      } else {
+        // Run before the installed attempt guard, which must refuse the now-expired write.
+        await sql`
+          CREATE FUNCTION test_wait_for_saml_mailbox_expiry() RETURNS trigger
+          LANGUAGE plpgsql AS $$
+          BEGIN
+            IF NEW.requires_mailbox THEN
+              PERFORM pg_sleep_until(NEW.expires_at);
+            END IF;
+            RETURN NEW;
+          END;
+          $$;
+          CREATE TRIGGER a_test_wait_for_saml_mailbox_expiry
+          BEFORE INSERT ON sso_attempts FOR EACH ROW
+          EXECUTE FUNCTION test_wait_for_saml_mailbox_expiry();
+        `.execute(db)
+      }
+      try {
+        expectRefusedAcs(await acs(provider.id, signed.encoded, attempt.relayState))
+      } finally {
+        if (phase === 'during the pending insert')
+          await sql`
+            DROP TRIGGER a_test_wait_for_saml_mailbox_expiry ON sso_attempts;
+            DROP FUNCTION test_wait_for_saml_mailbox_expiry();
+          `.execute(db)
+      }
+      expect(await identityEffects()).toEqual(before)
+      expect(await protocolEffects(provider.id)).toEqual(state)
+      const failure = await db
+        .selectFrom('audit_events')
+        .select(['details'])
+        .where('action', '=', 'sso_authentication.failed')
+        .where('target_id', '=', provider.id)
+        .executeTakeFirstOrThrow()
+      expect(failure.details).toMatchObject({
+        method: 'saml',
+        reason: 'attempt_expired',
+        correlationId: attempt.requestId.slice(1),
+      })
+    },
+  )
+
+  it('gives unlinked SAML subjects the same mailbox handoff with or without an existing account', async () => {
+    const email = `unlinked-${randomUUID()}@${verifiedDomain}`
+    const provider = await enabledProvider({ assertedMailbox: email })
+    const fixture = await seedTeam()
+    const { request, jobs, deliverProof, consumeProof } = management()
+    const before = await identityEffects()
+    const free = await stageMailbox(request, provider)
+    await db.updateTable('auth.user').set({ email }).where('id', '=', fixture.otherOwner).execute()
+    const existing = await stageMailbox(request, provider)
+
+    async function publicOutcome({ id, response }: PendingMailbox) {
+      const setCookie = response.headers.getSetCookie()[0] ?? ''
+      expect(setCookie).toMatch(/^__Secure-hourmere\.saml_admission\./)
+      expect(setCookie).toContain('Path=/api/auth;')
+      expect(setCookie).toContain('HttpOnly; Secure; SameSite=Strict')
+      return {
+        status: response.status,
+        body: await response.text(),
+        location: response.headers.get('location')?.replace(id, '<attempt>'),
+        contentType: response.headers.get('content-type'),
+        cacheControl: response.headers.get('cache-control'),
+        referrerPolicy: response.headers.get('referrer-policy'),
+        cookieOptions: setCookie
+          .slice(setCookie.indexOf(';'))
+          .replace(/Expires=[^;]+/i, 'Expires=DATE'),
+      }
+    }
+    expect(await publicOutcome(free)).toEqual(await publicOutcome(existing))
+    expect(jobs).toEqual([])
+    for (const result of [free, existing])
+      await expectRefusedCompletion(await complete(result, { request }))
+    expect(await identityEffects()).toEqual(before)
+
+    const freeMail = await deliverProof(free.id, free.cookies)
+    const existingMail = await deliverProof(existing.id, existing.cookies)
+    const message = (email: typeof freeMail, id: string) => ({
+      to: email.to,
+      subject: email.subject,
+      text: email.text.replaceAll(id, '<attempt>').replaceAll(email.token, '<token>'),
+    })
+    expect(freeMail.to).toBe(email)
+    expect(message(freeMail, free.id)).toEqual(message(existingMail, existing.id))
+    for (const [pending, proof] of [
+      [free, freeMail],
+      [existing, existingMail],
+    ] as const) {
+      expect((await consumeProof(pending.id, pending.cookies, proof.token)).status).toBe(200)
+      const completed = await complete(pending, { request })
+      expect(completed.status).toBe(200)
+      expect(await completed.json()).toEqual({ status: 'link_required' })
+      expect(completed.headers.getSetCookie().join(';')).not.toContain('better-auth.session_token')
+      await expectRefusedCompletion(await complete(pending, { request }))
+    }
+    expect(await identityEffects()).toEqual({
+      ...before,
+      mailboxTokens: String(Number(before.mailboxTokens) + 2),
+    })
+    expect(await storedLinks(provider)).toEqual([])
+    expect(
+      await db.selectFrom('auth.user').select('id').where('email', '=', email).execute(),
+    ).toEqual([{ id: fixture.otherOwner }])
+  })
+
+  async function jitFixture() {
+    const fixture = await seedTeam()
+    const name = `jit-${randomUUID()}.example.com`
+    const claim = await db
+      .insertInto('sso_domains')
+      .values(claimedDomainValues(fixture.team, name))
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await db
+      .insertInto('sso_policies')
+      .values({ organization_id: fixture.team, admission: 'jit' })
+      .execute()
+    const provider = await enabledProvider({
+      organizationId: fixture.team,
+      domainId: claim.id,
+      assertedMailbox: `admit@${name}`,
+    })
+    return { fixture, provider }
+  }
+
+  it('admits a proved SAML subject through JIT once in its original browser with open signup', async () => {
+    const { fixture, provider } = await jitFixture()
+    const manager = management(fixture.team)
+    const { request } = manager
+    const result = await stageMailbox(request, provider)
+    await proveMailbox(manager, result)
+    const before = await identityEffects()
+    const beforeAttempts = await protocolEffects(provider.id)
+    const wrongBrowser = mergeCookies(result.cookies, [
+      `${bindingCookie}=${randomBytes(32).toString('base64url')}`,
+    ])
+    await expectRefusedCompletion(await complete(result, { request, cookies: wrongBrowser }))
+    const closed = instance(samlOnly, undefined, { mode: 'closed', allowedDomains: [] })
+    const denied = await complete(result, { request: closed })
+    expect(denied.status).toBe(403)
+    expect(await denied.json()).toEqual({ error: 'signup_disabled' })
+    expect(denied.headers.getSetCookie()).toEqual([])
+    expect(await identityEffects()).toEqual(before)
+    expect(await protocolEffects(provider.id)).toEqual(beforeAttempts)
+
+    const attempts = await Promise.all([
+      complete(result, { request }),
+      complete(result, { request }),
+    ])
+    expect(attempts.map(({ status }) => status).sort()).toEqual([303, 400])
+    const success = attempts.find((response) => response.status === 303)
+    const refused = attempts.find((response) => response.status === 400)
+    if (!success || !refused) expect.unreachable('One JIT completion should succeed')
+    expect(success.headers.get('location')).toBe(returnPath)
+    await expectRefusedCompletion(refused)
+    const session = cookiesFrom(success).find((cookie) => cookie.includes('session_token='))
+    if (!session) expect.unreachable('JIT admission should issue a session')
+    const login = await auth.api.getSession({
+      headers: new Headers({ cookie: session }),
+      query: { disableRefresh: true, disableCookieCache: true },
+    })
+    if (!login) expect.unreachable('JIT admission should create a valid session')
+    expect(login.user).toMatchObject({ email: provider.mailbox, emailVerified: true })
+    expect(login.session).toMatchObject({ activeOrganizationId: fixture.team })
+    expect(await storedLinks(provider)).toEqual([
+      expect.objectContaining({
+        user_id: login.user.id,
+        issuer: provider.issuer,
+        subject: provider.subject,
+        proven_email: provider.mailbox,
+      }),
+    ])
+    expect(
+      await db
+        .selectFrom('sso_browser_proofs')
+        .select(['user_id', 'session_id'])
+        .where('provider_id', '=', provider.id)
+        .execute(),
+    ).toEqual([{ user_id: login.user.id, session_id: login.session.id }])
+    expect(
+      await db
+        .selectFrom('auth.member as member')
+        .leftJoin(
+          'personal_organizations as personal',
+          'personal.organization_id',
+          'member.organizationId',
+        )
+        .select(['member.organizationId', 'member.role', 'personal.user_id'])
+        .where('member.userId', '=', login.user.id)
+        .orderBy('member.role')
+        .execute(),
+    ).toEqual([
+      { organizationId: fixture.team, role: 'member', user_id: null },
+      { organizationId: expect.any(String), role: 'owner', user_id: login.user.id },
+    ])
+    const events = await db
+      .selectFrom('audit_events')
+      .select(['action', 'details'])
+      .where('organization_id', '=', fixture.team)
+      .where('details', '@>', JSON.stringify({ correlationId: result.id }))
+      .orderBy('action')
+      .execute()
+    const details = { method: 'saml', providerId: provider.id, correlationId: result.id }
+    expect(events).toMatchObject([
+      { action: 'sso_authentication.succeeded', details },
+      { action: 'sso_jit.admitted', details },
+      { action: 'sso_jit.refused', details: { ...details, reason: 'unclassified' } },
+      { action: 'sso_link.linked', details },
+    ])
+  })
+
+  it('refuses an expired SAML admission result after real mailbox proof', async () => {
+    const { fixture, provider } = await jitFixture()
+    const manager = management(fixture.team)
+    const result = await stageMailbox(manager.request, provider)
+    await proveMailbox(manager, result)
+    // Age the proved attempt and its consumed token together in the isolated test database.
+    await db.transaction().execute(async (trx) => {
+      await sql`SET LOCAL session_replication_role = replica`.execute(trx)
+      const earlier = sql`interval '10 minutes'`
+      await trx
+        .updateTable('sso_attempts')
+        .set({
+          created_at: sql`created_at - ${earlier}`,
+          expires_at: sql`expires_at - ${earlier}`,
+          mailbox_proven_at: sql`mailbox_proven_at - ${earlier}`,
+          mailbox_proof_expires_at: sql`mailbox_proof_expires_at - ${earlier}`,
+        })
+        .where('id', '=', result.id)
+        .execute()
+      await trx
+        .updateTable('sso_mailbox_tokens')
+        .set({
+          issued_at: sql`issued_at - ${earlier}`,
+          expires_at: sql`expires_at - ${earlier}`,
+          consumed_at: sql`consumed_at - ${earlier}`,
+        })
+        .where('attempt_id', '=', result.id)
+        .execute()
+    })
+    const before = await identityEffects()
+    const state = await protocolEffects(provider.id)
+    await expectRefusedCompletion(await complete(result, { request: manager.request }))
+    expect(await identityEffects()).toEqual(before)
+    expect(await protocolEffects(provider.id)).toEqual(state)
+  })
+
+  it('accepts only a current matching member invitation explicitly and preserves the closed-signup exception', async () => {
+    const provider = await enabledProvider({
+      assertedMailbox: `invited-${randomUUID()}@${verifiedDomain}`,
+    })
+    const manager = management(team.team, samlOnly, { mode: 'closed', allowedDomains: [] })
+    const { request } = manager
+    const result = await stageMailbox(request, provider)
+    const eligible = await invite(team, provider.mailbox)
+    await expectRefusedCompletion(await acceptInvitation(request, result, eligible))
+    await proveMailbox(manager, result)
+    const before = await identityEffects()
+    const state = await protocolEffects(provider.id)
+
+    const waiting = await complete(result, { request })
+    expect(waiting.status).toBe(409)
+    expect(await waiting.json()).toEqual({ error: 'sso_invitation_required' })
+    const differentBrowser = mergeCookies(result.cookies, [
+      `${bindingCookie}=${randomBytes(32).toString('base64url')}`,
+    ])
+    await expectRefusedCompletion(
+      await acceptInvitation(request, result, eligible, differentBrowser),
+    )
+    const ineligible = [
+      await invite(team, provider.mailbox, {
+        organizationId: team.otherTeam,
+        inviterId: team.otherOwner,
+      }),
+      await invite(team, provider.mailbox, { inviterId: team.otherOwner }),
+      await invite(team, provider.mailbox, { role: 'admin' }),
+      await invite(team, provider.mailbox, { expiresAt: at(-10) }),
+      await invite(team, `another-${randomUUID()}@${verifiedDomain}`),
+    ]
+    for (const invitationId of ineligible) {
+      const denied = await acceptInvitation(request, result, invitationId)
+      expect(denied.status).toBe(403)
+      expect(await denied.json()).toEqual({ error: 'team_management_access_denied' })
+    }
+    expect(await identityEffects()).toEqual(before)
+    expect(await protocolEffects(provider.id)).toEqual(state)
+    expect(
+      await db
+        .selectFrom('auth.invitation')
+        .select('status')
+        .where('id', 'in', [...ineligible, eligible])
+        .where('status', '!=', 'pending')
+        .execute(),
+    ).toEqual([])
+
+    const accepted = await acceptInvitation(request, result, eligible)
+    expect(accepted.status).toBe(200)
+    expect(await accepted.json()).toMatchObject({
+      invitation: { id: eligible, status: 'accepted', role: 'member' },
+      member: { organizationId: team.team, role: 'member' },
+    })
+    expect(accepted.headers.getSetCookie().join(';')).toContain('better-auth.session_token')
+    expect(await storedLinks(provider)).toEqual([
+      expect.objectContaining({ subject: provider.subject, proven_email: provider.mailbox }),
+    ])
+    await expectRefusedCompletion(await acceptInvitation(request, result, eligible))
+    await expectRefusedCompletion(await complete(result, { request }))
+  })
+
+  it('waits for concurrent team removal and honors its tombstone after account deletion', async () => {
+    const { fixture, provider } = await jitFixture()
+    await db
+      .updateTable('auth.user')
+      .set({ email: provider.mailbox })
+      .where('id', '=', fixture.member)
+      .execute()
+    const staleInvite = await invite(fixture, provider.mailbox)
+    const manager = management(fixture.team)
+    const { request } = manager
+    const result = await stageMailbox(request, provider)
+    await proveMailbox(manager, result)
+    const state = await protocolEffects(provider.id)
+    let completing: Promise<Response> | undefined
+    try {
+      await db.transaction().execute(async (trx) => {
+        await trx
+          .selectFrom('auth.user')
+          .select('id')
+          .where('id', '=', fixture.member)
+          .forUpdate()
+          .execute()
+        await trx
+          .selectFrom('auth.organization')
+          .select('id')
+          .where('id', '=', fixture.team)
+          .forUpdate()
+          .execute()
+        await recordSsoAdmissionRemoval(trx, {
+          organizationId: fixture.team,
+          userId: fixture.member,
+        })
+        await trx.deleteFrom('auth.member').where('id', '=', fixture.memberMember).execute()
+        await trx.deleteFrom('auth.user').where('id', '=', fixture.member).execute()
+        const { pid } = await trx
+          .selectNoFrom(sql<number>`pg_backend_pid()`.as('pid'))
+          .executeTakeFirstOrThrow()
+        completing = Promise.resolve(complete(result, { request }))
+        await vi.waitFor(
+          async () => {
+            const { rows } = await owned.pool.query<{ blocked: boolean }>(
+              `SELECT EXISTS (SELECT FROM pg_stat_activity WHERE datname = current_database()
+               AND $1 = ANY(pg_blocking_pids(pid))) AS blocked`,
+              [pid],
+            )
+            expect(rows[0]?.blocked).toBe(true)
+          },
+          { timeout: 2500, interval: 20 },
+        )
+      })
+    } finally {
+      await Promise.allSettled([completing])
+    }
+    if (!completing) expect.unreachable('Expected an admission waiting on removal')
+    for (const denied of [await completing, await acceptInvitation(request, result, staleInvite)]) {
+      expect(denied.status).toBe(403)
+      expect(await denied.json()).toEqual({ error: 'team_management_access_denied' })
+      expect(denied.headers.getSetCookie()).toEqual([])
+    }
+    const tombstone = () =>
+      db
+        .selectFrom('scim_membership_blocks')
+        .select(['cleared_at', 'kind', 'source', 'user_id'])
+        .where('organization_id', '=', fixture.team)
+        .where('identity_email', '=', provider.mailbox)
+        .executeTakeFirstOrThrow()
+    expect(await tombstone()).toEqual({
+      cleared_at: null,
+      kind: 'removal',
+      source: 'local',
+      user_id: null,
+    })
+    expect(
+      await db.selectFrom('auth.user').select('id').where('email', '=', provider.mailbox).execute(),
+    ).toEqual([])
+    expect(await storedLinks(provider)).toEqual([])
+    expect(await protocolEffects(provider.id)).toEqual(state)
+
+    const freshInvite = await invite(fixture, provider.mailbox)
+    expect((await acceptInvitation(request, result, freshInvite)).status).toBe(200)
+    expect((await tombstone()).cleared_at).toBeInstanceOf(Date)
+  })
+
   it('keeps the SAML routes hard-off with no writes and OIDC sign-in available', async () => {
     const provider = await linkedProvider()
     const attempt = await start(provider)
@@ -1551,16 +2025,27 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
         SSO_SAML_ENABLED: 'true',
       }),
     )
+    const admissionProvider = await enabledProvider({
+      assertedMailbox: `off-${randomUUID()}@${verifiedDomain}`,
+    })
+    const manager = management()
+    const admission = await stageMailbox(manager.request, admissionProvider)
+    await proveMailbox(manager, admission)
+    const invitationId = await invite(team, admissionProvider.mailbox)
     const { request: off, json, withMailbox } = management(team.team, capabilities)
     const member = await browserSession(team.member)
     const before = await identityEffects()
     const state = await protocolEffects(provider.id)
+    const admissionState = await protocolEffects(admissionProvider.id)
     const attemptIds = () => db.selectFrom('sso_attempts').select('id').orderBy('id').execute()
     const attemptsBefore = await attemptIds()
     for (const response of [
+      await signIn(admissionProvider.id, off),
       await acs(provider.id, freshResponse.encoded, fresh.relayState, off),
       await off.request(result.location, { headers: { cookie: result.cookies.join('; ') } }),
       await complete(result, { request: off }),
+      await complete(admission, { request: off }),
+      await acceptInvitation(off, admission, invitationId),
       await json(linkPath(provider), member.cookies, {}),
     ]) {
       expect(response.status).toBe(404)
@@ -1569,7 +2054,16 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
     }
     expect(await identityEffects()).toEqual(before)
     expect(await protocolEffects(provider.id)).toEqual(state)
+    expect(await protocolEffects(admissionProvider.id)).toEqual(admissionState)
     expect(await attemptIds()).toEqual(attemptsBefore)
+    expect(await storedLinks(admissionProvider)).toEqual([])
+    expect(
+      await db
+        .selectFrom('auth.invitation')
+        .select('status')
+        .where('id', '=', invitationId)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ status: 'pending' })
 
     const oidc = await providerId()
     const issuer = `${idpOrigin}/oidc`
