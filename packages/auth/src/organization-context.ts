@@ -202,7 +202,8 @@ export async function organizationContext(
     .executeTakeFirst()
   if (!live) throw changed()
   const active =
-    live.activeOrganizationId && (await isMember(db, session.user.id, live.activeOrganizationId))
+    live.activeOrganizationId &&
+    (await isMember(db, session.user.id, live.activeOrganizationId, scimResourcesEnabled))
       ? live.activeOrganizationId
       : await ensurePersonalOrganization(db, session.user.id)
   if (expectedId !== active.toLowerCase()) {

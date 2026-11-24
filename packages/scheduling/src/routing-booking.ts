@@ -29,11 +29,12 @@ export interface RoutingBookingSnapshot {
 
 /** Read provenance and current authorization from the same database snapshot. */
 export async function readBookingRoutingSnapshot(
-  { db, principal }: ServiceContext,
+  { db, principal, scimResourcesEnabled }: ServiceContext,
   bookingId: string,
 ): Promise<RoutingBookingSnapshot | null | undefined> {
   const { id: userId } = principal.user
   const { id: organizationId } = principal.organization
+  const managedChildren = scimResourcesEnabled === true
   let query = db
     .selectFrom('auth.member as member')
     .innerJoin('auth.user as actor', 'actor.id', 'member.userId')
@@ -57,7 +58,7 @@ export async function readBookingRoutingSnapshot(
     .where('member.organizationId', '=', organizationId)
     .where('member.userId', '=', userId)
     .where('actor.emailVerified', '=', true)
-    .where((eb) => eb.not(scimSuspended(organizationId, userId)))
+    .where((eb) => eb.not(scimSuspended(organizationId, userId, managedChildren)))
 
   if (principal.kind === 'session') {
     const { sessionId } = principal
@@ -88,7 +89,11 @@ export async function readBookingRoutingSnapshot(
                         activeOrganization,
                       ),
                     )
-                    .where((eb) => eb.not(scimSuspended(eb.ref('active.organizationId'), userId))),
+                    .where((eb) =>
+                      eb.not(
+                        scimSuspended(eb.ref('active.organizationId'), userId, managedChildren),
+                      ),
+                    ),
                 ),
               ),
             ]),
@@ -200,7 +205,7 @@ export interface RoutingBookingClaim {
 export async function findRoutingBookingEvent(
   db: Db,
   { eventTypeId, organizationId }: RoutingBookingReceipt,
-  options?: { lock?: boolean },
+  options?: { lock?: boolean; scimResourcesEnabled?: boolean | undefined },
 ) {
   try {
     const event = await findOneTimeEventType(db, eventTypeId, options)

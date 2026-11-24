@@ -32,8 +32,10 @@ describe.skipIf(!serverUrl)('SCIM identity constraint coverage', () => {
     try {
       // Drop 0073's User primary key without its later Group source foreign key.
       // The release schema tests that foreign key in the Group migration's coverage suite.
+      // The roster source index of 0184 needs the column that 0183 adds.
+      const later = ['0183_scim_groups.sql', '0184_scim_group_members.sql']
       for (const file of await readdir(migrationsDir)) {
-        if (file.endsWith('.sql') && file !== '0183_scim_groups.sql') {
+        if (file.endsWith('.sql') && !later.includes(file)) {
           await copyFile(join(migrationsDir, file), join(directory, file))
         }
       }

@@ -11,7 +11,11 @@ import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const migration = '0073_scim_identity.sql'
-const dependentMigrations = ['0181_scim_team_hierarchy.sql', '0183_scim_groups.sql']
+const dependentMigrations = [
+  '0181_scim_team_hierarchy.sql',
+  '0183_scim_groups.sql',
+  '0184_scim_group_members.sql',
+]
 
 async function records(pool: pg.Pool, tables?: { schema: string; name: string }[]) {
   const selected =

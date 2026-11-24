@@ -254,7 +254,12 @@ export async function createMeetingPoll(
     // Public booking's host phase: an unlocked read names the hosts, whose sorted booking
     // locks precede the event share lock. A booking of these hosts that committed earlier
     // is visible to the availability check below; a later one waits for this commit.
-    const hostUserIds = (await findOneTimeEventType(trx, named.id))?.hostUserIds ?? []
+    const hostUserIds =
+      (
+        await findOneTimeEventType(trx, named.id, {
+          scimResourcesEnabled: ctx.scimResourcesEnabled,
+        })
+      )?.hostUserIds ?? []
     await lockHosts(trx, hostUserIds)
     const event = await trx
       .selectFrom('event_types')

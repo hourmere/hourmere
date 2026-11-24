@@ -1,0 +1,7 @@
+{
+  "migration": "0184_scim_group_members.sql",
+  "objects": {
+    "index public.scim_team_managed_memberships.scim_team_managed_memberships_scim_user_idx": "CREATE INDEX scim_team_managed_memberships_scim_user_idx ON public.scim_team_managed_memberships USING btree (scim_user_id)",
+    "index public.scim_team_managed_memberships.scim_team_managed_memberships_suspended_idx": "CREATE INDEX scim_team_managed_memberships_suspended_idx ON public.scim_team_managed_memberships USING btree (child_organization_id, user_id) WHERE (suspended_at IS NOT NULL)"
+  }
+}

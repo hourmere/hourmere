@@ -355,7 +355,8 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
     const person = await entry(s)
     const ordinary = await f.eventType(s.organizationId, s.userId, { slug: 'ordinary' })
     const existing = kind === 'cancellation' ? await book(s, 'cancel@example.test') : undefined
-    const calendar = kind === 'calendar sync' ? await f.calendarBusy(s.userId, []) : undefined
+    const calendar =
+      kind === 'calendar sync' ? await f.calendarBusy(s.userId, [], { now: s.now }) : undefined
     const pause = pausedAvailability()
     const pending = scan({ ...s.ctx, db: pause.db }, s.eventTypeId)
     pending.catch(() => {})
@@ -1591,7 +1592,7 @@ describe.skipIf(!serverUrl)('waitlist discovery and booking attribution', () => 
       JSON.stringify(weekdays({ start: '09:00', end: '11:00' })),
       s.scheduleId,
     ])
-    const busy = await f.calendarBusy(s.userId, [[START, END]])
+    const busy = await f.calendarBusy(s.userId, [[START, END]], { now: s.now })
     expect(await scanWaitlistEvent(s.ctx, s.eventTypeId)).toBe(0)
     await testDb.pool.query('DELETE FROM calendar_busy WHERE calendar_id=$1', [busy.calendarId])
     expect(await scanWaitlistEvent(s.ctx, s.eventTypeId)).toBe(1)

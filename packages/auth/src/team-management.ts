@@ -132,6 +132,7 @@ export async function checkTeamManagementAccess(
     allowMemberRead,
     context?.includeRecoveryOwner,
     context?.includeScimManaged,
+    principal.scimResourcesEnabled === true,
   )
   const { personal, role } = membership
 
@@ -148,7 +149,12 @@ export async function checkTeamManagementAccess(
     // membership is ineffective. Recompute that context from current database facts.
     const activeMembership =
       session.activeOrganizationId && uuid(session.activeOrganizationId)
-        ? await isMember(db, principal.user.id, session.activeOrganizationId)
+        ? await isMember(
+            db,
+            principal.user.id,
+            session.activeOrganizationId,
+            principal.scimResourcesEnabled === true,
+          )
         : false
     if (activeMembership || !personal) {
       if (role === 'member' && !context.allowPersonal && !allowMemberRead) throw denied()
@@ -175,6 +181,7 @@ export async function checkTeamManagementMembership(
   allowMemberRead = false,
   includeRecoveryOwner = false,
   includeScimManaged = false,
+  scimResourcesEnabled = false,
 ): Promise<TeamReader & { personal: boolean }> {
   const personal = await db
     .selectFrom('personal_organizations')
@@ -189,7 +196,7 @@ export async function checkTeamManagementMembership(
     .select('role')
     .where('userId', '=', userId)
     .where('organizationId', '=', teamId)
-    .where((eb) => eb.not(scimSuspended(teamId, userId)))
+    .where((eb) => eb.not(scimSuspended(teamId, userId, scimResourcesEnabled)))
   if (lock) memberQuery = memberQuery.forShare()
   const member = await memberQuery
     .$if(includeRecoveryOwner, (query) => query.select(ssoRecoveryOwner))

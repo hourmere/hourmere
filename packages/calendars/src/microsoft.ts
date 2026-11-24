@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto'
+import { addAbortListener } from 'node:events'
+import { setTimeout } from 'node:timers/promises'
 import { isSingleLineText } from '@hourmere/scheduling/text'
 import { z } from 'zod'
 import {
@@ -18,9 +20,17 @@ export const MICROSOFT_CALENDAR_SCOPES = [
 ] as const
 
 export class MicrosoftCalendarError extends CalendarProviderError {
-  constructor(code: CalendarProviderError['code'], status?: number, oauthError?: OAuthTokenError) {
+  readonly retryAfterMs: number | undefined
+
+  constructor(
+    code: CalendarProviderError['code'],
+    status?: number,
+    oauthError?: OAuthTokenError,
+    retryAfterMs?: number,
+  ) {
     super(code, status, oauthError)
     this.name = 'MicrosoftCalendarError'
+    this.retryAfterMs = retryAfterMs
   }
 }
 
@@ -48,6 +58,67 @@ const calendarPage = z.object({
     .max(250),
 })
 
+// Graph returns offset-free dateTime strings in the requested UTC time zone.
+const graphUtcTime = z.object({
+  dateTime: z
+    .string()
+    .regex(/^(?!0000)\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:[0-5]\d(?:\.\d{1,7})?(?:Z|\+00:00)?$/u),
+  timeZone: z.literal('UTC'),
+})
+const busyPageSize = 250
+const busyPage = z.object({
+  '@odata.nextLink': z.string().min(1).max(16_384).optional(),
+  value: z
+    .array(
+      z.object({
+        id: text,
+        start: graphUtcTime,
+        end: graphUtcTime,
+        isAllDay: z.boolean(),
+        isCancelled: z.boolean(),
+        showAs: z.enum(['free', 'tentative', 'busy', 'oof', 'workingElsewhere', 'unknown']),
+      }),
+    )
+    .max(busyPageSize),
+})
+
+function graphInstant(value: string) {
+  try {
+    return Temporal.Instant.from(
+      value.endsWith('Z') || value.endsWith('+00:00') ? value : `${value}Z`,
+    )
+  } catch {
+    throw new MicrosoftCalendarError('provider_unavailable')
+  }
+}
+
+function isCalendarViewPath(path: string, calendarId: string): boolean {
+  const segment = /^\/v1\.0\/me\/calendars\/([^/]+)\/calendarView$/u.exec(path)?.[1]
+  try {
+    // Graph can return the same calendar ID with a different URL encoding in nextLink.
+    return segment !== undefined && decodeURIComponent(segment) === calendarId
+  } catch {
+    return false
+  }
+}
+
+async function abortable<T>(signal: AbortSignal, work: () => Promise<T>): Promise<T> {
+  signal.throwIfAborted()
+  const aborted = Promise.withResolvers<never>()
+  using _listener = addAbortListener(signal, () =>
+    aborted.reject(new MicrosoftCalendarError('provider_unavailable')),
+  )
+  return await Promise.race([aborted.promise, work()])
+}
+
+function retryAfterMs(value: string | null, now: number): number | undefined {
+  if (!value) return undefined
+  const maximum = 24 * 60 * 60 * 1000
+  if (/^\d+$/u.test(value)) return Math.min(maximum, Number(value) * 1000)
+  const date = new Date(value)
+  if (date.toUTCString() === value) return Math.min(maximum, Math.max(0, date.getTime() - now))
+}
+
 /** Refresh tokens establish continuing access; offline_access need not be echoed in scope. */
 export function hasMicrosoftCalendarListAccess(scopes: readonly string[] | undefined) {
   return (
@@ -66,13 +137,30 @@ export function createMicrosoftCalendarClient(
   const tokenUrl = 'https://login.microsoftonline.com/common/oauth2/v2.0/token'
   const calendarsUrl = 'https://graph.microsoft.com/v1.0/me/calendars'
 
-  async function json(url: string, init: RequestInit, signal: AbortSignal): Promise<unknown> {
+  async function json(
+    url: string,
+    init: RequestInit,
+    signal: AbortSignal,
+    retryThrottledRead = false,
+  ): Promise<unknown> {
     try {
-      const response = await request(url, { ...init, signal, redirect: 'error' })
+      const send = () => request(url, { ...init, signal, redirect: 'error' })
+      let response = await abortable(signal, send)
+      if (retryThrottledRead && response.status === 429) {
+        const wait = retryAfterMs(response.headers.get('Retry-After'), now())
+        // Long or unspecified backoff belongs to the caller's background retry schedule.
+        if (wait !== undefined && wait <= 10_000) {
+          void response.body?.cancel().catch(() => {})
+          await setTimeout(wait, undefined, { signal })
+          response = await abortable(signal, send)
+        }
+      }
       if (!response.ok) {
         const tokenEndpoint = url === tokenUrl
-        const oauthError = tokenEndpoint ? await readOAuthTokenError(response) : undefined
-        if (!tokenEndpoint) await response.body?.cancel()
+        const oauthError = tokenEndpoint
+          ? await abortable(signal, () => readOAuthTokenError(response))
+          : undefined
+        if (!tokenEndpoint) void response.body?.cancel().catch(() => {})
         throw new MicrosoftCalendarError(
           tokenEndpoint
             ? oauthError !== undefined &&
@@ -87,6 +175,9 @@ export function createMicrosoftCalendarClient(
                 : 'provider_unavailable',
           response.status,
           oauthError,
+          response.status === 429
+            ? retryAfterMs(response.headers.get('Retry-After'), now())
+            : undefined,
         )
       }
       if (!response.body) throw new MicrosoftCalendarError('provider_unavailable')
@@ -95,14 +186,14 @@ export function createMicrosoftCalendarClient(
       let size = 0
       try {
         for (;;) {
-          const { done, value } = await reader.read()
+          const { done, value } = await abortable(signal, () => reader.read())
           if (done) break
           size += value.byteLength
           if (size > 262_144) throw new MicrosoftCalendarError('provider_unavailable')
           chunks.push(value)
         }
       } finally {
-        await reader.cancel().catch(() => {})
+        void reader.cancel().catch(() => {})
       }
       return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown
     } catch (error) {
@@ -233,6 +324,70 @@ export function createMicrosoftCalendarClient(
             throw new MicrosoftCalendarError('provider_unavailable')
           return calendars
         }
+        try {
+          next = new URL(link)
+        } catch {
+          throw new MicrosoftCalendarError('provider_unavailable')
+        }
+      }
+      throw new MicrosoftCalendarError('provider_unavailable')
+    },
+    async busyEvents(
+      accessToken: string,
+      calendarId: string,
+      start: Temporal.Instant,
+      end: Temporal.Instant,
+      signal: AbortSignal,
+    ): Promise<{ id: string; start: Temporal.Instant; end: Temporal.Instant }[]> {
+      if (
+        !text.safeParse(calendarId).success ||
+        !calendarId.isWellFormed() ||
+        Temporal.Instant.compare(start, end) >= 0
+      )
+        throw new MicrosoftCalendarError('provider_unavailable')
+
+      const deadline = AbortSignal.any([signal, AbortSignal.timeout(15_000)])
+      const headers = { authorization: `Bearer ${accessToken}`, prefer: 'outlook.timezone="UTC"' }
+      let next = new URL(`${calendarsUrl}/${encodeURIComponent(calendarId)}/calendarView`)
+      next.searchParams.set('startDateTime', start.toString())
+      next.searchParams.set('endDateTime', end.toString())
+      next.searchParams.set('$top', String(busyPageSize))
+      next.searchParams.set('$select', 'id,start,end,isAllDay,isCancelled,showAs')
+      const visited = new Set<string>()
+      const ids = new Set<string>()
+      const busy: { id: string; start: Temporal.Instant; end: Temporal.Instant }[] = []
+
+      for (let page = 0; page < 20; page++) {
+        if (
+          next.origin !== 'https://graph.microsoft.com' ||
+          !isCalendarViewPath(next.pathname, calendarId) ||
+          next.username ||
+          next.password ||
+          next.hash ||
+          visited.has(next.href)
+        )
+          throw new MicrosoftCalendarError('provider_unavailable')
+        visited.add(next.href)
+
+        const parsed = busyPage.safeParse(await json(next.href, { headers }, deadline, true))
+        if (!parsed.success) throw new MicrosoftCalendarError('provider_unavailable')
+        for (const event of parsed.data.value) {
+          if (ids.has(event.id)) throw new MicrosoftCalendarError('provider_unavailable')
+          ids.add(event.id)
+          if (event.isCancelled || event.showAs === 'free' || event.showAs === 'workingElsewhere')
+            continue
+          // The all-day boundaries are already converted to UTC by Graph. Preserve both
+          // instants: local midnights can be non-midnight in UTC and straddle a DST transition.
+          const from = graphInstant(event.start.dateTime)
+          const to = graphInstant(event.end.dateTime)
+          const order = Temporal.Instant.compare(from, to)
+          if (order > 0 || (order === 0 && event.isAllDay))
+            throw new MicrosoftCalendarError('provider_unavailable')
+          if (order < 0) busy.push({ id: event.id, start: from, end: to })
+        }
+
+        const link = parsed.data['@odata.nextLink']
+        if (!link) return busy
         try {
           next = new URL(link)
         } catch {

@@ -263,6 +263,7 @@ async function completeSamlTest(
   result: z.infer<typeof testResultSchema>,
   actor: OidcTestActor,
   test: z.infer<typeof samlTestBinding>,
+  scimResourcesEnabled: boolean,
 ) {
   const pending = (executor: Db) =>
     executor
@@ -285,7 +286,14 @@ async function completeSamlTest(
     revision: snapshot.provider_revision,
   }
   return db.transaction().execute(async (trx) => {
-    const role = await lockOidcTestActor(trx, provider, actor, test.recovery, 'saml')
+    const role = await lockOidcTestActor(
+      trx,
+      provider,
+      actor,
+      test.recovery,
+      scimResourcesEnabled,
+      'saml',
+    )
     const attempt = await pending(trx)
       .select(samlDatabaseInstantText(sql.ref('expires_at')).as('expiresAt'))
       .forUpdate()
@@ -467,6 +475,7 @@ async function completeSamlSignIn(
         candidate,
         link.proven_email,
         false,
+        options.scimResourcesEnabled === true,
         'saml',
       )
       if (context.reason !== undefined || context.link.proven_email !== link.proven_email)
@@ -764,6 +773,7 @@ export function samlSignInRoutes({
             test.data,
             actor,
             testBinding,
+            capabilities.scimResourcesEnabled === true,
           ).catch((error: unknown) => {
             if (
               error instanceof OidcAttemptRefused ||

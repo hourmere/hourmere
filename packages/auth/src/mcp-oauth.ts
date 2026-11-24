@@ -85,6 +85,7 @@ async function requireMembership(
   userId: string,
   organizationId: string,
   refusal = refused,
+  scimResourcesEnabled = false,
 ) {
   if (!isUuid(userId) || !isUuid(organizationId)) throw refusal()
   const row = await db
@@ -94,7 +95,7 @@ async function requireMembership(
     .where('m.userId', '=', userId)
     .where('m.organizationId', '=', organizationId)
     .where('u.emailVerified', '=', true)
-    .where((eb) => eb.not(scimSuspended(organizationId, userId)))
+    .where((eb) => eb.not(scimSuspended(organizationId, userId, scimResourcesEnabled)))
     .executeTakeFirst()
   if (!row) throw refusal()
 }
@@ -215,7 +216,13 @@ async function checkRefresh(
   )
     throw invalidGrant()
   // Check even lost-response replay, which bypasses customAccessTokenClaims.
-  await requireMembership(db, refresh.userId, consent.organization_id, invalidGrant)
+  await requireMembership(
+    db,
+    refresh.userId,
+    consent.organization_id,
+    invalidGrant,
+    capabilities.scimResourcesEnabled === true,
+  )
   await requireDelegation(db, capabilities, consent, refresh.userId, refresh.referenceId)
 }
 
@@ -315,7 +322,13 @@ export function mcpOAuthPlugins(
           const intent = intents.getStore()
           if (!intent || intent.userId !== user.id || intent.sessionId !== session.id)
             throw refused()
-          await requireMembership(intent.transaction ?? db, user.id, intent.organizationId)
+          await requireMembership(
+            intent.transaction ?? db,
+            user.id,
+            intent.organizationId,
+            refused,
+            capabilities.scimResourcesEnabled === true,
+          )
           return intent.grantId
         },
       },
@@ -329,7 +342,13 @@ export function mcpOAuthPlugins(
           .where('user_id', '=', user.id)
           .executeTakeFirst()
         if (!grant) throw invalidGrant()
-        await requireMembership(db, user.id, grant.organization_id, invalidGrant)
+        await requireMembership(
+          db,
+          user.id,
+          grant.organization_id,
+          invalidGrant,
+          capabilities.scimResourcesEnabled === true,
+        )
         const consent = await currentConsent(db, capabilities, referenceId, user.id)
         if (
           !Array.isArray(consent.scopes) ||
@@ -557,7 +576,15 @@ export function createMcpOAuthResolver({
       .whereRef('c.clientId', '=', 'grant_row.client_id')
       .whereRef('c.userId', '=', 'grant_row.user_id')
       .where('u.emailVerified', '=', true)
-      .where((eb) => eb.not(scimSuspended(eb.ref('grant_row.organization_id'), eb.ref('u.id'))))
+      .where((eb) =>
+        eb.not(
+          scimSuspended(
+            eb.ref('grant_row.organization_id'),
+            eb.ref('u.id'),
+            ssoCapabilities.scimResourcesEnabled === true,
+          ),
+        ),
+      )
       .where(sql<boolean>`a.disabled IS DISTINCT FROM true`)
       .executeTakeFirst()
     if (
@@ -579,6 +606,7 @@ export function createMcpOAuthResolver({
         oauthGrantId: grantId,
         ssoDelegationStatus: row.ssoDelegationStatus,
         ...(row.scimProvisioned && { scimProvisioned: true }),
+        ...(ssoCapabilities.scimResourcesEnabled && { scimResourcesEnabled: true as const }),
         clientId: payload.client_id,
         scopes,
         user: { id: row.userId, name: row.name, email: row.email },

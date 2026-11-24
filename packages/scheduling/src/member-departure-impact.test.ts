@@ -384,7 +384,11 @@ describe.skipIf(!serverUrl)('member departure impact', () => {
   async function verifyWhitelist(read: Read) {
     const f = await setup()
     const id = await booking(f)
-    await createFixtures(db).calendarBusy(f.member.id, [['2026-11-03T09:00Z', '2026-11-03T10:00Z']])
+    await createFixtures(db).calendarBusy(
+      f.member.id,
+      [['2026-11-03T09:00Z', '2026-11-03T10:00Z']],
+      { now: now() },
+    )
     const result = await read(f.adminCtx, input(f))
     expect(ResultSchema.safeParse(result).success).toBe(true)
     expect(JSON.stringify(result).includes('private-only-')).toBe(false)

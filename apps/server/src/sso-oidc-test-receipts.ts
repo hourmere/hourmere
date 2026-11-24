@@ -58,11 +58,12 @@ export async function recordOidcProviderTest(
   provider: SsoProviderRevision,
   attempt: Awaited<ReturnType<typeof consumeOidcAttempt>>,
   reason?: SsoAuditReason,
+  scimResourcesEnabled = false,
 ) {
   if (!attempt.test) throw new OidcAttemptRefused()
   const { actor, recovery } = attempt.test
   await db.transaction().execute(async (trx) => {
-    const role = await lockOidcTestActor(trx, provider, actor, recovery)
+    const role = await lockOidcTestActor(trx, provider, actor, recovery, scimResourcesEnabled)
     const { live } = await trx
       .selectNoFrom(sql<boolean>`${attempt.expiresAt}::timestamptz > clock_timestamp()`.as('live'))
       .executeTakeFirstOrThrow()

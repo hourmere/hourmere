@@ -50,6 +50,7 @@ export async function readEligibleHostIds(
   organizationId: string,
   userIds: readonly string[],
   lock = false,
+  scimResourcesEnabled = false,
 ): Promise<string[]> {
   const ids = [...new Set(userIds)].sort()
   if (!ids.length || ids.length > 8) return []
@@ -65,7 +66,9 @@ export async function readEligibleHostIds(
     .select(['userId', 'organizationId'])
     .where('organizationId', '=', organizationId)
     .where('userId', 'in', ids)
-    .where((eb) => eb.not(scimSuspended(eb.ref('organizationId'), eb.ref('userId'))))
+    .where((eb) =>
+      eb.not(scimSuspended(eb.ref('organizationId'), eb.ref('userId'), scimResourcesEnabled)),
+    )
     .orderBy('userId')
   if (lock) members = members.forShare()
   return eligibleHostIds(organizationId, ids, verified, await members.execute())
@@ -77,8 +80,15 @@ export async function assertHosts(
   organizationId: string,
   userIds: readonly string[],
   lock = false,
+  scimResourcesEnabled = false,
 ): Promise<void> {
-  const included = await readEligibleHostIds(db, organizationId, userIds, lock)
+  const included = await readEligibleHostIds(
+    db,
+    organizationId,
+    userIds,
+    lock,
+    scimResourcesEnabled,
+  )
   if (!included.length || included.length !== new Set(userIds).size) throw invalidHosts()
 }
 
@@ -113,6 +123,7 @@ export async function bookingHostIds(
   organizationId: string,
   required: readonly string[],
   lock = false,
+  scimResourcesEnabled = false,
 ): Promise<string[]> {
   const hosts = await db
     .selectFrom(resolvedBookingHosts(db).as('host'))
@@ -135,7 +146,7 @@ export async function bookingHostIds(
     )
   }
   try {
-    await assertHosts(db, organizationId, ids, lock)
+    await assertHosts(db, organizationId, ids, lock, scimResourcesEnabled)
   } catch (error) {
     if (error instanceof DomainError && error.code === 'invalid_hosts')
       throw new DomainError(

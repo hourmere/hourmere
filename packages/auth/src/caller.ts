@@ -36,6 +36,11 @@ export type Principal = {
   personalOrganizationId?: string | null
   /** Whether the active team already has a SCIM connection. */
   scimProvisioned?: boolean
+  /**
+   * Set only by a resolver that holds the in-process SCIM resource capability, so later
+   * membership checks for this caller read the same managed child suspension.
+   */
+  scimResourcesEnabled?: true
 } & (
   | { kind: 'session'; sessionId: string }
   | {
@@ -80,12 +85,20 @@ const BEARER = /^Bearer[ \t]+(\S+)[ \t]*$/i
 export function createCallerResolver({
   auth,
   db,
-  ssoCapabilities = ssoHardOff,
+  ssoCapabilities: protocolCapabilities = ssoHardOff,
+  scimResourcesEnabled = false,
 }: {
   auth: Auth
   db: Db
   ssoCapabilities?: TeamSsoCapabilities
+  /** No production registration. The SCIM resource test harness supplies this flag. */
+  scimResourcesEnabled?: boolean
 }): CallerResolver {
+  // Off keeps the same object, so nothing downstream changes without the test flag.
+  const ssoCapabilities: TeamSsoCapabilities = scimResourcesEnabled
+    ? { ...protocolCapabilities, scimResourcesEnabled: true }
+    : protocolCapabilities
+  const resourceCapability = scimResourcesEnabled ? { scimResourcesEnabled: true as const } : {}
   type Membership = Pick<
     Principal,
     'user' | 'organization' | 'personalOrganizationId' | 'scimProvisioned'
@@ -154,14 +167,14 @@ export function createCallerResolver({
       .$if(recoverySessionId !== undefined, (qb) =>
         qb.select(
           sql<SsoRecoveryTeam[] | null>`CASE WHEN u."emailVerified"
-            THEN ${ssoRecoveryTeamsFor(db, userId, recoverySessionId as string)} END`.as(
+            THEN ${ssoRecoveryTeamsFor(db, userId, recoverySessionId as string, scimResourcesEnabled)} END`.as(
             'ssoRecoveryTeams',
           ),
         ),
       )
       .where('m.userId', '=', userId)
       .where('m.organizationId', '=', organizationId)
-      .where((eb) => eb.not(scimSuspended(organizationId, userId)))
+      .where((eb) => eb.not(scimSuspended(organizationId, userId, scimResourcesEnabled)))
       .executeTakeFirst()
     if (!row) return undefined
     const metadata =
@@ -239,7 +252,13 @@ export function createCallerResolver({
     const { emailVerified: _, apiKeyScope, ...caller } = membership
     return {
       ok: true,
-      principal: { ...caller, kind: 'api_key', apiKeyId: result.key.id, apiKeyScope },
+      principal: {
+        ...caller,
+        ...resourceCapability,
+        kind: 'api_key',
+        apiKeyId: result.key.id,
+        apiKeyScope,
+      },
       setCookie: [],
     }
   }
@@ -282,7 +301,12 @@ export function createCallerResolver({
     } = membership
     return {
       ok: true,
-      principal: { ...caller, kind: 'session', sessionId: session.session.id },
+      principal: {
+        ...caller,
+        ...resourceCapability,
+        kind: 'session',
+        sessionId: session.session.id,
+      },
       ...(ssoRecoveryTeams && { ssoRecoveryTeams }),
       setCookie,
     }

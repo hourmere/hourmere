@@ -329,7 +329,7 @@ export function publicRoutes({
   receiptNow,
   rateLimits = {},
 }: PublicRoutesDeps): RouteModule {
-  const ctx: PublicContext = {
+  const publicDeps: PublicContext = {
     db,
     now,
     notify,
@@ -348,6 +348,9 @@ export function publicRoutes({
   const routedSecurity: Record<string, string[]>[] = [{}, { apiKey: [] }]
   return (shared) => {
     const { app } = shared
+    const ctx: PublicContext = shared.scimResourcesEnabled
+      ? { ...publicDeps, scimResourcesEnabled: true }
+      : publicDeps
     publicRoutingFormRoutes({
       db,
       pageLimit,

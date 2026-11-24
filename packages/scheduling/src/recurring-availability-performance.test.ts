@@ -46,7 +46,7 @@ describe.skipIf(!serverUrl)('bounded recurring availability on PostgreSQL', () =
     organizationId = team.id
     for (const host of hosts) {
       await fixtures.schedule(host.id, { timeZone: 'UTC' })
-      const { calendarId } = await fixtures.calendarBusy(host.id, [])
+      const { calendarId } = await fixtures.calendarBusy(host.id, [], { now })
       await sql`
         INSERT INTO calendar_busy (calendar_id, external_event_id, period)
         SELECT ${calendarId}::uuid, 'dense-' || week || '-' || n,
@@ -123,7 +123,8 @@ describe.skipIf(!serverUrl)('bounded recurring availability on PostgreSQL', () =
       expect(result.metrics.reads).toBe(reads)
       expect(result.metrics.reads).toBeLessThanOrEqual(MAX_RECURRING_AVAILABILITY_READS)
       expect(result.metrics.rows).toBe(rows)
-      expect(result.metrics.rows).toBe(9_826)
+      // The fact set includes the eight Microsoft calendars' freshness rows.
+      expect(result.metrics.rows).toBe(9_834)
       expect(result.metrics.rows).toBeLessThanOrEqual(MAX_RECURRING_AVAILABILITY_ROWS)
       reads = 0
       rows = 0

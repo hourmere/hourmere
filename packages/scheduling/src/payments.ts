@@ -67,7 +67,9 @@ export async function createPaymentHold(
   if (input.waitlistToken || input.guests?.length)
     throw new DomainError('invalid', 'payment_flow_unsupported')
   const invitee = validateInvitee(input.invitee)
-  const event = await findPublicEventType(ctx.db, input.handle, input.slug)
+  const event = await findPublicEventType(ctx.db, input.handle, input.slug, {
+    scimResourcesEnabled: ctx.scimResourcesEnabled,
+  })
   if (!event) throw new DomainError('not_found', 'event_type_not_found')
   const key = input.idempotencyKey
   const bookingInput = { ...input, start: input.start.toString() }
@@ -112,7 +114,10 @@ export async function createPaymentHold(
         expiresAt: existing.payment_hold_expires_at.toISOString(),
       }
     }
-    const current = await findPublicEventType(trx, input.handle, input.slug, { lock: true })
+    const current = await findPublicEventType(trx, input.handle, input.slug, {
+      lock: true,
+      scimResourcesEnabled: ctx.scimResourcesEnabled,
+    })
     if (
       !current ||
       current.id !== event.id ||

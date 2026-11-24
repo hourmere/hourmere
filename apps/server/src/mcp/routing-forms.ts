@@ -88,6 +88,7 @@ export function routingFormConfigurationTools({
   const context = (principal: McpCaller): ServiceContext => ({
     db,
     principal,
+    ...(principal.scimResourcesEnabled && { scimResourcesEnabled: true }),
     now,
   })
   const continuation = {

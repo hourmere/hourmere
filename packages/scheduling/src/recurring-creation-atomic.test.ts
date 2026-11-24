@@ -341,9 +341,11 @@ describe.skipIf(!serverUrl)('atomic recurring booking creation on PostgreSQL', (
     const { organizationId, eventTypeId, firstHost, secondHost, page, webhookId } =
       await roundRobin()
     const last = occurrenceTime(3)
-    await fixtures.calendarBusy(firstHost, [
-      [last.toString(), last.add({ minutes: durationMinutes }).toString()],
-    ])
+    await fixtures.calendarBusy(
+      firstHost,
+      [[last.toString(), last.add({ minutes: durationMinutes }).toString()]],
+      { now: now() },
+    )
     // The other candidate's overdue hold must be drained even though it won't get the series.
     const hold = await overdueHold(organizationId, firstHost, 1)
     const ordinaryNotify = vi.fn(async () => {})

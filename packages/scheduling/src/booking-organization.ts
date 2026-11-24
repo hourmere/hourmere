@@ -7,7 +7,7 @@ import { isUuid } from './internal.ts'
 
 /** Resolve only browser-visible bookings; this read never changes the session's space. */
 export async function resolveBookingOrganization(
-  { db, principal }: ServiceContext,
+  { db, principal, scimResourcesEnabled }: ServiceContext,
   bookingId: string,
   authorizeSpace?: (scope: { id: string; personal: boolean }) => Promise<void>,
 ): Promise<{ organizationId: string; access: 'host' | 'team_admin' }> {
@@ -38,7 +38,15 @@ export async function resolveBookingOrganization(
     .where('booking.id', '=', bookingId)
     .where('user.id', '=', principal.user.id)
     .where('user.emailVerified', '=', true)
-    .where((eb) => eb.not(scimSuspended(eb.ref('booking.organization_id'), eb.ref('user.id'))))
+    .where((eb) =>
+      eb.not(
+        scimSuspended(
+          eb.ref('booking.organization_id'),
+          eb.ref('user.id'),
+          scimResourcesEnabled === true,
+        ),
+      ),
+    )
     .where('session.id', '=', principal.sessionId)
     .where('session.expiresAt', '>', sql<Date>`clock_timestamp()`)
     .executeTakeFirst()
