@@ -12,6 +12,7 @@ import * as PhoneNumbers from 'libphonenumber-js/max'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import * as Zod from 'zod'
 import * as Availability from './availability.ts'
+import * as BookingChain from './booking-chain.ts'
 import * as BookingPage from './booking-page.ts'
 import * as ChangeDeadlines from './change-deadlines.ts'
 import * as Conferences from './conferences.ts'
@@ -50,6 +51,7 @@ const dependencies: Record<string, object> = {
   '@hourmere/db/audit': Audit,
   '@hourmere/db/team-write': TeamWrite,
   './availability.ts': Availability,
+  './booking-chain.ts': BookingChain,
   './booking-page.ts': BookingPage,
   './change-deadlines.ts': ChangeDeadlines,
   './conferences.ts': Conferences,
