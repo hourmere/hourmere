@@ -711,7 +711,7 @@ describe.skipIf(!databaseUrl)('SCIM Group resources', () => {
     ])
   })
 
-  it('applies name PATCH operations in order and rejects mixed member requests atomically', async () => {
+  it('applies name PATCH operations in order and rejects mixed role or member requests atomically', async () => {
     const parent = await team('Patch parent')
     const child = await team('Patch child')
     const token = await issue(parent.id)
@@ -733,14 +733,18 @@ describe.skipIf(!databaseUrl)('SCIM Group resources', () => {
 
     const before = await scopedRows(mapping)
     for (const operation of [
-      { op: 'replace', path: 'Members', value: [] },
-      { op: 'remove', path: `${GROUP}:mEmBeRs[value eq "${randomUUID()}"]` },
-      { op: 'Remove', path: 'members', value: [{ value: randomUUID() }] },
-      { op: 'replace', value: { displayName: 'Pathless rejected name', MeMbErS: [] } },
+      { op: 'add', path: 'Members', value: [{ value: randomUUID(), roles: ['owner'] }] },
+      { op: 'replace', value: { displayName: 'Pathless rejected name', RoLeS: ['owner'] } },
+      { op: 'replace', path: `${GROUP}:mEmBeRs[value eq "${randomUUID()}"].role`, value: 'owner' },
       { op: 'replace', path: 'members.role', value: 'owner' },
     ]) {
       await expectError(await patch(first, operation), 403, 'mutability')
     }
+    await expectError(
+      await patch(first, { op: 'add', path: 'members', value: [{ value: randomUUID() }] }),
+      400,
+      'invalidValue',
+    )
     await expectError(await patch(first, { op: 'remove', path: 'externalId' }), 400, 'mutability')
     await expectError(await patch(first, { op: 'remove', path: 'displayName' }), 400, 'mutability')
     await expectError(
@@ -1056,6 +1060,7 @@ describe.skipIf(!databaseUrl)('SCIM Group resources', () => {
           'PATCH',
           patchBody({ op: 'replace', path: 'displayName', value: 'PATCH name not applied' }),
         ],
+        ['PATCH', patchBody({ op: 'remove', path: 'members' })],
       ] as const) {
         const response = await call(production, token, path, { method, body })
         expect(response.status, method).toBe(404)

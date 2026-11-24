@@ -18,6 +18,9 @@ The User PATCH normalization step adds `PATCH /Users/{id}` under that same flag.
 The User retirement step adds `DELETE /Users/{id}` under the resource test flag.
 The Group reads and creation step adds `GET /Groups`, `GET /Groups/{id}`, `POST /Groups`
 and the Group discovery entries under the same test flag.
+The Group membership step adds member operations to `PATCH /Groups/{id}` under that flag,
+and applies the source User's deactivation, reactivation and retirement to the child
+memberships it sourced.
 `SCIM_PROVISIONING_ENABLED` defaults to off (an empty value means "use the default"). Enabling
 it permits credential creation and rotation, not user provisioning. Listing and revocation remain
 available while it is off, and every `/scim/v2` resource remains unavailable either way.
@@ -670,8 +673,8 @@ name, initial roster and parent journal's `scim_group.created` event commit toge
 The event identifies the token and opaque Group ID without recording request attributes.
 
 In the resource test harness, `PUT /Groups/{id}` replaces the Group's non-member fields
-and requires `displayName`. `PATCH /Groups/{id}` applies non-member operations in order
-and commits them together. The mapping's exact, case-sensitive `externalId` is retained
+and requires `displayName`. `PATCH /Groups/{id}` applies name and member operations in
+order and commits them together. The mapping's exact, case-sensitive `externalId` is retained
 when omitted or echoed. Changing or removing it returns 400 `mutability`. PUT and PATCH
 apply the same name constraints as POST. The name is trimmed and must be a nonempty single
 line of at most 200 UTF-16 code units. Teams can share a name regardless of how they are
@@ -679,21 +682,78 @@ managed. While directory authority is active, conflicting manual edits to the ma
 child's name are refused.
 
 PUT accepts an omitted `members` field or an exact echo of the current mapped roster.
-A different roster, any member operation in PATCH (including filtered paths and pathless
-values), or an attempted role assignment returns 403 `mutability` for the entire request.
+A different roster in PUT, or an attempted role assignment in either method, returns 403
+`mutability` for the entire request.
+
+PATCH changes the mapped roster with these forms. Attribute names and operation names are
+case-insensitive, and `members` can carry the Group schema URN prefix.
+
+| Operation | Effect |
+|---|---|
+| `add` with path `members`, or a pathless `add` naming `members` | Adds the listed Users. The value is a list of members or one member object. |
+| `replace` with path `members`, or a pathless `replace` naming `members` | Makes the listed Users the whole mapped roster. An empty list removes every mapped member. |
+| `remove` with path `members` and a value listing `{ "value": id }` entries (Entra) | Removes only the listed Users. An empty list removes nobody; a null value returns 400 `invalidValue`. |
+| `remove` with path `members[value eq "<id>"]` and no value | Removes that User. |
+| `remove` with path `members` and no value member at all | Removes every mapped member (RFC 7644). |
+
+The operations apply in order to the roster read under the team locks, and only the
+difference between the first and final roster is written. A request that leaves the name
+and roster unchanged is a successful no-op, so a repeated add or removal returns the same
+Group with the same `meta.lastModified` and no audit event. Removing a User that is not
+on the roster is such a no-op. A filter other than `value eq` on a User ID, a filter with
+a sub-attribute, and `add` or `replace` through a filter return 400 (`invalidPath`, or
+`invalidFilter` for a value that is not a User ID).
+
+An added member must be an active, linked User of the same connection, otherwise the
+request returns 400 `invalidValue`. The child's admission blockers, existing manual
+memberships and member limit apply as in POST. A removal ends only the membership this
+mapping sourced, through the ordinary departure checks: a current owner or admin of the
+child returns 403 `mutability`, and a member who still hosts event types or has unfinished
+bookings in the child returns 409 until an administrator of the child reassigns them. A
+removal revokes the member's sessions, API keys and MCP grants for the child and writes no
+admission blocker, so the User can be added again. Any refusal rolls back the whole request.
+
+The source User's lifecycle follows its managed memberships on mappings with directory
+authority. `active:false` keeps the child memberships and suspends them, and revokes the
+child credentials. The suspension is stored on the membership's provenance row
+(`scim_team_managed_memberships.suspended_at`). The shared suspension check reads it only
+when its caller passes the resource test flag; without the flag the authorization
+statements are the same as before and read no Group storage. In the resource test
+harness the flag reaches REST and MCP caller resolution, API-key writes, admin role
+changes and readiness. The remaining callers of the check (native team selection and
+membership checks, SSO proofs and delegations, MCP OAuth grants, host eligibility and
+booking routing) still need it before release. Reactivation lifts the suspension. A
+parent team's own blocker affects only the parent: when it refuses the reactivation
+with 403 `mutability`, the child memberships are resumed anyway, the directory entry
+stays inactive and nothing else in the request is applied. A later `active:false`
+suspends them again. `DELETE /Users/{id}` removes those child memberships through the
+same departure checks as a Group removal, and advances `meta.lastModified` of every
+Group whose roster listed the User. A User write that would suspend or remove a current owner or admin of a child
+returns 403 `mutability`, and a retirement that would strand hosted event types or
+unfinished bookings returns 409. In both cases nothing changes in the parent either. A
+mapping whose directory authority was stopped keeps its memberships and suspensions
+unchanged. User PUT, PATCH and DELETE lock the parent and those child teams in ascending
+ID order before reading the User, and restart if a Group write added another child in
+between.
 Both methods return 200 with the projected Group and return 412 for unsupported write
-preconditions. A name change records `scim_group.updated` in the parent journal in the
+preconditions. A name or roster change records `scim_group.updated` in the parent journal in the
 same transaction. The event identifies the token and Group ID and omits request attributes.
 A no-op preserves `meta.lastModified` and adds no audit event.
 
 资源测试环境中的 `PUT /Groups/{id}` 完整替换非成员字段，必须提供 `displayName`。
-`PATCH /Groups/{id}` 按顺序应用非成员操作，全部成功后才提交。省略或原样传回 `externalId`
+`PATCH /Groups/{id}` 按顺序应用名称和成员操作，全部成功后才提交。省略或原样传回 `externalId`
 会保留映射中区分大小写的原值，修改或移除该字段会返回 400 `mutability`。PUT 和 PATCH 与 POST 使用相同的名称规则。
 名称去除首尾空白后必须为非空单行，最多 200 个 UTF-16 代码单元。团队可以同名，名称由目录管理或手动管理均可。
 目录管理权限有效期间，系统拒绝手动修改映射子团队的名称。PUT 可省略 `members`，或原样传回当前映射成员列表。
-PUT 尝试更改成员、PATCH 包含任何成员操作，或请求试图分配角色时，整次请求返回 403 `mutability`。
+PUT 尝试更改成员，或任一方法试图分配角色时，整次请求返回 403 `mutability`。
+PATCH 可用 `add`、`replace` 和 `remove` 更改映射成员：`remove` 可带 `{ "value": id }` 列表（Entra），
+也可用 `members[value eq "<id>"]` 路径，只移除列出的用户。重复的添加或移除不产生变化，也不写审计事件。
+新成员必须是同一连接中已关联且启用的用户，否则返回 400 `invalidValue`。子团队当前的所有者或管理员不能被移除，
+返回 403 `mutability`。仍主持活动类型或有未完成预约的成员返回 409，需由子团队管理员先行交接。
+来源用户停用时，其受管子团队成员资格保留并暂停，重新启用后恢复，删除来源用户会移除这些成员资格并更新相关群组的 `meta.lastModified`。
+父团队自身的拦截只影响父团队：重新启用因此被拒绝（403 `mutability`）时，子团队成员资格仍会恢复。
 成功返回 200 及按请求投影的群组，不支持的写入前置条件返回 412。名称变更与父团队审计事件
-`scim_group.updated` 在同一事务提交，事件仅记录令牌和群组 ID 等审计元数据。
+`scim_group.updated` 在同一事务提交（成员变更同样记录），事件仅记录令牌和群组 ID 等审计元数据。
 原样重试保留 `meta.lastModified`，也不增加审计事件。
 
 Activation makes the child name directory-managed. Existing manual members, owners and

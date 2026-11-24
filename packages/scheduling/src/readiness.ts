@@ -315,7 +315,11 @@ export async function getSelfReadiness(
         )
         .on((eb) =>
           eb.not(
-            scimSuspended(eb.ref('activeMember.organizationId'), eb.ref('activeMember.userId')),
+            scimSuspended(
+              eb.ref('activeMember.organizationId'),
+              eb.ref('activeMember.userId'),
+              ctx.scimResourcesEnabled === true,
+            ),
           ),
         ),
     )
@@ -324,7 +328,15 @@ export async function getSelfReadiness(
     .select(['m.id', 'm.userId', 'u.name', 'u.emailVerified', 'p.user_id as personalOwner'])
     .where('m.organizationId', '=', principal.organization.id)
     .where('m.userId', '=', principal.user.id)
-    .where((eb) => eb.not(scimSuspended(eb.ref('m.organizationId'), eb.ref('m.userId'))))
+    .where((eb) =>
+      eb.not(
+        scimSuspended(
+          eb.ref('m.organizationId'),
+          eb.ref('m.userId'),
+          ctx.scimResourcesEnabled === true,
+        ),
+      ),
+    )
     .where('u.emailVerified', '=', true)
     .where('s.id', '=', principal.sessionId)
     .where('s.expiresAt', '>', sql<Date>`clock_timestamp()`)
@@ -458,7 +470,7 @@ export async function getTeamMemberReadiness(
           )
         return [
           scimManagedMember(eb.ref('m.organizationId'), eb.ref('m.userId')).as('scimManaged'),
-          scimSuspended(eb.ref('m.organizationId'), eb.ref('m.userId')).as('scimSuspension'),
+          scimSuspended(eb.ref('m.organizationId'), eb.ref('m.userId'), true).as('scimSuspension'),
           eb.exists(localBlocks.where('block.kind', '=', 'suspension')).as('localSuspension'),
           eb.exists(localBlocks.where('block.kind', '=', 'removal')).as('localRemoval'),
         ]
