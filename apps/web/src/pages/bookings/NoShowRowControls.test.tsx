@@ -1,5 +1,7 @@
 import { fireEvent, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { act } from 'react'
+import { createRoot } from 'react-dom/client'
 import { beforeAll, describe, expect, it } from 'vitest'
 import type { Booking } from '../../api/resources.ts'
 import { AppShell, BookingsPage, RequireSession, SessionLayout } from '../../lazy-pages.tsx'
@@ -15,6 +17,7 @@ import {
 } from '../../test/fake-api.tsx'
 import { booking } from '../../test/fixtures.ts'
 import { resolveLazy } from '../../test/resolve-lazy.ts'
+import { NoShowRowControls } from './NoShowAttendees.tsx'
 
 beforeAll(() => resolveLazy(SessionLayout, RequireSession, AppShell, BookingsPage))
 
@@ -191,6 +194,44 @@ describe('no-show controls in the host bookings list', () => {
     await answer.answer(marker(GRACE, true))
     expect(await cells.findByText('No-show')).toBeTruthy()
     expect(api.to(route(one))).toHaveLength(1)
+  })
+
+  it('disables a control clicked before its pending-write subscription is attached', async () => {
+    // A page that renders outside act() (a fetch answer) commits before its passive effects
+    // run, and the shared pending-write store only subscribes in one of those effects.
+    const one = held()
+    const answer = later()
+    const api = fakeApi({ [route(one)]: () => answer.response })
+    const env = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+    const container = document.body.appendChild(document.createElement('div'))
+    const root = createRoot(container)
+    try {
+      env.IS_REACT_ACT_ENVIRONMENT = false
+      const committed = new Promise<HTMLButtonElement>((resolve) => {
+        new MutationObserver(() => {
+          const button = container.querySelector('button')
+          if (button) resolve(button)
+        }).observe(container, { childList: true, subtree: true })
+      })
+      root.render(
+        <NoShowRowControls
+          booking={one}
+          expectedOrganizationId={ME.organization.id}
+          onChanged={() => {}}
+        />,
+      )
+      const button = await committed
+      env.IS_REACT_ACT_ENVIRONMENT = true
+      act(() => button.click())
+      expect(button.disabled).toBe(true)
+      act(() => button.click())
+      await answer.answer(marker(GRACE, true))
+      expect(api.to(route(one))).toHaveLength(1)
+    } finally {
+      env.IS_REACT_ACT_ENVIRONMENT = true
+      act(() => root.unmount())
+      container.remove()
+    }
   })
 })
 
