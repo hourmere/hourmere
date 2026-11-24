@@ -50,27 +50,31 @@ test.describe('Keycloak signing keys', () => {
   })
 })
 
-test('a Keycloak outage blocks new SSO access without admitting a mailbox session', async ({
-  page,
-  keycloak: app,
-}) => {
-  await page.goto(signInUrl(app))
-  await signInAtKeycloak(page, app)
-  await expectSession(page, app, app.linkedUserId, false)
-  await app.idp.stop()
-  // The issued team proof remains usable through the upstream outage.
-  const live = await page.request.get(`${app.url}/api/v1/event-types`)
-  expect(live.status()).toBe(200)
-  await signOut(page, app)
+test.describe('', () => {
+  test.use({ dedicatedKeycloak: true })
 
-  await page.goto(signInUrl(app))
-  await clickPrivate(button(page, ssoLabel))
-  await expect(page.getByRole('alert')).toHaveText(
-    'Single sign-on is unavailable. Try again or use another sign-in method.',
-  )
-  await expectSignedOut(page, app)
-  await expectMailboxCannotEnterTeam(page, app)
-  expect(app.tokenExchanges()).toEqual(['issued'])
+  test('a Keycloak outage blocks new SSO access without admitting a mailbox session', async ({
+    page,
+    keycloak: app,
+  }) => {
+    await page.goto(signInUrl(app))
+    await signInAtKeycloak(page, app)
+    await expectSession(page, app, app.linkedUserId, false)
+    await app.idp.stop()
+    // The issued team proof remains usable through the upstream outage.
+    const live = await page.request.get(`${app.url}/api/v1/event-types`)
+    expect(live.status()).toBe(200)
+    await signOut(page, app)
+
+    await page.goto(signInUrl(app))
+    await clickPrivate(button(page, ssoLabel))
+    await expect(page.getByRole('alert')).toHaveText(
+      'Single sign-on is unavailable. Try again or use another sign-in method.',
+    )
+    await expectSignedOut(page, app)
+    await expectMailboxCannotEnterTeam(page, app)
+    expect(app.tokenExchanges()).toEqual(['issued'])
+  })
 })
 
 test.describe('with the OIDC setting off', () => {

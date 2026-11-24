@@ -1,13 +1,13 @@
 import { execFile } from 'node:child_process'
-import { randomBytes, randomUUID } from 'node:crypto'
+import { randomBytes, randomInt, randomUUID } from 'node:crypto'
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { get } from 'node:https'
+import { get, request } from 'node:https'
 import { createServer as createNetServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { text } from 'node:stream/consumers'
 import { setTimeout as delay } from 'node:timers/promises'
 import { promisify } from 'node:util'
-import { sendSsoRequest } from '../../../packages/outbound/src/sso.ts'
 import realm from './realm.json' with { type: 'json' }
 
 const KEYCLOAK_IMAGE =
@@ -16,10 +16,10 @@ const KEYCLOAK_IMAGE =
 const run = promisify(execFile)
 const ownerLabel = 'com.hourmere.e2e.keycloak-owner'
 const containerId = /^[a-f0-9]{64}$/
-const adminClientId = 'fixture-key-rotation'
+const adminClientId = 'fixture-admin'
 
-function persona(name: string) {
-  const user = realm.users.find((entry) => entry.username === name)
+function persona(users: typeof realm.users, name: string) {
+  const user = users.find((entry) => entry.username === name)
   if (!user) throw new Error(`The Keycloak realm is missing the ${name} persona`)
   return { subject: user.id, username: user.username, email: user.email }
 }
@@ -59,23 +59,35 @@ function discoveryStatus(issuer: string, ca: string): Promise<string> {
   })
 }
 
-/** Reserve a loopback port for a container that shares the host network. */
-function freeLoopbackPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
+/** Whether nothing on the host is bound to this loopback port right now. */
+function loopbackPortFree(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
     const probe = createNetServer()
-    probe.once('error', reject)
-    probe.listen(0, '127.0.0.1', () => {
-      const address = probe.address()
-      probe.close(() =>
-        typeof address === 'object' && address
-          ? resolve(address.port)
-          : reject(new Error('Unable to reserve a loopback port')),
-      )
-    })
+    probe.once('error', () => resolve(false))
+    probe.listen(port, '127.0.0.1', () => probe.close(() => resolve(true)))
   })
 }
 
-/** Fetch one Keycloak page and discard it. Used only to warm a freshly started container. */
+/**
+ * Reserve a loopback port for a container that shares the host network. The port comes from
+ * below the kernel's ephemeral range: a port the kernel hands out (listen(0)) can be taken as the
+ * source port of an outgoing connection from Chrome, PostgreSQL clients or the app during the
+ * seconds before Keycloak binds it, and Keycloak then exits at start.
+ */
+async function freeLoopbackPort(): Promise<number> {
+  const range = await readFile('/proc/sys/net/ipv4/ip_local_port_range', 'utf8').catch(() => '')
+  const ephemeralLow = Number(/^\s*(\d+)/.exec(range)?.[1] ?? 32768)
+  const high = Math.min(ephemeralLow, 32768)
+  const low = 10_000
+  if (high - low < 1000) throw new Error('The ephemeral port range leaves no room for Keycloak')
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const port = randomInt(low, high)
+    if (await loopbackPortFree(port)) return port
+  }
+  throw new Error('Unable to reserve a loopback port')
+}
+
+/** Fetch one Keycloak page and discard it to warm a fresh realm. */
 function warm(url: string, ca: string): Promise<void> {
   return new Promise((resolve) => {
     const request = get(url, { ca, signal: AbortSignal.timeout(10_000) }, (response) => {
@@ -87,89 +99,207 @@ function warm(url: string, ca: string): Promise<void> {
   })
 }
 
-async function addSigningKey(origin: string, adminSecret: string) {
-  const { hostname, port } = new URL(origin)
-  const privateTargets = [{ host: hostname, port: Number(port) }]
-  const adminRealm = `${origin}/admin/realms/${realm.realm}`
+interface KeycloakRequestOptions {
+  action: string
+  expectedStatus: number
+  method?: 'GET' | 'POST' | 'DELETE'
+  authorization?: string
+  contentType?: string
+  body?: string
+}
+
+function keycloakRequest(
+  url: string,
+  ca: string,
+  { action, expectedStatus, method, authorization, contentType, body }: KeycloakRequestOptions,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const failed = () => reject(new Error(`Unable to ${action}`))
+    // All URLs are built from the owned loopback origin and TLS pins that container's CA.
+    // Never follow a redirect or include a response, credential or request error in output.
+    const req = request(
+      url,
+      {
+        ca,
+        method,
+        signal: AbortSignal.timeout(10_000),
+        headers: {
+          ...(authorization && { authorization }),
+          ...(contentType && { 'content-type': contentType }),
+          ...(body && { 'content-length': Buffer.byteLength(body) }),
+        },
+      },
+      async (response) => {
+        try {
+          const payload = await text(response)
+          if (response.statusCode !== expectedStatus)
+            reject(new Error(`Unable to ${action} (HTTP ${response.statusCode})`))
+          else resolve(payload)
+        } catch {
+          failed()
+        }
+      },
+    )
+    req.once('error', failed)
+    req.end(body)
+  })
+}
+
+function readJsonStringField(payload: string, field: string, action: string): string {
   try {
-    const token = await sendSsoRequest({
-      url: `${origin}/realms/master/protocol/openid-connect/token`,
-      privateTargets,
+    const value = JSON.parse(payload)[field]
+    if (typeof value === 'string' && value) return value
+  } catch {
+    // The admin response may contain private credentials or key configuration.
+  }
+  throw new Error(`Unable to ${action}`)
+}
+
+function realmFactory(origin: string, ca: string, adminSecret: string) {
+  const admin = (path: string, options: KeycloakRequestOptions) =>
+    keycloakRequest(`${origin}${path}`, ca, options)
+  const authorize = async () => {
+    const action = 'authenticate the owned Keycloak fixture admin'
+    const payload = await admin('/realms/master/protocol/openid-connect/token', {
+      action,
+      expectedStatus: 200,
       method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      contentType: 'application/x-www-form-urlencoded',
       body: new URLSearchParams({
         grant_type: 'client_credentials',
         client_id: adminClientId,
         client_secret: adminSecret,
       }).toString(),
     })
-    if (token.status !== 200) throw new Error()
-    const { access_token: accessToken } = JSON.parse(token.body.toString('utf8'))
-    if (typeof accessToken !== 'string' || !accessToken) throw new Error()
-    const authorization = `Bearer ${accessToken}`
-    const metadata = await sendSsoRequest({
-      url: adminRealm,
-      privateTargets,
-      headers: { authorization },
-    })
-    if (metadata.status !== 200) throw new Error()
-    const { id: parentId } = JSON.parse(metadata.body.toString('utf8'))
-    if (typeof parentId !== 'string' || !parentId) throw new Error()
-    const created = await sendSsoRequest({
-      url: `${adminRealm}/components`,
-      privateTargets,
+    return `Bearer ${readJsonStringField(payload, 'access_token', action)}`
+  }
+
+  return async (redirectUri: string) => {
+    const callback = new URL(redirectUri)
+    if (
+      callback.protocol !== 'http:' ||
+      callback.hostname !== '127.0.0.1' ||
+      !callback.port ||
+      [3000, 3998].includes(Number(callback.port)) ||
+      callback.username ||
+      callback.password ||
+      callback.search ||
+      callback.hash ||
+      callback.href.includes('*')
+    )
+      throw new Error('Keycloak requires one exact callback on an owned Hourmere loopback port')
+
+    const client = realm.clients[0]
+    if (!client) throw new Error('The Keycloak realm is missing its OIDC client')
+    const name = `${realm.realm}-${randomUUID()}`
+    const issuer = `${origin}/realms/${name}`
+    const discoveryUrl = `${issuer}/.well-known/openid-configuration`
+    const adminRealm = `/admin/realms/${name}`
+    const clientSecret = randomBytes(32).toString('base64url')
+    const password = randomBytes(32).toString('base64url')
+    const users = realm.users.map((user) => ({
+      ...user,
+      id: randomUUID(),
+      credentials: [{ type: 'password', value: password, temporary: false }],
+    }))
+    const personas = {
+      linked: persona(users, 'linked'),
+      linkable: persona(users, 'linkable'),
+      sameEmail: persona(users, 'same-email'),
+      unverified: persona(users, 'unverified'),
+      invited: persona(users, 'invited'),
+    }
+    await admin('/admin/realms', {
+      action: 'create the owned Keycloak test realm',
+      expectedStatus: 201,
       method: 'POST',
-      headers: { authorization, 'content-type': 'application/json' },
+      authorization: await authorize(),
+      contentType: 'application/json',
       body: JSON.stringify({
-        name: 'rotated-fixture-signing-key',
-        parentId,
-        providerId: 'rsa-generated',
-        providerType: 'org.keycloak.keys.KeyProvider',
-        config: {
-          priority: ['200'],
-          enabled: ['true'],
-          active: ['true'],
-          algorithm: ['RS256'],
-          keySize: ['2048'],
-        },
+        ...realm,
+        realm: name,
+        // These random passwords are disposable. Argon2 delayed sign-in with parallel CI workers.
+        passwordPolicy: 'hashAlgorithm(pbkdf2-sha256) and hashIterations(1)',
+        clients: [{ ...client, secret: clientSecret, redirectUris: [callback.href] }],
+        users,
       }),
     })
-    if (created.status !== 201) throw new Error()
-  } catch {
-    // The admin response may contain private credentials or key configuration.
-    throw new Error('Unable to rotate the owned Keycloak realm signing key')
+
+    const close = async () => {
+      await admin(adminRealm, {
+        action: 'delete the owned Keycloak test realm',
+        expectedStatus: 204,
+        method: 'DELETE',
+        authorization: await authorize(),
+      })
+      await keycloakRequest(discoveryUrl, ca, {
+        action: 'verify the deleted Keycloak test realm is gone',
+        expectedStatus: 404,
+      })
+    }
+
+    try {
+      const action = 'read the owned Keycloak test realm discovery'
+      const discovery = await keycloakRequest(discoveryUrl, ca, { action, expectedStatus: 200 })
+      if (readJsonStringField(discovery, 'issuer', action) !== issuer)
+        throw new Error('The Keycloak test realm discovery issuer did not match')
+      // Load the realm's login form and signing keys before the browser's first round trip.
+      const authorizeUrl = new URL(`${issuer}/protocol/openid-connect/auth`)
+      authorizeUrl.search = new URLSearchParams({
+        client_id: client.clientId,
+        redirect_uri: callback.href,
+        response_type: 'code',
+        scope: 'openid',
+      }).toString()
+      await Promise.all([
+        warm(authorizeUrl.href, ca),
+        warm(`${issuer}/protocol/openid-connect/certs`, ca),
+      ])
+    } catch (error) {
+      await close()
+      throw error
+    }
+
+    return {
+      issuer,
+      clientId: client.clientId,
+      clientSecret,
+      certificate: ca,
+      password,
+      ...personas,
+      close,
+      async rotateSigningKey() {
+        const authorization = await authorize()
+        const action = 'rotate the owned Keycloak realm signing key'
+        const metadata = await admin(adminRealm, { action, expectedStatus: 200, authorization })
+        const parentId = readJsonStringField(metadata, 'id', action)
+        await admin(`${adminRealm}/components`, {
+          action,
+          expectedStatus: 201,
+          method: 'POST',
+          authorization,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            name: 'rotated-fixture-signing-key',
+            parentId,
+            providerId: 'rsa-generated',
+            providerType: 'org.keycloak.keys.KeyProvider',
+            config: {
+              priority: ['200'],
+              enabled: ['true'],
+              active: ['true'],
+              algorithm: ['RS256'],
+              keySize: ['2048'],
+            },
+          }),
+        })
+      },
+    }
   }
 }
 
-/** Start one disposable, loopback-only IdP for a single Hourmere callback. */
-export async function startKeycloak(
-  redirectUri: string,
-  { keyRotation }: { keyRotation: boolean },
-) {
-  const callback = new URL(redirectUri)
-  if (
-    callback.protocol !== 'http:' ||
-    callback.hostname !== '127.0.0.1' ||
-    !callback.port ||
-    [3000, 3998].includes(Number(callback.port)) ||
-    callback.username ||
-    callback.password ||
-    callback.search ||
-    callback.hash ||
-    callback.href.includes('*')
-  )
-    throw new Error('Keycloak requires one exact callback on an owned Hourmere loopback port')
-
-  const client = realm.clients[0]
-  if (!client) throw new Error('The Keycloak realm is missing its OIDC client')
-  const personas = {
-    linked: persona('linked'),
-    linkable: persona('linkable'),
-    sameEmail: persona('same-email'),
-    unverified: persona('unverified'),
-    invited: persona('invited'),
-  }
-
+/** Start one disposable, loopback-only IdP for a worker or a disruptive test. */
+export async function startKeycloak() {
   const owner = randomUUID()
   const name = `hourmere-e2e-keycloak-${owner}`
   const label = `${ownerLabel}=${owner}`
@@ -181,11 +311,8 @@ export async function startKeycloak(
     command('docker', 'pull the pinned Keycloak image', ['pull', KEYCLOAK_IMAGE], 120_000),
   )
 
-  const clientSecret = randomBytes(32).toString('base64url')
-  const password = randomBytes(32).toString('base64url')
-  const adminSecret = keyRotation ? randomBytes(32).toString('base64url') : undefined
+  const adminSecret = randomBytes(32).toString('base64url')
   const directory = await mkdtemp(join(tmpdir(), 'hourmere-keycloak-'))
-  const importPath = join(directory, 'realm.json')
   const certificatePath = join(directory, 'tls.crt')
   const privateKeyPath = join(directory, 'tls.key')
   const adminEnvironment = join(directory, 'admin.env')
@@ -224,26 +351,13 @@ export async function startKeycloak(
   }
 
   try {
-    const importedRealm = {
-      ...realm,
-      // The password is random and lives only for this container. Keycloak's default Argon2
-      // hashing is slow in the throttled fixture JVM and delayed sign-in under parallel workers.
-      passwordPolicy: 'hashAlgorithm(pbkdf2-sha256) and hashIterations(1)',
-      clients: [{ ...client, secret: clientSecret, redirectUris: [callback.href] }],
-      users: realm.users.map((user) => ({
-        ...user,
-        credentials: [{ type: 'password', value: password, temporary: false }],
-      })),
-    }
+    await writeFile(
+      adminEnvironment,
+      `KC_BOOTSTRAP_ADMIN_CLIENT_ID=${adminClientId}\nKC_BOOTSTRAP_ADMIN_CLIENT_SECRET=${adminSecret}\n`,
+      { mode: 0o600 },
+    )
     // The host directory is private. Mount each file individually so Keycloak's
     // unprivileged container user can read it without access to the host directory.
-    await writeFile(importPath, JSON.stringify(importedRealm))
-    if (adminSecret)
-      await writeFile(
-        adminEnvironment,
-        `KC_BOOTSTRAP_ADMIN_CLIENT_ID=${adminClientId}\nKC_BOOTSTRAP_ADMIN_CLIENT_SECRET=${adminSecret}\n`,
-        { mode: 0o600 },
-      )
     await command('openssl', 'generate the Keycloak TLS certificate', [
       'req',
       '-x509',
@@ -261,9 +375,7 @@ export async function startKeycloak(
       '-out',
       certificatePath,
     ])
-    await Promise.all(
-      [importPath, certificatePath, privateKeyPath].map((path) => chmod(path, 0o644)),
-    )
+    await Promise.all([certificatePath, privateKeyPath].map((path) => chmod(path, 0o644)))
     const certificate = await readFile(certificatePath, 'utf8')
     // A bridge network adds and removes a host interface for every container. Chrome on the same
     // Linux host then aborts whatever navigation is in flight ("Your connection was interrupted"),
@@ -284,13 +396,12 @@ export async function startKeycloak(
         label,
         '--log-driver',
         'none',
-        ...(adminSecret ? ['--env-file', adminEnvironment] : []),
+        '--env-file',
+        adminEnvironment,
         // These short-lived JVMs run side by side with Chrome and PostgreSQL in CI.
         '--env',
         'JAVA_OPTS_APPEND=-XX:ActiveProcessorCount=2 -XX:TieredStopAtLevel=1',
         ...(hostPort ? ['--network', 'host'] : ['--publish', '127.0.0.1::8443']),
-        '--mount',
-        `type=bind,src=${importPath},dst=/opt/keycloak/data/import/${realm.realm}-realm.json,readonly`,
         '--mount',
         `type=bind,src=${certificatePath},dst=/opt/keycloak/conf/fixture.crt,readonly`,
         '--mount',
@@ -298,7 +409,6 @@ export async function startKeycloak(
         KEYCLOAK_IMAGE,
         'start-dev',
         '--db=dev-mem',
-        '--import-realm',
         '--https-certificate-file=/opt/keycloak/conf/fixture.crt',
         '--https-certificate-key-file=/opt/keycloak/conf/fixture.key',
         ...(hostPort
@@ -322,37 +432,14 @@ export async function startKeycloak(
       throw new Error('Docker must publish Keycloak on an unused loopback port')
 
     const origin = `https://127.0.0.1:${port}`
-    const issuer = `${origin}/realms/${realm.realm}`
+    const issuer = `${origin}/realms/master`
     const deadline = Date.now() + 45_000
     let discovery = 'not checked'
     while (Date.now() < deadline) {
       discovery = await discoveryStatus(issuer, certificate)
       if (discovery === 'ready') {
-        // Discovery answers before the login path is loaded. Render the sign-in form and read the
-        // signing keys once, so the first browser round trip is not the container's cold start.
-        const authorize = new URL(`${issuer}/protocol/openid-connect/auth`)
-        authorize.search = new URLSearchParams({
-          client_id: client.clientId,
-          redirect_uri: callback.href,
-          response_type: 'code',
-          scope: 'openid',
-        }).toString()
-        await Promise.all([
-          warm(authorize.href, certificate),
-          warm(`${issuer}/protocol/openid-connect/certs`, certificate),
-        ])
         return {
-          origin,
-          issuer,
-          clientId: client.clientId,
-          clientSecret,
-          certificate,
-          password,
-          ...personas,
-          async rotateSigningKey() {
-            if (!adminSecret) throw new Error('This fixture did not enable Keycloak key rotation')
-            await addSigningKey(origin, adminSecret)
-          },
+          createRealm: realmFactory(origin, certificate, adminSecret),
           async stop() {
             await command('docker', 'stop the owned Keycloak container', [
               'stop',
@@ -383,7 +470,7 @@ export async function startKeycloak(
         ? state
         : 'unavailable'
     throw new Error(
-      `The owned Keycloak realm did not publish discovery before its deadline (${discovery}, Docker state/exit/OOM ${safeState})`,
+      `The owned Keycloak container did not publish discovery before its deadline (${discovery}, Docker state/exit/OOM ${safeState})`,
     )
   } catch (error) {
     await close()
