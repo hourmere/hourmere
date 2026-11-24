@@ -1340,7 +1340,9 @@ describe('the calendars page', () => {
         ).toBeDefined()
         expect(screen.getByText('No calendars selected for conflict checks.')).toBeDefined()
       }
-      expect(screen.getByText(/A booking copy needs attention/).textContent).toContain(message)
+      expect((await screen.findByText(/A booking copy needs attention/)).textContent).toContain(
+        message,
+      )
       await user.click(screen.getByRole('button', { name: 'Stop writing bookings here' }))
       expect(await screen.findByRole('button', { name: 'Write new bookings here' })).toBeDefined()
       expect(screen.getAllByText('Not a booking destination')).toHaveLength(2)
