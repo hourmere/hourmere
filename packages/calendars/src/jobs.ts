@@ -88,11 +88,13 @@ export function calendarDispatchJob(
             or([
               eb('cc.provider', '!=', 'microsoft'),
               eb.and([
+                eb('c.sync_error', 'is distinct from', 'calendar_removed'),
                 sql<boolean>`coalesce(c.sync_state->>'retryAt','') <= ${new Date(now).toISOString()}`,
                 or([
                   eb('c.last_synced_at', 'is', null),
                   eb('c.sync_error', 'is not', null),
-                  // Refresh the whole Graph view before expiry without polling it every minute.
+                  sql<boolean>`c.sync_state->>'deltaLink' is null or c.sync_state->'microsoftPending' is not null`,
+                  // Refresh the Graph cursor before the snapshot becomes stale.
                   eb('c.last_synced_at', '<=', new Date(now - SYNC_MAX_AGE_MS / 2)),
                 ]),
               ]),

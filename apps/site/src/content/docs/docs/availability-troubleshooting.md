@@ -99,10 +99,11 @@ The view never fetches providers itself. **Refresh calendar list** alone is not 
   values fail sync unless the server supplies usable expanded values. Connection routes,
   app controls and production worker registration remain unavailable; these services do not
   mean a user can connect iCloud, Fastmail or Nextcloud today.
-- **Microsoft:** selected Outlook calendars use full, bounded Graph snapshots for conflict
-  checks. Timed and all-day events use the absolute intervals returned by Graph. Reconnect
-  if consent was revoked or permissions are missing. A temporary provider failure leaves
-  availability unknown until a successful sync. [Microsoft Calendar](/docs/microsoft-calendar)
+- **Microsoft:** selected Outlook calendars use incremental Graph sync. Timed and all-day
+  events use the absolute intervals returned by Graph. An incomplete or failed sync leaves
+  availability unknown until synchronization succeeds. If Microsoft stops listing a selected
+  calendar, refresh the calendar list to check for its return or clear that selection.
+  [Microsoft Calendar](/docs/microsoft-calendar)
 
 ### Existing bookings and change deadlines
 

@@ -96,7 +96,12 @@ const Signal = z.object({
     ])
     .nullable(),
 })
-const SafeSyncError = z.enum(['provider_unavailable', 'needs_reauth', 'permissions_missing'])
+const SafeSyncError = z.enum([
+  'provider_unavailable',
+  'needs_reauth',
+  'permissions_missing',
+  'calendar_removed',
+])
 const SelfReadinessSchema = z.object({
   subject: z.object({
     kind: z.enum(['member', 'event_type']),

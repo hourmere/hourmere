@@ -3202,4 +3202,8 @@ export const admin = {
   // Microsoft Calendar conflict checks
   'Microsoft will ask for your account identity, continuing access and permission to read basic calendar details. Hourmere lists your calendars and checks busy times on the calendars you select. Booking event writes are unavailable. Connecting is separate from signing in.':
     'Microsoft will ask for your account identity, continuing access and permission to read basic calendar details. Hourmere lists your calendars and checks busy times on the calendars you select. Booking event writes are unavailable. Connecting is separate from signing in.',
+  'Microsoft no longer lists this calendar. Booking times stay unavailable while it is selected. Refresh the calendar list or clear the selection.':
+    'Microsoft no longer lists this calendar. Booking times stay unavailable while it is selected. Refresh the calendar list or clear the selection.',
+  'Microsoft denied access to this calendar. Booking times stay unavailable until access is restored.':
+    'Microsoft denied access to this calendar. Booking times stay unavailable until access is restored.',
 } as const
