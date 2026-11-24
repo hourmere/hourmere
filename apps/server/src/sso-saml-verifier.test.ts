@@ -1,10 +1,26 @@
-import { createHash, generateKeyPairSync, type KeyObject, sign as signBytes } from 'node:crypto'
+import {
+  createHash,
+  generateKeyPairSync,
+  type KeyObject,
+  randomUUID,
+  sign as signBytes,
+} from 'node:crypto'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createDb, type Db } from '@hourmere/db'
+import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { DOMParser } from '@xmldom/xmldom'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { sql } from 'kysely'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { SignedXml } from 'xml-crypto'
+import { samlProviderValues, ssoFixture } from '../../../packages/db/src/sso-storage-fixtures.ts'
+import {
+  consumeSamlReplay,
+  purgeExpiredSamlReplay,
+  SamlTimingError,
+  validateSamlTiming,
+} from './sso-saml-replay.ts'
 import {
   type SamlRejection,
   SamlVerificationError,
@@ -91,6 +107,7 @@ const config: SamlVerifierConfig = {
 
 type AssertionOptions = {
   id?: string
+  issueInstant?: string | null
   issuer?: string
   nameId?: string
   subject?: string
@@ -98,6 +115,7 @@ type AssertionOptions = {
   inResponseTo?: string
   conditions?: string
   conditionsAttributes?: string
+  confirmationNotBefore?: string | null
   confirmationNotOnOrAfter?: string | null
   statements?: string
 }
@@ -105,19 +123,21 @@ type AssertionOptions = {
 function assertionXml(options: AssertionOptions = {}) {
   const {
     id = '_assertion-a1',
+    issueInstant = '2026-06-12T12:00:00Z',
     issuer = IDP,
     nameId = 'ada@acme.example',
     recipient = ACS,
     inResponseTo = REQUEST,
     conditionsAttributes = ' NotBefore="2026-06-12T11:59:00Z" NotOnOrAfter="2026-06-12T12:05:00Z"',
+    confirmationNotBefore = null,
     confirmationNotOnOrAfter = '2026-06-12T12:05:00Z',
     conditions = `<saml:AudienceRestriction><saml:Audience>${SP}</saml:Audience></saml:AudienceRestriction>`,
     statements = `<saml:AuthnStatement AuthnInstant="2026-06-12T11:59:58Z" SessionIndex="_session-1"><saml:AuthnContext><saml:AuthnContextClassRef>urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport</saml:AuthnContextClassRef></saml:AuthnContext></saml:AuthnStatement><saml:AttributeStatement><saml:Attribute Name="email"><saml:AttributeValue>ada@acme.example</saml:AttributeValue></saml:Attribute><saml:Attribute Name="groups"><saml:AttributeValue>staff</saml:AttributeValue><saml:AttributeValue>owners</saml:AttributeValue></saml:Attribute></saml:AttributeStatement>`,
   } = options
   const subject =
     options.subject ??
-    `<saml:NameID Format="urn:oasis:names:tc:SAML:2.0:nameid-format:persistent">${nameId}</saml:NameID><saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer"><saml:SubjectConfirmationData InResponseTo="${inResponseTo}"${confirmationNotOnOrAfter === null ? '' : ` NotOnOrAfter="${confirmationNotOnOrAfter}"`}${recipient === null ? '' : ` Recipient="${recipient}"`}/></saml:SubjectConfirmation>`
-  return `<saml:Assertion xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="${id}" IssueInstant="2026-06-12T12:00:00Z" Version="2.0"><saml:Issuer>${issuer}</saml:Issuer><saml:Subject>${subject}</saml:Subject><saml:Conditions${conditionsAttributes}>${conditions}</saml:Conditions>${statements}</saml:Assertion>`
+    `<saml:NameID Format="urn:oasis:names:tc:SAML:2.0:nameid-format:persistent">${nameId}</saml:NameID><saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer"><saml:SubjectConfirmationData InResponseTo="${inResponseTo}"${confirmationNotBefore === null ? '' : ` NotBefore="${confirmationNotBefore}"`}${confirmationNotOnOrAfter === null ? '' : ` NotOnOrAfter="${confirmationNotOnOrAfter}"`}${recipient === null ? '' : ` Recipient="${recipient}"`}/></saml:SubjectConfirmation>`
+  return `<saml:Assertion xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="${id}"${issueInstant === null ? '' : ` IssueInstant="${issueInstant}"`} Version="2.0"><saml:Issuer>${issuer}</saml:Issuer><saml:Subject>${subject}</saml:Subject><saml:Conditions${conditionsAttributes}>${conditions}</saml:Conditions>${statements}</saml:Assertion>`
 }
 
 type ResponseOptions = {
@@ -1156,7 +1176,17 @@ describe('SAML verifier: off', () => {
     )
     const mention =
       /sso-saml-verifier|verifySamlResponse|SamlVerificationError|samlInitialAlgorithms|(['"`])(?:xml-crypto|@xmldom\/xmldom|samlify)(?:\/[^'"`]*)?\1/
-    const mentioning = files.filter((file) => mention.test(readFileSync(join(root, file), 'utf8')))
+    const mentioning = files.filter((file) => {
+      const source = readFileSync(join(root, file), 'utf8')
+      const runtime =
+        file === 'apps/server/src/sso-saml-replay.ts'
+          ? source.replace(
+              /^import type \{ VerifiedSamlResponse \} from '\.\/sso-saml-verifier\.ts'$/m,
+              '',
+            )
+          : source
+      return mention.test(runtime)
+    })
     expect(mentioning).toEqual([verifier])
     // The pattern does catch an import, a re-export and a dynamic import.
     for (const line of [
@@ -1167,5 +1197,422 @@ describe('SAML verifier: off', () => {
       'import * as saml from "samlify"',
     ])
       expect(mention.test(line)).toBe(true)
+  })
+})
+
+const issued = Temporal.Instant.from('2026-06-12T12:00:00Z')
+const conditionsTimes = (notBefore: string | null, notOnOrAfter: string | null) =>
+  `${notBefore === null ? '' : ` NotBefore="${notBefore}"`}${notOnOrAfter === null ? '' : ` NotOnOrAfter="${notOnOrAfter}"`}`
+
+describe('SAML timing and replay: signed time bounds', () => {
+  const before = issued.subtract({ seconds: 60 }).toString()
+  const after = issued.add({ seconds: 300 }).toString()
+
+  it.each<{ label: string; options: AssertionOptions }>([
+    {
+      label: 'missing Conditions NotBefore',
+      options: { conditionsAttributes: conditionsTimes(null, after) },
+    },
+    {
+      label: 'infinite Conditions NotBefore',
+      options: { conditionsAttributes: conditionsTimes('-infinity', after) },
+    },
+    {
+      label: 'missing Conditions NotOnOrAfter',
+      options: { conditionsAttributes: conditionsTimes(before, null) },
+    },
+    {
+      label: 'infinite Conditions NotOnOrAfter',
+      options: { conditionsAttributes: conditionsTimes(before, 'infinity') },
+    },
+    { label: 'missing bearer NotOnOrAfter', options: { confirmationNotOnOrAfter: null } },
+    { label: 'infinite bearer NotOnOrAfter', options: { confirmationNotOnOrAfter: 'infinity' } },
+    { label: 'infinite IssueInstant', options: { issueInstant: 'infinity' } },
+    { label: 'invalid calendar date', options: { issueInstant: '2026-06-31T12:00:00Z' } },
+    { label: 'timestamp without timezone', options: { issueInstant: '2026-06-12T12:00:00' } },
+  ])('refuses $label after signature validation', ({ options }) => {
+    const { assertion } = verifySamlResponse(config, encode(valid(options)))
+    expect(() => validateSamlTiming(assertion, issued)).toThrow(SamlTimingError)
+  })
+
+  it('refuses a signed assertion missing IssueInstant at the verifier boundary', () => {
+    expect(() => verifySamlResponse(config, encode(valid({ issueInstant: null })))).toThrow(
+      expect.objectContaining({ reason: 'unexpected_structure' }),
+    )
+  })
+
+  it.each([
+    {
+      label: 'Entra: 70-minute Conditions, 5-minute bearer',
+      conditionsSeconds: 4_200,
+      bearerSeconds: 300,
+      deadlineSeconds: 300,
+    },
+    {
+      label: 'AD FS: 60-minute Conditions and long bearer',
+      conditionsSeconds: 3_600,
+      bearerSeconds: 3_600,
+      deadlineSeconds: 600,
+    },
+    {
+      label: 'Conditions expire first',
+      conditionsSeconds: 180,
+      bearerSeconds: 300,
+      deadlineSeconds: 180,
+    },
+  ])(
+    'uses the earliest deadline for $label',
+    ({ conditionsSeconds, bearerSeconds, deadlineSeconds }) => {
+      // The unsigned response IssueInstant cannot choose the clock window.
+      const xml = valid({
+        conditionsAttributes: conditionsTimes(
+          issued.toString(),
+          issued.add({ seconds: conditionsSeconds }).toString(),
+        ),
+        confirmationNotOnOrAfter: issued.add({ seconds: bearerSeconds }).toString(),
+      }).replace('IssueInstant="2026-06-12T12:00:01Z"', 'IssueInstant="infinity"')
+      const { assertion } = verifySamlResponse(config, encode(xml))
+      const deadline = issued.add({ seconds: deadlineSeconds })
+      const expiry = deadline.add({ seconds: 60 })
+      expect(
+        validateSamlTiming(assertion, deadline.subtract({ nanoseconds: 1 })).epochNanoseconds,
+      ).toBe(deadline.epochNanoseconds)
+      expect(
+        validateSamlTiming(assertion, expiry.subtract({ nanoseconds: 1 })).epochNanoseconds,
+      ).toBe(deadline.epochNanoseconds)
+      expect(() => validateSamlTiming(assertion, expiry)).toThrow(SamlTimingError)
+      expect(() => validateSamlTiming(assertion, expiry.add({ nanoseconds: 1 }))).toThrow(
+        SamlTimingError,
+      )
+    },
+  )
+
+  const future = issued.add({ seconds: 60 }).toString()
+
+  it.each<{ label: string; options: AssertionOptions }>([
+    {
+      label: 'Conditions NotBefore',
+      options: { conditionsAttributes: conditionsTimes(future, after) },
+    },
+    { label: 'bearer NotBefore', options: { confirmationNotBefore: future } },
+    { label: 'IssueInstant', options: { issueInstant: future } },
+  ])('allows exactly 60 seconds of future skew for $label', ({ options }) => {
+    const { assertion } = verifySamlResponse(config, encode(valid(options)))
+    expect(validateSamlTiming(assertion, issued).epochNanoseconds).toBe(
+      issued.add({ seconds: 300 }).epochNanoseconds,
+    )
+    expect(() => validateSamlTiming(assertion, issued.subtract({ nanoseconds: 1 }))).toThrow(
+      SamlTimingError,
+    )
+  })
+})
+
+const databaseUrl = process.env.DATABASE_URL
+const replayDigest = (value: string) => createHash('sha256').update(value).digest('hex')
+
+describe.skipIf(!databaseUrl)('SAML timing and replay: database', () => {
+  let owned: TestDatabase
+  let db: Db
+  let organizationId: string
+  let providerId: string
+  let otherProviderId: string
+
+  beforeAll(async () => {
+    owned = await createTestDatabase(databaseUrl as string, undefined, { tag: 'saml_replay' })
+    db = createDb(owned.pool)
+    const seed = await owned.pool.connect()
+    let fixture: Awaited<ReturnType<typeof ssoFixture>>
+    try {
+      fixture = await ssoFixture(seed)
+    } finally {
+      seed.release()
+    }
+    organizationId = fixture.team
+    providerId = (
+      await db
+        .insertInto('sso_providers')
+        .values({ ...samlProviderValues(organizationId), issuer: IDP })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+    ).id
+    otherProviderId = (
+      await db
+        .insertInto('sso_providers')
+        .values(samlProviderValues(fixture.otherTeam))
+        .returning('id')
+        .executeTakeFirstOrThrow()
+    ).id
+  })
+
+  afterAll(async () => {
+    await owned?.drop()
+  })
+
+  async function inputs(requestLifetime = 540) {
+    // Use the same wall clock as expiry in Postgres, even under the JS clock-offset suite.
+    const { now } = await db
+      .selectNoFrom(
+        sql<string>`to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`.as(
+          'now',
+        ),
+      )
+      .executeTakeFirstOrThrow()
+    const issueInstant = Temporal.Instant.from(now)
+    const deadline = issueInstant.add({ seconds: 300 })
+    const request = {
+      id: `_request-${randomUUID()}`,
+      organizationId,
+      providerId,
+      expiresAt: issueInstant.add({ seconds: requestLifetime }),
+    }
+    return { deadline, request, issueInstant }
+  }
+
+  function signedResult(
+    input: Awaited<ReturnType<typeof inputs>>,
+    assertionId = `_assertion-${randomUUID()}`,
+    responseId = `_response-${randomUUID()}`,
+    signResponse = false,
+  ) {
+    const { request, issueInstant, deadline } = input
+    const xml = valid(
+      {
+        id: assertionId,
+        inResponseTo: request.id,
+        issueInstant: issueInstant.toString(),
+        conditionsAttributes: conditionsTimes(
+          issueInstant.toString(),
+          issueInstant.add({ seconds: 4_200 }).toString(),
+        ),
+        confirmationNotOnOrAfter: deadline.toString(),
+      },
+      { id: responseId, inResponseTo: request.id },
+    )
+    return verifySamlResponse(config, encode(signResponse ? sign(xml, 'Response') : xml))
+  }
+
+  async function retainedFor(keys: string[]) {
+    return db
+      .selectFrom('sso_replay_cache')
+      .select([
+        'kind',
+        'key_digest',
+        sql<string>`to_char(retain_until AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`.as(
+          'retention',
+        ),
+      ])
+      .where('provider_id', '=', providerId)
+      .where('key_digest', 'in', keys.map(replayDigest))
+      .execute()
+  }
+
+  it('refuses an expired request, an unmatched ID and a different provider without writing', async () => {
+    const live = await inputs()
+    const verified = signedResult(live)
+    await expect(
+      consumeSamlReplay(
+        db,
+        verified,
+        { ...live.request, expiresAt: live.issueInstant },
+        providerId,
+      ),
+    ).rejects.toMatchObject({ reason: 'request_expired' })
+    await expect(
+      consumeSamlReplay(db, verified, { ...live.request, id: '_other-request' }, providerId),
+    ).rejects.toMatchObject({ reason: 'request_mismatch' })
+    await expect(
+      consumeSamlReplay(db, verified, live.request, otherProviderId),
+    ).rejects.toMatchObject({ reason: 'request_mismatch' })
+    expect(
+      await retainedFor([live.request.id, verified.assertion.id, verified.response.id]),
+    ).toEqual([])
+    expect((await consumeSamlReplay(db, verified, live.request, providerId)).epochNanoseconds).toBe(
+      live.deadline.epochNanoseconds,
+    )
+  })
+
+  const backend = (conn: Db) =>
+    conn.selectNoFrom(sql<number>`pg_backend_pid()`.as('pid')).executeTakeFirstOrThrow()
+
+  it('rechecks expiry after a database lock wait and rolls back the consumed keys', async () => {
+    const blocker = await owned.pool.connect()
+    try {
+      await blocker.query('BEGIN')
+      await blocker.query('LOCK TABLE sso_replay_cache IN SHARE MODE')
+      const input = await inputs(2)
+      const verified = signedResult(input)
+      await db.connection().execute(async (conn) => {
+        const { pid } = await backend(conn)
+        const outcome = Promise.allSettled([
+          consumeSamlReplay(conn, verified, input.request, providerId),
+        ])
+        try {
+          await expect
+            .poll(async () => {
+              const { rows } = await blocker.query<{ blocked: boolean }>(
+                'SELECT cardinality(pg_blocking_pids($1)) > 0 AS blocked',
+                [pid],
+              )
+              return rows[0]?.blocked
+            })
+            .toBe(true)
+          await blocker.query('SELECT pg_sleep_until($1::timestamptz)', [
+            input.request.expiresAt.toString(),
+          ])
+        } finally {
+          await blocker.query('ROLLBACK')
+          await outcome
+        }
+        expect(await outcome).toMatchObject([
+          { status: 'rejected', reason: { reason: 'request_expired' } },
+        ])
+      })
+      expect(await retainedFor([input.request.id, verified.assertion.id])).toEqual([])
+    } finally {
+      blocker.release(true)
+    }
+  })
+
+  it('commits only one of two concurrent callbacks with the same signed assertion ID', async () => {
+    const left = await inputs()
+    const right = await inputs()
+    const sharedAssertion = `_assertion-${randomUUID()}`
+    const leftResponse = signedResult(left, sharedAssertion)
+    const rightResponse = signedResult(right, sharedAssertion)
+
+    // Both callbacks have their own valid signed request correlation. The assertion ID is
+    // the only shared key, so a conflict on the request key cannot make this test pass.
+    const outcomes = await db.connection().execute((conn1) =>
+      db.connection().execute(async (conn2) => {
+        expect((await backend(conn1)).pid).not.toBe((await backend(conn2)).pid)
+        return Promise.allSettled([
+          consumeSamlReplay(conn1, leftResponse, left.request, providerId),
+          consumeSamlReplay(conn2, rightResponse, right.request, providerId),
+        ])
+      }),
+    )
+
+    expect(outcomes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ status: 'fulfilled' }),
+        expect.objectContaining({
+          status: 'rejected',
+          reason: expect.objectContaining({ reason: 'replay' }),
+        }),
+      ]),
+    )
+    const loser = outcomes[0].status === 'rejected' ? left : right
+    const winner = loser === left ? right : left
+    expect(await retainedFor([left.request.id, right.request.id, sharedAssertion])).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'saml_request',
+          key_digest: replayDigest(winner.request.id),
+        }),
+        expect.objectContaining({
+          kind: 'saml_assertion',
+          key_digest: replayDigest(sharedAssertion),
+        }),
+      ]),
+    )
+    expect(await retainedFor([loser.request.id])).toEqual([])
+    await expect(
+      consumeSamlReplay(db, signedResult(loser), loser.request, providerId),
+    ).resolves.toEqual(loser.deadline)
+  })
+
+  it('consumes the request and a signed response ID independently of the assertion ID', async () => {
+    const first = await inputs()
+    const verified = signedResult(first, undefined, undefined, true)
+    await consumeSamlReplay(db, verified, first.request, providerId)
+    await expect(
+      consumeSamlReplay(db, signedResult(first), first.request, providerId),
+    ).rejects.toMatchObject({ reason: 'replay' })
+
+    const second = await inputs()
+    const sameResponse = signedResult(second, undefined, verified.response.id, true)
+    await expect(
+      consumeSamlReplay(db, sameResponse, second.request, providerId),
+    ).rejects.toMatchObject({ reason: 'replay' })
+    expect(await retainedFor([second.request.id, sameResponse.assertion.id])).toEqual([])
+    // The same wrapper ID without a response signature cannot reserve or consume a key.
+    await expect(
+      consumeSamlReplay(
+        db,
+        signedResult(second, undefined, verified.response.id),
+        second.request,
+        providerId,
+      ),
+    ).resolves.toEqual(second.deadline)
+  })
+
+  it.each([100, 540])(
+    'retains every consumed key through both time windows (request lifetime %s seconds)',
+    async (requestLifetime) => {
+      const input = await inputs(requestLifetime)
+      const verified = signedResult(input, undefined, undefined, true)
+      await consumeSamlReplay(db, verified, input.request, providerId)
+      const rows = await retainedFor([
+        input.request.id,
+        verified.assertion.id,
+        verified.response.id,
+      ])
+      expect(rows.map(({ kind }) => kind).sort()).toEqual([
+        'saml_assertion',
+        'saml_request',
+        'saml_response',
+      ])
+      const expected =
+        requestLifetime === 100 ? input.deadline.add({ seconds: 60 }) : input.request.expiresAt
+      for (const { retention } of rows)
+        expect(Temporal.Instant.from(retention).epochNanoseconds).toBe(expected.epochNanoseconds)
+    },
+  )
+
+  it('rounds replay retention up to the database precision', async () => {
+    const input = await inputs(100)
+    const deadline = input.deadline.add({ nanoseconds: 1 })
+    const verified = signedResult({ ...input, deadline })
+    expect(
+      (await consumeSamlReplay(db, verified, input.request, providerId)).epochNanoseconds,
+    ).toBe(deadline.epochNanoseconds)
+    const expected = input.deadline.add({ seconds: 60, microseconds: 1 })
+    const rows = await retainedFor([input.request.id, verified.assertion.id])
+    expect(rows).toHaveLength(2)
+    for (const { retention } of rows)
+      expect(Temporal.Instant.from(retention).epochNanoseconds).toBe(expected.epochNanoseconds)
+  })
+
+  it('purges expired rows in bounded batches while retaining live entries', async () => {
+    const live = await inputs()
+    const verified = signedResult(live)
+    await consumeSamlReplay(db, verified, live.request, providerId)
+    const expiredIds = [`_old-${randomUUID()}`, `_old-${randomUUID()}`]
+    // Insert historical rows without the insert-time guard that rightly refuses expired writes.
+    await db.transaction().execute(async (trx) => {
+      await sql`SET LOCAL session_replication_role = replica`.execute(trx)
+      await trx
+        .insertInto('sso_replay_cache')
+        .values(
+          expiredIds.map((id) => ({
+            organization_id: organizationId,
+            provider_id: providerId,
+            kind: 'saml_assertion',
+            key_digest: replayDigest(id),
+            consumed_at: sql<string>`clock_timestamp() - interval '180 seconds'`,
+            retain_until: sql<string>`clock_timestamp() - interval '60 seconds'`,
+          })),
+        )
+        .execute()
+    })
+    expect(await retainedFor(expiredIds)).toHaveLength(2)
+    expect(await purgeExpiredSamlReplay(db, 1)).toBe(1)
+    expect(await retainedFor(expiredIds)).toHaveLength(1)
+    expect(await purgeExpiredSamlReplay(db, 1)).toBe(1)
+    expect(await retainedFor(expiredIds)).toHaveLength(0)
+    expect(await purgeExpiredSamlReplay(db, 1)).toBe(0)
+    expect(
+      await retainedFor([live.request.id, verified.assertion.id, verified.response.id]),
+    ).toHaveLength(2)
   })
 })

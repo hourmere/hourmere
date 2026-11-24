@@ -31,7 +31,7 @@ import { createTestDatabase, type TestDatabase } from './testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
 
-/** Constraints, standalone indexes and triggers the migration creates, by name. */
+/** Constraints, standalone indexes and triggers on the identity tables, by name. */
 async function catalogObjects(pool: pg.Pool) {
   const tables = [...identityTables]
   const relations = `SELECT oid FROM pg_class WHERE relname = ANY($1) AND relnamespace='public'::regnamespace`
@@ -91,6 +91,8 @@ describe.skipIf(!serverUrl)('SSO identity storage', () => {
 
   it('names every constraint, index, trigger and trigger rule in a protection', async () => {
     const { constraints, indexes, triggers } = await catalogObjects(owned.pool)
+    // The replay expiry index has its own 0185 catalog-drop test.
+    const retentionIndex = 'sso_replay_cache_retain_until_idx'
     const source = await readFile(join(migrationsDir, identityMigration), 'utf8')
     // Every rule a guard raises names itself as the error's constraint.
     const rules = [...source.matchAll(/CONSTRAINT = '([a-z_]+)'/g)].map(([, rule]) => rule)
@@ -109,6 +111,7 @@ describe.skipIf(!serverUrl)('SSO identity storage', () => {
       'sso_identity_links_live_identity',
       'sso_identity_links_live_user',
       'sso_identity_links_user_id',
+      retentionIndex,
     ])
     expect(triggers).toHaveLength(8)
     expect(new Set(rules).size).toBe(rules.length)
@@ -119,6 +122,7 @@ describe.skipIf(!serverUrl)('SSO identity storage', () => {
       ...new Set([
         ...Object.values(identityProtections).flatMap(({ objects }) => objects),
         ...targets,
+        retentionIndex,
       ]),
     ]
     expect(covered.sort()).toEqual(objects)
