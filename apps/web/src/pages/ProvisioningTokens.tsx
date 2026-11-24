@@ -206,7 +206,11 @@ function TokenPanel({
             onChange={(event) => setName(event.target.value)}
           />
           <div>
-            <button className="button button-primary" type="submit" disabled={busy || !name.trim()}>
+            <button
+              className="button button-primary button-wrap"
+              type="submit"
+              disabled={busy || !name.trim()}
+            >
               {t('Create provisioning token')}
             </button>
           </div>
