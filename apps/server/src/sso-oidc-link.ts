@@ -29,7 +29,12 @@ export const oidcLinkReturnPath = '/app/settings'
 export class OidcLinkDomainUnverified extends OidcAttemptRefused {}
 
 /** The current account, membership and active browser session. Take locks in team-write order. */
-export async function lockOidcLinkActor(trx: Db, organizationId: string, actor: OidcTestActor) {
+export async function lockOidcLinkActor(
+  trx: Db,
+  organizationId: string,
+  actor: OidcTestActor,
+  scimResourcesEnabled = false,
+) {
   const user = await trx
     .selectFrom('auth.user')
     .select(['id', 'email'])
@@ -50,7 +55,7 @@ export async function lockOidcLinkActor(trx: Db, organizationId: string, actor: 
     .select('id')
     .where('organizationId', '=', organizationId)
     .where('userId', '=', user.id)
-    .where((eb) => eb.not(scimSuspended(organizationId, user.id)))
+    .where((eb) => eb.not(scimSuspended(organizationId, user.id, scimResourcesEnabled)))
     .forShare()
     .executeTakeFirst()
   if (!member) throw new OidcAttemptRefused()
@@ -107,6 +112,7 @@ type LinkActor = {
 interface LinkDeps {
   db: Db
   configurationKey: Buffer
+  scimResourcesEnabled?: boolean | undefined
 }
 
 /** Both IdP callbacks stage consent without changing the user's link. */
@@ -146,9 +152,10 @@ async function lockLinkContext(
   trx: Db,
   provider: SsoProviderRevision,
   { actor, binding }: LinkActor,
+  scimResourcesEnabled: boolean,
   protocol: 'oidc' | 'saml' = 'oidc',
 ) {
-  const context = await lockOidcLinkActor(trx, provider.organizationId, actor)
+  const context = await lockOidcLinkActor(trx, provider.organizationId, actor, scimResourcesEnabled)
   const { issuer } = await lockOidcProvider(trx, provider, true, protocol)
   if (context.member.id !== binding.memberId || sha256(context.mailbox) !== binding.mailboxDigest)
     throw new OidcAttemptRefused()
@@ -160,7 +167,7 @@ async function lockLinkContext(
 
 /** Freeze the validated IdP subject for a later explicit, same-origin completion. */
 export async function stageOidcLink(
-  { db, configurationKey }: LinkDeps,
+  { db, configurationKey, scimResourcesEnabled }: LinkDeps,
   provider: SsoProviderRevision,
   link: LinkActor,
   identity: Awaited<ReturnType<typeof verifyOidcIdToken>>,
@@ -175,7 +182,7 @@ export async function stageOidcLink(
   )
     throw new OidcAttemptRefused()
   return db.transaction().execute(async (trx) => {
-    const context = await lockLinkContext(trx, provider, link)
+    const context = await lockLinkContext(trx, provider, link, scimResourcesEnabled === true)
     const { issuedAt, deadline } = await trx
       .selectNoFrom([
         sql<string>`clock_timestamp()::text`.as('issuedAt'),
@@ -208,7 +215,7 @@ export async function stageOidcLink(
 const invalid = { status: 'invalid' } as const
 
 export async function completeOidcLink(
-  { db, configurationKey }: LinkDeps,
+  { db, configurationKey, scimResourcesEnabled }: LinkDeps,
   {
     id,
     browserBinding,
@@ -269,7 +276,13 @@ export async function completeOidcLink(
   } as const
   try {
     const result = await db.transaction().execute(async (trx) => {
-      const context = await lockLinkContext(trx, provider, { actor, binding: projection }, protocol)
+      const context = await lockLinkContext(
+        trx,
+        provider,
+        { actor, binding: projection },
+        scimResourcesEnabled === true,
+        protocol,
+      )
       const attempt = await attempts(trx)
         .select(sql<string>`expires_at::text`.as('expires_at'))
         .where('user_id', '=', actor.userId)

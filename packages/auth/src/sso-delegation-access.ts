@@ -10,7 +10,7 @@ export type SsoDelegationStatus = 'unenforced' | 'required' | 'valid' | null
 /** One reliance predicate for inventory, machine authorization and write-time checks. */
 export function liveSsoDelegations(
   kind: CredentialKind,
-  { ssoOidcEnabled, ssoSamlEnabled }: TeamSsoCapabilities,
+  { ssoOidcEnabled, ssoSamlEnabled, scimResourcesEnabled }: TeamSsoCapabilities,
 ) {
   const isKey = kind === 'api_key'
   const credential = isKey ? sql`lease_binding.api_key_id` : sql`lease_binding.oauth_grant_id`
@@ -56,7 +56,7 @@ export function liveSsoDelegations(
     `,
     live: sql`
       ${expiry} > statement_timestamp()
-      AND NOT (${scimSuspended(sql.ref('lease_binding.organization_id'), sql.ref('lease_binding.user_id'))})
+      AND NOT (${scimSuspended(sql.ref('lease_binding.organization_id'), sql.ref('lease_binding.user_id'), scimResourcesEnabled === true)})
       AND lease_link.retired_at IS NULL AND lease_provider.enabled AND lease_provider.retired_at IS NULL
       AND ((${ssoOidcEnabled} AND lease_provider.protocol = 'oidc') OR (${ssoSamlEnabled} AND lease_provider.protocol = 'saml'))
       AND lease_domain.retired_at IS NULL AND lease_domain.verified_at IS NOT NULL
@@ -126,7 +126,14 @@ export async function lockSsoDelegation(
   }: { organizationId: string; userId: string; kind: CredentialKind; credentialId: string },
   denied: () => never,
 ): Promise<string | undefined> {
-  const { policy, suspended } = await lockTeamSsoPolicy(db, organizationId, userId)
+  const { policy, suspended } = await lockTeamSsoPolicy(
+    db,
+    organizationId,
+    userId,
+    undefined,
+    undefined,
+    capabilities.scimResourcesEnabled === true,
+  )
   if (suspended) denied()
   if (!policy?.require_sso) return
   if (!(capabilities.ssoOidcEnabled || capabilities.ssoSamlEnabled)) denied()

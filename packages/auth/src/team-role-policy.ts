@@ -457,7 +457,7 @@ export function createTeamRolePolicy(
     const target = await targetQuery
       .$if(scimResourcesEnabled && lock && role === 'admin', (query) =>
         query.select(({ ref }) =>
-          scimSuspended(facts.organizationId, ref('auth.member.userId')).as('scimBlocked'),
+          scimSuspended(facts.organizationId, ref('auth.member.userId'), true).as('scimBlocked'),
         ),
       )
       .executeTakeFirst()
@@ -946,14 +946,29 @@ export function createTeamRolePolicy(
                 .forShare()
                 .executeTakeFirst()
               if (!organization) throw teamRoleDenied()
-              await checkTeamManagementMembership(trx, actor.user.id, targetId, true, true, true)
+              await checkTeamManagementMembership(
+                trx,
+                actor.user.id,
+                targetId,
+                true,
+                true,
+                true,
+                false,
+                false,
+                scimResourcesEnabled,
+              )
             }
             const live = await teamSession(trx, actor, true)
             const expected = ctx.request?.headers.get('x-expected-organization-id') ?? null
             if (expected !== null) {
               const activeMember =
                 live.activeOrganizationId &&
-                (await isMember(trx, actor.user.id, live.activeOrganizationId))
+                (await isMember(
+                  trx,
+                  actor.user.id,
+                  live.activeOrganizationId,
+                  scimResourcesEnabled,
+                ))
               const personal = activeMember
                 ? undefined
                 : await trx

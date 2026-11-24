@@ -540,7 +540,9 @@ describe.skipIf(!serverUrl)('collective scheduling', () => {
   it('checks busy time and Google cursor freshness for a non-first host', async () => {
     const s = await setup()
     const hostId = required(s.event.hosts.at(-1)).userId
-    const busy = await s.f.calendarBusy(hostId, [['2026-11-02T09:00Z', '2026-11-02T10:00Z']])
+    const busy = await s.f.calendarBusy(hostId, [['2026-11-02T09:00Z', '2026-11-02T10:00Z']], {
+      now: now(),
+    })
     expect(await code(() => booking(s))).toBe('slot_unavailable')
     const slots = await listPublicTeamSlots(s.pub, { ...s.page, ...range })
     expect(slots.some((slot) => slot.start === '2026-11-02T09:00:00.000Z')).toBe(false)
@@ -553,6 +555,11 @@ describe.skipIf(!serverUrl)('collective scheduling', () => {
       .updateTable('calendar_connections')
       .set({ provider: 'google' })
       .where('id', '=', calendar.connection_id)
+      .execute()
+    await db
+      .updateTable('calendars')
+      .set({ last_synced_at: null })
+      .where('id', '=', busy.calendarId)
       .execute()
     expect(await code(() => listPublicTeamSlots(s.pub, { ...s.page, ...range }))).toBe(
       'calendar_sync_unavailable',

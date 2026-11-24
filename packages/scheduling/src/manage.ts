@@ -226,6 +226,8 @@ async function listBookingSlots(
     booking.id,
     snapshot.organization_id,
     snapshot.required_host_user_ids,
+    false,
+    ctx.scimResourcesEnabled === true,
   )
   const selectedDuration =
     durationMinutes === undefined

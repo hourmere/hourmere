@@ -168,6 +168,7 @@ export function beforeHook(
         scoped?.context ? { ...ctx, query: scoped.context.query } : ctx,
         db,
         filter,
+        scimResourcesEnabled,
       )
       if (empty) return empty
     }
@@ -176,7 +177,7 @@ export function beforeHook(
       (scoped?.context && { context: scoped.context }) ??
       defaultMagicLinkErrorRedirect(ctx) ??
       displayNameRules(ctx) ??
-      apiKeyRules(ctx, db)
+      apiKeyRules(ctx, db, scimResourcesEnabled)
     )
   })
 }

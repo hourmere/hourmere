@@ -909,6 +909,69 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
     expect(await protocolEffects(provider.id)).toEqual(before)
   })
 
+  it('refuses SAML link consent for a directory-suspended child member when SCIM resources are enabled', async () => {
+    const fixture = await seedTeam()
+    const domainName = `directory-${randomUUID()}.example.com`
+    const assertedMailbox = `member@${domainName}`
+    await db
+      .updateTable('auth.user')
+      .set({ email: assertedMailbox })
+      .where('id', '=', fixture.member)
+      .execute()
+    const claim = await db
+      .insertInto('sso_domains')
+      .values(claimedDomainValues(fixture.team, domainName))
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    const provider = await enabledProvider({
+      organizationId: fixture.team,
+      domainId: claim.id,
+      assertedMailbox,
+    })
+    const manager = management(fixture.team, { ...samlOnly, scimResourcesEnabled: true })
+    const member = await browserSession(fixture.member, fixture.team)
+    const { request } = manager
+    const result = await stageLink(request, await startLink(provider, member.cookies, manager))
+    const before = await protocolEffects(provider.id)
+
+    const connection = await db
+      .insertInto('scim_connections')
+      .values({ organization_id: fixture.otherTeam })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    const mapping = await db
+      .insertInto('scim_team_mappings')
+      .values({
+        parent_organization_id: fixture.otherTeam,
+        child_organization_id: fixture.team,
+        connection_id: connection.id,
+        external_id: 'roster',
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await db
+      .insertInto('scim_team_managed_memberships')
+      .values({
+        member_id: fixture.memberMember,
+        mapping_id: mapping.id,
+        child_organization_id: fixture.team,
+        user_id: fixture.member,
+        suspended_at: sql`clock_timestamp()`,
+      })
+      .execute()
+
+    await expectRefusedCompletion(await complete(result, { request }))
+    expect(await storedLinks(provider)).toEqual([])
+    expect(await protocolEffects(provider.id)).toEqual(before)
+
+    const completed = await complete(result, { request: instance() })
+    expect(completed.status).toBe(303)
+    expect(completed.headers.get('location')).toBe('/app/settings')
+    expect(await storedLinks(provider)).toEqual([
+      expect.objectContaining({ user_id: fixture.member, subject: provider.subject }),
+    ])
+  })
+
   it('binds a draft test to fresh administration, its original session and browser, and its exact revision', async () => {
     const provider = await samlDraft(team.team)
     const { json, mailboxProof, request, withMailbox } = management()

@@ -185,7 +185,12 @@ function requireScopes(
     throw new GoogleCalendarError('permissions_missing')
 }
 
-async function saveCalendars(db: Db, connectionId: string, calendars: ProviderCalendar[]) {
+async function saveCalendars(
+  db: Db,
+  connectionId: string,
+  calendars: ProviderCalendar[],
+  provider: CalendarProvider,
+) {
   if (calendars.length) {
     await db
       .insertInto('calendars')
@@ -220,6 +225,24 @@ async function saveCalendars(db: Db, connectionId: string, calendars: ProviderCa
       'not in',
       calendars.map((c) => c.id),
     )
+  if (provider === 'microsoft') {
+    // Graph can omit a calendar after access changes. Keep opted-in calendars blocking
+    // availability until they can be read again or the owner removes the selection.
+    await db
+      .updateTable('calendars')
+      .set({ sync_error: 'provider_unavailable' })
+      .where('connection_id', '=', connectionId)
+      .where('check_conflicts', '=', true)
+      .$if(calendars.length > 0, (q) =>
+        q.where(
+          'external_id',
+          'not in',
+          calendars.map((c) => c.id),
+        ),
+      )
+      .execute()
+    removed = removed.where('check_conflicts', '=', false)
+  }
   await removed.execute()
 }
 
@@ -289,6 +312,8 @@ export async function listCalendarConnections(deps: CalendarDeps, principal: Pri
       updatedAt: connection.updated_at.toISOString(),
       syncAuthorized:
         connection.provider === 'caldav' ||
+        (connection.provider === 'microsoft' &&
+          hasMicrosoftCalendarListAccess(connection.scopes)) ||
         (connection.provider === 'google' &&
           GOOGLE_CALENDAR_SYNC_SCOPES.every((scope) => connection.scopes.includes(scope))),
       calendars: calendars
@@ -517,7 +542,17 @@ async function finishConnection(
         )
         .returning('id')
         .executeTakeFirstOrThrow()
-      await saveCalendars(trx, connection.id, calendars)
+      await saveCalendars(trx, connection.id, calendars, provider)
+      if (provider === 'microsoft' && previous) {
+        const selected = await trx
+          .updateTable('calendars')
+          .set({ last_synced_at: null, sync_state: null })
+          .where('connection_id', '=', connection.id)
+          .where('check_conflicts', '=', true)
+          .returning('id')
+          .execute()
+        for (const calendar of selected) await deps.enqueueSync?.(calendar.id, trx)
+      }
       if (provider === 'google' && previous)
         await deps.enqueueWritebackRecovery?.(connection.id, trx)
     })
@@ -639,7 +674,7 @@ async function refreshCalendarProvider(
       // A refresh may rotate the refresh token. Keep it even when the following list
       // request fails transiently, or the next attempt would reuse the obsolete token.
       const calendars = await client.calendars(tokens.accessToken, signal)
-      await saveCalendars(trx, id, calendars)
+      await saveCalendars(trx, id, calendars, provider)
       return 'ok'
     } catch (error) {
       if (!(error instanceof CalendarProviderError)) throw error

@@ -336,10 +336,12 @@ describe.skipIf(!serverUrl)('recurring availability on PostgreSQL', () => {
 
   it('intersects round-robin candidates over all dates and rechecks current eligibility', async () => {
     const { first, second, request } = await roundRobin()
-    await f.calendarBusy(first.id, [['2026-11-10T12:00Z', '2026-11-10T12:30Z']])
-    const { calendarId } = await f.calendarBusy(second.id, [
-      ['2026-11-03T12:00Z', '2026-11-03T12:30Z'],
-    ])
+    await f.calendarBusy(first.id, [['2026-11-10T12:00Z', '2026-11-10T12:30Z']], { now: NOW })
+    const { calendarId } = await f.calendarBusy(
+      second.id,
+      [['2026-11-03T12:00Z', '2026-11-03T12:30Z']],
+      { now: NOW },
+    )
     const sequence = () =>
       db
         .selectFrom('round_robin_state')
@@ -445,11 +447,11 @@ describe.skipIf(!serverUrl)('recurring availability on PostgreSQL', () => {
       canBook: true,
       hostUserIds: [first.id],
     })
-    await f.calendarBusy(first.id, [['2026-11-10T12:00Z', '2026-11-10T12:30Z']])
+    await f.calendarBusy(first.id, [['2026-11-10T12:00Z', '2026-11-10T12:30Z']], { now: NOW })
     await expect(checkRecurringAvailability(db, request)).rejects.toMatchObject({
       code: 'calendar_sync_unavailable',
     })
-    await f.calendarBusy(second.id, [['2026-11-03T12:00Z', '2026-11-03T12:30Z']])
+    await f.calendarBusy(second.id, [['2026-11-03T12:00Z', '2026-11-03T12:30Z']], { now: NOW })
     // The stale candidate independently fails the first date, but no known host can
     // cover the second date. That date still has unknown availability.
     await expect(checkRecurringAvailability(db, request)).rejects.toMatchObject({

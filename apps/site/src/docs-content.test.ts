@@ -218,8 +218,8 @@ describe('launch documentation disclosures', () => {
     {
       topic: 'Microsoft calendar scope and acceptance',
       claims: [
-        /Microsoft [Cc]alendars? lists? (?:calendars )?only/,
-        /(?:no|without) busy-time sync(?:hronization)? or event writes/,
+        /Microsoft Calendar uses bounded busy-time snapshots/,
+        /Incremental sync and event writes are pending/,
         /Microsoft sign-in and calendar connections have not had real-account acceptance/,
       ],
     },

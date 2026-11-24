@@ -1293,6 +1293,7 @@ export interface ScimTeamManagedMemberships {
   mapping_id: string;
   member_id: string;
   scim_user_id: string | null;
+  suspended_at: Timestamp | null;
   user_id: string;
 }
 

@@ -24,7 +24,8 @@ export interface ScimMappingNoticeQueue {
 export const scimMappingNoticeQueue = defineJob({ name, payload })
 
 function verifiedOwners(db: Db, organizationId: string) {
-  return ssoRecoveryTeamOwners(db, organizationId)
+  // Mapping notices exist only with the resource capability.
+  return ssoRecoveryTeamOwners(db, organizationId, true)
     .innerJoin('auth.user', 'auth.user.id', 'auth.member.userId')
     .where('auth.user.emailVerified', '=', true)
 }

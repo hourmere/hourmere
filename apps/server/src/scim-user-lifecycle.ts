@@ -1,7 +1,14 @@
 import { teamRoles } from '@hourmere/auth'
 import type { Database } from '@hourmere/db'
+import { writeAuditEvent } from '@hourmere/db/audit'
 import { suspendScimMembership } from '@hourmere/db/scim-suspension'
 import { sql, type Transaction } from 'kysely'
+import {
+  rejectPrivilegedChildMembership,
+  resumeManagedChildMemberships,
+  sourcedChildMemberships,
+  suspendManagedChildMemberships,
+} from './scim-managed-child-memberships.ts'
 import { immutableScimPrivileges, refuse } from './scim-user-write.ts'
 
 interface LifecycleWrite {
@@ -50,16 +57,59 @@ export async function assertScimUserCanRetire(trx: Transaction<Database>, entry:
     rejectPrivilegedMembership(await linkedMemberships(trx, entry, entry.linked_user_id))
 }
 
-/** The caller holds the organization update lock and the live resource row lock. */
+/**
+ * The caller holds the update locks of the organization and of the child teams in which
+ * this User sources a managed membership, and the live resource row lock. A returned
+ * reply is a refusal whose child changes the caller must still commit.
+ */
 export async function applyScimUserLifecycle(
   trx: Transaction<Database>,
   entry: LifecycleEntry & { active: boolean },
   { active, deactivationRequested, roleWrite }: LifecycleWrite,
   actor: { type: 'scim_token'; id: string },
 ) {
-  const userId = entry.linked_user_id
   const reactivating = active === true && !entry.active
-  if (userId === null || (!reactivating && !deactivationRequested && !roleWrite)) return
+  if (!reactivating && !deactivationRequested && !roleWrite) return
+  // Child access follows the roster source, so check it before any state changes.
+  const sourced = deactivationRequested ? await sourcedChildMemberships(trx, entry) : []
+  rejectPrivilegedChildMembership(sourced)
+  const resumed = reactivating ? await resumeManagedChildMemberships(trx, entry) : 0
+  const blocked = await applyParentLifecycle(
+    trx,
+    entry,
+    { active, deactivationRequested, roleWrite },
+    actor,
+  )
+  if (blocked) {
+    if (resumed === 0) throw blocked
+    // The parent's own blocker decides only parent access. This is the one refusal that
+    // commits a change: the User itself is left exactly as it was (RFC 7644 section
+    // 3.5.2), nothing else from the request is applied, and the child resume it carries
+    // is journaled so that the refused request never changes access silently.
+    await writeAuditEvent(trx, {
+      organizationId: entry.organization_id,
+      actor,
+      credential: { type: 'none' },
+      action: 'scim_user.child_access_resumed',
+      targetType: 'scim_user',
+      targetId: entry.id,
+    })
+    return blocked.reply
+  }
+  // The entry stays inactive after a refused reactivation, so a repeated deactivation
+  // suspends again whatever that reactivation resumed.
+  if (active === false) await suspendManagedChildMemberships(trx, sourced)
+}
+
+async function applyParentLifecycle(
+  trx: Transaction<Database>,
+  entry: LifecycleEntry & { active: boolean },
+  { active, deactivationRequested, roleWrite }: LifecycleWrite,
+  actor: { type: 'scim_token'; id: string },
+) {
+  const userId = entry.linked_user_id
+  if (userId === null) return
+  const reactivating = active === true && !entry.active
   const organizationId = entry.organization_id
   const memberships = await linkedMemberships(trx, entry, userId)
   if (deactivationRequested || roleWrite) rejectPrivilegedMembership(memberships)
@@ -76,7 +126,8 @@ export async function applyScimUserLifecycle(
       .where('cleared_at', 'is', null)
       .where((eb) => eb.or([eb('user_id', '=', userId), eb('identity_email', '=', mailbox)]))
       .executeTakeFirst()
-    if (localBlock || !memberships.some(({ memberId }) => memberId !== null)) throw locallyBlocked()
+    if (localBlock || !memberships.some(({ memberId }) => memberId !== null))
+      return locallyBlocked()
     await trx
       .updateTable('scim_membership_blocks')
       .set({ cleared_at: sql<Date>`clock_timestamp()` })

@@ -3,7 +3,11 @@ import type { Db, EventTypeHosts, EventTypes, Schedules } from '@hourmere/db'
 import { scimManagedMember, scimSuspended } from '@hourmere/db/scim-suspension'
 import { type Selectable, sql } from 'kysely'
 import { z } from 'zod'
-import { assertCachedCalendarSync, servedHandle } from './availability.ts'
+import {
+  assertCachedCalendarSync,
+  CACHED_CONFLICT_PROVIDERS,
+  servedHandle,
+} from './availability.ts'
 import { checkedCatalogPage } from './catalog-page.ts'
 import {
   automaticMeet,
@@ -306,7 +310,11 @@ export async function getSelfReadiness(
         )
         .on((eb) =>
           eb.not(
-            scimSuspended(eb.ref('activeMember.organizationId'), eb.ref('activeMember.userId')),
+            scimSuspended(
+              eb.ref('activeMember.organizationId'),
+              eb.ref('activeMember.userId'),
+              ctx.scimResourcesEnabled === true,
+            ),
           ),
         ),
     )
@@ -315,7 +323,15 @@ export async function getSelfReadiness(
     .select(['m.id', 'm.userId', 'u.name', 'u.emailVerified', 'p.user_id as personalOwner'])
     .where('m.organizationId', '=', principal.organization.id)
     .where('m.userId', '=', principal.user.id)
-    .where((eb) => eb.not(scimSuspended(eb.ref('m.organizationId'), eb.ref('m.userId'))))
+    .where((eb) =>
+      eb.not(
+        scimSuspended(
+          eb.ref('m.organizationId'),
+          eb.ref('m.userId'),
+          ctx.scimResourcesEnabled === true,
+        ),
+      ),
+    )
     .where('u.emailVerified', '=', true)
     .where('s.id', '=', principal.sessionId)
     .where('s.expiresAt', '>', sql<Date>`clock_timestamp()`)
@@ -449,7 +465,7 @@ export async function getTeamMemberReadiness(
           )
         return [
           scimManagedMember(eb.ref('m.organizationId'), eb.ref('m.userId')).as('scimManaged'),
-          scimSuspended(eb.ref('m.organizationId'), eb.ref('m.userId')).as('scimSuspension'),
+          scimSuspended(eb.ref('m.organizationId'), eb.ref('m.userId'), true).as('scimSuspension'),
           eb.exists(localBlocks.where('block.kind', '=', 'suspension')).as('localSuspension'),
           eb.exists(localBlocks.where('block.kind', '=', 'removal')).as('localRemoval'),
         ]
@@ -694,7 +710,7 @@ function calendarChecks(facts: Facts, userId: string, now: Temporal.Instant): Ch
   const selected = facts.calendars.value.filter((c) => c.user_id === userId && c.check_conflicts)
   if (!selected.length)
     return [na('conflict_calendar_selection', now), na('selected_calendar_sync', now)]
-  const unsupported = selected.some((c) => c.provider !== 'google' && c.provider !== 'caldav')
+  const unsupported = selected.some((c) => !CACHED_CONFLICT_PROVIDERS.includes(c.provider))
   const selection = check(
     'conflict_calendar_selection',
     unsupported ? 'not_checked' : 'satisfied',
@@ -704,9 +720,7 @@ function calendarChecks(facts: Facts, userId: string, now: Temporal.Instant): Ch
     'member_self',
   )
   const syncIssues: Check[] = []
-  for (const calendar of selected.filter(
-    (c) => c.provider === 'google' || c.provider === 'caldav',
-  )) {
+  for (const calendar of selected.filter((c) => CACHED_CONFLICT_PROVIDERS.includes(c.provider))) {
     try {
       assertCachedCalendarSync([calendar], now)
     } catch (error) {

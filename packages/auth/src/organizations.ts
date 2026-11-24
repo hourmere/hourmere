@@ -10,14 +10,19 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 /** Ids from cookies, key metadata or requests are checked before they reach a uuid column. */
 export const isUuid = (value: string) => UUID.test(value)
 
-export async function isMember(db: Db, userId: string, organizationId: string): Promise<boolean> {
+export async function isMember(
+  db: Db,
+  userId: string,
+  organizationId: string,
+  scimResourcesEnabled = false,
+): Promise<boolean> {
   if (!isUuid(userId) || !isUuid(organizationId)) return false
   const row = await db
     .selectFrom('auth.member')
     .select('id')
     .where('userId', '=', userId)
     .where('organizationId', '=', organizationId)
-    .where((eb) => eb.not(scimSuspended(organizationId, userId)))
+    .where((eb) => eb.not(scimSuspended(organizationId, userId, scimResourcesEnabled)))
     .executeTakeFirst()
   return row !== undefined
 }

@@ -145,7 +145,7 @@ async function liveRecoveryAuthority(db: Db, principal: Browser, binding: string
       AND a.consumed_at IS NOT NULL AND r.accepted_at <= a.consumed_at
       AND a.browser_binding_digest = ${binding} AND a.mailbox = lower(btrim(u.email))
       AND u."emailVerified"
-      AND NOT ${scimSuspended(sql.ref('a.organization_id'), sql.ref('a.user_id'))}
+      AND NOT ${scimSuspended(sql.ref('a.organization_id'), sql.ref('a.user_id'), principal.scimResourcesEnabled === true)}
       AND a.mailbox_proof_expires_at > ${observedAt} AND a.expires_at > ${observedAt}
       AND s."expiresAt" > ${observedAt}
       AND EXISTS (SELECT FROM unnest(string_to_array(m.role, ',')) AS roles(token)

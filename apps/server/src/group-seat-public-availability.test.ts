@@ -222,7 +222,7 @@ describe.skipIf(!process.env.DATABASE_URL)('public group availability', () => {
       .set({ weekly_hours: '{}' })
       .where('id', '=', f.scheduleId)
       .execute()
-    await createFixtures(db).calendarBusy(f.userId, [[START, NEXT]])
+    await createFixtures(db).calendarBusy(f.userId, [[START, NEXT]], { now: NOW })
     expect(await slots(f.path)).toEqual([
       { start: START, end: '2027-11-01T09:30:00Z', capacity: 3, seatsRemaining: 2 },
     ])

@@ -289,6 +289,7 @@ async function completeSamlTest(
   result: z.infer<typeof testResultSchema>,
   actor: OidcTestActor,
   test: z.infer<typeof samlTestBinding>,
+  scimResourcesEnabled: boolean,
 ) {
   const pending = (executor: Db) =>
     executor
@@ -311,7 +312,14 @@ async function completeSamlTest(
     revision: snapshot.provider_revision,
   }
   return db.transaction().execute(async (trx) => {
-    const role = await lockOidcTestActor(trx, provider, actor, test.recovery, 'saml')
+    const role = await lockOidcTestActor(
+      trx,
+      provider,
+      actor,
+      test.recovery,
+      scimResourcesEnabled,
+      'saml',
+    )
     const attempt = await pending(trx)
       .select(samlDatabaseInstantText(sql.ref('expires_at')).as('expiresAt'))
       .forUpdate()
@@ -384,6 +392,7 @@ async function stageSamlCompletion(
   requestId: string,
   relayState: string,
   response: VerifiedSamlResponse,
+  scimResourcesEnabled: boolean,
   actor?: OidcTestActor,
 ) {
   const { organizationId, providerId, revision } = provider
@@ -400,7 +409,8 @@ async function stageSamlCompletion(
         .forShare()
         .executeTakeFirst()
     }
-    const local = actor && (await lockOidcLinkActor(trx, organizationId, actor))
+    const local =
+      actor && (await lockOidcLinkActor(trx, organizationId, actor, scimResourcesEnabled))
     await lockOidcProvider(trx, provider, true, 'saml')
     const correlated = correlatedSamlRequest(
       trx,
@@ -476,7 +486,7 @@ async function stageSamlCompletion(
     if (!link || link.retired_at) return undefined
     if (link.proven_email !== identity.mailbox) {
       const pending = await stageSsoMailboxCompletion(
-        { db: trx, configurationKey },
+        { db: trx, configurationKey, scimResourcesEnabled },
         provider,
         link,
         identity.mailbox,
@@ -575,6 +585,7 @@ async function completeSamlSignIn(
         candidate,
         link.proven_email,
         false,
+        options.scimResourcesEnabled === true,
         'saml',
       )
       if (context.reason !== undefined || context.link.proven_email !== link.proven_email)
@@ -630,6 +641,7 @@ export function samlSignInRoutes({
   session,
   readSession,
 }: SamlSignInDeps): SamlSignInModule {
+  const scimResourcesEnabled = capabilities.scimResourcesEnabled === true
   const deliveries = createRateLimiter({ limit: 30, windowSeconds: 60 })
   const completions = createRateLimiter({ limit: 30, windowSeconds: 60 })
   const guard: MiddlewareHandler = async (c, next) => {
@@ -816,6 +828,7 @@ export function samlSignInRoutes({
               requestId,
               relayState,
               verified.response,
+              scimResourcesEnabled,
               link && request.user_id && request.session_id
                 ? { userId: request.user_id, id: request.session_id }
                 : undefined,
@@ -876,6 +889,7 @@ export function samlSignInRoutes({
         if (!configurationKey || !binding) return c.json(completionInvalid, 400)
         const sessionOptions = {
           ...session,
+          scimResourcesEnabled,
           publicUrl,
           headers: c.req.raw.headers,
           ip: c.var.clientIp,
@@ -889,7 +903,7 @@ export function samlSignInRoutes({
         const linkEnvelope = getCookie(c, linkCookie.name)
         if (linkIntent) {
           const completed = await completeOidcLink(
-            { db, configurationKey },
+            { db, configurationKey, scimResourcesEnabled },
             { id: id.data, browserBinding, envelope: linkEnvelope },
             async () => readSession?.(c.req.raw.headers),
             (requestId) => {
@@ -913,7 +927,7 @@ export function samlSignInRoutes({
         const mailboxEnvelope = getCookie(c, mailboxCookie.name)
         if (mailboxEnvelope !== undefined) {
           const completed = await completeOidcSignIn(
-            { db, configurationKey },
+            { db, configurationKey, scimResourcesEnabled },
             { id: id.data, browserBinding, envelope: mailboxEnvelope },
             sessionOptions,
             returnState,
@@ -952,6 +966,7 @@ export function samlSignInRoutes({
             test.data,
             actor,
             testBinding,
+            scimResourcesEnabled,
           ).catch((error: unknown) => {
             if (
               error instanceof OidcAttemptRefused ||

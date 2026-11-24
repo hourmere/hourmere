@@ -34,6 +34,7 @@ const projectionSchema = z.strictObject({
 interface CompletionDependencies {
   db: Db
   configurationKey: Buffer
+  scimResourcesEnabled?: boolean | undefined
 }
 
 function projectionAad(provider: SsoProviderRevision, id: string, binding: string) {
@@ -95,7 +96,7 @@ export function expiresDuringOidcWrite(error: unknown): boolean {
 
 /** Transfer a consumed callback to its own immutable, mailbox-bound completion attempt. */
 export async function stageOidcCompletion(
-  { db, configurationKey }: CompletionDependencies,
+  { db, configurationKey, scimResourcesEnabled }: CompletionDependencies,
   provider: SsoProviderRevision,
   candidate: OidcLink,
   assertedMailbox: string,
@@ -105,7 +106,7 @@ export async function stageOidcCompletion(
 ) {
   const binding = browserBindingDigest(browserBinding)
   return stageSsoMailboxCompletion(
-    { db, configurationKey },
+    { db, configurationKey, scimResourcesEnabled },
     provider,
     candidate,
     assertedMailbox,
@@ -116,7 +117,7 @@ export async function stageOidcCompletion(
 }
 
 export async function stageSsoMailboxCompletion(
-  { db, configurationKey }: CompletionDependencies,
+  { db, configurationKey, scimResourcesEnabled }: CompletionDependencies,
   provider: SsoProviderRevision,
   candidate: OidcLink,
   assertedMailbox: string,
@@ -136,6 +137,7 @@ export async function stageSsoMailboxCompletion(
         candidate,
         assertedMailbox,
         false,
+        scimResourcesEnabled === true,
         method,
       )
       if (context.reason !== undefined) return { reason: context.reason }
@@ -212,7 +214,7 @@ const collision = { status: 'collision' } as const
 
 /** Complete from locked local state. This code has no provider transport. */
 export async function completeOidcSignIn(
-  { db, configurationKey }: CompletionDependencies,
+  { db, configurationKey, scimResourcesEnabled }: CompletionDependencies,
   {
     id,
     browserBinding,
@@ -275,6 +277,7 @@ export async function completeOidcSignIn(
         { id: result.linkId, user_id: result.userId, generation: result.linkGeneration },
         mailbox,
         true,
+        scimResourcesEnabled === true,
         method,
       )
       if (

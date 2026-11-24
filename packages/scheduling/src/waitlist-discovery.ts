@@ -25,7 +25,12 @@ interface Work {
 }
 
 /** Resolve current handles from stable identity; renamed/hidden direct links still work. */
-async function resolveById(db: Db, eventTypeId: string, lock = false) {
+async function resolveById(
+  db: Db,
+  eventTypeId: string,
+  lock = false,
+  scimResourcesEnabled = false,
+) {
   const { rows } = await sql<{
     slug: string
     handle: string | null
@@ -45,6 +50,7 @@ async function resolveById(db: Db, eventTypeId: string, lock = false) {
       team: !row.owner_user_id,
     },
     false,
+    scimResourcesEnabled,
   )
 }
 
@@ -98,7 +104,7 @@ export async function scanWaitlistEvent(
   // Availability computation holds no work, entry, host or event row locks.
   const snapshot = await ctx.db.transaction().execute(async (trx) => {
     await ensureWaitlistKey(trx, ctx.secret)
-    const event = await resolveById(trx, eventTypeId, true)
+    const event = await resolveById(trx, eventTypeId, true, ctx.scimResourcesEnabled === true)
     if (!event) return undefined
     await sql`INSERT INTO waitlist_scan_work(event_type_id) VALUES (${eventTypeId})
       ON CONFLICT (event_type_id) DO NOTHING`.execute(trx)
@@ -175,7 +181,7 @@ export async function scanWaitlistEvent(
     // Publication never takes host or booking locks. Its event -> work -> entry order
     // matches configuration writers. Dirty signals never acquire these row locks.
     // Nothing after these locks waits for or computes ordinary availability.
-    const event = await resolveById(trx, eventTypeId, true)
+    const event = await resolveById(trx, eventTypeId, true, ctx.scimResourcesEnabled === true)
     if (!event) return 0
     const work = (
       await sql<Work>`SELECT dirty_generation,cursor_start_at FROM waitlist_scan_work
