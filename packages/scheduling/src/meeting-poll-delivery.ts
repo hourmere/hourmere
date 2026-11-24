@@ -1,5 +1,5 @@
 // Internal worker primitives; this subpath installs no public transport.
-export { latestBookingInChain } from './bookings.ts'
+export { latestBookingInChain } from './booking-chain.ts'
 export { lockOrganization } from './hosts.ts'
 export { ensureMeetingPollKey } from './meeting-poll-key.ts'
 export { meetingPollBookingUpdateSequence } from './meeting-poll-outcomes.ts'

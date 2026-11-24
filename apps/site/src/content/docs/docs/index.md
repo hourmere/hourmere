@@ -50,7 +50,7 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [Google Calendar](/docs/google-calendar): configure separate calendar authorization and
   choose busy-time calendars and a booking destination.
 - [Microsoft Calendar](/docs/microsoft-calendar): register an Entra application, connect
-  Outlook and choose calendars for busy-time conflict checks.
+  Outlook and choose calendars for busy-time conflict checks and booking copies.
 
 - [Marking no-shows](/docs/no-shows): record private attendance per invitee or guest.
 - [Booking waitlists](/docs/booking-waitlist): let invitees confirm an empty period and
@@ -300,9 +300,9 @@ not grant host rescheduling or reschedule-request authority through REST, MCP or
   instance/database; separate instances do not share budgets. Per-IP request limits remain
   in process memory, except the additional durable booking-waitlist admission limits.
 - [Microsoft Calendar](/docs/microsoft-calendar) incrementally updates busy-time snapshots and
-  creates new booking copies. Updating Microsoft copies after reschedules and cancellations remains
-  future work. [Microsoft sign-in](/docs/configuration#sign-in-with-microsoft) and calendar
-  connections have not had real-account acceptance.
+  creates new booking copies. It updates the original copy after rescheduling and removes it
+  after cancellation. [Microsoft sign-in](/docs/configuration#sign-in-with-microsoft) and
+  calendar connections have not had real-account acceptance.
 - [Automatic Zoom](/docs/automatic-zoom)
   supports personal event types and individual team event types with one actual host;
   collective and round-robin event types are unsupported.

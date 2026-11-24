@@ -759,13 +759,13 @@ to per-occurrence confirmation or failure fan-out and require the real count and
 zero-suppression assertions to fail. These are future implementation tests; this PR only
 pins the design contract, not runtime delivery behavior.
 
-Google and CalDAV use the ordinary per-booking jobs for each occurrence. With write-back
+Google, CalDAV and Microsoft use the ordinary per-booking jobs for each occurrence. With write-back
 configured, the series transaction pins each member's eligible destinations and queues its
 jobs. Each worker reconciles the occurrence's booking chain using its existing UID and
-retry policy. Google uses `<root_booking_id>@hourmere` and CalDAV uses the root booking ID.
-Tail cancellation queues reconciliation for the affected occurrences. Provider copies are
-independent events with no recurring master. Microsoft Calendar supports busy-time checks.
-If Microsoft write-back is added, it follows the same per-occurrence model.
+retry policy. Google uses `<root_booking_id>@hourmere`, CalDAV uses the root booking ID and
+Microsoft uses a stable Graph transaction identifier and booking marker. Tail cancellation
+queues reconciliation for the affected occurrences. Provider copies are independent events
+with no recurring master.
 No shared Zoom/Meet recurring meeting is introduced.
 
 If a provider write fails after commit, the series stays booked. The existing job and

@@ -1,10 +1,16 @@
 import { createHash } from 'node:crypto'
 import type { Db } from '@hourmere/db'
+import { latestBookingId } from '@hourmere/scheduling/booking-chain'
 import { sql } from 'kysely'
 import { z } from 'zod'
 import { type CalendarDeps, getMicrosoftCalendarToken } from './index.ts'
-import { hasMicrosoftCalendarWriteAccess, MicrosoftCalendarError } from './microsoft.ts'
+import {
+  hasMicrosoftCalendarWriteAccess,
+  type MicrosoftCalendarClient,
+  MicrosoftCalendarError,
+} from './microsoft.ts'
 import type { MicrosoftBookingEvent } from './microsoft-events.ts'
+import { clearMicrosoftChanges } from './microsoft-snapshot.ts'
 
 export type CalendarWritePayload = { bookingId: string } | { groupSlotId: string }
 
@@ -19,14 +25,26 @@ const reasons = z.enum([
   'event_conflict',
 ])
 type Reason = z.infer<typeof reasons>
+const maxAttempts = 6
+const projectionSchema = z.object({
+  start: z.iso.datetime(),
+  end: z.iso.datetime(),
+  seatCount: z.number().int().positive().optional(),
+})
+type EventProjection = z.infer<typeof projectionSchema>
 const stateSchema = z.object({
   status: z.enum(['pending', 'retrying', 'failed', 'succeeded']),
   attempts: z.number().int().nonnegative(),
   updatedAt: z.iso.datetime(),
   nextAttemptAt: z.iso.datetime().optional(),
   reason: reasons.optional(),
-  // Persisted marker that a previous claim may already have created the event.
+  revision: z.string().optional(),
+  mappedBookingId: z.uuid().optional(),
+  // A claim may have sent a create request even if it did not commit a mapping.
   lookupOnly: z.boolean().optional(),
+  createRevision: z.string().optional(),
+  createProjection: projectionSchema.optional(),
+  patchProjections: z.array(projectionSchema).max(maxAttempts).optional(),
   seatCount: z.number().int().positive().optional(),
   countRevision: z
     .string()
@@ -34,7 +52,6 @@ const stateSchema = z.object({
     .optional(),
 })
 type WriteState = z.infer<typeof stateSchema>
-const maxAttempts = 6
 const leaseMs = 120_000
 const settleMs = 30_000
 const pending = (now: number): WriteState => ({
@@ -90,7 +107,27 @@ export async function recordMicrosoftGroupDestination(db: Db, groupSlotId: strin
       AND c.access_role='owner'
       AND s.location->>'autoCreate' IS DISTINCT FROM 'true'
   `.execute(db)
-  return Boolean(numAffectedRows)
+  return Boolean(numAffectedRows) || hasMicrosoftGroupDestination(db, groupSlotId)
+}
+
+export async function hasMicrosoftBookingDestination(db: Db, bookingId: string) {
+  return Boolean(
+    await bookingIntents(db)
+      .select('root_booking_id')
+      .where('root_booking_id', '=', bookingId)
+      .where('microsoft_writeback', 'is not', null)
+      .executeTakeFirst(),
+  )
+}
+
+export async function hasMicrosoftGroupDestination(db: Db, slotId: string) {
+  return Boolean(
+    await groupIntents(db)
+      .select('id')
+      .where('id', '=', slotId)
+      .where('microsoft_writeback', 'is not', null)
+      .executeTakeFirst(),
+  )
 }
 
 interface Destination {
@@ -169,62 +206,36 @@ function writeFailure(state: WriteState, now: number, reason: Reason, retryMs?: 
   } satisfies WriteState
 }
 
-async function claim(
-  db: Db,
-  payload: CalendarWritePayload,
-  target: Destination,
-  clock: () => number,
-) {
-  return db.transaction().execute(async (trx) => {
-    const state = await readState(trx, payload, target, true)
-    const now = clock()
-    if (!state?.nextAttemptAt || Date.parse(state.nextAttemptAt) > now) return
-    if (state.attempts >= maxAttempts) {
-      await setState(trx, payload, target, writeFailure(state, now, 'outcome_unknown'))
-      return
-    }
-    const possiblyCreated = state.lookupOnly === true
-    const desired = possiblyCreated ? undefined : await desiredEvent(trx, payload, target)
-    if (!desired && !possiblyCreated) {
-      await setState(trx, payload, target, null)
-      return
-    }
-    const lease = {
-      ...state,
-      status: 'retrying',
-      attempts: state.attempts + 1,
-      updatedAt: new Date(now).toISOString(),
-      nextAttemptAt: new Date(now + leaseMs).toISOString(),
-      // Commit before provider I/O. If this worker dies, its lease gives Graph
-      // time to settle before another worker looks up the same transaction.
-      lookupOnly: true,
-      // A group replay uses the original seat count and reports the revision that sent it.
-      seatCount: possiblyCreated ? state.seatCount : desired?.seatCount,
-      countRevision: possiblyCreated ? state.countRevision : desired?.countRevision,
-    } satisfies WriteState
-    await setState(trx, payload, target, lease)
-    return { lease, possiblyCreated }
-  })
+interface DesiredEvent {
+  revision: string
+  active: boolean
+  bookingId?: string
+  title: string
+  start: Date
+  end: Date
+  seatCount?: number
+  countRevision?: string
 }
+
+const bookingRevision = (bookingId: string, active: boolean) => `${bookingId}:${active}`
+const groupRevision = (countRevision: string, active: boolean) => `${countRevision}:${active}`
 
 async function desiredEvent(
   db: Db,
   payload: CalendarWritePayload,
   target: Destination,
-): Promise<
-  { title: string; start: Date; end: Date; seatCount?: number; countRevision?: string } | undefined
-> {
+): Promise<DesiredEvent | undefined> {
   if ('bookingId' in payload) {
     const booking = await db
       .selectFrom('bookings as b')
-      .innerJoin('booking_hosts as bh', 'bh.booking_id', 'b.id')
-      .select(['b.title', 'b.start_at as start', 'b.end_at as end'])
-      .where('b.id', '=', payload.bookingId)
-      .where('bh.user_id', '=', target.userId)
-      .where('b.status', '=', 'confirmed')
-      .where('b.rescheduled_from_id', 'is', null)
+      .leftJoin('booking_hosts as bh', (join) =>
+        join.onRef('bh.booking_id', '=', 'b.id').on('bh.user_id', '=', target.userId),
+      )
+      .select(['b.id as bookingId', 'b.title', 'b.start_at as start', 'b.end_at as end'])
+      .select(sql<boolean>`b.status='confirmed' AND bh.user_id IS NOT NULL`.as('active'))
+      .where('b.id', '=', latestBookingId(payload.bookingId))
       .executeTakeFirst()
-    return booking
+    return booking && { ...booking, revision: bookingRevision(booking.bookingId, booking.active) }
   }
   const slot = await groupIntent(db, payload.groupSlotId, target)
     .select([
@@ -234,38 +245,409 @@ async function desiredEvent(
       'active_seats as seatCount',
       'count_revision as countRevision',
     ])
-    .where('state', '=', 'open')
-    .where('active_seats', '>', 0)
+    .select(sql<boolean>`state='open' AND active_seats>0`.as('active'))
     .executeTakeFirst()
-  return slot
+  return slot && { ...slot, revision: groupRevision(slot.countRevision, slot.active) }
+}
+
+const bookingMappings = (db: Db, bookingId: string, calendarId: string) =>
+  db
+    .selectFrom('booking_calendar_events')
+    .where('booking_id', '=', bookingId)
+    .where('calendar_id', '=', calendarId)
+const groupMappings = (db: Db, groupSlotId: string, calendarId: string) =>
+  db
+    .selectFrom('group_slot_calendar_events')
+    .where('group_slot_id', '=', groupSlotId)
+    .where('calendar_id', '=', calendarId)
+
+interface EventMapping {
+  id: string
+  projection: EventProjection
+  countRevision?: string
+}
+
+async function readMapping(
+  db: Db,
+  payload: CalendarWritePayload,
+  target: Destination,
+  state: WriteState,
+  desired: DesiredEvent,
+): Promise<EventMapping | undefined> {
+  if ('bookingId' in payload) {
+    const mapping = await bookingMappings(
+      db,
+      state.mappedBookingId ?? payload.bookingId,
+      target.calendarId,
+    )
+      .innerJoin('bookings as b', 'b.id', 'booking_calendar_events.booking_id')
+      .select(['external_event_id as id', 'b.start_at as start', 'b.end_at as end'])
+      .executeTakeFirst()
+    return mapping && { id: mapping.id, projection: projectionOf(mapping) }
+  }
+  const mapping = await groupMappings(db, payload.groupSlotId, target.calendarId)
+    .select(['external_event_id as id', 'count_revision as countRevision'])
+    .executeTakeFirst()
+  // Group slot times are immutable. Older receipts may lack the written seat count.
+  const seatCount =
+    mapping?.countRevision === desired.countRevision ? desired.seatCount : state.seatCount
+  return mapping && { ...mapping, projection: projectionOf({ ...desired, seatCount }) }
+}
+
+const projectionOf = (value: { start: Date; end: Date; seatCount?: number }): EventProjection => ({
+  start: value.start.toISOString(),
+  end: value.end.toISOString(),
+  seatCount: value.seatCount,
+})
+
+const sameProjection = (a: EventProjection, b: EventProjection) =>
+  a.start === b.start && a.end === b.end && a.seatCount === b.seatCount
+
+async function claim(
+  db: Db,
+  payload: CalendarWritePayload,
+  target: Destination,
+  clock: () => number,
+) {
+  return db.transaction().execute(async (trx) => {
+    const state = await readState(trx, payload, target, true)
+    const now = clock()
+    if (!state || (state.nextAttemptAt && Date.parse(state.nextAttemptAt) > now)) return
+    const desired = await desiredEvent(trx, payload, target)
+    if (!desired) return
+    const mapping = await readMapping(trx, payload, target, state, desired)
+    // Existing receipts predate lifecycle revisions. They describe the original create.
+    let priorRevision = state.revision
+    if (!priorRevision) {
+      if ('bookingId' in payload) priorRevision = bookingRevision(payload.bookingId, true)
+      else {
+        const count = state.countRevision ?? mapping?.countRevision
+        if (count) priorRevision = groupRevision(count, true)
+      }
+    }
+    const changed = priorRevision !== undefined && priorRevision !== desired.revision
+    if (!state.nextAttemptAt && !changed) return
+    const attempts = changed ? 0 : state.attempts
+    if (attempts >= maxAttempts) {
+      await setState(
+        trx,
+        payload,
+        target,
+        writeFailure(
+          state,
+          now,
+          state.lookupOnly ? 'outcome_unknown' : (state.reason ?? 'provider_unavailable'),
+        ),
+      )
+      return
+    }
+    const possiblyCreated = state.lookupOnly === true
+    if (!desired.active && !mapping && !possiblyCreated) {
+      await setState(trx, payload, target, null)
+      return
+    }
+    const mayCreate = !mapping && desired.active
+    const createRevision = possiblyCreated
+      ? (state.createRevision ?? priorRevision)
+      : desired.revision
+    let createProjection = state.createProjection
+    if (!createProjection && possiblyCreated) {
+      // Older claims stored the original group count, or always wrote the booking root.
+      if ('bookingId' in payload) {
+        const original = await trx
+          .selectFrom('bookings')
+          .select(['start_at as start', 'end_at as end'])
+          .where('id', '=', payload.bookingId)
+          .executeTakeFirst()
+        if (original) createProjection = projectionOf(original)
+      } else if (state.seatCount !== undefined) {
+        createProjection = projectionOf({ ...desired, seatCount: state.seatCount })
+      }
+    }
+    const priorPatches = state.patchProjections ?? []
+    const projection = projectionOf(desired)
+    // Record what this worker could send before I/O. A completed preflight
+    // failure will restore the earlier candidates without losing a lost PATCH.
+    const patchProjections =
+      desired.active && (mapping || possiblyCreated)
+        ? [...priorPatches.filter((prior) => !sameProjection(prior, projection)), projection].slice(
+            -maxAttempts,
+          )
+        : priorPatches
+    const lease = {
+      ...state,
+      revision: desired.revision,
+      status: 'retrying',
+      attempts: attempts + 1,
+      updatedAt: new Date(now).toISOString(),
+      nextAttemptAt: new Date(now + leaseMs).toISOString(),
+      // A replacement worker must look up an earlier POST before deciding whether it can replay.
+      lookupOnly: possiblyCreated || mayCreate,
+      createRevision: possiblyCreated || mayCreate ? createRevision : undefined,
+      createProjection: possiblyCreated
+        ? createProjection
+        : mayCreate
+          ? projectionOf(desired)
+          : undefined,
+      patchProjections,
+    } satisfies WriteState
+    await setState(trx, payload, target, lease)
+    return { lease, possiblyCreated, desired, mapping, priorPatches }
+  })
 }
 
 async function saveMapping(
   db: Db,
   payload: CalendarWritePayload,
   target: Destination,
-  event: MicrosoftBookingEvent,
-  countRevision: string | undefined,
+  previousBookingId: string | undefined,
+  desired: DesiredEvent,
+  event: MicrosoftBookingEvent | undefined,
+  previous: EventMapping | undefined,
 ) {
-  const mapping = {
-    calendar_id: target.calendarId,
-    external_event_id: event.id,
-    etag: event.etag ?? null,
-  }
-  if ('bookingId' in payload)
-    await db
-      .insertInto('booking_calendar_events')
-      .values({ booking_id: payload.bookingId, ...mapping })
-      .onConflict((oc) => oc.columns(['booking_id', 'calendar_id']).doNothing())
-      .execute()
-  else {
-    if (!countRevision) throw new Error('Missing Microsoft group calendar revision')
+  const calendarId = target.calendarId
+  if ('bookingId' in payload) {
+    const mappedBookingId = previousBookingId ?? payload.bookingId
+    if (!event || mappedBookingId !== desired.bookingId)
+      await db
+        .deleteFrom('booking_calendar_events')
+        .where('booking_id', '=', mappedBookingId)
+        .where('calendar_id', '=', calendarId)
+        .execute()
+    if (event && desired.bookingId)
+      await db
+        .insertInto('booking_calendar_events')
+        .values({
+          booking_id: desired.bookingId,
+          calendar_id: calendarId,
+          external_event_id: event.id,
+          etag: event.etag ?? null,
+        })
+        .onConflict((oc) =>
+          oc.columns(['booking_id', 'calendar_id']).doUpdateSet({
+            external_event_id: event.id,
+            etag: event.etag ?? null,
+          }),
+        )
+        .execute()
+  } else if (event && desired.countRevision) {
     await db
       .insertInto('group_slot_calendar_events')
-      .values({ group_slot_id: payload.groupSlotId, count_revision: countRevision, ...mapping })
-      .onConflict((oc) => oc.column('group_slot_id').doNothing())
+      .values({
+        group_slot_id: payload.groupSlotId,
+        calendar_id: calendarId,
+        external_event_id: event.id,
+        etag: event.etag ?? null,
+        count_revision: desired.countRevision,
+      })
+      .onConflict((oc) =>
+        oc.column('group_slot_id').doUpdateSet({
+          external_event_id: event.id,
+          etag: event.etag ?? null,
+          count_revision: desired.countRevision,
+        }),
+      )
       .execute()
+  } else
+    await db
+      .deleteFrom('group_slot_calendar_events')
+      .where('group_slot_id', '=', payload.groupSlotId)
+      .where('calendar_id', '=', calendarId)
+      .execute()
+
+  const period = sql<string>`tstzrange(${desired.start.toISOString()}::timestamptz,${desired.end.toISOString()}::timestamptz,'[)')`
+  if (event)
+    await db
+      .insertInto('calendar_busy')
+      .values({ calendar_id: calendarId, external_event_id: event.id, period })
+      .onConflict((oc) =>
+        oc.columns(['calendar_id', 'external_event_id']).doUpdateSet({
+          period,
+          all_day_start: null,
+          all_day_end: null,
+        }),
+      )
+      .execute()
+  else if (previous)
+    await db
+      .deleteFrom('calendar_busy')
+      .where('calendar_id', '=', calendarId)
+      .where('external_event_id', '=', previous.id)
+      .execute()
+}
+
+const isGraphStatus = (error: unknown, ...statuses: number[]) =>
+  error instanceof MicrosoftCalendarError &&
+  error.status !== undefined &&
+  statuses.includes(error.status)
+const eventConflict = () => new MicrosoftCalendarError('provider_unavailable', 412)
+const removedCalendar = () => new MicrosoftCalendarError('provider_unavailable', 404)
+
+interface EventScope {
+  client: MicrosoftCalendarClient
+  token: string
+  calendarId: string
+  transactionId: string
+  signal: AbortSignal
+}
+
+async function updateMappedEvent(
+  scope: EventScope,
+  eventId: string,
+  desired: DesiredEvent,
+  earlier: { patches: EventProjection[]; written?: EventProjection },
+  onSend: () => void,
+) {
+  const { client, token, calendarId, transactionId, signal } = scope
+  const get = () =>
+    client.getEvent(
+      token,
+      calendarId,
+      eventId,
+      transactionId,
+      signal,
+      desired.seatCount !== undefined,
+    )
+  const missing = async () => {
+    const calendars = await client.calendars(token, signal)
+    if (!calendars.some((calendar) => calendar.id === calendarId)) throw removedCalendar()
+    throw eventConflict()
   }
+  const wanted = projectionOf(desired)
+  const actual = await get()
+  if (!actual) return missing()
+  if (!actual.etag || actual.hasAttendees) throw eventConflict()
+  // A prior PATCH can apply before a timeout or a worker crash. Confirm the
+  // written projection before using the current ETag for a subsequent revision.
+  const actualProjection = projectionOf(actual)
+  const written = earlier.written && {
+    ...earlier.written,
+    // For an older group receipt, keep the count seen on the first read as
+    // the baseline for detecting a concurrent edit during this attempt.
+    seatCount: earlier.written.seatCount ?? actualProjection.seatCount,
+  }
+  const matchesEarlierPatch = (projection: EventProjection) =>
+    earlier.patches.some((prior) => sameProjection(prior, projection))
+  const matchesEarlierWrite = (projection: EventProjection) =>
+    (written && sameProjection(written, projection)) || matchesEarlierPatch(projection)
+  if (sameProjection(actualProjection, wanted)) return actual
+  if (!matchesEarlierWrite(actualProjection)) throw eventConflict()
+  const patch = (etag: string) => {
+    onSend()
+    return client.updateEvent(token, calendarId, eventId, etag, desired, signal)
+  }
+  let preconditionFailed: boolean
+  try {
+    return await patch(actual.etag)
+  } catch (error) {
+    if (isGraphStatus(error, 404, 410)) return missing()
+    if (!isGraphStatus(error, 409, 412)) throw error
+    preconditionFailed = isGraphStatus(error, 412)
+  }
+  const latest = await get()
+  if (!latest) return missing()
+  if (!latest.etag || latest.hasAttendees) throw eventConflict()
+  const latestProjection = projectionOf(latest)
+  if (sameProjection(latestProjection, wanted)) return latest
+  if (
+    preconditionFailed
+      ? matchesEarlierWrite(latestProjection)
+      : latest.etag !== actual.etag && matchesEarlierPatch(latestProjection)
+  )
+    return patch(latest.etag)
+  throw eventConflict()
+}
+
+async function findRelocatedEvent(scope: EventScope) {
+  const { client, token, calendarId, transactionId, signal } = scope
+  const calendars = await client.calendars(token, signal)
+  let relocated: { calendarId: string; event: MicrosoftBookingEvent } | undefined
+  let incomplete = false
+  for (const calendar of calendars) {
+    if (calendar.id === calendarId) continue
+    let event: MicrosoftBookingEvent | undefined
+    try {
+      event = await client.findEvent(token, calendar.id, transactionId, signal)
+    } catch (error) {
+      // Graph can return 404 for a shared calendar that contains private items.
+      // Absence cannot be confirmed if the mailbox denies this marker lookup.
+      if (calendar.accessRole !== 'owner' && isGraphStatus(error, 403, 404, 410)) {
+        incomplete = true
+        continue
+      }
+      if (isGraphStatus(error, 404, 410)) continue
+      throw error
+    }
+    if (!event) {
+      if (calendar.accessRole === 'writerWithoutPrivateAccess') incomplete = true
+      continue
+    }
+    if (relocated || calendar.accessRole !== 'owner') throw eventConflict()
+    relocated = { calendarId: calendar.id, event }
+  }
+  if (!relocated && incomplete) throw eventConflict()
+  return { relocated, calendarPresent: calendars.some((calendar) => calendar.id === calendarId) }
+}
+
+interface DeletedEvent {
+  calendarId: string
+  eventId: string
+}
+
+async function removeMappedEvent(
+  scope: EventScope,
+  mapping: EventMapping | undefined,
+  calendarRemoved: boolean,
+): Promise<DeletedEvent | true | false> {
+  const { client, token, calendarId, transactionId, signal } = scope
+  const remove = async (calendar: string, id: string) => {
+    // Deleting an organizer's meeting can send Outlook cancellation mail.
+    // Verify that it is still our appointment before adopting the current ETag.
+    const actual = await client.getEvent(token, calendar, id, transactionId, signal)
+    if (!actual) return false
+    if (!actual.etag || actual.hasAttendees) throw eventConflict()
+    return (await client.deleteEvent(token, calendar, id, actual.etag, signal)) === 'deleted'
+  }
+  if (!calendarRemoved && mapping && (await remove(calendarId, mapping.id)))
+    return { calendarId, eventId: mapping.id }
+
+  if (!calendarRemoved) {
+    let event: MicrosoftBookingEvent | undefined
+    try {
+      event = await client.findEvent(token, calendarId, transactionId, signal)
+    } catch (error) {
+      if (!isGraphStatus(error, 404, 410)) throw error
+    }
+    if (event) {
+      if (await remove(calendarId, event.id)) return { calendarId, eventId: event.id }
+      // The marker moved during cleanup. Check the remaining calendars before
+      // acknowledging absence from the pinned calendar.
+      throw eventConflict()
+    }
+  }
+  const { relocated, calendarPresent } = await findRelocatedEvent(scope)
+  if (relocated) {
+    if (await remove(relocated.calendarId, relocated.event.id))
+      return { calendarId: relocated.calendarId, eventId: relocated.event.id }
+    throw eventConflict()
+  }
+  if (calendarRemoved || !calendarPresent) throw removedCalendar()
+  // An absent mapped event has already been deleted. An ambiguous POST might
+  // still become visible after Graph settles, so keep its bounded retry active.
+  return Boolean(mapping)
+}
+
+async function resetWritebackSnapshot(db: Db, calendarId: string) {
+  // A delta round staged before the write could otherwise publish the old time
+  // again. Resume from the last complete cursor, keeping its current snapshot.
+  const reset = await db
+    .updateTable('calendars')
+    .set({ sync_state: sql<string>`sync_state - 'microsoftPending'` })
+    .where('id', '=', calendarId)
+    .where(sql<boolean>`sync_state ? 'microsoftPending'`)
+    .returning('id')
+    .executeTakeFirst()
+  if (reset) await clearMicrosoftChanges(db, reset.id)
 }
 
 async function writeDestination(
@@ -277,19 +659,20 @@ async function writeDestination(
   const clock = deps.now ?? Date.now
   const attempt = await claim(deps.db, payload, target, clock)
   if (!attempt) return
-  const { lease, possiblyCreated } = attempt
+  const { lease, possiblyCreated, desired, mapping, priorPatches } = attempt
   const { connectionId } = target
   if (!connectionId) {
     // A group slot retains its pinned destination after explicit disconnection.
-    return setState(
+    await setState(
       deps.db,
       payload,
       target,
       writeFailure({ ...lease, lookupOnly: possiblyCreated }, clock(), 'calendar_removed'),
       lease,
     )
+    return
   }
-  await deps.db.transaction().execute(async (trx) => {
+  return deps.db.transaction().execute(async (trx) => {
     // Match the busy/list credential rotation lock order. This also serializes disconnect.
     await trx
       .selectFrom('auth.user')
@@ -307,28 +690,83 @@ async function writeDestination(
       .executeTakeFirst()
     if (!ownsLease(await readState(trx, payload, target), lease)) return
 
-    const finish = (reason: Reason, retryMs?: number, uncertain = possiblyCreated) =>
-      setState(
+    const complete = async (
+      state: WriteState,
+      event?: MicrosoftBookingEvent,
+      deleted?: DeletedEvent | true,
+    ) => {
+      if (!ownsLease(await readState(trx, payload, target, true), lease)) return
+      if (state.status === 'succeeded') {
+        await saveMapping(trx, payload, target, lease.mappedBookingId, desired, event, mapping)
+        if (mapping || patchSent || deleted) await resetWritebackSnapshot(trx, target.calendarId)
+        if (deleted && deleted !== true) {
+          const movedCalendar = await trx
+            .selectFrom('calendars')
+            .select('id')
+            .where('connection_id', '=', connectionId)
+            .where('external_id', '=', deleted.calendarId)
+            .executeTakeFirst()
+          if (movedCalendar) {
+            await trx
+              .deleteFrom('calendar_busy')
+              .where('external_event_id', '=', deleted.eventId)
+              .where('calendar_id', '=', movedCalendar.id)
+              .execute()
+            if (movedCalendar.id !== target.calendarId)
+              await resetWritebackSnapshot(trx, movedCalendar.id)
+          }
+        }
+      }
+      // If the follow-up job saw the lease and returned, dispatch still needs to
+      // find the new revision. Holding the intent lock also makes this check
+      // atomic with any worker inspecting the new revision after the booking commits.
+      const latest = await desiredEvent(trx, payload, target)
+      const changed = latest && latest.revision !== desired.revision && !state.nextAttemptAt
+      await setState(
         trx,
         payload,
         target,
-        writeFailure({ ...lease, lookupOnly: uncertain }, clock(), reason, retryMs),
-        lease,
+        changed
+          ? {
+              ...state,
+              ...pending(clock()),
+              reason: undefined,
+            }
+          : state,
       )
+      return changed
+    }
+    let patchSent = false
+    const onPatch = () => {
+      patchSent = true
+    }
+    const finish = (reason: Reason, retryMs?: number, uncertain = possiblyCreated) =>
+      complete(
+        writeFailure(
+          {
+            ...lease,
+            lookupOnly: uncertain,
+            patchProjections: patchSent ? lease.patchProjections : priorPatches,
+          },
+          clock(),
+          reason,
+          retryMs,
+        ),
+      )
+
     const calendar = await trx
       .selectFrom('calendars')
       .select(['external_id', 'access_role', 'sync_error'])
       .where('id', '=', target.calendarId)
       .where('connection_id', '=', connectionId)
       .executeTakeFirst()
-    if (!calendar || calendar.sync_error === 'calendar_removed') return finish('calendar_removed')
+    if (!calendar || (calendar.sync_error === 'calendar_removed' && desired.active))
+      return finish('calendar_removed')
     if (!connection || !deps.microsoft || calendar.access_role !== 'owner')
       return finish('calendar_unavailable')
     if (connection.status !== 'active') return finish('needs_reauth')
     if (!hasMicrosoftCalendarWriteAccess(connection.scopes)) return finish('permissions_missing')
 
-    if (!possiblyCreated && !(await desiredEvent(trx, payload, target)))
-      return setState(trx, payload, target, null, lease)
     const resource =
       'bookingId' in payload ? ['booking', payload.bookingId] : ['group', payload.groupSlotId]
     const transactionId = createHash('sha256')
@@ -337,6 +775,7 @@ async function writeDestination(
     const deadline = AbortSignal.any([signal, AbortSignal.timeout(20_000)])
     const backoff = Math.min(settleMs * 2 ** (lease.attempts - 1), 15 * 60_000)
     let event: MicrosoftBookingEvent | undefined
+    let deleted: DeletedEvent | true | false | undefined
     let posted = false
     try {
       const { token, scopes } = await getMicrosoftCalendarToken(
@@ -349,24 +788,66 @@ async function writeDestination(
       )
       if (!hasMicrosoftCalendarWriteAccess(scopes)) return finish('permissions_missing')
       const client = deps.microsoft.client
-      event = await client.findEvent(token, calendar.external_id, transactionId, deadline)
-      if (!event) {
-        const desired = await desiredEvent(trx, payload, target)
-        if (!desired)
-          return possiblyCreated
-            ? finish(
-                lease.reason === 'event_conflict' ? 'event_conflict' : 'provider_unavailable',
-                backoff,
-              )
-            : setState(trx, payload, target, null, lease)
-        // An empty lookup after the settle delay permits an idempotent replay.
-        posted = true
-        event = await client.createEvent(
-          token,
-          calendar.external_id,
-          { ...desired, seatCount: lease.seatCount ?? desired.seatCount, transactionId },
-          deadline,
+      const scope = {
+        client,
+        token,
+        calendarId: calendar.external_id,
+        transactionId,
+        signal: deadline,
+      }
+      if (!desired.active) {
+        deleted = await removeMappedEvent(
+          scope,
+          mapping,
+          calendar.sync_error === 'calendar_removed',
         )
+        if (!deleted) return finish('provider_unavailable', backoff)
+      } else if (mapping) {
+        event = await updateMappedEvent(
+          scope,
+          mapping.id,
+          desired,
+          { patches: priorPatches, written: mapping.projection },
+          onPatch,
+        )
+      } else {
+        event = await client.findEvent(token, scope.calendarId, transactionId, deadline)
+        if (!event) {
+          if (possiblyCreated && (await findRelocatedEvent(scope)).relocated) throw eventConflict()
+          if (!(await desiredEvent(trx, payload, target))?.active) {
+            if (possiblyCreated) return finish('provider_unavailable', backoff)
+          } else {
+            const original = lease.createProjection
+            // A replay keeps the original POST projection and transaction ID.
+            // If the booking moved, the same event can then be PATCHed safely.
+            const value = original
+              ? {
+                  ...desired,
+                  start: new Date(original.start),
+                  end: new Date(original.end),
+                  seatCount: original.seatCount,
+                }
+              : desired
+            posted = true
+            event = await client.createEvent(
+              token,
+              scope.calendarId,
+              { ...value, transactionId },
+              deadline,
+            )
+          }
+        }
+        if (event && possiblyCreated && lease.createRevision !== desired.revision)
+          event = await updateMappedEvent(
+            scope,
+            event.id,
+            desired,
+            {
+              patches: priorPatches,
+              written: lease.createProjection,
+            },
+            onPatch,
+          )
       }
     } catch (error) {
       if (!(error instanceof MicrosoftCalendarError)) throw error
@@ -379,11 +860,15 @@ async function writeDestination(
         return finish('needs_reauth')
       }
       if (error.code === 'permissions_missing') return finish('permissions_missing')
-      if (error.status === 404 || error.status === 410) return finish('calendar_removed')
+      if (isGraphStatus(error, 404, 410)) return finish('calendar_removed')
       if (error.status === 429)
         return finish('rate_limited', Math.max(error.retryAfterMs ?? 0, backoff))
-      if (error.status === 409 || error.status === 412)
-        return finish('event_conflict', backoff, possiblyCreated || posted)
+      if (isGraphStatus(error, 409, 412))
+        return finish(
+          'event_conflict',
+          posted || !desired.active ? backoff : undefined,
+          possiblyCreated || posted,
+        )
       if (
         error.status !== undefined &&
         error.status >= 400 &&
@@ -393,15 +878,18 @@ async function writeDestination(
         return finish('calendar_unavailable')
       return finish('provider_unavailable', backoff, posted || possiblyCreated)
     }
-    // Do not hold the group slot lock over provider I/O. Recheck the lease before
-    // committing the mapping and status together.
-    if (!ownsLease(await readState(trx, payload, target, true), lease)) return
-    await saveMapping(trx, payload, target, event, lease.countRevision)
-    await setState(trx, payload, target, {
-      status: 'succeeded',
-      attempts: lease.attempts,
-      updatedAt: new Date(clock()).toISOString(),
-    })
+    return complete(
+      {
+        status: 'succeeded',
+        attempts: lease.attempts,
+        updatedAt: new Date(clock()).toISOString(),
+        revision: desired.revision,
+        mappedBookingId: event ? desired.bookingId : undefined,
+        seatCount: event ? desired.seatCount : undefined,
+      },
+      event,
+      deleted || undefined,
+    )
   })
 }
 
@@ -446,7 +934,8 @@ export async function writeMicrosoftCalendar(
           .execute()
   for (const destination of destinations) {
     signal.throwIfAborted()
-    await writeDestination(deps, payload, destination, signal)
+    if (await writeDestination(deps, payload, destination, signal))
+      await writeDestination(deps, payload, destination, signal)
   }
 }
 
@@ -487,13 +976,19 @@ export async function readMicrosoftWritebackSummary(db: Db, calendarIds: string[
     CROSS JOIN LATERAL (
       SELECT state FROM (
         SELECT t.microsoft_writeback AS state FROM booking_calendar_targets t
-        JOIN bookings b ON b.id=t.root_booking_id
-        WHERE t.calendar_id=c.id AND t.user_id=cc.user_id AND b.start_at>${stamp}::timestamptz
-          AND t.microsoft_writeback IS NOT NULL
+        JOIN bookings b ON b.id=${latestBookingId(sql.ref('t.root_booking_id'))}
+        WHERE t.calendar_id=c.id AND t.user_id=cc.user_id AND t.microsoft_writeback IS NOT NULL
+          AND (b.start_at>${stamp}::timestamptz OR (
+            t.microsoft_writeback->>'revision' LIKE '%:false'
+            AND t.microsoft_writeback->>'status'<>'succeeded'
+          ))
         UNION ALL
         SELECT s.microsoft_writeback AS state FROM group_slots s
-        WHERE s.destination_calendar_id=c.id AND s.host_user_id=cc.user_id AND s.start_at>${stamp}::timestamptz
-          AND s.microsoft_writeback IS NOT NULL
+        WHERE s.destination_calendar_id=c.id AND s.host_user_id=cc.user_id
+          AND s.microsoft_writeback IS NOT NULL AND (s.start_at>${stamp}::timestamptz OR (
+            s.microsoft_writeback->>'revision' LIKE '%:false'
+            AND s.microsoft_writeback->>'status'<>'succeeded'
+          ))
       ) intents
       ORDER BY CASE state->>'status' WHEN 'failed' THEN 0 WHEN 'retrying' THEN 1 WHEN 'pending' THEN 2 ELSE 3 END,
         state->>'updatedAt' DESC LIMIT 1
@@ -523,21 +1018,20 @@ export async function redispatchMicrosoftWriteback(
   now: number,
 ) {
   const recovered = resetWriteState(new Date(now).toISOString())
-  const unknown = sql<boolean>`microsoft_writeback->>'status'='failed'
-    AND microsoft_writeback->>'reason'='outcome_unknown'`
+  const failed = sql<boolean>`microsoft_writeback->>'status'='failed'`
   if ('bookingId' in payload)
     await db
       .updateTable('booking_calendar_targets')
       .set({ microsoft_writeback: recovered })
       .where('root_booking_id', '=', payload.bookingId)
-      .where(unknown)
+      .where(failed)
       .execute()
   else
     await db
       .updateTable('group_slots')
       .set({ microsoft_writeback: recovered })
       .where('id', '=', payload.groupSlotId)
-      .where(unknown)
+      .where(failed)
       .execute()
 }
 
@@ -548,15 +1042,18 @@ export async function recoverMicrosoftWritebacks(db: Db, connectionId: string, n
   await sql`
     UPDATE booking_calendar_targets t SET microsoft_writeback=${recovered}
     FROM calendars c, bookings b
-    WHERE t.calendar_id=c.id AND c.connection_id=${connectionId} AND b.id=t.root_booking_id
-      AND b.start_at>${stamp}::timestamptz AND t.microsoft_writeback->>'status'='failed'
+    WHERE t.calendar_id=c.id AND c.connection_id=${connectionId}
+      AND b.id=${latestBookingId(sql.ref('t.root_booking_id'))}
+      AND (b.start_at>${stamp}::timestamptz OR t.microsoft_writeback->>'revision' LIKE '%:false')
+      AND t.microsoft_writeback->>'status'='failed'
       AND t.microsoft_writeback->>'reason' IN ('needs_reauth','permissions_missing','outcome_unknown')
   `.execute(db)
   await sql`
     UPDATE group_slots s SET microsoft_writeback=${recovered}
     FROM calendars c
     WHERE s.destination_calendar_id=c.id AND c.connection_id=${connectionId}
-      AND s.start_at>${stamp}::timestamptz AND s.microsoft_writeback->>'status'='failed'
+      AND (s.start_at>${stamp}::timestamptz OR s.microsoft_writeback->>'revision' LIKE '%:false')
+      AND s.microsoft_writeback->>'status'='failed'
       AND s.microsoft_writeback->>'reason' IN ('needs_reauth','permissions_missing','outcome_unknown')
   `.execute(db)
 }
