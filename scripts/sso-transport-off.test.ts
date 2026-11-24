@@ -151,6 +151,7 @@ describe('SSO transport permits only domain TXT and guarded SSO ceremonies', () 
       [OIDC_SESSION, [OIDC_ATTEMPT, OIDC_VERIFIER]],
       [OIDC_SIGN_IN, [OIDC_ATTEMPT, OIDC_JWKS, OIDC_VERIFIER]],
       [OIDC_TEST_RECEIPTS, [OIDC_ATTEMPT]],
+      ['apps/server/src/sso-saml-sign-in.ts', [OIDC_ATTEMPT]],
     ])
   })
 

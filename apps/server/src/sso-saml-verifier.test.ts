@@ -1,10 +1,4 @@
-import {
-  createHash,
-  generateKeyPairSync,
-  type KeyObject,
-  randomUUID,
-  sign as signBytes,
-} from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -15,6 +9,7 @@ import { sql } from 'kysely'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { SignedXml } from 'xml-crypto'
 import { samlProviderValues, ssoFixture } from '../../../packages/db/src/sso-storage-fixtures.ts'
+import { samlSigningIdentity as identity } from './sso-saml-fixtures.ts'
 import {
   consumeSamlReplay,
   purgeExpiredSamlReplay,
@@ -48,49 +43,7 @@ const EXC_C14N = 'http://www.w3.org/2001/10/xml-exc-c14n#'
 const C14N = 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315'
 const ENVELOPED = 'http://www.w3.org/2000/09/xmldsig#enveloped-signature'
 
-// --- keys and self-signed certificates (node:crypto cannot issue one, so DER by hand) -----
-
-function der(tag: number, ...parts: Buffer[]) {
-  const body = Buffer.concat(parts)
-  const length =
-    body.length < 128
-      ? Buffer.from([body.length])
-      : body.length < 256
-        ? Buffer.from([0x81, body.length])
-        : Buffer.from([0x82, body.length >> 8, body.length & 0xff])
-  return Buffer.concat([Buffer.from([tag]), length, body])
-}
-
-function identity(commonName: string, modulusLength = 2048) {
-  const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength })
-  const algorithm = der(0x30, Buffer.from('06092a864886f70d01010b0500', 'hex'))
-  const name = der(
-    0x30,
-    der(0x31, der(0x30, Buffer.from('0603550403', 'hex'), der(0x0c, Buffer.from(commonName)))),
-  )
-  const validity = der(
-    0x30,
-    der(0x17, Buffer.from('250101000000Z')),
-    der(0x17, Buffer.from('450101000000Z')),
-  )
-  const tbs = der(
-    0x30,
-    der(0xa0, der(0x02, Buffer.from([2]))),
-    der(0x02, Buffer.from([1])),
-    algorithm,
-    name,
-    validity,
-    name,
-    publicKey.export({ type: 'spki', format: 'der' }),
-  )
-  const signature = signBytes('sha256', tbs, privateKey)
-  const certificate = der(0x30, tbs, algorithm, der(0x03, Buffer.from([0]), signature))
-  const base64 = certificate.toString('base64')
-  const pem = `-----BEGIN CERTIFICATE-----\n${base64.match(/.{1,64}/g)?.join('\n')}\n-----END CERTIFICATE-----\n`
-  return { privateKey, pem, base64 }
-}
-
-type Identity = { privateKey: KeyObject; pem: string; base64: string }
+type Identity = ReturnType<typeof identity>
 const idp = identity('idp.example.test')
 const rotated = identity('idp-next.example.test')
 const attacker = identity('idp.example.test')
@@ -1146,9 +1099,10 @@ describe('SAML verifier: review hardening', () => {
   })
 })
 
-describe('SAML verifier: off', () => {
+describe('SAML verifier: runtime callers', () => {
   const root = fileURLToPath(new URL('../../../', import.meta.url))
   const verifier = 'apps/server/src/sso-saml-verifier.ts'
+  const acs = 'apps/server/src/sso-saml-sign-in.ts'
 
   function productionSources() {
     const files: string[] = []
@@ -1169,14 +1123,18 @@ describe('SAML verifier: off', () => {
     return files
   }
 
-  it('has no caller and limits XML library imports to SAML request construction', () => {
+  it('allows only the ACS to use the SAML verifier and limits XML library imports', () => {
     const files = productionSources()
     expect(files).toEqual(
       expect.arrayContaining([verifier, 'apps/server/src/server.ts', 'tools/cli/src/cli.ts']),
     )
     const mention =
       /sso-saml-verifier|verifySamlResponse|SamlVerificationError|samlInitialAlgorithms|(['"`])(?:xml-crypto|@xmldom\/xmldom|samlify)(?:\/[^'"`]*)?\1/
+    const xmlLibrary = /(['"`])(?:xml-crypto|@xmldom\/xmldom|samlify)(?:\/[^'"`]*)?\1/
+    expect(mention.test(readFileSync(join(root, acs), 'utf8'))).toBe(true)
+    expect(xmlLibrary.test(readFileSync(join(root, acs), 'utf8'))).toBe(false)
     const mentioning = files.filter((file) => {
+      if (file === acs) return false
       const source = readFileSync(join(root, file), 'utf8')
       let runtime = source
       if (file === 'apps/server/src/sso-saml-replay.ts')
