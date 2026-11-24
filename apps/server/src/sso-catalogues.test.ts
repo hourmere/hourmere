@@ -18,6 +18,7 @@ import { openApiDocument, openApiRouteInventory } from './openapi-document.ts'
 import { productionAppOptions, productionAuthOptions, productRoutes } from './server.ts'
 import { MAILBOX_PROOF_CONSUME_PATH, MAILBOX_PROOF_SEND_PATH } from './sso-mailbox-proof.ts'
 import { OIDC_CALLBACK_PATH, OIDC_COMPLETE_PATH, OIDC_SIGN_IN_PATH } from './sso-oidc-sign-in.ts'
+import { SAML_ACS_PATH, SAML_COMPLETE_PATH } from './sso-saml-state.ts'
 import { createWorkerHealthApp } from './worker-health.ts'
 
 // Lower-case names that run the acronym together with a neighbouring word have no case,
@@ -80,7 +81,7 @@ function expectNoSsoRoutes(paths: string[]) {
 // The SSO auth-protocol endpoints that are mounted in every setting state (docs/sso.md,
 // Setting-off behaviour). They are exempt by exact path from the route inventory and source
 // literals only. The suite below proves, in the app production assembles with the OIDC setting
-// off, that the OIDC sign-in and completion paths answer `404 {"error":"sso_disabled"}`
+// off, that the OIDC sign-in and the SAML and OIDC completion paths answer `404 {"error":"sso_disabled"}`
 // before any other check, and that the Mailbox proof pair, which recovery and trust-reducing
 // operations keep using, runs its own checks without a caller, queue or database effect.
 const GUARDED_SSO_AUTH_PATHS = [
@@ -89,6 +90,8 @@ const GUARDED_SSO_AUTH_PATHS = [
   '/api/auth/sign-in/sso',
   '/api/auth/sso/callback/:providerId',
   '/api/auth/sso/oidc/complete',
+  '/api/auth/sso/saml2/sp/acs/:providerId',
+  '/api/auth/sso/saml2/complete',
 ] as const
 const RETAINED_SSO_AUTH_PATHS: readonly string[] = GUARDED_SSO_AUTH_PATHS.slice(0, 2)
 
@@ -653,6 +656,8 @@ describe('SSO setting-off excludes only SSO from the published catalogues', () =
       OIDC_SIGN_IN_PATH,
       OIDC_CALLBACK_PATH,
       OIDC_COMPLETE_PATH,
+      SAML_ACS_PATH,
+      SAML_COMPLETE_PATH,
     ]).toEqual([...GUARDED_SSO_AUTH_PATHS])
     expectNoUnguardedSsoRoutes([...GUARDED_SSO_AUTH_PATHS])
     // The ordinary rule is unchanged: the same paths fail every other check.
@@ -676,6 +681,9 @@ describe('SSO setting-off excludes only SSO from the published catalogues', () =
       `${OIDC_COMPLETE_PATH}/`,
       '/api/auth/sso/oidc/*',
       '/api/auth/sso/oidc/complete/other',
+      '/api/auth/sso/saml2/sp/acs/*',
+      `${SAML_COMPLETE_PATH}/`,
+      '/api/auth/sso/saml2/sp/slo/:providerId',
       '/api/auth/sso/*',
       '/api/v1/sso/mailbox-proof/send',
       '/sso/mailbox-proof/consume',
@@ -692,7 +700,7 @@ describe('SSO setting-off excludes only SSO from the published catalogues', () =
     ['empty', ''],
     ['false', 'false'],
   ])(
-    'answers 404 sso_disabled on every OIDC endpoint as production assembles the app with the setting %s',
+    'answers 404 sso_disabled on sign-in endpoints as production assembles the app with OIDC %s',
     async (_state, setting) => {
       const db = createDb(createPool('postgres://catalogue@127.0.0.1:9/catalogue'))
       const previous = { oidc: process.env.SSO_OIDC_ENABLED, saml: process.env.SSO_SAML_ENABLED }
@@ -742,10 +750,11 @@ describe('SSO setting-off excludes only SSO from the published catalogues', () =
               { origin: 'https://attacker.example', authorization: 'Bearer hm_x', cookie: 'a=b' },
             ])
               for (const id of ['0190f2c4-0000-7000-8000-000000000001', 'not-an-id']) {
+                const resolvedPath = path.replace(':providerId', id)
                 const requestPath =
                   path === OIDC_CALLBACK_PATH
-                    ? `${path.replace(':providerId', id)}?state=synthetic&code=synthetic`
-                    : path
+                    ? `${resolvedPath}?state=synthetic&code=synthetic`
+                    : resolvedPath
                 const body =
                   path === OIDC_SIGN_IN_PATH
                     ? { providerId: id, intent: 'sign_in' }
@@ -1111,12 +1120,8 @@ describe('SSO setting-off excludes only SSO from the published catalogues', () =
       'packages/auth/src/testing.ts',
     )
     const sources = shipped.map((file) => [file, readFileSync(new URL(file, root), 'utf8')])
-    // AuthnRequest generation declares the SP identifiers. The route inventories still
-    // forbid registration of these endpoints until their own steps land.
-    const samlRequestUris = new Set([
-      '/api/auth/sso/saml2/sp/metadata/{providerId}',
-      '/api/auth/sso/saml2/sp/acs/{providerId}',
-    ])
+    // AuthnRequest generation declares the SP entity ID before metadata is served.
+    const samlEntityId = '/api/auth/sso/saml2/sp/metadata/{providerId}'
     const literals = sources.flatMap(([file, source = '']) =>
       [...source.matchAll(/(['"`])(\/[^'"`\s]*)\1/g)]
         .map(([, , literal = '']) => literal)
@@ -1125,7 +1130,7 @@ describe('SSO setting-off excludes only SSO from the published catalogues', () =
             !(
               file === 'apps/web/src/paths.ts' &&
               GUARDED_SSO_WEB_PATHS.some((path) => path === literal)
-            ) && !(file === 'apps/server/src/sso-saml-start.ts' && samlRequestUris.has(literal)),
+            ) && !(file === 'apps/server/src/sso-saml-state.ts' && literal === samlEntityId),
         ),
     )
     expect(literals.length).toBeGreaterThan(500)

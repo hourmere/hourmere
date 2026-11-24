@@ -26,7 +26,7 @@ export const normalizeOidcMailbox = (email: string) => email.trim().toLowerCase(
 export function findOidcLink(
   db: Db,
   { organizationId, providerId }: SsoProviderRevision,
-  { issuer, subject }: Awaited<ReturnType<typeof verifyOidcIdToken>>,
+  { issuer, subject }: Pick<Awaited<ReturnType<typeof verifyOidcIdToken>>, 'issuer' | 'subject'>,
 ) {
   return db
     .selectFrom('sso_identity_links')
@@ -49,6 +49,7 @@ export async function lockOidcSignInContext(
   candidate: Pick<OidcLink, 'id' | 'user_id' | 'generation'>,
   mailbox: string,
   writeLink = false,
+  method: 'oidc' | 'saml' = 'oidc',
 ) {
   const domain = normalizeSsoDomain(mailbox.slice(mailbox.lastIndexOf('@') + 1))
   if (!domain) return { reason: 'domain_unverified' } as const
@@ -61,7 +62,7 @@ export async function lockOidcSignInContext(
     .forShare()
     .executeTakeFirst()
   if (!user?.emailVerified) return { reason: 'mailbox_unproven' } as const
-  await lockOidcProvider(trx, provider)
+  await lockOidcProvider(trx, provider, true, method)
   const member = await trx
     .selectFrom('auth.member')
     .select(['id', scimSuspended(organizationId, user.id).as('suspended')])
@@ -120,8 +121,8 @@ type OidcSignInContext = Exclude<
 export async function oidcSignInTiming(
   trx: Db,
   context: OidcSignInContext,
-  attemptExpiresAt: Date,
-  sessionDeadline: Date | undefined,
+  attemptExpiresAt: Date | string,
+  sessionDeadline: Date | string | undefined,
   options: OidcSessionOptions,
 ) {
   const now = await databaseClock(trx)
@@ -154,6 +155,7 @@ export async function writeOidcSession(
   attemptId: string,
   { now, deadline }: { now: string; deadline: string },
   options: OidcSessionRequest,
+  method: 'oidc' | 'saml' = 'oidc',
 ) {
   const session = await createBrowserSession(trx, options, {
     ...options,
@@ -184,7 +186,7 @@ export async function writeOidcSession(
     targetType: 'sso_provider',
     targetId: providerId,
     action: 'sso_authentication.succeeded',
-    details: { method: 'oidc', providerId, revision, correlationId: attemptId },
+    details: { method, providerId, revision, correlationId: attemptId },
   })
   return { cookie: session.cookie, sessionId: session.id }
 }

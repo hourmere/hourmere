@@ -58,6 +58,7 @@ import type { MailboxProofModule } from './sso-mailbox-proof.ts'
 import { readSsoMe } from './sso-me.ts'
 import type { OidcSignInModule } from './sso-oidc-sign-in.ts'
 import { restTeamReadAccess } from './sso-read-routes.ts'
+import type { SamlSignInModule } from './sso-saml-sign-in.ts'
 import { ssoStorageDiagnostic } from './sso-storage-errors.ts'
 import type { SsoTeamReadDeps } from './sso-team-reads.ts'
 import {
@@ -111,6 +112,7 @@ export interface AppDeps {
    */
   ssoMailboxProof?: MailboxProofModule | undefined
   ssoOidcSignIn?: OidcSignInModule | undefined
+  ssoSamlSignIn?: SamlSignInModule | undefined
   ssoTeamReads?: SsoTeamReadDeps | undefined
 }
 
@@ -175,7 +177,9 @@ function isSsoTrustPath(path: string, method: string): boolean {
     (method === 'PUT' && /^\/api\/v1\/team\/sso\/policy\/?$/i.test(path)) ||
     /^\/api\/v1\/team\/sso\/(?:providers|domains|delegations|recovery)(?:\/|$)/i.test(path) ||
     /^\/api\/v1\/scim\/team-mappings(?:\/|$)/i.test(path) ||
-    /^\/api\/auth\/(?:sign-in\/sso|sso\/(?:callback|oidc\/complete))(?:\/|$)/i.test(path)
+    /^\/api\/auth\/(?:sign-in\/sso|sso\/(?:callback|oidc\/complete|saml2\/(?:complete|sp\/acs)))(?:\/|$)/i.test(
+      path,
+    )
   )
 }
 
@@ -430,6 +434,7 @@ export function createApp({
   waitlist,
   ssoMailboxProof,
   ssoOidcSignIn,
+  ssoSamlSignIn,
   ssoTeamReads: ssoTeamReadOptions,
 }: AppDeps) {
   const app = new OpenAPIHono({ defaultHook: validationHook })
@@ -609,6 +614,7 @@ export function createApp({
   const resolveClientIp = clientIp(trustedProxies)
   // Hard-off answers even precede the general auth credential and body checks.
   ssoOidcSignIn?.mount({ app, publicUrl, requestLogger, clientIp: resolveClientIp })
+  ssoSamlSignIn?.mount({ app, publicUrl, requestLogger, clientIp: resolveClientIp })
   app.use('/api/*', resolveClientIp)
   app.use('/api/v1/*', noStoreByDefault)
   // Routing submissions and continuations count even when credentials or body lengths are refused.

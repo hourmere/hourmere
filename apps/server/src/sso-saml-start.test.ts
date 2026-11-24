@@ -159,9 +159,10 @@ describe.skipIf(!databaseUrl)('SAML sign-in initiation', () => {
     ).toBe(publicUrl + metadataPath(id))
     expect(xml).not.toContain('synthetic-member')
 
-    const setCookies = response.headers.getSetCookie()
-    expect(setCookies).toHaveLength(1)
-    const [cookiePair = '', ...attributes] = (setCookies[0] ?? '').split('; ')
+    const setBinding = response.headers
+      .getSetCookie()
+      .find((value) => value.startsWith(`${bindingCookie}=`))
+    const [cookiePair = '', ...attributes] = (setBinding ?? '').split('; ')
     expect(cookiePair).toMatch(/^[^=]+=[A-Za-z0-9_-]{43}$/)
     expect(cookiePair.split('=')[0]).toBe(bindingCookie)
     expect(attributes.sort()).toEqual(['HttpOnly', 'Path=/', 'SameSite=Lax', 'Secure'])
@@ -196,7 +197,7 @@ describe.skipIf(!databaseUrl)('SAML sign-in initiation', () => {
     )
     const secondRedirect = await redirectUrl(second)
     expect(secondRedirect.searchParams.get('RelayState')?.split('.')[1]).not.toBe(relaySecret)
-    expect(second.headers.getSetCookie()[0]?.split('; ')[0]).toBe(cookiePair)
+    expect(second.headers.getSetCookie().map((value) => value.split('; ')[0])).toContain(cookiePair)
   })
 
   it('requires an exact Origin, browser-only credentials and the strict sign-in input', async () => {
@@ -210,7 +211,7 @@ describe.skipIf(!databaseUrl)('SAML sign-in initiation', () => {
       [{ ...input, attemptId: randomUUID() }, {}, 400, 'invalid_request'],
       [{ ...input, returnTo: '//different.example.com' }, {}, 400, 'invalid_request'],
       [{ ...input, returnTo: '/outside-app' }, {}, 400, 'invalid_request'],
-      [{ ...input, intent: 'step_up', attemptId: randomUUID() }, {}, 404, 'sso_disabled'],
+      [{ ...input, intent: 'step_up', attemptId: randomUUID() }, {}, 400, 'invalid_request'],
     ] as const) {
       const response = await app.request(startPath, post(body, headers))
       expect(response.status).toBe(status)
@@ -219,6 +220,32 @@ describe.skipIf(!databaseUrl)('SAML sign-in initiation', () => {
     }
     expect(await attempts(id).execute()).toEqual([])
   })
+
+  it.each([samlOnly, { ssoOidcEnabled: true, ssoSamlEnabled: false }])(
+    'treats disabled and retired SAML providers as missing with %j',
+    async (capabilities) => {
+      const disabledId = await samlProvider()
+      const retiredId = await samlProvider()
+      await db
+        .updateTable('sso_providers')
+        .set({ enabled: false })
+        .where('id', '=', disabledId)
+        .execute()
+      await db
+        .updateTable('sso_providers')
+        .set({ enabled: false, retired_at: sql`clock_timestamp()` })
+        .where('id', '=', retiredId)
+        .execute()
+      const app = appFor(capabilities)
+      for (const providerId of [disabledId, retiredId]) {
+        const response = await app.request(startPath, post({ providerId, intent: 'sign_in' }))
+        expect(response.status).toBe(404)
+        expect(await response.json()).toEqual({ error: 'sso_not_found' })
+        expect(response.headers.getSetCookie()).toEqual([])
+        expect(await attempts(providerId).execute()).toEqual([])
+      }
+    },
+  )
 
   it('refuses an IdP endpoint that supplies a reserved redirect parameter', async () => {
     const id = await samlProvider(`${ssoEndpoint}?relaystate=synthetic`)
@@ -229,7 +256,7 @@ describe.skipIf(!databaseUrl)('SAML sign-in initiation', () => {
     expect(await attempts(id).execute()).toEqual([])
   })
 
-  it('leaves GET inert and has no IdP-initiated sign-in route', async () => {
+  it('leaves GET on the sign-in start route inert', async () => {
     const id = await samlProvider()
     const app = appFor()
     const get = await app.request(`${startPath}?providerId=${id}&intent=sign_in`, {
@@ -237,14 +264,6 @@ describe.skipIf(!databaseUrl)('SAML sign-in initiation', () => {
     })
     expect(get.status).toBe(405)
     expect(get.headers.getSetCookie()).toEqual([])
-    expect(app.routes.filter(({ path }) => path.includes('/saml2/'))).toEqual([])
-
-    const unsolicited = await app.request(acsPath(id), {
-      method: 'POST',
-      body: new URLSearchParams({ SAMLResponse: Buffer.from('<Response/>').toString('base64') }),
-    })
-    expect(unsolicited.status).toBe(404)
-    expect(unsolicited.headers.getSetCookie()).toEqual([])
     expect(await attempts(id).execute()).toEqual([])
     expect(await db.selectFrom('auth.session').select('id').execute()).toEqual([])
   })

@@ -4,20 +4,21 @@ import { type SsoRequest, ssoUrl } from '@hourmere/outbound/sso'
 import { DOMImplementation, XMLSerializer } from '@xmldom/xmldom'
 import { sql } from 'kysely'
 import { Constants, IdentityProvider, ServiceProvider } from 'samlify'
-import { z } from 'zod'
 import { openSsoProviderConfiguration, type SsoProviderRevision } from './sso-configuration.ts'
 import { browserBindingDigest, sha256 } from './sso-mailbox-proof.ts'
 import { authenticationAttemptLifetime } from './sso-oidc-limits.ts'
 import { samlDatabaseInstantText, samlDatabaseNow, samlRequestExpired } from './sso-saml-replay.ts'
+import {
+  samlProviderConfig,
+  samlServiceProviderUrls,
+  samlStartOperation,
+} from './sso-saml-state.ts'
 
-const sealedConfig = z.strictObject({ ssoEndpoint: z.string() })
 const { binding: samlBinding, format, names } = Constants.namespace
 const reservedRedirectParameters = new Set([
   ...Object.values(Constants.wording.urlParams).map((key) => key.toLowerCase()),
   'samlencoding',
 ])
-const spMetadataPath = '/api/auth/sso/saml2/sp/metadata/{providerId}'
-const spAcsPath = '/api/auth/sso/saml2/sp/acs/{providerId}'
 
 export class SamlStartRefused extends Error {
   constructor() {
@@ -60,11 +61,10 @@ export async function startSamlSignIn(
   const binding = browserBindingDigest(browserBinding)
   if (!binding) throw new SamlStartRefused()
 
-  const entityID = new URL(spMetadataPath.replace('{providerId}', providerId), publicUrl).href
-  const acs = new URL(spAcsPath.replace('{providerId}', providerId), publicUrl).href
+  const { spEntityId: entityID, acsUrl: acs } = samlServiceProviderUrls(publicUrl, providerId)
   let idp: ReturnType<typeof IdentityProvider>
   try {
-    const config = sealedConfig.parse(
+    const config = samlProviderConfig.parse(
       JSON.parse(openSsoProviderConfiguration(configurationKey, provider, configuration)),
     )
     const endpoint = ssoUrl(config.ssoEndpoint, privateTargets)
@@ -127,7 +127,7 @@ export async function startSamlSignIn(
       .values({
         id,
         kind: 'sign_in',
-        operation: 'samlSignIn',
+        operation: samlStartOperation,
         organization_id: organizationId,
         provider_id: providerId,
         provider_revision: revision,
@@ -142,6 +142,6 @@ export async function startSamlSignIn(
     if (samlRequestExpired(Temporal.Instant.from(expiresAt), now)) {
       throw new SamlStartRefused()
     }
-    return request.context
+    return { id, url: request.context }
   })
 }
