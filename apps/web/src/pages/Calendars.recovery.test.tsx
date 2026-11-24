@@ -475,39 +475,102 @@ describe('calendar recovery actions', () => {
     },
   )
 
-  it('lets a Microsoft account retry a temporary busy-time failure without reconnecting', async () => {
-    const user = userEvent.setup()
-    const retry = `POST /api/v1/calendars/${calendar.id}/sync`
-    const requests = fakeApi({
-      ...signedIn,
-      ...profile(),
-      ...list([
-        {
-          ...connection,
-          provider: 'microsoft',
-          lastError: 'provider_unavailable',
-          calendars: [{ ...calendar, syncError: 'provider_unavailable' }],
-        },
-      ]),
-      [retry]: () => new Response(null, { status: 204 }),
-    })
-    renderApp('/app/calendars')
-    const card = await account()
-    expect(
-      within(card).getByText(
+  it.each([
+    {
+      syncError: 'provider_unavailable',
+      lastError: 'provider_unavailable',
+      message:
         'Synchronization failed. Booking times stay unavailable until synchronization recovers.',
-      ),
-    ).toBeDefined()
-    expect(within(card).queryByRole('alert')).toBeNull()
-    expect(
-      within(card).queryByRole('link', {
-        name: /Reconnect|Restore calendar|Enable calendar synchronization/,
-      }),
-    ).toBeNull()
-    await user.click(within(card).getByRole('button', { name: 'Retry synchronization' }))
-    expect(await screen.findByText('Busy times synchronized for this calendar.')).toBeDefined()
-    expect(requests.to(retry)).toHaveLength(1)
-  })
+    },
+    {
+      syncError: 'permissions_missing',
+      lastError: null,
+      message:
+        'Microsoft denied access to this calendar. Booking times stay unavailable until access is restored.',
+    },
+  ] as const)(
+    'lets a Microsoft calendar retry $syncError without reconnecting',
+    async ({ syncError, lastError, message }) => {
+      const user = userEvent.setup()
+      const retry = `POST /api/v1/calendars/${calendar.id}/sync`
+      const requests = fakeApi({
+        ...signedIn,
+        ...profile(),
+        ...list([
+          {
+            ...connection,
+            provider: 'microsoft',
+            lastError,
+            calendars: [{ ...calendar, syncError }],
+          },
+        ]),
+        [retry]: () => new Response(null, { status: 204 }),
+      })
+      renderApp('/app/calendars')
+      const card = await account()
+      expect(within(card).getByText(message)).toBeDefined()
+      expect(within(card).queryByRole('alert')).toBeNull()
+      expect(
+        within(card).queryByRole('link', {
+          name: /Reconnect|Restore calendar|Enable calendar synchronization/,
+        }),
+      ).toBeNull()
+      await user.click(within(card).getByRole('button', { name: 'Retry synchronization' }))
+      expect(await screen.findByText('Busy times synchronized for this calendar.')).toBeDefined()
+      expect(requests.to(retry)).toHaveLength(1)
+    },
+  )
+
+  it.each([
+    {
+      locale: 'en',
+      message:
+        'Microsoft no longer lists this calendar. Booking times stay unavailable while it is selected. Refresh the calendar list or clear the selection.',
+      refresh: 'Refresh calendar list',
+      sync: 'Sync now',
+    },
+    {
+      locale: 'zh-CN',
+      message:
+        'Microsoft 已不再列出此日历。只要它仍被选中，就无法提供可预约时段。请刷新日历列表或取消选中。',
+      refresh: '刷新日历列表',
+      sync: '立即同步',
+    },
+  ] as const)(
+    'shows a removed Microsoft selection in $locale and lets the owner clear it',
+    async ({ locale, message, refresh, sync }) => {
+      const user = userEvent.setup()
+      const selection = `PATCH /api/v1/calendars/${calendar.id}`
+      const requests = fakeApi({
+        ...signedIn,
+        ...profile({ ...PROFILE, locale }),
+        ...list([
+          {
+            ...connection,
+            provider: 'microsoft',
+            calendars: [
+              { ...calendar, available: false, syncError: 'calendar_removed' },
+              { ...calendar, id: 'c0000000-0000-7000-8000-000000000002', name: 'Other calendar' },
+            ],
+          },
+        ]),
+        [selection]: () => new Response(null, { status: 204 }),
+      })
+      renderApp('/app/calendars')
+      const card = await account()
+      const removed = within(card)
+        .getByRole('heading', { name: calendar.name })
+        .closest('li') as HTMLElement
+      expect(within(removed).getByText(message)).toBeDefined()
+      expect(within(removed).queryByRole('button')).toBeNull()
+      expect(within(card).getByRole('button', { name: refresh }).matches(':disabled')).toBe(false)
+      expect(within(card).getByRole('button', { name: sync }).matches(':disabled')).toBe(false)
+      const checkbox = within(removed).getByRole('checkbox')
+      expect(checkbox.matches(':checked')).toBe(true)
+      await user.click(checkbox)
+      expect(requests.to(selection)[0]?.body).toEqual({ checkConflicts: false })
+    },
+  )
 
   it.each([
     {

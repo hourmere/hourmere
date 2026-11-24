@@ -296,13 +296,15 @@ describe.skipIf(!process.env.DATABASE_URL)(
           .where('cc.provider', '=', 'microsoft')
           .executeTakeFirstOrThrow()
       ).id
-      microsoft.controls.viewHook = () =>
+      microsoft.controls.viewHook = (url) =>
         failMicrosoft
           ? Response.json({ error: { code: 'ServiceUnavailable' } }, { status: 503 })
           : Response.json({
+              '@odata.deltaLink': `${url.origin}${url.pathname}?$deltatoken=synthetic-cursor`,
               value: [
                 {
                   id: 'synthetic-ms-busy',
+                  type: 'singleInstance',
                   subject: 'Private Outlook appointment',
                   start: { dateTime: '2030-03-10T22:00:00.0000000', timeZone: 'UTC' },
                   end: { dateTime: '2030-03-10T22:30:00.0000000', timeZone: 'UTC' },

@@ -200,6 +200,7 @@ export function errorMessage(err: unknown): UiText {
     microsoft_calendar_provider_unavailable:
       'Microsoft Calendar could not be reached. Try again shortly.',
     microsoft_calendar_needs_reauth: 'Reconnect Microsoft Calendar to restore access.',
+    microsoft_calendar_removed: 'This calendar is no longer available. Refresh the calendar list.',
     microsoft_calendar_permissions_missing:
       'Reconnect Microsoft Calendar and allow the requested permissions.',
     automatic_zoom_disabled: 'Automatic Zoom meetings are disabled on this instance.',

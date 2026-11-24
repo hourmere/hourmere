@@ -11849,7 +11849,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description google_calendar_permissions_missing, microsoft_calendar_permissions_missing, microsoft_calendar_disabled or calendar_events_unreadable */
+            /** @description google_calendar_permissions_missing, microsoft_calendar_permissions_missing, microsoft_calendar_disabled, microsoft_calendar_removed or calendar_events_unreadable */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -11918,7 +11918,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description calendar_sync_disabled, google_calendar_provider_unavailable, microsoft_calendar_provider_unavailable, microsoft_calendar_needs_reauth, microsoft_calendar_permissions_missing or microsoft_calendar_disabled */
+            /** @description calendar_sync_disabled, calendar_events_unreadable, google_calendar_provider_unavailable, microsoft_calendar_provider_unavailable, microsoft_calendar_needs_reauth, microsoft_calendar_permissions_missing, microsoft_calendar_disabled or microsoft_calendar_removed */
             409: {
                 headers: {
                     [name: string]: unknown;

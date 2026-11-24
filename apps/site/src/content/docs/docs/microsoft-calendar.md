@@ -15,19 +15,25 @@ offering bookings. The connection uses read-only access to Microsoft Graph.
 - `GET /oidc/userinfo` supplies the account subject and optional display email.
   `GET /v1.0/me/calendars` supplies calendar IDs, names, default-calendar flags and access
   metadata. Hourmere stores those account and calendar details with the local connection.
-  `GET /v1.0/me/calendars/{id}/calendarView` reads complete, bounded snapshots for
-  selected conflict calendars. [Graph calendar list](https://learn.microsoft.com/en-us/graph/api/user-list-calendars?view=graph-rest-1.0),
-  [Graph calendar view](https://learn.microsoft.com/en-us/graph/api/user-list-calendarview?view=graph-rest-1.0)
-- The busy-time cache stores opaque event identifiers and blocking intervals. The calendar
-  view requests only availability fields and uses the UTC start and end Graph returns for
-  timed and all-day events. Event titles, attendees, locations and descriptions stay out of
-  the cache and availability responses. Graph calls use the connected account’s delegated
-  access. Hourmere makes no Graph event writes.
+  [Graph calendar list](https://learn.microsoft.com/en-us/graph/api/user-list-calendars?view=graph-rest-1.0)
+- Each selected conflict calendar has its own `calendarView/delta` cursor and date range.
+  Hourmere resumes large syncs across background runs and publishes busy times only when
+  the entire round completes. An expired cursor or a date range that no longer covers
+  upcoming bookings triggers a fresh snapshot. Booking times stay unavailable while a
+  snapshot is incomplete or a sync has failed.
+  [Graph calendar view delta](https://learn.microsoft.com/en-us/graph/delta-query-events)
+- Graph expands recurring events. Hourmere uses modified occurrences at their updated times
+  and removes busy intervals for cancelled occurrences and deleted series. Timed and all-day
+  events use the UTC intervals Graph returns. The cache retains opaque identifiers and busy
+  intervals. Event titles, attendees, locations and descriptions are discarded and never
+  included in availability responses.
+- If Graph denies access to one selected calendar, its busy times become unavailable and
+  the account’s other calendars continue syncing. If a complete list omits a selected
+  calendar, Hourmere marks it unavailable and stops syncing it. Use **Refresh calendar list**
+  to check for its return or clear its conflict-check selection to resume booking without it.
 - When Graph throttles a request, Hourmere waits briefly within the read deadline or
   defers the next read by the `Retry-After` delay, up to 24 hours. [Graph throttling guidance](https://learn.microsoft.com/en-us/graph/throttling)
-- Remaining work includes incremental sync across recurring events and exceptions,
-  idempotent booking creation and write-back, and reconciliation of provider conflicts
-  during booking changes, including reschedules and cancellations.
+- Booking event writes and reconciliation during booking changes remain future work.
 
 ## Prepare a test calendar
 
@@ -84,8 +90,9 @@ credentials, calendars and outstanding connection attempts. It does not revoke t
 account-wide grant; remove that separately in the Microsoft account's application permissions
 if desired. Keep regular encrypted database backups and protect the encryption key separately.
 
-If consent was revoked or permissions are missing, choose **Reconnect Microsoft Calendar**
-and authorize the original Microsoft account to restore the connection.
+If the account shows **Reconnect required**, choose **Reconnect Microsoft Calendar** and
+authorize the original Microsoft account to restore the connection. If Microsoft denies
+access to a particular calendar, review that calendar’s access in Outlook and retry its sync.
 On return, check the account status and wait for a successful busy-time sync. While a
 selected calendar’s snapshot is incomplete, stale or unavailable, Hourmere treats those
 times as unknown. See [Troubleshoot availability](/docs/availability-troubleshooting#sync-freshness-and-provider-differences)
