@@ -10,7 +10,12 @@ import { DomainError } from '@hourmere/scheduling'
 import { HTTPException } from 'hono/http-exception'
 import { sql } from 'kysely'
 import { z } from 'zod'
-import { requireSsoEnabled, SCIM_MAPPING_CONSENT, type SsoCapabilities } from './sso.ts'
+import {
+  requireSsoEnabled,
+  requireSsoRetained,
+  SCIM_MAPPING_CONSENT,
+  type SsoCapabilities,
+} from './sso.ts'
 import {
   bindingCookieName,
   browserBindingDigest,
@@ -153,7 +158,7 @@ export async function runWithFreshProof<T>(
     if (!request.scimMappingConsentEnabled)
       throw new DomainError('not_found', 'scim_resources_disabled')
   } else {
-    requireSsoEnabled(deps.capabilities)
+    requireSsoRetained(deps.capabilities)
   }
   const publicUrl = new URL(deps.publicUrl)
   if (request.headers.get('origin') !== publicUrl.origin || request.headers.has('authorization'))

@@ -108,10 +108,15 @@ describe.skipIf(!databaseUrl)('SSO recovery', () => {
   })
 
   function instance(
-    enabled = true,
+    enabled: boolean | 'setting-off' = true,
     resolveCaller: CallerResolver = createCallerResolver({ auth, db }),
   ) {
-    const capabilities = { ssoOidcEnabled: enabled, ssoSamlEnabled: false }
+    // 'setting-off' is what the running server passes while SSO_OIDC_ENABLED is off.
+    const capabilities = {
+      ssoOidcEnabled: enabled === true,
+      ssoSamlEnabled: false,
+      ssoOperatorSetting: enabled === 'setting-off',
+    }
     const notices: Notice[] = []
     const proofJobs: MailboxProofEmailPayload[] = []
     const state = { now: undefined as string | undefined, failQueue: false }
@@ -550,6 +555,24 @@ describe.skipIf(!databaseUrl)('SSO recovery', () => {
       true,
     )
     expect(await policy()).toEqual({ require_sso: true, policy_revision: 7, trust_generation: 1 })
+  })
+
+  it('notifies every owner when recovery is used while the OIDC setting is off', async () => {
+    const h = instance('setting-off')
+    await enforceSso()
+    const owner = await browser(fixture.owner)
+    const proof = await recoveryProof(h, owner.cookie)
+    expect((await useRecovery(h, proof.cookie, proof.id)).status).toBe(204)
+    expect(h.notices.map(({ kind }) => kind)).toEqual(['used', 'used'])
+    const delivered = await deliverNotices(h)
+    expect(delivered.map(({ to }) => to).sort()).toEqual(
+      [await email(fixture.owner), await email(fixture.coOwner)].sort(),
+    )
+    // Enrollment adds trust: a notice queued before the setting was turned off is dropped,
+    // and hard-off, which only tests assemble, delivers nothing at all.
+    h.notices.push({ kind: 'enrolled', userId: fixture.owner, language: 'en' })
+    expect(await deliverNotices(h)).toHaveLength(2)
+    expect(await deliverNotices({ ...h, capabilities: instance(false).capabilities })).toEqual([])
   })
 
   it('binds recovery use to its expected revision, browser session and origin', async () => {
@@ -1397,10 +1420,19 @@ describe.skipIf(!databaseUrl)('SSO recovery', () => {
     await teamReadsStillClosed()
   })
 
-  it.each(['unlink', 'owner removal'])(
-    'retains recovery ownership through %s of an SSO link',
-    async (operation) => {
-      const h = instance()
+  it.each([
+    ['unlink', true],
+    ['owner removal', true],
+    ['unlink', 'setting-off'],
+    ['owner removal', 'setting-off'],
+  ] as const)(
+    'retains recovery ownership through %s of an SSO link (OIDC %s)',
+    async (operation, state) => {
+      const h = instance(state)
+      if (state === 'setting-off')
+        // Reads of stored state stay available to the team's administrators.
+        for (const path of [policyPath, providersPath])
+          expect((await read(h, path, (await browser(fixture.owner)).cookie)).status).toBe(200)
       const prior = await addExistingOwner()
       const link = await db
         .insertInto('sso_identity_links')

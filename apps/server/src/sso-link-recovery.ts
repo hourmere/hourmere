@@ -13,7 +13,7 @@ import { DomainError } from '@hourmere/scheduling'
 import { HTTPException } from 'hono/http-exception'
 import { sql } from 'kysely'
 import { z } from 'zod'
-import { requireSsoEnabled, type SsoCapabilities } from './sso.ts'
+import { requireSsoRetained, type SsoCapabilities, ssoRetained } from './sso.ts'
 import { type FreshProofDeps, runWithFreshProof } from './sso-fresh-proof.ts'
 import { EXPECTED_ORGANIZATION_HEADER } from './team-management.ts'
 
@@ -56,7 +56,7 @@ export function ssoLinkRemovalEmailJob({
     payload: notificationPayload,
     retry: { limit: 3, delaySeconds: 5, backoff: true, maxDelaySeconds: 60 },
     handler: async ({ userId, language }, { signal }) => {
-      if (!capabilities.ssoOidcEnabled && !capabilities.ssoSamlEnabled) return
+      if (!ssoRetained(capabilities)) return
       try {
         const user = await db
           .selectFrom('auth.user')
@@ -82,7 +82,7 @@ export async function retireSsoIdentityLink(
   request: z.infer<typeof RemoveSsoIdentityLinkInput>,
   operation: typeof UNLINK_SSO_ACCOUNT | typeof REMOVE_SSO_IDENTITY_LINK,
 ) {
-  requireSsoEnabled(deps.capabilities)
+  requireSsoRetained(deps.capabilities)
   if (
     principal.kind !== 'session' ||
     principal.organization.personal ||
@@ -168,7 +168,6 @@ export async function retireSsoIdentityLink(
             )
               throw denied()
           }
-          if (self) requireSsoEnabled(deps.capabilities, 'oidc')
           if (provider.protocol !== 'oidc') throw new DomainError('not_found', 'sso_disabled')
           if (link.generation !== request.expectedLinkGeneration) throw changed()
           target = { userId: link.user_id, revision: provider.revision }

@@ -3,7 +3,7 @@ import { DomainError } from '@hourmere/scheduling'
 import type { MiddlewareHandler } from 'hono'
 import type { CallerEnv } from '../caller.ts'
 import { ErrorBody, errorResponses, json, type RouteModule } from '../openapi.ts'
-import { requireSsoEnabled } from '../sso.ts'
+import { requireSsoEnabled, requireSsoRetained } from '../sso.ts'
 import {
   ActivateSsoProviderInput,
   activateSsoProvider,
@@ -53,23 +53,27 @@ export const FreshProofChallenge = ErrorBody.extend({
 
 /** Browser-only trust changes; no corresponding machine tools or commands exist. */
 export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): RouteModule {
-  const enabled: MiddlewareHandler<CallerEnv> = async (c, next) => {
-    requireSsoEnabled(deps.capabilities)
-    let input: unknown
-    try {
-      input = await c.req.json()
-    } catch (error) {
-      // Let session authorization precede ordinary malformed-body validation.
-      if (!(error instanceof SyntaxError)) throw error
+  // Creating and updating add trust through OIDC; deletion stays available while it is off.
+  const draft =
+    (addsTrust: boolean): MiddlewareHandler<CallerEnv> =>
+    async (c, next) => {
+      requireSsoRetained(deps.capabilities)
+      let input: unknown
+      try {
+        input = await c.req.json()
+      } catch (error) {
+        // Let session authorization precede ordinary malformed-body validation.
+        if (!(error instanceof SyntaxError)) throw error
+      }
+      if (
+        input &&
+        typeof input === 'object' &&
+        (('protocol' in input && input.protocol === 'saml') || 'saml' in input)
+      )
+        throw new DomainError('not_found', 'sso_disabled')
+      if (addsTrust) requireSsoEnabled(deps.capabilities, 'oidc')
+      await next()
     }
-    if (
-      input &&
-      typeof input === 'object' &&
-      (('protocol' in input && input.protocol === 'saml') || 'saml' in input)
-    )
-      throw new DomainError('not_found', 'sso_disabled')
-    await next()
-  }
   const oidcEnabled: MiddlewareHandler<CallerEnv> = async (c, next) => {
     c.header('Cache-Control', 'no-store')
     c.header('Referrer-Policy', 'no-referrer')
@@ -79,7 +83,7 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
   const activationEnabled: MiddlewareHandler<CallerEnv> = async (c, next) => {
     c.header('Cache-Control', 'no-store')
     c.header('Referrer-Policy', 'no-referrer')
-    requireSsoEnabled(deps.capabilities)
+    requireSsoRetained(deps.capabilities)
     if (!deps.capabilities.ssoOidcEnabled) {
       let input: unknown
       try {
@@ -121,7 +125,8 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
       teamManagementSessionCaller(caller),
       sessionOnly,
     ] as const
-    const middleware = [enabled, ...sessionMiddleware] as const
+    const middleware = [draft(true), ...sessionMiddleware] as const
+    const deleteMiddleware = [draft(false), ...sessionMiddleware] as const
     app.openapi(
       createRoute({
         method: 'post',
@@ -130,7 +135,7 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
         tags: ['SSO'],
         summary: 'Create a disabled SSO provider draft',
         description:
-          'Verified team owner/admin browser session with fresh proof. An enrolled owner can spend one recovery grant on an enforced team. Secrets are write-only. OIDC and SAML are being built and remain unavailable.',
+          'Verified team owner/admin browser session with fresh proof. An enrolled owner can spend one recovery grant on an enforced team. Secrets are write-only. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.',
         security: [{ session: [] }],
         middleware: [...middleware] as const,
         request: {
@@ -164,7 +169,7 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
         tags: ['SSO'],
         summary: 'Start a browser-bound OIDC provider test',
         description:
-          'Verified team owner/admin browser session with fresh proof and expected revision. An enrolled owner can spend one recovery grant on an enforced team to test a provider, including an enabled provider. Follow the authorization URL in the same browser and check the provider inventory for the result. SSO remains unavailable.',
+          'Verified team owner/admin browser session with fresh proof and expected revision. An enrolled owner can spend one recovery grant on an enforced team to test a provider, including an enabled provider. Follow the authorization URL in the same browser and check the provider inventory for the result. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.',
         security: [{ session: [] }],
         middleware: [oidcEnabled, ...sessionMiddleware] as const,
         request: {
@@ -207,7 +212,7 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
         tags: ['SSO'],
         summary: 'Enable or disable an SSO provider',
         description:
-          'Verified team owner browser session with fresh administration proof. An enrolled owner can spend one recovery grant on an enforced team. Enabling requires a passed test of the current revision and a positively rechecked, unexpired linked domain. An enforced team must keep a usable provider. SSO remains unavailable.',
+          'Verified team owner browser session with fresh administration proof. An enrolled owner can spend one recovery grant on an enforced team. Enabling requires a passed test of the current revision and a positively rechecked, unexpired linked domain. An enforced team must keep a usable provider. While SSO_OIDC_ENABLED is off, enabling returns 404 sso_disabled and disabling stays available.',
         security: [{ session: [] }],
         middleware: [activationEnabled, ...sessionMiddleware] as const,
         request: {
@@ -248,7 +253,7 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
         tags: ['SSO'],
         summary: 'Start explicit linking of the caller’s OIDC identity',
         description:
-          'Current team member browser session with independent mailbox proof. Follow the authorization URL in the same browser and explicitly complete the pending link. SSO remains unavailable.',
+          'Current team member browser session with independent mailbox proof. Follow the authorization URL in the same browser and explicitly complete the pending link. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.',
         security: [{ session: [] }],
         middleware: [oidcEnabled, ...sessionMiddleware] as const,
         request: {
@@ -298,7 +303,7 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
         tags: ['SSO'],
         summary: 'Update an SSO provider draft',
         description:
-          'Verified team owner/admin browser session with fresh proof and expected revision. An enrolled owner can spend one recovery grant on an enforced team. Omitted secrets are preserved; replacements are never returned. SSO remains unavailable.',
+          'Verified team owner/admin browser session with fresh proof and expected revision. An enrolled owner can spend one recovery grant on an enforced team. Omitted secrets are preserved; replacements are never returned. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.',
         security: [{ session: [] }],
         middleware: [...middleware] as const,
         request: {
@@ -334,9 +339,9 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
         tags: ['SSO'],
         summary: 'Retire an SSO provider',
         description:
-          'Verified team owner/admin browser session with fresh proof and expected revision. An enforced team must keep a usable provider. An authorized repeat retirement is idempotent. SSO remains unavailable.',
+          'Verified team owner/admin browser session with fresh proof and expected revision. An enforced team must keep a usable provider. An authorized repeat retirement is idempotent. Stays available while SSO_OIDC_ENABLED is off.',
         security: [{ session: [] }],
-        middleware: [...middleware] as const,
+        middleware: [...deleteMiddleware] as const,
         request: {
           headers: z.object({
             'X-Expected-Organization-Id': z.string().optional().openapi({

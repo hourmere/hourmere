@@ -3,7 +3,7 @@ import type { Db } from '@hourmere/db'
 import { DomainError } from '@hourmere/scheduling'
 import { sql } from 'kysely'
 import { z } from 'zod'
-import { requireSsoEnabled, type SsoCapabilities } from './sso.ts'
+import { requireSsoRetained, type SsoCapabilities } from './sso.ts'
 import { currentSsoProviderTestStatus } from './sso-oidc-test-receipts.ts'
 import type { TeamReadPolicy } from './sso-team-reads.ts'
 
@@ -15,7 +15,7 @@ const denied = () => new DomainError('forbidden', 'team_management_access_denied
 
 /** Every adapter uses the same current membership and credential boundary. */
 export async function authorizeSsoRead(deps: SsoReadDeps, principal: Principal) {
-  requireSsoEnabled(deps.capabilities)
+  requireSsoRetained(deps.capabilities)
   if (
     principal.organization.personal ||
     (principal.kind === 'api_key' && !['read', 'full'].includes(principal.apiKeyScope)) ||
@@ -154,7 +154,8 @@ export async function listSsoProviders(
     .execute()
   const page = rows.slice(0, limit)
   const recoveryProviderIds =
-    query.includeRecoveryLinks && deps.capabilities.ssoOidcEnabled && principal.kind === 'session'
+    // Listed while the setting is off too: retiring a link stays available.
+    query.includeRecoveryLinks && principal.kind === 'session'
       ? new Set(
           page.filter((provider) => provider.protocol === 'oidc').map((provider) => provider.id),
         )

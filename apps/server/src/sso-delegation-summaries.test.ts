@@ -39,8 +39,8 @@ describe.skipIf(!databaseUrl)('owned SSO delegation inventories', () => {
   let on: ReturnType<typeof instance>
   const statements: string[] = []
 
-  function instance(enabled: boolean) {
-    const ssoCapabilities = { ssoOidcEnabled: enabled, ssoSamlEnabled: false }
+  function instance(enabled: boolean, ssoOperatorSetting?: boolean) {
+    const ssoCapabilities = { ssoOidcEnabled: enabled, ssoSamlEnabled: false, ssoOperatorSetting }
     const auth = createAuth({
       pool: authPool,
       db,
@@ -218,6 +218,10 @@ describe.skipIf(!databaseUrl)('owned SSO delegation inventories', () => {
     expect(grantBytes).toBe(
       JSON.stringify({ data: [memberGrant.connection, personalGrant.connection] }),
     )
+    // With the OIDC setting off and nothing bound, both inventories keep the same bytes.
+    const settingOff = instance(false, true)
+    expect(await read(settingOff, listKeys, member)).toBe(keyBytes)
+    expect(await read(settingOff, listGrants, member)).toBe(grantBytes)
 
     const client = await owned.pool.connect()
     let keySummary: { id: string; expiresAt: string }
@@ -268,6 +272,19 @@ describe.skipIf(!databaseUrl)('owned SSO delegation inventories', () => {
         personalGrant.connection,
       ],
     })
+    // The setting suspends a delegation without hiding it: its owner can still revoke it.
+    expect(await read(settingOff, listKeys, member)).toBe(await read(on, listKeys, member))
+    expect(JSON.parse(await read(settingOff, listGrants, member))).toEqual({
+      data: [
+        {
+          ...memberGrant.connection,
+          credentialId: memberGrant.credentialId,
+          ssoDelegation: grantSummary,
+        },
+        personalGrant.connection,
+      ],
+    })
+    expect(await read(settingOff, listGrants, owner)).toBe(await read(off, listGrants, owner))
     expect(await read(on, listKeys, owner)).toBe(await read(off, listKeys, owner))
     expect(JSON.parse(await read(on, listKeys, owner))).toMatchObject({
       apiKeys: [{ id: ownerKey }],

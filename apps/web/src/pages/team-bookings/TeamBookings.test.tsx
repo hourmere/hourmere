@@ -1,8 +1,9 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Schemas } from '../../api/client.ts'
 import { chooseLanguage } from '../../i18n/store.ts'
+import { AppShell, RequireSession, SessionLayout, TeamBookingsPage } from '../../lazy-pages.tsx'
 import { instantOf } from '../../public/time.ts'
 import {
   fakeApi,
@@ -15,8 +16,10 @@ import {
   renderApp,
   signedInAs,
 } from '../../test/fake-api.tsx'
+import { resolveLazy } from '../../test/resolve-lazy.ts'
 import { teamBookingPanelApi } from '../../test/team-booking-panel-api.ts'
 
+beforeAll(() => resolveLazy(SessionLayout, RequireSession, AppShell, TeamBookingsPage))
 const PAGE = '/app/team/bookings'
 // The fixed booking must remain cancellable until a test explicitly advances this clock.
 beforeEach(() => vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2030-03-01T12:00:00Z')))
@@ -585,6 +588,12 @@ describe('team booking cancellation', () => {
     await user.type(screen.getByLabelText(/Reason/), 'Schedule changed')
     await user.click(screen.getByRole('button', { name: 'Cancel booking' }))
     await screen.findByText('The booking is cancelled.')
+    // The panel closes by navigating back, which React Router runs as a transition: the
+    // announcement can commit first, and the list refresh can meanwhile show the open
+    // detail's form again. Wait for the detail to close before checking what remains.
+    await waitFor(() =>
+      expect(screen.queryByRole('region', { name: 'Team booking details' })).toBeNull(),
+    )
     expect(api.to(CANCEL)).toHaveLength(1)
     expect(api.to(CANCEL)[0]?.headers.get('X-Expected-Organization-Id')).toBe(TEAM.organization.id)
     expect(api.to(CANCEL)[0]?.body).toEqual({ reason: 'Schedule changed' })

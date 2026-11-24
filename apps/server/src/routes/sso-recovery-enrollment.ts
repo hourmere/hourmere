@@ -3,7 +3,12 @@ import { DomainError } from '@hourmere/scheduling'
 import type { MiddlewareHandler } from 'hono'
 import type { CallerEnv } from '../caller.ts'
 import { ErrorBody, errorResponses, json, type RouteModule } from '../openapi.ts'
-import { requireSsoEnabled, USE_SSO_RECOVERY } from '../sso.ts'
+import {
+  requireSsoEnabled,
+  requireSsoRetained,
+  type SsoCapabilities,
+  USE_SSO_RECOVERY,
+} from '../sso.ts'
 import {
   ACCEPT_SSO_RECOVERY_ENROLLMENT,
   AcceptSsoRecoveryEnrollmentInput,
@@ -42,15 +47,19 @@ const responses = {
 }
 
 export function ssoRecoveryEnrollmentRoutes(deps: SsoRecoveryEnrollmentDeps): RouteModule {
-  const guard: MiddlewareHandler<CallerEnv> = async (c, next) => {
-    c.header('Cache-Control', 'no-store')
-    requireSsoEnabled(deps.capabilities)
-    if (c.req.header('origin') !== new URL(deps.publicUrl).origin)
-      throw new DomainError('forbidden', 'team_management_access_denied')
-    await next()
-  }
+  // Recovery use stays available while every protocol's setting is off; enrolling adds trust.
+  const guard =
+    (require: (capabilities: SsoCapabilities) => void): MiddlewareHandler<CallerEnv> =>
+    async (c, next) => {
+      c.header('Cache-Control', 'no-store')
+      require(deps.capabilities)
+      if (c.req.header('origin') !== new URL(deps.publicUrl).origin)
+        throw new DomainError('forbidden', 'team_management_access_denied')
+      await next()
+    }
   return ({ app, caller }) => {
-    const middleware = [guard, teamManagementSessionCaller(caller)] as const
+    const middleware = [guard(requireSsoEnabled), teamManagementSessionCaller(caller)] as const
+    const useMiddleware = [guard(requireSsoRetained), teamManagementSessionCaller(caller)] as const
     app.openapi(
       createRoute({
         method: 'post',
@@ -59,9 +68,9 @@ export function ssoRecoveryEnrollmentRoutes(deps: SsoRecoveryEnrollmentDeps): Ro
         tags: ['SSO'],
         summary: 'Start SSO recovery for the specified team',
         description:
-          'Requires an enrolled owner’s browser session and fresh mailbox proof. Permits inspecting SSO configuration and one provider repair write or one write turning off enforcement. SSO remains unavailable.',
+          'Requires an enrolled owner’s browser session and fresh mailbox proof. Permits inspecting SSO configuration and one provider repair write or one write turning off enforcement. Stays available while SSO_OIDC_ENABLED is off.',
         security: [{ session: [] }],
-        middleware: [...middleware] as const,
+        middleware: [...useMiddleware] as const,
         request: {
           headers: recoveryTargetHeader,
           body: { required: true, content: json(UseSsoRecoveryInput) },
@@ -99,7 +108,7 @@ export function ssoRecoveryEnrollmentRoutes(deps: SsoRecoveryEnrollmentDeps): Ro
         tags: ['SSO'],
         summary: 'Nominate a current team owner for SSO recovery',
         description:
-          'Requires a team owner browser session and fresh administration proof. SSO remains unavailable.',
+          'Requires a team owner browser session and fresh administration proof. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.',
         security: [{ session: [] }],
         middleware: [...middleware] as const,
         request: { headers, body: { required: true, content: json(ConfigureSsoRecoveryInput) } },
@@ -137,7 +146,7 @@ export function ssoRecoveryEnrollmentRoutes(deps: SsoRecoveryEnrollmentDeps): Ro
         tags: ['SSO'],
         summary: 'Accept the caller’s SSO recovery nomination',
         description:
-          'Requires the nominated owner’s browser session and independent mailbox proof. SSO remains unavailable.',
+          'Requires the nominated owner’s browser session and independent mailbox proof. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.',
         security: [{ session: [] }],
         middleware: [...middleware] as const,
         request: {

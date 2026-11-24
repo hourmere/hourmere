@@ -97,6 +97,9 @@ describe('first-run deployment setup', { timeout: 20_000 }, () => {
     expect(/^DATABASE_URL=/m.test(text)).toBe(false)
     expect(text.includes("SIGNUP='first-user'\n")).toBe(true)
     expect(text.includes("AUTO_MIGRATE='true'\n")).toBe(true)
+    // Copied verbatim from the template: empty, so this install follows the release default.
+    expect(/^SSO_OIDC_ENABLED=$/m.test(text)).toBe(true)
+    expect(/^SSO_SAML_ENABLED/m.test(text)).toBe(false)
     expect(
       text.includes("SMTP_URL='smtps://synthetic:$literal\\'pass@smtp.example.test:465'\n"),
     ).toBe(true)

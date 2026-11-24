@@ -43,14 +43,14 @@ describe.skipIf(!databaseUrl)('native and trusted team SSO enforcement', () => {
   let on: Auth
   const enqueued: { invitationId: string; generation: number }[] = []
 
-  function auth(enabled: boolean) {
+  function auth(enabled: boolean, ssoOperatorSetting?: boolean) {
     return createAuth({
       db,
       pool,
       baseURL: origin,
       secret,
       signup,
-      ssoCapabilities: { ssoOidcEnabled: enabled, ssoSamlEnabled: false },
+      ssoCapabilities: { ssoOidcEnabled: enabled, ssoSamlEnabled: false, ssoOperatorSetting },
       leaveTeamMember: (principal, teamId, expectedOrganizationId, transaction) =>
         leaveTeamMember(
           { db: transaction ?? db, principal, now: () => Temporal.Now.instant() },
@@ -691,6 +691,43 @@ describe.skipIf(!databaseUrl)('native and trusted team SSO enforcement', () => {
     }
     expect((await http(on, f, update)).status).toBe(200)
     expect((await effects(f)).organization).toMatchObject([{ name: 'Updated with live proof' }])
+  })
+
+  it('suspends a live proof while the OIDC setting is off and accepts it again before its deadline', async () => {
+    const f = await fixture()
+    await policy(f)
+    await grantProof(f)
+    const proofs = () =>
+      db
+        .selectFrom('sso_browser_proofs')
+        .select(['id', 'expires_at'])
+        .where('organization_id', '=', f.team)
+        .execute()
+    const before = await proofs()
+    expect(before).toHaveLength(1)
+    const read: Operation = {
+      api: 'getOrganization',
+      path: 'get-organization',
+      query: { organizationId: f.team },
+    }
+    expect((await http(on, f, read)).status).toBe(200)
+    // The operator setting keeps recovery available, but never the suspended proof.
+    const settingOff = auth(false, true)
+    await refused(await http(settingOff, f, read))
+    // Stored enforcement is kept, and the proof is neither revoked nor extended.
+    expect(
+      await db
+        .selectFrom('sso_policies')
+        .select('require_sso')
+        .where('organization_id', '=', f.team)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ require_sso: true })
+    expect(await proofs()).toEqual(before)
+    const accepted = await http(auth(true, true), f, read)
+    expect(accepted.status).toBe(200)
+    expect(await accepted.json()).toMatchObject({ id: f.team })
+    // Proof rows are immutable: the deadline they were issued with still ends them.
+    expect(await proofs()).toEqual(before)
   })
 
   it('enforces the explicit slug target while the session is in its personal space', async () => {

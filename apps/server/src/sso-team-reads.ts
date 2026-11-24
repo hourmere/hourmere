@@ -18,6 +18,8 @@ export interface TeamReadAccess {
   suspended?: true
   /** A machine decision carries only the authorization result. Fetch policy fields on demand. */
   policy: TeamReadPolicy | null | undefined
+  /** Only while every protocol's setting is off: the team has stored SSO state. */
+  stored?: boolean
 }
 export type SsoTeamReadDeps = TeamSsoDeps & { scimResourcesEnabled?: boolean }
 

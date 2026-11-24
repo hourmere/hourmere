@@ -325,6 +325,31 @@ describe.skipIf(!serverUrl)('SSO delegation on the REST API-key path', () => {
     await expectRefused(await me(off, credential.headers))
   })
 
+  it('suspends a delegation while the OIDC setting is off and accepts it again before its deadline', async () => {
+    const credential = await key()
+    await policy()
+    await bind(credential.id)
+    const bindings = () =>
+      db
+        .selectFrom('sso_delegation_bindings')
+        .select(['id', 'expires_at'])
+        .where('organization_id', '=', fixture.team)
+        .execute()
+    const before = await bindings()
+    expect(before).toHaveLength(1)
+    const settingOff = { ...disabled, ssoOperatorSetting: true }
+    const settingOn = { ...enabled, ssoOperatorSetting: true }
+    expect((await me(instance(settingOn), credential.headers)).status).toBe(200)
+    // Suspended, not revoked: enforcement stays, the binding row and its deadline are untouched.
+    await expectRefused(await me(instance(settingOff), credential.headers))
+    expect(await bindings()).toEqual(before)
+    const again = await me(instance(settingOn), credential.headers)
+    expect(again.status).toBe(200)
+    expect(await again.json()).toMatchObject({ organization: { id: fixture.team } })
+    // Binding rows are immutable: the deadline they were issued with still ends them.
+    expect(await bindings()).toEqual(before)
+  })
+
   it('rechecks the persisted key organization when evaluating a stale binding', async () => {
     const { id } = await key()
     await joinOtherTeam()

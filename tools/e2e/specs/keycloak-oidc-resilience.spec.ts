@@ -73,10 +73,10 @@ test('a Keycloak outage blocks new SSO access without admitting a mailbox sessio
   expect(app.tokenExchanges()).toEqual(['issued'])
 })
 
-test.describe('without OIDC injection', () => {
+test.describe('with the OIDC setting off', () => {
   test.use({ oidcEnabled: false })
 
-  test('the seeded team still enforces SSO when sign-in is hard-off', async ({
+  test('the seeded team still enforces SSO when the OIDC setting is off', async ({
     page,
     keycloak: app,
   }) => {

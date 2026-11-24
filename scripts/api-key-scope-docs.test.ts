@@ -178,12 +178,14 @@ describe('published API key scope tables', () => {
   })
 
   it.each(documents)(
-    '$path labels the published SSO reads unavailable outside generated tables',
+    '$path explains the OIDC setting and its off state outside generated tables',
     ({ document }) => {
       const after = document.slice(document.indexOf(SCOPE_TABLE_END) + SCOPE_TABLE_END.length)
-      expect(after).toContain('SSO is being built and is not available yet')
+      expect(after).toContain('off unless the operator sets `SSO_OIDC_ENABLED=true`')
+      expect(after).toContain('SAML is\nbeing built and no setting enables it')
       expect(after).toContain('404 sso_disabled')
-      expect(after).toContain('SSO 正在开发中，尚不可用')
+      expect(after).toContain('除非运营者设置 `SSO_OIDC_ENABLED=true`，否则 OIDC 单点登录保持关闭')
+      expect(after).not.toContain('SSO is being built and is not available yet')
       for (const name of [
         'list_sso_providers',
         'get_sso_policy',
@@ -245,7 +247,11 @@ describe('published API key scope tables', () => {
   it('keeps the public SSO limitation current', () => {
     expect(
       readFileSync(new URL('../apps/site/src/content/docs/docs/index.md', import.meta.url), 'utf8'),
-    ).toContain('Organization OIDC/SAML SSO is being built and is not available yet.')
+    ).toContain('the operator turns it\n  on with `SSO_OIDC_ENABLED=true`')
+    const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8')
+    expect(readme).toContain('Organization OIDC single sign-on is off by default.')
+    expect(readme).toContain('`SSO_OIDC_ENABLED=true`')
+    expect(readme).not.toContain('Organization OIDC/SAML SSO is being built')
   })
 
   it.each(documents)(

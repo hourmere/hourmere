@@ -455,15 +455,18 @@ These routes keep their own authentication; API key scopes do not authorize them
 
 <!-- api-key-scope-table:end -->
 
-SSO is being built and is not available yet. The SSO operations in these tables return
-`404 sso_disabled` until an operator can enable the protocol; OIDC and SAML currently
-remain hard-off in code, so no setting enables them. MCP omits `list_sso_providers`
-and `get_sso_policy` from `tools/list` while off; direct MCP calls and CLI
-`sso providers list` / `sso policy` report `sso_disabled` for otherwise allowed scopes.
+OIDC single sign-on is off unless the operator sets `SSO_OIDC_ENABLED=true`; SAML is
+being built and no setting enables it. While OIDC is off, the SSO operations in these
+tables that add trust (sign-in, linking, provider and domain setup, enabling enforcement,
+delegation binding) return `404 sso_disabled`. The reads `list_sso_providers` and
+`get_sso_policy` (CLI `sso providers list` / `sso policy`), recovery and trust-reducing
+operations stay available to a team's owners and administrators, so stored configuration
+can still be inspected and removed.
 
-SSO 正在开发中，尚不可用。表中的 SSO 操作在运营者能够启用协议之前返回
-`404 sso_disabled`；目前 OIDC 和 SAML 在代码中保持关闭，任何配置均无法启用。
-关闭时 MCP 工具列表不包含上述工具；允许范围内的直接调用和 CLI 命令返回相同错误。
+除非运营者设置 `SSO_OIDC_ENABLED=true`，否则 OIDC 单点登录保持关闭；SAML 仍在开发中，
+没有可启用它的设置。OIDC 关闭时，表中增加信任的 SSO 操作（登录、关联、身份提供方和域名
+配置、开启强制、委托绑定）返回 `404 sso_disabled`；上述两个读取操作、恢复操作和降低信任的
+操作对团队所有者和管理员保持可用，已保存的配置仍可查看和移除。
 
 Booking workflow operations (`GET /api/v1/workflows`, `GET /api/v1/workflows/{id}`,
 `list_workflows`, `get_workflow`, `workflows list` and `workflows get`) are listed before the

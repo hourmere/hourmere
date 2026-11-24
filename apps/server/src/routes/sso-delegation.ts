@@ -4,7 +4,7 @@ import type { MiddlewareHandler } from 'hono'
 import { deleteCookie, getCookie } from 'hono/cookie'
 import type { CallerEnv } from '../caller.ts'
 import { errorResponses, json, type RouteModule } from '../openapi.ts'
-import { requireSsoEnabled } from '../sso.ts'
+import { requireSsoEnabled, requireSsoRetained } from '../sso.ts'
 import {
   BindSsoDelegationInput,
   bindSsoDelegation,
@@ -21,20 +21,25 @@ import { teamManagementSessionCaller } from '../team-management.ts'
 import { FreshProofChallenge } from './sso-drafts.ts'
 
 export function ssoDelegationRoutes(deps: SsoDelegationDeps): RouteModule {
-  const guard: MiddlewareHandler<CallerEnv> = async (c, next) => {
-    c.header('Cache-Control', 'no-store')
-    requireSsoEnabled(deps.capabilities)
-    if (c.req.header('origin') !== new URL(deps.publicUrl).origin)
-      throw new DomainError('forbidden', 'team_management_access_denied')
-    await next()
-  }
+  // Binding adds trust through OIDC; revoking stays available while its setting is off.
+  const guard =
+    (require: () => void): MiddlewareHandler<CallerEnv> =>
+    async (c, next) => {
+      c.header('Cache-Control', 'no-store')
+      require()
+      if (c.req.header('origin') !== new URL(deps.publicUrl).origin)
+        throw new DomainError('forbidden', 'team_management_access_denied')
+      await next()
+    }
   const headers = z.object({
     'X-Expected-Organization-Id': z.string().optional().openapi({
       description: 'Required for writes and must match the current team.',
     }),
   })
   return ({ app, caller }) => {
-    const middleware = [guard, teamManagementSessionCaller(caller)] as const
+    const session = teamManagementSessionCaller(caller)
+    const middleware = [guard(() => requireSsoEnabled(deps.capabilities, 'oidc')), session] as const
+    const revokeMiddleware = [guard(() => requireSsoRetained(deps.capabilities)), session] as const
     app.openapi(
       createRoute({
         method: 'post',
@@ -42,7 +47,8 @@ export function ssoDelegationRoutes(deps: SsoDelegationDeps): RouteModule {
         operationId: BIND_SSO_DELEGATION,
         tags: ['SSO'],
         summary: 'Bind delegated SSO proof to an owned team credential',
-        description: 'Requires fresh SSO step-up in the current team. SSO remains unavailable.',
+        description:
+          'Requires fresh SSO step-up in the current team. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.',
         security: [{ session: [] }],
         middleware: [...middleware] as const,
         request: { headers, body: { required: true, content: json(BindSsoDelegationInput) } },
@@ -86,9 +92,10 @@ export function ssoDelegationRoutes(deps: SsoDelegationDeps): RouteModule {
         operationId: REVOKE_SSO_DELEGATION,
         tags: ['SSO'],
         summary: 'Revoke the caller’s exact SSO delegation',
-        description: 'Requires a current team browser session. SSO remains unavailable.',
+        description:
+          'Requires a current team browser session. Stays available while SSO_OIDC_ENABLED is off.',
         security: [{ session: [] }],
-        middleware: [...middleware] as const,
+        middleware: [...revokeMiddleware] as const,
         request: { headers, params: z.object({ bindingId: z.uuid() }) },
         responses: {
           ...errorResponses({

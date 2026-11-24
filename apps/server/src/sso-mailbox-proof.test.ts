@@ -1087,23 +1087,17 @@ describe.skipIf(!databaseUrl)('SSO mailbox proof', () => {
     }
   })
 
-  it('keeps the production composition off, also with the SSO settings in the environment', async () => {
-    for (const name of ['SSO_OIDC_ENABLED', 'SSO_SAML_ENABLED']) vi.stubEnv(name, 'true')
-    try {
-      const control = await sourceCopy<typeof server>('./server.ts')
-      await expectProductionOff(control)
-      for (const name of ['ssoOidcEnabled', 'ssoSamlEnabled']) {
-        const mutant = await sourceCopy<typeof server>('./server.ts', [
-          `const ${name} = false`,
-          `const ${name} = true`,
-        ])
-        await expect(expectProductionOff(mutant)).rejects.toMatchObject({
-          name: 'AssertionError',
-        })
-      }
-    } finally {
-      vi.unstubAllEnvs()
-    }
+  it('keeps mailbox proof reachable in the production composition while the setting is off', async () => {
+    const control = await sourceCopy<typeof server>('./server.ts')
+    await expectProductionAvailable(control)
+    // Without the operator setting marker the composition would be hard-off again.
+    const mutant = await sourceCopy<typeof server>('./server.ts', [
+      'ssoOperatorSetting: true }',
+      'ssoOperatorSetting: false }',
+    ])
+    await expect(expectProductionAvailable(mutant)).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
   })
 
   describe('source-copy mutations: each protection fails a real assertion when broken', () => {
@@ -1112,7 +1106,7 @@ describe.skipIf(!databaseUrl)('SSO mailbox proof', () => {
         'offEndpoints',
         'endpoint guard',
         [
-          "if (!scimMappingConsentEnabled) requireSsoEnabled(deps.capabilities)\n        c.header('Cache-Control', 'no-store')",
+          "if (!scimMappingConsentEnabled) requireSsoRetained(deps.capabilities)\n        c.header('Cache-Control', 'no-store')",
           "c.header('Cache-Control', 'no-store')",
         ],
       ],
@@ -1235,7 +1229,7 @@ describe.skipIf(!databaseUrl)('SSO mailbox proof', () => {
 })
 
 /** The app startServer assembles answers 404 sso_disabled on both endpoints, before anything. */
-async function expectProductionOff(module: typeof server) {
+async function expectProductionAvailable(module: typeof server) {
   const refusing = createDb(createPool('postgres://mailbox-proof@127.0.0.1:9/production'))
   const unavailable = async (): Promise<never> => {
     throw new Error('unavailable')
@@ -1246,6 +1240,9 @@ async function expectProductionOff(module: typeof server) {
       DATABASE_URL: 'postgres://mailbox-proof@127.0.0.1:9/production',
       BETTER_AUTH_SECRET: SECRET,
       PUBLIC_URL: PUBLIC_URL,
+      // Unset, empty and false are the same setting-off state; SAML is not a setting.
+      SSO_OIDC_ENABLED: '',
+      SSO_SAML_ENABLED: 'true',
     })
     const app = nativeCreateApp(
       module.productionAppOptions({
@@ -1270,14 +1267,18 @@ async function expectProductionOff(module: typeof server) {
       }),
     )
     for (const path of [real.MAILBOX_PROOF_SEND_PATH, real.MAILBOX_PROOF_CONSUME_PATH])
-      for (const headers of [{}, { origin: PUBLIC_URL, 'content-type': 'application/json' }]) {
+      for (const [headers, status, error] of [
+        // The endpoint's own checks answer: exact Origin first, then the input.
+        [{}, 403, 'forbidden'],
+        [{ origin: PUBLIC_URL, 'content-type': 'application/json' }, 400, 'invalid_request'],
+      ] as const) {
         const response = await app.request(path, {
           method: 'POST',
           headers,
-          body: JSON.stringify({ attemptId: '0190f2c4-0000-7000-8000-000000000001', token: 't' }),
+          body: JSON.stringify({ attemptId: 'not-an-attempt', token: 't' }),
         })
-        expect(response.status).toBe(404)
-        expect(await response.json()).toEqual({ error: 'sso_disabled' })
+        expect(response.status).toBe(status)
+        expect(await response.json()).toEqual({ error })
       }
   } finally {
     await refusing.destroy()

@@ -105,6 +105,79 @@ describe('SSO setup while hard-off', () => {
   )
 })
 
+describe('SSO setup while the setting is off for a team with stored SSO state', () => {
+  it('keeps the read and trust-reducing controls and offers nothing that adds trust', async () => {
+    // Off, the server still sends the summary because this team has stored SSO state.
+    const stored: Schemas['Me'] = {
+      ...TEAM,
+      sso: { requireSso: true, providers: [], attempts: [], links: [], proofs: [] },
+    }
+    const domain = {
+      id: '00000000-0000-7000-8000-000000000011',
+      name: 'login.example.com',
+      generation: 2,
+      status: 'verified',
+    }
+    const provider = {
+      id: '00000000-0000-7000-8000-000000000012',
+      protocol: 'oidc',
+      revision: 3,
+      enabled: true,
+      displayName: 'Example identity',
+      issuer: 'https://identity.example.com',
+      clientId: 'hourmere-web',
+      validationStatus: 'unknown',
+      testStatus: 'passed',
+      createdAt: '2026-10-01T00:00:00Z',
+      domains: [domain],
+    }
+    const api = fakeApi({
+      ...signedInAs(stored),
+      ...emptyTeamLists,
+      'GET /api/v1/instance': () => json(200, { ssoOidcEnabled: false, ssoSamlEnabled: false }),
+      [INVENTORY]: () => json(200, { data: [provider], nextCursor: null }),
+      [POLICY]: () =>
+        json(200, {
+          admission: 'invitation_only',
+          policyRevision: 2,
+          requireSso: true,
+          trustGeneration: 1,
+        } satisfies Schemas['SsoPolicy']),
+    })
+    renderApp(PATHS.settings)
+    const region = await screen.findByRole('region', { name: 'Single sign-on' })
+    await userEvent.click(within(region).getByRole('link', { name: 'Identity providers' }))
+    await screen.findByRole('heading', { name: 'Single sign-on', level: 1 })
+    await screen.findByText(/Single sign-on is turned off on this instance\./)
+    await screen.findByRole('heading', { name: 'Example identity' })
+    expect(screen.getByRole('button', { name: 'Retire provider Example identity' })).toBeDefined()
+    for (const name of [
+      'Add provider',
+      'Edit Example identity',
+      'Test provider Example identity',
+      'Enable provider Example identity',
+      'Require SSO',
+      'Save admission policy',
+    ])
+      expect(screen.queryByRole('button', { name }), name).toBeNull()
+
+    await userEvent.click(screen.getByRole('link', { name: 'SSO domains' }))
+    await screen.findByRole('heading', { name: 'login.example.com' })
+    expect(screen.getByRole('button', { name: 'Retire domain login.example.com' })).toBeDefined()
+    for (const name of [
+      'Generate DNS challenge',
+      'Verify domain login.example.com',
+      'Rotate challenge for login.example.com',
+    ])
+      expect(screen.queryByRole('button', { name }), name).toBeNull()
+    // Only the two reads were made: nothing that adds trust is even attempted.
+    expect(api.calls.filter(({ path }) => ssoPath.test(path)).map(({ method }) => method)).toEqual(
+      expect.arrayContaining(['GET']),
+    )
+    expect(api.calls.filter(({ method }) => method !== 'GET')).toEqual([])
+  })
+})
+
 describe('SSO setup in an enabled test instance', () => {
   it('offers setup from Settings without loading an inventory until the link is opened', async () => {
     const api = fakeApi({

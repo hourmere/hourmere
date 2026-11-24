@@ -38,14 +38,25 @@ const saveError = 'Could not change SSO delegation. Try again.'
 export function SsoDelegation(props: Props) {
   const me = useMe()
   const shell = useOutletContext<AppShellContext | null>()
+  // With the setting off, binding is refused: only an existing delegation can be revoked.
+  const stored = shell?.ssoOidcEnabled !== true && shell?.ssoStored === true
+  const credentials = stored
+    ? props.credentials.filter(({ ssoDelegation }) => ssoDelegation !== undefined)
+    : props.credentials
   if (
-    shell?.ssoOidcEnabled !== true ||
+    (shell?.ssoOidcEnabled !== true && !stored) ||
     me.organization.personal ||
     me.principal.kind !== 'session' ||
-    props.credentials.length === 0
+    credentials.length === 0
   )
     return null
-  return <DelegationForm key={`${me.user.id}:${me.organization.id}`} {...props} />
+  return (
+    <DelegationForm
+      key={`${me.user.id}:${me.organization.id}`}
+      {...props}
+      credentials={credentials}
+    />
+  )
 }
 
 function DelegationForm({ kind, credentials, reload }: Props) {
