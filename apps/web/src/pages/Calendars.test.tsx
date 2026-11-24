@@ -1271,9 +1271,13 @@ describe('the calendars page', () => {
     expect(requests.to('POST /api/v1/calendar-connections/google/authorize')).toHaveLength(0)
   })
 
-  it.each(['calendar_removed', 'permissions_missing'] as const)(
+  it.each([
+    ['calendar_removed', 'This calendar is no longer available.'],
+    ['permissions_missing', 'Reconnect Microsoft Calendar and allow the requested permissions.'],
+    ['event_conflict', 'Microsoft reported a conflict with the booking copy.'],
+  ] as const)(
     'selects an owned Microsoft booking calendar and shows a %s copy failure',
-    async (reason) => {
+    async (reason, message) => {
       const user = userEvent.setup()
       const calendar = connection.calendars[0] as Schemas['CalendarConnection']['calendars'][number]
       let destinationCalendarId: string | null = null
@@ -1330,17 +1334,13 @@ describe('the calendars page', () => {
       await user.click(await screen.findByRole('button', { name: 'Write new bookings here' }))
       if (reason === 'calendar_removed') {
         expect(await screen.findByText('Selected for new bookings — unavailable')).toBeDefined()
-      } else {
+      } else if (reason === 'permissions_missing') {
         expect(
           await screen.findByRole('link', { name: 'Reconnect Microsoft Calendar' }),
         ).toBeDefined()
         expect(screen.getByText('No calendars selected for conflict checks.')).toBeDefined()
       }
-      expect(screen.getByText(/A booking copy needs attention/).textContent).toContain(
-        reason === 'calendar_removed'
-          ? 'This calendar is no longer available.'
-          : 'Reconnect Microsoft Calendar and allow the requested permissions.',
-      )
+      expect(screen.getByText(/A booking copy needs attention/).textContent).toContain(message)
       await user.click(screen.getByRole('button', { name: 'Stop writing bookings here' }))
       expect(await screen.findByRole('button', { name: 'Write new bookings here' })).toBeDefined()
       expect(screen.getAllByText('Not a booking destination')).toHaveLength(2)

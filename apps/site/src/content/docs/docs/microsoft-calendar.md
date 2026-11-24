@@ -4,7 +4,7 @@ description: Register an Entra application and connect Outlook calendars indepen
 ---
 
 Connect an Outlook account and choose which calendars Hourmere checks for busy time when
-offering bookings. You can also choose where to create private calendar copies of new bookings.
+offering bookings. You can also choose a calendar for private copies of your bookings.
 
 ## Microsoft Graph status
 
@@ -46,15 +46,26 @@ offering bookings. You can also choose where to create private calendar copies o
   appointment in the viewer's time zone. [Graph event creation](https://learn.microsoft.com/en-us/graph/api/calendar-post-events?view=graph-rest-1.0)
 - Each booking copy uses a stable Graph `transactionId`. If Graph may have accepted a create,
   such as when its response is lost, Hourmere looks up the original copy using its booking marker.
-  After a short delay, an empty lookup lets Hourmere send the create again with the same identifier
-  and marker. A successful write stores the Graph event ID. Temporary failures use bounded retries
-  and honor Graph's `Retry-After`. If the Calendars page still shows an unknown result, reconnecting
-  the original account restarts retries for upcoming bookings. Self-hosted operators can also
-  redispatch a booking or connection with `scripts/redispatch-calendar-writeback.ts`.
+  If the booking is still active, an empty lookup after a short delay lets Hourmere retry creation
+  using the same identifier and marker. If the booking was cancelled, Hourmere looks for the
+  original copy to remove it. A successful create stores the Graph event ID.
   [Graph event lookup by extended property](https://learn.microsoft.com/en-us/graph/api/singlevaluelegacyextendedproperty-get?view=graph-rest-1.0)
-- Updating or removing a Microsoft calendar copy after a reschedule or cancellation remains
-  future work. The Outlook copy may still show the original time after the booking changes.
-  Bookings with automatic Google Meet or Zoom keep their existing conference calendar flow.
+- Rescheduling updates the existing event by its stored ID, sending the new start and end in UTC.
+  Hourmere uses the event's version (ETag) to detect conflicting edits. If a reschedule cannot
+  safely update the original copy, the Calendars page shows a conflict for that calendar.
+  [Graph event update](https://learn.microsoft.com/en-us/graph/api/event-update?view=graph-rest-1.0)
+- Cancellation removes the copy from Outlook. If an event has moved, Hourmere looks for the
+  booking marker and can remove a matching copy from another calendar the connected account owns.
+  A copy that is already absent satisfies the cancellation. If Hourmere cannot verify where
+  a copy went, or if the copy now has Outlook attendees, the Calendars page shows a conflict
+  so the owner can check it in Outlook. [Graph event deletion](https://learn.microsoft.com/en-us/graph/api/event-delete?view=graph-rest-1.0)
+- Temporary write failures use bounded retries and honor Graph's `Retry-After`. The Calendars
+  page shows problems such as revoked consent, missing write permission, calendar removal or an
+  outcome Hourmere could not confirm. Reconnecting the original account can restart eligible
+  writes. Self-hosted operators can also redispatch a booking or connection with
+  `scripts/redispatch-calendar-writeback.ts`.
+  [Graph error responses](https://learn.microsoft.com/en-us/graph/errors)
+- Bookings with automatic Google Meet or Zoom keep their existing conference calendar flow.
 
 ## Prepare a test calendar
 
@@ -117,10 +128,20 @@ calendar. Use **Refresh calendar list** to update ownership information on an ex
 connection.
 
 Hourmere saves the chosen destination when each booking is made. A change to your default
-calendar applies to new bookings. If Microsoft removes a selected calendar or denies write
-access, the Calendars page shows a problem for that destination and the booking stays confirmed.
-Use **Refresh calendar list** to check whether the calendar has returned, or select another
-calendar for future bookings. If permission was revoked, reconnect the original account.
+calendar applies to new bookings. When you reschedule in Hourmere, the existing Outlook copy
+moves to the new time. When you cancel in Hourmere, its copy is removed. Each group occurrence
+has one copy, which is removed when its last active seat is cancelled. Each occurrence of a
+recurring booking uses a separate Outlook appointment.
+
+Manage the booking in Hourmere to change its time or cancel it. Changes you make directly in
+Outlook affect only the Outlook copy. If a copy needs attention after you edit, move or delete it
+in Outlook, check the event and its calendar in Outlook. The booking still reflects the change
+you made in Hourmere.
+
+If Microsoft removes a calendar or denies write access, check the affected destination on the
+**Calendars** page. Use **Refresh calendar list** to check whether the calendar has returned, or
+select another calendar for future bookings. If permission was revoked, reconnect the original
+account.
 
 Your own `full` API key can select the destination through `PUT /api/v1/calendar-destination`.
 `GET /api/v1/calendar-connections` and MCP `list_calendar_connections` report write consent and

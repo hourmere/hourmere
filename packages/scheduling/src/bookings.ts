@@ -12,7 +12,7 @@ import {
 } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import { recordTeamWriteOrganizationLock, teamWriteTransaction } from '@hourmere/db/team-write'
-import { sql, type Transaction } from 'kysely'
+import { type Expression, sql, type Transaction } from 'kysely'
 import { parsePhoneNumberFromString } from 'libphonenumber-js/max'
 import { z } from 'zod'
 import {
@@ -365,11 +365,11 @@ async function latestInChain(db: Db, id: string): Promise<string> {
 }
 
 /** A scalar subquery, so callers can read the current booking in the same snapshot. */
-export function latestBookingId(id: string, organizationId?: string) {
+export function latestBookingId(id: string | Expression<string>, organizationId?: string) {
   return sql<string>`(SELECT id FROM ${latestBookingInChain(id, organizationId)} AS latest)`
 }
 
-export function latestBookingInChain(id: string, organizationId?: string) {
+export function latestBookingInChain(id: string | Expression<string>, organizationId?: string) {
   const scope =
     organizationId === undefined ? sql`` : sql`WHERE b.organization_id = ${organizationId}`
   return sql<{ id: string; depth: number }>`(

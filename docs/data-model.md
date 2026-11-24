@@ -46,10 +46,12 @@ acknowledged strong ETag (null after deletion). Group copies use
 bounded result and root identity separately from busy sync; successful busy reads retain
 write failures. No new schema is required. See [CalDAV](caldav.md).
 
-Microsoft Graph uses the same pinned target and provider event mappings for booking creation.
-`booking_calendar_targets.microsoft_writeback` and `group_slots.microsoft_writeback` retain the
-finite create or lookup state. The worker commits a checkpoint before calling Graph and stores the
-provider event ID with the successful status. The ID uses the same format as the busy snapshot.
+Microsoft Graph uses the same pinned targets and provider event mappings for booking writeback.
+`booking_calendar_targets.microsoft_writeback` and `group_slots.microsoft_writeback` track bounded
+attempts to bring the Outlook copy into line with the current booking or group occurrence. The
+worker commits a checkpoint before calling Graph and uses the stable booking marker to recover an
+ambiguous create. Acknowledged writes retain the provider event ID and any ETag Graph supplies.
+The ID uses the same format as the busy snapshot.
 See [Microsoft Calendar](https://hourmere.com/docs/microsoft-calendar).
 
 `calendar_busy` stores each event ID with exactly one representation: a nonempty

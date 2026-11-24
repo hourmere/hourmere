@@ -1,8 +1,14 @@
 import type { Principal } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
-import { createPublicBooking } from '@hourmere/scheduling'
+import {
+  cancelManagedBooking,
+  createPublicBooking,
+  type PublicContext,
+  rescheduleManagedBooking,
+} from '@hourmere/scheduling'
 import { createFixtures } from '@hourmere/scheduling/testing'
+import { sql } from 'kysely'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { calendarBookingNotifier, redispatchBookingCalendar } from './booking-events.ts'
 import { calendarEncryptionKey, encryptCredential } from './credentials.ts'
@@ -24,20 +30,36 @@ import { TEST_CALENDAR_KEY } from './testing.ts'
 
 const NOW = Temporal.Instant.from('2030-03-04T08:00:00Z')
 const START = Temporal.Instant.from('2030-03-06T10:00:00Z')
+const NEXT = Temporal.Instant.from('2030-03-07T11:00:00Z')
 const etag = 'W/"DwAAABYAAAC3I5RWx7luSYmfvk6V4H3sAADTeGJB"'
+const updatedEtag = 'W/"DwAAABYAAAC3I5RWx7luSYmfvk6V4H3sAADTeGJC"'
 const eventId = 'AAMkAGViNDU7zAAAAAGtlAAAMh8kAAA='
 const scope = 'Calendars.ReadWrite'
 const invitee = { name: 'Private Invitee', email: 'invitee@example.test', timeZone: 'UTC' }
 const signal = () => new AbortController().signal
 
-type GraphEvent = {
+type GraphTime = { dateTime: string; timeZone: 'UTC' }
+type EventTimes = {
+  start: GraphTime
+  end: GraphTime
+  body?: { contentType: 'text'; content: string }
+}
+type GraphEvent = EventTimes & {
   id: string
   '@odata.etag': string
   transactionId: string
   type: 'singleInstance'
   isCancelled: false
+  attendees: { emailAddress: { address: string }; type: 'required' }[]
 }
-type Call = { calendar: string; method: 'GET' | 'POST'; transactionId: string; body?: unknown }
+type Call = {
+  calendar: string
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE'
+  transactionId?: string
+  id?: string
+  ifMatch?: string | null
+  body?: unknown
+}
 
 function graphError(status: number, code: string, headers?: Record<string, string>) {
   return Response.json(
@@ -64,10 +86,14 @@ function graph(now: () => number) {
   const calls: Call[] = []
   const events = new Map<string, GraphEvent>()
   const controls: {
-    beforeLookup?: () => Response | undefined | Promise<Response | undefined>
+    beforeLookup?: (calendar: string) => Response | undefined | Promise<Response | undefined>
     beforeCreate?: () => Response | undefined
     afterCreate?: () => Promise<Response | undefined>
-    reconnect?: { account: string; calendars: string[] }
+    beforeRead?: () => Response | undefined
+    beforePatch?: () => Response | undefined
+    beforeDelete?: () => Response | undefined
+    afterPatch?: () => Response | undefined
+    reconnect?: { account: string; calendars: string[]; sharedCalendars?: string[] }
   } = {}
   const client = createMicrosoftCalendarClient(
     { clientId: 'fake-client', clientSecret: 'fake-secret', publicUrl: 'https://hourmere.test' },
@@ -78,24 +104,56 @@ function graph(now: () => number) {
         init?.method === 'POST'
       )
         return token()
-      if (controls.reconnect && url.origin === 'https://graph.microsoft.com') {
-        if (url.pathname === '/oidc/userinfo')
+      if (url.origin === 'https://graph.microsoft.com') {
+        if (controls.reconnect && url.pathname === '/oidc/userinfo')
           return Response.json({ sub: controls.reconnect.account })
         if (url.pathname === '/v1.0/me/calendars')
           return Response.json({
-            value: controls.reconnect.calendars.map((id) => ({
+            value: (controls.reconnect?.calendars ?? ['outlook-selected']).map((id) => ({
               id,
               name: id,
               canEdit: true,
-              canShare: true,
+              canShare: !controls.reconnect?.sharedCalendars?.includes(id),
               canViewPrivateItems: true,
             })),
           })
       }
-      const segment = /^\/v1\.0\/me\/calendars\/([^/]+)\/events$/u.exec(url.pathname)?.[1]
+      const [, segment, eventSegment] =
+        /^\/v1\.0\/me\/calendars\/([^/]+)\/events(?:\/([^/]+))?$/u.exec(url.pathname) ?? []
       if (url.origin !== 'https://graph.microsoft.com' || !segment)
         throw new Error('Unexpected synthetic Graph endpoint')
       const calendar = decodeURIComponent(segment)
+      if (eventSegment) {
+        const id = decodeURIComponent(eventSegment)
+        const saved = [...events].find(
+          ([key, value]) =>
+            value.id === id && key === JSON.stringify([calendar, value.transactionId]),
+        )
+        const [key, event] = saved ?? []
+        const method = init?.method ?? 'GET'
+        if (method !== 'GET' && method !== 'PATCH' && method !== 'DELETE')
+          throw new Error('Unexpected synthetic Graph event method')
+        const ifMatch = new Headers(init?.headers).get('If-Match')
+        const body = init?.body ? (JSON.parse(String(init.body)) as EventTimes) : undefined
+        calls.push({ calendar, method, id, transactionId: event?.transactionId, ifMatch, body })
+        const failure =
+          method === 'PATCH'
+            ? controls.beforePatch?.()
+            : method === 'DELETE'
+              ? controls.beforeDelete?.()
+              : controls.beforeRead?.()
+        if (failure) return failure
+        if (!key || !event) return graphError(404, 'ErrorItemNotFound')
+        if (method === 'GET') return Response.json(event)
+        if (ifMatch !== event['@odata.etag']) return graphError(412, 'ErrorIrresolvableConflict')
+        if (method === 'DELETE') {
+          events.delete(key)
+          return new Response(null, { status: 204 })
+        }
+        const updated = { ...event, ...body, '@odata.etag': updatedEtag }
+        events.set(key, updated)
+        return controls.afterPatch?.() ?? Response.json(updated)
+      }
       if (init?.method === 'POST') {
         const body = JSON.parse(String(init.body))
         const transactionId = String(body.transactionId)
@@ -105,11 +163,15 @@ function graph(now: () => number) {
         const key = JSON.stringify([calendar, transactionId])
         if (events.has(key)) return graphError(409, 'ErrorDuplicateTransactionId')
         const event: GraphEvent = {
-          id: eventId,
+          id: events.size ? `outlook-${transactionId}` : eventId,
           '@odata.etag': etag,
           transactionId,
           type: 'singleInstance',
           isCancelled: false,
+          attendees: [],
+          start: body.start,
+          end: body.end,
+          ...(body.body && { body: body.body }),
         }
         events.set(key, event)
         return (
@@ -122,7 +184,7 @@ function graph(now: () => number) {
       )?.[1]
       if (!transactionId) throw new Error('Missing synthetic Graph recovery filter')
       calls.push({ calendar, method: 'GET', transactionId })
-      const failure = await controls.beforeLookup?.()
+      const failure = await controls.beforeLookup?.(calendar)
       if (failure) return failure
       const event = events.get(JSON.stringify([calendar, transactionId]))
       return Response.json({ value: event ? [event] : [] })
@@ -137,6 +199,11 @@ function graph(now: () => number) {
     events,
     posts: () => calls.filter((c) => c.method === 'POST'),
   }
+}
+
+function requireToken(token: string | null | undefined) {
+  if (!token) throw new Error('Expected a booking management token')
+  return token
 }
 
 describe.skipIf(!process.env.DATABASE_URL)(
@@ -228,7 +295,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       })
     })
 
-    async function book(person = invitee, idempotencyKey?: string) {
+    function context(): PublicContext {
       const notify = calendarBookingNotifier(
         {
           async enqueue(name, payload, options) {
@@ -240,31 +307,38 @@ describe.skipIf(!process.env.DATABASE_URL)(
         },
         { google: false, now: () => now },
       )
-      const result = await createPublicBooking(
-        {
-          db,
-          now: () => Temporal.Instant.fromEpochMilliseconds(now),
-          notify: (trx, event) =>
-            event.type === 'created' ? notify(trx, event) : Promise.resolve(),
+      return {
+        db,
+        now: () => Temporal.Instant.fromEpochMilliseconds(now),
+        notify: async (trx, event) => {
+          if (!('requestId' in event)) await notify(trx, event)
         },
-        {
-          handle: host.handle,
-          slug: 'outlook-booking',
-          start: START,
-          invitee: person,
-          idempotencyKey,
-        },
-      )
-      return result.booking.id
+      }
     }
 
-    async function bookGroup() {
-      await db
+    function create(person = invitee, idempotencyKey?: string, start = START) {
+      return createPublicBooking(context(), {
+        handle: host.handle,
+        slug: 'outlook-booking',
+        start,
+        invitee: person,
+        idempotencyKey,
+      })
+    }
+
+    async function book(person = invitee, idempotencyKey?: string) {
+      return (await create(person, idempotencyKey)).booking.id
+    }
+
+    function setGroupType() {
+      return db
         .updateTable('event_types')
         .set({ booking_mode: 'group', group_capacity: 3 })
         .where('id', '=', eventTypeId)
         .execute()
-      const bookingId = await book()
+    }
+
+    async function slotFor(bookingId: string) {
       const slot = await db
         .selectFrom('bookings')
         .select('group_slot_id')
@@ -272,6 +346,11 @@ describe.skipIf(!process.env.DATABASE_URL)(
         .executeTakeFirstOrThrow()
       if (!slot.group_slot_id) throw new Error('Expected a group occurrence')
       return slot.group_slot_id
+    }
+
+    async function bookGroup() {
+      await setGroupType()
+      return slotFor(await book())
     }
 
     async function hostSession(): Promise<Principal> {
@@ -318,6 +397,13 @@ describe.skipIf(!process.env.DATABASE_URL)(
         .select(['calendar_id', 'external_event_id', 'etag'])
         .where('booking_id', '=', bookingId)
         .execute()
+    const busy = () =>
+      db
+        .selectFrom('calendar_busy')
+        .select(sql<Date>`lower(period)`.as('start'))
+        .where('calendar_id', '=', selected)
+        .where('external_event_id', '=', eventId)
+        .execute()
     const work = (payload: CalendarWritePayload) =>
       bookingCalendarJob(deps).handler(payload, {
         id: 'synthetic-job',
@@ -329,6 +415,460 @@ describe.skipIf(!process.env.DATABASE_URL)(
         {},
         { id: 'synthetic-dispatch-job', signal: signal(), attempt: 1 },
       )
+    const patches = () => provider.calls.filter((call) => call.method === 'PATCH')
+    const deletes = () => provider.calls.filter((call) => call.method === 'DELETE')
+    async function settleCancellationConflict(bookingId: string) {
+      expect(await state(bookingId)).toMatchObject({
+        status: 'retrying',
+        reason: 'event_conflict',
+        attempts: 1,
+      })
+      for (let attempt = 1; attempt < 6; attempt++) {
+        now += 15 * 60_000
+        await work({ bookingId })
+      }
+      expect(await state(bookingId)).toMatchObject({
+        status: 'failed',
+        reason: 'event_conflict',
+        attempts: 6,
+      })
+    }
+
+    it('updates the pinned copy once through concurrent successor jobs and deletes it on cancellation', async () => {
+      // The same Los Angeles wall time becomes an hour earlier in UTC after the DST change.
+      await db
+        .updateTable('schedules')
+        .set({ time_zone: 'America/Los_Angeles' })
+        .where('user_id', '=', host.userId)
+        .execute()
+      const beforeDst = Temporal.ZonedDateTime.from('2030-03-08T09:00-08:00[America/Los_Angeles]')
+      const afterDst = beforeDst.add({ days: 3 })
+      const created = await create(invitee, undefined, beforeDst.toInstant())
+      const bookingId = created.booking.id
+      await work({ bookingId })
+      expect(provider.posts()[0]?.body).toMatchObject({
+        start: { dateTime: '2030-03-08T17:00:00.000', timeZone: 'UTC' },
+      })
+
+      await db
+        .updateTable('calendars')
+        .set({
+          sync_state: JSON.stringify({ microsoftPending: { position: 1 } }),
+        })
+        .where('id', '=', selected)
+        .execute()
+      await db
+        .insertInto('calendar_microsoft_changes')
+        .values({
+          calendar_id: selected,
+          position: 0,
+          external_event_id: eventId,
+          removes_series: false,
+          is_exception: false,
+        })
+        .execute()
+      await select(await calendar(connectionId, 'outlook-replacement'))
+      const moved = await rescheduleManagedBooking(context(), requireToken(created.manageToken), {
+        start: afterDst.toInstant(),
+      })
+      expect(moved.booking.id).not.toBe(bookingId)
+      expect(queued).toEqual([{ bookingId }, { bookingId }])
+      await Promise.all([work({ bookingId }), work({ bookingId: moved.booking.id })])
+      await work({ bookingId })
+      expect(provider.posts()).toHaveLength(1)
+      expect(patches()).toEqual([
+        expect.objectContaining({
+          calendar: 'outlook-selected',
+          id: eventId,
+          ifMatch: etag,
+          body: {
+            start: { dateTime: '2030-03-11T16:00:00.000', timeZone: 'UTC' },
+            end: { dateTime: '2030-03-11T16:30:00.000', timeZone: 'UTC' },
+          },
+        }),
+      ])
+      expect(provider.events.size).toBe(1)
+      expect(await mappings(bookingId)).toEqual([])
+      expect(await mappings(moved.booking.id)).toEqual([
+        { calendar_id: selected, external_event_id: eventId, etag: updatedEtag },
+      ])
+      expect(await busy()).toEqual([{ start: new Date(afterDst.epochMilliseconds) }])
+      expect(
+        await db
+          .selectFrom('calendar_microsoft_changes')
+          .select('position')
+          .where('calendar_id', '=', selected)
+          .execute(),
+      ).toEqual([])
+      expect(
+        await db
+          .selectFrom('calendars')
+          .select('sync_state')
+          .where('id', '=', selected)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({ sync_state: {} })
+
+      await cancelManagedBooking(context(), requireToken(moved.manageToken))
+      expect(queued).toEqual([{ bookingId }, { bookingId }, { bookingId }])
+      await Promise.all([work({ bookingId }), work({ bookingId: moved.booking.id })])
+      await work({ bookingId })
+      expect(deletes()).toEqual([
+        expect.objectContaining({
+          calendar: 'outlook-selected',
+          id: eventId,
+          ifMatch: updatedEtag,
+        }),
+      ])
+      expect(provider.events.size).toBe(0)
+      expect(await mappings(moved.booking.id)).toEqual([])
+      expect(await busy()).toEqual([])
+      expect(await state(bookingId)).toMatchObject({ status: 'succeeded' })
+    })
+
+    it.each([false, true])(
+      'removes a copy cancelled before the in-flight create finishes (lost response: %s)',
+      async (lostResponse) => {
+        const created = await create()
+        const bookingId = created.booking.id
+        const sent = Promise.withResolvers<void>()
+        const release = Promise.withResolvers<void>()
+        provider.controls.afterCreate = async () => {
+          sent.resolve()
+          await release.promise
+          return lostResponse ? graphError(503, 'ServiceUnavailable') : undefined
+        }
+        const writing = work({ bookingId })
+        try {
+          await Promise.race([sent.promise, writing])
+          expect(provider.events.size).toBe(1)
+          await cancelManagedBooking(context(), requireToken(created.manageToken))
+          expect(queued).toEqual([{ bookingId }, { bookingId }])
+        } finally {
+          release.resolve()
+          await writing
+        }
+        if (lostResponse) now += 30_000
+        await Promise.all([work({ bookingId }), work({ bookingId })])
+        expect(provider.posts()).toHaveLength(1)
+        expect(deletes()).toHaveLength(1)
+        expect(provider.events.size).toBe(0)
+        expect(await mappings(bookingId)).toEqual([])
+        expect(await state(bookingId)).toMatchObject({ status: 'succeeded' })
+      },
+    )
+
+    it('reconciles a successor committed during an ambiguous Outlook create to its final time', async () => {
+      const created = await create()
+      const bookingId = created.booking.id
+      let successor: string | undefined
+      provider.controls.afterCreate = async () => {
+        const moved = await rescheduleManagedBooking(context(), requireToken(created.manageToken), {
+          start: NEXT,
+        })
+        successor = moved.booking.id
+        return graphError(503, 'ServiceUnavailable')
+      }
+      await work({ bookingId })
+      expect(queued).toEqual([{ bookingId }, { bookingId }])
+      if (!successor) throw new Error('Expected a successor to the in-flight booking')
+      expect(await state(bookingId)).toMatchObject({ status: 'retrying', lookupOnly: true })
+
+      now += 30_000
+      await Promise.all([work({ bookingId: successor }), work({ bookingId })])
+      expect(provider.posts()).toHaveLength(1)
+      expect(patches()).toHaveLength(1)
+      expect([...provider.events.values()]).toMatchObject([
+        {
+          id: eventId,
+          start: { dateTime: '2030-03-07T11:00:00.000', timeZone: 'UTC' },
+          end: { dateTime: '2030-03-07T11:30:00.000', timeZone: 'UTC' },
+        },
+      ])
+      expect(await mappings(bookingId)).toEqual([])
+      expect(await mappings(successor)).toMatchObject([{ external_event_id: eventId }])
+    })
+
+    it.each(['edited', 'deleted', 'turned into a meeting'])(
+      'surfaces an Outlook change (%s) as a reschedule conflict and reconciles cancellation',
+      async (change) => {
+        const created = await create()
+        const bookingId = created.booking.id
+        await work({ bookingId })
+        const original = [...provider.events][0]
+        if (!original) throw new Error('Expected the first Graph copy')
+        const [key, event] = original
+        if (change === 'deleted') provider.events.delete(key)
+        else
+          provider.events.set(key, {
+            ...event,
+            '@odata.etag': updatedEtag,
+            start: { dateTime: '2030-03-06T12:00:00.000', timeZone: 'UTC' },
+            ...(change === 'turned into a meeting' && {
+              attendees: [
+                { emailAddress: { address: 'outlook-guest@example.test' }, type: 'required' },
+              ],
+            }),
+          })
+        provider.controls.reconnect = {
+          account: `graph-account-${host.userId}`,
+          calendars: ['outlook-selected'],
+        }
+        const moved = await rescheduleManagedBooking(context(), requireToken(created.manageToken), {
+          start: NEXT,
+        })
+        await work({ bookingId })
+        expect(await state(bookingId)).toMatchObject({ reason: 'event_conflict' })
+        expect(await mappings(bookingId)).toMatchObject([{ external_event_id: eventId, etag }])
+        expect(await mappings(moved.booking.id)).toEqual([])
+        expect(provider.posts()).toHaveLength(1)
+
+        await cancelManagedBooking(context(), requireToken(moved.manageToken))
+        await work({ bookingId })
+        if (change === 'turned into a meeting') {
+          await settleCancellationConflict(bookingId)
+          expect(deletes().some((call) => call.ifMatch === updatedEtag)).toBe(false)
+          expect(provider.events.size).toBe(1)
+        } else {
+          expect(await state(bookingId)).toMatchObject({ status: 'succeeded' })
+          expect(provider.events.size).toBe(0)
+          expect(await mappings(bookingId)).toEqual([])
+        }
+      },
+    )
+
+    it('defers a throttled reschedule and accepts a lost PATCH response without repeating the update', async () => {
+      const created = await create()
+      const bookingId = created.booking.id
+      await work({ bookingId })
+      const moved = await rescheduleManagedBooking(context(), requireToken(created.manageToken), {
+        start: NEXT,
+      })
+      provider.controls.beforePatch = () =>
+        graphError(429, 'TooManyRequests', { 'Retry-After': '120' })
+      await work({ bookingId })
+      expect(await state(bookingId)).toMatchObject({
+        status: 'retrying',
+        reason: 'rate_limited',
+        nextAttemptAt: new Date(now + 120_000).toISOString(),
+      })
+      provider.controls.beforePatch = undefined
+      provider.controls.afterPatch = () => graphError(503, 'ServiceUnavailable')
+      now += 119_999
+      await work({ bookingId })
+      expect(patches()).toHaveLength(1)
+
+      now++
+      await work({ bookingId })
+      expect(await state(bookingId)).toMatchObject({
+        status: 'retrying',
+        reason: 'provider_unavailable',
+      })
+      now += 15 * 60_000
+      await work({ bookingId })
+      expect(provider.posts()).toHaveLength(1)
+      expect(patches()).toHaveLength(2)
+      expect(await state(bookingId)).toMatchObject({ status: 'succeeded' })
+      expect(await mappings(moved.booking.id)).toMatchObject([{ etag: updatedEtag }])
+    })
+
+    it('retains a lost PATCH projection through a throttled preflight for a later successor', async () => {
+      const created = await create()
+      const bookingId = created.booking.id
+      await work({ bookingId })
+      const moved = await rescheduleManagedBooking(context(), requireToken(created.manageToken), {
+        start: NEXT,
+      })
+      provider.controls.afterPatch = () => graphError(503, 'ServiceUnavailable')
+      await work({ bookingId })
+      const finalTime = NEXT.add({ hours: 1 })
+      const successor = await rescheduleManagedBooking(context(), requireToken(moved.manageToken), {
+        start: finalTime,
+      })
+      provider.controls.afterPatch = undefined
+      provider.controls.beforeRead = () =>
+        graphError(429, 'TooManyRequests', { 'Retry-After': '120' })
+      now += 30_000
+      await work({ bookingId })
+      expect(await state(bookingId)).toMatchObject({ status: 'retrying', reason: 'rate_limited' })
+      expect(patches()).toHaveLength(1)
+
+      provider.controls.beforeRead = undefined
+      now += 120_000
+      await work({ bookingId })
+      expect(await state(bookingId)).toMatchObject({ status: 'succeeded' })
+      expect(await mappings(successor.booking.id)).toMatchObject([{ external_event_id: eventId }])
+      expect(provider.posts()).toHaveLength(1)
+      expect(patches()).toHaveLength(2)
+      expect([...provider.events.values()]).toEqual([
+        expect.objectContaining({
+          start: { dateTime: '2030-03-07T12:00:00.000', timeZone: 'UTC' },
+        }),
+      ])
+    })
+
+    it('keeps the POST payload stable through ambiguous create replay and successive moves', async () => {
+      const created = await create()
+      const bookingId = created.booking.id
+      provider.controls.beforeCreate = () => graphError(503, 'ServiceUnavailable')
+      await work({ bookingId })
+      const moved = await rescheduleManagedBooking(context(), requireToken(created.manageToken), {
+        start: NEXT,
+      })
+      provider.controls.beforeCreate = undefined
+      provider.controls.afterCreate = async () => graphError(503, 'ServiceUnavailable')
+      now += 30_000
+      await work({ bookingId })
+      const finalTime = NEXT.add({ hours: 1 })
+      const successor = await rescheduleManagedBooking(context(), requireToken(moved.manageToken), {
+        start: finalTime,
+      })
+      provider.controls.afterCreate = undefined
+      now += 30_000
+      await work({ bookingId })
+
+      expect(provider.posts()).toHaveLength(2)
+      expect(provider.posts()[1]?.body).toEqual(provider.posts()[0]?.body)
+      expect(patches()).toHaveLength(1)
+      expect(provider.events.size).toBe(1)
+      expect(await state(bookingId)).toMatchObject({ status: 'succeeded' })
+      expect(await mappings(successor.booking.id)).toMatchObject([{ external_event_id: eventId }])
+    })
+
+    it('retains a cancelled copy for follow-up if the host loses ownership of its calendar', async () => {
+      const created = await create()
+      const bookingId = created.booking.id
+      await work({ bookingId })
+      const calls = provider.calls.length
+      await db
+        .updateTable('calendars')
+        .set({ access_role: 'writer' })
+        .where('id', '=', selected)
+        .execute()
+      await cancelManagedBooking(context(), requireToken(created.manageToken))
+      await work({ bookingId })
+      expect(provider.calls).toHaveLength(calls)
+      expect(provider.events.size).toBe(1)
+      expect(await mappings(bookingId)).toMatchObject([{ external_event_id: eventId }])
+      expect(await state(bookingId)).toMatchObject({
+        status: 'failed',
+        reason: 'calendar_unavailable',
+      })
+    })
+
+    it.each([
+      [401, 'InvalidAuthenticationToken', 'needs_reauth'],
+      [403, 'ErrorAccessDenied', 'permissions_missing'],
+    ])(
+      'reports a successor cancellation blocked by Graph %s after the original time passes',
+      async (status, code, reason) => {
+        const created = await create()
+        const bookingId = created.booking.id
+        await work({ bookingId })
+        const moved = await rescheduleManagedBooking(context(), requireToken(created.manageToken), {
+          start: NEXT,
+        })
+        await work({ bookingId })
+        now = START.epochMilliseconds + 1_000
+        await db
+          .updateTable('calendar_connections')
+          .set({ credentials: credentials(host.userId, now + 86_400_000) })
+          .where('id', '=', connectionId)
+          .execute()
+        provider.controls.beforeDelete = () => graphError(status, code)
+        await cancelManagedBooking(context(), requireToken(moved.manageToken))
+        await work({ bookingId })
+        await work({ bookingId })
+        expect(deletes()).toHaveLength(1)
+        expect(provider.events.size).toBe(1)
+        expect(await mappings(moved.booking.id)).toMatchObject([{ external_event_id: eventId }])
+        expect(await state(bookingId)).toMatchObject({ status: 'failed', reason })
+        expect(await readMicrosoftWritebackSummary(db, [selected], now)).toEqual(
+          new Map([[selected, { status: 'failed', reason }]]),
+        )
+        if (status === 401)
+          expect(
+            await db
+              .selectFrom('calendar_connections')
+              .select(['status', 'last_error'])
+              .where('id', '=', connectionId)
+              .executeTakeFirstOrThrow(),
+          ).toEqual({ status: 'needs_reauth', last_error: 'needs_reauth' })
+      },
+    )
+
+    it('treats a DELETE 404 as success once the booking marker is absent', async () => {
+      const created = await create()
+      const bookingId = created.booking.id
+      await work({ bookingId })
+      provider.controls.reconnect = {
+        account: `graph-account-${host.userId}`,
+        calendars: ['outlook-selected'],
+      }
+      provider.controls.beforeDelete = () => {
+        provider.events.clear()
+        return graphError(404, 'ErrorItemNotFound')
+      }
+      await cancelManagedBooking(context(), requireToken(created.manageToken))
+      await work({ bookingId })
+      expect(deletes()).toHaveLength(1)
+      expect(await mappings(bookingId)).toEqual([])
+      expect(await state(bookingId)).toMatchObject({ status: 'succeeded' })
+    })
+
+    it.each(['owned', 'shared', 'shared private'])(
+      'reconciles cancellation after Outlook moves the copy to another %s calendar',
+      async (role) => {
+        const created = await create()
+        const bookingId = created.booking.id
+        await work({ bookingId })
+        const other = 'outlook-other-calendar'
+        await calendar(connectionId, other)
+        provider.controls.reconnect = {
+          account: `graph-account-${host.userId}`,
+          calendars: ['outlook-selected', other],
+          sharedCalendars: role === 'owned' ? [] : [other],
+        }
+        const original = [...provider.events][0]
+        if (!original) throw new Error('Expected the first Graph copy')
+        const [key, event] = original
+        provider.events.delete(key)
+        const movedId = `${eventId}-after-move`
+        provider.events.set(JSON.stringify([other, event.transactionId]), {
+          ...event,
+          id: movedId,
+          '@odata.etag': updatedEtag,
+        })
+
+        const moved = await rescheduleManagedBooking(context(), requireToken(created.manageToken), {
+          start: NEXT,
+        })
+        await work({ bookingId })
+        expect(await state(bookingId)).toMatchObject({ reason: 'event_conflict' })
+        expect(provider.posts()).toHaveLength(1)
+        expect(patches().every((call) => call.calendar === 'outlook-selected')).toBe(true)
+
+        if (role === 'shared private')
+          provider.controls.beforeLookup = (calendar) =>
+            calendar === other ? graphError(404, 'ErrorItemNotFound') : undefined
+        await cancelManagedBooking(context(), requireToken(moved.manageToken))
+        await work({ bookingId })
+        if (role === 'owned') {
+          expect(deletes().at(-1)).toMatchObject({
+            calendar: other,
+            id: movedId,
+            ifMatch: updatedEtag,
+          })
+          expect(provider.events.size).toBe(0)
+          expect(await state(bookingId)).toMatchObject({ status: 'succeeded' })
+          expect(await mappings(bookingId)).toEqual([])
+        } else {
+          await settleCancellationConflict(bookingId)
+          expect(deletes().some((call) => call.calendar === other)).toBe(false)
+          expect(provider.events.size).toBe(1)
+          expect(await mappings(bookingId)).toMatchObject([{ external_event_id: eventId }])
+        }
+      },
+    )
 
     it('pins the event-type calendar and creates one private copy through concurrent jobs', async () => {
       const override = await calendar(connectionId, 'outlook-override')
@@ -407,10 +947,19 @@ describe.skipIf(!process.env.DATABASE_URL)(
       expect(provider.calls).toEqual([])
     })
 
-    it('writes one private group copy rather than an event per seat', async () => {
-      const groupSlotId = await bookGroup()
-      await book({ ...invitee, name: 'Second Invitee', email: 'second@example.test' })
-      expect(queued).toEqual([{ groupSlotId }])
+    it('updates one private group copy until the last seat is cancelled', async () => {
+      await setGroupType()
+      const first = await create()
+      const groupSlotId = await slotFor(first.booking.id)
+      const second = await create({
+        ...invitee,
+        name: 'Second Invitee',
+        email: 'second@example.test',
+      })
+      expect(queued.length).toBeGreaterThan(0)
+      expect(
+        queued.every((payload) => 'groupSlotId' in payload && payload.groupSlotId === groupSlotId),
+      ).toBe(true)
       await work({ groupSlotId })
       await work({ groupSlotId })
       expect(provider.posts()).toHaveLength(1)
@@ -426,9 +975,28 @@ describe.skipIf(!process.env.DATABASE_URL)(
         .where('group_slot_id', '=', groupSlotId)
         .executeTakeFirstOrThrow()
       expect(copy).toEqual({ calendar_id: selected, external_event_id: eventId, etag })
+
+      await cancelManagedBooking(context(), requireToken(first.manageToken))
+      await work({ groupSlotId })
+      expect(patches()).toMatchObject([
+        { id: eventId, ifMatch: etag, body: { body: { content: '1' } } },
+      ])
+      expect(provider.events.size).toBe(1)
+      await cancelManagedBooking(context(), requireToken(second.manageToken))
+      await work({ groupSlotId })
+      expect(deletes()).toMatchObject([{ id: eventId, ifMatch: updatedEtag }])
+      expect(provider.events.size).toBe(0)
+      expect(
+        await db
+          .selectFrom('group_slot_calendar_events')
+          .select('group_slot_id')
+          .where('group_slot_id', '=', groupSlotId)
+          .execute(),
+      ).toEqual([])
+      expect(provider.posts()).toHaveLength(1)
     })
 
-    it('recovers the revision sent to Graph when group seats change during the lookup', async () => {
+    it('reconciles the latest group seat count after a create with a lost response', async () => {
       const groupSlotId = await bookGroup()
       const initial = await db
         .selectFrom('group_slots')
@@ -451,8 +1019,15 @@ describe.skipIf(!process.env.DATABASE_URL)(
         .select(['external_event_id', 'count_revision'])
         .where('group_slot_id', '=', groupSlotId)
         .executeTakeFirstOrThrow()
-      expect(copy).toEqual({ external_event_id: eventId, count_revision: initial.count_revision })
+      const latest = await db
+        .selectFrom('group_slots')
+        .select('count_revision')
+        .where('id', '=', groupSlotId)
+        .executeTakeFirstOrThrow()
+      expect(latest.count_revision).not.toBe(initial.count_revision)
+      expect(copy).toEqual({ external_event_id: eventId, count_revision: latest.count_revision })
       expect(provider.posts()).toHaveLength(1)
+      expect(patches()).toMatchObject([{ body: { body: { content: '2' } } }])
     })
 
     it('records a pending group destination as removed after its account disconnects', async () => {

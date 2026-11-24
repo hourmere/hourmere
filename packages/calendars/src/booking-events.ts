@@ -9,6 +9,8 @@ import { writeGroupSlotCalendar } from './group-slot-events.ts'
 import type { CalendarDeps } from './index.ts'
 import { hasMicrosoftCalendarWriteAccess } from './microsoft.ts'
 import {
+  hasMicrosoftBookingDestination,
+  hasMicrosoftGroupDestination,
   recordMicrosoftBookingDestinations,
   recordMicrosoftGroupDestination,
   recoverMicrosoftWritebacks,
@@ -204,11 +206,6 @@ export function calendarBookingNotifier(
       .where('id', '=', event.bookingId)
       .executeTakeFirst()
     if (seat?.group_slot_id) {
-      const microsoft =
-        event.type !== 'rescheduled' &&
-        event.type !== 'cancelled' &&
-        (await recordMicrosoftGroupDestination(trx, seat.group_slot_id, now()))
-      if (!google && !microsoft) return
       const slots = new Set([seat.group_slot_id])
       if (event.type === 'rescheduled' && seat.rescheduled_from_id) {
         const source = await trx
@@ -218,12 +215,18 @@ export function calendarBookingNotifier(
           .executeTakeFirst()
         if (source?.group_slot_id) slots.add(source.group_slot_id)
       }
-      for (const groupSlotId of [...slots].sort())
-        await queue.enqueue(
-          BOOKING_CALENDAR_JOB,
-          { groupSlotId },
-          { transaction: trx, singletonKey: `group:${groupSlotId}` },
-        )
+      for (const groupSlotId of [...slots].sort()) {
+        const microsoft =
+          groupSlotId === seat.group_slot_id && event.type !== 'cancelled'
+            ? await recordMicrosoftGroupDestination(trx, groupSlotId, now())
+            : await hasMicrosoftGroupDestination(trx, groupSlotId)
+        if (google || microsoft)
+          await queue.enqueue(
+            BOOKING_CALENDAR_JOB,
+            { groupSlotId },
+            { transaction: trx, singletonKey: `group:${groupSlotId}` },
+          )
+      }
       return
     }
     const root = await rootOf(trx, event.bookingId)
@@ -235,12 +238,9 @@ export function calendarBookingNotifier(
         .executeTakeFirst()
       if (google && !automatic && event.type !== 'cancelled')
         await recordBookingDestinations(trx, event.bookingId, root)
-      const microsoft =
-        !automatic &&
-        event.bookingId === root &&
-        event.type !== 'cancelled' &&
-        (await recordMicrosoftBookingDestinations(trx, root, now()))
-      if (!google && !microsoft) return
+      if (!automatic && event.bookingId === root && event.type !== 'cancelled')
+        await recordMicrosoftBookingDestinations(trx, root, now())
+      if (!google && (automatic || !(await hasMicrosoftBookingDestination(trx, root)))) return
       await queue.enqueue(
         BOOKING_CALENDAR_JOB,
         { bookingId: root },
@@ -295,6 +295,7 @@ export async function writeBookingCalendar(
     .innerJoin('calendars as c', 'c.id', 'bce.calendar_id')
     .innerJoin('calendar_connections as cc', 'cc.id', 'c.connection_id')
     .select(['c.id', 'c.connection_id', 'cc.user_id'])
+    .where('cc.provider', '=', 'google')
     .where(
       'bce.booking_id',
       'in',

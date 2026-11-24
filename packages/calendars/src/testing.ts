@@ -260,7 +260,7 @@ export function fakeMicrosoft(now?: () => number) {
       return Response.json(controls.identity)
     if (
       url.origin === 'https://graph.microsoft.com' &&
-      /^\/v1\.0\/me\/calendars\/[^/]+\/events$/u.test(url.pathname) &&
+      /^\/v1\.0\/me\/calendars\/[^/]+\/events(?:\/[^/]+)?$/u.test(url.pathname) &&
       controls.eventHook
     )
       return controls.eventHook(url, init)
