@@ -25,6 +25,34 @@ export function providerTestStatus(ownerOnly: boolean, lock = false) {
 
 export const currentSsoProviderTestStatus = providerTestStatus(false)
 
+/** Caller holds the provider revision and the original test actor's authority. */
+export function writeSsoProviderTestReceipt(
+  db: Db,
+  provider: SsoProviderRevision,
+  actor: { userId: string; id: string },
+  role: string,
+  protocol: 'oidc' | 'saml',
+  attemptId: string,
+  reason?: SsoAuditReason,
+) {
+  return writeSsoAuditEvent(db, {
+    ...auditActor({ kind: 'session', user: { id: actor.userId }, sessionId: actor.id }),
+    organizationId: provider.organizationId,
+    action,
+    // Keep the role at the time of the test even if the actor is promoted later.
+    targetType: role === 'owner' ? 'sso_provider_owner_test' : 'sso_provider',
+    targetId: provider.providerId,
+    details: {
+      method: protocol,
+      providerId: provider.providerId,
+      revision: provider.revision,
+      correlationId: attemptId,
+      outcome: reason === undefined ? 'passed' : 'failed',
+      ...(reason !== undefined && { reason }),
+    },
+  })
+}
+
 export async function recordOidcProviderTest(
   db: Db,
   provider: SsoProviderRevision,
@@ -39,21 +67,6 @@ export async function recordOidcProviderTest(
       .selectNoFrom(sql<boolean>`${attempt.expiresAt}::timestamptz > clock_timestamp()`.as('live'))
       .executeTakeFirstOrThrow()
     if (!live) throw new OidcAttemptRefused()
-    await writeSsoAuditEvent(trx, {
-      ...auditActor({ kind: 'session', user: { id: actor.userId }, sessionId: actor.id }),
-      organizationId: provider.organizationId,
-      action,
-      // Keep the role at the time of the test even if the actor is promoted later.
-      targetType: role === 'owner' ? 'sso_provider_owner_test' : 'sso_provider',
-      targetId: provider.providerId,
-      details: {
-        method: 'oidc',
-        providerId: provider.providerId,
-        revision: provider.revision,
-        correlationId: attempt.id,
-        outcome: reason === undefined ? 'passed' : 'failed',
-        ...(reason !== undefined && { reason }),
-      },
-    })
+    await writeSsoProviderTestReceipt(trx, provider, actor, role, 'oidc', attempt.id, reason)
   })
 }

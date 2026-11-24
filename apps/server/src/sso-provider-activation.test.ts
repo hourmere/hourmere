@@ -763,7 +763,12 @@ describe.skipIf(!databaseUrl)('SSO provider activation', () => {
     for (const { path, method, body } of removals) {
       await error(await write(path, body, { method }), 403, 'sso_required')
     }
-    await error(await write(activationPath(provider.id), activate), 404, 'sso_disabled')
+    if (offState === samlOnly) {
+      // With an available protocol, team authority is checked before the stored protocol.
+      await error(await write(activationPath(provider.id), activate), 403, 'sso_required')
+    } else {
+      await error(await write(activationPath(provider.id), activate), 404, 'sso_disabled')
+    }
     // Stored enforcement is kept while the setting is off.
     expect(await policy()).toMatchObject({ require_sso: true, policy_revision: 2 })
     if (offState === settingOff) {
@@ -787,6 +792,7 @@ describe.skipIf(!databaseUrl)('SSO provider activation', () => {
     expect(
       (await write(use, { expectedRevision: 2, proofAttemptId: recovery.id }, recovery)).status,
     ).toBe(204)
+    await error(await write(activationPath(provider.id), activate, recovery), 404, 'sso_disabled')
     const disabled = await setPolicy(turnOff, recovery)
     expect(disabled.status).toBe(200)
     expect(await disabled.json()).toMatchObject({ requireSso: false, policyRevision: 3 })

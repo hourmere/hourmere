@@ -181,6 +181,34 @@ describe.skipIf(!process.env.DATABASE_URL)('SSO draft REST writes', () => {
     expect(patch.status).toBe(403)
     expect(await patch.json()).toMatchObject({ error: 'sso_reauthentication_required' })
   })
+  it('allows bounded SAML metadata beyond the default API body limit and keeps it for OIDC', async () => {
+    const response = await request(
+      app(principal(), { ssoOidcEnabled: false, ssoSamlEnabled: true }),
+      'POST',
+      '',
+      {
+        protocol: 'saml',
+        displayName: 'SAML',
+        domainIds: [],
+        saml: {
+          metadataDocument: `<EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" entityID="urn:synthetic:large-idp">
+            <Extensions><test:Padding xmlns:test="urn:synthetic">${'x'.repeat(80_000)}</test:Padding></Extensions>
+            <IDPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+              <SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://idp.example.com/sso"/>
+            </IDPSSODescriptor>
+          </EntityDescriptor>`,
+        },
+      },
+    )
+    expect(response.status).toBe(403)
+    expect(await response.json()).toMatchObject({ error: 'sso_reauthentication_required' })
+    const oidc = await request(app(), 'POST', '', {
+      ...input,
+      oidc: { ...input.oidc, clientSecret: 'x'.repeat(80_000) },
+    })
+    expect(oidc.status).toBe(413)
+    expect(await oidc.json()).toEqual({ error: 'payload_too_large' })
+  })
   it('omits invalid secret keys, URL queries and unexpected failure details from diagnostics', async () => {
     const secret = 'synthetic-secret-diagnostic-marker'
     const logs = [
@@ -216,6 +244,16 @@ describe.skipIf(!process.env.DATABASE_URL)('SSO draft REST writes', () => {
     }
   })
   it('keeps all operations Off before validation and refuses SAML while only OIDC is injected on', async () => {
+    const counts = async () =>
+      Promise.all(
+        (['sso_providers', 'sso_attempts', 'audit_events'] as const).map((table) =>
+          db
+            .selectFrom(table)
+            .select(({ fn }) => fn.countAll().as('count'))
+            .executeTakeFirstOrThrow(),
+        ),
+      )
+    const before = await counts()
     for (const method of ['POST', 'PATCH', 'DELETE']) {
       const response = await request(
         app(principal(), OFF),
@@ -226,13 +264,15 @@ describe.skipIf(!process.env.DATABASE_URL)('SSO draft REST writes', () => {
       expect(response.status).toBe(404)
       expect(await response.json()).toEqual({ error: 'sso_disabled' })
     }
-    const saml = await request(app(), 'POST', '', {
-      protocol: 'saml',
-      displayName: 'SAML',
-      domainIds: [],
-      saml: { metadata: 'synthetic' },
-    })
-    expect(saml.status).toBe(404)
-    expect(await saml.json()).toEqual({ error: 'sso_disabled' })
+    for (const [method, path, body] of [
+      ['POST', '', { protocol: 'saml', displayName: 'SAML', domainIds: [] }],
+      ['PATCH', '/not-an-id', { protocol: 'saml' }],
+      ['PATCH', `/${randomUUID()}`, { expectedRevision: 1, saml: { wantAssertionsSigned: true } }],
+    ] as const) {
+      const response = await request(app(), method, path, body, { origin: '' })
+      expect(response.status).toBe(404)
+      expect(await response.json()).toEqual({ error: 'sso_disabled' })
+    }
+    expect(await counts()).toEqual(before)
   })
 })

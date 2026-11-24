@@ -18,7 +18,7 @@ import { openApiDocument, openApiRouteInventory } from './openapi-document.ts'
 import { productionAppOptions, productionAuthOptions, productRoutes } from './server.ts'
 import { MAILBOX_PROOF_CONSUME_PATH, MAILBOX_PROOF_SEND_PATH } from './sso-mailbox-proof.ts'
 import { OIDC_CALLBACK_PATH, OIDC_COMPLETE_PATH, OIDC_SIGN_IN_PATH } from './sso-oidc-sign-in.ts'
-import { SAML_ACS_PATH, SAML_COMPLETE_PATH } from './sso-saml-state.ts'
+import { SAML_ACS_PATH, SAML_COMPLETE_PATH, SAML_METADATA_PATH } from './sso-saml-state.ts'
 import { createWorkerHealthApp } from './worker-health.ts'
 
 // Lower-case names that run the acronym together with a neighbouring word have no case,
@@ -91,6 +91,7 @@ const GUARDED_SSO_AUTH_PATHS = [
   '/api/auth/sso/callback/:providerId',
   '/api/auth/sso/oidc/complete',
   '/api/auth/sso/saml2/sp/acs/:providerId',
+  '/api/auth/sso/saml2/sp/metadata/:providerId',
   '/api/auth/sso/saml2/complete',
 ] as const
 const RETAINED_SSO_AUTH_PATHS: readonly string[] = GUARDED_SSO_AUTH_PATHS.slice(0, 2)
@@ -657,6 +658,7 @@ describe('SSO setting-off excludes only SSO from the published catalogues', () =
       OIDC_CALLBACK_PATH,
       OIDC_COMPLETE_PATH,
       SAML_ACS_PATH,
+      SAML_METADATA_PATH,
       SAML_COMPLETE_PATH,
     ]).toEqual([...GUARDED_SSO_AUTH_PATHS])
     expectNoUnguardedSsoRoutes([...GUARDED_SSO_AUTH_PATHS])
@@ -682,6 +684,7 @@ describe('SSO setting-off excludes only SSO from the published catalogues', () =
       '/api/auth/sso/oidc/*',
       '/api/auth/sso/oidc/complete/other',
       '/api/auth/sso/saml2/sp/acs/*',
+      '/api/auth/sso/saml2/sp/metadata/*',
       `${SAML_COMPLETE_PATH}/`,
       '/api/auth/sso/saml2/sp/slo/:providerId',
       '/api/auth/sso/*',
@@ -1120,8 +1123,6 @@ describe('SSO setting-off excludes only SSO from the published catalogues', () =
       'packages/auth/src/testing.ts',
     )
     const sources = shipped.map((file) => [file, readFileSync(new URL(file, root), 'utf8')])
-    // AuthnRequest generation declares the SP entity ID before metadata is served.
-    const samlEntityId = '/api/auth/sso/saml2/sp/metadata/{providerId}'
     const literals = sources.flatMap(([file, source = '']) =>
       [...source.matchAll(/(['"`])(\/[^'"`\s]*)\1/g)]
         .map(([, , literal = '']) => literal)
@@ -1130,7 +1131,7 @@ describe('SSO setting-off excludes only SSO from the published catalogues', () =
             !(
               file === 'apps/web/src/paths.ts' &&
               GUARDED_SSO_WEB_PATHS.some((path) => path === literal)
-            ) && !(file === 'apps/server/src/sso-saml-state.ts' && literal === samlEntityId),
+            ),
         ),
     )
     expect(literals.length).toBeGreaterThan(500)

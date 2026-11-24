@@ -1,24 +1,23 @@
 import { randomBytes } from 'node:crypto'
 import type { Db } from '@hourmere/db'
-import { type SsoRequest, ssoUrl } from '@hourmere/outbound/sso'
+import type { SsoRequest } from '@hourmere/outbound/sso'
 import { DOMImplementation, XMLSerializer } from '@xmldom/xmldom'
 import { sql } from 'kysely'
 import { Constants, IdentityProvider, ServiceProvider } from 'samlify'
 import { openSsoProviderConfiguration, type SsoProviderRevision } from './sso-configuration.ts'
 import { browserBindingDigest, sha256 } from './sso-mailbox-proof.ts'
+import { lockOidcProvider, OidcAttemptRefused, type OidcTestActor } from './sso-oidc-attempt.ts'
 import { authenticationAttemptLifetime } from './sso-oidc-limits.ts'
+import { samlIdentityProviderRedirectUrl } from './sso-saml-configuration.ts'
 import { samlDatabaseInstantText, samlDatabaseNow, samlRequestExpired } from './sso-saml-replay.ts'
 import {
   samlProviderConfig,
   samlServiceProviderUrls,
   samlStartOperation,
+  samlTestOperation,
 } from './sso-saml-state.ts'
 
 const { binding: samlBinding, format, names } = Constants.namespace
-const reservedRedirectParameters = new Set([
-  ...Object.values(Constants.wording.urlParams).map((key) => key.toLowerCase()),
-  'samlencoding',
-])
 
 export class SamlStartRefused extends Error {
   constructor() {
@@ -35,6 +34,7 @@ interface SamlStartDependencies {
 }
 
 type SamlStartProvider = SsoProviderRevision & { issuer: string; configuration: Buffer }
+type SamlTest = { actor: OidcTestActor; enabled: boolean; recoveryDeadline?: string | undefined }
 
 function redirectIdentityProvider(issuer: string, location: string) {
   // Build metadata locally from the pinned settings. Passing metadata lets samlify
@@ -51,11 +51,12 @@ function redirectIdentityProvider(issuer: string, location: string) {
   return IdentityProvider({ metadata: new XMLSerializer().serializeToString(metadata) })
 }
 
-/** Start an SP-initiated ceremony, returning its IdP URL only after the attempt commits. */
+/** Start an SP-initiated sign-in or administrator test. */
 export async function startSamlSignIn(
   { db, configurationKey, privateTargets, publicUrl }: SamlStartDependencies,
   provider: SamlStartProvider,
   browserBinding: string,
+  test?: SamlTest,
 ) {
   const { organizationId, providerId, revision, issuer, configuration } = provider
   const binding = browserBindingDigest(browserBinding)
@@ -67,41 +68,18 @@ export async function startSamlSignIn(
     const config = samlProviderConfig.parse(
       JSON.parse(openSsoProviderConfiguration(configurationKey, provider, configuration)),
     )
-    const endpoint = ssoUrl(config.ssoEndpoint, privateTargets)
-    if (!endpoint) throw new SamlStartRefused()
-    const location = new URL(endpoint)
-    for (const key of location.searchParams.keys()) {
-      if (reservedRedirectParameters.has(key.toLowerCase())) throw new SamlStartRefused()
-    }
-    // Remove a bare '?' so the redirect binding can add its own query separator.
-    if (!location.search) location.search = ''
-    idp = redirectIdentityProvider(issuer, location.href)
+    const endpoint = samlIdentityProviderRedirectUrl(config.ssoEndpoint, privateTargets)
+    if (!endpoint || (test && !config.signingCertificates)) throw new SamlStartRefused()
+    idp = redirectIdentityProvider(issuer, endpoint)
   } catch {
     throw new SamlStartRefused()
   }
 
-  return db.transaction().execute(async (trx) => {
-    // Take the locks in the team-write order and hold this configuration revision until commit.
-    const organization = await trx
-      .selectFrom('auth.organization')
-      .select('id')
-      .where('id', '=', organizationId)
-      .forShare()
-      .executeTakeFirst()
-    if (!organization) throw new SamlStartRefused()
-    const current = await trx
-      .selectFrom('sso_providers')
-      .select('id')
-      .where('id', '=', providerId)
-      .where('organization_id', '=', organizationId)
-      .where('protocol', '=', 'saml')
-      .where('revision', '=', revision)
-      .where('enabled', '=', true)
-      .where('retired_at', 'is', null)
-      .forShare()
-      .executeTakeFirst()
-    if (!current) throw new SamlStartRefused()
-
+  const start = async (trx: Db) => {
+    await lockOidcProvider(trx, provider, test?.enabled ?? true, 'saml').catch((error: unknown) => {
+      if (error instanceof OidcAttemptRefused) throw new SamlStartRefused()
+      throw error
+    })
     const { id } = await trx.selectNoFrom(sql<string>`uuidv7()`.as('id')).executeTakeFirstOrThrow()
     // The UUID indexes the attempt. Its compact representation plus an independent secret
     // stays within the SAML binding's 80-byte RelayState limit. Store only the handle digest.
@@ -121,20 +99,30 @@ export async function startSamlSignIn(
       allowUnsolicitedResponse: false,
     }
     const createdAt = await samlDatabaseNow(trx)
+    const lifetime = createdAt.add({ seconds: authenticationAttemptLifetime })
+    const recoveryDeadline = test?.recoveryDeadline
+      ? Temporal.Instant.from(new Date(test.recoveryDeadline).toISOString())
+      : undefined
+    const deadline =
+      recoveryDeadline && Temporal.Instant.compare(recoveryDeadline, lifetime) < 0
+        ? recoveryDeadline
+        : lifetime
+    if (samlRequestExpired(deadline, createdAt)) throw new SamlStartRefused()
     const request = ServiceProvider(spSettings).createLoginRequest(idp, 'redirect', { relayState })
     const { expiresAt } = await trx
       .insertInto('sso_attempts')
       .values({
         id,
-        kind: 'sign_in',
-        operation: samlStartOperation,
+        kind: test ? 'test' : 'sign_in',
+        operation: test ? samlTestOperation : samlStartOperation,
         organization_id: organizationId,
         provider_id: providerId,
         provider_revision: revision,
+        ...(test && { user_id: test.actor.userId, session_id: test.actor.id }),
         browser_binding_digest: binding,
         input_digest: sha256(relayState),
         created_at: createdAt.toString(),
-        expires_at: createdAt.add({ seconds: authenticationAttemptLifetime }).toString(),
+        expires_at: deadline.toString(),
       })
       .returning(samlDatabaseInstantText(sql.ref('expires_at')).as('expiresAt'))
       .executeTakeFirstOrThrow()
@@ -143,5 +131,6 @@ export async function startSamlSignIn(
       throw new SamlStartRefused()
     }
     return { id, url: request.context }
-  })
+  }
+  return db.isTransaction ? start(db) : db.transaction().execute(start)
 }

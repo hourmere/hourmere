@@ -11,6 +11,7 @@ import { type SsoFixture, ssoFixture } from '../../../packages/db/src/sso-storag
 import { openSsoProviderConfiguration } from './sso-configuration.ts'
 import * as real from './sso-drafts.ts'
 import { BROWSER_BINDING_COOKIE } from './sso-mailbox-proof.ts'
+import { samlSigningIdentity } from './sso-saml-fixtures.ts'
 
 const ON = { ssoOidcEnabled: true, ssoSamlEnabled: false }
 const OFF = { ssoOidcEnabled: false, ssoSamlEnabled: false }
@@ -171,6 +172,135 @@ describe.skipIf(!process.env.DATABASE_URL)('SSO provider drafts', () => {
       logs.mockRestore()
     }
   })
+
+  it('imports SAML metadata only after fresh proof and pins a same-team certificate rotation', async () => {
+    const entityId = 'urn:synthetic:saml:idp'
+    const ssoUrl = 'https://saml.example.com/login'
+    const metadataUrl = 'https://saml.example.com/metadata'
+    const metadata = `<md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" entityID="${entityId}">
+      <md:IDPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+        <md:KeyDescriptor use="signing"/>
+        <md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="${ssoUrl}"/>
+      </md:IDPSSODescriptor>
+    </md:EntityDescriptor>`
+    const oldKey = samlSigningIdentity('Initial IdP signing key')
+    const nextKey = samlSigningIdentity('Rotated IdP signing key')
+    const service = {
+      ...deps(),
+      capabilities: { ssoOidcEnabled: false, ssoSamlEnabled: true },
+      send: vi.fn(async () => ({
+        status: 200,
+        contentType: 'application/samlmetadata+xml',
+        body: Buffer.from(metadata),
+      })),
+    }
+    const h = headers()
+    const create = {
+      protocol: 'saml',
+      displayName: 'Synthetic SAML IdP',
+      domainIds: [],
+      saml: { metadataUrl, signingCertificates: [oldKey.pem], wantAssertionsSigned: true },
+    }
+    await expect(
+      real.createSsoProvider(service, principal(f.member), h, create),
+    ).rejects.toMatchObject({
+      code: 'team_management_access_denied',
+    })
+    const challenge = await real.createSsoProvider(service, principal(), h, create)
+    expect(service.send).not.toHaveBeenCalled()
+    expect(challenge.status).toBe('proof_required')
+    if (challenge.status !== 'proof_required') throw new Error('Expected proof')
+    expect(challenge.body.proofMethods).toEqual(['mailbox'])
+    await prove(challenge.body.attemptId)
+    const result = await real.createSsoProvider(service, principal(), h, {
+      ...create,
+      proofAttemptId: challenge.body.attemptId,
+    })
+    expect(result.status).toBe('complete')
+    if (result.status !== 'complete') throw new Error('Expected completion')
+    expect(service.send).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ url: metadataUrl }),
+    )
+    const { provider } = result.value
+    expect(provider).toMatchObject({
+      protocol: 'saml',
+      issuer: entityId,
+      clientId: null,
+      hasClientSecret: false,
+      enabled: false,
+      revision: 1,
+    })
+    const readConfiguration = async (revision: number) => {
+      const row = await db
+        .selectFrom('sso_providers')
+        .select(['configuration', 'revision'])
+        .where('id', '=', provider.id)
+        .executeTakeFirstOrThrow()
+      expect(row.revision).toBe(revision)
+      expect(row.configuration.includes(Buffer.from(oldKey.base64))).toBe(false)
+      return JSON.parse(
+        openSsoProviderConfiguration(
+          key,
+          { organizationId: f.team, providerId: provider.id, revision },
+          row.configuration,
+        ),
+      )
+    }
+    expect(await readConfiguration(1)).toEqual({
+      ssoEndpoint: ssoUrl,
+      signingCertificates: [oldKey.base64],
+    })
+    for (const saml of [{ entityId: 'urn:changed:idp' }, { wantAssertionsSigned: false }]) {
+      await expect(
+        real.updateSsoProvider(service, principal(), h, provider.id, { expectedRevision: 1, saml }),
+      ).rejects.toMatchObject({ code: 'invalid_request' })
+    }
+    const rotation = {
+      expectedRevision: 1,
+      saml: { signingCertificates: [oldKey.pem, nextKey.pem] },
+    }
+    await expect(
+      real.updateSsoProvider(
+        service,
+        principal(f.otherOwner, f.otherTeam),
+        headers(f.otherTeam),
+        provider.id,
+        rotation,
+      ),
+    ).rejects.toMatchObject({ code: 'sso_not_found' })
+    const before = await trust()
+    const rotated = await ceremony(
+      (body) => real.updateSsoProvider(service, principal(), h, provider.id, body),
+      rotation,
+    )
+    expect(rotated.provider.revision).toBe(2)
+    expect(await readConfiguration(2)).toEqual({
+      ssoEndpoint: ssoUrl,
+      signingCertificates: [oldKey.base64, nextKey.base64].sort(),
+    })
+    expect(await trust()).toBe(before + 1)
+    expect(service.send).toHaveBeenCalledTimes(1)
+    await ceremony((body) => real.updateSsoProvider(service, principal(), h, provider.id, body), {
+      expectedRevision: 2,
+      saml: { signingCertificates: [nextKey.pem, oldKey.base64] },
+    })
+    expect(await trust()).toBe(before + 1)
+    const audit = await db
+      .selectFrom('audit_events')
+      .selectAll()
+      .where('target_id', '=', provider.id)
+      .execute()
+    expect(
+      audit
+        .filter((event) => event.action === 'sso_provider.certificate_rotated')
+        .map((event) => event.details),
+    ).toEqual([{ method: 'saml', providerId: provider.id, revision: 2 }])
+    const publicData = JSON.stringify([result.value, rotated, audit])
+    for (const value of [metadataUrl, ssoUrl, oldKey.base64, nextKey.base64, 'EntityDescriptor']) {
+      expect(publicData).not.toContain(value)
+    }
+  })
+
   it('preserves omitted secrets; only trust edits and deletion advance trust; retired delete is idempotent', async () => {
     const p = await create()
     const h = headers()

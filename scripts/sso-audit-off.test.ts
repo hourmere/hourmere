@@ -43,6 +43,7 @@ const EMITTERS: Readonly<Record<string, readonly string[]>> = {
     'sso_provider.enabled',
     'sso_provider.disabled',
     'sso_provider.deleted',
+    'sso_provider.certificate_rotated',
     'sso_provider.secret_rotated',
   ],
   'apps/server/src/sso-oidc-admission-write.ts': [

@@ -61,7 +61,7 @@ import { verifyOidcIdToken } from './sso-oidc-verifier.ts'
 import { authorizeSsoRead } from './sso-reads.ts'
 import { providerRecoveryAuthority, ssoWriteContextAccess } from './sso-recovery-use.ts'
 import { SamlStartRefused, startSamlSignIn } from './sso-saml-start.ts'
-import { samlStateCookie, sealSamlState } from './sso-saml-state.ts'
+import { samlStateCookie, type samlTestBinding, sealSamlState } from './sso-saml-state.ts'
 import { EXPECTED_ORGANIZATION_HEADER } from './team-management.ts'
 
 export const OIDC_SIGN_IN_PATH = '/api/auth/sign-in/sso'
@@ -242,7 +242,7 @@ export async function testSsoProvider(
   input: z.infer<typeof TestSsoProviderInput>,
   recoveryRequired = false,
 ) {
-  requireSsoEnabled(deps.capabilities, 'oidc')
+  requireSsoEnabled(deps.capabilities)
   const denied = () => new DomainError('forbidden', 'team_management_access_denied')
   const missing = () => new DomainError('not_found', 'sso_not_found')
   const changed = () => new DomainError('conflict', 'sso_configuration_changed')
@@ -254,7 +254,7 @@ export async function testSsoProvider(
   const draft = async (db: Db) => {
     const provider = await findProvider(db, providerId, organizationId)
     if (!provider || provider.retiredAt) throw missing()
-    if (provider.protocol !== 'oidc') throw new DomainError('not_found', 'sso_disabled')
+    requireSsoEnabled(deps.capabilities, provider.protocol === 'saml' ? 'saml' : 'oidc')
     return provider
   }
   let authorized: Provider | undefined
@@ -291,6 +291,7 @@ export async function testSsoProvider(
       },
       prepare: async () => {
         if (!authorized || !configurationKey) throw missing()
+        if (authorized.protocol === 'saml') return
         try {
           endpoints = await providerEndpoints(authorized, configurationKey, transport)
         } catch {
@@ -299,7 +300,35 @@ export async function testSsoProvider(
       },
       mutate: async (db, _input, browserBinding, _mailbox, _attemptId, recovery) => {
         const provider = authorized
-        if (!provider || !configurationKey || !endpoints) throw missing()
+        if (!provider || !configurationKey) throw missing()
+        if (provider.protocol === 'saml') {
+          const { id, url } = await startSamlSignIn(
+            { db, configurationKey, privateTargets: transport.privateTargets, publicUrl },
+            provider,
+            browserBinding,
+            { actor, enabled: provider.enabled, recoveryDeadline: recovery?.deadline },
+          )
+          const state: z.infer<typeof samlTestBinding> = {
+            ...(recovery && {
+              recovery: { acceptedAt: recovery.acceptedAt, testProviderEnabled: provider.enabled },
+            }),
+          }
+          const cookie = samlStateCookie(publicUrl, 'test', id)
+          return {
+            url,
+            attemptId: id,
+            setCookie: authorizationBindingCookie(publicUrl, browserBinding),
+            setTestCookie: serialize(
+              cookie.name,
+              sealSamlState(configurationKey, 'test', id, JSON.stringify(state)),
+              {
+                ...cookie.options,
+                maxAge: authenticationAttemptLifetime,
+              },
+            ),
+          }
+        }
+        if (!endpoints) throw missing()
         const parameters = await startOidcAttempt(
           { db, configurationKey },
           {
@@ -324,12 +353,18 @@ export async function testSsoProvider(
           url: authorizationUrl(publicUrl, provider.providerId, endpoints, parameters),
           attemptId: parameters.id,
           setCookie: authorizationBindingCookie(publicUrl, browserBinding),
+          setTestCookie: undefined,
         }
       },
     },
   ).catch((error) => {
     if (error instanceof HTTPException && error.status === 403) throw denied()
-    if (error instanceof OidcAttemptRefused || expiresDuringOidcWrite(error)) throw changed()
+    if (
+      error instanceof OidcAttemptRefused ||
+      error instanceof SamlStartRefused ||
+      expiresDuringOidcWrite(error)
+    )
+      throw changed()
     throw error
   })
 }

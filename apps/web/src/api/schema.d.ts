@@ -5295,7 +5295,7 @@ export interface paths {
         put?: never;
         /**
          * Create a disabled SSO provider draft
-         * @description Verified team owner/admin browser session with fresh proof. An enrolled owner can spend one recovery grant on an enforced team. Secrets are write-only. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.
+         * @description Verified team owner/admin browser session with fresh proof. An enrolled owner can spend one recovery grant on an enforced team. Provider credentials and raw metadata are write-only. Returns 404 sso_disabled when the requested protocol is off. SAML is unavailable.
          */
         post: operations["createSsoProvider"];
         delete?: never;
@@ -5323,7 +5323,7 @@ export interface paths {
         head?: never;
         /**
          * Update an SSO provider draft
-         * @description Verified team owner/admin browser session with fresh proof and expected revision. An enrolled owner can spend one recovery grant on an enforced team. Omitted secrets are preserved; replacements are never returned. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.
+         * @description Verified team owner/admin browser session with fresh proof and expected revision. An enrolled owner can spend one recovery grant on an enforced team. Omitted secrets are preserved. Provider credentials and raw metadata are write-only. Returns 404 sso_disabled when the requested protocol is off. SAML is unavailable.
          */
         patch: operations["updateSsoProvider"];
         trace?: never;
@@ -5339,7 +5339,7 @@ export interface paths {
         put?: never;
         /**
          * Enable or disable an SSO provider
-         * @description Verified team owner browser session with fresh administration proof. An enrolled owner can spend one recovery grant on an enforced team. Enabling requires a passed test of the current revision and a positively rechecked, unexpired linked domain. An enforced team must keep a usable provider. While SSO_OIDC_ENABLED is off, enabling returns 404 sso_disabled and disabling stays available.
+         * @description Verified team owner browser session with fresh administration proof. An enrolled owner can spend one recovery grant on an enforced team. Enabling requires a passed test of the current revision and a positively rechecked, unexpired linked domain. An enforced team must keep a usable provider. When the provider protocol is off, enabling returns 404 sso_disabled and disabling stays available.
          */
         post: operations["activateSsoProvider"];
         delete?: never;
@@ -5402,8 +5402,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Start a browser-bound OIDC provider test
-         * @description Verified team owner/admin browser session with fresh proof and expected revision. An enrolled owner can spend one recovery grant on an enforced team to test a provider, including an enabled provider. Follow the authorization URL in the same browser and check the provider inventory for the result. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.
+         * Start a browser-bound SSO provider test
+         * @description Verified team owner/admin browser session with fresh administration proof and expected revision. An enrolled owner can spend one recovery grant on an enforced team to test a provider, including an enabled provider. Follow the authorization URL in the same browser and check the provider inventory for the result. Returns 404 sso_disabled when the provider protocol is off.
          */
         post: operations["testSsoProvider"];
         delete?: never;
@@ -20195,7 +20195,17 @@ export interface operations {
                     proofAttemptId?: string;
                     /** @enum {string} */
                     protocol: "oidc" | "saml";
-                    saml?: unknown;
+                    saml?: {
+                        entityId?: string;
+                        metadataDocument?: string;
+                        /** Format: uri */
+                        metadataUrl?: string;
+                        signingCertificates?: string[];
+                        /** Format: uri */
+                        ssoUrl?: string;
+                        /** @enum {boolean} */
+                        wantAssertionsSigned?: true;
+                    };
                 };
             };
         };
@@ -20249,6 +20259,15 @@ export interface operations {
             };
             /** @description organization_context_changed or sso_configuration_changed */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description payload_too_large */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -20389,7 +20408,17 @@ export interface operations {
                     };
                     /** Format: uuid */
                     proofAttemptId?: string;
-                    saml?: unknown;
+                    saml?: {
+                        entityId?: string;
+                        metadataDocument?: string;
+                        /** Format: uri */
+                        metadataUrl?: string;
+                        signingCertificates?: string[];
+                        /** Format: uri */
+                        ssoUrl?: string;
+                        /** @enum {boolean} */
+                        wantAssertionsSigned?: true;
+                    };
                 };
             };
         };
@@ -20443,6 +20472,15 @@ export interface operations {
             };
             /** @description organization_context_changed or sso_configuration_changed */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description payload_too_large */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };

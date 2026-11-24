@@ -174,6 +174,7 @@ export async function lockOidcTestActor(
   provider: SsoProviderRevision,
   actor: OidcTestActor,
   recovery?: RecoveryTestBinding,
+  protocol: 'oidc' | 'saml' = 'oidc',
 ) {
   const user = await trx
     .selectFrom('auth.user')
@@ -183,7 +184,7 @@ export async function lockOidcTestActor(
     .forShare()
     .executeTakeFirst()
   if (!user) throw refused()
-  await lockOidcProvider(trx, provider, recovery?.testProviderEnabled ?? false)
+  await lockOidcProvider(trx, provider, recovery?.testProviderEnabled ?? false, protocol)
   try {
     const member = await checkTeamManagementMembership(
       trx,
