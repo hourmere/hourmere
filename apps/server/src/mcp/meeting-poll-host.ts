@@ -73,6 +73,7 @@ export function meetingPollHostTools({
     ...deps,
     meetingPollSecret,
     principal,
+    ...(principal.scimResourcesEnabled && { scimResourcesEnabled: true }),
     now: () => Temporal.Now.instant(),
   })
   async function admissionContext(call: ToolCall): Promise<MeetingPollHostContext> {

@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { parse } from '@babel/parser'
 import {
   DummyDriver,
   Kysely,
@@ -21,8 +22,39 @@ const db = new Kysely<Database>({
 })
 const organization = '00000000-0000-4000-8000-000000000001'
 const user = '00000000-0000-4000-8000-000000000002'
-const compiled = (...capability: [] | [boolean]) =>
-  db.selectNoFrom(scimSuspended(organization, user, ...capability).as('suspended')).compile()
+const compiled = (capability: boolean) =>
+  db.selectNoFrom(scimSuspended(organization, user, capability).as('suspended')).compile()
+
+function scanSuspensionCalls(source: string) {
+  const calls: { line: number; hasDecision: boolean }[] = []
+  function visit(value: unknown): void {
+    if (value === null || typeof value !== 'object') return
+    const node = value as {
+      type?: string
+      callee?: { type: string; name?: string }
+      arguments?: { type: string; name?: string; value?: unknown }[]
+      loc?: { start: { line: number } }
+    }
+    if (
+      node.type === 'CallExpression' &&
+      node.callee?.type === 'Identifier' &&
+      node.callee.name === 'scimSuspended'
+    ) {
+      const decision = node.arguments?.[2]
+      calls.push({
+        line: node.loc?.start.line ?? 0,
+        hasDecision:
+          node.arguments?.length === 3 &&
+          decision?.type !== 'SpreadElement' &&
+          !(decision?.type === 'BooleanLiteral' && decision.value === false) &&
+          !(decision?.type === 'Identifier' && decision.name === 'undefined'),
+      })
+    }
+    for (const child of Object.values(value)) visit(child)
+  }
+  visit(parse(source, { sourceType: 'module', plugins: ['typescript'] }).program)
+  return calls
+}
 
 // The statement every production authorization path embeds while SCIM resources are off.
 const production = `select CASE WHEN EXISTS (
@@ -36,11 +68,10 @@ const production = `select CASE WHEN EXISTS (
 
 describe('SCIM suspension statement', () => {
   it('is unchanged and reads no Group storage without the resource capability', () => {
-    for (const statement of [compiled(), compiled(false)]) {
-      expect(statement.sql).toBe(production)
-      expect(statement.parameters).toEqual([organization, user, organization])
-      expect(statement.sql).not.toContain('scim_team_managed_memberships')
-    }
+    const statement = compiled(false)
+    expect(statement.sql).toBe(production)
+    expect(statement.parameters).toEqual([organization, user, organization])
+    expect(statement.sql).not.toContain('scim_team_managed_memberships')
   })
 
   it('also reads a managed membership suspension with the resource capability', () => {
@@ -59,8 +90,8 @@ describe('SCIM suspension statement', () => {
   })
 
   it('is given the capability decision by every caller', () => {
-    // A caller that leaves the third argument out would silently keep a directory-suspended
-    // child member active on its path once the capability is on.
+    // A caller that drops the decision would keep a directory-suspended child member
+    // active on its path while the resource capability is on.
     const root = join(import.meta.dirname, '../../..')
     const sources = ['apps', 'packages'].flatMap((workspace) =>
       readdirSync(join(root, workspace), { recursive: true, encoding: 'utf8' })
@@ -74,34 +105,29 @@ describe('SCIM suspension statement', () => {
         )
         .map((file) => join(workspace, file)),
     )
-    const calls: { file: string; arguments: number }[] = []
-    for (const file of sources) {
+    const calls = sources.flatMap((file) => {
       const source = readFileSync(join(root, file), 'utf8')
-      for (const match of source.matchAll(/\bscimSuspended\(/g)) {
-        let depth = 1
-        let count = 1
-        let text = ''
-        for (let index = match.index + match[0].length; depth > 0; index++) {
-          const character = source[index] as string
-          if ('([{'.includes(character)) depth++
-          else if (')]}'.includes(character)) depth--
-          else if (character === ',' && depth === 1) {
-            if (
-              source
-                .slice(index + 1)
-                .trimStart()
-                .startsWith(')')
-            )
-              continue
-            count++
-          }
-          text += character
-        }
-        expect(text.trim(), file).not.toBe(')')
-        calls.push({ file, arguments: count })
-      }
-    }
+      if (!source.includes('scimSuspended')) return []
+      return scanSuspensionCalls(source).map((call) => ({ file, ...call }))
+    })
     expect(calls.length).toBeGreaterThanOrEqual(25)
-    expect(calls.filter((call) => call.arguments !== 3)).toEqual([])
+    expect(calls.filter((call) => !call.hasDecision)).toEqual([])
+  })
+
+  it('ignores comments and strings and detects omitted or hard-coded off decisions', () => {
+    const source = [
+      '// scimSuspended(([',
+      'const example = "scimSuspended({";',
+      'scimSuspended(org, user);',
+      'scimSuspended(org, user, false);',
+      'scimSuspended(org, user, undefined);',
+      'scimSuspended(ref("org"), ref("user"), flags.scimResourcesEnabled === true,);',
+    ].join('\n')
+    expect(scanSuspensionCalls(source)).toEqual([
+      { line: 3, hasDecision: false },
+      { line: 4, hasDecision: false },
+      { line: 5, hasDecision: false },
+      { line: 6, hasDecision: true },
+    ])
   })
 })

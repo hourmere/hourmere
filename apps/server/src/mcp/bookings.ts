@@ -298,7 +298,7 @@ export function bookingTools({
   automaticZoom,
   rateLimits = {},
 }: BookingToolsDeps): Tool[] {
-  const pub: PublicContext = {
+  const publicContext = (caller: McpCaller): PublicContext => ({
     db,
     waitlistSecret,
     smtpConfigured,
@@ -308,7 +308,8 @@ export function bookingTools({
     smsRemindersAvailable,
     automaticZoom,
     bookingMaxInviteeReschedules,
-  }
+    ...(caller.scimResourcesEnabled && { scimResourcesEnabled: true }),
+  })
   const context = (caller: McpCaller): ServiceContext => ({
     db,
     principal: caller,
@@ -371,6 +372,7 @@ export function bookingTools({
       const longest = start.add({ hours: MAX_SLOT_RANGE_DAYS * 24 })
       const end = Temporal.Instant.compare(nextDay, longest) > 0 ? longest : nextDay
       const pageInput = { handle: (args.teamSlug ?? args.handle) as string, slug: args.slug }
+      const pub = publicContext(call.caller)
       const eventType = await (args.teamSlug !== undefined
         ? getPublicTeamEventType
         : getPublicEventType)(pub, pageInput)
@@ -434,6 +436,7 @@ export function bookingTools({
     },
     async run(args, call) {
       call.rateLimit(bookLimit)
+      const pub = publicContext(call.caller)
       if (args.routeToken !== undefined) {
         return bookRoutingContinuation(
           { ...pub, routingFormsEnabled, routingSecret, receiptNow },
@@ -543,7 +546,7 @@ export function bookingTools({
         )
       }
       return rescheduleManagedBooking(
-        pub,
+        publicContext(call.caller),
         args.manageToken,
         {
           start: Temporal.Instant.from(args.start),
@@ -582,7 +585,7 @@ export function bookingTools({
       }
       call.rateLimit(manageLimit)
       return cancelManagedBooking(
-        pub,
+        publicContext(call.caller),
         args.manageToken,
         { reason: args.reason, rescheduleRequestId: args.rescheduleRequestId },
         origin(call.caller),
