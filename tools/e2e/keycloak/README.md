@@ -1,4 +1,4 @@
-# Keycloak OIDC browser fixture
+# Keycloak test fixture
 
 The fixture runs the official Keycloak 26.8.2 container pinned to the multi-platform
 image digest `sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3`
@@ -63,3 +63,30 @@ teardown removes the exact container it owns and its private temporary files. Ea
 container carries a unique `com.hourmere.e2e.keycloak-owner` label. The fixture uses the
 exact name and label to recover ownership if Docker fails after creating a container.
 Admin credentials stay in private fixture state and Docker logging is disabled.
+
+## Outbound SCIM capture
+
+The browserless SCIM spec uses the same Keycloak image, one container per worker and a
+disposable realm per test. Install Node dependencies, Docker and OpenSSL, and start a
+PostgreSQL instance whose bootstrap account can create and drop test databases. Run from
+the repository root in an escalated shell under the repository's Playwright rules.
+
+```sh
+HOURMERE_E2E_BOOTSTRAP_URL=postgres://hourmere:hourmere@localhost:5432/hourmere \
+  npm run test --workspace @hourmere/e2e -- --config=playwright.scim.config.ts
+```
+
+The opt-in spec runs outside the required browser shards. It downloads the versioned
+JAR from its official release and verifies its SHA-256 before starting the container.
+Linux uses the existing host network and Keycloak ports below the ephemeral range.
+Docker Desktop on macOS reaches the loopback-only Hourmere listener through
+`host.docker.internal`. Keycloak waits for discovery before the test creates its realm.
+The plugin only allows requests to the local SCIM host. A per-realm file vault supplies
+the random provisioning bearer. Teardown deletes the target and realm, then releases the
+listener, database, worker container and its private files.
+
+Each JSON line in the Playwright output shows a SCIM request and response. The capture
+keeps the method, resource path, selected query fields, selected SCIM JSON fields and
+status. It aliases generated IDs and includes only allowlisted fixture text. Headers,
+origins, timestamps, raw errors and credentials are omitted. The observed provisioning
+sequence and upstream capability are recorded in [docs/scim.md](../../../docs/scim.md#local-keycloak-harness).
