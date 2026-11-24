@@ -110,6 +110,7 @@ const DATA_OWNERS: Readonly<Record<string, readonly string[]>> = {
   ],
   'apps/server/src/sso-oidc-sign-in.ts': ['sso_providers'],
   'apps/server/src/sso-saml-replay.ts': ['sso_replay_cache'],
+  'apps/server/src/sso-saml-sign-in.ts': ['sso_attempts', 'sso_identity_links', 'sso_providers'],
   'apps/server/src/sso-saml-start.ts': ['sso_attempts', 'sso_providers'],
   'apps/server/src/sso-link-recovery.ts': [
     'sso_providers',
@@ -234,7 +235,7 @@ function productionSources(): string[] {
   return files.sort()
 }
 
-it('keeps SAML response timing and replay consumption out of production composition', () => {
+it('limits SAML response timing and replay consumption to the guarded sign-in adapter', () => {
   const module = 'apps/server/src/sso-saml-replay.ts'
   const mention =
     /\b(?:validateSamlTiming|consumeSamlReplay|purgeExpiredSamlReplay|SamlTimingError)\b/
@@ -243,10 +244,10 @@ it('keeps SAML response timing and replay consumption out of production composit
   expect(sources).toContain('tools/cli/src/cli.ts')
   expect(
     sources.filter((file) => mention.test(readFileSync(join(rootPath, file), 'utf8'))),
-  ).toEqual([module])
+  ).toEqual([module, 'apps/server/src/sso-saml-sign-in.ts'])
   expect(
     sources.filter((file) => /sso-saml-replay/.test(readFileSync(join(rootPath, file), 'utf8'))),
-  ).toEqual(['apps/server/src/sso-saml-start.ts'])
+  ).toEqual(['apps/server/src/sso-saml-sign-in.ts', 'apps/server/src/sso-saml-start.ts'])
 })
 
 describe('SSO configuration and identity storage are tables only', () => {

@@ -206,6 +206,7 @@ import {
   type SsoRecoveryEnrollmentQueue,
   ssoRecoveryEnrollmentEmailJob,
 } from './sso-recovery-enrollment.ts'
+import { samlSignInRoutes } from './sso-saml-sign-in.ts'
 import type { InvitationSummaryMailLimits } from './team-invitations.ts'
 import { createWorkerHealthApp } from './worker-health.ts'
 
@@ -730,7 +731,7 @@ export function productionAppOptions({
     waitlist,
     ssoTeamReads: { capabilities: sso, db },
     // Mounted in every state. Mailbox proof serves recovery and trust-reducing operations
-    // while the setting is off; the OIDC endpoints answer 404 sso_disabled then.
+    // while the setting is off; the protocol endpoints answer 404 sso_disabled when off.
     ssoMailboxProof: mailboxProofRoutes({
       capabilities: sso,
       db,
@@ -750,6 +751,12 @@ export function productionAppOptions({
             query: { disableRefresh: true, disableCookieCache: true },
           })
         )?.session,
+    }),
+    ssoSamlSignIn: samlSignInRoutes({
+      capabilities: sso,
+      db,
+      configurationKey: ssoConfigurationKey,
+      session: { secret: config.BETTER_AUTH_SECRET },
     }),
     // db is closed by the caller.
     routes: productRoutes({

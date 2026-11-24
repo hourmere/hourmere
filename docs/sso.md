@@ -701,13 +701,31 @@ tests. It creates an HTTP-Redirect AuthnRequest with an issuer and ACS URL deriv
 the existing HttpOnly, SameSite=Lax, Path=/ binding cookie (Secure and `__Host-` on HTTPS).
 The attempt stores the request ID through its row ID, plus the SHA-256 digests of the
 binding and the opaque RelayState. Its deadline is 600 seconds from the database clock,
-with no skew on request expiry. The start validates `returnTo` under `/app`. A later
-completion step will store and apply that return path. SAML stays hard-off. Selecting a
-SAML provider returns `404 sso_disabled` while OIDC follows its operator setting, default false.
+with no skew on request expiry. An encrypted cookie tied to the request keeps the
+validated `returnTo` under `/app` until completion. SAML stays hard-off. Selecting an
+enabled SAML provider returns `404 sso_disabled` while OIDC follows its operator setting,
+default false.
 
 进程内测试可发起 SAML 登录。服务器先保存请求标识、RelayState 和浏览器绑定的摘要及过期时间，
 再返回身份提供方的跳转 URL 并设置绑定 Cookie。请求有效期为 600 秒。SAML 在生产环境保持关闭，
 选择 SAML 提供方会返回 `404 sso_disabled`。OIDC 登录仍由原有设置控制，默认关闭。
+
+In-process SAML fixtures can complete sign-in for an already-linked persistent NameID
+scoped to the configured IdP and SP, with its previously proven email. The ACS verifies
+the signed assertion and commits request consumption, replay digests and the pending
+attempt together. The pending attempt lasts
+up to 300 seconds and cannot outlive the initiating request. The ACS redirects
+to a confirmation form and sets an encrypted, HttpOnly pending-result cookie. The GET is
+inert. The form POST requires the exact instance origin and the original browser binding.
+Before issuing a session and browser proof, it rechecks the assertion deadline, provider
+revision, live link, team membership and domain claim. The pending result is used once and
+its cookies are cleared on success. A missing, expired or wrong-browser result returns
+`400 sso_saml_completion_invalid`. Production ACS and completion return `404 sso_disabled`.
+
+进程内测试可用已关联的持久 NameID 和已验证邮箱完成 SAML 登录。ACS 校验签名后保存待确认结果，
+并将浏览器转到确认页面。在发起登录的浏览器中选择**继续登录**，服务器会重新校验断言有效期和账号
+的团队访问资格，然后创建会话及浏览器凭据。待确认结果只能使用一次。生产环境中 ACS 和确认端点
+均返回 `404 sso_disabled`。
 
 ### Fetching, credentials and audit
 
@@ -941,6 +959,7 @@ The stable domain codes are exactly:
 | `sso_recovery_required` | 409 | Enforcement needs at least one usable recovery owner (a current owner with accepted status), the last recovery owner tries to leave, be removed or lose the owner role, or the account affected by a link retirement lacks a verified login mailbox |
 | `sso_mailbox_proof_invalid` | 400 | Mailbox proof consume refused: unknown, expired, consumed or another attempt's token, another browser, session or person, or a provider no longer at the attempt's revision, all with one identical response |
 | `sso_oidc_completion_invalid` | 400 | The OIDC completion result or its own mailbox proof is missing, expired, consumed, bound to a different browser or no longer current |
+| `sso_saml_completion_invalid` | 400 | The SAML completion result is missing, expired, consumed, bound to a different browser or no longer current |
 | `sso_invitation_required` | 409 | The proven OIDC subject needs explicit acceptance of a current team invitation |
 | `sso_email_collision` | 409 | The independently proven new mailbox belongs to another account. Only the browser completing its own attempt can receive this response after proof |
 | `sso_not_found` | 404 | Unknown, other-team or retired provider, domain, link, nomination or delegation ID, all with one identical response; a nomination addressed to another owner and another person's delegation answer the same way. Only an authorized repeat delete of the team's own retired provider succeeds idempotently |
@@ -1877,12 +1896,13 @@ only GET `/api/v1/team/sso/providers` (`listSsoProviders`) and GET
 `/api/v1/team/sso/policy` (`getSsoPolicy`) in OpenAPI, route and literal inventories,
 and their exact CLI command/tool mappings. Production requests prove that both reads
 return `404 sso_disabled` before caller or database lookup, including malformed query
-parameters. MCP lists neither tool while off and direct calls return `sso_disabled`. There
-are also three earlier exact-path exemptions. The guarded auth-protocol endpoints that a
+parameters. MCP lists neither tool while off and direct calls return `sso_disabled`. The
+guarded auth-protocol endpoints that a
 built step mounts while hard-off, because each must answer `404 sso_disabled` itself
 (the Mailbox proof pair `/api/auth/sso/mailbox-proof/send` and `/consume`, the OIDC sign-in
-pair `/api/auth/sign-in/sso` and `/api/auth/sso/callback/{providerId}`, and OIDC completion
-at `/api/auth/sso/oidc/complete`), are exempt
+pair `/api/auth/sign-in/sso` and `/api/auth/sso/callback/{providerId}`, OIDC completion
+at `/api/auth/sso/oidc/complete`, and the SAML ACS and completion paths, `/api/auth/sso/saml2/sp/acs/{providerId}`
+and `/api/auth/sso/saml2/complete`), are exempt
 in the route inventory and the source literals only, and only because the suite requests
 each of them in the app built from `productionAppOptions` with `SSO_OIDC_ENABLED=true` and
 `SSO_SAML_ENABLED=true` in the environment and requires `404 {"error":"sso_disabled"}` for
