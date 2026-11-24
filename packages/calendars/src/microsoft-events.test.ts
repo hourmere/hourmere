@@ -392,11 +392,9 @@ describe('Microsoft Graph Teams event fixtures', () => {
     allowedOnlineMeetingProviders: ['skypeForBusiness'],
   }
 
-  // Personal accounts can use the calendar API. The empty list is a synthetic Graph
-  // projection for a personal mailbox, based on Outlook's Business Exchange requirement.
-  // https://learn.microsoft.com/en-us/graph/api/calendar-post-events?view=graph-rest-1.0#permissions
-  // https://support.microsoft.com/en-us/teams/meetings/schedule-a-microsoft-teams-meeting-from-outlook
-  const personalCalendar = { id: calendarId, allowedOnlineMeetingProviders: [] }
+  // Graph documents the consumer provider in the calendar's allowed provider collection.
+  // https://learn.microsoft.com/en-us/graph/api/resources/calendar?view=graph-rest-1.0#properties
+  const personalCalendar = { id: calendarId, allowedOnlineMeetingProviders: ['skypeForConsumer'] }
 
   // Adapted from Microsoft's calendar online-meeting example, with synthetic values and
   // Hourmere's existing transactionId, UTC booking projection and private event metadata.
@@ -569,7 +567,6 @@ describe('Microsoft Graph Teams event fixtures', () => {
       graphCode: 'ServiceUnavailable',
       code: 'provider_unavailable',
       retryAfter: '90',
-      retryAfterMs: 90_000,
     },
   ])(
     'sanitizes Teams HTTP $status without resending the write',

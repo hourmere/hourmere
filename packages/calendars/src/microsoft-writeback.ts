@@ -46,7 +46,9 @@ const stateSchema = z.object({
   createProjection: projectionSchema.optional(),
   patchProjections: z.array(projectionSchema).max(maxAttempts).optional(),
   seatCount: z.number().int().positive().optional(),
-  teamsStatus: z.enum(['pending', 'supported', 'ready', 'teams_unavailable']).optional(),
+  teamsStatus: z
+    .enum(['pending', 'supported', 'join_url_pending', 'ready', 'teams_unavailable'])
+    .optional(),
   teamsJoinUrl: teamsJoinUrl.optional(),
   countRevision: z
     .string()
@@ -735,7 +737,7 @@ async function writeDestination(
       deleted?: DeletedEvent | true,
     ) => {
       if (!ownsLease(await readState(trx, payload, target, true), lease)) return
-      if (state.status === 'succeeded') {
+      if (event || state.status === 'succeeded') {
         await saveMapping(trx, payload, target, lease.mappedBookingId, desired, event, mapping)
         if (mapping || patchSent || deleted) await resetWritebackSnapshot(trx, target.calendarId)
         if (deleted && deleted !== true) {
@@ -816,7 +818,10 @@ async function writeDestination(
     let event: MicrosoftBookingEvent | undefined
     let deleted: DeletedEvent | true | false | undefined
     let posted = false
-    const includeTeams = lease.teamsStatus === 'supported' || lease.teamsStatus === 'ready'
+    const includeTeams =
+      lease.teamsStatus === 'supported' ||
+      lease.teamsStatus === 'join_url_pending' ||
+      lease.teamsStatus === 'ready'
     try {
       const { token, scopes } = await getMicrosoftCalendarToken(
         deps.microsoft,
@@ -852,7 +857,7 @@ async function writeDestination(
           revision: desired.revision,
           teamsStatus: supported ? 'supported' : 'teams_unavailable',
         })
-        return true
+        return 'probed'
       } else if (mapping) {
         event = await updateMappedEvent(
           scope,
@@ -906,8 +911,27 @@ async function writeDestination(
             onPatch,
           )
       }
-      if (event && includeTeams && !event.teamsJoinUrl)
-        return finish('provider_unavailable', backoff, !mapping)
+      if (event && includeTeams && !event.teamsJoinUrl) {
+        // Graph confirmed the copy. Retry its meeting details using the saved event ID.
+        return complete(
+          writeFailure(
+            {
+              ...lease,
+              mappedBookingId: desired.bookingId,
+              lookupOnly: false,
+              createRevision: undefined,
+              createProjection: undefined,
+              patchProjections: undefined,
+              teamsStatus: 'join_url_pending',
+              teamsJoinUrl: undefined,
+            },
+            clock(),
+            'provider_unavailable',
+            backoff,
+          ),
+          event,
+        )
+      }
     } catch (error) {
       if (!(error instanceof MicrosoftCalendarError)) throw error
       if (error.code === 'needs_reauth') {
@@ -935,11 +959,7 @@ async function writeDestination(
         error.status !== 408
       )
         return finish('calendar_unavailable')
-      return finish(
-        'provider_unavailable',
-        Math.max(error.retryAfterMs ?? 0, backoff),
-        posted || possiblyCreated,
-      )
+      return finish('provider_unavailable', backoff, posted || possiblyCreated)
     }
     const joinUrl = includeTeams ? event?.teamsJoinUrl : undefined
     return complete(
@@ -1004,9 +1024,12 @@ export async function writeMicrosoftCalendar(
           .execute()
   for (const destination of destinations) {
     signal.throwIfAborted()
-    // Reconcile once more after probing Teams and after a concurrent booking revision.
-    for (let pass = 0; pass < 3; pass++) {
-      if (!(await writeDestination(deps, payload, destination, signal))) break
+    let maxPasses = 2
+    for (let pass = 0; pass < maxPasses; pass++) {
+      const result = await writeDestination(deps, payload, destination, signal)
+      if (!result) break
+      // A capability probe reserves one pass in addition to the usual write and reconciliation.
+      if (result === 'probed') maxPasses = 3
     }
   }
 }

@@ -55,8 +55,10 @@ The ID uses the same format as the busy snapshot.
 For a test-enabled Teams booking, the pinned destination also records `teamsStatus`.
 The worker checks the selected calendar's `allowedOnlineMeetingProviders` and persists the
 result before creating the event so job replays keep the same payload and `transactionId`.
-`ready` stores `teamsJoinUrl` in the private writeback record. `teams_unavailable` records a
-calendar without Teams support, with an ordinary Outlook event still written. The link is
+`ready` stores `teamsJoinUrl` in the private writeback record. `join_url_pending` records a
+confirmed event without a valid Teams link. The event mapping is saved so bounded retries can
+read the same event by ID. `teams_unavailable` records a calendar without Teams support, with
+an ordinary Outlook event still written. The link is
 cleared when cancellation reconciles; calendar connection summaries exclude it.
 See [Microsoft Calendar](https://hourmere.com/docs/microsoft-calendar).
 
