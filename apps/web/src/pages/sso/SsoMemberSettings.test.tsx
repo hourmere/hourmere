@@ -360,7 +360,8 @@ describe('Member SSO settings', () => {
   })
 
   it.each([
-    { viewer: teamMe, enabled: false },
+    // Off, the server sends no summary for a team without stored SSO state.
+    { viewer: { ...ME, organization: team }, enabled: false },
     { viewer: { ...ME, sso: teamMe.sso }, enabled: true },
   ])(
     'keeps ordinary account settings and omits member SSO outside enabled team sessions',

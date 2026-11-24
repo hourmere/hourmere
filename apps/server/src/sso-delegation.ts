@@ -13,7 +13,7 @@ import { DomainError } from '@hourmere/scheduling'
 import { HTTPException } from 'hono/http-exception'
 import { sql } from 'kysely'
 import { z } from 'zod'
-import { requireSsoEnabled } from './sso.ts'
+import { requireSsoEnabled, requireSsoRetained } from './sso.ts'
 import { BIND_SSO_DELEGATION, openDelegationProof } from './sso-delegation-proof.ts'
 import { normalizeSsoDomain } from './sso-domains.ts'
 import {
@@ -349,7 +349,7 @@ export async function revokeSsoDelegation(
   headers: Headers,
   bindingId: string,
 ) {
-  requireSsoEnabled(deps.capabilities)
+  requireSsoRetained(deps.capabilities)
   const actor = delegationActor(deps, principal, headers)
   const { organizationId, userId } = actor
   await deps.db.transaction().execute(async (trx) => {

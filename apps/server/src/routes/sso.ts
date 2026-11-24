@@ -2,7 +2,7 @@ import { createRoute, z } from '@hono/zod-openapi'
 import type { MiddlewareHandler } from 'hono'
 import type { CallerEnv } from '../caller.ts'
 import { authenticated, errorResponses, json, type RouteModule } from '../openapi.ts'
-import { requireSsoEnabled } from '../sso.ts'
+import { requireSsoRetained } from '../sso.ts'
 import { restTeamReadAccess, ssoRecoveryReadPrincipal } from '../sso-read-routes.ts'
 import { authorizeSsoRead, getSsoPolicy, listSsoProviders, type SsoReadDeps } from '../sso-reads.ts'
 import { EXPECTED_ORGANIZATION_HEADER, organizationContextAccess } from '../team-management.ts'
@@ -57,7 +57,7 @@ const recoveryReadHeaders = z.object({
 
 export function ssoRoutes(deps: SsoReadDeps): RouteModule {
   const enabled: MiddlewareHandler<CallerEnv> = async (_c, next) => {
-    requireSsoEnabled(deps.capabilities)
+    requireSsoRetained(deps.capabilities)
     await next()
   }
   const responses = errorResponses({
@@ -75,7 +75,7 @@ export function ssoRoutes(deps: SsoReadDeps): RouteModule {
         tags: ['SSO'],
         summary: 'List safe SSO provider drafts for the current team',
         description:
-          'Owner/admin only; read/full API key or authorized MCP OAuth. SSO is being built and is not available yet. Follow nextCursor for all providers. Opaque links and generations are only returned to browser sessions. Configuration, secrets, raw metadata and identity claims are never returned. Objects and status strings may gain values.',
+          'Owner/admin only; read/full API key or authorized MCP OAuth. OIDC SSO is off unless the operator sets SSO_OIDC_ENABLED=true; while off, this read still answers for stored configuration. Follow nextCursor for all providers. Opaque links and generations are only returned to browser sessions. Configuration, secrets, raw metadata and identity claims are never returned. Objects and status strings may gain values.',
         security: authenticated,
         middleware: [enabled, caller] as const,
         request: {
@@ -115,7 +115,7 @@ export function ssoRoutes(deps: SsoReadDeps): RouteModule {
         tags: ['SSO'],
         summary: 'Read the current team SSO policy',
         description:
-          'Owner/admin only; read/full API key or authorized MCP OAuth. An unconfigured team has invitation-only admission and no SSO requirement. SSO is being built and is not available yet.',
+          'Owner/admin only; read/full API key or authorized MCP OAuth. An unconfigured team has invitation-only admission and no SSO requirement. OIDC SSO is off unless the operator sets SSO_OIDC_ENABLED=true; while off, this read still answers for stored configuration.',
         security: authenticated,
         middleware: [enabled, caller] as const,
         request: { headers: recoveryReadHeaders },

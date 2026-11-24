@@ -190,6 +190,11 @@ const schema = z
     SCIM_PROVISIONING_ENABLED: optional(z.enum(['true', 'false'])).transform(
       (value) => value === 'true',
     ),
+    // Organization OIDC sign-in. Empty or unset follows the release default, which is off
+    // until SSO ships. SSO_SAML_ENABLED is not a setting yet and is not read.
+    SSO_OIDC_ENABLED: optional(
+      z.enum(['true', 'false'], { error: 'SSO_OIDC_ENABLED must be true, false or empty' }),
+    ).transform((value) => value === 'true'),
     MCP_OAUTH_ENABLED: optional(z.enum(['true', 'false'])).transform((v) => v === 'true'),
     PORT: z.preprocess(
       (value) => (typeof value === 'string' && value.trim() === '' ? Number.NaN : value),

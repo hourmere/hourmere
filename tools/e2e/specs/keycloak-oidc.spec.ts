@@ -368,7 +368,7 @@ test.describe('JIT team admission', () => {
   })
 })
 
-test.describe('without OIDC injection', () => {
+test.describe('with the OIDC setting off', () => {
   test.use({ oidcEnabled: false })
 
   test('the same seeded fixture offers no SSO sign-in, link, or admission entry', async ({

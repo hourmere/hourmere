@@ -192,6 +192,7 @@ import { parseRoutingFormsEnabled, resolveRoutingFormsEnabled } from './routing-
 import { productionScimResourcesEnabled } from './scim.ts'
 import { closeConnectionsWhen, closeServer } from './shutdown.ts'
 import { configuredSmsJobs, createConfiguredSmsInbound } from './sms.ts'
+import { type SsoCapabilities, ssoRetained } from './sso.ts'
 import { SSO_DOMAIN_RECHECK_JOB, ssoDomainRecheckJob } from './sso-domain-recheck.ts'
 import { type SsoLinkRemovalQueue, ssoLinkRemovalEmailJob } from './sso-link-recovery.ts'
 import {
@@ -208,10 +209,23 @@ import {
 import type { InvitationSummaryMailLimits } from './team-invitations.ts'
 import { createWorkerHealthApp } from './worker-health.ts'
 
-// Hard-off until each protocol completes its rollout. Production never overrides these;
-// only in-process tests inject enabled capabilities into productRoutes.
-const ssoOidcEnabled = false
+// SAML stays hard-off until its rollout completes: no setting is read for it, and only
+// in-process tests inject it into productRoutes.
 const ssoSamlEnabled = false
+
+/**
+ * The SSO capabilities of the running server. OIDC follows the operator setting
+ * SSO_OIDC_ENABLED; while it is off, stored SSO state stays readable, recoverable and
+ * reducible (Setting-off behaviour in docs/sso.md).
+ */
+export function productionSsoCapabilities(
+  config: Pick<Config, 'SSO_OIDC_ENABLED'>,
+): SsoCapabilities {
+  return withScimResources(
+    { ssoOidcEnabled: config.SSO_OIDC_ENABLED, ssoSamlEnabled, ssoOperatorSetting: true },
+    productionScimResourcesEnabled,
+  )
+}
 
 /**
  * The /api/v1 route groups, each created with what it needs. The OpenAPI document (and with
@@ -241,13 +255,15 @@ export function productRoutes({
   smsRemindersAvailable = false,
   embedAllowedOrigins,
   scimProvisioningEnabled = false,
+  scimResourcesEnabled,
   slotSnippetsEnabled = false,
   ssoConfigurationKey,
   ssoPrivateTargets,
   ssoLinkRemovalQueue,
   ssoRecoveryEnrollmentQueue,
-  ssoOidcEnabled: oidcEnabled = ssoOidcEnabled,
-  ssoSamlEnabled: samlEnabled = ssoSamlEnabled,
+  ssoOidcEnabled: oidcEnabled = false,
+  ssoSamlEnabled: samlEnabled = false,
+  ssoOperatorSetting,
   routingFormsEnabled: routingEnabled = false,
   successRedirectAllowIpHosts = false,
   successRedirectPolicy = { publicUrl, allowIpHosts: successRedirectAllowIpHosts },
@@ -276,16 +292,19 @@ export function productRoutes({
   smsRemindersAvailable?: boolean
   embedAllowedOrigins?: readonly string[]
   scimProvisioningEnabled?: boolean
+  scimResourcesEnabled?: boolean | undefined
   slotSnippetsEnabled?: boolean
   /** Operator-managed key for encrypted provider configuration; does not enable SSO. */
   ssoConfigurationKey?: Buffer | undefined
   ssoPrivateTargets?: OidcProviderTestDeps['privateTargets']
   ssoLinkRemovalQueue?: SsoLinkRemovalQueue | undefined
   ssoRecoveryEnrollmentQueue?: SsoRecoveryEnrollmentQueue | undefined
-  /** In-process test injection only; no operator setting exists during hard-off. */
+  /** SSO_OIDC_ENABLED as the running server passes it; tests inject it directly. */
   ssoOidcEnabled?: boolean
   /** In-process test injection only; no operator setting exists during hard-off. */
   ssoSamlEnabled?: boolean
+  /** Passed by the running server: a protocol that is off keeps its Setting-off behaviour. */
+  ssoOperatorSetting?: boolean | undefined
   /** In-process test injection only; no operator setting exists during hard-off. */
   routingFormsEnabled?: boolean
   routingBookingReceiptNow?: () => Temporal.Instant
@@ -320,12 +339,16 @@ export function productRoutes({
   enqueueCalendarWritebackRecovery?: CalendarDeps['enqueueWritebackRecovery']
 } & RecurringBookingAdmissionDeps &
   WorkflowSettings): RouteModule[] {
+  const ssoCapabilities = withScimResources(
+    { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled, ssoOperatorSetting },
+    scimResourcesEnabled,
+  )
   return [
     mcpOAuthRoutes({
       auth: mcpAuth,
       db,
       publicUrl,
-      ssoCapabilities: { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled },
+      ssoCapabilities,
     }),
     instanceRoutes({
       publicUrl,
@@ -366,41 +389,41 @@ export function productRoutes({
     webhookRoutes({ db, ...webhooks, workflowsEnabled }),
     brandingRoutes({ db }),
     auditLogRoutes({ db, auditLogRetentionDays }),
-    ssoRoutes({ db, capabilities: { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled } }),
+    ssoRoutes({ db, capabilities: ssoCapabilities }),
     ssoPolicyRoutes({
       db,
       publicUrl,
-      capabilities: { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled },
+      capabilities: ssoCapabilities,
     }),
     ssoDomainRoutes({
       db,
       publicUrl,
-      capabilities: { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled },
+      capabilities: ssoCapabilities,
     }),
     ssoDraftRoutes({
       db,
       publicUrl,
       configurationKey: ssoConfigurationKey,
       privateTargets: ssoPrivateTargets,
-      capabilities: { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled },
+      capabilities: ssoCapabilities,
     }),
     ssoIdentityRecoveryRoutes({
       db,
       publicUrl,
-      capabilities: { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled },
+      capabilities: ssoCapabilities,
       notificationQueue: ssoLinkRemovalQueue,
     }),
     ssoRecoveryEnrollmentRoutes({
       db,
       publicUrl,
-      capabilities: { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled },
+      capabilities: ssoCapabilities,
       notificationQueue: ssoRecoveryEnrollmentQueue,
     }),
     ssoDelegationRoutes({
       db,
       publicUrl,
       configurationKey: ssoConfigurationKey,
-      capabilities: { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled },
+      capabilities: ssoCapabilities,
     }),
     slackDestinationRoutes({ db, ...webhooks, queue: webhookQueue }),
     eventTypeRoutes({
@@ -503,6 +526,8 @@ export function productTools({
   smtpConfigured,
   publicUrl,
   slotSnippetsEnabled = false,
+  // Hard-off unless the running server passes its configured capabilities.
+  ssoCapabilities: sso = { ssoOidcEnabled: false, ssoSamlEnabled: false },
   routingFormsEnabled: routingEnabled = false,
   followUpHostNotesEnabled,
   workflowRunCursorSecret,
@@ -530,6 +555,8 @@ export function productTools({
   routingBookingReceiptNow?: (() => Temporal.Instant) | undefined
   smtpConfigured?: boolean | undefined
   slotSnippetsEnabled?: boolean | undefined
+  /** Hard-off unless the running server passes its configured capabilities. */
+  ssoCapabilities?: SsoCapabilities | undefined
   routingFormsEnabled?: boolean | undefined
   publicUrl?: string | undefined
   smsRemindersAvailable?: boolean | undefined
@@ -601,7 +628,7 @@ export function productTools({
       workflowRunCursorSecret,
       workflowsEnabled,
     }),
-    ...ssoReadTools({ db, capabilities: { ssoOidcEnabled, ssoSamlEnabled } }),
+    ...ssoReadTools({ db, capabilities: sso }),
     ...routingFormConfigurationTools({
       db,
       routingFormsEnabled: routingEnabled,
@@ -687,6 +714,7 @@ export function productionAppOptions({
     ? Buffer.from(config.SSO_ENCRYPTION_KEY, 'base64')
     : undefined
   const ssoPrivateTargets = config.SSO_PRIVATE_TARGETS
+  const sso = productionSsoCapabilities(config)
   return {
     checkDb,
     scim: { db, enabled: config.SCIM_PROVISIONING_ENABLED },
@@ -700,15 +728,16 @@ export function productionAppOptions({
     webDist: config.WEB_DIST,
     routingFormsEnabled,
     waitlist,
-    ssoTeamReads: { capabilities: { ssoOidcEnabled, ssoSamlEnabled }, db },
-    // Mounted in every state: while hard-off both endpoints answer 404 sso_disabled.
+    ssoTeamReads: { capabilities: sso, db },
+    // Mounted in every state. Mailbox proof serves recovery and trust-reducing operations
+    // while the setting is off; the OIDC endpoints answer 404 sso_disabled then.
     ssoMailboxProof: mailboxProofRoutes({
-      capabilities: { ssoOidcEnabled, ssoSamlEnabled },
+      capabilities: sso,
       db,
       queue: mailboxProofQueue,
     }),
     ssoOidcSignIn: oidcSignInRoutes({
-      capabilities: { ssoOidcEnabled, ssoSamlEnabled },
+      capabilities: sso,
       db,
       configurationKey: ssoConfigurationKey,
       privateTargets: ssoPrivateTargets,
@@ -724,6 +753,7 @@ export function productionAppOptions({
     }),
     // db is closed by the caller.
     routes: productRoutes({
+      ...sso,
       ssoConfigurationKey,
       ssoPrivateTargets,
       ssoLinkRemovalQueue,
@@ -802,6 +832,7 @@ export function productionAppOptions({
         routingSecret: config.BETTER_AUTH_SECRET,
         workflowRunCursorSecret: config.BETTER_AUTH_SECRET,
         workflowsEnabled,
+        ssoCapabilities: sso,
       }),
     }),
   }
@@ -835,13 +866,14 @@ export function productionAuthOptions({
   invitationMailLimits,
   jobs,
 }: ProductionAuthDeps): AuthConfig {
-  const recordAdmissionRemoval = ssoOidcEnabled ? recordSsoAdmissionRemoval : undefined
+  const sso = productionSsoCapabilities(config)
+  const recordAdmissionRemoval = sso.ssoOidcEnabled ? recordSsoAdmissionRemoval : undefined
   return {
     pool,
     db,
     leaveTeamMember: nativeTeamLeave(db, recordAdmissionRemoval),
     recordAdmissionRemoval,
-    ssoCapabilities: { ssoOidcEnabled, ssoSamlEnabled },
+    ssoCapabilities: sso,
     baseURL: config.PUBLIC_URL,
     secret: config.BETTER_AUTH_SECRET,
     mailer,
@@ -889,13 +921,10 @@ async function start(
   restoreConsole: () => void,
 ): Promise<RunningServer> {
   const config = loadConfig(env)
+  const sso = productionSsoCapabilities(config)
   const routingFormsRequested = parseRoutingFormsEnabled(env.ROUTING_FORMS_ENABLED)
   const workflowsEnabled = config.WORKFLOWS_ENABLED
   const role = config.HOURMERE_ROLE
-  const ssoCapabilities = withScimResources(
-    { ssoOidcEnabled, ssoSamlEnabled },
-    productionScimResourcesEnabled,
-  )
   if (config.WEBHOOK_PRIVATE_TARGETS.length)
     console.warn(
       'WEBHOOK_PRIVATE_TARGETS permits operator-trusted private webhook destinations. Self-hosting only; Hourmere Cloud must never enable this setting.',
@@ -1049,7 +1078,7 @@ async function start(
     workflowsEnabled,
     encryptionKey: config.WEBHOOK_ENCRYPTION_KEY,
     privateTargets: config.WEBHOOK_PRIVATE_TARGETS,
-    ssoCapabilities,
+    ssoCapabilities: sso,
   }
   const calendarDeps: CalendarDeps = {
     db,
@@ -1072,7 +1101,7 @@ async function start(
   // Background jobs: every role queues them, `all` and `worker` run them.
   const notificationDeps = {
     db,
-    ssoCapabilities,
+    ssoCapabilities: sso,
     followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,
     mailer,
     publicUrl: config.PUBLIC_URL,
@@ -1137,14 +1166,14 @@ async function start(
   const jobs = createJobs({
     connectionString: config.DATABASE_URL,
     disabledSchedules: [
-      ...(ssoOidcEnabled || ssoSamlEnabled ? [] : [SSO_DOMAIN_RECHECK_JOB]),
+      ...(ssoRetained(sso) ? [] : [SSO_DOMAIN_RECHECK_JOB]),
       ...(role !== 'web' && !runWorkflowJobs ? ['workflow-repair-v1'] : []),
     ],
     definitions: [
       ssoDomainRecheckJob({
         db,
         publicUrl: config.PUBLIC_URL,
-        capabilities: ssoCapabilities,
+        capabilities: sso,
       }),
       ...waitlistMaintenanceJobs({
         scan: () => scanWaitlists(waitlistDeps),
@@ -1195,7 +1224,7 @@ async function start(
       // Delivery drops every job while hard-off; the attempt cleanup only deletes, so it runs
       // in every state.
       ...mailboxProofJobs({
-        capabilities: ssoCapabilities,
+        capabilities: sso,
         db,
         mailer,
         publicUrl: config.PUBLIC_URL,
@@ -1206,12 +1235,12 @@ async function start(
       }),
       ssoLinkRemovalEmailJob({
         db,
-        capabilities: ssoCapabilities,
+        capabilities: sso,
         mailer,
       }),
       ssoRecoveryEnrollmentEmailJob({
         db,
-        capabilities: ssoCapabilities,
+        capabilities: sso,
         publicUrl: config.PUBLIC_URL,
         mailer,
       }),
@@ -1410,13 +1439,13 @@ async function start(
         resolveCaller: createCallerResolver({
           auth,
           db,
-          ssoCapabilities: { ssoOidcEnabled, ssoSamlEnabled },
+          ssoCapabilities: sso,
         }),
         resolveMcpOAuth: createMcpOAuthResolver({
           auth,
           db,
           publicUrl: config.PUBLIC_URL,
-          ssoCapabilities: { ssoOidcEnabled, ssoSamlEnabled },
+          ssoCapabilities: sso,
         }),
         checkDb,
         waitlist: {

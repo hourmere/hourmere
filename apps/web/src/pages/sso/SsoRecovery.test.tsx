@@ -188,7 +188,8 @@ describe('SSO recovery while hard-off', () => {
     [PATHS.ssoRecovery, 'Page not found'],
   ])('has no entry or SSO request from %s', async (path, heading) => {
     const api = fakeApi({
-      ...signedInAs({ ...TEAM, ssoRecoveryTeams: [RECOVERY_TEAM] }),
+      // Off, the server lists no recovery team and no summary unless SSO state is stored.
+      ...signedInAs(TEAM),
       ...emptyAccount,
       ...emptyTeamLists,
       'GET /api/v1/instance': () =>

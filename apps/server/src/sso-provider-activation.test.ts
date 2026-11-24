@@ -51,6 +51,8 @@ const on = { ssoOidcEnabled: true, ssoSamlEnabled: false }
 const off = { ssoOidcEnabled: false, ssoSamlEnabled: false }
 const bothOn = { ssoOidcEnabled: true, ssoSamlEnabled: true }
 const samlOnly = { ssoOidcEnabled: false, ssoSamlEnabled: true }
+// What the running server passes while SSO_OIDC_ENABLED is unset, empty or false.
+const settingOff = { ssoOidcEnabled: false, ssoSamlEnabled: false, ssoOperatorSetting: true }
 const providerPath = (id: string) => `/api/v1/team/sso/providers/${id}`
 const activationPath = (id: string) => `${providerPath(id)}/activation`
 const activate = { expectedRevision: 1, enabled: true }
@@ -728,7 +730,10 @@ describe.skipIf(!databaseUrl)('SSO provider activation', () => {
     expect(await policy()).toBeUndefined()
   })
 
-  it('can recover without any linked admin and remove trust after OIDC turns off', async () => {
+  it.each([
+    ['SAML alone is on', samlOnly],
+    ['the OIDC setting is off', settingOff],
+  ])('can recover without any linked admin and remove trust when %s', async (_state, offState) => {
     const { provider, claim } = await testedEnabledProvider()
     await db.insertInto('sso_recovery_owners').values(recoveryOwnerValues(fixture)).execute()
     expect(
@@ -743,7 +748,7 @@ describe.skipIf(!databaseUrl)('SSO provider activation', () => {
       200,
     )
 
-    app = instance(samlOnly)
+    app = instance(offState)
     const turnOff = { ...enforce, expectedRevision: 2, requireSso: false }
     const removals = [
       { path: activationPath(provider.id), method: 'POST', body: deactivate },
@@ -759,9 +764,26 @@ describe.skipIf(!databaseUrl)('SSO provider activation', () => {
       await error(await write(path, body, { method }), 403, 'sso_required')
     }
     await error(await write(activationPath(provider.id), activate), 404, 'sso_disabled')
+    // Stored enforcement is kept while the setting is off.
+    expect(await policy()).toMatchObject({ require_sso: true, policy_revision: 2 })
+    if (offState === settingOff) {
+      // Every operation that adds trust is refused while no protocol is on, whatever is stored.
+      const adding = [
+        ['/api/v1/team/sso/domains', 'POST', { name: 'added.example.test' }],
+        [`/api/v1/team/sso/domains/${claim.id}/verify`, 'POST', { expectedGeneration: 1 }],
+        ['/api/v1/team/sso/providers', 'POST', { protocol: 'oidc', displayName: 'Added' }],
+        [providerPath(provider.id), 'PATCH', { expectedRevision: 1, displayName: 'Renamed' }],
+        [`${providerPath(provider.id)}/test`, 'POST', { expectedRevision: 1 }],
+        [`${providerPath(provider.id)}/link`, 'POST', { expectedRevision: 1 }],
+        ['/api/v1/team/sso/recovery', 'POST', { ownerUserId: fixture.owner, expectedRevision: 2 }],
+        [`/api/v1/team/sso/recovery/${randomUUID()}/accept`, 'POST', { expectedRevision: 2 }],
+      ] as const
+      for (const [path, method, body] of adding)
+        await error(await write(path, body, { method }), 404, 'sso_disabled')
+    }
 
     const use = '/api/v1/team/sso/recovery/use'
-    const recovery = await mailbox(await write(use, { expectedRevision: 2 }), samlOnly)
+    const recovery = await mailbox(await write(use, { expectedRevision: 2 }), offState)
     expect(
       (await write(use, { expectedRevision: 2, proofAttemptId: recovery.id }, recovery)).status,
     ).toBe(204)
@@ -769,7 +791,7 @@ describe.skipIf(!databaseUrl)('SSO provider activation', () => {
     expect(disabled.status).toBe(200)
     expect(await disabled.json()).toMatchObject({ requireSso: false, policyRevision: 3 })
     for (const { path, method, body } of removals) {
-      const proof = await mailbox(await write(path, body, { method }), samlOnly)
+      const proof = await mailbox(await write(path, body, { method }), offState)
       expect(
         (await write(path, { ...body, proofAttemptId: proof.id }, { ...proof, method })).status,
       ).toBe(200)
@@ -784,6 +806,15 @@ describe.skipIf(!databaseUrl)('SSO provider activation', () => {
       .where('id', '=', claim.id)
       .executeTakeFirstOrThrow()
     expect(retired.retired_at).toBeInstanceOf(Date)
+    if (offState === settingOff) {
+      // With enforcement off, turning it back on or opening JIT admission still adds trust.
+      for (const body of [
+        { expectedRevision: 3, requireSso: true, admission: 'invitation_only' },
+        { expectedRevision: 3, requireSso: false, admission: 'jit' },
+      ])
+        await error(await setPolicy(body), 404, 'sso_disabled')
+      expect(await policy()).toMatchObject({ require_sso: false, policy_revision: 3 })
+    }
   })
 
   it('points an enforced owner with only a SAML browser proof to recovery for trust reductions', async () => {

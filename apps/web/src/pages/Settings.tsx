@@ -48,7 +48,7 @@ export function SettingsPage() {
   const personal = me.organization.personal
   const recoveryEnabled =
     me.principal.kind === 'session' &&
-    (shell?.ssoOidcEnabled === true || shell?.ssoSamlEnabled === true)
+    (shell?.ssoOidcEnabled === true || shell?.ssoSamlEnabled === true || shell?.ssoStored === true)
   // RequireSession resets this state when the account or active space changes.
   const [linkCallback, setLinkCallback] = useState<string | null | undefined>()
   const [nomination, setNomination] = useState<RecoveryNomination | null | undefined>()
@@ -239,17 +239,20 @@ export function SettingsPage() {
           }
         />
       )}
-      {!personal && me.principal.kind === 'session' && shell?.ssoOidcEnabled === true && (
-        <SsoMemberSettings
-          callbackAttemptId={isLinkCallback ? undefined : linkCallback}
-          onDismissCallback={dismissLinkCallback}
-        />
-      )}
+      {!personal &&
+        me.principal.kind === 'session' &&
+        (shell?.ssoOidcEnabled === true ||
+          (shell?.ssoStored === true && Boolean(me.sso?.links.length))) && (
+          <SsoMemberSettings
+            callbackAttemptId={isLinkCallback ? undefined : linkCallback}
+            onDismissCallback={dismissLinkCallback}
+          />
+        )}
       {(shell?.showSsoSettings || canStartRecovery) && (
         <section className="panel" aria-labelledby="sso-settings-heading">
           <h2 id="sso-settings-heading">{t('Single sign-on')}</h2>
           <div className="form-actions">
-            {shell?.showSsoSettings && shell.ssoOidcEnabled && (
+            {shell?.showSsoSettings && (shell.ssoOidcEnabled || shell.ssoStored) && (
               <Link className="button" to={PATHS.sso}>
                 {t('Identity providers')}
               </Link>
@@ -275,7 +278,7 @@ export function SettingsPage() {
           currentUserId={userId}
           onLeft={() => void refresh({ fresh: true })}
           onReload={confirmReload}
-          canNominateRecoveryOwner={recoveryEnabled && currentOwner}
+          canNominateRecoveryOwner={recoveryEnabled && currentOwner && shell?.ssoStored !== true}
         />
       )}
     </>

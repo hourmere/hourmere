@@ -30,7 +30,7 @@ import { hasAccount, maySignUp, type SignupPolicy, signupConnectionOptions } fro
 import type { SsoAdmissionRemoval } from './sso-admission-blocks.ts'
 import { nativeTeamTransactions, teamTransactionAdapter } from './team-native-atomicity.ts'
 import { createTeamRolePolicy, teamMembershipLimit } from './team-role-policy.ts'
-import { ssoHardOff, type TeamSsoCapabilities, withScimResources } from './team-sso.ts'
+import { ssoHardOff, ssoRetained, type TeamSsoCapabilities, withScimResources } from './team-sso.ts'
 import { nativeTeamSso } from './team-sso-native.ts'
 
 export { type ApiKeyScope, parsePersistedApiKeyMetadata } from './api-key-metadata.ts'
@@ -563,9 +563,7 @@ export function createAuth({
         enableMetadata: true,
         rateLimit: { enabled: true, ...API_KEY_RATE_LIMIT },
       }),
-      ...(ssoCapabilities.ssoOidcEnabled || ssoCapabilities.ssoSamlEnabled
-        ? [apiKeyDelegationSummaries(db, ssoCapabilities)]
-        : []),
+      ...(ssoRetained(ssoCapabilities) ? [apiKeyDelegationSummaries(db, ssoCapabilities)] : []),
       magicLink({
         expiresIn: MAGIC_LINK_MINUTES * 60,
         // Only a hash is stored, so a database leak does not expose usable links.
@@ -645,6 +643,7 @@ export {
   lockTeamSsoProof,
   memoizeTeamSsoAccess,
   ssoHardOff,
+  ssoRetained,
   type TeamReadAccess,
   type TeamReadPolicy,
   type TeamSsoCapabilities,

@@ -26,9 +26,10 @@ import { z } from 'zod'
 import { withClientIpHeader } from './client-ip.ts'
 import { createRateLimiter, type RateLimiter, rateLimitKey } from './rate-limit.ts'
 import {
-  requireSsoEnabled,
+  requireSsoRetained,
   SCIM_MAPPING_CONSENT,
   type SsoCapabilities,
+  ssoRetained,
   USE_SSO_RECOVERY,
 } from './sso.ts'
 import { ssoStorageDiagnostic } from './sso-storage-errors.ts'
@@ -214,8 +215,9 @@ export interface MailboxProofDeliveryDeps {
   log?: ((line: string) => void) | undefined
 }
 
+// Recovery and trust-reducing operations keep their mailbox proof while a setting is off.
 function mailboxProofEnabled(capabilities: SsoCapabilities, mappingEnabled?: boolean) {
-  return mappingEnabled || capabilities.ssoOidcEnabled || capabilities.ssoSamlEnabled
+  return mappingEnabled || ssoRetained(capabilities)
 }
 
 function attemptEnabled(
@@ -337,7 +339,7 @@ export async function consumeMailboxProof(
   input: { attemptId: string; token: string },
   presenter: Presenter,
 ): Promise<boolean> {
-  if (!deps.scimMappingConsentEnabled) requireSsoEnabled(deps.capabilities)
+  if (!deps.scimMappingConsentEnabled) requireSsoRetained(deps.capabilities)
   const clock = deps.now ?? databaseClock
   return deps.db.transaction().execute(async (trx) => {
     // Take the row locks first (a delivery may hold the attempt through SMTP), then read the
@@ -474,7 +476,7 @@ export function mailboxProofRoutes(deps: {
         schema: z.ZodType<T>,
       ): Promise<Response | { input: T; presenter: Presenter; language: InterfaceLanguage }> {
         // While every protocol is off: before Origin, input, rate limits or any lookup.
-        if (!scimMappingConsentEnabled) requireSsoEnabled(deps.capabilities)
+        if (!scimMappingConsentEnabled) requireSsoRetained(deps.capabilities)
         c.header('Cache-Control', 'no-store')
         if (c.req.method !== 'POST') return c.json({ error: 'method_not_allowed' }, 405)
         // A protocol endpoint, not a product write: exact Origin, never a Referer or a key.

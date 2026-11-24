@@ -40,7 +40,10 @@ export function SsoEnforcement({
   busy,
   mutate,
   reload,
+  addsTrust = true,
 }: {
+  /** False while the operator setting is off: enforcement and JIT can only be turned off. */
+  addsTrust?: boolean
   organizationId: string
   owner: boolean
   busy: boolean
@@ -148,7 +151,7 @@ export function SsoEnforcement({
           </p>
           {currentAdmission && admission ? (
             <>
-              {owner && (
+              {owner && (addsTrust || requireSso) && (
                 <>
                   {!requireSso && (
                     <p className="hint">
@@ -173,7 +176,10 @@ export function SsoEnforcement({
                   </fieldset>
                 </>
               )}
-              <form onSubmit={saveAdmission}>
+              <form
+                onSubmit={saveAdmission}
+                hidden={!addsTrust && (requireSso || currentAdmission !== 'jit')}
+              >
                 <fieldset className="form-fieldset" disabled={busy}>
                   <Field
                     id={admissionId}

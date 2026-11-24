@@ -1,14 +1,17 @@
 import type { Db } from '@hourmere/db'
 import { sql } from 'kysely'
 import { liveSsoDelegations } from './sso-delegation-access.ts'
-import type { TeamSsoCapabilities } from './team-sso.ts'
+import { ssoRetained, type TeamSsoCapabilities } from './team-sso.ts'
 
 export interface SsoDelegationSummary {
   id: string
   expiresAt: string
 }
 
-/** Account inventories show live leases, including those prepared before enforcement. */
+/**
+ * Account inventories show live leases, including those prepared before enforcement. A lease
+ * that only its protocol's setting suspends is listed too, so that it can still be revoked.
+ */
 export async function liveSsoDelegationSummaries(
   db: Db,
   capabilities: TeamSsoCapabilities,
@@ -16,10 +19,13 @@ export async function liveSsoDelegationSummaries(
   kind: 'api_key' | 'oauth_grant',
   credentialIds: string[],
 ): Promise<ReadonlyMap<string, SsoDelegationSummary>> {
-  if (!(capabilities.ssoOidcEnabled || capabilities.ssoSamlEnabled) || credentialIds.length === 0)
-    return new Map()
+  if (!ssoRetained(capabilities) || credentialIds.length === 0) return new Map()
 
-  const lease = liveSsoDelegations(kind, capabilities)
+  const lease = liveSsoDelegations(kind, {
+    ...capabilities,
+    ssoOidcEnabled: true,
+    ssoSamlEnabled: true,
+  })
   const result = await sql<{ credential_id: string; id: string; expires_at: Date }>`
     SELECT ${lease.credential} AS credential_id, lease_binding.id, ${lease.expiry} AS expires_at
     ${lease.from}

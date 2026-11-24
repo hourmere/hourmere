@@ -169,6 +169,48 @@ describe.skipIf(!process.env.DATABASE_URL)('SSO /me projection', () => {
         '"principal":{"kind":"session","apiKeyId":null}}',
     )
   })
+  it('adds no summary while the OIDC setting is off for a team without stored SSO state', async () => {
+    const settingOff = { ssoOidcEnabled: false, ssoSamlEnabled: false, ssoOperatorSetting: true }
+    const hardOff = await me(withoutSso, {
+      db: deps.db,
+      capabilities: { ...settingOff, ssoOperatorSetting: false },
+    })
+    const response = await me(
+      withoutSso,
+      { db: deps.db, capabilities: settingOff },
+      browserHeaders(),
+    )
+    expect(response.status).toBe(200)
+    expect(await response.text()).toBe(await hardOff.text())
+  })
+  it('keeps the caller’s own link while the OIDC setting is off and offers nothing that adds trust', async () => {
+    const settingOff = { ssoOidcEnabled: false, ssoSamlEnabled: false, ssoOperatorSetting: true }
+    const response = await me(
+      principal,
+      { db: deps.db, capabilities: settingOff },
+      browserHeaders(),
+    )
+    expect(response.status).toBe(200)
+    const f = fixture
+    expect(((await response.json()) as { sso: unknown }).sso).toEqual({
+      requireSso: true,
+      // No provider to sign in or link with, and no pending attempt to continue.
+      providers: [],
+      attempts: [],
+      links: [
+        { id: f.memberLink.id, providerId: f.provider.id, generation: f.memberLink.generation },
+      ],
+      // The proof is suspended, not revoked: it is not live while the setting is off.
+      proofs: [],
+    })
+    expect(
+      await deps.db
+        .selectFrom('sso_browser_proofs')
+        .select('id')
+        .where('id', '=', proof.id as string)
+        .execute(),
+    ).toHaveLength(1)
+  })
   it('returns only the active team’s safe provider metadata and the caller’s current status', async () => {
     const response = await me(principal, deps, browserHeaders())
     expect(response.status).toBe(200)

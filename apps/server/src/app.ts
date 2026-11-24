@@ -54,6 +54,7 @@ import {
   strictTransportSecurity,
 } from './security-headers.ts'
 import { MAGIC_LINK_CONFIRM_PATH, signInConfirmPage } from './sign-in-confirm.ts'
+import { ssoRetained } from './sso.ts'
 import type { MailboxProofModule } from './sso-mailbox-proof.ts'
 import { readSsoMe } from './sso-me.ts'
 import type { OidcSignInModule } from './sso-oidc-sign-in.ts'
@@ -737,7 +738,7 @@ export function createApp({
   const caller = requireCaller(resolveCaller, { allowedOrigin })
   const capabilities = ssoTeamReads?.capabilities
   const meCaller =
-    capabilities?.ssoOidcEnabled || capabilities?.ssoSamlEnabled
+    capabilities && ssoRetained(capabilities)
       ? requireCaller(resolveCaller, { allowedOrigin, includeSsoRecoveryTeams: true })
       : caller
 
@@ -770,6 +771,7 @@ export function createApp({
         c.req.raw.headers,
         publicUrl,
         access?.policy ?? null,
+        access?.stored,
       ))
     const ssoRecoveryTeams = !access?.suspended && c.var.ssoRecoveryTeams
     return c.json(
