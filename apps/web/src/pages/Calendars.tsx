@@ -132,9 +132,9 @@ const writebackMessages = {
   permissions_missing: 'Reconnect Microsoft Calendar and allow the requested permissions.',
   provider_unavailable: 'Microsoft Calendar could not be reached. Try again shortly.',
   rate_limited: 'Microsoft Calendar has limited requests temporarily.',
-  outcome_unknown:
-    'Hourmere could not confirm whether Microsoft created the original booking copy.',
-  event_conflict: 'Microsoft reported a conflict when creating the booking copy.',
+  outcome_unknown: 'Hourmere could not confirm the latest change to the Outlook booking copy.',
+  event_conflict:
+    'Microsoft reported a conflict with the booking copy. Check the calendar in Outlook.',
 } as const
 
 export function CalendarsPage() {
@@ -619,8 +619,8 @@ export function CalendarsPage() {
                               calendar.writebackStatus === 'failed'
                                 ? 'A booking copy needs attention.'
                                 : calendar.writebackStatus === 'retrying'
-                                  ? 'Hourmere will retry writing a booking copy.'
-                                  : 'A booking copy is waiting to be written.',
+                                  ? 'Hourmere will retry syncing a booking copy.'
+                                  : 'A booking copy has a pending change.',
                             )}{' '}
                             {calendar.writebackError &&
                               Object.hasOwn(writebackMessages, calendar.writebackError) &&
@@ -970,7 +970,7 @@ export function CalendarsPage() {
             >
               <p id="microsoft-calendar-permissions">
                 {t(
-                  'Microsoft will ask for your account identity, continuing access and permission to read and write calendar events. Hourmere checks busy times on the calendars you select and creates private booking copies only on your chosen booking calendar. Connecting is separate from signing in.',
+                  'Microsoft will ask for your account identity, continuing access and permission to read and write calendar events. Hourmere checks busy times on the calendars you select, creates private copies on your chosen booking calendar and updates or removes those copies when bookings change. Connecting is separate from signing in.',
                 )}
               </p>
               {microsoftRecovery && <p>{ui(accountHint(microsoftRecovery))}</p>}

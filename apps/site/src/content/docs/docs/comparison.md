@@ -98,7 +98,7 @@ Check the documented limits when evaluating it:
   active unexpired links, with a 200-link sub-limit for ordinary team members. See the
   [one-time link limits and privacy rules](/docs/one-time-links#limits-and-cleanup).
 - [Microsoft calendar connections](/docs/microsoft-calendar) support busy-time conflict checks
-  and creation of booking copies on your chosen calendar.
+  and private booking copies that follow Hourmere reschedules and cancellations.
 - [Zoom account connections](/docs/zoom-connections) are separate from sign-in and calendar
   connections. Identity-only authorization does not create or read meetings.
 
