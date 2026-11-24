@@ -16,6 +16,7 @@ import {
   publishMicrosoftChanges,
   stageMicrosoftChanges,
 } from './microsoft-snapshot.ts'
+import { SYNC_MAX_AGE_MS } from './sync.ts'
 
 export const MICROSOFT_DELTA_PAGE_BUDGET = 16
 const rolloverLeadHours = 7 * 24
@@ -24,6 +25,7 @@ const windowSchema = z.object({ start: z.iso.datetime(), end: z.iso.datetime() }
 const cursorSchema = windowSchema.extend({ version: z.literal(2), deltaLink: z.string().min(1) })
 const checkpointSchema = windowSchema.extend({
   nextLink: z.string().min(1),
+  startedAt: z.iso.datetime(),
   position: z.int().nonnegative(),
   replace: z.boolean(),
 })
@@ -95,7 +97,7 @@ export async function syncMicrosoftCalendar(
     const removed = () => new DomainError('conflict', 'microsoft_calendar_removed')
     if (calendar.sync_error === 'calendar_removed') return principal ? removed() : undefined
     const persisted = z.record(z.string(), z.unknown()).safeParse(calendar.sync_state)
-    const state = persisted.data ?? {}
+    let state = persisted.data ?? {}
     if (typeof state.retryAt === 'string' && state.retryAt > new Date(clock()).toISOString()) {
       return principal ? new MicrosoftCalendarError('provider_unavailable', 429) : undefined
     }
@@ -157,121 +159,139 @@ export async function syncMicrosoftCalendar(
         ...required,
         end: requiredEnd.add({ hours: rolloverLeadHours }).toString(),
       }
-      const cursor = cursorSchema.safeParse(state).data
-      const saved = checkpointSchema.safeParse(state.microsoftPending).data
-      const resumed = saved && covers(saved, required) ? saved : undefined
-      // Start replacement with overlap so its pages can finish while the published range still serves bookings.
-      const base = cursor && covers(cursor, rollover) ? cursor : undefined
-      let window = resumed ?? base ?? fresh
-      let nextLink = resumed?.nextLink ?? base?.deltaLink
-      let position = resumed?.position ?? 0
-      let replace = resumed?.replace ?? !base
-      let deltaLink: string | undefined
-      let changes: MicrosoftDeltaChange[][] = []
-      const visited = new Set<string>()
       const budget = AbortSignal.timeout(30_000)
       const pageSignal = AbortSignal.any([signal, budget])
-      readingCalendar = true
-      for (let request = 0; request < MICROSOFT_DELTA_PAGE_BUDGET; request++) {
-        if (nextLink) visited.add(nextLink)
-        let page: MicrosoftDeltaPage
-        try {
-          page = await client.deltaEvents(
-            accessToken,
-            calendar.external_id,
-            {
-              start: Temporal.Instant.from(window.start),
-              end: Temporal.Instant.from(window.end),
-              link: nextLink,
-            },
-            pageSignal,
-          )
-        } catch (error) {
-          // A local budget expiry can still checkpoint pages already fetched.
-          if (
-            budget.aborted &&
-            !signal.aborted &&
-            (changes.length || expired) &&
-            error instanceof MicrosoftCalendarError &&
-            error.status === undefined
-          )
-            break
-          if (!(error instanceof MicrosoftDeltaReset) || !nextLink || expired) throw error
-          expired = true
-          expiredCursor = !replace
-          window = fresh
-          replace = true
-          position = 0
-          changes = []
-          nextLink = undefined
-          visited.clear()
-          continue
+      let requests = 0
+      let published = false
+      rounds: do {
+        expired = false
+        expiredCursor = false
+        const cursor = cursorSchema.safeParse(state).data
+        // Checkpoints without a start time cannot establish the age of their staged pages.
+        const saved = checkpointSchema.safeParse(state.microsoftPending).data
+        const resumed = saved && covers(saved, required) ? saved : undefined
+        // Start replacement with overlap so its pages can finish while the published range still serves bookings.
+        const base = cursor && (published || covers(cursor, rollover)) ? cursor : undefined
+        let window = resumed ?? base ?? fresh
+        let nextLink = resumed?.nextLink ?? base?.deltaLink
+        let startedAt = resumed?.startedAt ?? new Date(clock()).toISOString()
+        let position = resumed?.position ?? 0
+        let replace = resumed?.replace ?? !base
+        let deltaLink: string | undefined
+        let changes: MicrosoftDeltaChange[][] = []
+        const visited = new Set<string>()
+        readingCalendar = true
+        while (requests < MICROSOFT_DELTA_PAGE_BUDGET) {
+          requests++
+          if (nextLink) visited.add(nextLink)
+          let page: MicrosoftDeltaPage
+          try {
+            page = await client.deltaEvents(
+              accessToken,
+              calendar.external_id,
+              {
+                start: Temporal.Instant.from(window.start),
+                end: Temporal.Instant.from(window.end),
+                link: nextLink,
+              },
+              pageSignal,
+            )
+          } catch (error) {
+            // A local budget expiry can still checkpoint pages already fetched.
+            if (
+              budget.aborted &&
+              !signal.aborted &&
+              (changes.length || expired || published) &&
+              error instanceof MicrosoftCalendarError &&
+              error.status === undefined
+            ) {
+              if (!changes.length && !expired) break rounds
+              break
+            }
+            if (!(error instanceof MicrosoftDeltaReset) || !nextLink || expired) throw error
+            expired = true
+            expiredCursor = !replace
+            window = fresh
+            replace = true
+            position = 0
+            changes = []
+            nextLink = undefined
+            startedAt = new Date(clock()).toISOString()
+            visited.clear()
+            continue
+          }
+          changes.push(page.changes)
+          nextLink = page.nextLink
+          deltaLink = page.deltaLink
+          if (nextLink && visited.has(nextLink))
+            throw new MicrosoftCalendarError('provider_unavailable')
+          if (deltaLink || budget.aborted) break
         }
-        changes.push(page.changes)
-        nextLink = page.nextLink
-        deltaLink = page.deltaLink
-        if (nextLink && visited.has(nextLink))
+        readingCalendar = false
+        if (!deltaLink && !nextLink && !expired)
           throw new MicrosoftCalendarError('provider_unavailable')
-        if (deltaLink || budget.aborted) break
-      }
-      readingCalendar = false
-      if (!deltaLink && !nextLink && !expired)
-        throw new MicrosoftCalendarError('provider_unavailable')
 
-      // If staging or publication fails, retain the old snapshot and checkpoint, then
-      // record the failure on the calendar in the outer transaction.
-      await sql`SAVEPOINT microsoft_calendar_snapshot`.execute(trx)
-      try {
-        if (!resumed || expired) await clearMicrosoftChanges(trx, calendarId)
-        const bounds = {
-          start: Temporal.Instant.from(window.start),
-          end: Temporal.Instant.from(window.end),
+        // If staging or publication fails, retain the last snapshot and checkpoint, then
+        // record the failure on the calendar in the outer transaction.
+        await sql`SAVEPOINT microsoft_calendar_snapshot`.execute(trx)
+        try {
+          if (!resumed || expired) await clearMicrosoftChanges(trx, calendarId)
+          const bounds = {
+            start: Temporal.Instant.from(window.start),
+            end: Temporal.Instant.from(window.end),
+          }
+          for (const page of changes) {
+            await stageMicrosoftChanges(trx, calendarId, position, bounds, page)
+            position += page.length
+          }
+          const nextState = deltaLink
+            ? {
+                version: 2,
+                start: window.start,
+                end: window.end,
+                timeZone: calendar.time_zone,
+                deltaLink,
+              }
+            : {
+                ...state,
+                ...(expiredCursor ? { deltaLink: undefined } : {}),
+                retryAt: undefined,
+                microsoftPending: nextLink
+                  ? {
+                      start: window.start,
+                      end: window.end,
+                      nextLink,
+                      startedAt,
+                      position,
+                      replace,
+                    }
+                  : undefined,
+              }
+          if (deltaLink) await publishMicrosoftChanges(trx, calendarId, replace)
+          await trx
+            .updateTable('calendars')
+            .set({
+              sync_state: JSON.stringify(nextState),
+              ...(deltaLink ? { last_synced_at: new Date(startedAt), sync_error: null } : {}),
+            })
+            .where('id', '=', calendarId)
+            .execute()
+          await sql`RELEASE SAVEPOINT microsoft_calendar_snapshot`.execute(trx)
+          state = nextState
+        } catch {
+          await sql`ROLLBACK TO SAVEPOINT microsoft_calendar_snapshot`.execute(trx)
+          throw new MicrosoftCalendarError('provider_unavailable')
         }
-        for (const page of changes) {
-          await stageMicrosoftChanges(trx, calendarId, position, bounds, page)
-          position += page.length
+        if (!deltaLink) {
+          if (!published)
+            return principal ? new MicrosoftCalendarError('provider_unavailable') : undefined
+          break
         }
-        if (deltaLink) await publishMicrosoftChanges(trx, calendarId, replace)
-        await trx
-          .updateTable('calendars')
-          .set(
-            deltaLink
-              ? {
-                  sync_state: JSON.stringify({
-                    version: 2,
-                    start: window.start,
-                    end: window.end,
-                    timeZone: calendar.time_zone,
-                    deltaLink,
-                  }),
-                  last_synced_at: new Date(clock()),
-                  sync_error: null,
-                }
-              : {
-                  sync_state: JSON.stringify({
-                    ...state,
-                    ...(expiredCursor ? { deltaLink: undefined } : {}),
-                    retryAt: undefined,
-                    microsoftPending: nextLink
-                      ? {
-                          start: window.start,
-                          end: window.end,
-                          nextLink,
-                          position,
-                          replace,
-                        }
-                      : undefined,
-                  }),
-                },
-          )
-          .where('id', '=', calendarId)
-          .execute()
-      } catch {
-        await sql`ROLLBACK TO SAVEPOINT microsoft_calendar_snapshot`.execute(trx)
-        throw new MicrosoftCalendarError('provider_unavailable')
-      }
-      if (!deltaLink)
-        return principal ? new MicrosoftCalendarError('provider_unavailable') : undefined
+        published = true
+        // Changes to already-read pages can arrive in the next round. Catch up within the
+        // same budget if this snapshot has already aged out, or let the minute dispatcher retry.
+        if (clock() - Date.parse(startedAt) <= SYNC_MAX_AGE_MS) break
+      } while (requests < MICROSOFT_DELTA_PAGE_BUDGET && !pageSignal.aborted)
       await trx
         .updateTable('calendar_connections')
         .set({ last_error: null })

@@ -22,6 +22,9 @@ offering bookings. The connection uses read-only access to Microsoft Graph.
   expires and also rebuilds when Graph expires a cursor. During a rebuild, bookings still
   use the previous snapshot while it is fresh and covers the requested times. An initial
   sync, a failed sync, or a stale or insufficient snapshot leaves the affected times unavailable.
+  A snapshot's 10-minute freshness window starts with its first read. If a round takes longer,
+  Hourmere starts the next incremental read immediately when its remaining budget allows.
+  Otherwise the once-per-minute dispatcher queues the calendar for another read.
   [Graph calendar view delta](https://learn.microsoft.com/en-us/graph/delta-query-events)
 - Graph expands recurring events. Hourmere uses modified occurrences at their updated times
   and removes busy intervals for cancelled occurrences and deleted series. Timed and all-day

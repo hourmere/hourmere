@@ -349,10 +349,11 @@ Microsoft calendar connections use separate `MICROSOFT_CALENDAR_*` client creden
 their own callback and the `calendar_connections.credentials` ciphertext. That flow requests
 `offline_access` with `Calendars.ReadBasic` and requires a refresh token for continued
 calendar access. `calendars.sync_state` stores the Graph delta link, its fixed date window and
-any in-progress page checkpoint. `calendar_microsoft_changes` holds normalized changes until
-Graph returns a final delta link. A transaction publishes these changes together with the cursor
-and clears the staging rows. `calendar_busy` retains the series ID and original start for
-recurring instances so a moved exception can replace its original slot.
+any in-progress page checkpoint, including the round's start time. `calendar_microsoft_changes`
+holds normalized changes until Graph returns a final delta link. A transaction publishes these
+changes together with the cursor, records the round's start as `last_synced_at` and clears the
+staging rows. `calendar_busy` retains the series ID and original start for recurring instances
+so a moved exception can replace its original slot.
 
 ### `public`
 

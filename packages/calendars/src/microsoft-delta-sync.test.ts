@@ -2,7 +2,8 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { assertCachedCalendarSync } from '../../scheduling/src/availability.ts'
+import { assertCachedCalendarSync, findSlots } from '../../scheduling/src/availability.ts'
+import { createFixtures } from '../../scheduling/src/testing.ts'
 import {
   beginMicrosoftConnection,
   type CalendarDeps,
@@ -12,6 +13,7 @@ import {
 } from './index.ts'
 import { calendarDispatchJob } from './jobs.ts'
 import { MICROSOFT_DELTA_PAGE_BUDGET, syncMicrosoftCalendar } from './microsoft-sync.ts'
+import { SYNC_MAX_AGE_MS } from './sync.ts'
 import { calendarTestSession, fakeMicrosoft, TEST_CALENDAR_KEY } from './testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -176,12 +178,15 @@ describe.skipIf(!serverUrl)('incremental Microsoft calendar snapshots', () => {
     expect(() => assertCachedCalendarSync([original], instant())).not.toThrow()
 
     const lastPage = 2 * MICROSOFT_DELTA_PAGE_BUDGET + 2
+    const rebuildStartedAt = now + 1_000
     const requests: string[] = []
     let failedPage: number | undefined
     microsoft.controls.viewHook = (url) => {
       requests.push(url.href)
-      if (url.href === cursor('expired'))
+      if (url.href === cursor('expired')) {
+        now = rebuildStartedAt
         return error('SyncStateNotFound', 410, { Location: 'https://example.invalid/resync' })
+      }
       const page = Number(url.searchParams.get('$skiptoken') ?? '1')
       if (page === 1) expect(url.searchParams.has('startDateTime')).toBe(true)
       if (failedPage === page) return error('ServiceUnavailable', 503)
@@ -201,7 +206,10 @@ describe.skipIf(!serverUrl)('incremental Microsoft calendar snapshots', () => {
     const checkpoint = await metadata()
     expect(checkpoint.last_synced_at).toEqual(original.last_synced_at)
     expect(checkpoint.sync_state).toMatchObject({
-      microsoftPending: { nextLink: continuation(MICROSOFT_DELTA_PAGE_BUDGET) },
+      microsoftPending: {
+        nextLink: continuation(MICROSOFT_DELTA_PAGE_BUDGET),
+        startedAt: new Date(rebuildStartedAt).toISOString(),
+      },
     })
     expect(await ids()).toEqual(['prior'])
     expect(checkpoint.sync_error).toBeNull()
@@ -224,7 +232,6 @@ describe.skipIf(!serverUrl)('incremental Microsoft calendar snapshots', () => {
     expect(requests[0]).toBe(continuation(MICROSOFT_DELTA_PAGE_BUDGET))
     expect(requests).toHaveLength(MICROSOFT_DELTA_PAGE_BUDGET)
     expect(await ids()).toEqual(['prior'])
-    now += 11 * 60_000
     await sync()
     expect(await ids()).toEqual(
       Array.from({ length: lastPage }, (_, index) => `replacement-${index + 1}`).sort(),
@@ -235,9 +242,109 @@ describe.skipIf(!serverUrl)('incremental Microsoft calendar snapshots', () => {
     const published = await metadata()
     expect(published.sync_state).toMatchObject({ deltaLink: cursor('rebuilt') })
     expect(published.sync_state).not.toHaveProperty('microsoftPending')
-    expect(published.last_synced_at).toEqual(new Date(now))
+    expect(published.last_synced_at).toEqual(new Date(rebuildStartedAt))
     expect(() => assertCachedCalendarSync([published], instant(), requiredWindow())).not.toThrow()
   })
+
+  it.each(['next dispatch', 'same run', 'resumed catch-up'])(
+    'never offers a newly busy slot after a stale round with catch-up by %s',
+    async (catchUp) => {
+      const fixtures = createFixtures(db)
+      const hostUserId = owner.user.id
+      const scheduleId = await fixtures.schedule(hostUserId, { timeZone: 'UTC', isDefault: false })
+      const eventTypeId = await fixtures.eventType(owner.organization.id, hostUserId, {
+        hosts: [{ userId: hostUserId, scheduleId }],
+      })
+      const rangeStart = Temporal.Instant.from('2026-03-05T10:00:00Z')
+      const rangeEnd = rangeStart.add({ hours: 1 })
+      const slotStarts = async () =>
+        (
+          await findSlots(db, { eventTypeId, hostUserId, rangeStart, rangeEnd, now: instant() })
+        ).map(({ start }) => start.toString())
+      const unaffectedSlot = rangeStart.add({ minutes: 30 }).toString()
+      microsoft.controls.viewHook = () => finish('before-long-round')
+      await sync()
+      expect(await slotStarts()).toEqual([rangeStart.toString(), unaffectedSlot])
+
+      const pagesLeft = catchUp === 'next dispatch' ? 0 : 1
+      const lastPage = 2 * MICROSOFT_DELTA_PAGE_BUDGET - pagesLeft
+      const catchUpContinuation = continuation(lastPage + 1)
+      const requests: string[] = []
+      let delayedChange: ReturnType<typeof event> | undefined
+      microsoft.controls.viewHook = (url) => {
+        requests.push(url.href)
+        if (url.href === cursor('long-round')) {
+          expect(delayedChange).toBeDefined()
+          now += 1_000
+          const value = [delayedChange]
+          if (catchUp === 'resumed catch-up')
+            return Response.json({ '@odata.nextLink': catchUpContinuation, value })
+          return finish('caught-up', value)
+        }
+        if (url.href === catchUpContinuation) return finish('caught-up')
+        const page =
+          url.href === cursor('before-long-round') ? 1 : Number(url.searchParams.get('$skiptoken'))
+        if (page === lastPage) return finish('long-round')
+        return Response.json({ '@odata.nextLink': continuation(page + 1), value: [] })
+      }
+
+      now += 1_000
+      const startedAt = now
+      await sync()
+      expect(requests).toHaveLength(MICROSOFT_DELTA_PAGE_BUDGET)
+      expect(requests[0]).toBe(cursor('before-long-round'))
+      // A change to a page Graph has already returned only shows up on the next delta read.
+      now += 60_000
+      delayedChange = event('late-change', '2026-03-05T10:00:00', '2026-03-05T10:30:00')
+      now += SYNC_MAX_AGE_MS
+      let followUpStartedAt = now
+      await sync()
+      expect(requests).toHaveLength(2 * MICROSOFT_DELTA_PAGE_BUDGET)
+
+      if (catchUp !== 'same run') {
+        await expect(slotStarts()).rejects.toMatchObject({ code: 'calendar_sync_unavailable' })
+        const stale = await metadata()
+        expect(stale).toMatchObject({
+          last_synced_at: new Date(startedAt),
+          sync_state: { deltaLink: cursor('long-round') },
+          sync_error: null,
+        })
+        expect(await ids()).toEqual([])
+        if (catchUp === 'resumed catch-up') {
+          expect(stale.sync_state).toMatchObject({
+            microsoftPending: {
+              nextLink: catchUpContinuation,
+              startedAt: new Date(followUpStartedAt).toISOString(),
+            },
+          })
+        }
+
+        now += 60_000
+        const enqueued: string[] = []
+        const dispatch = calendarDispatchJob(deps, async (id) => enqueued.push(id))
+        expect(dispatch.schedule?.cron).toBe('* * * * *')
+        await dispatch.handler(
+          {},
+          { id: 'synthetic-job', signal: new AbortController().signal, attempt: 1 },
+        )
+        expect(enqueued).toEqual([calendarId])
+        if (catchUp === 'next dispatch') followUpStartedAt = now
+        await sync()
+      }
+
+      expect(requests.slice(0, lastPage).at(-1)).toBe(continuation(lastPage))
+      expect(requests.slice(lastPage)).toEqual(
+        catchUp === 'resumed catch-up'
+          ? [cursor('long-round'), catchUpContinuation]
+          : [cursor('long-round')],
+      )
+      expect(await metadata()).toMatchObject({
+        last_synced_at: new Date(followUpStartedAt),
+        sync_state: { deltaLink: cursor('caught-up') },
+      })
+      expect(await slotStarts()).toEqual([unaffectedSlot])
+    },
+  )
 
   it.each(['early rollover', 'legacy snapshot'])(
     'serves a covering snapshot during %s',
