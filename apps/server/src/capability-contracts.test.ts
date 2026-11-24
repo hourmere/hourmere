@@ -1,7 +1,11 @@
 import { readFile } from 'node:fs/promises'
+import { SCIM_MAPPING_SCOPE_OPERATIONS } from '@hourmere/auth'
 import { createDb, createPool } from '@hourmere/db'
 import { describe, expect, it } from 'vitest'
-import { apiKeyScopeParityErrors } from '../../../scripts/api-key-scope-parity.ts'
+import {
+  API_KEY_SCOPE_POLICIES,
+  apiKeyScopeParityErrors,
+} from '../../../scripts/api-key-scope-parity.ts'
 import { COMMANDS } from '../../../tools/cli/src/cli.ts'
 import { CROSS_ORIGIN_WRITE } from './openapi.ts'
 import { openApiDocument, openApiRouteInventory } from './openapi-document.ts'
@@ -33,17 +37,33 @@ describe('REST and MCP capability contract', () => {
     // Use the same registry as the running server, without connecting to a database.
     const db = createDb(createPool('postgres://synthetic@127.0.0.1:9/parity-contract'))
     try {
-      const tools = productTools({ db, slotSnippetsEnabled: true, routingFormsEnabled: true })
-      const { document, routes: registeredRest } = await openApiRouteInventory()
+      const {
+        document,
+        routes: registeredRest,
+        scimMappingTools,
+      } = await openApiRouteInventory({
+        scimResourcesEnabled: true,
+      })
+      const tools = [
+        ...productTools({ db, slotSnippetsEnabled: true, routingFormsEnabled: true }),
+        ...scimMappingTools,
+      ]
       const { paths } = document as { paths: Paths }
       const rest = Object.entries(paths).flatMap(([path, item]) =>
         (['get', 'head', 'options', 'trace', 'post', 'put', 'patch', 'delete'] as const).flatMap(
           (method) => (item[method] ? [{ method, path, security: item[method]?.security }] : []),
         ),
       )
-      expect(apiKeyScopeParityErrors({ rest, registeredRest, mcp: tools, cli: COMMANDS })).toEqual(
-        [],
-      )
+      expect(
+        apiKeyScopeParityErrors(
+          { rest, registeredRest, mcp: tools, cli: COMMANDS },
+          {
+            rest: [...API_KEY_SCOPE_POLICIES.rest, ...SCIM_MAPPING_SCOPE_OPERATIONS.rest],
+            mcp: [...API_KEY_SCOPE_POLICIES.mcp, ...SCIM_MAPPING_SCOPE_OPERATIONS.mcp],
+            cli: [...API_KEY_SCOPE_POLICIES.cli, ...SCIM_MAPPING_SCOPE_OPERATIONS.cli],
+          },
+        ),
+      ).toEqual([])
     } finally {
       await db.destroy()
     }
