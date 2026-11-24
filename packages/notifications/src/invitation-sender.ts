@@ -137,6 +137,7 @@ async function originalInviterIsMember(
 
 async function invitationAuthorizationIsCurrent(
   db: Db,
+  deps: InvitationEmailSenderDeps,
   invitation: NonNullable<Awaited<ReturnType<typeof lockedDelivery>>>['invitation'],
   authorizedByUserId: string,
 ) {
@@ -154,7 +155,17 @@ async function invitationAuthorizationIsCurrent(
   try {
     // Each generation carries its authorizing administrator, rather than a browser session.
     // Read current team authority without reversing management's parent-first lock order.
-    await checkTeamManagementMembership(db, authorizedByUserId, invitation.organizationId)
+    await checkTeamManagementMembership(
+      db,
+      authorizedByUserId,
+      invitation.organizationId,
+      false,
+      false,
+      false,
+      false,
+      false,
+      deps.ssoCapabilities?.scimResourcesEnabled === true,
+    )
   } catch (error) {
     if (error instanceof TeamManagementError) return false
     throw error
@@ -193,7 +204,7 @@ async function claimAttempt(deps: InvitationEmailSenderDeps, request: Invitation
     await lockNotificationEmailBudget(trx)
     const authorizedByUserId = delivery.authorized_by_user_id ?? invitation.inviterId
     const authorized =
-      (await invitationAuthorizationIsCurrent(trx, invitation, authorizedByUserId)) &&
+      (await invitationAuthorizationIsCurrent(trx, deps, invitation, authorizedByUserId)) &&
       (
         await currentInvitationSsoAccess(
           trx,
@@ -278,7 +289,7 @@ async function currentMessage(deps: InvitationEmailSenderDeps, claim: Claim) {
       await terminal(trx, claim, 'skipped', 'invitation_ineligible', now)
       return
     }
-    if (!(await invitationAuthorizationIsCurrent(trx, invitation, authorizedByUserId))) {
+    if (!(await invitationAuthorizationIsCurrent(trx, deps, invitation, authorizedByUserId))) {
       await terminal(trx, claim, 'skipped', 'invitation_ineligible', now)
       return
     }

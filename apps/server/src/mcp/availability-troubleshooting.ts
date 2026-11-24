@@ -36,6 +36,7 @@ export function availabilityTroubleshootingTools({
             automaticMeet,
             automaticZoom,
             principal: call.caller,
+            ...(call.caller.scimResourcesEnabled && { scimResourcesEnabled: true }),
             now: () => Temporal.Now.instant(),
           },
           args,

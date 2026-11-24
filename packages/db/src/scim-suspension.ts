@@ -197,7 +197,7 @@ export function scimManagedMember(
 export function scimSuspended(
   organizationId: Expression<string> | string,
   userId: Expression<string> | string,
-  managedChildren = false,
+  managedChildren: boolean,
 ) {
   const suspended = sql<boolean>`CASE WHEN EXISTS (
     SELECT 1 FROM scim_membership_blocks AS block

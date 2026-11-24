@@ -218,8 +218,8 @@ describe('launch documentation disclosures', () => {
     {
       topic: 'Microsoft calendar scope and acceptance',
       claims: [
-        /Microsoft Calendar uses bounded busy-time snapshots/,
-        /Incremental sync and event writes are pending/,
+        /Microsoft Calendar incrementally updates busy-time snapshots and creates new booking copies/,
+        /Updating Microsoft copies after reschedules and cancellations remains future work/,
         /Microsoft sign-in and calendar connections have not had real-account acceptance/,
       ],
     },

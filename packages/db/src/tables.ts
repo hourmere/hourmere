@@ -304,6 +304,7 @@ export interface BookingCalendarEvents {
 
 export interface BookingCalendarTargets {
   calendar_id: string;
+  microsoft_writeback: Json | null;
   root_booking_id: string;
   user_id: string;
 }
@@ -588,6 +589,8 @@ export interface CalendarBusy {
   all_day_start: string | null;
   calendar_id: string;
   external_event_id: string;
+  microsoft_original_start: string | null;
+  microsoft_series_id: string | null;
   period: string | null;
 }
 
@@ -603,6 +606,18 @@ export interface CalendarConnections {
   status: Generated<string>;
   updated_at: Generated<Timestamp>;
   user_id: string;
+}
+
+export interface CalendarMicrosoftChanges {
+  calendar_id: string;
+  external_event_id: string;
+  is_exception: boolean;
+  last_modified_at: Timestamp | null;
+  microsoft_original_start: string | null;
+  microsoft_series_id: string | null;
+  period: string | null;
+  position: number;
+  removes_series: boolean;
 }
 
 export interface CalendarOauthStates {
@@ -828,6 +843,7 @@ export interface GroupSlots {
   location: Json | null;
   location_option: Json | null;
   logistics_revision: Generated<Int8>;
+  microsoft_writeback: Json | null;
   organization_id: string;
   organizer_user_id: string | null;
   original_event_type_id: string;
@@ -1895,6 +1911,7 @@ export interface DB {
   bookings: Bookings;
   calendar_busy: CalendarBusy;
   calendar_connections: CalendarConnections;
+  calendar_microsoft_changes: CalendarMicrosoftChanges;
   calendar_oauth_states: CalendarOauthStates;
   calendars: Calendars;
   conference_connections: ConferenceConnections;

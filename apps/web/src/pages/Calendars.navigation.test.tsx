@@ -91,7 +91,7 @@ it.each([
         expect(disclosure?.textContent).toContain(
           provider === 'google'
             ? 'Google will ask for your email, calendar list and event access'
-            : 'Microsoft will ask for your account identity, continuing access and permission to read basic calendar details',
+            : 'Microsoft will ask for your account identity, continuing access and permission to read and write calendar events',
         )
         expect(
           (disclosure?.compareDocumentPosition(button) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING,

@@ -11,7 +11,7 @@ const config = {
 const signal = () => AbortSignal.timeout(1000)
 
 describe('Microsoft OAuth and Graph response boundary', () => {
-  it('requests only list access with PKCE and a distinct calendar callback', () => {
+  it('requests calendar read/write consent with PKCE and a distinct calendar callback', () => {
     const url = new URL(
       createMicrosoftCalendarClient(config).authorizationUrl('fake-state', 'fake-verifier'),
     )
@@ -22,7 +22,8 @@ describe('Microsoft OAuth and Graph response boundary', () => {
       'http://localhost:5173/api/calendar/microsoft/callback',
     )
     expect(url.searchParams.get('scope')).toBe(MICROSOFT_CALENDAR_SCOPES.join(' '))
-    expect(url.searchParams.get('scope')).not.toMatch(/Calendars.ReadWrite|User.Read/)
+    expect(url.searchParams.get('scope')).toContain('Calendars.ReadWrite')
+    expect(url.searchParams.get('scope')).not.toContain('User.Read')
     expect(url.searchParams.get('response_mode')).toBe('query')
     expect(url.searchParams.get('code_challenge_method')).toBe('S256')
     expect(url.searchParams.get('code_challenge')).toBe(
@@ -76,12 +77,19 @@ describe('Microsoft OAuth and Graph response boundary', () => {
     })
     fake.controls.pages[0]!['@odata.nextLink'] =
       'https://graph.microsoft.com/v1.0/me/calendars?$skiptoken=1'
-    fake.controls.pages.push({ value: [{ id: 'readonly', name: 'Read only', canEdit: false }] })
+    fake.controls.pages.push({
+      value: [
+        { id: 'readonly', name: 'Read only', canEdit: false },
+        { id: 'secondary', name: 'Owned secondary', canEdit: true, canShare: true },
+      ],
+    })
     const calendars = await fake.client.calendars('fake-access', signal())
     expect(calendars).toMatchObject([
-      { id: 'microsoft-calendar-1', isPrimary: true, accessRole: 'writer', timeZone: null },
+      { id: 'microsoft-calendar-1', isPrimary: true, accessRole: 'owner', timeZone: null },
       { id: 'readonly', isPrimary: false, accessRole: 'reader' },
+      { id: 'secondary', isPrimary: false, accessRole: 'owner' },
     ])
+    expect(fake.calls[1]?.url.searchParams.get('$select')?.split(',')).toContain('canShare')
     expect(fake.calls.filter((c) => c.url.pathname.endsWith('/calendars'))).toHaveLength(2)
   })
 
@@ -92,9 +100,12 @@ describe('Microsoft OAuth and Graph response boundary', () => {
       'openid',
       'email',
       'offline_access',
-      'Calendars.ReadBasic',
+      'Calendars.ReadWrite',
     ])
-    expect((await fake.client.refresh('fake-refresh', signal())).scopes).toBeUndefined()
+    const grantedScopes = ['openid', 'email', 'Calendars.ReadBasic']
+    expect(
+      (await fake.client.refresh('fake-refresh', signal(), grantedScopes)).scopes,
+    ).toBeUndefined()
     fake.controls.token.scope = ''
     expect((await fake.client.exchange('fake-code', 'fake-verifier', signal())).scopes).toEqual([])
     fake.controls.token.scope = 'openid email'

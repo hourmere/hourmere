@@ -14,9 +14,11 @@ import {
 } from './google.ts'
 import {
   hasMicrosoftCalendarListAccess,
+  hasMicrosoftCalendarWriteAccess,
   type MicrosoftCalendarClient,
   MicrosoftCalendarError,
 } from './microsoft.ts'
+import { readMicrosoftWritebackSummary, recoverMicrosoftWritebacks } from './microsoft-writeback.ts'
 import {
   type CalendarProvider,
   CalendarProviderError,
@@ -170,6 +172,52 @@ export function readTokens(
     throw new Error('Stored calendar credentials are invalid')
   }
 }
+
+/** The caller owns the connection lock so read and write workers cannot race a refresh. */
+export async function getMicrosoftCalendarToken(
+  config: NonNullable<CalendarDeps['microsoft']>,
+  db: Db,
+  userId: string,
+  connection: { id: string; external_account_id: string; credentials: Buffer; scopes: string[] },
+  clock: () => number,
+  signal: AbortSignal,
+) {
+  const key = calendarEncryptionKey(config.encryptionKey)
+  let previous: StoredTokens
+  try {
+    previous = readTokens(
+      key,
+      userId,
+      connection.external_account_id,
+      connection.credentials,
+      'microsoft',
+    )
+  } catch {
+    throw new MicrosoftCalendarError('needs_reauth')
+  }
+  if (previous.expiresAt > clock() + 60_000)
+    return { token: previous.accessToken, scopes: connection.scopes }
+  const next = await config.client.refresh(previous.refreshToken, signal, connection.scopes)
+  const scopes = next.scopes ?? connection.scopes
+  await db
+    .updateTable('calendar_connections')
+    .set({
+      scopes,
+      credentials: encryptCredential(
+        key,
+        tokenAad(userId, connection.external_account_id, 'microsoft'),
+        JSON.stringify({
+          accessToken: next.accessToken,
+          refreshToken: next.refreshToken ?? previous.refreshToken,
+          expiresAt: next.expiresAt,
+        } satisfies StoredTokens),
+      ),
+    })
+    .where('id', '=', connection.id)
+    .execute()
+  return { token: next.accessToken, scopes }
+}
+
 function requireScopes(
   scopes: string[] | undefined,
   access = 'list',
@@ -185,13 +233,27 @@ function requireScopes(
     throw new GoogleCalendarError('permissions_missing')
 }
 
-async function saveCalendars(
+export async function saveCalendars(
   db: Db,
   connectionId: string,
   calendars: ProviderCalendar[],
   provider: CalendarProvider,
 ) {
   if (calendars.length) {
+    if (provider === 'microsoft') {
+      // Once the provider lists a removed calendar again, rebuild its snapshot before use.
+      await db
+        .updateTable('calendars')
+        .set({ sync_error: 'provider_unavailable', last_synced_at: null, sync_state: null })
+        .where('connection_id', '=', connectionId)
+        .where('sync_error', '=', 'calendar_removed')
+        .where(
+          'external_id',
+          'in',
+          calendars.map((calendar) => calendar.id),
+        )
+        .execute()
+    }
     await db
       .insertInto('calendars')
       .values(
@@ -226,13 +288,18 @@ async function saveCalendars(
       calendars.map((c) => c.id),
     )
   if (provider === 'microsoft') {
-    // Graph can omit a calendar after access changes. Keep opted-in calendars blocking
-    // availability until they can be read again or the owner removes the selection.
+    // Preserve selected and pinned destinations when a complete list omits the calendar.
+    const retained = sql<boolean>`(check_conflicts
+      OR EXISTS (SELECT 1 FROM profiles p WHERE p.destination_calendar_id=calendars.id)
+      OR EXISTS (SELECT 1 FROM event_type_hosts h WHERE h.destination_calendar_id=calendars.id)
+      OR EXISTS (SELECT 1 FROM booking_calendar_targets t WHERE t.calendar_id=calendars.id)
+      OR EXISTS (SELECT 1 FROM group_slots s WHERE s.destination_calendar_id=calendars.id))`
     await db
       .updateTable('calendars')
-      .set({ sync_error: 'provider_unavailable' })
+      .set({ sync_error: 'calendar_removed' })
       .where('connection_id', '=', connectionId)
-      .where('check_conflicts', '=', true)
+      .where(retained)
+      .where('sync_error', 'is distinct from', 'calendar_removed')
       .$if(calendars.length > 0, (q) =>
         q.where(
           'external_id',
@@ -241,7 +308,7 @@ async function saveCalendars(
         ),
       )
       .execute()
-    removed = removed.where('check_conflicts', '=', false)
+    removed = removed.where(sql<boolean>`NOT ${retained}`)
   }
   await removed.execute()
 }
@@ -293,6 +360,14 @@ export async function listCalendarConnections(deps: CalendarDeps, principal: Pri
         .orderBy('id')
         .execute()
     : []
+  const microsoftConnectionIds = new Set(
+    connections.filter((c) => c.provider === 'microsoft').map((c) => c.id),
+  )
+  const writebacks = await readMicrosoftWritebackSummary(
+    deps.db,
+    calendars.filter((c) => microsoftConnectionIds.has(c.connection_id)).map((c) => c.id),
+    (deps.now ?? Date.now)(),
+  )
   return {
     caldavEnabled: deps.caldav !== undefined,
     googleEnabled: deps.google !== undefined,
@@ -316,23 +391,34 @@ export async function listCalendarConnections(deps: CalendarDeps, principal: Pri
           hasMicrosoftCalendarListAccess(connection.scopes)) ||
         (connection.provider === 'google' &&
           GOOGLE_CALENDAR_SYNC_SCOPES.every((scope) => connection.scopes.includes(scope))),
+      ...(connection.provider === 'microsoft' && {
+        writeAuthorized: hasMicrosoftCalendarWriteAccess(connection.scopes),
+      }),
       calendars: calendars
         .filter((c) => c.connection_id === connection.id)
-        .map((c) => ({
-          id: c.id,
-          name: c.name,
-          timeZone: c.time_zone,
-          isPrimary: c.is_primary,
-          checkConflicts: c.check_conflicts,
-          accessRole: c.access_role,
-          lastSyncedAt: c.last_synced_at?.toISOString() ?? null,
-          syncError: c.sync_error,
-          available:
-            connection.provider !== 'caldav' ||
-            z
-              .object({ caldavDiscovery: z.object({ available: z.literal(true) }) })
-              .safeParse(c.sync_state).success,
-        })),
+        .map((c) => {
+          const writeback = writebacks.get(c.id)
+          return {
+            id: c.id,
+            name: c.name,
+            timeZone: c.time_zone,
+            isPrimary: c.is_primary,
+            checkConflicts: c.check_conflicts,
+            accessRole: c.access_role,
+            lastSyncedAt: c.last_synced_at?.toISOString() ?? null,
+            syncError: c.sync_error,
+            available:
+              c.sync_error !== 'calendar_removed' &&
+              (connection.provider !== 'caldav' ||
+                z
+                  .object({ caldavDiscovery: z.object({ available: z.literal(true) }) })
+                  .safeParse(c.sync_state).success),
+            ...(writeback && {
+              writebackStatus: writeback.status,
+              writebackError: writeback.reason ?? null,
+            }),
+          }
+        }),
     })),
   }
 }
@@ -546,12 +632,15 @@ async function finishConnection(
       if (provider === 'microsoft' && previous) {
         const selected = await trx
           .updateTable('calendars')
-          .set({ last_synced_at: null, sync_state: null })
+          .set({ last_synced_at: null })
           .where('connection_id', '=', connection.id)
           .where('check_conflicts', '=', true)
+          .where('sync_error', 'is distinct from', 'calendar_removed')
           .returning('id')
           .execute()
         for (const calendar of selected) await deps.enqueueSync?.(calendar.id, trx)
+        if (hasMicrosoftCalendarWriteAccess(tokens.scopes))
+          await recoverMicrosoftWritebacks(trx, connection.id, clock())
       }
       if (provider === 'google' && previous)
         await deps.enqueueWritebackRecovery?.(connection.id, trx)
@@ -648,7 +737,7 @@ async function refreshCalendarProvider(
       const tokens: CalendarTokens =
         previous.expiresAt > (deps.now ?? Date.now)() + 60_000
           ? previous
-          : await client.refresh(previous.refreshToken, signal)
+          : await client.refresh(previous.refreshToken, signal, connection.scopes)
       const scopes = tokens.scopes ?? connection.scopes
       requireScopes(scopes, 'list', provider)
       const credentials = encryptCredential(

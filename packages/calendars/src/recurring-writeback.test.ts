@@ -21,7 +21,6 @@ import { calendarEncryptionKey, encryptCredential } from './credentials.ts'
 import { GOOGLE_CALENDAR_SYNC_SCOPES, GoogleCalendarError } from './google.ts'
 import type { CalendarDeps } from './index.ts'
 import { bookingCalendarJob } from './jobs.ts'
-import { MICROSOFT_CALENDAR_SCOPES } from './microsoft.ts'
 import { fakeGoogle, fakeMicrosoft, TEST_CALENDAR_KEY } from './testing.ts'
 
 const databaseUrl = process.env.DATABASE_URL
@@ -126,7 +125,7 @@ describe.skipIf(!databaseUrl)(
         pollingIntervalSeconds: 0.5,
         log: () => {},
       })
-      const googleNotify = calendarBookingNotifier(jobs)
+      const googleNotify = calendarBookingNotifier(jobs, { now: providerNow })
       notify = async (trx, event) => {
         if (!('requestId' in event)) await googleNotify(trx, event)
       }
@@ -172,9 +171,7 @@ describe.skipIf(!databaseUrl)(
               provider,
               external_account_id: account,
               scopes: [
-                ...(provider === 'google'
-                  ? GOOGLE_CALENDAR_SYNC_SCOPES
-                  : MICROSOFT_CALENDAR_SCOPES),
+                ...(provider === 'google' ? GOOGLE_CALENDAR_SYNC_SCOPES : ['Calendars.ReadWrite']),
               ],
               credentials: encryptCredential(
                 key,
@@ -515,11 +512,28 @@ describe.skipIf(!databaseUrl)(
       }
     })
 
-    it('leaves Microsoft calendars untouched during series creation and cancellation', async () => {
+    it('creates Microsoft copies for the series and preserves their mappings after cancellation', async () => {
       const fixture = await seriesFixture('microsoft')
+      const created = new Set<string>()
+      microsoft.controls.eventHook = (_url, init) => {
+        if (init.method !== 'POST') return Response.json({ value: [] })
+        const { transactionId } = JSON.parse(String(init.body)) as { transactionId: string }
+        const id = `outlook-${transactionId}`
+        created.add(id)
+        return Response.json(
+          { id, transactionId, type: 'singleInstance', isCancelled: false },
+          { status: 201 },
+        )
+      }
       const series = await fixture.create()
       const bookingIds = ids(series.occurrences).toSorted()
       await expectJobs(bookingIds, bookingIds.map(completed))
+      const originalMappings = await mappings(fixture.calendarId)
+      expect(originalMappings.map(({ booking_id }) => booking_id)).toEqual(bookingIds)
+      expect(new Set(originalMappings.map(({ external_event_id }) => external_event_id))).toEqual(
+        created,
+      )
+      expect(created.size).toBe(bookingIds.length)
       await cancelManagedBookingSeries(context(), required(series.manageToken), {
         scope: 'all',
         expectedRevision: '1',
@@ -529,10 +543,12 @@ describe.skipIf(!databaseUrl)(
         bookingIds,
         bookingIds.flatMap((id) => [completed(id), completed(id)]),
       )
-      expect(await targets(fixture.calendarId)).toEqual([])
-      expect(await mappings(fixture.calendarId)).toEqual([])
+      expect(await targets(fixture.calendarId)).toEqual(
+        bookingIds.map((root_booking_id) => ({ root_booking_id })),
+      )
+      expect(await mappings(fixture.calendarId)).toEqual(originalMappings)
       expect(google.calls).toHaveLength(0)
-      expect(microsoft.calls).toHaveLength(0)
+      expect(microsoft.calls).toHaveLength(2 * bookingIds.length)
     })
 
     it('keeps ordinary booking calendar payloads, singleton keys and retry policy', async () => {

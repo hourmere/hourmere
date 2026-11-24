@@ -1,6 +1,5 @@
 import { teamRoles } from '@hourmere/auth'
 import type { Database } from '@hourmere/db'
-import { writeAuditEvent } from '@hourmere/db/audit'
 import { suspendScimMembership } from '@hourmere/db/scim-suspension'
 import { sql, type Transaction } from 'kysely'
 import {
@@ -59,8 +58,7 @@ export async function assertScimUserCanRetire(trx: Transaction<Database>, entry:
 
 /**
  * The caller holds the update locks of the organization and of the child teams in which
- * this User sources a managed membership, and the live resource row lock. A returned
- * reply is a refusal whose child changes the caller must still commit.
+ * this User sources a managed membership, and the live resource row lock.
  */
 export async function applyScimUserLifecycle(
   trx: Transaction<Database>,
@@ -73,31 +71,8 @@ export async function applyScimUserLifecycle(
   // Child access follows the roster source, so check it before any state changes.
   const sourced = deactivationRequested ? await sourcedChildMemberships(trx, entry) : []
   rejectPrivilegedChildMembership(sourced)
-  const resumed = reactivating ? await resumeManagedChildMemberships(trx, entry) : 0
-  const blocked = await applyParentLifecycle(
-    trx,
-    entry,
-    { active, deactivationRequested, roleWrite },
-    actor,
-  )
-  if (blocked) {
-    if (resumed === 0) throw blocked
-    // The parent's own blocker decides only parent access. This is the one refusal that
-    // commits a change: the User itself is left exactly as it was (RFC 7644 section
-    // 3.5.2), nothing else from the request is applied, and the child resume it carries
-    // is journaled so that the refused request never changes access silently.
-    await writeAuditEvent(trx, {
-      organizationId: entry.organization_id,
-      actor,
-      credential: { type: 'none' },
-      action: 'scim_user.child_access_resumed',
-      targetType: 'scim_user',
-      targetId: entry.id,
-    })
-    return blocked.reply
-  }
-  // The entry stays inactive after a refused reactivation, so a repeated deactivation
-  // suspends again whatever that reactivation resumed.
+  await applyParentLifecycle(trx, entry, { active, deactivationRequested, roleWrite }, actor)
+  if (reactivating) await resumeManagedChildMemberships(trx, entry)
   if (active === false) await suspendManagedChildMemberships(trx, sourced)
 }
 
@@ -126,8 +101,7 @@ async function applyParentLifecycle(
       .where('cleared_at', 'is', null)
       .where((eb) => eb.or([eb('user_id', '=', userId), eb('identity_email', '=', mailbox)]))
       .executeTakeFirst()
-    if (localBlock || !memberships.some(({ memberId }) => memberId !== null))
-      return locallyBlocked()
+    if (localBlock || !memberships.some(({ memberId }) => memberId !== null)) throw locallyBlocked()
     await trx
       .updateTable('scim_membership_blocks')
       .set({ cleared_at: sql<Date>`clock_timestamp()` })

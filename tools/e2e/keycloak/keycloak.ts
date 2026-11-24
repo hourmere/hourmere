@@ -9,6 +9,7 @@ import { text } from 'node:stream/consumers'
 import { setTimeout as delay } from 'node:timers/promises'
 import { promisify } from 'node:util'
 import realm from './realm.json' with { type: 'json' }
+import { createScimRealm, type KeycloakAdminOptions, prepareScimPlugin } from './scim-plugin.ts'
 
 const KEYCLOAK_IMAGE =
   'quay.io/keycloak/keycloak:26.8.2@sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3'
@@ -99,19 +100,22 @@ function warm(url: string, ca: string): Promise<void> {
   })
 }
 
-interface KeycloakRequestOptions {
-  action: string
-  expectedStatus: number
-  method?: 'GET' | 'POST' | 'DELETE'
+interface KeycloakRequestOptions extends KeycloakAdminOptions {
   authorization?: string
-  contentType?: string
-  body?: string
 }
 
 function keycloakRequest(
   url: string,
   ca: string,
-  { action, expectedStatus, method, authorization, contentType, body }: KeycloakRequestOptions,
+  {
+    action,
+    expectedStatus,
+    method,
+    authorization,
+    contentType,
+    body,
+    readLocation,
+  }: KeycloakRequestOptions,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const failed = () => reject(new Error(`Unable to ${action}`))
@@ -134,7 +138,7 @@ function keycloakRequest(
           const payload = await text(response)
           if (response.statusCode !== expectedStatus)
             reject(new Error(`Unable to ${action} (HTTP ${response.statusCode})`))
-          else resolve(payload)
+          else resolve(readLocation ? (response.headers.location ?? '') : payload)
         } catch {
           failed()
         }
@@ -155,7 +159,7 @@ function readJsonStringField(payload: string, field: string, action: string): st
   throw new Error(`Unable to ${action}`)
 }
 
-function realmFactory(origin: string, ca: string, adminSecret: string) {
+function keycloakAdmin(origin: string, ca: string, adminSecret: string) {
   const admin = (path: string, options: KeycloakRequestOptions) =>
     keycloakRequest(`${origin}${path}`, ca, options)
   const authorize = async () => {
@@ -173,7 +177,14 @@ function realmFactory(origin: string, ca: string, adminSecret: string) {
     })
     return `Bearer ${readJsonStringField(payload, 'access_token', action)}`
   }
+  return { admin, authorize }
+}
 
+function realmFactory(
+  origin: string,
+  ca: string,
+  { admin, authorize }: ReturnType<typeof keycloakAdmin>,
+) {
   return async (redirectUri: string) => {
     const callback = new URL(redirectUri)
     if (
@@ -299,7 +310,7 @@ function realmFactory(origin: string, ca: string, adminSecret: string) {
 }
 
 /** Start one disposable, loopback-only IdP for a worker or a disruptive test. */
-export async function startKeycloak() {
+export async function startKeycloak({ scim = false } = {}) {
   const owner = randomUUID()
   const name = `hourmere-e2e-keycloak-${owner}`
   const label = `${ownerLabel}=${owner}`
@@ -351,6 +362,7 @@ export async function startKeycloak() {
   }
 
   try {
+    const scimPlugin = scim ? await prepareScimPlugin(directory) : undefined
     await writeFile(
       adminEnvironment,
       `KC_BOOTSTRAP_ADMIN_CLIENT_ID=${adminClientId}\nKC_BOOTSTRAP_ADMIN_CLIENT_SECRET=${adminSecret}\n`,
@@ -406,11 +418,13 @@ export async function startKeycloak() {
         `type=bind,src=${certificatePath},dst=/opt/keycloak/conf/fixture.crt,readonly`,
         '--mount',
         `type=bind,src=${privateKeyPath},dst=/opt/keycloak/conf/fixture.key,readonly`,
+        ...(scimPlugin?.mounts ?? []),
         KEYCLOAK_IMAGE,
         'start-dev',
         '--db=dev-mem',
         '--https-certificate-file=/opt/keycloak/conf/fixture.crt',
         '--https-certificate-key-file=/opt/keycloak/conf/fixture.key',
+        ...(scimPlugin?.options ?? []),
         ...(hostPort
           ? [
               '--http-host=127.0.0.1',
@@ -438,8 +452,16 @@ export async function startKeycloak() {
     while (Date.now() < deadline) {
       discovery = await discoveryStatus(issuer, certificate)
       if (discovery === 'ready') {
+        const connection = keycloakAdmin(origin, certificate, adminSecret)
         return {
-          createRealm: realmFactory(origin, certificate, adminSecret),
+          createRealm: realmFactory(origin, certificate, connection),
+          scimTargetHost: scimPlugin?.host ?? '',
+          async createScimRealm() {
+            if (!scimPlugin) throw new Error('This Keycloak worker did not enable the SCIM plugin')
+            return createScimRealm(scimPlugin, async (path, options) =>
+              connection.admin(path, { ...options, authorization: await connection.authorize() }),
+            )
+          },
           async stop() {
             await command('docker', 'stop the owned Keycloak container', [
               'stop',

@@ -13,6 +13,7 @@ import {
   createCallerResolver,
   createMcpOAuthResolver,
   recordSsoAdmissionRemoval,
+  withScimResources,
 } from '@hourmere/auth'
 import {
   bookingCalendarJob,
@@ -188,6 +189,7 @@ import { webhookRoutes } from './routes/webhooks.ts'
 import { workflowRoutes } from './routes/workflows.ts'
 import { zoomEventRoutes } from './routes/zoom-events.ts'
 import { parseRoutingFormsEnabled, resolveRoutingFormsEnabled } from './routing-form-setting.ts'
+import { productionScimResourcesEnabled } from './scim.ts'
 import { closeConnectionsWhen, closeServer } from './shutdown.ts'
 import { configuredSmsJobs, createConfiguredSmsInbound } from './sms.ts'
 import { type SsoCapabilities, ssoRetained } from './sso.ts'
@@ -220,7 +222,10 @@ const ssoSamlEnabled = false
 export function productionSsoCapabilities(
   config: Pick<Config, 'SSO_OIDC_ENABLED'>,
 ): SsoCapabilities {
-  return { ssoOidcEnabled: config.SSO_OIDC_ENABLED, ssoSamlEnabled, ssoOperatorSetting: true }
+  return withScimResources(
+    { ssoOidcEnabled: config.SSO_OIDC_ENABLED, ssoSamlEnabled, ssoOperatorSetting: true },
+    productionScimResourcesEnabled,
+  )
 }
 
 /**
@@ -251,6 +256,7 @@ export function productRoutes({
   smsRemindersAvailable = false,
   embedAllowedOrigins,
   scimProvisioningEnabled = false,
+  scimResourcesEnabled,
   slotSnippetsEnabled = false,
   ssoConfigurationKey,
   ssoPrivateTargets,
@@ -287,6 +293,7 @@ export function productRoutes({
   smsRemindersAvailable?: boolean
   embedAllowedOrigins?: readonly string[]
   scimProvisioningEnabled?: boolean
+  scimResourcesEnabled?: boolean | undefined
   slotSnippetsEnabled?: boolean
   /** Operator-managed key for encrypted provider configuration; does not enable SSO. */
   ssoConfigurationKey?: Buffer | undefined
@@ -333,11 +340,10 @@ export function productRoutes({
   enqueueCalendarWritebackRecovery?: CalendarDeps['enqueueWritebackRecovery']
 } & RecurringBookingAdmissionDeps &
   WorkflowSettings): RouteModule[] {
-  const ssoCapabilities: SsoCapabilities = {
-    ssoOidcEnabled: oidcEnabled,
-    ssoSamlEnabled: samlEnabled,
-    ssoOperatorSetting,
-  }
+  const ssoCapabilities = withScimResources(
+    { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled, ssoOperatorSetting },
+    scimResourcesEnabled,
+  )
   return [
     mcpOAuthRoutes({
       auth: mcpAuth,
@@ -1138,6 +1144,7 @@ async function start(
   }
   const waitlistDeps = {
     db,
+    scimResourcesEnabled: productionScimResourcesEnabled,
     secret: config.BETTER_AUTH_SECRET,
     publicUrl: config.PUBLIC_URL,
     automaticMeet: config.GOOGLE_MEET_ENABLED,
@@ -1246,7 +1253,11 @@ async function start(
         publicUrl: config.PUBLIC_URL,
         mailer,
       }),
-      ssoOperatorRecoveryEmailJob(db, config.SMTP_URL && config.MAIL_FROM ? mailer : undefined),
+      ssoOperatorRecoveryEmailJob(
+        db,
+        config.SMTP_URL && config.MAIL_FROM ? mailer : undefined,
+        productionScimResourcesEnabled,
+      ),
       bookingNotificationJob(notificationDeps),
       rescheduleRequestExpiryJob({
         db,
@@ -1282,6 +1293,7 @@ async function start(
                 {
                   ...workflowWorker,
                   mailer,
+                  scimResourcesEnabled: productionScimResourcesEnabled,
                   budget: {
                     secret: config.BETTER_AUTH_SECRET,
                     mailMaxPerHour: config.MAIL_MAX_PER_HOUR,
@@ -1329,7 +1341,15 @@ async function start(
           ),
         (connectionId, after) => enqueueWritebackRecovery(connectionId, after),
       ),
-      calendarDispatchJob(calendarDeps, (id) => enqueueCalendar(id)),
+      calendarDispatchJob(
+        calendarDeps,
+        (id) => enqueueCalendar(id),
+        (payload): Promise<unknown> =>
+          jobs.enqueue('booking-calendar', payload, {
+            singletonKey:
+              'bookingId' in payload ? payload.bookingId : `group:${payload.groupSlotId}`,
+          }),
+      ),
     ],
     work: role !== 'web',
     // pg-boss installs and upgrades its own `pgboss` schema; with AUTO_MIGRATE=false,
@@ -1400,7 +1420,7 @@ async function start(
   } else {
     // Booking changes over REST and MCP queue their emails in their own transactions.
     const emailNotifier = bookingNotifier(jobs)
-    const calendarNotifier = calendarBookingNotifier(jobs)
+    const calendarNotifier = calendarBookingNotifier(jobs, { google: Boolean(googleCalendar) })
     const caldavNotifier = calDavBookingNotifier(jobs)
     const conferenceNotifier = conferenceBookingNotifier(jobs)
     const notifyAttendeeNoShow = webhookAttendeeNoShowNotifier(jobs, webhookSettings)
@@ -1408,7 +1428,7 @@ async function start(
     const notify: BookingNotifier = async (trx, event, now) => {
       if (!('requestId' in event)) await conferenceNotifier(trx, event)
       await emailNotifier(trx, event, now)
-      if (googleCalendar && !('requestId' in event)) await calendarNotifier(trx, event)
+      if (!('requestId' in event)) await calendarNotifier(trx, event)
       if (caldavCalendar && !('requestId' in event)) await caldavNotifier(trx, event)
       await webhookNotifier(trx, event, now)
       // Core notification intents precede workflow capture in the booking's transaction.

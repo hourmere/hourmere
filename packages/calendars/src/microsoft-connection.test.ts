@@ -20,6 +20,11 @@ import { calendarDispatchJob, calendarSyncJob } from './jobs.ts'
 import { calendarTestSession, fakeGoogle, fakeMicrosoft, TEST_CALENDAR_KEY } from './testing.ts'
 
 const url = process.env.DATABASE_URL
+const emptyDelta = (url: URL) =>
+  Response.json({
+    '@odata.deltaLink': `${url.origin}${url.pathname}?$deltatoken=completed`,
+    value: [],
+  })
 describe.skipIf(!url)('separate Microsoft calendar connections (real Postgres)', () => {
   let database: TestDatabase
   let db: Db
@@ -220,10 +225,12 @@ describe.skipIf(!url)('separate Microsoft calendar connections (real Postgres)',
   it('connects and refreshes when a successful response omits scope, but refuses an explicit empty grant', async () => {
     delete microsoft.controls.token.scope
     const row = await connect()
-    expect(row.scopes).toContain('Calendars.ReadBasic')
+    expect(row.scopes).toContain('Calendars.ReadWrite')
     now += 3_600_001
     microsoft.controls.token.expires_in = 7200
     await refreshCalendarList(deps, owner, row.id)
+    const refresh = microsoft.calls.filter((c) => c.url.pathname.endsWith('/token')).at(-1)
+    expect(new URLSearchParams(String(refresh?.init.body)).get('scope')).toBe(row.scopes.join(' '))
     expect((await listCalendarConnections(deps, owner)).data[0]?.status).toBe('active')
     microsoft.controls.token.scope = ''
     expect(await finishMicrosoftConnection(deps, owner, query(await start()))).toBe(
@@ -231,6 +238,28 @@ describe.skipIf(!url)('separate Microsoft calendar connections (real Postgres)',
     )
     expect((await listCalendarConnections(deps, owner)).data).toHaveLength(1)
   })
+
+  it.each(['calendar list', 'busy-time sync'])(
+    'refreshes a stored read-only grant during %s',
+    async (operation) => {
+      const row = await connect()
+      expect(row.scopes).toEqual(['openid', 'email', 'Calendars.ReadBasic'])
+      const calendar = (await listCalendarConnections(deps, owner)).data[0]?.calendars[0]
+      if (!calendar) throw new Error('Expected connected calendar')
+      await configureCalendar(deps, owner, calendar.id, true)
+      now += 3_600_001
+      delete microsoft.controls.token.scope
+      microsoft.controls.viewHook = emptyDelta
+
+      if (operation === 'calendar list') await refreshCalendarList(deps, owner, row.id)
+      else await syncOwnedCalendar(deps, owner, calendar.id)
+
+      const refresh = microsoft.calls.filter((c) => c.url.pathname.endsWith('/token')).at(-1)
+      const body = new URLSearchParams(String(refresh?.init.body))
+      expect(body.get('grant_type')).toBe('refresh_token')
+      expect(body.get('scope')).toBe('openid email Calendars.ReadBasic offline_access')
+    },
+  )
 
   it('keeps rotated credentials when listing fails and reuses them on retry', async () => {
     const row = await connect()
@@ -265,8 +294,18 @@ describe.skipIf(!url)('separate Microsoft calendar connections (real Postgres)',
 
   it('retains a refresh token on reconnect, marks withdrawn permission, and lists while disabled', async () => {
     const row = await connect()
+    const calendar = (await listCalendarConnections(deps, owner)).data[0]?.calendars[0]
+    if (!calendar) throw new Error('Expected connected calendar')
+    await configureCalendar(deps, owner, calendar.id, true)
+    microsoft.controls.viewHook = emptyDelta
+    await syncOwnedCalendar(deps, owner, calendar.id)
     delete microsoft.controls.token.refresh_token
     expect((await connect()).id).toBe(row.id)
+    expect((await listCalendarConnections(deps, owner)).data[0]?.calendars).toMatchObject([
+      { id: calendar.id, lastSyncedAt: null },
+    ])
+    await syncOwnedCalendar(deps, owner, calendar.id)
+    expect(microsoft.calls.at(-1)?.url.searchParams.get('$deltatoken')).toBe('completed')
     microsoft.controls.listStatus = 403
     await expect(refreshCalendarList(deps, owner, row.id)).rejects.toMatchObject({
       code: 'microsoft_calendar_permissions_missing',
@@ -282,7 +321,6 @@ describe.skipIf(!url)('separate Microsoft calendar connections (real Postgres)',
   })
 
   it.each([
-    ['Graph forbidden', 'permissions_missing'],
     ['revoked refresh grant', 'needs_reauth'],
     ['insufficient refresh scope', 'permissions_missing'],
     ['unreadable credentials', 'needs_reauth'],
@@ -291,12 +329,9 @@ describe.skipIf(!url)('separate Microsoft calendar connections (real Postgres)',
     const calendar = (await listCalendarConnections(deps, owner)).data[0]?.calendars[0]
     if (!calendar) throw new Error('Expected connected calendar')
     await configureCalendar(deps, owner, calendar.id, true)
-    microsoft.controls.viewHook = () => Response.json({ value: [] })
+    microsoft.controls.viewHook = emptyDelta
     await syncOwnedCalendar(deps, owner, calendar.id)
-    if (failure === 'Graph forbidden')
-      microsoft.controls.viewHook = () =>
-        Response.json({ error: { code: 'ErrorAccessDenied' } }, { status: 403 })
-    else if (failure === 'unreadable credentials')
+    if (failure === 'unreadable credentials')
       await db
         .updateTable('calendar_connections')
         .set({ credentials: Buffer.from('unreadable synthetic credentials') })
@@ -322,7 +357,42 @@ describe.skipIf(!url)('separate Microsoft calendar connections (real Postgres)',
     ])
   })
 
-  it('dispatches selected Microsoft calendars and keeps an omitted selection unavailable', async () => {
+  it('isolates a forbidden calendar read while another selected calendar stays current', async () => {
+    const page = microsoft.controls.pages[0] as { value: object[] }
+    page.value.push({ id: 'microsoft-calendar-2', name: 'Work calendar' })
+    const connection = await connect()
+    const calendars = (await listCalendarConnections(deps, owner)).data[0]?.calendars ?? []
+    const [denied, accessible] = calendars
+    if (!denied || !accessible) throw new Error('Expected two calendars')
+    for (const calendar of calendars) await configureCalendar(deps, owner, calendar.id, true)
+    microsoft.controls.viewHook = (url) =>
+      url.pathname.includes('/microsoft-calendar-1/')
+        ? Response.json({ error: { code: 'ErrorAccessDenied' } }, { status: 403 })
+        : emptyDelta(url)
+
+    await expect(syncOwnedCalendar(deps, owner, denied.id)).rejects.toMatchObject({
+      code: 'calendar_events_unreadable',
+    })
+    await syncOwnedCalendar(deps, owner, accessible.id)
+    expect((await listCalendarConnections(deps, owner)).data).toMatchObject([
+      {
+        id: connection.id,
+        status: 'active',
+        lastError: null,
+        calendars: [
+          { id: denied.id, checkConflicts: true, syncError: 'permissions_missing' },
+          {
+            id: accessible.id,
+            checkConflicts: true,
+            lastSyncedAt: new Date(now).toISOString(),
+            syncError: null,
+          },
+        ],
+      },
+    ])
+  })
+
+  it('stops reading a calendar missing from a complete discovery and resumes after it returns', async () => {
     const connection = await connect()
     const calendar = (await listCalendarConnections(deps, owner)).data[0]?.calendars[0]
     if (!calendar) throw new Error('Expected connected calendar')
@@ -334,7 +404,7 @@ describe.skipIf(!url)('separate Microsoft calendar connections (real Postgres)',
     await configureCalendar(deps, owner, calendar.id, true)
     await dispatch.handler({}, run)
     expect(enqueue).toHaveBeenCalledExactlyOnceWith(calendar.id)
-    microsoft.controls.viewHook = () => Response.json({ value: [] })
+    microsoft.controls.viewHook = emptyDelta
     await calendarSyncJob(deps).handler({ calendarId: calendar.id }, run)
     expect((await listCalendarConnections(deps, owner)).data[0]?.calendars[0]?.lastSyncedAt).toBe(
       new Date(now).toISOString(),
@@ -342,10 +412,59 @@ describe.skipIf(!url)('separate Microsoft calendar connections (real Postgres)',
     await dispatch.handler({}, run)
     expect(enqueue).toHaveBeenCalledOnce()
 
+    const listed = microsoft.controls.pages
+    microsoft.controls.pages = [
+      {
+        '@odata.nextLink': 'https://graph.microsoft.com/v1.0/me/calendars?$skiptoken=1',
+        value: [],
+      },
+    ]
+    await expect(refreshCalendarList(deps, owner, connection.id)).rejects.toMatchObject({
+      code: 'microsoft_calendar_provider_unavailable',
+    })
+    expect((await listCalendarConnections(deps, owner)).data[0]?.calendars).toMatchObject([
+      { id: calendar.id, available: true, syncError: null },
+    ])
+
     microsoft.controls.pages = [{ value: [] }]
+    microsoft.controls.viewHook = () =>
+      Response.json({ error: { code: 'ErrorItemNotFound' } }, { status: 404 })
+    await calendarSyncJob(deps).handler({ calendarId: calendar.id }, run)
+    expect((await listCalendarConnections(deps, owner)).data[0]?.calendars).toMatchObject([
+      { id: calendar.id, available: false, checkConflicts: true, syncError: 'calendar_removed' },
+    ])
+    const requests = microsoft.calls.length
+    await dispatch.handler({}, run)
+    expect(enqueue).toHaveBeenCalledOnce()
+    await calendarSyncJob(deps).handler({ calendarId: calendar.id }, run)
+    await expect(syncOwnedCalendar(deps, owner, calendar.id)).rejects.toMatchObject({
+      code: 'microsoft_calendar_removed',
+    })
+    for (const requester of [owner, other]) {
+      await expect(configureCalendar(deps, requester, calendar.id, true)).rejects.toMatchObject({
+        code: requester === owner ? 'microsoft_calendar_removed' : 'calendar_not_found',
+      })
+    }
+    expect((await listCalendarConnections(deps, other)).data).toEqual([])
+    expect(microsoft.calls).toHaveLength(requests)
+
+    microsoft.controls.pages = listed
     await refreshCalendarList(deps, owner, connection.id)
     expect((await listCalendarConnections(deps, owner)).data[0]?.calendars).toMatchObject([
-      { id: calendar.id, checkConflicts: true, syncError: 'provider_unavailable' },
+      {
+        id: calendar.id,
+        available: true,
+        checkConflicts: true,
+        lastSyncedAt: null,
+        syncError: 'provider_unavailable',
+      },
+    ])
+    await dispatch.handler({}, run)
+    expect(enqueue).toHaveBeenCalledTimes(2)
+    microsoft.controls.viewHook = emptyDelta
+    await calendarSyncJob(deps).handler({ calendarId: calendar.id }, run)
+    expect((await listCalendarConnections(deps, owner)).data[0]?.calendars).toMatchObject([
+      { id: calendar.id, available: true, checkConflicts: true, syncError: null },
     ])
   })
 
@@ -383,7 +502,7 @@ describe.skipIf(!url)('separate Microsoft calendar connections (real Postgres)',
     now += 60_000
     await dispatch.handler({}, run)
     expect(enqueue).toHaveBeenCalledExactlyOnceWith(calendar.id)
-    microsoft.controls.viewHook = () => Response.json({ value: [] })
+    microsoft.controls.viewHook = emptyDelta
     await sync()
     expect(microsoft.calls).toHaveLength(requestCount + 1)
     expect((await listCalendarConnections(deps, owner)).data[0]?.calendars[0]?.syncError).toBeNull()

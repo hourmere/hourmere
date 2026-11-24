@@ -1,0 +1,12 @@
+{
+  "migration": "0186_microsoft_calendar_delta.sql",
+  "objects": {
+    "constraint public.calendar_microsoft_changes.calendar_microsoft_changes_calendar_id_fkey": "FOREIGN KEY (calendar_id) REFERENCES calendars(id) ON DELETE CASCADE",
+    "constraint public.calendar_microsoft_changes.calendar_microsoft_changes_pkey": "PRIMARY KEY (calendar_id, \"position\")",
+    "constraint public.calendars.calendars_sync_error_check": "CHECK ((sync_error = ANY (ARRAY['needs_reauth'::text, 'permissions_missing'::text, 'provider_unavailable'::text, 'calendar_removed'::text])))",
+    "index public.calendar_busy.calendar_busy_microsoft_series": "CREATE INDEX calendar_busy_microsoft_series ON public.calendar_busy USING btree (calendar_id, microsoft_series_id, microsoft_original_start) WHERE (microsoft_series_id IS NOT NULL)",
+    "not_null public.calendar_microsoft_changes.external_event_id": "NOT NULL",
+    "not_null public.calendar_microsoft_changes.is_exception": "NOT NULL",
+    "not_null public.calendar_microsoft_changes.removes_series": "NOT NULL"
+  }
+}

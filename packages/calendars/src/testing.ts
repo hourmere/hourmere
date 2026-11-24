@@ -237,6 +237,7 @@ export function fakeMicrosoft(now?: () => number) {
             name: 'Outlook calendar',
             isDefaultCalendar: true,
             canEdit: true,
+            canShare: true,
             canViewPrivateItems: true,
           },
         ],
@@ -245,6 +246,9 @@ export function fakeMicrosoft(now?: () => number) {
     listStatus: 200,
     listHook: undefined as ((url: URL) => Promise<Response>) | undefined,
     viewHook: undefined as ((url: URL) => Response | Promise<Response>) | undefined,
+    eventHook: undefined as
+      | ((url: URL, init: RequestInit) => Response | Promise<Response>)
+      | undefined,
   }
   const calls: { url: URL; init: RequestInit }[] = []
   const request: typeof fetch = async (input, init = {}) => {
@@ -256,7 +260,13 @@ export function fakeMicrosoft(now?: () => number) {
       return Response.json(controls.identity)
     if (
       url.origin === 'https://graph.microsoft.com' &&
-      url.pathname === '/v1.0/me/calendars/microsoft-calendar-1/calendarView' &&
+      /^\/v1\.0\/me\/calendars\/[^/]+\/events$/u.test(url.pathname) &&
+      controls.eventHook
+    )
+      return controls.eventHook(url, init)
+    if (
+      url.origin === 'https://graph.microsoft.com' &&
+      /^\/v1\.0\/me\/calendars\/[^/]+\/calendarView\/delta(?:\(\))?$/u.test(url.pathname) &&
       controls.viewHook
     )
       return controls.viewHook(url)

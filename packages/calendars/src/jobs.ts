@@ -10,6 +10,11 @@ import {
 import { writeGroupSlotCalendar } from './group-slot-events.ts'
 import type { CalendarDeps } from './index.ts'
 import { syncMicrosoftCalendar } from './microsoft-sync.ts'
+import {
+  type CalendarWritePayload,
+  dispatchMicrosoftWritebacks,
+  writeMicrosoftCalendar,
+} from './microsoft-writeback.ts'
 import { SYNC_MAX_AGE_MS, syncGoogleCalendar } from './sync.ts'
 
 export function calendarSyncJob(deps: CalendarDeps) {
@@ -47,19 +52,19 @@ export function bookingCalendarJob(deps: CalendarDeps) {
     concurrency: 2,
     retry: { limit: 12, delaySeconds: 60, backoff: true, maxDelaySeconds: 3600 },
     expireInSeconds: 300,
-    handler: (payload, { signal }) =>
-      'groupSlotId' in payload
-        ? writeGroupSlotCalendar(deps, payload.groupSlotId, signal)
-        : writeBookingCalendar(
-            deps,
-            payload.bookingId,
-            AbortSignal.any([signal, AbortSignal.timeout(120_000)]),
-          ),
+    handler: async (payload, { signal }) => {
+      const deadline = AbortSignal.any([signal, AbortSignal.timeout(120_000)])
+      if ('groupSlotId' in payload) {
+        await writeMicrosoftCalendar(deps, payload, deadline)
+        await writeGroupSlotCalendar(deps, payload.groupSlotId, deadline)
+      } else await writeBookingCalendar(deps, payload.bookingId, deadline)
+    },
   })
 }
 export function calendarDispatchJob(
   deps: CalendarDeps,
   enqueue: (calendarId: string) => Promise<unknown>,
+  enqueueWriteback?: (payload: CalendarWritePayload) => Promise<unknown>,
 ) {
   return defineJob({
     name: 'calendar-sync-dispatch',
@@ -68,6 +73,7 @@ export function calendarDispatchJob(
     schedule: { cron: '* * * * *', payload: {} },
     expireInSeconds: 120,
     handler: async (_payload, { signal }) => {
+      if (enqueueWriteback) await dispatchMicrosoftWritebacks(deps, enqueueWriteback, signal)
       const providers = [
         ...(deps.google ? ['google'] : []),
         ...(deps.microsoft ? ['microsoft'] : []),
@@ -88,11 +94,13 @@ export function calendarDispatchJob(
             or([
               eb('cc.provider', '!=', 'microsoft'),
               eb.and([
+                eb('c.sync_error', 'is distinct from', 'calendar_removed'),
                 sql<boolean>`coalesce(c.sync_state->>'retryAt','') <= ${new Date(now).toISOString()}`,
                 or([
                   eb('c.last_synced_at', 'is', null),
                   eb('c.sync_error', 'is not', null),
-                  // Refresh the whole Graph view before expiry without polling it every minute.
+                  sql<boolean>`c.sync_state->>'deltaLink' is null or c.sync_state->'microsoftPending' is not null`,
+                  // Refresh the Graph cursor before the snapshot becomes stale.
                   eb('c.last_synced_at', '<=', new Date(now - SYNC_MAX_AGE_MS / 2)),
                 ]),
               ]),

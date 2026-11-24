@@ -40,9 +40,9 @@ The dated observations here are deliberately separate from Hourmere's decisions.
 | [Entra provisioning implementation](https://learn.microsoft.com/en-us/entra/identity/app-provisioning/use-scim-to-provision-users-and-groups) | Examples cover Users and Groups, PATCH, matching, deletion and schema discovery. Group retrieval can exclude members. Group provisioning is optional. |
 | [Entra compliance issues](https://learn.microsoft.com/en-us/entra/identity/app-provisioning/application-provisioning-config-problem-scim-compatibility) | Documents legacy PATCH forms and `aadOptscim062020`, including string booleans and member removal values; the flag does not work with on-demand provisioning according to this page. Older customappsso behavior is not recommended. |
 
-These sources do not certify Hourmere or establish native SCIM support in Google
-Workspace or Keycloak. Google Workspace through a third-party connector and Keycloak
-through a separately chosen plugin are future test targets, not verified integrations.
+The provider examples establish protocol shapes. Google Workspace through a third-party
+connector remains a future test target. Keycloak coverage is limited to the
+[local outbound harness](#local-keycloak-harness) below.
 The RFC Editor pages list later updates to these RFCs; this first implementation
 explicitly targets the bounded RFC 7643/7644 subset below, not every newer extension.
 
@@ -725,22 +725,18 @@ checks, team management and booking-write checks, SSO proofs, delegations, sign-
 account linking and recovery, MCP OAuth grants, host eligibility, recurring
 availability and booking routing. The caller resolver marks the principals it resolves,
 and the protocol capabilities, service contexts and public booking contexts carry the
-flag to the checks behind them. A test fails when a call of the shared check omits the
-decision. Three places stay on the default until they are hardened: background jobs
-(invitation delivery, workflow email, waitlist notification), public booking contexts
-built by MCP tools, and the locked host rechecks of meeting-poll creation and of
-waitlist settings saved with an event type, whose unlocked reads already refuse.
-Reactivation lifts the suspension. A
-parent team's own blocker affects only the parent: when it refuses the reactivation
-with 403 `mutability`, the child memberships are resumed anyway, the directory entry
-stays inactive and nothing else in the request is applied. This is the one refusal
-that commits a change, and it is deliberate. RFC 7644 section 3.5.2 requires a failed
-PATCH to leave the resource as it was, which holds: the User is returned unchanged by
-a later read. The resumed child access is state of another team that the User only
-sources, so the refusal records it as `scim_user.child_access_resumed` in the parent
-journal, in the same transaction. A repeated refused reactivation has nothing left to
-resume and records nothing. A later `active:false`
-suspends them again. `DELETE /Users/{id}` removes those child memberships through the
+flag to the checks behind them, including public booking and waitlist contexts built by
+MCP tools, meeting-poll eligibility and waitlist writes. Background jobs and offline
+operator recovery carry the same capability through their checks, with production set
+to off. The shared suspension check requires callers to pass the capability decision.
+
+A successful reactivation lifts the suspension. A parent-local blocker or missing
+parent membership refuses reactivation with 403 `mutability` and rolls back the entire
+request. The User still reads as `active:false`, its managed child memberships stay
+suspended, and the refusal adds no audit event. Once an administrator clears the blocker
+or restores the parent membership, the IdP still reads `active:false` and can retry
+`active:true`. Only that successful write resumes access. A subsequent `active:false`
+suspends the memberships again. `DELETE /Users/{id}` removes those child memberships through the
 same departure checks as a Group removal, and advances `meta.lastModified` of every
 Group whose roster listed the User. A User write that would suspend or remove a current owner or admin of a child
 returns 403 `mutability`, and a retirement that would strand hosted event types or
@@ -794,8 +790,10 @@ PATCH 可用 `add`、`replace` 和 `remove` 更改映射成员：`remove` 可带
 新成员必须是同一连接中已关联且启用的用户，否则返回 400 `invalidValue`。子团队当前的所有者或管理员不能被移除，
 返回 403 `mutability`。仍主持活动类型或有未完成预约的成员返回 409，需由子团队管理员先行交接。
 来源用户停用时，其受管子团队成员资格保留并暂停，重新启用后恢复，删除来源用户会移除这些成员资格并更新相关群组的 `meta.lastModified`。
-父团队自身的拦截只影响父团队：重新启用因此被拒绝（403 `mutability`）时，子团队成员资格仍会恢复，用户资源本身保持不变，
-这次恢复会以 `scim_user.child_access_resumed` 记入父团队审计日志。
+父团队的本地拦截或缺少父团队成员资格会以 403 `mutability` 拒绝重新启用，并回滚整个请求。
+用户仍显示为 `active:false`，受管子团队成员资格仍暂停，审计日志不新增记录。
+管理员清除拦截或恢复父团队成员资格后，IdP 仍会读到 `active:false`，可重试 `active:true`。
+访问权限在重试成功后恢复，随后发送的 `active:false` 仍会暂停访问。
 成功返回 200 及按请求投影的群组，不支持的写入前置条件返回 412。名称变更与父团队审计事件
 `scim_group.updated` 在同一事务提交（成员变更同样记录），事件仅记录令牌和群组 ID 等审计元数据。
 原样重试保留 `meta.lastModified`，也不增加审计事件。
@@ -813,7 +811,8 @@ authorized local suspension and removal continue through ordinary administration
 
 New Group membership grants only the child member role. Check the child's current admission
 blockers for the linked account and its verified mailbox. Local suspension or removal in the
-child wins over directory writes. A parent team's local blocker affects only the parent.
+child wins over directory writes. Applying a parent-local blocker directly restricts
+parent access. SCIM reactivation of the source User also requires the parent checks above.
 On a mapping with directory authority, deactivating its source User suspends that User's
 retained managed child memberships. Retiring the User removes those memberships through
 the managed departure checks below. Revoke the affected child credentials in either case.
@@ -1050,7 +1049,7 @@ operator-accessible.
 | Group membership changes | Group name and replacement | PATCH Groups/{id} member operations; no MCP/CLI | Resource test flag only | Entra removal forms, same-connection Users, replay, blockers, concurrent replacement, source User lifecycle checks across managed memberships, owner/admin access cannot be removed |
 | Group retirement | Group membership changes | DELETE Groups/{id}; no MCP/CLI | Resource test flag only | Managed access removed, team history retained, privileged-member and booking checks, subsequent operations 404, retired uniqueness excluded |
 | RFC and provider corpus | Group retirement | No new endpoint/tool/command | Resources hard-off | RFC errors/filters/PATCH, Okta PUT/Entra variants, source-copy controls, bounded Postgres pools |
-| Local Keycloak harness | RFC and provider corpus | Pinned local image/plugin fixture and synthetic identities; no new interface | Resources hard-off | Document actual SCIM capability, deterministic startup/cleanup, no live third-party calls, reproducible protocol capture without secrets |
+| [Local Keycloak harness](#local-keycloak-harness) | RFC and provider corpus | Pinned local image/plugin fixture and synthetic identities; no new interface | Resources hard-off | Document actual SCIM capability, deterministic startup/cleanup, no live third-party calls, reproducible protocol capture without secrets |
 | Local lifecycle acceptance | Local Keycloak harness; audit log PR #246; SSO design PR #247 and accepted linking implementation | Local fixture scenarios; no new interface | Resources hard-off | Create/rename/deactivate/reactivate/delete/groups, owner/admin refusal, credential rotation/revocation, recovery, rate limits and audit acceptance |
 | Release documentation and registration | Local lifecycle acceptance | Operator/provider docs and production resource registration; no new protocol operation | Enable only after all prior acceptance; same feature for self-hosters | Tested-provider matrix, limitations, rollback drill documented, any intermediate release hard-off proven; complete Users/Groups/conformance before registering handlers; default of `SCIM_PROVISIONING_ENABLED` changed to on, and an install whose `.env` was copied from an earlier `.env.example` (empty value) is on after upgrade without editing `.env` |
 
@@ -1145,12 +1144,43 @@ Current releases cannot pass an IdP connection test or synchronize users/groups,
 with the flag enabled. Do not configure production provisioning yet. The
 [operator guide](https://hourmere.com/docs/scim) states this same limitation.
 
-Future tests use local HTTP protocol fixtures and throwaway Postgres databases first.
-Use a pinned local Keycloak image plus a reviewed, pinned SCIM plugin/connector only
-after documenting its actual provisioning capability; OIDC/SAML support alone proves
-nothing about SCIM. Exercise create, rename, disable, re-enable, delete, groups,
-credential overlap and revoked-token retries with synthetic identities. Replay official
-Okta/Entra request shapes against the same server in CI without live provider calls.
-A later explicitly authorized tenant trial can establish interoperability; never claim
-Okta/Entra/Google certification from fixtures alone. The foundation performs no provider
-calls and adds no booking reschedule/cancel/DST behavior.
+The HTTP corpus covers the supported RFC 7643/7644 schema, error, filter and PATCH
+behavior and replays synthetic Okta PUT and Entra PATCH fixtures against a throwaway
+Postgres database. It exercises both Entra scheduled shapes and the on-demand legacy
+shape. The fixtures run without external provider calls.
+
+### Local Keycloak harness
+
+Keycloak 26.8.2's built-in SCIM API receives provisioning requests into a Keycloak realm.
+The harness uses the Apache-2.0 Shebang Labs outbound plugin v0.1.1 to send requests to
+Hourmere. The project published v0.1.0 and v0.1.1 in October and November 2026 and lists
+Keycloak 26.8.x support. The fixture reuses the OIDC image digest and verifies the
+official JAR against SHA-256
+`eeadffe79790cfc38bdd7accccf1270bc7843ddd9ff4332b78b5ad1b786a52d9` before mounting it.
+[Keycloak release notes](https://www.keycloak.org/2026/10/keycloak-2680-released.html),
+[plugin release](https://github.com/shebang-labs/scim-outbound-for-keycloak/releases/tag/v0.1.1).
+
+This is the HTTP sequence observed with the plugin's `AUTO` user update mode, Groups
+enabled and `DEACTIVATE` selected. IDs below are aliases assigned by the capture.
+
+| Request | Response and observed behavior |
+|---|---|
+| `GET /ServiceProviderConfig` | `200`, with PATCH and up to 100 filter results advertised. |
+| `GET /Users?filter=userName eq "scim-alex@example.test"` | `200`, empty list before creation. |
+| `POST /Users` | `201`, with `active: true`. The request uses the Keycloak user ID as `externalId`. |
+| `PATCH /Users/user-1` | `200`, with a changed given name. The request uses `replace` for the mapped attributes. |
+| `PATCH /Users/user-1` after disabling the Keycloak user | `200`, with `active: false`. The request includes `replace` on `active` with a JSON boolean. |
+| `GET /Groups?filter=displayName eq "SCIM fixture group"` | `200`, empty list before creation. |
+| `POST /Groups` | `201`, using the Keycloak group ID as `externalId`. The fixture reserves that ID in Hourmere's team mapping first. |
+| `PATCH /Groups/group-1` | `200`, with the new `displayName`. |
+
+The run sent no PUT or DELETE. The plugin also provides a User PUT mode and can fall
+back to PUT in `AUTO` when discovery reports no PATCH support or a User PATCH gets `400`.
+Group updates follow the advertised PATCH capability. Group membership synchronization,
+optional deletion, reactivation and credential lifecycle belong to later acceptance
+scenarios. [Tagged plugin configuration guide](https://github.com/shebang-labs/scim-outbound-for-keycloak/blob/v0.1.1/docs/configuration.md).
+
+The harness uses a synthetic realm, a disposable PostgreSQL database and the existing
+in-process SCIM resource test flag. The plugin's target is the owned local listener.
+Production continues to register no SCIM resource handlers. Reproduce the request and
+response log using the [Keycloak fixture README](../tools/e2e/keycloak/README.md#outbound-scim-capture).

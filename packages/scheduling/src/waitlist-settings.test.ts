@@ -349,16 +349,20 @@ describe.skipIf(!serverUrl)('internal waitlist settings', () => {
     await assertRoundTrip(events)
   })
   it.each([
-    [
-      'create',
-      'if (waitlist) await writeWaitlistSettings(trx, await loadEventType(trx, id), waitlist)',
-    ],
-    [
-      'PATCH',
-      'if (waitlist) await writeWaitlistSettings(trx, await loadEventType(trx, row.id), waitlist)',
-    ],
-  ])('detects source-copy omission of %s waitlist settings', async (_name, anchor) => {
-    const copy = await sourceCopy([anchor as string, ''])
+    ['create', 'id'],
+    ['PATCH', 'row.id'],
+  ])('detects source-copy omission of %s waitlist settings', async (_name, eventId) => {
+    const anchor = [
+      '      if (waitlist)',
+      '        await writeWaitlistSettings(',
+      '          trx,',
+      `          await loadEventType(trx, ${eventId}),`,
+      '          waitlist,',
+      '          ctx.scimResourcesEnabled === true,',
+      '        )',
+      '',
+    ].join('\n')
+    const copy = await sourceCopy([anchor, ''])
     await expectKilled(copy, assertRoundTrip)
   })
 

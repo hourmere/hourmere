@@ -33,7 +33,7 @@ describe.each([
         const signal = AbortSignal.timeout(1000)
         return operation === 'exchange'
           ? client.exchange('fake-code', 'fake-verifier', signal)
-          : client.refresh('fake-refresh', signal)
+          : client.refresh('fake-refresh', signal, ['Calendars.ReadBasic'])
       }
       expect((await tokens()).expiresAt).toBe(now + 3_600_000)
       now += 4 * 3_600_000

@@ -7,6 +7,8 @@ import type { Tool } from './mcp/tools.ts'
 import type { RouteModule } from './openapi.ts'
 import { createRateLimiter, rateLimitKey } from './rate-limit.ts'
 
+// Worker and offline maintenance contexts have no request-scoped test capability.
+export const productionScimResourcesEnabled = false
 export const SCIM_ERROR_SCHEMA = 'urn:ietf:params:scim:api:messages:2.0:Error'
 
 /**

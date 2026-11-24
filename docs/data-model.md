@@ -46,6 +46,12 @@ acknowledged strong ETag (null after deletion). Group copies use
 bounded result and root identity separately from busy sync; successful busy reads retain
 write failures. No new schema is required. See [CalDAV](caldav.md).
 
+Microsoft Graph uses the same pinned target and provider event mappings for booking creation.
+`booking_calendar_targets.microsoft_writeback` and `group_slots.microsoft_writeback` retain the
+finite create or lookup state. The worker commits a checkpoint before calling Graph and stores the
+provider event ID with the successful status. The ID uses the same format as the busy snapshot.
+See [Microsoft Calendar](https://hourmere.com/docs/microsoft-calendar).
+
 `calendar_busy` stores each event ID with exactly one representation: a nonempty
 `period` (`tstzrange`) for an absolute interval, or `all_day_start` and `all_day_end`
 (`date`) with an exclusive end for a date-only event. The dates are finite, within years
@@ -347,9 +353,15 @@ Better Auth token retrieval/refresh HTTP endpoints are disabled. A Microsoft sig
 refresh token is therefore unnecessary; `offline_access` is intentionally omitted.
 Microsoft calendar connections use separate `MICROSOFT_CALENDAR_*` client credentials,
 their own callback and the `calendar_connections.credentials` ciphertext. That flow requests
-`offline_access` with `Calendars.ReadBasic` and requires a refresh token for continued
-calendar access. Selected calendars use complete, bounded Graph calendar-view snapshots
-for `calendar_busy` and coverage metadata in `calendars.sync_state`.
+`offline_access` with `Calendars.ReadWrite` and requires a refresh token for continued
+calendar access. Refresh requests use the connection's stored scopes, including read-only scopes
+on older connections. `calendars.sync_state` stores the Graph delta link, its fixed date window and
+any in-progress page checkpoint, including the round's start time. `calendar_microsoft_changes`
+holds normalized changes until Graph returns a final delta link. A transaction publishes these
+changes together with the cursor, records the round's start as `last_synced_at` and clears the
+staging rows. `calendar_busy` retains the series ID and original start for recurring instances
+so a moved exception can replace its original slot. Existing read-only grants still support busy
+sync. Reconnect a read-only account before selecting it for booking writes.
 
 ### `public`
 

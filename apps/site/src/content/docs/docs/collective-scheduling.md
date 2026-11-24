@@ -83,8 +83,8 @@ when migrating; identities deleted before that point cannot be reconstructed. Th
 is not included in public responses.
 
 Each host receives the normal notification and, when configured, a private destination
-calendar copy. All copies use the reschedule-chain root UID, as do the ICS attachments, so
-retries, rescheduling and cancellation update the same meeting. Google busy-time/calendar
-writes are supported; Microsoft Graph busy-time and event writes remain pending. Synthetic
-provider/mail tests establish local behavior, not real inbox deliverability or production
-provider acceptance.
+calendar copy. Google and CalDAV use the same booking root as the ICS attachments to update
+their copies through retries, reschedules and cancellations. Microsoft Graph supports busy-time
+checks and creates a private copy on the selected destination for each host. Updating a Microsoft
+copy after a reschedule or cancellation remains future work. Synthetic provider and mail tests
+cover local behavior. Real inbox deliverability and production provider acceptance are still pending.

@@ -4,30 +4,57 @@ description: Register an Entra application and connect Outlook calendars indepen
 ---
 
 Connect an Outlook account and choose which calendars Hourmere checks for busy time when
-offering bookings. The connection uses read-only access to Microsoft Graph.
+offering bookings. You can also choose where to create private calendar copies of new bookings.
 
 ## Microsoft Graph status
 
-- The separate Entra calendar client requests delegated `Calendars.ReadBasic`, `openid`,
+- The separate Entra calendar client requests delegated `Calendars.ReadWrite`, `openid`,
   `email` and `offline_access`. The authorization-code flow uses session-bound state and
   PKCE. Hourmere encrypts the access and refresh tokens at rest, refreshes access on the
-  server and saves rotated refresh tokens. [Microsoft authorization-code flow](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-auth-code-flow)
+  server and saves rotated refresh tokens. Existing read-only grants still support busy-time
+  checks. Reconnect to grant booking write access. [Microsoft authorization-code flow](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-auth-code-flow)
 - `GET /oidc/userinfo` supplies the account subject and optional display email.
   `GET /v1.0/me/calendars` supplies calendar IDs, names, default-calendar flags and access
   metadata. Hourmere stores those account and calendar details with the local connection.
-  `GET /v1.0/me/calendars/{id}/calendarView` reads complete, bounded snapshots for
-  selected conflict calendars. [Graph calendar list](https://learn.microsoft.com/en-us/graph/api/user-list-calendars?view=graph-rest-1.0),
-  [Graph calendar view](https://learn.microsoft.com/en-us/graph/api/user-list-calendarview?view=graph-rest-1.0)
-- The busy-time cache stores opaque event identifiers and blocking intervals. The calendar
-  view requests only availability fields and uses the UTC start and end Graph returns for
-  timed and all-day events. Event titles, attendees, locations and descriptions stay out of
-  the cache and availability responses. Graph calls use the connected account’s delegated
-  access. Hourmere makes no Graph event writes.
+  [Graph calendar list](https://learn.microsoft.com/en-us/graph/api/user-list-calendars?view=graph-rest-1.0)
+- Each selected conflict calendar has its own `calendarView/delta` cursor and date range.
+  Hourmere resumes large syncs across background runs and publishes busy times only when
+  the entire round completes. Hourmere starts rebuilding before the current date range
+  expires and also rebuilds when Graph expires a cursor. During a rebuild, bookings still
+  use the previous snapshot while it is fresh and covers the requested times. An initial
+  sync, a failed sync, or a stale or insufficient snapshot leaves the affected times unavailable.
+  A snapshot's 10-minute freshness window starts with its first read. If a round takes longer,
+  Hourmere starts the next incremental read immediately when its remaining budget allows.
+  Otherwise the once-per-minute dispatcher queues the calendar for another read.
+  [Graph calendar view delta](https://learn.microsoft.com/en-us/graph/delta-query-events)
+- Graph expands recurring events. Hourmere uses modified occurrences at their updated times
+  and removes busy intervals for cancelled occurrences and deleted series. Timed and all-day
+  events use the UTC intervals Graph returns. The cache retains opaque identifiers and busy
+  intervals. Event titles, attendees, locations and descriptions are discarded and never
+  included in availability responses.
+- If Graph denies access to one selected calendar, its busy times become unavailable and
+  the account’s other calendars continue syncing. If a complete list omits a selected
+  calendar, Hourmere marks it unavailable and stops syncing it. Use **Refresh calendar list**
+  to check for its return or clear its conflict-check selection to resume booking without it.
 - When Graph throttles a request, Hourmere waits briefly within the read deadline or
   defers the next read by the `Retry-After` delay, up to 24 hours. [Graph throttling guidance](https://learn.microsoft.com/en-us/graph/throttling)
-- Remaining work includes incremental sync across recurring events and exceptions,
-  idempotent booking creation and write-back, and reconciliation of provider conflicts
-  during booking changes, including reschedules and cancellations.
+- New bookings enqueue creation of a private, busy appointment on the selected booking
+  calendar. The appointment includes the saved booking title, which may include the invitee's
+  display name, and its time. A group appointment also includes the seat count at creation.
+  Guest lists, email addresses, booking answers and provider invitations
+  stay out of the calendar copy. Hourmere sends start and end in UTC, and Outlook displays the
+  appointment in the viewer's time zone. [Graph event creation](https://learn.microsoft.com/en-us/graph/api/calendar-post-events?view=graph-rest-1.0)
+- Each booking copy uses a stable Graph `transactionId`. If Graph may have accepted a create,
+  such as when its response is lost, Hourmere looks up the original copy using its booking marker.
+  After a short delay, an empty lookup lets Hourmere send the create again with the same identifier
+  and marker. A successful write stores the Graph event ID. Temporary failures use bounded retries
+  and honor Graph's `Retry-After`. If the Calendars page still shows an unknown result, reconnecting
+  the original account restarts retries for upcoming bookings. Self-hosted operators can also
+  redispatch a booking or connection with `scripts/redispatch-calendar-writeback.ts`.
+  [Graph event lookup by extended property](https://learn.microsoft.com/en-us/graph/api/singlevaluelegacyextendedproperty-get?view=graph-rest-1.0)
+- Updating or removing a Microsoft calendar copy after a reschedule or cancellation remains
+  future work. The Outlook copy may still show the original time after the booking changes.
+  Bookings with automatic Google Meet or Zoom keep their existing conference calendar flow.
 
 ## Prepare a test calendar
 
@@ -53,7 +80,7 @@ account owner.
    For `npm run dev`, the normal URI is
    `http://localhost:5173/api/calendar/microsoft/callback`. Use HTTPS outside loopback.
 4. Record the **Application (client) ID**. In **API permissions**, configure Microsoft Graph
-   **delegated** `Calendars.ReadBasic`, plus `openid`, `email` and `offline_access`. The
+   **delegated** `Calendars.ReadWrite`, plus `openid`, `email` and `offline_access`. The
    connection does not need `User.Read` or application permissions. Remove unused default
    permissions rather than granting broader access. Tenant policies may require an
    administrator to approve delegated consent.
@@ -79,16 +106,40 @@ should affect availability. Newly selected calendars need a successful sync befo
 Hourmere can offer times covered by them. The Calendars page shows account display
 information and local calendar status.
 
-Use **Refresh calendar list** to retrieve changes. **Disconnect** deletes the local connection,
-credentials, calendars and outstanding connection attempts. It does not revoke the Microsoft
-account-wide grant; remove that separately in the Microsoft account's application permissions
-if desired. Keep regular encrypted database backups and protect the encryption key separately.
+## Write new bookings to Outlook
 
-If consent was revoked or permissions are missing, choose **Reconnect Microsoft Calendar**
-and authorize the original Microsoft account to restore the connection.
-On return, check the account status and wait for a successful busy-time sync. While a
-selected calendar’s snapshot is incomplete, stale or unavailable, Hourmere treats those
-times as unknown. See [Troubleshoot availability](/docs/availability-troubleshooting#sync-freshness-and-provider-differences)
+In **Calendars**, choose **Write new bookings here** on an eligible Microsoft calendar.
+You can choose one default booking destination across providers. Choose a calendar your
+connected Outlook account owns and can edit. Calendars shared with you can still be used
+for conflict checks. If your account was connected with read-only access, choose
+**Reconnect Microsoft Calendar** and authorize the original account before selecting its
+calendar. Use **Refresh calendar list** to update ownership information on an existing
+connection.
+
+Hourmere saves the chosen destination when each booking is made. A change to your default
+calendar applies to new bookings. If Microsoft removes a selected calendar or denies write
+access, the Calendars page shows a problem for that destination and the booking stays confirmed.
+Use **Refresh calendar list** to check whether the calendar has returned, or select another
+calendar for future bookings. If permission was revoked, reconnect the original account.
+
+Your own `full` API key can select the destination through `PUT /api/v1/calendar-destination`.
+`GET /api/v1/calendar-connections` and MCP `list_calendar_connections` report write consent and
+calendar writeback status as private connection metadata. Provider authorization requires your
+browser session.
+
+## Manage the connection
+
+Use **Refresh calendar list** to retrieve changes. **Disconnect** deletes the local connection,
+credentials, calendars and outstanding connection attempts. Existing Outlook copies stay in your
+calendar. You can remove the account-wide grant separately in the Microsoft account's application
+permissions. Keep regular encrypted database backups and protect the encryption key separately.
+
+If the account shows **Reconnect required**, choose **Reconnect Microsoft Calendar** and
+authorize the original Microsoft account to restore the connection. If Microsoft denies
+access to a particular calendar, review that calendar’s access in Outlook and retry its sync.
+On return, check the account status and wait for a successful busy-time sync. Hourmere
+treats times without a fresh, covering snapshot as unknown. See
+[Troubleshoot availability](/docs/availability-troubleshooting#sync-freshness-and-provider-differences)
 for the retry and recovery behavior.
 
 Test organizational mailboxes separately from personal Outlook accounts before relying on

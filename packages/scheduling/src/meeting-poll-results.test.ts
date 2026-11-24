@@ -1831,8 +1831,8 @@ describe.skipIf(!serverUrl)('meeting poll results and voter removal', () => {
           '    const lockedSnapshot = {\n      poll: metadata,',
         ],
         [
-          '  })\n  return { ...snapshot, candidates: await advisoryCandidates(ctx.db, snapshot) }',
-          '    return { ...lockedSnapshot, candidates: await advisoryCandidates(trx, lockedSnapshot) }\n  })\n  return snapshot',
+          '  })\n  return {\n    ...snapshot,\n    candidates: await advisoryCandidates(ctx.db, snapshot, ctx.scimResourcesEnabled === true),\n  }',
+          '    return { ...lockedSnapshot, candidates: await advisoryCandidates(trx, lockedSnapshot, ctx.scimResourcesEnabled === true) }\n  })\n  return snapshot',
         ],
       ],
     })

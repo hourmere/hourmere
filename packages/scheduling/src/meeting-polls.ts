@@ -241,6 +241,7 @@ export async function createMeetingPoll(
   requireWriteScope(ctx)
   const request = validCreateInput(input)
   const source = pollSource(ctx, options.source)
+  const scimResourcesEnabled = ctx.scimResourcesEnabled === true
   return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, request.eventTypeId)
     const authority = await lockAuthority(trx, ctx)
@@ -257,7 +258,7 @@ export async function createMeetingPoll(
     const hostUserIds =
       (
         await findOneTimeEventType(trx, named.id, {
-          scimResourcesEnabled: ctx.scimResourcesEnabled,
+          scimResourcesEnabled,
         })
       )?.hostUserIds ?? []
     await lockHosts(trx, hostUserIds)
@@ -316,7 +317,7 @@ export async function createMeetingPoll(
     )
     // Host users and members are share-locked before the clock is read, as in public
     // booking, so a wait for those rows never leaves the decision instant stale.
-    const bookable = await lockBookableEvent(trx, event.id, hostUserIds)
+    const bookable = await lockBookableEvent(trx, event.id, hostUserIds, scimResourcesEnabled)
     const createdAt = await clock(trx)
     validateSchedule(createdAt, deadlineAt, starts, event.minimum_notice_minutes)
     await requireBookableCandidates(trx, bookable, starts, durationMinutes, createdAt)
@@ -961,11 +962,12 @@ async function lockBookableEvent(
   trx: Db,
   eventTypeId: string,
   lockedHostUserIds: readonly string[],
+  scimResourcesEnabled: boolean,
 ): Promise<BookableEvent> {
   let event: Awaited<ReturnType<typeof findOneTimeEventType>>
   try {
     // ID-addressed booking's resolution, host eligibility and host user/member locks.
-    event = await findOneTimeEventType(trx, eventTypeId, { lock: true })
+    event = await findOneTimeEventType(trx, eventTypeId, { lock: true, scimResourcesEnabled })
   } catch (error) {
     if (error instanceof DomainError && error.code === 'booking_changed') throw eventChanged()
     throw error

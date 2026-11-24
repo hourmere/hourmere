@@ -3200,6 +3200,25 @@ export const admin = {
   'Single sign-on is turned off on this instance. You can review and remove existing settings, but nothing new can be added.':
     'Single sign-on is turned off on this instance. You can review and remove existing settings, but nothing new can be added.',
   // Microsoft Calendar conflict checks
-  'Microsoft will ask for your account identity, continuing access and permission to read basic calendar details. Hourmere lists your calendars and checks busy times on the calendars you select. Booking event writes are unavailable. Connecting is separate from signing in.':
-    'Microsoft will ask for your account identity, continuing access and permission to read basic calendar details. Hourmere lists your calendars and checks busy times on the calendars you select. Booking event writes are unavailable. Connecting is separate from signing in.',
+  'Microsoft no longer lists this calendar. Booking times stay unavailable while it is selected. Refresh the calendar list or clear the selection.':
+    'Microsoft no longer lists this calendar. Booking times stay unavailable while it is selected. Refresh the calendar list or clear the selection.',
+  'Microsoft denied access to this calendar. Booking times stay unavailable until access is restored.':
+    'Microsoft denied access to this calendar. Booking times stay unavailable until access is restored.',
+  // Microsoft Calendar booking writeback
+  'Microsoft will ask for your account identity, continuing access and permission to read and write calendar events. Hourmere checks busy times on the calendars you select and creates private booking copies only on your chosen booking calendar. Connecting is separate from signing in.':
+    'Microsoft will ask for your account identity, continuing access and permission to read and write calendar events. Hourmere checks busy times on the calendars you select and creates private booking copies only on your chosen booking calendar. Connecting is separate from signing in.',
+  'Reconnect Microsoft Calendar to allow writing new booking events.':
+    'Reconnect Microsoft Calendar to allow writing new booking events.',
+  'Microsoft Calendar could not write to this calendar. Check its access in Outlook.':
+    'Microsoft Calendar could not write to this calendar. Check its access in Outlook.',
+  'Microsoft Calendar has limited requests temporarily.':
+    'Microsoft Calendar has limited requests temporarily.',
+  'Hourmere could not confirm whether Microsoft created the original booking copy.':
+    'Hourmere could not confirm whether Microsoft created the original booking copy.',
+  'Microsoft reported a conflict when creating the booking copy.':
+    'Microsoft reported a conflict when creating the booking copy.',
+  'A booking copy needs attention.': 'A booking copy needs attention.',
+  'Hourmere will retry writing a booking copy.': 'Hourmere will retry writing a booking copy.',
+  'A booking copy is waiting to be written.': 'A booking copy is waiting to be written.',
+  'Choose a Microsoft calendar you own.': 'Choose a Microsoft calendar you own.',
 } as const
