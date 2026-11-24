@@ -933,11 +933,12 @@ Reject SCIM tokens on `/api/v1`, `/mcp`, `/api/auth` and every other authenticat
 do not fall back to a cookie when an Authorization header is present. Keep SCIM and API
 key stores/verifiers separate even though they share a hash primitive.
 
-Before resources ship, add bounded request/body/operation/member counts, per-IP failed
-authentication and per-organization authenticated rate limits with 429/Retry-After.
-Transport limits today are process-local; document replica multiplication and move
-organization mutation budgets to durable/shared storage before claiming cluster-wide
-limits. Optional IP allow-listing is initially an operator reverse-proxy control, not an
+The SCIM transport limits every source to 120 requests per minute, including failed
+authentication. With resource handlers registered in the test harness, it also limits
+authenticated traffic to 120 requests per minute per organization across all sources
+and tokens. Either limit returns a SCIM 429 with `Retry-After`. These fixed windows
+are process-local. Each replica has its own budget. Shared mutation budgets would
+require durable storage. Optional IP allow-listing is initially an operator reverse-proxy control, not an
 application feature; trust forwarded addresses only through configured trusted proxies.
 
 Ordinary access logs retain method, route and response status for token administration,
@@ -962,9 +963,7 @@ Token foundation must never claim full audit coverage. SCIM action names follow 
 one-dot form `<resource>.<past-tense verb>`, as `scim_user.created` does, because the action
 check allows exactly one dot. Required future actions:
 `scim_connection.authentication_failed` and `scim_connection.rate_limited` (bounded
-aggregation); `scim_user.deleted`; `scim_group.updated`,
-`scim_group.deleted`; `scim_group.member_added`, `scim_group.member_removed`;
-`scim_mapping.linked`, `scim_mapping.suspended`, `scim_mapping.unlinked`; `scim_user.conflicted`;
+aggregation); `scim_group.member_added`, `scim_group.member_removed`; `scim_user.conflicted`;
 `scim_user.privileged_member_blocked`; `scim_user.last_owner_blocked`;
 `scim_user.membership_suspended`.
 Record organization/connection, safe credential ID or human actor, target opaque ID,
@@ -1050,7 +1049,7 @@ operator-accessible.
 | Group retirement | Group membership changes | DELETE Groups/{id}; no MCP/CLI | Resource test flag only | Managed access removed, team history retained, privileged-member and booking checks, subsequent operations 404, retired uniqueness excluded |
 | RFC and provider corpus | Group retirement | No new endpoint/tool/command | Resources hard-off | RFC errors/filters/PATCH, Okta PUT/Entra variants, source-copy controls, bounded Postgres pools |
 | [Local Keycloak harness](#local-keycloak-harness) | RFC and provider corpus | Pinned local image/plugin fixture and synthetic identities; no new interface | Resources hard-off | Document actual SCIM capability, deterministic startup/cleanup, no live third-party calls, reproducible protocol capture without secrets |
-| Local lifecycle acceptance | Local Keycloak harness; audit log PR #246; SSO design PR #247 and accepted linking implementation | Local fixture scenarios; no new interface | Resources hard-off | Create/rename/deactivate/reactivate/delete/groups, owner/admin refusal, credential rotation/revocation, recovery, rate limits and audit acceptance |
+| [Local lifecycle acceptance](#local-lifecycle-acceptance) | Local Keycloak harness; audit log PR #246; SSO design PR #247 and accepted linking implementation | Local fixture scenarios; no new interface | Resources hard-off | Create/rename/deactivate/reactivate/delete/groups, owner/admin refusal, credential rotation/revocation, recovery, rate limits and audit acceptance |
 | Release documentation and registration | Local lifecycle acceptance | Operator/provider docs and production resource registration; no new protocol operation | Enable only after all prior acceptance; same feature for self-hosters | Tested-provider matrix, limitations, rollback drill documented, any intermediate release hard-off proven; complete Users/Groups/conformance before registering handlers; default of `SCIM_PROVISIONING_ENABLED` changed to on, and an install whose `.env` was copied from an earlier `.env.example` (empty value) is on after upgrade without editing `.env` |
 
 The retirement flow above defines proof for a retained member's re-admission. The SSO linking
@@ -1160,27 +1159,32 @@ official JAR against SHA-256
 [Keycloak release notes](https://www.keycloak.org/2026/10/keycloak-2680-released.html),
 [plugin release](https://github.com/shebang-labs/scim-outbound-for-keycloak/releases/tag/v0.1.1).
 
-This is the HTTP sequence observed with the plugin's `AUTO` user update mode, Groups
-enabled and `DEACTIVATE` selected. IDs below are aliases assigned by the capture.
+### Local lifecycle acceptance
 
-| Request | Response and observed behavior |
+The opt-in Playwright suite shares one Keycloak container across eight scenarios.
+Each scenario owns a synthetic realm, a PostgreSQL database and an in-process
+Hourmere listener. The fixture uses the existing SCIM resource test flag.
+Production continues to register no SCIM resource handlers.
+
+| Capability | Driver and observed result |
 |---|---|
-| `GET /ServiceProviderConfig` | `200`, with PATCH and up to 100 filter results advertised. |
-| `GET /Users?filter=userName eq "scim-alex@example.test"` | `200`, empty list before creation. |
-| `POST /Users` | `201`, with `active: true`. The request uses the Keycloak user ID as `externalId`. |
-| `PATCH /Users/user-1` | `200`, with a changed given name. The request uses `replace` for the mapped attributes. |
-| `PATCH /Users/user-1` after disabling the Keycloak user | `200`, with `active: false`. The request includes `replace` on `active` with a JSON boolean. |
-| `GET /Groups?filter=displayName eq "SCIM fixture group"` | `200`, empty list before creation. |
-| `POST /Groups` | `201`, using the Keycloak group ID as `externalId`. The fixture reserves that ID in Hourmere's team mapping first. |
-| `PATCH /Groups/group-1` | `200`, with the new `displayName`. |
+| Discover and create a User | The Keycloak plugin reads `ServiceProviderConfig`, looks up the User with a `userName eq` filter, and sends `POST /Users`. Hourmere returns 201 with the Keycloak user ID as `externalId`. |
+| Rename, deactivate and reactivate a User | In `AUTO` mode the plugin sends PATCH with mapped profile fields and a boolean `active`. Hourmere returns 200. Deactivation revokes the linked account's team session and preserves its personal session. Reactivation permits fresh team access while the revoked session remains unusable. |
+| Replace and retire a User | With `userUpdateMode: PUT`, the plugin reads the existing representation and sends a merged PUT that changes the username and mapped name on the same ID. With `deprovision: DELETE`, deleting the Keycloak user sends SCIM DELETE. Hourmere returns 204, cancels the pending SCIM invitation and returns 404 on the retired ID. |
+| Create, rename and change a Group roster | The fixture first reserves the Keycloak group ID as the mapping's `externalId`. The plugin looks up the Group by display name, creates it with POST and renames it with PATCH. Keycloak join and leave events send PATCH `add` and `remove` operations on `members`, with arrays of User IDs in both cases. |
+| Replace and retire a Group | The plugin picks PATCH for Group updates when discovery advertises it. The fixture sends Group PUT directly with the provisioning bearer and verifies that renaming preserves the roster. Deleting the Keycloak group sends DELETE. Hourmere retires the mapping, removes the managed roster, preserves the child team and local memberships, and returns 404 on the retired ID. |
+| Preserve owner and admin access | Plugin User deactivation and DELETE, Group member removal and Group deletion exercise refusal with 403 `mutability` for protected members. The fixture sends User and Group role writes and Group PUT roster changes directly with the provisioning bearer because the plugin has no corresponding configuration. The successful state and journal stay unchanged after refused writes. |
+| Rotate and revoke the provisioning credential | An owner session calls the existing token API. With zero overlap, the old bearer immediately returns 401 in direct SCIM requests and a subsequent plugin sync. The replacement keeps the same connection, and a cross-team request returns 401. With overlap both generations work. Updating the fixture vault lets the plugin sync with the replacement. Revocation immediately refuses both generations, including the plugin’s next request. |
+| Recover a retained User | Keycloak deletes and reprovisions the User with the same username. The new ID starts unlinked. The original verified account confirms readmission through the existing native session endpoint, which clears the retired User's SCIM suspension without restoring the revoked session. Another account and replay are refused. The initial retained account link is fixture setup. |
+| Recover a team mapping | Keycloak provisions the Group and its roster. The fixture calls the offline mapping recovery service with both exact team IDs, exercises idempotent suspension and detachment, and checks both journals and the fake owner-notice queue. Group requests return 404 after suspension, and subsequent parent User suspension leaves the child access intact until detachment. Offline detachment also refuses to remove a protected child admin. |
+| Rate limits | Direct SCIM requests exercise 429 and `Retry-After` at the per-source and authenticated organization ceilings. Two credentials and different fixture client addresses share the organization budget. Another organization can still use its own credential. |
+| Audit and privacy | The suite checks action names, target IDs, actor and credential attribution, and allowlisted details. User retirement records `scim_user.retired`. Changes to a Group's name or roster record `scim_group.updated`. Group retirement records `scim_group.deleted` plus `scim_mapping.unlinked` on both teams, with a system actor on the child. Token, invitation, claim, suspension, reactivation and recovery journals are checked along their respective paths. Fixture secrets and digests are absent from the journals and sanitized protocol capture. |
 
-The run sent no PUT or DELETE. The plugin also provides a User PUT mode and can fall
-back to PUT in `AUTO` when discovery reports no PATCH support or a User PATCH gets `400`.
-Group updates follow the advertised PATCH capability. Group membership synchronization,
-optional deletion, reactivation and credential lifecycle belong to later acceptance
-scenarios. [Tagged plugin configuration guide](https://github.com/shebang-labs/scim-outbound-for-keycloak/blob/v0.1.1/docs/configuration.md).
+The plugin's automatic User fallback to PUT depends on the advertised capability or a
+400 from User PATCH. This suite uses its explicit PUT mode for the replacement path.
+See the [tagged plugin configuration guide](https://github.com/shebang-labs/scim-outbound-for-keycloak/blob/v0.1.1/docs/configuration.md)
+and [fixture commands and capture fields](../tools/e2e/keycloak/README.md#outbound-scim-capture).
 
-The harness uses a synthetic realm, a disposable PostgreSQL database and the existing
-in-process SCIM resource test flag. The plugin's target is the owned local listener.
-Production continues to register no SCIM resource handlers. Reproduce the request and
-response log using the [Keycloak fixture README](../tools/e2e/keycloak/README.md#outbound-scim-capture).
+本地验收用固定版本的 Keycloak 和插件覆盖用户及群组生命周期。矩阵列明哪些请求由插件发送，
+以及哪些检查直接调用现有 SCIM、凭证或认领接口，或使用离线映射恢复服务。审计检查包括操作、
+来源和许可字段，协议记录仅保留经过筛选的测试值。验收需要显式运行，生产环境仍不注册 SCIM 资源。

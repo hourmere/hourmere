@@ -133,22 +133,26 @@ export function mountScim(
   if (options?.resources && !publicUrl) throw new Error('SCIM resources need the public URL')
   const origin = publicUrl ? new URL(publicUrl).origin : ''
   const limit = createRateLimiter({ limit: 120, windowSeconds: 60 })
+  const organizationLimit = options?.resources
+    ? createRateLimiter({ limit: 120, windowSeconds: 60 })
+    : undefined
   const send = (c: Context, status: Exclude<ScimReply['status'], 204> | 500, body: unknown) => {
     c.header('Content-Type', 'application/scim+json')
     return c.body(JSON.stringify(body), status)
   }
   const respond = (c: Context, status: 401 | 404 | 429 | 500, detail: string) =>
     send(c, status, scimError(status, detail))
+  const rateLimited = (c: Context, retry: number) => {
+    c.header('Retry-After', String(retry))
+    return respond(c, 429, 'Too many requests.')
+  }
   app.use('/scim/*', clientIp(trustedProxies))
   app.all('/scim/*', async (c) => {
     c.header('Cache-Control', 'no-store')
     c.header('Referrer-Policy', 'no-referrer')
     if (!options?.enabled) return respond(c, 404, 'SCIM provisioning is disabled.')
     const retry = limit.hit(rateLimitKey(c.var.clientIp))
-    if (retry !== undefined) {
-      c.header('Retry-After', String(retry))
-      return respond(c, 429, 'Too many requests.')
-    }
+    if (retry !== undefined) return rateLimited(c, retry)
     const organizationId = /^\/scim\/v2\/([a-f0-9-]{36})(?:\/|$)/i.exec(c.req.path)?.[1]
     if (!organizationId) return respond(c, 404, 'SCIM resources are not available yet.')
     try {
@@ -162,6 +166,8 @@ export function mountScim(
         c.header('WWW-Authenticate', 'Bearer')
         return respond(c, 401, 'A valid provisioning token is required.')
       }
+      const organizationRetry = organizationLimit?.hit(principal.organizationId)
+      if (organizationRetry !== undefined) return rateLimited(c, organizationRetry)
       // Locations name the stored organization, never the URL's spelling of it.
       const reply = await options.resources?.({
         method: c.req.method,
