@@ -62,6 +62,7 @@ const signup = { mode: 'open', allowedDomains: [] } as const
 const samlOnly = { ssoOidcEnabled: false, ssoSamlEnabled: true }
 const persistent = 'urn:oasis:names:tc:SAML:2.0:nameid-format:persistent'
 const transient = 'urn:oasis:names:tc:SAML:2.0:nameid-format:transient'
+const stableAttribute = 'urn:example:immutable-id'
 const assertionNamespace = 'urn:oasis:names:tc:SAML:2.0:assertion'
 const protocolNamespace = 'urn:oasis:names:tc:SAML:2.0:protocol'
 const digest = (value: string) => createHash('sha256').update(value).digest('hex')
@@ -99,6 +100,7 @@ interface SignedResponseOptions {
   nameQualifier?: string
   spNameQualifier?: string
   mailbox?: string
+  subjectAttributeValues?: readonly string[]
   bearerLifetime?: number
   sessionLifetime?: number
   signingIdentity?: ReturnType<typeof samlSigningIdentity>
@@ -226,37 +228,60 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
     )
   }
 
-  async function linkedProvider() {
+  async function enabledProvider({
+    organizationId = team.team,
+    domainId = domain.id,
+    subjectAttribute,
+    assertedMailbox = mailbox,
+  }: {
+    organizationId?: string
+    domainId?: string
+    subjectAttribute?: string
+    assertedMailbox?: string
+  } = {}) {
     const id = await providerId()
-    const values = samlProviderValues(team.team)
+    const values = samlProviderValues(organizationId)
     await db
       .insertInto('sso_providers')
       .values({
         ...values,
         id,
         enabled: true,
-        configuration: seal(id, { ssoEndpoint, signingCertificates: [idp.pem] }),
+        configuration: sealSsoProviderConfiguration(
+          configurationKey,
+          { organizationId, providerId: id, revision: 1 },
+          JSON.stringify({ ssoEndpoint, signingCertificates: [idp.pem], subjectAttribute }),
+        ),
       })
       .execute()
     await db
       .insertInto('sso_provider_domains')
-      .values({ organization_id: team.team, provider_id: id, domain_id: domain.id })
+      .values({ organization_id: organizationId, provider_id: id, domain_id: domainId })
       .execute()
-    const subject = `fixture-subject-${randomUUID()}`
+    return {
+      id,
+      issuer: values.issuer,
+      subject: `fixture-subject-${randomUUID()}`,
+      mailbox: assertedMailbox,
+    }
+  }
+
+  async function linkedProvider() {
+    const provider = await enabledProvider()
     const link = await db
       .insertInto('sso_identity_links')
       .values({
         organization_id: team.team,
-        provider_id: id,
+        provider_id: provider.id,
         user_id: team.member,
-        issuer: values.issuer,
-        subject,
+        issuer: provider.issuer,
+        subject: provider.subject,
         proven_email: mailbox,
         email_proven_at: at(-60),
       })
       .returning(['id', 'generation'])
       .executeTakeFirstOrThrow()
-    return { id, issuer: values.issuer, subject, mailbox, link }
+    return { ...provider, link }
   }
 
   function signIn(providerId: string, request: App) {
@@ -335,6 +360,7 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
       nameQualifier,
       spNameQualifier,
       mailbox = provider.mailbox,
+      subjectAttributeValues,
       bearerLifetime = 300,
       sessionLifetime,
       signingIdentity,
@@ -348,6 +374,11 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
     const correlation = correlatedId === null ? '' : ` InResponseTo="${correlatedId}"`
     const nameScope = nameQualifier ? ` NameQualifier="${nameQualifier}"` : ''
     const spScope = spNameQualifier ? ` SPNameQualifier="${spNameQualifier}"` : ''
+    const immutableAttribute = subjectAttributeValues
+      ? `<saml:Attribute Name="${stableAttribute}">${subjectAttributeValues
+          .map((value) => `<saml:AttributeValue>${value}</saml:AttributeValue>`)
+          .join('')}</saml:Attribute>`
+      : ''
     const assertion = `<saml:Assertion xmlns:saml="${assertionNamespace}" ID="${assertionId}" Version="2.0" IssueInstant="${issued}">
       <saml:Issuer>${provider.issuer}</saml:Issuer>
       <saml:Subject>
@@ -362,6 +393,7 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
       <saml:AuthnStatement AuthnInstant="${issued}"${sessionBound}/>
       <saml:AttributeStatement>
         <saml:Attribute Name="email"><saml:AttributeValue>${mailbox}</saml:AttributeValue></saml:Attribute>
+        ${immutableAttribute}
       </saml:AttributeStatement>
     </saml:Assertion>`
     const xml = sign(
@@ -404,11 +436,14 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
     expect(response.headers.getSetCookie()).toEqual([])
   }
 
-  async function pending(accepted: Response, attempt: Start) {
+  async function pending(accepted: Response, attempt: Start, intent?: 'link') {
     expect(accepted.status).toBe(303)
     const location = new URL(accepted.headers.get('location') ?? '', publicUrl)
     expect(location.origin + location.pathname).toBe(publicUrl + completePath)
-    expect([...location.searchParams.keys()]).toEqual(['attemptId'])
+    expect([...location.searchParams.keys()].sort()).toEqual(
+      intent ? ['attemptId', 'intent'] : ['attemptId'],
+    )
+    expect(location.searchParams.get('intent')).toBe(intent ?? null)
     const id = location.searchParams.get('attemptId')
     if (!id) throw new Error('Missing pending SAML handle')
     const cookies = accepted.headers.getSetCookie()
@@ -423,12 +458,19 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
 
   function complete(
     result: Awaited<ReturnType<typeof pending>>,
-    { request = app, cookies = result.cookies, origin = publicUrl } = {},
+    {
+      request = app,
+      cookies = result.cookies,
+      origin = publicUrl,
+      intent = result.location.searchParams.get('intent'),
+    } = {},
   ) {
+    const body = new URLSearchParams({ attemptId: result.id })
+    if (intent) body.set('intent', intent)
     return request.request(new URL(completePath, publicUrl), {
       method: 'POST',
       headers: { origin, cookie: cookies.join('; ') },
-      body: new URLSearchParams({ attemptId: result.id }),
+      body,
     })
   }
 
@@ -528,20 +570,13 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
         body: JSON.stringify(body),
       })
 
-    async function mailboxProof(response: Response, original: string[]) {
-      expect(response.status).toBe(403)
-      const challenge = (await response.json()) as { attemptId: string }
-      expect(challenge).toMatchObject({
-        error: 'sso_reauthentication_required',
-        attemptId: expect.any(String),
-        proofMethods: ['mailbox'],
-      })
-      const cookies = mergeCookies(original, cookiesFrom(response))
-      const { attemptId } = challenge
-      expect((await json(MAILBOX_PROOF_SEND_PATH, cookies, { attemptId })).status).toBe(202)
+    async function deliverProof(attemptId: string, cookies: string[]) {
+      const accepted = await json(MAILBOX_PROOF_SEND_PATH, cookies, { attemptId })
+      expect(accepted.status).toBe(202)
+      expect(await accepted.json()).toEqual({ status: 'queued' })
       const job = jobs.shift()
       if (!job) throw new Error('Missing queued mailbox proof')
-      let token: string | undefined
+      let delivery: { token: string; subject: string; text: string; to: string } | undefined
       await deliverMailboxProof(
         {
           db,
@@ -552,16 +587,33 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
           signInMailMaxPerHour: 20,
           mailer: {
             async send(message) {
-              token = /#attempt=[0-9a-f-]+&token=([A-Za-z0-9_-]+)/.exec(message.text ?? '')?.[1]
+              const text = message.text ?? ''
+              const token = /[#&]token=([A-Za-z0-9_-]{43})/.exec(text)?.[1]
+              if (token) delivery = { token, subject: message.subject, text, to: message.to }
             },
           },
         },
         job,
       )
-      if (!token) throw new Error('Missing token in captured mailbox proof message')
-      expect((await json(MAILBOX_PROOF_CONSUME_PATH, cookies, { attemptId, token })).status).toBe(
-        200,
-      )
+      if (!delivery) throw new Error('Missing token in captured mailbox proof message')
+      return delivery
+    }
+
+    const consumeProof = (attemptId: string, cookies: string[], token: string) =>
+      json(MAILBOX_PROOF_CONSUME_PATH, cookies, { attemptId, token })
+
+    async function mailboxProof(response: Response, original: string[]) {
+      expect(response.status).toBe(403)
+      const challenge = (await response.json()) as { attemptId: string }
+      expect(challenge).toMatchObject({
+        error: 'sso_reauthentication_required',
+        attemptId: expect.any(String),
+        proofMethods: ['mailbox'],
+      })
+      const cookies = mergeCookies(original, cookiesFrom(response))
+      const { attemptId } = challenge
+      const { token } = await deliverProof(attemptId, cookies)
+      expect((await consumeProof(attemptId, cookies, token)).status).toBe(200)
       return { attemptId, cookies }
     }
 
@@ -581,7 +633,7 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
       }
     }
 
-    return { request, json, mailboxProof, withMailbox }
+    return { request, json, deliverProof, consumeProof, mailboxProof, withMailbox }
   }
 
   const receipts = (id: string) =>
@@ -605,6 +657,257 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
     expect(completed.status).toBe(303)
     expect(completed.headers.get('location')).toBe('/app/settings')
   }
+
+  const linkPath = (provider: Provider) => `${providersPath}/${provider.id}/link`
+
+  function storedLinks(provider: Provider) {
+    return db
+      .selectFrom('sso_identity_links')
+      .select(['id', 'user_id', 'issuer', 'subject', 'generation', 'proven_email'])
+      .where('provider_id', '=', provider.id)
+      .execute()
+  }
+
+  async function startLink(
+    provider: Provider,
+    browser: string[],
+    { withMailbox }: ReturnType<typeof management>,
+  ) {
+    const { response, cookies } = await withMailbox(linkPath(provider), browser, {})
+    return readStart(provider, response, cookies)
+  }
+
+  async function stageLink(request: App, attempt: Start, options?: SignedResponseOptions) {
+    const signed = await signedResponse(attempt, options)
+    return pending(
+      await acs(attempt.provider.id, signed.encoded, attempt.relayState, request),
+      attempt,
+      'link',
+    )
+  }
+
+  it('requires independent mailbox proof and explicit consent in the original SAML linking browser and session', async () => {
+    const provider = await enabledProvider()
+    const { request, json, mailboxProof } = management()
+    const member = await browserSession(team.member)
+    const otherSession = await browserSession(team.member)
+    const otherMember = await browserSession(team.admin)
+    const me = async (cookies: string[], application = request) => {
+      const response = await application.request(new URL('/api/v1/me', publicUrl), {
+        headers: { cookie: cookies.join('; ') },
+      })
+      expect(response.status).toBe(200)
+      return ((await response.json()) as { sso: Record<string, unknown> }).sso
+    }
+    const before = await identityEffects()
+    const challenge = await json(linkPath(provider), member.cookies, {})
+    expect(await protocolEffects(provider.id)).toEqual([[], []])
+    expect(await identityEffects()).toEqual(before)
+    expect(await me(mergeCookies(member.cookies, cookiesFrom(challenge)))).toMatchObject({
+      attempts: [{ phase: 'fresh_proof', mailboxProven: false }],
+    })
+    const proof = await mailboxProof(challenge, member.cookies)
+    const attempt = await readStart(
+      provider,
+      await json(linkPath(provider), proof.cookies, { proofAttemptId: proof.attemptId }),
+      proof.cookies,
+    )
+    const authorizationId = attempt.requestId.slice(1)
+    const authorizationSummary = await me(attempt.cookies)
+    expect(authorizationSummary).toMatchObject({
+      providers: expect.arrayContaining([
+        { id: provider.id, revision: 1, displayName: 'Synthetic AD FS' },
+      ]),
+      attempts: [
+        {
+          id: authorizationId,
+          providerId: provider.id,
+          phase: 'authorization',
+          mailboxProven: true,
+          expiresAt: expect.any(String),
+        },
+      ],
+    })
+    const staged = await stageLink(request, attempt)
+    const beforeConsent = await identityEffects()
+    expect(beforeConsent).toEqual({
+      ...before,
+      mailboxTokens: String(Number(before.mailboxTokens) + 1),
+    })
+    const page = await request.request(staged.location, {
+      headers: { cookie: staged.cookies.join('; '), 'accept-language': 'en' },
+    })
+    expect(page.status).toBe(200)
+    const form = await page.text()
+    expect(form).toContain('Link account')
+    expect(form).toContain('name="intent" value="link"')
+    expect(await identityEffects()).toEqual(beforeConsent)
+    expect(await storedLinks(provider)).toEqual([])
+    expect(await me(staged.cookies)).toMatchObject({
+      attempts: [
+        { id: staged.id, providerId: provider.id, phase: 'completion', mailboxProven: true },
+      ],
+    })
+    const off = management(team.team, { ssoOidcEnabled: true, ssoSamlEnabled: false }).request
+    expect(await me(staged.cookies, off)).toMatchObject({ providers: [], attempts: [] })
+    const wrongBrowser = mergeCookies(staged.cookies, [
+      `${bindingCookie}=${randomBytes(32).toString('base64url')}`,
+    ])
+    const wrongSession = mergeCookies(staged.cookies, otherSession.cookies)
+    const wrongUser = mergeCookies(staged.cookies, otherMember.cookies)
+    for (const cookies of [wrongBrowser, wrongSession, wrongUser]) {
+      expect(await me(cookies)).toMatchObject({ attempts: [] })
+      await expectRefusedCompletion(await complete(staged, { request, cookies }))
+    }
+    await expectRefusedCompletion(await complete(staged, { request, intent: null }))
+    expect(await identityEffects()).toEqual(beforeConsent)
+
+    const consent = await complete(staged, { request })
+    expect(consent.status).toBe(303)
+    expect(consent.headers.get('location')).toBe('/app/settings')
+    await expectRefusedCompletion(await complete(staged, { request }))
+    expect(await identityEffects()).toEqual({
+      ...beforeConsent,
+      links: String(Number(beforeConsent.links) + 1),
+    })
+    const [link] = await storedLinks(provider)
+    expect(link).toEqual({
+      id: expect.any(String),
+      user_id: team.member,
+      issuer: provider.issuer,
+      subject: provider.subject,
+      generation: 1,
+      proven_email: mailbox,
+    })
+    const summary = await me(staged.cookies)
+    expect(summary).toMatchObject({
+      attempts: [],
+      links: [{ id: link?.id, generation: 1, providerId: provider.id }],
+      proofs: [],
+    })
+    expect(JSON.stringify(summary)).not.toContain(provider.subject)
+    expect(JSON.stringify(summary)).not.toContain(mailbox)
+    expect(await me(wrongUser)).toMatchObject({ links: [], attempts: [] })
+  })
+
+  it('refuses transient NameID, uses only a single pinned immutable attribute and still needs a matching mailbox', async () => {
+    const manager = management()
+    const { request } = manager
+    const member = await browserSession(team.member)
+    const unpinned = await enabledProvider()
+    const pinned = await enabledProvider({ subjectAttribute: stableAttribute })
+    const stableSubject = `immutable-${randomUUID()}`
+    for (const [provider, options] of [
+      [unpinned, { subjectFormat: transient, subjectAttributeValues: [stableSubject] }],
+      [pinned, {}],
+      [pinned, { subjectAttributeValues: [stableSubject, 'second-value'] }],
+      [pinned, { subjectAttributeValues: [stableSubject], mailbox: `other@${verifiedDomain}` }],
+    ] as const) {
+      const attempt = await startLink(provider, member.cookies, manager)
+      const signed = await signedResponse(attempt, options)
+      expectRefusedAcs(await acs(provider.id, signed.encoded, attempt.relayState, request))
+      expect(await storedLinks(provider)).toEqual([])
+    }
+
+    const staged = await stageLink(request, await startLink(pinned, member.cookies, manager), {
+      subjectAttributeValues: [stableSubject],
+    })
+    expect((await complete(staged, { request })).status).toBe(303)
+    expect(await storedLinks(pinned)).toEqual([
+      expect.objectContaining({ subject: stableSubject, user_id: team.member }),
+    ])
+    const signedIn = await signIn(pinned.id, request)
+    const attempt = await readStart(pinned, signedIn)
+    const assertion = await signedResponse(attempt, {
+      subject: 'different-persistent-name-id',
+      subjectAttributeValues: [stableSubject],
+    })
+    const result = await pending(
+      await acs(pinned.id, assertion.encoded, attempt.relayState, request),
+      attempt,
+    )
+    expect((await complete(result, { request })).status).toBe(303)
+  })
+
+  it('refuses an expired SAML link intent without consuming it or creating a link', async () => {
+    const provider = await enabledProvider()
+    const manager = management()
+    const member = await browserSession(team.member)
+    const { request } = manager
+    const result = await stageLink(request, await startLink(provider, member.cookies, manager), {
+      sessionLifetime: 2,
+    })
+    await vi.waitFor(
+      async () => {
+        const row = await db
+          .selectFrom('sso_attempts')
+          .select(sql<boolean>`expires_at <= clock_timestamp()`.as('expired'))
+          .where('id', '=', result.id)
+          .executeTakeFirstOrThrow()
+        expect(row.expired).toBe(true)
+      },
+      { timeout: 2500, interval: 50 },
+    )
+    const before = await protocolEffects(provider.id)
+    await expectRefusedCompletion(await complete(result, { request }))
+    expect(await storedLinks(provider)).toEqual([])
+    expect(await protocolEffects(provider.id)).toEqual(before)
+  })
+
+  it('refuses link consent when a concurrent team membership removal commits first', async () => {
+    const fixture = await seedTeam()
+    const domainName = `removal-${randomUUID()}.example.com`
+    const assertedMailbox = `member@${domainName}`
+    await db
+      .updateTable('auth.user')
+      .set({ email: assertedMailbox })
+      .where('id', '=', fixture.member)
+      .execute()
+    const claim = await db
+      .insertInto('sso_domains')
+      .values(claimedDomainValues(fixture.team, domainName))
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    const provider = await enabledProvider({
+      organizationId: fixture.team,
+      domainId: claim.id,
+      assertedMailbox,
+    })
+    const manager = management(fixture.team)
+    const member = await browserSession(fixture.member, fixture.team)
+    const { request } = manager
+    const result = await stageLink(request, await startLink(provider, member.cookies, manager))
+    const before = await protocolEffects(provider.id)
+    const blocker = await owned.pool.connect()
+    let completing: Promise<Response> | undefined
+    try {
+      await blocker.query('BEGIN')
+      const { rows } = await blocker.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+      await blocker.query('SELECT id FROM auth.organization WHERE id = $1 FOR UPDATE', [
+        fixture.team,
+      ])
+      await blocker.query('DELETE FROM auth.member WHERE id = $1', [fixture.memberMember])
+      completing = Promise.resolve(complete(result, { request }))
+      await vi.waitFor(
+        async () => {
+          const waiting = await owned.pool.query<{ blocked: boolean }>(
+            `SELECT EXISTS (SELECT FROM pg_stat_activity WHERE datname = current_database()
+             AND $1 = ANY(pg_blocking_pids(pid))) AS blocked`,
+            [rows[0]?.pid],
+          )
+          expect(waiting.rows[0]?.blocked).toBe(true)
+        },
+        { timeout: 2500, interval: 10 },
+      )
+      await blocker.query('COMMIT')
+    } finally {
+      await blocker.query('ROLLBACK')
+      blocker.release()
+    }
+    await expectRefusedCompletion(await completing)
+    expect(await storedLinks(provider)).toEqual([])
+    expect(await protocolEffects(provider.id)).toEqual(before)
+  })
 
   it('binds a draft test to fresh administration, its original session and browser, and its exact revision', async () => {
     const provider = await samlDraft(team.team)
@@ -1089,6 +1392,83 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
     }
   })
 
+  it('requires the same changed-email proof with and without an account for the new mailbox', async () => {
+    const provider = await linkedProvider()
+    const { request, deliverProof, consumeProof } = management()
+    const assertedMailbox = `changed-${randomUUID()}@${verifiedDomain}`
+    const fixture = await seedTeam()
+    const account = await db
+      .selectFrom('auth.user')
+      .select('email')
+      .where('id', '=', fixture.otherOwner)
+      .executeTakeFirstOrThrow()
+    const before = await identityEffects()
+    const oldLink = await storedLinks(provider)
+    const setOtherMailbox = (email: string) =>
+      db.updateTable('auth.user').set({ email }).where('id', '=', fixture.otherOwner).execute()
+
+    async function changedMailbox() {
+      const attempt = await readStart(provider, await signIn(provider.id, request))
+      const signed = await signedResponse(attempt, { mailbox: assertedMailbox })
+      const response = await acs(provider.id, signed.encoded, attempt.relayState, request)
+      expect(response.status).toBe(303)
+      const location = new URL(response.headers.get('location') ?? '', publicUrl)
+      expect(location.origin + location.pathname).toBe(`${publicUrl}/app/mailbox-proof`)
+      expect(location.search).toBe('')
+      const fragment = new URLSearchParams(location.hash.slice(1))
+      const id = fragment.get('attempt')
+      if (!id) throw new Error('Missing pending mailbox attempt')
+      expect([...fragment.keys()].sort()).toEqual(['attempt', 'saml'])
+      expect(fragment.get('saml')).toBe('1')
+      expect(response.headers.getSetCookie()).toHaveLength(1)
+      const staged = { id, location, cookies: mergeCookies(attempt.cookies, cookiesFrom(response)) }
+      expect(await identityEffects()).toEqual(before)
+      expect(await storedLinks(provider)).toEqual(oldLink)
+      await expectRefusedCompletion(await complete(staged, { request }))
+      expect(await identityEffects()).toEqual(before)
+      return staged
+    }
+
+    const free = await changedMailbox()
+    await setOtherMailbox(assertedMailbox)
+    const taken = await changedMailbox()
+    const freeMail = await deliverProof(free.id, free.cookies)
+    const takenMail = await deliverProof(taken.id, taken.cookies)
+    const normalizeMail = (email: typeof freeMail, attemptId: string) => ({
+      to: email.to,
+      subject: email.subject,
+      text: email.text.replace(attemptId, '<attempt>').replace(email.token, '<token>'),
+    })
+    expect(freeMail.to).toBe(assertedMailbox)
+    expect(normalizeMail(freeMail, free.id)).toEqual(normalizeMail(takenMail, taken.id))
+    expect((await consumeProof(taken.id, taken.cookies, takenMail.token)).status).toBe(200)
+    const collision = await complete(taken, { request })
+    expect(collision.status).toBe(409)
+    expect(await collision.json()).toEqual({ error: 'sso_email_collision' })
+    expect(collision.headers.getSetCookie().join(';')).not.toContain('better-auth.session_token')
+    expect(await storedLinks(provider)).toEqual(oldLink)
+    expect(await protocolEffects(provider.id)).toEqual([
+      expect.not.arrayContaining([expect.objectContaining({ id: taken.id })]),
+      expect.any(Array),
+    ])
+
+    await setOtherMailbox(account.email)
+    expect((await consumeProof(free.id, free.cookies, freeMail.token)).status).toBe(200)
+    const completed = await complete(free, { request })
+    expect(completed.status).toBe(303)
+    expect(completed.headers.get('location')).toBe(returnPath)
+    expect(completed.headers.getSetCookie().join(';')).toContain('better-auth.session_token')
+    expect(await storedLinks(provider)).toEqual([
+      expect.objectContaining({
+        id: provider.link.id,
+        generation: provider.link.generation + 1,
+        subject: provider.subject,
+        proven_email: assertedMailbox,
+      }),
+    ])
+    await expectRefusedCompletion(await complete(free, { request }))
+  })
+
   it('keeps the SAML routes hard-off with no writes and OIDC sign-in available', async () => {
     const provider = await linkedProvider()
     const attempt = await start(provider)
@@ -1099,23 +1479,26 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
     )
     const fresh = await start(provider)
     const freshResponse = await signedResponse(fresh)
-    const off = instance(
-      productionSsoCapabilities(
-        loadConfig({
-          DATABASE_URL: owned.url,
-          PUBLIC_URL: publicUrl,
-          BETTER_AUTH_SECRET: secret,
-          SSO_OIDC_ENABLED: 'true',
-          SSO_SAML_ENABLED: 'true',
-        }),
-      ),
+    const capabilities = productionSsoCapabilities(
+      loadConfig({
+        DATABASE_URL: owned.url,
+        PUBLIC_URL: publicUrl,
+        BETTER_AUTH_SECRET: secret,
+        SSO_OIDC_ENABLED: 'true',
+        SSO_SAML_ENABLED: 'true',
+      }),
     )
+    const { request: off, json, withMailbox } = management(team.team, capabilities)
+    const member = await browserSession(team.member)
     const before = await identityEffects()
     const state = await protocolEffects(provider.id)
+    const attemptIds = () => db.selectFrom('sso_attempts').select('id').orderBy('id').execute()
+    const attemptsBefore = await attemptIds()
     for (const response of [
       await acs(provider.id, freshResponse.encoded, fresh.relayState, off),
       await off.request(result.location, { headers: { cookie: result.cookies.join('; ') } }),
       await complete(result, { request: off }),
+      await json(linkPath(provider), member.cookies, {}),
     ]) {
       expect(response.status).toBe(404)
       expect(await response.json()).toEqual({ error: 'sso_disabled' })
@@ -1123,6 +1506,7 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
     }
     expect(await identityEffects()).toEqual(before)
     expect(await protocolEffects(provider.id)).toEqual(state)
+    expect(await attemptIds()).toEqual(attemptsBefore)
 
     const oidc = await providerId()
     const issuer = `${idpOrigin}/oidc`
@@ -1147,11 +1531,27 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
         enabled: true,
       })
       .execute()
+    await db
+      .insertInto('sso_provider_domains')
+      .values({ organization_id: team.team, provider_id: oidc, domain_id: domain.id })
+      .execute()
     const oidcStart = await signIn(oidc, off)
     expect(oidcStart.status).toBe(200)
     const { url } = (await oidcStart.json()) as { url: string }
     const authorization = new URL(url)
     expect(authorization.origin + authorization.pathname).toBe(config.authorizationEndpoint)
     expect(authorization.searchParams.get('code_challenge_method')).toBe('S256')
+
+    const oidcLink = await withMailbox(`${providersPath}/${oidc}/link`, member.cookies, {})
+    expect(oidcLink.response.status).toBe(200)
+    const link = (await oidcLink.response.json()) as { url: string; attemptId: string }
+    expect(new URL(link.url).pathname).toBe(authorization.pathname)
+    expect(
+      await db
+        .selectFrom('sso_attempts')
+        .select('kind')
+        .where('id', '=', link.attemptId)
+        .executeTakeFirst(),
+    ).toEqual({ kind: 'link' })
   })
 })

@@ -727,6 +727,32 @@ its cookies are cleared on success. A missing, expired or wrong-browser result r
 的团队访问资格，然后创建会话及浏览器凭据。待确认结果只能使用一次。生产环境中 ACS 和确认端点
 均返回 `404 sso_disabled`。
 
+In-process tests also support self-linking through the existing `linkSsoAccount` operation.
+A team member first verifies their Hourmere mailbox. After the IdP returns a signed
+assertion for that mailbox, the member selects **Link account** in the original browser
+and session. The link uses the IdP- and SP-scoped persistent NameID by default. Set
+`saml.subjectAttribute` when creating a provider to use one exact, immutable attribute
+instead. It must have one nonempty value and cannot be an email address. The choice is
+fixed for that provider. The member's own Settings summary shows their SAML providers,
+pending links and opaque link IDs while SAML is enabled in-process.
+
+When a linked subject asserts a different email address, Hourmere asks the browser to
+verify that mailbox through the existing email proof flow. The prompt and message are
+identical whether or not another account holds the address. After verification, Hourmere
+can disclose a collision to that mailbox holder and leaves the existing link unchanged.
+The production SAML switch stays off and the link operation returns `404 sso_disabled`
+for SAML.
+
+进程内测试可通过现有的 `linkSsoAccount` 操作关联 SAML 账号。团队成员先验证自己的 Hourmere
+邮箱，身份提供方再返回使用同一邮箱的签名断言，成员随后在原浏览器及会话中选择**关联账号**。
+系统默认使用限定于身份提供方和服务提供方的持久 NameID。创建提供方时可用
+`saml.subjectAttribute` 固定一个不可变的属性名，该属性必须有唯一且非空的值，且该值不能是
+邮箱地址。设置页面仅显示当前成员自己的 SAML 提供方、待处理的关联和不透明的关联标识符。
+
+如果已关联的身份改用另一邮箱，Hourmere 会通过现有邮件流程要求验证。无论该邮箱是否已被
+其他账号使用，验证提示和邮件内容都相同。验证后才会向邮箱持有人告知冲突，原有关联保持不变。
+生产环境仍关闭 SAML，SAML 关联请求返回 `404 sso_disabled`。
+
 ### Fetching, credentials and audit
 
 The outbound URL policy and pinned-socket transport that webhooks use now live in the

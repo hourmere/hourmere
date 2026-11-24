@@ -57,14 +57,17 @@ export const FreshProofChallenge = ErrorBody.extend({
 
 /** Browser-only trust changes; no corresponding machine tools or commands exist. */
 export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): RouteModule {
-  const draft: MiddlewareHandler<CallerEnv> = async (c, next) => {
+  const draftEnabled: MiddlewareHandler<CallerEnv> = async (_c, next) => {
     requireSsoEnabled(deps.capabilities)
+    await next()
+  }
+  const draftBody: MiddlewareHandler<CallerEnv> = async (c, next) => {
     const body = await c.req.arrayBuffer()
     let input: unknown
     try {
       input = await c.req.json()
     } catch (error) {
-      // Let session authorization precede ordinary malformed-body validation.
+      // Let the route validator report ordinary malformed JSON.
       if (!(error instanceof SyntaxError)) throw error
     }
     const protocol = guardSsoDraftInput(deps.capabilities, input)
@@ -73,12 +76,6 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
   }
   const retained: MiddlewareHandler<CallerEnv> = async (_c, next) => {
     requireSsoRetained(deps.capabilities)
-    await next()
-  }
-  const oidcEnabled: MiddlewareHandler<CallerEnv> = async (c, next) => {
-    c.header('Cache-Control', 'no-store')
-    c.header('Referrer-Policy', 'no-referrer')
-    requireSsoEnabled(deps.capabilities, 'oidc')
     await next()
   }
   const testEnabled: MiddlewareHandler<CallerEnv> = async (c, next) => {
@@ -134,8 +131,9 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
     ] as const
     const middleware = [
       routeBodyLimit(samlProviderRequestMaximumBytes),
-      draft,
+      draftEnabled,
       ...sessionMiddleware,
+      draftBody,
     ] as const
     const deleteMiddleware = [retained, ...sessionMiddleware] as const
     app.openapi(
@@ -264,11 +262,11 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
         path: '/api/v1/team/sso/providers/{providerId}/link',
         operationId: 'linkSsoAccount',
         tags: ['SSO'],
-        summary: 'Start explicit linking of the caller’s OIDC identity',
+        summary: 'Start explicit linking of the caller’s SSO identity',
         description:
-          'Current team member browser session with independent mailbox proof. Follow the authorization URL in the same browser and explicitly complete the pending link. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.',
+          'Current team member browser session with independent mailbox proof. Follow the authorization URL in the same browser and explicitly complete the pending link. Returns 404 sso_disabled when the provider protocol is off.',
         security: [{ session: [] }],
-        middleware: [oidcEnabled, ...sessionMiddleware] as const,
+        middleware: [testEnabled, ...sessionMiddleware] as const,
         request: {
           headers: z.object({
             'X-Expected-Organization-Id': z.string().optional().openapi({
@@ -303,8 +301,9 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
           if (result.setCookie) c.header('Set-Cookie', result.setCookie, { append: true })
           return c.json(result.body, 403)
         }
-        const { setCookie, ...body } = result.value
+        const { setCookie, stateCookie, ...body } = result.value
         c.header('Set-Cookie', setCookie, { append: true })
+        if (stateCookie) c.header('Set-Cookie', stateCookie, { append: true })
         return c.json(body, 200)
       },
     )

@@ -5358,8 +5358,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Start explicit linking of the caller’s OIDC identity
-         * @description Current team member browser session with independent mailbox proof. Follow the authorization URL in the same browser and explicitly complete the pending link. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.
+         * Start explicit linking of the caller’s SSO identity
+         * @description Current team member browser session with independent mailbox proof. Follow the authorization URL in the same browser and explicitly complete the pending link. Returns 404 sso_disabled when the provider protocol is off.
          */
         post: operations["linkSsoAccount"];
         /**
@@ -7800,6 +7800,8 @@ export interface components {
                 generation: number;
                 /** Format: uuid */
                 id: string;
+                /** @enum {string} */
+                protocol?: "saml";
                 /** Format: uuid */
                 providerId: string;
             }[];
@@ -20203,6 +20205,8 @@ export interface operations {
                         signingCertificates?: string[];
                         /** Format: uri */
                         ssoUrl?: string;
+                        /** @description Exact name of an immutable IdP attribute. Choose when creating the provider. */
+                        subjectAttribute?: string;
                         /** @enum {boolean} */
                         wantAssertionsSigned?: true;
                     };
@@ -20416,6 +20420,8 @@ export interface operations {
                         signingCertificates?: string[];
                         /** Format: uri */
                         ssoUrl?: string;
+                        /** @description Exact name of an immutable IdP attribute. Choose when creating the provider. */
+                        subjectAttribute?: string;
                         /** @enum {boolean} */
                         wantAssertionsSigned?: true;
                     };

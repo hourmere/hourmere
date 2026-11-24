@@ -11,7 +11,12 @@ import type { MessageKey } from '../../i18n/translate.ts'
 import { PATHS } from '../../paths.ts'
 import { useMe, useSession } from '../../session.tsx'
 import { SsoFreshProof } from './SsoFreshProof.tsx'
-import { type SsoProofChallenge, SsoProofRequired, unwrapSsoWrite } from './setup.ts'
+import {
+  oidcStepUpProviders,
+  type SsoProofChallenge,
+  SsoProofRequired,
+  unwrapSsoWrite,
+} from './setup.ts'
 import './sso-setup.css'
 
 interface DelegationCredential {
@@ -84,8 +89,7 @@ function DelegationForm({ kind, credentials, reload }: Props) {
     saved?.inventory === credentials && saved.credentialId === credential?.id
       ? saved.binding
       : credential?.ssoDelegation
-  const linked = new Set(sso?.links.map(({ providerId }) => providerId))
-  const stepUpProviders = sso?.providers.filter(({ id }) => linked.has(id)) ?? []
+  const stepUpProviders = oidcStepUpProviders(sso)
 
   useLayoutEffect(() => {
     function interrupt() {

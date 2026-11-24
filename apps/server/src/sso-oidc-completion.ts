@@ -13,6 +13,7 @@ import {
   oidcSignInTiming,
   writeOidcSession,
 } from './sso-oidc-session.ts'
+import { samlMailboxOperation } from './sso-saml-state.ts'
 
 const operation = 'oidcCompleteSignIn'
 const mailboxSchema = z.email().max(320)
@@ -26,7 +27,8 @@ const projectionSchema = z.strictObject({
   domainGeneration: z.int().positive(),
   trustGeneration: z.int().positive(),
   sessionDeadline: z.iso.datetime().optional(),
-  returnPath: z.string(),
+  returnPath: z.string().optional(),
+  requestId: z.uuidv7().optional(),
 })
 
 interface CompletionDependencies {
@@ -102,12 +104,40 @@ export async function stageOidcCompletion(
   browserBinding: string | undefined,
 ) {
   const binding = browserBindingDigest(browserBinding)
+  return stageSsoMailboxCompletion(
+    { db, configurationKey },
+    provider,
+    candidate,
+    assertedMailbox,
+    sessionDeadline,
+    attempt,
+    binding,
+  )
+}
+
+export async function stageSsoMailboxCompletion(
+  { db, configurationKey }: CompletionDependencies,
+  provider: SsoProviderRevision,
+  candidate: OidcLink,
+  assertedMailbox: string,
+  sessionDeadline: Date | undefined,
+  attempt: { expiresAt: Date; returnPath: string } | { expiresAt: Date; requestId: string },
+  binding: string | null,
+) {
   if (!binding || !mailboxSchema.safeParse(assertedMailbox).success)
     return { reason: 'mailbox_unproven' } as const
+  const method = 'requestId' in attempt ? 'saml' : 'oidc'
 
   try {
-    return await db.transaction().execute(async (trx) => {
-      const context = await lockOidcSignInContext(trx, provider, candidate, assertedMailbox)
+    const stage = async (trx: Db) => {
+      const context = await lockOidcSignInContext(
+        trx,
+        provider,
+        candidate,
+        assertedMailbox,
+        false,
+        method,
+      )
       if (context.reason !== undefined) return { reason: context.reason }
       if (context.link.proven_email !== candidate.proven_email)
         return { reason: 'mailbox_unproven' } as const
@@ -143,7 +173,9 @@ export async function stageOidcCompletion(
         domainGeneration: context.claim.generation,
         trustGeneration: context.trustGeneration,
         sessionDeadline: sessionDeadline?.toISOString(),
-        returnPath: attempt.returnPath,
+        ...('requestId' in attempt
+          ? { requestId: attempt.requestId }
+          : { returnPath: attempt.returnPath }),
       }
       // The pending row freezes a digest of this encrypted projection. The browser carries
       // the ciphertext so the existing attempt storage needs no claim or token columns.
@@ -157,7 +189,7 @@ export async function stageOidcCompletion(
           provider_id: provider.providerId,
           provider_revision: provider.revision,
           browser_binding_digest: binding,
-          operation,
+          operation: method === 'saml' ? samlMailboxOperation : operation,
           input_digest: sha256(envelope),
           requires_mailbox: true,
           mailbox: assertedMailbox,
@@ -166,8 +198,10 @@ export async function stageOidcCompletion(
         })
         .execute()
       return { id, envelope, expiresAt }
-    })
+    }
+    return await (db.isTransaction ? stage(db) : db.transaction().execute(stage))
   } catch (error) {
+    if (db.isTransaction) throw error
     if (expiresDuringOidcWrite(error)) return { reason: 'attempt_expired' } as const
     throw error
   }
@@ -189,7 +223,9 @@ export async function completeOidcSignIn(
     envelope: string | undefined
   },
   options: OidcSessionRequest,
+  readSamlReturn?: (requestId: string) => string | undefined,
 ) {
+  const method = readSamlReturn ? 'saml' : 'oidc'
   const binding = browserBindingDigest(browserBinding)
   if (!binding || !isOidcCompletionEnvelope(envelope)) return invalid
 
@@ -198,7 +234,7 @@ export async function completeOidcSignIn(
       .selectFrom('sso_attempts')
       .where('id', '=', id)
       .where('kind', '=', 'sign_in')
-      .where('operation', '=', operation)
+      .where('operation', '=', readSamlReturn ? samlMailboxOperation : operation)
       .where('browser_binding_digest', '=', binding)
       .where('input_digest', '=', sha256(envelope))
       .where('consumed_at', 'is', null)
@@ -223,8 +259,11 @@ export async function completeOidcSignIn(
   } catch {
     return invalid
   }
-  const returnPath = oidcReturnDestination(result.returnPath)
-  if (!returnPath) return invalid
+  const storedReturn = readSamlReturn
+    ? result.requestId && readSamlReturn(result.requestId)
+    : result.returnPath
+  const returnPath = storedReturn && oidcReturnDestination(storedReturn)
+  if (!returnPath || (readSamlReturn && !returnPath.startsWith('/app'))) return invalid
 
   try {
     return await db.transaction().execute(async (trx) => {
@@ -236,6 +275,7 @@ export async function completeOidcSignIn(
         { id: result.linkId, user_id: result.userId, generation: result.linkGeneration },
         mailbox,
         true,
+        method,
       )
       if (
         context.reason !== undefined ||
@@ -300,8 +340,22 @@ export async function completeOidcSignIn(
         id,
         timing,
         options,
+        method,
       )
-      return { status: 'completed', returnPath, cookie: session.cookie } as const
+      if (readSamlReturn) {
+        const { live } = await trx
+          .selectNoFrom(
+            sql<boolean>`${attempt.expires_at}::timestamptz > clock_timestamp()`.as('live'),
+          )
+          .executeTakeFirstOrThrow()
+        if (!live) throw new OidcAttemptRefused()
+      }
+      return {
+        status: 'completed',
+        returnPath,
+        cookie: session.cookie,
+        requestId: result.requestId,
+      } as const
     })
   } catch (error) {
     if (error instanceof OidcAttemptRefused || expiresDuringOidcWrite(error)) return invalid
