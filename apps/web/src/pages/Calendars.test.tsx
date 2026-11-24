@@ -1272,7 +1272,7 @@ describe('the calendars page', () => {
   })
 
   it.each(['calendar_removed', 'permissions_missing'] as const)(
-    'selects a writable Microsoft booking calendar and shows a %s copy failure',
+    'selects an owned Microsoft booking calendar and shows a %s copy failure',
     async (reason) => {
       const user = userEvent.setup()
       const calendar = connection.calendars[0] as Schemas['CalendarConnection']['calendars'][number]
@@ -1296,13 +1296,20 @@ describe('the calendars page', () => {
                 calendars: [
                   {
                     ...calendar,
-                    accessRole: 'writer',
+                    accessRole: 'owner',
                     available: !(writeFailed && reason === 'calendar_removed'),
                     ...(writeFailed && {
                       syncError: reason === 'calendar_removed' ? reason : null,
                       writebackStatus: 'failed',
                       writebackError: reason,
                     }),
+                  },
+                  {
+                    ...calendar,
+                    id: 'shared-outlook-calendar',
+                    name: 'Shared Outlook calendar',
+                    isPrimary: false,
+                    accessRole: 'writer',
                   },
                 ],
               },
@@ -1315,6 +1322,11 @@ describe('the calendars page', () => {
         },
       })
       renderApp('/app/calendars')
+      const shared = await screen.findByRole('group', { name: 'Shared Outlook calendar' })
+      expect(within(shared).queryByRole('button', { name: 'Write new bookings here' })).toBeNull()
+      expect(
+        within(shared).getByRole('checkbox', { name: 'Check this calendar for conflicts' }),
+      ).toBeDefined()
       await user.click(await screen.findByRole('button', { name: 'Write new bookings here' }))
       if (reason === 'calendar_removed') {
         expect(await screen.findByText('Selected for new bookings — unavailable')).toBeDefined()
@@ -1330,7 +1342,8 @@ describe('the calendars page', () => {
           : 'Reconnect Microsoft Calendar and allow the requested permissions.',
       )
       await user.click(screen.getByRole('button', { name: 'Stop writing bookings here' }))
-      expect(await screen.findByText('Not a booking destination')).toBeDefined()
+      expect(await screen.findByRole('button', { name: 'Write new bookings here' })).toBeDefined()
+      expect(screen.getAllByText('Not a booking destination')).toHaveLength(2)
       expect(screen.getByText(/A booking copy needs attention/)).toBeDefined()
       expect(
         requests.to('PUT /api/v1/calendar-destination').map((request) => request.body),

@@ -194,7 +194,7 @@ describe.skipIf(!databaseUrl)(
           connection_id: connectionId,
           external_id: provider === 'caldav' ? `${calDavOrigin}/calendars/synthetic/` : account,
           name: 'Synthetic calendar',
-          access_role: provider === 'google' ? 'owner' : 'writer',
+          access_role: provider === 'caldav' ? 'writer' : 'owner',
           time_zone: timeZone,
           check_conflicts: false,
           ...(provider === 'caldav' && {

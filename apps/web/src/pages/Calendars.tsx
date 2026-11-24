@@ -122,9 +122,7 @@ const noticeFor = (search: URLSearchParams): UiText | null => {
 }
 
 const writableCalendar = (provider: Connection['provider'], calendar: Calendar) =>
-  provider === 'microsoft'
-    ? calendar.accessRole === 'writer'
-    : calendar.accessRole === 'owner' || (provider === 'caldav' && calendar.accessRole === 'writer')
+  calendar.accessRole === 'owner' || (provider === 'caldav' && calendar.accessRole === 'writer')
 
 const writebackMessages = {
   calendar_removed: 'This calendar is no longer available. Refresh the calendar list.',

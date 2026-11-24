@@ -46,8 +46,11 @@ offering bookings. You can also choose where to create private calendar copies o
   appointment in the viewer's time zone. [Graph event creation](https://learn.microsoft.com/en-us/graph/api/calendar-post-events?view=graph-rest-1.0)
 - Each booking copy uses a stable Graph `transactionId`. If Graph may have accepted a create,
   such as when its response is lost, Hourmere looks up the original copy using its booking marker.
-  A successful write stores the Graph event ID. Temporary failures use bounded retries and honor
-  Graph's `Retry-After`; the Calendars page shows when a copy needs attention.
+  After a short delay, an empty lookup lets Hourmere send the create again with the same identifier
+  and marker. A successful write stores the Graph event ID. Temporary failures use bounded retries
+  and honor Graph's `Retry-After`. If the Calendars page still shows an unknown result, reconnecting
+  the original account restarts retries for upcoming bookings. Self-hosted operators can also
+  redispatch a booking or connection with `scripts/redispatch-calendar-writeback.ts`.
   [Graph event lookup by extended property](https://learn.microsoft.com/en-us/graph/api/singlevaluelegacyextendedproperty-get?view=graph-rest-1.0)
 - Updating or removing a Microsoft calendar copy after a reschedule or cancellation remains
   future work. The Outlook copy may still show the original time after the booking changes.
@@ -106,10 +109,12 @@ information and local calendar status.
 ## Write new bookings to Outlook
 
 In **Calendars**, choose **Write new bookings here** on an eligible Microsoft calendar.
-You can choose one default booking destination across providers. The selected account must
-have event write access and the calendar must allow editing private events. If the account
-was connected with read-only access, choose **Reconnect Microsoft Calendar** and authorize
-the original account before selecting its calendar.
+You can choose one default booking destination across providers. Choose a calendar your
+connected Outlook account owns and can edit. Calendars shared with you can still be used
+for conflict checks. If your account was connected with read-only access, choose
+**Reconnect Microsoft Calendar** and authorize the original account before selecting its
+calendar. Use **Refresh calendar list** to update ownership information on an existing
+connection.
 
 Hourmere saves the chosen destination when each booking is made. A change to your default
 calendar applies to new bookings. If Microsoft removes a selected calendar or denies write

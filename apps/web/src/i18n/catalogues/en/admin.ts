@@ -3209,8 +3209,6 @@ export const admin = {
     'Microsoft will ask for your account identity, continuing access and permission to read and write calendar events. Hourmere checks busy times on the calendars you select and creates private booking copies only on your chosen booking calendar. Connecting is separate from signing in.',
   'Reconnect Microsoft Calendar to allow writing new booking events.':
     'Reconnect Microsoft Calendar to allow writing new booking events.',
-  'Choose a Microsoft calendar that allows editing private events.':
-    'Choose a Microsoft calendar that allows editing private events.',
   'Microsoft Calendar could not write to this calendar. Check its access in Outlook.':
     'Microsoft Calendar could not write to this calendar. Check its access in Outlook.',
   'Microsoft Calendar has limited requests temporarily.':
@@ -3222,4 +3220,5 @@ export const admin = {
   'A booking copy needs attention.': 'A booking copy needs attention.',
   'Hourmere will retry writing a booking copy.': 'Hourmere will retry writing a booking copy.',
   'A booking copy is waiting to be written.': 'A booking copy is waiting to be written.',
+  'Choose a Microsoft calendar you own.': 'Choose a Microsoft calendar you own.',
 } as const

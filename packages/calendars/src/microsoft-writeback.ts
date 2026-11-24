@@ -25,7 +25,9 @@ const stateSchema = z.object({
   updatedAt: z.iso.datetime(),
   nextAttemptAt: z.iso.datetime().optional(),
   reason: reasons.optional(),
+  // Persisted marker that a previous claim may already have created the event.
   lookupOnly: z.boolean().optional(),
+  seatCount: z.number().int().positive().optional(),
   countRevision: z
     .string()
     .regex(/^[1-9]\d*$/u)
@@ -34,6 +36,7 @@ const stateSchema = z.object({
 type WriteState = z.infer<typeof stateSchema>
 const maxAttempts = 6
 const leaseMs = 120_000
+const settleMs = 30_000
 const pending = (now: number): WriteState => ({
   status: 'pending',
   attempts: 0,
@@ -59,6 +62,7 @@ export async function recordMicrosoftBookingDestinations(db: Db, bookingId: stri
     .select(['bh.user_id', 'c.id'])
     .where('bh.booking_id', '=', bookingId)
     .where('cc.provider', '=', 'microsoft')
+    .where('c.access_role', '=', 'owner')
     .forKeyShare('c')
     .execute()
   if (!destinations.length) return false
@@ -83,6 +87,7 @@ export async function recordMicrosoftGroupDestination(db: Db, groupSlotId: strin
     FROM calendars c JOIN calendar_connections cc ON cc.id=c.connection_id
     WHERE s.id=${groupSlotId} AND s.destination_calendar_id=c.id AND cc.user_id=s.host_user_id
       AND cc.provider='microsoft' AND s.microsoft_writeback IS NULL
+      AND c.access_role='owner'
       AND s.location->>'autoCreate' IS DISTINCT FROM 'true'
   `.execute(db)
   return Boolean(numAffectedRows)
@@ -160,7 +165,7 @@ function writeFailure(state: WriteState, now: number, reason: Reason, retryMs?: 
     status: retry ? 'retrying' : 'failed',
     updatedAt: new Date(now).toISOString(),
     nextAttemptAt: retry ? new Date(now + retryMs).toISOString() : undefined,
-    reason,
+    reason: !retry && retryMs !== undefined && state.lookupOnly ? 'outcome_unknown' : reason,
   } satisfies WriteState
 }
 
@@ -178,9 +183,9 @@ async function claim(
       await setState(trx, payload, target, writeFailure(state, now, 'outcome_unknown'))
       return
     }
-    const lookupOnly = state.lookupOnly === true
-    const desired = lookupOnly ? undefined : await desiredEvent(trx, payload, target)
-    if (!desired && !lookupOnly) {
+    const possiblyCreated = state.lookupOnly === true
+    const desired = possiblyCreated ? undefined : await desiredEvent(trx, payload, target)
+    if (!desired && !possiblyCreated) {
       await setState(trx, payload, target, null)
       return
     }
@@ -190,13 +195,15 @@ async function claim(
       attempts: state.attempts + 1,
       updatedAt: new Date(now).toISOString(),
       nextAttemptAt: new Date(now + leaseMs).toISOString(),
-      // Commit this before making any provider calls. If the process or database dies
-      // after POST, a following worker can only look up this exact transaction.
+      // Commit before provider I/O. If this worker dies, its lease gives Graph
+      // time to settle before another worker looks up the same transaction.
       lookupOnly: true,
-      countRevision: desired?.countRevision ?? state.countRevision,
+      // A group replay uses the original seat count and reports the revision that sent it.
+      seatCount: possiblyCreated ? state.seatCount : desired?.seatCount,
+      countRevision: possiblyCreated ? state.countRevision : desired?.countRevision,
     } satisfies WriteState
     await setState(trx, payload, target, lease)
-    return { lease, lookupOnly, desired }
+    return { lease, possiblyCreated }
   })
 }
 
@@ -270,7 +277,7 @@ async function writeDestination(
   const clock = deps.now ?? Date.now
   const attempt = await claim(deps.db, payload, target, clock)
   if (!attempt) return
-  const { lease, lookupOnly, desired } = attempt
+  const { lease, possiblyCreated } = attempt
   const { connectionId } = target
   if (!connectionId) {
     // A group slot retains its pinned destination after explicit disconnection.
@@ -278,7 +285,7 @@ async function writeDestination(
       deps.db,
       payload,
       target,
-      writeFailure({ ...lease, lookupOnly }, clock(), 'calendar_removed'),
+      writeFailure({ ...lease, lookupOnly: possiblyCreated }, clock(), 'calendar_removed'),
       lease,
     )
   }
@@ -300,12 +307,12 @@ async function writeDestination(
       .executeTakeFirst()
     if (!ownsLease(await readState(trx, payload, target), lease)) return
 
-    const finish = (reason: Reason, retryMs?: number, only = lookupOnly) =>
+    const finish = (reason: Reason, retryMs?: number, uncertain = possiblyCreated) =>
       setState(
         trx,
         payload,
         target,
-        writeFailure({ ...lease, lookupOnly: only }, clock(), reason, retryMs),
+        writeFailure({ ...lease, lookupOnly: uncertain }, clock(), reason, retryMs),
         lease,
       )
     const calendar = await trx
@@ -315,12 +322,12 @@ async function writeDestination(
       .where('connection_id', '=', connectionId)
       .executeTakeFirst()
     if (!calendar || calendar.sync_error === 'calendar_removed') return finish('calendar_removed')
-    if (!connection || !deps.microsoft || calendar.access_role !== 'writer')
+    if (!connection || !deps.microsoft || calendar.access_role !== 'owner')
       return finish('calendar_unavailable')
     if (connection.status !== 'active') return finish('needs_reauth')
     if (!hasMicrosoftCalendarWriteAccess(connection.scopes)) return finish('permissions_missing')
 
-    if (!lookupOnly && !(await desiredEvent(trx, payload, target)))
+    if (!possiblyCreated && !(await desiredEvent(trx, payload, target)))
       return setState(trx, payload, target, null, lease)
     const resource =
       'bookingId' in payload ? ['booking', payload.bookingId] : ['group', payload.groupSlotId]
@@ -328,7 +335,7 @@ async function writeDestination(
       .update(JSON.stringify(['hourmere', ...resource, calendar.external_id]))
       .digest('hex')
     const deadline = AbortSignal.any([signal, AbortSignal.timeout(20_000)])
-    const backoff = Math.min(30_000 * 2 ** (lease.attempts - 1), 15 * 60_000)
+    const backoff = Math.min(settleMs * 2 ** (lease.attempts - 1), 15 * 60_000)
     let event: MicrosoftBookingEvent | undefined
     let posted = false
     try {
@@ -343,17 +350,21 @@ async function writeDestination(
       if (!hasMicrosoftCalendarWriteAccess(scopes)) return finish('permissions_missing')
       const client = deps.microsoft.client
       event = await client.findEvent(token, calendar.external_id, transactionId, deadline)
-      if (!event && !desired)
-        return finish(
-          lease.reason === 'event_conflict' ? 'event_conflict' : 'outcome_unknown',
-          backoff,
-        )
-      if (!event && desired) {
+      if (!event) {
+        const desired = await desiredEvent(trx, payload, target)
+        if (!desired)
+          return possiblyCreated
+            ? finish(
+                lease.reason === 'event_conflict' ? 'event_conflict' : 'provider_unavailable',
+                backoff,
+              )
+            : setState(trx, payload, target, null, lease)
+        // An empty lookup after the settle delay permits an idempotent replay.
         posted = true
         event = await client.createEvent(
           token,
           calendar.external_id,
-          { ...desired, transactionId },
+          { ...desired, seatCount: lease.seatCount ?? desired.seatCount, transactionId },
           deadline,
         )
       }
@@ -372,7 +383,7 @@ async function writeDestination(
       if (error.status === 429)
         return finish('rate_limited', Math.max(error.retryAfterMs ?? 0, backoff))
       if (error.status === 409 || error.status === 412)
-        return finish('event_conflict', backoff, lookupOnly || posted)
+        return finish('event_conflict', backoff, possiblyCreated || posted)
       if (
         error.status !== undefined &&
         error.status >= 400 &&
@@ -380,13 +391,8 @@ async function writeDestination(
         error.status !== 408
       )
         return finish('calendar_unavailable')
-      return finish(
-        posted || lookupOnly ? 'outcome_unknown' : 'provider_unavailable',
-        backoff,
-        posted || lookupOnly,
-      )
+      return finish('provider_unavailable', backoff, posted || possiblyCreated)
     }
-    if (!event) throw new Error('Microsoft calendar creation did not resolve')
     // Do not hold the group slot lock over provider I/O. Recheck the lease before
     // committing the mapping and status together.
     if (!ownsLease(await readState(trx, payload, target, true), lease)) return
@@ -500,24 +506,57 @@ export async function readMicrosoftWritebackSummary(db: Db, calendarIds: string[
   return result
 }
 
-/** Reauthorize pinned failures for this account, retaining any lookup-only obligation. */
+const resetWriteState = (stamp: string) =>
+  sql<string>`(microsoft_writeback - 'reason') || jsonb_build_object(
+    'status','pending','attempts',0,'updatedAt',${stamp}::text,'nextAttemptAt',
+    CASE WHEN microsoft_writeback->>'reason' = 'outcome_unknown' THEN
+      to_char(greatest(${stamp}::timestamptz,
+        (microsoft_writeback->>'updatedAt')::timestamptz + make_interval(secs => ${settleMs / 1000})
+      ) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+    ELSE ${stamp}::text END
+  )`
+
+/** Restart the selected resource's bounded retry budget without discarding its marker. */
+export async function redispatchMicrosoftWriteback(
+  db: Db,
+  payload: CalendarWritePayload,
+  now: number,
+) {
+  const recovered = resetWriteState(new Date(now).toISOString())
+  const unknown = sql<boolean>`microsoft_writeback->>'status'='failed'
+    AND microsoft_writeback->>'reason'='outcome_unknown'`
+  if ('bookingId' in payload)
+    await db
+      .updateTable('booking_calendar_targets')
+      .set({ microsoft_writeback: recovered })
+      .where('root_booking_id', '=', payload.bookingId)
+      .where(unknown)
+      .execute()
+  else
+    await db
+      .updateTable('group_slots')
+      .set({ microsoft_writeback: recovered })
+      .where('id', '=', payload.groupSlotId)
+      .where(unknown)
+      .execute()
+}
+
+/** Restart failed future writes for this account after reconnect or operator recovery. */
 export async function recoverMicrosoftWritebacks(db: Db, connectionId: string, now: number) {
   const stamp = new Date(now).toISOString()
-  const recovered = sql`(microsoft_writeback - 'reason') || jsonb_build_object(
-    'status','pending','attempts',0,'updatedAt',${stamp}::text,'nextAttemptAt',${stamp}::text
-  )`
+  const recovered = resetWriteState(stamp)
   await sql`
     UPDATE booking_calendar_targets t SET microsoft_writeback=${recovered}
     FROM calendars c, bookings b
     WHERE t.calendar_id=c.id AND c.connection_id=${connectionId} AND b.id=t.root_booking_id
       AND b.start_at>${stamp}::timestamptz AND t.microsoft_writeback->>'status'='failed'
-      AND t.microsoft_writeback->>'reason' IN ('needs_reauth','permissions_missing')
+      AND t.microsoft_writeback->>'reason' IN ('needs_reauth','permissions_missing','outcome_unknown')
   `.execute(db)
   await sql`
     UPDATE group_slots s SET microsoft_writeback=${recovered}
     FROM calendars c
     WHERE s.destination_calendar_id=c.id AND c.connection_id=${connectionId}
       AND s.start_at>${stamp}::timestamptz AND s.microsoft_writeback->>'status'='failed'
-      AND s.microsoft_writeback->>'reason' IN ('needs_reauth','permissions_missing')
+      AND s.microsoft_writeback->>'reason' IN ('needs_reauth','permissions_missing','outcome_unknown')
   `.execute(db)
 }

@@ -197,7 +197,7 @@ export async function getMicrosoftCalendarToken(
   }
   if (previous.expiresAt > clock() + 60_000)
     return { token: previous.accessToken, scopes: connection.scopes }
-  const next = await config.client.refresh(previous.refreshToken, signal)
+  const next = await config.client.refresh(previous.refreshToken, signal, connection.scopes)
   const scopes = next.scopes ?? connection.scopes
   await db
     .updateTable('calendar_connections')
@@ -737,7 +737,7 @@ async function refreshCalendarProvider(
       const tokens: CalendarTokens =
         previous.expiresAt > (deps.now ?? Date.now)() + 60_000
           ? previous
-          : await client.refresh(previous.refreshToken, signal)
+          : await client.refresh(previous.refreshToken, signal, connection.scopes)
       const scopes = tokens.scopes ?? connection.scopes
       requireScopes(scopes, 'list', provider)
       const credentials = encryptCredential(

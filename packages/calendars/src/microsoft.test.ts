@@ -77,12 +77,19 @@ describe('Microsoft OAuth and Graph response boundary', () => {
     })
     fake.controls.pages[0]!['@odata.nextLink'] =
       'https://graph.microsoft.com/v1.0/me/calendars?$skiptoken=1'
-    fake.controls.pages.push({ value: [{ id: 'readonly', name: 'Read only', canEdit: false }] })
+    fake.controls.pages.push({
+      value: [
+        { id: 'readonly', name: 'Read only', canEdit: false },
+        { id: 'secondary', name: 'Owned secondary', canEdit: true, canShare: true },
+      ],
+    })
     const calendars = await fake.client.calendars('fake-access', signal())
     expect(calendars).toMatchObject([
-      { id: 'microsoft-calendar-1', isPrimary: true, accessRole: 'writer', timeZone: null },
+      { id: 'microsoft-calendar-1', isPrimary: true, accessRole: 'owner', timeZone: null },
       { id: 'readonly', isPrimary: false, accessRole: 'reader' },
+      { id: 'secondary', isPrimary: false, accessRole: 'owner' },
     ])
+    expect(fake.calls[1]?.url.searchParams.get('$select')?.split(',')).toContain('canShare')
     expect(fake.calls.filter((c) => c.url.pathname.endsWith('/calendars'))).toHaveLength(2)
   })
 
@@ -95,8 +102,10 @@ describe('Microsoft OAuth and Graph response boundary', () => {
       'offline_access',
       'Calendars.ReadWrite',
     ])
-    expect((await fake.client.refresh('fake-refresh', signal())).scopes).toBeUndefined()
-    expect(new URLSearchParams(String(fake.calls[1]?.init.body)).has('scope')).toBe(false)
+    const grantedScopes = ['openid', 'email', 'Calendars.ReadBasic']
+    expect(
+      (await fake.client.refresh('fake-refresh', signal(), grantedScopes)).scopes,
+    ).toBeUndefined()
     fake.controls.token.scope = ''
     expect((await fake.client.exchange('fake-code', 'fake-verifier', signal())).scopes).toEqual([])
     fake.controls.token.scope = 'openid email'

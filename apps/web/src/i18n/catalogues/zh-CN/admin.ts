@@ -3064,8 +3064,6 @@ export const admin = {
     'Microsoft 会请求你的账户身份、持续访问权限以及读写日历事件的权限。Hourmere 会检查所选日历的忙碌时段，并仅在你指定的预约日历中创建私人预约副本。连接日历与登录是分开的操作。',
   'Reconnect Microsoft Calendar to allow writing new booking events.':
     '请重新连接 Microsoft 日历，以允许写入新的预约事件。',
-  'Choose a Microsoft calendar that allows editing private events.':
-    '请选择允许编辑私人事件的 Microsoft 日历。',
   'Microsoft Calendar could not write to this calendar. Check its access in Outlook.':
     'Microsoft 日历无法写入此日历。请在 Outlook 中检查访问权限。',
   'Microsoft Calendar has limited requests temporarily.': 'Microsoft 日历已暂时限制请求。',
@@ -3076,4 +3074,5 @@ export const admin = {
   'A booking copy needs attention.': '有一个预约副本需要处理。',
   'Hourmere will retry writing a booking copy.': 'Hourmere 将重试写入预约副本。',
   'A booking copy is waiting to be written.': '有一个预约副本正等待写入。',
+  'Choose a Microsoft calendar you own.': '请选择你拥有的 Microsoft 日历。',
 } as const

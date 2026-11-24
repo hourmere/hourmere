@@ -45,7 +45,7 @@ describe.each([
       ),
     )
     const failure = await client
-      .refresh('fake-refresh', AbortSignal.timeout(1000))
+      .refresh('fake-refresh', AbortSignal.timeout(1000), ['Calendars.ReadBasic'])
       .catch((error: unknown) => error)
     expect(failure).toMatchObject({ code, status, oauthError: error })
     expect(String(failure)).toBe(`${_provider}CalendarError: ${code} (${error})`)
@@ -65,7 +65,7 @@ describe.each([
   ])('keeps unknown, malformed and oversized token errors retryable: %s', async (_kind, body) => {
     const client = createClient(config, async () => Response.json(body, { status: 400 }))
     const failure = await client
-      .refresh('fake-refresh', AbortSignal.timeout(1000))
+      .refresh('fake-refresh', AbortSignal.timeout(1000), ['Calendars.ReadBasic'])
       .catch((error: unknown) => error)
     expect(failure).toMatchObject({ code: 'provider_unavailable', oauthError: undefined })
     expect(inspect(failure)).not.toContain('private-provider-echo')

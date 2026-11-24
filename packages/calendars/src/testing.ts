@@ -237,6 +237,7 @@ export function fakeMicrosoft(now?: () => number) {
             name: 'Outlook calendar',
             isDefaultCalendar: true,
             canEdit: true,
+            canShare: true,
             canViewPrivateItems: true,
           },
         ],

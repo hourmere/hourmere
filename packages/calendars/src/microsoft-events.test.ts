@@ -194,7 +194,9 @@ describe('Microsoft Graph booking event transport', () => {
         { status: 400 },
       ),
     )
-    await expect(client.refresh('fake-refresh', signal())).rejects.toMatchObject({
+    await expect(
+      client.refresh('fake-refresh', signal(), ['Calendars.ReadWrite']),
+    ).rejects.toMatchObject({
       code: 'needs_reauth',
       oauthError: 'invalid_grant',
       message: 'needs_reauth (invalid_grant)',

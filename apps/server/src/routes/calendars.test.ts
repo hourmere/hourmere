@@ -297,6 +297,37 @@ describe.skipIf(!databaseUrl)('calendar HTTP routes (real Postgres)', () => {
     })
   })
 
+  it('refuses a shared Microsoft calendar with permission to edit private events', async () => {
+    microsoft.controls.pages = [
+      {
+        value: [
+          {
+            id: 'shared-calendar',
+            name: 'Shared calendar',
+            canShare: false,
+            canEdit: true,
+            canViewPrivateItems: true,
+          },
+        ],
+      },
+    ]
+    const calendar = await connectMicrosoft('Calendars.ReadWrite')
+    const response = await request(
+      '/api/v1/calendar-destination',
+      'PUT',
+      JSON.stringify({ calendarId: calendar.id }),
+    )
+    expect(response.status).toBe(409)
+    expect(await response.json()).toMatchObject({ error: 'microsoft_calendar_not_writable' })
+    expect(await destination()).toBeNull()
+    const conflictSelection = await request(
+      `/api/v1/calendars/${calendar.id}`,
+      'PATCH',
+      JSON.stringify({ checkConflicts: true }),
+    )
+    expect(conflictSelection.status).toBe(204)
+  })
+
   it('selects a writable Microsoft calendar only for its owner and keeps a removed destination visible', async () => {
     const calendar = await connectMicrosoft('Calendars.ReadWrite')
     const set = (headers?: Record<string, string>) =>
@@ -306,7 +337,6 @@ describe.skipIf(!databaseUrl)('calendar HTTP routes (real Postgres)', () => {
         JSON.stringify({ calendarId: calendar.id }),
         headers,
       )
-    const calls = microsoft.calls.length
     const otherKey = { authorization: 'Bearer hm_other', cookie: '', origin: '' }
     const forbidden = await set(otherKey)
     expect(forbidden.status).toBe(404)
@@ -322,12 +352,14 @@ describe.skipIf(!databaseUrl)('calendar HTTP routes (real Postgres)', () => {
     expect(readOnly.status).toBe(409)
     expect(await readOnly.json()).toMatchObject({ error: 'microsoft_calendar_not_writable' })
     expect(await destination()).toBeNull()
-    await db
-      .updateTable('calendars')
-      .set({ access_role: 'writer' })
-      .where('id', '=', calendar.id)
-      .execute()
+    const refresh = await request(
+      `/api/v1/calendar-connections/${calendar.connection_id}/refresh`,
+      'POST',
+      '{}',
+    )
+    expect(refresh.status).toBe(204)
 
+    const calls = microsoft.calls.length
     const ownerKey = { authorization: 'Bearer hm_test', cookie: '', origin: '' }
     expect((await set(ownerKey)).status).toBe(204)
     expect(await destination()).toBe(calendar.id)

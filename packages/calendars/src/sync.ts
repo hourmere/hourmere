@@ -546,7 +546,7 @@ export async function setCalendarDestination(
           throw new DomainError('conflict', 'microsoft_calendar_removed')
         if (!hasMicrosoftCalendarWriteAccess(row.scopes))
           throw new DomainError('conflict', 'microsoft_calendar_permissions_missing')
-        if (row.access_role !== 'writer')
+        if (row.access_role !== 'owner')
           throw new DomainError('conflict', 'microsoft_calendar_not_writable')
       } else if (
         row.access_role !== 'owner' ||

@@ -4,7 +4,7 @@ import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createPublicBooking } from '@hourmere/scheduling'
 import { createFixtures } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { calendarBookingNotifier } from './booking-events.ts'
+import { calendarBookingNotifier, redispatchBookingCalendar } from './booking-events.ts'
 import { calendarEncryptionKey, encryptCredential } from './credentials.ts'
 import {
   beginMicrosoftConnection,
@@ -13,9 +13,13 @@ import {
   finishMicrosoftConnection,
   tokenAad,
 } from './index.ts'
-import { bookingCalendarJob, calendarDispatchJob } from './jobs.ts'
+import { bookingCalendarJob, bookingCalendarRecoveryJob, calendarDispatchJob } from './jobs.ts'
 import { createMicrosoftCalendarClient } from './microsoft.ts'
-import { type CalendarWritePayload, readMicrosoftWritebackSummary } from './microsoft-writeback.ts'
+import {
+  type CalendarWritePayload,
+  readMicrosoftWritebackSummary,
+  writeMicrosoftCalendar,
+} from './microsoft-writeback.ts'
 import { TEST_CALENDAR_KEY } from './testing.ts'
 
 const NOW = Temporal.Instant.from('2030-03-04T08:00:00Z')
@@ -60,7 +64,7 @@ function graph(now: () => number) {
   const calls: Call[] = []
   const events = new Map<string, GraphEvent>()
   const controls: {
-    beforeLookup?: () => Response | undefined
+    beforeLookup?: () => Response | undefined | Promise<Response | undefined>
     beforeCreate?: () => Response | undefined
     afterCreate?: () => Promise<Response | undefined>
     reconnect?: { account: string; calendars: string[] }
@@ -83,6 +87,7 @@ function graph(now: () => number) {
               id,
               name: id,
               canEdit: true,
+              canShare: true,
               canViewPrivateItems: true,
             })),
           })
@@ -117,7 +122,7 @@ function graph(now: () => number) {
       )?.[1]
       if (!transactionId) throw new Error('Missing synthetic Graph recovery filter')
       calls.push({ calendar, method: 'GET', transactionId })
-      const failure = controls.beforeLookup?.()
+      const failure = await controls.beforeLookup?.()
       if (failure) return failure
       const event = events.get(JSON.stringify([calendar, transactionId]))
       return Response.json({ value: event ? [event] : [] })
@@ -186,7 +191,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
           connection_id: connection,
           external_id: name,
           name,
-          access_role: 'writer',
+          access_role: 'owner',
           check_conflicts: false,
         })
         .returning('id')
@@ -423,6 +428,33 @@ describe.skipIf(!process.env.DATABASE_URL)(
       expect(copy).toEqual({ calendar_id: selected, external_event_id: eventId, etag })
     })
 
+    it('recovers the revision sent to Graph when group seats change during the lookup', async () => {
+      const groupSlotId = await bookGroup()
+      const initial = await db
+        .selectFrom('group_slots')
+        .select('count_revision')
+        .where('id', '=', groupSlotId)
+        .executeTakeFirstOrThrow()
+      provider.controls.beforeLookup = async () => {
+        provider.controls.beforeLookup = undefined
+        await book({ ...invitee, name: 'Second Invitee', email: 'second@example.test' })
+        return undefined
+      }
+      provider.controls.afterCreate = async () => graphError(503, 'ServiceUnavailable')
+      await work({ groupSlotId })
+      expect(provider.posts()[0]?.body).toMatchObject({ body: { content: '1' } })
+
+      now += 30_000
+      await work({ groupSlotId })
+      const copy = await db
+        .selectFrom('group_slot_calendar_events')
+        .select(['external_event_id', 'count_revision'])
+        .where('group_slot_id', '=', groupSlotId)
+        .executeTakeFirstOrThrow()
+      expect(copy).toEqual({ external_event_id: eventId, count_revision: initial.count_revision })
+      expect(provider.posts()).toHaveLength(1)
+    })
+
     it('records a pending group destination as removed after its account disconnects', async () => {
       const groupSlotId = await bookGroup()
       const readSlot = () =>
@@ -452,6 +484,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       ['removed at Graph', 404, 'calendar_removed'],
       ['marked removed by sync', 0, 'calendar_removed'],
       ['read-only calendar', 0, 'calendar_unavailable'],
+      ['shared writable calendar', 0, 'calendar_unavailable'],
     ])(
       'surfaces a pinned destination %s without choosing a replacement',
       async (kind, status, reason) => {
@@ -464,7 +497,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
             .set(
               kind === 'marked removed by sync'
                 ? { sync_error: 'calendar_removed' }
-                : { access_role: 'reader' },
+                : { access_role: kind === 'shared writable calendar' ? 'writer' : 'reader' },
             )
             .where('id', '=', selected)
             .execute()
@@ -506,61 +539,71 @@ describe.skipIf(!process.env.DATABASE_URL)(
       expect(await state(bookingId)).toMatchObject({ status: 'succeeded', attempts: 2 })
     })
 
-    it('recovers a permission-blocked booking on the same calendar after OAuth reconnect', async () => {
-      const bookingId = await book()
-      provider.controls.beforeCreate = () => graphError(403, 'ErrorAccessDenied')
-      await work({ bookingId })
-      expect(await state(bookingId)).toMatchObject({
-        status: 'failed',
-        reason: 'permissions_missing',
-      })
-      await select(await calendar(connectionId, 'outlook-replacement'))
-      provider.controls.beforeCreate = () => undefined
-      provider.controls.reconnect = {
-        account: `graph-account-${host.userId}`,
-        calendars: ['outlook-selected', 'outlook-replacement'],
-      }
-      provider.token.mockReturnValueOnce(
-        Response.json({
-          access_token: 'fake-reconnected-access',
-          refresh_token: 'fake-reconnected-refresh',
-          token_type: 'Bearer',
-          expires_in: 3600,
-          scope,
-        }),
-      )
-      const session = await hostSession()
-      const authorization = new URL(
-        (await beginMicrosoftConnection(deps, session)).authorizationUrl,
-      )
-      const stateToken = authorization.searchParams.get('state')
-      if (!stateToken) throw new Error('Expected an OAuth state')
-      await expect(
-        finishMicrosoftConnection(
-          deps,
-          session,
-          new URLSearchParams({ state: stateToken, code: 'fake-code' }),
-        ),
-      ).resolves.toBe('connected')
-      expect(await state(bookingId)).toMatchObject({ status: 'pending', attempts: 0 })
+    it.each([
+      [403, 'ErrorAccessDenied', 'permissions_missing'],
+      [503, 'ServiceUnavailable', 'outcome_unknown'],
+    ])(
+      'recovers a booking blocked by %s on the same calendar after OAuth reconnect',
+      async (status, code, reason) => {
+        const bookingId = await book()
+        provider.controls.beforeCreate = () => graphError(status, code)
+        for (let attempt = 0; attempt < 6; attempt++) {
+          await work({ bookingId })
+          now += 15 * 60_000
+        }
+        expect(await state(bookingId)).toMatchObject({
+          status: 'failed',
+          reason,
+        })
+        await select(await calendar(connectionId, 'outlook-replacement'))
+        provider.controls.beforeCreate = () => undefined
+        provider.controls.reconnect = {
+          account: `graph-account-${host.userId}`,
+          calendars: ['outlook-selected', 'outlook-replacement'],
+        }
+        provider.token.mockReturnValueOnce(
+          Response.json({
+            access_token: 'fake-reconnected-access',
+            refresh_token: 'fake-reconnected-refresh',
+            token_type: 'Bearer',
+            expires_in: 3600,
+            scope,
+          }),
+        )
+        const session = await hostSession()
+        const authorization = new URL(
+          (await beginMicrosoftConnection(deps, session)).authorizationUrl,
+        )
+        const stateToken = authorization.searchParams.get('state')
+        if (!stateToken) throw new Error('Expected an OAuth state')
+        await expect(
+          finishMicrosoftConnection(
+            deps,
+            session,
+            new URLSearchParams({ state: stateToken, code: 'fake-code' }),
+          ),
+        ).resolves.toBe('connected')
+        expect(await state(bookingId)).toMatchObject({ status: 'pending', attempts: 0 })
 
-      await work({ bookingId })
-      expect(provider.posts().map((call) => call.calendar)).toEqual([
-        'outlook-selected',
-        'outlook-selected',
-      ])
-      expect(provider.posts()[1]?.transactionId).toBe(provider.posts()[0]?.transactionId)
-      expect(await mappings(bookingId)).toEqual([
-        { calendar_id: selected, external_event_id: eventId, etag },
-      ])
-      expect(await state(bookingId)).toMatchObject({ status: 'succeeded', attempts: 1 })
-    })
+        const priorPosts = provider.posts().length
+        await work({ bookingId })
+        expect(provider.posts()).toHaveLength(priorPosts + 1)
+        expect(new Set(provider.posts().map((call) => call.calendar))).toEqual(
+          new Set(['outlook-selected']),
+        )
+        expect(new Set(provider.posts().map((call) => call.transactionId)).size).toBe(1)
+        expect(await mappings(bookingId)).toEqual([
+          { calendar_id: selected, external_event_id: eventId, etag },
+        ])
+        expect(await state(bookingId)).toMatchObject({ status: 'succeeded', attempts: 1 })
+      },
+    )
 
     it.each([
       [409, 'ErrorConflict', 'event_conflict'],
       [412, 'ErrorIrresolvableConflict', 'event_conflict'],
-      [503, 'ServiceUnavailable', 'outcome_unknown'],
-      [0, 'TimeoutError', 'outcome_unknown'],
+      [503, 'ServiceUnavailable', 'provider_unavailable'],
+      [0, 'TimeoutError', 'provider_unavailable'],
     ])('recovers a committed Graph create after %s by lookup', async (status, code, reason) => {
       const bookingId = await book()
       provider.controls.afterCreate = async () => {
@@ -586,27 +629,145 @@ describe.skipIf(!process.env.DATABASE_URL)(
       expect(await state(bookingId)).toMatchObject({ status: 'succeeded', attempts: 2 })
     })
 
-    it('stops retrying an unknown result after bounded empty lookups without another POST', async () => {
+    it('reposts a 503 that created nothing after settling, with a fresh lookup and the same key', async () => {
       const bookingId = await book()
-      provider.controls.beforeCreate = () => graphError(500, 'InternalServerError')
+      provider.controls.beforeCreate = () => graphError(503, 'ServiceUnavailable')
       await work({ bookingId })
-      provider.controls.beforeCreate = () => undefined
-      for (let i = 0; i < 8; i++) {
+      expect(provider.events.size).toBe(0)
+      provider.controls.beforeCreate = undefined
+
+      now += 29_999
+      await work({ bookingId })
+      expect(provider.calls.map((c) => c.method)).toEqual(['GET', 'POST'])
+
+      now++
+      await Promise.all([work({ bookingId }), work({ bookingId })])
+      expect(provider.calls.map((c) => c.method)).toEqual(['GET', 'POST', 'GET', 'POST'])
+      expect(new Set(provider.calls.map((c) => c.transactionId)).size).toBe(1)
+      expect(provider.posts()[1]?.body).toEqual(provider.posts()[0]?.body)
+      expect(provider.events.size).toBe(1)
+      expect(await mappings(bookingId)).toEqual([
+        { calendar_id: selected, external_event_id: eventId, etag },
+      ])
+      expect(await state(bookingId)).toMatchObject({ status: 'succeeded', attempts: 2 })
+    })
+
+    it('creates exactly one copy after a worker stops between claim and provider I/O', async () => {
+      const bookingId = await book()
+      const beginTransaction = db.transaction.bind(db)
+      const transaction = vi
+        .spyOn(db, 'transaction')
+        .mockImplementationOnce(beginTransaction)
+        .mockImplementationOnce(() => {
+          throw new Error('Worker stopped after claim')
+        })
+      try {
+        await expect(writeMicrosoftCalendar(deps, { bookingId }, signal())).rejects.toThrow(
+          'Worker stopped after claim',
+        )
+      } finally {
+        transaction.mockRestore()
+      }
+      expect(await state(bookingId)).toMatchObject({ status: 'retrying', attempts: 1 })
+      expect(provider.calls).toEqual([])
+
+      now += 120_000
+      await Promise.all([work({ bookingId }), work({ bookingId })])
+      expect(provider.calls.map((c) => c.method)).toEqual(['GET', 'POST'])
+      expect(provider.events.size).toBe(1)
+      expect(await mappings(bookingId)).toEqual([
+        { calendar_id: selected, external_event_id: eventId, etag },
+      ])
+      expect(await state(bookingId)).toMatchObject({ status: 'succeeded', attempts: 2 })
+    })
+
+    it.each([1, 5])('recovers one copy after %i deduplicated replays', async (replays) => {
+      const bookingId = await book()
+      provider.controls.afterCreate = async () => graphError(503, 'ServiceUnavailable')
+      await work({ bookingId })
+      expect(provider.events.size).toBe(1)
+
+      provider.controls.beforeLookup = () => Response.json({ value: [] })
+      for (let attempt = 0; attempt < replays; attempt++) {
         now += 15 * 60_000
         await work({ bookingId })
       }
-      expect(provider.posts()).toHaveLength(1)
-      expect(provider.calls.filter((c) => c.method === 'GET')).toHaveLength(6)
-      expect(await mappings(bookingId)).toEqual([])
-      expect(await state(bookingId)).toMatchObject({
-        status: 'failed',
-        reason: 'outcome_unknown',
-        attempts: 6,
-      })
-      const enqueue = vi.fn(async (_payload: CalendarWritePayload) => {})
-      await dispatch(enqueue)
-      expect(enqueue).not.toHaveBeenCalled()
+      expect(provider.events.size).toBe(1)
+      expect(provider.posts()).toHaveLength(replays + 1)
+      if (replays === 5) {
+        expect(await state(bookingId)).toMatchObject({
+          status: 'failed',
+          reason: 'outcome_unknown',
+        })
+        await bookingCalendarRecoveryJob(deps, vi.fn(), vi.fn()).handler(
+          { connectionId },
+          { id: 'synthetic-recovery-job', signal: signal(), attempt: 1 },
+        )
+      }
+
+      now += 60_000
+      provider.controls.beforeLookup = undefined
+      await work({ bookingId })
+      expect(provider.calls.at(-1)?.method).toBe('GET')
+      expect(provider.posts()).toHaveLength(replays + 1)
+      expect(new Set(provider.calls.map((c) => c.transactionId)).size).toBe(1)
+      expect(await mappings(bookingId)).toEqual([
+        { calendar_id: selected, external_event_id: eventId, etag },
+      ])
     })
+
+    it.each(['booking', 'connection'])(
+      'bounds failed creates and resets on operator redispatch by %s',
+      async (target) => {
+        const bookingId = await book()
+        provider.controls.beforeCreate = () => graphError(500, 'InternalServerError')
+        for (let attempt = 0; attempt < 6; attempt++) {
+          await work({ bookingId })
+          if (attempt < 5) now += 15 * 60_000
+        }
+        await work({ bookingId })
+        expect(provider.calls.filter((c) => c.method === 'GET')).toHaveLength(6)
+        expect(provider.posts()).toHaveLength(6)
+        expect(await mappings(bookingId)).toEqual([])
+        expect(await state(bookingId)).toMatchObject({
+          status: 'failed',
+          reason: 'outcome_unknown',
+          attempts: 6,
+        })
+        const enqueue = vi.fn(async (_payload: CalendarWritePayload) => {})
+        await dispatch(enqueue)
+        expect(enqueue).not.toHaveBeenCalled()
+
+        provider.controls.beforeCreate = undefined
+        if (target === 'booking') {
+          await redispatchBookingCalendar(
+            db,
+            {
+              async enqueue(_name, payload) {
+                queued.push(payload)
+                return null
+              },
+            },
+            bookingId,
+            now,
+          )
+        } else {
+          await bookingCalendarRecoveryJob(deps, vi.fn(), vi.fn()).handler(
+            { connectionId },
+            { id: 'synthetic-recovery-job', signal: signal(), attempt: 1 },
+          )
+        }
+        expect(await state(bookingId)).toMatchObject({ status: 'pending', attempts: 0 })
+        await work({ bookingId })
+        expect(provider.posts()).toHaveLength(6)
+        now += 30_000
+        await work({ bookingId })
+        expect(provider.calls.slice(-2).map((c) => c.method)).toEqual(['GET', 'POST'])
+        expect(new Set(provider.calls.map((c) => c.transactionId)).size).toBe(1)
+        expect(provider.events.size).toBe(1)
+        expect(await state(bookingId)).toMatchObject({ status: 'succeeded', attempts: 1 })
+      },
+    )
 
     it.each([
       [401, 'InvalidAuthenticationToken', 'needs_reauth'],
