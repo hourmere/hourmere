@@ -1048,20 +1048,20 @@ No read creates a policy, changes trust or emits an audit event.
 代码中保持关闭，读取返回 `sso_disabled`。
 
 Provider draft writes are registered as browser-session-only POST/PATCH/DELETE operations,
-with no MCP tool or CLI write command. They remain unavailable (`sso_disabled`) while
-both protocols are hard-off. With the internal OIDC test capability enabled, verified
-team owners/admins must send the exact Origin and `X-Expected-Organization-Id`, then
+with no MCP tool or CLI write command. Creating and updating require the provider's protocol
+to be enabled. Verified team owners/admins must send the exact Origin and
+`X-Expected-Organization-Id`, then
 complete the operation-bound fresh-proof retry. New providers are disabled; edits require
 `expectedRevision`. Omitted secrets are preserved and returned summaries never include
 sealed configuration or secrets. Changing trust configuration or retiring a provider
 increments the team trust generation; changing its display name alone does not.
-The issuer/client ID identity cannot change: create a replacement provider instead.
+Changing the OIDC issuer/client ID or SAML IdP entity ID requires a replacement provider.
 Deletion retires the record and an authorized repeat deletion is idempotent.
 `SSO_ENCRYPTION_KEY` is an optional independent 32-byte base64 key for sealing drafts.
 Keep it stable and back it up privately; configuring it never enables a protocol.
 
 提供者草稿的创建、修改和删除仅允许浏览器会话使用，没有 MCP/CLI 写命令。
-OIDC 与 SAML 仍保持代码级关闭，接口返回 `sso_disabled`。内部测试开启 OIDC 后，
+创建或修改要求对应协议已启用。SAML 在生产环境保持关闭，请求返回 `404 sso_disabled`。
 已验证的团队所有者或管理员必须提供同源请求、预期团队和操作绑定的新鲜证明。
 修改须携带预期版本；省略密钥会保留旧值，响应不回显密钥或密封配置。
 信任配置变更和退役会递增团队信任代次，仅修改显示名称不会；重复退役具有幂等性。
@@ -1072,9 +1072,23 @@ Every write except `revokeSsoDelegation` accepts an optional opaque `proofAttemp
 its strict input for the fresh-proof retry below. DELETE operations carry their strict
 JSON body, which OpenAPI 3.1 permits. Create accepts `{protocol, displayName, domainIds,
 oidc?, saml?, proofAttemptId?}`; OIDC has issuer,
-clientId and write-only clientSecret; SAML has explicit entityId, SSO URL, trusted
-signing certificates and an optional metadata import URL/document. Server-generated
-callback URLs cannot be supplied by the caller. Return `{provider}` with id, protocol,
+clientId and write-only clientSecret. The SAML `saml` object accepts `entityId`, `ssoUrl`
+for the IdP's HTTP-Redirect endpoint and `signingCertificates` for its pinned RSA signing
+certificates. It can import those fields from either `metadataDocument` or `metadataUrl`.
+The server fetches metadata URLs through the SSO transport after fresh proof, validates
+the XML through the verifier's bounded parser, and seals the resulting configuration.
+An import requires a single SAML 2.0 IdP entity and one HTTP-Redirect endpoint. Explicit
+values must agree with any values present in the document. For a document without signing
+keys, supply `signingCertificates` in the same request. Reimporting metadata is an
+explicit update. To rotate a signing key, update the
+certificate list with the old and new certificates, test the new revision, then remove
+the old certificate after the IdP switches. A pin-set change records a certificate rotation
+audit event. `wantAssertionsSigned` defaults to `true`
+and only accepts `true`. The SP metadata endpoint publishes `WantAssertionsSigned="true"`,
+the stable SP entity ID and the exact HTTP-POST ACS URL for the provider, including a
+disabled draft. It derives both URLs from `PUBLIC_URL` and returns only the SP metadata.
+SAML stays hard-off in production. Server-generated callback URLs cannot be supplied by
+the caller. Return `{provider}` with id, protocol,
 revision, enabled, safe display fields and validation/test status; never echo secrets,
 raw metadata or identities. New providers are disabled. Update takes `{expectedRevision,
 displayName?, domainIds?, oidc?, saml?, proofAttemptId?}` and delete takes
@@ -1083,6 +1097,17 @@ and live proofs.
 A changed identity tuple requires a replacement provider. Repeating the delete of the
 team's own retired provider succeeds idempotently for an authorized caller; every other
 operation on a retired ID returns `sso_not_found`.
+
+SAML 的 `saml` 对象支持 `entityId`、用于 HTTP-Redirect 的 `ssoUrl` 和固定信任的 RSA 签名
+证书列表 `signingCertificates`，也可通过 `metadataDocument` 或 `metadataUrl` 导入这些字段。
+服务器在完成新鲜证明后使用受限的 SSO 传输下载元数据，经验证器使用的受限 XML 解析器处理，
+并密封保存解析后的配置。每份文档须含一个 SAML 2.0 IdP 实体和一个 HTTP-Redirect 端点。
+显式填写的值须与文档一致；如果文档未包含签名密钥，须在同次请求提供 `signingCertificates`。
+重新导入须显式提交修改。轮换时先同时保留旧证书和新证书，并测试新版本；
+身份提供方切换签名密钥后再移除旧证书。证书集合变更会记录轮换审计事件。
+`wantAssertionsSigned` 默认为 `true`，且只接受 `true`。
+SP 元数据端点也支持禁用的草稿，公布固定的 SP 实体 ID、精确的 HTTP-POST ACS 地址和
+`WantAssertionsSigned="true"`。两个地址均由 `PUBLIC_URL` 派生。更改身份提供方实体 ID 须创建替代提供者。
 
 Provider activation takes `{expectedRevision, enabled, proofAttemptId?}` and returns the
 same safe `{provider}` summary. A verified current team owner must use a browser session
@@ -1099,7 +1124,7 @@ new activation while the existing provider can still serve that domain until ver
 Changing activation state keeps the provider revision and records an audit event.
 Disabling also increments `trustGeneration`. An authorized request to enable an already
 enabled provider still checks the current prerequisites.
-While `SSO_OIDC_ENABLED` is off, enabling returns `404 sso_disabled` and disabling stays available.
+When the provider protocol is off, enabling returns `404 sso_disabled` and disabling stays available.
 
 提供者启停仅限当前团队中邮箱已验证的所有者使用浏览器会话发起，须提供同源请求、预期团队、
 预期提供者版本和操作绑定的新鲜证明。未强制 SSO 的团队使用邮箱证明；已强制的团队需要 SSO
@@ -1107,7 +1132,7 @@ While `SSO_OIDC_ENABLED` is off, enabling returns `404 sso_disabled` and disabli
 使用一次浏览器恢复授权完成新鲜管理验证。启用前，当前版本必须通过测试，
 且至少一个关联域名的验证仍有效、最近一次复查通过。已强制 SSO 的团队停用最后一个可用提供者时，
 会收到 `409 sso_last_provider`。启停变更保留提供者版本并写入审计日志，停用还会递增信任代次。
-两种协议仍在代码中保持关闭，生产环境返回 `404 sso_disabled`。
+协议关闭时，启用提供者返回 `404 sso_disabled`，停用仍可用。SAML 在生产环境保持关闭。
 
 Domain challenge takes `{domain, proofAttemptId?}` and returns `{domain: {id, name,
 status}, txtName, txtValue, expiresAt}` once; repeated creation rotates rather than
@@ -1172,6 +1197,24 @@ SSO 的团队使用管理员自己的 Hourmere 邮箱完成证明。重试成功
 该次测试。测试状态可在提供者列表查看。任何版本变更都会使之前的
 测试收据失效。测试不会创建账号、身份关联、团队成员或登录会话。两种协议仍在代码中保持
 关闭，接口返回 `404 sso_disabled`。
+
+SAML uses the same test operation, expected revision and fresh administration flow.
+An enforcing team uses OIDC step-up until SAML step-up ships. A recovery owner can
+update, test and re-activate the provider using three separate recovery grants.
+Follow the authorization URL in the initiating browser, then select **Continue**
+on the SAML completion page. The ACS verifies the response and stages its result.
+Completion checks the initiating browser, session and administrator, the provider
+revision and, for recovery tests, the enrollment, activation state and grant deadline.
+It returns to settings and writes the revision-bound receipt for the inventory.
+The test can authenticate an IdP identity without enrolling it. SAML stays hard-off
+and testing a SAML provider returns `404 sso_disabled` in production.
+
+SAML 使用同一测试接口、预期版本和新鲜管理证明流程。在 SAML 重新认证交付前，已强制 SSO
+的团队使用 OIDC 重新认证。恢复所有者可以分别使用三次恢复授权来修改、测试和重新启用提供者。
+请在发起测试的浏览器中打开授权 URL，并在 SAML 确认页面选择**继续**。ACS 校验响应并暂存结果。
+确认时会核对原浏览器、会话、管理员和提供者版本。恢复测试还核对恢复登记、启停状态和授权期限。
+确认后返回设置并写入当前版本的测试回执，结果可在提供者列表中查看。测试不会注册 IdP 身份。
+生产环境中 SAML 保持关闭，测试 SAML 提供者返回 `404 sso_disabled`。
 
 The OIDC self-link operation takes `{proofAttemptId?}` and applies to an enabled provider
 in the caller's active team. A current member uses their existing browser session and

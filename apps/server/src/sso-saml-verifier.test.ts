@@ -1103,6 +1103,7 @@ describe('SAML verifier: runtime callers', () => {
   const root = fileURLToPath(new URL('../../../', import.meta.url))
   const verifier = 'apps/server/src/sso-saml-verifier.ts'
   const acs = 'apps/server/src/sso-saml-sign-in.ts'
+  const configuration = 'apps/server/src/sso-saml-configuration.ts'
 
   function productionSources() {
     const files: string[] = []
@@ -1123,18 +1124,27 @@ describe('SAML verifier: runtime callers', () => {
     return files
   }
 
-  it('allows only the ACS to use the SAML verifier and limits XML library imports', () => {
+  it('allows the ACS to verify assertions and metadata import to reuse the hardened parser', () => {
     const files = productionSources()
     expect(files).toEqual(
-      expect.arrayContaining([verifier, 'apps/server/src/server.ts', 'tools/cli/src/cli.ts']),
+      expect.arrayContaining([
+        verifier,
+        configuration,
+        'apps/server/src/server.ts',
+        'tools/cli/src/cli.ts',
+      ]),
     )
     const mention =
       /sso-saml-verifier|verifySamlResponse|SamlVerificationError|samlInitialAlgorithms|(['"`])(?:xml-crypto|@xmldom\/xmldom|samlify)(?:\/[^'"`]*)?\1/
     const xmlLibrary = /(['"`])(?:xml-crypto|@xmldom\/xmldom|samlify)(?:\/[^'"`]*)?\1/
     expect(mention.test(readFileSync(join(root, acs), 'utf8'))).toBe(true)
     expect(xmlLibrary.test(readFileSync(join(root, acs), 'utf8'))).toBe(false)
+    const configurationSource = readFileSync(join(root, configuration), 'utf8')
+    expect(configurationSource).toContain('parseSamlXml(document)')
+    expect(configurationSource).not.toMatch(/\bverifySamlResponse\b/)
+    expect(xmlLibrary.test(configurationSource)).toBe(false)
     const mentioning = files.filter((file) => {
-      if (file === acs) return false
+      if (file === acs || file === configuration) return false
       const source = readFileSync(join(root, file), 'utf8')
       let runtime = source
       if (file === 'apps/server/src/sso-saml-replay.ts')

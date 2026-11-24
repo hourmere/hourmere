@@ -1232,6 +1232,11 @@ account deletion; a subject-keyed JIT check adds its column there in the step th
   Its expiry cannot exceed the grant's deadline. The authenticated state binds the provider's
   activation state and the owner's accepted recovery enrollment. The callback can only record
   that attempt's test receipt.
+  A SAML test binds the starting administrator and session to a provider revision and
+  stores only the digests of RelayState and the browser binding. The ACS consumes the
+  request and stages a short-lived test result. A same-origin completion in the original
+  browser and session writes the safe receipt. The test never stores the asserted
+  identity in the pending result.
   The internal OIDC verifier uses this storage for sign-in attempts. Its pending row stores
   the state digest and browser-binding digest. The authenticated state envelope carries the
   nonce, PKCE verifier and return path, bound to the attempt and its provider revision.

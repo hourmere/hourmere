@@ -716,6 +716,13 @@ export function productionAppOptions({
     : undefined
   const ssoPrivateTargets = config.SSO_PRIVATE_TARGETS
   const sso = productionSsoCapabilities(config)
+  const readSsoSession = async (headers: Headers) =>
+    (
+      await auth.api?.getSession({
+        headers,
+        query: { disableRefresh: true, disableCookieCache: true },
+      })
+    )?.session
   return {
     checkDb,
     scim: { db, enabled: config.SCIM_PROVISIONING_ENABLED },
@@ -744,19 +751,14 @@ export function productionAppOptions({
       privateTargets: ssoPrivateTargets,
       signup: config.signup,
       session: { secret: config.BETTER_AUTH_SECRET },
-      readSession: async (headers) =>
-        (
-          await auth.api?.getSession({
-            headers,
-            query: { disableRefresh: true, disableCookieCache: true },
-          })
-        )?.session,
+      readSession: readSsoSession,
     }),
     ssoSamlSignIn: samlSignInRoutes({
       capabilities: sso,
       db,
       configurationKey: ssoConfigurationKey,
       session: { secret: config.BETTER_AUTH_SECRET },
+      readSession: readSsoSession,
     }),
     // db is closed by the caller.
     routes: productRoutes({

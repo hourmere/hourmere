@@ -1,6 +1,7 @@
 import { type Principal, teamRoles } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import { auditActor, writeSsoAuditEvent } from '@hourmere/db/audit'
+import type { SsoRequest, sendSsoRequest } from '@hourmere/outbound/sso'
 import { DomainError } from '@hourmere/scheduling'
 import { HTTPException } from 'hono/http-exception'
 import { sql } from 'kysely'
@@ -12,9 +13,17 @@ import { type FreshProofDeps, runWithFreshProof } from './sso-fresh-proof.ts'
 import { currentSsoProviderTestStatus } from './sso-oidc-test-receipts.ts'
 import { authorizeSsoRead } from './sso-reads.ts'
 import { providerRecoveryAuthority, ssoWriteContextAccess } from './sso-recovery-use.ts'
+import {
+  normalizeSamlSigningCertificates,
+  resolveSamlProviderInput,
+  samlProviderInput,
+} from './sso-saml-configuration.ts'
+import { samlProviderConfig } from './sso-saml-state.ts'
 
 export interface SsoDraftDeps extends FreshProofDeps {
   configurationKey?: Buffer | undefined
+  privateTargets?: SsoRequest['privateTargets'] | undefined
+  send?: typeof sendSsoRequest | undefined
 }
 function configurationKey(deps: SsoDraftDeps) {
   if (!deps.configurationKey) throw new Error('SSO configuration encryption is unavailable')
@@ -41,16 +50,18 @@ const domains = z
   .max(100)
   .refine((ids) => new Set(ids).size === ids.length)
 const create = z.strictObject({
-  protocol: z.literal('oidc'),
+  protocol: z.enum(['oidc', 'saml']),
   displayName: z.string().trim().min(1).max(100),
   domainIds: domains,
-  oidc,
+  oidc: oidc.optional(),
+  saml: samlProviderInput.optional(),
 })
 const update = z.strictObject({
   expectedRevision: z.number().int().min(1).max(2147483646),
   displayName: z.string().trim().min(1).max(100).optional(),
   domainIds: domains.optional(),
   oidc: oidc.partial().optional(),
+  saml: samlProviderInput.optional(),
 })
 const remove = z.strictObject({ expectedRevision: z.number().int().min(1).max(2147483646) })
 const activation = z.strictObject({
@@ -58,13 +69,8 @@ const activation = z.strictObject({
   enabled: z.boolean(),
 })
 const proof = { proofAttemptId: z.uuid().optional() }
-export const CreateSsoProviderInput = create.extend({
-  ...proof,
-  protocol: z.enum(['oidc', 'saml']),
-  oidc: oidc.optional(),
-  saml: z.unknown().optional(),
-})
-export const UpdateSsoProviderInput = update.extend({ ...proof, saml: z.unknown().optional() })
+export const CreateSsoProviderInput = create.extend(proof)
+export const UpdateSsoProviderInput = update.extend(proof)
 export const DeleteSsoProviderInput = remove.extend(proof)
 export const ActivateSsoProviderInput = activation.extend(proof)
 const denied = () => new DomainError('forbidden', 'team_management_access_denied')
@@ -74,6 +80,23 @@ function uniformDenial(error: unknown): never {
 }
 const changed = () => new DomainError('conflict', 'sso_configuration_changed')
 const missing = () => new DomainError('not_found', 'sso_not_found')
+const invalid = () => new DomainError('invalid', 'invalid_request')
+
+type SamlInput = z.infer<typeof samlProviderInput>
+type ResolvedSaml = Awaited<ReturnType<typeof resolveSamlProviderInput>>
+
+function draftProtocol(input: unknown) {
+  if (input && typeof input === 'object') {
+    if (('protocol' in input && input.protocol === 'saml') || 'saml' in input) return 'saml'
+    if (('protocol' in input && input.protocol === 'oidc') || 'oidc' in input) return 'oidc'
+  }
+}
+
+export function guardSsoDraftInput(capabilities: SsoCapabilities, input: unknown) {
+  const protocol = draftProtocol(input)
+  requireSsoEnabled(capabilities, protocol)
+  return protocol
+}
 
 async function provider(db: Db, organizationId: string, id: string) {
   if (!z.uuid().safeParse(id).success) throw missing()
@@ -142,16 +165,9 @@ async function changeTrust(db: Db, organizationId: string) {
     .where('organization_id', '=', organizationId)
     .execute()
 }
-function enabled(deps: SsoDraftDeps, principal: Principal, input: unknown, requiresOidc = true) {
+function browserPrincipal(deps: SsoDraftDeps, principal: Principal) {
   requireSsoRetained(deps.capabilities)
   if (principal.kind !== 'session' || principal.organization.personal) throw denied()
-  if (
-    input &&
-    typeof input === 'object' &&
-    (('protocol' in input && input.protocol === 'saml') || 'saml' in input)
-  )
-    throw new DomainError('not_found', 'sso_disabled')
-  if (requiresOidc) requireSsoEnabled(deps.capabilities, 'oidc')
   return principal
 }
 async function authorize(
@@ -174,6 +190,7 @@ async function audit(
     | 'sso_provider.enabled'
     | 'sso_provider.disabled'
     | 'sso_provider.deleted'
+    | 'sso_provider.certificate_rotated'
     | 'sso_provider.secret_rotated',
 ) {
   await writeSsoAuditEvent(db, {
@@ -197,7 +214,10 @@ export async function createSsoProvider(
   input: unknown,
   recoveryRequired = false,
 ) {
-  const p = enabled(deps, principal, input)
+  const protocol = guardSsoDraftInput(deps.capabilities, input)
+  const p = browserPrincipal(deps, principal)
+  let saml: SamlInput | undefined
+  let resolvedSaml: ResolvedSaml | undefined
   return runWithFreshProof(
     deps,
     {
@@ -214,10 +234,28 @@ export async function createSsoProvider(
       authorize: async (db) => {
         await authorize(deps, db, p, headers, recoveryRequired)
         const parsed = CreateSsoProviderInput.parse(input)
+        if (parsed.protocol === 'saml') {
+          if (!parsed.saml || parsed.oidc) throw invalid()
+          saml = parsed.saml
+        } else if (!parsed.oidc || parsed.saml) {
+          throw invalid()
+        }
         await checkDomains(db, p.organization.id, parsed.domainIds)
       },
+      ...(protocol === 'saml' && {
+        prepare: async () => {
+          if (!saml) throw invalid()
+          resolvedSaml = await resolveSamlProviderInput(saml, {
+            privateTargets: deps.privateTargets,
+            transport: deps.send,
+          })
+        },
+      }),
       mutate: async (db, raw) => {
         const value = create.parse(raw)
+        const configuration = value.protocol === 'saml' ? resolvedSaml?.configuration : value.oidc
+        const issuer = value.protocol === 'saml' ? resolvedSaml?.entityId : value.oidc?.issuer
+        if (!configuration || !issuer) throw invalid()
         const { id } = await db
           .selectNoFrom(sql<string>`uuidv7()`.as('id'))
           .executeTakeFirstOrThrow()
@@ -226,14 +264,14 @@ export async function createSsoProvider(
           .values({
             id,
             organization_id: p.organization.id,
-            protocol: 'oidc',
+            protocol: value.protocol,
             display_name: value.displayName,
-            issuer: value.oidc.issuer,
-            client_id: value.oidc.clientId,
+            issuer,
+            client_id: value.oidc?.clientId ?? null,
             configuration: sealSsoProviderConfiguration(
               configurationKey(deps),
               { organizationId: p.organization.id, providerId: id, revision: 1 },
-              JSON.stringify(value.oidc),
+              JSON.stringify(configuration),
             ),
           })
           .returningAll()
@@ -324,7 +362,8 @@ export async function activateSsoProvider(
   input: z.infer<typeof ActivateSsoProviderInput>,
   recoveryRequired = false,
 ) {
-  const p = enabled(deps, principal, input, input.enabled)
+  if (input.enabled) requireSsoEnabled(deps.capabilities)
+  const p = browserPrincipal(deps, principal)
   const organizationId = p.organization.id
   let target: { row: Provider; testStatus: string }
   return runWithFreshProof(
@@ -354,8 +393,8 @@ export async function activateSsoProvider(
 
         const row = await provider(db, organizationId, providerId)
         if (row.retired_at) throw missing()
-        if (input.enabled && row.protocol !== 'oidc')
-          throw new DomainError('not_found', 'sso_disabled')
+        if (input.enabled)
+          requireSsoEnabled(deps.capabilities, row.protocol === 'saml' ? 'saml' : 'oidc')
         if (row.revision !== input.expectedRevision) throw changed()
         const { testStatus } = await db
           .selectFrom('sso_providers')
@@ -410,7 +449,12 @@ export async function updateSsoProvider(
   input: unknown,
   recoveryRequired = false,
 ) {
-  const p = enabled(deps, principal, input)
+  const protocol = guardSsoDraftInput(deps.capabilities, input)
+  const p = browserPrincipal(deps, principal)
+  let old: Provider
+  let saml: SamlInput | undefined
+  let resolvedSaml: ResolvedSaml | undefined
+  let samlCertificatesRotated = false
   return runWithFreshProof(
     deps,
     {
@@ -429,20 +473,55 @@ export async function updateSsoProvider(
         await authorize(deps, db, p, headers, recoveryRequired)
         const row = await provider(db, p.organization.id, providerId)
         if (row.retired_at) throw missing()
-        if (row.protocol !== 'oidc') throw new DomainError('not_found', 'sso_disabled')
+        requireSsoEnabled(deps.capabilities, row.protocol === 'saml' ? 'saml' : 'oidc')
         const value = UpdateSsoProviderInput.parse(input)
         if (row.revision !== value.expectedRevision) throw changed()
         if (
+          (value.saml && row.protocol !== 'saml') ||
+          (value.oidc && row.protocol !== 'oidc') ||
           (value.oidc?.issuer !== undefined && value.oidc.issuer !== row.issuer) ||
-          (value.oidc?.clientId !== undefined && value.oidc.clientId !== row.client_id)
+          (value.oidc?.clientId !== undefined && value.oidc.clientId !== row.client_id) ||
+          (value.saml?.entityId !== undefined && value.saml.entityId !== row.issuer)
         )
-          throw new DomainError('invalid', 'invalid_request')
+          throw invalid()
         await checkDomains(db, p.organization.id, value.domainIds)
+        old = row
+        saml = value.saml
       },
+      ...(protocol === 'saml' && {
+        prepare: async () => {
+          if (!saml) throw invalid()
+          const configuration = samlProviderConfig.safeParse(
+            JSON.parse(
+              openSsoProviderConfiguration(
+                configurationKey(deps),
+                { organizationId: p.organization.id, providerId, revision: old.revision },
+                old.configuration,
+              ),
+            ),
+          )
+          if (!configuration.success) throw invalid()
+          resolvedSaml = await resolveSamlProviderInput(saml, {
+            current: { entityId: old.issuer, configuration: configuration.data },
+            privateTargets: deps.privateTargets,
+            transport: deps.send,
+          })
+          try {
+            const previousPins = normalizeSamlSigningCertificates(
+              configuration.data.signingCertificates ?? [],
+            )
+            samlCertificatesRotated =
+              JSON.stringify(previousPins) !==
+              JSON.stringify(resolvedSaml.configuration.signingCertificates)
+          } catch {
+            // A valid replacement repairs invalid stored pins.
+            samlCertificatesRotated = true
+          }
+        },
+      }),
       mutate: async (db, raw) => {
         const { providerId: _providerId, ...body } = raw
         const value = update.parse(body)
-        const old = await provider(db, p.organization.id, providerId)
         const before = JSON.parse(
           openSsoProviderConfiguration(
             configurationKey(deps),
@@ -450,14 +529,17 @@ export async function updateSsoProvider(
             old.configuration,
           ),
         )
-        const configuration = { ...before, ...value.oidc }
+        const configuration = resolvedSaml?.configuration ?? { ...before, ...value.oidc }
         const oldDomains = await db
           .selectFrom('sso_provider_domains')
           .select('domain_id')
           .where('provider_id', '=', providerId)
           .execute()
         const trustChanged =
-          JSON.stringify(configuration) !== JSON.stringify(before) ||
+          (resolvedSaml
+            ? samlCertificatesRotated ||
+              resolvedSaml.configuration.ssoEndpoint !== before.ssoEndpoint
+            : JSON.stringify(configuration) !== JSON.stringify(before)) ||
           (value.domainIds !== undefined &&
             JSON.stringify([...value.domainIds].sort()) !==
               JSON.stringify(oldDomains.map((d) => d.domain_id).sort()))
@@ -479,6 +561,7 @@ export async function updateSsoProvider(
           await setDomains(db, p.organization.id, providerId, value.domainIds)
         if (trustChanged) await changeTrust(db, p.organization.id)
         await audit(db, p, row, 'sso_provider.updated')
+        if (samlCertificatesRotated) await audit(db, p, row, 'sso_provider.certificate_rotated')
         if (
           value.oidc?.clientSecret !== undefined &&
           value.oidc.clientSecret !== before.clientSecret
@@ -497,7 +580,7 @@ export async function deleteSsoProvider(
   providerId: string,
   input: unknown,
 ) {
-  const p = enabled(deps, principal, input, false)
+  const p = browserPrincipal(deps, principal)
   return runWithFreshProof(
     deps,
     {

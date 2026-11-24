@@ -3,10 +3,16 @@ import { z } from 'zod'
 
 export const SAML_ACS_PATH = '/api/auth/sso/saml2/sp/acs/:providerId'
 export const SAML_COMPLETE_PATH = '/api/auth/sso/saml2/complete'
-const samlMetadataPath = '/api/auth/sso/saml2/sp/metadata/{providerId}'
+export const SAML_METADATA_PATH = '/api/auth/sso/saml2/sp/metadata/:providerId'
 export const samlStartOperation = 'samlSignIn'
 export const samlCompleteOperation = 'samlCompleteSignIn'
+export const samlTestOperation = 'samlTestProvider'
+export const samlCompleteTestOperation = 'samlCompleteProviderTest'
 export const samlId = z.uuidv7()
+
+export const samlTestBinding = z.strictObject({
+  recovery: z.strictObject({ acceptedAt: z.string(), testProviderEnabled: z.boolean() }).optional(),
+})
 
 export const samlProviderConfig = z.strictObject({
   ssoEndpoint: z.string(),
@@ -15,7 +21,7 @@ export const samlProviderConfig = z.strictObject({
 
 export function samlServiceProviderUrls(publicUrl: string, providerId: string) {
   return {
-    spEntityId: new URL(samlMetadataPath.replace('{providerId}', providerId), publicUrl).href,
+    spEntityId: new URL(SAML_METADATA_PATH.replace(':providerId', providerId), publicUrl).href,
     acsUrl: new URL(SAML_ACS_PATH.replace(':providerId', providerId), publicUrl).href,
   }
 }
@@ -35,20 +41,22 @@ export function samlRelayAttemptId(relayState: string) {
   if (samlId.safeParse(id).success) return id
 }
 
-export function samlStateCookie(publicUrl: string, kind: 'return' | 'result', id: string) {
+type StateKind = 'return' | 'result' | 'test'
+
+export function samlStateCookie(publicUrl: string, kind: StateKind, id: string) {
   const secure = new URL(publicUrl).protocol === 'https:'
   const name = `${secure ? '__Secure-' : ''}hourmere.saml_${kind}.${id}`
   const options = { httpOnly: true, secure, path: SAML_COMPLETE_PATH, sameSite: 'Strict' } as const
   return { name, options }
 }
 
-const stateAad = (kind: 'return' | 'result', id: string) => `hourmere-saml-${kind}-v1:${id}`
+const stateAad = (kind: StateKind, id: string) => `hourmere-saml-${kind}-v1:${id}`
 
-export function sealSamlState(key: Buffer, kind: 'return' | 'result', id: string, state: string) {
+export function sealSamlState(key: Buffer, kind: StateKind, id: string, state: string) {
   return encryptCredential(key, stateAad(kind, id), state).toString('base64url')
 }
 
-export function openSamlState(key: Buffer, kind: 'return' | 'result', id: string, state: string) {
+export function openSamlState(key: Buffer, kind: StateKind, id: string, state: string) {
   if (!/^[A-Za-z0-9_-]{1,3800}$/.test(state)) return undefined
   try {
     return decryptCredential(key, stateAad(kind, id), Buffer.from(state, 'base64url'))
