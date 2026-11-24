@@ -9,7 +9,12 @@ import { apiBodyLimit, routeBodyLimit } from './body-limit.ts'
 import { createRateLimiter, rateLimitKey } from './rate-limit.ts'
 import { requireSsoEnabled, type SsoCapabilities } from './sso.ts'
 import { openSsoProviderConfiguration, type SsoProviderRevision } from './sso-configuration.ts'
-import { bindingCookieName, browserBindingDigest, sha256 } from './sso-mailbox-proof.ts'
+import {
+  bindingCookieName,
+  browserBindingDigest,
+  MAILBOX_PROOF_CONFIRM_PATH,
+  sha256,
+} from './sso-mailbox-proof.ts'
 import {
   lockOidcProvider,
   lockOidcTestActor,
@@ -17,7 +22,17 @@ import {
   type OidcTestActor,
   oidcReturnDestination,
 } from './sso-oidc-attempt.ts'
-import { expiresDuringOidcWrite } from './sso-oidc-completion.ts'
+import {
+  completeOidcSignIn,
+  expiresDuringOidcWrite,
+  stageSsoMailboxCompletion,
+} from './sso-oidc-completion.ts'
+import {
+  completeOidcLink,
+  lockOidcLinkActor,
+  oidcLinkReturnPath,
+  stageSsoLinkResult,
+} from './sso-oidc-link.ts'
 import {
   findOidcLink,
   lockOidcSignInContext,
@@ -29,6 +44,7 @@ import {
 } from './sso-oidc-session.ts'
 import { writeSsoProviderTestReceipt } from './sso-oidc-test-receipts.ts'
 import { samlServiceProviderMetadata } from './sso-saml-configuration.ts'
+import { samlClockSkew } from './sso-saml-limits.ts'
 import {
   consumeSamlReplay,
   SamlTimingError,
@@ -46,6 +62,7 @@ import {
   samlCompleteOperation,
   samlCompleteTestOperation,
   samlId,
+  samlLinkOperation,
   samlProviderConfig,
   samlRelayAttemptId,
   samlServiceProviderUrls,
@@ -64,6 +81,7 @@ import {
 } from './sso-saml-verifier.ts'
 
 const persistentNameId = 'urn:oasis:names:tc:SAML:2.0:nameid-format:persistent'
+const emailAddress = z.email().max(320)
 const errorPath = '/sign-in?error=unable_to_create_session'
 const completionInvalid = { error: 'sso_saml_completion_invalid' } as const
 const completionLifetime = { seconds: 300 }
@@ -144,13 +162,21 @@ function correlatedSamlRequest(
   { organizationId, providerId, revision }: SsoProviderRevision,
   requestId: string,
   relayState: string,
-  test = false,
+  kind: 'test' | 'link' | 'sign_in',
 ) {
   return db
     .selectFrom('sso_attempts')
     .where('id', '=', requestId)
-    .where('kind', '=', test ? 'test' : 'sign_in')
-    .where('operation', '=', test ? samlTestOperation : samlStartOperation)
+    .where('kind', '=', kind)
+    .where(
+      'operation',
+      '=',
+      kind === 'test'
+        ? samlTestOperation
+        : kind === 'link'
+          ? samlLinkOperation
+          : samlStartOperation,
+    )
     .where('organization_id', '=', organizationId)
     .where('provider_id', '=', providerId)
     .where('provider_revision', '=', revision)
@@ -188,7 +214,7 @@ async function stageSamlTest(
       .forShare()
       .executeTakeFirst()
     if (!session) throw new OidcAttemptRefused()
-    const request = await correlatedSamlRequest(trx, provider, requestId, relayState, true)
+    const request = await correlatedSamlRequest(trx, provider, requestId, relayState, 'test')
       .where('user_id', '=', actor.userId)
       .where('session_id', '=', actor.id)
       .select([
@@ -328,22 +354,75 @@ async function completeSamlTest(
   })
 }
 
+function stableSamlIdentity(
+  { assertion: { nameId, attributes, issuer } }: VerifiedSamlResponse,
+  spEntityId: string,
+  subjectAttribute: string | undefined,
+) {
+  const [email, ...otherEmails] = Object.hasOwn(attributes, 'email') ? (attributes.email ?? []) : []
+  const mailbox = email && normalizeOidcMailbox(email)
+  if (!mailbox || otherEmails.length || !emailAddress.safeParse(mailbox).success) return
+  let subject: string | undefined
+  if (subjectAttribute !== undefined) {
+    const values = Object.hasOwn(attributes, subjectAttribute)
+      ? attributes[subjectAttribute]
+      : undefined
+    if (values?.length === 1) subject = values[0]
+  } else if (
+    nameId.format === persistentNameId &&
+    (nameId.nameQualifier === null || nameId.nameQualifier === issuer) &&
+    (nameId.spNameQualifier === null || nameId.spNameQualifier === spEntityId)
+  ) {
+    subject = nameId.value
+  }
+  if (
+    !subject?.trim() ||
+    Buffer.byteLength(subject) > 1024 ||
+    z.email().safeParse(subject.trim()).success
+  )
+    return
+  return { issuer, subject, mailbox }
+}
+
 /** Enforce SP initiation and commit the replay keys and pending result together. */
 async function stageSamlCompletion(
   db: Db,
   configurationKey: Buffer,
-  provider: SsoProviderRevision & { spEntityId: string },
+  provider: SsoProviderRevision & { spEntityId: string; subjectAttribute?: string | undefined },
   requestId: string,
   relayState: string,
   response: VerifiedSamlResponse,
+  scimResourcesEnabled: boolean,
+  actor?: OidcTestActor,
 ) {
   const { organizationId, providerId, revision } = provider
-  const { assertion } = response
-  const { nameId } = assertion
-  const sessionDeadline = samlSessionDeadline(assertion)
+  const identity = stableSamlIdentity(response, provider.spEntityId, provider.subjectAttribute)
+  const candidate = !actor && identity ? await findOidcLink(db, provider, identity) : undefined
+  const sessionDeadline = samlSessionDeadline(response.assertion)
   return db.transaction().execute(async (trx) => {
+    // Match sign-in and membership writes: a linked account lock precedes the team lock.
+    if (candidate && candidate.proven_email !== identity?.mailbox) {
+      await trx
+        .selectFrom('auth.user')
+        .select('id')
+        .where('id', '=', candidate.user_id)
+        .forShare()
+        .executeTakeFirst()
+    }
+    const local =
+      actor && (await lockOidcLinkActor(trx, organizationId, actor, scimResourcesEnabled))
     await lockOidcProvider(trx, provider, true, 'saml')
-    const request = await correlatedSamlRequest(trx, provider, requestId, relayState)
+    const correlated = correlatedSamlRequest(
+      trx,
+      provider,
+      requestId,
+      relayState,
+      actor ? 'link' : 'sign_in',
+    )
+    const request = await (actor
+      ? correlated.where('user_id', '=', actor.userId).where('session_id', '=', actor.id)
+      : correlated
+    )
       .select([
         'browser_binding_digest',
         'consumed_at',
@@ -368,25 +447,56 @@ async function stageSamlCompletion(
       .where('id', '=', requestId)
       .execute()
 
-    const [email, ...otherEmails] = assertion.attributes.email ?? []
-    // An explicit qualifier must name the IdP or SP whose scope the stored subject represents.
-    if (
-      nameId.format !== persistentNameId ||
-      (nameId.nameQualifier !== null && nameId.nameQualifier !== assertion.issuer) ||
-      (nameId.spNameQualifier !== null && nameId.spNameQualifier !== provider.spEntityId) ||
-      !email ||
-      otherEmails.length
-    )
-      return undefined
-    const link = await findOidcLink(trx, provider, {
-      issuer: assertion.issuer,
-      subject: nameId.value,
-    })
-    if (!link || link.retired_at || link.proven_email !== normalizeOidcMailbox(email))
-      return undefined
-
+    if (!identity) return undefined
     const deadline = now.add(completionLifetime)
     const pendingExpiry = Temporal.Instant.compare(deadline, expiresAt) < 0 ? deadline : expiresAt
+    const signInDeadline = [
+      pendingExpiry,
+      acceptanceDeadline.add({ seconds: samlClockSkew }),
+      sessionDeadline,
+    ].reduce<Temporal.Instant>(
+      (earliest, value) =>
+        value && Temporal.Instant.compare(value, earliest) < 0 ? value : earliest,
+      pendingExpiry,
+    )
+    if (actor) {
+      if (local?.mailbox !== identity.mailbox) return undefined
+      const { expiresAt } = await trx
+        .selectNoFrom(
+          samlDatabaseInstantText(sql`least(
+            ${signInDeadline.round({ smallestUnit: 'microsecond', roundingMode: 'floor' }).toString()}::timestamptz,
+            ${local.session.deadline}::timestamptz
+          )`).as('expiresAt'),
+        )
+        .executeTakeFirstOrThrow()
+      if (samlRequestExpired(Temporal.Instant.from(expiresAt), now)) return undefined
+      const pending = await stageSsoLinkResult(
+        trx,
+        configurationKey,
+        provider,
+        actor,
+        request.browser_binding_digest,
+        { requestId, subject: identity.subject, mailboxDigest: sha256(identity.mailbox) },
+        now.toString(),
+        expiresAt,
+      )
+      return { id: pending.id, result: pending.envelope, kind: 'link-result' as const }
+    }
+    const link = candidate
+    if (!link || link.retired_at) return undefined
+    if (link.proven_email !== identity.mailbox) {
+      const pending = await stageSsoMailboxCompletion(
+        { db: trx, configurationKey, scimResourcesEnabled },
+        provider,
+        link,
+        identity.mailbox,
+        sessionDeadline && new Date(sessionDeadline.epochMilliseconds),
+        { expiresAt: new Date(signInDeadline.epochMilliseconds), requestId },
+        request.browser_binding_digest,
+      )
+      if (pending.reason !== undefined) return undefined
+      return { id: pending.id, result: pending.envelope, kind: 'mailbox' as const }
+    }
     const { id } = await trx.selectNoFrom(sql<string>`uuidv7()`.as('id')).executeTakeFirstOrThrow()
     const result = sealSamlState(
       configurationKey,
@@ -423,7 +533,7 @@ async function stageSamlCompletion(
     if (samlRequestExpired(pendingExpiry, stagedAt)) throw new SamlTimingError('request_expired')
     if (samlAcceptanceExpired(acceptanceDeadline, stagedAt))
       throw new SamlTimingError('timing_invalid')
-    return { id, result }
+    return { id, result, kind: 'result' as const }
   })
 }
 
@@ -531,6 +641,7 @@ export function samlSignInRoutes({
   session,
   readSession,
 }: SamlSignInDeps): SamlSignInModule {
+  const scimResourcesEnabled = capabilities.scimResourcesEnabled === true
   const deliveries = createRateLimiter({ limit: 30, windowSeconds: 60 })
   const completions = createRateLimiter({ limit: 30, windowSeconds: 60 })
   const guard: MiddlewareHandler = async (c, next) => {
@@ -615,11 +726,11 @@ export function samlSignInRoutes({
             .executeTakeFirst()
           if (!request) return refuse()
           const test = request.kind === 'test' && request.operation === samlTestOperation
+          const link = request.kind === 'link' && request.operation === samlLinkOperation
+          const signIn = request.kind === 'sign_in' && request.operation === samlStartOperation
           if (
-            !test &&
-            (!provider.enabled ||
-              request.operation !== samlStartOperation ||
-              request.kind !== 'sign_in')
+            (!test && (!provider.enabled || (!link && !signIn))) ||
+            (link && (!request.user_id || !request.session_id))
           )
             return refuse()
           const fail = async (reason: SsoAuditReason | 'replay') => {
@@ -637,13 +748,20 @@ export function samlSignInRoutes({
             })
             return refuse()
           }
-          const finish = (pending: { id: string; result: string }) => {
-            const cookie = samlStateCookie(publicUrl, 'result', pending.id)
+          const finish = (pending: {
+            id: string
+            result: string
+            kind?: 'result' | 'link-result' | 'mailbox'
+          }) => {
+            const cookie = samlStateCookie(publicUrl, pending.kind ?? 'result', pending.id)
             setCookie(c, cookie.name, pending.result, {
               ...cookie.options,
               maxAge: completionLifetime.seconds,
             })
-            return c.redirect(`${SAML_COMPLETE_PATH}?attemptId=${pending.id}`, 303)
+            if (pending.kind === 'mailbox')
+              return c.redirect(`${MAILBOX_PROOF_CONFIRM_PATH}#attempt=${pending.id}&saml=1`, 303)
+            const intent = pending.kind === 'link-result' ? '&intent=link' : ''
+            return c.redirect(`${SAML_COMPLETE_PATH}?attemptId=${pending.id}${intent}`, 303)
           }
           const stageTest = (verdict: VerifiedSamlResponse | SamlTestFailure) => {
             if (!request.user_id || !request.session_id) throw new OidcAttemptRefused()
@@ -671,7 +789,7 @@ export function samlSignInRoutes({
             }
             if (!config.signingCertificates) return 'configuration_changed' as const
             try {
-              return verifySamlResponse(
+              const response = verifySamlResponse(
                 {
                   ...samlServiceProviderUrls(publicUrl, provider.providerId),
                   idpEntityId: provider.issuer,
@@ -680,6 +798,7 @@ export function samlSignInRoutes({
                 },
                 samlResponse,
               )
+              return { response, subjectAttribute: config.subjectAttribute }
             } catch (error) {
               if (error instanceof SamlVerificationError) return samlRefusalReason(error)
               throw error
@@ -688,7 +807,9 @@ export function samlSignInRoutes({
           try {
             const verified = verify()
             if (test) {
-              const pending = await stageTest(verified).catch((error: unknown) => {
+              const pending = await stageTest(
+                typeof verified === 'string' ? verified : verified.response,
+              ).catch((error: unknown) => {
                 if (error instanceof SamlTimingError && error.reason === 'timing_invalid')
                   return stageTest('timing_invalid')
                 throw error
@@ -702,10 +823,15 @@ export function samlSignInRoutes({
               {
                 ...provider,
                 spEntityId: samlServiceProviderUrls(publicUrl, provider.providerId).spEntityId,
+                subjectAttribute: verified.subjectAttribute,
               },
               requestId,
               relayState,
-              verified,
+              verified.response,
+              scimResourcesEnabled,
+              link && request.user_id && request.session_id
+                ? { userId: request.user_id, id: request.session_id }
+                : undefined,
             )
             if (!pending) return fail('mailbox_unproven')
             return finish(pending)
@@ -726,14 +852,22 @@ export function samlSignInRoutes({
         if (c.req.method === 'GET') {
           const query = new URL(c.req.url).searchParams
           const id = samlId.safeParse(query.get('attemptId'))
-          if (!id.success || query.size !== 1) return c.json(completionInvalid, 400)
+          const link = query.get('intent') === 'link'
+          if (!id.success || query.size !== (link ? 2 : 1)) return c.json(completionInvalid, 400)
           const chinese = /^(zh)(?:[-;,]|$)/i.test(c.req.header('accept-language') ?? '')
-          const label = chinese ? '继续' : 'Continue'
+          const label = link
+            ? chinese
+              ? '关联账号'
+              : 'Link account'
+            : chinese
+              ? '继续'
+              : 'Continue'
+          const consent = link ? '<input type="hidden" name="intent" value="link">' : ''
           // This origin-only policy lets a native form POST send Origin without the attempt URL.
           c.header('Referrer-Policy', 'strict-origin')
           c.header('Vary', 'Accept-Language')
           return c.html(
-            `<!doctype html><html lang="${chinese ? 'zh-CN' : 'en'}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${label}</title></head><body><main><form action="${SAML_COMPLETE_PATH}" method="post"><input type="hidden" name="attemptId" value="${id.data}"><button type="submit">${label}</button></form></main></body></html>`,
+            `<!doctype html><html lang="${chinese ? 'zh-CN' : 'en'}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${label}</title></head><body><main><form action="${SAML_COMPLETE_PATH}" method="post"><input type="hidden" name="attemptId" value="${id.data}">${consent}<button type="submit">${label}</button></form></main></body></html>`,
           )
         }
         if (c.req.method !== 'POST') return c.json({ error: 'method_not_allowed' }, 405)
@@ -742,16 +876,75 @@ export function samlSignInRoutes({
 
         const fields = await form(c)
         const id = samlId.safeParse(fields?.get('attemptId'))
-        if (!id.success || fields?.size !== 1) return c.json({ error: 'invalid_request' }, 400)
+        const linkIntent = fields?.get('intent') === 'link'
+        if (!id.success || fields?.size !== (linkIntent ? 2 : 1))
+          return c.json({ error: 'invalid_request' }, 400)
         const wait = completions.hit(rateLimitKey(c.var.clientIp))
         if (wait !== undefined) {
           c.header('Retry-After', String(wait))
           return c.json({ error: 'rate_limited' }, 429)
         }
-        const binding = browserBindingDigest(getCookie(c, bindingName))
+        const browserBinding = getCookie(c, bindingName)
+        const binding = browserBindingDigest(browserBinding)
+        if (!configurationKey || !binding) return c.json(completionInvalid, 400)
+        const sessionOptions = {
+          ...session,
+          scimResourcesEnabled,
+          publicUrl,
+          headers: c.req.raw.headers,
+          ip: c.var.clientIp,
+        }
+        const returnState = (requestId: string) => {
+          const name = samlStateCookie(publicUrl, 'return', requestId).name
+          const stored = getCookie(c, name)
+          if (stored) return openSamlState(configurationKey, 'return', requestId, stored)
+        }
+        const linkCookie = samlStateCookie(publicUrl, 'link-result', id.data)
+        const linkEnvelope = getCookie(c, linkCookie.name)
+        if (linkIntent) {
+          const completed = await completeOidcLink(
+            { db, configurationKey, scimResourcesEnabled },
+            { id: id.data, browserBinding, envelope: linkEnvelope },
+            async () => readSession?.(c.req.raw.headers),
+            (requestId) => {
+              const name = samlStateCookie(publicUrl, 'link', requestId).name
+              const state = getCookie(c, name)
+              const plaintext = state && openSamlState(configurationKey, 'link', requestId, state)
+              if (plaintext) return JSON.parse(plaintext)
+            },
+          )
+          if (completed?.status === 'domain_unverified')
+            return c.json({ error: 'sso_domain_unverified' }, 409)
+          if (completed?.status !== 'linked' || !completed.requestId)
+            return c.json(completionInvalid, 400)
+          const startCookie = samlStateCookie(publicUrl, 'link', completed.requestId)
+          deleteCookie(c, linkCookie.name, linkCookie.options)
+          deleteCookie(c, startCookie.name, startCookie.options)
+          return c.redirect(oidcLinkReturnPath, 303)
+        }
+        if (linkEnvelope !== undefined) return c.json(completionInvalid, 400)
+        const mailboxCookie = samlStateCookie(publicUrl, 'mailbox', id.data)
+        const mailboxEnvelope = getCookie(c, mailboxCookie.name)
+        if (mailboxEnvelope !== undefined) {
+          const completed = await completeOidcSignIn(
+            { db, configurationKey, scimResourcesEnabled },
+            { id: id.data, browserBinding, envelope: mailboxEnvelope },
+            sessionOptions,
+            returnState,
+          )
+          if (completed.status === 'invalid') return c.json(completionInvalid, 400)
+          deleteCookie(c, mailboxCookie.name, mailboxCookie.options)
+          if (completed.status === 'collision') return c.json({ error: 'sso_email_collision' }, 409)
+          if (completed.requestId) {
+            const returnCookie = samlStateCookie(publicUrl, 'return', completed.requestId)
+            deleteCookie(c, returnCookie.name, returnCookie.options)
+          }
+          c.header('Set-Cookie', completed.cookie, { append: true })
+          return c.redirect(completed.returnPath, 303)
+        }
         const cookie = samlStateCookie(publicUrl, 'result', id.data)
         const envelope = getCookie(c, cookie.name)
-        if (!configurationKey || !binding || !envelope) return c.json(completionInvalid, 400)
+        if (!envelope) return c.json(completionInvalid, 400)
 
         const plaintext = openSamlState(configurationKey, 'result', id.data, envelope)
         if (plaintext === undefined) return c.json(completionInvalid, 400)
@@ -773,7 +966,7 @@ export function samlSignInRoutes({
             test.data,
             actor,
             testBinding,
-            capabilities.scimResourcesEnabled === true,
+            scimResourcesEnabled,
           ).catch((error: unknown) => {
             if (
               error instanceof OidcAttemptRefused ||
@@ -797,12 +990,8 @@ export function samlSignInRoutes({
           binding,
           envelope,
           signIn.data,
-          (requestId) => {
-            const name = samlStateCookie(publicUrl, 'return', requestId).name
-            const stored = getCookie(c, name)
-            if (stored) return openSamlState(configurationKey, 'return', requestId, stored)
-          },
-          { ...session, publicUrl, headers: c.req.raw.headers, ip: c.var.clientIp },
+          returnState,
+          sessionOptions,
         )
         if (!completed) return c.json(completionInvalid, 400)
         const returnCookie = samlStateCookie(publicUrl, 'return', completed.requestId)

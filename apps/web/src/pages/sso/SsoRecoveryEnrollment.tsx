@@ -6,7 +6,12 @@ import type { MessageKey } from '../../i18n/translate.ts'
 import { useMe, useSession } from '../../session.tsx'
 import type { RecoveryNomination } from './recovery-nomination.ts'
 import { SsoFreshProof } from './SsoFreshProof.tsx'
-import { type SsoProofChallenge, SsoProofRequired, unwrapSsoWrite } from './setup.ts'
+import {
+  oidcStepUpProviders,
+  type SsoProofChallenge,
+  SsoProofRequired,
+  unwrapSsoWrite,
+} from './setup.ts'
 import './sso-setup.css'
 
 const unavailable = 'This recovery nomination is unavailable. Ask a team owner to send a new one.'
@@ -119,8 +124,7 @@ export function SsoRecoveryNomination({
   const [expiresAt, setExpiresAt] = useState<string | null>(null)
   const { busy, failure, pending, start, cancelProof } = useEnrollmentWrite(false)
   const headers = { 'X-Expected-Organization-Id': organization.id }
-  const stepUpProviders =
-    sso?.providers.filter(({ id }) => sso.links.some(({ providerId }) => providerId === id)) ?? []
+  const stepUpProviders = oidcStepUpProviders(sso)
   const formattedExpiry =
     expiresAt && Number.isFinite(Date.parse(expiresAt))
       ? new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(

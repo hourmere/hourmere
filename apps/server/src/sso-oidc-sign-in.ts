@@ -61,7 +61,12 @@ import { verifyOidcIdToken } from './sso-oidc-verifier.ts'
 import { authorizeSsoRead } from './sso-reads.ts'
 import { providerRecoveryAuthority, ssoWriteContextAccess } from './sso-recovery-use.ts'
 import { SamlStartRefused, startSamlSignIn } from './sso-saml-start.ts'
-import { samlStateCookie, type samlTestBinding, sealSamlState } from './sso-saml-state.ts'
+import {
+  samlLinkOperation,
+  samlStateCookie,
+  type samlTestBinding,
+  sealSamlState,
+} from './sso-saml-state.ts'
 import { EXPECTED_ORGANIZATION_HEADER } from './team-management.ts'
 
 export const OIDC_SIGN_IN_PATH = '/api/auth/sign-in/sso'
@@ -303,7 +308,7 @@ export async function testSsoProvider(
             { db, configurationKey, privateTargets: transport.privateTargets, publicUrl },
             provider,
             browserBinding,
-            { actor, enabled: provider.enabled, recoveryDeadline: recovery?.deadline },
+            { kind: 'test', actor, enabled: provider.enabled, deadline: recovery?.deadline },
           )
           const state: z.infer<typeof samlTestBinding> = {
             ...(recovery && {
@@ -376,7 +381,7 @@ export async function linkSsoAccount(
   providerId: string,
   input: z.infer<typeof LinkSsoAccountInput>,
 ) {
-  requireSsoEnabled(deps.capabilities, 'oidc')
+  requireSsoEnabled(deps.capabilities)
   const denied = () => new DomainError('forbidden', 'team_management_access_denied')
   const missing = () => new DomainError('not_found', 'sso_not_found')
   const changed = () => new DomainError('conflict', 'sso_configuration_changed')
@@ -393,6 +398,7 @@ export async function linkSsoAccount(
   const actor = { userId: principal.user.id, id: principal.sessionId }
   const { db, configurationKey, publicUrl } = deps
   const snapshot = await findProvider(db, providerId, organizationId)
+  const protocol = snapshot?.protocol === 'saml' ? 'saml' : 'oidc'
   let authorized:
     | {
         context: Awaited<ReturnType<typeof lockOidcLinkActor>>
@@ -408,7 +414,7 @@ export async function linkSsoAccount(
         userId: actor.userId,
         sessionId: actor.id,
         organizationId,
-        operation: LINK_SSO_ACCOUNT,
+        operation: protocol === 'saml' ? samlLinkOperation : LINK_SSO_ACCOUNT,
         proofMode: 'mailbox',
         input: { ...input, providerId, revision: snapshot?.revision ?? 1 },
         schema: linkInput,
@@ -426,28 +432,62 @@ export async function linkSsoAccount(
           })
           const current = await findProvider(trx, providerId, organizationId)
           if (!current || current.retiredAt) throw missing()
-          if (current.protocol !== 'oidc') throw new DomainError('not_found', 'sso_disabled')
+          requireSsoEnabled(deps.capabilities, current.protocol === 'saml' ? 'saml' : 'oidc')
           if (!current.enabled) throw missing()
           if (current.revision !== snapshot?.revision) throw changed()
           const claim = await lockOidcLinkDomain(trx, current, context.mailbox)
           authorized = { context, claim }
         },
-        prepare: async () => {
-          if (!snapshot || !configurationKey) throw missing()
-          try {
-            endpoints = await providerEndpoints(snapshot, configurationKey, {
-              privateTargets: deps.privateTargets ?? [],
-              send: deps.send ?? sendSsoRequest,
-            })
-          } catch {
-            throw missing()
-          }
-        },
+        ...(protocol === 'oidc' && {
+          prepare: async () => {
+            if (!snapshot || !configurationKey) throw missing()
+            try {
+              endpoints = await providerEndpoints(snapshot, configurationKey, {
+                privateTargets: deps.privateTargets ?? [],
+                send: deps.send ?? sendSsoRequest,
+              })
+            } catch {
+              throw missing()
+            }
+          },
+        }),
         mutate: async (trx, _input, browserBinding, mailboxProof) => {
-          if (!snapshot || !configurationKey || !endpoints || !authorized || !mailboxProof)
+          if (!snapshot || !configurationKey || !authorized || !mailboxProof)
             throw new OidcAttemptRefused()
           const { context, claim } = authorized
           if (context.mailbox !== mailboxProof.mailbox) throw new OidcAttemptRefused()
+          const binding = {
+            memberId: context.member.id,
+            domainId: claim.id,
+            domainGeneration: claim.generation,
+            mailboxDigest: sha256(mailboxProof.mailbox),
+            provenAt: mailboxProof.provenAt,
+            proofExpiresAt: mailboxProof.expiresAt,
+          }
+          const setCookie = authorizationBindingCookie(publicUrl, browserBinding)
+          if (protocol === 'saml') {
+            const { id, url } = await startSamlSignIn(
+              { db: trx, configurationKey, privateTargets: deps.privateTargets ?? [], publicUrl },
+              snapshot,
+              browserBinding,
+              { kind: 'link', actor, deadline: mailboxProof.expiresAt },
+            )
+            const cookie = samlStateCookie(publicUrl, 'link', id)
+            return {
+              url,
+              attemptId: id,
+              setCookie,
+              stateCookie: serialize(
+                cookie.name,
+                sealSamlState(configurationKey, 'link', id, JSON.stringify(binding)),
+                {
+                  ...cookie.options,
+                  expires: new Date(mailboxProof.expiresAt),
+                },
+              ),
+            }
+          }
+          if (!endpoints) throw new OidcAttemptRefused()
           const parameters = await startOidcAttempt(
             { db: trx, configurationKey },
             {
@@ -459,20 +499,13 @@ export async function linkSsoAccount(
             {
               kind: 'link',
               actor,
-              binding: {
-                memberId: context.member.id,
-                domainId: claim.id,
-                domainGeneration: claim.generation,
-                mailboxDigest: sha256(mailboxProof.mailbox),
-                provenAt: mailboxProof.provenAt,
-                proofExpiresAt: mailboxProof.expiresAt,
-              },
+              binding,
             },
           )
           return {
             url: authorizationUrl(publicUrl, snapshot.providerId, endpoints, parameters),
             attemptId: parameters.id,
-            setCookie: authorizationBindingCookie(publicUrl, browserBinding),
+            setCookie,
           }
         },
       },
@@ -481,6 +514,7 @@ export async function linkSsoAccount(
     if (error instanceof OidcLinkDomainUnverified)
       throw new DomainError('conflict', 'sso_domain_unverified')
     if (error instanceof HTTPException && error.status === 403) throw denied()
+    if (error instanceof SamlStartRefused) throw missing()
     if (error instanceof OidcAttemptRefused || expiresDuringOidcWrite(error)) throw changed()
     throw error
   }

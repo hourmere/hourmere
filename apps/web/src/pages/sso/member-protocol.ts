@@ -86,6 +86,16 @@ export function openMailboxProofChannel(attemptId: string): BroadcastChannel | n
   }
 }
 
+function completionRedirect(response: Response) {
+  if (!response.redirected) return null
+  void response.body?.cancel().catch(() => {})
+  const url = new URL(response.url)
+  const path = url.pathname + url.search + url.hash
+  return url.origin === window.location.origin && path === safeNextPath(path)
+    ? { kind: 'redirect' as const, path }
+    : null
+}
+
 export async function completeOidcAttempt(
   attemptId: string,
   signal: AbortSignal,
@@ -100,13 +110,22 @@ export async function completeOidcAttempt(
   })
   if (!response.ok) throw requestError(response.status, error, response.headers.get('Retry-After'))
   if (response.redirected) {
-    void response.body?.cancel().catch(() => {})
-    const url = new URL(response.url)
-    const path = url.pathname + url.search + url.hash
-    if (url.origin === window.location.origin && path === safeNextPath(path))
-      return { kind: 'redirect', path }
+    const result = completionRedirect(response)
+    if (result) return result
   } else if ((await response.json())?.status === 'link_required') {
     return { kind: 'link_required' }
   }
   throw new Error('Invalid SSO completion response')
+}
+
+export async function completeSamlMailboxAttempt(attemptId: string, signal: AbortSignal) {
+  const response = await fetch('/api/auth/sso/saml2/complete', {
+    method: 'POST',
+    body: new URLSearchParams({ attemptId }),
+    mode: 'same-origin',
+    signal,
+  })
+  if (!response.ok)
+    throw requestError(response.status, undefined, response.headers.get('Retry-After'))
+  return completionRedirect(response)
 }

@@ -22,6 +22,7 @@ import {
 } from './sso-oidc-completion.ts'
 import { normalizeOidcMailbox } from './sso-oidc-session.ts'
 import type { verifyOidcIdToken } from './sso-oidc-verifier.ts'
+import { samlCompleteLinkOperation } from './sso-saml-state.ts'
 
 export { LINK_SSO_ACCOUNT }
 export const OIDC_COMPLETE_LINK = 'oidcCompleteLink'
@@ -96,6 +97,14 @@ export async function lockOidcLinkDomain(trx: Db, provider: SsoProviderRevision,
 }
 
 const resultSchema = oidcLinkBinding.extend({ subject: z.string().min(1).max(255) })
+const samlResultSchema = z.strictObject({
+  requestId: z.uuidv7(),
+  subject: z
+    .string()
+    .min(1)
+    .refine((subject) => Buffer.byteLength(subject) <= 1024),
+  mailboxDigest: z.hex().length(64),
+})
 type LinkBinding = z.infer<typeof oidcLinkBinding>
 type LinkActor = {
   actor: OidcTestActor
@@ -107,11 +116,45 @@ interface LinkDeps {
   scimResourcesEnabled?: boolean | undefined
 }
 
+/** Both IdP callbacks stage consent without changing the user's link. */
+export async function stageSsoLinkResult(
+  trx: Db,
+  configurationKey: Buffer,
+  provider: SsoProviderRevision,
+  actor: OidcTestActor,
+  binding: string,
+  projection: z.infer<typeof resultSchema> | z.infer<typeof samlResultSchema>,
+  issuedAt: string,
+  expiresAt: Date | string,
+) {
+  const { id } = await trx.selectNoFrom(sql<string>`uuidv7()`.as('id')).executeTakeFirstOrThrow()
+  const envelope = sealOidcCompletion(configurationKey, provider, id, binding, projection)
+  await trx
+    .insertInto('sso_attempts')
+    .values({
+      id,
+      kind: 'link',
+      organization_id: provider.organizationId,
+      provider_id: provider.providerId,
+      provider_revision: provider.revision,
+      user_id: actor.userId,
+      session_id: actor.id,
+      browser_binding_digest: binding,
+      operation: 'requestId' in projection ? samlCompleteLinkOperation : OIDC_COMPLETE_LINK,
+      input_digest: sha256(envelope),
+      created_at: issuedAt,
+      expires_at: expiresAt,
+    })
+    .execute()
+  return { id, envelope, expiresAt }
+}
+
 async function lockLinkContext(
   trx: Db,
   provider: SsoProviderRevision,
   { actor, binding }: LinkActor,
-  scimResourcesEnabled = false,
+  scimResourcesEnabled: boolean,
+  protocol: 'oidc' | 'saml' = 'oidc',
   lockTeamForClaim = false,
 ) {
   const context = await lockOidcLinkActor(
@@ -121,7 +164,7 @@ async function lockLinkContext(
     scimResourcesEnabled,
     lockTeamForClaim,
   )
-  const { issuer } = await lockOidcProvider(trx, provider)
+  const { issuer } = await lockOidcProvider(trx, provider, true, protocol)
   if (context.member.id !== binding.memberId || sha256(context.mailbox) !== binding.mailboxDigest)
     throw new OidcAttemptRefused()
   const claim = await lockOidcLinkDomain(trx, provider, context.mailbox)
@@ -148,9 +191,8 @@ export async function stageOidcLink(
     throw new OidcAttemptRefused()
   return db.transaction().execute(async (trx) => {
     const context = await lockLinkContext(trx, provider, link, scimResourcesEnabled === true)
-    const { id, issuedAt, deadline } = await trx
+    const { issuedAt, deadline } = await trx
       .selectNoFrom([
-        sql<string>`uuidv7()`.as('id'),
         sql<string>`clock_timestamp()::text`.as('issuedAt'),
         sql<Date>`least(
           ${expiresAt}::timestamptz,
@@ -162,28 +204,19 @@ export async function stageOidcLink(
       ])
       .executeTakeFirstOrThrow()
     if (deadline <= new Date(issuedAt)) throw new OidcAttemptRefused()
-    const envelope = sealOidcCompletion(configurationKey, provider, id, binding, {
-      ...link.binding,
-      subject: identity.subject,
-    })
-    await trx
-      .insertInto('sso_attempts')
-      .values({
-        id,
-        kind: 'link',
-        organization_id: provider.organizationId,
-        provider_id: provider.providerId,
-        provider_revision: provider.revision,
-        user_id: link.actor.userId,
-        session_id: link.actor.id,
-        browser_binding_digest: binding,
-        operation: OIDC_COMPLETE_LINK,
-        input_digest: sha256(envelope),
-        created_at: issuedAt,
-        expires_at: deadline,
-      })
-      .execute()
-    return { id, envelope, expiresAt: deadline }
+    return {
+      ...(await stageSsoLinkResult(
+        trx,
+        configurationKey,
+        provider,
+        link.actor,
+        binding,
+        { ...link.binding, subject: identity.subject },
+        issuedAt,
+        deadline,
+      )),
+      expiresAt: deadline,
+    }
   })
 }
 
@@ -206,7 +239,10 @@ export async function completeOidcLink(
     envelope: string | undefined
   },
   readActor: () => Promise<OidcTestActor | null | undefined>,
+  readSamlBinding?: (requestId: string) => unknown,
 ) {
+  const protocol = readSamlBinding ? 'saml' : 'oidc'
+  const completesScimClaim = protocol === 'oidc' && scimClaims?.link !== undefined
   const binding = browserBindingDigest(browserBinding)
   if (!binding || !isOidcCompletionEnvelope(envelope)) return invalid
   const digest = sha256(envelope)
@@ -215,7 +251,7 @@ export async function completeOidcLink(
       .selectFrom('sso_attempts')
       .where('id', '=', id)
       .where('kind', '=', 'link')
-      .where('operation', '=', OIDC_COMPLETE_LINK)
+      .where('operation', '=', readSamlBinding ? samlCompleteLinkOperation : OIDC_COMPLETE_LINK)
       .where('browser_binding_digest', '=', binding)
       .where('input_digest', '=', digest)
       .where('consumed_at', 'is', null)
@@ -233,15 +269,21 @@ export async function completeOidcLink(
     revision: pending.provider_revision,
   }
   let projection: z.infer<typeof resultSchema>
+  let requestId: string | undefined
   try {
-    projection = resultSchema.parse(
-      openOidcCompletion(configurationKey, provider, id, binding, envelope),
-    )
+    const result = openOidcCompletion(configurationKey, provider, id, binding, envelope)
+    if (readSamlBinding) {
+      const saml = samlResultSchema.parse(result)
+      requestId = saml.requestId
+      const initial = oidcLinkBinding.parse(readSamlBinding(requestId))
+      if (initial.mailboxDigest !== saml.mailboxDigest) return invalid
+      projection = { ...initial, subject: saml.subject }
+    } else projection = resultSchema.parse(result)
   } catch {
     return invalid
   }
   const details = {
-    method: 'oidc',
+    method: protocol,
     providerId: provider.providerId,
     revision: provider.revision,
     correlationId: id,
@@ -253,10 +295,11 @@ export async function completeOidcLink(
         provider,
         { actor, binding: projection },
         scimResourcesEnabled === true,
-        scimClaims?.link !== undefined,
+        protocol,
+        completesScimClaim,
       )
       const attempt = await attempts(trx)
-        .select('expires_at')
+        .select(sql<string>`expires_at::text`.as('expires_at'))
         .where('user_id', '=', actor.userId)
         .where('session_id', '=', actor.id)
         .forUpdate()
@@ -278,7 +321,7 @@ export async function completeOidcLink(
 
       const audit = auditActor({ kind: 'session', sessionId: actor.id, user: context.user })
       const claim =
-        context.member.role === 'member'
+        completesScimClaim && context.member.role === 'member'
           ? await scimClaims?.link?.(trx, {
               organizationId: provider.organizationId,
               userId: actor.userId,
@@ -319,7 +362,18 @@ export async function completeOidcLink(
         organizationId: provider.organizationId,
         userId: actor.userId,
       })
-      return { status: 'linked' } as const
+      if (readSamlBinding) {
+        const { live } = await trx
+          .selectNoFrom(
+            sql<boolean>`least(
+            ${attempt.expires_at}::timestamptz, ${context.claim.deadline}::timestamptz,
+            ${context.session.deadline}::timestamptz
+          ) > clock_timestamp()`.as('live'),
+          )
+          .executeTakeFirstOrThrow()
+        if (!live) throw new OidcAttemptRefused()
+      }
+      return { status: 'linked', requestId } as const
     })
     if (result.status !== 'conflict') return result
     await writeSsoSecurityFailure(db, {

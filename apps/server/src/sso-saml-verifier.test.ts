@@ -477,12 +477,20 @@ describe('SAML negative corpus: signature wrapping', () => {
     expect(rejection(document)).toBe(reason)
   })
 
-  it('refuses a comment that would truncate the signed NameID for a careless reader', () => {
-    const assertion = sign(
-      assertionXml({ nameId: 'ada@acme.example<!---->.evil.example' }),
-      'Assertion',
+  it('reads the complete signed NameID when exclusive canonicalization omits a comment', () => {
+    const nameId = 'person.stable-subject'
+    const signed = sign(valid({ nameId }), 'Response')
+    const withComment = signed.replace(
+      `${nameId}</saml:NameID>`,
+      'person<!--<saml:NameID>ignored</saml:NameID>-->.stable-subject</saml:NameID>',
     )
-    expect(rejection(responseXml({ assertion }))).toBe('forbidden_markup')
+    expect(withComment).not.toBe(signed)
+    const result = verifySamlResponse(config, encode(withComment))
+    expect(result).toEqual(verifySamlResponse(config, encode(signed)))
+    expect(result.assertion.nameId.value).toBe(nameId)
+    expect(rejection(withComment.replace('.stable-subject', '.different-subject'))).toBe(
+      'signature_invalid',
+    )
   })
 })
 
@@ -521,7 +529,8 @@ describe('SAML negative corpus: DTD, entities and other active markup', () => {
       `<?xml version="1.0"?><?xml-stylesheet href="http://127.0.0.1:9/x.xsl" type="text/xsl"?>${valid()}`,
     ],
     ['CDATA section', valid().replace('<samlp:Status>', '<samlp:Status><![CDATA[x]]>')],
-    ['comment', valid().replace('<samlp:Status>', '<!-- note --><samlp:Status>')],
+    ['comment in an attribute', valid().replace('Version="2.0"', 'Version="2.0<!-- note -->"')],
+    ['active markup after a comment', withEntity('<!-- note --><!DOCTYPE r>')],
   ]
 
   it.each(cases)('refuses a document with: %s', (_name, document) => {
@@ -532,6 +541,15 @@ describe('SAML negative corpus: DTD, entities and other active markup', () => {
     expect(parse).not.toHaveBeenCalled()
     expect(check).not.toHaveBeenCalled()
   })
+
+  it.each(['<!-- unclosed', '<!-- double -- hyphen -->'])(
+    'refuses an invalid XML comment: %s',
+    (comment) => {
+      const parse = vi.spyOn(DOMParser.prototype, 'parseFromString')
+      expect(rejection(`${comment}${valid()}`)).toBe('malformed_xml')
+      expect(parse).not.toHaveBeenCalled()
+    },
+  )
 
   it('refuses a DOCTYPE hidden in a UTF-16 document and characters XML forbids', () => {
     const utf16 = Buffer.from(`﻿<!DOCTYPE r [<!ENTITY xxe "x">]>${valid()}`, 'utf16le')

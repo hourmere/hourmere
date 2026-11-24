@@ -31,6 +31,7 @@ import {
 } from './sso/recovery-nomination.ts'
 import { SsoMemberSettings } from './sso/SsoMemberSettings.tsx'
 import { SsoRecoveryAcceptance } from './sso/SsoRecoveryEnrollment.tsx'
+import { oidcStepUpProviders } from './sso/setup.ts'
 import { TeamMembers } from './TeamMembers.tsx'
 
 export function SettingsPage() {
@@ -232,16 +233,13 @@ export function SettingsPage() {
           key={`${organizationId}:${location.key}`}
           organizationId={organizationId}
           role={role.status === 'ready' ? role.data : null}
-          stepUpProviders={
-            me.sso?.providers.filter(({ id }) =>
-              me.sso?.links.some(({ providerId }) => providerId === id),
-            ) ?? []
-          }
+          stepUpProviders={oidcStepUpProviders(me.sso)}
         />
       )}
       {!personal &&
         me.principal.kind === 'session' &&
         (shell?.ssoOidcEnabled === true ||
+          shell?.ssoSamlEnabled === true ||
           (shell?.ssoStored === true && Boolean(me.sso?.links.length))) && (
           <SsoMemberSettings
             callbackAttemptId={isLinkCallback ? undefined : linkCallback}
