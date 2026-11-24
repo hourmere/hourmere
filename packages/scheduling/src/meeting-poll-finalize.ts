@@ -3,11 +3,11 @@ import { auditActor } from '@hourmere/db/audit'
 import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { sql } from 'kysely'
 import { findOneTimeEventType, selectDurationMinutes } from './availability.ts'
+import { latestBookingId } from './booking-chain.ts'
 import {
   type Booking,
   type CreateBookingInput,
   createBookingInTransaction,
-  latestBookingId,
   prepareBookingAttendees,
 } from './bookings.ts'
 import { DomainError } from './errors.ts'

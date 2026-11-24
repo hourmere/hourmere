@@ -512,18 +512,36 @@ describe.skipIf(!databaseUrl)(
       }
     })
 
-    it('creates Microsoft copies for the series and preserves their mappings after cancellation', async () => {
+    it('deletes Microsoft copies only for cancelled series occurrences', async () => {
       const fixture = await seriesFixture('microsoft')
-      const created = new Set<string>()
-      microsoft.controls.eventHook = (_url, init) => {
-        if (init.method !== 'POST') return Response.json({ value: [] })
-        const { transactionId } = JSON.parse(String(init.body)) as { transactionId: string }
-        const id = `outlook-${transactionId}`
-        created.add(id)
-        return Response.json(
-          { id, transactionId, type: 'singleInstance', isCancelled: false },
-          { status: 201 },
-        )
+      const etag = 'W/"DwAAABYAAAC3I5RWx7luSYmfvk6V4H3sAADTeGJB"'
+      const created = new Map<string, Record<string, unknown>>()
+      microsoft.controls.eventHook = (url, init) => {
+        if (init.method === 'POST') {
+          const { transactionId, start, end } = JSON.parse(String(init.body))
+          const id = `outlook-${transactionId}`
+          const event = {
+            id,
+            transactionId,
+            start,
+            end,
+            type: 'singleInstance',
+            isCancelled: false,
+            attendees: [],
+            '@odata.etag': etag,
+          }
+          created.set(id, event)
+          return Response.json(event, { status: 201 })
+        }
+        const id = decodeURIComponent(url.pathname.split('/').at(-1) ?? '')
+        const event = created.get(id)
+        if (init.method === 'DELETE') {
+          expect(event).toBeDefined()
+          expect(new Headers(init.headers).get('If-Match')).toBe(etag)
+          created.delete(id)
+          return new Response(null, { status: 204 })
+        }
+        return Response.json(event ?? { value: [] })
       }
       const series = await fixture.create()
       const bookingIds = ids(series.occurrences).toSorted()
@@ -531,24 +549,34 @@ describe.skipIf(!databaseUrl)(
       const originalMappings = await mappings(fixture.calendarId)
       expect(originalMappings.map(({ booking_id }) => booking_id)).toEqual(bookingIds)
       expect(new Set(originalMappings.map(({ external_event_id }) => external_event_id))).toEqual(
-        created,
+        new Set(created.keys()),
       )
       expect(created.size).toBe(bookingIds.length)
+      const affectedIds = new Set(ids(series.occurrences.slice(1)))
       await cancelManagedBookingSeries(context(), required(series.manageToken), {
-        scope: 'all',
+        scope: 'following',
+        fromOrdinal: 2,
         expectedRevision: '1',
         idempotencyKey: randomUUID(),
       })
       await expectJobs(
         bookingIds,
-        bookingIds.flatMap((id) => [completed(id), completed(id)]),
+        bookingIds.flatMap((id) =>
+          affectedIds.has(id) ? [completed(id), completed(id)] : [completed(id)],
+        ),
       )
       expect(await targets(fixture.calendarId)).toEqual(
         bookingIds.map((root_booking_id) => ({ root_booking_id })),
       )
-      expect(await mappings(fixture.calendarId)).toEqual(originalMappings)
+      const retained = originalMappings.filter(({ booking_id }) => !affectedIds.has(booking_id))
+      expect(await mappings(fixture.calendarId)).toEqual(retained)
+      expect([...created.keys()]).toEqual(
+        retained.map(({ external_event_id }) => external_event_id),
+      )
       expect(google.calls).toHaveLength(0)
-      expect(microsoft.calls).toHaveLength(2 * bookingIds.length)
+      expect(microsoft.calls.filter(({ init }) => init.method === 'DELETE')).toHaveLength(
+        affectedIds.size,
+      )
     })
 
     it('keeps ordinary booking calendar payloads, singleton keys and retry policy', async () => {
