@@ -527,7 +527,7 @@ export function bookingRoutes({
   rateLimits = {},
   hostRateLimits = {},
 }: BookingRoutesDeps): RouteModule {
-  const publicContext: PublicContext = {
+  const publicDeps: PublicContext = {
     db,
     now,
     notify,
@@ -557,7 +557,10 @@ export function bookingRoutes({
   const hostManageLimit = hostLimit(hostRateLimits.manage ?? PUBLIC_RATE_LIMITS.manage)
   const hostSlotsLimit = hostLimit(hostRateLimits.slots ?? PUBLIC_RATE_LIMITS.slots)
 
-  return ({ app, caller }) => {
+  return ({ app, caller, scimResourcesEnabled }) => {
+    const publicContext: PublicContext = scimResourcesEnabled
+      ? { ...publicDeps, scimResourcesEnabled: true }
+      : publicDeps
     // Tuples preserve caller's principal type through createRoute's middleware inference.
     const hostManage: [typeof caller, MiddlewareHandler<CallerEnv>] = [caller, hostManageLimit]
     const hostSlots: [typeof caller, MiddlewareHandler<CallerEnv>] = [caller, hostSlotsLimit]
@@ -576,6 +579,7 @@ export function bookingRoutes({
       bookingExportMaxConcurrent,
       routingFormsEnabled,
       authorizeOrganizationWrite: bookingWriteAccess(principal, expectedOrganizationId),
+      ...(scimResourcesEnabled && { scimResourcesEnabled }),
     })
 
     app.openapi(

@@ -168,11 +168,13 @@ export async function resolveWaitlistEvent(
   db: Db,
   ref: WaitlistEventReference,
   lock = false,
+  scimResourcesEnabled = false,
 ): Promise<PublicEventTypeRecord> {
   let et = await (ref.team ? findPublicTeamEventType : findPublicEventType)(
     db,
     ref.handle,
     ref.slug,
+    { scimResourcesEnabled },
   )
   if (!et) throw new DomainError('not_found', 'event_type_not_found')
   if (
@@ -194,7 +196,7 @@ export async function resolveWaitlistEvent(
       db,
       ref.handle,
       ref.slug,
-      { lock: true },
+      { lock: true, scimResourcesEnabled },
     )
     if (!et) throw new DomainError('not_found', 'event_type_not_found')
     if (
@@ -210,6 +212,7 @@ export async function resolveWaitlistEvent(
 export async function resolveWaitlistEventById(
   db: Db,
   eventTypeId: string,
+  scimResourcesEnabled = false,
 ): Promise<PublicEventTypeRecord | undefined> {
   const row = await db
     .selectFrom('event_types as et')
@@ -220,11 +223,16 @@ export async function resolveWaitlistEventById(
     .executeTakeFirst()
   if (!row) return undefined
   try {
-    return await resolveWaitlistEvent(db, {
-      handle: row.owner_user_id ? (row.handle ?? '') : row.team_slug,
-      slug: row.slug,
-      team: !row.owner_user_id,
-    })
+    return await resolveWaitlistEvent(
+      db,
+      {
+        handle: row.owner_user_id ? (row.handle ?? '') : row.team_slug,
+        slug: row.slug,
+        team: !row.owner_user_id,
+      },
+      false,
+      scimResourcesEnabled,
+    )
   } catch (error) {
     if (error instanceof DomainError) return undefined
     throw error
@@ -476,7 +484,7 @@ export async function joinWaitlist(
       ctx.secret,
       ctx.now ? new Date(ctx.now().epochMilliseconds) : undefined,
     )
-    const et = await resolveWaitlistEvent(db, input, true)
+    const et = await resolveWaitlistEvent(db, input, true, ctx.scimResourcesEnabled === true)
     const checkedAt = await waitlistNow(
       db,
       ctx.now ? new Date(ctx.now().epochMilliseconds) : undefined,
@@ -553,7 +561,7 @@ export async function resendWaitlistVerification(
       ctx.secret,
       ctx.now ? new Date(ctx.now().epochMilliseconds) : undefined,
     )
-    const et = await resolveWaitlistEvent(db, input, true)
+    const et = await resolveWaitlistEvent(db, input, true, ctx.scimResourcesEnabled === true)
     await sql`SELECT pg_advisory_xact_lock(1752658796, 1633969261)`.execute(db)
     const now = await waitlistNow(db, ctx.now ? new Date(ctx.now().epochMilliseconds) : undefined)
     await expireEventEntries(db, et.id, now)
@@ -654,7 +662,7 @@ export async function verifyWaitlist(
       entry.expires_at <= now ||
       entry.verification_generation !== current.generation ||
       !LIVE.includes(entry.status) ||
-      !(await resolveWaitlistEventById(db, entry.event_type_id))
+      !(await resolveWaitlistEventById(db, entry.event_type_id, ctx.scimResourcesEnabled === true))
     )
       throw invalidToken()
     if (current.consumed_at) {
@@ -742,7 +750,7 @@ export async function prepareWaitlistVerification(db: Db, ctx: WaitlistContext, 
     entry.verification_generation !== row.generation ||
     entry.pending_expires_at <= now ||
     entry.expires_at <= now ||
-    !(await resolveWaitlistEventById(db, entry.event_type_id))
+    !(await resolveWaitlistEventById(db, entry.event_type_id, ctx.scimResourcesEnabled === true))
   )
     return undefined
   const payload = openWaitlistVerificationOutbox(ctx, row)
@@ -790,7 +798,7 @@ export async function getWaitlistEntry(ctx: WaitlistContext, input: { token: str
       !LIVE.includes(entry.status) ||
       entry.expires_at <= now ||
       (entry.status === 'pending_verification' && entry.pending_expires_at <= now) ||
-      !(await resolveWaitlistEventById(db, entry.event_type_id))
+      !(await resolveWaitlistEventById(db, entry.event_type_id, ctx.scimResourcesEnabled === true))
     )
       throw invalidToken()
     return {

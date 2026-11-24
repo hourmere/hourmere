@@ -719,13 +719,27 @@ child credentials. The suspension is stored on the membership's provenance row
 (`scim_team_managed_memberships.suspended_at`). The shared suspension check reads it only
 when its caller passes the resource test flag; without the flag the authorization
 statements are the same as before and read no Group storage. In the resource test
-harness the flag reaches REST and MCP caller resolution, API-key writes, admin role
-changes and readiness. The remaining callers of the check (native team selection and
-membership checks, SSO proofs and delegations, MCP OAuth grants, host eligibility and
-booking routing) still need it before release. Reactivation lifts the suspension. A
+harness every caller of the check passes the flag: REST and MCP caller resolution,
+API-key writes, admin role changes and readiness, native team selection and membership
+checks, team management and booking-write checks, SSO proofs, delegations, sign-in,
+account linking and recovery, MCP OAuth grants, host eligibility, recurring
+availability and booking routing. The caller resolver marks the principals it resolves,
+and the protocol capabilities, service contexts and public booking contexts carry the
+flag to the checks behind them. A test fails when a call of the shared check omits the
+decision. Three places stay on the default until they are hardened: background jobs
+(invitation delivery, workflow email, waitlist notification), public booking contexts
+built by MCP tools, and the locked host rechecks of meeting-poll creation and of
+waitlist settings saved with an event type, whose unlocked reads already refuse.
+Reactivation lifts the suspension. A
 parent team's own blocker affects only the parent: when it refuses the reactivation
 with 403 `mutability`, the child memberships are resumed anyway, the directory entry
-stays inactive and nothing else in the request is applied. A later `active:false`
+stays inactive and nothing else in the request is applied. This is the one refusal
+that commits a change, and it is deliberate. RFC 7644 section 3.5.2 requires a failed
+PATCH to leave the resource as it was, which holds: the User is returned unchanged by
+a later read. The resumed child access is state of another team that the User only
+sources, so the refusal records it as `scim_user.child_access_resumed` in the parent
+journal, in the same transaction. A repeated refused reactivation has nothing left to
+resume and records nothing. A later `active:false`
 suspends them again. `DELETE /Users/{id}` removes those child memberships through the
 same departure checks as a Group removal, and advances `meta.lastModified` of every
 Group whose roster listed the User. A User write that would suspend or remove a current owner or admin of a child
@@ -740,6 +754,35 @@ preconditions. A name or roster change records `scim_group.updated` in the paren
 same transaction. The event identifies the token and Group ID and omits request attributes.
 A no-op preserves `meta.lastModified` and adds no audit event.
 
+In the resource test harness, `DELETE /Groups/{id}` retires the Group. Under the same
+locks as the other Group writes (both teams in ascending ID order, then the token, then
+the mapping and its Group), it removes every child membership the mapping sourced through
+the departure checks above, retires the mapping and with it the hierarchy link, and
+returns 204 with an empty body. A current owner or admin of the child on the roster
+returns 403 `mutability`, and a member who still hosts event types or has unfinished
+bookings returns 409; either refusal changes nothing. A removed member's sessions, API
+keys and MCP grants for the child are revoked. The child team, its other members and
+blockers, its current name, and its bookings and audit history are kept, and the name
+returns to manual control. The parent journal records `scim_group.deleted` and
+`scim_mapping.unlinked` with the token actor. The child journal records
+`scim_mapping.unlinked` with the `system` actor and no token ID. The owners of both
+teams are sent the unlink notice. All of it commits together or not at all. Afterwards
+every operation on that Group ID, a repeated DELETE included, returns the same 404 as an
+unknown ID, and the ID is never assigned again. A live Group returns 412 for an
+unsupported write precondition before any other check. A Group outside the token's
+connection, or one whose directory authority an operator stopped, returns 404. The
+retired reservation takes no part in `externalId` uniqueness: once both owners approve
+a new mapping, the same `externalId` can be activated again and gets a new Group ID
+with an empty roster. Without that approval a POST still returns 409 `uniqueness`.
+
+资源测试环境中的 `DELETE /Groups/{id}` 停用该群组：在与其他群组写入相同的锁顺序下，移除该映射带来的全部子团队成员资格，
+停用映射并解除层级关联，成功返回 204 且无响应体。名单中有子团队当前的所有者或管理员时返回 403 `mutability`，
+仍主持活动类型或有未完成预约的成员返回 409，任一拒绝都不产生任何变化。被移除成员在子团队的会话、API 密钥和 MCP 授权同时撤销。
+子团队本身、其余成员与拦截记录、当前名称、预约和审计历史全部保留，名称恢复为手动管理。
+父团队审计日志记录 `scim_group.deleted` 和 `scim_mapping.unlinked`（令牌为操作者），子团队只记录 `scim_mapping.unlinked`（系统操作者，不含令牌 ID），
+并向两个团队的所有者发送解除关联通知，以上全部在同一事务提交。此后对该群组 ID 的任何操作（包括再次 DELETE）都返回 404，该 ID 不会再被分配。
+已停用的预留不再参与 `externalId` 唯一性判断：双方所有者重新批准映射后，可用相同的 `externalId` 再次创建群组，并获得新的群组 ID。
+
 资源测试环境中的 `PUT /Groups/{id}` 完整替换非成员字段，必须提供 `displayName`。
 `PATCH /Groups/{id}` 按顺序应用名称和成员操作，全部成功后才提交。省略或原样传回 `externalId`
 会保留映射中区分大小写的原值，修改或移除该字段会返回 400 `mutability`。PUT 和 PATCH 与 POST 使用相同的名称规则。
@@ -751,7 +794,8 @@ PATCH 可用 `add`、`replace` 和 `remove` 更改映射成员：`remove` 可带
 新成员必须是同一连接中已关联且启用的用户，否则返回 400 `invalidValue`。子团队当前的所有者或管理员不能被移除，
 返回 403 `mutability`。仍主持活动类型或有未完成预约的成员返回 409，需由子团队管理员先行交接。
 来源用户停用时，其受管子团队成员资格保留并暂停，重新启用后恢复，删除来源用户会移除这些成员资格并更新相关群组的 `meta.lastModified`。
-父团队自身的拦截只影响父团队：重新启用因此被拒绝（403 `mutability`）时，子团队成员资格仍会恢复。
+父团队自身的拦截只影响父团队：重新启用因此被拒绝（403 `mutability`）时，子团队成员资格仍会恢复，用户资源本身保持不变，
+这次恢复会以 `scim_user.child_access_resumed` 记入父团队审计日志。
 成功返回 200 及按请求投影的群组，不支持的写入前置条件返回 412。名称变更与父团队审计事件
 `scim_group.updated` 在同一事务提交（成员变更同样记录），事件仅记录令牌和群组 ID 等审计元数据。
 原样重试保留 `meta.lastModified`，也不增加审计事件。

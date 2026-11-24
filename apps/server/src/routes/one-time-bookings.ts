@@ -52,7 +52,7 @@ export function oneTimeBookingRoutes({
   successRedirectPolicy,
   rateLimits = {},
 }: PublicRoutesDeps): RouteModule {
-  const ctx: PublicContext = {
+  const publicDeps: PublicContext = {
     db,
     now,
     notify,
@@ -63,7 +63,10 @@ export function oneTimeBookingRoutes({
   }
   const limit = (group: 'page' | 'slots' | 'book') =>
     rateLimit(createRateLimiter(rateLimits[group] ?? PUBLIC_RATE_LIMITS[group]))
-  return ({ app }) => {
+  return ({ app, ...shared }) => {
+    const ctx: PublicContext = shared.scimResourcesEnabled
+      ? { ...publicDeps, scimResourcesEnabled: true }
+      : publicDeps
     app.openapi(
       createRoute({
         method: 'get',

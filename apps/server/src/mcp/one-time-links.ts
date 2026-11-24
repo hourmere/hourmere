@@ -31,6 +31,7 @@ export function oneTimeLinkTools({
   const context = (principal: McpCaller): ServiceContext => ({
     db,
     principal,
+    ...(principal.scimResourcesEnabled && { scimResourcesEnabled: true }),
     now: () => Temporal.Now.instant(),
   })
   const eventTypeId = z.uuid().openapi({ description: 'The event type id from list_event_types' })

@@ -145,7 +145,10 @@ export function createPublicBookingSeries(
   options: CreateBookingSeriesOptions,
 ): Promise<CreateBookingSeriesResult> {
   return createBookingSeries(ctx, input, options, (db, lock) =>
-    findPublicEventType(db, input.handle, input.slug, lock),
+    findPublicEventType(db, input.handle, input.slug, {
+      ...lock,
+      scimResourcesEnabled: ctx.scimResourcesEnabled,
+    }),
   )
 }
 
@@ -155,7 +158,10 @@ export function createPublicTeamBookingSeries(
   options: CreateBookingSeriesOptions,
 ): Promise<CreateBookingSeriesResult> {
   return createBookingSeries(ctx, input, options, (db, lock) =>
-    findPublicTeamEventType(db, input.handle, input.slug, lock),
+    findPublicTeamEventType(db, input.handle, input.slug, {
+      ...lock,
+      scimResourcesEnabled: ctx.scimResourcesEnabled,
+    }),
   )
 }
 
@@ -194,7 +200,15 @@ async function createBookingSeries(
     const retryAfter = await admissionRetryAfter(ctx.db, event, actorDigest)
     if (retryAfter !== undefined) throw new BookingSeriesRateLimitError(retryAfter)
     const initial = await resolveBatch(ctx.db, event, input, request, ctx.now())
-    if (!(await checkRecurringAvailability(ctx.db, initial.availability)).canBook)
+    if (
+      !(
+        await checkRecurringAvailability(
+          ctx.db,
+          initial.availability,
+          ctx.scimResourcesEnabled === true,
+        )
+      ).canBook
+    )
       throw seriesUnavailable()
 
     return await ctx.db.transaction().execute(async (trx) => {
@@ -225,7 +239,11 @@ async function createBookingSeries(
       for (const hostUserId of current.eligibleHostUserIds)
         await expirePaymentHolds({ db: trx, hostUserId })
 
-      const checked = await checkRecurringAvailability(trx, batch.availability)
+      const checked = await checkRecurringAvailability(
+        trx,
+        batch.availability,
+        ctx.scimResourcesEnabled === true,
+      )
       if (!checked.canBook) throw seriesUnavailable()
       const candidates =
         roundRobin && automaticMeet(batch.locationOption)

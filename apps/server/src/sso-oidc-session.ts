@@ -19,6 +19,7 @@ export type OidcSessionRequest = OidcSessionOptions & {
   publicUrl: string
   headers: Headers
   ip?: string | undefined
+  scimResourcesEnabled?: boolean | undefined
 }
 
 export const normalizeOidcMailbox = (email: string) => email.trim().toLowerCase()
@@ -49,6 +50,7 @@ export async function lockOidcSignInContext(
   candidate: Pick<OidcLink, 'id' | 'user_id' | 'generation'>,
   mailbox: string,
   writeLink = false,
+  scimResourcesEnabled = false,
 ) {
   const domain = normalizeSsoDomain(mailbox.slice(mailbox.lastIndexOf('@') + 1))
   if (!domain) return { reason: 'domain_unverified' } as const
@@ -64,7 +66,7 @@ export async function lockOidcSignInContext(
   await lockOidcProvider(trx, provider)
   const member = await trx
     .selectFrom('auth.member')
-    .select(['id', scimSuspended(organizationId, user.id).as('suspended')])
+    .select(['id', scimSuspended(organizationId, user.id, scimResourcesEnabled).as('suspended')])
     .where('organizationId', '=', organizationId)
     .where('userId', '=', user.id)
     .forShare()
@@ -198,7 +200,14 @@ export function issueOidcSession(
   options: OidcSessionRequest,
 ) {
   return db.transaction().execute(async (trx) => {
-    const context = await lockOidcSignInContext(trx, provider, candidate, candidate.proven_email)
+    const context = await lockOidcSignInContext(
+      trx,
+      provider,
+      candidate,
+      candidate.proven_email,
+      false,
+      options.scimResourcesEnabled === true,
+    )
     if (context.reason !== undefined) return { reason: context.reason }
     // The current account must be verified. Its independently proven link owns the IdP mailbox.
     if (context.link.proven_email !== candidate.proven_email)

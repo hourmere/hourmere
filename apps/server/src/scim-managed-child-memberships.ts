@@ -136,6 +136,28 @@ export function rosterMemberships(
     .execute()
 }
 
+/** The caller holds both team locks and the mapping. Locks every membership it sourced. */
+export function mappingMemberships(
+  trx: Transaction<Database>,
+  mappingId: string,
+  childId: string,
+): Promise<ManagedChildMembership[]> {
+  return trx
+    .selectFrom('scim_team_managed_memberships as source')
+    .innerJoin('auth.member as member', 'member.id', 'source.member_id')
+    .where('source.mapping_id', '=', mappingId)
+    .where('source.child_organization_id', '=', childId)
+    .select([
+      'member.id as memberId',
+      'member.role',
+      'member.userId',
+      'source.child_organization_id as childId',
+    ])
+    .orderBy('member.userId')
+    .forUpdate('member')
+    .execute()
+}
+
 /** Directory writes never suspend or remove a current owner or admin of the child. */
 export function rejectPrivilegedChildMembership(memberships: ManagedChildMembership[]) {
   if (

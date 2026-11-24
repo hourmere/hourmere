@@ -75,6 +75,7 @@ const unavailableCalendar = () =>
 export async function checkRecurringAvailability(
   db: Db,
   input: RecurringAvailabilityInput,
+  scimResourcesEnabled = false,
 ): Promise<RecurringAvailabilityResult> {
   if (
     input.occurrences.length < MIN_RECURRING_OCCURRENCES ||
@@ -108,7 +109,7 @@ export async function checkRecurringAvailability(
     throw invalidRecurrence()
   const span = { start: range.start, end: range.end }
   return withRecurringAvailabilityBudget(db, (connection, budget) =>
-    checkBatch(connection, budget, input, starts, span),
+    checkBatch(connection, budget, input, starts, span, scimResourcesEnabled),
   )
 }
 
@@ -118,6 +119,7 @@ async function checkBatch(
   input: RecurringAvailabilityInput,
   starts: readonly Slot[],
   span: InstantInterval,
+  scimResourcesEnabled = false,
 ): Promise<RecurringAvailabilityResult> {
   const { eventTypeId, organizationId, now } = input
   const [event] = await budget.read(
@@ -214,7 +216,11 @@ async function checkBatch(
             .select('m.id')
             .whereRef('m.userId', '=', 'u.id')
             .whereRef('m.organizationId', '=', 'et.organization_id')
-            .where((eb) => eb.not(scimSuspended(eb.ref('m.organizationId'), eb.ref('m.userId')))),
+            .where((eb) =>
+              eb.not(
+                scimSuspended(eb.ref('m.organizationId'), eb.ref('m.userId'), scimResourcesEnabled),
+              ),
+            ),
         ).as('is_member'),
       )
       .where('et.id', '=', eventTypeId)

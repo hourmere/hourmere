@@ -73,6 +73,8 @@ export interface ServiceContext extends RecurringBookingAdmissionDeps {
 /** For unauthenticated flows such as public booking pages and invitee links. */
 export interface PublicContext {
   smsRemindersAvailable?: boolean | undefined
+  /** In-process SCIM resource capability. Defaults off. */
+  scimResourcesEnabled?: boolean | undefined
   /** Whether trusted server configuration enables SMTP; waitlist enrollment needs mail. */
   smtpConfigured?: boolean | undefined
   db: Db
