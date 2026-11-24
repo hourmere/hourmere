@@ -178,7 +178,7 @@ function isSsoTrustPath(path: string, method: string): boolean {
     (method === 'PUT' && /^\/api\/v1\/team\/sso\/policy\/?$/i.test(path)) ||
     /^\/api\/v1\/team\/sso\/(?:providers|domains|delegations|recovery)(?:\/|$)/i.test(path) ||
     /^\/api\/v1\/scim\/team-mappings(?:\/|$)/i.test(path) ||
-    /^\/api\/auth\/(?:sign-in\/sso|sso\/(?:callback|oidc\/complete|saml2\/(?:complete|sp\/acs)))(?:\/|$)/i.test(
+    /^\/api\/auth\/(?:sign-in\/sso|sso\/(?:callback|oidc\/complete|saml2\/(?:complete|sp\/(?:acs|metadata))))(?:\/|$)/i.test(
       path,
     )
   )

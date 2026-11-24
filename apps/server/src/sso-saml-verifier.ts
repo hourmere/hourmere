@@ -2,7 +2,7 @@ import { createHash, timingSafeEqual, X509Certificate } from 'node:crypto'
 import { DOMParser, type Element } from '@xmldom/xmldom'
 import { SignedXml } from 'xml-crypto'
 
-// SAML response verifier (docs/sso.md, "SAML"). It has no caller yet: SAML is hard-off.
+// SAML response verifier (docs/sso.md, "SAML"). SAML remains hard-off in production.
 //
 // The verifier writes no cryptography, canonicalization or XML signature code: xml-crypto
 // verifies the signature and returns the canonical bytes it digested, and every value handed
@@ -147,7 +147,7 @@ export type VerifiedSamlResponse = {
 export const samlMaximumResponseBytes = 262_144
 const MAX_DEPTH = 24
 const MAX_NODES = 5_000
-const MAX_CERTIFICATES = 4
+export const samlMaximumSigningCertificates = 4
 // No real response has a long run of white space; libraries need not be asked to chew on one.
 const MAX_WHITESPACE_RUN = 4_096
 const XML_ID = /^[A-Za-z_][A-Za-z0-9._-]{0,255}$/
@@ -185,7 +185,7 @@ const isWhitespace = (code: number) => code === 0x20 || code === 0x9 || code ===
  * character data or attribute values, so the textual checks are exact, and they run before
  * any parser sees the input: nothing is ever expanded, fetched or read from disk.
  */
-function parseStrict(xml: string): Element {
+export function parseSamlXml(xml: string, inspect?: (element: Element) => void): Element {
   if (Buffer.byteLength(xml) > samlMaximumResponseBytes) throw reject('too_large')
   let run = 0
   for (const character of xml) {
@@ -228,7 +228,17 @@ function parseStrict(xml: string): Element {
     throw error instanceof SamlVerificationError ? error : reject('malformed_xml')
   }
   if (!root) throw reject('malformed_xml')
-  checkTree(root)
+  let nodes = 0
+  const visit = (element: Element, depth: number) => {
+    nodes += 1
+    if (depth > MAX_DEPTH || nodes > MAX_NODES) throw reject('too_large')
+    inspect?.(element)
+    for (const child of Array.from(element.childNodes)) {
+      if (child.nodeType === 1) visit(child as Element, depth + 1)
+      else if (child.nodeType !== 3) throw reject('forbidden_markup')
+    }
+  }
+  visit(root, 1)
   return root
 }
 
@@ -240,12 +250,9 @@ const is = (element: Element, namespace: string, localName: string) =>
  * element, unqualified attributes only (besides namespace declarations and `xsi:type` on an
  * attribute value), and ID attributes only on the Response and the Assertion, each unique.
  */
-function checkTree(root: Element) {
+function parseStrict(xml: string) {
   const ids = new Set<string>()
-  let nodes = 0
-  const visit = (element: Element, depth: number) => {
-    nodes += 1
-    if (depth > MAX_DEPTH || nodes > MAX_NODES) throw reject('too_large')
+  return parseSamlXml(xml, (element) => {
     if (ENCRYPTED.has(element.localName ?? '')) throw reject('encrypted_unsupported')
     if (!ELEMENT_NAMESPACES.has(element.namespaceURI ?? '')) throw reject('unexpected_namespace')
     for (const attribute of Array.from(element.attributes)) {
@@ -271,12 +278,7 @@ function checkTree(root: Element) {
       if (ids.has(attribute.value)) throw reject('duplicate_id')
       ids.add(attribute.value)
     }
-    for (const child of Array.from(element.childNodes)) {
-      if (child.nodeType === 1) visit(child as Element, depth + 1)
-      else if (child.nodeType !== 3) throw reject('forbidden_markup')
-    }
-  }
-  visit(root, 1)
+  })
 }
 
 /** The element children of an element that may hold nothing else but white space. */
@@ -344,6 +346,22 @@ type Trust = {
   canonicalization: Set<string>
 }
 
+/** A configured X.509 certificate whose public key can verify our signature profile. */
+export function samlSigningCertificate(certificate: string): X509Certificate {
+  try {
+    if (typeof certificate !== 'string') throw reject('invalid_configuration')
+    const parsed = new X509Certificate(
+      certificate.includes('-----BEGIN') ? certificate : Buffer.from(certificate, 'base64'),
+    )
+    const { publicKey } = parsed
+    const bits = publicKey.asymmetricKeyDetails?.modulusLength ?? 0
+    if (publicKey.asymmetricKeyType !== 'rsa' || bits < 2048) throw reject('invalid_configuration')
+    return parsed
+  } catch {
+    throw reject('invalid_configuration')
+  }
+}
+
 function trustFrom(config: SamlVerifierConfig): Trust {
   const invalid = reject('invalid_configuration')
   const { algorithms, signingCertificates } = config ?? {}
@@ -362,22 +380,14 @@ function trustFrom(config: SamlVerifierConfig): Trust {
   if (
     !Array.isArray(signingCertificates) ||
     signingCertificates.length === 0 ||
-    signingCertificates.length > MAX_CERTIFICATES
+    signingCertificates.length > samlMaximumSigningCertificates
   )
     throw invalid
-  const keys = signingCertificates.map((certificate) => {
-    try {
-      if (typeof certificate !== 'string') throw invalid
-      const { publicKey } = new X509Certificate(
-        certificate.includes('-----BEGIN') ? certificate : Buffer.from(certificate, 'base64'),
-      )
-      const bits = publicKey.asymmetricKeyDetails?.modulusLength ?? 0
-      if (publicKey.asymmetricKeyType !== 'rsa' || bits < 2048) throw invalid
-      return publicKey.export({ type: 'spki', format: 'pem' }).toString()
-    } catch {
-      throw invalid
-    }
-  })
+  const keys = signingCertificates.map((certificate) =>
+    samlSigningCertificate(certificate)
+      .publicKey.export({ type: 'spki', format: 'pem' })
+      .toString(),
+  )
   return {
     config,
     keys,

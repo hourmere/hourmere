@@ -56,6 +56,7 @@ import {
   mailboxProofRoutes,
 } from './sso-mailbox-proof.ts'
 import { oidcSignInRoutes } from './sso-oidc-sign-in.ts'
+import { samlSigningIdentity } from './sso-saml-fixtures.ts'
 
 const databaseUrl = process.env.DATABASE_URL
 const publicUrl = 'https://hourmere.example.test'
@@ -1766,11 +1767,34 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     ['provider draft', 201],
     ['domain challenge', 201],
     ['provider test', 200],
+    ['SAML provider test', 200],
     ['admin link removal', 204],
   ] as const)('requires OIDC step-up for an enforced team %s write', async (operation, status) => {
     const f = await stepUpFixture()
     const draft = await provider({ enabled: false, discovery: operation === 'provider test' })
     const target = await recoveryTarget(f, fixture.member)
+    let draftId = draft.providerId
+    if (operation === 'SAML provider test') {
+      app = instance({ samlEnabled: true })
+      const { id } = await db.selectNoFrom(sql<string>`uuidv7()`.as('id')).executeTakeFirstOrThrow()
+      draftId = id
+      const { pem } = samlSigningIdentity('login.example.com')
+      await db
+        .insertInto('sso_providers')
+        .values({
+          ...samlProviderValues(fixture.team),
+          id,
+          configuration: sealSsoProviderConfiguration(
+            configurationKey,
+            { organizationId: fixture.team, providerId: id, revision: 1 },
+            JSON.stringify({
+              ssoEndpoint: 'https://login.example.com/saml',
+              signingCertificates: [pem],
+            }),
+          ),
+        })
+        .execute()
+    }
     const requestWrite = (cookie: string, proofAttemptId?: string) => {
       const proof = proofAttemptId ? { proofAttemptId } : {}
       const writes = {
@@ -1789,8 +1813,8 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
           ),
         'domain challenge': () =>
           domainChallenge(cookie, { domain: 'new-org.example.com', ...proof }),
-        'provider test': () =>
-          testRequest(draft.providerId, cookie, { expectedRevision: 1, ...proof }),
+        'provider test': () => testRequest(draftId, cookie, { expectedRevision: 1, ...proof }),
+        'SAML provider test': () => testRequest(draftId, cookie, { expectedRevision: 1, ...proof }),
         'admin link removal': () =>
           recoveryRequest(removeLinkPath(f.providerId, target.link.id), cookie, proof),
       }
@@ -1831,7 +1855,12 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
         return json(metadata)
       })
     }
-    expect((await requestWrite(pending.cookie, pending.id)).status).toBe(status)
+    const response = await requestWrite(pending.cookie, pending.id)
+    expect(response.status).toBe(status)
+    if (operation === 'SAML provider test') {
+      const { url } = (await response.json()) as { url: string }
+      expect(new URL(url).searchParams.get('SAMLRequest')).toBeTruthy()
+    }
     if (operation === 'provider test') expect(idp.discovery).toHaveBeenCalledOnce()
     expect((await attemptRow(pending)).consumed_at).toBeInstanceOf(Date)
     if (operation === 'admin link removal') {

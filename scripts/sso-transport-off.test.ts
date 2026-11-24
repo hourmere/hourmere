@@ -1,5 +1,5 @@
-// The SSO transport profile serves domain TXT proofs, OIDC documents and OIDC token exchange.
-// SAML start uses only its URL syntax policy for the browser redirect.
+// The SSO transport profile serves domain TXT proofs, OIDC ceremonies and SAML metadata.
+// SAML start reuses the configuration's URL syntax policy for the browser redirect.
 // Interactive writes, rechecks and sign-in are hard-off. Offline retirement removes trust.
 // The configuration loader parses `SSO_PRIVATE_TARGETS` and server composition passes it
 // to guarded OIDC sign-in, provider tests and self-link, so it routes nothing while OIDC
@@ -13,6 +13,7 @@ const root = new URL('..', import.meta.url)
 const rootPath = fileURLToPath(root)
 const PROFILE = 'packages/outbound/src/sso.ts'
 const TARGETS = 'packages/outbound/src/sso-private-targets.ts'
+const SSO_DRAFTS = 'apps/server/src/sso-drafts.ts'
 const OIDC_ADMISSION_WRITE = 'apps/server/src/sso-oidc-admission-write.ts'
 const OIDC_ADMISSION = 'apps/server/src/sso-oidc-admission.ts'
 const OIDC_ATTEMPT = 'apps/server/src/sso-oidc-attempt.ts'
@@ -23,6 +24,7 @@ const OIDC_SESSION = 'apps/server/src/sso-oidc-session.ts'
 const OIDC_SIGN_IN = 'apps/server/src/sso-oidc-sign-in.ts'
 const OIDC_TEST_RECEIPTS = 'apps/server/src/sso-oidc-test-receipts.ts'
 const OIDC_VERIFIER = 'apps/server/src/sso-oidc-verifier.ts'
+const SAML_CONFIGURATION = 'apps/server/src/sso-saml-configuration.ts'
 const SAML_START = 'apps/server/src/sso-saml-start.ts'
 const OIDC_VERIFIER_MODULES = new Set([OIDC_ATTEMPT, OIDC_JWKS, OIDC_VERIFIER])
 
@@ -96,7 +98,7 @@ describe('SSO transport permits only domain TXT and guarded SSO ceremonies', () 
       expect(importsProfile(file, source), source).toBe(false)
   })
 
-  it('imports the profile only for domain TXT, OIDC ceremonies and SAML redirect validation', () => {
+  it('imports the profile only for domain TXT, OIDC ceremonies and SAML configuration', () => {
     const sources = productionSources()
     expect(sources.length).toBeGreaterThan(100)
     // The scan sees the profile, its package and the server, so a caller cannot hide.
@@ -119,7 +121,14 @@ describe('SSO transport permits only domain TXT and guarded SSO ceremonies', () 
       'apps/server/src/sso-domain-retirement.ts',
       'apps/server/src/sso-domains.ts',
     ]
-    expect(callers).toEqual([...domainCallers, OIDC_JWKS, OIDC_SIGN_IN, SAML_START])
+    expect(callers).toEqual([
+      ...domainCallers,
+      SSO_DRAFTS,
+      OIDC_JWKS,
+      OIDC_SIGN_IN,
+      SAML_CONFIGURATION,
+      SAML_START,
+    ])
     for (const caller of domainCallers) {
       const domainSource = readFileSync(new URL(caller, root), 'utf8')
       expect(domainSource).toContain('resolveSsoDomainTxt')
@@ -127,8 +136,14 @@ describe('SSO transport permits only domain TXT and guarded SSO ceremonies', () 
     }
     expect(readFileSync(new URL(OIDC_JWKS, root), 'utf8')).toContain('sendSsoRequest')
     expect(readFileSync(new URL(OIDC_SIGN_IN, root), 'utf8')).toContain('sendSsoRequest')
+    expect(readFileSync(new URL(SSO_DRAFTS, root), 'utf8')).toContain(
+      "import type { SsoRequest, sendSsoRequest } from '@hourmere/outbound/sso'",
+    )
+    const samlConfiguration = readFileSync(new URL(SAML_CONFIGURATION, root), 'utf8')
+    expect(samlConfiguration).toContain('sendSsoRequest')
+    expect(samlConfiguration).toContain('ssoUrl(')
     const samlStart = readFileSync(new URL(SAML_START, root), 'utf8')
-    expect(samlStart).toContain('ssoUrl(')
+    expect(samlStart).toContain('samlIdentityProviderRedirectUrl(')
     expect(samlStart).not.toMatch(/sendSsoRequest|resolveSsoDomainTxt/)
   })
 
@@ -152,6 +167,7 @@ describe('SSO transport permits only domain TXT and guarded SSO ceremonies', () 
       [OIDC_SIGN_IN, [OIDC_ATTEMPT, OIDC_JWKS, OIDC_VERIFIER]],
       [OIDC_TEST_RECEIPTS, [OIDC_ATTEMPT]],
       ['apps/server/src/sso-saml-sign-in.ts', [OIDC_ATTEMPT]],
+      [SAML_START, [OIDC_ATTEMPT]],
     ])
   })
 

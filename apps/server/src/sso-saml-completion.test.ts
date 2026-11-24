@@ -1,6 +1,11 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { inflateRawSync } from 'node:zlib'
-import { createAuth, createAuthPool } from '@hourmere/auth'
+import {
+  createAuth,
+  createAuthPool,
+  createBrowserSession,
+  createCallerResolver,
+} from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { DOMParser } from '@xmldom/xmldom'
@@ -10,15 +15,27 @@ import { SignedXml } from 'xml-crypto'
 import {
   at,
   claimedDomainValues,
+  oidcProviderValues,
+  recoveryOwnerValues,
   type SsoFixture,
   samlProviderValues,
   ssoFixture,
 } from '../../../packages/db/src/sso-storage-fixtures.ts'
 import { createApp } from './app.ts'
 import { loadConfig } from './config.ts'
+import { ssoDraftRoutes } from './routes/sso-drafts.ts'
+import { ssoRecoveryEnrollmentRoutes } from './routes/sso-recovery-enrollment.ts'
 import { productionSsoCapabilities } from './server.ts'
 import type { SsoCapabilities } from './sso.ts'
 import { sealSsoProviderConfiguration } from './sso-configuration.ts'
+import {
+  databaseClock,
+  deliverMailboxProof,
+  MAILBOX_PROOF_CONSUME_PATH,
+  MAILBOX_PROOF_SEND_PATH,
+  MailboxProofEmailPayload,
+  mailboxProofRoutes,
+} from './sso-mailbox-proof.ts'
 import { oidcSignInRoutes } from './sso-oidc-sign-in.ts'
 import { samlSigningIdentity } from './sso-saml-fixtures.ts'
 import { samlClockSkew } from './sso-saml-limits.ts'
@@ -31,6 +48,8 @@ const idpOrigin = 'https://login.example.com'
 const ssoEndpoint = `${idpOrigin}/saml`
 const startPath = '/api/auth/sign-in/sso'
 const completePath = '/api/auth/sso/saml2/complete'
+const providersPath = '/api/v1/team/sso/providers'
+const recoveryUsePath = '/api/v1/team/sso/recovery/use'
 const errorPath = '/sign-in?error=unable_to_create_session'
 const returnPath = '/app/bookings?tab=next#recent'
 const verifiedDomain = 'fixture.example.com'
@@ -48,6 +67,12 @@ const protocolNamespace = 'urn:oasis:names:tc:SAML:2.0:protocol'
 const digest = (value: string) => createHash('sha256').update(value).digest('hex')
 const cookiesFrom = (response: Response) =>
   response.headers.getSetCookie().map((cookie) => cookie.split(';')[0] ?? '')
+
+function mergeCookies(...groups: string[][]) {
+  const cookies = new Map<string, string>()
+  for (const cookie of groups.flat()) cookies.set(cookie.split('=', 1)[0] ?? '', cookie)
+  return [...cookies.values()]
+}
 
 interface Provider {
   id: string
@@ -76,6 +101,8 @@ interface SignedResponseOptions {
   mailbox?: string
   bearerLifetime?: number
   sessionLifetime?: number
+  signingIdentity?: ReturnType<typeof samlSigningIdentity>
+  responseOnly?: boolean
 }
 
 type App = ReturnType<typeof createApp>
@@ -89,16 +116,17 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
   let app: App
   let domain: { id: string; generation: number }
   let idp: ReturnType<typeof samlSigningIdentity>
+  let rotatedIdp: ReturnType<typeof samlSigningIdentity>
+
+  async function seedTeam() {
+    const client = await owned.pool.connect()
+    return ssoFixture(client).finally(() => client.release())
+  }
 
   beforeAll(async () => {
     owned = await createTestDatabase(databaseUrl as string, undefined, { tag: 'saml_completion' })
     db = createDb(owned.pool)
-    const seed = await owned.pool.connect()
-    try {
-      team = await ssoFixture(seed)
-    } finally {
-      seed.release()
-    }
+    team = await seedTeam()
     await db
       .updateTable('auth.user')
       .set({ email: mailbox })
@@ -110,6 +138,7 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
       .returning(['id', 'generation'])
       .executeTakeFirstOrThrow()
     idp = samlSigningIdentity('login.example.com')
+    rotatedIdp = samlSigningIdentity('login.example.com')
     authPool = createAuthPool(owned.url, signup)
     auth = createAuth({
       pool: authPool,
@@ -129,13 +158,51 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
     await owned?.drop()
   })
 
-  function instance(capabilities: SsoCapabilities = samlOnly) {
+  function instance(
+    capabilities: SsoCapabilities = samlOnly,
+    mailboxJobs?: MailboxProofEmailPayload[],
+  ) {
     const deps = { db, capabilities, configurationKey, session: { secret } }
+    const readSession = async (headers: Headers) =>
+      (
+        await auth.api.getSession({
+          headers,
+          query: { disableRefresh: true, disableCookieCache: true },
+        })
+      )?.session
     return createApp({
       checkDb: async () => {},
       authHandler: auth.handler,
-      resolveCaller: async () => expect.unreachable('SAML completion does not resolve a caller'),
+      resolveCaller: mailboxJobs
+        ? createCallerResolver({ auth, db })
+        : async () => expect.unreachable('SAML completion does not resolve a caller'),
       publicUrl,
+      ...(mailboxJobs && {
+        routes: [
+          ssoDraftRoutes({ ...deps, publicUrl, privateTargets: [] }),
+          ssoRecoveryEnrollmentRoutes({
+            ...deps,
+            publicUrl,
+            notificationQueue: {
+              async enqueue(_name, _payload, options) {
+                expect(options.transaction).toMatchObject({ isTransaction: true })
+                return 'recovery-notice'
+              },
+            },
+          }),
+        ],
+        ssoTeamReads: { db, capabilities },
+        ssoMailboxProof: mailboxProofRoutes({
+          db,
+          capabilities,
+          queue: {
+            async enqueue(_name, payload) {
+              mailboxJobs.push(MailboxProofEmailPayload.parse(payload))
+              return 'mailbox-proof'
+            },
+          },
+        }),
+      }),
       ssoOidcSignIn: oidcSignInRoutes({
         ...deps,
         privateTargets: [],
@@ -143,7 +210,7 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
         signup,
         readSession: async () => expect.unreachable('Sign-in does not read a session'),
       }),
-      ssoSamlSignIn: samlSignInRoutes(deps),
+      ssoSamlSignIn: samlSignInRoutes({ ...deps, readSession }),
     })
   }
 
@@ -202,6 +269,10 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
 
   async function start(provider: Provider): Promise<Start> {
     const response = await signIn(provider.id, app)
+    return readStart(provider, response)
+  }
+
+  async function readStart(provider: Provider, response: Response, cookies: string[] = []) {
     expect(response.status).toBe(200)
     const { url } = (await response.json()) as { url: string }
     const redirect = new URL(url)
@@ -214,13 +285,20 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
     const recipient = request?.getAttribute('AssertionConsumerServiceURL')
     const audience = request?.getElementsByTagNameNS(assertionNamespace, 'Issuer')[0]?.textContent
     if (!requestId || !recipient || !audience) throw new Error('Missing AuthnRequest fields')
-    return { provider, requestId, relayState, audience, recipient, cookies: cookiesFrom(response) }
+    return {
+      provider,
+      requestId,
+      relayState,
+      audience,
+      recipient,
+      cookies: mergeCookies(cookies, cookiesFrom(response)),
+    }
   }
 
-  function sign(xml: string, element: 'Assertion' | 'Response') {
+  function sign(xml: string, element: 'Assertion' | 'Response', signingIdentity = idp) {
     const canonicalizationAlgorithm = 'http://www.w3.org/2001/10/xml-exc-c14n#'
     const signer = new SignedXml({
-      privateKey: idp.privateKey,
+      privateKey: signingIdentity.privateKey,
       signatureAlgorithm: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
       canonicalizationAlgorithm,
     })
@@ -259,6 +337,8 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
       mailbox = provider.mailbox,
       bearerLifetime = 300,
       sessionLifetime,
+      signingIdentity,
+      responseOnly = false,
     } = options
     const issued = await samlReplay.samlDatabaseNow(db)
     const deadline = issued.add({ seconds: bearerLifetime })
@@ -268,8 +348,7 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
     const correlation = correlatedId === null ? '' : ` InResponseTo="${correlatedId}"`
     const nameScope = nameQualifier ? ` NameQualifier="${nameQualifier}"` : ''
     const spScope = spNameQualifier ? ` SPNameQualifier="${spNameQualifier}"` : ''
-    const assertion = sign(
-      `<saml:Assertion xmlns:saml="${assertionNamespace}" ID="${assertionId}" Version="2.0" IssueInstant="${issued}">
+    const assertion = `<saml:Assertion xmlns:saml="${assertionNamespace}" ID="${assertionId}" Version="2.0" IssueInstant="${issued}">
       <saml:Issuer>${provider.issuer}</saml:Issuer>
       <saml:Subject>
         <saml:NameID Format="${subjectFormat}"${nameScope}${spScope}>${subject}</saml:NameID>
@@ -284,16 +363,15 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
       <saml:AttributeStatement>
         <saml:Attribute Name="email"><saml:AttributeValue>${mailbox}</saml:AttributeValue></saml:Attribute>
       </saml:AttributeStatement>
-    </saml:Assertion>`,
-      'Assertion',
-    )
+    </saml:Assertion>`
     const xml = sign(
       `<samlp:Response xmlns:samlp="${protocolNamespace}" ID="${responseId}" Version="2.0" IssueInstant="${issued}" Destination="${recipient}"${correlation}>
       <saml:Issuer xmlns:saml="${assertionNamespace}">${provider.issuer}</saml:Issuer>
       <samlp:Status><samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></samlp:Status>
-      ${assertion}
+      ${responseOnly ? assertion : sign(assertion, 'Assertion', signingIdentity)}
     </samlp:Response>`,
       'Response',
+      signingIdentity,
     )
     return {
       encoded: Buffer.from(xml).toString('base64'),
@@ -394,6 +472,383 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
         .execute(),
     ])
   }
+
+  async function browserSession(userId: string, organizationId = team.team) {
+    const session = await db
+      .transaction()
+      .execute(async (trx) =>
+        createBrowserSession(
+          trx,
+          { publicUrl, secret },
+          { userId, organizationId, now: await databaseClock(trx), headers: new Headers() },
+        ),
+      )
+    return { id: session.id, cookies: [session.cookie.split(';')[0] ?? ''] }
+  }
+
+  async function samlDraft(organizationId: string) {
+    const id = await providerId()
+    const values = samlProviderValues(organizationId)
+    const configuration = sealSsoProviderConfiguration(
+      configurationKey,
+      { organizationId, providerId: id, revision: 1 },
+      JSON.stringify({ ssoEndpoint, signingCertificates: [idp.pem] }),
+    )
+    await db
+      .insertInto('sso_providers')
+      .values({ ...values, id, configuration })
+      .execute()
+    return {
+      id,
+      issuer: values.issuer,
+      subject: `new-saml-test-subject-${randomUUID()}`,
+      mailbox: `unenrolled-${randomUUID()}@${verifiedDomain}`,
+    }
+  }
+
+  function management(organizationId = team.team, capabilities: SsoCapabilities = samlOnly) {
+    const jobs: MailboxProofEmailPayload[] = []
+    const request = instance(capabilities, jobs)
+    const json = (
+      path: string,
+      cookies: string[],
+      body: Record<string, unknown>,
+      method = 'POST',
+      headers: Record<string, string> = {},
+    ) =>
+      request.request(new URL(path, publicUrl), {
+        method,
+        headers: {
+          origin: publicUrl,
+          cookie: cookies.join('; '),
+          'X-Expected-Organization-Id': organizationId,
+          'content-type': 'application/json',
+          ...headers,
+        },
+        body: JSON.stringify(body),
+      })
+
+    async function mailboxProof(response: Response, original: string[]) {
+      expect(response.status).toBe(403)
+      const challenge = (await response.json()) as { attemptId: string }
+      expect(challenge).toMatchObject({
+        error: 'sso_reauthentication_required',
+        attemptId: expect.any(String),
+        proofMethods: ['mailbox'],
+      })
+      const cookies = mergeCookies(original, cookiesFrom(response))
+      const { attemptId } = challenge
+      expect((await json(MAILBOX_PROOF_SEND_PATH, cookies, { attemptId })).status).toBe(202)
+      const job = jobs.shift()
+      if (!job) throw new Error('Missing queued mailbox proof')
+      let token: string | undefined
+      await deliverMailboxProof(
+        {
+          db,
+          capabilities,
+          publicUrl,
+          secret,
+          mailMaxPerHour: 0,
+          signInMailMaxPerHour: 20,
+          mailer: {
+            async send(message) {
+              token = /#attempt=[0-9a-f-]+&token=([A-Za-z0-9_-]+)/.exec(message.text ?? '')?.[1]
+            },
+          },
+        },
+        job,
+      )
+      if (!token) throw new Error('Missing token in captured mailbox proof message')
+      expect((await json(MAILBOX_PROOF_CONSUME_PATH, cookies, { attemptId, token })).status).toBe(
+        200,
+      )
+      return { attemptId, cookies }
+    }
+
+    async function withMailbox(
+      path: string,
+      original: string[],
+      body: Record<string, unknown>,
+      method = 'POST',
+    ) {
+      const { attemptId, cookies } = await mailboxProof(
+        await json(path, original, body, method),
+        original,
+      )
+      return {
+        response: await json(path, cookies, { ...body, proofAttemptId: attemptId }, method),
+        cookies,
+      }
+    }
+
+    return { request, json, mailboxProof, withMailbox }
+  }
+
+  const receipts = (id: string) =>
+    db
+      .selectFrom('audit_events')
+      .select(['actor_id', 'credential_id', 'target_type', 'details'])
+      .where('action', '=', 'sso_provider.tested')
+      .where('target_id', '=', id)
+      .orderBy('occurred_at')
+      .orderBy('id')
+      .execute()
+
+  async function finishProviderTest(request: App, attempt: Start, options?: SignedResponseOptions) {
+    const response = await signedResponse(attempt, options)
+    expect(Buffer.from(response.encoded, 'base64').toString('utf8')).not.toContain('KeyInfo')
+    const result = await pending(
+      await acs(attempt.provider.id, response.encoded, attempt.relayState, request),
+      attempt,
+    )
+    const completed = await complete(result, { request })
+    expect(completed.status).toBe(303)
+    expect(completed.headers.get('location')).toBe('/app/settings')
+  }
+
+  it('binds a draft test to fresh administration, its original session and browser, and its exact revision', async () => {
+    const provider = await samlDraft(team.team)
+    const { json, mailboxProof, request, withMailbox } = management()
+    const testPath = `${providersPath}/${provider.id}/test`
+    const owner = await browserSession(team.owner)
+    const secondSession = await browserSession(team.owner)
+    const member = await browserSession(team.member)
+    const outsider = await browserSession(team.otherOwner, team.otherTeam)
+    const input = { expectedRevision: 1 }
+    for (const response of [
+      await json(testPath, member.cookies, input),
+      await json(testPath, outsider.cookies, input),
+      await json(testPath, owner.cookies, input, 'POST', { origin: idpOrigin }),
+    ]) {
+      expect(response.status).toBe(403)
+      expect(await response.json()).toEqual({ error: 'team_management_access_denied' })
+    }
+    const proofRequired = await json(testPath, owner.cookies, input)
+    expect(await protocolEffects(provider.id)).toEqual([[], []])
+    const proof = await mailboxProof(proofRequired, owner.cookies)
+    const attempt = await readStart(
+      provider,
+      await json(testPath, proof.cookies, { ...input, proofAttemptId: proof.attemptId }),
+      proof.cookies,
+    )
+    const signed = await signedResponse(attempt)
+    const before = await identityEffects()
+    const result = await pending(
+      await acs(provider.id, signed.encoded, attempt.relayState, request),
+      attempt,
+    )
+    expect(await receipts(provider.id)).toEqual([])
+    const confirmation = await request.request(result.location, {
+      headers: { cookie: result.cookies.join('; ') },
+    })
+    expect(confirmation.status).toBe(200)
+    expect(await receipts(provider.id)).toEqual([])
+    const withoutBinding = result.cookies.filter(
+      (cookie) => !cookie.startsWith(`${bindingCookie}=`),
+    )
+    await expectRefusedCompletion(await complete(result, { request, cookies: withoutBinding }))
+    await expectRefusedCompletion(
+      await complete(result, {
+        request,
+        cookies: mergeCookies(result.cookies, secondSession.cookies),
+      }),
+    )
+    expect(await receipts(provider.id)).toEqual([])
+
+    const completed = await complete(result, { request })
+    expect(completed.status).toBe(303)
+    expect(completed.headers.get('location')).toBe('/app/settings')
+    expect(await receipts(provider.id)).toEqual([
+      {
+        actor_id: team.owner,
+        credential_id: owner.id,
+        target_type: 'sso_provider_owner_test',
+        details: {
+          method: 'saml',
+          providerId: provider.id,
+          revision: 1,
+          correlationId: attempt.requestId.slice(1),
+          outcome: 'passed',
+        },
+      },
+    ])
+    await expectRefusedCompletion(await complete(result, { request }))
+    expect(await identityEffects()).toEqual(before)
+
+    const second = await withMailbox(testPath, proof.cookies, input)
+    const inFlight = await readStart(provider, second.response, second.cookies)
+    const later = await signedResponse(inFlight)
+    const staged = await pending(
+      await acs(provider.id, later.encoded, inFlight.relayState, request),
+      inFlight,
+    )
+    const update = await withMailbox(
+      `${providersPath}/${provider.id}`,
+      proof.cookies,
+      { ...input, displayName: 'Renamed while a test was pending' },
+      'PATCH',
+    )
+    expect(update.response.status).toBe(200)
+    expect(await update.response.json()).toMatchObject({
+      provider: { id: provider.id, revision: 2, testStatus: 'unknown' },
+    })
+    await expectRefusedCompletion(await complete(staged, { request }))
+    expect(await receipts(provider.id)).toHaveLength(1)
+  })
+
+  it('tests overlapping signing certificates without KeyInfo and refuses removed certificates and response-only signatures', async () => {
+    const fixture = await seedTeam()
+    const provider = await samlDraft(fixture.team)
+    const { request, withMailbox } = management(fixture.team)
+    const owner = await browserSession(fixture.owner, fixture.team)
+    const path = `${providersPath}/${provider.id}`
+    const update = (revision: number, signingCertificates: string[]) =>
+      withMailbox(
+        path,
+        owner.cookies,
+        { expectedRevision: revision, saml: { signingCertificates } },
+        'PATCH',
+      )
+    async function runTest(revision: number, options: SignedResponseOptions) {
+      const { response, cookies } = await withMailbox(`${path}/test`, owner.cookies, {
+        expectedRevision: revision,
+      })
+      await finishProviderTest(request, await readStart(provider, response, cookies), options)
+    }
+    const overlap = await update(1, [idp.pem, rotatedIdp.pem])
+    expect(overlap.response.status).toBe(200)
+    await runTest(2, { signingIdentity: idp })
+    await runTest(2, { signingIdentity: rotatedIdp })
+    expect((await receipts(provider.id)).map(({ details }) => details)).toMatchObject([
+      { revision: 2, outcome: 'passed' },
+      { revision: 2, outcome: 'passed' },
+    ])
+
+    const rotated = await update(2, [rotatedIdp.pem])
+    expect(rotated.response.status).toBe(200)
+    expect(await rotated.response.json()).toMatchObject({
+      provider: { revision: 3, testStatus: 'unknown' },
+    })
+    await runTest(3, { signingIdentity: idp })
+    await runTest(3, { signingIdentity: rotatedIdp, responseOnly: true })
+    await runTest(3, { signingIdentity: rotatedIdp })
+    expect((await receipts(provider.id)).slice(2).map(({ details }) => details)).toMatchObject([
+      { revision: 3, outcome: 'failed', reason: 'signature_invalid' },
+      { revision: 3, outcome: 'failed', reason: 'signature_invalid' },
+      { revision: 3, outcome: 'passed' },
+    ])
+  })
+
+  it('requires a distinct fresh recovery grant to update, test, and re-enable a SAML provider', async () => {
+    const fixture = await seedTeam()
+    const provider = await samlDraft(fixture.team)
+    const { json, request, withMailbox } = management(fixture.team)
+    const owner = await browserSession(fixture.owner, fixture.team)
+    const claim = await db
+      .insertInto('sso_domains')
+      .values(claimedDomainValues(fixture.team))
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await db
+      .insertInto('sso_provider_domains')
+      .values({ organization_id: fixture.team, provider_id: provider.id, domain_id: claim.id })
+      .execute()
+    await db.insertInto('sso_recovery_owners').values(recoveryOwnerValues(fixture)).execute()
+    await db
+      .insertInto('sso_policies')
+      .values({ organization_id: fixture.team, require_sso: true })
+      .execute()
+
+    async function recovery(cookies: string[]) {
+      const grant = await withMailbox(recoveryUsePath, cookies, { expectedRevision: 1 })
+      expect(grant.response.status).toBe(204)
+      return grant.cookies
+    }
+
+    const path = `${providersPath}/${provider.id}`
+    const first = await recovery(owner.cookies)
+    const updated = await json(
+      path,
+      first,
+      {
+        expectedRevision: 1,
+        saml: { signingCertificates: [rotatedIdp.pem] },
+      },
+      'PATCH',
+    )
+    expect(updated.status).toBe(200)
+    expect(await updated.json()).toMatchObject({
+      provider: { id: provider.id, revision: 2, enabled: false, testStatus: 'unknown' },
+    })
+    const testPath = `${path}/test`
+    const activationPath = `${path}/activation`
+    const testInput = { expectedRevision: 2 }
+    const activateInput = { ...testInput, enabled: true }
+    const reusedFirst = await json(testPath, first, testInput)
+    expect(reusedFirst.status).toBe(403)
+    expect(await reusedFirst.json()).toEqual({ error: 'sso_required' })
+
+    const second = await recovery(first)
+    const untested = await json(activationPath, second, activateInput)
+    expect(untested.status).toBe(409)
+    expect(await untested.json()).toEqual({ error: 'sso_test_required' })
+    const attempt = await readStart(provider, await json(testPath, second, testInput), second)
+    const before = await identityEffects()
+    await finishProviderTest(request, attempt, { signingIdentity: rotatedIdp })
+    expect(await identityEffects()).toEqual(before)
+    const reusedSecond = await json(activationPath, second, activateInput)
+    expect(reusedSecond.status).toBe(403)
+    expect(await reusedSecond.json()).toEqual({ error: 'sso_required' })
+
+    const third = await recovery(second)
+    const activated = await json(activationPath, third, activateInput)
+    expect(activated.status).toBe(200)
+    expect(await activated.json()).toMatchObject({
+      provider: { id: provider.id, revision: 2, enabled: true, testStatus: 'passed' },
+    })
+    const reusedThird = await json(activationPath, third, activateInput)
+    expect(reusedThird.status).toBe(403)
+    expect(await reusedThird.json()).toEqual({ error: 'sso_required' })
+    const uses = await db
+      .selectFrom('audit_events')
+      .select('details')
+      .where('organization_id', '=', fixture.team)
+      .where('action', '=', 'sso_recovery.used')
+      .execute()
+    expect(uses).toHaveLength(3)
+    expect(new Set(uses.map(({ details }) => JSON.stringify(details))).size).toBe(3)
+  })
+
+  it('refuses tests of a hard-off SAML provider before writing while OIDC administration still requests proof', async () => {
+    const saml = await samlDraft(team.team)
+    const oidc = await db
+      .insertInto('sso_providers')
+      .values(oidcProviderValues(team.team))
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    const owner = await browserSession(team.owner)
+    const { json } = management(team.team, {
+      ssoOidcEnabled: true,
+      ssoSamlEnabled: false,
+      ssoOperatorSetting: true,
+    })
+    const before = await protocolEffects(saml.id)
+    const response = await json(`${providersPath}/${saml.id}/test`, owner.cookies, {
+      expectedRevision: 1,
+    })
+    expect(response.status).toBe(404)
+    expect(await response.json()).toEqual({ error: 'sso_disabled' })
+    expect(await protocolEffects(saml.id)).toEqual(before)
+    expect(await receipts(saml.id)).toEqual([])
+    const challenge = await json(`${providersPath}/${oidc.id}/test`, owner.cookies, {
+      expectedRevision: 1,
+    })
+    expect(challenge.status).toBe(403)
+    expect(await challenge.json()).toMatchObject({
+      error: 'sso_reauthentication_required',
+      proofMethods: ['mailbox'],
+    })
+  })
 
   it('only issues the linked native session and browser proof at the original browser POST', async () => {
     const provider = await linkedProvider()
