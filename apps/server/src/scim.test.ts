@@ -11,6 +11,7 @@ import { createApp } from './app.ts'
 import { loadConfig } from './config.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
 import { provisioningTokenRoutes } from './routes/provisioning-tokens.ts'
+import { scimDiscoveryWithGroups } from './scim-discovery.ts'
 import { productionAppOptions } from './server.ts'
 
 const origin = 'http://localhost'
@@ -518,6 +519,33 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM credential HTTP boundaries', ()
     const response = await application.request(`/scim/v2/${organizationId}/Users`)
     expect(response.status).toBe(429)
     expect(response.headers.get('retry-after')).toBeTruthy()
+  })
+  it('shares the authenticated SCIM budget across an organization’s sources and tokens', async () => {
+    const first = await issue()
+    const second = await issue()
+    const verify = async (mount: typeof import('./scim.ts').mountScim) => {
+      const application = new OpenAPIHono()
+      mount(application, { db, enabled: true, resources: scimDiscoveryWithGroups }, [], origin)
+      const target = `${origin}/scim/v2/${organizationId}/ServiceProviderConfig`
+      const probe = (remoteAddress: string, bearer: string) =>
+        application.fetch(new Request(target, { headers: { authorization: `Bearer ${bearer}` } }), {
+          incoming: { socket: { remoteAddress } },
+        })
+      for (let i = 0; i < 60; i++) {
+        expect((await probe('192.0.2.1', first.secret)).status).toBe(200)
+        expect((await probe('192.0.2.2', second.secret)).status).toBe(200)
+      }
+      const refused = await probe('192.0.2.3', second.secret)
+      expect(refused.status).toBe(429)
+      expect(refused.headers.get('retry-after')).toMatch(/^\d+$/)
+      expect(await refused.json()).toMatchObject({ status: '429' })
+    }
+    await verify((await import('./scim.ts')).mountScim)
+    const mutant = await sourceCopy<typeof import('./scim.ts')>('./scim.ts', [
+      'organizationLimit?.hit(principal.organizationId)',
+      'organizationLimit?.hit(principal.tokenId)',
+    ])
+    await expect(verify(mutant.mountScim)).rejects.toMatchObject({ name: 'AssertionError' })
   })
   it('keeps every resource unavailable with valid credentials and detects accidental registration', async () => {
     const issued = await issue()
