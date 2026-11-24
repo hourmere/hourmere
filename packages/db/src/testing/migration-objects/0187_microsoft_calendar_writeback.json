@@ -1,0 +1,7 @@
+{
+  "migration": "0187_microsoft_calendar_writeback.sql",
+  "objects": {
+    "index public.booking_calendar_targets.booking_calendar_targets_microsoft_due": "CREATE INDEX booking_calendar_targets_microsoft_due ON public.booking_calendar_targets USING btree (((microsoft_writeback ->> 'nextAttemptAt'::text))) WHERE ((microsoft_writeback ->> 'status'::text) = ANY (ARRAY['pending'::text, 'retrying'::text]))",
+    "index public.group_slots.group_slots_microsoft_due": "CREATE INDEX group_slots_microsoft_due ON public.group_slots USING btree (((microsoft_writeback ->> 'nextAttemptAt'::text))) WHERE ((microsoft_writeback ->> 'status'::text) = ANY (ARRAY['pending'::text, 'retrying'::text]))"
+  }
+}

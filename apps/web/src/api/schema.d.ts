@@ -1523,7 +1523,7 @@ export interface paths {
         put?: never;
         /**
          * Start a separate Microsoft Calendar connection
-         * @description Requires a same-origin browser session. Requests identity, continuing access and Calendars.ReadBasic to list calendars and read busy times on selected calendars. Microsoft calendars are read-only in Hourmere.
+         * @description Requires a same-origin browser session. Requests identity, continuing access and Calendars.ReadWrite to list calendars, read busy times on selected calendars and create booking events on a chosen calendar. Reconnect to upgrade a read-only connection.
          */
         post: operations["authorizeMicrosoftCalendarConnection"];
         delete?: never;
@@ -1541,7 +1541,7 @@ export interface paths {
         };
         get?: never;
         /**
-         * Choose the owned Google calendar for new booking events
+         * Choose a calendar for new booking events
          * @description Sessions and API keys change only the caller’s own writeback destination.
          */
         put: operations["setCalendarDestination"];
@@ -6210,6 +6210,10 @@ export interface components {
                 name: string;
                 syncError: string | null;
                 timeZone: string | null;
+                /** @enum {string|null} */
+                writebackError?: "calendar_removed" | "calendar_unavailable" | "needs_reauth" | "permissions_missing" | "provider_unavailable" | "rate_limited" | "outcome_unknown" | "event_conflict" | null;
+                /** @enum {string} */
+                writebackStatus?: "pending" | "retrying" | "failed" | "succeeded";
             }[];
             /** Format: date-time */
             createdAt: string;
@@ -6224,6 +6228,8 @@ export interface components {
             syncAuthorized: boolean;
             /** Format: date-time */
             updatedAt: string;
+            /** @description For Microsoft accounts, whether the connection has granted event write access. */
+            writeAuthorized?: boolean;
         };
         CancelBooking: {
             reason?: string;
@@ -11769,7 +11775,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description calendar_not_writable */
+            /** @description calendar_not_writable, microsoft_calendar_not_writable, microsoft_calendar_permissions_missing, microsoft_calendar_needs_reauth, microsoft_calendar_removed, microsoft_calendar_disabled, caldav_calendar_unavailable or caldav_calendar_disabled */
             409: {
                 headers: {
                     [name: string]: unknown;

@@ -1320,7 +1320,15 @@ async function start(
           ),
         (connectionId, after) => enqueueWritebackRecovery(connectionId, after),
       ),
-      calendarDispatchJob(calendarDeps, (id) => enqueueCalendar(id)),
+      calendarDispatchJob(
+        calendarDeps,
+        (id) => enqueueCalendar(id),
+        (payload): Promise<unknown> =>
+          jobs.enqueue('booking-calendar', payload, {
+            singletonKey:
+              'bookingId' in payload ? payload.bookingId : `group:${payload.groupSlotId}`,
+          }),
+      ),
     ],
     work: role !== 'web',
     // pg-boss installs and upgrades its own `pgboss` schema; with AUTO_MIGRATE=false,
@@ -1391,7 +1399,7 @@ async function start(
   } else {
     // Booking changes over REST and MCP queue their emails in their own transactions.
     const emailNotifier = bookingNotifier(jobs)
-    const calendarNotifier = calendarBookingNotifier(jobs)
+    const calendarNotifier = calendarBookingNotifier(jobs, { google: Boolean(googleCalendar) })
     const caldavNotifier = calDavBookingNotifier(jobs)
     const conferenceNotifier = conferenceBookingNotifier(jobs)
     const notifyAttendeeNoShow = webhookAttendeeNoShowNotifier(jobs, webhookSettings)
@@ -1399,7 +1407,7 @@ async function start(
     const notify: BookingNotifier = async (trx, event, now) => {
       if (!('requestId' in event)) await conferenceNotifier(trx, event)
       await emailNotifier(trx, event, now)
-      if (googleCalendar && !('requestId' in event)) await calendarNotifier(trx, event)
+      if (!('requestId' in event)) await calendarNotifier(trx, event)
       if (caldavCalendar && !('requestId' in event)) await caldavNotifier(trx, event)
       await webhookNotifier(trx, event, now)
       // Core notification intents precede workflow capture in the booking's transaction.

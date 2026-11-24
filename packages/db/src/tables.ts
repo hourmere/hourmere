@@ -304,6 +304,7 @@ export interface BookingCalendarEvents {
 
 export interface BookingCalendarTargets {
   calendar_id: string;
+  microsoft_writeback: Json | null;
   root_booking_id: string;
   user_id: string;
 }
@@ -842,6 +843,7 @@ export interface GroupSlots {
   location: Json | null;
   location_option: Json | null;
   logistics_revision: Generated<Int8>;
+  microsoft_writeback: Json | null;
   organization_id: string;
   organizer_user_id: string | null;
   original_event_type_id: string;

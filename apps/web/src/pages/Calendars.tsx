@@ -18,6 +18,7 @@ import { leavesPage } from '../unsaved-changes.tsx'
 import { CalDavConnect } from './CalDavConnect.tsx'
 
 type Connection = Schemas['CalendarConnection']
+type Calendar = Connection['calendars'][number]
 const load = async (signal: AbortSignal) => {
   const [connections, profile] = await Promise.all([
     unwrap(api.GET('/api/v1/calendar-connections', { signal })),
@@ -75,8 +76,12 @@ const needsSyncPermission = (connection: Connection) =>
       )))
 const needsPermissionReview = (connection: Connection) =>
   connection.provider === 'google' && connection.lastError === 'permissions_missing'
+const needsMicrosoftWritePermission = (connection: Connection) =>
+  connection.provider === 'microsoft' &&
+  (connection.writeAuthorized === false ||
+    connection.calendars.some((calendar) => calendar.writebackError === 'permissions_missing'))
 const recoveryLabel = (connection: Connection): UiText =>
-  needsReconnect(connection)
+  needsReconnect(connection) || needsMicrosoftWritePermission(connection)
     ? msg('Reconnect {0} Calendar', { '0': providerName(connection) })
     : needsSyncPermission(connection)
       ? 'Enable calendar synchronization'
@@ -115,6 +120,24 @@ const noticeFor = (search: URLSearchParams): UiText | null => {
       })
     : null
 }
+
+const writableCalendar = (provider: Connection['provider'], calendar: Calendar) =>
+  provider === 'microsoft'
+    ? calendar.accessRole === 'writer'
+    : calendar.accessRole === 'owner' || (provider === 'caldav' && calendar.accessRole === 'writer')
+
+const writebackMessages = {
+  calendar_removed: 'This calendar is no longer available. Refresh the calendar list.',
+  calendar_unavailable:
+    'Microsoft Calendar could not write to this calendar. Check its access in Outlook.',
+  needs_reauth: 'Reconnect Microsoft Calendar to restore access.',
+  permissions_missing: 'Reconnect Microsoft Calendar and allow the requested permissions.',
+  provider_unavailable: 'Microsoft Calendar could not be reached. Try again shortly.',
+  rate_limited: 'Microsoft Calendar has limited requests temporarily.',
+  outcome_unknown:
+    'Hourmere could not confirm whether Microsoft created the original booking copy.',
+  event_conflict: 'Microsoft reported a conflict when creating the booking copy.',
+} as const
 
 export function CalendarsPage() {
   const { t, text, ui, formatLocale: displayLocale } = useI18n()
@@ -395,7 +418,9 @@ export function CalendarsPage() {
               const reconnect = needsReconnect(connection)
               const syncPermission = needsSyncPermission(connection)
               const permissionReview = needsPermissionReview(connection)
-              const authorizationRequired = reconnect || syncPermission || permissionReview
+              const microsoftWritePermission = needsMicrosoftWritePermission(connection)
+              const authorizationRequired =
+                reconnect || syncPermission || permissionReview || microsoftWritePermission
               const providerEnabled =
                 connection.provider === 'caldav'
                   ? state.data.caldavEnabled
@@ -403,6 +428,10 @@ export function CalendarsPage() {
                     ? state.data.googleEnabled
                     : state.data.microsoftEnabled
               const syncCapable = connection.syncAuthorized
+              const writeCapable =
+                connection.provider === 'microsoft'
+                  ? connection.writeAuthorized === true
+                  : syncCapable
               const conflictCount = connection.calendars.filter(
                 (calendar) => calendar.checkConflicts,
               ).length
@@ -411,13 +440,11 @@ export function CalendarsPage() {
               )
               const destinationAvailable =
                 destination &&
-                connection.provider !== 'microsoft' &&
-                syncCapable &&
+                writeCapable &&
                 !reconnect &&
                 destination.available !== false &&
                 providerEnabled &&
-                (destination.accessRole === 'owner' ||
-                  (connection.provider === 'caldav' && destination.accessRole === 'writer'))
+                writableCalendar(connection.provider, destination)
               return (
                 <article className="panel stack calendar-account" key={connection.id}>
                   <header className="calendar-account-heading">
@@ -471,6 +498,11 @@ export function CalendarsPage() {
                   )}
                   {authorizationRequired && connection.provider !== 'caldav' && (
                     <div className="stack">
+                      {microsoftWritePermission && !reconnect && (
+                        <p>
+                          {t('Reconnect Microsoft Calendar to allow writing new booking events.')}
+                        </p>
+                      )}
                       <p>{ui(accountHint(connection))}</p>
                       {providerEnabled && (
                         <a
@@ -577,6 +609,26 @@ export function CalendarsPage() {
                             </dd>
                           </div>
                         </dl>
+                        {calendar.writebackStatus && calendar.writebackStatus !== 'succeeded' && (
+                          <p
+                            className={
+                              calendar.writebackStatus === 'failed'
+                                ? 'alert alert-error'
+                                : undefined
+                            }
+                          >
+                            {t(
+                              calendar.writebackStatus === 'failed'
+                                ? 'A booking copy needs attention.'
+                                : calendar.writebackStatus === 'retrying'
+                                  ? 'Hourmere will retry writing a booking copy.'
+                                  : 'A booking copy is waiting to be written.',
+                            )}{' '}
+                            {calendar.writebackError &&
+                              Object.hasOwn(writebackMessages, calendar.writebackError) &&
+                              t(writebackMessages[calendar.writebackError])}
+                          </p>
+                        )}
                         {connection.provider === 'google' &&
                           calendar.accessRole === 'owner' &&
                           state.data.destinationCalendarId === calendar.id &&
@@ -691,41 +743,40 @@ export function CalendarsPage() {
                                 </>
                               )
                             )}
-                            {connection.provider !== 'microsoft' &&
-                              (calendar.accessRole === 'owner' ||
-                                (connection.provider === 'caldav' &&
-                                  calendar.accessRole === 'writer') ||
-                                state.data.destinationCalendarId === calendar.id) && (
-                                <button
-                                  type="button"
-                                  className="button button-small"
-                                  aria-describedby={
-                                    state.data.hasProfile ||
-                                    state.data.destinationCalendarId === calendar.id
-                                      ? undefined
-                                      : 'calendar-profile-hint'
-                                  }
-                                  disabled={
-                                    state.data.destinationCalendarId !== calendar.id &&
-                                    (!state.data.hasProfile ||
-                                      calendar.available === false ||
-                                      connection.status !== 'active' ||
-                                      !providerEnabled ||
-                                      !connection.syncAuthorized)
-                                  }
-                                  onClick={() =>
-                                    calendarAction(
-                                      calendar.id,
-                                      'destination',
-                                      state.data.destinationCalendarId === calendar.id,
-                                    )
-                                  }
-                                >
-                                  {state.data.destinationCalendarId === calendar.id
-                                    ? t('Stop writing bookings here')
-                                    : t('Write new bookings here')}
-                                </button>
-                              )}
+                            {(state.data.destinationCalendarId === calendar.id ||
+                              (writableCalendar(connection.provider, calendar) &&
+                                (connection.provider !== 'microsoft' || writeCapable))) && (
+                              <button
+                                type="button"
+                                className="button button-small"
+                                aria-describedby={
+                                  state.data.hasProfile ||
+                                  state.data.destinationCalendarId === calendar.id
+                                    ? undefined
+                                    : 'calendar-profile-hint'
+                                }
+                                disabled={
+                                  state.data.destinationCalendarId !== calendar.id &&
+                                  (!state.data.hasProfile ||
+                                    calendar.available === false ||
+                                    connection.status !== 'active' ||
+                                    !providerEnabled ||
+                                    !writeCapable ||
+                                    (connection.provider === 'microsoft' && reconnect))
+                                }
+                                onClick={() =>
+                                  calendarAction(
+                                    calendar.id,
+                                    'destination',
+                                    state.data.destinationCalendarId === calendar.id,
+                                  )
+                                }
+                              >
+                                {state.data.destinationCalendarId === calendar.id
+                                  ? t('Stop writing bookings here')
+                                  : t('Write new bookings here')}
+                              </button>
+                            )}
                           </fieldset>
                         )}
                       </li>
@@ -921,7 +972,7 @@ export function CalendarsPage() {
             >
               <p id="microsoft-calendar-permissions">
                 {t(
-                  'Microsoft will ask for your account identity, continuing access and permission to read basic calendar details. Hourmere lists your calendars and checks busy times on the calendars you select. Booking event writes are unavailable. Connecting is separate from signing in.',
+                  'Microsoft will ask for your account identity, continuing access and permission to read and write calendar events. Hourmere checks busy times on the calendars you select and creates private booking copies only on your chosen booking calendar. Connecting is separate from signing in.',
                 )}
               </p>
               {microsoftRecovery && <p>{ui(accountHint(microsoftRecovery))}</p>}

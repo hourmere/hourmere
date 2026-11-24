@@ -225,7 +225,7 @@ describe.skipIf(!url)('separate Microsoft calendar connections (real Postgres)',
   it('connects and refreshes when a successful response omits scope, but refuses an explicit empty grant', async () => {
     delete microsoft.controls.token.scope
     const row = await connect()
-    expect(row.scopes).toContain('Calendars.ReadBasic')
+    expect(row.scopes).toContain('Calendars.ReadWrite')
     now += 3_600_001
     microsoft.controls.token.expires_in = 7200
     await refreshCalendarList(deps, owner, row.id)

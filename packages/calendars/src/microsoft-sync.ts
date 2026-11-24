@@ -2,8 +2,7 @@ import type { Principal } from '@hourmere/auth'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { sql } from 'kysely'
 import { z } from 'zod'
-import { calendarEncryptionKey, encryptCredential } from './credentials.ts'
-import { type CalendarDeps, lockUser, readTokens, saveCalendars, tokenAad } from './index.ts'
+import { type CalendarDeps, getMicrosoftCalendarToken, lockUser, saveCalendars } from './index.ts'
 import {
   hasMicrosoftCalendarListAccess,
   MicrosoftCalendarError,
@@ -46,7 +45,8 @@ export async function syncMicrosoftCalendar(
   principal?: Principal,
 ) {
   if (!deps.microsoft) return
-  const { client, encryptionKey } = deps.microsoft
+  const { microsoft } = deps
+  const { client } = microsoft
   const clock = deps.now ?? Date.now
   const ownership = deps.db
     .selectFrom('calendars as c')
@@ -74,7 +74,7 @@ export async function syncMicrosoftCalendar(
         .execute()
     const connection = await trx
       .selectFrom('calendar_connections')
-      .select(['credentials', 'external_account_id', 'scopes', 'status'])
+      .select(['id', 'credentials', 'external_account_id', 'scopes', 'status'])
       .where('id', '=', owner.connectionId)
       .where('user_id', '=', owner.userId)
       .where('provider', '=', 'microsoft')
@@ -109,43 +109,17 @@ export async function syncMicrosoftCalendar(
       if (connection.status !== 'active') return new MicrosoftCalendarError('needs_reauth')
       if (!hasMicrosoftCalendarListAccess(connection.scopes))
         throw new MicrosoftCalendarError('permissions_missing')
-      const key = calendarEncryptionKey(encryptionKey)
-      let previous: ReturnType<typeof readTokens>
-      try {
-        previous = readTokens(
-          key,
-          owner.userId,
-          connection.external_account_id,
-          connection.credentials,
-          'microsoft',
-        )
-      } catch {
-        throw new MicrosoftCalendarError('needs_reauth')
-      }
-      accessToken = previous.accessToken
-      if (previous.expiresAt <= clock() + 60_000) {
-        const next = await client.refresh(previous.refreshToken, signal)
-        const scopes = next.scopes ?? connection.scopes
-        await trx
-          .updateTable('calendar_connections')
-          .set({
-            scopes,
-            credentials: encryptCredential(
-              key,
-              tokenAad(owner.userId, connection.external_account_id, 'microsoft'),
-              JSON.stringify({
-                accessToken: next.accessToken,
-                refreshToken: next.refreshToken ?? previous.refreshToken,
-                expiresAt: next.expiresAt,
-              }),
-            ),
-          })
-          .where('id', '=', owner.connectionId)
-          .execute()
-        if (!hasMicrosoftCalendarListAccess(scopes))
-          throw new MicrosoftCalendarError('permissions_missing')
-        accessToken = next.accessToken
-      }
+      const { token, scopes } = await getMicrosoftCalendarToken(
+        microsoft,
+        trx,
+        owner.userId,
+        connection,
+        clock,
+        signal,
+      )
+      if (!hasMicrosoftCalendarListAccess(scopes))
+        throw new MicrosoftCalendarError('permissions_missing')
+      accessToken = token
       const now = Temporal.Instant.fromEpochMilliseconds(clock())
       const day = now.toZonedDateTimeISO('UTC').startOfDay().toInstant()
       const requiredEnd = day.add({ hours: 403 * 24 })

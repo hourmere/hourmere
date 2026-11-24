@@ -41,6 +41,9 @@ export const CalendarConnection = z
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
     syncAuthorized: z.boolean(),
+    writeAuthorized: z.boolean().optional().openapi({
+      description: 'For Microsoft accounts, whether the connection has granted event write access.',
+    }),
     calendars: z.array(
       z.object({
         id: z.uuid(),
@@ -52,6 +55,20 @@ export const CalendarConnection = z
         lastSyncedAt: z.iso.datetime().nullable(),
         syncError: z.string().nullable(),
         available: z.boolean(),
+        writebackStatus: z.enum(['pending', 'retrying', 'failed', 'succeeded']).optional(),
+        writebackError: z
+          .enum([
+            'calendar_removed',
+            'calendar_unavailable',
+            'needs_reauth',
+            'permissions_missing',
+            'provider_unavailable',
+            'rate_limited',
+            'outcome_unknown',
+            'event_conflict',
+          ])
+          .nullable()
+          .optional(),
       }),
     ),
   })
@@ -139,7 +156,7 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
         tags: ['Calendars'],
         summary: 'Start a separate Microsoft Calendar connection',
         description:
-          'Requires a same-origin browser session. Requests identity, continuing access and Calendars.ReadBasic to list calendars and read busy times on selected calendars. Microsoft calendars are read-only in Hourmere.',
+          'Requires a same-origin browser session. Requests identity, continuing access and Calendars.ReadWrite to list calendars, read busy times on selected calendars and create booking events on a chosen calendar. Reconnect to upgrade a read-only connection.',
         security: [{ session: [] }],
         middleware: sessionWrite,
         request: emptyBody,
@@ -224,7 +241,7 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
         path: '/api/v1/calendar-destination',
         operationId: 'setCalendarDestination',
         tags: ['Calendars'],
-        summary: 'Choose the owned Google calendar for new booking events',
+        summary: 'Choose a calendar for new booking events',
         description: 'Sessions and API keys change only the caller’s own writeback destination.',
         security: authenticated,
         middleware: protectedWrite,
@@ -239,7 +256,7 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
           ...errorResponses({
             403: `${CROSS_ORIGIN_WRITE} or session_required when the browser session becomes invalid during the request`,
             404: 'calendar_not_found or profile_not_found',
-            409: 'calendar_not_writable',
+            409: 'calendar_not_writable, microsoft_calendar_not_writable, microsoft_calendar_permissions_missing, microsoft_calendar_needs_reauth, microsoft_calendar_removed, microsoft_calendar_disabled, caldav_calendar_unavailable or caldav_calendar_disabled',
           }),
         },
       }),

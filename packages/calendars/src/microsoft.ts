@@ -3,6 +3,7 @@ import { addAbortListener } from 'node:events'
 import { setTimeout } from 'node:timers/promises'
 import { isSingleLineText } from '@hourmere/scheduling/text'
 import { z } from 'zod'
+import { microsoftEventMethods } from './microsoft-events.ts'
 import {
   CalendarProviderError,
   type CalendarTokens,
@@ -16,7 +17,7 @@ export const MICROSOFT_CALENDAR_SCOPES = [
   'openid',
   'email',
   'offline_access',
-  'https://graph.microsoft.com/Calendars.ReadBasic',
+  'https://graph.microsoft.com/Calendars.ReadWrite',
 ] as const
 
 export class MicrosoftCalendarError extends CalendarProviderError {
@@ -247,6 +248,10 @@ export function hasMicrosoftCalendarListAccess(scopes: readonly string[] | undef
   )
 }
 
+export function hasMicrosoftCalendarWriteAccess(scopes: readonly string[] | undefined) {
+  return scopes?.includes('Calendars.ReadWrite') ?? false
+}
+
 export function createMicrosoftCalendarClient(
   config: { clientId: string; clientSecret: string; publicUrl: string },
   request: typeof fetch = fetch,
@@ -328,7 +333,10 @@ export function createMicrosoftCalendarClient(
             ...body,
             client_id: config.clientId,
             client_secret: config.clientSecret,
-            scope: MICROSOFT_CALENDAR_SCOPES.join(' '),
+            // Refresh within the existing grant, including older read-only connections.
+            ...(body.grant_type === 'authorization_code'
+              ? { scope: MICROSOFT_CALENDAR_SCOPES.join(' ') }
+              : {}),
           }),
         },
         signal,
@@ -354,6 +362,7 @@ export function createMicrosoftCalendarClient(
   }
 
   return {
+    ...microsoftEventMethods(json),
     authorizationUrl(state: string, verifier: string, access: 'list' | 'sync' = 'list') {
       if (access !== 'list') throw new MicrosoftCalendarError('permissions_missing')
       const url = new URL('https://login.microsoftonline.com/common/oauth2/v2.0/authorize')

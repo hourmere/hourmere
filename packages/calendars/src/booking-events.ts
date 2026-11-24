@@ -7,6 +7,11 @@ import { GOOGLE_CALENDAR_SYNC_SCOPES, GoogleCalendarError } from './google.ts'
 import type { GoogleEventWrite } from './google-events.ts'
 import { writeGroupSlotCalendar } from './group-slot-events.ts'
 import type { CalendarDeps } from './index.ts'
+import {
+  recordMicrosoftBookingDestinations,
+  recordMicrosoftGroupDestination,
+  writeMicrosoftCalendar,
+} from './microsoft-writeback.ts'
 import { useGoogleConnection } from './sync.ts'
 
 export const BOOKING_CALENDAR_JOB = 'booking-calendar'
@@ -175,7 +180,10 @@ export async function recoverBookingCalendarPage(
 }
 
 /** Stately queue keeps one follow-up when another change commits during an in-flight write. */
-export function calendarBookingNotifier(queue: CalendarBookingQueue) {
+export function calendarBookingNotifier(
+  queue: CalendarBookingQueue,
+  { google = true, now = Date.now }: { google?: boolean; now?: () => number } = {},
+) {
   return async (trx: Db, event: BookingEvent) => {
     if (!trx.isTransaction) throw new Error('Calendar jobs require the booking transaction')
     if (await isImportedBooking(trx, event.bookingId)) return
@@ -185,6 +193,11 @@ export function calendarBookingNotifier(queue: CalendarBookingQueue) {
       .where('id', '=', event.bookingId)
       .executeTakeFirst()
     if (seat?.group_slot_id) {
+      const microsoft =
+        event.type !== 'rescheduled' &&
+        event.type !== 'cancelled' &&
+        (await recordMicrosoftGroupDestination(trx, seat.group_slot_id, now()))
+      if (!google && !microsoft) return
       const slots = new Set([seat.group_slot_id])
       if (event.type === 'rescheduled' && seat.rescheduled_from_id) {
         const source = await trx
@@ -209,8 +222,14 @@ export function calendarBookingNotifier(queue: CalendarBookingQueue) {
         .select('root_booking_id')
         .where('root_booking_id', '=', root)
         .executeTakeFirst()
-      if (!automatic && event.type !== 'cancelled')
+      if (google && !automatic && event.type !== 'cancelled')
         await recordBookingDestinations(trx, event.bookingId, root)
+      const microsoft =
+        !automatic &&
+        event.bookingId === root &&
+        event.type !== 'cancelled' &&
+        (await recordMicrosoftBookingDestinations(trx, root, now()))
+      if (!google && !microsoft) return
       await queue.enqueue(
         BOOKING_CALENDAR_JOB,
         { bookingId: root },
@@ -232,9 +251,13 @@ export async function writeBookingCalendar(
     .select('group_slot_id')
     .where('id', '=', bookingId)
     .executeTakeFirst()
-  if (seat?.group_slot_id) return writeGroupSlotCalendar(deps, seat.group_slot_id, signal)
+  if (seat?.group_slot_id) {
+    await writeMicrosoftCalendar(deps, { groupSlotId: seat.group_slot_id }, signal)
+    return writeGroupSlotCalendar(deps, seat.group_slot_id, signal)
+  }
   const root = await rootOf(deps.db, bookingId)
   if (!root) return
+  await writeMicrosoftCalendar(deps, { bookingId: root }, signal)
   // Automatic roots have exactly one provider-create authority, including unknown imports.
   const automatic = await deps.db
     .selectFrom('booking_conferences')

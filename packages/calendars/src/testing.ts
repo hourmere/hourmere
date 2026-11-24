@@ -245,6 +245,9 @@ export function fakeMicrosoft(now?: () => number) {
     listStatus: 200,
     listHook: undefined as ((url: URL) => Promise<Response>) | undefined,
     viewHook: undefined as ((url: URL) => Response | Promise<Response>) | undefined,
+    eventHook: undefined as
+      | ((url: URL, init: RequestInit) => Response | Promise<Response>)
+      | undefined,
   }
   const calls: { url: URL; init: RequestInit }[] = []
   const request: typeof fetch = async (input, init = {}) => {
@@ -254,6 +257,12 @@ export function fakeMicrosoft(now?: () => number) {
       return Response.json(controls.token, { status: controls.tokenStatus })
     if (url.href === 'https://graph.microsoft.com/oidc/userinfo')
       return Response.json(controls.identity)
+    if (
+      url.origin === 'https://graph.microsoft.com' &&
+      /^\/v1\.0\/me\/calendars\/[^/]+\/events$/u.test(url.pathname) &&
+      controls.eventHook
+    )
+      return controls.eventHook(url, init)
     if (
       url.origin === 'https://graph.microsoft.com' &&
       /^\/v1\.0\/me\/calendars\/[^/]+\/calendarView\/delta(?:\(\))?$/u.test(url.pathname) &&

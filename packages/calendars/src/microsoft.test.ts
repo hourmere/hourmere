@@ -11,7 +11,7 @@ const config = {
 const signal = () => AbortSignal.timeout(1000)
 
 describe('Microsoft OAuth and Graph response boundary', () => {
-  it('requests only list access with PKCE and a distinct calendar callback', () => {
+  it('requests calendar read/write consent with PKCE and a distinct calendar callback', () => {
     const url = new URL(
       createMicrosoftCalendarClient(config).authorizationUrl('fake-state', 'fake-verifier'),
     )
@@ -22,7 +22,8 @@ describe('Microsoft OAuth and Graph response boundary', () => {
       'http://localhost:5173/api/calendar/microsoft/callback',
     )
     expect(url.searchParams.get('scope')).toBe(MICROSOFT_CALENDAR_SCOPES.join(' '))
-    expect(url.searchParams.get('scope')).not.toMatch(/Calendars.ReadWrite|User.Read/)
+    expect(url.searchParams.get('scope')).toContain('Calendars.ReadWrite')
+    expect(url.searchParams.get('scope')).not.toContain('User.Read')
     expect(url.searchParams.get('response_mode')).toBe('query')
     expect(url.searchParams.get('code_challenge_method')).toBe('S256')
     expect(url.searchParams.get('code_challenge')).toBe(
@@ -92,9 +93,10 @@ describe('Microsoft OAuth and Graph response boundary', () => {
       'openid',
       'email',
       'offline_access',
-      'Calendars.ReadBasic',
+      'Calendars.ReadWrite',
     ])
     expect((await fake.client.refresh('fake-refresh', signal())).scopes).toBeUndefined()
+    expect(new URLSearchParams(String(fake.calls[1]?.init.body)).has('scope')).toBe(false)
     fake.controls.token.scope = ''
     expect((await fake.client.exchange('fake-code', 'fake-verifier', signal())).scopes).toEqual([])
     fake.controls.token.scope = 'openid email'
