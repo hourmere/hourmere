@@ -31,7 +31,7 @@ import {
 } from '../../../packages/db/src/sso-storage-fixtures.ts'
 import { createFinalizeFixture } from '../../../packages/scheduling/src/meeting-poll-finalize-fixture.ts'
 import { createApp } from './app.ts'
-import { mcpEndpoint } from './mcp/endpoint.ts'
+import { mcpEndpoint, oauthLimits } from './mcp/endpoint.ts'
 import { meetingPollHostTools } from './mcp/meeting-poll-host.ts'
 import { mcpOAuthCleanupJob, mcpOAuthRoutes } from './mcp/oauth.ts'
 import { whoamiTool } from './mcp/whoami.ts'
@@ -1069,8 +1069,18 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
     const s = await session(),
       tokens = await connected(s),
       server = app()
-    for (let i = 0; i < 120; i++)
+    // Three of the 120 allowed calls are real requests, so real calls are shown to count; the
+    // other 117 are counted directly instead of as full requests, which ran near the timeout.
+    for (let i = 0; i < 2; i++)
       expect((await server.request(mcpRequest(tokens.access_token))).status).toBe(200)
+    const resolved = await createMcpOAuthResolver({ auth, db, publicUrl: BASE, ssoCapabilities })(
+      mcpRequest(tokens.access_token),
+    )
+    if (!resolved.ok) throw new Error(`token did not resolve: ${resolved.error}`)
+    for (let i = 0; i < 117; i++)
+      expect(oauthLimits.hit(resolved.principal.oauthConsentId)).toBeUndefined()
+    // The 120th call is still served; only the one after it is refused.
+    expect((await server.request(mcpRequest(tokens.access_token))).status).toBe(200)
     const limited = await server.request(mcpRequest(tokens.access_token))
     expect(limited.status).toBe(429)
     expect(await limited.json()).toEqual({ error: 'rate_limited' })
