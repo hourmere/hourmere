@@ -289,7 +289,9 @@ export function authAuditRecords(scimResourcesEnabled = false): BetterAuthPlugin
                   // key cannot be created or moved into a team during its suspension.
                   if (typeof owner === 'string' && isUuid(owner)) {
                     const { suspended } = await trx
-                      .selectNoFrom(scimSuspended(keyTarget, owner).as('suspended'))
+                      .selectNoFrom(
+                        scimSuspended(keyTarget, owner, scimResourcesEnabled).as('suspended'),
+                      )
                       .executeTakeFirstOrThrow()
                     if (suspended)
                       throw new APIError('FORBIDDEN', {

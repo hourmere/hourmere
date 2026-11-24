@@ -463,10 +463,9 @@ describe('the calendars page', () => {
 
   it.each([
     ['google', false, 'Not enabled — calendar list only.'],
-    ['microsoft', false, 'Not available — calendar list only.'],
-    ['microsoft', true, 'Not available — calendar list only.'],
+    ['microsoft', false, 'Paused until you reconnect this account.'],
   ] as const)(
-    'keeps %s list-only capability explicit when sync authorization is %s',
+    'explains unavailable %s sync when sync authorization is %s',
     async (provider, syncAuthorized, expected) => {
       const calendar = connection.calendars[0] as NonNullable<(typeof connection.calendars)[0]>
       fakeApi({
@@ -494,7 +493,9 @@ describe('the calendars page', () => {
       expect(within(article).queryByRole('button', { name: 'Write new bookings here' })).toBeNull()
       expect(within(article).queryByRole('checkbox')).toBeNull()
       if (provider === 'microsoft') {
-        expect(within(article).getByText(/lists calendars only/)).toBeDefined()
+        expect(
+          within(article).getByRole('link', { name: 'Reconnect Microsoft Calendar' }),
+        ).toBeDefined()
         expect(
           within(article).queryByRole('button', { name: 'Enable calendar synchronization' }),
         ).toBeNull()
@@ -730,7 +731,7 @@ describe('the calendars page', () => {
               syncAuthorized: true,
               calendars: [{ ...calendar, timeZone }],
             },
-            ...(!timeZone || provider === 'microsoft'
+            ...(!timeZone
               ? [
                   {
                     ...connection,
@@ -743,7 +744,7 @@ describe('the calendars page', () => {
               : []),
           ],
           true,
-          false,
+          provider === 'microsoft',
           calendar.id,
         ),
         'GET /api/v1/schedules': () =>
@@ -1205,19 +1206,33 @@ describe('the calendars page', () => {
     expect(screen.getByRole('button', { name: 'Connect Google Calendar' })).toBeDefined()
   })
 
-  it('connects Microsoft separately and exposes only its available calendar-list actions', async () => {
+  it('connects Microsoft separately and allows selecting a read-only conflict calendar', async () => {
     const user = userEvent.setup()
     const microsoft: Schemas['CalendarConnection'] = {
       ...connection,
       id: 'b0000000-0000-7000-8000-000000000001',
       provider: 'microsoft',
       accountEmail: 'outlook@example.com',
+      syncAuthorized: true,
     }
+    const calendar = microsoft.calendars[0] as Schemas['CalendarConnection']['calendars'][number]
+    let selected = false
     const microsoftUrl =
       'https://login.microsoftonline.com/common/oauth2/v2.0/authorize?state=fake-microsoft-state'
     const requests = fakeApi({
       ...signedIn,
-      ...list([microsoft], false, true),
+      ...profile(),
+      'GET /api/v1/calendar-connections': () =>
+        json(200, {
+          data: [{ ...microsoft, calendars: [{ ...calendar, checkConflicts: selected }] }],
+          googleEnabled: false,
+          microsoftEnabled: true,
+          destinationCalendarId: null,
+        }),
+      [`PATCH /api/v1/calendars/${calendar.id}`]: () => {
+        selected = true
+        return new Response(null, { status: 204 })
+      },
       'POST /api/v1/calendar-connections/microsoft/authorize': () =>
         json(200, { authorizationUrl: microsoftUrl }),
     })
@@ -1225,12 +1240,22 @@ describe('the calendars page', () => {
     const article = (await screen.findByRole('heading', { name: 'outlook@example.com' })).closest(
       'article',
     ) as HTMLElement
-    expect(within(article).getByText(/lists calendars only/)).toBeDefined()
+    expect(definition(article, 'Busy-time sync').textContent).toBe(
+      'No calendars selected for conflict checks.',
+    )
     expect(
       within(article).queryByRole('button', { name: 'Enable calendar synchronization' }),
     ).toBeNull()
-    expect(within(article).queryByRole('checkbox')).toBeNull()
     expect(within(article).queryByRole('button', { name: /Write new bookings/ })).toBeNull()
+    await user.click(
+      within(article).getByRole('checkbox', { name: 'Check this calendar for conflicts' }),
+    )
+    expect(
+      await screen.findByText('Synchronization is not ready for selected calendars yet.'),
+    ).toBeDefined()
+    expect(requests.to(`PATCH /api/v1/calendars/${calendar.id}`)[0]?.body).toEqual({
+      checkConflicts: true,
+    })
     await user.click(screen.getByRole('button', { name: 'Connect Microsoft Calendar' }))
     await vi.waitFor(() => expect(goTo).toHaveBeenCalledWith(microsoftUrl))
     expect(requests.to('POST /api/v1/calendar-connections/microsoft/authorize')[0]?.body).toEqual(

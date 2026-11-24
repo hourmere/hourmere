@@ -78,9 +78,9 @@ saving a preset or other timing settings; an unsaved editor change has no effect
 
 ### Sync freshness and provider differences
 
-`calendar_sync_unavailable` is a request error, not a busy-time reason. For selected Google
-and CalDAV conflict calendars, missing, failed, stale (over ten minutes), incompatible or
-incomplete cached snapshots cannot establish availability. Coverage must include the queried
+`calendar_sync_unavailable` is a request error, not a busy-time reason. For selected Google,
+Microsoft and CalDAV conflict calendars, missing, failed, stale (over ten minutes), incompatible
+or incomplete cached snapshots cannot establish availability. Coverage must include the queried
 range and buffers. Personal and collective checks return this error; round-robin checks
 can omit affected hosts and still offer another eligible host. Do not interpret the error
 as “no working hours”, “no calendar configured” or “the host is busy”. Check connection
@@ -99,10 +99,10 @@ The view never fetches providers itself. **Refresh calendar list** alone is not 
   values fail sync unless the server supplies usable expanded values. Connection routes,
   app controls and production worker registration remain unavailable; these services do not
   mean a user can connect iCloud, Fastmail or Nextcloud today.
-- **Microsoft:** the shipped connection lists calendars and manages credentials; it does
-  **not yet sync busy events or write bookings**. Microsoft calendars also have **no
-  sync-freshness check** in availability. An available explanation is not proof that an
-  Outlook calendar is free or current. Check Outlook separately until busy sync is shipped.
+- **Microsoft:** selected Outlook calendars use full, bounded Graph snapshots for conflict
+  checks. Timed and all-day events use the absolute intervals returned by Graph. Reconnect
+  if consent was revoked or permissions are missing. A temporary provider failure leaves
+  availability unknown until a successful sync. [Microsoft Calendar](/docs/microsoft-calendar)
 
 ### Existing bookings and change deadlines
 
@@ -169,8 +169,8 @@ time zone, else UTC) and `durationMinutes` (defaults to the event length). The r
 
 Errors: `400 invalid_date`, `invalid_time_zone`, `invalid_duration`, `range_too_long`;
 `403 insufficient_scope`; `404 event_type_not_found`; `409 calendar_sync_unavailable` when
-selected Google/CalDAV snapshots fail freshness or coverage checks, or `409 location_unavailable` when the event’s
-default location cannot be offered.
+selected conflict calendars fail freshness or coverage checks, or `409 location_unavailable`
+when the event’s default location cannot be offered.
 
 ## MCP
 
@@ -195,8 +195,6 @@ The CLI prints the same JSON. It needs a `full` key.
 - Explanations use cached data and do not reserve a time. Provider polling can lag a new
   external event even when the snapshot passes freshness checks. Recheck before booking;
   there is no atomic transaction shared with an external calendar.
-- Google/CalDAV freshness checks do not cover Microsoft. CalDAV services remain internal,
-  and Microsoft busy synchronization remains unavailable, as described above.
 - `outside_working_hours` does not say whether weekly hours or a date override closed the time;
   check both on the schedule.
 - For a team host, a time even partly outside their working hours hides that host's
@@ -235,7 +233,7 @@ The CLI prints the same JSON. It needs a `full` key.
 - `collective_member_unavailable`：集体会议需要所有主持人空闲，请查看各人的原因。
 - `no_eligible_round_robin_host`：没有符合条件且空闲的轮值主持人；核对池的启用、资格、日程及日历状态。
 
-`calendar_sync_unavailable` 是整个请求的错误，不是忙碌原因。Google 和内部 CalDAV
+`calendar_sync_unavailable` 是整个请求的错误，不是忙碌原因。Google、Microsoft 和内部 CalDAV
 冲突日历的快照缺失、失败、超过十分钟、版本不兼容或未覆盖查询及缓冲范围时，不能
 判断为空闲。个人及集体检查返回错误；轮值可跳过受影响的人而由其他人提供时间。
 检查连接状态、按提示重新连接并等待同步成功；只刷新日历列表不能代替忙碌同步。
@@ -247,8 +245,9 @@ Google 使用服务器展开的重复事件与例外；取消、透明和本人�
 支持服务器展开的重复实例与例外，但连接界面、公开接口及生产任务注册尚未开放。
 CalDAV 排除透明和取消事件，保留暂定事件；当前同步服务没有提供已验证的日历用户
 地址，因此拒绝的事件仍保守地计为忙碌。不支持的重复规则或本地 DST 时间会令同步失败。
-Microsoft 当前仅连接、列出日历和管理凭据，没有忙碌同步、写回，**也没有同步新鲜度检查**；
-这里显示可预约不能证明 Outlook 空闲或数据新鲜。
+选中的 Microsoft 日历使用 Graph 返回的完整时段快照检查冲突，定时事件和全天事件都按
+返回的绝对时间处理。授权已撤回或权限不足时，请重新连接。服务暂时故障时，可用性在
+同步成功前保持未知。参见 [Microsoft 日历](/docs/microsoft-calendar)。
 
 这是新预约排障，不是已有预约的改期资格检查：不会排除正在改期的原预约，也不会显示
 截止时间原因。请在原预约管理页查看其保存的截止时间；后来修改事件设置不会改变它。

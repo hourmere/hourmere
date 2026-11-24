@@ -200,7 +200,9 @@ describe.skipIf(!serverUrl)('internal waitlist admission and lifecycle', () => {
   it('propagates stale calendar errors instead of treating them as empty', async () => {
     const et = await event()
     await f.schedule(et.host.userId)
-    await f.calendarBusy(et.host.userId, [['2026-11-02T08:00Z', '2026-11-02T18:00Z']])
+    await f.calendarBusy(et.host.userId, [['2026-11-02T08:00Z', '2026-11-02T18:00Z']], {
+      now: clock.subtract({ minutes: 11 }),
+    })
     await db
       .updateTable('calendar_connections')
       .set({ provider: 'google' })

@@ -413,7 +413,7 @@ describe.skipIf(!serverUrl)('round-robin scheduling', () => {
       ids = s.users.map((u) => u.id).sort(),
       stale = required(ids[0]),
       fresh = required(ids[1])
-    const calendar = await s.f.calendarBusy(stale, [])
+    const calendar = await s.f.calendarBusy(stale, [], { now: now().subtract({ minutes: 11 }) })
     const connection = await db
       .selectFrom('calendars')
       .select('connection_id')

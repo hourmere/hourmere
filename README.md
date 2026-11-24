@@ -11,6 +11,7 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 - Personal and team booking pages, including [collective meetings](https://hourmere.com/docs/collective-scheduling)
   and [round-robin scheduling](https://hourmere.com/docs/round-robin-scheduling).
 - [Google Calendar](https://hourmere.com/docs/google-calendar) busy-time sync and booking writeback.
+- [Microsoft Calendar](https://hourmere.com/docs/microsoft-calendar) busy-time conflict checks.
 - [REST](https://hourmere.com/docs/rest), [MCP](https://hourmere.com/docs/mcp) and
   [CLI](https://hourmere.com/docs/cli) access for agents and scripts.
 - [Booking waitlists](https://hourmere.com/docs/booking-waitlist) for fully booked
@@ -35,7 +36,7 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 | `packages/db` | Database access (Kysely) and SQL migrations in `packages/db/migrations`. |
 | `packages/scheduling` | Service layer shared by the REST API and the MCP server: reads and writes the database, enforces permissions, throws `DomainError`. |
 | `packages/auth` | Sign-in (Better Auth: email links, Google, Microsoft), sessions, organizations, API keys. |
-| `packages/calendars` | Separate Google Calendar OAuth, encrypted credentials, incremental busy-time sync and booking writeback. See [Google Calendar](https://hourmere.com/docs/google-calendar). |
+| `packages/calendars` | Separate calendar connections, encrypted credentials, busy-time sync and Google/CalDAV booking writeback. See [Google Calendar](https://hourmere.com/docs/google-calendar) and [Microsoft Calendar](https://hourmere.com/docs/microsoft-calendar). |
 | `packages/conferences` | Independent Zoom connections and single-host automatic meetings; see [automatic Zoom](https://hourmere.com/docs/automatic-zoom), separate from sign-in. |
 | `packages/mail` | Outgoing email: SMTP, or the server log when SMTP is not configured; booking email templates and calendar invitations. |
 | `packages/jobs` | Background jobs on Postgres (pg-boss): typed job definitions, enqueueing inside a transaction, workers. |
@@ -484,8 +485,8 @@ and linked operating guides before deploying:
 - [Meeting polls](https://hourmere.com/docs/meeting-polls) support one confirmed booking per
   poll. Group event types and one-time booking links are unsupported. Terminal polls are
   kept until explicit poll, linked-booking or organization deletion.
-- Microsoft Calendar lists calendars only; no busy-time sync or event writes. Microsoft sign-in and
-  calendar connections have not had real-account acceptance.
+- Microsoft Calendar uses bounded busy-time snapshots. Incremental sync and event writes are
+  pending. Microsoft sign-in and calendar connections have not had real-account acceptance.
 - Automatic Zoom supports personal event types and individual team event types with one
   actual host; collective and round-robin event types are unsupported.
 - [Meeting location choices](https://hourmere.com/docs/location-choices) support up to five distinct kinds

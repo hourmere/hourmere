@@ -887,7 +887,9 @@ describe.skipIf(!serverUrl)('public routes', () => {
   it('copes with busy time that Postgres clips to sub-millisecond bounds', async () => {
     // With this range the window around it ends at 2026-11-10T10:00:00.0005Z, so the busy
     // row is clipped to [10:00:00, 10:00:00.0005): one millisecond once widened, not empty.
-    await f.calendarBusy(ada.userId, [['2026-11-10T10:00:00Z', '2026-11-10T11:00:00Z']])
+    await f.calendarBusy(ada.userId, [['2026-11-10T10:00:00Z', '2026-11-10T11:00:00Z']], {
+      now: NOW,
+    })
     const slots = await get(
       '/api/v1/public/ada/intro/slots?start=2026-11-06T00:00:00Z&end=2026-11-07T10:00:00.0005Z',
     )

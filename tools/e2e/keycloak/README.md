@@ -16,11 +16,15 @@ HOURMERE_E2E_BOOTSTRAP_URL=postgres://hourmere:hourmere@localhost:5432/hourmere 
 ```
 
 The PostgreSQL bootstrap connection creates and drops a disposable Hourmere database.
-Keycloak uses an in-memory database inside its container and a random loopback
-HTTPS port. On Linux the container shares the host network and binds only to loopback,
-because adding and removing a bridge interface interrupts Chrome navigations in flight. The fixture generates a TLS certificate, an OIDC client secret and a password
-at startup. It imports [the synthetic realm](realm.json) with one exact callback and
-personas for linked sign-in, self-link, same-email sign-in and new account admission.
+Each Playwright worker starts one Keycloak container on demand, with an in-memory
+database, a TLS certificate and a loopback HTTPS port. On Linux the container shares
+the host network and binds only to loopback because changes to bridge interfaces can
+interrupt Chrome navigations. macOS publishes the HTTPS port on loopback.
+
+For each test, the fixture uses a temporary admin service account to create a fresh
+[synthetic realm](realm.json) with its own issuer, signing keys, user subjects, client
+secret, password and exact callback. It deletes the realm at teardown and checks that
+discovery returns 404. The worker removes its container when it exits.
 Team personas use the reserved `company.example.com` domain to satisfy
 the team SSO validator's public DNS syntax. The fixture seeds the verified domain in
 PostgreSQL without a DNS query. Personal sign-in uses `example.test`, an in-memory mail
@@ -48,14 +52,14 @@ catalog. Without OIDC injection, the seeded enforcement policy still blocks ordi
 team access and the sign-in page has no SSO option.
 
 The recovery cases spend a fresh mailbox ceremony on each provider repair write and
-exercise the existing operator command while the fixture IdP is down. The rotation
-case starts an ephemeral Keycloak admin service account and adds a higher-priority
-RS256 key in the disposable realm. It verifies a new signing key and a fresh JWKS
-fetch after the verifier cooldown. The outage case stops only its owned IdP and
-checks existing proof, new sign-in refusal and the ordinary mailbox boundary.
+exercise the existing operator command while the fixture IdP is down. Both outage
+cases opt into a dedicated container that they can stop. The signing-key rotation
+case also uses a dedicated container and adds a higher-priority RS256 key to its
+realm. It verifies a new signing key and a fresh JWKS fetch after the verifier cooldown.
+The outage case checks existing proof, new sign-in refusal and the ordinary mailbox boundary.
 
-PostgreSQL, the container and the browser context are disposable. Teardown
-removes the exact container created by this run and its private temporary files. Each
+The browser context and Hourmere database are disposable for every test. Container
+teardown removes the exact container it owns and its private temporary files. Each
 container carries a unique `com.hourmere.e2e.keycloak-owner` label. The fixture uses the
 exact name and label to recover ownership if Docker fails after creating a container.
-No Docker volume or shared Compose service is involved.
+Admin credentials stay in private fixture state and Docker logging is disabled.

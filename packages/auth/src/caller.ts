@@ -81,10 +81,13 @@ export function createCallerResolver({
   auth,
   db,
   ssoCapabilities = ssoHardOff,
+  scimResourcesEnabled = false,
 }: {
   auth: Auth
   db: Db
   ssoCapabilities?: TeamSsoCapabilities
+  /** No production registration. The SCIM resource test harness supplies this flag. */
+  scimResourcesEnabled?: boolean
 }): CallerResolver {
   type Membership = Pick<
     Principal,
@@ -161,7 +164,7 @@ export function createCallerResolver({
       )
       .where('m.userId', '=', userId)
       .where('m.organizationId', '=', organizationId)
-      .where((eb) => eb.not(scimSuspended(organizationId, userId)))
+      .where((eb) => eb.not(scimSuspended(organizationId, userId, scimResourcesEnabled)))
       .executeTakeFirst()
     if (!row) return undefined
     const metadata =

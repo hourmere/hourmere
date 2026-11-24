@@ -1,5 +1,6 @@
 import type { Db } from '@hourmere/db'
 import { defineJob } from '@hourmere/jobs'
+import { sql } from 'kysely'
 import { z } from 'zod'
 import {
   BOOKING_CALENDAR_JOB,
@@ -8,7 +9,8 @@ import {
 } from './booking-events.ts'
 import { writeGroupSlotCalendar } from './group-slot-events.ts'
 import type { CalendarDeps } from './index.ts'
-import { syncGoogleCalendar } from './sync.ts'
+import { syncMicrosoftCalendar } from './microsoft-sync.ts'
+import { SYNC_MAX_AGE_MS, syncGoogleCalendar } from './sync.ts'
 
 export function calendarSyncJob(deps: CalendarDeps) {
   return defineJob({
@@ -18,8 +20,20 @@ export function calendarSyncJob(deps: CalendarDeps) {
     concurrency: 2,
     retry: { limit: 5, delaySeconds: 30, backoff: true, maxDelaySeconds: 120 },
     expireInSeconds: 120,
-    handler: ({ calendarId }, { signal }) =>
-      syncGoogleCalendar(deps, calendarId, AbortSignal.any([signal, AbortSignal.timeout(60_000)])),
+    handler: async ({ calendarId }, { signal }) => {
+      const deadline = AbortSignal.any([signal, AbortSignal.timeout(60_000)])
+      const calendar =
+        deps.microsoft &&
+        (await deps.db
+          .selectFrom('calendars as c')
+          .innerJoin('calendar_connections as cc', 'cc.id', 'c.connection_id')
+          .select('cc.provider')
+          .where('c.id', '=', calendarId)
+          .executeTakeFirst())
+      if (calendar && calendar.provider === 'microsoft')
+        await syncMicrosoftCalendar(deps, calendarId, deadline)
+      else await syncGoogleCalendar(deps, calendarId, deadline)
+    },
   })
 }
 export function bookingCalendarJob(deps: CalendarDeps) {
@@ -54,17 +68,36 @@ export function calendarDispatchJob(
     schedule: { cron: '* * * * *', payload: {} },
     expireInSeconds: 120,
     handler: async (_payload, { signal }) => {
-      if (!deps.google) return
+      const providers = [
+        ...(deps.google ? ['google'] : []),
+        ...(deps.microsoft ? ['microsoft'] : []),
+      ]
+      if (!providers.length) return
       let after: string | undefined
       for (;;) {
         signal.throwIfAborted()
+        const now = (deps.now ?? Date.now)()
         const calendars = await deps.db
           .selectFrom('calendars as c')
           .innerJoin('calendar_connections as cc', 'cc.id', 'c.connection_id')
           .select('c.id')
-          .where('cc.provider', '=', 'google')
+          .where('cc.provider', 'in', providers)
           .where('cc.status', '=', 'active')
           .where('c.check_conflicts', '=', true)
+          .where(({ or, eb }) =>
+            or([
+              eb('cc.provider', '!=', 'microsoft'),
+              eb.and([
+                sql<boolean>`coalesce(c.sync_state->>'retryAt','') <= ${new Date(now).toISOString()}`,
+                or([
+                  eb('c.last_synced_at', 'is', null),
+                  eb('c.sync_error', 'is not', null),
+                  // Refresh the whole Graph view before expiry without polling it every minute.
+                  eb('c.last_synced_at', '<=', new Date(now - SYNC_MAX_AGE_MS / 2)),
+                ]),
+              ]),
+            ]),
+          )
           .$if(Boolean(after), (q) => q.where('c.id', '>', after as string))
           .orderBy('c.id')
           .limit(100)

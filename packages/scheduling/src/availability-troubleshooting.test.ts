@@ -190,7 +190,9 @@ describe.skipIf(!serverUrl)('availability troubleshooting service in Postgres', 
 
     it('calendar_busy, without calendar or event details', async () => {
       const s = await personal()
-      const busy = await f.calendarBusy(s.host.userId, [[`${day}T10:00Z`, `${day}T10:30Z`]])
+      const busy = await f.calendarBusy(s.host.userId, [[`${day}T10:00Z`, `${day}T10:30Z`]], {
+        now: now(),
+      })
       const result = await troubleshootEventAvailability(s.ctx, s.input)
       expect(at(result, '10:00')).toEqual({
         start: `${day}T10:00:00Z`,
@@ -256,7 +258,7 @@ describe.skipIf(!serverUrl)('availability troubleshooting service in Postgres', 
 
     it('collective_member_unavailable, naming the member only for managers', async () => {
       const s = await team('collective')
-      await f.calendarBusy(s.member.id, [[`${day}T10:00Z`, `${day}T10:30Z`]])
+      await f.calendarBusy(s.member.id, [[`${day}T10:00Z`, `${day}T10:30Z`]], { now: now() })
       const result = await troubleshootEventAvailability(s.ownerCtx, s.input)
       expect(result.hosts).toEqual([
         { userId: s.owner.id, name: 'Avery Owner' },
@@ -280,11 +282,11 @@ describe.skipIf(!serverUrl)('availability troubleshooting service in Postgres', 
 
     it('no_eligible_round_robin_host', async () => {
       const s = await team('round_robin')
-      await f.calendarBusy(s.owner.id, [[`${day}T10:00Z`, `${day}T10:30Z`]])
+      await f.calendarBusy(s.owner.id, [[`${day}T10:00Z`, `${day}T10:30Z`]], { now: now() })
       const partly = await troubleshootEventAvailability(s.ownerCtx, s.input)
       // One free host is enough; the busy host's reason is then omitted.
       expect(at(partly, '10:00')).toMatchObject({ status: 'available', reasons: [] })
-      await f.calendarBusy(s.member.id, [[`${day}T10:00Z`, `${day}T10:30Z`]])
+      await f.calendarBusy(s.member.id, [[`${day}T10:00Z`, `${day}T10:30Z`]], { now: now() })
       const result = await troubleshootEventAvailability(s.ownerCtx, s.input)
       expect(codes(result, '10:00')).toEqual([
         'calendar_busy',
@@ -296,10 +298,14 @@ describe.skipIf(!serverUrl)('availability troubleshooting service in Postgres', 
 
   it("keeps a team host's off-hours timings private from managers", async () => {
     const s = await team('collective')
-    await f.calendarBusy(s.member.id, [
-      [`${day}T10:00Z`, `${day}T10:30Z`],
-      [`${day}T20:07Z`, `${day}T20:23Z`],
-    ])
+    await f.calendarBusy(
+      s.member.id,
+      [
+        [`${day}T10:00Z`, `${day}T10:30Z`],
+        [`${day}T20:07Z`, `${day}T20:23Z`],
+      ],
+      { now: now() },
+    )
     await f.booking(s.t.id, [s.member.id], `${day}T21:00Z`, `${day}T21:30Z`)
     const verify = async (run: Troubleshoot) => {
       const result = await run(s.ownerCtx, s.input)
@@ -349,10 +355,14 @@ describe.skipIf(!serverUrl)('availability troubleshooting service in Postgres', 
       .set({ buffer_before_minutes: 30, buffer_after_minutes: 30 })
       .where('id', '=', s.event.id)
       .execute()
-    await f.calendarBusy(s.member.id, [
-      [`${day}T12:10Z`, `${day}T12:40Z`],
-      [`${day}T20:00Z`, `${day}T20:30Z`],
-    ])
+    await f.calendarBusy(
+      s.member.id,
+      [
+        [`${day}T12:10Z`, `${day}T12:40Z`],
+        [`${day}T20:00Z`, `${day}T20:30Z`],
+      ],
+      { now: now() },
+    )
     const memberCodes = (result: TroubleshootAvailabilityResult, time: string) =>
       at(result, time)
         ?.reasons.filter((reason) => reason.hostUserId === s.member.id)
@@ -392,7 +402,7 @@ describe.skipIf(!serverUrl)('availability troubleshooting service in Postgres', 
 
   it('still shows hosts their own off-hours timings on personal event types', async () => {
     const s = await personal()
-    await f.calendarBusy(s.host.userId, [[`${day}T20:00Z`, `${day}T20:30Z`]])
+    await f.calendarBusy(s.host.userId, [[`${day}T20:00Z`, `${day}T20:30Z`]], { now: now() })
     const result = await troubleshootEventAvailability(s.ctx, s.input)
     expect(codes(result, '20:00')).toEqual(['outside_working_hours', 'calendar_busy'])
   })
@@ -508,7 +518,7 @@ describe.skipIf(!serverUrl)('availability troubleshooting service in Postgres', 
 
   it('serializes only allowlisted fields and host names only for team event types', async () => {
     const s = await personal()
-    await f.calendarBusy(s.host.userId, [[`${day}T10:00Z`, `${day}T10:30Z`]])
+    await f.calendarBusy(s.host.userId, [[`${day}T10:00Z`, `${day}T10:30Z`]], { now: now() })
     const verify = async (run: Troubleshoot) => {
       const result = await run(s.ctx, s.input)
       expect(Object.keys(result).sort()).toEqual([

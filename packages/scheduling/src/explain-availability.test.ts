@@ -203,7 +203,7 @@ describe.skipIf(!serverUrl)('availability explanations in Postgres', () => {
       .execute()
     // Only the owner can host Meet, and is busy after 10:00; the member is free all morning.
     await f.meetDestination(s.owner.id)
-    await f.calendarBusy(s.owner.id, [['2026-11-02T10:00Z', '2026-11-02T12:00Z']])
+    await f.calendarBusy(s.owner.id, [['2026-11-02T10:00Z', '2026-11-02T12:00Z']], { now: now() })
     const meet = { db, now, automaticMeet: true }
     const ctx = { ...s.ctx, automaticMeet: true }
     const publicQuery = {
@@ -258,7 +258,9 @@ describe.skipIf(!serverUrl)('availability explanations in Postgres', () => {
         eventTypeId: otherEvent,
       },
     )
-    await f.calendarBusy(s.host.userId, [['2026-11-02T10:10Z', '2026-11-02T10:20Z']])
+    await f.calendarBusy(s.host.userId, [['2026-11-02T10:10Z', '2026-11-02T10:20Z']], {
+      now: now(),
+    })
     const slots = await explainEventAvailability(s.ctx, s.query)
     expect(codes(at(slots, '09:00'))).toEqual(['host_conflict'])
     expect(codes(at(slots, '10:00'))).toEqual(['calendar_busy'])
@@ -405,8 +407,10 @@ describe.skipIf(!serverUrl)('availability explanations in Postgres', () => {
     'matches normal %s slots and suppresses irrelevant host failures when a round-robin host is free',
     async (mode) => {
       const s = await team(mode)
-      await f.calendarBusy(s.owner.id, [['2026-11-02T09:00Z', '2026-11-02T09:30Z']])
-      await f.calendarBusy(s.member.id, [['2026-11-02T09:30Z', '2026-11-02T10:00Z']])
+      await f.calendarBusy(s.owner.id, [['2026-11-02T09:00Z', '2026-11-02T09:30Z']], { now: now() })
+      await f.calendarBusy(s.member.id, [['2026-11-02T09:30Z', '2026-11-02T10:00Z']], {
+        now: now(),
+      })
       const slots = await explainEventAvailability(s.ctx, s.query)
       const ordinary = await listPublicTeamSlots(
         { db, now },
@@ -437,7 +441,9 @@ describe.skipIf(!serverUrl)('availability explanations in Postgres', () => {
 
   it('clips blocking intervals and projects only safe fields for managers', async () => {
     const s = await team('collective')
-    const busy = await f.calendarBusy(s.owner.id, [['2026-11-02T08:00Z', '2026-11-02T09:10Z']])
+    const busy = await f.calendarBusy(s.owner.id, [['2026-11-02T08:00Z', '2026-11-02T09:10Z']], {
+      now: now(),
+    })
     const booking = await f.booking(
       s.team.id,
       [s.member.id],
@@ -592,7 +598,7 @@ describe.skipIf(!serverUrl)('availability explanations in Postgres', () => {
 
   it('keeps a stale round-robin member neutral and matches the normal failure when no fresh slot is offered', async () => {
     const s = await team('round_robin')
-    const busy = await f.calendarBusy(s.owner.id, [])
+    const busy = await f.calendarBusy(s.owner.id, [], { now: now().subtract({ minutes: 11 }) })
     await db
       .updateTable('calendar_connections')
       .set({ provider: 'google' })
@@ -605,7 +611,7 @@ describe.skipIf(!serverUrl)('availability explanations in Postgres', () => {
     expect(
       slots.flatMap((slot) => slot.reasons).some((reason) => reason.hostUserId === s.owner.id),
     ).toBe(false)
-    await f.calendarBusy(s.member.id, [['2026-11-02T08:00Z', '2026-11-02T13:00Z']])
+    await f.calendarBusy(s.member.id, [['2026-11-02T08:00Z', '2026-11-02T13:00Z']], { now: now() })
     await expect(explainEventAvailability(s.ctx, s.query)).rejects.toMatchObject({
       code: 'calendar_sync_unavailable',
     })
@@ -762,9 +768,11 @@ describe.skipIf(!serverUrl)('availability explanations in Postgres', () => {
               .execute()
           }
           const busyStart = start.add({ minutes: 60 + random(4) * 30 })
-          await f.calendarBusy(host.id, [
-            [busyStart.toString(), busyStart.add({ minutes: 25 }).toString()],
-          ])
+          await f.calendarBusy(
+            host.id,
+            [[busyStart.toString(), busyStart.add({ minutes: 25 }).toString()]],
+            { now: clock },
+          )
           if (random(2) === 0)
             await f.booking(
               s.team.id,

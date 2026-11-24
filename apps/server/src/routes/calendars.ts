@@ -139,7 +139,7 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
         tags: ['Calendars'],
         summary: 'Start a separate Microsoft Calendar connection',
         description:
-          'Requires a same-origin browser session. Requests identity, continuing access and Calendars.ReadBasic to list calendars. This connection does not synchronize busy times or write events.',
+          'Requires a same-origin browser session. Requests identity, continuing access and Calendars.ReadBasic to list calendars and read busy times on selected calendars. Microsoft calendars are read-only in Hourmere.',
         security: [{ session: [] }],
         middleware: sessionWrite,
         request: emptyBody,
@@ -179,7 +179,7 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
             400: 'invalid_request',
             403: `${CROSS_ORIGIN_WRITE} or session_required when the browser session becomes invalid during the request`,
             404: 'calendar_not_found',
-            409: 'google_calendar_permissions_missing or calendar_events_unreadable',
+            409: 'google_calendar_permissions_missing, microsoft_calendar_permissions_missing, microsoft_calendar_disabled or calendar_events_unreadable',
           }),
         },
       }),
@@ -209,7 +209,7 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
           ...errorResponses({
             403: `${CROSS_ORIGIN_WRITE} or session_required when the browser session becomes invalid during the request`,
             404: 'calendar_not_found',
-            409: 'calendar_sync_disabled or google_calendar_provider_unavailable',
+            409: 'calendar_sync_disabled, google_calendar_provider_unavailable, microsoft_calendar_provider_unavailable, microsoft_calendar_needs_reauth, microsoft_calendar_permissions_missing or microsoft_calendar_disabled',
           }),
         },
       }),
