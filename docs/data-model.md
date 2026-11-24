@@ -1228,12 +1228,14 @@ account deletion; a subject-keyed JIT check adds its column there in the step th
 - **Mailbox tokens** store only the SHA-256 digest of the emailed token: one per attempt,
   issued only while the attempt awaits its mailbox proof, valid until the earlier of the
   attempt's expiry and 300 seconds, consumed once before expiry. Resending replaces it.
-- **The replay cache** keeps the SHA-256 digest of each consumed SAML request, response and
-  assertion ID per provider and kind, so concurrent callbacks consume it once. Entries are
+- **The replay cache** keeps the SHA-256 digest of each consumed SAML request and assertion
+  ID per provider and kind, plus the response ID when signed. A single transaction inserts
+  all entries, so concurrent callbacks consume them once. Entries are
   written at consumption, immutable and kept until `retain_until`, which the service sets to
   at least `max(acceptanceDeadline + clockSkew, requestExpiresAt)` and which is in the future
   and at most 720 seconds after consumption (the largest value that bound can take under the
-  pinned limits); only the team's deletion removes them earlier.
+  pinned limits); only the team's deletion removes them earlier. Migration 0185 indexes
+  `retain_until` for the internal cleanup, which deletes up to 1,000 expired rows per call.
 - **Browser proofs and delegation bindings** record the membership, the enabled provider,
   the link and its generation, the team's `trustGeneration` (1 before the team has a policy)
   and the domain claim with its generation; all must be current when the row is written,

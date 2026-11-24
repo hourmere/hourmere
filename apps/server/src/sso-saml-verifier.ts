@@ -13,11 +13,13 @@ import { SignedXml } from 'xml-crypto'
 // Contract for the steps that will call this:
 // - `assertion.*` is always authenticated. `response.*` is authenticated only when
 //   `response.signed` is true; otherwise its ID, IssueInstant, Destination and Status came from
-//   the unsigned wrapper. Replay and time checks must therefore key on `assertion.*` only.
+//   the unsigned wrapper. Timing uses assertion timestamps. Replay caches the response ID
+//   only when signed, in addition to the request and assertion IDs.
 // - InResponseTo is only checked for internal agreement (response and bearer confirmation).
 //   The ACS step must compare `assertion.subjectConfirmation.inResponseTo` with the pending
 //   attempt of the same provider.
-// - A missing NotBefore or NotOnOrAfter is returned as null; the timing step must refuse null.
+// - A missing NotBefore or NotOnOrAfter is returned as null. The timing step requires both
+//   Conditions bounds and the bearer expiry, and checks bearer NotBefore when present.
 // - NameID and attribute values are returned exactly as signed, untrimmed. They must not be
 //   trimmed, case-folded or otherwise normalised before identity matching.
 

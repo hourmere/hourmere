@@ -147,11 +147,12 @@ source imports `@better-auth/sso`.
   against the signed DigestValue in constant time.
   Contract for the steps that call the verifier: `assertion.*` is always authenticated, but
   when the Response element is unsigned (`response.signed` is false) its ID, IssueInstant,
-  Destination and Status come from the unsigned wrapper, so replay and time checks key only
-  on `assertion.*`. The verifier checks only that the response and bearer InResponseTo
-  agree; the ACS step compares `assertion.subjectConfirmation.inResponseTo` with the pending
-  attempt. An absent NotBefore or NotOnOrAfter is returned as null and the timing step
-  refuses null. NameID and attribute values are returned exactly as signed, untrimmed, and
+  Destination and Status come from the unsigned wrapper. The timing module uses the signed
+  assertion timestamps and caches the response ID only when the response is also signed.
+  The verifier checks that the response and bearer InResponseTo agree. The timing module
+  matches both against the outstanding request of the verifying provider. It requires the
+  assertion bounds listed below and checks bearer NotBefore when present. NameID and
+  attribute values are returned exactly as signed, untrimmed, and
   are not normalised before identity matching.
 - Retained: Better Auth's session and account machinery (`internalAdapter.createSession`,
   as `handleOAuthUserInfo` uses it) and Hourmere's existing session database hooks.
@@ -688,6 +689,12 @@ below the accepted deadline or outstanding request window. Parallel callbacks mu
 yield one success. Encrypted assertions are deferred: reject them explicitly until decryption
 and signed-decrypted-node validation are implemented and tested together. Encryption
 never replaces signatures.
+
+The internal timing and replay module returns the unskewed acceptance deadline for the
+later completion step. The replay write checks database wall time again after the insert
+can wait on a competing transaction. It stores only ID digests, and its bounded cleanup
+removes expired rows. The module has no production caller or cleanup schedule. SAML is
+hard-off and the OIDC setting still defaults to false.
 
 ### Fetching, credentials and audit
 
