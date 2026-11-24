@@ -113,8 +113,6 @@ export const admin = {
   'Location options and conferencing': '地点选项与视频会议',
   'Duration (minutes)': '时长（分钟）',
   'SCIM provisioning tokens': 'SCIM 预配令牌',
-  'Provisioning is not available yet. These tokens prepare your organization for a future SCIM connection.':
-    '预配功能尚未开放。这些令牌用于为组织未来的 SCIM 连接做准备。',
   'Tokens only authorize SCIM for this organization. Keep them private.':
     '令牌仅授权访问此组织的 SCIM 服务。请妥善保管。',
   'Could not update provisioning tokens. Check the token list before trying again.':
@@ -3075,4 +3073,6 @@ export const admin = {
   'Hourmere will retry writing a booking copy.': 'Hourmere 将重试写入预约副本。',
   'A booking copy is waiting to be written.': '有一个预约副本正等待写入。',
   'Choose a Microsoft calendar you own.': '请选择你拥有的 Microsoft 日历。',
+  // SCIM provisioning
+  'SCIM provisioning is disabled on this instance.': '此实例已禁用 SCIM 预配。',
 } as const

@@ -76,9 +76,10 @@ PostgreSQL is the system of record. The schema is defined by the SQL files in
 `packages/db/migrations` (applied in order, never edited once applied); TypeScript table
 types in `packages/db/src/tables.ts` are generated from the migrated database.
 
-The [SCIM design and provisioning-token foundation](scim.md) describes organization-scoped
-credential storage and the planned user lifecycle and Groups-to-teams mapping. Token
-administration and connection/User storage are implemented; SCIM resources remain unavailable.
+The [SCIM provisioning guide](scim.md) describes organization-scoped credential
+storage, the User lifecycle and Groups-to-teams mappings. SCIM resources are
+available by default. The instance setting can disable provisioning while preserving
+its records and persisted suspensions.
 
 Migration `0073_scim_identity.sql` adds one stable `scim_connections` identity per
 organization and separate `scim_token_connections` bindings. Existing credentials,
@@ -104,20 +105,18 @@ stored, or whose decision is already a live tombstone, is dropped so that accoun
 is never refused. The live `(organization_id, user_id, source, kind)` index serves
 the existing membership and team-proof queries. An uncleared SCIM suspension denies
 authorization for that account's team. Admission checks also use the proven mailbox
-to respect tombstones retained after account deletion. Users, Groups and discovery
-handlers remain unregistered in production. The User creation handler, which only test
-harnesses register, writes a resource and, for its work address, one pending claim whose
-`invitation_id` names the invitation it issued or reused, or is null when the address
-already belongs to a member or another pending invitation holds it; it never sets an
-account or membership link. Claim completion, which only test harnesses wire into invitation
-acceptance, sets both links of the claim's entry when its invitation is accepted, together with
-the claim's `completed_at`; it reads live blockers, by account and by mailbox, and refuses
-admission while one exists. The test-only re-admission confirmation can complete a claim
+to respect tombstones retained after account deletion. The User creation handler
+writes a resource and, for its work address, one pending claim whose `invitation_id`
+names the invitation it issued or reused. That reference is null when the address
+already belongs to a member or another pending invitation holds it. The new resource
+starts without an account or membership link. While provisioning is enabled, accepting
+the attached invitation sets both links and the claim's `completed_at`, subject to
+the live account and mailbox blockers. Re-admission confirmation can complete a claim
 without an invitation for a retained ordinary member and clear that account's matching
-retired SCIM suspension in the same organization transaction. User replacement, also available
-only in test harnesses, updates the mapped profile and its timestamp in the existing row.
-When the normalized work address changes, it sets the unfinished claim's `invalidated_at`
-in the same transaction. The claim's mailbox and invitation reference are retained.
+retired SCIM suspension in the same organization transaction. User replacement updates
+the mapped profile and timestamp in the existing row. If the normalized work address
+changes, the same transaction sets the unfinished claim's `invalidated_at` and keeps its
+mailbox and invitation reference.
 
 Migration `0181_scim_team_hierarchy.sql` adds storage for the
 [SCIM Groups-to-teams hierarchy](scim.md#groups-to-teams-hierarchy-authorization).
@@ -132,8 +131,7 @@ Mapping intents freeze the approved action and inputs. Each team's consent recor
 the approving owner, membership, session and proof deadline so the internal service
 can recheck both approvals before consuming the intent in the link or unlink
 transaction. Managed child membership provenance is scoped to the live mapping
-and the child's own member row. Hierarchy storage is exercised through the SCIM
-resource test flag. Team authorization continues to use the acting team's own
+and the child's own member row. Team authorization uses the acting team's own
 memberships and credentials.
 
 Migration `0183_scim_groups.sql` stores a distinct Group ID and timestamps for each
@@ -145,10 +143,9 @@ account cannot take over that membership.
 
 Migration `0184_scim_group_members.sql` adds `suspended_at` to managed child membership
 provenance. Deactivating the source SCIM User sets it and reactivation clears it, so the
-suspension ends with the membership row. The shared SCIM suspension check reads it only
-for callers that pass the resource test flag, so production authorization statements are
-unchanged. The migration also indexes the provenance rows by source User
-and, for suspended rows, by child team and account.
+suspension ends with the membership row. Authorization checks honor this stored
+suspension even when SCIM provisioning is disabled. The provenance rows are indexed by
+source User and, for suspended rows, by child team and account.
 
 The [paid-booking design](payments.md) describes pending-payment holds, bounded slot
 occupancy, terminal transitions and the future Stripe/refund integration. Checkout is not

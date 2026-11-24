@@ -107,7 +107,7 @@ export function restOperations(document: unknown): RestOperation[] {
 
 /** Read the same route/tool/command registries used at runtime; never execute handlers. */
 export async function loadInterfaceInventory(): Promise<InterfaceInventory> {
-  // Inventory the actual interfaces with in-process resource test registrations present.
+  // Inventory the published interfaces with optional SCIM provisioning enabled.
   const { document, scimMappingTools } = await openApiRouteInventory({ scimResourcesEnabled: true })
   // Neither constructing the tool registry nor ending this pool opens a connection.
   const db = createDb(createPool('postgres://interface-parity@127.0.0.1:9/interface-parity'))
@@ -118,7 +118,7 @@ export async function loadInterfaceInventory(): Promise<InterfaceInventory> {
         ...productTools({ db, slotSnippetsEnabled: true, routingFormsEnabled: true }),
         ...scimMappingTools,
       ].map((tool) => tool.name),
-      cli: cliCommands(true),
+      cli: cliCommands(),
       restCli: REST_COMMANDS,
     }
   } finally {

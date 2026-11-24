@@ -110,10 +110,7 @@ interface OidcSignInDeps {
   privateTargets: SsoRequest['privateTargets']
   send?: typeof sendSsoRequest | undefined
   signup: SignupPolicy
-  /**
-   * The SCIM claim completion native invitation acceptance receives (the resource test flag of
-   * docs/scim.md). Only test harnesses pass it, with the same value they pass createAuth.
-   */
+  /** The same claim decision that native invitation acceptance receives. */
   scimClaims?: ScimClaimCompletion | undefined
   session: OidcSessionOptions
   readSession: (headers: Headers) => Promise<OidcTestActor | null | undefined>
@@ -921,7 +918,7 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
         const name = resultCookieName(id)
         const pending = { id, browserBinding: getCookie(c, cookie), envelope: getCookie(c, name) }
         const link = await completeOidcLink(
-          { db, configurationKey, scimResourcesEnabled },
+          { db, configurationKey, scimResourcesEnabled, scimClaims },
           pending,
           () => deps.readSession(c.req.raw.headers),
         )

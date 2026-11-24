@@ -33,7 +33,6 @@ const everyDay: WeeklyHours = {
   sunday: [{ start: '00:00', end: '24:00' }],
 }
 
-// The capability is the caller's: absent or false must read exactly as before.
 describe.skipIf(!serverUrl)('directory-managed child suspension in scheduling', () => {
   let owned: TestDatabase
   let db: Db
@@ -112,21 +111,22 @@ describe.skipIf(!serverUrl)('directory-managed child suspension in scheduling', 
     await owned?.drop()
   })
 
-  it('keeps the host eligible unless the caller holds the capability', async () => {
+  it('excludes the suspended host with provisioning enabled or disabled', async () => {
     const both = [active.id, suspended.id].sort()
-    await expect(readEligibleHostIds(db, teamId, both)).resolves.toEqual(both)
-    await expect(readEligibleHostIds(db, teamId, both, false, false)).resolves.toEqual(both)
+    await expect(readEligibleHostIds(db, teamId, both)).resolves.toEqual([active.id])
+    await expect(readEligibleHostIds(db, teamId, both, false, false)).resolves.toEqual([active.id])
     await expect(readEligibleHostIds(db, teamId, both, false, true)).resolves.toEqual([active.id])
-    await expect(assertHosts(db, teamId, [suspended.id])).resolves.toBeUndefined()
+    await expect(assertHosts(db, teamId, [suspended.id])).rejects.toMatchObject({
+      code: 'invalid_hosts',
+    })
     await expect(assertHosts(db, teamId, [suspended.id], false, true)).rejects.toMatchObject({
       code: 'invalid_hosts',
     })
 
-    // The event lookup options carry the same capability to the host read.
     for (const options of [undefined, {}, { scimResourcesEnabled: false }])
-      expect((await findOneTimeEventType(db, eventTypeId, options))?.eligibleHostUserIds).toEqual(
-        both,
-      )
+      expect((await findOneTimeEventType(db, eventTypeId, options))?.eligibleHostUserIds).toEqual([
+        active.id,
+      ])
     expect(
       (await findOneTimeEventType(db, eventTypeId, { scimResourcesEnabled: true }))
         ?.eligibleHostUserIds,
@@ -134,8 +134,7 @@ describe.skipIf(!serverUrl)('directory-managed child suspension in scheduling', 
   })
 
   it('withholds a reusable booking path for a directory-suspended sole host', async () => {
-    const path = `/team/${owner.principal.organization.slug}/managed-host`
-    await expect(findPublicBookingPath(db, individualEventId, false)).resolves.toBe(path)
+    await expect(findPublicBookingPath(db, individualEventId, false)).resolves.toBeUndefined()
     await expect(findPublicBookingPath(db, individualEventId, true)).resolves.toBeUndefined()
   })
 
@@ -147,20 +146,22 @@ describe.skipIf(!serverUrl)('directory-managed child suspension in scheduling', 
     await expect(getEventTypeWaitlist(owner, individualEventId)).resolves.toEqual({
       enabled: false,
     })
-    await expect(updateEventType(owner, individualEventId, patch)).resolves.toMatchObject(patch)
+    await expect(updateEventType(owner, individualEventId, patch)).rejects.toMatchObject({
+      code: 'waitlist_unsupported',
+    })
   })
 
-  it('reads the routing snapshot for the member unless the capability is held', async () => {
-    await expect(readBookingRoutingSnapshot(member, bookingId)).resolves.toBeNull()
+  it('withholds the routing snapshot with provisioning enabled or disabled', async () => {
+    await expect(readBookingRoutingSnapshot(member, bookingId)).resolves.toBeUndefined()
     await expect(
       readBookingRoutingSnapshot({ ...member, scimResourcesEnabled: false }, bookingId),
-    ).resolves.toBeNull()
+    ).resolves.toBeUndefined()
     await expect(
       readBookingRoutingSnapshot({ ...member, scimResourcesEnabled: true }, bookingId),
     ).resolves.toBeUndefined()
   })
 
-  it('keeps the recurring candidate unless the capability is held', async () => {
+  it('excludes the suspended recurring candidate with provisioning enabled or disabled', async () => {
     const request = {
       eventTypeId,
       organizationId: teamId,
@@ -178,16 +179,14 @@ describe.skipIf(!serverUrl)('directory-managed child suspension in scheduling', 
     }
     const hosts = async (...capability: boolean[]) =>
       [...(await checkRecurringAvailability(db, request, ...capability)).hostUserIds].sort()
-    const both = [active.id, suspended.id].sort()
-    expect(await hosts()).toEqual(both)
-    expect(await hosts(false)).toEqual(both)
+    expect(await hosts()).toEqual([active.id])
+    expect(await hosts(false)).toEqual([active.id])
     expect(await hosts(true)).toEqual([active.id])
   })
 
-  it('resolves the booking team for the host unless the capability is held', async () => {
-    await expect(resolveBookingOrganization(session, bookingId)).resolves.toEqual({
-      organizationId: teamId,
-      access: 'host',
+  it('refuses to resolve the booking team with provisioning enabled or disabled', async () => {
+    await expect(resolveBookingOrganization(session, bookingId)).rejects.toMatchObject({
+      code: 'booking_not_found',
     })
     await expect(
       resolveBookingOrganization({ ...session, scimResourcesEnabled: true }, bookingId),

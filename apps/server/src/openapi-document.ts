@@ -8,7 +8,7 @@ import { isTeamWriteMiddleware } from './sso-write-middleware.ts'
 /**
  * The OpenAPI document as the server publishes it, made without a database: the app with
  * the same route groups as the server (productRoutes), asked for /api/v1/openapi.json, which
- * touches nothing else. Type generation also includes the in-process resource test routes.
+ * touches nothing else. Type generation includes the optional SCIM mapping routes.
  */
 export async function openApiDocument({ scimResourcesEnabled = false } = {}): Promise<unknown> {
   return (await openApiRouteInventory({ scimResourcesEnabled })).document

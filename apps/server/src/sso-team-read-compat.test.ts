@@ -126,6 +126,8 @@ describe.skipIf(!serverUrl)('SSO team read compatibility', () => {
       enqueueCalendarSync: unavailable,
       enqueueCalendarWritebackRecovery: unavailable,
       mailboxProofQueue: { enqueue: unavailable },
+      scimMappingNotices: { enqueue: unavailable },
+      enqueueScimInvitation: unavailable,
     })
     app = createApp(options)
     // The same routes, records, authentication and transports, with the new hook omitted.

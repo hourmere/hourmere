@@ -17,6 +17,12 @@ import { loadStripeConfig, type StripeConfig } from './stripe-config.ts'
 const optional = <T extends z.ZodType>(schema: T) =>
   z.preprocess((v) => (v === '' ? undefined : v), schema.optional())
 
+export const scimProvisioningEnabled = optional(
+  z.enum(['true', 'false', '0', 'off'], {
+    error: 'SCIM_PROVISIONING_ENABLED must be true, false, 0, off or empty',
+  }),
+).transform((value) => value === undefined || value === 'true')
+
 const emailLimit = (name: string, fallback: number, minimum: number) => {
   const error = `${name} must be a whole number from ${minimum} to 2147483647`
   return z.preprocess(
@@ -187,9 +193,7 @@ const schema = z
         { error: 'WEBHOOK_ENCRYPTION_KEY must be 32 random bytes encoded as base64' },
       ),
     ),
-    SCIM_PROVISIONING_ENABLED: optional(z.enum(['true', 'false'])).transform(
-      (value) => value === 'true',
-    ),
+    SCIM_PROVISIONING_ENABLED: scimProvisioningEnabled,
     // Organization OIDC sign-in. Empty or unset follows the release default, which is off
     // until SSO ships. SSO_SAML_ENABLED is not a setting yet and is not read.
     SSO_OIDC_ENABLED: optional(

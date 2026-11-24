@@ -115,8 +115,6 @@ export const admin = {
   'Location options and conferencing': 'Location options and conferencing',
   'Duration (minutes)': 'Duration (minutes)',
   'SCIM provisioning tokens': 'SCIM provisioning tokens',
-  'Provisioning is not available yet. These tokens prepare your organization for a future SCIM connection.':
-    'Provisioning is not available yet. These tokens prepare your organization for a future SCIM connection.',
   'Tokens only authorize SCIM for this organization. Keep them private.':
     'Tokens only authorize SCIM for this organization. Keep them private.',
   'Could not update provisioning tokens. Check the token list before trying again.':
@@ -3221,4 +3219,7 @@ export const admin = {
   'Hourmere will retry writing a booking copy.': 'Hourmere will retry writing a booking copy.',
   'A booking copy is waiting to be written.': 'A booking copy is waiting to be written.',
   'Choose a Microsoft calendar you own.': 'Choose a Microsoft calendar you own.',
+  // SCIM provisioning
+  'SCIM provisioning is disabled on this instance.':
+    'SCIM provisioning is disabled on this instance.',
 } as const

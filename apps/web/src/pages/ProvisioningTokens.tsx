@@ -26,6 +26,7 @@ export function ProvisioningTokens({
       key={`${organizationId}:${location.key}:${role}`}
       organizationId={organizationId}
       timeZone={timeZone}
+      paused={instance.status === 'ready' && instance.data.scimProvisioningEnabled === false}
       canMint={
         instance.status === 'ready' &&
         instance.data.scimProvisioningEnabled === true &&
@@ -38,10 +39,12 @@ export function ProvisioningTokens({
 function TokenPanel({
   organizationId,
   canMint,
+  paused,
   timeZone,
 }: {
   organizationId: string
   canMint: boolean
+  paused: boolean
   timeZone?: string
 }) {
   const { t, formatLocale } = useI18n()
@@ -165,11 +168,7 @@ function TokenPanel({
   return (
     <section className="panel stack" aria-labelledby="scim-heading">
       <h2 id="scim-heading">{t('SCIM provisioning tokens')}</h2>
-      <p>
-        {t(
-          'Provisioning is not available yet. These tokens prepare your organization for a future SCIM connection.',
-        )}
-      </p>
+      {paused && <p>{t('SCIM provisioning is disabled on this instance.')}</p>}
       <p className="hint">
         {t('Tokens only authorize SCIM for this organization. Keep them private.')}
       </p>

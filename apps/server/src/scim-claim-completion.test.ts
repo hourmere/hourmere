@@ -26,7 +26,8 @@ import { manageInvitation } from '../../../packages/auth/src/invitations.ts'
 import { createApp } from './app.ts'
 import { loadConfig } from './config.ts'
 import type { ScimResourceHandler } from './scim.ts'
-import { SCIM_URN, scimDiscovery } from './scim-discovery.ts'
+import { SCIM_URN } from './scim-discovery.ts'
+import { scimDiscovery } from './scim-discovery-fixture.ts'
 import { type ScimUserCreationDeps, scimUserCreation } from './scim-user-create.ts'
 import { scimUserReplacement } from './scim-user-replace.ts'
 import { scimUserRetirement } from './scim-user-retirement.ts'
@@ -1719,12 +1720,15 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
   }
   async function productionAcceptance(
     server: Pick<typeof import('./server.ts'), 'productionAppOptions' | 'productionAuthOptions'>,
+    enabled: boolean,
+    blocked?: 'mailbox' | 'inactive',
   ) {
     const config = loadConfig({
       DATABASE_URL: owned.url,
       BETTER_AUTH_SECRET: secret,
       PUBLIC_URL: origin,
-      SCIM_PROVISIONING_ENABLED: 'true',
+      SCIM_PROVISIONING_ENABLED: String(enabled),
+      SIGNUP: 'open',
     })
     const options = server.productionAuthOptions({
       config,
@@ -1743,6 +1747,7 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
       jobs: { enqueue: unreachable },
     })
     const auth = createAuth(options)
+    const enqueueScimInvitation = vi.fn(async () => {})
     const url = await listen(
       createApp(
         server.productionAppOptions({
@@ -1764,22 +1769,58 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
           enqueueCalendarSync: unreachable,
           enqueueCalendarWritebackRecovery: unreachable,
           mailboxProofQueue: { enqueue: unreachable },
+          scimMappingNotices: { enqueue: unreachable },
+          enqueueScimInvitation,
         }),
       ).fetch,
     )
-    // The claim comes from the flagged test harness; production has no SCIM resources.
-    const harness = await instance(undefined)
+    // When off, stage a claim that was issued before rollback.
+    const issuer = enabled ? { url } : await instance(undefined)
     const organization = await team()
     const mailbox = `production-${unique()}@example.com`
-    const { id, claim } = await provision(harness, organization, mailbox)
+    const { id, claim } = await provision(issuer, organization, mailbox)
+    if (blocked === 'mailbox') {
+      await db
+        .insertInto('scim_membership_blocks')
+        .values({
+          organization_id: organization.id,
+          identity_email: mailbox,
+          source: 'scim',
+          kind: 'suspension',
+          connection_id: claim.connection_id,
+          scim_user_id: id,
+        })
+        .execute()
+    }
+    if (blocked === 'inactive') {
+      const patched = await fetch(`${issuer.url}/scim/v2/${organization.id}/Users/${id}`, {
+        method: 'PUT',
+        headers: {
+          authorization: `Bearer ${organization.secret}`,
+          'content-type': 'application/scim+json',
+        },
+        body: JSON.stringify({
+          schemas: [SCIM_URN.user],
+          userName: `inactive-${unique()}`,
+          active: false,
+          emails: [{ value: mailbox, type: 'work', primary: true }],
+        }),
+      })
+      expect(patched.status).toBe(200)
+      await patched.body?.cancel()
+    }
     const pat = await person(mailbox)
     const { cookie } = await signIn(pat)
+    const before = await snapshot(organization.id)
     const answer = await accept({ url }, cookie, claim.invitation_id as string)
-    expect((await confirmReadmission({ url }, cookie, organization.id, id)).status).toBe(404)
     const after = await snapshot(organization.id)
     return {
-      options,
+      enqueueScimInvitation,
+      invitationId: claim.invitation_id,
       answer,
+      readmissionStatus: (await confirmReadmission({ url }, cookie, organization.id, id)).status,
+      before,
+      after,
       claim: after.claims.find((row) => row.id === claim.id),
       entry: after.entries.find((row) => row.id === id),
       claimed: claimed(after.events).length,
@@ -1787,35 +1828,64 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
     }
   }
 
-  it('is not wired in the production assembly', async () => {
-    const production = await productionAcceptance({ productionAppOptions, productionAuthOptions })
-    expect('scimClaims' in production.options).toBe(false)
-    // The invitation admits as before, and the claim stays pending and unlinked.
-    expect(production.answer.status).toBe(200)
-    expect(production).toMatchObject({
-      claim: { completed_at: null, invalidated_at: null },
-      entry: { linked_user_id: null, linked_member_id: null },
-      claimed: 0,
-      admitted: true,
+  async function verifyProductionAcceptance(
+    server: Parameters<typeof productionAcceptance>[0],
+    enabled: boolean,
+  ) {
+    const production = await productionAcceptance(server, enabled)
+    expect(production.answer.status).toBe(enabled ? 200 : 403)
+    expect(production.admitted).toBe(enabled)
+    expect(production.claimed).toBe(enabled ? 1 : 0)
+    if (enabled) {
+      expect(production.claim?.completed_at).toBeInstanceOf(Date)
+      expect(production.entry).toMatchObject({
+        linked_user_id: expect.any(String),
+        linked_member_id: expect.any(String),
+      })
+      expect(production.enqueueScimInvitation).toHaveBeenCalledWith({
+        invitationId: production.invitationId,
+        generation: 1,
+      })
+      expect(production.readmissionStatus).toBe(403)
+    } else {
+      expect(production.answer.body).toEqual(denied)
+      expect(production.after).toEqual(production.before)
+      expect(production.claim).toMatchObject({ completed_at: null, invalidated_at: null })
+      expect(production.entry).toMatchObject({ linked_user_id: null, linked_member_id: null })
+      expect(production.enqueueScimInvitation).not.toHaveBeenCalled()
+      expect(production.readmissionStatus).toBe(404)
+    }
+  }
+
+  it.each([true, false])(
+    'gates production invitation claim completion with SCIM set to %s',
+    async (enabled) => {
+      await verifyProductionAcceptance({ productionAppOptions, productionAuthOptions }, enabled)
+    },
+  )
+
+  it.each(['mailbox', 'inactive'] as const)(
+    'keeps stored %s admission restrictions effective after production rollback',
+    async (blocked) => {
+      const production = await productionAcceptance(
+        { productionAppOptions, productionAuthOptions },
+        false,
+        blocked,
+      )
+      expect(production.answer).toEqual({ status: 403, body: denied })
+      expect(production.after).toEqual(production.before)
+    },
+  )
+
+  it('detects missing production claim completion in a source copy', async () => {
+    await verifyProductionAcceptance(await serverCopy(), true)
+    const mutant = await serverCopy([
+      '    scimClaims: config.SCIM_PROVISIONING_ENABLED ? scimClaimCompletion : scimClaimAdmissionOnly,\n    baseURL:',
+      '    scimClaims: undefined,\n    baseURL:',
+    ])
+    await expect(verifyProductionAcceptance(mutant, true)).rejects.toMatchObject({
+      name: 'AssertionError',
     })
-    // An unmutated copy of the assembly answers the same; wired in production, the claim
-    // would complete.
-    const control = await productionAcceptance(await serverCopy())
-    expect(control).toMatchObject({ claimed: 0, entry: { linked_user_id: null } })
-    const wired = await productionAcceptance(
-      await serverCopy(
-        [
-          "} from '@hourmere/auth'\n",
-          "} from '@hourmere/auth'\nimport { scimClaimCompletion } from '@hourmere/auth'\n",
-        ],
-        [
-          '    mcpOAuth: config.MCP_OAUTH_ENABLED,\n',
-          '    mcpOAuth: config.MCP_OAUTH_ENABLED,\n    scimClaims: scimClaimCompletion,\n',
-        ],
-      ),
-    )
-    expect(wired.claimed).toBe(1)
-    expect(wired.entry?.linked_user_id).not.toBeNull()
   })
 
   async function refuseReadmissionInOtherScope(
