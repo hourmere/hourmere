@@ -47,6 +47,7 @@ export const LOCATION_KINDS: { value: LocationKind | ''; label: string }[] = [
   { value: '', label: 'Not set' },
   { value: 'google_meet', label: 'Google Meet (provider label only)' },
   { value: 'zoom', label: 'Zoom (provider label only)' },
+  { value: 'microsoft_teams', label: 'Microsoft Teams' },
   { value: 'phone', label: 'Phone call' },
   { value: 'in_person', label: 'In person' },
   { value: 'link', label: 'Other video or meeting link' },
@@ -903,6 +904,13 @@ export function serverErrors(
       return field(
         'zoomConnectionId',
         'The assigned host must configure Zoom in their own signed-in session.',
+      )
+    case 'microsoft_teams_host_policy':
+      return field('location-kind', 'Microsoft Teams requires individual scheduling with one host.')
+    case 'microsoft_teams_calendar_unavailable':
+      return field(
+        'location-kind',
+        'The host needs a Microsoft 365 work or school calendar selected for booking write-back.',
       )
     case 'invalid_conference_organizer':
       return field('conferenceOrganizer', 'Choose the meeting organizer from the required hosts.')

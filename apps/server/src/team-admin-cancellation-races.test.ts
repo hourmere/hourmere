@@ -43,6 +43,7 @@ import {
   enqueueMeetingPollBookingUpdate,
   meetingPollChainLinked,
 } from '../../../packages/scheduling/src/meeting-poll-outcomes.ts'
+import { microsoftTeamsLocation } from '../../../packages/scheduling/src/microsoft-teams.ts'
 import * as notificationSettings from '../../../packages/scheduling/src/notification-settings.ts'
 import { expirePaymentHolds } from '../../../packages/scheduling/src/payment-expiry.ts'
 import * as questions from '../../../packages/scheduling/src/questions.ts'
@@ -117,6 +118,8 @@ async function guestRoutesCopy(before: string, after: string): Promise<GuestRout
       ...recurringMembers,
       ...roundRobin,
       ...text,
+      microsoftTeamsLocation,
+      readTeamsMeetingLocations: scheduling.readTeamsMeetingLocations,
       DomainError: scheduling.DomainError,
     },
     ['cancelManagedBooking', 'rescheduleManagedBooking'],

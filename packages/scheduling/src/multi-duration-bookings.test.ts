@@ -38,6 +38,7 @@ import {
   enqueueMeetingPollBookingUpdate,
   meetingPollChainLinked,
 } from './meeting-poll-outcomes.ts'
+import { microsoftTeamsLocation, requireMicrosoftTeamsHost } from './microsoft-teams.ts'
 import * as notificationSettings from './notification-settings.ts'
 import { expirePaymentHolds } from './payment-expiry.ts'
 import { parseQuestions, validateResponses } from './questions.ts'
@@ -45,6 +46,7 @@ import * as recurringCapabilities from './recurring-capabilities.ts'
 import * as recurringMembers from './recurring-members.ts'
 import * as roundRobin from './round-robin.ts'
 import * as successRedirect from './success-redirect.ts'
+import { readTeamsMeetingLocations } from './teams-meeting-locations.ts'
 import {
   createFixtures,
   createTestTeam,
@@ -141,6 +143,9 @@ function sourceCopy(...changes: Change[]): Api {
     ...recurringMembers,
     ...roundRobin,
     ...successRedirect,
+    microsoftTeamsLocation,
+    requireMicrosoftTeamsHost,
+    readTeamsMeetingLocations,
     cleanInviteeEmail,
     cleanText,
   }

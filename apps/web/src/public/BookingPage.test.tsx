@@ -125,6 +125,33 @@ describe('public host identity', () => {
 })
 
 describe('the booking page', () => {
+  it('shows the Teams location publicly and the join link only on the booking receipt', async () => {
+    const url = 'https://teams.microsoft.com/l/meetup-join/fake-meeting/0'
+    const kind = 'microsoft_teams' as const
+    fakeApi({
+      ...eventRoutes(
+        { ...EVENT, location: { kind }, locations: [{ id: 'legacy', kind }] },
+        DST_SLOTS,
+      ),
+      'POST /api/v1/public/ada/intro/bookings': () =>
+        json(201, {
+          booking: booking({ location: { kind, status: 'ready', url } }),
+          manageToken: TOKEN,
+        }),
+    })
+    const user = userEvent.setup()
+    renderApp('/ada/intro')
+    expect(await screen.findByText('Microsoft Teams')).toBeDefined()
+    expect(screen.queryByRole('link', { name: 'Join Microsoft Teams' })).toBeNull()
+    await chooseSlot(user, /November 2, available/, '9:00 AM')
+    await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
+    await user.type(screen.getByLabelText('Email'), 'grace@example.com')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    expect(
+      (await screen.findByRole('link', { name: 'Join Microsoft Teams' })).getAttribute('href'),
+    ).toBe(url)
+  })
+
   it.each(['Change time', 'conflict'])(
     'restores the month, day, time zone and complete draft after returning through %s',
     async (back) => {

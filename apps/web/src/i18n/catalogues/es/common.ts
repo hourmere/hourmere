@@ -595,4 +595,10 @@ export const common = {
     'Para continuar, vuelva a la pestaña donde solicitó la verificación.',
   'Copy the link from your email and paste it into the tab where you requested verification.':
     'Copie el enlace del correo y péguelo en la pestaña donde solicitó la verificación.',
+  // Microsoft Teams meeting locations
+  'Microsoft Teams': 'Microsoft Teams',
+  'Join Microsoft Teams': 'Unirse a la reunión de Microsoft Teams',
+  'The Teams link isn’t ready yet.': 'El enlace de Teams aún no está listo.',
+  'The booking is still scheduled without a Teams link.':
+    'La reserva sigue confirmada, sin enlace de Teams.',
 } as const

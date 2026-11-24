@@ -99,10 +99,21 @@ const ExpectedOrganizationHeaders = z.object({
   }),
 })
 
-export const BookingLocation = z.looseObject({ kind: LocationKind }).openapi('BookingLocation', {
-  description:
-    'Where the meeting happens. Details depend on the kind: `number` (phone), `address` (in_person), `url` (link)',
-})
+export const BookingLocation = z
+  .looseObject({
+    kind: LocationKind,
+    url: z.unknown().optional().openapi({
+      description: 'A ready Teams booking includes a validated HTTPS participant URL.',
+    }),
+    status: z.unknown().optional().openapi({
+      description:
+        'Microsoft Teams meeting state when available: join_url_pending, ready, teams_unavailable or writeback_failed. Clients must tolerate additional values.',
+    }),
+  })
+  .openapi('BookingLocation', {
+    description:
+      'Where the meeting happens. Details depend on the kind: `number` (phone), `address` (in_person), `url` (link or a ready online meeting). A Teams join URL requires host access or the invitee’s booking capability.',
+  })
 
 const Attendee = z
   .object({
