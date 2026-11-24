@@ -168,8 +168,15 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
     capabilities: SsoCapabilities = samlOnly,
     mailboxJobs?: MailboxProofEmailPayload[],
     signupPolicy: SignupPolicy = signup,
+    database = db,
   ) {
-    const deps = { db, capabilities, configurationKey, session: { secret }, signup: signupPolicy }
+    const deps = {
+      db: database,
+      capabilities,
+      configurationKey,
+      session: { secret },
+      signup: signupPolicy,
+    }
     const readSession = async (headers: Headers) =>
       (
         await auth.api.getSession({
@@ -181,7 +188,7 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
       checkDb: async () => {},
       authHandler: auth.handler,
       resolveCaller: mailboxJobs
-        ? createCallerResolver({ auth, db })
+        ? createCallerResolver({ auth, db: database })
         : async () => expect.unreachable('SAML completion does not resolve a caller'),
       publicUrl,
       ...(mailboxJobs && {
@@ -198,9 +205,9 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
             },
           }),
         ],
-        ssoTeamReads: { db, capabilities },
+        ssoTeamReads: { db: database, capabilities },
         ssoMailboxProof: mailboxProofRoutes({
-          db,
+          db: database,
           capabilities,
           queue: {
             async enqueue(_name, payload) {
@@ -1598,46 +1605,62 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
     await expectRefusedCompletion(await complete(free, { request }))
   })
 
-  it.each(['before the pending insert', 'during the pending insert'])(
-    'classifies a changed SAML mailbox deadline hit %s as attempt_expired',
-    async (phase) => {
-      const provider = await linkedProvider()
+  it.each([
+    { flow: 'changed SAML mailbox', phase: 'before the pending insert' },
+    { flow: 'changed SAML mailbox', phase: 'during the pending insert' },
+    { flow: 'SAML admission', phase: 'during the pending insert' },
+  ])(
+    'classifies a $flow deadline hit $phase as attempt_expired and rolls back the callback',
+    async ({ flow, phase }) => {
+      const provider = flow === 'SAML admission' ? await enabledProvider() : await linkedProvider()
       const attempt = await start(provider)
-      const signed = await signedResponse(attempt, {
-        mailbox: `deadline-${randomUUID()}@${verifiedDomain}`,
-        sessionLifetime: phase === 'during the pending insert' ? 2 : 60,
-      })
       const before = await identityEffects()
       const state = await protocolEffects(provider.id)
-      if (phase === 'before the pending insert') {
-        if (!signed.sessionDeadline) expect.unreachable('Expected a signed session deadline')
-        vi.spyOn(mailboxProofModule, 'databaseClock').mockResolvedValueOnce(
-          signed.sessionDeadline.toString(),
-        )
-      } else {
+      const waitInInsert = phase === 'during the pending insert'
+      if (waitInInsert) {
         // Run before the installed attempt guard, which must refuse the now-expired write.
         await sql`
-          CREATE FUNCTION test_wait_for_saml_mailbox_expiry() RETURNS trigger
+          CREATE SEQUENCE test_saml_pending_insert;
+          CREATE FUNCTION test_wait_for_saml_pending_expiry() RETURNS trigger
           LANGUAGE plpgsql AS $$
           BEGIN
             IF NEW.requires_mailbox THEN
+              PERFORM nextval('test_saml_pending_insert');
               PERFORM pg_sleep_until(NEW.expires_at);
             END IF;
             RETURN NEW;
           END;
           $$;
-          CREATE TRIGGER a_test_wait_for_saml_mailbox_expiry
+          CREATE TRIGGER a_test_wait_for_saml_pending_expiry
           BEFORE INSERT ON sso_attempts FOR EACH ROW
-          EXECUTE FUNCTION test_wait_for_saml_mailbox_expiry();
+          EXECUTE FUNCTION test_wait_for_saml_pending_expiry();
         `.execute(db)
       }
       try {
+        const signed = await signedResponse(attempt, {
+          mailbox: `deadline-${randomUUID()}@${verifiedDomain}`,
+          sessionLifetime: waitInInsert ? 2 : 60,
+        })
+        if (!waitInInsert) {
+          if (!signed.sessionDeadline) expect.unreachable('Expected a signed session deadline')
+          vi.spyOn(mailboxProofModule, 'databaseClock').mockResolvedValueOnce(
+            signed.sessionDeadline.toString(),
+          )
+        }
         expectRefusedAcs(await acs(provider.id, signed.encoded, attempt.relayState))
+        if (waitInInsert) {
+          // Sequence changes survive rollback, so an earlier refusal cannot satisfy this case.
+          const { rows } = await sql<{ is_called: boolean }>`
+            SELECT is_called FROM test_saml_pending_insert
+          `.execute(db)
+          expect(rows).toEqual([{ is_called: true }])
+        }
       } finally {
-        if (phase === 'during the pending insert')
+        if (waitInInsert)
           await sql`
-            DROP TRIGGER a_test_wait_for_saml_mailbox_expiry ON sso_attempts;
-            DROP FUNCTION test_wait_for_saml_mailbox_expiry();
+            DROP TRIGGER a_test_wait_for_saml_pending_expiry ON sso_attempts;
+            DROP FUNCTION test_wait_for_saml_pending_expiry();
+            DROP SEQUENCE test_saml_pending_insert;
           `.execute(db)
       }
       expect(await identityEffects()).toEqual(before)
@@ -1825,6 +1848,38 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
     ])
   })
 
+  it('excludes another browser’s proved SAML admission from the database result', async () => {
+    const provider = await enabledProvider({
+      assertedMailbox: `browser-${randomUUID()}@${verifiedDomain}`,
+    })
+    const manager = management()
+    const result = await stageMailbox(manager.request, provider)
+    await proveMailbox(manager, result)
+
+    const selectedMailboxes: string[] = []
+    const observed = db.withPlugin({
+      transformQuery: ({ node }) => node,
+      async transformResult({ result }) {
+        for (const row of result.rows) {
+          if (row.id === provider.id && row.mailbox === provider.mailbox)
+            selectedMailboxes.push(provider.mailbox)
+        }
+        return result
+      },
+    })
+    const request = instance(samlOnly, undefined, signup, observed)
+    const wrongBrowser = mergeCookies(result.cookies, [
+      `${bindingCookie}=${randomBytes(32).toString('base64url')}`,
+    ])
+    await expectRefusedCompletion(await complete(result, { request, cookies: wrongBrowser }))
+    expect(selectedMailboxes).toEqual([])
+
+    const matchingBrowser = await complete(result, { request })
+    expect(matchingBrowser.status).toBe(409)
+    expect(await matchingBrowser.json()).toEqual({ error: 'sso_invitation_required' })
+    expect(selectedMailboxes).toEqual([provider.mailbox])
+  })
+
   it('refuses an expired SAML admission result after real mailbox proof', async () => {
     const { fixture, provider } = await jitFixture()
     const manager = management(fixture.team)
@@ -1862,14 +1917,20 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
   })
 
   it('accepts only a current matching member invitation explicitly and preserves the closed-signup exception', async () => {
+    // Closed signup grants an exception to invitations from the instance's first user.
+    await db
+      .updateTable('auth.user')
+      .set({ createdAt: new Date(0) })
+      .where('id', '=', team.owner)
+      .execute()
     const provider = await enabledProvider({
       assertedMailbox: `invited-${randomUUID()}@${verifiedDomain}`,
     })
     const manager = management(team.team, samlOnly, { mode: 'closed', allowedDomains: [] })
     const { request } = manager
     const result = await stageMailbox(request, provider)
-    const eligible = await invite(team, provider.mailbox)
-    await expectRefusedCompletion(await acceptInvitation(request, result, eligible))
+    const adminInvite = await invite(team, provider.mailbox, { inviterId: team.admin })
+    await expectRefusedCompletion(await acceptInvitation(request, result, adminInvite))
     await proveMailbox(manager, result)
     const before = await identityEffects()
     const state = await protocolEffects(provider.id)
@@ -1877,6 +1938,11 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
     const waiting = await complete(result, { request })
     expect(waiting.status).toBe(409)
     expect(await waiting.json()).toEqual({ error: 'sso_invitation_required' })
+    const signupDenied = await acceptInvitation(request, result, adminInvite)
+    expect(signupDenied.status).toBe(403)
+    expect(await signupDenied.json()).toEqual({ error: 'signup_disabled' })
+
+    const eligible = await invite(team, provider.mailbox)
     const differentBrowser = mergeCookies(result.cookies, [
       `${bindingCookie}=${randomBytes(32).toString('base64url')}`,
     ])
@@ -1904,7 +1970,7 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
       await db
         .selectFrom('auth.invitation')
         .select('status')
-        .where('id', 'in', [...ineligible, eligible])
+        .where('id', 'in', [adminInvite, ...ineligible, eligible])
         .where('status', '!=', 'pending')
         .execute(),
     ).toEqual([])
