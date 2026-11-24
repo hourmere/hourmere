@@ -129,12 +129,16 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
       teamManagementSessionCaller(caller),
       sessionOnly,
     ] as const
-    const middleware = [
-      routeBodyLimit(samlProviderRequestMaximumBytes),
-      draftEnabled,
-      ...sessionMiddleware,
-      draftBody,
-    ] as const
+    // The larger metadata envelope is available only through an authorized browser.
+    // With SAML off, a bounded read preserves protocol-off errors before session checks.
+    const middleware = deps.capabilities.ssoSamlEnabled
+      ? ([
+          routeBodyLimit(samlProviderRequestMaximumBytes),
+          draftEnabled,
+          ...sessionMiddleware,
+          draftBody,
+        ] as const)
+      : ([draftEnabled, draftBody, ...sessionMiddleware] as const)
     const deleteMiddleware = [retained, ...sessionMiddleware] as const
     app.openapi(
       createRoute({

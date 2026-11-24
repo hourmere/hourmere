@@ -139,17 +139,19 @@ describe.skipIf(!process.env.DATABASE_URL)('SSO provider drafts', () => {
   it.each([
     ['POST', '/api/v1/team/sso/providers'],
     ['PATCH', '/api/v1/team/sso/providers/0190f2c4-0000-7000-8000-000000000001'],
-  ])('authorizes %s draft requests before reading their body', async (method, path) => {
-    const app = createApp({
-      checkDb: async () => {},
-      authHandler: async () => new Response(null, { status: 404 }),
-      resolveCaller: async (headers) =>
-        headers.has('cookie')
-          ? { ok: true, principal: principal(), setCookie: [] }
-          : { ok: false, error: 'unauthorized', setCookie: [] },
-      publicUrl,
-      routes: [ssoDraftRoutes(deps())],
-    })
+  ])('guards %s draft bodies by protocol capability and session', async (method, path) => {
+    const application = (ssoSamlEnabled: boolean) =>
+      createApp({
+        checkDb: async () => {},
+        authHandler: async () => new Response(null, { status: 404 }),
+        resolveCaller: async (headers) =>
+          headers.has('cookie')
+            ? { ok: true, principal: principal(), setCookie: [] }
+            : { ok: false, error: 'unauthorized', setCookie: [] },
+        publicUrl,
+        routes: [ssoDraftRoutes({ ...deps(), capabilities: { ...ON, ssoSamlEnabled } })],
+      })
+    const app = application(true)
     const body = JSON.stringify({ oidc: { clientSecret: 'x'.repeat(DEFAULT_BODY_LIMIT) } })
     const request = new Request(`${publicUrl}${path}`, {
       method,
@@ -168,6 +170,20 @@ describe.skipIf(!process.env.DATABASE_URL)('SSO provider drafts', () => {
     })
     expect(oversized.status).toBe(413)
     expect(await oversized.json()).toEqual({ error: 'payload_too_large' })
+
+    const limited = new Request(`${publicUrl}${path}`, {
+      method,
+      headers: {
+        origin: publicUrl,
+        'content-type': 'application/json',
+        'content-length': String(Buffer.byteLength(body)),
+      },
+      body,
+    })
+    const rejected = await application(false).fetch(limited)
+    expect(rejected.status).toBe(413)
+    expect(await rejected.json()).toEqual({ error: 'payload_too_large' })
+    expect(limited.bodyUsed).toBe(false)
   })
 
   it('creates the first disabled provider with mailbox proof, ciphertext-only storage and safe response/audit', async () => {
