@@ -80,9 +80,11 @@ describe.skipIf(!serverUrl)('team admin booking lifecycle whitelist', () => {
       guests: [{ name: 'Guest', email: 'guest@example.com' }],
       responses: { medical: PRIVATE_ANSWER },
     })
-    const privateCalendar = await f.calendarBusy(owner.id, [
-      ['2026-11-03T09:00Z', '2026-11-03T09:30Z'],
-    ])
+    const privateCalendar = await f.calendarBusy(
+      owner.id,
+      [['2026-11-03T09:00Z', '2026-11-03T09:30Z']],
+      { now: now() },
+    )
     await db
       .updateTable('calendars')
       .set({ name: PRIVATE_CALENDAR })

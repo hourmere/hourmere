@@ -455,11 +455,16 @@ describe('routing continuation', () => {
     'shows the same recovery if the link is unusable on %s',
     async (endpointName) => {
       const user = userEvent.setup()
+      const requestStarted = Promise.withResolvers<void>()
+      const response = Promise.withResolvers<Response>()
+      const rejectLink = () => {
+        requestStarted.resolve()
+        return response.promise
+      }
       fakeApi({
-        [resolveRoute]:
-          endpointName === 'resolve' ? unavailableResponse : () => json(200, projection),
-        [slotsRoute]: endpointName === 'slots' ? unavailableResponse : slotsResponse,
-        [bookingsRoute]: unavailableResponse,
+        [resolveRoute]: endpointName === 'resolve' ? rejectLink : () => json(200, projection),
+        [slotsRoute]: endpointName === 'slots' ? rejectLink : slotsResponse,
+        [bookingsRoute]: rejectLink,
       })
       render(<RoutingContinuationPage routeToken={TOKEN} />)
       if (endpointName === 'bookings') {
@@ -467,7 +472,10 @@ describe('routing continuation', () => {
         await user.type(screen.getByRole('textbox', { name: 'Project reference' }), 'PRJ-42')
         await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
       }
-      const heading = await screen.findByRole('heading', {
+      // Wait for the request before answering in act, which flushes the heading's focus effect.
+      await requestStarted.promise
+      await act(async () => response.resolve(unavailableResponse()))
+      const heading = screen.getByRole('heading', {
         name: 'This booking link is unavailable',
       })
       expect(document.activeElement).toBe(heading)

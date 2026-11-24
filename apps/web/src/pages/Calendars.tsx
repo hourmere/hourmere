@@ -64,7 +64,8 @@ const providerName = (connection: Connection) =>
 const needsReconnect = (connection: Connection) =>
   connection.status !== 'active' ||
   connection.lastError === 'needs_reauth' ||
-  (connection.provider === 'microsoft' && connection.lastError === 'permissions_missing')
+  (connection.provider === 'microsoft' &&
+    (!connection.syncAuthorized || connection.lastError === 'permissions_missing'))
 const needsSyncPermission = (connection: Connection) =>
   connection.provider === 'google' &&
   (!connection.syncAuthorized ||
@@ -89,11 +90,12 @@ const accountHint = (connection: Connection): UiText =>
     : msg('Choose the original account on the {0} authorization page.', {
         '0': providerName(connection),
       })
-const syncSummary = (connection: Connection, googleEnabled: boolean): UiText => {
-  if (connection.provider === 'microsoft') return 'Not available — calendar list only.'
+const syncSummary = (connection: Connection, providerEnabled: boolean): UiText => {
+  if (connection.provider === 'microsoft' && needsReconnect(connection))
+    return 'Paused until you reconnect this account.'
   if (!connection.syncAuthorized) return 'Not enabled — calendar list only.'
   if (connection.status !== 'active') return 'Paused until you reconnect this account.'
-  if (!googleEnabled) return 'Unavailable on this instance.'
+  if (!providerEnabled) return 'Unavailable on this instance.'
   const selected = connection.calendars.filter((calendar) => calendar.checkConflicts)
   if (
     (connection.provider === 'caldav' && connection.lastError) ||
@@ -400,7 +402,7 @@ export function CalendarsPage() {
                   : connection.provider === 'google'
                     ? state.data.googleEnabled
                     : state.data.microsoftEnabled
-              const syncCapable = connection.provider !== 'microsoft' && connection.syncAuthorized
+              const syncCapable = connection.syncAuthorized
               const conflictCount = connection.calendars.filter(
                 (calendar) => calendar.checkConflicts,
               ).length
@@ -409,6 +411,7 @@ export function CalendarsPage() {
               )
               const destinationAvailable =
                 destination &&
+                connection.provider !== 'microsoft' &&
                 syncCapable &&
                 !reconnect &&
                 destination.available !== false &&
@@ -483,13 +486,20 @@ export function CalendarsPage() {
                       )}
                     </div>
                   )}
-                  {connection.lastError === 'provider_unavailable' && (
-                    <p className="alert alert-error" role="alert">
-                      {t(
-                        'The calendar provider could not be reached. Try refreshing the calendar list again.',
-                      )}
-                    </p>
-                  )}
+                  {connection.lastError === 'provider_unavailable' &&
+                    !(
+                      connection.provider === 'microsoft' &&
+                      connection.calendars.some(
+                        (calendar) =>
+                          calendar.checkConflicts && calendar.syncError === 'provider_unavailable',
+                      )
+                    ) && (
+                      <p className="alert alert-error" role="alert">
+                        {t(
+                          'The calendar provider could not be reached. Try refreshing the calendar list again.',
+                        )}
+                      </p>
+                    )}
                   <dl className="calendar-account-summary">
                     <div>
                       <dt>{t('Busy-time sync')}</dt>
@@ -525,13 +535,6 @@ export function CalendarsPage() {
                   </dl>
                   {destination && (!destinationAvailable || permissionReview) && (
                     <a href="#booking-calendar-options">{t('Choose another booking calendar')}</a>
-                  )}
-                  {connection.provider === 'microsoft' && (
-                    <p>
-                      {t(
-                        'This connection lists calendars only. Busy-time synchronization and booking writes are not yet available.',
-                      )}
-                    </p>
                   )}
                   {connection.provider === 'google' && !connection.syncAuthorized && (
                     <div className="stack">
@@ -603,74 +606,75 @@ export function CalendarsPage() {
                             ? t('Synchronizing busy times…')
                             : null}
                         </div>
-                        {connection.provider !== 'microsoft' &&
-                          (connection.syncAuthorized ||
-                            calendar.checkConflicts ||
-                            state.data.destinationCalendarId === calendar.id) && (
-                            <fieldset
-                              className="form-fieldset calendar-controls"
-                              aria-labelledby={`calendar-${calendar.id}`}
-                              aria-busy={pending === `sync:${calendar.id}` || undefined}
-                              disabled={pending !== null}
-                            >
-                              <label className="checkbox">
-                                <input
-                                  type="checkbox"
-                                  checked={calendar.checkConflicts}
-                                  disabled={
-                                    pending !== null ||
-                                    (!calendar.checkConflicts &&
-                                      (calendar.accessRole === 'freeBusyReader' ||
-                                        calendar.available === false ||
-                                        connection.status !== 'active' ||
-                                        !providerEnabled ||
-                                        !connection.syncAuthorized))
-                                  }
-                                  onChange={(event) =>
-                                    calendarAction(calendar.id, 'toggle', event.target.checked)
-                                  }
-                                />
-                                {t('Check this calendar for conflicts')}
-                              </label>
-                              {calendar.checkConflicts && (
-                                <>
-                                  <p>
-                                    {calendar.syncError || calendar.available === false
-                                      ? t(
-                                          'Synchronization failed. Booking times stay unavailable until synchronization recovers.',
-                                        )
-                                      : calendar.lastSyncedAt
-                                        ? t('Last synchronized: {0}', {
-                                            '0': new Date(calendar.lastSyncedAt).toLocaleString(
-                                              displayLocale,
-                                              { calendar: 'gregory' },
-                                            ),
-                                          })
-                                        : t(
-                                            'Synchronization is not ready yet. Booking times stay unavailable until it completes.',
-                                          )}
-                                  </p>
-                                  <button
-                                    type="button"
-                                    className="button button-small"
-                                    disabled={
-                                      connection.status !== 'active' ||
+                        {(connection.syncAuthorized ||
+                          calendar.checkConflicts ||
+                          state.data.destinationCalendarId === calendar.id) && (
+                          <fieldset
+                            className="form-fieldset calendar-controls"
+                            aria-labelledby={`calendar-${calendar.id}`}
+                            aria-busy={pending === `sync:${calendar.id}` || undefined}
+                            disabled={pending !== null}
+                          >
+                            <label className="checkbox">
+                              <input
+                                type="checkbox"
+                                checked={calendar.checkConflicts}
+                                disabled={
+                                  pending !== null ||
+                                  (!calendar.checkConflicts &&
+                                    (calendar.accessRole === 'freeBusyReader' ||
                                       calendar.available === false ||
+                                      connection.status !== 'active' ||
+                                      (connection.provider === 'microsoft' && reconnect) ||
                                       !providerEnabled ||
-                                      !connection.syncAuthorized ||
-                                      reconnect ||
-                                      (connection.lastError === 'permissions_missing' &&
-                                        calendar.syncError === 'permissions_missing')
-                                    }
-                                    onClick={() => calendarAction(calendar.id, 'sync')}
-                                  >
-                                    {calendar.syncError || calendar.available === false
-                                      ? t('Retry synchronization')
-                                      : t('Sync now')}
-                                  </button>
-                                </>
-                              )}
-                              {(calendar.accessRole === 'owner' ||
+                                      !connection.syncAuthorized))
+                                }
+                                onChange={(event) =>
+                                  calendarAction(calendar.id, 'toggle', event.target.checked)
+                                }
+                              />
+                              {t('Check this calendar for conflicts')}
+                            </label>
+                            {calendar.checkConflicts && (
+                              <>
+                                <p>
+                                  {calendar.syncError || calendar.available === false
+                                    ? t(
+                                        'Synchronization failed. Booking times stay unavailable until synchronization recovers.',
+                                      )
+                                    : calendar.lastSyncedAt
+                                      ? t('Last synchronized: {0}', {
+                                          '0': new Date(calendar.lastSyncedAt).toLocaleString(
+                                            displayLocale,
+                                            { calendar: 'gregory' },
+                                          ),
+                                        })
+                                      : t(
+                                          'Synchronization is not ready yet. Booking times stay unavailable until it completes.',
+                                        )}
+                                </p>
+                                <button
+                                  type="button"
+                                  className="button button-small"
+                                  disabled={
+                                    connection.status !== 'active' ||
+                                    calendar.available === false ||
+                                    !providerEnabled ||
+                                    !connection.syncAuthorized ||
+                                    reconnect ||
+                                    (connection.lastError === 'permissions_missing' &&
+                                      calendar.syncError === 'permissions_missing')
+                                  }
+                                  onClick={() => calendarAction(calendar.id, 'sync')}
+                                >
+                                  {calendar.syncError || calendar.available === false
+                                    ? t('Retry synchronization')
+                                    : t('Sync now')}
+                                </button>
+                              </>
+                            )}
+                            {connection.provider !== 'microsoft' &&
+                              (calendar.accessRole === 'owner' ||
                                 (connection.provider === 'caldav' &&
                                   calendar.accessRole === 'writer') ||
                                 state.data.destinationCalendarId === calendar.id) && (
@@ -704,8 +708,8 @@ export function CalendarsPage() {
                                     : t('Write new bookings here')}
                                 </button>
                               )}
-                            </fieldset>
-                          )}
+                          </fieldset>
+                        )}
                       </li>
                     ))}
                   </ul>
@@ -899,7 +903,7 @@ export function CalendarsPage() {
             >
               <p id="microsoft-calendar-permissions">
                 {t(
-                  'Microsoft will ask for your account identity, continuing access and permission to read basic calendar details. This connection lists your calendars; busy-time synchronization and booking event writes are not yet available. Connecting is separate from signing in.',
+                  'Microsoft will ask for your account identity, continuing access and permission to read basic calendar details. Hourmere lists your calendars and checks busy times on the calendars you select. Booking event writes are unavailable. Connecting is separate from signing in.',
                 )}
               </p>
               {microsoftRecovery && <p>{ui(accountHint(microsoftRecovery))}</p>}

@@ -7,15 +7,16 @@ import {
   oidcClockSkew,
   ssoProofLifetime,
 } from '../apps/server/src/sso-oidc-limits.ts'
+import { maximumSamlAssertionLifetime, samlClockSkew } from '../apps/server/src/sso-saml-limits.ts'
 import { SSO_AUDIT_LIMITS } from '../packages/db/src/sso-audit.ts'
 import { SSO_TRANSPORT_LIMITS } from '../packages/outbound/src/sso.ts'
 
 const source = readFileSync(new URL('../docs/sso.md', import.meta.url), 'utf8')
 const limits = {
-  clockSkew: 60,
+  clockSkew: samlClockSkew,
   oidcClockSkew,
   authenticationAttemptLifetime,
-  maximumSamlAssertionLifetime: 600,
+  maximumSamlAssertionLifetime,
   ssoProofLifetime,
   ssoDelegationLifetime: 2592000,
   freshAdministrationProof: 300,
@@ -192,9 +193,7 @@ describe('SSO audit limits (bound to the runtime constants)', () => {
   })
 })
 
-// These guard the written contract only. Signed protocol fixtures belong to the
-// implementation's SAML verifier and SAML timing and replay steps; no product
-// verifier exists in this PR.
+// These guard the written contract. The SAML verifier suite exercises the signed fixtures.
 const samlCommitments = {
   requiredTimestamps:
     'require finite Conditions NotBefore and NotOnOrAfter, bearer SubjectConfirmationData NotOnOrAfter and assertion IssueInstant.',

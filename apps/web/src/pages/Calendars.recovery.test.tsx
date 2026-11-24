@@ -96,10 +96,7 @@ describe('calendar recovery actions', () => {
       renderApp('/app/calendars')
       const card = await account()
       expect(within(card).getByText(`${name} Calendar`)).toBeDefined()
-      if (provider === 'google')
-        expect(within(card).getByRole('button', { name: 'Sync now' }).matches(':disabled')).toBe(
-          true,
-        )
+      expect(within(card).getByRole('button', { name: 'Sync now' }).matches(':disabled')).toBe(true)
       expect(card.textContent).toContain(
         `Choose original@example.test on the ${name} authorization page. Connecting a different account will not restore this one.`,
       )
@@ -423,7 +420,6 @@ describe('calendar recovery actions', () => {
                 ...connection,
                 provider,
                 lastError: failed ? 'provider_unavailable' : null,
-                syncAuthorized: provider === 'google',
                 calendars: [],
               },
             ],
@@ -479,31 +475,38 @@ describe('calendar recovery actions', () => {
     },
   )
 
-  it('leaves a healthy Microsoft account with its list-only disclosure and no recovery action', async () => {
-    fakeApi({
+  it('lets a Microsoft account retry a temporary busy-time failure without reconnecting', async () => {
+    const user = userEvent.setup()
+    const retry = `POST /api/v1/calendars/${calendar.id}/sync`
+    const requests = fakeApi({
       ...signedIn,
       ...profile(),
-      ...list([{ ...connection, provider: 'microsoft', syncAuthorized: false }]),
+      ...list([
+        {
+          ...connection,
+          provider: 'microsoft',
+          lastError: 'provider_unavailable',
+          calendars: [{ ...calendar, syncError: 'provider_unavailable' }],
+        },
+      ]),
+      [retry]: () => new Response(null, { status: 204 }),
     })
     renderApp('/app/calendars')
     const card = await account()
-    expect(within(card).getByText('Not available — calendar list only.')).toBeDefined()
     expect(
       within(card).getByText(
-        'This connection lists calendars only. Busy-time synchronization and booking writes are not yet available.',
+        'Synchronization failed. Booking times stay unavailable until synchronization recovers.',
       ),
     ).toBeDefined()
     expect(within(card).queryByRole('alert')).toBeNull()
-    expect(
-      within(card).queryByRole('button', {
-        name: /Retry synchronization|Sync now/,
-      }),
-    ).toBeNull()
     expect(
       within(card).queryByRole('link', {
         name: /Reconnect|Restore calendar|Enable calendar synchronization/,
       }),
     ).toBeNull()
+    await user.click(within(card).getByRole('button', { name: 'Retry synchronization' }))
+    expect(await screen.findByText('Busy times synchronized for this calendar.')).toBeDefined()
+    expect(requests.to(retry)).toHaveLength(1)
   })
 
   it.each([
@@ -513,7 +516,7 @@ describe('calendar recovery actions', () => {
       lastError: null,
       syncError: null,
       label: /重新连接\s*Microsoft\s*日历/,
-      summary: '暂不支持，仅可查看日历列表。',
+      summary: '已暂停，请重新连接此账号。',
     },
     {
       provider: 'google',

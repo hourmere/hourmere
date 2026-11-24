@@ -367,12 +367,42 @@ describe.skipIf(!databaseUrl)('calendar HTTP routes (real Postgres)', () => {
     }
     const list = (await (await request('/api/v1/calendar-connections')).json()) as {
       microsoftEnabled: boolean
-      data: { id: string; provider: string; syncAuthorized: boolean }[]
+      data: {
+        id: string
+        provider: string
+        syncAuthorized: boolean
+        calendars: { id: string; checkConflicts: boolean }[]
+      }[]
     }
     expect(list.microsoftEnabled).toBe(true)
     expect(list.data).toHaveLength(1)
-    expect(list.data[0]).toMatchObject({ provider: 'microsoft', syncAuthorized: false })
-    const id = list.data[0]!.id
+    expect(list.data[0]).toMatchObject({
+      provider: 'microsoft',
+      syncAuthorized: true,
+      calendars: [{ checkConflicts: false }],
+    })
+    const calendarId = list.data[0]?.calendars[0]?.id
+    const otherKey = { authorization: 'Bearer hm_other', cookie: '', origin: '' }
+    const calls = microsoft.calls.length
+    for (const [path, method, body] of [
+      [`/api/v1/calendars/${calendarId}`, 'PATCH', '{"checkConflicts":true}'],
+      [`/api/v1/calendars/${calendarId}/sync`, 'POST', '{}'],
+    ] as const) {
+      const forbidden = await request(path, method, body, otherKey)
+      expect(forbidden.status).toBe(404)
+      expect(await forbidden.json()).toMatchObject({ error: 'calendar_not_found' })
+    }
+    expect(microsoft.calls).toHaveLength(calls)
+    expect(await db.selectFrom('calendars').select('check_conflicts').execute()).toEqual([
+      { check_conflicts: false },
+    ])
+    expect(
+      (await request(`/api/v1/calendars/${calendarId}`, 'PATCH', '{"checkConflicts":true}')).status,
+    ).toBe(204)
+    expect(await db.selectFrom('calendars').select('check_conflicts').execute()).toEqual([
+      { check_conflicts: true },
+    ])
+    const id = list.data[0]?.id
     expect((await request(`/api/v1/calendar-connections/${id}/refresh`, 'POST', '{}')).status).toBe(
       204,
     )

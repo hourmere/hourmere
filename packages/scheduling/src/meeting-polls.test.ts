@@ -1839,9 +1839,11 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
     ]
     await book(db, s.organizationId, host, sameEvent, { eventTypeId: s.eventTypeId })
     await book(db, s.organizationId, host, otherEvent, { eventTypeId: other })
-    await fixtures.calendarBusy(s.user.id, [
-      [calendar, Temporal.Instant.from(calendar).add({ minutes: 30 }).toString()],
-    ])
+    await fixtures.calendarBusy(
+      s.user.id,
+      [[calendar, Temporal.Instant.from(calendar).add({ minutes: 30 }).toString()]],
+      { now: await databaseNow() },
+    )
     await book(db, s.organizationId, host, canceled, {
       eventTypeId: s.eventTypeId,
       status: 'cancelled',
