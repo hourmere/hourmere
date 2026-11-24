@@ -263,7 +263,7 @@ const groupMappings = (db: Db, groupSlotId: string, calendarId: string) =>
 
 interface EventMapping {
   id: string
-  etag: string | null
+  projection: EventProjection
   countRevision?: string
 }
 
@@ -272,14 +272,26 @@ async function readMapping(
   payload: CalendarWritePayload,
   target: Destination,
   state: WriteState,
+  desired: DesiredEvent,
 ): Promise<EventMapping | undefined> {
-  return 'bookingId' in payload
-    ? bookingMappings(db, state.mappedBookingId ?? payload.bookingId, target.calendarId)
-        .select(['external_event_id as id', 'etag'])
-        .executeTakeFirst()
-    : groupMappings(db, payload.groupSlotId, target.calendarId)
-        .select(['external_event_id as id', 'etag', 'count_revision as countRevision'])
-        .executeTakeFirst()
+  if ('bookingId' in payload) {
+    const mapping = await bookingMappings(
+      db,
+      state.mappedBookingId ?? payload.bookingId,
+      target.calendarId,
+    )
+      .innerJoin('bookings as b', 'b.id', 'booking_calendar_events.booking_id')
+      .select(['external_event_id as id', 'b.start_at as start', 'b.end_at as end'])
+      .executeTakeFirst()
+    return mapping && { id: mapping.id, projection: projectionOf(mapping) }
+  }
+  const mapping = await groupMappings(db, payload.groupSlotId, target.calendarId)
+    .select(['external_event_id as id', 'count_revision as countRevision'])
+    .executeTakeFirst()
+  // Group slot times are immutable. Older receipts may lack the written seat count.
+  const seatCount =
+    mapping?.countRevision === desired.countRevision ? desired.seatCount : state.seatCount
+  return mapping && { ...mapping, projection: projectionOf({ ...desired, seatCount }) }
 }
 
 const projectionOf = (value: { start: Date; end: Date; seatCount?: number }): EventProjection => ({
@@ -303,7 +315,7 @@ async function claim(
     if (!state || (state.nextAttemptAt && Date.parse(state.nextAttemptAt) > now)) return
     const desired = await desiredEvent(trx, payload, target)
     if (!desired) return
-    const mapping = await readMapping(trx, payload, target, state)
+    const mapping = await readMapping(trx, payload, target, state, desired)
     // Existing receipts predate lifecycle revisions. They describe the original create.
     let priorRevision = state.revision
     if (!priorRevision) {
@@ -481,9 +493,9 @@ interface EventScope {
 
 async function updateMappedEvent(
   scope: EventScope,
-  event: MicrosoftBookingEvent,
+  eventId: string,
   desired: DesiredEvent,
-  earlier: { patches: EventProjection[]; create?: EventProjection },
+  earlier: { patches: EventProjection[]; written?: EventProjection },
   onSend: () => void,
 ) {
   const { client, token, calendarId, transactionId, signal } = scope
@@ -491,13 +503,11 @@ async function updateMappedEvent(
     client.getEvent(
       token,
       calendarId,
-      event.id,
+      eventId,
       transactionId,
       signal,
       desired.seatCount !== undefined,
     )
-  const matchesEarlierPatch = (projection: EventProjection) =>
-    earlier.patches.some((prior) => sameProjection(prior, projection))
   const missing = async () => {
     const calendars = await client.calendars(token, signal)
     if (!calendars.some((calendar) => calendar.id === calendarId)) throw removedCalendar()
@@ -508,33 +518,42 @@ async function updateMappedEvent(
   if (!actual) return missing()
   if (!actual.etag || actual.hasAttendees) throw eventConflict()
   // A prior PATCH can apply before a timeout or a worker crash. Confirm the
-  // exact projection before accepting its new ETag for a subsequent revision.
+  // written projection before using the current ETag for a subsequent revision.
   const actualProjection = projectionOf(actual)
+  const written = earlier.written && {
+    ...earlier.written,
+    // For an older group receipt, keep the count seen on the first read as
+    // the baseline for detecting a concurrent edit during this attempt.
+    seatCount: earlier.written.seatCount ?? actualProjection.seatCount,
+  }
+  const matchesEarlierPatch = (projection: EventProjection) =>
+    earlier.patches.some((prior) => sameProjection(prior, projection))
+  const matchesEarlierWrite = (projection: EventProjection) =>
+    (written && sameProjection(written, projection)) || matchesEarlierPatch(projection)
   if (sameProjection(actualProjection, wanted)) return actual
-  if (
-    !matchesEarlierPatch(actualProjection) &&
-    (earlier.create
-      ? !sameProjection(actualProjection, earlier.create)
-      : event.etag && event.etag !== actual.etag)
-  )
-    throw eventConflict()
+  if (!matchesEarlierWrite(actualProjection)) throw eventConflict()
   const patch = (etag: string) => {
     onSend()
-    return client.updateEvent(token, calendarId, event.id, etag, desired, signal)
+    return client.updateEvent(token, calendarId, eventId, etag, desired, signal)
   }
+  let preconditionFailed: boolean
   try {
     return await patch(actual.etag)
   } catch (error) {
     if (isGraphStatus(error, 404, 410)) return missing()
     if (!isGraphStatus(error, 409, 412)) throw error
+    preconditionFailed = isGraphStatus(error, 412)
   }
   const latest = await get()
-  if (!latest?.etag || latest.hasAttendees) throw eventConflict()
+  if (!latest) return missing()
+  if (!latest.etag || latest.hasAttendees) throw eventConflict()
   const latestProjection = projectionOf(latest)
   if (sameProjection(latestProjection, wanted)) return latest
-  // A timed-out prior PATCH may have won the race between preflight and PATCH.
-  // Only its exact projection authorizes one more conditional write.
-  if (latest.etag !== actual.etag && matchesEarlierPatch(latestProjection))
+  if (
+    preconditionFailed
+      ? matchesEarlierWrite(latestProjection)
+      : latest.etag !== actual.etag && matchesEarlierPatch(latestProjection)
+  )
     return patch(latest.etag)
   throw eventConflict()
 }
@@ -786,9 +805,9 @@ async function writeDestination(
       } else if (mapping) {
         event = await updateMappedEvent(
           scope,
-          { id: mapping.id, etag: mapping.etag ?? undefined },
+          mapping.id,
           desired,
-          { patches: priorPatches },
+          { patches: priorPatches, written: mapping.projection },
           onPatch,
         )
       } else {
@@ -821,11 +840,11 @@ async function writeDestination(
         if (event && possiblyCreated && lease.createRevision !== desired.revision)
           event = await updateMappedEvent(
             scope,
-            event,
+            event.id,
             desired,
             {
               patches: priorPatches,
-              create: lease.createProjection,
+              written: lease.createProjection,
             },
             onPatch,
           )
@@ -866,6 +885,7 @@ async function writeDestination(
         updatedAt: new Date(clock()).toISOString(),
         revision: desired.revision,
         mappedBookingId: event ? desired.bookingId : undefined,
+        seatCount: event ? desired.seatCount : undefined,
       },
       event,
       deleted || undefined,

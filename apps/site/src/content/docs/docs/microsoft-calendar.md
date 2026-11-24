@@ -51,8 +51,10 @@ offering bookings. You can also choose a calendar for private copies of your boo
   original copy to remove it. A successful create stores the Graph event ID.
   [Graph event lookup by extended property](https://learn.microsoft.com/en-us/graph/api/singlevaluelegacyextendedproperty-get?view=graph-rest-1.0)
 - Rescheduling updates the existing event by its stored ID, sending the new start and end in UTC.
-  Hourmere uses the event's version (ETag) to detect conflicting edits. If a reschedule cannot
-  safely update the original copy, the Calendars page shows a conflict for that calendar.
+  Hourmere checks whether the Outlook times still match the last write and uses the current
+  event version (ETag) for the update. Changes such as categorizing the event or dismissing a
+  reminder can change its version while leaving its times intact. If a reschedule cannot safely
+  update the original copy, the Calendars page shows a conflict for that calendar.
   [Graph event update](https://learn.microsoft.com/en-us/graph/api/event-update?view=graph-rest-1.0)
 - Cancellation removes the copy from Outlook. If an event has moved, Hourmere looks for the
   booking marker and can remove a matching copy from another calendar the connected account owns.

@@ -33,6 +33,7 @@ const START = Temporal.Instant.from('2030-03-06T10:00:00Z')
 const NEXT = Temporal.Instant.from('2030-03-07T11:00:00Z')
 const etag = 'W/"DwAAABYAAAC3I5RWx7luSYmfvk6V4H3sAADTeGJB"'
 const updatedEtag = 'W/"DwAAABYAAAC3I5RWx7luSYmfvk6V4H3sAADTeGJC"'
+const outlookEtag = 'W/"DwAAABYAAAC3I5RWx7luSYmfvk6V4H3sAADTeGJD"'
 const eventId = 'AAMkAGViNDU7zAAAAAGtlAAAMh8kAAA='
 const scope = 'Calendars.ReadWrite'
 const invitee = { name: 'Private Invitee', email: 'invitee@example.test', timeZone: 'UTC' }
@@ -543,12 +544,16 @@ describe.skipIf(!process.env.DATABASE_URL)(
           expect(provider.events.size).toBe(1)
           await cancelManagedBooking(context(), requireToken(created.manageToken))
           expect(queued).toEqual([{ bookingId }, { bookingId }])
+          await Promise.all(queued.slice(1).map(work))
+          expect(deletes()).toHaveLength(0)
         } finally {
           release.resolve()
           await writing
         }
-        if (lostResponse) now += 30_000
-        await Promise.all([work({ bookingId }), work({ bookingId })])
+        if (lostResponse) {
+          now += 30_000
+          await dispatch(work)
+        }
         expect(provider.posts()).toHaveLength(1)
         expect(deletes()).toHaveLength(1)
         expect(provider.events.size).toBe(0)
@@ -557,35 +562,168 @@ describe.skipIf(!process.env.DATABASE_URL)(
       },
     )
 
-    it('reconciles a successor committed during an ambiguous Outlook create to its final time', async () => {
+    it.each([false, true])(
+      'moves a copy rescheduled before the in-flight create finishes (lost response: %s)',
+      async (lostResponse) => {
+        const created = await create()
+        const bookingId = created.booking.id
+        const sent = Promise.withResolvers<void>()
+        const release = Promise.withResolvers<void>()
+        provider.controls.afterCreate = async () => {
+          sent.resolve()
+          await release.promise
+          return lostResponse ? graphError(503, 'ServiceUnavailable') : undefined
+        }
+        const writing = work({ bookingId })
+        let successor: string
+        try {
+          await Promise.race([sent.promise, writing])
+          expect(provider.events.size).toBe(1)
+          const moved = await rescheduleManagedBooking(
+            context(),
+            requireToken(created.manageToken),
+            {
+              start: NEXT,
+            },
+          )
+          successor = moved.booking.id
+          expect(queued).toEqual([{ bookingId }, { bookingId }])
+          await Promise.all(queued.slice(1).map(work))
+          expect(patches()).toHaveLength(0)
+        } finally {
+          release.resolve()
+          await writing
+        }
+        if (lostResponse) {
+          expect(await state(bookingId)).toMatchObject({ status: 'retrying', lookupOnly: true })
+          now += 30_000
+          await dispatch(work)
+        }
+        expect(provider.posts()).toHaveLength(1)
+        expect(patches()).toHaveLength(1)
+        expect([...provider.events.values()]).toMatchObject([
+          {
+            id: eventId,
+            start: { dateTime: '2030-03-07T11:00:00.000', timeZone: 'UTC' },
+            end: { dateTime: '2030-03-07T11:30:00.000', timeZone: 'UTC' },
+          },
+        ])
+        expect(await mappings(bookingId)).toEqual([])
+        expect(await mappings(successor)).toMatchObject([{ external_event_id: eventId }])
+        expect(await state(bookingId)).toMatchObject({ status: 'succeeded' })
+      },
+    )
+
+    it('reschedules after an Outlook ETag-only change using the freshly read tag', async () => {
       const created = await create()
       const bookingId = created.booking.id
-      let successor: string | undefined
-      provider.controls.afterCreate = async () => {
+      await work({ bookingId })
+      const original = [...provider.events][0]
+      if (!original) throw new Error('Expected the first Graph copy')
+      const [key, event] = original
+      provider.events.set(key, { ...event, '@odata.etag': outlookEtag })
+
+      const moved = await rescheduleManagedBooking(context(), requireToken(created.manageToken), {
+        start: NEXT,
+      })
+      await work({ bookingId })
+      expect(patches()).toMatchObject([{ id: eventId, ifMatch: outlookEtag }])
+      expect(provider.events.get(key)).toMatchObject({
+        start: { dateTime: '2030-03-07T11:00:00.000', timeZone: 'UTC' },
+        end: { dateTime: '2030-03-07T11:30:00.000', timeZone: 'UTC' },
+      })
+      expect(await state(bookingId)).toMatchObject({ status: 'succeeded' })
+      expect(await mappings(moved.booking.id)).toMatchObject([{ external_event_id: eventId }])
+    })
+
+    it('rejects an Outlook end-time edit when the stored receipt has no ETag', async () => {
+      const created = await create()
+      const bookingId = created.booking.id
+      await work({ bookingId })
+      await db
+        .updateTable('booking_calendar_events')
+        .set({ etag: null })
+        .where('booking_id', '=', bookingId)
+        .where('calendar_id', '=', selected)
+        .execute()
+      const original = [...provider.events][0]
+      if (!original) throw new Error('Expected the first Graph copy')
+      const [key, event] = original
+      const end = { dateTime: '2030-03-06T10:45:00.000', timeZone: 'UTC' } as const
+      provider.events.set(key, { ...event, '@odata.etag': outlookEtag, end })
+
+      const moved = await rescheduleManagedBooking(context(), requireToken(created.manageToken), {
+        start: NEXT,
+      })
+      await work({ bookingId })
+      expect(patches()).toHaveLength(0)
+      expect(provider.events.get(key)?.end).toEqual(end)
+      expect(await state(bookingId)).toMatchObject({ status: 'failed', reason: 'event_conflict' })
+      expect(await mappings(moved.booking.id)).toEqual([])
+    })
+
+    it.each([false, true])(
+      'rechecks the Outlook copy once after PATCH gets 412 (time edited: %s)',
+      async (timeEdited) => {
+        const created = await create()
+        const bookingId = created.booking.id
+        await work({ bookingId })
+        const original = [...provider.events][0]
+        if (!original) throw new Error('Expected the first Graph copy')
+        const [key, event] = original
+        const end = timeEdited
+          ? { dateTime: '2030-03-06T10:45:00.000', timeZone: 'UTC' as const }
+          : event.end
+        provider.controls.beforePatch = () => {
+          provider.controls.beforePatch = undefined
+          provider.events.set(key, { ...event, '@odata.etag': outlookEtag, end })
+          return graphError(412, 'ErrorIrresolvableConflict')
+        }
+
         const moved = await rescheduleManagedBooking(context(), requireToken(created.manageToken), {
           start: NEXT,
         })
-        successor = moved.booking.id
-        return graphError(503, 'ServiceUnavailable')
-      }
-      await work({ bookingId })
-      expect(queued).toEqual([{ bookingId }, { bookingId }])
-      if (!successor) throw new Error('Expected a successor to the in-flight booking')
-      expect(await state(bookingId)).toMatchObject({ status: 'retrying', lookupOnly: true })
+        await work({ bookingId })
+        expect(
+          provider.calls.filter((call) => call.method === 'GET' && call.id === eventId),
+        ).toHaveLength(2)
+        expect(patches().map((call) => call.ifMatch)).toEqual(
+          timeEdited ? [etag] : [etag, outlookEtag],
+        )
+        if (timeEdited) {
+          expect(provider.events.get(key)?.end).toEqual(end)
+          expect(await state(bookingId)).toMatchObject({
+            status: 'failed',
+            reason: 'event_conflict',
+          })
+          expect(await mappings(moved.booking.id)).toEqual([])
+        } else {
+          expect(provider.events.get(key)).toMatchObject({
+            start: { dateTime: '2030-03-07T11:00:00.000', timeZone: 'UTC' },
+            end: { dateTime: '2030-03-07T11:30:00.000', timeZone: 'UTC' },
+          })
+          expect(await state(bookingId)).toMatchObject({ status: 'succeeded' })
+          expect(await mappings(moved.booking.id)).toMatchObject([{ external_event_id: eventId }])
+        }
+      },
+    )
 
-      now += 30_000
-      await Promise.all([work({ bookingId: successor }), work({ bookingId })])
-      expect(provider.posts()).toHaveLength(1)
-      expect(patches()).toHaveLength(1)
-      expect([...provider.events.values()]).toMatchObject([
-        {
-          id: eventId,
-          start: { dateTime: '2030-03-07T11:00:00.000', timeZone: 'UTC' },
-          end: { dateTime: '2030-03-07T11:30:00.000', timeZone: 'UTC' },
-        },
-      ])
-      expect(await mappings(bookingId)).toEqual([])
-      expect(await mappings(successor)).toMatchObject([{ external_event_id: eventId }])
+    it('stops after one retry when Outlook keeps returning 412', async () => {
+      const created = await create()
+      const bookingId = created.booking.id
+      await work({ bookingId })
+      const moved = await rescheduleManagedBooking(context(), requireToken(created.manageToken), {
+        start: NEXT,
+      })
+      provider.controls.beforePatch = () => graphError(412, 'ErrorIrresolvableConflict')
+
+      await work({ bookingId })
+      expect(
+        provider.calls.filter((call) => call.method === 'GET' && call.id === eventId),
+      ).toHaveLength(2)
+      expect(patches()).toHaveLength(2)
+      expect(await state(bookingId)).toMatchObject({ status: 'failed', reason: 'event_conflict' })
+      expect(await mappings(moved.booking.id)).toEqual([])
     })
 
     it.each(['edited', 'deleted', 'turned into a meeting'])(
@@ -976,10 +1114,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
         .executeTakeFirstOrThrow()
       expect(copy).toEqual({ calendar_id: selected, external_event_id: eventId, etag })
 
+      const original = [...provider.events][0]
+      if (!original) throw new Error('Expected the first Graph copy')
+      const [key, event] = original
+      provider.events.set(key, { ...event, '@odata.etag': outlookEtag })
       await cancelManagedBooking(context(), requireToken(first.manageToken))
       await work({ groupSlotId })
       expect(patches()).toMatchObject([
-        { id: eventId, ifMatch: etag, body: { body: { content: '1' } } },
+        { id: eventId, ifMatch: outlookEtag, body: { body: { content: '1' } } },
       ])
       expect(provider.events.size).toBe(1)
       await cancelManagedBooking(context(), requireToken(second.manageToken))
@@ -994,6 +1136,27 @@ describe.skipIf(!process.env.DATABASE_URL)(
           .execute(),
       ).toEqual([])
       expect(provider.posts()).toHaveLength(1)
+    })
+
+    it('preserves an Outlook edit to a group copy’s seat count', async () => {
+      await setGroupType()
+      const first = await create()
+      const groupSlotId = await slotFor(first.booking.id)
+      await book({ ...invitee, name: 'Second Invitee', email: 'second@example.test' })
+      await work({ groupSlotId })
+      const original = [...provider.events][0]
+      if (!original) throw new Error('Expected the first Graph copy')
+      const [key, event] = original
+      const body = { contentType: 'text', content: '3' } as const
+      provider.events.set(key, { ...event, '@odata.etag': outlookEtag, body })
+
+      await cancelManagedBooking(context(), requireToken(first.manageToken))
+      await work({ groupSlotId })
+      expect(patches()).toHaveLength(0)
+      expect(provider.events.get(key)?.body).toEqual(body)
+      expect(await readMicrosoftWritebackSummary(db, [selected], now)).toEqual(
+        new Map([[selected, { status: 'failed', reason: 'event_conflict' }]]),
+      )
     })
 
     it('reconciles the latest group seat count after a create with a lost response', async () => {
