@@ -13,6 +13,7 @@ import {
   createCallerResolver,
   createMcpOAuthResolver,
   recordSsoAdmissionRemoval,
+  withScimResources,
 } from '@hourmere/auth'
 import {
   bookingCalendarJob,
@@ -188,6 +189,7 @@ import { webhookRoutes } from './routes/webhooks.ts'
 import { workflowRoutes } from './routes/workflows.ts'
 import { zoomEventRoutes } from './routes/zoom-events.ts'
 import { parseRoutingFormsEnabled, resolveRoutingFormsEnabled } from './routing-form-setting.ts'
+import { productionScimResourcesEnabled } from './scim.ts'
 import { closeConnectionsWhen, closeServer } from './shutdown.ts'
 import { configuredSmsJobs, createConfiguredSmsInbound } from './sms.ts'
 import { SSO_DOMAIN_RECHECK_JOB, ssoDomainRecheckJob } from './sso-domain-recheck.ts'
@@ -890,6 +892,10 @@ async function start(
   const routingFormsRequested = parseRoutingFormsEnabled(env.ROUTING_FORMS_ENABLED)
   const workflowsEnabled = config.WORKFLOWS_ENABLED
   const role = config.HOURMERE_ROLE
+  const ssoCapabilities = withScimResources(
+    { ssoOidcEnabled, ssoSamlEnabled },
+    productionScimResourcesEnabled,
+  )
   if (config.WEBHOOK_PRIVATE_TARGETS.length)
     console.warn(
       'WEBHOOK_PRIVATE_TARGETS permits operator-trusted private webhook destinations. Self-hosting only; Hourmere Cloud must never enable this setting.',
@@ -1043,7 +1049,7 @@ async function start(
     workflowsEnabled,
     encryptionKey: config.WEBHOOK_ENCRYPTION_KEY,
     privateTargets: config.WEBHOOK_PRIVATE_TARGETS,
-    ssoCapabilities: { ssoOidcEnabled, ssoSamlEnabled },
+    ssoCapabilities,
   }
   const calendarDeps: CalendarDeps = {
     db,
@@ -1066,7 +1072,7 @@ async function start(
   // Background jobs: every role queues them, `all` and `worker` run them.
   const notificationDeps = {
     db,
-    ssoCapabilities: { ssoOidcEnabled, ssoSamlEnabled },
+    ssoCapabilities,
     followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,
     mailer,
     publicUrl: config.PUBLIC_URL,
@@ -1100,6 +1106,7 @@ async function start(
   }
   const waitlistDeps = {
     db,
+    scimResourcesEnabled: productionScimResourcesEnabled,
     secret: config.BETTER_AUTH_SECRET,
     publicUrl: config.PUBLIC_URL,
     automaticMeet: config.GOOGLE_MEET_ENABLED,
@@ -1137,7 +1144,7 @@ async function start(
       ssoDomainRecheckJob({
         db,
         publicUrl: config.PUBLIC_URL,
-        capabilities: { ssoOidcEnabled, ssoSamlEnabled },
+        capabilities: ssoCapabilities,
       }),
       ...waitlistMaintenanceJobs({
         scan: () => scanWaitlists(waitlistDeps),
@@ -1188,7 +1195,7 @@ async function start(
       // Delivery drops every job while hard-off; the attempt cleanup only deletes, so it runs
       // in every state.
       ...mailboxProofJobs({
-        capabilities: { ssoOidcEnabled, ssoSamlEnabled },
+        capabilities: ssoCapabilities,
         db,
         mailer,
         publicUrl: config.PUBLIC_URL,
@@ -1199,16 +1206,20 @@ async function start(
       }),
       ssoLinkRemovalEmailJob({
         db,
-        capabilities: { ssoOidcEnabled, ssoSamlEnabled },
+        capabilities: ssoCapabilities,
         mailer,
       }),
       ssoRecoveryEnrollmentEmailJob({
         db,
-        capabilities: { ssoOidcEnabled, ssoSamlEnabled },
+        capabilities: ssoCapabilities,
         publicUrl: config.PUBLIC_URL,
         mailer,
       }),
-      ssoOperatorRecoveryEmailJob(db, config.SMTP_URL && config.MAIL_FROM ? mailer : undefined),
+      ssoOperatorRecoveryEmailJob(
+        db,
+        config.SMTP_URL && config.MAIL_FROM ? mailer : undefined,
+        productionScimResourcesEnabled,
+      ),
       bookingNotificationJob(notificationDeps),
       rescheduleRequestExpiryJob({
         db,
@@ -1244,6 +1255,7 @@ async function start(
                 {
                   ...workflowWorker,
                   mailer,
+                  scimResourcesEnabled: productionScimResourcesEnabled,
                   budget: {
                     secret: config.BETTER_AUTH_SECRET,
                     mailMaxPerHour: config.MAIL_MAX_PER_HOUR,

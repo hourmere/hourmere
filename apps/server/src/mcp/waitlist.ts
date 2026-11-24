@@ -60,7 +60,14 @@ export function waitlistTools({
   const publicContext = (call: ToolCall): WaitlistContext => {
     if (!secret) throw new DomainError('conflict', 'waitlist_unavailable')
     if (!smtpConfigured) throw new DomainError('conflict', 'waitlist_smtp_not_configured')
-    return { db, secret, publicUrl, trustedIp: call.trustedIp, now }
+    return {
+      db,
+      secret,
+      publicUrl,
+      trustedIp: call.trustedIp,
+      now,
+      ...(call.caller.scimResourcesEnabled && { scimResourcesEnabled: true }),
+    }
   }
   return [
     defineTool({

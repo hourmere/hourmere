@@ -226,7 +226,7 @@ export async function suspendManagedChildMemberships(
 
 /** Reactivation lifts only this source's suspension, on mappings with directory authority. */
 export async function resumeManagedChildMemberships(trx: Transaction<Database>, entry: SourceUser) {
-  const { numUpdatedRows } = await trx
+  await trx
     .updateTable('scim_team_managed_memberships')
     .set({ suspended_at: null })
     .where('scim_user_id', '=', entry.id)
@@ -239,8 +239,7 @@ export async function resumeManagedChildMemberships(trx: Transaction<Database>, 
         .where('live_connection_id', '=', entry.connection_id)
         .where('suspended_at', 'is', null),
     )
-    .executeTakeFirst()
-  return Number(numUpdatedRows)
+    .execute()
 }
 
 /** Retiring a User takes it off every roster it was on, which changes those Groups. */

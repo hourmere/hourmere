@@ -26,6 +26,7 @@ import { templatePlaceholders } from './variables.ts'
 interface WorkflowEmailMarkerContext extends WorkflowDispatchContext {
   budget: WorkflowMailLimits & { secret: string }
   followUpHostNotesEnabled: () => boolean
+  scimResourcesEnabled?: boolean
 }
 
 type RecipientSkip = 'budget_suppressed' | 'existing_notification' | 'render_limit'
@@ -106,7 +107,7 @@ async function workflowEmailInput(
     )
   let publicPath: string | undefined
   if (usesPublicPath) {
-    publicPath = await findPublicBookingPath(trx, eventType.id)
+    publicPath = await findPublicBookingPath(trx, eventType.id, ctx.scimResourcesEnabled === true)
     hostTextEnabled = ctx.followUpHostNotesEnabled()
   }
   const personal = eventType.owner_user_id !== null

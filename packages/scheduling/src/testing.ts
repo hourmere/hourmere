@@ -168,6 +168,42 @@ export function createFixtures(db: Db) {
       .execute()
   }
 
+  /** Set up an existing member's Group-sourced child suspension. */
+  async function suspendManagedChildMembership(childId: string, userId: string) {
+    const parentId = await organization()
+    const { id: connectionId } = await db
+      .insertInto('scim_connections')
+      .values({ organization_id: parentId })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    const { id: mappingId } = await db
+      .insertInto('scim_team_mappings')
+      .values({
+        parent_organization_id: parentId,
+        child_organization_id: childId,
+        connection_id: connectionId,
+        external_id: 'roster',
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    const { id: memberId } = await db
+      .selectFrom('auth.member')
+      .select('id')
+      .where('organizationId', '=', childId)
+      .where('userId', '=', userId)
+      .executeTakeFirstOrThrow()
+    await db
+      .insertInto('scim_team_managed_memberships')
+      .values({
+        member_id: memberId,
+        mapping_id: mappingId,
+        child_organization_id: childId,
+        user_id: userId,
+        suspended_at: new Date(),
+      })
+      .execute()
+  }
+
   /** A user with a personal organization (as sign-up creates it) and, unless null, a profile. */
   async function host({
     name = 'Ada Lovelace',
@@ -429,6 +465,7 @@ export function createFixtures(db: Db) {
     user,
     organization,
     member,
+    suspendManagedChildMembership,
     host,
     schedule,
     eventType,

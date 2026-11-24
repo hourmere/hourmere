@@ -11,6 +11,7 @@ import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import { canonicalJson, lockHosts } from './bookings.ts'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
+import { getMeetingPollResults } from './meeting-poll-results.ts'
 import * as Polls from './meeting-polls.ts'
 import {
   createFixtures,
@@ -29,6 +30,8 @@ const PIN_CLOCK = [
   'const createdAt = await clock(trx)',
   'const createdAt = (globalThis as { meetingPollClock?: string }).meetingPollClock ?? (await clock(trx))',
 ] as const
+const BOOKABLE_EVENT_LOCK =
+  '    const bookable = await lockBookableEvent(trx, event.id, hostUserIds, scimResourcesEnabled)\n'
 
 /** Imports an isolated copy; the production file is never overwritten. */
 async function sourceCopy(...replacements: (readonly [string, string])[]): Promise<PollModule> {
@@ -1968,6 +1971,30 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
     expect(poll.candidates.map((candidate) => candidate.startAt)).toEqual([oneFree, open])
   }
 
+  async function verifyDirectoryHostSuspension(M: PollModule) {
+    const s = await team({}, { hosts: ['member', 'owner'], schedulingType: 'round_robin' })
+    await fixtures.suspendManagedChildMembership(s.organizationId, s.member.id)
+    const { deadline, starts } = await hourly(2)
+    const [blocked] = starts as [string, string]
+    await book(db, s.organizationId, [s.owner.id], blocked)
+    const managed = { ...s.ctx, scimResourcesEnabled: true }
+
+    await refused(propose(M, managed, s.eventTypeId, starts, deadline), s.eventTypeId, [blocked])
+    const { poll } = await succeeds(() => propose(M, s.ctx, s.eventTypeId, starts, deadline))
+
+    const meetingPollSecret = 'directory-host-test-secret'
+    const ordinary = await getMeetingPollResults({ ...s.ctx, meetingPollSecret }, poll.id)
+    expect(ordinary.candidates.map((candidate) => candidate.availability)).toEqual([
+      'available',
+      'available',
+    ])
+    const directory = await getMeetingPollResults({ ...managed, meetingPollSecret }, poll.id)
+    expect(directory.candidates.map((candidate) => candidate.availability)).toEqual([
+      'unavailable',
+      'available',
+    ])
+  }
+
   /** Wall-clock hours resolve in the host's zone on each side of a daylight-saving change. */
   async function verifyTimeZones(M: PollModule) {
     const zone = 'America/New_York'
@@ -2312,6 +2339,20 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
 
   it('needs one eligible round-robin host free and refuses when all are busy', async () => {
     await verifyRoundRobin(Polls)
+  })
+
+  it('excludes a directory-suspended host when creating a poll and reading its availability', async () => {
+    await verifyDirectoryHostSuspension(Polls)
+  })
+
+  it('detects a missing directory-suspension capability in the locked poll host check', async () => {
+    const copy = await sourceCopy([
+      'findOneTimeEventType(trx, eventTypeId, { lock: true, scimResourcesEnabled })',
+      'findOneTimeEventType(trx, eventTypeId, { lock: true })',
+    ])
+    await expectKilled(copy, verifyDirectoryHostSuspension, {
+      outcome: { message: expect.stringContaining('expected the operation to fail') },
+    })
   })
 
   it('resolves working hours in the host’s zone across a daylight-saving change', async () => {
@@ -2796,10 +2837,10 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
     [
       'the creation clock is read before the host users and members are locked',
       verifyCreationClock,
-      ['    const bookable = await lockBookableEvent(trx, event.id, hostUserIds)\n', ''],
+      [BOOKABLE_EVENT_LOCK, ''],
       [
         '    await requireBookableCandidates(trx, bookable,',
-        '    const bookable = await lockBookableEvent(trx, event.id, hostUserIds)\n    await requireBookableCandidates(trx, bookable,',
+        `${BOOKABLE_EVENT_LOCK}    await requireBookableCandidates(trx, bookable,`,
       ],
     ],
     [

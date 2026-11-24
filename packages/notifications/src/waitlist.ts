@@ -215,7 +215,11 @@ async function currentMessage(
     !['pending_verification', 'active', 'notified'].includes(entry.status)
   )
     return
-  const event = await resolveWaitlistEventById(db, entry.event_type_id)
+  const event = await resolveWaitlistEventById(
+    db,
+    entry.event_type_id,
+    deps.scimResourcesEnabled === true,
+  )
   if (!event) return
   if (claim.kind === 'verification') {
     if (
@@ -459,7 +463,11 @@ async function refreshNotifiedEntries(deps: WaitlistEmailDeps, afterId: string |
     if (performance.now() - started > 5000) break
     afterId = entry.id
     try {
-      const event = await resolveWaitlistEventById(deps.db, entry.event_type_id)
+      const event = await resolveWaitlistEventById(
+        deps.db,
+        entry.event_type_id,
+        deps.scimResourcesEnabled === true,
+      )
       if (!event) continue
       const receipts = await deps.db
         .selectFrom('waitlist_candidates')
