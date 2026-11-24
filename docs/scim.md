@@ -40,9 +40,9 @@ The dated observations here are deliberately separate from Hourmere's decisions.
 | [Entra provisioning implementation](https://learn.microsoft.com/en-us/entra/identity/app-provisioning/use-scim-to-provision-users-and-groups) | Examples cover Users and Groups, PATCH, matching, deletion and schema discovery. Group retrieval can exclude members. Group provisioning is optional. |
 | [Entra compliance issues](https://learn.microsoft.com/en-us/entra/identity/app-provisioning/application-provisioning-config-problem-scim-compatibility) | Documents legacy PATCH forms and `aadOptscim062020`, including string booleans and member removal values; the flag does not work with on-demand provisioning according to this page. Older customappsso behavior is not recommended. |
 
-These sources do not certify Hourmere or establish native SCIM support in Google
-Workspace or Keycloak. Google Workspace through a third-party connector and Keycloak
-through a separately chosen plugin are future test targets, not verified integrations.
+The provider examples establish protocol shapes. Google Workspace through a third-party
+connector remains a future test target. Keycloak coverage is limited to the
+[local outbound harness](#local-keycloak-harness) below.
 The RFC Editor pages list later updates to these RFCs; this first implementation
 explicitly targets the bounded RFC 7643/7644 subset below, not every newer extension.
 
@@ -1049,7 +1049,7 @@ operator-accessible.
 | Group membership changes | Group name and replacement | PATCH Groups/{id} member operations; no MCP/CLI | Resource test flag only | Entra removal forms, same-connection Users, replay, blockers, concurrent replacement, source User lifecycle checks across managed memberships, owner/admin access cannot be removed |
 | Group retirement | Group membership changes | DELETE Groups/{id}; no MCP/CLI | Resource test flag only | Managed access removed, team history retained, privileged-member and booking checks, subsequent operations 404, retired uniqueness excluded |
 | RFC and provider corpus | Group retirement | No new endpoint/tool/command | Resources hard-off | RFC errors/filters/PATCH, Okta PUT/Entra variants, source-copy controls, bounded Postgres pools |
-| Local Keycloak harness | RFC and provider corpus | Pinned local image/plugin fixture and synthetic identities; no new interface | Resources hard-off | Document actual SCIM capability, deterministic startup/cleanup, no live third-party calls, reproducible protocol capture without secrets |
+| [Local Keycloak harness](#local-keycloak-harness) | RFC and provider corpus | Pinned local image/plugin fixture and synthetic identities; no new interface | Resources hard-off | Document actual SCIM capability, deterministic startup/cleanup, no live third-party calls, reproducible protocol capture without secrets |
 | Local lifecycle acceptance | Local Keycloak harness; audit log PR #246; SSO design PR #247 and accepted linking implementation | Local fixture scenarios; no new interface | Resources hard-off | Create/rename/deactivate/reactivate/delete/groups, owner/admin refusal, credential rotation/revocation, recovery, rate limits and audit acceptance |
 | Release documentation and registration | Local lifecycle acceptance | Operator/provider docs and production resource registration; no new protocol operation | Enable only after all prior acceptance; same feature for self-hosters | Tested-provider matrix, limitations, rollback drill documented, any intermediate release hard-off proven; complete Users/Groups/conformance before registering handlers; default of `SCIM_PROVISIONING_ENABLED` changed to on, and an install whose `.env` was copied from an earlier `.env.example` (empty value) is on after upgrade without editing `.env` |
 
@@ -1149,10 +1149,38 @@ behavior and replays synthetic Okta PUT and Entra PATCH fixtures against a throw
 Postgres database. It exercises both Entra scheduled shapes and the on-demand legacy
 shape. The fixtures run without external provider calls.
 
-Use a pinned local Keycloak image plus a reviewed, pinned SCIM plugin/connector only
-after documenting its actual provisioning capability; OIDC/SAML support alone proves
-nothing about SCIM. Exercise create, rename, disable, re-enable, delete, groups,
-credential overlap and revoked-token retries with synthetic identities.
-A later explicitly authorized tenant trial can establish interoperability; never claim
-Okta/Entra/Google certification from fixtures alone. The foundation performs no provider
-calls and adds no booking reschedule/cancel/DST behavior.
+### Local Keycloak harness
+
+Keycloak 26.8.2's built-in SCIM API receives provisioning requests into a Keycloak realm.
+The harness uses the Apache-2.0 Shebang Labs outbound plugin v0.1.1 to send requests to
+Hourmere. The project published v0.1.0 and v0.1.1 in October and November 2026 and lists
+Keycloak 26.8.x support. The fixture reuses the OIDC image digest and verifies the
+official JAR against SHA-256
+`eeadffe79790cfc38bdd7accccf1270bc7843ddd9ff4332b78b5ad1b786a52d9` before mounting it.
+[Keycloak release notes](https://www.keycloak.org/2026/10/keycloak-2680-released.html),
+[plugin release](https://github.com/shebang-labs/scim-outbound-for-keycloak/releases/tag/v0.1.1).
+
+This is the HTTP sequence observed with the plugin's `AUTO` user update mode, Groups
+enabled and `DEACTIVATE` selected. IDs below are aliases assigned by the capture.
+
+| Request | Response and observed behavior |
+|---|---|
+| `GET /ServiceProviderConfig` | `200`, with PATCH and up to 100 filter results advertised. |
+| `GET /Users?filter=userName eq "scim-alex@example.test"` | `200`, empty list before creation. |
+| `POST /Users` | `201`, with `active: true`. The request uses the Keycloak user ID as `externalId`. |
+| `PATCH /Users/user-1` | `200`, with a changed given name. The request uses `replace` for the mapped attributes. |
+| `PATCH /Users/user-1` after disabling the Keycloak user | `200`, with `active: false`. The request includes `replace` on `active` with a JSON boolean. |
+| `GET /Groups?filter=displayName eq "SCIM fixture group"` | `200`, empty list before creation. |
+| `POST /Groups` | `201`, using the Keycloak group ID as `externalId`. The fixture reserves that ID in Hourmere's team mapping first. |
+| `PATCH /Groups/group-1` | `200`, with the new `displayName`. |
+
+The run sent no PUT or DELETE. The plugin also provides a User PUT mode and can fall
+back to PUT in `AUTO` when discovery reports no PATCH support or a User PATCH gets `400`.
+Group updates follow the advertised PATCH capability. Group membership synchronization,
+optional deletion, reactivation and credential lifecycle belong to later acceptance
+scenarios. [Tagged plugin configuration guide](https://github.com/shebang-labs/scim-outbound-for-keycloak/blob/v0.1.1/docs/configuration.md).
+
+The harness uses a synthetic realm, a disposable PostgreSQL database and the existing
+in-process SCIM resource test flag. The plugin's target is the owned local listener.
+Production continues to register no SCIM resource handlers. Reproduce the request and
+response log using the [Keycloak fixture README](../tools/e2e/keycloak/README.md#outbound-scim-capture).
