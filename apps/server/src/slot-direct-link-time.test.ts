@@ -211,7 +211,8 @@ describe.skipIf(!bootstrap)('direct-slot exact reads use current engine time rul
     ]
     for (const scenario of cases) {
       const s = await personal(scenario.options)
-      if (scenario.busy) await f.calendarBusy(s.host.userId, [scenario.busy])
+      if (scenario.busy)
+        await f.calendarBusy(s.host.userId, [scenario.busy], { now: scenario.now ?? NOW })
       if (scenario.booking)
         await f.booking(s.host.organizationId, [s.host.userId], ...scenario.booking, {
           eventTypeId: s.eventId,
@@ -277,17 +278,12 @@ describe.skipIf(!bootstrap)('direct-slot exact reads use current engine time rul
   }
 
   async function staleCalendar(userId: string) {
-    const calendar = await f.calendarBusy(userId, [])
-    const connection = await db
-      .selectFrom('calendars')
-      .select('connection_id')
-      .where('id', '=', calendar.calendarId)
-      .executeTakeFirstOrThrow()
-    // Synthetic cached Google state with no successful cursor; no provider network request exists.
+    const calendar = await f.calendarBusy(userId, [], { now: NOW })
+    // Synthetic cached state with no successful snapshot; no provider request exists.
     await db
-      .updateTable('calendar_connections')
-      .set({ provider: 'google' })
-      .where('id', '=', connection.connection_id)
+      .updateTable('calendars')
+      .set({ sync_state: null, last_synced_at: null })
+      .where('id', '=', calendar.calendarId)
       .execute()
   }
 

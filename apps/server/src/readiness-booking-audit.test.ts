@@ -137,7 +137,13 @@ describe.skipIf(!bootstrap)('readiness compared with real availability and HTTP 
 
   async function calendar(
     user: TestUser,
-    options: { status?: string; syncedAt?: Date; syncState?: Json; provider?: string } = {},
+    options: {
+      status?: string
+      syncedAt?: Date
+      syncState?: Json
+      syncError?: string
+      provider?: string
+    } = {},
   ) {
     const connection = await db
       .insertInto('calendar_connections')
@@ -158,6 +164,7 @@ describe.skipIf(!bootstrap)('readiness compared with real availability and HTTP 
         name: 'Synthetic audit calendar',
         time_zone: 'UTC',
         check_conflicts: true,
+        sync_error: options.syncError ?? null,
         last_synced_at: options.syncedAt ?? new Date(now().epochMilliseconds),
         sync_state: options.syncState ?? {
           version: 2,
@@ -262,10 +269,21 @@ describe.skipIf(!bootstrap)('readiness compared with real availability and HTTP 
     },
   )
 
-  it('a provider without cached sync checks stays unchecked while the existing engine can book', async () => {
+  it('a healthy Microsoft snapshot satisfies readiness and allows booking', async () => {
     const setup = await fixture()
     await calendar(setup.host, { provider: 'microsoft' })
-    await compare(setup, { summary: 'not_checked', slots: 16, status: 201 })
+    await compare(setup, { summary: 'checks_passed', slots: 16, status: 201 })
+  })
+
+  it('a failed Microsoft snapshot reports an unavailable dependency and refuses booking', async () => {
+    const setup = await fixture()
+    await calendar(setup.host, { provider: 'microsoft', syncError: 'provider_unavailable' })
+    await compare(setup, {
+      summary: 'dependency_unavailable',
+      slots: 'calendar_sync_unavailable',
+      status: 409,
+      error: 'calendar_sync_unavailable',
+    })
   })
 
   it('healthy configuration with a fully booked range is no promise of a free slot', async () => {

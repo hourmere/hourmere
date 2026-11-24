@@ -45,6 +45,7 @@ describe.skipIf(!serverUrl)('availability', () => {
   describe('slots from the database match the engine', () => {
     let host: Awaited<ReturnType<Fixtures['host']>>
     let eventTypeId: string
+    let calendarId: string
     let expected: AvailabilityInput
 
     beforeAll(async () => {
@@ -109,11 +110,19 @@ describe.skipIf(!serverUrl)('availability', () => {
           eventTypeId: other,
         },
       )
-      await f.calendarBusy(host.userId, [['2026-11-05T14:00Z', '2026-11-05T15:00Z']])
+      const calendar = await f.calendarBusy(
+        host.userId,
+        [['2026-11-05T14:00Z', '2026-11-05T15:00Z']],
+        { now: NOW },
+      )
+      calendarId = calendar.calendarId
       await f.calendarBusy(host.userId, [['2026-11-05T08:00Z', '2026-11-05T09:00Z']], {
         checkConflicts: false,
+        now: NOW,
       })
-      await f.calendarBusy(someoneElse.userId, [['2026-11-05T09:00Z', '2026-11-05T10:00Z']])
+      await f.calendarBusy(someoneElse.userId, [['2026-11-05T09:00Z', '2026-11-05T10:00Z']], {
+        now: NOW,
+      })
       // Friday: a booking without an event type (no buffers), one in another organization of
       // the host (with its event type's 30-minute buffer after), and another host's booking.
       await f.booking(host.organizationId, [host.userId], '2026-11-06T08:00Z', '2026-11-06T09:00Z')
@@ -222,6 +231,11 @@ describe.skipIf(!serverUrl)('availability', () => {
 
     it('never offers anything before now', async () => {
       const later = instant('2026-11-04T12:40:00Z')
+      await db
+        .updateTable('calendars')
+        .set({ last_synced_at: new Date(later.epochMilliseconds) })
+        .where('id', '=', calendarId)
+        .execute()
       const slots = await findSlots(db, {
         eventTypeId,
         hostUserId: host.userId,
@@ -310,7 +324,7 @@ describe.skipIf(!serverUrl)('availability', () => {
         end: instant(end),
       })
     // Busy from Tuesday 12:00 Berlin on, forever.
-    await f.calendarBusy(host.userId, [['2026-11-03T11:00:00Z', 'infinity']])
+    await f.calendarBusy(host.userId, [['2026-11-03T11:00:00Z', 'infinity']], { now: NOW })
     const monday = await slots('2026-11-02T00:00Z', '2026-11-03T00:00Z')
     expect(monday).toHaveLength(16)
     expect((await slots('2026-11-03T00:00Z', '2026-11-04T00:00Z')).map((s) => s.start)).toEqual([
@@ -322,10 +336,14 @@ describe.skipIf(!serverUrl)('availability', () => {
       '2026-11-03T10:30:00.000Z',
     ])
     // And then busy for all time, with an unbounded range too.
-    await f.calendarBusy(host.userId, [
-      ['-infinity', 'infinity'],
-      ['', '2026-11-01T00:00:00Z'],
-    ])
+    await f.calendarBusy(
+      host.userId,
+      [
+        ['-infinity', 'infinity'],
+        ['', '2026-11-01T00:00:00Z'],
+      ],
+      { now: NOW },
+    )
     expect(await slots('2026-11-02T00:00Z', '2026-11-07T00:00Z')).toEqual([])
   })
 
@@ -334,9 +352,11 @@ describe.skipIf(!serverUrl)('availability', () => {
     await f.schedule(host.userId)
     const eventTypeId = await f.eventType(host.organizationId, host.userId)
     // Both shorter than a millisecond and inside one: as Dates they would be empty.
-    await f.calendarBusy(host.userId, [
-      ['2026-11-04T10:00:00.000300Z', '2026-11-04T10:00:00.000700Z'],
-    ])
+    await f.calendarBusy(
+      host.userId,
+      [['2026-11-04T10:00:00.000300Z', '2026-11-04T10:00:00.000700Z']],
+      { now: NOW },
+    )
     await f.booking(
       host.organizationId,
       [host.userId],
