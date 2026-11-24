@@ -85,7 +85,8 @@ The plugin only allows requests to the local SCIM host. A per-realm file vault s
 the random provisioning bearer. Teardown deletes the target and realm, then releases the
 listener, database, worker container and its private files.
 
-Each JSON line in the Playwright output shows a SCIM request and response. The capture
+Each JSON line in the Playwright output shows a SCIM request and response. Consecutive
+identical projections, such as rate-limit probes, are printed once. The capture
 keeps the method, resource path, selected query fields, selected SCIM JSON fields and
 status. It aliases generated IDs and includes only allowlisted fixture text. Headers,
 origins, timestamps, raw errors and credentials are omitted. The observed provisioning

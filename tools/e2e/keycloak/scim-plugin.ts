@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { chmod, mkdir, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 const version = '0.1.1'
@@ -66,6 +66,11 @@ export interface KeycloakAdminOptions {
 
 type AdminRequest = (path: string, options: KeycloakAdminOptions) => Promise<string>
 
+export interface ScimTargetOptions {
+  userUpdateMode?: 'AUTO' | 'PUT'
+  deprovision?: 'DEACTIVATE' | 'DELETE'
+}
+
 interface UserProfile {
   username: string
   email: string
@@ -101,12 +106,21 @@ export async function createScimRealm(plugin: Plugin, admin: AdminRequest) {
     method: 'POST',
     expectedStatus: 201,
     contentType: 'application/json',
-    body: JSON.stringify({ realm, enabled: true, eventsListeners: ['scim-outbound'] }),
+    body: JSON.stringify({
+      realm,
+      enabled: true,
+      editUsernameAllowed: true,
+      eventsListeners: ['scim-outbound'],
+    }),
   })
 
   let targetId: string | undefined
   return {
-    async configureTarget(baseUrl: string, credential: string) {
+    async configureTarget(
+      baseUrl: string,
+      credential: string,
+      { userUpdateMode = 'AUTO', deprovision = 'DEACTIVATE' }: ScimTargetOptions = {},
+    ) {
       const target = URL.parse(baseUrl)
       if (
         target?.protocol !== 'http:' ||
@@ -134,7 +148,8 @@ export async function createScimRealm(plugin: Plugin, admin: AdminRequest) {
           name: 'hourmere-fixture',
           baseUrl: target.href,
           auth: { type: 'BEARER', token: `\${vault.${vaultKey}}` },
-          deprovision: 'DEACTIVATE',
+          deprovision,
+          userUpdateMode,
           syncGroups: true,
         }),
       })
@@ -142,6 +157,16 @@ export async function createScimRealm(plugin: Plugin, admin: AdminRequest) {
         targetId = resourceId(JSON.parse(response).id)
       } catch {
         throw new Error('Unable to read the owned Keycloak SCIM target identifier')
+      }
+    },
+    async replaceTargetCredential(credential: string) {
+      if (!targetId) throw new Error('The owned Keycloak SCIM target is missing')
+      const replacement = `${credentialPath}.${randomUUID()}`
+      await writeFile(replacement, credential, { flag: 'wx', mode: 0o644 })
+      try {
+        await rename(replacement, credentialPath)
+      } finally {
+        await rm(replacement, { force: true })
       }
     },
     createUser(user: UserProfile) {
@@ -156,6 +181,13 @@ export async function createScimRealm(plugin: Plugin, admin: AdminRequest) {
         body: JSON.stringify(change),
       })
     },
+    async deleteUser(id: string) {
+      await admin(`${realmPath}/users/${resourceId(id)}`, {
+        action: 'delete the synthetic Keycloak user',
+        method: 'DELETE',
+        expectedStatus: 204,
+      })
+    },
     createGroup(name: string) {
       return create('groups', 'create the synthetic Keycloak group', { name })
     },
@@ -166,6 +198,20 @@ export async function createScimRealm(plugin: Plugin, admin: AdminRequest) {
         expectedStatus: 204,
         contentType: 'application/json',
         body: JSON.stringify({ name }),
+      })
+    },
+    async setGroupMembership(userId: string, groupId: string, member: boolean) {
+      await admin(`${realmPath}/users/${resourceId(userId)}/groups/${resourceId(groupId)}`, {
+        action: 'change the synthetic Keycloak group membership',
+        method: member ? 'PUT' : 'DELETE',
+        expectedStatus: 204,
+      })
+    },
+    async deleteGroup(id: string) {
+      await admin(`${realmPath}/groups/${resourceId(id)}`, {
+        action: 'delete the synthetic Keycloak group',
+        method: 'DELETE',
+        expectedStatus: 204,
       })
     },
     async close() {
