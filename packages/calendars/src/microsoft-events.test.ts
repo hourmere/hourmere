@@ -31,6 +31,15 @@ const createdEvent = {
   ...graphEvent,
 }
 const reference = { id: graphEvent.id, etag: graphEvent['@odata.etag'] }
+const resource = `${collection}/${encodeURIComponent(graphEvent.id)}`
+const updatedEvent = {
+  ...graphEvent,
+  '@odata.etag': 'W/"DwAAABYAAAC3I5RWx7luSYmfvk6V4H3sAADTeGJC"',
+  changeKey: 'DwAAABYAAAC3I5RWx7luSYmfvk6V4H3sAADTeGJC',
+  start: { dateTime: '2030-03-10T06:45:00.0000000', timeZone: 'UTC' },
+  end: { dateTime: '2030-03-10T07:15:00.0000000', timeZone: 'UTC' },
+  attendees: [],
+}
 const signal = () => AbortSignal.timeout(1000)
 
 function providerError(code: string, status: number, retryAfter?: string) {
@@ -217,5 +226,152 @@ describe('Microsoft Graph booking event transport', () => {
     controller.abort(new DOMException('request deadline', 'TimeoutError'))
     await expect(creation).rejects.toMatchObject({ code: 'provider_unavailable' })
     expect(fetch).toHaveBeenCalledOnce()
+  })
+
+  it('conditionally moves the stored event using UTC instants across the DST transition', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async (url, init) => {
+      expect(url).toBe(resource)
+      expect(init).toMatchObject({
+        method: 'PATCH',
+        headers: {
+          authorization: 'Bearer fake-access',
+          'content-type': 'application/json',
+          'if-match': reference.etag,
+        },
+      })
+      expect(JSON.parse(String(init?.body))).toEqual({
+        start: { dateTime: '2030-03-10T06:45:00.000', timeZone: 'UTC' },
+        end: { dateTime: '2030-03-10T07:15:00.000', timeZone: 'UTC' },
+      })
+      return Response.json(updatedEvent)
+    })
+    const client = createMicrosoftCalendarClient(config, fetch)
+    await expect(
+      client.updateEvent(
+        'fake-access',
+        calendarId,
+        reference.id,
+        reference.etag,
+        booking,
+        signal(),
+      ),
+    ).resolves.toEqual({ id: reference.id, etag: updatedEvent['@odata.etag'] })
+    expect(fetch).toHaveBeenCalledOnce()
+  })
+
+  it('reads a copy for reconciliation and projects the optional plain-text group count', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async (url, init) => {
+      expect(new URL(String(url)).pathname).toBe(new URL(resource).pathname)
+      expect(new URL(String(url)).searchParams.get('$select')).toBe(
+        'id,transactionId,type,isCancelled,start,end,attendees,body',
+      )
+      expect(init?.headers).toMatchObject({
+        prefer: 'outlook.timezone="UTC", outlook.body-content-type="text"',
+      })
+      return Response.json({ ...updatedEvent, body: { contentType: 'text', content: '3' } })
+    })
+    const client = createMicrosoftCalendarClient(config, fetch)
+    await expect(
+      client.getEvent('fake-access', calendarId, reference.id, transactionId, signal(), true),
+    ).resolves.toEqual({
+      id: reference.id,
+      etag: updatedEvent['@odata.etag'],
+      start: booking.start,
+      end: booking.end,
+      hasAttendees: false,
+      seatCount: 3,
+    })
+  })
+
+  it('treats a different transaction at the stored ID as a conflict', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async (url) => {
+      expect(new URL(String(url)).searchParams.get('$select')).toBe(
+        'id,transactionId,type,isCancelled,start,end,attendees',
+      )
+      return Response.json({ ...updatedEvent, transactionId: null })
+    })
+    const client = createMicrosoftCalendarClient(config, fetch)
+    await expect(
+      client.getEvent('fake-access', calendarId, reference.id, transactionId, signal()),
+    ).rejects.toMatchObject({ status: 412 })
+  })
+
+  it('recognizes an Outlook edit adding an attendee without returning attendee details', async () => {
+    const client = createMicrosoftCalendarClient(config, async () =>
+      Response.json({
+        ...updatedEvent,
+        attendees: [
+          {
+            type: 'required',
+            status: { response: 'none', time: '0001-01-01T00:00:00Z' },
+            emailAddress: { name: 'Outlook guest', address: 'attendee@example.invalid' },
+          },
+        ],
+      }),
+    )
+    await expect(
+      client.getEvent('fake-access', calendarId, reference.id, transactionId, signal()),
+    ).resolves.toEqual({
+      id: reference.id,
+      etag: updatedEvent['@odata.etag'],
+      start: booking.start,
+      end: booking.end,
+      hasAttendees: true,
+    })
+  })
+
+  it('conditionally deletes the matching copy and distinguishes an already absent event', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(providerError('ErrorItemNotFound', 404))
+    const client = createMicrosoftCalendarClient(config, fetch)
+    const remove = () =>
+      client.deleteEvent('fake-access', calendarId, reference.id, reference.etag, signal())
+    await expect(remove()).resolves.toBe('deleted')
+    await expect(remove()).resolves.toBe('not_found')
+    expect(fetch).toHaveBeenCalledTimes(2)
+    for (const [url, init] of fetch.mock.calls) {
+      expect(url).toBe(resource)
+      expect(init).toMatchObject({
+        method: 'DELETE',
+        headers: { authorization: 'Bearer fake-access', 'if-match': reference.etag },
+      })
+      expect(init?.body).toBeUndefined()
+    }
+  })
+
+  it('passes on Graph edit conflicts and throttling without replaying mutations', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(providerError('ErrorIrresolvableConflict', 412))
+      .mockResolvedValueOnce(providerError('TooManyRequests', 429, '83'))
+    const client = createMicrosoftCalendarClient(config, fetch)
+    await expect(
+      client.updateEvent(
+        'fake-access',
+        calendarId,
+        reference.id,
+        reference.etag,
+        booking,
+        signal(),
+      ),
+    ).rejects.toMatchObject({ status: 412, message: 'provider_unavailable' })
+    await expect(
+      client.deleteEvent('fake-access', calendarId, reference.id, reference.etag, signal()),
+    ).rejects.toMatchObject({ status: 429, retryAfterMs: 83_000 })
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('rejects wildcard preconditions and paths outside the scoped calendar', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>()
+    const client = createMicrosoftCalendarClient(config, fetch)
+    await expect(
+      client.deleteEvent('fake-access', calendarId, reference.id, '*', signal()),
+    ).rejects.toMatchObject({ status: 412 })
+    await expect(
+      client.deleteEvent('fake-access', calendarId, '..', reference.etag, signal()),
+    ).rejects.toMatchObject({ code: 'provider_unavailable' })
+    expect(fetch).not.toHaveBeenCalled()
   })
 })

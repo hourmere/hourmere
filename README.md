@@ -11,7 +11,7 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 - Personal and team booking pages, including [collective meetings](https://hourmere.com/docs/collective-scheduling)
   and [round-robin scheduling](https://hourmere.com/docs/round-robin-scheduling).
 - [Google Calendar](https://hourmere.com/docs/google-calendar) busy-time sync and booking writeback.
-- [Microsoft Calendar](https://hourmere.com/docs/microsoft-calendar) busy-time conflict checks and booking creation writeback.
+- [Microsoft Calendar](https://hourmere.com/docs/microsoft-calendar) busy-time conflict checks and booking writeback.
 - [REST](https://hourmere.com/docs/rest), [MCP](https://hourmere.com/docs/mcp) and
   [CLI](https://hourmere.com/docs/cli) access for agents and scripts.
 - [Booking waitlists](https://hourmere.com/docs/booking-waitlist) for fully booked
@@ -486,7 +486,7 @@ and linked operating guides before deploying:
   poll. Group event types and one-time booking links are unsupported. Terminal polls are
   kept until explicit poll, linked-booking or organization deletion.
 - Microsoft Calendar incrementally updates busy-time snapshots and creates new booking copies.
-  Updating Microsoft copies after reschedules and cancellations remains future work.
+  It updates the original copy after rescheduling and removes it after cancellation.
   Microsoft sign-in and calendar connections have not had real-account acceptance.
 - Automatic Zoom supports personal event types and individual team event types with one
   actual host; collective and round-robin event types are unsupported.

@@ -68,7 +68,7 @@ const calendarPage = z.object({
 })
 
 // Graph returns offset-free dateTime strings in the requested UTC time zone.
-const graphUtcTime = z.object({
+export const graphUtcTime = z.object({
   dateTime: z
     .string()
     .regex(/^(?!0000)\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:[0-5]\d(?:\.\d{1,7})?(?:Z|\+00:00)?$/u),
@@ -154,7 +154,7 @@ function deltaChange(value: unknown): MicrosoftDeltaChange {
   }
 }
 
-function graphInstant(value: string) {
+export function graphInstant(value: string) {
   try {
     return Temporal.Instant.from(/(?:Z|[+-]\d{2}:\d{2})$/u.test(value) ? value : `${value}Z`)
   } catch {
@@ -314,6 +314,11 @@ export function createMicrosoftCalendarClient(
             ? retryAfterMs(response.headers.get('Retry-After'), now())
             : undefined,
         )
+      }
+      if (init.method === 'DELETE') {
+        if (response.status === 204) return
+        void response.body?.cancel().catch(() => {})
+        throw new MicrosoftCalendarError('provider_unavailable')
       }
       // Delta does not support $select. Retain a byte cap for its larger event objects.
       return await readJsonBody(response, signal, deltaRead ? 1_048_576 : 262_144)
