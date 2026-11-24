@@ -1214,6 +1214,7 @@ describe('the calendars page', () => {
       provider: 'microsoft',
       accountEmail: 'outlook@example.com',
       syncAuthorized: true,
+      writeAuthorized: false,
     }
     const calendar = microsoft.calendars[0] as Schemas['CalendarConnection']['calendars'][number]
     let selected = false
@@ -1247,6 +1248,11 @@ describe('the calendars page', () => {
       within(article).queryByRole('button', { name: 'Enable calendar synchronization' }),
     ).toBeNull()
     expect(within(article).queryByRole('button', { name: /Write new bookings/ })).toBeNull()
+    expect(
+      within(article).getByText(
+        'Reconnect Microsoft Calendar to allow writing new booking events.',
+      ),
+    ).toBeDefined()
     await user.click(
       within(article).getByRole('checkbox', { name: 'Check this calendar for conflicts' }),
     )
@@ -1256,13 +1262,94 @@ describe('the calendars page', () => {
     expect(requests.to(`PATCH /api/v1/calendars/${calendar.id}`)[0]?.body).toEqual({
       checkConflicts: true,
     })
-    await user.click(screen.getByRole('button', { name: 'Connect Microsoft Calendar' }))
+    await user.click(screen.getByRole('link', { name: 'Reconnect Microsoft Calendar' }))
+    await user.click(screen.getByRole('button', { name: 'Reconnect Microsoft Calendar' }))
     await vi.waitFor(() => expect(goTo).toHaveBeenCalledWith(microsoftUrl))
     expect(requests.to('POST /api/v1/calendar-connections/microsoft/authorize')[0]?.body).toEqual(
       {},
     )
     expect(requests.to('POST /api/v1/calendar-connections/google/authorize')).toHaveLength(0)
   })
+
+  it.each(['calendar_removed', 'permissions_missing'] as const)(
+    'selects an owned Microsoft booking calendar and shows a %s copy failure',
+    async (reason) => {
+      const user = userEvent.setup()
+      const calendar = connection.calendars[0] as Schemas['CalendarConnection']['calendars'][number]
+      let destinationCalendarId: string | null = null
+      let writeFailed = false
+      const requests = fakeApi({
+        ...signedIn,
+        ...profile(),
+        'GET /api/v1/calendar-connections': () =>
+          json(200, {
+            caldavEnabled: false,
+            googleEnabled: false,
+            microsoftEnabled: true,
+            destinationCalendarId,
+            data: [
+              {
+                ...connection,
+                provider: 'microsoft',
+                syncAuthorized: true,
+                writeAuthorized: true,
+                calendars: [
+                  {
+                    ...calendar,
+                    accessRole: 'owner',
+                    available: !(writeFailed && reason === 'calendar_removed'),
+                    ...(writeFailed && {
+                      syncError: reason === 'calendar_removed' ? reason : null,
+                      writebackStatus: 'failed',
+                      writebackError: reason,
+                    }),
+                  },
+                  {
+                    ...calendar,
+                    id: 'shared-outlook-calendar',
+                    name: 'Shared Outlook calendar',
+                    isPrimary: false,
+                    accessRole: 'writer',
+                  },
+                ],
+              },
+            ],
+          }),
+        'PUT /api/v1/calendar-destination': (request) => {
+          destinationCalendarId = (request.body as { calendarId: string | null }).calendarId
+          if (destinationCalendarId !== null) writeFailed = true
+          return new Response(null, { status: 204 })
+        },
+      })
+      renderApp('/app/calendars')
+      const shared = await screen.findByRole('group', { name: 'Shared Outlook calendar' })
+      expect(within(shared).queryByRole('button', { name: 'Write new bookings here' })).toBeNull()
+      expect(
+        within(shared).getByRole('checkbox', { name: 'Check this calendar for conflicts' }),
+      ).toBeDefined()
+      await user.click(await screen.findByRole('button', { name: 'Write new bookings here' }))
+      if (reason === 'calendar_removed') {
+        expect(await screen.findByText('Selected for new bookings — unavailable')).toBeDefined()
+      } else {
+        expect(
+          await screen.findByRole('link', { name: 'Reconnect Microsoft Calendar' }),
+        ).toBeDefined()
+        expect(screen.getByText('No calendars selected for conflict checks.')).toBeDefined()
+      }
+      expect(screen.getByText(/A booking copy needs attention/).textContent).toContain(
+        reason === 'calendar_removed'
+          ? 'This calendar is no longer available.'
+          : 'Reconnect Microsoft Calendar and allow the requested permissions.',
+      )
+      await user.click(screen.getByRole('button', { name: 'Stop writing bookings here' }))
+      expect(await screen.findByRole('button', { name: 'Write new bookings here' })).toBeDefined()
+      expect(screen.getAllByText('Not a booking destination')).toHaveLength(2)
+      expect(screen.getByText(/A booking copy needs attention/)).toBeDefined()
+      expect(
+        requests.to('PUT /api/v1/calendar-destination').map((request) => request.body),
+      ).toEqual([{ calendarId: calendar.id }, { calendarId: null }])
+    },
+  )
 
   it.each([
     'https://attacker.example/authorize',

@@ -16,7 +16,7 @@ import {
   requireCalendarSession,
   tokenAad,
 } from './index.ts'
-import { hasMicrosoftCalendarListAccess } from './microsoft.ts'
+import { hasMicrosoftCalendarListAccess, hasMicrosoftCalendarWriteAccess } from './microsoft.ts'
 import { syncMicrosoftCalendar } from './microsoft-sync.ts'
 import { CalendarProviderError } from './provider.ts'
 
@@ -532,13 +532,23 @@ export async function setCalendarDestination(
       const row = await trx
         .selectFrom('calendars as c')
         .innerJoin('calendar_connections as cc', 'cc.id', 'c.connection_id')
-        .select(['c.access_role', 'cc.status', 'cc.scopes'])
+        .select(['c.access_role', 'c.sync_error', 'cc.provider', 'cc.status', 'cc.scopes'])
         .where('c.id', '=', calendarId)
         .where('cc.user_id', '=', principal.user.id)
-        .where('cc.provider', '=', 'google')
+        .where('cc.provider', 'in', ['google', 'microsoft'])
         .executeTakeFirst()
       if (!row) throw new DomainError('not_found', 'calendar_not_found')
-      if (
+      if (row.provider === 'microsoft') {
+        if (!deps.microsoft) throw new DomainError('conflict', 'microsoft_calendar_disabled')
+        if (row.status !== 'active')
+          throw new DomainError('conflict', 'microsoft_calendar_needs_reauth')
+        if (row.sync_error === 'calendar_removed')
+          throw new DomainError('conflict', 'microsoft_calendar_removed')
+        if (!hasMicrosoftCalendarWriteAccess(row.scopes))
+          throw new DomainError('conflict', 'microsoft_calendar_permissions_missing')
+        if (row.access_role !== 'owner')
+          throw new DomainError('conflict', 'microsoft_calendar_not_writable')
+      } else if (
         row.access_role !== 'owner' ||
         row.status !== 'active' ||
         !GOOGLE_CALENDAR_SYNC_SCOPES.every((s) => row.scopes.includes(s))

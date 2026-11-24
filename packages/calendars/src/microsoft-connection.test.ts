@@ -225,10 +225,12 @@ describe.skipIf(!url)('separate Microsoft calendar connections (real Postgres)',
   it('connects and refreshes when a successful response omits scope, but refuses an explicit empty grant', async () => {
     delete microsoft.controls.token.scope
     const row = await connect()
-    expect(row.scopes).toContain('Calendars.ReadBasic')
+    expect(row.scopes).toContain('Calendars.ReadWrite')
     now += 3_600_001
     microsoft.controls.token.expires_in = 7200
     await refreshCalendarList(deps, owner, row.id)
+    const refresh = microsoft.calls.filter((c) => c.url.pathname.endsWith('/token')).at(-1)
+    expect(new URLSearchParams(String(refresh?.init.body)).get('scope')).toBe(row.scopes.join(' '))
     expect((await listCalendarConnections(deps, owner)).data[0]?.status).toBe('active')
     microsoft.controls.token.scope = ''
     expect(await finishMicrosoftConnection(deps, owner, query(await start()))).toBe(
@@ -236,6 +238,28 @@ describe.skipIf(!url)('separate Microsoft calendar connections (real Postgres)',
     )
     expect((await listCalendarConnections(deps, owner)).data).toHaveLength(1)
   })
+
+  it.each(['calendar list', 'busy-time sync'])(
+    'refreshes a stored read-only grant during %s',
+    async (operation) => {
+      const row = await connect()
+      expect(row.scopes).toEqual(['openid', 'email', 'Calendars.ReadBasic'])
+      const calendar = (await listCalendarConnections(deps, owner)).data[0]?.calendars[0]
+      if (!calendar) throw new Error('Expected connected calendar')
+      await configureCalendar(deps, owner, calendar.id, true)
+      now += 3_600_001
+      delete microsoft.controls.token.scope
+      microsoft.controls.viewHook = emptyDelta
+
+      if (operation === 'calendar list') await refreshCalendarList(deps, owner, row.id)
+      else await syncOwnedCalendar(deps, owner, calendar.id)
+
+      const refresh = microsoft.calls.filter((c) => c.url.pathname.endsWith('/token')).at(-1)
+      const body = new URLSearchParams(String(refresh?.init.body))
+      expect(body.get('grant_type')).toBe('refresh_token')
+      expect(body.get('scope')).toBe('openid email Calendars.ReadBasic offline_access')
+    },
+  )
 
   it('keeps rotated credentials when listing fails and reuses them on retry', async () => {
     const row = await connect()

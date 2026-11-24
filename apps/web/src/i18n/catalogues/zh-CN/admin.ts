@@ -3055,10 +3055,24 @@ export const admin = {
   'Single sign-on is turned off on this instance. You can review and remove existing settings, but nothing new can be added.':
     '此实例已关闭单点登录。你可以查看和移除已有设置，但无法新增。',
   // Microsoft Calendar conflict checks
-  'Microsoft will ask for your account identity, continuing access and permission to read basic calendar details. Hourmere lists your calendars and checks busy times on the calendars you select. Booking event writes are unavailable. Connecting is separate from signing in.':
-    'Microsoft 会请求你的账户身份、持续访问权限，以及读取基本日历信息的权限。Hourmere 会列出你的日历，并检查所选日历的忙碌时段。暂不支持写入预约事件。连接日历与登录是分开的操作。',
   'Microsoft no longer lists this calendar. Booking times stay unavailable while it is selected. Refresh the calendar list or clear the selection.':
     'Microsoft 已不再列出此日历。只要它仍被选中，就无法提供可预约时段。请刷新日历列表或取消选中。',
   'Microsoft denied access to this calendar. Booking times stay unavailable until access is restored.':
     'Microsoft 拒绝访问此日历。恢复访问权限后才会提供可预约时段。',
+  // Microsoft Calendar booking writeback
+  'Microsoft will ask for your account identity, continuing access and permission to read and write calendar events. Hourmere checks busy times on the calendars you select and creates private booking copies only on your chosen booking calendar. Connecting is separate from signing in.':
+    'Microsoft 会请求你的账户身份、持续访问权限以及读写日历事件的权限。Hourmere 会检查所选日历的忙碌时段，并仅在你指定的预约日历中创建私人预约副本。连接日历与登录是分开的操作。',
+  'Reconnect Microsoft Calendar to allow writing new booking events.':
+    '请重新连接 Microsoft 日历，以允许写入新的预约事件。',
+  'Microsoft Calendar could not write to this calendar. Check its access in Outlook.':
+    'Microsoft 日历无法写入此日历。请在 Outlook 中检查访问权限。',
+  'Microsoft Calendar has limited requests temporarily.': 'Microsoft 日历已暂时限制请求。',
+  'Hourmere could not confirm whether Microsoft created the original booking copy.':
+    'Hourmere 无法确认 Microsoft 是否已创建原始预约副本。',
+  'Microsoft reported a conflict when creating the booking copy.':
+    'Microsoft 在创建预约副本时报告了冲突。',
+  'A booking copy needs attention.': '有一个预约副本需要处理。',
+  'Hourmere will retry writing a booking copy.': 'Hourmere 将重试写入预约副本。',
+  'A booking copy is waiting to be written.': '有一个预约副本正等待写入。',
+  'Choose a Microsoft calendar you own.': '请选择你拥有的 Microsoft 日历。',
 } as const

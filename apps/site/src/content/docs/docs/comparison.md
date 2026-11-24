@@ -97,8 +97,8 @@ Check the documented limits when evaluating it:
   rescheduling never reactivate the link. Each personal owner/team has at most 1000
   active unexpired links, with a 200-link sub-limit for ordinary team members. See the
   [one-time link limits and privacy rules](/docs/one-time-links#limits-and-cleanup).
-- [Microsoft calendar connections](/docs/microsoft-calendar) support read-only busy-time
-  conflict checks.
+- [Microsoft calendar connections](/docs/microsoft-calendar) support busy-time conflict checks
+  and creation of booking copies on your chosen calendar.
 - [Zoom account connections](/docs/zoom-connections) are separate from sign-in and calendar
   connections. Identity-only authorization does not create or read meetings.
 

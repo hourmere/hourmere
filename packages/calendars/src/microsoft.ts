@@ -3,6 +3,7 @@ import { addAbortListener } from 'node:events'
 import { setTimeout } from 'node:timers/promises'
 import { isSingleLineText } from '@hourmere/scheduling/text'
 import { z } from 'zod'
+import { microsoftEventMethods } from './microsoft-events.ts'
 import {
   CalendarProviderError,
   type CalendarTokens,
@@ -16,7 +17,7 @@ export const MICROSOFT_CALENDAR_SCOPES = [
   'openid',
   'email',
   'offline_access',
-  'https://graph.microsoft.com/Calendars.ReadBasic',
+  'https://graph.microsoft.com/Calendars.ReadWrite',
 ] as const
 
 export class MicrosoftCalendarError extends CalendarProviderError {
@@ -59,6 +60,7 @@ const calendarPage = z.object({
         name: text,
         isDefaultCalendar: z.boolean().optional(),
         canEdit: z.boolean().optional(),
+        canShare: z.boolean().optional(),
         canViewPrivateItems: z.boolean().optional(),
       }),
     )
@@ -247,6 +249,10 @@ export function hasMicrosoftCalendarListAccess(scopes: readonly string[] | undef
   )
 }
 
+export function hasMicrosoftCalendarWriteAccess(scopes: readonly string[] | undefined) {
+  return scopes?.includes('Calendars.ReadWrite') ?? false
+}
+
 export function createMicrosoftCalendarClient(
   config: { clientId: string; clientSecret: string; publicUrl: string },
   request: typeof fetch = fetch,
@@ -328,7 +334,6 @@ export function createMicrosoftCalendarClient(
             ...body,
             client_id: config.clientId,
             client_secret: config.clientSecret,
-            scope: MICROSOFT_CALENDAR_SCOPES.join(' '),
           }),
         },
         signal,
@@ -339,9 +344,7 @@ export function createMicrosoftCalendarClient(
     // Microsoft's successful code response may omit scope when it matches the initial
     // request. An explicitly empty/partial scope is still authoritative. Refresh responses
     // without scope keep the connection's previously recorded grant in the service layer.
-    const scope =
-      t.scope ??
-      (body.grant_type === 'authorization_code' ? MICROSOFT_CALENDAR_SCOPES.join(' ') : undefined)
+    const scope = t.scope ?? (body.grant_type === 'authorization_code' ? body.scope : undefined)
     return {
       accessToken: t.access_token,
       refreshToken: t.refresh_token,
@@ -354,6 +357,7 @@ export function createMicrosoftCalendarClient(
   }
 
   return {
+    ...microsoftEventMethods(json),
     authorizationUrl(state: string, verifier: string, access: 'list' | 'sync' = 'list') {
       if (access !== 'list') throw new MicrosoftCalendarError('permissions_missing')
       const url = new URL('https://login.microsoftonline.com/common/oauth2/v2.0/authorize')
@@ -377,12 +381,22 @@ export function createMicrosoftCalendarClient(
           code,
           code_verifier: verifier,
           redirect_uri: redirectUri,
+          scope: MICROSOFT_CALENDAR_SCOPES.join(' '),
         },
         signal,
       )
     },
-    refresh(refreshToken: string, signal: AbortSignal) {
-      return token({ grant_type: 'refresh_token', refresh_token: refreshToken }, signal)
+    refresh(refreshToken: string, signal: AbortSignal, grantedScopes: readonly string[]) {
+      return token(
+        {
+          grant_type: 'refresh_token',
+          refresh_token: refreshToken,
+          // Microsoft does not echo offline_access in the granted scope, but a refresh without it
+          // may return no new refresh token. Keep asking for it within the existing grant.
+          scope: [...new Set([...grantedScopes, 'offline_access'])].join(' '),
+        },
+        signal,
+      )
     },
     async identity(accessToken: string, signal: AbortSignal) {
       const parsed = identitySchema.safeParse(
@@ -403,7 +417,10 @@ export function createMicrosoftCalendarClient(
       const seen = new Set<string>()
       let next = new URL(calendarsUrl)
       next.searchParams.set('$top', '250')
-      next.searchParams.set('$select', 'id,name,isDefaultCalendar,canEdit,canViewPrivateItems')
+      next.searchParams.set(
+        '$select',
+        'id,name,isDefaultCalendar,canEdit,canShare,canViewPrivateItems',
+      )
       for (let page = 0; page < 20; page++) {
         // Provider paging URLs carry the access token only to this exact official resource.
         if (
@@ -425,11 +442,14 @@ export function createMicrosoftCalendarClient(
             id: c.id,
             name: c.name,
             isPrimary: c.isDefaultCalendar ?? false,
-            accessRole: c.canEdit
-              ? c.canViewPrivateItems
-                ? 'writer'
-                : 'writerWithoutPrivateAccess'
-              : 'reader',
+            // Graph reserves canShare for the calendar creator, even when delegates can edit.
+            accessRole: !c.canEdit
+              ? 'reader'
+              : c.canShare
+                ? 'owner'
+                : c.canViewPrivateItems
+                  ? 'writer'
+                  : 'writerWithoutPrivateAccess',
             timeZone: null,
           })
         if (calendars.length > 2000) throw new MicrosoftCalendarError('provider_unavailable')

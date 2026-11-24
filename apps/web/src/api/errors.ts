@@ -203,6 +203,7 @@ export function errorMessage(err: unknown): UiText {
     microsoft_calendar_removed: 'This calendar is no longer available. Refresh the calendar list.',
     microsoft_calendar_permissions_missing:
       'Reconnect Microsoft Calendar and allow the requested permissions.',
+    microsoft_calendar_not_writable: 'Choose a Microsoft calendar you own.',
     automatic_zoom_disabled: 'Automatic Zoom meetings are disabled on this instance.',
     automatic_zoom_unavailable:
       'Automatic Zoom meetings are unavailable. Contact the host or choose another meeting type.',

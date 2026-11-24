@@ -135,6 +135,19 @@ describe.skipIf(!databaseUrl)('calendar HTTP routes (real Postgres)', () => {
     return db.selectFrom('calendars').select(['id', 'connection_id']).executeTakeFirstOrThrow()
   }
 
+  async function connectMicrosoft(scope: 'Calendars.ReadBasic' | 'Calendars.ReadWrite') {
+    microsoft.controls.token.scope = `openid email ${scope}`
+    const response = await request('/api/v1/calendar-connections/microsoft/authorize', 'POST', '{}')
+    expect(response.status).toBe(200)
+    const { authorizationUrl } = (await response.json()) as { authorizationUrl: string }
+    const state = new URL(authorizationUrl).searchParams.get('state')
+    const callback = await request(`/api/calendar/microsoft/callback?state=${state}&code=fake-code`)
+    expect(callback.headers.get('location')).toBe(
+      '/app/calendars?connection=connected&provider=microsoft',
+    )
+    return db.selectFrom('calendars').select(['id', 'connection_id']).executeTakeFirstOrThrow()
+  }
+
   async function destination() {
     return (
       await db
@@ -175,7 +188,7 @@ describe.skipIf(!databaseUrl)('calendar HTTP routes (real Postgres)', () => {
         'openid',
         'email',
         'offline_access',
-        'https://graph.microsoft.com/Calendars.ReadBasic',
+        'https://graph.microsoft.com/Calendars.ReadWrite',
       ],
     },
   ])('requests only the disclosed permissions: $providerName $body', async (entry) => {
@@ -269,24 +282,113 @@ describe.skipIf(!databaseUrl)('calendar HTTP routes (real Postgres)', () => {
     },
   )
 
-  it('refuses a Microsoft destination even if its stored role and scope resemble a Google owner', async () => {
-    const calendar = await connectForSync()
-    await db
-      .updateTable('calendar_connections')
-      .set({ provider: 'microsoft' })
-      .where('id', '=', calendar.connection_id)
-      .execute()
-    const calls = provider.calls.length
+  it('requires reconnecting a read-only Microsoft account before selecting a destination', async () => {
+    const calendar = await connectMicrosoft('Calendars.ReadBasic')
     const response = await request(
       '/api/v1/calendar-destination',
       'PUT',
       JSON.stringify({ calendarId: calendar.id }),
     )
-    expect(response.status).toBe(404)
-    expect(await response.json()).toMatchObject({ error: 'calendar_not_found' })
+    expect(response.status).toBe(409)
+    expect(await response.json()).toMatchObject({ error: 'microsoft_calendar_permissions_missing' })
     expect(await destination()).toBeNull()
-    expect(provider.calls).toHaveLength(calls)
-    expect(microsoft.calls).toHaveLength(0)
+    expect(await (await request('/api/v1/calendar-connections')).json()).toMatchObject({
+      data: [{ provider: 'microsoft', syncAuthorized: true, writeAuthorized: false }],
+    })
+  })
+
+  it('refuses a shared Microsoft calendar with permission to edit private events', async () => {
+    microsoft.controls.pages = [
+      {
+        value: [
+          {
+            id: 'shared-calendar',
+            name: 'Shared calendar',
+            canShare: false,
+            canEdit: true,
+            canViewPrivateItems: true,
+          },
+        ],
+      },
+    ]
+    const calendar = await connectMicrosoft('Calendars.ReadWrite')
+    const response = await request(
+      '/api/v1/calendar-destination',
+      'PUT',
+      JSON.stringify({ calendarId: calendar.id }),
+    )
+    expect(response.status).toBe(409)
+    expect(await response.json()).toMatchObject({ error: 'microsoft_calendar_not_writable' })
+    expect(await destination()).toBeNull()
+    const conflictSelection = await request(
+      `/api/v1/calendars/${calendar.id}`,
+      'PATCH',
+      JSON.stringify({ checkConflicts: true }),
+    )
+    expect(conflictSelection.status).toBe(204)
+  })
+
+  it('selects a writable Microsoft calendar only for its owner and keeps a removed destination visible', async () => {
+    const calendar = await connectMicrosoft('Calendars.ReadWrite')
+    const set = (headers?: Record<string, string>) =>
+      request(
+        '/api/v1/calendar-destination',
+        'PUT',
+        JSON.stringify({ calendarId: calendar.id }),
+        headers,
+      )
+    const otherKey = { authorization: 'Bearer hm_other', cookie: '', origin: '' }
+    const forbidden = await set(otherKey)
+    expect(forbidden.status).toBe(404)
+    expect(await forbidden.json()).toMatchObject({ error: 'calendar_not_found' })
+    expect(await destination()).toBeNull()
+
+    await db
+      .updateTable('calendars')
+      .set({ access_role: 'writerWithoutPrivateAccess' })
+      .where('id', '=', calendar.id)
+      .execute()
+    const readOnly = await set()
+    expect(readOnly.status).toBe(409)
+    expect(await readOnly.json()).toMatchObject({ error: 'microsoft_calendar_not_writable' })
+    expect(await destination()).toBeNull()
+    const refresh = await request(
+      `/api/v1/calendar-connections/${calendar.connection_id}/refresh`,
+      'POST',
+      '{}',
+    )
+    expect(refresh.status).toBe(204)
+
+    const calls = microsoft.calls.length
+    const ownerKey = { authorization: 'Bearer hm_test', cookie: '', origin: '' }
+    expect((await set(ownerKey)).status).toBe(204)
+    expect(await destination()).toBe(calendar.id)
+    expect(microsoft.calls).toHaveLength(calls)
+
+    microsoft.controls.pages = [{ value: [] }]
+    expect(
+      (
+        await request(
+          `/api/v1/calendar-connections/${calendar.connection_id}/refresh`,
+          'POST',
+          '{}',
+        )
+      ).status,
+    ).toBe(204)
+    expect(await destination()).toBe(calendar.id)
+    expect(await (await request('/api/v1/calendar-connections')).json()).toMatchObject({
+      destinationCalendarId: calendar.id,
+      data: [
+        {
+          provider: 'microsoft',
+          writeAuthorized: true,
+          calendars: [{ id: calendar.id, available: false }],
+        },
+      ],
+    })
+    const removed = await set()
+    expect(removed.status).toBe(409)
+    expect(await removed.json()).toMatchObject({ error: 'microsoft_calendar_removed' })
   })
 
   it('requires a profile before saving a booking destination', async () => {
@@ -340,6 +442,7 @@ describe.skipIf(!databaseUrl)('calendar HTTP routes (real Postgres)', () => {
   })
 
   it('keeps Microsoft callback secrets out of redirects and logs, then refreshes and disconnects', async () => {
+    microsoft.controls.token.scope = 'openid email Calendars.ReadBasic'
     const response = await request('/api/v1/calendar-connections/microsoft/authorize', 'POST', '{}')
     expect(response.status).toBe(200)
     const { authorizationUrl } = (await response.json()) as { authorizationUrl: string }
