@@ -112,8 +112,10 @@ describe.skipIf(!serverUrl)('selected duration availability in Postgres', () => 
       minimumNoticeMinutes: 60,
       maxBookingsPerDay: 1,
     })
-    await f.calendarBusy(s.host.userId, [['2026-11-02T10:30Z', '2026-11-02T10:45Z']])
     const ctx = { db, now: () => instant('2026-11-02T08:20Z') }
+    await f.calendarBusy(s.host.userId, [['2026-11-02T10:30Z', '2026-11-02T10:45Z']], {
+      now: ctx.now(),
+    })
     const expected = new Map([
       [15, ['09:30', '09:45', '10:00', '11:00', '11:15', '11:30', '11:45']],
       [30, ['09:30', '09:45', '11:00', '11:15', '11:30']],
@@ -231,8 +233,8 @@ describe.skipIf(!serverUrl)('selected duration availability in Postgres', () => 
         .where('id', '=', event.id)
         .execute()
       if (schedulingType === 'round_robin') event = await activateRoundRobin(ctx, event.id)
-      await f.calendarBusy(owner.id, [['2026-11-02T10:00Z', '2026-11-02T12:00Z']])
-      await f.calendarBusy(other.id, [['2026-11-02T09:00Z', '2026-11-02T09:30Z']])
+      await f.calendarBusy(owner.id, [['2026-11-02T10:00Z', '2026-11-02T12:00Z']], { now: now() })
+      await f.calendarBusy(other.id, [['2026-11-02T09:00Z', '2026-11-02T09:30Z']], { now: now() })
       const slots = (durationMinutes: number) =>
         listPublicTeamSlots(
           { db, now },

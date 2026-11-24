@@ -55,13 +55,30 @@ function decodeQuotedPrintable(body: string) {
   return Buffer.from(bytes).toString('utf8')
 }
 
-/** Every MIME part's body decoded, plus RFC 2047 encoded-word headers, for searching. */
-function decodeMime(raw: string): Raw {
+/**
+ * Every MIME part's body decoded, plus RFC 2047 encoded-word headers, for searching.
+ * Parts are split only on the boundary their multipart Content-Type declares: a body line
+ * may itself start with "--" (a quoted-printable soft break inside a base64url link token),
+ * and SMTP dot-stuffing is undone first, as a receiving server would.
+ */
+function decodeMime(data: string): Raw {
+  const raw = data.replace(/^\./gm, '')
   const parts: string[] = [unfold(raw)]
   let ics: string | undefined
-  const partPattern = /((?:^[^\r\n]+\r\n)+)\r\n([\s\S]*?)(?=\r\n--|$(?![\s\S]))/gm
-  for (const [, headers = '', body = ''] of raw.matchAll(partPattern)) {
-    const head = unfold(headers)
+  const visit = (entity: string) => {
+    const split = entity.indexOf('\r\n\r\n')
+    const head = unfold(split === -1 ? entity : entity.slice(0, split))
+    const body = split === -1 ? '' : entity.slice(split + 4)
+    const boundary = head.match(
+      /^Content-Type:\s*multipart\/[^\r\n]*?boundary="?([^";\r\n]+)"?/im,
+    )?.[1]
+    if (boundary) {
+      const segments = `\r\n${body}`.split(`\r\n--${boundary}`)
+      // segments[0] is the preamble; the closing delimiter's segment starts with "--".
+      for (const segment of segments.slice(1))
+        if (!segment.startsWith('--')) visit(segment.replace(/^[ \t]*\r\n/, ''))
+      return
+    }
     const encoding = head.match(/^Content-Transfer-Encoding:\s*([\w-]+)/im)?.[1]?.toLowerCase()
     const decoded =
       encoding === 'base64'
@@ -72,6 +89,7 @@ function decodeMime(raw: string): Raw {
     if (/^Content-Type:\s*text\/calendar/im.test(head)) ics ??= decoded
     parts.push(unfold(decoded))
   }
+  visit(raw)
   for (const [, charset, kind, word = ''] of raw.matchAll(/=\?([^?]+)\?([BQ])\?([^?]*)\?=/gi))
     parts.push(
       charset && kind?.toUpperCase() === 'B'

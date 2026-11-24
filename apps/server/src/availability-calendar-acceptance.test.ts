@@ -6,7 +6,6 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import type { TroubleshootAvailabilityResult } from '@hourmere/scheduling'
 import { createFixtures, createTestUser } from '@hourmere/scheduling/testing'
-import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { connectCalDav } from '../../../packages/calendars/src/caldav-connection.ts'
 import {
@@ -21,7 +20,11 @@ import {
   finishGoogleConnection,
   finishMicrosoftConnection,
 } from '../../../packages/calendars/src/index.ts'
-import { configureCalendar, syncGoogleCalendar } from '../../../packages/calendars/src/sync.ts'
+import {
+  configureCalendar,
+  syncGoogleCalendar,
+  syncOwnedCalendar,
+} from '../../../packages/calendars/src/sync.ts'
 import {
   calendarTestSession,
   fakeGoogle,
@@ -66,6 +69,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
     let microsoftCalendarId: string
     let failCalDav = false
     let refreshCalDav: () => Promise<void>
+    let failMicrosoft = false
+    let refreshMicrosoft: () => Promise<void>
 
     beforeAll(async () => {
       database = await createTestDatabase(process.env.DATABASE_URL as string, undefined, {
@@ -291,21 +296,25 @@ describe.skipIf(!process.env.DATABASE_URL)(
           .where('cc.provider', '=', 'microsoft')
           .executeTakeFirstOrThrow()
       ).id
-      // Microsoft currently lists calendars only: this is explicitly a normalized-cache
-      // fixture, not an assertion that Graph event ingestion or freshness exists.
-      await db
-        .updateTable('calendars')
-        .set({ check_conflicts: true })
-        .where('id', '=', microsoftCalendarId)
-        .execute()
-      await db
-        .insertInto('calendar_busy')
-        .values({
-          calendar_id: microsoftCalendarId,
-          external_event_id: 'synthetic-ms-busy',
-          period: sql` tstzrange('2030-03-10T22:00:00Z', '2030-03-10T22:30:00Z', '[)')`,
-        })
-        .execute()
+      microsoft.controls.viewHook = () =>
+        failMicrosoft
+          ? Response.json({ error: { code: 'ServiceUnavailable' } }, { status: 503 })
+          : Response.json({
+              value: [
+                {
+                  id: 'synthetic-ms-busy',
+                  subject: 'Private Outlook appointment',
+                  start: { dateTime: '2030-03-10T22:00:00.0000000', timeZone: 'UTC' },
+                  end: { dateTime: '2030-03-10T22:30:00.0000000', timeZone: 'UTC' },
+                  showAs: 'busy',
+                  isCancelled: false,
+                  isAllDay: false,
+                },
+              ],
+            })
+      await configureCalendar(deps, owner, microsoftCalendarId, true)
+      refreshMicrosoft = () => syncOwnedCalendar(deps, owner, microsoftCalendarId)
+      await refreshMicrosoft()
       caller = { ...owner, kind: 'api_key', apiKeyId: randomUUID(), apiKeyScope: 'full' }
       vi.spyOn(Temporal.Now, 'instant').mockReturnValue(now)
       app = createApp({
@@ -395,6 +404,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
         'private-attendee@example.test',
         'Private work calendar',
         'Private CalDAV calendar',
+        'Private Outlook appointment',
         googleCalendarId,
         caldavCalendarId,
         microsoftCalendarId,
@@ -477,7 +487,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     })
 
-    it('fails closed on unreadable CalDAV and stale Google, without claiming missing setup', async () => {
+    it('fails closed on unreadable providers and stale Google, without claiming missing setup', async () => {
       const query = {
         eventTypeId,
         hostUserId: owner.user.id,
@@ -489,11 +499,30 @@ describe.skipIf(!process.env.DATABASE_URL)(
         await expect(findSlots(db, query)).rejects.toMatchObject({
           code: 'calendar_sync_unavailable',
         })
+        const publicQuery = new URLSearchParams({
+          start: query.rangeStart.toString(),
+          end: query.rangeEnd.toString(),
+        })
+        const publicSlots = await app.request(
+          `/api/v1/public/calendar-acceptance/calendar-check/slots?${publicQuery}`,
+        )
+        expect(publicSlots.status).toBe(409)
+        expect(await publicSlots.json()).toMatchObject({ error: 'calendar_sync_unavailable' })
         for (const transport of ['REST', 'MCP'] as const) {
           const result = await explain('2030-03-10', transport)
           expect(result.ok).toBe(false)
           expect(JSON.stringify(result.body)).toContain('calendar_sync_unavailable')
         }
+      }
+      failMicrosoft = true
+      try {
+        await expect(refreshMicrosoft()).rejects.toMatchObject({
+          code: 'microsoft_calendar_provider_unavailable',
+        })
+        await unavailable()
+      } finally {
+        failMicrosoft = false
+        await refreshMicrosoft()
       }
       failCalDav = true
       try {

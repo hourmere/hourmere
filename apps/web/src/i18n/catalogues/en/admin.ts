@@ -1540,8 +1540,6 @@ export const admin = {
   'Meeting link': 'Meeting link',
   'Microsoft Calendar is not configured on this Hourmere instance. Contact its administrator to enable it.':
     'Microsoft Calendar is not configured on this Hourmere instance. Contact its administrator to enable it.',
-  'Microsoft will ask for your account identity, continuing access and permission to read basic calendar details. This connection lists your calendars; busy-time synchronization and booking event writes are not yet available. Connecting is separate from signing in.':
-    'Microsoft will ask for your account identity, continuing access and permission to read basic calendar details. This connection lists your calendars; busy-time synchronization and booking event writes are not yet available. Connecting is separate from signing in.',
   'Minimum notice': 'Minimum notice',
   Mon: 'Mon',
   Monday: 'Monday',
@@ -1711,8 +1709,6 @@ export const admin = {
     'This connection attempt was interrupted. Restart it from your AI app.',
   'This connection has calendar-list access only. Enable synchronization to use busy times and write booking events.':
     'This connection has calendar-list access only. Enable synchronization to use busy times and write booking events.',
-  'This connection lists calendars only. Busy-time synchronization and booking writes are not yet available.':
-    'This connection lists calendars only. Busy-time synchronization and booking writes are not yet available.',
   'This email address already has an account. {0}':
     'This email address already has an account. {0}',
   'This event type does not exist, or it was deleted.':
@@ -3203,4 +3199,7 @@ export const admin = {
   // Single sign-on turned off by the operator
   'Single sign-on is turned off on this instance. You can review and remove existing settings, but nothing new can be added.':
     'Single sign-on is turned off on this instance. You can review and remove existing settings, but nothing new can be added.',
+  // Microsoft Calendar conflict checks
+  'Microsoft will ask for your account identity, continuing access and permission to read basic calendar details. Hourmere lists your calendars and checks busy times on the calendars you select. Booking event writes are unavailable. Connecting is separate from signing in.':
+    'Microsoft will ask for your account identity, continuing access and permission to read basic calendar details. Hourmere lists your calendars and checks busy times on the calendars you select. Booking event writes are unavailable. Connecting is separate from signing in.',
 } as const

@@ -1409,12 +1409,14 @@ export function factWindowRange(window: InstantInterval) {
     eb.fn<string>('tstzrange', [eb.val(window.start.toString()), eb.val(window.end.toString())])
 }
 
+export const CACHED_CONFLICT_PROVIDERS: readonly string[] = ['google', 'caldav', 'microsoft']
+
 export function cachedConflictCalendars(db: Db) {
   return db
     .selectFrom('calendars as c')
     .innerJoin('calendar_connections as cc', 'cc.id', 'c.connection_id')
     .select(['cc.status', 'c.last_synced_at', 'c.sync_state', 'c.sync_error', 'c.time_zone'])
-    .where('cc.provider', 'in', ['google', 'caldav'])
+    .where('cc.provider', 'in', CACHED_CONFLICT_PROVIDERS)
     .where('c.check_conflicts', '=', true)
 }
 

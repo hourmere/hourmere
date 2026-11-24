@@ -35,7 +35,7 @@ A post-login hook cannot repair a session that should never have been issued.
 
 ### Method and exact versions
 
-packages/auth/package.json pins better-auth, `@better-auth/sso` and every other family package at exactly 1.7.16, and the root lockfile records the whole tree. The evaluation reads the installed JS, chiefly `packages/auth/node_modules/@better-auth/sso/dist/index.mjs`; line numbers below refer to that file unless another file is named. Lockfile versions of the plugin's dependencies: samlify 2.15.1, jose 6.2.12, @xmldom/xmldom 0.9.12 (0.8.15 nested under xml-crypto and @authenio/xml-encryption), fast-xml-parser 5.12.0, xml-crypto 6.4.0 and tldts 7.4.18; all are MIT-licensed. The plugin is a `devDependencies` entry with the exact 1.7.16 pin, so `npm prune --omit=dev` in the image build leaves the plugin and its SAML and XML stack out of the image. `npm audit` and `npm audit --omit=dev` report no vulnerabilities, and the production tree keeps its 174 packages. The first plan step that imports the plugin from shipped code moves it to `dependencies` and re-runs the production audit.
+packages/auth/package.json pins better-auth, `@better-auth/sso` and every other family package at exactly 1.7.16, and the root lockfile records the whole tree. The evaluation reads the installed JS, chiefly `packages/auth/node_modules/@better-auth/sso/dist/index.mjs`; line numbers below refer to that file unless another file is named. Lockfile versions of the plugin's dependencies: samlify 2.15.1, jose 6.2.12, @xmldom/xmldom 0.9.12 (0.8.15 nested under xml-crypto and @authenio/xml-encryption), fast-xml-parser 5.12.0, xml-crypto 6.4.0 and tldts 7.4.18; all are MIT-licensed. The plugin is a `devDependencies` entry with the exact 1.7.16 pin, so `npm prune --omit=dev` in the image build leaves the plugin and its SAML and XML stack out of the image. `npm audit` and `npm audit --omit=dev` report no vulnerabilities. The production tree kept its 174 packages until the SAML verifier step, which made xml-crypto 6.4.0 and @xmldom/xmldom 0.9.12 direct `dependencies` of apps/server at the versions already locked; that adds five packages to the image (those two, @xmldom/is-dom-node 1.0.1 and, nested under xml-crypto, @xmldom/xmldom 0.8.15 and xpath 0.0.33), and both audits still report none. The plugin and samlify stay development-only. The first plan step that imports the plugin from shipped code moves it to `dependencies` and re-runs the production audit.
 
 Against 1.7.12, the 2026-11-06 baseline, the plugin's runtime JS differs only in bundler output: folded constants, added block braces and one local hoisted out of an object literal (the remote JWKS set is still created on every callback). The plugin's changelog has empty entries for 1.7.13 to 1.7.16, and core's `oauth2/verify-id-token.mjs` is byte-identical. Every row below was re-checked against the 1.7.16 source. The 1.7.12 baseline came from an owned spike install (`.sso-evaluation-spike`, deleted after inspection) that resolved jose 6.2.15; the lockfile now resolves 6.2.12, which has the same `iat` behaviour.
 
@@ -125,7 +125,7 @@ source imports `@better-auth/sso`.
   `algorithms`, `maxTokenAge`, `requiredClaims` and `clockTolerance`. Hourmere fetches
   JWKS through its pinned transport, caches the imported public keys and uses JOSE for
   signature and JWT claim verification. State consumption uses Hourmere's pending
-  attempts. The SAML verifier step builds
+  attempts. The SAML verifier step planned
   the SAML adapter on samlify 2.15.1 with xml-crypto and @xmldom/xmldom. samlify's response
   flow (`samlify/build/src/flow.js` 703–825) verifies the signature, issuer, audience,
   recipient and a present Destination, that the signed and outer InResponseTo agree, and
@@ -135,6 +135,25 @@ source imports `@better-auth/sso`.
   as the reference; exported pure helpers
   (`validateDiscoveryDocument`, `computeDiscoveryUrl`, `deriveSAMLServiceProviderPolicy`)
   may be reused. Neither adapter writes cryptography or XML signature code.
+  As built, the SAML verifier (`apps/server/src/sso-saml-verifier.ts`) calls xml-crypto and
+  @xmldom/xmldom, the two libraries under samlify, directly and does not import samlify.
+  samlify's `verifySignature` returns after the first signature it selects, uses only the
+  first configured certificate when the message has no KeyInfo, hands back a re-serialized
+  node rather than the digested bytes, and its `allowedSignatureAlgorithms` option only
+  pre-checks the signature and digest methods: it does not cover canonicalization or
+  transforms and does not prune the algorithm tables of its `SignedXml` instance; importing
+  it would also ship its decryption stack, which this release refuses to use. The verifier reads every returned value from the canonical bytes
+  that xml-crypto's `getSignedReferences()` reports as digested, after re-hashing them
+  against the signed DigestValue in constant time.
+  Contract for the steps that call the verifier: `assertion.*` is always authenticated, but
+  when the Response element is unsigned (`response.signed` is false) its ID, IssueInstant,
+  Destination and Status come from the unsigned wrapper. The timing module uses the signed
+  assertion timestamps and caches the response ID only when the response is also signed.
+  The verifier checks that the response and bearer InResponseTo agree. The timing module
+  matches both against the outstanding request of the verifying provider. It requires the
+  assertion bounds listed below and checks bearer NotBefore when present. NameID and
+  attribute values are returned exactly as signed, untrimmed, and
+  are not normalised before identity matching.
 - Retained: Better Auth's session and account machinery (`internalAdapter.createSession`,
   as `handleOAuthUserInfo` uses it) and Hourmere's existing session database hooks.
 - Not exposed and not replaced: provider management (`/sso/register`, `/sso/providers`,
@@ -670,6 +689,12 @@ below the accepted deadline or outstanding request window. Parallel callbacks mu
 yield one success. Encrypted assertions are deferred: reject them explicitly until decryption
 and signed-decrypted-node validation are implemented and tested together. Encryption
 never replaces signatures.
+
+The internal timing and replay module returns the unskewed acceptance deadline for the
+later completion step. The replay write checks database wall time again after the insert
+can wait on a competing transaction. It stores only ID digests, and its bounded cleanup
+removes expired rows. The module has no production caller or cleanup schedule. SAML is
+hard-off and the OIDC setting still defaults to false.
 
 ### Fetching, credentials and audit
 

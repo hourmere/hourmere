@@ -231,13 +231,13 @@ describe.skipIf(!bootstrap)('ordinary direct-slot public reads and final booking
   it('rechecks round-robin availability without pinning the host and assigns only on submit', async () => {
     const s = await team('round_robin')
     const app = application()
-    const originalBusy = await f.calendarBusy(s.alternate.id, [[START, END]])
+    const originalBusy = await f.calendarBusy(s.alternate.id, [[START, END]], { now: NOW })
     expect(await (await exact(app, s.api)).json()).toEqual({ data: [{ start: START, end: END }] })
     await db
       .deleteFrom('calendar_busy')
       .where('calendar_id', '=', originalBusy.calendarId)
       .execute()
-    await f.calendarBusy(s.owner.id, [[START, END]])
+    await f.calendarBusy(s.owner.id, [[START, END]], { now: NOW })
     const before = await snapshot()
     const current = await exact(app, s.api)
     expect(await current.json()).toEqual({ data: [{ start: START, end: END }] })
@@ -276,7 +276,9 @@ describe.skipIf(!bootstrap)('ordinary direct-slot public reads and final booking
     expect(await (await exact(app, s.api, START, 60)).json()).toEqual({
       data: [{ start: START, end: '2026-11-02T10:00:00.000Z' }],
     })
-    await f.calendarBusy(s.alternate.id, [['2026-11-02T09:45:00Z', '2026-11-02T10:00:00Z']])
+    await f.calendarBusy(s.alternate.id, [['2026-11-02T09:45:00Z', '2026-11-02T10:00:00Z']], {
+      now: NOW,
+    })
     const response = await exact(app, s.api, START, 60)
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ data: [] })

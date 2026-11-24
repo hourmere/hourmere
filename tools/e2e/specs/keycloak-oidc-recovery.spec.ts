@@ -178,77 +178,81 @@ async function runOperatorRecovery(app: KeycloakFixture) {
   }
 }
 
-test('operator recovery restores browser access to only the target team during a Keycloak outage', async ({
-  page,
-  keycloak: app,
-}) => {
-  const { id: otherTeam } = await app.db
-    .insertInto('auth.organization')
-    .values({ slug: 'unaffected-team', name: 'Unaffected team', createdAt: new Date() })
-    .returning('id')
-    .executeTakeFirstOrThrow()
-  await app.db
-    .insertInto('sso_policies')
-    .values({ organization_id: otherTeam, require_sso: true })
-    .execute()
-  const { ssoOperatorRecoveryQueue } = await import(
-    '../../../apps/server/src/sso-operator-recovery.ts'
-  )
-  const { createJobs } = await import('../../../packages/jobs/src/index.ts')
-  const queue = createJobs({
-    connectionString: app.databaseUrl,
-    definitions: [ssoOperatorRecoveryQueue],
-    migrate: true,
-    work: false,
-    log: () => {},
+test.describe('', () => {
+  test.use({ dedicatedKeycloak: true })
+
+  test('operator recovery restores browser access to only the target team during a Keycloak outage', async ({
+    page,
+    keycloak: app,
+  }) => {
+    const { id: otherTeam } = await app.db
+      .insertInto('auth.organization')
+      .values({ slug: 'unaffected-team', name: 'Unaffected team', createdAt: new Date() })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await app.db
+      .insertInto('sso_policies')
+      .values({ organization_id: otherTeam, require_sso: true })
+      .execute()
+    const { ssoOperatorRecoveryQueue } = await import(
+      '../../../apps/server/src/sso-operator-recovery.ts'
+    )
+    const { createJobs } = await import('../../../packages/jobs/src/index.ts')
+    const queue = createJobs({
+      connectionString: app.databaseUrl,
+      definitions: [ssoOperatorRecoveryQueue],
+      migrate: true,
+      work: false,
+      log: () => {},
+    })
+    try {
+      await queue.start()
+    } finally {
+      await queue.stop()
+    }
+    const policies = () =>
+      app.db.selectFrom('sso_policies').selectAll().orderBy('organization_id').execute()
+    const before = await policies()
+
+    await app.idp.stop()
+    await openMailboxSession(page, app)
+    await expectTeamDataDenied(page, app)
+    expect(await runOperatorRecovery(app)).toBe(
+      'SSO enforcement disabled. Owner notifications queued.',
+    )
+    expect(await policies()).toEqual(
+      before.map((row) =>
+        row.organization_id === app.teamId
+          ? {
+              ...row,
+              require_sso: false,
+              policy_revision: row.policy_revision + 1,
+              trust_generation: row.trust_generation + 1,
+            }
+          : row,
+      ),
+    )
+
+    await page.goto(`${app.url}${returnPath}`)
+    const space = page.getByRole('button', { name: /^Switch space/ })
+    await space.click()
+    await page.getByRole('menuitemradio', { name: app.teamName, exact: true }).click()
+    await expect(space).toContainText(app.teamName)
+    await expectSession(page, app, app.linkedUserId, false)
+
+    expect(await runOperatorRecovery(app)).toBe('SSO enforcement is already off. No changes made.')
+    const events = await app.db
+      .selectFrom('audit_events')
+      .select(['organization_id', 'actor_type', 'target_id'])
+      .where('action', '=', 'sso_maintenance.enforcement_disabled')
+      .execute()
+    expect(events).toEqual([
+      { organization_id: app.teamId, actor_type: 'system', target_id: app.teamId },
+    ])
+    const { rows } = await sql<{ organizationId: string; userId: string }>`
+      select data->>'organizationId' as "organizationId", data->>'userId' as "userId"
+      from pgboss.job where name = ${ssoOperatorRecoveryQueue.name}
+    `.execute(app.db)
+    expect(rows).toEqual([{ organizationId: app.teamId, userId: app.linkedUserId }])
   })
-  try {
-    await queue.start()
-  } finally {
-    await queue.stop()
-  }
-  const policies = () =>
-    app.db.selectFrom('sso_policies').selectAll().orderBy('organization_id').execute()
-  const before = await policies()
-
-  await app.idp.stop()
-  await openMailboxSession(page, app)
-  await expectTeamDataDenied(page, app)
-  expect(await runOperatorRecovery(app)).toBe(
-    'SSO enforcement disabled. Owner notifications queued.',
-  )
-  expect(await policies()).toEqual(
-    before.map((row) =>
-      row.organization_id === app.teamId
-        ? {
-            ...row,
-            require_sso: false,
-            policy_revision: row.policy_revision + 1,
-            trust_generation: row.trust_generation + 1,
-          }
-        : row,
-    ),
-  )
-
-  await page.goto(`${app.url}${returnPath}`)
-  const space = page.getByRole('button', { name: /^Switch space/ })
-  await space.click()
-  await page.getByRole('menuitemradio', { name: app.teamName, exact: true }).click()
-  await expect(space).toContainText(app.teamName)
-  await expectSession(page, app, app.linkedUserId, false)
-
-  expect(await runOperatorRecovery(app)).toBe('SSO enforcement is already off. No changes made.')
-  const events = await app.db
-    .selectFrom('audit_events')
-    .select(['organization_id', 'actor_type', 'target_id'])
-    .where('action', '=', 'sso_maintenance.enforcement_disabled')
-    .execute()
-  expect(events).toEqual([
-    { organization_id: app.teamId, actor_type: 'system', target_id: app.teamId },
-  ])
-  const { rows } = await sql<{ organizationId: string; userId: string }>`
-    select data->>'organizationId' as "organizationId", data->>'userId' as "userId"
-    from pgboss.job where name = ${ssoOperatorRecoveryQueue.name}
-  `.execute(app.db)
-  expect(rows).toEqual([{ organizationId: app.teamId, userId: app.linkedUserId }])
 })
