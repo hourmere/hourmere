@@ -2,6 +2,7 @@
 import { createDb, createPool } from '@hourmere/db'
 import { createJobs } from '@hourmere/jobs'
 import { z } from 'zod'
+import { productionScimResourcesEnabled } from './scim.ts'
 import { disableSsoEnforcement, ssoOperatorRecoveryQueue } from './sso-operator-recovery.ts'
 
 const [argument, ...extra] = process.argv.slice(2)
@@ -25,7 +26,7 @@ if (process.env.HOURMERE_SERVER_CONTAINER !== '1') {
   })
   try {
     await jobs.start()
-    const result = await disableSsoEnforcement(db, jobs, team.data)
+    const result = await disableSsoEnforcement(db, jobs, team.data, productionScimResourcesEnabled)
     if (result === 'unknown_team') {
       console.error('Unknown team. Supply the UUID of an existing team.')
       process.exitCode = 1

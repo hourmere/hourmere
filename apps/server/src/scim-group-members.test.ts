@@ -12,10 +12,13 @@ import {
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
+import { bookingTools } from './mcp/bookings.ts'
+import { type McpCaller, runTool } from './mcp/tools.ts'
 import { scimDiscoveryWithGroups } from './scim-discovery.ts'
 import { scimGroups } from './scim-groups.ts'
 import { scimUserReplacement } from './scim-user-replace.ts'
 import { scimUserRetirement } from './scim-user-retirement.ts'
+import { scimUsers } from './scim-users.ts'
 
 const databaseUrl = process.env.DATABASE_URL
 const publicUrl = 'https://scim-group-members.example.test'
@@ -72,6 +75,7 @@ describe.skipIf(!databaseUrl)('SCIM Group membership changes', () => {
     const groups = scimGroups(db)
     const replace = scimUserReplacement(db)
     const retire = scimUserRetirement(db)
+    const users = scimUsers(db)
     app = createApp({
       publicUrl,
       checkDb: async () => {},
@@ -84,7 +88,8 @@ describe.skipIf(!databaseUrl)('SCIM Group membership changes', () => {
           scimDiscoveryWithGroups(request) ??
           groups(request) ??
           retire(request) ??
-          replace(request),
+          replace(request) ??
+          users(request),
       },
     })
   })
@@ -599,7 +604,9 @@ describe.skipIf(!databaseUrl)('SCIM Group membership changes', () => {
     // capability the statement does not read the child suspension at all.
     await expect(issueKey(source.id, f.child.id)).rejects.toMatchObject({ status: 'FORBIDDEN' })
     await expect(
-      db.selectNoFrom(scimSuspended(f.child.id, source.id).as('suspended')).executeTakeFirst(),
+      db
+        .selectNoFrom(scimSuspended(f.child.id, source.id, false).as('suspended'))
+        .executeTakeFirst(),
     ).resolves.toEqual({ suspended: false })
     expect((await keyAccess(otherKey.key)).status).toBe(200)
     // A replayed deactivation keeps the original suspension.
@@ -693,14 +700,14 @@ describe.skipIf(!databaseUrl)('SCIM Group membership changes', () => {
     expect(await suspended(f.child.id, promoted)).toBe(false)
   })
 
-  it('resumes child access when only the parent blocks the reactivation', async () => {
+  it('resumes child access only after an IdP retries reactivation with the parent blocker cleared', async () => {
     const f = await directory(1)
     const [sourceId] = f.ids as [string]
     const [source] = f.people as [TestUser]
     await applied(await f.patch({ op: 'add', path: 'members', value: values(sourceId) }), f.ids)
     expect((await setActive(f.token, sourceId, false)).status).toBe(200)
     expect(await suspended(f.child.id, source)).toBe(true)
-    await db
+    const blocker = await db
       .insertInto('scim_membership_blocks')
       .values({
         organization_id: f.parent.id,
@@ -708,37 +715,57 @@ describe.skipIf(!databaseUrl)('SCIM Group membership changes', () => {
         source: 'local',
         kind: 'suspension',
       })
-      .execute()
+      .returning('id')
+      .executeTakeFirstOrThrow()
 
-    // The parent's own blocker refuses the parent and applies nothing else of the request.
-    const reactivation = () =>
-      call(
+    const read = async () => {
+      const response = await call(f.token, `Users/${sourceId}`)
+      expect(response.status).toBe(200)
+      return (await response.json()) as { active: boolean; displayName: string }
+    }
+    const sync = async (desiredActive: boolean) => {
+      if ((await read()).active === desiredActive) return
+      return setActive(f.token, sourceId, desiredActive)
+    }
+    const before = await read()
+    expect(before).toMatchObject({ active: false, displayName: source.name })
+    await expectError(
+      await call(
         f.token,
         `Users/${sourceId}`,
         'PATCH',
         patchBody(
           { op: 'replace', path: 'active', value: true },
-          { op: 'replace', path: 'displayName', value: 'Not applied' },
+          { op: 'replace', path: 'displayName', value: 'Refused name' },
         ),
-      )
-    await expectError(await reactivation(), 403, 'mutability')
-    expect(await suspended(f.child.id, source)).toBe(false)
+      ),
+      403,
+      'mutability',
+    )
+    expect(await read()).toEqual(before)
+    expect(await suspended(f.child.id, source), 'refusal keeps child access suspended').toBe(true)
     expect(await suspended(f.parent.id, source)).toBe(true)
-    expect(await entry(sourceId)).toEqual({ active: false, retired_at: null })
-    expect(
-      await db
-        .selectFrom('scim_users')
-        .select('display_name')
-        .where('id', '=', sourceId)
-        .executeTakeFirstOrThrow(),
-    ).toEqual({ display_name: source.name })
-    // With nothing left to resume, the same refusal changes nothing.
-    await expectError(await reactivation(), 403, 'mutability')
-    expect(await suspended(f.child.id, source)).toBe(false)
-
-    // The entry is still inactive, and a repeated deactivation suspends the child again.
-    expect((await setActive(f.token, sourceId, false)).status).toBe(200)
+    expect(await sync(false)).toBeUndefined()
     expect(await suspended(f.child.id, source)).toBe(true)
+
+    await db
+      .updateTable('scim_membership_blocks')
+      .set({ cleared_at: new Date() })
+      .where('id', '=', blocker.id)
+      .execute()
+    expect(await read()).toEqual(before)
+    expect(await suspended(f.child.id, source)).toBe(true)
+    expect((await sync(true))?.status).toBe(200)
+    expect(await read()).toMatchObject({ active: true, displayName: source.name })
+    expect(await suspended(f.child.id, source)).toBe(false)
+    expect(await suspended(f.parent.id, source)).toBe(false)
+    const key = await issueKey(source.id, f.child.id)
+    expect((await keyAccess(key.key)).status).toBe(200)
+
+    expect((await sync(false))?.status).toBe(200)
+    expect(await read()).toMatchObject({ active: false })
+    expect(await suspended(f.child.id, source)).toBe(true)
+    expect((await keyAccess(key.key)).status).toBe(401)
   })
 
   it('takes the child team lock before a source User write changes child access', async () => {
@@ -782,5 +809,61 @@ describe.skipIf(!databaseUrl)('SCIM Group membership changes', () => {
     await expectError(await pending, 403, 'mutability')
     expect(await entry(sourceId)).toEqual({ active: true, retired_at: null })
     expect(await suspended(f.child.id, f.people[0] as TestUser)).toBe(false)
+  })
+
+  it('withholds MCP public availability for a suspended directory host when resources are enabled', async () => {
+    const f = await directory(1)
+    const [sourceId] = f.ids as [string]
+    const [source] = f.people as [TestUser]
+    await applied(await f.patch({ op: 'add', path: 'members', value: values(sourceId) }), f.ids)
+    const fixtures = createFixtures(db)
+    const slug = 'directory-host'
+    await fixtures.eventType(f.child.id, null, { slug, hosts: [{ userId: source.id }] })
+    await fixtures.schedule(source.id)
+    const organization = await db
+      .selectFrom('auth.organization')
+      .select(['id', 'name', 'slug'])
+      .where('id', '=', f.child.id)
+      .executeTakeFirstOrThrow()
+    const tool = bookingTools({
+      db,
+      now: () => Temporal.Instant.from('2026-11-01T12:00:00Z'),
+    }).find(({ name }) => name === 'find_available_slots')
+    if (!tool) throw new Error('No availability tool')
+    const caller: McpCaller = {
+      kind: 'api_key',
+      apiKeyId: randomUUID(),
+      apiKeyScope: 'bookings',
+      organization: { ...organization, personal: false },
+      user: f.child.owner,
+    }
+    const search = (scimResourcesEnabled: boolean) =>
+      runTool(
+        tool,
+        {
+          teamSlug: organization.slug,
+          slug,
+          startDate: '2026-11-02',
+          endDate: '2026-11-02',
+          timeZone: 'UTC',
+        },
+        {
+          caller: { ...caller, ...(scimResourcesEnabled && { scimResourcesEnabled: true }) },
+          rateLimit: () => {},
+        },
+        () => expect.unreachable('Availability must return a structured result'),
+      )
+
+    expect((await search(true)).structuredContent).toMatchObject({
+      slots: expect.arrayContaining([expect.objectContaining({ start: expect.any(String) })]),
+    })
+    expect((await setActive(f.token, sourceId, false)).status).toBe(200)
+    expect(await search(true)).toMatchObject({
+      isError: true,
+      content: [{ type: 'text', text: expect.stringContaining('"error":"event_type_not_found"') }],
+    })
+    expect((await search(false)).structuredContent).toMatchObject({
+      slots: expect.arrayContaining([expect.objectContaining({ start: expect.any(String) })]),
+    })
   })
 })

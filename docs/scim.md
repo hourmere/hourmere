@@ -725,22 +725,18 @@ checks, team management and booking-write checks, SSO proofs, delegations, sign-
 account linking and recovery, MCP OAuth grants, host eligibility, recurring
 availability and booking routing. The caller resolver marks the principals it resolves,
 and the protocol capabilities, service contexts and public booking contexts carry the
-flag to the checks behind them. A test fails when a call of the shared check omits the
-decision. Three places stay on the default until they are hardened: background jobs
-(invitation delivery, workflow email, waitlist notification), public booking contexts
-built by MCP tools, and the locked host rechecks of meeting-poll creation and of
-waitlist settings saved with an event type, whose unlocked reads already refuse.
-Reactivation lifts the suspension. A
-parent team's own blocker affects only the parent: when it refuses the reactivation
-with 403 `mutability`, the child memberships are resumed anyway, the directory entry
-stays inactive and nothing else in the request is applied. This is the one refusal
-that commits a change, and it is deliberate. RFC 7644 section 3.5.2 requires a failed
-PATCH to leave the resource as it was, which holds: the User is returned unchanged by
-a later read. The resumed child access is state of another team that the User only
-sources, so the refusal records it as `scim_user.child_access_resumed` in the parent
-journal, in the same transaction. A repeated refused reactivation has nothing left to
-resume and records nothing. A later `active:false`
-suspends them again. `DELETE /Users/{id}` removes those child memberships through the
+flag to the checks behind them, including public booking and waitlist contexts built by
+MCP tools, meeting-poll eligibility and waitlist writes. Background jobs and offline
+operator recovery carry the same capability through their checks, with production set
+to off. The shared suspension check requires callers to pass the capability decision.
+
+A successful reactivation lifts the suspension. A parent-local blocker or missing
+parent membership refuses reactivation with 403 `mutability` and rolls back the entire
+request. The User still reads as `active:false`, its managed child memberships stay
+suspended, and the refusal adds no audit event. Once an administrator clears the blocker
+or restores the parent membership, the IdP still reads `active:false` and can retry
+`active:true`. Only that successful write resumes access. A subsequent `active:false`
+suspends the memberships again. `DELETE /Users/{id}` removes those child memberships through the
 same departure checks as a Group removal, and advances `meta.lastModified` of every
 Group whose roster listed the User. A User write that would suspend or remove a current owner or admin of a child
 returns 403 `mutability`, and a retirement that would strand hosted event types or
@@ -794,8 +790,10 @@ PATCH 可用 `add`、`replace` 和 `remove` 更改映射成员：`remove` 可带
 新成员必须是同一连接中已关联且启用的用户，否则返回 400 `invalidValue`。子团队当前的所有者或管理员不能被移除，
 返回 403 `mutability`。仍主持活动类型或有未完成预约的成员返回 409，需由子团队管理员先行交接。
 来源用户停用时，其受管子团队成员资格保留并暂停，重新启用后恢复，删除来源用户会移除这些成员资格并更新相关群组的 `meta.lastModified`。
-父团队自身的拦截只影响父团队：重新启用因此被拒绝（403 `mutability`）时，子团队成员资格仍会恢复，用户资源本身保持不变，
-这次恢复会以 `scim_user.child_access_resumed` 记入父团队审计日志。
+父团队的本地拦截或缺少父团队成员资格会以 403 `mutability` 拒绝重新启用，并回滚整个请求。
+用户仍显示为 `active:false`，受管子团队成员资格仍暂停，审计日志不新增记录。
+管理员清除拦截或恢复父团队成员资格后，IdP 仍会读到 `active:false`，可重试 `active:true`。
+访问权限在重试成功后恢复，随后发送的 `active:false` 仍会暂停访问。
 成功返回 200 及按请求投影的群组，不支持的写入前置条件返回 412。名称变更与父团队审计事件
 `scim_group.updated` 在同一事务提交（成员变更同样记录），事件仅记录令牌和群组 ID 等审计元数据。
 原样重试保留 `meta.lastModified`，也不增加审计事件。
@@ -813,7 +811,8 @@ authorized local suspension and removal continue through ordinary administration
 
 New Group membership grants only the child member role. Check the child's current admission
 blockers for the linked account and its verified mailbox. Local suspension or removal in the
-child wins over directory writes. A parent team's local blocker affects only the parent.
+child wins over directory writes. Applying a parent-local blocker directly restricts
+parent access. SCIM reactivation of the source User also requires the parent checks above.
 On a mapping with directory authority, deactivating its source User suspends that User's
 retained managed child memberships. Retiring the User removes those memberships through
 the managed departure checks below. Revoke the affected child credentials in either case.
@@ -1145,12 +1144,15 @@ Current releases cannot pass an IdP connection test or synchronize users/groups,
 with the flag enabled. Do not configure production provisioning yet. The
 [operator guide](https://hourmere.com/docs/scim) states this same limitation.
 
-Future tests use local HTTP protocol fixtures and throwaway Postgres databases first.
+The HTTP corpus covers the supported RFC 7643/7644 schema, error, filter and PATCH
+behavior and replays synthetic Okta PUT and Entra PATCH fixtures against a throwaway
+Postgres database. It exercises both Entra scheduled shapes and the on-demand legacy
+shape. The fixtures run without external provider calls.
+
 Use a pinned local Keycloak image plus a reviewed, pinned SCIM plugin/connector only
 after documenting its actual provisioning capability; OIDC/SAML support alone proves
 nothing about SCIM. Exercise create, rename, disable, re-enable, delete, groups,
-credential overlap and revoked-token retries with synthetic identities. Replay official
-Okta/Entra request shapes against the same server in CI without live provider calls.
+credential overlap and revoked-token retries with synthetic identities.
 A later explicitly authorized tenant trial can establish interoperability; never claim
 Okta/Entra/Google certification from fixtures alone. The foundation performs no provider
 calls and adds no booking reschedule/cancel/DST behavior.

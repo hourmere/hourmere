@@ -3,10 +3,15 @@ import type { WeeklyHours } from '@hourmere/core'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { findOneTimeEventType } from './availability.ts'
+import { findOneTimeEventType, findPublicBookingPath } from './availability.ts'
 import { resolveBookingOrganization } from './booking-organization.ts'
 import type { ServiceContext } from './context.ts'
-import { activateRoundRobin, createEventType } from './event-types.ts'
+import {
+  activateRoundRobin,
+  createEventType,
+  getEventTypeWaitlist,
+  updateEventType,
+} from './event-types.ts'
 import { assertHosts, readEligibleHostIds } from './hosts.ts'
 import { checkRecurringAvailability } from './recurring-availability.ts'
 import { readBookingRoutingSnapshot } from './routing-booking.ts'
@@ -36,7 +41,9 @@ describe.skipIf(!serverUrl)('directory-managed child suspension in scheduling', 
   let suspended: TestUser
   let teamId: string
   let eventTypeId: string
+  let individualEventId: string
   let bookingId: string
+  let owner: ServiceContext
   let member: ServiceContext
   let session: ServiceContext
 
@@ -53,7 +60,7 @@ describe.skipIf(!serverUrl)('directory-managed child suspension in scheduling', 
     teamId = team.id
     for (const host of [active, suspended])
       await f.schedule(host.id, { timeZone: 'UTC', weeklyHours: everyDay })
-    const owner = testContext(db, team.as(active), () => NOW)
+    owner = testContext(db, team.as(active), () => NOW)
     const event = await createEventType(owner, {
       slug: 'managed-rotation',
       title: 'Rotating hosts',
@@ -63,6 +70,14 @@ describe.skipIf(!serverUrl)('directory-managed child suspension in scheduling', 
     })
     await activateRoundRobin(owner, event.id)
     eventTypeId = event.id
+    individualEventId = (
+      await createEventType(owner, {
+        slug: 'managed-host',
+        title: 'Managed host',
+        durationMinutes: 30,
+        hosts: [{ userId: suspended.id }],
+      })
+    ).id
     bookingId = await f.booking(teamId, [suspended.id], '2026-12-01T12:00Z', '2026-12-01T12:30Z', {
       eventTypeId,
     })
@@ -90,26 +105,7 @@ describe.skipIf(!serverUrl)('directory-managed child suspension in scheduling', 
       () => NOW,
     )
 
-    // A Group-sourced membership of the child team, suspended with its source User.
-    const parent = await f.organization()
-    const connection = randomUUID()
-    const mapping = randomUUID()
-    await owned.pool.query('INSERT INTO scim_connections (id, organization_id) VALUES ($1,$2)', [
-      connection,
-      parent,
-    ])
-    await owned.pool.query(
-      `INSERT INTO scim_team_mappings (id, parent_organization_id, child_organization_id,
-       connection_id, external_id) VALUES ($1,$2,$3,$4,'roster')`,
-      [mapping, parent, teamId, connection],
-    )
-    await owned.pool.query(
-      `INSERT INTO scim_team_managed_memberships
-       (member_id, mapping_id, child_organization_id, user_id, suspended_at)
-       SELECT id, $1, "organizationId", "userId", clock_timestamp() FROM auth.member
-       WHERE "organizationId" = $2 AND "userId" = $3`,
-      [mapping, teamId, suspended.id],
-    )
+    await f.suspendManagedChildMembership(teamId, suspended.id)
   })
 
   afterAll(async () => {
@@ -135,6 +131,23 @@ describe.skipIf(!serverUrl)('directory-managed child suspension in scheduling', 
       (await findOneTimeEventType(db, eventTypeId, { scimResourcesEnabled: true }))
         ?.eligibleHostUserIds,
     ).toEqual([active.id])
+  })
+
+  it('withholds a reusable booking path for a directory-suspended sole host', async () => {
+    const path = `/team/${owner.principal.organization.slug}/managed-host`
+    await expect(findPublicBookingPath(db, individualEventId, false)).resolves.toBe(path)
+    await expect(findPublicBookingPath(db, individualEventId, true)).resolves.toBeUndefined()
+  })
+
+  it('checks the current host when an update enables a waitlist without changing hosts', async () => {
+    const patch = { waitlist: { enabled: true } }
+    await expect(
+      updateEventType({ ...owner, scimResourcesEnabled: true }, individualEventId, patch),
+    ).rejects.toMatchObject({ code: 'waitlist_unsupported' })
+    await expect(getEventTypeWaitlist(owner, individualEventId)).resolves.toEqual({
+      enabled: false,
+    })
+    await expect(updateEventType(owner, individualEventId, patch)).resolves.toMatchObject(patch)
   })
 
   it('reads the routing snapshot for the member unless the capability is held', async () => {

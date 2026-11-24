@@ -22,6 +22,7 @@ interface WorkflowExecutionContext
     WorkflowSettings {
   budget: WorkflowMailLimits & { secret: string }
   followUpHostNotesEnabled: () => boolean
+  scimResourcesEnabled?: boolean
   mailer: Mailer
   captureWebhook(
     trx: Db,

@@ -21,7 +21,11 @@ export async function liveSsoDelegationSummaries(
 ): Promise<ReadonlyMap<string, SsoDelegationSummary>> {
   if (!ssoRetained(capabilities) || credentialIds.length === 0) return new Map()
 
-  const lease = liveSsoDelegations(kind, { ssoOidcEnabled: true, ssoSamlEnabled: true })
+  const lease = liveSsoDelegations(kind, {
+    ...capabilities,
+    ssoOidcEnabled: true,
+    ssoSamlEnabled: true,
+  })
   const result = await sql<{ credential_id: string; id: string; expires_at: Date }>`
     SELECT ${lease.credential} AS credential_id, lease_binding.id, ${lease.expiry} AS expires_at
     ${lease.from}

@@ -211,7 +211,10 @@ export async function getMeetingPollResults(
       })),
     }
   })
-  return { ...snapshot, candidates: await advisoryCandidates(ctx.db, snapshot) }
+  return {
+    ...snapshot,
+    candidates: await advisoryCandidates(ctx.db, snapshot, ctx.scimResourcesEnabled === true),
+  }
 }
 
 /** Run only after the results transaction commits. Availability may change independently. */
@@ -221,12 +224,13 @@ async function advisoryCandidates(
     poll: MeetingPoll
     candidates: Omit<MeetingPollCandidateResult, 'availability'>[]
   },
+  scimResourcesEnabled: boolean,
 ): Promise<MeetingPollCandidateResult[]> {
   const { poll, candidates } = snapshot
   if (poll.status === 'scheduled' || poll.status === 'canceled')
     return candidates.map((candidate) => ({ ...candidate, availability: 'unavailable' }))
 
-  const event = await findOneTimeEventType(db, poll.eventTypeId)
+  const event = await findOneTimeEventType(db, poll.eventTypeId, { scimResourcesEnabled })
   if (!event || event.bookingMode === 'group')
     return candidates.map((candidate) => ({ ...candidate, availability: 'unavailable' }))
 
