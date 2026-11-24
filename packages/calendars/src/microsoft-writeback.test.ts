@@ -4,6 +4,7 @@ import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import {
   cancelManagedBooking,
   createPublicBooking,
+  getManagedBooking,
   type PublicContext,
   rescheduleManagedBooking,
 } from '@hourmere/scheduling'
@@ -35,6 +36,7 @@ const etag = 'W/"DwAAABYAAAC3I5RWx7luSYmfvk6V4H3sAADTeGJB"'
 const updatedEtag = 'W/"DwAAABYAAAC3I5RWx7luSYmfvk6V4H3sAADTeGJC"'
 const outlookEtag = 'W/"DwAAABYAAAC3I5RWx7luSYmfvk6V4H3sAADTeGJD"'
 const eventId = 'AAMkAGViNDU7zAAAAAGtlAAAMh8kAAA='
+const teamsJoinUrl = 'https://teams.microsoft.com/l/meetup-join/synthetic-booking/0'
 const scope = 'Calendars.ReadWrite'
 const invitee = { name: 'Private Invitee', email: 'invitee@example.test', timeZone: 'UTC' }
 const signal = () => new AbortController().signal
@@ -52,6 +54,9 @@ type GraphEvent = EventTimes & {
   type: 'singleInstance'
   isCancelled: false
   attendees: { emailAddress: { address: string }; type: 'required' }[]
+  isOnlineMeeting?: true
+  onlineMeetingProvider?: 'teamsForBusiness'
+  onlineMeeting?: { joinUrl: string }
 }
 type Call = {
   calendar: string
@@ -85,8 +90,11 @@ function graph(now: () => number) {
     ),
   )
   const calls: Call[] = []
+  const capabilityReads: string[] = []
   const events = new Map<string, GraphEvent>()
   const controls: {
+    allowedOnlineMeetingProviders: string[]
+    beforeCapabilities?: () => Response | undefined | Promise<Response | undefined>
     beforeLookup?: (calendar: string) => Response | undefined | Promise<Response | undefined>
     beforeCreate?: () => Response | undefined
     afterCreate?: () => Promise<Response | undefined>
@@ -94,8 +102,9 @@ function graph(now: () => number) {
     beforePatch?: () => Response | undefined
     beforeDelete?: () => Response | undefined
     afterPatch?: () => Response | undefined
+    omitTeamsInPatchResponse?: boolean
     reconnect?: { account: string; calendars: string[]; sharedCalendars?: string[] }
-  } = {}
+  } = { allowedOnlineMeetingProviders: ['teamsForBusiness'] }
   const client = createMicrosoftCalendarClient(
     { clientId: 'fake-client', clientSecret: 'fake-secret', publicUrl: 'https://hourmere.test' },
     async (input, init) => {
@@ -118,6 +127,18 @@ function graph(now: () => number) {
               canViewPrivateItems: true,
             })),
           })
+        const calendarSegment = /^\/v1\.0\/me\/calendars\/([^/]+)$/u.exec(url.pathname)?.[1]
+        if (calendarSegment && !init?.method) {
+          const id = decodeURIComponent(calendarSegment)
+          capabilityReads.push(id)
+          return (
+            (await controls.beforeCapabilities?.()) ??
+            Response.json({
+              id,
+              allowedOnlineMeetingProviders: controls.allowedOnlineMeetingProviders,
+            })
+          )
+        }
       }
       const [, segment, eventSegment] =
         /^\/v1\.0\/me\/calendars\/([^/]+)\/events(?:\/([^/]+))?$/u.exec(url.pathname) ?? []
@@ -153,6 +174,8 @@ function graph(now: () => number) {
         }
         const updated = { ...event, ...body, '@odata.etag': updatedEtag }
         events.set(key, updated)
+        if (controls.omitTeamsInPatchResponse)
+          return Response.json({ id, '@odata.etag': updatedEtag })
         return controls.afterPatch?.() ?? Response.json(updated)
       }
       if (init?.method === 'POST') {
@@ -173,6 +196,12 @@ function graph(now: () => number) {
           start: body.start,
           end: body.end,
           ...(body.body && { body: body.body }),
+          ...(body.isOnlineMeeting === true &&
+            body.onlineMeetingProvider === 'teamsForBusiness' && {
+              isOnlineMeeting: true,
+              onlineMeetingProvider: 'teamsForBusiness',
+              onlineMeeting: { joinUrl: teamsJoinUrl },
+            }),
         }
         events.set(key, event)
         return (
@@ -196,6 +225,7 @@ function graph(now: () => number) {
     client,
     controls,
     calls,
+    capabilityReads,
     token,
     events,
     posts: () => calls.filter((c) => c.method === 'POST'),
@@ -220,6 +250,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
     let connectionId: string
     let selected: string
     let eventTypeId: string
+    let microsoftTeamsForTest: CalendarDeps['microsoftTeamsForTest']
     let queued: CalendarWritePayload[]
 
     beforeAll(async () => {
@@ -280,6 +311,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       await f.schedule(host.userId, { timeZone: 'UTC' })
       now = NOW.epochMilliseconds
       queued = []
+      microsoftTeamsForTest = undefined
       provider = graph(() => now)
       deps = {
         db,
@@ -306,7 +338,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
             return null
           },
         },
-        { google: false, now: () => now },
+        { google: false, now: () => now, microsoftTeamsForTest },
       )
       return {
         db,
@@ -435,96 +467,124 @@ describe.skipIf(!process.env.DATABASE_URL)(
       })
     }
 
-    it('updates the pinned copy once through concurrent successor jobs and deletes it on cancellation', async () => {
-      // The same Los Angeles wall time becomes an hour earlier in UTC after the DST change.
-      await db
-        .updateTable('schedules')
-        .set({ time_zone: 'America/Los_Angeles' })
-        .where('user_id', '=', host.userId)
-        .execute()
-      const beforeDst = Temporal.ZonedDateTime.from('2030-03-08T09:00-08:00[America/Los_Angeles]')
-      const afterDst = beforeDst.add({ days: 3 })
-      const created = await create(invitee, undefined, beforeDst.toInstant())
-      const bookingId = created.booking.id
-      await work({ bookingId })
-      expect(provider.posts()[0]?.body).toMatchObject({
-        start: { dateTime: '2030-03-08T17:00:00.000', timeZone: 'UTC' },
-      })
+    it.each([false, true])(
+      'updates the pinned copy across DST and deletes it on cancellation (Teams: %s)',
+      async (teams) => {
+        if (teams) microsoftTeamsForTest = (id) => id === eventTypeId
+        // The same Los Angeles wall time becomes an hour earlier in UTC after the DST change.
+        await db
+          .updateTable('schedules')
+          .set({ time_zone: 'America/Los_Angeles' })
+          .where('user_id', '=', host.userId)
+          .execute()
+        const beforeDst = Temporal.ZonedDateTime.from('2030-03-08T09:00-08:00[America/Los_Angeles]')
+        const afterDst = beforeDst.add({ days: 3 })
+        const created = await create(invitee, undefined, beforeDst.toInstant())
+        const bookingId = created.booking.id
+        microsoftTeamsForTest = undefined
+        await work({ bookingId })
+        expect(provider.posts()[0]?.body).toMatchObject({
+          start: { dateTime: '2030-03-08T17:00:00.000', timeZone: 'UTC' },
+          isOnlineMeeting: teams,
+        })
+        expect(provider.capabilityReads).toEqual(teams ? ['outlook-selected'] : [])
+        if (teams) {
+          const body = provider.posts()[0]?.body
+          expect(body).toMatchObject({
+            onlineMeetingProvider: 'teamsForBusiness',
+            sensitivity: 'private',
+          })
+          expect(body).not.toHaveProperty('attendees')
+          expect(body).not.toHaveProperty('location')
+          expect(JSON.stringify(body)).not.toContain(invitee.email)
+          expect(await state(bookingId)).toMatchObject({ teamsStatus: 'ready', teamsJoinUrl })
+          const managed = await getManagedBooking(context(), requireToken(created.manageToken))
+          expect(JSON.stringify(managed)).not.toContain(teamsJoinUrl)
+          expect(
+            JSON.stringify([...(await readMicrosoftWritebackSummary(db, [selected], now))]),
+          ).not.toContain(teamsJoinUrl)
+        }
 
-      await db
-        .updateTable('calendars')
-        .set({
-          sync_state: JSON.stringify({ microsoftPending: { position: 1 } }),
-        })
-        .where('id', '=', selected)
-        .execute()
-      await db
-        .insertInto('calendar_microsoft_changes')
-        .values({
-          calendar_id: selected,
-          position: 0,
-          external_event_id: eventId,
-          removes_series: false,
-          is_exception: false,
-        })
-        .execute()
-      await select(await calendar(connectionId, 'outlook-replacement'))
-      const moved = await rescheduleManagedBooking(context(), requireToken(created.manageToken), {
-        start: afterDst.toInstant(),
-      })
-      expect(moved.booking.id).not.toBe(bookingId)
-      expect(queued).toEqual([{ bookingId }, { bookingId }])
-      await Promise.all([work({ bookingId }), work({ bookingId: moved.booking.id })])
-      await work({ bookingId })
-      expect(provider.posts()).toHaveLength(1)
-      expect(patches()).toEqual([
-        expect.objectContaining({
-          calendar: 'outlook-selected',
-          id: eventId,
-          ifMatch: etag,
-          body: {
-            start: { dateTime: '2030-03-11T16:00:00.000', timeZone: 'UTC' },
-            end: { dateTime: '2030-03-11T16:30:00.000', timeZone: 'UTC' },
-          },
-        }),
-      ])
-      expect(provider.events.size).toBe(1)
-      expect(await mappings(bookingId)).toEqual([])
-      expect(await mappings(moved.booking.id)).toEqual([
-        { calendar_id: selected, external_event_id: eventId, etag: updatedEtag },
-      ])
-      expect(await busy()).toEqual([{ start: new Date(afterDst.epochMilliseconds) }])
-      expect(
         await db
-          .selectFrom('calendar_microsoft_changes')
-          .select('position')
-          .where('calendar_id', '=', selected)
-          .execute(),
-      ).toEqual([])
-      expect(
-        await db
-          .selectFrom('calendars')
-          .select('sync_state')
+          .updateTable('calendars')
+          .set({
+            sync_state: JSON.stringify({ microsoftPending: { position: 1 } }),
+          })
           .where('id', '=', selected)
-          .executeTakeFirstOrThrow(),
-      ).toEqual({ sync_state: {} })
+          .execute()
+        await db
+          .insertInto('calendar_microsoft_changes')
+          .values({
+            calendar_id: selected,
+            position: 0,
+            external_event_id: eventId,
+            removes_series: false,
+            is_exception: false,
+          })
+          .execute()
+        await select(await calendar(connectionId, 'outlook-replacement'))
+        provider.controls.omitTeamsInPatchResponse = teams
+        const moved = await rescheduleManagedBooking(context(), requireToken(created.manageToken), {
+          start: afterDst.toInstant(),
+        })
+        expect(moved.booking.id).not.toBe(bookingId)
+        expect(queued).toEqual([{ bookingId }, { bookingId }])
+        await Promise.all([work({ bookingId }), work({ bookingId: moved.booking.id })])
+        await work({ bookingId })
+        expect(provider.posts()).toHaveLength(1)
+        expect(patches()).toEqual([
+          expect.objectContaining({
+            calendar: 'outlook-selected',
+            id: eventId,
+            ifMatch: etag,
+            body: {
+              start: { dateTime: '2030-03-11T16:00:00.000', timeZone: 'UTC' },
+              end: { dateTime: '2030-03-11T16:30:00.000', timeZone: 'UTC' },
+            },
+          }),
+        ])
+        expect(provider.events.size).toBe(1)
+        expect(await mappings(bookingId)).toEqual([])
+        expect(await mappings(moved.booking.id)).toEqual([
+          { calendar_id: selected, external_event_id: eventId, etag: updatedEtag },
+        ])
+        expect(await busy()).toEqual([{ start: new Date(afterDst.epochMilliseconds) }])
+        if (teams)
+          expect(await state(bookingId)).toMatchObject({ teamsStatus: 'ready', teamsJoinUrl })
+        expect(
+          await db
+            .selectFrom('calendar_microsoft_changes')
+            .select('position')
+            .where('calendar_id', '=', selected)
+            .execute(),
+        ).toEqual([])
+        expect(
+          await db
+            .selectFrom('calendars')
+            .select('sync_state')
+            .where('id', '=', selected)
+            .executeTakeFirstOrThrow(),
+        ).toEqual({ sync_state: {} })
 
-      await cancelManagedBooking(context(), requireToken(moved.manageToken))
-      expect(queued).toEqual([{ bookingId }, { bookingId }, { bookingId }])
-      await Promise.all([work({ bookingId }), work({ bookingId: moved.booking.id })])
-      await work({ bookingId })
-      expect(deletes()).toEqual([
-        expect.objectContaining({
-          calendar: 'outlook-selected',
-          id: eventId,
-          ifMatch: updatedEtag,
-        }),
-      ])
-      expect(provider.events.size).toBe(0)
-      expect(await mappings(moved.booking.id)).toEqual([])
-      expect(await busy()).toEqual([])
-      expect(await state(bookingId)).toMatchObject({ status: 'succeeded' })
-    })
+        await cancelManagedBooking(context(), requireToken(moved.manageToken))
+        expect(queued).toEqual([{ bookingId }, { bookingId }, { bookingId }])
+        await Promise.all([work({ bookingId }), work({ bookingId: moved.booking.id })])
+        await work({ bookingId })
+        expect(deletes()).toEqual([
+          expect.objectContaining({
+            calendar: 'outlook-selected',
+            id: eventId,
+            ifMatch: updatedEtag,
+          }),
+        ])
+        expect(provider.events.size).toBe(0)
+        expect(await mappings(moved.booking.id)).toEqual([])
+        expect(await busy()).toEqual([])
+        const cancelled = await state(bookingId)
+        expect(cancelled).toMatchObject({ status: 'succeeded' })
+        expect(cancelled).not.toHaveProperty('teamsJoinUrl')
+      },
+    )
 
     it.each([false, true])(
       'removes a copy cancelled before the in-flight create finishes (lost response: %s)',
@@ -562,9 +622,15 @@ describe.skipIf(!process.env.DATABASE_URL)(
       },
     )
 
-    it.each([false, true])(
-      'moves a copy rescheduled before the in-flight create finishes (lost response: %s)',
-      async (lostResponse) => {
+    it.each([
+      { teams: false, lostResponse: false },
+      { teams: false, lostResponse: true },
+      { teams: true, lostResponse: false },
+      { teams: true, lostResponse: true },
+    ])(
+      'moves a copy rescheduled before the in-flight create finishes (Teams: $teams, lost response: $lostResponse)',
+      async ({ teams, lostResponse }) => {
+        if (teams) microsoftTeamsForTest = (id) => id === eventTypeId
         const created = await create()
         const bookingId = created.booking.id
         const sent = Promise.withResolvers<void>()
@@ -599,6 +665,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
           now += 30_000
           await dispatch(work)
         }
+        await work({ bookingId: successor })
         expect(provider.posts()).toHaveLength(1)
         expect(patches()).toHaveLength(1)
         expect([...provider.events.values()]).toMatchObject([
@@ -611,6 +678,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
         expect(await mappings(bookingId)).toEqual([])
         expect(await mappings(successor)).toMatchObject([{ external_event_id: eventId }])
         expect(await state(bookingId)).toMatchObject({ status: 'succeeded' })
+        if (teams)
+          expect(await state(bookingId)).toMatchObject({ teamsStatus: 'ready', teamsJoinUrl })
       },
     )
 
@@ -844,33 +913,46 @@ describe.skipIf(!process.env.DATABASE_URL)(
       ])
     })
 
-    it('keeps the POST payload stable through ambiguous create replay and successive moves', async () => {
-      const created = await create()
-      const bookingId = created.booking.id
-      provider.controls.beforeCreate = () => graphError(503, 'ServiceUnavailable')
-      await work({ bookingId })
-      const moved = await rescheduleManagedBooking(context(), requireToken(created.manageToken), {
-        start: NEXT,
-      })
-      provider.controls.beforeCreate = undefined
-      provider.controls.afterCreate = async () => graphError(503, 'ServiceUnavailable')
-      now += 30_000
-      await work({ bookingId })
-      const finalTime = NEXT.add({ hours: 1 })
-      const successor = await rescheduleManagedBooking(context(), requireToken(moved.manageToken), {
-        start: finalTime,
-      })
-      provider.controls.afterCreate = undefined
-      now += 30_000
-      await work({ bookingId })
+    it.each([false, true])(
+      'keeps the POST payload stable through ambiguous create replay and successive moves (Teams: %s)',
+      async (teams) => {
+        if (teams) microsoftTeamsForTest = (id) => id === eventTypeId
+        const created = await create()
+        const bookingId = created.booking.id
+        provider.controls.beforeCreate = () => graphError(503, 'ServiceUnavailable')
+        await work({ bookingId })
+        provider.controls.allowedOnlineMeetingProviders = []
+        const moved = await rescheduleManagedBooking(context(), requireToken(created.manageToken), {
+          start: NEXT,
+        })
+        provider.controls.beforeCreate = undefined
+        provider.controls.afterCreate = async () => graphError(503, 'ServiceUnavailable')
+        now += 30_000
+        await work({ bookingId })
+        const finalTime = NEXT.add({ hours: 1 })
+        const successor = await rescheduleManagedBooking(
+          context(),
+          requireToken(moved.manageToken),
+          {
+            start: finalTime,
+          },
+        )
+        provider.controls.afterCreate = undefined
+        now += 30_000
+        await work({ bookingId })
 
-      expect(provider.posts()).toHaveLength(2)
-      expect(provider.posts()[1]?.body).toEqual(provider.posts()[0]?.body)
-      expect(patches()).toHaveLength(1)
-      expect(provider.events.size).toBe(1)
-      expect(await state(bookingId)).toMatchObject({ status: 'succeeded' })
-      expect(await mappings(successor.booking.id)).toMatchObject([{ external_event_id: eventId }])
-    })
+        expect(provider.posts()).toHaveLength(2)
+        expect(provider.posts()[1]?.body).toEqual(provider.posts()[0]?.body)
+        expect(provider.posts()[0]?.body).toMatchObject({ isOnlineMeeting: teams })
+        expect(provider.capabilityReads).toEqual(teams ? ['outlook-selected'] : [])
+        expect(patches()).toHaveLength(1)
+        expect(provider.events.size).toBe(1)
+        expect(await state(bookingId)).toMatchObject({ status: 'succeeded' })
+        expect(await mappings(successor.booking.id)).toMatchObject([{ external_event_id: eventId }])
+        if (teams)
+          expect(await state(bookingId)).toMatchObject({ teamsStatus: 'ready', teamsJoinUrl })
+      },
+    )
 
     it('retains a cancelled copy for follow-up if the host loses ownership of its calendar', async () => {
       const created = await create()
@@ -1062,7 +1144,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
         subject: 'Booking title with Private Invitee',
         sensitivity: 'private',
         showAs: 'busy',
+        isOnlineMeeting: false,
       })
+      expect(provider.capabilityReads).toEqual([])
+      expect(body).not.toHaveProperty('onlineMeetingProvider')
       expect(body).not.toHaveProperty('attendees')
       expect(body).not.toHaveProperty('body')
       expect(body).not.toHaveProperty('location')
@@ -1075,6 +1160,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
     })
 
     it('ignores even a persisted destination owned by someone outside the booking', async () => {
+      microsoftTeamsForTest = (id) => id === eventTypeId
       const other = await f.host()
       const foreign = await calendar(await connect(other.userId), 'foreign-calendar')
       await select(foreign)
@@ -1083,9 +1169,11 @@ describe.skipIf(!process.env.DATABASE_URL)(
       expect(await state(bookingId)).toBeUndefined()
       expect(await mappings(bookingId)).toEqual([])
       expect(provider.calls).toEqual([])
+      expect(provider.capabilityReads).toEqual([])
     })
 
     it('updates one private group copy until the last seat is cancelled', async () => {
+      microsoftTeamsForTest = (id) => id === eventTypeId
       await setGroupType()
       const first = await create()
       const groupSlotId = await slotFor(first.booking.id)
@@ -1105,7 +1193,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
         subject: 'Booking title',
         body: { contentType: 'text', content: '2' },
         sensitivity: 'private',
+        isOnlineMeeting: false,
       })
+      expect(provider.capabilityReads).toEqual([])
       expect(JSON.stringify(provider.posts()[0]?.body)).not.toMatch(/Invitee|@example.test/)
       const copy = await db
         .selectFrom('group_slot_calendar_events')
@@ -1249,32 +1339,115 @@ describe.skipIf(!process.env.DATABASE_URL)(
       },
     )
 
-    it('defers a throttled POST until Retry-After and uses the same transactionId', async () => {
-      const bookingId = await book()
-      provider.controls.beforeCreate = () =>
-        graphError(429, 'TooManyRequests', { 'Retry-After': '120' })
+    it.each([false, true])(
+      'defers a throttled POST until Retry-After and uses the same transactionId (Teams: %s)',
+      async (teams) => {
+        if (teams) microsoftTeamsForTest = (id) => id === eventTypeId
+        const bookingId = await book()
+        provider.controls.beforeCreate = () =>
+          graphError(429, 'TooManyRequests', { 'Retry-After': '120' })
+        await work({ bookingId })
+        expect(await state(bookingId)).toMatchObject({
+          status: 'retrying',
+          reason: 'rate_limited',
+          nextAttemptAt: new Date(now + 120_000).toISOString(),
+        })
+        expect(await mappings(bookingId)).toEqual([])
+        provider.controls.beforeCreate = () => undefined
+        const enqueue = vi.fn(async (_payload: CalendarWritePayload) => {})
+        now += 119_999
+        await dispatch(enqueue)
+        await work({ bookingId })
+        expect(enqueue).not.toHaveBeenCalled()
+        expect(provider.posts()).toHaveLength(1)
+        now++
+        await dispatch(enqueue)
+        expect(enqueue).toHaveBeenCalledExactlyOnceWith({ bookingId })
+        await work({ bookingId })
+        expect(provider.posts()).toHaveLength(2)
+        expect(provider.posts()[1]?.transactionId).toBe(provider.posts()[0]?.transactionId)
+        expect(provider.posts()[1]?.body).toEqual(provider.posts()[0]?.body)
+        expect(provider.posts()[0]?.body).toMatchObject({ isOnlineMeeting: teams })
+        expect(provider.events.size).toBe(1)
+        expect(await state(bookingId)).toMatchObject({ status: 'succeeded', attempts: 2 })
+        if (teams)
+          expect(await state(bookingId)).toMatchObject({ teamsStatus: 'ready', teamsJoinUrl })
+      },
+    )
+
+    it.each([
+      { mailbox: 'work or school without Teams', allowed: ['skypeForBusiness'] },
+      { mailbox: 'personal Outlook', allowed: [] },
+    ])('keeps the booking and tracks Teams unavailability for $mailbox', async ({ allowed }) => {
+      microsoftTeamsForTest = (id) => id === eventTypeId
+      provider.controls.allowedOnlineMeetingProviders = allowed
+      const created = await create()
+      const bookingId = created.booking.id
       await work({ bookingId })
-      expect(await state(bookingId)).toMatchObject({
-        status: 'retrying',
-        reason: 'rate_limited',
-        nextAttemptAt: new Date(now + 120_000).toISOString(),
-      })
-      expect(await mappings(bookingId)).toEqual([])
-      provider.controls.beforeCreate = () => undefined
-      const enqueue = vi.fn(async (_payload: CalendarWritePayload) => {})
-      now += 119_999
-      await dispatch(enqueue)
       await work({ bookingId })
-      expect(enqueue).not.toHaveBeenCalled()
+
+      expect(provider.capabilityReads).toEqual(['outlook-selected'])
       expect(provider.posts()).toHaveLength(1)
-      now++
-      await dispatch(enqueue)
-      expect(enqueue).toHaveBeenCalledExactlyOnceWith({ bookingId })
+      expect(provider.posts()[0]?.body).toMatchObject({ isOnlineMeeting: false })
+      expect(provider.posts()[0]?.body).not.toHaveProperty('onlineMeetingProvider')
+      expect(await state(bookingId)).toMatchObject({
+        status: 'succeeded',
+        teamsStatus: 'teams_unavailable',
+      })
+      expect(await state(bookingId)).not.toHaveProperty('teamsJoinUrl')
+      expect(await mappings(bookingId)).toMatchObject([{ external_event_id: eventId }])
+
+      const moved = await rescheduleManagedBooking(context(), requireToken(created.manageToken), {
+        start: NEXT,
+      })
+      await work({ bookingId: moved.booking.id })
+      expect(await state(bookingId)).toMatchObject({ teamsStatus: 'teams_unavailable' })
+      expect(provider.posts()).toHaveLength(1)
+      expect(provider.capabilityReads).toEqual(['outlook-selected'])
+      await cancelManagedBooking(context(), requireToken(moved.manageToken))
       await work({ bookingId })
-      expect(provider.posts()).toHaveLength(2)
-      expect(provider.posts()[1]?.transactionId).toBe(provider.posts()[0]?.transactionId)
-      expect(provider.events.size).toBe(1)
-      expect(await state(bookingId)).toMatchObject({ status: 'succeeded', attempts: 2 })
+      expect(await state(bookingId)).not.toHaveProperty('teamsStatus')
+      expect(provider.events.size).toBe(0)
+    })
+
+    it('does not mark a possible create before the Teams capability check finishes', async () => {
+      microsoftTeamsForTest = (id) => id === eventTypeId
+      const created = await create()
+      const bookingId = created.booking.id
+      const probing = Promise.withResolvers<void>()
+      const release = Promise.withResolvers<void>()
+      provider.controls.beforeCapabilities = async () => {
+        probing.resolve()
+        await release.promise
+        return undefined
+      }
+      const writing = work({ bookingId })
+      try {
+        await Promise.race([probing.promise, writing])
+        expect(await state(bookingId)).toMatchObject({ teamsStatus: 'pending', lookupOnly: false })
+        await cancelManagedBooking(context(), requireToken(created.manageToken))
+      } finally {
+        release.resolve()
+        await writing
+      }
+      expect(provider.posts()).toEqual([])
+      expect(await state(bookingId)).toBeNull()
+    })
+
+    it('records a Graph 403 during Teams capability discovery as a permission failure', async () => {
+      microsoftTeamsForTest = (id) => id === eventTypeId
+      provider.controls.beforeCapabilities = () => graphError(403, 'ErrorAccessDenied')
+      const bookingId = await book()
+      await work({ bookingId })
+
+      expect(provider.capabilityReads).toEqual(['outlook-selected'])
+      expect(provider.posts()).toEqual([])
+      expect(await state(bookingId)).toMatchObject({
+        status: 'failed',
+        reason: 'permissions_missing',
+        teamsStatus: 'pending',
+      })
+      expect(JSON.stringify(await state(bookingId))).not.toContain('Private Graph details')
     })
 
     it.each([

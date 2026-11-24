@@ -9,7 +9,7 @@ import {
   type MicrosoftCalendarClient,
   MicrosoftCalendarError,
 } from './microsoft.ts'
-import type { MicrosoftBookingEvent } from './microsoft-events.ts'
+import { type MicrosoftBookingEvent, teamsJoinUrl } from './microsoft-events.ts'
 import { clearMicrosoftChanges } from './microsoft-snapshot.ts'
 
 export type CalendarWritePayload = { bookingId: string } | { groupSlotId: string }
@@ -46,6 +46,8 @@ const stateSchema = z.object({
   createProjection: projectionSchema.optional(),
   patchProjections: z.array(projectionSchema).max(maxAttempts).optional(),
   seatCount: z.number().int().positive().optional(),
+  teamsStatus: z.enum(['pending', 'supported', 'ready', 'teams_unavailable']).optional(),
+  teamsJoinUrl: teamsJoinUrl.optional(),
   countRevision: z
     .string()
     .regex(/^[1-9]\d*$/u)
@@ -62,7 +64,12 @@ const pending = (now: number): WriteState => ({
 })
 
 /** Save the host's selected destination in the booking transaction, even if access was lost. */
-export async function recordMicrosoftBookingDestinations(db: Db, bookingId: string, now: number) {
+export async function recordMicrosoftBookingDestinations(
+  db: Db,
+  bookingId: string,
+  now: number,
+  microsoftTeamsForTest?: CalendarDeps['microsoftTeamsForTest'],
+) {
   const destinations = await db
     .selectFrom('booking_hosts as bh')
     .innerJoin('bookings as b', 'b.id', 'bh.booking_id')
@@ -77,6 +84,20 @@ export async function recordMicrosoftBookingDestinations(db: Db, bookingId: stri
       join.onRef('cc.id', '=', 'c.connection_id').onRef('cc.user_id', '=', 'bh.user_id'),
     )
     .select(['bh.user_id', 'c.id'])
+    .$if(microsoftTeamsForTest !== undefined, (query) =>
+      query
+        .select(['b.event_type_id'])
+        .select(({ not, exists, selectFrom }) =>
+          not(
+            exists(
+              selectFrom('booking_hosts as other')
+                .select('other.user_id')
+                .whereRef('other.booking_id', '=', 'b.id')
+                .whereRef('other.user_id', '!=', 'bh.user_id'),
+            ),
+          ).as('singleHost'),
+        ),
+    )
     .where('bh.booking_id', '=', bookingId)
     .where('cc.provider', '=', 'microsoft')
     .where('c.access_role', '=', 'owner')
@@ -90,7 +111,13 @@ export async function recordMicrosoftBookingDestinations(db: Db, bookingId: stri
         root_booking_id: bookingId,
         user_id: destination.user_id,
         calendar_id: destination.id,
-        microsoft_writeback: JSON.stringify(pending(now)),
+        microsoft_writeback: JSON.stringify({
+          ...pending(now),
+          // Production does not pass a selector until event types can choose Teams.
+          ...(destination.singleHost &&
+            destination.event_type_id &&
+            microsoftTeamsForTest?.(destination.event_type_id) && { teamsStatus: 'pending' }),
+        } satisfies WriteState),
       })),
     )
     .onConflict((oc) => oc.columns(['root_booking_id', 'user_id']).doNothing())
@@ -346,7 +373,7 @@ async function claim(
       await setState(trx, payload, target, null)
       return
     }
-    const mayCreate = !mapping && desired.active
+    const mayCreate = !mapping && desired.active && state.teamsStatus !== 'pending'
     const createRevision = possiblyCreated
       ? (state.createRevision ?? priorRevision)
       : desired.revision
@@ -489,6 +516,7 @@ interface EventScope {
   calendarId: string
   transactionId: string
   signal: AbortSignal
+  includeTeams: boolean
 }
 
 async function updateMappedEvent(
@@ -498,7 +526,7 @@ async function updateMappedEvent(
   earlier: { patches: EventProjection[]; written?: EventProjection },
   onSend: () => void,
 ) {
-  const { client, token, calendarId, transactionId, signal } = scope
+  const { client, token, calendarId, transactionId, signal, includeTeams } = scope
   const get = () =>
     client.getEvent(
       token,
@@ -507,6 +535,7 @@ async function updateMappedEvent(
       transactionId,
       signal,
       desired.seatCount !== undefined,
+      includeTeams,
     )
   const missing = async () => {
     const calendars = await client.calendars(token, signal)
@@ -532,13 +561,23 @@ async function updateMappedEvent(
     (written && sameProjection(written, projection)) || matchesEarlierPatch(projection)
   if (sameProjection(actualProjection, wanted)) return actual
   if (!matchesEarlierWrite(actualProjection)) throw eventConflict()
-  const patch = (etag: string) => {
+  const patch = async (etag: string, currentJoinUrl?: string) => {
     onSend()
-    return client.updateEvent(token, calendarId, eventId, etag, desired, signal)
+    const updated = await client.updateEvent(
+      token,
+      calendarId,
+      eventId,
+      etag,
+      desired,
+      signal,
+      includeTeams,
+    )
+    const joinUrl = updated.teamsJoinUrl ?? currentJoinUrl
+    return joinUrl ? { ...updated, teamsJoinUrl: joinUrl } : updated
   }
   let preconditionFailed: boolean
   try {
-    return await patch(actual.etag)
+    return await patch(actual.etag, actual.teamsJoinUrl)
   } catch (error) {
     if (isGraphStatus(error, 404, 410)) return missing()
     if (!isGraphStatus(error, 409, 412)) throw error
@@ -554,7 +593,7 @@ async function updateMappedEvent(
       ? matchesEarlierWrite(latestProjection)
       : latest.etag !== actual.etag && matchesEarlierPatch(latestProjection)
   )
-    return patch(latest.etag)
+    return patch(latest.etag, latest.teamsJoinUrl)
   throw eventConflict()
 }
 
@@ -777,6 +816,7 @@ async function writeDestination(
     let event: MicrosoftBookingEvent | undefined
     let deleted: DeletedEvent | true | false | undefined
     let posted = false
+    const includeTeams = lease.teamsStatus === 'supported' || lease.teamsStatus === 'ready'
     try {
       const { token, scopes } = await getMicrosoftCalendarToken(
         deps.microsoft,
@@ -794,6 +834,7 @@ async function writeDestination(
         calendarId: calendar.external_id,
         transactionId,
         signal: deadline,
+        includeTeams,
       }
       if (!desired.active) {
         deleted = await removeMappedEvent(
@@ -802,6 +843,16 @@ async function writeDestination(
           calendar.sync_error === 'calendar_removed',
         )
         if (!deleted) return finish('provider_unavailable', backoff)
+      } else if (lease.teamsStatus === 'pending') {
+        const supported = await client.calendarSupportsTeams(token, scope.calendarId, deadline)
+        // Pin the provider choice before any POST so replay keeps the same request.
+        // The capability check and the event write each have a bounded retry budget.
+        await complete({
+          ...pending(clock()),
+          revision: desired.revision,
+          teamsStatus: supported ? 'supported' : 'teams_unavailable',
+        })
+        return true
       } else if (mapping) {
         event = await updateMappedEvent(
           scope,
@@ -811,7 +862,13 @@ async function writeDestination(
           onPatch,
         )
       } else {
-        event = await client.findEvent(token, scope.calendarId, transactionId, deadline)
+        event = await client.findEvent(
+          token,
+          scope.calendarId,
+          transactionId,
+          deadline,
+          includeTeams,
+        )
         if (!event) {
           if (possiblyCreated && (await findRelocatedEvent(scope)).relocated) throw eventConflict()
           if (!(await desiredEvent(trx, payload, target))?.active) {
@@ -832,7 +889,7 @@ async function writeDestination(
             event = await client.createEvent(
               token,
               scope.calendarId,
-              { ...value, transactionId },
+              { ...value, transactionId, ...(includeTeams && { teams: true }) },
               deadline,
             )
           }
@@ -849,6 +906,8 @@ async function writeDestination(
             onPatch,
           )
       }
+      if (event && includeTeams && !event.teamsJoinUrl)
+        return finish('provider_unavailable', backoff, !mapping)
     } catch (error) {
       if (!(error instanceof MicrosoftCalendarError)) throw error
       if (error.code === 'needs_reauth') {
@@ -876,8 +935,13 @@ async function writeDestination(
         error.status !== 408
       )
         return finish('calendar_unavailable')
-      return finish('provider_unavailable', backoff, posted || possiblyCreated)
+      return finish(
+        'provider_unavailable',
+        Math.max(error.retryAfterMs ?? 0, backoff),
+        posted || possiblyCreated,
+      )
     }
+    const joinUrl = includeTeams ? event?.teamsJoinUrl : undefined
     return complete(
       {
         status: 'succeeded',
@@ -886,6 +950,12 @@ async function writeDestination(
         revision: desired.revision,
         mappedBookingId: event ? desired.bookingId : undefined,
         seatCount: event ? desired.seatCount : undefined,
+        teamsStatus: joinUrl
+          ? 'ready'
+          : event && lease.teamsStatus === 'teams_unavailable'
+            ? 'teams_unavailable'
+            : undefined,
+        teamsJoinUrl: joinUrl,
       },
       event,
       deleted || undefined,
@@ -934,8 +1004,10 @@ export async function writeMicrosoftCalendar(
           .execute()
   for (const destination of destinations) {
     signal.throwIfAborted()
-    if (await writeDestination(deps, payload, destination, signal))
-      await writeDestination(deps, payload, destination, signal)
+    // Reconcile once more after probing Teams and after a concurrent booking revision.
+    for (let pass = 0; pass < 3; pass++) {
+      if (!(await writeDestination(deps, payload, destination, signal))) break
+    }
   }
 }
 

@@ -167,3 +167,14 @@ for the retry and recovery behavior.
 
 Test organizational mailboxes separately from personal Outlook accounts before relying on
 company-specific consent policies.
+
+## Known limitations
+
+Event types cannot select automatic Microsoft Teams meetings yet. The writeback worker can
+exercise this path in tests for single-host bookings on a host-owned Outlook calendar.
+The worker uses the calendar's allowed providers to decide whether to create a Teams meeting.
+Personal Outlook calendars and other calendars without Teams support still receive a regular
+booking copy, with `teams_unavailable` recorded internally. A Teams join link stays on the
+private writeback record while Hourmere updates the same event on reschedule. Cancellation
+removes the event and clears the link. Join links are unavailable in booking confirmations.
+[Microsoft Graph online meetings in Outlook](https://learn.microsoft.com/en-us/graph/outlook-calendar-online-meetings)

@@ -375,3 +375,213 @@ describe('Microsoft Graph booking event transport', () => {
     expect(fetch).not.toHaveBeenCalled()
   })
 })
+
+describe('Microsoft Graph Teams event fixtures', () => {
+  const calendarResource = collection.slice(0, -'/events'.length)
+
+  // Projected from the supported-provider example. The first negative fixture removes
+  // Teams from the documented collection to model a calendar without that capability.
+  // https://learn.microsoft.com/en-us/graph/outlook-calendar-online-meetings#calendars-and-online-meeting-providers
+  // https://learn.microsoft.com/en-us/graph/api/calendar-get?view=graph-rest-1.0
+  const capableCalendar = {
+    id: calendarId,
+    allowedOnlineMeetingProviders: ['teamsForBusiness', 'skypeForBusiness'],
+  }
+  const calendarWithoutTeams = {
+    id: calendarId,
+    allowedOnlineMeetingProviders: ['skypeForBusiness'],
+  }
+
+  // Personal accounts can use the calendar API. The empty list is a synthetic Graph
+  // projection for a personal mailbox, based on Outlook's Business Exchange requirement.
+  // https://learn.microsoft.com/en-us/graph/api/calendar-post-events?view=graph-rest-1.0#permissions
+  // https://support.microsoft.com/en-us/teams/meetings/schedule-a-microsoft-teams-meeting-from-outlook
+  const personalCalendar = { id: calendarId, allowedOnlineMeetingProviders: [] }
+
+  // Adapted from Microsoft's calendar online-meeting example, with synthetic values and
+  // Hourmere's existing transactionId, UTC booking projection and private event metadata.
+  // https://learn.microsoft.com/en-us/graph/outlook-calendar-online-meetings#create-an-event-and-enable-attendees-to-meet-online
+  // https://learn.microsoft.com/en-us/graph/api/calendar-post-events?view=graph-rest-1.0#example-1-create-an-event-in-a-specific-calendar
+  const onlineMeetingRequest = { isOnlineMeeting: true, onlineMeetingProvider: 'teamsForBusiness' }
+  const joinUrl =
+    'https://teams.microsoft.com/l/meetup-join/19%3ameeting_synthetic%40thread.v2/0?context=%7b%22Tid%22%3a%22example%22%7d'
+  const onlineMeetingResponse = {
+    ...onlineMeetingRequest,
+    onlineMeeting: { joinUrl, conferenceId: '123456789', tollNumber: '+1 323-555-0100' },
+    onlineMeetingUrl: null,
+  }
+
+  it.each([
+    ['Microsoft 365 with Teams', capableCalendar, true],
+    ['Microsoft 365 without Teams', calendarWithoutTeams, false],
+    ['personal Microsoft account', personalCalendar, false],
+  ])('reads the selected calendar capabilities for %s', async (_, fixture, supported) => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json(fixture))
+    const client = createMicrosoftCalendarClient(config, fetch)
+    await expect(client.calendarSupportsTeams('fake-access', calendarId, signal())).resolves.toBe(
+      supported,
+    )
+    expect(fetch).toHaveBeenCalledOnce()
+    const [input, init] = fetch.mock.calls[0] ?? []
+    const url = new URL(String(input))
+    expect(url.origin + url.pathname).toBe(calendarResource)
+    expect(url.searchParams.get('$select')).toBe('id,allowedOnlineMeetingProviders')
+    expect(init).toMatchObject({
+      headers: { authorization: 'Bearer fake-access' },
+      redirect: 'error',
+    })
+    expect(init?.body).toBeUndefined()
+  })
+
+  it.each([{ id: calendarId }, { ...capableCalendar, id: 'different-calendar' }])(
+    'handles unverified capability data as a provider failure',
+    async (fixture) => {
+      const client = createMicrosoftCalendarClient(config, async () => Response.json(fixture))
+      await expect(
+        client.calendarSupportsTeams('fake-access', calendarId, signal()),
+      ).rejects.toMatchObject({ code: 'provider_unavailable' })
+    },
+  )
+
+  it('adds Teams to the same private calendar create request across DST', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () =>
+      Response.json({ ...createdEvent, ...onlineMeetingResponse }, { status: 201 }),
+    )
+    const client = createMicrosoftCalendarClient(config, fetch)
+    await expect(
+      client.createEvent('fake-access', calendarId, { ...booking, teams: true }, signal()),
+    ).resolves.toEqual({ ...reference, teamsJoinUrl: joinUrl })
+    expect(fetch).toHaveBeenCalledOnce()
+    const [input, init] = fetch.mock.calls[0] ?? []
+    expect(input).toBe(collection)
+    expect(init?.method).toBe('POST')
+    expect(JSON.parse(String(init?.body))).toEqual({
+      subject: booking.title,
+      start: { dateTime: '2030-03-10T06:45:00.000', timeZone: 'UTC' },
+      end: { dateTime: '2030-03-10T07:15:00.000', timeZone: 'UTC' },
+      isAllDay: false,
+      showAs: 'busy',
+      sensitivity: 'private',
+      ...onlineMeetingRequest,
+      transactionId,
+      singleValueExtendedProperties: [
+        {
+          id: 'String {3eb52777-459b-4501-8511-4284ebcd11de} Name HourmereBookingKey',
+          value: transactionId,
+        },
+      ],
+    })
+  })
+
+  // Graph exposes this projection for both event lookup and online meeting reads.
+  // https://learn.microsoft.com/en-us/graph/outlook-calendar-online-meetings#get-information-to-join-meeting-online
+  // https://learn.microsoft.com/en-us/graph/api/event-update?view=graph-rest-1.0
+  it('reads the same join URL after a marker lookup and an ETag-guarded time update', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(
+        Response.json({ value: [{ ...graphEvent, ...onlineMeetingResponse }] }),
+      )
+      .mockResolvedValueOnce(Response.json({ ...updatedEvent, ...onlineMeetingResponse }))
+      .mockResolvedValueOnce(Response.json({ ...updatedEvent, ...onlineMeetingResponse }))
+    const client = createMicrosoftCalendarClient(config, fetch)
+    const expected = { id: reference.id, etag: updatedEvent['@odata.etag'], teamsJoinUrl: joinUrl }
+    await expect(
+      client.findEvent('fake-access', calendarId, transactionId, signal(), true),
+    ).resolves.toEqual({ ...reference, teamsJoinUrl: joinUrl })
+    await expect(
+      client.getEvent(
+        'fake-access',
+        calendarId,
+        reference.id,
+        transactionId,
+        signal(),
+        false,
+        true,
+      ),
+    ).resolves.toEqual({ ...expected, start: booking.start, end: booking.end, hasAttendees: false })
+    await expect(
+      client.updateEvent(
+        'fake-access',
+        calendarId,
+        reference.id,
+        reference.etag,
+        booking,
+        signal(),
+        true,
+      ),
+    ).resolves.toEqual(expected)
+    expect(fetch).toHaveBeenCalledTimes(3)
+    for (const [input] of fetch.mock.calls.slice(0, 2)) {
+      const select = new URL(String(input)).searchParams.get('$select')?.split(',')
+      expect(select).toEqual(
+        expect.arrayContaining(['isOnlineMeeting', 'onlineMeetingProvider', 'onlineMeeting']),
+      )
+    }
+    const [, patch] = fetch.mock.calls[2] ?? []
+    expect(patch).toMatchObject({ method: 'PATCH', headers: { 'if-match': reference.etag } })
+    expect(JSON.parse(String(patch?.body))).toEqual({
+      start: { dateTime: '2030-03-10T06:45:00.000', timeZone: 'UTC' },
+      end: { dateTime: '2030-03-10T07:15:00.000', timeZone: 'UTC' },
+    })
+  })
+
+  it.each([
+    { onlineMeeting: null, onlineMeetingUrl: joinUrl },
+    { isOnlineMeeting: false },
+    { onlineMeetingProvider: 'skypeForBusiness' },
+    { onlineMeeting: { joinUrl: 'http://teams.microsoft.com/meet/example' } },
+    { onlineMeeting: { joinUrl: 'https://teams.microsoft.com.evil.invalid/meet/example' } },
+    { onlineMeeting: { joinUrl: 'https://user@teams.microsoft.com/meet/example' } },
+  ])('keeps the verified event identity when no usable Teams link is returned', async (fixture) => {
+    const client = createMicrosoftCalendarClient(config, async () =>
+      Response.json({ ...createdEvent, ...onlineMeetingResponse, ...fixture }, { status: 201 }),
+    )
+    await expect(
+      client.createEvent('fake-access', calendarId, { ...booking, teams: true }, signal()),
+    ).resolves.toEqual(reference)
+  })
+
+  it('omits returned Teams metadata when the calendar event has no Teams request', async () => {
+    const client = createMicrosoftCalendarClient(config, async () =>
+      Response.json({ ...createdEvent, ...onlineMeetingResponse }, { status: 201 }),
+    )
+    await expect(client.createEvent('fake-access', calendarId, booking, signal())).resolves.toEqual(
+      reference,
+    )
+  })
+
+  // The error envelopes use synthetic values within Graph's documented HTTP/JSON shape.
+  // https://learn.microsoft.com/en-us/graph/errors#http-status-codes
+  // https://learn.microsoft.com/en-us/graph/throttling#sample-response
+  it.each([
+    { status: 403, graphCode: 'ErrorAccessDenied', code: 'permissions_missing' },
+    {
+      status: 429,
+      graphCode: 'TooManyRequests',
+      code: 'provider_unavailable',
+      retryAfter: '60',
+      retryAfterMs: 60_000,
+    },
+    { status: 500, graphCode: 'InternalServerError', code: 'provider_unavailable' },
+    {
+      status: 503,
+      graphCode: 'ServiceUnavailable',
+      code: 'provider_unavailable',
+      retryAfter: '90',
+      retryAfterMs: 90_000,
+    },
+  ])(
+    'sanitizes Teams HTTP $status without resending the write',
+    async ({ status, graphCode, code, retryAfter, retryAfterMs }) => {
+      const fetch = vi.fn<typeof globalThis.fetch>(async () =>
+        providerError(graphCode, status, retryAfter),
+      )
+      const client = createMicrosoftCalendarClient(config, fetch)
+      await expect(
+        client.createEvent('fake-access', calendarId, { ...booking, teams: true }, signal()),
+      ).rejects.toMatchObject({ code, status, retryAfterMs, message: code })
+      expect(fetch).toHaveBeenCalledOnce()
+    },
+  )
+})

@@ -310,7 +310,7 @@ export function createMicrosoftCalendarClient(
                 : 'provider_unavailable',
           response.status,
           oauthError,
-          response.status === 429
+          response.status === 429 || response.status === 503
             ? retryAfterMs(response.headers.get('Retry-After'), now())
             : undefined,
         )

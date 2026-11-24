@@ -52,6 +52,12 @@ attempts to bring the Outlook copy into line with the current booking or group o
 worker commits a checkpoint before calling Graph and uses the stable booking marker to recover an
 ambiguous create. Acknowledged writes retain the provider event ID and any ETag Graph supplies.
 The ID uses the same format as the busy snapshot.
+For a test-enabled Teams booking, the pinned destination also records `teamsStatus`.
+The worker checks the selected calendar's `allowedOnlineMeetingProviders` and persists the
+result before creating the event so job replays keep the same payload and `transactionId`.
+`ready` stores `teamsJoinUrl` in the private writeback record. `teams_unavailable` records a
+calendar without Teams support, with an ordinary Outlook event still written. The link is
+cleared when cancellation reconciles; calendar connection summaries exclude it.
 See [Microsoft Calendar](https://hourmere.com/docs/microsoft-calendar).
 
 `calendar_busy` stores each event ID with exactly one representation: a nonempty
