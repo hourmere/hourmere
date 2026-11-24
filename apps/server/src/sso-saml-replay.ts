@@ -58,7 +58,22 @@ export function validateSamlTiming(
     (earliest, bound) => (compare(bound, earliest) < 0 ? bound : earliest),
     ageLimit,
   )
-  if (compare(now, deadline.add(skew)) >= 0) throw new SamlTimingError('timing_invalid')
+  if (samlAcceptanceExpired(deadline, now)) throw new SamlTimingError('timing_invalid')
+  return deadline
+}
+
+export function samlAcceptanceExpired(deadline: Temporal.Instant, now: Temporal.Instant) {
+  return compare(now, deadline.add(skew)) >= 0
+}
+
+/** Signed IdP session bounds cap the browser proof independently of assertion acceptance. */
+export function samlSessionDeadline(assertion: VerifiedSamlResponse['assertion']) {
+  let deadline: Temporal.Instant | undefined
+  for (const statement of assertion.authnStatements) {
+    if (statement.sessionNotOnOrAfter === null) continue
+    const bound = parseTime(statement.sessionNotOnOrAfter)
+    if (!deadline || compare(bound, deadline) < 0) deadline = bound
+  }
   return deadline
 }
 
@@ -110,33 +125,36 @@ export async function consumeSamlReplay(
     return validateSamlTiming(assertion, now)
   }
 
+  async function consume(trx: Db) {
+    const deadline = check(await samlDatabaseNow(trx))
+    const skewedExpiry = deadline.add(skew)
+    const retainUntil = compare(skewedExpiry, expiresAt) >= 0 ? skewedExpiry : expiresAt
+    // Round up to PostgreSQL's precision to preserve the retention lower bound.
+    const retained = {
+      organization_id: organizationId,
+      provider_id: providerId,
+      retain_until: retainUntil
+        .round({ smallestUnit: 'microsecond', roundingMode: 'ceil' })
+        .toString(),
+    }
+    // Insert in a consistent order and let the primary key serialize competitors.
+    await trx
+      .insertInto('sso_replay_cache')
+      .values([
+        { ...retained, kind: 'saml_request', key_digest: digest(id) },
+        { ...retained, kind: 'saml_assertion', key_digest: digest(assertion.id) },
+        ...(response.signed
+          ? [{ ...retained, kind: 'saml_response', key_digest: digest(response.id) }]
+          : []),
+      ])
+      .execute()
+    // Uniqueness or foreign-key checks can wait even if the insert ultimately succeeds.
+    return check(await samlDatabaseNow(trx))
+  }
+
   try {
-    return await db.transaction().execute(async (trx) => {
-      const deadline = check(await samlDatabaseNow(trx))
-      const skewedExpiry = deadline.add(skew)
-      const retainUntil = compare(skewedExpiry, expiresAt) >= 0 ? skewedExpiry : expiresAt
-      // Round up to PostgreSQL's precision to preserve the retention lower bound.
-      const retained = {
-        organization_id: organizationId,
-        provider_id: providerId,
-        retain_until: retainUntil
-          .round({ smallestUnit: 'microsecond', roundingMode: 'ceil' })
-          .toString(),
-      }
-      // Insert in a consistent order and let the primary key serialize competitors.
-      await trx
-        .insertInto('sso_replay_cache')
-        .values([
-          { ...retained, kind: 'saml_request', key_digest: digest(id) },
-          { ...retained, kind: 'saml_assertion', key_digest: digest(assertion.id) },
-          ...(response.signed
-            ? [{ ...retained, kind: 'saml_response', key_digest: digest(response.id) }]
-            : []),
-        ])
-        .execute()
-      // Uniqueness or foreign-key checks can wait even if the insert ultimately succeeds.
-      return check(await samlDatabaseNow(trx))
-    })
+    // The ACS holds the request lock and commits the pending result with the replay write.
+    return await (db.isTransaction ? consume(db) : db.transaction().execute(consume))
   } catch (error) {
     if (error instanceof Error && 'code' in error && 'constraint' in error) {
       if (error.code === '23505' && error.constraint === 'sso_replay_cache_pkey') {

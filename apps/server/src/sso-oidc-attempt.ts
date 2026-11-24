@@ -140,7 +140,12 @@ function stateAad(browser: OriginatingBrowser, id: string, binding: string): str
   ])
 }
 
-export async function lockOidcProvider(trx: Db, browser: SsoProviderRevision, enabled = true) {
+export async function lockOidcProvider(
+  trx: Db,
+  browser: SsoProviderRevision,
+  enabled = true,
+  protocol: 'oidc' | 'saml' = 'oidc',
+) {
   // Match the team-write order. Hold the provider revision stable until the attempt commits.
   const organization = await trx
     .selectFrom('auth.organization')
@@ -155,7 +160,7 @@ export async function lockOidcProvider(trx: Db, browser: SsoProviderRevision, en
     .where('id', '=', browser.providerId)
     .where('organization_id', '=', browser.organizationId)
     .where('revision', '=', browser.revision)
-    .where('protocol', '=', 'oidc')
+    .where('protocol', '=', protocol)
     .where('enabled', '=', enabled)
     .where('retired_at', 'is', null)
     .forShare()

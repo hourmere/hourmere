@@ -41,6 +41,7 @@ import {
   stageOidcCompletion,
 } from './sso-oidc-completion.ts'
 import { fetchOidcDiscovery, OidcJwksCache } from './sso-oidc-jwks.ts'
+import { authenticationAttemptLifetime } from './sso-oidc-limits.ts'
 import {
   completeOidcLink,
   lockOidcLinkActor,
@@ -60,6 +61,7 @@ import { verifyOidcIdToken } from './sso-oidc-verifier.ts'
 import { authorizeSsoRead } from './sso-reads.ts'
 import { providerRecoveryAuthority, ssoWriteContextAccess } from './sso-recovery-use.ts'
 import { SamlStartRefused, startSamlSignIn } from './sso-saml-start.ts'
+import { samlStateCookie, sealSamlState } from './sso-saml-state.ts'
 import { EXPECTED_ORGANIZATION_HEADER } from './team-management.ts'
 
 export const OIDC_SIGN_IN_PATH = '/api/auth/sign-in/sso'
@@ -558,21 +560,26 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
         const reuse = currentBinding !== undefined && browserBindingDigest(currentBinding) !== null
         const browserBinding = reuse ? currentBinding : randomBytes(32).toString('base64url')
         const provider = await findProvider(db, parsed.data.providerId)
-        if (provider?.protocol === 'oidc' || provider?.protocol === 'saml') {
+        if (!provider?.enabled || provider.retiredAt) return c.json({ error: 'sso_not_found' }, 404)
+        if (provider.protocol === 'oidc' || provider.protocol === 'saml') {
           requireSsoEnabled(capabilities, provider.protocol)
         }
-        if (!provider?.enabled || provider.retiredAt || !configurationKey)
-          return c.json({ error: 'sso_not_found' }, 404)
+        if (!configurationKey) return c.json({ error: 'sso_not_found' }, 404)
         if (provider.protocol === 'saml') {
-          if (parsed.data.intent !== 'sign_in') return c.json({ error: 'sso_disabled' }, 404)
+          if (parsed.data.intent !== 'sign_in') return c.json({ error: 'invalid_request' }, 400)
           if (!returnPath.startsWith('/app')) return c.json({ error: 'invalid_request' }, 400)
           try {
-            const url = await startSamlSignIn(
+            const { id, url } = await startSamlSignIn(
               { db, configurationKey, privateTargets, publicUrl },
               provider,
               browserBinding,
             )
+            const result = samlStateCookie(publicUrl, 'return', id)
             setCookie(c, cookie, browserBinding, startBindingOptions)
+            setCookie(c, result.name, sealSamlState(configurationKey, 'return', id, returnPath), {
+              ...result.options,
+              maxAge: authenticationAttemptLifetime,
+            })
             return c.json({ url, redirect: true })
           } catch (error) {
             if (error instanceof SamlStartRefused) return c.json({ error: 'sso_not_found' }, 404)
