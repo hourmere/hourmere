@@ -17,7 +17,7 @@ must approve publication through the [release workflow](https://github.com/hourm
   lifecycle, team credential revocation and child-team audit records ship together.
   Provisioning is enabled by default, including on upgrades with an empty
   `SCIM_PROVISIONING_ENABLED`. Operators can disable it while keeping existing
-  records and suspensions. See the [provider matrix and rollback drill](https://hourmere.com/docs/scim).
+  records and suspensions. See the [provider matrix and rollback drill](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/scim.md).
 
 - Audit log reading and retention: owners and admins filter their team's or personal
   space's audit log by time, actor and action on a new admin page and through REST, MCP and
