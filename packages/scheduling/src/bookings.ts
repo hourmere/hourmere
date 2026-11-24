@@ -1351,7 +1351,10 @@ export async function createPublicBooking(
   const replay = await groupCreationReplay(ctx, input, origin, false)
   if (replay) return replay
   return publicBooking(ctx, input, origin, (db, options) =>
-    findPublicEventType(db, input.handle, input.slug, options),
+    findPublicEventType(db, input.handle, input.slug, {
+      ...options,
+      scimResourcesEnabled: ctx.scimResourcesEnabled,
+    }),
   )
 }
 
@@ -1364,7 +1367,10 @@ export async function createPublicTeamBooking(
   const replay = await groupCreationReplay(ctx, input, origin, true)
   if (replay) return replay
   return publicBooking(ctx, input, origin, (db, options) =>
-    findPublicTeamEventType(db, input.handle, input.slug, options),
+    findPublicTeamEventType(db, input.handle, input.slug, {
+      ...options,
+      scimResourcesEnabled: ctx.scimResourcesEnabled,
+    }),
   )
 }
 
@@ -1455,7 +1461,9 @@ export async function createRoutedBooking(
 
   try {
     const receipt = await findRoutingBookingReceipt(ctx, tokenDigest)
-    const et = await findRoutingBookingEvent(ctx.db, receipt)
+    const et = await findRoutingBookingEvent(ctx.db, receipt, {
+      scimResourcesEnabled: ctx.scimResourcesEnabled,
+    })
     // Only ordinary final fields participate in the booking. The pinned routing
     // answers are read separately under the receipt lock and never passed to its outbox.
     validateResponses(et.questions, bookingInput.responses ?? {})
@@ -1466,7 +1474,11 @@ export async function createRoutedBooking(
         input: bookingInput,
         origin,
         event: et,
-        resolve: (db, options) => findRoutingBookingEvent(db, receipt, options),
+        resolve: (db, options) =>
+          findRoutingBookingEvent(db, receipt, {
+            ...options,
+            scimResourcesEnabled: ctx.scimResourcesEnabled,
+          }),
         attendees,
         scope: request && { ...request, organizationId: et.organizationId },
         routing: {
@@ -1523,7 +1535,10 @@ export async function createOneTimeBooking(
       origin,
       async (db, options) => {
         await resolveOneTimeBookingLink({ db }, input.token)
-        return findOneTimeEventType(db, link.eventTypeId, options)
+        return findOneTimeEventType(db, link.eventTypeId, {
+          ...options,
+          scimResourcesEnabled: ctx.scimResourcesEnabled,
+        })
       },
       { id: link.id, token: input.token },
     )
@@ -2361,7 +2376,14 @@ async function rescheduleLocked(
     ? [...old.required_host_user_ids].sort()
     : hosts.map((h) => h.user_id).sort()
   await lockHosts(trx, hostUserIds)
-  await bookingHostIds(trx, old.id, old.organization_id, old.required_host_user_ids, true)
+  await bookingHostIds(
+    trx,
+    old.id,
+    old.organization_id,
+    old.required_host_user_ids,
+    true,
+    ctx.scimResourcesEnabled === true,
+  )
   const eventType =
     old.event_type_id === null
       ? undefined
@@ -2667,9 +2689,20 @@ async function rescheduleGroupLocked(
   selectedDuration?: number,
   expectedGroupSlotId?: string | undefined,
 ): Promise<BookingWithToken> {
-  await bookingHostIds(trx, old.id, old.organization_id, old.required_host_user_ids, true)
+  await bookingHostIds(
+    trx,
+    old.id,
+    old.organization_id,
+    old.required_host_user_ids,
+    true,
+    ctx.scimResourcesEnabled === true,
+  )
   const event =
-    old.event_type_id && (await findOneTimeEventType(trx, old.event_type_id, { lock: true }))
+    old.event_type_id &&
+    (await findOneTimeEventType(trx, old.event_type_id, {
+      lock: true,
+      scimResourcesEnabled: ctx.scimResourcesEnabled,
+    }))
   if (!event || event.hostUserIds.join() !== old.required_host_user_ids.join())
     throw new DomainError(
       'conflict',

@@ -16,12 +16,16 @@ const payload = z.strictObject({
 // Unlike recovery ceremonies, operator maintenance can remove trust in every protocol state.
 export const ssoOperatorRecoveryQueue = defineJob({ name, payload })
 
-export function ssoOperatorRecoveryEmailJob(db: Db, mailer: Mailer | undefined) {
+export function ssoOperatorRecoveryEmailJob(
+  db: Db,
+  mailer: Mailer | undefined,
+  scimResourcesEnabled = false,
+) {
   return defineJob({
     ...ssoOperatorRecoveryQueue,
     handler: async ({ organizationId, userId, language }, { signal }) => {
       try {
-        const owner = await ssoRecoveryTeamOwners(db, organizationId)
+        const owner = await ssoRecoveryTeamOwners(db, organizationId, scimResourcesEnabled)
           .innerJoin('auth.user', 'auth.user.id', 'auth.member.userId')
           .select('auth.user.email')
           .where('auth.member.userId', '=', userId)
@@ -53,6 +57,7 @@ export function disableSsoEnforcement(
   db: Db,
   queue: OperatorRecoveryQueue,
   organizationId: string,
+  scimResourcesEnabled = false,
 ) {
   return db.transaction().execute(async (trx) => {
     // Same serialization point as setSsoPolicy, including when there is no policy row yet.
@@ -99,7 +104,7 @@ export function disableSsoEnforcement(
       targetId: team.id,
       details: { revision },
     })
-    const owners = await ssoRecoveryTeamOwners(trx, team.id).execute()
+    const owners = await ssoRecoveryTeamOwners(trx, team.id, scimResourcesEnabled).execute()
     for (const { userId, locale } of owners) {
       const job = await queue.enqueue(
         name,

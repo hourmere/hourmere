@@ -278,6 +278,7 @@ async function completeSamlSignIn(
         candidate,
         link.proven_email,
         false,
+        options.scimResourcesEnabled === true,
         'saml',
       )
       if (context.reason !== undefined || context.link.proven_email !== link.proven_email)

@@ -312,6 +312,7 @@ export function bookingTools({
   const context = (caller: McpCaller): ServiceContext => ({
     db,
     principal: caller,
+    ...(caller.scimResourcesEnabled && { scimResourcesEnabled: true }),
     routingFormsEnabled,
     notifyAttendeeNoShow,
     now,

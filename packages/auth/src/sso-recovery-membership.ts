@@ -45,7 +45,12 @@ export interface SsoRecoveryTeam {
 }
 
 /** Project the caller's recovery targets in the existing membership SELECT. */
-export function ssoRecoveryTeamsFor(db: Db, userId: string, sessionId: string) {
+export function ssoRecoveryTeamsFor(
+  db: Db,
+  userId: string,
+  sessionId: string,
+  scimResourcesEnabled = false,
+) {
   return jsonArrayFrom(
     currentRecoveryOwners(db)
       .innerJoin('sso_policies as policy', 'policy.organization_id', 'recovery.organization_id')
@@ -53,7 +58,7 @@ export function ssoRecoveryTeamsFor(db: Db, userId: string, sessionId: string) {
       .select(['team.id', 'team.name as displayName', 'policy.policy_revision as policyRevision'])
       .where('recovery.user_id', '=', userId)
       .where('policy.require_sso', '=', true)
-      .where((eb) => eb.not(scimSuspended(eb.ref('team.id'), userId)))
+      .where((eb) => eb.not(scimSuspended(eb.ref('team.id'), userId, scimResourcesEnabled)))
       .where((eb) =>
         eb.exists(
           eb

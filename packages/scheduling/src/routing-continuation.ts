@@ -112,7 +112,9 @@ async function readContinuation(
       throw unavailable()
     // Like one-time links, resolve the event by its capability-bound ID. This also checks
     // current host eligibility and activation without relying on a reusable booking address.
-    const event = await findOneTimeEventType(ctx.db, target.eventTypeId)
+    const event = await findOneTimeEventType(ctx.db, target.eventTypeId, {
+      scimResourcesEnabled: ctx.scimResourcesEnabled,
+    })
     if (!event) throw unavailable()
     return { event, sources, target, answers, expiresAt: toInstant(receipt.expiresAt).toString() }
   } catch (error) {

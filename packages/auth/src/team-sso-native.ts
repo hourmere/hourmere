@@ -143,7 +143,13 @@ export function nativeTeamSso(db: Db, capabilities: TeamSsoCapabilities) {
           addMember ||
           fromInvitation ||
           (!session && checkSlug) ||
-          (session && (await isMember(db, session.user.id, organizationId)))
+          (session &&
+            (await isMember(
+              db,
+              session.user.id,
+              organizationId,
+              capabilities.scimResourcesEnabled === true,
+            )))
         )
           nativeSsoRequired()
         if (fromQuery || activeMember || path === '/organization/has-permission') {

@@ -54,6 +54,7 @@ export function waitlistTools({
   const context = (principal: McpCaller): ServiceContext => ({
     db,
     principal,
+    ...(principal.scimResourcesEnabled && { scimResourcesEnabled: true }),
     now: now ?? (() => Temporal.Now.instant()),
   })
   const publicContext = (call: ToolCall): WaitlistContext => {

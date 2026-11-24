@@ -28,6 +28,7 @@ export function eventTypeTools({
   const context = (principal: McpCaller): ServiceContext => ({
     db,
     principal,
+    ...(principal.scimResourcesEnabled && { scimResourcesEnabled: true }),
     automaticMeet,
     automaticZoom,
     smsRemindersAvailable,

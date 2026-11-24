@@ -32,6 +32,7 @@ const projectionSchema = z.strictObject({
 interface CompletionDependencies {
   db: Db
   configurationKey: Buffer
+  scimResourcesEnabled?: boolean | undefined
 }
 
 function projectionAad(provider: SsoProviderRevision, id: string, binding: string) {
@@ -93,7 +94,7 @@ export function expiresDuringOidcWrite(error: unknown): boolean {
 
 /** Transfer a consumed callback to its own immutable, mailbox-bound completion attempt. */
 export async function stageOidcCompletion(
-  { db, configurationKey }: CompletionDependencies,
+  { db, configurationKey, scimResourcesEnabled }: CompletionDependencies,
   provider: SsoProviderRevision,
   candidate: OidcLink,
   assertedMailbox: string,
@@ -107,7 +108,14 @@ export async function stageOidcCompletion(
 
   try {
     return await db.transaction().execute(async (trx) => {
-      const context = await lockOidcSignInContext(trx, provider, candidate, assertedMailbox)
+      const context = await lockOidcSignInContext(
+        trx,
+        provider,
+        candidate,
+        assertedMailbox,
+        false,
+        scimResourcesEnabled === true,
+      )
       if (context.reason !== undefined) return { reason: context.reason }
       if (context.link.proven_email !== candidate.proven_email)
         return { reason: 'mailbox_unproven' } as const
@@ -178,7 +186,7 @@ const collision = { status: 'collision' } as const
 
 /** Complete from locked local state. This code has no provider transport. */
 export async function completeOidcSignIn(
-  { db, configurationKey }: CompletionDependencies,
+  { db, configurationKey, scimResourcesEnabled }: CompletionDependencies,
   {
     id,
     browserBinding,
@@ -236,6 +244,7 @@ export async function completeOidcSignIn(
         { id: result.linkId, user_id: result.userId, generation: result.linkGeneration },
         mailbox,
         true,
+        scimResourcesEnabled === true,
       )
       if (
         context.reason !== undefined ||

@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import {
   DummyDriver,
   Kysely,
@@ -47,5 +49,59 @@ describe('SCIM suspension statement', () => {
     expect(statement.sql).toContain('scim_team_managed_memberships')
     expect(statement.sql).toContain('managed_source.suspended_at IS NOT NULL')
     expect(statement.parameters).toEqual([organization, user, organization, organization, user])
+    expect(
+      statement.sql,
+    ).toBe(`select (${production.slice('select '.length, -' as "suspended"'.length)} OR EXISTS (
+    SELECT 1 FROM scim_team_managed_memberships AS managed_source
+    WHERE managed_source.child_organization_id = $4::uuid
+      AND managed_source.user_id = $5::uuid AND managed_source.suspended_at IS NOT NULL
+  )) as "suspended"`)
+  })
+
+  it('is given the capability decision by every caller', () => {
+    // A caller that leaves the third argument out would silently keep a directory-suspended
+    // child member active on its path once the capability is on.
+    const root = join(import.meta.dirname, '../../..')
+    const sources = ['apps', 'packages'].flatMap((workspace) =>
+      readdirSync(join(root, workspace), { recursive: true, encoding: 'utf8' })
+        .filter(
+          (file) =>
+            /(^|\/)src\//.test(file) &&
+            file.endsWith('.ts') &&
+            !file.endsWith('.test.ts') &&
+            !file.includes('node_modules') &&
+            !file.endsWith('db/src/scim-suspension.ts'),
+        )
+        .map((file) => join(workspace, file)),
+    )
+    const calls: { file: string; arguments: number }[] = []
+    for (const file of sources) {
+      const source = readFileSync(join(root, file), 'utf8')
+      for (const match of source.matchAll(/\bscimSuspended\(/g)) {
+        let depth = 1
+        let count = 1
+        let text = ''
+        for (let index = match.index + match[0].length; depth > 0; index++) {
+          const character = source[index] as string
+          if ('([{'.includes(character)) depth++
+          else if (')]}'.includes(character)) depth--
+          else if (character === ',' && depth === 1) {
+            if (
+              source
+                .slice(index + 1)
+                .trimStart()
+                .startsWith(')')
+            )
+              continue
+            count++
+          }
+          text += character
+        }
+        expect(text.trim(), file).not.toBe(')')
+        calls.push({ file, arguments: count })
+      }
+    }
+    expect(calls.length).toBeGreaterThanOrEqual(25)
+    expect(calls.filter((call) => call.arguments !== 3)).toEqual([])
   })
 })

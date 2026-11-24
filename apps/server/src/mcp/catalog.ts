@@ -83,6 +83,7 @@ export function catalogTools({
   const context = (principal: McpCaller): ServiceContext => ({
     db,
     principal,
+    ...(principal.scimResourcesEnabled && { scimResourcesEnabled: true }),
     now: () => Temporal.Now.instant(),
     smsRemindersAvailable,
     followUpHostNotesEnabled,

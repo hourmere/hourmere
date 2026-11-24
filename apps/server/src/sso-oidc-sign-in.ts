@@ -383,7 +383,12 @@ export async function linkSsoAccount(
       },
       {
         authorize: async (trx) => {
-          const context = await lockOidcLinkActor(trx, organizationId, actor).catch((error) => {
+          const context = await lockOidcLinkActor(
+            trx,
+            organizationId,
+            actor,
+            deps.capabilities.scimResourcesEnabled === true,
+          ).catch((error) => {
             if (error instanceof OidcAttemptRefused) throw denied()
             throw error
           })
@@ -502,12 +507,14 @@ function admissionRefused(
 
 export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
   const { db, capabilities, configurationKey, privateTargets, signup, scimClaims } = deps
+  const scimResourcesEnabled = capabilities.scimResourcesEnabled === true
   const transport = { send: deps.send ?? sendSsoRequest, privateTargets }
   const keys = new OidcJwksCache(transport)
   const starts = createRateLimiter({ limit: 30, windowSeconds: 60 })
   const completions = createRateLimiter({ limit: 30, windowSeconds: 60 })
   const sessionOptions = (c: Context, publicUrl: string) => ({
     ...deps.session,
+    scimResourcesEnabled,
     publicUrl,
     headers: c.req.raw.headers,
     ip: c.var.clientIp,
@@ -595,7 +602,7 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
 
         try {
           const parameters = await startOidcAttempt(
-            { db, configurationKey },
+            { db, configurationKey, scimResourcesEnabled },
             { ...provider, browserBinding, returnPath, endpointsDigest: endpoints.digest },
             ceremony,
           )
@@ -659,7 +666,7 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
         let attempt: Awaited<ReturnType<typeof consumeOidcAttempt>>
         try {
           attempt = await consumeOidcAttempt(
-            { db, configurationKey },
+            { db, configurationKey, scimResourcesEnabled },
             { ...browser, state: states[0] ?? null },
             testActor ? { kind: 'test', actor: testActor } : undefined,
             readActor,
@@ -680,7 +687,7 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
         correlationId = attempt.id
         const finishTest = async (reason?: SsoAuditReason) => {
           try {
-            await recordOidcProviderTest(db, provider, attempt, reason)
+            await recordOidcProviderTest(db, provider, attempt, reason, scimResourcesEnabled)
             return c.redirect(attempt.returnPath)
           } catch (error) {
             if (error instanceof OidcAttemptRefused) return c.redirect(errorPath)
@@ -779,7 +786,7 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
           }
           if (attempt.link) {
             const pending = await stageOidcLink(
-              { db, configurationKey },
+              { db, configurationKey, scimResourcesEnabled },
               provider,
               attempt.link,
               identity,
@@ -812,7 +819,7 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
           const mailbox = normalizeOidcMailbox(identity.email)
           if (mailbox !== link.proven_email) {
             const pending = await stageOidcCompletion(
-              { db, configurationKey },
+              { db, configurationKey, scimResourcesEnabled },
               provider,
               link,
               mailbox,
@@ -878,8 +885,10 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
         }
         const name = resultCookieName(id)
         const pending = { id, browserBinding: getCookie(c, cookie), envelope: getCookie(c, name) }
-        const link = await completeOidcLink({ db, configurationKey }, pending, () =>
-          deps.readSession(c.req.raw.headers),
+        const link = await completeOidcLink(
+          { db, configurationKey, scimResourcesEnabled },
+          pending,
+          () => deps.readSession(c.req.raw.headers),
         )
         if (link?.status === 'invalid') return c.json(completionInvalid, 400)
         if (link?.status === 'domain_unverified')
@@ -889,7 +898,7 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
           return c.redirect(oidcLinkReturnPath)
         }
         const result = await completeOidcSignIn(
-          { db, configurationKey },
+          { db, configurationKey, scimResourcesEnabled },
           pending,
           sessionOptions(c, publicUrl),
         )
