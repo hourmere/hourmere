@@ -11,6 +11,7 @@ import { authenticationAttemptLifetime } from './sso-oidc-limits.ts'
 import { samlIdentityProviderRedirectUrl } from './sso-saml-configuration.ts'
 import { samlDatabaseInstantText, samlDatabaseNow, samlRequestExpired } from './sso-saml-replay.ts'
 import {
+  samlLinkOperation,
   samlProviderConfig,
   samlServiceProviderUrls,
   samlStartOperation,
@@ -34,7 +35,9 @@ interface SamlStartDependencies {
 }
 
 type SamlStartProvider = SsoProviderRevision & { issuer: string; configuration: Buffer }
-type SamlTest = { actor: OidcTestActor; enabled: boolean; recoveryDeadline?: string | undefined }
+type SamlIntent =
+  | { kind: 'test'; actor: OidcTestActor; enabled: boolean; deadline?: string | undefined }
+  | { kind: 'link'; actor: OidcTestActor; deadline: string }
 
 function redirectIdentityProvider(issuer: string, location: string) {
   // Build metadata locally from the pinned settings. Passing metadata lets samlify
@@ -51,12 +54,12 @@ function redirectIdentityProvider(issuer: string, location: string) {
   return IdentityProvider({ metadata: new XMLSerializer().serializeToString(metadata) })
 }
 
-/** Start an SP-initiated sign-in or administrator test. */
+/** Start an SP-initiated login, self-link or administrator test. */
 export async function startSamlSignIn(
   { db, configurationKey, privateTargets, publicUrl }: SamlStartDependencies,
   provider: SamlStartProvider,
   browserBinding: string,
-  test?: SamlTest,
+  intent?: SamlIntent,
 ) {
   const { organizationId, providerId, revision, issuer, configuration } = provider
   const binding = browserBindingDigest(browserBinding)
@@ -64,19 +67,26 @@ export async function startSamlSignIn(
 
   const { spEntityId: entityID, acsUrl: acs } = samlServiceProviderUrls(publicUrl, providerId)
   let idp: ReturnType<typeof IdentityProvider>
+  let nameIDFormat: string = format.unspecified
   try {
     const config = samlProviderConfig.parse(
       JSON.parse(openSsoProviderConfiguration(configurationKey, provider, configuration)),
     )
     const endpoint = samlIdentityProviderRedirectUrl(config.ssoEndpoint, privateTargets)
-    if (!endpoint || (test && !config.signingCertificates)) throw new SamlStartRefused()
+    if (!endpoint || (intent && !config.signingCertificates)) throw new SamlStartRefused()
+    if (intent?.kind === 'link' && !config.subjectAttribute) nameIDFormat = format.persistent
     idp = redirectIdentityProvider(issuer, endpoint)
   } catch {
     throw new SamlStartRefused()
   }
 
   const start = async (trx: Db) => {
-    await lockOidcProvider(trx, provider, test?.enabled ?? true, 'saml').catch((error: unknown) => {
+    await lockOidcProvider(
+      trx,
+      provider,
+      intent?.kind === 'test' ? intent.enabled : true,
+      'saml',
+    ).catch((error: unknown) => {
       if (error instanceof OidcAttemptRefused) throw new SamlStartRefused()
       throw error
     })
@@ -93,19 +103,19 @@ export async function startSamlSignIn(
       // The XML ID is a reversible representation of the stored attempt UUID.
       generateID: () => `_${id}`,
       templateRenderer: 'strict',
-      nameIDFormat: [format.unspecified],
+      nameIDFormat: [nameIDFormat],
       allowCreate: true,
       wantAssertionsSigned: true,
       allowUnsolicitedResponse: false,
     }
     const createdAt = await samlDatabaseNow(trx)
     const lifetime = createdAt.add({ seconds: authenticationAttemptLifetime })
-    const recoveryDeadline = test?.recoveryDeadline
-      ? Temporal.Instant.from(new Date(test.recoveryDeadline).toISOString())
+    const intentDeadline = intent?.deadline
+      ? Temporal.Instant.from(new Date(intent.deadline).toISOString())
       : undefined
     const deadline =
-      recoveryDeadline && Temporal.Instant.compare(recoveryDeadline, lifetime) < 0
-        ? recoveryDeadline
+      intentDeadline && Temporal.Instant.compare(intentDeadline, lifetime) < 0
+        ? intentDeadline
         : lifetime
     if (samlRequestExpired(deadline, createdAt)) throw new SamlStartRefused()
     const request = ServiceProvider(spSettings).createLoginRequest(idp, 'redirect', { relayState })
@@ -113,12 +123,17 @@ export async function startSamlSignIn(
       .insertInto('sso_attempts')
       .values({
         id,
-        kind: test ? 'test' : 'sign_in',
-        operation: test ? samlTestOperation : samlStartOperation,
+        kind: intent?.kind ?? 'sign_in',
+        operation:
+          intent?.kind === 'test'
+            ? samlTestOperation
+            : intent
+              ? samlLinkOperation
+              : samlStartOperation,
         organization_id: organizationId,
         provider_id: providerId,
         provider_revision: revision,
-        ...(test && { user_id: test.actor.userId, session_id: test.actor.id }),
+        ...(intent && { user_id: intent.actor.userId, session_id: intent.actor.id }),
         browser_binding_digest: binding,
         input_digest: sha256(relayState),
         created_at: createdAt.toString(),
