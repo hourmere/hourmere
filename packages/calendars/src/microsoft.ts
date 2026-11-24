@@ -111,7 +111,7 @@ export type MicrosoftDeltaChange =
       period: { start: Temporal.Instant; end: Temporal.Instant } | null
     }
 
-type MicrosoftDeltaPage = { changes: MicrosoftDeltaChange[] } & (
+export type MicrosoftDeltaPage = { changes: MicrosoftDeltaChange[] } & (
   | { nextLink: string; deltaLink?: never }
   | { nextLink?: never; deltaLink: string }
 )

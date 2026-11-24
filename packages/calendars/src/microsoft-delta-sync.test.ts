@@ -10,6 +10,7 @@ import {
   finishMicrosoftConnection,
   syncOwnedCalendar,
 } from './index.ts'
+import { calendarDispatchJob } from './jobs.ts'
 import { MICROSOFT_DELTA_PAGE_BUDGET, syncMicrosoftCalendar } from './microsoft-sync.ts'
 import { calendarTestSession, fakeMicrosoft, TEST_CALENDAR_KEY } from './testing.ts'
 
@@ -101,6 +102,11 @@ describe.skipIf(!serverUrl)('incremental Microsoft calendar snapshots', () => {
       .orderBy('external_event_id')
       .execute()
   const ids = async () => (await busy()).map((row) => row.id)
+  const instant = () => Temporal.Instant.fromEpochMilliseconds(now)
+  const requiredWindow = () => {
+    const day = instant().toZonedDateTimeISO('UTC').startOfDay().toInstant()
+    return { start: day.subtract({ hours: 72 }), end: day.add({ hours: 403 * 24 }) }
+  }
 
   it('reconciles recurrence exceptions by original slot, cancellations, and series deletion', async () => {
     const first = occurrence('first', '2026-03-05')
@@ -167,10 +173,9 @@ describe.skipIf(!serverUrl)('incremental Microsoft calendar snapshots', () => {
     microsoft.controls.viewHook = () => finish('expired', [prior])
     await sync()
     const original = await metadata()
-    const instant = () => Temporal.Instant.fromEpochMilliseconds(now)
     expect(() => assertCachedCalendarSync([original], instant())).not.toThrow()
 
-    const lastPage = 22
+    const lastPage = 2 * MICROSOFT_DELTA_PAGE_BUDGET + 2
     const requests: string[] = []
     let failedPage: number | undefined
     microsoft.controls.viewHook = (url) => {
@@ -181,9 +186,11 @@ describe.skipIf(!serverUrl)('incremental Microsoft calendar snapshots', () => {
       if (page === 1) expect(url.searchParams.has('startDateTime')).toBe(true)
       if (failedPage === page) return error('ServiceUnavailable', 503)
       const value = [{ ...prior, id: `replacement-${page}` }]
-      return page === lastPage
-        ? finish('rebuilt', value)
-        : Response.json({ '@odata.nextLink': continuation(page + 1), value })
+      if (page === lastPage) {
+        now += 1_000
+        return finish('rebuilt', value)
+      }
+      return Response.json({ '@odata.nextLink': continuation(page + 1), value })
     }
 
     await expect(syncOwnedCalendar(deps, owner, calendarId)).rejects.toMatchObject({
@@ -197,15 +204,18 @@ describe.skipIf(!serverUrl)('incremental Microsoft calendar snapshots', () => {
       microsoftPending: { nextLink: continuation(MICROSOFT_DELTA_PAGE_BUDGET) },
     })
     expect(await ids()).toEqual(['prior'])
-    expect(() => assertCachedCalendarSync([checkpoint], instant())).toThrow(
-      expect.objectContaining({ code: 'calendar_sync_unavailable' }),
-    )
+    expect(checkpoint.sync_error).toBeNull()
+    expect(() => assertCachedCalendarSync([checkpoint], instant(), requiredWindow())).not.toThrow()
 
     failedPage = MICROSOFT_DELTA_PAGE_BUDGET + 1
     requests.length = 0
     await expect(sync()).rejects.toMatchObject({ code: 'provider_unavailable', status: 503 })
     expect(requests).toEqual([continuation(MICROSOFT_DELTA_PAGE_BUDGET), continuation(failedPage)])
-    expect(await metadata()).toEqual(checkpoint)
+    const failed = await metadata()
+    expect(failed).toEqual({ ...checkpoint, sync_error: 'provider_unavailable' })
+    expect(() => assertCachedCalendarSync([failed], instant(), requiredWindow())).toThrow(
+      expect.objectContaining({ code: 'calendar_sync_unavailable' }),
+    )
     expect(await ids()).toEqual(['prior'])
 
     failedPage = undefined
@@ -225,19 +235,129 @@ describe.skipIf(!serverUrl)('incremental Microsoft calendar snapshots', () => {
     const published = await metadata()
     expect(published.sync_state).toMatchObject({ deltaLink: cursor('rebuilt') })
     expect(published.sync_state).not.toHaveProperty('microsoftPending')
-    expect(() => assertCachedCalendarSync([published], instant())).toThrow(
-      expect.objectContaining({ code: 'calendar_sync_unavailable' }),
-    )
-    microsoft.controls.viewHook = (url) => {
-      expect(url.href).toBe(cursor('rebuilt'))
-      return finish('caught-up')
-    }
-    await sync()
-    const caughtUp = await metadata()
-    expect(() => assertCachedCalendarSync([caughtUp], instant())).not.toThrow()
+    expect(published.last_synced_at).toEqual(new Date(now))
+    expect(() => assertCachedCalendarSync([published], instant(), requiredWindow())).not.toThrow()
   })
 
-  it('uses the newer event version across unordered pages and removes an explicitly deleted event', async () => {
+  it.each(['early rollover', 'legacy snapshot'])(
+    'serves a covering snapshot during %s',
+    async (mode) => {
+      const prior = event('published', '2026-04-01T10:00:00', '2026-04-01T11:00:00')
+      microsoft.controls.viewHook = () => finish('old', [prior])
+      await sync()
+      if (mode === 'early rollover') now += 22 * 24 * 60 * 60_000
+      const required = requiredWindow()
+      await db
+        .updateTable('calendars')
+        .set({
+          last_synced_at: new Date(now),
+          ...(mode === 'legacy snapshot'
+            ? {
+                sync_state: JSON.stringify({
+                  version: 2,
+                  start: required.start.toString(),
+                  end: required.end.toString(),
+                  timeZone: null,
+                }),
+              }
+            : {}),
+        })
+        .where('id', '=', calendarId)
+        .execute()
+      const original = await metadata()
+      const requests: URL[] = []
+      microsoft.controls.viewHook = (url) => {
+        requests.push(url)
+        const page = Number(url.searchParams.get('$skiptoken') ?? '0')
+        return Response.json({ '@odata.nextLink': continuation(page + 1), value: [] })
+      }
+      await sync()
+      expect(requests[0]?.searchParams.get('endDateTime')).toBe(
+        required.end.add({ hours: 28 * 24 }).toString(),
+      )
+      const pending = await metadata()
+      expect(pending.sync_state).toMatchObject({
+        ...(mode === 'early rollover' ? { deltaLink: cursor('old') } : {}),
+        microsoftPending: { nextLink: continuation(MICROSOFT_DELTA_PAGE_BUDGET), replace: true },
+      })
+      expect(pending.last_synced_at).toEqual(original.last_synced_at)
+      expect(pending.sync_error).toBeNull()
+      expect(() => assertCachedCalendarSync([pending], instant(), required)).not.toThrow()
+      expect(await ids()).toEqual(['published'])
+
+      const enqueued: string[] = []
+      await calendarDispatchJob(deps, async (id) => enqueued.push(id)).handler(
+        {},
+        {
+          id: 'synthetic-job',
+          signal: new AbortController().signal,
+          attempt: 1,
+        },
+      )
+      expect(enqueued).toEqual([calendarId])
+
+      microsoft.controls.viewHook = (url) => {
+        expect(url.href).toBe(continuation(MICROSOFT_DELTA_PAGE_BUDGET))
+        return finish('new')
+      }
+      await sync()
+      expect(await ids()).toEqual([])
+      expect((await metadata()).sync_state).toMatchObject({ deltaLink: cursor('new') })
+    },
+  )
+
+  it.each(['stale', 'too short'])(
+    'fails closed after a 410 when the old snapshot is %s',
+    async (mode) => {
+      const required = requiredWindow()
+      microsoft.controls.viewHook = () => finish('expired')
+      await sync()
+      const shortenedEnd = required.end.subtract({ hours: 24 })
+      if (mode === 'stale') now += 11 * 60_000
+      else {
+        await db
+          .updateTable('calendars')
+          .set({
+            sync_state: JSON.stringify({
+              version: 2,
+              start: required.start.toString(),
+              end: shortenedEnd.toString(),
+              timeZone: null,
+              deltaLink: cursor('expired'),
+              microsoftPending: {
+                start: required.start.toString(),
+                end: required.end.toString(),
+                nextLink: continuation(1),
+                startedAt: instant().toString(),
+                position: 0,
+                replace: true,
+              },
+            }),
+          })
+          .where('id', '=', calendarId)
+          .execute()
+      }
+      const expiredLink = mode === 'stale' ? cursor('expired') : continuation(1)
+      const expiredAtProvider: string[] = []
+      microsoft.controls.viewHook = (url) => {
+        if (url.href === expiredLink && !expiredAtProvider.length) {
+          expiredAtProvider.push(url.href)
+          return error('SyncStateNotFound', 410)
+        }
+        const page = Number(url.searchParams.get('$skiptoken') ?? '0')
+        return Response.json({ '@odata.nextLink': continuation(page + 1), value: [] })
+      }
+      await sync()
+      expect(expiredAtProvider).toEqual([expiredLink])
+      const pending = await metadata()
+      expect(pending.sync_error).toBeNull()
+      expect(() => assertCachedCalendarSync([pending], instant(), required)).toThrow(
+        expect.objectContaining({ code: 'calendar_sync_unavailable' }),
+      )
+    },
+  )
+
+  it('uses the last delta copy even when its modification time is earlier', async () => {
     const moving = event('moving', '2026-03-05T13:00:00', '2026-03-05T14:00:00')
     const deleted = event('deleted', '2026-03-06T10:00:00', '2026-03-06T11:00:00')
     microsoft.controls.viewHook = () => finish('before-replays', [moving, deleted])
@@ -248,16 +368,72 @@ describe.skipIf(!serverUrl)('incremental Microsoft calendar snapshots', () => {
             '@odata.nextLink': continuation(1),
             value: [
               { ...moving, lastModifiedDateTime: '2026-03-04T14:00:00Z' },
-              tombstone(deleted.id),
+              { ...deleted, lastModifiedDateTime: '2026-03-04T14:00:00Z' },
             ],
           })
         : finish('after-replays', [
             { ...moving, showAs: 'free', lastModifiedDateTime: '2026-03-04T13:00:00Z' },
-            { ...deleted, lastModifiedDateTime: '2026-03-04T13:00:00Z' },
+            tombstone(deleted.id),
           ])
     await sync()
-    expect(await ids()).toEqual([moving.id])
+    expect(await ids()).toEqual([])
   })
+
+  it('keeps an event busy after it moves out of and back into the window across runs', async () => {
+    const moving = event('moving', '2026-03-05T13:00:00', '2026-03-05T14:00:00')
+    const returned = event('moving', '2026-03-06T13:00:00', '2026-03-06T14:00:00')
+    microsoft.controls.viewHook = () => finish('before-move', [moving])
+    await sync()
+    const original = await busy()
+
+    microsoft.controls.viewHook = (url) => {
+      if (url.href === cursor('before-move')) {
+        return Response.json({ '@odata.nextLink': continuation(1), value: [tombstone(moving.id)] })
+      }
+      const page = Number(url.searchParams.get('$skiptoken'))
+      return page === MICROSOFT_DELTA_PAGE_BUDGET
+        ? finish('after-move', [returned])
+        : Response.json({ '@odata.nextLink': continuation(page + 1), value: [] })
+    }
+    await sync()
+    expect(await busy()).toEqual(original)
+    expect((await metadata()).sync_state).toMatchObject({
+      microsoftPending: { nextLink: continuation(MICROSOFT_DELTA_PAGE_BUDGET), position: 1 },
+    })
+
+    await sync()
+    expect(await busy()).toEqual([
+      { id: moving.id, start: '2026-03-06T13:00:00.000000Z', end: '2026-03-06T14:00:00.000000Z' },
+    ])
+  })
+
+  it('keeps the live event that follows a changed marker in the same page', async () => {
+    const live = event('live', '2026-03-05T13:00:00', '2026-03-05T14:00:00')
+    microsoft.controls.viewHook = () =>
+      finish('after-change', [{ id: live.id, '@removed': { reason: 'changed' } }, live])
+    await sync()
+    expect(await ids()).toEqual([live.id])
+  })
+
+  it.each([undefined, '2026-03-04T14:00:00Z'])(
+    'preserves a busy recurring slot when another alias has ambiguous modification time (%s)',
+    async (lastModifiedDateTime) => {
+      const live = {
+        ...occurrence('live-exception', '2026-03-05'),
+        type: 'exception',
+        ...(lastModifiedDateTime && { lastModifiedDateTime }),
+      }
+      const free = {
+        ...live,
+        id: 'free-exception',
+        showAs: 'free',
+        lastModifiedDateTime: '2026-03-04T14:00:00Z',
+      }
+      microsoft.controls.viewHook = () => finish('with-ambiguous-alias', [live, free])
+      await sync()
+      expect(await ids()).toEqual([live.id])
+    },
+  )
 
   it('drops expired cursors after syncStateNotFound, then reuses the rebuilt window until it runs out', async () => {
     const prior = event('prior', '2026-03-05T10:00:00', '2026-03-05T11:00:00')

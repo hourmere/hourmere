@@ -93,6 +93,7 @@ export function calendarDispatchJob(
                 or([
                   eb('c.last_synced_at', 'is', null),
                   eb('c.sync_error', 'is not', null),
+                  sql<boolean>`c.sync_state->>'deltaLink' is null or c.sync_state->'microsoftPending' is not null`,
                   // Refresh the Graph cursor before the snapshot becomes stale.
                   eb('c.last_synced_at', '<=', new Date(now - SYNC_MAX_AGE_MS / 2)),
                 ]),

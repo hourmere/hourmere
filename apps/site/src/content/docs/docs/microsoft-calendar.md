@@ -18,9 +18,10 @@ offering bookings. The connection uses read-only access to Microsoft Graph.
   [Graph calendar list](https://learn.microsoft.com/en-us/graph/api/user-list-calendars?view=graph-rest-1.0)
 - Each selected conflict calendar has its own `calendarView/delta` cursor and date range.
   Hourmere resumes large syncs across background runs and publishes busy times only when
-  the entire round completes. An expired cursor or a date range that no longer covers
-  upcoming bookings triggers a fresh snapshot. Booking times stay unavailable while a
-  snapshot is incomplete or a sync has failed.
+  the entire round completes. Hourmere starts rebuilding before the current date range
+  expires and also rebuilds when Graph expires a cursor. During a rebuild, bookings still
+  use the previous snapshot while it is fresh and covers the requested times. An initial
+  sync, a failed sync, or a stale or insufficient snapshot leaves the affected times unavailable.
   [Graph calendar view delta](https://learn.microsoft.com/en-us/graph/delta-query-events)
 - Graph expands recurring events. Hourmere uses modified occurrences at their updated times
   and removes busy intervals for cancelled occurrences and deleted series. Timed and all-day
@@ -93,9 +94,9 @@ if desired. Keep regular encrypted database backups and protect the encryption k
 If the account shows **Reconnect required**, choose **Reconnect Microsoft Calendar** and
 authorize the original Microsoft account to restore the connection. If Microsoft denies
 access to a particular calendar, review that calendar’s access in Outlook and retry its sync.
-On return, check the account status and wait for a successful busy-time sync. While a
-selected calendar’s snapshot is incomplete, stale or unavailable, Hourmere treats those
-times as unknown. See [Troubleshoot availability](/docs/availability-troubleshooting#sync-freshness-and-provider-differences)
+On return, check the account status and wait for a successful busy-time sync. Hourmere
+treats times without a fresh, covering snapshot as unknown. See
+[Troubleshoot availability](/docs/availability-troubleshooting#sync-freshness-and-provider-differences)
 for the retry and recovery behavior.
 
 Test organizational mailboxes separately from personal Outlook accounts before relying on

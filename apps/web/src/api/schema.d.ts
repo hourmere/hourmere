@@ -8829,7 +8829,7 @@ export interface components {
                             provider: string;
                             status: string;
                             /** @enum {string|null} */
-                            syncError: "provider_unavailable" | "needs_reauth" | "permissions_missing" | null;
+                            syncError: "provider_unavailable" | "needs_reauth" | "permissions_missing" | "calendar_removed" | null;
                         }[];
                         schedules: {
                             /** Format: uuid */
@@ -8897,7 +8897,7 @@ export interface components {
                         provider: string;
                         status: string;
                         /** @enum {string|null} */
-                        syncError: "provider_unavailable" | "needs_reauth" | "permissions_missing" | null;
+                        syncError: "provider_unavailable" | "needs_reauth" | "permissions_missing" | "calendar_removed" | null;
                     }[];
                     schedules: {
                         /** Format: uuid */

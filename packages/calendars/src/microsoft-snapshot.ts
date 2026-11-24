@@ -51,19 +51,24 @@ export async function clearMicrosoftChanges(trx: Db, calendarId: string) {
 }
 
 export async function publishMicrosoftChanges(trx: Db, calendarId: string, replace: boolean) {
-  // A modified occurrence may get a different event ID. Match the original slot as well,
-  // preferring its exception independently of page order. A tombstone can also name a master.
+  // Positions span all pages of the round, including those staged by earlier runs.
+  // Match recurring aliases by original slot and prefer the exception. For equally ranked
+  // aliases with indistinguishable modification times, prefer a busy interval.
   await sql`
     WITH changes AS MATERIALIZED (
       SELECT DISTINCT ON (external_event_id) *
       FROM calendar_microsoft_changes
       WHERE calendar_id = ${calendarId}
-      ORDER BY external_event_id, removes_series DESC, last_modified_at DESC NULLS LAST, position DESC
+      ORDER BY external_event_id, position DESC
     ), slots AS MATERIALIZED (
       SELECT DISTINCT ON (microsoft_series_id, microsoft_original_start) *
       FROM changes WHERE microsoft_original_start IS NOT NULL
       ORDER BY microsoft_series_id, microsoft_original_start,
-        is_exception DESC, last_modified_at DESC NULLS LAST, position DESC
+        is_exception DESC,
+        CASE WHEN bool_and(last_modified_at IS NOT NULL) OVER (
+          PARTITION BY microsoft_series_id, microsoft_original_start, is_exception
+        ) THEN last_modified_at END DESC NULLS LAST,
+        (period IS NOT NULL) DESC, position DESC
     ), busy AS MATERIALIZED (
       SELECT change.* FROM changes change
       LEFT JOIN slots slot USING (microsoft_series_id, microsoft_original_start)
