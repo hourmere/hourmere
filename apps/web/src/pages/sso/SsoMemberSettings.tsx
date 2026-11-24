@@ -355,7 +355,8 @@ export function SsoMemberSettings({
                           {t('Identity link ID')} <code data-private>{link.id}</code>
                         </p>
                       </div>
-                      {methodAction({ kind: 'unlink', providerId: link.providerId, link }, name)}
+                      {link.protocol !== 'saml' &&
+                        methodAction({ kind: 'unlink', providerId: link.providerId, link }, name)}
                     </li>
                   )
                 })}

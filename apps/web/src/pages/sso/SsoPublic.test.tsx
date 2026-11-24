@@ -171,6 +171,38 @@ describe('SSO mailbox proof', () => {
   const verified = 'Email verification complete.'
   const sendEmail = 'Send verification email'
 
+  it('uses the SAML completion form after proving a changed mailbox with OIDC off', async () => {
+    const api = fakeApi({
+      'GET /api/v1/instance': () => json(200, { ssoOidcEnabled: false, ssoSamlEnabled: true }),
+      [send]: () => json(200, { status: 'queued' }),
+      [consume]: () => json(200, { status: 'proven' }),
+    })
+    const fetchApi = globalThis.fetch
+    const completeSaml = vi.fn(() => redirectedTo(PATHS.settings))
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => {
+      if (input === '/api/auth/sso/saml2/complete') {
+        expect(init?.method).toBe('POST')
+        expect(init?.body?.toString()).toBe(`attemptId=${attemptId}`)
+        return Promise.resolve(completeSaml())
+      }
+      return fetchApi(input, init)
+    })
+    testRouter(`${proof}&saml=1`)
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: sendEmail }))
+    await user.type(
+      await screen.findByLabelText('Email verification link'),
+      new URL(emailedLink, location.origin).href,
+    )
+    await user.click(screen.getByRole('button', { name: verify }))
+    const continueButton = await screen.findByRole('button', { name: 'Continue' })
+    expect(completeSaml).not.toHaveBeenCalled()
+    await user.click(continueButton)
+    await waitFor(() => expect(replaceWith).toHaveBeenCalledWith(PATHS.settings))
+    expect(completeSaml).toHaveBeenCalledOnce()
+    expect(api.to(complete)).toEqual([])
+  })
+
   it.each([403, 503])(
     'keeps controls inert while loading and when discovery returns %s',
     async (status) => {

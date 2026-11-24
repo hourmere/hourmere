@@ -374,13 +374,30 @@ describe('Member SSO settings', () => {
       })
       await screen.findByRole('heading', { name: 'Account' })
       expect(screen.queryByRole('heading', { name: memberHeading })).toBeNull()
-      await instance.answer(json(200, { ssoOidcEnabled: enabled, ssoSamlEnabled: !enabled }))
+      await instance.answer(json(200, { ssoOidcEnabled: enabled, ssoSamlEnabled: false }))
       expect(screen.getByRole('button', { name: 'Save display name' })).toBeDefined()
       expect(screen.queryByRole('heading', { name: memberHeading })).toBeNull()
       expect(screen.getByTestId('current-hash').textContent).toBe('')
       expect(requests.calls.filter(({ path }) => path.includes('/sso/'))).toEqual([])
     },
   )
+
+  it('shows the self-link action on a SAML-only team', async () => {
+    showSettings({ enabled: false })
+    await screen.findByRole('button', { name: `Link account (${provider.displayName})` })
+  })
+
+  it('shows a SAML link without offering identity recovery', async () => {
+    showSettings({
+      enabled: false,
+      viewer: {
+        ...teamMe,
+        sso: { ...empty, providers: [provider], links: [{ ...linked, protocol: 'saml' }] },
+      },
+    })
+    await screen.findByText(linked.id)
+    expect(screen.queryByRole('button', { name: /^(Link|Unlink) account/ })).toBeNull()
+  })
 
   it('uses neutral unavailable and loading states when the SSO projection cannot be loaded', async () => {
     const reload = later()

@@ -167,7 +167,6 @@ const ELEMENT_NAMESPACES = new Set([SAMLP, SAML, DSIG, EXC_C14N])
 // optional standalone, either quote style.
 const XML_DECLARATION =
   /^<\?xml[ \t\r\n]+version[ \t\r\n]*=[ \t\r\n]*(?:"1\.0"|'1\.0')(?:[ \t\r\n]+encoding[ \t\r\n]*=[ \t\r\n]*(?:"[Uu][Tt][Ff]-8"|'[Uu][Tt][Ff]-8'))?(?:[ \t\r\n]+standalone[ \t\r\n]*=[ \t\r\n]*(?:"(?:yes|no)"|'(?:yes|no)'))?[ \t\r\n]*\?>/
-const ENTITY_REFERENCE = /&([^;&<\s]*;?)/g
 // Anything outside the XML 1.0 Char production, plus the noncharacters U+FFFE and U+FFFF.
 const isXmlChar = (code: number) =>
   code === 0x9 ||
@@ -179,11 +178,48 @@ const isXmlChar = (code: number) =>
 
 const isWhitespace = (code: number) => code === 0x20 || code === 0x9 || code === 0xa || code === 0xd
 
+/** Refuses active markup before either XML parser sees the input. Comments are inert. */
+function checkMarkup(body: string): number {
+  const markup = /<!|<\?|[<>"']|&([^;&<\s]*;?)/g
+  let comments = 0
+  let inTag = false
+  let quote: string | undefined
+  for (let match = markup.exec(body); match; match = markup.exec(body)) {
+    const [token, reference] = match
+    if (token === '<!' || token === '<?') {
+      if (inTag || !body.startsWith('<!--', match.index)) throw reject('forbidden_markup')
+      // XML comments cannot contain "--" or end in a hyphen.
+      const close = body.indexOf('--', match.index + 4)
+      if (close < 0 || body[close + 2] !== '>') throw reject('malformed_xml')
+      markup.lastIndex = close + 3
+      comments += 1
+      if (comments >= MAX_NODES) throw reject('too_large')
+    } else if (token === '<') {
+      if (inTag) throw reject('malformed_xml')
+      inTag = true
+    } else if (token === '>') {
+      if (!quote) inTag = false
+    } else if (token === '"' || token === "'") {
+      if (inTag) {
+        if (quote === token) quote = undefined
+        else if (!quote) quote = token
+      }
+    } else if (reference !== undefined && !/^(?:lt|gt|amp|quot|apos);$/.test(reference)) {
+      const numeric = /^#(?:([0-9]{1,7})|x([0-9A-Fa-f]{1,6}));$/.exec(reference)
+      if (!numeric) throw reject('forbidden_markup')
+      const code = numeric[1]
+        ? Number.parseInt(numeric[1], 10)
+        : Number.parseInt(numeric[2] ?? '', 16)
+      if (!isXmlChar(code)) throw reject('malformed_xml')
+    }
+  }
+  return comments
+}
+
 /**
- * Parses a document that has no DTD, no entity beyond the five predefined ones, no comment,
- * no CDATA section and no processing instruction. `<!` and `<?` cannot occur in well-formed
- * character data or attribute values, so the textual checks are exact, and they run before
- * any parser sees the input: nothing is ever expanded, fetched or read from disk.
+ * Parses a document with no DTD, CDATA, processing instructions or custom entities.
+ * The returned tree omits comments. Signature verification still receives the submitted XML
+ * and uses exclusive canonicalization without comments.
  */
 export function parseSamlXml(xml: string, inspect?: (element: Element) => void): Element {
   if (Buffer.byteLength(xml) > samlMaximumResponseBytes) throw reject('too_large')
@@ -203,16 +239,7 @@ export function parseSamlXml(xml: string, inspect?: (element: Element) => void):
   while (start < end && isWhitespace(declared.charCodeAt(start))) start += 1
   while (end > start && isWhitespace(declared.charCodeAt(end - 1))) end -= 1
   const body = declared.slice(start, end)
-  if (body.includes('<!') || body.includes('<?')) throw reject('forbidden_markup')
-  for (const [, reference = ''] of body.matchAll(ENTITY_REFERENCE)) {
-    if (/^(?:lt|gt|amp|quot|apos);$/.test(reference)) continue
-    const numeric = /^#(?:([0-9]{1,7})|x([0-9A-Fa-f]{1,6}));$/.exec(reference)
-    if (!numeric) throw reject('forbidden_markup')
-    const code = numeric[1]
-      ? Number.parseInt(numeric[1], 10)
-      : Number.parseInt(numeric[2] ?? '', 16)
-    if (!isXmlChar(code)) throw reject('malformed_xml')
-  }
+  let nodes = checkMarkup(body)
   let root: Element | null
   try {
     const document = new DOMParser({
@@ -222,19 +249,23 @@ export function parseSamlXml(xml: string, inspect?: (element: Element) => void):
       },
     }).parseFromString(body, 'text/xml')
     if (document.doctype) throw reject('forbidden_markup')
-    if (document.childNodes.length !== 1) throw reject('malformed_xml')
     root = document.documentElement
+    for (const child of Array.from(document.childNodes)) {
+      if (child === root || child.nodeType === 8) continue
+      if (child.nodeType !== 3 || !/^[\t\r\n ]*$/.test(child.nodeValue ?? ''))
+        throw reject('malformed_xml')
+    }
   } catch (error) {
     throw error instanceof SamlVerificationError ? error : reject('malformed_xml')
   }
   if (!root) throw reject('malformed_xml')
-  let nodes = 0
   const visit = (element: Element, depth: number) => {
     nodes += 1
     if (depth > MAX_DEPTH || nodes > MAX_NODES) throw reject('too_large')
     inspect?.(element)
     for (const child of Array.from(element.childNodes)) {
       if (child.nodeType === 1) visit(child as Element, depth + 1)
+      else if (child.nodeType === 8) element.removeChild(child)
       else if (child.nodeType !== 3) throw reject('forbidden_markup')
     }
   }
