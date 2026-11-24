@@ -693,8 +693,21 @@ never replaces signatures.
 The internal timing and replay module returns the unskewed acceptance deadline for the
 later completion step. The replay write checks database wall time again after the insert
 can wait on a competing transaction. It stores only ID digests, and its bounded cleanup
-removes expired rows. The module has no production caller or cleanup schedule. SAML is
-hard-off and the OIDC setting still defaults to false.
+removes expired rows.
+
+The shared sign-in POST starts SAML `sign_in` for an enabled provider in in-process
+tests. It creates an HTTP-Redirect AuthnRequest with an issuer and ACS URL derived from
+`PUBLIC_URL` and the provider ID. It commits the attempt before returning the URL and
+the existing HttpOnly, SameSite=Lax, Path=/ binding cookie (Secure and `__Host-` on HTTPS).
+The attempt stores the request ID through its row ID, plus the SHA-256 digests of the
+binding and the opaque RelayState. Its deadline is 600 seconds from the database clock,
+with no skew on request expiry. The start validates `returnTo` under `/app`. A later
+completion step will store and apply that return path. SAML stays hard-off. Selecting a
+SAML provider returns `404 sso_disabled` while OIDC follows its operator setting, default false.
+
+进程内测试可发起 SAML 登录。服务器先保存请求标识、RelayState 和浏览器绑定的摘要及过期时间，
+再返回身份提供方的跳转 URL 并设置绑定 Cookie。请求有效期为 600 秒。SAML 在生产环境保持关闭，
+选择 SAML 提供方会返回 `404 sso_disabled`。OIDC 登录仍由原有设置控制，默认关闭。
 
 ### Fetching, credentials and audit
 

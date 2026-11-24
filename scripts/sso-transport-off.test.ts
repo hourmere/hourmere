@@ -1,4 +1,5 @@
 // The SSO transport profile serves domain TXT proofs, OIDC documents and OIDC token exchange.
+// SAML start uses only its URL syntax policy for the browser redirect.
 // Interactive writes, rechecks and sign-in are hard-off. Offline retirement removes trust.
 // The configuration loader parses `SSO_PRIVATE_TARGETS` and server composition passes it
 // to guarded OIDC sign-in, provider tests and self-link, so it routes nothing while OIDC
@@ -22,6 +23,7 @@ const OIDC_SESSION = 'apps/server/src/sso-oidc-session.ts'
 const OIDC_SIGN_IN = 'apps/server/src/sso-oidc-sign-in.ts'
 const OIDC_TEST_RECEIPTS = 'apps/server/src/sso-oidc-test-receipts.ts'
 const OIDC_VERIFIER = 'apps/server/src/sso-oidc-verifier.ts'
+const SAML_START = 'apps/server/src/sso-saml-start.ts'
 const OIDC_VERIFIER_MODULES = new Set([OIDC_ATTEMPT, OIDC_JWKS, OIDC_VERIFIER])
 
 /** Every non-test source file in the src directory of each apps, packages and tools workspace. */
@@ -69,7 +71,7 @@ const importsTargets = (file: string, source: string) =>
     (target) => target === TARGETS || target === '@hourmere/outbound/sso-private-targets',
   )
 
-describe('SSO transport permits only domain TXT and guarded OIDC ceremonies', () => {
+describe('SSO transport permits only domain TXT and guarded SSO ceremonies', () => {
   it('recognises every import form of the profile and nothing else', () => {
     const server = 'apps/server/src/example.ts'
     const outbound = 'packages/outbound/src/example.ts'
@@ -94,7 +96,7 @@ describe('SSO transport permits only domain TXT and guarded OIDC ceremonies', ()
       expect(importsProfile(file, source), source).toBe(false)
   })
 
-  it('imports the profile only for domain TXT, OIDC documents and code exchange', () => {
+  it('imports the profile only for domain TXT, OIDC ceremonies and SAML redirect validation', () => {
     const sources = productionSources()
     expect(sources.length).toBeGreaterThan(100)
     // The scan sees the profile, its package and the server, so a caller cannot hide.
@@ -117,7 +119,7 @@ describe('SSO transport permits only domain TXT and guarded OIDC ceremonies', ()
       'apps/server/src/sso-domain-retirement.ts',
       'apps/server/src/sso-domains.ts',
     ]
-    expect(callers).toEqual([...domainCallers, OIDC_JWKS, OIDC_SIGN_IN])
+    expect(callers).toEqual([...domainCallers, OIDC_JWKS, OIDC_SIGN_IN, SAML_START])
     for (const caller of domainCallers) {
       const domainSource = readFileSync(new URL(caller, root), 'utf8')
       expect(domainSource).toContain('resolveSsoDomainTxt')
@@ -125,6 +127,9 @@ describe('SSO transport permits only domain TXT and guarded OIDC ceremonies', ()
     }
     expect(readFileSync(new URL(OIDC_JWKS, root), 'utf8')).toContain('sendSsoRequest')
     expect(readFileSync(new URL(OIDC_SIGN_IN, root), 'utf8')).toContain('sendSsoRequest')
+    const samlStart = readFileSync(new URL(SAML_START, root), 'utf8')
+    expect(samlStart).toContain('ssoUrl(')
+    expect(samlStart).not.toMatch(/sendSsoRequest|resolveSsoDomainTxt/)
   })
 
   it('restricts OIDC verification dependencies to guarded ceremonies', () => {

@@ -1111,13 +1111,21 @@ describe('SSO setting-off excludes only SSO from the published catalogues', () =
       'packages/auth/src/testing.ts',
     )
     const sources = shipped.map((file) => [file, readFileSync(new URL(file, root), 'utf8')])
+    // AuthnRequest generation declares the SP identifiers. The route inventories still
+    // forbid registration of these endpoints until their own steps land.
+    const samlRequestUris = new Set([
+      '/api/auth/sso/saml2/sp/metadata/{providerId}',
+      '/api/auth/sso/saml2/sp/acs/{providerId}',
+    ])
     const literals = sources.flatMap(([file, source = '']) =>
       [...source.matchAll(/(['"`])(\/[^'"`\s]*)\1/g)]
         .map(([, , literal = '']) => literal)
         .filter(
           (literal) =>
-            file !== 'apps/web/src/paths.ts' ||
-            !GUARDED_SSO_WEB_PATHS.some((path) => path === literal),
+            !(
+              file === 'apps/web/src/paths.ts' &&
+              GUARDED_SSO_WEB_PATHS.some((path) => path === literal)
+            ) && !(file === 'apps/server/src/sso-saml-start.ts' && samlRequestUris.has(literal)),
         ),
     )
     expect(literals.length).toBeGreaterThan(500)

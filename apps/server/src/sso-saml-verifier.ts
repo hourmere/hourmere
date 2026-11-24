@@ -484,7 +484,8 @@ function signedBytes(xml: string, signature: Element, ownerId: string, trust: Tr
     keep(verifier.SignatureAlgorithms, (uri) => trust.signature.has(uri))
     let references: string[]
     try {
-      verifier.loadSignature(signature)
+      // xml-crypto accepts xmldom nodes at runtime. Its types use the browser's DOM Node.
+      verifier.loadSignature(signature as unknown as Parameters<SignedXml['loadSignature']>[0])
       if (!verifier.checkSignature(xml)) continue
       references = verifier.getSignedReferences()
     } catch {
