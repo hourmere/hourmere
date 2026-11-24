@@ -6,7 +6,7 @@
   margin-block-end: var(--space-4);
 }
 
-@media (min-width: 1200px) {
+@media (min-width: 1280px) {
   .event-type-editor-layout {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);

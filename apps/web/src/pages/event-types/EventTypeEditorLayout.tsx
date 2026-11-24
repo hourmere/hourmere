@@ -10,7 +10,7 @@ import type { Me } from '../../session.tsx'
 import { draftQuestions, type EventTypeDraft, orderedLocations } from './event-type-form.ts'
 import './event-type-editor-layout.css'
 
-const WIDE_EDITOR = '(min-width: 1200px)'
+const WIDE_EDITOR = '(min-width: 1280px)'
 
 /** Saved assets load through the admin API once per space. The booking preview receives bytes. */
 function useSavedBranding(organization: Me['organization'], canRead: boolean) {

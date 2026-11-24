@@ -107,7 +107,7 @@ it('updates the booking page as the host edits without fetching or persisting th
   ).toEqual([ME.organization.id, ME.organization.id])
 })
 
-it('places the preview beside the settings at 1200px and in a modal at 1199px', async () => {
+it('places the preview beside the settings at 1280px and in a modal at 1279px', async () => {
   // jsdom exposes the element but leaves these two native modal APIs unimplemented.
   const dialogMethods = {
     showModal: {
@@ -128,7 +128,7 @@ it('places the preview beside the settings at 1200px and in a modal at 1199px', 
     for (const method of Object.keys(dialogMethods))
       Reflect.deleteProperty(HTMLDialogElement.prototype, method)
   })
-  const resize = viewport(1200)
+  const resize = viewport(1280)
   setup()
   const user = userEvent.setup()
   const view = renderApp('/app/event-types/new')
@@ -138,7 +138,7 @@ it('places the preview beside the settings at 1200px and in a modal at 1199px', 
   expect(pane.closest('main')?.className).toBe('main-content-wide')
   expect(screen.queryByRole('button', { name: 'Preview booking page' })).toBeNull()
 
-  resize(1199)
+  resize(1279)
   expect(screen.queryByRole('complementary', { name: 'Booking page preview' })).toBeNull()
   expect(screen.queryByRole('dialog', { name: 'Booking page preview' })).toBeNull()
   expect(view.container.querySelector('.booking-layout')).toBeNull()
@@ -170,7 +170,7 @@ it('applies the two-column grid only at the wide breakpoint and makes the modal 
   const layout = '.event-type-editor-layout'
   const wide = rules.find(
     (rule): rule is CSSMediaRule =>
-      rule instanceof CSSMediaRule && rule.conditionText === '(min-width: 1200px)',
+      rule instanceof CSSMediaRule && rule.conditionText === '(min-width: 1280px)',
   )
   const grid = [...(wide?.cssRules ?? [])].find(
     (rule): rule is CSSStyleRule => rule instanceof CSSStyleRule && rule.selectorText === layout,
