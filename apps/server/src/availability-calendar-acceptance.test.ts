@@ -20,6 +20,7 @@ import {
   finishGoogleConnection,
   finishMicrosoftConnection,
 } from '../../../packages/calendars/src/index.ts'
+import { MICROSOFT_DELTA_PAGE_BUDGET } from '../../../packages/calendars/src/microsoft-sync.ts'
 import {
   configureCalendar,
   syncGoogleCalendar,
@@ -66,6 +67,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
     let google: ReturnType<typeof fakeGoogle>
     let googleCalendarId: string
     let caldavCalendarId: string
+    let microsoft: ReturnType<typeof fakeMicrosoft>
     let microsoftCalendarId: string
     let failCalDav = false
     let refreshCalDav: () => Promise<void>
@@ -122,7 +124,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
           ],
         },
       ]
-      const microsoft = fakeMicrosoft(() => now.epochMilliseconds)
+      microsoft = fakeMicrosoft(() => now.epochMilliseconds)
       const deps = {
         db,
         now: () => now.epochMilliseconds,
@@ -296,13 +298,15 @@ describe.skipIf(!process.env.DATABASE_URL)(
           .where('cc.provider', '=', 'microsoft')
           .executeTakeFirstOrThrow()
       ).id
-      microsoft.controls.viewHook = () =>
+      microsoft.controls.viewHook = (url) =>
         failMicrosoft
           ? Response.json({ error: { code: 'ServiceUnavailable' } }, { status: 503 })
           : Response.json({
+              '@odata.deltaLink': `${url.origin}${url.pathname}?$deltatoken=synthetic-cursor`,
               value: [
                 {
                   id: 'synthetic-ms-busy',
+                  type: 'singleInstance',
                   subject: 'Private Outlook appointment',
                   start: { dateTime: '2030-03-10T22:00:00.0000000', timeZone: 'UTC' },
                   end: { dateTime: '2030-03-10T22:30:00.0000000', timeZone: 'UTC' },
@@ -468,6 +472,42 @@ describe.skipIf(!process.env.DATABASE_URL)(
           .set({ check_conflicts: true })
           .where('id', '=', microsoftCalendarId)
           .execute()
+      }
+    })
+
+    it('offers free slots and protects published busy times while the first delta round is pending', async () => {
+      const originalView = microsoft.controls.viewHook
+      const day = now.toZonedDateTimeISO('UTC').startOfDay().toInstant()
+      // A v2 snapshot produced by the former full-read worker has coverage and no delta link.
+      await db
+        .updateTable('calendars')
+        .set({
+          sync_state: JSON.stringify({
+            version: 2,
+            start: day.subtract({ hours: 72 }).toString(),
+            end: day.add({ hours: 403 * 24 }).toString(),
+            timeZone: null,
+          }),
+        })
+        .where('id', '=', microsoftCalendarId)
+        .execute()
+      let pages = 0
+      microsoft.controls.viewHook = (url) =>
+        Response.json({
+          '@odata.nextLink': `${url.origin}${url.pathname}?$skiptoken=${++pages}`,
+          value: [],
+        })
+      try {
+        await expect(refreshMicrosoft()).rejects.toMatchObject({
+          code: 'microsoft_calendar_provider_unavailable',
+        })
+        expect(pages).toBe(MICROSOFT_DELTA_PAGE_BUDGET)
+        const result = await verify('2030-03-10')
+        expect(first(result, '2030-03-10T18:00:00-04:00')).toBe('calendar_busy')
+        expect(first(result, '2030-03-10T09:00:00-04:00')).toBe('available')
+      } finally {
+        microsoft.controls.viewHook = originalView
+        await refreshMicrosoft()
       }
     })
 

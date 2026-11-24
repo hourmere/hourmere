@@ -185,13 +185,27 @@ function requireScopes(
     throw new GoogleCalendarError('permissions_missing')
 }
 
-async function saveCalendars(
+export async function saveCalendars(
   db: Db,
   connectionId: string,
   calendars: ProviderCalendar[],
   provider: CalendarProvider,
 ) {
   if (calendars.length) {
+    if (provider === 'microsoft') {
+      // Once the provider lists a removed calendar again, rebuild its snapshot before use.
+      await db
+        .updateTable('calendars')
+        .set({ sync_error: 'provider_unavailable', last_synced_at: null, sync_state: null })
+        .where('connection_id', '=', connectionId)
+        .where('sync_error', '=', 'calendar_removed')
+        .where(
+          'external_id',
+          'in',
+          calendars.map((calendar) => calendar.id),
+        )
+        .execute()
+    }
     await db
       .insertInto('calendars')
       .values(
@@ -226,13 +240,14 @@ async function saveCalendars(
       calendars.map((c) => c.id),
     )
   if (provider === 'microsoft') {
-    // Graph can omit a calendar after access changes. Keep opted-in calendars blocking
-    // availability until they can be read again or the owner removes the selection.
+    // Keep opted-in calendars blocking availability while they are absent from a complete
+    // list. Stop polling their event view until rediscovery or deselection.
     await db
       .updateTable('calendars')
-      .set({ sync_error: 'provider_unavailable' })
+      .set({ sync_error: 'calendar_removed' })
       .where('connection_id', '=', connectionId)
       .where('check_conflicts', '=', true)
+      .where('sync_error', 'is distinct from', 'calendar_removed')
       .$if(calendars.length > 0, (q) =>
         q.where(
           'external_id',
@@ -328,10 +343,11 @@ export async function listCalendarConnections(deps: CalendarDeps, principal: Pri
           lastSyncedAt: c.last_synced_at?.toISOString() ?? null,
           syncError: c.sync_error,
           available:
-            connection.provider !== 'caldav' ||
-            z
-              .object({ caldavDiscovery: z.object({ available: z.literal(true) }) })
-              .safeParse(c.sync_state).success,
+            c.sync_error !== 'calendar_removed' &&
+            (connection.provider !== 'caldav' ||
+              z
+                .object({ caldavDiscovery: z.object({ available: z.literal(true) }) })
+                .safeParse(c.sync_state).success),
         })),
     })),
   }
@@ -546,9 +562,10 @@ async function finishConnection(
       if (provider === 'microsoft' && previous) {
         const selected = await trx
           .updateTable('calendars')
-          .set({ last_synced_at: null, sync_state: null })
+          .set({ last_synced_at: null })
           .where('connection_id', '=', connection.id)
           .where('check_conflicts', '=', true)
+          .where('sync_error', 'is distinct from', 'calendar_removed')
           .returning('id')
           .execute()
         for (const calendar of selected) await deps.enqueueSync?.(calendar.id, trx)

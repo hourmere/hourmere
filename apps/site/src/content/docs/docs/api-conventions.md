@@ -1111,6 +1111,8 @@ On the self read, an `Authorization` header takes precedence over the session co
 a cookie receives `403 readiness_access_denied`; an invalid bearer or MCP OAuth access
 token receives `401 unauthorized`, even alongside a valid cookie. There is no `userId`,
 organization or audience override; unknown query fields receive `400 invalid_request`.
+The member's calendar details report `syncError: "calendar_removed"` when Microsoft no
+longer lists a previously connected calendar.
 
 `GET /api/v1/teams/{teamId}/readiness` returns minimal member and event-type summaries for
 the acting team, through the shared team-management access check. Only current verified

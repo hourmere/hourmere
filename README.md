@@ -485,8 +485,8 @@ and linked operating guides before deploying:
 - [Meeting polls](https://hourmere.com/docs/meeting-polls) support one confirmed booking per
   poll. Group event types and one-time booking links are unsupported. Terminal polls are
   kept until explicit poll, linked-booking or organization deletion.
-- Microsoft Calendar uses bounded busy-time snapshots. Incremental sync and event writes are
-  pending. Microsoft sign-in and calendar connections have not had real-account acceptance.
+- Microsoft Calendar incrementally updates busy-time snapshots. Event writes are pending.
+  Microsoft sign-in and calendar connections have not had real-account acceptance.
 - Automatic Zoom supports personal event types and individual team event types with one
   actual host; collective and round-robin event types are unsupported.
 - [Meeting location choices](https://hourmere.com/docs/location-choices) support up to five distinct kinds

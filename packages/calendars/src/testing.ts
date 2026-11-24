@@ -256,7 +256,7 @@ export function fakeMicrosoft(now?: () => number) {
       return Response.json(controls.identity)
     if (
       url.origin === 'https://graph.microsoft.com' &&
-      url.pathname === '/v1.0/me/calendars/microsoft-calendar-1/calendarView' &&
+      /^\/v1\.0\/me\/calendars\/[^/]+\/calendarView\/delta(?:\(\))?$/u.test(url.pathname) &&
       controls.viewHook
     )
       return controls.viewHook(url)
