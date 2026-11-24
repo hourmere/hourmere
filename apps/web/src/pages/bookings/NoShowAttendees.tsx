@@ -92,7 +92,11 @@ export function useNoShowToggle({
 }) {
   const mounted = useMounted()
   const pendingKey = `${expectedOrganizationId}:${bookingId}`
-  const busy = useSyncExternalStore(subscribePending, () => pendingBookings.has(pendingKey))
+  const shared = useSyncExternalStore(subscribePending, () => pendingBookings.has(pendingKey))
+  // The store subscribes in a passive effect, so a click that lands between the first commit
+  // and that effect would not re-render this control. Its own write also marks it busy.
+  const [sending, setSending] = useState(false)
+  const busy = shared || sending
   // The answer may arrive after later renders; it goes to the latest handlers.
   const handlers = useRef({ onChanged, onError })
   handlers.current = { onChanged, onError }
@@ -104,6 +108,7 @@ export function useNoShowToggle({
     if (!person.id || pendingBookings.has(pendingKey) || conflict) return
     pendingBookings.add(pendingKey)
     notifyPending()
+    setSending(true)
     setFailed(false)
     setSaved(false)
     try {
@@ -125,6 +130,7 @@ export function useNoShowToggle({
     } finally {
       pendingBookings.delete(pendingKey)
       notifyPending()
+      if (mounted.current) setSending(false)
     }
   }
 

@@ -1,9 +1,30 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import type { Schemas } from '../../api/client.ts'
+import {
+  AppShell,
+  EditRoutingFormPage,
+  NewRoutingFormPage,
+  RequireRoutingForms,
+  RequireSession,
+  SessionLayout,
+} from '../../lazy-pages.tsx'
 import { PATHS, routingFormPath } from '../../paths.ts'
 import { fakeApi, json, later, ME, renderApp, signedInAs } from '../../test/fake-api.tsx'
+import { resolveLazy } from '../../test/resolve-lazy.ts'
+
+// The first test would otherwise spend its first findBy* loading these route chunks.
+beforeAll(() =>
+  resolveLazy(
+    SessionLayout,
+    RequireSession,
+    AppShell,
+    RequireRoutingForms,
+    NewRoutingFormPage,
+    EditRoutingFormPage,
+  ),
+)
 
 type Form = Schemas['RoutingForm']
 type Publication = Schemas['RoutingFormPublication']

@@ -503,6 +503,7 @@ describe('SCIM discovery representations', () => {
     // The modules only the resource test flag reaches; they may import each other.
     const flagged = [
       'scim-discovery',
+      'scim-patch',
       'scim-query',
       'scim-groups',
       'scim-users',
