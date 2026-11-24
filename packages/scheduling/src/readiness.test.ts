@@ -9,7 +9,11 @@ import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { type KyselyPlugin, sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { assertCachedCalendarSync, servedHandle } from './availability.ts'
+import {
+  assertCachedCalendarSync,
+  CACHED_CONFLICT_PROVIDERS,
+  servedHandle,
+} from './availability.ts'
 import { checkedCatalogPage } from './catalog-page.ts'
 import {
   automaticMeet,
@@ -91,6 +95,7 @@ function sourceCopy(
     sql,
     z,
     assertCachedCalendarSync: calendarSyncGuard,
+    CACHED_CONFLICT_PROVIDERS,
     servedHandle,
     checkedCatalogPage,
     automaticMeet,
@@ -1042,13 +1047,16 @@ describe.skipIf(!serverUrl)('booking readiness from current cached facts (real P
       ])
   })
 
-  it('leaves unsupported selected providers unchecked and does not claim conflict protection', async () => {
+  it('reports selected Microsoft calendars with a failed snapshot as unavailable', async () => {
     const s = await personal()
-    await calendar(s.user.id, { provider: 'microsoft' })
+    await calendar(s.user.id, { provider: 'microsoft', syncError: 'provider_unavailable' })
     const result = await selfEvent(s)
-    expect(result).toMatchObject({ summary: 'not_checked', completeness: 'partial' })
-    expect(signal(result, 'selected_calendar_sync').state).toBe('not_checked')
-    expect(JSON.stringify(result.signals)).toContain('unsupported')
+    expect(result.summary).toBe('dependency_unavailable')
+    expect(signal(result, 'conflict_calendar_selection').state).toBe('satisfied')
+    expect(signal(result, 'selected_calendar_sync')).toMatchObject({
+      state: 'dependency_unavailable',
+      reasonCode: 'calendar_attention_required',
+    })
   })
 
   it.each(['google_meet', 'zoom'] as const)(

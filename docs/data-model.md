@@ -47,11 +47,11 @@ bounded result and root identity separately from busy sync; successful busy read
 write failures. No new schema is required. See [CalDAV](caldav.md).
 
 `calendar_busy` stores each event ID with exactly one representation: a nonempty
-`period` (`tstzrange`) for a timed event, or `all_day_start` and `all_day_end` (`date`)
-with an exclusive end for an all-day event. The dates are finite, within years 0001–9999,
-and strictly increasing. Availability expands all-day dates in each evaluated host's
-schedule zone, including collective and round-robin hosts; it does not use the source
-calendar's zone. Timed events retain their absolute instants.
+`period` (`tstzrange`) for an absolute interval, or `all_day_start` and `all_day_end`
+(`date`) with an exclusive end for a date-only event. The dates are finite, within years
+0001–9999, and strictly increasing. Availability expands date-only events in each evaluated
+host's schedule zone, including collective and round-robin hosts. Microsoft Graph supplies
+UTC endpoints for both timed and all-day events, so those use `period`.
 
 Migration `0039_calendar_busy_all_day_dates.sql` invalidates `sync_state` and
 `last_synced_at` for every Google calendar, including unselected calendars. Original
@@ -167,7 +167,7 @@ available in this foundation release.
 - **Public namespaces.** Organization creation and explicit slug updates reject the same
   case-insensitive reserved names as profile handles. Existing rows are not rewritten;
   metadata-only updates remain available for legacy slugs.
-- **Instants** use `timestamptz`. All-day calendar events retain a start date and
+- **Instants** use `timestamptz`. Date-only calendar events retain a start date and
   exclusive end date; availability expands them at local midnights in the evaluated
   host's schedule zone. Wall-clock rules (working hours) retain their IANA time zone.
   Temporal handles DST when these dates and rules become instants.
@@ -348,7 +348,8 @@ refresh token is therefore unnecessary; `offline_access` is intentionally omitte
 Microsoft calendar connections use separate `MICROSOFT_CALENDAR_*` client credentials,
 their own callback and the `calendar_connections.credentials` ciphertext. That flow requests
 `offline_access` with `Calendars.ReadBasic` and requires a refresh token for continued
-calendar-list access.
+calendar access. Selected calendars use complete, bounded Graph calendar-view snapshots
+for `calendar_busy` and coverage metadata in `calendars.sync_state`.
 
 ### `public`
 
@@ -1235,12 +1236,14 @@ account deletion; a subject-keyed JIT check adds its column there in the step th
 - **Mailbox tokens** store only the SHA-256 digest of the emailed token: one per attempt,
   issued only while the attempt awaits its mailbox proof, valid until the earlier of the
   attempt's expiry and 300 seconds, consumed once before expiry. Resending replaces it.
-- **The replay cache** keeps the SHA-256 digest of each consumed SAML request, response and
-  assertion ID per provider and kind, so concurrent callbacks consume it once. Entries are
+- **The replay cache** keeps the SHA-256 digest of each consumed SAML request and assertion
+  ID per provider and kind, plus the response ID when signed. A single transaction inserts
+  all entries, so concurrent callbacks consume them once. Entries are
   written at consumption, immutable and kept until `retain_until`, which the service sets to
   at least `max(acceptanceDeadline + clockSkew, requestExpiresAt)` and which is in the future
   and at most 720 seconds after consumption (the largest value that bound can take under the
-  pinned limits); only the team's deletion removes them earlier.
+  pinned limits); only the team's deletion removes them earlier. Migration 0185 indexes
+  `retain_until` for the internal cleanup, which deletes up to 1,000 expired rows per call.
 - **Browser proofs and delegation bindings** record the membership, the enabled provider,
   the link and its generation, the team's `trustGeneration` (1 before the team has a policy)
   and the domain claim with its generation; all must be current when the row is written,

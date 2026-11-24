@@ -7,13 +7,16 @@ import {
   beginGoogleConnection,
   beginMicrosoftConnection,
   type CalendarDeps,
+  configureCalendar,
   disconnectCalendar,
   finishGoogleConnection,
   finishMicrosoftConnection,
   listCalendarConnections,
   readTokens,
   refreshCalendarList,
+  syncOwnedCalendar,
 } from './index.ts'
+import { calendarDispatchJob, calendarSyncJob } from './jobs.ts'
 import { calendarTestSession, fakeGoogle, fakeMicrosoft, TEST_CALENDAR_KEY } from './testing.ts'
 
 const url = process.env.DATABASE_URL
@@ -107,7 +110,7 @@ describe.skipIf(!url)('separate Microsoft calendar connections (real Postgres)',
       {
         provider: 'microsoft',
         accountEmail: 'outlook@example.com',
-        syncAuthorized: false,
+        syncAuthorized: true,
         calendars: [{ name: 'Outlook calendar', checkConflicts: false }],
       },
     ])
@@ -276,6 +279,114 @@ describe.skipIf(!url)('separate Microsoft calendar connections (real Postgres)',
     })
     await disconnectCalendar({ db }, owner, row.id)
     expect((await listCalendarConnections({ db }, owner)).data).toEqual([])
+  })
+
+  it.each([
+    ['Graph forbidden', 'permissions_missing'],
+    ['revoked refresh grant', 'needs_reauth'],
+    ['insufficient refresh scope', 'permissions_missing'],
+    ['unreadable credentials', 'needs_reauth'],
+  ] as const)('requires reconnection after %s on a selected calendar', async (failure, code) => {
+    const connection = await connect()
+    const calendar = (await listCalendarConnections(deps, owner)).data[0]?.calendars[0]
+    if (!calendar) throw new Error('Expected connected calendar')
+    await configureCalendar(deps, owner, calendar.id, true)
+    microsoft.controls.viewHook = () => Response.json({ value: [] })
+    await syncOwnedCalendar(deps, owner, calendar.id)
+    if (failure === 'Graph forbidden')
+      microsoft.controls.viewHook = () =>
+        Response.json({ error: { code: 'ErrorAccessDenied' } }, { status: 403 })
+    else if (failure === 'unreadable credentials')
+      await db
+        .updateTable('calendar_connections')
+        .set({ credentials: Buffer.from('unreadable synthetic credentials') })
+        .where('id', '=', connection.id)
+        .execute()
+    else {
+      now += 3_600_001
+      if (failure === 'revoked refresh grant') {
+        microsoft.controls.tokenStatus = 400
+        microsoft.controls.token.error = 'invalid_grant'
+      } else microsoft.controls.token.scope = 'openid email'
+    }
+    await expect(syncOwnedCalendar(deps, owner, calendar.id)).rejects.toMatchObject({
+      code: `microsoft_calendar_${code}`,
+    })
+    expect((await listCalendarConnections(deps, owner)).data).toMatchObject([
+      {
+        id: connection.id,
+        status: 'needs_reauth',
+        lastError: code,
+        calendars: [{ id: calendar.id, checkConflicts: true, syncError: code }],
+      },
+    ])
+  })
+
+  it('dispatches selected Microsoft calendars and keeps an omitted selection unavailable', async () => {
+    const connection = await connect()
+    const calendar = (await listCalendarConnections(deps, owner)).data[0]?.calendars[0]
+    if (!calendar) throw new Error('Expected connected calendar')
+    const enqueue = vi.fn(async () => {})
+    const dispatch = calendarDispatchJob({ ...deps, google: undefined }, enqueue)
+    const run = { id: 'synthetic-job', signal: new AbortController().signal, attempt: 1 }
+    await dispatch.handler({}, run)
+    expect(enqueue).not.toHaveBeenCalled()
+    await configureCalendar(deps, owner, calendar.id, true)
+    await dispatch.handler({}, run)
+    expect(enqueue).toHaveBeenCalledExactlyOnceWith(calendar.id)
+    microsoft.controls.viewHook = () => Response.json({ value: [] })
+    await calendarSyncJob(deps).handler({ calendarId: calendar.id }, run)
+    expect((await listCalendarConnections(deps, owner)).data[0]?.calendars[0]?.lastSyncedAt).toBe(
+      new Date(now).toISOString(),
+    )
+    await dispatch.handler({}, run)
+    expect(enqueue).toHaveBeenCalledOnce()
+
+    microsoft.controls.pages = [{ value: [] }]
+    await refreshCalendarList(deps, owner, connection.id)
+    expect((await listCalendarConnections(deps, owner)).data[0]?.calendars).toMatchObject([
+      { id: calendar.id, checkConflicts: true, syncError: 'provider_unavailable' },
+    ])
+  })
+
+  it('defers further Graph requests until a long Retry-After elapses', async () => {
+    await connect()
+    const calendar = (await listCalendarConnections(deps, owner)).data[0]?.calendars[0]
+    if (!calendar) throw new Error('Expected connected calendar')
+    await configureCalendar(deps, owner, calendar.id, true)
+    microsoft.controls.viewHook = () =>
+      Response.json(
+        { error: { code: 'TooManyRequests' } },
+        {
+          status: 429,
+          headers: { 'Retry-After': '120' },
+        },
+      )
+    const sync = () => syncOwnedCalendar(deps, owner, calendar.id)
+    await expect(sync()).rejects.toMatchObject({ code: 'microsoft_calendar_provider_unavailable' })
+    expect((await listCalendarConnections(deps, owner)).data).toMatchObject([
+      {
+        status: 'active',
+        calendars: [{ checkConflicts: true, syncError: 'provider_unavailable' }],
+      },
+    ])
+    const requestCount = microsoft.calls.length
+    const enqueue = vi.fn(async () => {})
+    const dispatch = calendarDispatchJob(deps, enqueue)
+    const run = { id: 'synthetic-job', signal: new AbortController().signal, attempt: 1 }
+    now += 60_000
+    await dispatch.handler({}, run)
+    expect(enqueue).not.toHaveBeenCalled()
+    await calendarSyncJob(deps).handler({ calendarId: calendar.id }, run)
+    await expect(sync()).rejects.toMatchObject({ code: 'microsoft_calendar_provider_unavailable' })
+    expect(microsoft.calls).toHaveLength(requestCount)
+    now += 60_000
+    await dispatch.handler({}, run)
+    expect(enqueue).toHaveBeenCalledExactlyOnceWith(calendar.id)
+    microsoft.controls.viewHook = () => Response.json({ value: [] })
+    await sync()
+    expect(microsoft.calls).toHaveLength(requestCount + 1)
+    expect((await listCalendarConnections(deps, owner)).data[0]?.calendars[0]?.syncError).toBeNull()
   })
 
   it('does not let a slow callback resurrect a disconnected Microsoft connection', async () => {

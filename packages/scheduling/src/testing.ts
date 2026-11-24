@@ -286,15 +286,19 @@ export function createFixtures(db: Db) {
   async function calendarBusy(
     userId: string,
     intervals: [string, string][],
-    { checkConflicts = true }: { checkConflicts?: boolean } = {},
+    {
+      checkConflicts = true,
+      now = Temporal.Now.instant(),
+    }: {
+      checkConflicts?: boolean
+      now?: Temporal.Instant
+    } = {},
   ): Promise<{ calendarId: string; externalEventIds: string[] }> {
     const connection = await db
       .insertInto('calendar_connections')
       .values({
         user_id: userId,
-        // Static mirrored data for provider-independent engine tests. Microsoft is the one
-        // provider whose cache availability does not gate on sync freshness; Google and CalDAV
-        // data additionally need a fresh sync cursor/coverage, tested by calendar sync tests.
+        // Static mirrored data for provider-independent engine tests.
         provider: 'microsoft',
         external_account_id: `acct-${unique()}`,
         credentials: Buffer.from('ciphertext'),
@@ -308,6 +312,13 @@ export function createFixtures(db: Db) {
         external_id: `cal-${unique()}`,
         name: 'Work',
         check_conflicts: checkConflicts,
+        last_synced_at: new Date(now.epochMilliseconds),
+        sync_state: JSON.stringify({
+          version: 2,
+          start: '0001-01-01T00:00:00Z',
+          end: '9999-12-31T23:59:59Z',
+          timeZone: null,
+        }),
       })
       .returning('id')
       .executeTakeFirstOrThrow()

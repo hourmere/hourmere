@@ -1523,7 +1523,7 @@ export interface paths {
         put?: never;
         /**
          * Start a separate Microsoft Calendar connection
-         * @description Requires a same-origin browser session. Requests identity, continuing access and Calendars.ReadBasic to list calendars. This connection does not synchronize busy times or write events.
+         * @description Requires a same-origin browser session. Requests identity, continuing access and Calendars.ReadBasic to list calendars and read busy times on selected calendars. Microsoft calendars are read-only in Hourmere.
          */
         post: operations["authorizeMicrosoftCalendarConnection"];
         delete?: never;
@@ -11849,7 +11849,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description google_calendar_permissions_missing or calendar_events_unreadable */
+            /** @description google_calendar_permissions_missing, microsoft_calendar_permissions_missing, microsoft_calendar_disabled or calendar_events_unreadable */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -11918,7 +11918,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description calendar_sync_disabled or google_calendar_provider_unavailable */
+            /** @description calendar_sync_disabled, google_calendar_provider_unavailable, microsoft_calendar_provider_unavailable, microsoft_calendar_needs_reauth, microsoft_calendar_permissions_missing or microsoft_calendar_disabled */
             409: {
                 headers: {
                     [name: string]: unknown;

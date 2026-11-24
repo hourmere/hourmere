@@ -16,6 +16,9 @@ import {
   requireCalendarSession,
   tokenAad,
 } from './index.ts'
+import { hasMicrosoftCalendarListAccess } from './microsoft.ts'
+import { syncMicrosoftCalendar } from './microsoft-sync.ts'
+import { CalendarProviderError } from './provider.ts'
 
 export const SYNC_MAX_AGE_MS = 10 * 60_000
 // v2 retains all-day dates. Never extend a v1 snapshot of calendar-zone instant ranges.
@@ -363,12 +366,22 @@ export async function configureCalendar(
     const row = await trx
       .selectFrom('calendars as c')
       .innerJoin('calendar_connections as cc', 'cc.id', 'c.connection_id')
-      .select(['c.id', 'cc.scopes', 'cc.status', 'c.access_role', 'c.check_conflicts'])
+      .select([
+        'c.id',
+        'cc.provider',
+        'cc.scopes',
+        'cc.status',
+        'c.access_role',
+        'c.check_conflicts',
+      ])
       .where('c.id', '=', id)
       .where('cc.user_id', '=', principal.user.id)
-      .where('cc.provider', '=', 'google')
+      .where('cc.provider', 'in', ['google', 'microsoft'])
       .executeTakeFirst()
     if (!row) throw new DomainError('not_found', 'calendar_not_found')
+    const microsoft = row.provider === 'microsoft'
+    if (checkConflicts && microsoft && !deps.microsoft)
+      throw new DomainError('conflict', 'microsoft_calendar_disabled')
     if (checkConflicts && !row.check_conflicts) {
       const selected = await trx
         .selectFrom('calendars as c')
@@ -384,14 +397,14 @@ export async function configureCalendar(
           'Select at most 20 conflict calendars.',
         )
     }
-    if (
-      checkConflicts &&
-      (row.status !== 'active' || !GOOGLE_CALENDAR_SYNC_SCOPES.every((s) => row.scopes.includes(s)))
-    )
+    const authorized = microsoft
+      ? hasMicrosoftCalendarListAccess(row.scopes)
+      : GOOGLE_CALENDAR_SYNC_SCOPES.every((s) => row.scopes.includes(s))
+    if (checkConflicts && (row.status !== 'active' || !authorized))
       throw new DomainError(
         'conflict',
-        'google_calendar_permissions_missing',
-        'Reconnect Google Calendar to enable synchronization.',
+        `${row.provider}_calendar_permissions_missing`,
+        `Reconnect ${microsoft ? 'Microsoft' : 'Google'} Calendar to enable synchronization.`,
       )
     if (checkConflicts && row.access_role === 'freeBusyReader')
       throw new DomainError(
@@ -401,7 +414,12 @@ export async function configureCalendar(
       )
     await trx
       .updateTable('calendars')
-      .set({ check_conflicts: checkConflicts })
+      .set({
+        check_conflicts: checkConflicts,
+        ...(microsoft && checkConflicts && !row.check_conflicts
+          ? { last_synced_at: null, sync_state: null, sync_error: null }
+          : {}),
+      })
       .where('id', '=', id)
       .execute()
     if (checkConflicts) await deps.enqueueSync?.(id, trx)
@@ -444,24 +462,27 @@ export async function syncOwnedCalendar(deps: CalendarDeps, principal: Principal
   }
 
   if (!z.uuid().safeParse(id).success) throw new DomainError('not_found', 'calendar_not_found')
-  if (!deps.google) throw new DomainError('conflict', 'google_calendar_disabled')
   const calendar = await deps.db
     .selectFrom('calendars as c')
     .innerJoin('calendar_connections as cc', 'cc.id', 'c.connection_id')
-    .select('c.check_conflicts')
+    .select(['c.check_conflicts', 'cc.provider'])
     .where('c.id', '=', id)
     .where('cc.user_id', '=', principal.user.id)
-    .where('cc.provider', '=', 'google')
+    .where('cc.provider', 'in', ['google', 'microsoft'])
     .executeTakeFirst()
   if (!calendar) throw new DomainError('not_found', 'calendar_not_found')
+  const microsoft = calendar.provider === 'microsoft'
+  if (microsoft ? !deps.microsoft : !deps.google)
+    throw new DomainError('conflict', `${calendar.provider}_calendar_disabled`)
   if (!calendar.check_conflicts) throw new DomainError('conflict', 'calendar_sync_disabled')
   try {
-    await syncGoogleCalendar(deps, id, undefined, principal)
+    if (microsoft) await syncMicrosoftCalendar(deps, id, undefined, principal)
+    else await syncGoogleCalendar(deps, id, undefined, principal)
   } catch (error) {
-    if (error instanceof GoogleCalendarError)
+    if (error instanceof CalendarProviderError)
       throw new DomainError(
         'conflict',
-        `google_calendar_${error.code}`,
+        `${calendar.provider}_calendar_${error.code}`,
         'Calendar synchronization could not complete. Reconnect if access has expired, or try again shortly.',
         { cause: error },
       )

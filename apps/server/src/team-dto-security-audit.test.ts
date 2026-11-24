@@ -318,7 +318,7 @@ describe.skipIf(!adminUrl)('team launch DTO and selector security audit', () => 
       })
       .where('id', '=', bookingId)
       .execute()
-    await f.calendarBusy(member.id, [['2026-11-05T10:00:00Z', '2026-11-05T11:00:00Z']])
+    await f.calendarBusy(member.id, [['2026-11-05T10:00:00Z', '2026-11-05T11:00:00Z']], { now })
     await db.updateTable('calendars').set({ name: privateMarker }).execute()
     const webhookIds: string[] = []
     for (const [organizationId, booking] of [

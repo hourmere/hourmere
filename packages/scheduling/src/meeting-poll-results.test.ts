@@ -1753,7 +1753,7 @@ describe.skipIf(!serverUrl)('meeting poll results and voter removal', () => {
     const candidate = initial.candidates[0]
     if (!candidate) expect.unreachable('the first candidate is missing')
     const { startAt, endAt } = candidate
-    await p.fixtures.calendarBusy(p.member.id, [[startAt, endAt]])
+    await p.fixtures.calendarBusy(p.member.id, [[startAt, endAt]], { now: await databaseNow(p.db) })
     const busy = await results(REAL, p)
     expect(busy.candidates).toEqual([
       { ...initial.candidates[0], availability: 'unavailable' },

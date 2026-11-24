@@ -36,7 +36,9 @@ import { test as base, expect } from '../fixtures.ts'
 import { listenOwned, type OwnedListener } from '../listeners.ts'
 import { startKeycloak } from './keycloak.ts'
 
-type Keycloak = Awaited<ReturnType<typeof startKeycloak>>
+type KeycloakContainer = Awaited<ReturnType<typeof startKeycloak>>
+type KeycloakRealm = Awaited<ReturnType<KeycloakContainer['createRealm']>>
+type Keycloak = Omit<KeycloakRealm, 'close'> & { stop: () => Promise<void> }
 type TokenExchange = 'issued' | 'invalid_code' | 'failed'
 type Admission = 'invitation_only' | 'jit'
 
@@ -351,13 +353,17 @@ async function guardBrowser(
 
 async function releaseFixture(
   authPool: ReturnType<typeof createAuthPool> | undefined,
-  idp: Keycloak | undefined,
+  closeIdp: (() => Promise<void>) | undefined,
   drop: () => Promise<void>,
 ) {
-  const closed = await Promise.allSettled([authPool?.end(), idp?.close()])
+  const closed = await Promise.allSettled([authPool?.end(), closeIdp?.()])
   await drop()
   const failures = closed.flatMap((result) => (result.status === 'rejected' ? [result.reason] : []))
-  if (failures.length) throw new AggregateError(failures, 'Keycloak fixture cleanup failed')
+  const idpResult = closed[1]
+  if (failures.length)
+    throw new AggregateError(failures, 'Keycloak fixture cleanup failed', {
+      cause: idpResult.status === 'rejected' ? idpResult.reason : undefined,
+    })
 }
 
 /** Say where a sign-in stopped without printing query strings, cookies or form values. */
@@ -383,26 +389,57 @@ export async function describeStrandedPage(page: Page, app: { url: string }) {
   return `${site} ${url.pathname}; heading: ${clip(heading)}; feedback: ${clip(feedback)}; password field: ${form}`
 }
 
-export const test = base.extend<{
-  keycloak: KeycloakFixture
-  oidcEnabled: boolean
-  admission: Admission
-  signupMode: SignupPolicy['mode']
-  enforced: boolean
-  brokenProvider: boolean
-  keyRotation: boolean
-}>({
+export const test = base.extend<
+  {
+    keycloak: KeycloakFixture
+    oidcEnabled: boolean
+    admission: Admission
+    signupMode: SignupPolicy['mode']
+    enforced: boolean
+    brokenProvider: boolean
+    keyRotation: boolean
+    dedicatedKeycloak: boolean
+  },
+  { getWorkerKeycloak: () => Promise<KeycloakContainer> }
+>({
   oidcEnabled: [true, { option: true }],
   admission: ['invitation_only', { option: true }],
   signupMode: ['closed', { option: true }],
   enforced: [false, { option: true }],
   brokenProvider: [false, { option: true }],
   keyRotation: [false, { option: true }],
+  dedicatedKeycloak: [false, { option: true }],
+  getWorkerKeycloak: [
+    // biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructuring fixture dependencies.
+    async ({}, use) => {
+      // Leave workers that only run disruptive cases free of a second container.
+      let container: Promise<KeycloakContainer> | undefined
+      try {
+        await use(() => (container ??= startKeycloak()))
+      } finally {
+        // Startup already cleans up on failure and reports it to the requesting test.
+        const started = await container?.catch(() => undefined)
+        await started?.close()
+      }
+    },
+    { scope: 'worker' },
+  ],
   // Chrome uses an isolated context and the route above restricts its destinations.
   ignoreHTTPSErrors: true,
   keycloak: [
     async (
-      { context, page, oidcEnabled, admission, signupMode, enforced, brokenProvider, keyRotation },
+      {
+        context,
+        page,
+        oidcEnabled,
+        admission,
+        signupMode,
+        enforced,
+        brokenProvider,
+        keyRotation,
+        dedicatedKeycloak,
+        getWorkerKeycloak,
+      },
       use,
       testInfo,
     ) => {
@@ -410,7 +447,8 @@ export const test = base.extend<{
       if (!bootstrap) throw new Error('Keycloak tests require HOURMERE_E2E_BOOTSTRAP_URL')
       const owned = await createTestDatabase(bootstrap, undefined, { tag: 'keycloak' })
       let listener: OwnedListener | undefined
-      let idp: Keycloak | undefined
+      let dedicated: KeycloakContainer | undefined
+      let closeRealm: (() => Promise<void>) | undefined
       let authPool: ReturnType<typeof createAuthPool> | undefined
       const previousCAs = getCACertificates('default')
       try {
@@ -420,10 +458,23 @@ export const test = base.extend<{
         const { providerId } = await db
           .selectNoFrom(sql<string>`uuidv7()`.as('providerId'))
           .executeTakeFirstOrThrow()
-        idp = await startKeycloak(
+        if (dedicatedKeycloak || keyRotation) dedicated = await startKeycloak()
+        const container = dedicated ?? (await getWorkerKeycloak())
+        const { close, rotateSigningKey, ...realm } = await container.createRealm(
           new URL(OIDC_CALLBACK_PATH.replace(':providerId', providerId), url).href,
-          { keyRotation },
         )
+        closeRealm = close
+        const idp: Keycloak = {
+          ...realm,
+          async stop() {
+            if (!dedicated) throw new Error('Stopping Keycloak requires a dedicated container')
+            await dedicated.stop()
+          },
+          async rotateSigningKey() {
+            if (!keyRotation) throw new Error('This fixture did not enable Keycloak key rotation')
+            await rotateSigningKey()
+          },
+        }
         setDefaultCACertificates([...previousCAs, idp.certificate])
         const configurationKey = randomBytes(32)
         const seeded = await seedSignIn(db, providerId, idp, configurationKey, {
@@ -595,7 +646,9 @@ export const test = base.extend<{
           await listener?.close()
         } finally {
           setDefaultCACertificates(previousCAs)
-          await releaseFixture(authPool, idp, owned.drop)
+          // An outage test may have stopped its IdP. Removing its dedicated container also
+          // discards its realm. A worker's container lives on after its test's realm is deleted.
+          await releaseFixture(authPool, dedicated?.close ?? closeRealm, owned.drop)
         }
       }
     },

@@ -323,7 +323,7 @@ settings; calendar access still requires test users while the project is in Test
 Microsoft sign-in requires an email claim the auth library treats as verified. In Entra Token
 configuration add optional ID token claims `verified_primary_email` and
 `verified_secondary_email`; without verified email, the user gets `EMAIL_NOT_VERIFIED` and
-must use an email link. Microsoft calendar synchronization is not implemented yet.
+must use an email link.
 The sign-in button reads **Sign in with Microsoft**.
 
 Microsoft sign-in requests only `openid`, `profile` and `email`. It establishes an Hourmere
@@ -346,7 +346,7 @@ together or leave them unset. See [Google Calendar](/docs/google-calendar).
 | `GOOGLE_CALENDAR_CLIENT_ID` | Unset | Web client for `{PUBLIC_URL}/api/calendar/google/callback`. |
 | `GOOGLE_CALENDAR_CLIENT_SECRET` | Unset | Matching OAuth client secret. |
 | `MICROSOFT_CALENDAR_CLIENT_ID` | Unset | Separate Entra Web client for `{PUBLIC_URL}/api/calendar/microsoft/callback`; supports organizational and personal accounts. |
-| `MICROSOFT_CALENDAR_CLIENT_SECRET` | Unset | Matching Entra secret value. Requests delegated `Calendars.ReadBasic` with identity and offline access; lists calendars only, without busy-time synchronization or event writes. |
+| `MICROSOFT_CALENDAR_CLIENT_SECRET` | Unset | Matching Entra secret value. Requests delegated `Calendars.ReadBasic` with identity and offline access for calendar discovery and busy-time conflict checks. |
 | `CALENDAR_ENCRYPTION_KEY` | Unset | Exactly 32 random bytes in base64 (`openssl rand -base64 32`), independent of authentication and webhook keys. Startup rejects reused keys. Back up securely; losing/changing it makes saved tokens unreadable. |
 
 Each OAuth calendar provider requires its client ID, secret and `CALENDAR_ENCRYPTION_KEY` together. Calendar

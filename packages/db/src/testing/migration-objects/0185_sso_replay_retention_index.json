@@ -1,0 +1,6 @@
+{
+  "migration": "0185_sso_replay_retention_index.sql",
+  "objects": {
+    "index public.sso_replay_cache.sso_replay_cache_retain_until_idx": "CREATE INDEX sso_replay_cache_retain_until_idx ON public.sso_replay_cache USING btree (retain_until)"
+  }
+}

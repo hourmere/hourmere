@@ -552,10 +552,14 @@ describe.skipIf(!serverUrl)('bookings', () => {
       const s = await setup({ slotStepMinutes: 15 })
       const { booking, manageToken } = await s.book('2026-11-02T10:00:00Z')
       // Calendar sync mirrored the booking into the host's calendar; another event is real.
-      const { calendarId, externalEventIds } = await f.calendarBusy(s.userId, [
-        ['2026-11-02T10:00:00Z', '2026-11-02T10:30:00Z'],
-        ['2026-11-02T11:00:00Z', '2026-11-02T11:30:00Z'],
-      ])
+      const { calendarId, externalEventIds } = await f.calendarBusy(
+        s.userId,
+        [
+          ['2026-11-02T10:00:00Z', '2026-11-02T10:30:00Z'],
+          ['2026-11-02T11:00:00Z', '2026-11-02T11:30:00Z'],
+        ],
+        { now: NOW },
+      )
       await db
         .insertInto('booking_calendar_events')
         .values({
