@@ -257,7 +257,7 @@ describe.skipIf(!url)('separate Microsoft calendar connections (real Postgres)',
       const refresh = microsoft.calls.filter((c) => c.url.pathname.endsWith('/token')).at(-1)
       const body = new URLSearchParams(String(refresh?.init.body))
       expect(body.get('grant_type')).toBe('refresh_token')
-      expect(body.get('scope')).toBe('openid email Calendars.ReadBasic')
+      expect(body.get('scope')).toBe('openid email Calendars.ReadBasic offline_access')
     },
   )
 

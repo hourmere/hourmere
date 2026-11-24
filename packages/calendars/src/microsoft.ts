@@ -391,7 +391,9 @@ export function createMicrosoftCalendarClient(
         {
           grant_type: 'refresh_token',
           refresh_token: refreshToken,
-          scope: grantedScopes.join(' '),
+          // Microsoft does not echo offline_access in the granted scope, but a refresh without it
+          // may return no new refresh token. Keep asking for it within the existing grant.
+          scope: [...new Set([...grantedScopes, 'offline_access'])].join(' '),
         },
         signal,
       )
