@@ -39,6 +39,8 @@ const calendarMessages = {
     '日历连接是可选的。不连接日历也能使用基础预约。设置活动类型，即可开始接受预约。',
   'Set up event types': '设置活动类型',
   'Busy times synchronized for this calendar.': '此日历的忙碌时段已同步。',
+  'Microsoft will ask for your account identity, continuing access and permission to read basic calendar details. Hourmere lists your calendars and checks busy times on the calendars you select. Booking event writes are unavailable. Connecting is separate from signing in.':
+    'Microsoft 会请求你的账户身份、持续访问权限，以及读取基本日历信息的权限。Hourmere 会列出你的日历，并检查所选日历的忙碌时段。暂不支持写入预约事件。连接日历与登录是分开的操作。',
   'Disconnect deletes stored credentials and local calendar data, but leaves existing event copies in Google Calendar and does not revoke your Google grant. You can revoke access in your Google Account:':
     '“断开连接”可删除已存储的凭证和本地日历数据，但会保留 Google 日历中的现有事件副本，也不会撤销 Google 授权。你可以在 Google 账号中撤销授权：',
 } as const
@@ -63,7 +65,7 @@ describe('calendar catalogue preservation', () => {
 describe('Chinese calendar account summaries', () => {
   it.each([
     ['Google list access', 'google', false, true, '尚未启用，仅可查看日历列表。'],
-    ['Microsoft list access', 'microsoft', false, true, '暂不支持，仅可查看日历列表。'],
+    ['Microsoft conflict checks', 'microsoft', true, false, '尚未选择用于冲突检查的日历。'],
     ['disabled Google provider', 'google', true, false, '此实例暂不可用。'],
     ['no conflict calendars selected', 'google', true, true, '尚未选择用于冲突检查的日历。'],
   ] as const)(

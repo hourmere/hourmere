@@ -257,12 +257,9 @@ order. Personal owners and current team owners/admins may call it with a `full` 
 `mcp:tools` OAuth grant. `read`/`bookings` keys get `insufficient_scope`; other unauthorized
 callers get the same `event_type_not_found` as an unknown event.
 
-`calendar_sync_unavailable` means selected Google/CalDAV cached snapshots cannot establish
-fresh, complete availability; it does not mean a known busy event or missing setup. The tool
-does not refresh providers. CalDAV busy sync and write-back exist as internal services but
-are not exposed through user connection flows yet. Microsoft connections currently list
-calendars only: there is no busy sync or sync-freshness check. An available explanation does
-not establish that an Outlook calendar is free.
+`calendar_sync_unavailable` means a selected Google, Microsoft or CalDAV conflict calendar
+lacks a fresh, complete snapshot for the requested time range. Treat the affected
+availability as unknown. The tool reads cached snapshots, and scheduled syncs refresh them.
 
 This diagnoses new slots, not invitee permission to change an existing booking. Change
 deadlines are separate action errors. Busy intervals omit event titles, attendees, locations
@@ -273,8 +270,8 @@ reason-by-reason actions, DST behavior, privacy and provider limitations.
 `structuredContent` 与 REST 一致，原因按优先级排列，可预约时原因为空。
 仅所有者/团队管理员使用 `full` 密钥或有权限的 MCP OAuth 可调用；低权限密钥返回
 `insufficient_scope`，其他越权与不存在均返回 `event_type_not_found`。
-Google/内部 CalDAV 快照过期或不完整返回 `calendar_sync_unavailable`，不能说成缺少配置。
-CalDAV 同步及写回尚未开放连接入口；Microsoft 只有日历列表，没有忙碌同步或新鲜度检查。
+Google、Microsoft 或 CalDAV 冲突日历的快照过期或不完整时返回
+`calendar_sync_unavailable`，相关时段的可用性未知。
 此工具不刷新日历、不检查已有预约的改期截止时间，也不返回事件详情。
 
 ## Configure notice, booking window and buffers

@@ -1474,8 +1474,6 @@ export const admin = {
   'Meeting link': '会议链接',
   'Microsoft Calendar is not configured on this Hourmere instance. Contact its administrator to enable it.':
     '此 Hourmere 实例尚未配置 Microsoft 日历。请联系管理员启用。',
-  'Microsoft will ask for your account identity, continuing access and permission to read basic calendar details. This connection lists your calendars; busy-time synchronization and booking event writes are not yet available. Connecting is separate from signing in.':
-    'Microsoft 将请求你的账号标识、持续访问权限以及读取基本日历信息的权限。此连接用于列出日历；忙闲同步和写入预约事件尚不可用。连接日历与登录相互独立。',
   'Minimum notice': '最短提前预约时间',
   Mon: '周一',
   Monday: '星期一',
@@ -1638,8 +1636,6 @@ export const admin = {
     '此连接尝试被中断。请从 AI 应用重新开始。',
   'This connection has calendar-list access only. Enable synchronization to use busy times and write booking events.':
     '此连接只有日历列表访问权限。启用同步后，方可检查忙闲时间和写入预约事件。',
-  'This connection lists calendars only. Busy-time synchronization and booking writes are not yet available.':
-    '此连接仅用于列出日历。忙闲同步和写入预约事件暂不可用。',
   'This email address already has an account. {0}': '此邮箱已有账号。{0}',
   'This event type does not exist, or it was deleted.': '此活动类型不存在，或已被删除。',
   'This handle is already taken. Choose another one.': '此用户名已被占用。请选择另一个。',
@@ -3058,4 +3054,7 @@ export const admin = {
   // Single sign-on turned off by the operator
   'Single sign-on is turned off on this instance. You can review and remove existing settings, but nothing new can be added.':
     '此实例已关闭单点登录。你可以查看和移除已有设置，但无法新增。',
+  // Microsoft Calendar conflict checks
+  'Microsoft will ask for your account identity, continuing access and permission to read basic calendar details. Hourmere lists your calendars and checks busy times on the calendars you select. Booking event writes are unavailable. Connecting is separate from signing in.':
+    'Microsoft 会请求你的账户身份、持续访问权限，以及读取基本日历信息的权限。Hourmere 会列出你的日历，并检查所选日历的忙碌时段。暂不支持写入预约事件。连接日历与登录是分开的操作。',
 } as const

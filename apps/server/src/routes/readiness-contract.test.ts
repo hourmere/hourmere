@@ -294,21 +294,14 @@ describe.skipIf(!process.env.DATABASE_URL)('readiness strict wire projection', (
   })
 
   it.each(['not_checked', 'check_failed'] as const)(
-    'preserves required %s checks and partial completeness over HTTP',
+    'preserves %s signals and their completeness over HTTP',
     async (state) => {
       const f = await fixture()
-      if (state === 'not_checked')
-        await t.db
-          .updateTable('calendar_connections')
-          .set({ provider: 'microsoft' })
-          .where('id', '=', f.connectionId)
-          .execute()
-      else
-        await t.db
-          .updateTable('calendars')
-          .set({ check_conflicts: false })
-          .where('id', '=', f.calendarId)
-          .execute()
+      await t.db
+        .updateTable('calendars')
+        .set({ check_conflicts: false })
+        .where('id', '=', f.calendarId)
+        .execute()
       const db =
         state === 'check_failed'
           ? t.db.withPlugin({
@@ -328,17 +321,44 @@ describe.skipIf(!process.env.DATABASE_URL)('readiness strict wire projection', (
       })
       expect(response.status).toBe(200)
       const body = selfContract.parse(await response.json())
-      expect(body.member.summary).toBe(state)
-      expect(body.member.completeness).toBe('partial')
+      expect(body.member.summary).toBe(state === 'not_checked' ? 'checks_passed' : state)
+      expect(body.member.completeness).toBe(state === 'not_checked' ? 'complete' : 'partial')
       const check = body.member.signals.find(
-        (item) =>
-          item.id === (state === 'not_checked' ? 'selected_calendar_sync' : 'default_schedule'),
+        (item) => item.id === (state === 'not_checked' ? 'slot_observation' : 'default_schedule'),
       )
       expect(check?.state).toBe(state)
       if (state === 'not_checked') expect(check?.checkedAt).toBeNull()
       else expect(check?.checkedAt).toEqual(expect.any(String))
     },
   )
+
+  it('reports a failed selected Microsoft snapshot as an unavailable dependency', async () => {
+    const f = await fixture()
+    await t.db
+      .updateTable('calendar_connections')
+      .set({ provider: 'microsoft' })
+      .where('id', '=', f.connectionId)
+      .execute()
+    await t.db
+      .updateTable('calendars')
+      .set({ sync_error: 'provider_unavailable' })
+      .where('id', '=', f.calendarId)
+      .execute()
+    const response = await t.as(f.own).get(selfPath)
+    expect(response.status).toBe(200)
+    const { member } = selfContract.parse(response.body)
+    expect(member.summary).toBe('dependency_unavailable')
+    expect(member.signals).toContainEqual(
+      expect.objectContaining({ id: 'conflict_calendar_selection', state: 'satisfied' }),
+    )
+    expect(member.signals).toContainEqual(
+      expect.objectContaining({
+        id: 'selected_calendar_sync',
+        state: 'dependency_unavailable',
+        reasonCode: 'calendar_attention_required',
+      }),
+    )
+  })
 
   it.each(['self', 'self_calendar', 'team'] as const)(
     'detects an added private %s field in a source-copy response',

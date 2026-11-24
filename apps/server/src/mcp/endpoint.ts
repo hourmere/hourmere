@@ -169,7 +169,8 @@ const BEARER = /^Bearer[ \t]+\S/i
  * pages on any site could post to (CSRF). Per-key rate limits apply as for REST: resolving
  * the key counts the request.
  */
-const oauthLimits = createRateLimiter({ limit: 120, windowSeconds: 60 })
+/** OAuth MCP calls per consent and minute. Exported so tests can fill a window directly. */
+export const oauthLimits = createRateLimiter({ limit: 120, windowSeconds: 60 })
 
 function requireApiKey(
   resolveCaller: CallerResolver,

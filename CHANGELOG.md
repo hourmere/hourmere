@@ -182,8 +182,8 @@ must approve publication through the [release workflow](https://github.com/hourm
   unverified. Email abuse budgets apply per instance/database; separate instances do not
   share limits. Per-IP request limits remain in process memory.
 - [Microsoft Calendar](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/microsoft-calendar.md)
-  lists calendars only, without busy-time synchronization or event writes. Microsoft sign-in
-  and calendar connections have not had real-account acceptance.
+  uses bounded busy-time snapshots. Incremental sync and event writes are pending. Microsoft
+  sign-in and calendar connections have not had real-account acceptance.
 - [Automatic Zoom](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/automatic-zoom.md)
   supports personal event types and individual team event types with one actual host;
   collective and round-robin event types are unsupported.

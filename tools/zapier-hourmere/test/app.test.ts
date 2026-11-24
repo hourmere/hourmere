@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto'
 import { createRequire } from 'node:module'
 import nock from 'nock'
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest'
 
 const require = createRequire(import.meta.url)
 const App = require(process.env.HOURMERE_ZAPIER_TEST_APP ?? '../index.js')
@@ -559,6 +559,12 @@ describe('Hourmere REST hooks', () => {
     'invalid JSON',
     'wrong event',
   ])('drops %s deliveries with a masked specific reason and no cache claim', async (failure) => {
+    // The clock stands still: a 'future' timestamp is one second past the tolerance only
+    // until the next wall-clock second, so a later check would see it as within it.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    onTestFinished(() => {
+      vi.useRealTimers()
+    })
     const hook = delivery(
       failure === 'wrong event' ? 'booking.cancelled' : 'booking.created',
       failure === 'stale' ? -3601 : failure === 'future' ? 3601 : 0,
