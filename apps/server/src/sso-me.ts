@@ -5,6 +5,7 @@ import { sql } from 'kysely'
 import { ssoRetained } from './sso.ts'
 import { bindingCookieName, browserBindingDigest } from './sso-mailbox-proof.ts'
 import { LINK_SSO_ACCOUNT, OIDC_COMPLETE_LINK } from './sso-oidc-link.ts'
+import { samlCompleteLinkOperation, samlLinkOperation } from './sso-saml-state.ts'
 import { liveBrowserProofs, type SsoTeamReadDeps, type TeamReadPolicy } from './sso-team-reads.ts'
 
 export const MeSso = z
@@ -25,7 +26,12 @@ export const MeSso = z
       }),
     ),
     links: z.array(
-      z.object({ id: z.uuid(), providerId: z.uuid(), generation: z.int().positive() }),
+      z.object({
+        id: z.uuid(),
+        providerId: z.uuid(),
+        generation: z.int().positive(),
+        protocol: z.literal('saml').optional(),
+      }),
     ),
     proofs: z.array(z.object({ providerId: z.uuid(), expiresAt: z.iso.datetime() })),
   })
@@ -74,8 +80,9 @@ export async function readSsoMe(
         SELECT json_build_object('id', p.id, 'revision', p.revision, 'displayName', p.display_name)
         FROM sso_providers p
         WHERE p.organization_id = c.organization_id
-          AND p.protocol = 'oidc' AND p.enabled AND p.retired_at IS NULL
-          AND ${capabilities.ssoOidcEnabled}::boolean
+          AND p.enabled AND p.retired_at IS NULL
+          AND ((p.protocol = 'oidc' AND ${capabilities.ssoOidcEnabled}::boolean)
+            OR (p.protocol = 'saml' AND ${capabilities.ssoSamlEnabled}::boolean))
         ORDER BY p.id
       )) AS providers,
       to_json(ARRAY(
@@ -83,7 +90,7 @@ export async function readSsoMe(
           'id', a.id, 'providerId', a.provider_id,
           'phase', CASE
             WHEN a.kind = 'fresh_proof' THEN 'fresh_proof'
-            WHEN a.operation = ${OIDC_COMPLETE_LINK} THEN 'completion'
+            WHEN a.operation IN (${OIDC_COMPLETE_LINK}, ${samlCompleteLinkOperation}) THEN 'completion'
             ELSE 'authorization'
           END,
           'mailboxProven', a.kind = 'link' OR a.mailbox_proven_at IS NOT NULL,
@@ -94,22 +101,30 @@ export async function readSsoMe(
         WHERE a.organization_id = c.organization_id AND a.user_id = c.user_id
           AND a.session_id = c.session_id AND a.browser_binding_digest = ${binding}
           AND a.consumed_at IS NULL AND a.expires_at > c.observed_at
-          AND ${capabilities.ssoOidcEnabled}::boolean
           AND (a.mailbox_proven_at IS NULL OR a.mailbox_proof_expires_at > c.observed_at)
           AND (
-            (a.kind = 'fresh_proof' AND a.operation = ${LINK_SSO_ACCOUNT})
-            OR (a.kind = 'link' AND a.operation IN (${LINK_SSO_ACCOUNT}, ${OIDC_COMPLETE_LINK})
-              AND p.organization_id = c.organization_id AND p.protocol = 'oidc'
-              AND p.enabled AND p.retired_at IS NULL AND p.revision = a.provider_revision)
+            (a.kind = 'fresh_proof' AND (
+              (a.operation = ${LINK_SSO_ACCOUNT} AND ${capabilities.ssoOidcEnabled}::boolean)
+              OR (a.operation = ${samlLinkOperation} AND ${capabilities.ssoSamlEnabled}::boolean)
+            )) OR (a.kind = 'link' AND p.organization_id = c.organization_id
+              AND p.enabled AND p.retired_at IS NULL AND p.revision = a.provider_revision
+              AND (
+                (p.protocol = 'oidc' AND ${capabilities.ssoOidcEnabled}::boolean
+                  AND a.operation IN (${LINK_SSO_ACCOUNT}, ${OIDC_COMPLETE_LINK}))
+                OR (p.protocol = 'saml' AND ${capabilities.ssoSamlEnabled}::boolean
+                  AND a.operation IN (${samlLinkOperation}, ${samlCompleteLinkOperation}))
+              ))
           )
         ORDER BY a.id
       )) AS attempts,
       to_json(ARRAY(
-        SELECT json_build_object('id', l.id, 'providerId', l.provider_id, 'generation', l.generation)
+        SELECT jsonb_build_object('id', l.id, 'providerId', l.provider_id, 'generation', l.generation)
+          || CASE WHEN p.protocol = 'saml' THEN '{"protocol":"saml"}'::jsonb ELSE '{}'::jsonb END
         FROM sso_identity_links l
         JOIN sso_providers p ON p.id = l.provider_id AND p.organization_id = l.organization_id
         WHERE l.user_id = c.user_id AND l.organization_id = c.organization_id
-          AND l.retired_at IS NULL AND p.protocol = 'oidc' AND p.retired_at IS NULL
+          AND l.retired_at IS NULL AND p.retired_at IS NULL
+          AND (p.protocol = 'oidc' OR (p.protocol = 'saml' AND ${capabilities.ssoSamlEnabled}::boolean))
         ORDER BY l.id
       )) AS links,
       to_json(ARRAY(

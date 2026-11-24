@@ -135,6 +135,18 @@ describe('SAML IdP metadata configuration', () => {
     expect(transport).toHaveBeenCalledTimes(4)
   })
 
+  it('imports metadata with comments around the entity and inside certificate text', async () => {
+    const certificate = `${original.base64.slice(0, 12)}<!-- signing key -->${original.base64.slice(12)}`
+    const metadataDocument = `${idpMetadata(keyDescriptor(certificate)).replace(
+      '?>',
+      '?>\n<!-- Example parameters: a=1&b=2 -->',
+    )}\n<!-- End of metadata -->`
+    await expect(resolveSamlProviderInput({ metadataDocument })).resolves.toEqual({
+      entityId,
+      configuration: { ssoEndpoint: ssoUrl, signingCertificates: [original.base64] },
+    })
+  })
+
   it('refuses DTD markup, undeclared entities and XML past the byte limit', async () => {
     const document = idpMetadata(keyDescriptor(original.base64))
     const plain = document.slice(document.indexOf('<md:EntityDescriptor'))

@@ -22,6 +22,7 @@ import { signInPath } from '../../next-path.ts'
 import { PATHS } from '../../paths.ts'
 import {
   completeOidcAttempt,
+  completeSamlMailboxAttempt,
   mailboxToken,
   oidcAttemptId,
   openMailboxProofChannel,
@@ -36,7 +37,7 @@ const rateLimited = 'Too many requests. Wait a minute and try again.'
 const pasteInstruction =
   'Copy the link from your email and paste it into the tab where you requested verification.'
 
-type MailboxEntry = { attemptId: string; token: string | null }
+type MailboxEntry = { attemptId: string; token: string | null; saml: boolean }
 
 function parseEntry(hash: string): MailboxEntry | null {
   const params = new URLSearchParams(hash.slice(1))
@@ -44,14 +45,15 @@ function parseEntry(hash: string): MailboxEntry | null {
   const tokens = params.getAll('token')
   const attemptId = attempts.length === 1 ? oidcAttemptId(attempts[0]) : null
   const token = tokens[0] ?? null
+  const saml = params.get('saml') === '1' && token === null
   if (
     !attemptId ||
-    params.size !== 1 + tokens.length ||
+    params.size !== 1 + tokens.length + Number(saml) ||
     tokens.length > 1 ||
     (token !== null && !/^[A-Za-z0-9_-]{43}$/.test(token))
   )
     return null
-  return { attemptId, token }
+  return { attemptId, token, saml }
 }
 
 /** The callback link starts a sign-in ceremony. The emailed link confirms possession only. */
@@ -64,8 +66,11 @@ export function MailboxProofPage() {
   const read = useRef(hash)
   const heading = useRef<HTMLHeadingElement>(null)
   const oidcAvailable = instance.status === 'ready' && instance.data.ssoOidcEnabled === true
+  const samlAvailable = instance.status === 'ready' && instance.data.ssoSamlEnabled === true
   const confirmationAvailable =
-    oidcAvailable ||
+    (visit.entry?.saml
+      ? samlAvailable
+      : oidcAvailable || (samlAvailable && !!visit.entry?.token)) ||
     (instance.status === 'ready' &&
       instance.data.scimResourcesEnabled === true &&
       !!visit.entry?.token)
@@ -115,7 +120,7 @@ export function MailboxProofPage() {
 type MailboxPhase = 'start' | 'queued' | 'proven' | 'finished' | 'redirecting'
 
 function MailboxAttempt({
-  entry: { attemptId, token },
+  entry: { attemptId, token, saml },
   heading,
 }: {
   entry: MailboxEntry
@@ -215,7 +220,8 @@ function MailboxAttempt({
 
   function finishSignIn() {
     void run(async (signal) => {
-      const result = await completeOidcAttempt(attemptId, signal).catch((cause: unknown) => {
+      const complete = saml ? completeSamlMailboxAttempt : completeOidcAttempt
+      const result = await complete(attemptId, signal).catch((cause: unknown) => {
         if (cause instanceof RequestError && cause.status === 429) throw cause
         return null
       })

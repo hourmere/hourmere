@@ -8,6 +8,9 @@ export const samlStartOperation = 'samlSignIn'
 export const samlCompleteOperation = 'samlCompleteSignIn'
 export const samlTestOperation = 'samlTestProvider'
 export const samlCompleteTestOperation = 'samlCompleteProviderTest'
+export const samlLinkOperation = 'samlLinkAccount'
+export const samlCompleteLinkOperation = 'samlCompleteLink'
+export const samlMailboxOperation = 'samlCompleteChangedMailbox'
 export const samlId = z.uuidv7()
 
 export const samlTestBinding = z.strictObject({
@@ -17,6 +20,7 @@ export const samlTestBinding = z.strictObject({
 export const samlProviderConfig = z.strictObject({
   ssoEndpoint: z.string(),
   signingCertificates: z.array(z.string()).min(1).max(4).optional(),
+  subjectAttribute: z.string().min(1).max(512).optional(),
 })
 
 export function samlServiceProviderUrls(publicUrl: string, providerId: string) {
@@ -41,7 +45,7 @@ export function samlRelayAttemptId(relayState: string) {
   if (samlId.safeParse(id).success) return id
 }
 
-type StateKind = 'return' | 'result' | 'test'
+type StateKind = 'return' | 'result' | 'test' | 'link' | 'link-result' | 'mailbox'
 
 export function samlStateCookie(publicUrl: string, kind: StateKind, id: string) {
   const secure = new URL(publicUrl).protocol === 'https:'

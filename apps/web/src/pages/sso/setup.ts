@@ -4,6 +4,13 @@ import type { MessageKey } from '../../i18n/translate.ts'
 export type SsoProvider = Schemas['SsoProviderPage']['data'][number]
 export type SsoDomain = SsoProvider['domains'][number]
 
+export function oidcStepUpProviders(sso: Schemas['MeSso'] | undefined) {
+  const linked = new Set(
+    sso?.links.filter(({ protocol }) => protocol !== 'saml').map(({ providerId }) => providerId),
+  )
+  return sso?.providers.filter(({ id }) => linked.has(id)) ?? []
+}
+
 export async function loadSsoProviders(organizationId: string, signal: AbortSignal) {
   const providers: SsoProvider[] = []
   let cursor: string | null = null

@@ -1,7 +1,7 @@
 import { type SsoRequest, sendSsoRequest, ssoUrl } from '@hourmere/outbound/sso'
 import { DomainError } from '@hourmere/scheduling'
 import { z } from 'zod'
-import { type samlProviderConfig, samlServiceProviderUrls } from './sso-saml-state.ts'
+import { samlProviderConfig, samlServiceProviderUrls } from './sso-saml-state.ts'
 import {
   parseSamlXml,
   samlMaximumResponseBytes,
@@ -54,6 +54,9 @@ export const samlProviderInput = z
       .meta({ writeOnly: true })
       .optional(),
     wantAssertionsSigned: z.literal(true).optional(),
+    subjectAttribute: samlProviderConfig.shape.subjectAttribute.meta({
+      description: 'Exact name of an immutable IdP attribute. Choose when creating the provider.',
+    }),
   })
   .refine(({ metadataUrl, metadataDocument }) => !metadataUrl || !metadataDocument)
 
@@ -162,6 +165,11 @@ export async function resolveSamlProviderInput(
   try {
     const pinned = current?.entityId ?? input.entityId
     if (input.entityId !== undefined && input.entityId !== pinned) throw invalid()
+    const subjectAttribute = current
+      ? current.configuration.subjectAttribute
+      : input.subjectAttribute
+    if (input.subjectAttribute !== undefined && input.subjectAttribute !== subjectAttribute)
+      throw invalid()
     const xml = input.metadataUrl
       ? await downloadMetadata(input.metadataUrl, privateTargets, transport)
       : input.metadataDocument
@@ -190,7 +198,14 @@ export async function resolveSamlProviderInput(
       pins ??
       (imported ? importedPins : currentPins && normalizeSamlSigningCertificates(currentPins))
     if (!certificates?.length) throw invalid()
-    return { entityId, configuration: { ssoEndpoint, signingCertificates: certificates } }
+    return {
+      entityId,
+      configuration: {
+        ssoEndpoint,
+        signingCertificates: certificates,
+        ...(subjectAttribute !== undefined && { subjectAttribute }),
+      },
+    }
   } catch {
     // Neither XML parser diagnostics nor request errors can leave this service.
     throw invalid()
