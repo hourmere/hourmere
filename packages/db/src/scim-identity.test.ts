@@ -46,7 +46,11 @@ import { createTestDatabase, type TestDatabase } from './testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const migration = '0073_scim_identity.sql'
-const dependentMigrations = ['0181_scim_team_hierarchy.sql', '0183_scim_groups.sql']
+const dependentMigrations = [
+  '0181_scim_team_hierarchy.sql',
+  '0183_scim_groups.sql',
+  '0184_scim_group_members.sql',
+]
 // Adverse order for the binding cleanup: the connection cascade before the token cascade.
 // No entry is optional, because the coverage run never runs this order.
 const bindingCleanupOrder = [

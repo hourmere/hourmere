@@ -457,7 +457,7 @@ export function createTeamRolePolicy(
     const target = await targetQuery
       .$if(scimResourcesEnabled && lock && role === 'admin', (query) =>
         query.select(({ ref }) =>
-          scimSuspended(facts.organizationId, ref('auth.member.userId')).as('scimBlocked'),
+          scimSuspended(facts.organizationId, ref('auth.member.userId'), true).as('scimBlocked'),
         ),
       )
       .executeTakeFirst()
