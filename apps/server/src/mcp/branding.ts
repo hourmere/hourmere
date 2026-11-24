@@ -9,6 +9,7 @@ export function brandingTools({ db }: { db: Db }): Tool[] {
   const context = (principal: McpCaller): ServiceContext => ({
     db,
     principal,
+    ...(principal.scimResourcesEnabled && { scimResourcesEnabled: true }),
     now: () => Temporal.Now.instant(),
   })
   const read = {

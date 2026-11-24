@@ -163,7 +163,15 @@ export function mcpOAuthBroker({ auth, db, publicUrl, ssoCapabilities = ssoHardO
       .select(['o.id', 'o.name', 'o.slug'])
       .where('m.userId', '=', p.user.id)
       .where('u.emailVerified', '=', true)
-      .where((eb) => eb.not(scimSuspended(eb.ref('o.id'), eb.ref('u.id'))))
+      .where((eb) =>
+        eb.not(
+          scimSuspended(
+            eb.ref('o.id'),
+            eb.ref('u.id'),
+            ssoCapabilities.scimResourcesEnabled === true,
+          ),
+        ),
+      )
       .orderBy('o.name')
   }
   async function organization(client: Db, p: Session, organizationId: string) {

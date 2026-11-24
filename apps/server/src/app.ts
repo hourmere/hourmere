@@ -12,6 +12,7 @@ import {
   MCP_OAUTH_SCOPES,
   redactLogDetails,
   ScimTokenError,
+  withScimResources,
 } from '@hourmere/auth'
 import { embedParent } from '@hourmere/core/embed'
 import { isConnectionTimeout } from '@hourmere/db'
@@ -436,6 +437,7 @@ export function createApp({
   const scimResourcesEnabled = Boolean(scim?.enabled && scim.resources)
   const ssoTeamReads = ssoTeamReadOptions && {
     ...ssoTeamReadOptions,
+    capabilities: withScimResources(ssoTeamReadOptions.capabilities, scimResourcesEnabled),
     scimResourcesEnabled,
   }
   // Generate correlation IDs locally; caller headers may contain private or forged values.

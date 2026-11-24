@@ -173,7 +173,11 @@ export function apiKeyDelegationSummaries(db: Db, capabilities: TeamSsoCapabilit
  * key's metadata as `organizationId`: the personal organization unless the creator names
  * another organization they belong to. Keys always carry the `hm_` prefix.
  */
-export async function apiKeyRules(ctx: AuthMiddlewareContext, db: Db) {
+export async function apiKeyRules(
+  ctx: AuthMiddlewareContext,
+  db: Db,
+  scimResourcesEnabled = false,
+) {
   const creating = ctx.path === '/api-key/create'
   if (!creating && ctx.path !== '/api-key/update') return
   const body: unknown = ctx.body
@@ -222,7 +226,7 @@ export async function apiKeyRules(ctx: AuthMiddlewareContext, db: Db) {
   const metadata = withMetadata ? parseMetadata(body.metadata) : {}
   if (!withMetadata) return
   const organizationId = metadata.organizationId ?? (await ensurePersonalOrganization(db, userId))
-  if (!(await isMember(db, userId, organizationId))) {
+  if (!(await isMember(db, userId, organizationId, scimResourcesEnabled))) {
     throw new APIError('FORBIDDEN', {
       message: API_KEY_ORGANIZATION_MEMBERSHIP_MESSAGE,
     })

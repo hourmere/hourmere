@@ -63,13 +63,13 @@ function authorizedMappings(db: Db, { tokenId, organizationId }: Principal) {
     )
 }
 
-function visibleGroups(db: Db, principal: Principal) {
+export function visibleScimGroups(db: Db, principal: Principal) {
   return authorizedMappings(db, principal)
     .innerJoin('scim_groups as scim_group', 'scim_group.mapping_id', 'mapping.id')
     .innerJoin('auth.organization as child', 'child.id', 'mapping.live_child_organization_id')
 }
 
-type VisibleGroups = ReturnType<typeof visibleGroups>
+type VisibleGroups = ReturnType<typeof visibleScimGroups>
 function selectGroups(query: VisibleGroups) {
   return query
     .select([
@@ -134,7 +134,7 @@ async function listGroups(db: Db, request: ScimResourceRequest): Promise<ScimRep
     .setIsolationLevel('repeatable read')
     .setAccessMode('read only')
     .execute(async (trx) => {
-      let selected = visibleGroups(trx, request.principal)
+      let selected = visibleScimGroups(trx, request.principal)
       if (filter)
         selected =
           filter.attribute === 'externalId'
@@ -157,7 +157,7 @@ async function listGroups(db: Db, request: ScimResourceRequest): Promise<ScimRep
 }
 
 function scopedGroup(db: Db, principal: Principal, id: string) {
-  return selectGroups(visibleGroups(db, principal))
+  return selectGroups(visibleScimGroups(db, principal))
     .where('scim_group.id', '=', id)
     .executeTakeFirst()
 }
@@ -523,7 +523,7 @@ async function updateGroup(
       .transaction()
       .setIsolationLevel('read committed')
       .execute(async (trx) => {
-        const group = visibleGroups(trx, principal).where('scim_group.id', '=', id)
+        const group = visibleScimGroups(trx, principal).where('scim_group.id', '=', id)
         const candidate = await selectGroups(group)
           .select(['child.id as childId', 'mapping.connection_id as connectionId'])
           .executeTakeFirst()

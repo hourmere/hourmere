@@ -79,7 +79,8 @@ allow-lists and value checks.
 | Organization | `organization.created`, `organization.updated`, `organization.branding_updated` |
 | API keys | `api_key.created`, `api_key.updated`, `api_key.revoked`, `api_key.reenabled` |
 | SCIM provisioning tokens | `scim_token.created`, `scim_token.rotated`, `scim_token.revoked` |
-| SCIM Users | `scim_user.created`, `scim_user.claimed`, `scim_user.updated`, `scim_user.deactivated`, `scim_user.credentials_revoked`, `scim_user.reactivated`, `scim_user.retired` |
+| SCIM Users | `scim_user.created`, `scim_user.claimed`, `scim_user.updated`, `scim_user.deactivated`, `scim_user.credentials_revoked`, `scim_user.reactivated`, `scim_user.child_access_resumed`, `scim_user.retired` |
+| SCIM Groups | `scim_group.created`, `scim_group.updated`, `scim_group.deleted` |
 | SCIM team mappings | `scim_mapping.linked`, `scim_mapping.unlinked`, `scim_mapping.suspended` |
 | Webhooks | `webhook.created`, `webhook.updated`, `webhook.paused`, `webhook.resumed`, `webhook.deleted`, `webhook.secret_rotated` |
 | Slack destinations | `slack_destination.created`, `slack_destination.updated`, `slack_destination.paused`, `slack_destination.resumed`, `slack_destination.tested`, `slack_destination.deleted` |

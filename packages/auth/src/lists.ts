@@ -110,7 +110,12 @@ export function checkListQuery(path: string | undefined, query: unknown): Filter
  * the end. For a caller allowed to see the list, answer those cases here with the empty
  * list Better Auth would have returned. Everything else, including refusals, is left to it.
  */
-export async function emptyMemberList(ctx: AuthMiddlewareContext, db: Db, filter?: Filter) {
+export async function emptyMemberList(
+  ctx: AuthMiddlewareContext,
+  db: Db,
+  filter?: Filter,
+  scimResourcesEnabled = false,
+) {
   if (ctx.path !== '/organization/list-members') return undefined
   const query = isRecord(ctx.query) ? ctx.query : {}
   const session = await getSessionFromCtx(ctx)
@@ -136,7 +141,7 @@ export async function emptyMemberList(ctx: AuthMiddlewareContext, db: Db, filter
   }
   if (typeof organizationId !== 'string' || !isUuid(organizationId)) return undefined
   // Only members may learn how many members match; Better Auth refuses everyone else.
-  if (!(await isMember(db, session.user.id, organizationId))) return undefined
+  if (!(await isMember(db, session.user.id, organizationId, scimResourcesEnabled))) return undefined
   if (sortDirection !== undefined && sortDirection !== 'asc' && sortDirection !== 'desc') {
     return undefined
   }

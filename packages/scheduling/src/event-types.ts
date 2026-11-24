@@ -371,7 +371,7 @@ export async function setEventTypeWaitlist(
     await lockOrganization(trx, ctx.principal.organization.id)
     const row = await visibleRow(trx, ctx, id, { lock: true })
     await waitlistManager(trx, ctx, row)
-    await writeWaitlistSettings(trx, row, settings)
+    await writeWaitlistSettings(trx, row, settings, ctx.scimResourcesEnabled === true)
     await auditEventType(ctx, trx, row.id, 'event_type.waitlist_updated')
     return settings
   })
@@ -385,6 +385,7 @@ async function writeWaitlistSettings(
     'id' | 'scheduling_type' | 'organization_id' | 'owner_user_id' | 'waitlist_enabled'
   >,
   settings: WaitlistSettings,
+  scimResourcesEnabled = false,
 ) {
   if (settings.enabled) {
     const hosts = await db
@@ -404,6 +405,7 @@ async function writeWaitlistSettings(
         row.organization_id,
         hosts.map((host) => host.user_id),
         true,
+        scimResourcesEnabled,
       )
     } catch (error) {
       if (error instanceof DomainError) throw new DomainError('invalid', 'waitlist_unsupported')
@@ -712,7 +714,13 @@ async function createEventTypeWrite(
       validateGroupConfiguration(fields, schedulingType)
       const scheduleId = validScheduleId(input.scheduleId) ?? null
       if (schedulingType !== 'individual' && scheduleId !== null) throw invalidScheduleId()
-      await assertHosts(trx, ctx.principal.organization.id, hostIds, true)
+      await assertHosts(
+        trx,
+        ctx.principal.organization.id,
+        hostIds,
+        true,
+        ctx.scimResourcesEnabled === true,
+      )
       const organizer = validOrganizer(input.conferenceOrganizer) ?? null,
         zoomConnection = validZoomConnection(input.zoomConnectionId) ?? null
       if (zoomConnection && !fields.locations?.some(automaticZoom))
@@ -802,7 +810,13 @@ export async function updateEventType(
           schedulingType,
           row.owner_user_id,
         )
-        await assertHosts(trx, row.organization_id, hostIds, true)
+        await assertHosts(
+          trx,
+          row.organization_id,
+          hostIds,
+          true,
+          ctx.scimResourcesEnabled === true,
+        )
       }
       if (schedulingType !== 'individual' && scheduleId != null) throw invalidScheduleId()
       const organizer = validOrganizer(input.conferenceOrganizer),
@@ -846,7 +860,13 @@ export async function updateEventType(
           (input.isActive === true && !row.is_active)
         ) {
           const configuredHosts = hostIds ?? existing.map((h) => h.user_id)
-          await assertHosts(trx, row.organization_id, configuredHosts, true)
+          await assertHosts(
+            trx,
+            row.organization_id,
+            configuredHosts,
+            true,
+            ctx.scimResourcesEnabled === true,
+          )
           await validateConference(
             trx,
             ctx,
@@ -1543,7 +1563,7 @@ export async function activateRoundRobin(ctx: ServiceContext, id: string): Promi
       null,
     )
     if (hosts.some((host) => host.schedule_id !== null)) throw invalidScheduleId()
-    await assertHosts(trx, row.organization_id, ids, true)
+    await assertHosts(trx, row.organization_id, ids, true, ctx.scimResourcesEnabled === true)
     await trx
       .insertInto('round_robin_state')
       .values({ event_type_id: row.id, enabled: true })
