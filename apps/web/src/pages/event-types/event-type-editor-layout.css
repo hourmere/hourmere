@@ -1,0 +1,69 @@
+.event-type-editor-settings {
+  min-width: 0;
+}
+
+.event-type-preview-action {
+  margin-block-end: var(--space-4);
+}
+
+@media (min-width: 1200px) {
+  .event-type-editor-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--space-5);
+    align-items: start;
+  }
+}
+
+.event-type-preview-pane {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+@media (min-height: 600px) {
+  .event-type-preview-pane {
+    position: sticky;
+    inset-block-start: calc(var(--topbar-height) + var(--space-3));
+    max-height: calc(100dvh - var(--topbar-height) - 2 * var(--space-3));
+    overflow: auto;
+    scrollbar-gutter: stable;
+  }
+}
+
+.event-type-preview-dialog {
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: var(--bg);
+  color: var(--text);
+  overscroll-behavior: contain;
+}
+
+.event-type-preview-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-block-end: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.event-type-preview-dialog .event-type-preview-header {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 1;
+}
+
+.event-type-preview-header h2 {
+  margin: 0;
+  font-size: var(--text-md);
+}

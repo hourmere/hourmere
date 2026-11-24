@@ -56,6 +56,37 @@
   }
 }
 
+.public.public-preview {
+  min-height: 0;
+  background: var(--bg);
+}
+
+.public-preview .preview-booking-notice {
+  margin-block: 0 var(--space-4);
+}
+
+.public-preview .picker {
+  container: preview-picker / inline-size;
+}
+
+/* A wide editor can have a narrow preview. Fit the calendar to its own column. */
+@container preview-picker (width < 640px) {
+  .public-preview .picker .picker-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .public-preview .picker .slots {
+    grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+    max-height: none;
+    overflow: visible;
+    padding: 0;
+  }
+
+  .public-preview .picker .slots-scroll[data-more="true"]::after {
+    display: none;
+  }
+}
+
 /* Let long names, addresses and links contribute a shrinkable min-content size. */
 .public .user-content {
   overflow-wrap: anywhere;

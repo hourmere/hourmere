@@ -28,28 +28,36 @@ function detects(code: string, before: string, after: string, verify: (copy: str
 
 describe('essentials production-source negative controls', () => {
   const group = source.slice(source.indexOf('function SettingsGroup('))
+  const summaryMarkup = /<summary>[\s\S]*?<\/summary>/.exec(group)?.[0] ?? ''
   it.each([
     ['useState(initiallyOpen)', 'useState(true)'],
     ['useState(initiallyOpen)', 'useState(false)'],
-    ['<summary>{t(label)}</summary>', '<div>{t(label)}</div>'],
+    [summaryMarkup, summaryMarkup.replace('<summary>', '<div>').replace('</summary>', '</div>')],
     ['{children}</div>', '{open && children}</div>'],
   ])('detects loss of disclosure state, semantics or retained fields: %s → %s', (before, after) => {
     detects(group, before, after, (copy) => {
       const Group = compile<
-        react.ComponentType<{ label: string; initiallyOpen: boolean; children: react.ReactNode }>
+        react.ComponentType<{
+          label: string
+          summary: string
+          initiallyOpen: boolean
+          children: react.ReactNode
+        }>
       >(copy, 'SettingsGroup', {
         useState: react.useState,
         useI18n: () => ({ t: (text: string) => text }),
       })
       for (const initiallyOpen of [false, true]) {
         const view = render(
-          <Group label="Settings" initiallyOpen={initiallyOpen}>
+          <Group label="Settings" summary="Draft values" initiallyOpen={initiallyOpen}>
             <input defaultValue="Preserved" />
           </Group>,
         )
         try {
           expect(view.container.querySelector('details')?.open).toBe(initiallyOpen)
-          expect(view.container.querySelector('details > summary')?.textContent).toBe('Settings')
+          const header = view.container.querySelector('details > summary')
+          expect(header?.firstChild?.textContent).toBe('Settings')
+          expect(header?.querySelector('.event-settings-summary')?.textContent).toBe('Draft values')
           expect(view.container.querySelector('input')?.value).toBe('Preserved')
         } finally {
           view.unmount()
