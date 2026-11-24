@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { randomBytes, randomUUID } from 'node:crypto'
+import { randomBytes, randomInt, randomUUID } from 'node:crypto'
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { get, request } from 'node:https'
 import { createServer as createNetServer } from 'node:net'
@@ -59,20 +59,32 @@ function discoveryStatus(issuer: string, ca: string): Promise<string> {
   })
 }
 
-/** Reserve a loopback port for a container that shares the host network. */
-function freeLoopbackPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
+/** Whether nothing on the host is bound to this loopback port right now. */
+function loopbackPortFree(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
     const probe = createNetServer()
-    probe.once('error', reject)
-    probe.listen(0, '127.0.0.1', () => {
-      const address = probe.address()
-      probe.close(() =>
-        typeof address === 'object' && address
-          ? resolve(address.port)
-          : reject(new Error('Unable to reserve a loopback port')),
-      )
-    })
+    probe.once('error', () => resolve(false))
+    probe.listen(port, '127.0.0.1', () => probe.close(() => resolve(true)))
   })
+}
+
+/**
+ * Reserve a loopback port for a container that shares the host network. The port comes from
+ * below the kernel's ephemeral range: a port the kernel hands out (listen(0)) can be taken as the
+ * source port of an outgoing connection from Chrome, PostgreSQL clients or the app during the
+ * seconds before Keycloak binds it, and Keycloak then exits at start.
+ */
+async function freeLoopbackPort(): Promise<number> {
+  const range = await readFile('/proc/sys/net/ipv4/ip_local_port_range', 'utf8').catch(() => '')
+  const ephemeralLow = Number(/^\s*(\d+)/.exec(range)?.[1] ?? 32768)
+  const high = Math.min(ephemeralLow, 32768)
+  const low = 10_000
+  if (high - low < 1000) throw new Error('The ephemeral port range leaves no room for Keycloak')
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const port = randomInt(low, high)
+    if (await loopbackPortFree(port)) return port
+  }
+  throw new Error('Unable to reserve a loopback port')
 }
 
 /** Fetch one Keycloak page and discard it to warm a fresh realm. */
