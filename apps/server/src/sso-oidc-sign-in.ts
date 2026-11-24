@@ -59,6 +59,7 @@ import { recordOidcProviderTest } from './sso-oidc-test-receipts.ts'
 import { verifyOidcIdToken } from './sso-oidc-verifier.ts'
 import { authorizeSsoRead } from './sso-reads.ts'
 import { providerRecoveryAuthority, ssoWriteContextAccess } from './sso-recovery-use.ts'
+import { SamlStartRefused, startSamlSignIn } from './sso-saml-start.ts'
 import { EXPECTED_ORGANIZATION_HEADER } from './team-management.ts'
 
 export const OIDC_SIGN_IN_PATH = '/api/auth/sign-in/sso'
@@ -514,6 +515,7 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
       const origin = new URL(publicUrl).origin
       const cookie = bindingCookieName(publicUrl)
       const secure = new URL(publicUrl).protocol === 'https:'
+      const startBindingOptions = { httpOnly: true, secure, path: '/', sameSite: 'Lax' } as const
       const resultCookieName = (id: string) =>
         `${secure ? '__Secure-' : ''}hourmere.oidc_result.${id}`
       const resultCookieOptions = {
@@ -522,14 +524,17 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
         sameSite: 'Strict',
         path: OIDC_COMPLETE_PATH,
       } as const
-      const guard: MiddlewareHandler = async (c, next) => {
-        c.header('Cache-Control', 'no-store')
-        c.header('Referrer-Policy', 'no-referrer')
-        requireSsoEnabled(capabilities, 'oidc')
-        await next()
-      }
+      const guard =
+        (protocol?: 'oidc'): MiddlewareHandler =>
+        async (c, next) => {
+          c.header('Cache-Control', 'no-store')
+          c.header('Referrer-Policy', 'no-referrer')
+          requireSsoEnabled(capabilities, protocol)
+          await next()
+        }
+      const oidcGuard = guard('oidc')
 
-      app.all(OIDC_SIGN_IN_PATH, requestLogger, guard, clientIp, apiBodyLimit(), async (c) => {
+      app.all(OIDC_SIGN_IN_PATH, requestLogger, guard(), clientIp, apiBodyLimit(), async (c) => {
         if (c.req.method !== 'POST') return c.json({ error: 'method_not_allowed' }, 405)
         if (c.req.header('origin') !== origin || c.req.header('authorization') !== undefined)
           return c.json({ error: 'forbidden' }, 403)
@@ -544,20 +549,36 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
         }
         const currentBinding = getCookie(c, cookie)
         const reuse = currentBinding !== undefined && browserBindingDigest(currentBinding) !== null
+        const browserBinding = reuse ? currentBinding : randomBytes(32).toString('base64url')
+        const provider = await findProvider(db, parsed.data.providerId)
+        if (provider?.protocol === 'oidc' || provider?.protocol === 'saml') {
+          requireSsoEnabled(capabilities, provider.protocol)
+        }
+        if (!provider?.enabled || provider.retiredAt || !configurationKey)
+          return c.json({ error: 'sso_not_found' }, 404)
+        if (provider.protocol === 'saml') {
+          if (parsed.data.intent !== 'sign_in') return c.json({ error: 'sso_disabled' }, 404)
+          if (!returnPath.startsWith('/app')) return c.json({ error: 'invalid_request' }, 400)
+          try {
+            const url = await startSamlSignIn(
+              { db, configurationKey, privateTargets, publicUrl },
+              provider,
+              browserBinding,
+            )
+            setCookie(c, cookie, browserBinding, startBindingOptions)
+            return c.json({ url, redirect: true })
+          } catch (error) {
+            if (error instanceof SamlStartRefused) return c.json({ error: 'sso_not_found' }, 404)
+            throw error
+          }
+        }
+        if (provider.protocol !== 'oidc') return c.json({ error: 'sso_not_found' }, 404)
         let ceremony: { kind: 'step_up'; actor: OidcTestActor; attemptId: string } | undefined
         if (parsed.data.intent === 'step_up') {
           const actor = reuse && (await deps.readSession(c.req.raw.headers))
           if (!actor) return c.json({ error: 'sso_not_found' }, 404)
           ceremony = { kind: 'step_up', actor, attemptId: parsed.data.attemptId }
         }
-        const provider = await findProvider(db, parsed.data.providerId)
-        if (
-          provider?.protocol !== 'oidc' ||
-          !provider.enabled ||
-          provider.retiredAt ||
-          !configurationKey
-        )
-          return c.json({ error: 'sso_not_found' }, 404)
         let endpoints: Awaited<ReturnType<typeof providerEndpoints>>
         try {
           endpoints = await providerEndpoints(provider, configurationKey, transport)
@@ -565,7 +586,6 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
           return c.json({ error: 'sso_not_found' }, 404)
         }
 
-        const browserBinding = reuse ? currentBinding : randomBytes(32).toString('base64url')
         try {
           const parameters = await startOidcAttempt(
             { db, configurationKey },
@@ -574,12 +594,7 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
           )
           // A binding issued by fresh administration can still have SameSite=Strict.
           // Keep its value and allow the top-level GET back from the provider.
-          setCookie(c, cookie, browserBinding, {
-            httpOnly: true,
-            secure,
-            path: '/',
-            sameSite: 'Lax',
-          })
+          setCookie(c, cookie, browserBinding, startBindingOptions)
           return c.json({
             url: authorizationUrl(
               publicUrl,
@@ -597,7 +612,7 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
         }
       })
 
-      app.all(OIDC_CALLBACK_PATH, requestLogger, guard, clientIp, async (c: Context) => {
+      app.all(OIDC_CALLBACK_PATH, requestLogger, oidcGuard, clientIp, async (c: Context) => {
         if (c.req.method !== 'GET') return c.json({ error: 'method_not_allowed' }, 405)
         if (c.req.header('authorization') !== undefined) return c.redirect(errorPath)
         const parsed = providerIdSchema.safeParse(c.req.param('providerId'))
@@ -825,7 +840,7 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
         }
       })
 
-      app.all(OIDC_COMPLETE_PATH, requestLogger, guard, clientIp, apiBodyLimit(), async (c) => {
+      app.all(OIDC_COMPLETE_PATH, requestLogger, oidcGuard, clientIp, apiBodyLimit(), async (c) => {
         if (c.req.method !== 'POST') return c.json({ error: 'method_not_allowed' }, 405)
         if (c.req.header('origin') !== origin || c.req.header('authorization') !== undefined)
           return c.json({ error: 'forbidden' }, 403)

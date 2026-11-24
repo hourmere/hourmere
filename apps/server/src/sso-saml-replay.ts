@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { Db } from '@hourmere/db'
-import { sql } from 'kysely'
+import { type RawBuilder, sql } from 'kysely'
 import { maximumSamlAssertionLifetime, samlClockSkew } from './sso-saml-limits.ts'
 import type { VerifiedSamlResponse } from './sso-saml-verifier.ts'
 
@@ -69,15 +69,20 @@ type OutstandingSamlRequest = {
   expiresAt: Temporal.Instant
 }
 
-async function databaseNow(db: Db) {
+/** Retain PostgreSQL's microseconds independently of session DateStyle and TimeZone. */
+export function samlDatabaseInstantText(instant: RawBuilder<unknown>) {
+  return sql<string>`to_char(${instant} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`
+}
+
+export async function samlDatabaseNow(db: Db) {
   const { now } = await db
-    .selectNoFrom(
-      sql<string>`to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`.as(
-        'now',
-      ),
-    )
+    .selectNoFrom(samlDatabaseInstantText(sql`clock_timestamp()`).as('now'))
     .executeTakeFirstOrThrow()
   return Temporal.Instant.from(now)
+}
+
+export function samlRequestExpired(expiresAt: Temporal.Instant, now: Temporal.Instant) {
+  return compare(now, expiresAt) >= 0
 }
 
 const digest = (id: string) => createHash('sha256').update(id).digest('hex')
@@ -101,13 +106,13 @@ export async function consumeSamlReplay(
   }
 
   function check(now: Temporal.Instant) {
-    if (compare(now, expiresAt) >= 0) throw new SamlTimingError('request_expired')
+    if (samlRequestExpired(expiresAt, now)) throw new SamlTimingError('request_expired')
     return validateSamlTiming(assertion, now)
   }
 
   try {
     return await db.transaction().execute(async (trx) => {
-      const deadline = check(await databaseNow(trx))
+      const deadline = check(await samlDatabaseNow(trx))
       const skewedExpiry = deadline.add(skew)
       const retainUntil = compare(skewedExpiry, expiresAt) >= 0 ? skewedExpiry : expiresAt
       // Round up to PostgreSQL's precision to preserve the retention lower bound.
@@ -130,7 +135,7 @@ export async function consumeSamlReplay(
         ])
         .execute()
       // Uniqueness or foreign-key checks can wait even if the insert ultimately succeeds.
-      return check(await databaseNow(trx))
+      return check(await samlDatabaseNow(trx))
     })
   } catch (error) {
     if (error instanceof Error && 'code' in error && 'constraint' in error) {

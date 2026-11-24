@@ -1169,7 +1169,7 @@ describe('SAML verifier: off', () => {
     return files
   }
 
-  it('has no caller: no production source imports the verifier or its XML libraries', () => {
+  it('has no caller and limits XML library imports to SAML request construction', () => {
     const files = productionSources()
     expect(files).toEqual(
       expect.arrayContaining([verifier, 'apps/server/src/server.ts', 'tools/cli/src/cli.ts']),
@@ -1178,13 +1178,19 @@ describe('SAML verifier: off', () => {
       /sso-saml-verifier|verifySamlResponse|SamlVerificationError|samlInitialAlgorithms|(['"`])(?:xml-crypto|@xmldom\/xmldom|samlify)(?:\/[^'"`]*)?\1/
     const mentioning = files.filter((file) => {
       const source = readFileSync(join(root, file), 'utf8')
-      const runtime =
-        file === 'apps/server/src/sso-saml-replay.ts'
-          ? source.replace(
-              /^import type \{ VerifiedSamlResponse \} from '\.\/sso-saml-verifier\.ts'$/m,
-              '',
-            )
-          : source
+      let runtime = source
+      if (file === 'apps/server/src/sso-saml-replay.ts')
+        runtime = source.replace(
+          /^import type \{ VerifiedSamlResponse \} from '\.\/sso-saml-verifier\.ts'$/m,
+          '',
+        )
+      if (file === 'apps/server/src/sso-saml-start.ts')
+        runtime = source
+          .replace(/^import \{ DOMImplementation, XMLSerializer \} from '@xmldom\/xmldom'$/m, '')
+          .replace(
+            /^import \{ Constants, IdentityProvider, ServiceProvider \} from 'samlify'$/m,
+            '',
+          )
       return mention.test(runtime)
     })
     expect(mentioning).toEqual([verifier])
