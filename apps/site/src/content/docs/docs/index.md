@@ -299,8 +299,10 @@ not grant host rescheduling or reschedule-request authority through REST, MCP or
   unverified. [Email abuse limits](/docs/notifications#email-abuse-controls) apply per
   instance/database; separate instances do not share budgets. Per-IP request limits remain
   in process memory, except the additional durable booking-waitlist admission limits.
-- [Microsoft sign-in](/docs/configuration#sign-in-with-microsoft) and
-  [Microsoft Calendar](/docs/microsoft-calendar) connections have not had real-account acceptance.
+- [Microsoft Calendar](/docs/microsoft-calendar) incrementally updates busy-time snapshots and
+  creates new booking copies. It updates the original copy after rescheduling and removes it
+  after cancellation. [Microsoft sign-in](/docs/configuration#sign-in-with-microsoft) and
+  calendar connections have not had real-account acceptance.
 - [Automatic Zoom](/docs/automatic-zoom)
   supports personal event types and individual team event types with one actual host;
   collective and round-robin event types are unsupported.
