@@ -6,11 +6,11 @@ import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { sql } from 'kysely'
 import { z } from 'zod'
 import { type SsoProviderRevision, ssoProviderConfigurationAad } from './sso-configuration.ts'
+import { databaseInstantText } from './sso-database-clock.ts'
 import { BIND_SSO_DELEGATION } from './sso-delegation-proof.ts'
 import { browserBindingDigest, MAILBOX_PROOF_LIMITS, sha256 } from './sso-mailbox-proof.ts'
 import { authenticationAttemptLifetime, oidcClockSkew } from './sso-oidc-limits.ts'
 import { samlClockSkew } from './sso-saml-limits.ts'
-import { samlDatabaseInstantText } from './sso-saml-replay.ts'
 
 export const TEST_SSO_PROVIDER = 'testSsoProvider'
 export const LINK_SSO_ACCOUNT = 'linkSsoAccount'
@@ -268,7 +268,7 @@ export async function lockSsoStepUpTarget(
       'expires_at',
       'mailbox',
       'operation',
-      samlDatabaseInstantText(sql.ref('created_at')).as('createdAt'),
+      databaseInstantText(sql.ref('created_at')).as('createdAt'),
     ])
     .where('id', '=', attemptId)
     .where('kind', '=', 'fresh_proof')

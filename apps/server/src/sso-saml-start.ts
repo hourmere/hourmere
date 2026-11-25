@@ -5,6 +5,7 @@ import { DOMImplementation, XMLSerializer } from '@xmldom/xmldom'
 import { sql } from 'kysely'
 import { Constants, IdentityProvider, ServiceProvider } from 'samlify'
 import { openSsoProviderConfiguration, type SsoProviderRevision } from './sso-configuration.ts'
+import { databaseInstantText } from './sso-database-clock.ts'
 import { browserBindingDigest, sha256 } from './sso-mailbox-proof.ts'
 import {
   lockOidcProvider,
@@ -14,7 +15,7 @@ import {
 } from './sso-oidc-attempt.ts'
 import { authenticationAttemptLifetime } from './sso-oidc-limits.ts'
 import { samlIdentityProviderRedirectUrl } from './sso-saml-configuration.ts'
-import { samlDatabaseInstantText, samlDatabaseNow, samlRequestExpired } from './sso-saml-replay.ts'
+import { samlDatabaseNow, samlRequestExpired } from './sso-saml-replay.ts'
 import {
   samlLinkOperation,
   samlProviderConfig,
@@ -159,7 +160,7 @@ export async function startSamlSignIn(
         created_at: createdAt.toString(),
         expires_at: deadline.toString(),
       })
-      .returning(samlDatabaseInstantText(sql.ref('expires_at')).as('expiresAt'))
+      .returning(databaseInstantText(sql.ref('expires_at')).as('expiresAt'))
       .executeTakeFirstOrThrow()
     const now = await samlDatabaseNow(trx)
     if (samlRequestExpired(Temporal.Instant.from(expiresAt), now)) {

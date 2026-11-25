@@ -10,6 +10,7 @@ import { apiBodyLimit, routeBodyLimit } from './body-limit.ts'
 import { createRateLimiter, rateLimitKey } from './rate-limit.ts'
 import { requireSsoEnabled, type SsoCapabilities } from './sso.ts'
 import { openSsoProviderConfiguration, type SsoProviderRevision } from './sso-configuration.ts'
+import { databaseInstantText } from './sso-database-clock.ts'
 import { delegationProofCookie, sealDelegationProof } from './sso-delegation-proof.ts'
 import {
   bindingCookieName,
@@ -61,7 +62,6 @@ import {
   consumeSamlReplay,
   SamlTimingError,
   samlAcceptanceExpired,
-  samlDatabaseInstantText,
   samlDatabaseNow,
   samlRequestExpired,
   samlSessionDeadline,
@@ -246,7 +246,7 @@ async function stageSamlTest(
       .select([
         'browser_binding_digest',
         'consumed_at',
-        samlDatabaseInstantText(sql.ref('expires_at')).as('expiresAt'),
+        databaseInstantText(sql.ref('expires_at')).as('expiresAt'),
       ])
       .forUpdate()
       .executeTakeFirst()
@@ -347,7 +347,7 @@ async function completeSamlTest(
       'saml',
     )
     const attempt = await pending(trx)
-      .select(samlDatabaseInstantText(sql.ref('expires_at')).as('expiresAt'))
+      .select(databaseInstantText(sql.ref('expires_at')).as('expiresAt'))
       .forUpdate()
       .executeTakeFirst()
     if (!attempt) return false
@@ -457,8 +457,8 @@ async function stageSamlCompletion(
       .select([
         'browser_binding_digest',
         'consumed_at',
-        samlDatabaseInstantText(sql.ref('created_at')).as('createdAt'),
-        samlDatabaseInstantText(sql.ref('expires_at')).as('expiresAt'),
+        databaseInstantText(sql.ref('created_at')).as('createdAt'),
+        databaseInstantText(sql.ref('expires_at')).as('expiresAt'),
       ])
       .forUpdate()
       .executeTakeFirst()
@@ -542,7 +542,7 @@ async function stageSamlCompletion(
       if (local?.mailbox !== identity.mailbox) return undefined
       const { expiresAt } = await trx
         .selectNoFrom(
-          samlDatabaseInstantText(sql`least(
+          databaseInstantText(sql`least(
             ${signInDeadline.round({ smallestUnit: 'microsecond', roundingMode: 'floor' }).toString()}::timestamptz,
             ${local.session.deadline}::timestamptz
           )`).as('expiresAt'),
@@ -662,7 +662,7 @@ async function completeSamlSignIn(
       if (context.reason !== undefined || context.link.proven_email !== link.proven_email)
         return undefined
       const attempt = await readAttempt(trx)
-        .select(samlDatabaseInstantText(sql.ref('expires_at')).as('expiresAt'))
+        .select(databaseInstantText(sql.ref('expires_at')).as('expiresAt'))
         .forUpdate()
         .executeTakeFirst()
       if (!attempt) return undefined
@@ -757,7 +757,7 @@ async function completeSamlStepUp(
     )
     if (recorded.failure) return
     const attempt = await readAttempt(trx)
-      .select(samlDatabaseInstantText(sql.ref('expires_at')).as('expiresAt'))
+      .select(databaseInstantText(sql.ref('expires_at')).as('expiresAt'))
       .forUpdate()
       .executeTakeFirst()
     if (!attempt) throw new OidcAttemptRefused()
