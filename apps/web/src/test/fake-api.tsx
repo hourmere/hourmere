@@ -43,6 +43,8 @@ export function fakeApi(routes: Routes) {
     // with no team fixtures start with no listed teams and an unavailable role.
     'GET /api/auth/organization/list': () => json(200, []),
     'GET /api/auth/organization/get-active-member': () => json(404, { code: 'MEMBER_NOT_FOUND' }),
+    // Editor scenarios opt into branding fixtures when they need a branded preview.
+    'GET /api/v1/branding': () => json(403, { code: 'forbidden' }),
     ...routes,
   }
   const calls: Call[] = []

@@ -562,4 +562,7 @@ export const common = {
     '请返回发起验证的标签页继续操作。',
   'Copy the link from your email and paste it into the tab where you requested verification.':
     '请从邮件中复制验证链接，并粘贴到发起验证的标签页。',
+  // Booking page preview
+  'These are sample times. Booking is disabled in the preview.':
+    '这些时间仅供示例。预览中无法提交预约。',
 } as const

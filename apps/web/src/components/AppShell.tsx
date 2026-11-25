@@ -1,5 +1,5 @@
 import { type MouseEvent, Suspense, useEffect, useRef, useState } from 'react'
-import { Link, NavLink, Outlet, useLocation, useOutletContext } from 'react-router'
+import { Link, matchPath, NavLink, Outlet, useLocation, useOutletContext } from 'react-router'
 import { errorMessage } from '../api/errors.ts'
 import { LanguageSwitcher, useI18n } from '../i18n/runtime.tsx'
 import { msg, type UiText } from '../i18n/translate.ts'
@@ -122,6 +122,7 @@ function Shell() {
   const nav = useRef<HTMLElement>(null)
   const location = useLocation()
   const { pathname } = location
+  const widePage = WIDE_PAGES.includes(pathname) || matchPath(`${PATHS.eventTypes}/:id`, pathname)
   const shownPath = useRef(pathname)
   const confirmLeave = useConfirmLeave()
 
@@ -267,7 +268,7 @@ function Shell() {
         </nav>
         <main
           id="main"
-          className={WIDE_PAGES.includes(pathname) ? 'main-content-wide' : 'main-content'}
+          className={widePage ? 'main-content-wide' : 'main-content'}
           ref={main}
           tabIndex={-1}
         >

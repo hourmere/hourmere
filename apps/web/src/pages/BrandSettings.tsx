@@ -2,6 +2,7 @@ import { brandColorContrast, brandPalette } from '@hourmere/core/brand-contrast'
 import { type FormEvent, useCallback, useRef, useState } from 'react'
 import { api, unwrap } from '../api/client.ts'
 import { errorMessage, isOrganizationContextChanged, RequestError } from '../api/errors.ts'
+import { loadBrandLogo } from '../api/resources.ts'
 import { Field } from '../components/forms.tsx'
 import { useLoad, useMounted } from '../hooks.ts'
 import { useI18n } from '../i18n/runtime.tsx'
@@ -308,16 +309,7 @@ function BrandPreviews({
           reader.readAsDataURL(file)
         })
       }
-      if (!hash) return null
-      const bytes = await unwrap(
-        api.GET('/api/v1/branding/logo/{hash}', {
-          params: { path: { hash } },
-          headers: { 'X-Expected-Organization-Id': organizationId },
-          signal,
-          parseAs: 'arrayBuffer',
-        }),
-      )
-      return `data:image/png;base64,${btoa(Array.from(new Uint8Array(bytes), (byte) => String.fromCharCode(byte)).join(''))}`
+      return hash ? loadBrandLogo(organizationId, hash, signal) : null
     },
     [organizationId, hash, file],
   )

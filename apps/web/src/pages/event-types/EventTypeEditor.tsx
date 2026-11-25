@@ -36,8 +36,11 @@ import { useUnsavedChanges } from '../../unsaved-changes.tsx'
 import { MissingRecord } from '../NotFound.tsx'
 import { ConfigurationChecks } from './ConfigurationChecks.tsx'
 import { DurationsEditor } from './DurationsEditor.tsx'
+import { EventTypeEditorLayout } from './EventTypeEditorLayout.tsx'
 import { useEditorReadiness } from './editor-readiness.ts'
 import { teamReadinessBlocksSharing } from './event-readiness.ts'
+import './event-settings-summaries.css'
+import { eventSettingsSummaries } from './event-settings-summaries.ts'
 import {
   changeLocationKind,
   comparable,
@@ -489,6 +492,11 @@ function EventTypeForm({
             : 'Configuration not checked'
       : null
   const defaults = emptyDraft()
+  const summaries = eventSettingsSummaries(draft, schedules, ownSchedule, {
+    t,
+    ui,
+    locale: displayLocale,
+  })
   const changed = (...fields: (keyof EventTypeDraft)[]) =>
     editing &&
     fields.some((field) => JSON.stringify(baseline[field]) !== JSON.stringify(defaults[field]))
@@ -497,15 +505,8 @@ function EventTypeForm({
     ? `${(slugify(draft.slug) || 'event').slice(0, EVENT_TYPE.slugMaxLength - slugSuffix.length - 1).replace(/-+$/, '')}-${slugSuffix}`
     : null
 
-  return (
+  const settings = (
     <>
-      <p className="breadcrumb">
-        <Link to={PATHS.eventTypes}>{t('Event types')}</Link>
-      </p>
-      <PageHeader
-        title={uiText(title)}
-        lede={t('Set the booking details, questions and availability for this event type.')}
-      />
       {saved && (
         <SavedEventShare
           event={saved}
@@ -594,6 +595,9 @@ function EventTypeForm({
         <fieldset className="form-fieldset" disabled={saving} role="presentation">
           <section className="panel" aria-labelledby="basics-heading">
             <h2 id="basics-heading">{t('Basics')}</h2>
+            <p className="event-settings-summary" title={summaries.basics}>
+              {summaries.basics}
+            </p>
             <div className="stack">
               <Field
                 id="title"
@@ -771,6 +775,7 @@ function EventTypeForm({
             )}
           <SettingsGroup
             label="Description and visibility"
+            summary={summaries.visibility}
             initiallyOpen={changed('description', 'position', 'isActive', 'isHidden')}
           >
             <div className="stack">
@@ -865,7 +870,11 @@ function EventTypeForm({
             </div>
           </SettingsGroup>
 
-          <SettingsGroup label="Group events" initiallyOpen={draft.bookingMode === 'group'}>
+          <SettingsGroup
+            label="Group events"
+            summary={summaries.group}
+            initiallyOpen={draft.bookingMode === 'group'}
+          >
             <Field id="bookingMode" label={t('Booking mode')} error={errors.bookingMode}>
               {(props) => (
                 <select
@@ -904,6 +913,7 @@ function EventTypeForm({
 
           <SettingsGroup
             label="Additional durations"
+            summary={summaries.durations}
             initiallyOpen={editing && baseline.allowedDurationsMinutes.length > 1}
           >
             <DurationsEditor
@@ -934,7 +944,7 @@ function EventTypeForm({
             </section>
           )}
           {!me.organization.personal && (
-            <SettingsGroup label="Hosts" initiallyOpen={editing}>
+            <SettingsGroup label="Hosts" summary={summaries.hosts} initiallyOpen={editing}>
               {!me.organization.personal && canAssignHosts && (
                 <HostAssignment
                   organizationId={me.organization.id}
@@ -1003,6 +1013,7 @@ function EventTypeForm({
           )}
           <SettingsGroup
             label="Location options and conferencing"
+            summary={summaries.locations}
             initiallyOpen={
               editing &&
               ((saved?.locations?.length ?? 0) > 1 ||
@@ -1048,7 +1059,11 @@ function EventTypeForm({
             )}
           </SettingsGroup>
 
-          <SettingsGroup label="Booking waitlist" initiallyOpen={changed('waitlistEnabled')}>
+          <SettingsGroup
+            label="Booking waitlist"
+            summary={summaries.waitlist}
+            initiallyOpen={changed('waitlistEnabled')}
+          >
             <WaitlistEditor
               enabled={draft.waitlistEnabled}
               supported={
@@ -1064,7 +1079,11 @@ function EventTypeForm({
               onChange={(enabled) => set('waitlistEnabled', enabled)}
             />
           </SettingsGroup>
-          <SettingsGroup label="Reminders and follow-ups" initiallyOpen={changed('notifications')}>
+          <SettingsGroup
+            label="Reminders and follow-ups"
+            summary={summaries.notifications}
+            initiallyOpen={changed('notifications')}
+          >
             <label className="checkbox">
               <input
                 type="checkbox"
@@ -1092,7 +1111,11 @@ function EventTypeForm({
               }}
             />
           </SettingsGroup>
-          <SettingsGroup label="Booking form" initiallyOpen={changed('questions', 'allowGuests')}>
+          <SettingsGroup
+            label="Booking form"
+            summary={summaries.bookingForm}
+            initiallyOpen={changed('questions', 'allowGuests')}
+          >
             <section className="panel" aria-labelledby="questions-heading">
               <h2 id="questions-heading">{t('Booking form')}</h2>
               <label className="checkbox">
@@ -1118,6 +1141,7 @@ function EventTypeForm({
           </SettingsGroup>
           <SettingsGroup
             label="After booking"
+            summary={summaries.afterBooking}
             initiallyOpen={changed(
               'successRedirectUrl',
               'successRedirectParameters',
@@ -1130,6 +1154,7 @@ function EventTypeForm({
 
           <SettingsGroup
             label="When people can book"
+            summary={summaries.timing}
             initiallyOpen={changed(
               'scheduleId',
               'slotStepMinutes',
@@ -1395,6 +1420,33 @@ function EventTypeForm({
       )}
     </>
   )
+
+  return (
+    <>
+      <p className="breadcrumb">
+        <Link to={PATHS.eventTypes}>{t('Event types')}</Link>
+      </p>
+      <PageHeader
+        title={uiText(title)}
+        lede={t('Set the booking details, questions and availability for this event type.')}
+      />
+      <EventTypeEditorLayout
+        draft={draft}
+        me={me}
+        profile={profile}
+        smsRemindersAvailable={smsRemindersAvailable}
+        canReadBranding={
+          me.principal.kind === 'session' &&
+          (me.organization.personal ||
+            (access.status === 'ready' &&
+              access.roles?.some((teamRole) => teamRole === 'owner' || teamRole === 'admin') ===
+                true))
+        }
+      >
+        {settings}
+      </EventTypeEditorLayout>
+    </>
+  )
 }
 
 const defaultName = (schedules: Schedule[]) => schedules.find((s) => s.isDefault)?.name
@@ -1590,10 +1642,12 @@ function LocationFields({
 /** Native disclosure: keyboard activation and expanded state are provided by the browser. */
 function SettingsGroup({
   label,
+  summary,
   initiallyOpen,
   children,
 }: {
   label: MessageKey
+  summary: string
   initiallyOpen: boolean
   children: ReactNode
 }) {
@@ -1601,7 +1655,12 @@ function SettingsGroup({
   const [open] = useState(initiallyOpen)
   return (
     <details className="panel event-settings-group" open={open}>
-      <summary>{t(label)}</summary>
+      <summary>
+        {t(label)}
+        <span className="event-settings-summary" title={summary}>
+          {summary}
+        </span>
+      </summary>
       <div className="stack">{children}</div>
     </details>
   )

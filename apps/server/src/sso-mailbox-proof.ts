@@ -32,7 +32,11 @@ import {
   ssoRetained,
   USE_SSO_RECOVERY,
 } from './sso.ts'
-import { samlLinkOperation, samlMailboxOperation } from './sso-saml-state.ts'
+import {
+  samlAdmissionOperation,
+  samlLinkOperation,
+  samlMailboxOperation,
+} from './sso-saml-state.ts'
 import { ssoStorageDiagnostic } from './sso-storage-errors.ts'
 
 /** The auth-protocol endpoints (outside /api/v1 and the interface-parity inventory). */
@@ -228,7 +232,11 @@ function attemptEnabled(
     scimMappingConsentEnabled,
   }: Pick<MailboxProofDeliveryDeps, 'capabilities' | 'scimMappingConsentEnabled'>,
 ) {
-  if (attempt.operation === samlLinkOperation || attempt.operation === samlMailboxOperation)
+  if (
+    attempt.operation === samlLinkOperation ||
+    attempt.operation === samlMailboxOperation ||
+    attempt.operation === samlAdmissionOperation
+  )
     return capabilities.ssoSamlEnabled
   return attempt.operation === SCIM_MAPPING_CONSENT
     ? scimMappingConsentEnabled === true

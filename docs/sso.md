@@ -752,6 +752,26 @@ for SAML.
 其他账号使用，验证提示和邮件内容都相同。验证后才会向邮箱持有人告知冲突，原有关联保持不变。
 生产环境仍关闭 SAML，SAML 关联请求返回 `404 sso_disabled`。
 
+For an unlinked subject, the SAML ACS redirects to `/app/mailbox-proof` with the
+opaque attempt ID and `saml=1` in the fragment. The redirect and queued verification
+email are identical for existing accounts and unclaimed addresses.
+After verifying the mailbox, submit the attempt from the original browser to the
+existing SAML completion endpoint. Each successful resolution consumes the result once.
+An existing account receives `link_required` and must sign in independently to link.
+An eligible new account can join through JIT or explicitly accept a current invitation
+using `X-Hourmere-Sso-Attempt` on the existing invitation endpoint. Both protocols apply
+the same signup, inviter, domain, capacity and removal checks. While SAML is hard-off,
+SAML completion and SAML invitation acceptance return `404 sso_disabled`, including
+when OIDC is enabled.
+
+未关联的 SAML 身份统一跳转到 `/app/mailbox-proof`，网址片段中包含不透明的尝试标识和
+`saml=1`。无论邮箱是否已有 Hourmere 账号，跳转和排队发送的验证邮件均相同。验证邮箱后，
+须在原浏览器向现有 SAML 确认端点提交尝试标识。每个结果只能成功使用一次。已有账号会收到
+`link_required`，须用原有方式登录后显式关联。符合条件的新用户可通过 JIT 入组，也可在现有
+邀请接受端点用 `X-Hourmere-Sso-Attempt` 显式接受有效邀请。两种协议采用相同的注册、邀请人、
+域名、团队名额和移除检查。生产环境仍关闭 SAML，即使启用了 OIDC，SAML 确认和 SAML 邀请接受
+仍返回 `404 sso_disabled`。
+
 ### Fetching, credentials and audit
 
 The outbound URL policy and pinned-socket transport that webhooks use now live in the
@@ -984,8 +1004,8 @@ The stable domain codes are exactly:
 | `sso_recovery_required` | 409 | Enforcement needs at least one usable recovery owner (a current owner with accepted status), the last recovery owner tries to leave, be removed or lose the owner role, or the account affected by a link retirement lacks a verified login mailbox |
 | `sso_mailbox_proof_invalid` | 400 | Mailbox proof consume refused: unknown, expired, consumed or another attempt's token, another browser, session or person, or a provider no longer at the attempt's revision, all with one identical response |
 | `sso_oidc_completion_invalid` | 400 | The OIDC completion result or its own mailbox proof is missing, expired, consumed, bound to a different browser or no longer current |
-| `sso_saml_completion_invalid` | 400 | The SAML completion result is missing, expired, consumed, bound to a different browser or no longer current |
-| `sso_invitation_required` | 409 | The proven OIDC subject needs explicit acceptance of a current team invitation |
+| `sso_saml_completion_invalid` | 400 | The SAML completion result or any required mailbox proof is missing, expired, consumed, bound to a different browser or no longer current |
+| `sso_invitation_required` | 409 | The proven SSO subject needs explicit acceptance of a current team invitation |
 | `sso_email_collision` | 409 | The independently proven new mailbox belongs to another account. Only the browser completing its own attempt can receive this response after proof |
 | `sso_not_found` | 404 | Unknown, other-team or retired provider, domain, link, nomination or delegation ID, all with one identical response; a nomination addressed to another owner and another person's delegation answer the same way. Only an authorized repeat delete of the team's own retired provider succeeds idempotently |
 
