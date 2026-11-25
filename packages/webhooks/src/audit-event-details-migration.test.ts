@@ -22,20 +22,13 @@ import { seedEarly } from '../../db/src/upgrade-path-seed-early.ts'
 import { seedLater } from '../../db/src/upgrade-path-seed-later.ts'
 import { snapshotSchema } from '../../db/src/upgrade-schema-snapshot.ts'
 import { deliverWebhook } from './delivery.ts'
-import {
-  createWebhook,
-  deleteWebhook,
-  rotateWebhookSecret,
-  updateWebhook,
-  WEBHOOK_EVENTS,
-} from './service.ts'
+import { createWebhook, deleteWebhook, rotateWebhookSecret, updateWebhook } from './service.ts'
 import {
   createSlackDestination,
   deleteSlackDestination,
   testSlackDestination,
   updateSlackDestination,
 } from './slack.ts'
-import { SLACK_EVENTS } from './slack-format.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const migration = '0080_audit_event_details.sql'
@@ -43,7 +36,18 @@ const migrations = fileURLToPath(new URL('../../db/migrations/', import.meta.url
 const settings = { enabled: true, encryptionKey: Buffer.alloc(32, 5).toString('base64') }
 const now = Temporal.Instant.from('2026-11-01T12:00Z')
 const queue = { enqueue: async () => null }
-const bookingEvents = WEBHOOK_EVENTS.filter((event) => event !== 'workflow.executed')
+// Pin both journal inputs and protection assertions to the check installed by 0080.
+const slackEventsAt0080 = [
+  'booking.created',
+  'booking.rescheduled',
+  'booking.cancelled',
+  'booking.reschedule_requested',
+  'booking.reschedule_request_expired',
+] as const
+const cataloguesAt0080 = {
+  webhook: [...slackEventsAt0080, 'booking.attendee_no_show_changed'],
+  slack: slackEventsAt0080,
+} as const
 const slackUrl = (team: string) =>
   `https://hooks.slack.com/services/T${team}/BUPGRADE/private-upgrade-secret`
 
@@ -68,6 +72,8 @@ async function withCurrentScimReads<T>(db: Db, write: () => Promise<T>): Promise
  * A journal as the application writes it today: webhook, Slack destination (including the
  * delivery worker's automatic pause), no-show, SCIM token and event-type rows come from their
  * services; the other detail shapes go through writeAuditEvent as their services call it.
+ * If a service starts requiring later tables or columns, capture its 0080-era rows as SQL
+ * fixtures so the test still runs on the predecessor schema.
  */
 async function writeJournal(db: Db) {
   // Webhooks: every action, with API-key and session attribution.
@@ -79,7 +85,7 @@ async function writeJournal(db: Db) {
   }
   const all = await createWebhook(ctx, settings, {
     url: 'https://hooks.example.com/all-events?token=private-query',
-    events: bookingEvents.toReversed(),
+    events: cataloguesAt0080.webhook.toReversed(),
   })
   const one = await createWebhook(session, settings, {
     url: 'https://hooks.example.com/one-event',
@@ -98,7 +104,7 @@ async function writeJournal(db: Db) {
   const slack = { ...testContext(db, slackOwner.principal, () => now), requestId: randomUUID() }
   const destination = await createSlackDestination(slack, settings, {
     url: slackUrl('ALL'),
-    events: [...SLACK_EVENTS],
+    events: [...cataloguesAt0080.slack],
   })
   await updateSlackDestination(
     slack,
@@ -402,8 +408,8 @@ it.skipIf(!serverUrl)(
         await updateWebhook(ctx, oneWebhook, { isActive: false })
         await deleteWebhook(ctx, oneWebhook)
       })
-      await assertAuditEventListProtections(pool)
-      await assertAuditEventListProtections(fresh.pool)
+      await assertAuditEventListProtections(pool, cataloguesAt0080)
+      await assertAuditEventListProtections(fresh.pool, cataloguesAt0080)
     } finally {
       try {
         await fresh?.drop()
