@@ -1,18 +1,18 @@
 import {
   type CheckoutOperation,
   type CheckoutSession,
+  checkoutReconciliationWindow,
   checkoutSessionExpiry,
   type PaymentProvider,
 } from '@hourmere/scheduling'
 import { DomainError } from '@hourmere/scheduling/errors'
-import Stripe from 'stripe'
+import type Stripe from 'stripe'
+import { createStripeClient } from './stripe-client.ts'
 import type { StripeConfig } from './stripe-config.ts'
 
 const STRIPE_MIN_LIFETIME_SECONDS = 30 * 60
 const MAX_HOLD_AGE_SECONDS = 5
-const REQUEST_TIMEOUT_MS = 3000
 const MAX_RECONCILIATION_PAGES = 3
-const RECONCILIATION_CLOCK_SKEW_SECONDS = 5
 
 function bindingMismatch(): DomainError {
   return new DomainError('conflict', 'payment_provider_binding_mismatch')
@@ -68,20 +68,7 @@ export function createStripePaymentProvider(
     throw new Error('Stripe Checkout requires a valid PUBLIC_URL')
   const returnUrl = new URL('/', origin).href
   const { accountId, mode } = config
-  const stripe = new Stripe(config.apiKey(), {
-    httpClient: Stripe.createFetchHttpClient(async (input, init) => {
-      try {
-        return await transport(input, { ...init, redirect: 'error' })
-      } catch {
-        // Stripe retries some socket error codes even with maxNetworkRetries set to zero.
-        // An ambiguous create must return to the hold service for reconciliation.
-        throw new Error('Stripe checkout transport failed')
-      }
-    }),
-    maxNetworkRetries: 0,
-    telemetry: false,
-    timeout: REQUEST_TIMEOUT_MS,
-  })
+  const stripe = createStripeClient(config, transport)
 
   async function verifyAccount(input: CheckoutOperation) {
     if (input.accountId !== accountId || input.mode !== mode) throw bindingMismatch()
@@ -134,10 +121,7 @@ export function createStripePaymentProvider(
     },
     async findCheckout(input) {
       await verifyAccount(input)
-      const created = {
-        gte: Math.floor(Date.parse(input.startedAt) / 1000) - RECONCILIATION_CLOCK_SKEW_SECONDS,
-        lte: checkoutSessionExpiry(input.expiresAt) - STRIPE_MIN_LIFETIME_SECONDS,
-      }
+      const created = checkoutReconciliationWindow(input)
       let cursor: string | undefined
       let found: CheckoutSession | null = null
       for (let page = 0; page < MAX_RECONCILIATION_PAGES; page++) {
