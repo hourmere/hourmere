@@ -781,7 +781,10 @@ export function productionAppOptions({
       configurationKey: ssoConfigurationKey,
       privateTargets: ssoPrivateTargets,
       signup: config.signup,
-      scimClaims: config.SCIM_PROVISIONING_ENABLED ? scimClaimCompletion : scimClaimAdmissionOnly,
+      // Keep invitation acceptance available while implicit OIDC self-link claims are off.
+      scimClaims: config.SCIM_PROVISIONING_ENABLED
+        ? { invitation: scimClaimCompletion.invitation }
+        : scimClaimAdmissionOnly,
       session: { secret: config.BETTER_AUTH_SECRET },
       readSession: readSsoSession,
     }),

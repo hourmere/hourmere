@@ -339,6 +339,12 @@ mismatch, provider change, logout, stale session, conflicting links and concurre
 attempts with different users.
 Do not enable the disabled general `/api/auth/link-social` route to implement this.
 
+Ordinary SSO self-linking leaves the member's directory-management status unchanged.
+New-enrollment SCIM claims complete only through explicit acceptance of a SCIM-issued
+invitation with Hourmere mailbox proof, including when SSO supplies the sign-in flow.
+Claim completion through SSO linking is hard-off in production until the corresponding
+work ships. See [SCIM claim completion and rollout](scim.md#ordered-implementation-plan).
+
 An unlinked IdP subject never creates a second user or an automatic link. Whether or
 not its email matches an existing account, and whatever `email_verified` says, the
 callback stores a frozen pending result and returns one generic outcome: “Complete
