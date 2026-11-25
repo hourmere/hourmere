@@ -135,9 +135,9 @@ async function followReschedule(
   token: string,
   signal?: AbortSignal,
 ): Promise<ManagedBooking> {
-  if (booking.status !== 'cancelled' || booking.conference || booking.wasRescheduled) return booking
-  // Older servers can resolve the token before a reschedule and hydrate its cancelled
-  // predecessor afterward. Resolve the same capability once more. That result is final.
+  if (booking.status !== 'cancelled' || booking.conference) return booking
+  // A reschedule can commit between token resolution and hydration. Resolve the same
+  // capability once more in case it now follows a successor. That result is final.
   try {
     return await getManagedBooking(token, signal)
   } catch {

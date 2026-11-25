@@ -132,7 +132,7 @@ function managedProjection(change?: Change): typeof getManagedBookingDetails {
   return new Function(
     'getPublicBranding',
     'resolvedBookingHosts',
-    'getManagedBooking',
+    'prepareManagedBookingRead',
     'managedLinkRescheduleRequest',
     'changeDeadline',
     'cutoffsOf',
@@ -142,7 +142,7 @@ function managedProjection(change?: Change): typeof getManagedBookingDetails {
   )(
     async () => undefined,
     () => ({ as: () => 'booking_hosts' }),
-    async () => ({
+    async () => async () => ({
       id: 'synthetic-booking',
       eventTypeId: 'synthetic-event',
       start: '2030-01-01T10:00:00Z',

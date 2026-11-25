@@ -801,14 +801,21 @@ async function toBookings(
   })
 }
 
-async function loadBooking(db: Db, id: string, now?: Temporal.Instant): Promise<Booking> {
-  const row = await db
+function readBookingRow(db: Db, id: string): Promise<BookingRow> {
+  return db
     .selectFrom('bookings as b')
     .select(BOOKING_COLUMNS)
     .where('b.id', '=', id)
     .executeTakeFirstOrThrow()
+}
+
+async function hydrateBooking(db: Db, row: BookingRow, now?: Temporal.Instant): Promise<Booking> {
   const [booking] = await toBookings(db, [row], undefined, now)
   return booking as Booking
+}
+
+async function loadBooking(db: Db, id: string, now?: Temporal.Instant): Promise<Booking> {
+  return hydrateBooking(db, await readBookingRow(db, id), now)
 }
 
 // --- Writing bookings -------------------------------------------------------------------
@@ -2003,23 +2010,38 @@ export async function getManagedBooking(
   ctx: PublicContext,
   token: ManagedBookingSelector,
 ): Promise<Booking> {
+  const hydrate = await prepareManagedBookingRead(ctx, token)
+  return hydrate(ctx.db)
+}
+
+/** Authorizes and reads the seed row before hydrating its mutable lifecycle and details. */
+export async function prepareManagedBookingRead(ctx: PublicContext, token: ManagedBookingSelector) {
+  let id: string
+  let guestEmail: string | undefined
   if (token && typeof token === 'object') {
     const member = await resolveSeriesMember(ctx.db, token, { scope: 'read' })
     if (!member) throw bookingNotFound()
-    const booking = await loadBooking(ctx.db, member.bookingId, ctx.now())
-    if (member.guestEmail === undefined) return booking
+    id = member.bookingId
+    guestEmail = member.guestEmail
+  } else {
+    const hash = manageTokenHash(token)
+    const target = hash && (await resolveManagedTarget(ctx.db, hash))
+    if (!target) throw bookingNotFound()
+    id = target.id
+  }
+  const now = ctx.now()
+  const row = await readBookingRow(ctx.db, id)
+  return async (db: Db): Promise<Booking> => {
+    const booking = await hydrateBooking(db, row, now)
+    if (guestEmail === undefined) return booking
     delete booking.pendingReschedule
     return {
       ...booking,
-      attendees: booking.attendees.filter((a) => !a.isBooker && a.email === member.guestEmail),
+      attendees: booking.attendees.filter((a) => !a.isBooker && a.email === guestEmail),
       responses: {},
       cancelReason: null,
     }
   }
-  const hash = manageTokenHash(token)
-  const target = hash && (await resolveManagedTarget(ctx.db, hash))
-  if (!target) throw bookingNotFound()
-  return loadBooking(ctx.db, target.id, ctx.now())
 }
 
 /** Reload the selector after the series lock, then lock only its current member. */

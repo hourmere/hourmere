@@ -1,6 +1,6 @@
 // Booking details for invitee links and reschedule slots shared by invitees and hosts.
-// Invitee reads go through getManagedBooking, while host slots use getHostBooking so the
-// same availability rules retain each caller's authorization boundary.
+// Invitee reads share manage-token authorization, while host slots use getHostBooking so
+// the same availability rules retain each caller's authorization boundary.
 import {
   checkSlotRange,
   hasBookablePart,
@@ -18,6 +18,7 @@ import {
   type ManagedBookingSelector,
   type ManagedRescheduleRequestState,
   managedLinkRescheduleRequest,
+  prepareManagedBookingRead,
 } from './bookings.ts'
 import { getPublicBranding, type PublicBranding } from './branding.ts'
 import {
@@ -57,20 +58,23 @@ export async function getManagedBookingDetails(
   ctx: PublicContext,
   token: ManagedBookingSelector,
 ): Promise<ManagedBooking> {
-  // Resolve the token, booking and request at one database snapshot and decision time.
+  // The seed read picks the booking. Hydration can see changes committed since that
+  // read, but its lifecycle, pending request and link state share one snapshot.
   const now = ctx.now()
+  const at = { ...ctx, now: () => now }
+  const hydrate = await prepareManagedBookingRead(at, token)
   return ctx.db
     .transaction()
     .setIsolationLevel('repeatable read')
     .setAccessMode('read only')
-    .execute((db) => readManagedBookingDetails({ ...ctx, db, now: () => now }, token))
+    .execute(async (db) => readManagedBookingDetails({ ...at, db }, token, await hydrate(db)))
 }
 
 async function readManagedBookingDetails(
   ctx: PublicContext,
   token: ManagedBookingSelector,
+  booking: Booking,
 ): Promise<ManagedBooking> {
-  const booking = await getManagedBooking(ctx, token)
   const [eventType, hosts, rescheduleRequest, cutoffs] = await Promise.all([
     booking.eventTypeId === null
       ? undefined

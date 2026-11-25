@@ -173,7 +173,7 @@ describe('closed reschedule requests on the invitee page', () => {
     expect(screen.queryByText(COPY.en.cancelled)).toBeNull()
     expect(screen.queryByRole('button', { name: 'Reschedule' })).toBeNull()
     expect(api.to('POST /api/v1/bookings/manage/reschedule')).toHaveLength(1)
-    expect(api.to('GET /api/v1/bookings/manage')).toHaveLength(2)
+    expect(api.to('GET /api/v1/bookings/manage')).toHaveLength(3)
 
     await selectPublicLanguage(user, 'zh-CN')
     expect(await screen.findByText('此预约已改期。新预约有自己的链接。')).toBeDefined()
