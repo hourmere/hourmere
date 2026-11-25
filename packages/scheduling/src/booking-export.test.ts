@@ -718,6 +718,16 @@ describe.skipIf(!process.env.DATABASE_URL)('booking CSV database stream', () => 
       exportBookingsCsv(teamContext, range).then((stream) => stream.cancel()),
     ).resolves.toBeUndefined()
   })
+  it('releases both export slots when building the transaction throws synchronously', async () => {
+    const user = await createTestUser(db)
+    const ctx = { ...testContext(db, user.principal), bookingExportMaxConcurrent: 1 }
+    await db.transaction().execute(async (trx) => {
+      await expect(exportBookingsCsv({ ...ctx, db: trx }, range)).rejects.toThrow(
+        'calling the transaction method for a Transaction is not supported',
+      )
+    })
+    await (await exportBookingsCsv(ctx, range)).cancel()
+  })
   it('releases the connection and export slots when the stream is never read', async () => {
     const user = await createTestUser(db)
     const ctx = { ...testContext(db, user.principal), bookingExportMaxConcurrent: 1 }
@@ -920,9 +930,9 @@ describe.skipIf(!process.env.DATABASE_URL)('booking CSV database stream', () => 
     await vi.advanceTimersByTimeAsync(EXPORT_TIMEOUT_MS)
     await expect(timed.getReader().read()).rejects.toThrow('timed out')
     vi.useRealTimers()
-    // A subsequent database statement waits until rollback/commit has completed.
-    await new Promise((resolve) => setTimeout(resolve, 20))
-    await (await exportBookingsCsv(ctx, range)).cancel()
+    await vi.waitFor(async () => {
+      await (await exportBookingsCsv(ctx, range)).cancel()
+    })
   })
   it('streams over 10k rows with routing enabled, bounded pages, stable keysets and a consistent cancellation snapshot', async () => {
     const user = await createTestUser(db)

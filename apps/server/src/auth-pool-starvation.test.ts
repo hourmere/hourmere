@@ -3,7 +3,7 @@ import { CLIENT_IP_HEADER, createAuth, createAuthPool, createCallerResolver } fr
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createTestUser } from '@hourmere/scheduling/testing'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createApp } from './app.ts'
 import { mcpOAuthRoutes } from './mcp/oauth.ts'
 
@@ -18,36 +18,24 @@ const CLIENT = 'https://pool-client.test/metadata.json'
 const CALLBACK = 'https://pool-client.test/callback'
 const POOL_SIZE = 3
 const BOUND_MS = 15_000
+const TIMEOUT = 'TIMEOUT'
 const secret = randomBytes(32).toString('base64')
 let nextAddress = 0
 const testIp = () => `198.19.${Math.floor(++nextAddress / 250)}.${(nextAddress % 250) + 1}`
 
-/** Resolves to the value, or to 'TIMEOUT' when the work is still waiting at the bound. */
-async function within<T>(work: Promise<T>) {
-  let timer: NodeJS.Timeout | undefined
-  const outcome = await Promise.race([
-    work,
-    new Promise<'TIMEOUT'>((resolve) => {
-      timer = setTimeout(() => resolve('TIMEOUT'), BOUND_MS)
-    }),
-  ])
-  clearTimeout(timer)
-  return outcome
-}
-
-/** Resolves to the statuses, or to 'TIMEOUT' when the batch is still waiting at the bound. */
-function bounded(work: Promise<Response[]>) {
-  return within(work.then((responses) => responses.map((response) => response.status)))
-}
-
 describe.skipIf(!serverUrl)('auth pool starvation', () => {
   let owned: TestDatabase, db: Db
+  let needsSetup = true
+  let timedOut = false
   const pools: ReturnType<typeof createAuthPool>[] = []
-  beforeAll(async () => {
+  const instances = new Map<number, Instance>()
+  beforeEach(async () => {
+    if (!needsSetup) return
     owned = await createTestDatabase(serverUrl as string)
     db = createDb(owned.pool)
+    needsSetup = false
   })
-  afterAll(async () => {
+  async function cleanup() {
     // A starved pool never drains; dropping the database ends its connections.
     await Promise.all(
       pools.map((pool) =>
@@ -58,9 +46,51 @@ describe.skipIf(!serverUrl)('auth pool starvation', () => {
       ),
     )
     await owned?.drop()
+    instances.clear()
+    pools.length = 0
+    needsSetup = true
+  }
+  afterEach(async () => {
+    // Retire a starved instance before any other case can reuse its pool.
+    if (!timedOut) return
+    await cleanup()
+    timedOut = false
   })
-  /** A fresh auth instance whose pool has exactly `size` connections. */
+  afterAll(async () => {
+    if (!needsSetup) await cleanup()
+  })
+
+  async function within<T>(work: Promise<T>) {
+    let timer: NodeJS.Timeout | undefined
+    try {
+      return await Promise.race([
+        work,
+        new Promise<typeof TIMEOUT>((resolve) => {
+          timer = setTimeout(() => {
+            timedOut = true
+            resolve(TIMEOUT)
+          }, BOUND_MS)
+        }),
+      ])
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  function bounded(work: Promise<Response[]>) {
+    return within(work.then((responses) => responses.map((response) => response.status)))
+  }
+
   async function instance(size = POOL_SIZE) {
+    const cached = instances.get(size)
+    if (cached) return cached
+    const target = await buildInstance(size)
+    instances.set(size, target)
+    return target
+  }
+
+  /** An auth instance with exactly `size` connections, separate from the broker's app pool. */
+  async function buildInstance(size: number) {
     const signup = { mode: 'closed', allowedDomains: [] } as const
     const pool = createAuthPool(owned.url, signup)
     ;(pool as unknown as { options: { max: number } }).options.max = size
@@ -116,9 +146,9 @@ describe.skipIf(!serverUrl)('auth pool starvation', () => {
         },
         { incoming: { socket: { remoteAddress: testIp() } } },
       )
-    return { auth, request, api }
+    return { request, api }
   }
-  type Instance = Awaited<ReturnType<typeof instance>>
+  type Instance = Awaited<ReturnType<typeof buildInstance>>
   async function signedIn() {
     const user = await createTestUser(db)
     const token = randomBytes(24).toString('base64url')
@@ -205,65 +235,54 @@ describe.skipIf(!serverUrl)('auth pool starvation', () => {
       body: new URLSearchParams({ client_id: clientId, token }),
     })
   }
-  /** Authentication still works for someone else after the batch. */
+  /** Authentication still works for someone else on the same pool. */
   async function sessionStillResolves(target: Instance) {
     const other = await signedIn()
     expect(
       await bounded(
         target.request('/api/auth/get-session', { headers: other.headers }).then((r) => [r]),
       ),
-      'session lookup after the batch',
+      'session lookup after the OAuth or session request',
     ).toEqual([200])
   }
 
-  it('finishes as many anonymous revocations as the pool has connections', async () => {
-    const target = await instance()
-    expect(
-      await bounded(
-        Promise.all(
-          Array.from({ length: POOL_SIZE }, () => revoke(target, randomUUID(), 'probe-token')),
-        ),
-      ),
-      'anonymous revocation batch',
-    ).toEqual(Array(POOL_SIZE).fill(400))
-    await sessionStillResolves(target)
-  }, 60_000)
-
-  it('finishes as many valid refresh-token revocations as the pool has connections', async () => {
-    const target = await instance()
-    const tokens = []
-    for (let i = 0; i < POOL_SIZE; i++) tokens.push(await connected(target, await signedIn()))
-    expect(
-      await bounded(Promise.all(tokens.map((token) => revoke(target, CLIENT, token)))),
-      'valid revocation batch',
-    ).toEqual(Array(POOL_SIZE).fill(200))
-    await sessionStillResolves(target)
-  }, 60_000)
-
   // With one connection, a request that holds it while Better Auth needs another waits
   // forever on every run; a larger pool catches that only when the batch happens to overlap.
-  it('finishes a consent submission and both revocations on a pool of one connection', async () => {
+  it('finishes one anonymous revocation on an auth pool of one', async () => {
     const target = await instance(1)
     expect(
-      await bounded(revoke(target, randomUUID(), 'probe-token').then((r) => [r])),
+      await within(revoke(target, randomUUID(), 'probe-token').then((r) => r.status)),
       'anonymous revocation',
-    ).toEqual([400])
-    const s = await signedIn()
-    const pending = await untilConsent(target, s)
-    expect(
-      await bounded(
-        Promise.resolve(target.api('consent', s.headers, pending.body)).then((r) => [r]),
-      ),
-      'consent submission',
-    ).toEqual([200])
-    const token = await within(connected(target, await signedIn()))
-    expect(token, 'consent and token exchange for a connection').not.toBe('TIMEOUT')
-    expect(
-      await bounded(revoke(target, CLIENT, token as string).then((r) => [r])),
-      'valid revocation',
-    ).toEqual([200])
+    ).toBe(400)
     await sessionStillResolves(target)
-  }, 90_000)
+  }, 60_000)
+
+  it('finishes one broker consent on an auth pool of one', async () => {
+    const target = await instance(1)
+    const s = await signedIn()
+    const pending = await within(untilConsent(target, s))
+    if (pending === TIMEOUT) throw new Error('broker consent setup timed out')
+    const response = await within(Promise.resolve(target.api('consent', s.headers, pending.body)))
+    if (response === TIMEOUT) throw new Error('broker consent timed out')
+    expect(response.status).toBe(200)
+    const { redirectUrl } = (await response.json()) as { redirectUrl: string }
+    const callback = new URL(redirectUrl)
+    expect(`${callback.origin}${callback.pathname}`).toBe(CALLBACK)
+    expect(callback.searchParams.has('code')).toBe(true)
+    expect(callback.searchParams.has('error')).toBe(false)
+    await sessionStillResolves(target)
+  }, 60_000)
+
+  it('finishes one valid refresh-token revocation on an auth pool of one', async () => {
+    const target = await instance(1)
+    const token = await within(connected(target, await signedIn()))
+    if (token === TIMEOUT) throw new Error('refresh token setup timed out')
+    expect(
+      await within(revoke(target, CLIENT, token).then((r) => r.status)),
+      'valid revocation',
+    ).toBe(200)
+    await sessionStillResolves(target)
+  }, 60_000)
 
   it.each(['/sign-out', '/revoke-session', '/revoke-sessions', '/revoke-other-sessions'])(
     'finishes as many concurrent %s requests as the pool has connections',
