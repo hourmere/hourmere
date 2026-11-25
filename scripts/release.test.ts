@@ -102,6 +102,7 @@ describe('release preparation', () => {
       'google-calendar.md#automatic-meet-projection',
       'notifications.md#conference-outbox-delivery-budget',
       'webhooks.md',
+      'scim.md',
     ]
     for (const guide of guides) {
       expect(notes).toContain(

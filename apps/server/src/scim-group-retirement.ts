@@ -85,7 +85,7 @@ async function retire(
   }
 }
 
-/** DELETE /Groups/{id}, injected only by the SCIM resource test harness. */
+/** DELETE /Groups/{id}. */
 export function scimGroupRetirement(db: Db, notices: ScimMappingNoticeQueue): ScimResourceHandler {
   return (request) => {
     if (request.method !== 'DELETE') return

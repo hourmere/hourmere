@@ -154,10 +154,15 @@ export async function listSsoProviders(
     .execute()
   const page = rows.slice(0, limit)
   const recoveryProviderIds =
-    // Listed while the setting is off too: retiring a link stays available.
+    // OIDC recovery remains available with the setting off. SAML is still hard-off.
     query.includeRecoveryLinks && principal.kind === 'session'
       ? new Set(
-          page.filter((provider) => provider.protocol === 'oidc').map((provider) => provider.id),
+          page
+            .filter(
+              ({ protocol }) =>
+                protocol === 'oidc' || (protocol === 'saml' && deps.capabilities.ssoSamlEnabled),
+            )
+            .map(({ id }) => id),
         )
       : new Set<string>()
   const links =

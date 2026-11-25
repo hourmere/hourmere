@@ -277,12 +277,11 @@ export interface AuthConfig {
   /** Injected only by isolated client-metadata tests; runtime uses the pinned DNS transport. */
   mcpMetadataFetcher?: Parameters<typeof mcpOAuthPlugins>[2]
   /**
-   * SCIM claim completion inside the existing acceptance flows (docs/scim.md). The resource
-   * test flag: only test harnesses pass it, in code; productionAuthOptions never does, and no
-   * setting reaches it. The SSO linking completion step extends the same dependency.
+   * SCIM claim completion inside the existing acceptance flows (docs/scim.md).
+   * The running server still checks invitation eligibility when provisioning is paused.
    */
   scimClaims?: ScimClaimCompletion | undefined
-  /** Set alongside SCIM resource handlers in the test harness, even before the first connection. */
+  /** Set alongside SCIM resource handlers, even before the first connection. */
   scimResourcesEnabled?: boolean | undefined
   /** Optional SSO tombstone write in the existing administrative removal transaction. */
   recordAdmissionRemoval?: SsoAdmissionRemoval | undefined
@@ -617,6 +616,7 @@ export {
   type ScimClaimDecision,
   type ScimClaimFinish,
   type ScimInvitationProof,
+  scimClaimAdmissionOnly,
   scimClaimCompletion,
 } from './scim-claims.ts'
 export {

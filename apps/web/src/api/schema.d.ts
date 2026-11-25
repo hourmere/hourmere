@@ -5840,6 +5840,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/webhooks/stripe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Receive a signed Stripe snapshot event
+         * @description Stripe delivery endpoint for the configured account. Requires the exact raw body and endpoint signature. Available only when the operator enables the receiver.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header: {
+                    "Stripe-Signature": string;
+                };
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            responses: {
+                /** @description Delivery acknowledged */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            received: true;
+                        };
+                    };
+                };
+                /** @description Invalid signature or event envelope */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Receiver disabled or unconfigured */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Body exceeds 64 KiB */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Delivery could not be persisted; retry */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -7333,7 +7419,7 @@ export interface components {
             publicUrl: string;
             /** @description Effective state of routing forms. ROUTING_FORMS_ENABLED defaults to false. A legacy route handle keeps routing forms off. Absent when unknown. */
             routingFormsEnabled?: boolean;
-            /** @description Whether administrators may manage SCIM provisioning tokens; resources are not available yet */
+            /** @description Whether the operator enabled SCIM provisioning and owner token creation and rotation */
             scimProvisioningEnabled?: boolean;
             /** @enum {boolean} */
             scimResourcesEnabled?: true;

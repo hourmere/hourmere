@@ -115,8 +115,6 @@ export const admin = {
   'Location options and conferencing': 'Location options and conferencing',
   'Duration (minutes)': 'Duration (minutes)',
   'SCIM provisioning tokens': 'SCIM provisioning tokens',
-  'Provisioning is not available yet. These tokens prepare your organization for a future SCIM connection.':
-    'Provisioning is not available yet. These tokens prepare your organization for a future SCIM connection.',
   'Tokens only authorize SCIM for this organization. Keep them private.':
     'Tokens only authorize SCIM for this organization. Keep them private.',
   'Could not update provisioning tokens. Check the token list before trying again.':
@@ -3241,6 +3239,9 @@ export const admin = {
   'Remove a location option before adding another.':
     'Remove a location option before adding another.',
   'Open host booking details': 'Open host booking details',
+  // SCIM provisioning
+  'SCIM provisioning is disabled on this instance.':
+    'SCIM provisioning is disabled on this instance.',
   // Event type editor summaries and booking page preview
   'Preview booking page': 'Preview booking page',
   'Duration not set': 'Duration not set',

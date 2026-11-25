@@ -57,6 +57,7 @@ describe.skipIf(!serverUrl)('team writes without an SSO policy', () => {
       DATABASE_URL: owned.url,
       PUBLIC_URL: origin,
       BETTER_AUTH_SECRET: secret,
+      SCIM_PROVISIONING_ENABLED: 'false',
     })
     authPool = createAuthPool(owned.url, config.signup)
     const auth = createAuth({
@@ -94,6 +95,8 @@ describe.skipIf(!serverUrl)('team writes without an SSO policy', () => {
         enqueueCalendarSync: unavailable,
         enqueueCalendarWritebackRecovery: unavailable,
         mailboxProofQueue: { enqueue: unavailable },
+        scimMappingNotices: { enqueue: unavailable },
+        enqueueScimInvitation: unavailable,
       }),
     )
   })

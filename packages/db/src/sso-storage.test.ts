@@ -53,6 +53,20 @@ describe.skipIf(!serverUrl)('SSO configuration storage', () => {
     await owned?.drop()
   })
 
+  it('creates fixture users in strict timestamp order, with the owner first', async () => {
+    await inRolledBackTransaction(owned.pool, async (db) => {
+      const { owner, admin, member, coOwner, otherOwner, personalUser } = await ssoFixture(db)
+      const users = [owner, admin, member, coOwner, otherOwner, personalUser]
+      const { rows } = await db.query<{ id: string; created_at: string }>(
+        `SELECT id, "createdAt"::text AS created_at FROM auth."user"
+        WHERE id = ANY($1::uuid[]) ORDER BY "createdAt", id`,
+        [users],
+      )
+      expect(new Set(rows.map(({ created_at }) => created_at)).size).toBe(users.length)
+      expect(rows.map(({ id }) => id)).toEqual(users)
+    })
+  })
+
   it('names every constraint, index, trigger and trigger rule in a protection', async () => {
     const { constraints, indexes, triggers } = await catalogObjects(owned.pool)
     const source = await readFile(join(migrationsDir, ssoMigration), 'utf8')

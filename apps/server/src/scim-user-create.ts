@@ -4,8 +4,7 @@
 // An address that already has its own standing in the organization (a member's, or one
 // another pending invitation holds) gets the same entry and a claim without an invitation.
 // It never creates an account, a membership or a session, never marks an address verified,
-// and admits nobody: the recipient proves the mailbox through the claim later. Production
-// registers no handler yet; see ScimResources in scim.ts.
+// and admits nobody: the recipient proves the mailbox through the claim later.
 import {
   admitInvitation,
   type EnqueueInvitationEmail,

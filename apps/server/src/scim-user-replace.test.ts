@@ -669,80 +669,114 @@ describe.skipIf(!databaseUrl)('SCIM User profile replacement and PATCH', () => {
     },
   )
 
-  it('leaves production Users, Groups and discovery unregistered with token provisioning on', async () => {
-    const organization = await team()
-    const id = await entry(organization, 'production-control')
-    const unreachable = async (): Promise<never> => {
-      throw new Error('SCIM must not call this collaborator')
-    }
-    const application = createApp(
-      productionAppOptions({
-        config: loadConfig({
-          DATABASE_URL: owned.url,
-          BETTER_AUTH_SECRET: signingSecret,
-          PUBLIC_URL: origin,
-          SCIM_PROVISIONING_ENABLED: 'true',
+  it.each([false, true])(
+    'enforces the production switch for User updates and retirement (%s)',
+    async (enabled) => {
+      const organization = await team()
+      const id = await entry(organization, 'production-control')
+      const unreachable = async (): Promise<never> => {
+        throw new Error('SCIM must not call this collaborator')
+      }
+      const application = createApp(
+        productionAppOptions({
+          config: loadConfig({
+            DATABASE_URL: owned.url,
+            BETTER_AUTH_SECRET: signingSecret,
+            PUBLIC_URL: origin,
+            SCIM_PROVISIONING_ENABLED: String(enabled),
+          }),
+          db,
+          auth: { handler: unreachable },
+          resolveCaller: unreachable,
+          resolveMcpOAuth: unreachable,
+          checkDb: unreachable,
+          waitlist: { verify: unreachable, remove: unreachable },
+          invitationMailLimits: { secret: signingSecret },
+          webhookSettings: { enabled: false },
+          webhookQueue: { enqueue: unreachable },
+          notify: unreachable,
+          notifyAttendeeNoShow: unreachable,
+          googleCalendar: undefined,
+          microsoftCalendar: undefined,
+          zoomConference: undefined,
+          enqueueCalendarSync: unreachable,
+          enqueueCalendarWritebackRecovery: unreachable,
+          mailboxProofQueue: { enqueue: unreachable },
+          scimMappingNotices: { enqueue: unreachable },
+          enqueueScimInvitation: unreachable,
         }),
-        db,
-        auth: { handler: unreachable },
-        resolveCaller: unreachable,
-        resolveMcpOAuth: unreachable,
-        checkDb: unreachable,
-        waitlist: { verify: unreachable, remove: unreachable },
-        invitationMailLimits: { secret: signingSecret },
-        webhookSettings: { enabled: false },
-        webhookQueue: { enqueue: unreachable },
-        notify: unreachable,
-        notifyAttendeeNoShow: unreachable,
-        googleCalendar: undefined,
-        microsoftCalendar: undefined,
-        zoomConference: undefined,
-        enqueueCalendarSync: unreachable,
-        enqueueCalendarWritebackRecovery: unreachable,
-        mailboxProofQueue: { enqueue: unreachable },
-      }),
-    )
-    const unavailable = await expectError(
-      await send(organization, `Users/${id}`, 'PUT', profile('would-change'), {}, application),
-      404,
-    )
-    expect(unavailable.detail).toBe('SCIM resources are not available yet.')
-    expect(
-      await expectError(
-        await send(
+      )
+      if (enabled) {
+        const replaced = await send(
+          organization,
+          `Users/${id}`,
+          'PUT',
+          profile('replaced'),
+          {},
+          application,
+        )
+        expect(replaced.status).toBe(200)
+        expect(await replaced.json()).toMatchObject({ id, userName: 'replaced' })
+        const patched = await send(
           organization,
           `Users/${id}`,
           'PATCH',
-          patchProfile({ userName: 'would-change' }),
+          patchProfile({ userName: 'patched' }),
           {},
           application,
-        ),
+        )
+        expect(patched.status).toBe(200)
+        expect(await patched.json()).toMatchObject({ id, userName: 'patched' })
+        expect(
+          (await send(organization, `Users/${id}`, 'DELETE', undefined, {}, application)).status,
+        ).toBe(204)
+        expect(
+          (await send(organization, `Users/${id}`, 'GET', undefined, {}, application)).status,
+        ).toBe(404)
+        return
+      }
+      const unavailable = await expectError(
+        await send(organization, `Users/${id}`, 'PUT', profile('would-change'), {}, application),
         404,
-      ),
-    ).toEqual(unavailable)
-    expect(
-      await expectError(
-        await send(organization, `Users/${id}`, 'DELETE', undefined, {}, application),
-        404,
-      ),
-    ).toEqual(unavailable)
-    for (const resource of [
-      'Users',
-      `Users/${id}`,
-      'Groups',
-      'ServiceProviderConfig',
-      'ResourceTypes',
-      'Schemas',
-    ])
+      )
+      expect(unavailable.detail).toBe('SCIM provisioning is disabled.')
       expect(
         await expectError(
-          await send(organization, resource, 'GET', undefined, {}, application),
+          await send(
+            organization,
+            `Users/${id}`,
+            'PATCH',
+            patchProfile({ userName: 'would-change' }),
+            {},
+            application,
+          ),
           404,
         ),
       ).toEqual(unavailable)
-    expect(await stored(id)).toMatchObject({ user_name: 'production-control', retired_at: null })
-    expect(await updates(id)).toEqual([])
-  })
+      expect(
+        await expectError(
+          await send(organization, `Users/${id}`, 'DELETE', undefined, {}, application),
+          404,
+        ),
+      ).toEqual(unavailable)
+      for (const resource of [
+        'Users',
+        `Users/${id}`,
+        'Groups',
+        'ServiceProviderConfig',
+        'ResourceTypes',
+        'Schemas',
+      ])
+        expect(
+          await expectError(
+            await send(organization, resource, 'GET', undefined, {}, application),
+            404,
+          ),
+        ).toEqual(unavailable)
+      expect(await stored(id)).toMatchObject({ user_name: 'production-control', retired_at: null })
+      expect(await updates(id)).toEqual([])
+    },
+  )
 
   // Keep this last: disabling one-per-organization changes the test database's token trigger.
   it('scopes target IDs, manager IDs and identifiers to the exact token connection', async () => {

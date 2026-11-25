@@ -13,7 +13,7 @@ import pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
 import { loadConfig } from './config.ts'
-import { scimDiscoveryWithGroups } from './scim-discovery.ts'
+import { scimDiscoveryWithGroups } from './scim-discovery-fixture.ts'
 import { scimGroups } from './scim-groups.ts'
 import { productionAppOptions } from './server.ts'
 
@@ -986,12 +986,10 @@ describe.skipIf(!databaseUrl)('SCIM Group resources', () => {
     expect(await updateEvents(original.id)).toEqual([])
   })
 
-  it.each([
-    [true, 'SCIM resources are not available yet.'],
-    [false, 'SCIM provisioning is disabled.'],
-  ] as const)(
-    'pins production discovery bytes and keeps Group routes unavailable with provisioning %s',
-    async (enabled, detail) => {
+  it.each([false, true])(
+    'enforces the production switch for Group and discovery routes (%s)',
+    async (enabled) => {
+      const detail = 'SCIM provisioning is disabled.'
       const parent = await team('Production assembly parent')
       const child = await team('Production assembly child')
       const token = await issue(parent.id)
@@ -1007,7 +1005,7 @@ describe.skipIf(!databaseUrl)('SCIM Group resources', () => {
         SCIM_PROVISIONING_ENABLED: String(enabled),
       })
       const unexpected = async (): Promise<never> =>
-        expect.unreachable('SCIM routes must remain unavailable')
+        expect.unreachable('Unexpected SCIM collaborator')
       const production = createApp(
         productionAppOptions({
           config,
@@ -1028,6 +1026,8 @@ describe.skipIf(!databaseUrl)('SCIM Group resources', () => {
           enqueueCalendarSync: unexpected,
           enqueueCalendarWritebackRecovery: unexpected,
           mailboxProofQueue: { enqueue: unexpected },
+          scimMappingNotices: { enqueue: async () => randomUUID() },
+          enqueueScimInvitation: unexpected,
         }),
       )
       const expected = JSON.stringify({ schemas: [ERROR], status: '404', detail })
@@ -1043,16 +1043,18 @@ describe.skipIf(!databaseUrl)('SCIM Group resources', () => {
         `Groups/${value.id}`,
       ]) {
         const response = await call(production, token, path)
-        expect(response.status, path).toBe(404)
+        expect(response.status, path).toBe(enabled ? 200 : 404)
         expect(response.headers.get('content-type')).toBe('application/scim+json')
-        expect(await response.text(), path).toBe(expected)
+        if (!enabled) expect(await response.text(), path).toBe(expected)
       }
+      const anotherChild = await team('Another production child')
+      await reserve(token, anotherChild.id, 'production-post')
       const posted = await call(production, token, 'Groups', {
         method: 'POST',
-        body: groupBody('production-reservation', 'Not applied'),
+        body: groupBody('production-post', 'Production post'),
       })
-      expect(posted.status).toBe(404)
-      expect(await posted.text()).toBe(expected)
+      expect(posted.status).toBe(enabled ? 201 : 404)
+      if (!enabled) expect(await posted.text()).toBe(expected)
       const path = `Groups/${value.id}`
       for (const [method, body] of [
         ['PUT', groupBody('production-reservation', 'PUT name not applied')],
@@ -1063,11 +1065,17 @@ describe.skipIf(!databaseUrl)('SCIM Group resources', () => {
         ['PATCH', patchBody({ op: 'remove', path: 'members' })],
       ] as const) {
         const response = await call(production, token, path, { method, body })
-        expect(response.status, method).toBe(404)
+        expect(response.status, method).toBe(enabled ? 200 : 404)
         expect(response.headers.get('content-type')).toBe('application/scim+json')
-        expect(await response.text(), method).toBe(expected)
+        if (!enabled) expect(await response.text(), method).toBe(expected)
       }
-      expect(await storedName(child.id)).toBe(value.displayName)
+      expect(await storedName(child.id)).toBe(
+        enabled ? 'PATCH name not applied' : value.displayName,
+      )
+      const retired = await call(production, token, path, { method: 'DELETE' })
+      expect(retired.status).toBe(enabled ? 204 : 404)
+      if (!enabled) expect(await retired.text()).toBe(expected)
+      expect((await call(production, token, path)).status).toBe(404)
     },
   )
 })

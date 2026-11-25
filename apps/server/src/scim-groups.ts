@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import { teamMembershipLimit } from '@hourmere/auth'
-import type { Db } from '@hourmere/db'
+import type { Database, Db } from '@hourmere/db'
 import { writeAuditEvent } from '@hourmere/db/audit'
-import { sql } from 'kysely'
+import { sql, type Transaction } from 'kysely'
 import type { ScimReply, ScimResourceHandler, ScimResourceRequest } from './scim.ts'
+import { recordScimChildMembership } from './scim-child-journal.ts'
 import { SCIM_URN } from './scim-discovery.ts'
 import {
   removeManagedChildMemberships,
@@ -14,6 +15,7 @@ import {
   parseScimListQuery,
   parseScimProjection,
   projectScimResource,
+  SCIM_PAGE_SIZE,
   scimGroupQuery,
   scimListResponse,
   scimPageWindow,
@@ -363,7 +365,7 @@ async function linkedUsers(db: Db, organizationId: string, connectionId: string,
 }
 
 async function insertRoster(
-  trx: Db,
+  trx: Transaction<Database>,
   mappingId: string,
   childId: string,
   users: Awaited<ReturnType<typeof linkedUsers>>,
@@ -421,6 +423,9 @@ async function insertRoster(
     )
     .execute()
   await trx.insertInto('scim_team_managed_memberships').values(sourced).execute()
+  for (const { member_id: memberId } of sourced) {
+    await recordScimChildMembership(trx, { childId, memberId }, 'added')
+  }
 }
 
 async function createGroup(db: Db, request: ScimResourceRequest): Promise<ScimReply> {
@@ -640,9 +645,9 @@ async function updateGroup(
   }
 }
 
-/** Group resources, injected only by SCIM resource test harnesses. */
+/** Group creation, reads, replacement and PATCH. */
 export function scimGroups(db: Db): ScimResourceHandler {
-  return (request) => {
+  const handle: ScimResourceHandler = (request) => {
     if (request.method === 'POST' && request.path === '/Groups') return createGroup(db, request)
     const match = /^\/Groups(?:\/([^/]*))?$/.exec(request.path)
     if (!match) return
@@ -651,4 +656,9 @@ export function scimGroups(db: Db): ScimResourceHandler {
     if (request.method !== 'GET' && request.method !== 'HEAD') return
     return match[1] === undefined ? listGroups(db, request) : readGroup(db, request, match[1])
   }
+  return Object.assign(handle, {
+    resourceType: 'Group',
+    patch: true,
+    filter: { maxResults: SCIM_PAGE_SIZE },
+  } as const)
 }

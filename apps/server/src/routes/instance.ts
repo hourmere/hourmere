@@ -34,7 +34,7 @@ const Instance = z
     automaticZoom: z.boolean().optional(),
     scimProvisioningEnabled: z.boolean().optional().openapi({
       description:
-        'Whether administrators may manage SCIM provisioning tokens; resources are not available yet',
+        'Whether the operator enabled SCIM provisioning and owner token creation and rotation',
     }),
     slotSnippetsEnabled: z.boolean().optional().openapi({
       description:
@@ -70,7 +70,7 @@ const Instance = z
       .openapi({ description: 'The sign-in methods people can use on this instance' }),
   })
   .openapi('Instance')
-const ResourceTestInstance = z
+const ScimInstance = z
   .object({
     ...Instance.shape,
     scimResourcesEnabled: z.literal(true).optional(),
@@ -168,7 +168,7 @@ export function instanceRoutes({
         responses: {
           200: {
             description: "The instance's features",
-            content: json(scimResourcesEnabled ? ResourceTestInstance : Instance),
+            content: json(scimResourcesEnabled ? ScimInstance : Instance),
           },
         },
       }),

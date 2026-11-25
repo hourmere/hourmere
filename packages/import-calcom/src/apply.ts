@@ -216,7 +216,13 @@ export async function applyExtractedImport(
     const comparable = {
       ...fresh,
       extractedAt: saved.extractedAt,
-      plan: { ...fresh.plan, extractedAt: saved.plan.extractedAt },
+      plan: {
+        ...fresh.plan,
+        extractedAt: saved.plan.extractedAt,
+        // The target fingerprint already checked the stored rows. The parser's live
+        // occupancy context can change when a pending hold reaches its deadline.
+        targetContextFingerprint: saved.plan.targetContextFingerprint,
+      },
       planFingerprint: '',
     }
     if (fingerprint(comparable) !== fingerprint({ ...saved, planFingerprint: '' }))

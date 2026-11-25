@@ -243,6 +243,7 @@ describe('openApiDocument', () => {
     expect(Object.keys(doc.paths)).toEqual(
       expect.arrayContaining([
         '/api/health',
+        '/api/webhooks/stripe',
         '/api/v1/me',
         '/api/v1/readiness/self',
         '/api/v1/teams/{teamId}/readiness',

@@ -62,7 +62,7 @@ includes PostgreSQL 18.
 | `SSO_OIDC_ENABLED` | `false` | Turn on [organization OIDC single sign-on](/docs/sso). Unset or empty uses the release default, which is off until SSO ships; only `true` and `false` are accepted as nonempty values and anything else prevents startup. Set identically on web and worker. Turning it off never lifts a team's stored SSO requirement; see [what off means](/docs/sso#what-off-means). SAML has no setting yet. |
 | `SSO_ENCRYPTION_KEY` | Unset | Independent canonical 32-byte base64 key that seals identity provider configuration; required before a team can save a provider. Keep stable and back up privately; losing it makes saved configuration unreadable. Does not enable SSO by itself. |
 | `SSO_PRIVATE_TARGETS` | Unset | Used by organization OIDC sign-in when `SSO_OIDC_ENABLED` is on; validated at startup in every state. Self-hosting only: up to 32 comma-separated exact `hostname:port`, `IPv4:port` or `[IPv6]:port` entries, one port each, for identity providers on a private network, or public ones on a port other than 443 listed by their public DNS name. HTTPS stays required. Separate from `WEBHOOK_PRIVATE_TARGETS`; see [private identity providers](#private-identity-providers). |
-| `SCIM_PROVISIONING_ENABLED` | `false` | Enable owner-only provisioning-token creation/rotation for team organizations. Owners/admins can list/revoke while disabled. Users, Groups and SCIM discovery remain unavailable even when enabled. No subscription requirement; see [SCIM tokens](/docs/scim). |
+| `SCIM_PROVISIONING_ENABLED` | `true` (also unset or empty) | Enable Users, Groups and discovery for team organizations, plus owner-only provisioning token creation and rotation. Set `false`, `0` or `off` to disable. An invalid value stops startup. Owners and admins can list and revoke tokens while disabled. See [SCIM provisioning](/docs/scim). |
 | `MCP_OAUTH_ENABLED` | `false` | Enable MCP OAuth connectors alongside API keys. Requires HTTPS except on loopback; explicit organization approval and revocation at `/app/connected-apps`. No calendar/provider client credentials needed. Set identically on web and worker. |
 | `HOURMERE_ROLE` | `all` | `all`: API and workers; `web`: API/queues only; `worker`: jobs and health endpoint only. The separate-worker Compose overlay fixes the app to `web` and the worker to `worker`, independently of this `.env` setting. |
 
@@ -524,12 +524,12 @@ for public apps; its private/development apps do not trigger those notifications
 
 ## Paid-booking foundation
 
-`PAID_BOOKINGS_ENABLED` defaults to `false` and is reserved for a future rollout. It has no
-runtime effect in this release. Setting it to `true` does not permit hold creation or enable
-payment collection. Existing holds expire regardless of this setting. Leave the optional
-server-only Stripe settings empty while Checkout is internal. Compose forwards them unset
-by default. When using a `_FILE` setting, supply the path inside the container and mount the
-secret file read-only for each server role.
+`PAID_BOOKINGS_ENABLED` defaults to `false`. Set it to `true` with a complete Stripe
+configuration to receive signed events at `POST /api/webhooks/stripe` in an isolated test
+instance. Paid hold admission and public Checkout remain disabled. Existing holds expire
+regardless of this setting. Compose forwards the optional Stripe settings unset by default.
+When using a `_FILE` setting, supply the path inside the container and mount the secret file
+read-only for each server role.
 See [the operator note and limitations](/docs/payments).
 
 ## SMS reminders
