@@ -246,6 +246,38 @@ describe.skipIf(!serverUrl)('incremental Microsoft calendar snapshots', () => {
     expect(() => assertCachedCalendarSync([published], instant(), requiredWindow())).not.toThrow()
   })
 
+  it('retries a delta sync on the next dispatch after a 503 with Retry-After', async () => {
+    microsoft.controls.viewHook = () => finish('before-503')
+    await sync()
+    const original = await metadata()
+
+    microsoft.controls.viewHook = (url) => {
+      expect(url.href).toBe(cursor('before-503'))
+      return error('ServiceUnavailable', 503, { 'Retry-After': '3600' })
+    }
+    await expect(sync()).rejects.toMatchObject({ code: 'provider_unavailable', status: 503 })
+    expect(await metadata()).toEqual({ ...original, sync_error: 'provider_unavailable' })
+
+    now += 60_000
+    const enqueued: string[] = []
+    await calendarDispatchJob(deps, async (id) => enqueued.push(id)).handler(
+      {},
+      { id: 'synthetic-job', signal: new AbortController().signal, attempt: 1 },
+    )
+    expect(enqueued).toEqual([calendarId])
+
+    microsoft.controls.viewHook = (url) => {
+      expect(url.href).toBe(cursor('before-503'))
+      return finish('after-503')
+    }
+    await sync()
+    expect(await metadata()).toMatchObject({
+      sync_error: null,
+      sync_state: { deltaLink: cursor('after-503') },
+      last_synced_at: new Date(now),
+    })
+  })
+
   it.each(['next dispatch', 'same run', 'resumed catch-up'])(
     'never offers a newly busy slot after a stale round with catch-up by %s',
     async (catchUp) => {
