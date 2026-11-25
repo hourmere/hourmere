@@ -34,11 +34,11 @@ describe.skipIf(!databaseUrl)('SCIM-managed memberships on existing REST routes'
     owned = await createTestDatabase(databaseUrl as string, undefined, { tag: 'scim_rest_guards' })
     db = createDb(owned.pool)
     authPool = createAuthPool(owned.url, signup)
-    app = buildApp(false)
-    resourceApp = buildApp(true)
+    app = await buildApp(false)
+    resourceApp = await buildApp(true)
   })
 
-  function buildApp(scimResourcesEnabled: boolean) {
+  async function buildApp(scimResourcesEnabled: boolean) {
     const auth = createAuth({
       db,
       pool: authPool,
@@ -48,6 +48,8 @@ describe.skipIf(!databaseUrl)('SCIM-managed memberships on existing REST routes'
       scimResourcesEnabled,
       mailer: { send: async () => expect.unreachable('No mail should be sent by these routes') },
     })
+    // Complete Better Auth's one-time PostgreSQL schema check before counting route queries.
+    await auth.api.getSession({ headers: new Headers() })
     return createApp({
       publicUrl,
       checkDb: async () => {},

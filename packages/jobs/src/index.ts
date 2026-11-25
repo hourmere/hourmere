@@ -440,11 +440,12 @@ export function createJobs<const Defs extends readonly AnyJobDefinition[]>(
       if (state !== 'created') throw new Error(`jobs cannot start (${state})`)
       state = 'starting'
       try {
-        // The invitation liveness query depends on these exact internal columns and expiry
-        // rules. Reject an upgrade before starting any pool or workers until it is reviewed.
-        if (pgBossPackage.version !== '12.38.0') {
+        // Mail job liveness depends on pg-boss internals. 12.38.2 keeps schema 46 and
+        // advances keep_until on retry, so the existing expiry checks still apply.
+        // Reject any unreviewed upgrade before starting the pool or workers.
+        if (pgBossPackage.version !== '12.38.2') {
           throw new PgBossCompatibilityError(
-            `background jobs require pg-boss 12.38.0; found ${pgBossPackage.version}. Review the invitation job lookup before upgrading`,
+            `background jobs require pg-boss 12.38.2; found ${pgBossPackage.version}. Review the mail job lookups before upgrading`,
           )
         }
         for (const name of options.disabledSchedules ?? []) {

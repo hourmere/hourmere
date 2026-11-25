@@ -1696,12 +1696,13 @@ After admission commits, the request dispatches its current queued generation th
 injected dependency. A second short transaction locks invitation before delivery and
 commits the exclusive pg-boss job together with `last_job_id`. A queue exception or null
 enqueue rolls back only that dispatch; the admitted queued record and its due time remain
-available for request retry or periodic repair. A narrow adapter pinned to pg-boss 12.38.0
+available for request retry or periodic repair. A narrow adapter pinned to pg-boss 12.38.2
 checks job identity, exact payload, singleton key, live state and expiry without a foreign
 key into pg-boss, using pg-boss's own clock for job expiry. An unsupported pg-boss version
 fails job startup with a compatibility message. Startup and minute repair scans use bounded,
 fair cursor batches. A failed startup scan is logged and the minute schedule retries it.
-The repairer skips obsolete business states before enqueueing. If a job's 24-hour waiting
+The repairer skips obsolete business states before enqueueing. pg-boss moves the waiting
+retention deadline forward with the scheduled start on retry. If a job's 24-hour waiting
 retention or active expiry has passed, an exact-identity adapter cancels that expired job
 inside the replacement transaction, preserving its history and releasing the exclusive
 key without waiting for maintenance. Live jobs and completed, canceled or failed history

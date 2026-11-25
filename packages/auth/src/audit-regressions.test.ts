@@ -225,6 +225,8 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
 
   it('keeps the PostgreSQL statement counts for team API key writes with resources disabled', async () => {
     const auth = instance()
+    // Complete Better Auth's one-time PostgreSQL schema check before counting write queries.
+    await auth.api.getSession({ headers: new Headers() })
     const actor = await account()
     const team = await db
       .insertInto('auth.organization')
@@ -718,19 +720,31 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
     family())
   it('records refresh-token reuse at the token endpoint like revocation reuse', () =>
     family(createAuth, 'token'))
-  it('preserves another grant for the OAuth client when its native revoke races SCIM suspension', async () => {
-    const auth = instance(),
+  async function preservesSiblingGrant(factory = createAuth) {
+    const auth = instance(factory),
       { actor, clientId, presented, sibling, token } = await familySetup(true)
     await addMember(presented.organization_id, actor.user.id)
     const response = await raceSuspension(presented.organization_id, actor.user.id, () =>
       presentRevoked(auth, 'revoke', clientId, token),
     )
     expect(response.status).toBe(400)
-    expect(await familyTokens(clientId)).toEqual({
+    expect(await familyTokens(clientId), 'surviving grant keeps both tokens').toEqual({
       refresh: [expect.objectContaining({ referenceId: sibling.id })],
       access: [expect.objectContaining({ referenceId: sibling.id })],
     })
     expect(await events(sibling.organization_id)).toEqual([])
+  }
+  it('preserves another grant for the OAuth client when its native revoke races SCIM suspension', () =>
+    preservesSiblingGrant())
+  it('detects a source copy that allows the trailing access-token sweep after SCIM suspension', async () => {
+    const factory = await sourceCopy(
+      './audit.ts',
+      'if (familyAccessTokens && endpoint) {',
+      'if (familyAccessTokens && endpoint && deferredFamilyAccessTokens.get(endpoint) !== null) {',
+    )
+    await expect(preservesSiblingGrant(factory)).rejects.toThrow(
+      /surviving grant keeps both tokens/,
+    )
   })
   it.each(['revoke', 'token'] as const)(
     'deletes the %s family access tokens before its refresh tokens when nothing cascades',

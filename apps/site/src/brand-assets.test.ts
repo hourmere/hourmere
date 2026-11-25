@@ -30,7 +30,7 @@ describe('brand raster exports and delivery', () => {
         for (const tool of tools) {
           // Runtime consumers need these tools; site-only tooling stays dev-only.
           if (path === 'packages/import-calcom' && tool === 'parse5')
-            expect(manifest.dependencies?.[tool], `${path}: production ${tool}`).toBe('8.0.1')
+            expect(manifest.dependencies?.[tool], `${path}: production ${tool}`).toBe('8.1.1')
           else if (path === 'packages/scheduling' && tool === 'sharp')
             expect(manifest.dependencies?.[tool], `${path}: production ${tool}`).toBe('0.35.5')
           else expect(manifest.dependencies?.[tool], `${path}: production ${tool}`).toBeUndefined()
@@ -42,8 +42,8 @@ describe('brand raster exports and delivery', () => {
         )
       ) {
         if (path === 'node_modules/parse5') {
-          expect(metadata.version).toBe('8.0.1')
-          expect(lock.packages['packages/import-calcom']?.dependencies?.parse5).toBe('8.0.1')
+          expect(metadata.version).toBe('8.1.1')
+          expect(lock.packages['packages/import-calcom']?.dependencies?.parse5).toBe('8.1.1')
           expect(metadata.dev || metadata.devOptional).not.toBe(true)
         } else if (path === 'node_modules/sharp') {
           expect(metadata.version).toBe('0.35.5')
