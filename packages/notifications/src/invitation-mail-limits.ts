@@ -44,9 +44,9 @@ export async function invitationEmailBudgetAvailable(
         .filterWhere(sameTeam)
         .filterWhere(scim ? eb('user_id', 'is', null) : human)
       const globalRecipient = eb.fn.countAll<string>().filterWhere(sameRecipient)
-      // SCIM shares its tenant's mailbox allowance with manual invitations. Manual
-      // invitations retain their own instance-wide allowance across administrators.
-      const recipient = globalRecipient.filterWhere(scim ? sameTeam : human)
+      // Both sources count their own team's requests. App admissions also count human
+      // requests from other teams.
+      const recipient = globalRecipient.filterWhere(scim ? sameTeam : eb.or([human, sameTeam]))
       return [
         inviter.as('inviterDay'),
         inviter.filterWhere('requested_at', '>', hour).as('inviterHour'),

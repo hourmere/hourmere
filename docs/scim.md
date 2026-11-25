@@ -526,9 +526,10 @@ organization, using `MAIL_RECIPIENT_MAX_PER_HOUR` and `MAIL_RECIPIENT_MAX_PER_DA
 (5 and 20 by default). Scoping the normal cap to the organization lets a team provision
 an address that another team has invited. A separate instance-wide ceiling of four times
 each configured recipient limit (20 per hour and 80 per day by default) counts invitations
-from all teams and both sources to limit aggregate abuse. App invitations keep their
-instance-wide recipient cap for app requests. Both sources share the 100 pending-invitation
-cap per team and the instance-wide SMTP attempt budget.
+from all teams and both sources to limit aggregate abuse. App invitations count app
+requests from all teams and SCIM requests from their own team against the recipient cap.
+Both sources share the 100 pending-invitation cap per team and the instance-wide SMTP
+attempt budget.
 
 A SCIM create that would queue invitation email returns 429 with `Retry-After: 3600`
 when admission is limited. Honor the retry interval and stagger a larger initial sync.

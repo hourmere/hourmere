@@ -743,8 +743,9 @@ App invitation creation and explicit resends are limited at admission:
 `INVITATION_INVITER_MAX_PER_HOUR` (default 20) and `INVITATION_INVITER_MAX_PER_DAY`
 (default 100), shared across an inviter's teams; `INVITATION_TEAM_MAX_PER_HOUR` (default
 50) and `INVITATION_TEAM_MAX_PER_DAY` (default 200), shared across a team's inviters.
-App invitations count app requests for an address across teams against
-`MAIL_RECIPIENT_MAX_PER_HOUR` and `MAIL_RECIPIENT_MAX_PER_DAY`. SCIM admissions use the
+App invitations count app requests for an address across teams and SCIM requests from
+their own team against `MAIL_RECIPIENT_MAX_PER_HOUR` and `MAIL_RECIPIENT_MAX_PER_DAY`.
+SCIM admissions use the
 same settings to count an address's invitations within the organization and have a separate
 team budget. An instance-wide ceiling of four times each configured recipient limit
 counts all invitations for that address. [SCIM provisioning](/docs/scim#invitations-and-initial-sync)

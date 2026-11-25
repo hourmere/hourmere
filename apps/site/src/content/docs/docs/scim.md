@@ -80,10 +80,10 @@ and cancellation by provisioning.
   24 hours, shared across its provisioning tokens. App invitations and resends use
   the team's existing app invitation limits and the administrator's own budget.
 - The SCIM recipient cap counts requests within the team. Its defaults are five per
-  hour and 20 per day for one address. An invitation from another team therefore
-  cannot spend this team's recipient quota. An instance-wide ceiling across all
-  teams, including app invitations, limits aggregate abuse. This ceiling is four
-  times the configured recipient limits, 20 per hour and 80 per day by default.
+  hour and 20 per day for one address. App invitations count app requests across
+  teams and SCIM requests from their own team. An instance-wide ceiling across
+  all teams and both sources limits aggregate abuse. This ceiling is four times
+  the configured recipient limits, 20 per hour and 80 per day by default.
 - App and SCIM invitations share the team cap of 100 unexpired pending invitations
   and the instance-wide SMTP attempt budget. Stagger a large initial sync and
   honor the `Retry-After` header on 429. Pending capacity returns as invitations
@@ -155,8 +155,9 @@ SCIM 默认开启，自托管实例无需订阅。团队所有者在「设置 �
 
 SCIM 邀请邮件以身份提供商代表团队的名义发出，语言沿用邀请所关联的已验证所有者的语言偏好。
 审计日志记录发出或取消邀请的 SCIM 连接。每个团队在滚动一小时内可安排 60 封 SCIM 邀请邮件，滚动 24 小时内可安排 240 封，
-团队所有预配令牌共用此额度。应用内邀请和重发使用独立的管理者额度。收件人限额按团队计算，默认同一地址
-每小时 5 封、每天 20 封。为限制滥用，所有团队的邀请另有实例级收件人上限，为配置值的四倍，默认每小时 20 封、
+团队所有预配令牌共用此额度。应用内邀请和重发使用独立的管理者额度。SCIM 邀请的收件人限额按团队计算，默认同一地址
+每小时 5 封、每天 20 封。应用内邀请的收件人限额统计所有团队的应用内邀请和本团队的 SCIM 邀请。为限制滥用，
+所有团队的邀请另有实例级收件人上限，为配置值的四倍，默认每小时 20 封、
 每天 80 封。初次同步人数较多时请分批进行，遇到 429 时遵循 `Retry-After`。
 
 目录停用成员时会暂停其受管团队访问，并撤销相关会话、API 密钥和 MCP OAuth 授权。

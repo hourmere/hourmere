@@ -1110,10 +1110,7 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
     expect(await written(full.id)).toEqual(before)
   }
 
-  async function verifyOwnerBudget(create: Create) {
-    const organization = await team()
-    const reserve: NonNullable<ScimUserCreationDeps['reserve']> = (trx, input, now) =>
-      reserveInvitationEmailBudget(trx, input, { ...roomy, invitationInviterMaxPerHour: 2 }, now)
+  function invitationApp(create: Create, reserve: NonNullable<ScimUserCreationDeps['reserve']>) {
     const auth = createAuth({
       pool: authPool,
       db,
@@ -1123,12 +1120,15 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
       mailer: { send: async () => {} },
       reserveInvitationEmail: reserve,
     })
-    const application = harness(flagged(create, deps({ reserve })), true, auth.handler)
+    return harness(flagged(create, deps({ reserve })), true, auth.handler)
+  }
+
+  async function appInviter(application: ReturnType<typeof harness>, organization: Team) {
     const token = randomBytes(24).toString('base64url')
     await session(organization.people.owner, organization.id, token)
     const signature = createHmac('sha256', signingSecret).update(token).digest('base64')
     const cookie = `__Secure-better-auth.session_token=${encodeURIComponent(`${token}.${signature}`)}`
-    const inviteFromApp = () =>
+    return (email: string) =>
       application.request(`${publicUrl}/api/auth/organization/invite-member`, {
         method: 'POST',
         headers: {
@@ -1140,9 +1140,18 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
         body: JSON.stringify({
           organizationId: organization.id,
           role: 'member',
-          email: `manual-${unique()}@example.com`,
+          email,
         }),
       })
+  }
+
+  async function verifyOwnerBudget(create: Create) {
+    const organization = await team()
+    const application = invitationApp(create, (trx, input, now) =>
+      reserveInvitationEmailBudget(trx, input, { ...roomy, invitationInviterMaxPerHour: 2 }, now),
+    )
+    const inviteFromApp = await appInviter(application, organization)
+    const invite = () => inviteFromApp(`manual-${unique()}@example.com`)
     for (let i = 0; i < 2; i++) {
       const provisioned = await call(
         application,
@@ -1155,14 +1164,14 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
       expect(provisioned.status).toBe(201)
     }
     for (let i = 0; i < 2; i++) {
-      const invited = await inviteFromApp()
+      const invited = await invite()
       const { code } = (await invited.json()) as { code?: string }
       expect({ status: invited.status, code }).toEqual({
         status: 200,
         code: undefined,
       })
     }
-    const refused = await inviteFromApp()
+    const refused = await invite()
     expect(refused.status).toBe(429)
     expect(await refused.json()).toMatchObject({ code: 'INVITATION_RATE_LIMITED' })
     const { requests } = await written(organization.id)
@@ -1171,6 +1180,54 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
     expect(
       requests.filter((request) => request.user_id === organization.people.owner),
     ).toHaveLength(2)
+  }
+
+  async function verifyAppRecipientBudget(reserve: typeof reserveInvitationEmailBudget) {
+    const organization = await team()
+    const other = await team()
+    const mailbox = `shared-${unique()}@example.com`
+    const application = invitationApp(scimUserCreation, (trx, input, now) =>
+      reserve(trx, input, roomy, now),
+    )
+    for (let i = 0; i < 5; i++) {
+      const provisioned = await call(
+        application,
+        organization.id,
+        organization.secrets.first,
+        'Users',
+        'POST',
+        user(`provisioned-${unique()}`, work(mailbox)),
+      )
+      expect(provisioned.status).toBe(201)
+      // Close the pending invitation so the next request needs a fresh delivery.
+      await db
+        .updateTable('auth.invitation')
+        .set({ status: 'canceled' })
+        .where('organizationId', '=', organization.id)
+        .where('email', '=', mailbox)
+        .where('status', '=', 'pending')
+        .execute()
+    }
+    const before = await written(organization.id)
+    expect(before.deliveries).toHaveLength(5)
+    expect(before.requests.map((request) => request.user_id)).toEqual([
+      null,
+      null,
+      null,
+      null,
+      null,
+    ])
+    const inviteFromApp = await appInviter(application, organization)
+    const refused = await inviteFromApp(mailbox)
+    const { code } = (await refused.json()) as { code?: string }
+    expect({ status: refused.status, code }).toEqual({
+      status: 429,
+      code: 'INVITATION_RATE_LIMITED',
+    })
+    expect(await written(organization.id)).toEqual(before)
+    const inviteFromOther = await appInviter(application, other)
+    expect((await inviteFromOther(mailbox)).status).toBe(200)
+    expect((await written(other.id)).requests).toHaveLength(1)
   }
 
   async function verifyRecipientBudget() {
@@ -1942,6 +1999,23 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
     verifyOwnerBudget(scimUserCreation))
   it('counts same-tenant recipient requests and enforces a separate global ceiling', () =>
     verifyRecipientBudget())
+  it('counts five SCIM invitations against the in-app recipient cap only in their own team', () =>
+    verifyAppRecipientBudget(reserveInvitationEmailBudget))
+  it('detects a source copy that excludes same-team SCIM requests from the in-app recipient cap', async () => {
+    const copy = await sourceCopy<{
+      reserveInvitationEmailBudget: typeof reserveInvitationEmailBudget
+    }>('../../../packages/notifications/src/invitation-mail-limits.ts', [
+      'scim ? sameTeam : eb.or([human, sameTeam])',
+      'scim ? sameTeam : human',
+    ])
+    await expect(verifyAppRecipientBudget(copy.reserveInvitationEmailBudget)).rejects.toMatchObject(
+      {
+        name: 'AssertionError',
+        actual: { status: 200, code: undefined },
+        expected: { status: 429, code: 'INVITATION_RATE_LIMITED' },
+      },
+    )
+  })
   it('detects a source copy that makes SCIM spend the owner’s invitation budget', async () => {
     const invitations = sourceCopyUrl('../../../packages/auth/src/invitations.ts', [
       'scimIssued ? null : actor.userId',
