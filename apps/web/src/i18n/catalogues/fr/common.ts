@@ -602,4 +602,7 @@ export const common = {
   'The Teams link isn’t ready yet.': 'Le lien Teams n’est pas encore disponible.',
   'The booking is still scheduled without a Teams link.':
     'La réservation reste confirmée, sans lien Teams.',
+  // Booking page preview
+  'These are sample times. Booking is disabled in the preview.':
+    'Ces horaires sont donnés à titre d’exemple. Les réservations sont désactivées dans l’aperçu.',
 } as const

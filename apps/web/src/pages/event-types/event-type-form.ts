@@ -620,6 +620,16 @@ export function hasAutomaticLocation(draft: EventTypeDraft, kind: 'google_meet' 
   )
 }
 
+export function draftQuestions(questions: readonly QuestionDraft[]): Schemas['Question'][] {
+  return questions.map((q) => ({
+    id: q.id,
+    label: q.label.trim(),
+    type: q.type,
+    required: q.required,
+    ...(isChoice(q.type) && { options: q.options.map((o) => o.text.trim()) }),
+  }))
+}
+
 /** The API body for a draft that passed validateDraft. */
 export function toInput(draft: EventTypeDraft): EventTypeBody {
   const location = primaryLocation(draft)
@@ -659,13 +669,7 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
     ...(draft.locationOptions === null && !(location?.kind === 'phone' && location.askInvitee)
       ? { location }
       : { locations: orderedLocations(draft).length ? orderedLocations(draft) : null }),
-    questions: draft.questions.map((q) => ({
-      id: q.id,
-      label: q.label.trim(),
-      type: q.type,
-      required: q.required,
-      ...(isChoice(q.type) && { options: q.options.map((o) => o.text.trim()) }),
-    })),
+    questions: draftQuestions(draft.questions),
     scheduleId: draft.schedulingType !== 'individual' ? null : draft.scheduleId || null,
     position: whole(draft.position) as number,
     isActive: draft.isActive,

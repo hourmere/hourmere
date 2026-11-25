@@ -1,4 +1,5 @@
 import { brandPalette } from '@hourmere/core/brand-contrast'
+import { localeRegistry } from '@hourmere/core/language'
 import { publicAvatarImage } from '@hourmere/core/public-avatar'
 import {
   type CSSProperties,
@@ -73,14 +74,18 @@ type PublicBrand = Schemas['PublicEventType']['branding']
 
 /** Only the same-origin organization-scoped logo endpoint is accepted. */
 export function BrandLogo({ branding }: { branding: NonNullable<PublicBrand> }) {
-  const [failedImage, setFailedImage] = useState<string>()
   const src = branding.logoUrl
   if (!src || !/^\/api\/v1\/public\/branding\/[^/?#]+\/logo\/[a-f0-9]{64}$/.test(src)) return null
+  return <BrandLogoImage src={src} name={branding.name} />
+}
+
+function BrandLogoImage({ src, name }: { src: string; name: string }) {
+  const [failedImage, setFailedImage] = useState<string>()
   return (
     <div className="public-brand-logo">
       <img
         src={src}
-        alt={branding.name}
+        alt={name}
         width={192}
         height={64}
         referrerPolicy="no-referrer"
@@ -105,6 +110,77 @@ export function brandStyle(branding: PublicBrand): CSSProperties {
   return style as CSSProperties
 }
 
+function PublicFrame({
+  children,
+  wide = false,
+  branding,
+  embedded = false,
+  preview = false,
+  logo,
+  footer,
+}: {
+  children: ReactNode
+  wide?: boolean
+  branding?: PublicBrand
+  embedded?: boolean
+  preview?: boolean
+  logo?: ReactNode
+  footer?: ReactNode
+}) {
+  const { locale } = useI18n()
+  const palette = brandPalette(branding?.primaryColor)
+  const Content = preview ? 'div' : 'main'
+  const language = !embedded && <PublicLanguageSwitcher scoped={preview} />
+  return (
+    <div
+      className={`public${embedded ? ' public-embedded' : ''}${palette ? ' public-branded' : ''}${preview ? ' public-preview' : ''}`}
+      style={brandStyle(branding)}
+      lang={preview ? locale : undefined}
+      dir={preview ? localeRegistry[locale].direction : undefined}
+    >
+      {!embedded &&
+        (preview ? (
+          <div className="public-language">{language}</div>
+        ) : (
+          <header className="public-language">{language}</header>
+        ))}
+      <Content
+        id={preview ? undefined : 'main'}
+        className={`public-main user-content${wide ? ' public-main-wide' : ''}`}
+      >
+        {logo}
+        {children}
+      </Content>
+      {footer}
+    </div>
+  )
+}
+
+/** Preview receives loaded images; it never mounts URL-backed public assets or discovery. */
+export function PublicPreviewLayout({
+  children,
+  branding,
+  logoSrc,
+}: {
+  children: ReactNode
+  branding?: PublicBrand
+  logoSrc?: string | undefined
+}) {
+  const safeSource = logoSrc && /^data:image\/png;base64,[A-Za-z0-9+/]+=*$/.test(logoSrc)
+  return (
+    <PublicFrame
+      preview
+      wide
+      branding={branding}
+      logo={
+        branding && logoSrc && safeSource && <BrandLogoImage src={logoSrc} name={branding.name} />
+      }
+    >
+      {children}
+    </PublicFrame>
+  )
+}
+
 export function PublicLayout({
   children,
   wide = false,
@@ -114,7 +190,6 @@ export function PublicLayout({
   wide?: boolean
   branding?: PublicBrand
 }) {
-  const palette = brandPalette(branding?.primaryColor)
   const { t, locale } = useI18n()
   // Interpolate first so Han/Latin boundary spacing also applies around the logo.
   const [beforeBrand, afterBrand] = t('Powered by {0}', { '0': 'Hourmere' }).split('Hourmere')
@@ -143,28 +218,24 @@ export function PublicLayout({
   }, [embedded, locale])
   return (
     <HostedSignupUrl value={hostedSignupUrl}>
-      <div
-        className={`public${embedded ? ' public-embedded' : ''}${palette ? ' public-branded' : ''}`}
-        style={brandStyle(branding)}
+      <PublicFrame
+        wide={wide}
+        branding={branding}
+        embedded={embedded}
+        logo={branding && <BrandLogo branding={branding} />}
+        footer={
+          <footer className="public-footer">
+            <a href={hostedSignupUrl} target="_blank" rel="noopener noreferrer">
+              {beforeBrand}
+              <Logo size={18} />
+              {afterBrand}
+            </a>
+            <LegalLinks {...policyUrls} />
+          </footer>
+        }
       >
-        {!embedded && (
-          <header className="public-language">
-            <PublicLanguageSwitcher />
-          </header>
-        )}
-        <main id="main" className={`public-main user-content${wide ? ' public-main-wide' : ''}`}>
-          {branding && <BrandLogo branding={branding} />}
-          {children}
-        </main>
-        <footer className="public-footer">
-          <a href={hostedSignupUrl} target="_blank" rel="noopener noreferrer">
-            {beforeBrand}
-            <Logo size={18} />
-            {afterBrand}
-          </a>
-          <LegalLinks {...policyUrls} />
-        </footer>
-      </div>
+        {children}
+      </PublicFrame>
     </HostedSignupUrl>
   )
 }

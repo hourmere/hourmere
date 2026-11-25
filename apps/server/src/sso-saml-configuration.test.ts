@@ -208,7 +208,12 @@ function instance(db: Db, capabilities: SsoCapabilities) {
     authHandler: async () => expect.unreachable('SP metadata is mounted before Better Auth'),
     resolveCaller: async () => expect.unreachable('SP metadata needs no session'),
     publicUrl,
-    ssoSamlSignIn: samlSignInRoutes({ db, capabilities, session: { secret: 'fixture-only' } }),
+    ssoSamlSignIn: samlSignInRoutes({
+      db,
+      capabilities,
+      signup: { mode: 'closed', allowedDomains: [] },
+      session: { secret: 'fixture-only' },
+    }),
   })
 }
 

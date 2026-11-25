@@ -24,6 +24,7 @@ import * as publicApi from './api.ts'
 import * as details from './BookingDetails.tsx'
 import * as form from './BookingForm.tsx'
 import type { OneTimeBookingPage } from './BookingPage.tsx'
+import * as bookingParts from './BookingPageParts.tsx'
 import * as calendarDates from './calendar.ts'
 import * as description from './EventDescription.tsx'
 import * as embed from './embed-context.ts'
@@ -89,6 +90,7 @@ function pageCopy(text = source): typeof OneTimeBookingPage {
       './api.ts': publicApi,
       './BookingDetails.tsx': details,
       './BookingForm.tsx': form,
+      './BookingPageParts.tsx': bookingParts,
       './calendar.ts': calendarDates,
       './EventDescription.tsx': description,
       './embed-context.ts': embed,

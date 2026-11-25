@@ -498,11 +498,11 @@ export function productRoutes({
     memberDepartureImpactRoutes({ db }),
     memberRemovalRoutes({
       db,
-      recordAdmissionRemoval: oidcEnabled ? recordSsoAdmissionRemoval : undefined,
+      recordAdmissionRemoval: oidcEnabled || samlEnabled ? recordSsoAdmissionRemoval : undefined,
     }),
     memberLeaveRoutes({
       db,
-      recordAdmissionRemoval: oidcEnabled ? recordSsoAdmissionRemoval : undefined,
+      recordAdmissionRemoval: oidcEnabled || samlEnabled ? recordSsoAdmissionRemoval : undefined,
     }),
     analyticsRoutes({ db }),
     readinessRoutes({
@@ -766,6 +766,7 @@ export function productionAppOptions({
       capabilities: sso,
       db,
       configurationKey: ssoConfigurationKey,
+      signup: config.signup,
       session: { secret: config.BETTER_AUTH_SECRET },
       readSession: readSsoSession,
     }),
@@ -886,7 +887,8 @@ export function productionAuthOptions({
   jobs,
 }: ProductionAuthDeps): AuthConfig {
   const sso = productionSsoCapabilities(config)
-  const recordAdmissionRemoval = sso.ssoOidcEnabled ? recordSsoAdmissionRemoval : undefined
+  const recordAdmissionRemoval =
+    sso.ssoOidcEnabled || sso.ssoSamlEnabled ? recordSsoAdmissionRemoval : undefined
   return {
     pool,
     db,
