@@ -569,7 +569,6 @@ export const admin = {
   'Include the default duration in the allowed durations.':
     'Include the default duration in the allowed durations.',
   'Added {0}.': 'Added {0}.',
-  'Removed {0}. Default duration: {1}.': 'Removed {0}. Default duration: {1}.',
   Scope: 'Scope',
   'Bookings (read/write)': 'Bookings (read/write)',
   'Read only': 'Read only',
@@ -3303,4 +3302,7 @@ export const admin = {
   // SAML recovery
   'If you are replacing signing certificates, enter the full set your identity provider uses.':
     'If you are replacing signing certificates, enter the full set your identity provider uses.',
+
+  // Additional durations
+  'Removed {0}. Selected length: {1}.': 'Removed {0}. Selected length: {1}.',
 } as const
