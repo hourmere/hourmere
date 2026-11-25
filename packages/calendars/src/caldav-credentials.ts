@@ -5,11 +5,14 @@ import { z } from 'zod'
 import { redactCalDavField } from './caldav-redaction.ts'
 import { decryptCredential, encryptCredential } from './credentials.ts'
 
-/** Server-only input. Never include this object in logs or public responses. */
+/**
+ * Server-only input. Pass decrypted credentials directly; spreading them drops
+ * the non-enumerable username and password. Keep them out of logs and responses.
+ */
 export interface CalDavCredentials {
   serverUrl: string
-  username: string
-  password: string
+  readonly username: string
+  readonly password: string
 }
 
 export type CalDavCredentialRecord = Pick<
@@ -96,7 +99,7 @@ export function createCalDavCredentialRecord(
   }
 }
 
-/** Internal transport use only; never return decrypted credentials from a service/API. */
+/** Pass the returned object directly to internal callers; spread omits both secrets. */
 export function readCalDavCredentials(
   key: Buffer,
   record: CalDavCredentialRecord,
