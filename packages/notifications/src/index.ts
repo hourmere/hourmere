@@ -31,7 +31,7 @@ import {
   type MeetingLocation,
   meetingLocationText,
 } from '@hourmere/mail'
-import { readBookingPayment } from '@hourmere/scheduling'
+import { readBookingPayment } from '@hourmere/scheduling/booking-payment-details'
 import { conferenceOrganizerAvailable } from '@hourmere/scheduling/conferences'
 import { sql } from 'kysely'
 import { z } from 'zod'

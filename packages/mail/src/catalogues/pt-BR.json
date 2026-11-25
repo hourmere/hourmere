@@ -153,6 +153,13 @@
   "scimMapping.linked": "Sua equipe aprovou o mapeamento SCIM {mappingId}. Assim que o grupo for provisionado, o diretório vinculado poderá gerenciar o nome da equipe filha e os membros que ele administra.",
   "scimMapping.unlinked": "O mapeamento SCIM {mappingId} foi desvinculado da sua equipe. O diretório não pode mais gerenciar a equipe por meio desse mapeamento.",
   "scimMapping.suspended": "O acesso do diretório pelo mapeamento SCIM {mappingId} foi suspenso. Os vínculos de membros e os estados de suspensão existentes foram preservados.",
+  "bookingPayment.label": "Pagamento",
+  "bookingPayment.paid": "{amount} pagos",
+  "bookingPayment.refund": "Reembolso",
+  "bookingPayment.requested": "Reembolso solicitado",
+  "bookingPayment.pending": "Reembolso pendente",
+  "bookingPayment.succeeded": "Reembolso emitido",
+  "bookingPayment.failed": "Falha no reembolso",
   "series.confirmed.subject": "Série de reuniões confirmada: {event}",
   "series.confirmed.booker": "Sua série de reuniões com {host} está agendada.",
   "series.confirmed.guest": "{invitee} convidou você para uma série de reuniões com {host}.",
@@ -173,12 +180,5 @@
   "series.cancelled.member": "Cancelada",
   "series.manage": "Gerenciar série",
   "series.view": "Ver série",
-  "series.repair": "Para tentar gerar o link da reunião novamente, abra o agendamento correspondente no Hourmere.",
-  "bookingPayment.label": "Pagamento",
-  "bookingPayment.paid": "{amount} pagos",
-  "bookingPayment.refund": "Reembolso",
-  "bookingPayment.requested": "Reembolso solicitado",
-  "bookingPayment.pending": "Reembolso pendente",
-  "bookingPayment.succeeded": "Reembolso emitido",
-  "bookingPayment.failed": "Falha no reembolso"
+  "series.repair": "Para tentar gerar o link da reunião novamente, abra o agendamento correspondente no Hourmere."
 }

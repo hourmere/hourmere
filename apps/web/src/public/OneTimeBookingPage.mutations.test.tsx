@@ -26,6 +26,7 @@ import * as form from './BookingForm.tsx'
 import type { OneTimeBookingPage } from './BookingPage.tsx'
 import * as bookingParts from './BookingPageParts.tsx'
 import * as calendarDates from './calendar.ts'
+import * as checkoutReturn from './checkout-return.ts'
 import * as description from './EventDescription.tsx'
 import * as embed from './embed-context.ts'
 import * as env from './env.ts'
@@ -92,6 +93,7 @@ function pageCopy(text = source): typeof OneTimeBookingPage {
       './BookingForm.tsx': form,
       './BookingPageParts.tsx': bookingParts,
       './calendar.ts': calendarDates,
+      './checkout-return.ts': checkoutReturn,
       './EventDescription.tsx': description,
       './embed-context.ts': embed,
       './env.ts': {

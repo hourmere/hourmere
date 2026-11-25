@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { isPaidEventSupported } from '@hourmere/core/payment'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import * as react from 'react'
@@ -24,6 +25,7 @@ import { isMultiLineText, isSingleLineText, singleLineProblem } from '../../text
 import type * as eventFunctions from './event-type-form.ts'
 import type { NotificationsEditor } from './NotificationsEditor.tsx'
 import * as notificationFunctions from './notifications-form.ts'
+import * as paymentFunctions from './payment-form.ts'
 
 function required<T>(value: T | null | undefined): T {
   if (value === undefined || value === null) throw new Error('Expected a fixture value')
@@ -84,6 +86,8 @@ const formDeps = {
   isSingleLineText,
   singleLineProblem,
   ...notificationFunctions,
+  ...paymentFunctions,
+  isPaidEventSupported,
 }
 const buildForm = (source: string) =>
   copy<typeof eventFunctions>(

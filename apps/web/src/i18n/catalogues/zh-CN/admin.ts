@@ -3145,7 +3145,6 @@ export const admin = {
   'Enter a price for this duration.': '请输入此时长的价格。',
   'Enter a whole amount.': '请输入整数金额。',
   'Enter an amount with up to two decimal places.': '请输入最多保留两位小数的金额。',
-  'Enter an amount from {min} to {max} {currency}.':
-    '请输入 {min} 至 {max} {currency} 之间的金额。',
+  'Enter an amount from {min} to {max} {currency}.': '请输入{min}至{max} {currency}之间的金额。',
   'Check the price for every duration and try again.': '请检查每种时长的价格后重试。',
 } as const

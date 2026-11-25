@@ -610,7 +610,7 @@ export const common = {
   'bookingPayment.none': 'Aucun remboursement',
   'bookingPayment.unknown': 'État indisponible',
   // Paid booking checkout
-  'Price: {amount}': 'Prix : {amount}',
+  'Price: {amount}': 'Prix : {amount}',
   'Starting Checkout…': 'Ouverture de la page de paiement…',
   'Continue to payment': 'Passer au paiement',
   'Payment status': 'État du paiement',

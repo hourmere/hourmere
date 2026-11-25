@@ -9,6 +9,7 @@ import * as client from '../api/client.ts'
 import * as errors from '../api/errors.ts'
 import type { Booking } from '../api/resources.ts'
 import * as breakable from '../components/BreakableText.tsx'
+import * as bookingPayment from '../components/booking-payment.ts'
 import * as conference from '../components/ConferenceNotice.tsx'
 import * as copyButton from '../components/CopyButton.tsx'
 import * as forms from '../components/forms.tsx'
@@ -71,6 +72,7 @@ function sourceCopy<T>(path: string, before: string, after: string): T {
     '../../components/PageHeader.tsx': pageHeader,
     '../../components/forms.tsx': forms,
     '../../components/ConferenceNotice.tsx': conference,
+    '../../components/booking-payment.ts': bookingPayment,
     './BookingPanel.tsx': bookingPanel,
     './CalendarCopyNotice.tsx': calendarCopy,
     './booking-format.ts': bookingFormat,
@@ -86,6 +88,7 @@ function sourceCopy<T>(path: string, before: string, after: string): T {
     '../i18n/runtime.tsx': runtime,
     '../../i18n/runtime.tsx': runtime,
     '../components/CopyButton.tsx': copyButton,
+    '../components/booking-payment.ts': bookingPayment,
     './ics.ts': ics,
     '../format.ts': format,
     '../hooks.ts': hooks,

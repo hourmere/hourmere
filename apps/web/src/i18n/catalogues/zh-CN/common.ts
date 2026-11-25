@@ -567,7 +567,7 @@ export const common = {
     '这些时间仅供示例。预览中无法提交预约。',
   // Paid booking details
   'bookingPayment.label': '付款',
-  'bookingPayment.paid': '已支付 {amount}',
+  'bookingPayment.paid': '已支付{amount}',
   'bookingPayment.refund': '退款',
   'bookingPayment.requested': '已申请退款',
   'bookingPayment.pending': '退款处理中',

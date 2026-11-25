@@ -98,9 +98,9 @@ describe('Stripe startup configuration', () => {
   })
 })
 
-it.skipIf(!process.env.DATABASE_URL)(
-  'keeps Stripe settings out of production instance responses and logs with the paid flag set',
-  async () => {
+it.skipIf(!process.env.DATABASE_URL).each([true, false])(
+  'reports only coarse Stripe availability in production (account matches: %s)',
+  async (matches) => {
     const db = await createTestDatabase(process.env.DATABASE_URL as string, undefined, {
       tag: 'stripe_config',
     })
@@ -113,24 +113,40 @@ it.skipIf(!process.env.DATABASE_URL)(
         throw new Error('Unexpected outbound request in startup test')
       return fetchOnLoopback(input, init)
     })
-    try {
-      const server = await startServer({
-        ...configured,
-        DATABASE_URL: db.url,
-        HOURMERE_ROLE: 'web',
-        NODE_ENV: 'production',
-        STRIPE_MODE: 'test',
-        PAID_BOOKINGS_ENABLED: 'true',
-        PORT: '0',
-        PUBLIC_URL: 'http://localhost',
+    const stripeTransport = vi.fn<typeof fetch>(async (input, init) => {
+      const url = new URL(String(input))
+      expect(url.origin).toBe('https://api.stripe.com')
+      expect(url.pathname).toBe('/v1/account')
+      expect(init?.method).toBe('GET')
+      return Response.json({
+        object: 'account',
+        id: matches ? configured.STRIPE_ACCOUNT_ID : 'acct_differentfixture',
       })
+    })
+    try {
+      const server = await startServer(
+        {
+          ...configured,
+          DATABASE_URL: db.url,
+          HOURMERE_ROLE: 'web',
+          NODE_ENV: 'production',
+          STRIPE_MODE: 'test',
+          PAID_BOOKINGS_ENABLED: 'true',
+          PORT: '0',
+          PUBLIC_URL: 'http://localhost',
+        },
+        { stripeTransport },
+      )
       try {
         const result = await fetch(`http://127.0.0.1:${server.port}/api/v1/instance`)
         expect(result.status).toBe(200)
         const response = await result.text()
         expectRedacted(response)
-        expect(response.toLowerCase().includes('stripe')).toBe(false)
+        expect(JSON.parse(response)).toMatchObject({
+          eventTypePaymentAvailability: matches ? 'available' : 'stripe_unverified',
+        })
         expect(response.includes(configured.STRIPE_ACCOUNT_ID)).toBe(false)
+        expect(stripeTransport).toHaveBeenCalledTimes(1)
         expect(http).toHaveBeenCalledTimes(1)
       } finally {
         await server.close()

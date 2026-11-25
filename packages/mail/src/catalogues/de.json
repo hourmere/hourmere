@@ -153,6 +153,13 @@
   "scimMapping.linked": "Ihr Team hat die SCIM-Zuordnung {mappingId} genehmigt. Sobald die Gruppe bereitgestellt ist, kann das verknüpfte Verzeichnis den Namen des untergeordneten Teams und dessen verzeichnisverwaltete Mitglieder verwalten.",
   "scimMapping.unlinked": "Die SCIM-Zuordnung {mappingId} wurde für Ihr Team aufgehoben. Das Verzeichnis kann das Team über diese Zuordnung nicht mehr verwalten.",
   "scimMapping.suspended": "Der Verzeichniszugriff über die SCIM-Zuordnung {mappingId} wurde ausgesetzt. Bestehende Mitgliedschaften und Sperrstatus bleiben erhalten.",
+  "bookingPayment.label": "Zahlung",
+  "bookingPayment.paid": "{amount} bezahlt",
+  "bookingPayment.refund": "Rückerstattung",
+  "bookingPayment.requested": "Rückerstattung angefordert",
+  "bookingPayment.pending": "Rückerstattung ausstehend",
+  "bookingPayment.succeeded": "Rückerstattung veranlasst",
+  "bookingPayment.failed": "Rückerstattung fehlgeschlagen",
   "series.confirmed.subject": "Terminserie bestätigt: {event}",
   "series.confirmed.booker": "Ihre Terminserie mit {host} ist gebucht.",
   "series.confirmed.guest": "{invitee} hat Sie zu einer Terminserie mit {host} eingeladen.",
@@ -173,12 +180,5 @@
   "series.cancelled.member": "Storniert",
   "series.manage": "Terminserie verwalten",
   "series.view": "Terminserie ansehen",
-  "series.repair": "Öffnen Sie die betroffene Buchung in Hourmere, um die Erstellung des Meetinglinks erneut zu versuchen.",
-  "bookingPayment.label": "Zahlung",
-  "bookingPayment.paid": "{amount} bezahlt",
-  "bookingPayment.refund": "Rückerstattung",
-  "bookingPayment.requested": "Rückerstattung angefordert",
-  "bookingPayment.pending": "Rückerstattung ausstehend",
-  "bookingPayment.succeeded": "Rückerstattung veranlasst",
-  "bookingPayment.failed": "Rückerstattung fehlgeschlagen"
+  "series.repair": "Öffnen Sie die betroffene Buchung in Hourmere, um die Erstellung des Meetinglinks erneut zu versuchen."
 }

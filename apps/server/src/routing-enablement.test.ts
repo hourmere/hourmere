@@ -169,7 +169,7 @@ describe.skipIf(!databaseUrl)('routing enablement in the running server', () => 
           [
             '/api/v1/instance',
             200,
-            '{"publicUrl":"http://localhost","hostedSignupUrl":"https://hourmere.com","smsRemindersAvailable":false,"automaticGoogleMeet":false,"automaticZoom":false,"followUpHostNotesEnabled":true,"embedEnabled":false,"slotSnippetsEnabled":false,"ssoOidcEnabled":false,"ssoSamlEnabled":false,"routingFormsEnabled":false,"workflowsEnabled":false,"scimProvisioningEnabled":false,"signIn":{"email":true,"google":false,"microsoft":false}}',
+            '{"publicUrl":"http://localhost","hostedSignupUrl":"https://hourmere.com","smsRemindersAvailable":false,"eventTypePaymentAvailability":"stripe_not_configured","automaticGoogleMeet":false,"automaticZoom":false,"followUpHostNotesEnabled":true,"embedEnabled":false,"slotSnippetsEnabled":false,"ssoOidcEnabled":false,"ssoSamlEnabled":false,"routingFormsEnabled":false,"workflowsEnabled":false,"scimProvisioningEnabled":false,"signIn":{"email":true,"google":false,"microsoft":false}}',
           ],
           ['/route', 404, '404 Not Found'],
           ['/route/routing-host/intake', 404, '404 Not Found'],

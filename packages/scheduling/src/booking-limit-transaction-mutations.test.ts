@@ -14,6 +14,7 @@ import * as Zod from 'zod'
 import * as Availability from './availability.ts'
 import * as BookingChain from './booking-chain.ts'
 import * as BookingPage from './booking-page.ts'
+import * as BookingPaymentDetails from './booking-payment-details.ts'
 import * as ChangeDeadlines from './change-deadlines.ts'
 import * as Conferences from './conferences.ts'
 import type { PublicContext } from './context.ts'
@@ -54,6 +55,7 @@ const dependencies: Record<string, object> = {
   './availability.ts': Availability,
   './booking-chain.ts': BookingChain,
   './booking-page.ts': BookingPage,
+  './booking-payment-details.ts': BookingPaymentDetails,
   './change-deadlines.ts': ChangeDeadlines,
   './conferences.ts': Conferences,
   './errors.ts': Errors,

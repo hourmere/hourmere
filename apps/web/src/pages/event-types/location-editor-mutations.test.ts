@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { isPaidEventSupported } from '@hourmere/core/payment'
 import { describe, expect, it } from 'vitest'
 import { RequestError } from '../../api/errors.ts'
 import { parseWhole, wholeNumberProblem } from '../../components/forms.tsx'
@@ -9,6 +10,7 @@ import { eventType } from '../../test/fixtures.ts'
 import { isMultiLineText, isSingleLineText, singleLineProblem } from '../../text.ts'
 import type * as formFunctions from './event-type-form.ts'
 import * as notificationFunctions from './notifications-form.ts'
+import * as paymentFunctions from './payment-form.ts'
 
 const form = readFileSync('apps/web/src/pages/event-types/event-type-form.ts', 'utf8')
 
@@ -21,6 +23,8 @@ function buildForm(source: string): typeof formFunctions {
   )
   const dependencies = {
     ...notificationFunctions,
+    ...paymentFunctions,
+    isPaidEventSupported,
     RequestError,
     parseWhole,
     wholeNumberProblem,
