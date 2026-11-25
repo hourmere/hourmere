@@ -68,6 +68,10 @@ export const WebhookDeliveryPage = z.object({
   data: z.array(Delivery),
   nextAfter: z.string().nullable(),
 })
+// The service validates the cursor after checking endpoint visibility.
+export const WebhookDeliveryCursor = z.string().optional().openapi({
+  description: 'Use the previous page’s nextAfter UUID. Omit for the first page.',
+})
 const Params = z.object({ id: z.string() })
 const ExpectedReadHeaders = z.object({
   'x-expected-organization-id': z.string().optional().openapi({
@@ -271,7 +275,7 @@ export function webhookRoutes(deps: ServiceDeps & WebhookSettings): RouteModule 
         request: {
           params: Params,
           headers: ExpectedReadHeaders,
-          query: z.object({ after: z.string().optional() }),
+          query: z.object({ after: WebhookDeliveryCursor }),
         },
         responses: {
           200: {
@@ -279,6 +283,7 @@ export function webhookRoutes(deps: ServiceDeps & WebhookSettings): RouteModule 
             content: json(WebhookDeliveryPage),
           },
           ...errors,
+          ...errorResponses({ 400: 'invalid_request or invalid_cursor' }),
         },
       }),
       async (c) =>

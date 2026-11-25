@@ -233,6 +233,9 @@ not grant host rescheduling or reschedule-request authority through REST, MCP or
   block the batch, while daily/weekly/monthly limit differences are reported as warnings.
 - [Slack notifications](/docs/slack) support one incoming-webhook destination per organization,
   minimal booking data and at-least-once delivery; duplicate messages are possible.
+- [Signed booking webhooks](/docs/webhooks) use the endpoint list for lookup. To verify a
+  receiver, trigger a subscribed booking event and inspect delivery history.
+  中文：从列表查找签名 Webhook 端点。验证接收端时，请触发已订阅的预约事件并查看投递历史。
 - [Booking limits](/docs/booking-limits) apply per event type and actual host, across
   all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
   Lowering a limit does not cancel existing bookings.
