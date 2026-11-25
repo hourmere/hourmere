@@ -753,6 +753,23 @@ for SAML.
 其他账号使用，验证提示和邮件内容都相同。验证后才会向邮箱持有人告知冲突，原有关联保持不变。
 生产环境仍关闭 SAML，SAML 关联请求返回 `404 sso_disabled`。
 
+SAML identity recovery uses `unlinkSsoAccount` with independent mailbox proof and
+`removeSsoIdentityLink` with fresh administration proof. Both apply the same team and
+owner rules, exact link generation, and link-scoped revocation as OIDC. While SAML is
+enabled in-process, the browser-session provider inventory supplies the opaque SAML
+link IDs and generations for retirement. A conflicting subject stays bound until its
+link is explicitly retired. The member can then sign in locally and explicitly link
+the subject on a team without enforcement. While SAML is hard-off, both operations
+return `404 sso_disabled` for SAML links before creating a proof attempt. OIDC recovery
+remains available while `SSO_OIDC_ENABLED` is off.
+
+SAML 身份恢复沿用 `unlinkSsoAccount` 和 `removeSsoIdentityLink`。前者要求独立邮箱证明，后者要求
+新的管理权限证明。团队及所有者权限、精确关联代数和按关联撤销凭据的规则与 OIDC 相同。进程内
+启用 SAML 时，浏览器会话的提供方列表会显示解除关联所需的不透明关联标识符和代数。身份发生冲突时，
+须显式解除旧关联。未启用强制单点登录的团队成员随后可用原有方式登录，再显式关联 SAML 身份。
+SAML 保持关闭时，这两个操作对 SAML 关联均在创建证明尝试前返回 `404 sso_disabled`。关闭
+`SSO_OIDC_ENABLED` 时仍可恢复 OIDC 关联。
+
 For an unlinked subject, the SAML ACS redirects to `/app/mailbox-proof` with the
 opaque attempt ID and `saml=1` in the fragment. The redirect and queued verification
 email are identical for existing accounts and unclaimed addresses.
@@ -1081,17 +1098,17 @@ checks remain distinct. Validation status is currently `unknown`. Test status re
 the latest `passed` or `failed` receipt at the current revision, or `unknown` if no
 applicable receipt is retained. These reads use the audit journal without opening the
 sealed provider configuration. The active team's owner/admin browser sessions also receive
-`links: [{id, generation}]` for OIDC providers, limited to current members and live links.
+`links: [{id, generation}]` for OIDC providers and for SAML providers while the SAML
+capability is enabled, limited to current members and live links.
 `getSsoPolicy` returns `requireSso`, `admission`, `policyRevision` and `trustGeneration`;
 a team without a stored policy gets `false`, `invitation_only`, `1` and `1` respectively.
 No read creates a policy, changes trust or emits an audit event.
 
 当前草稿读取仅允许当前团队中已验证的所有者或管理员使用；API 密钥须具有 `read` 或
 `full` 范围，MCP OAuth 须具有 `mcp:tools` 权限。提供者列表按团队分页，不返回已退役
-提供者、密封配置、密钥或原始元数据。当前团队的所有者或管理员通过浏览器会话查看 OIDC
-提供者时，还可看到现有团队成员的有效关联不透明标识和代数。验证状态目前为 `unknown`，测试状态
-仅显示当前版本的最新收据。没有适用收据时，测试状态为 `unknown`。OIDC 和 SAML 仍在
-代码中保持关闭，读取返回 `sso_disabled`。
+提供者、密封配置、密钥或原始元数据。当前团队的所有者或管理员通过浏览器会话可查看现有成员的
+有效关联不透明标识和代数，适用于 OIDC 提供者和进程内启用 SAML 时的 SAML 提供者。验证状态
+目前为 `unknown`，测试状态仅显示当前版本的最新收据。没有适用收据时，测试状态为 `unknown`。
 
 Provider draft writes are registered as browser-session-only POST/PATCH/DELETE operations,
 with no MCP tool or CLI write command. Creating and updating require the provider's protocol
@@ -1419,10 +1436,11 @@ hard-off, the lists omit these fields and both delegation writes return `404 sso
 
 Both link-retirement operations take `{expectedLinkGeneration, proofAttemptId?}`.
 Self-unlink also takes `linkId` from `/me`; administrator removal takes `linkId` from
-the path. The OIDC recovery endpoints use the caller's active team membership. The ID
-and generation bind the request to the original row even if a
-replacement link starts at the same generation. Verify the affected member's request
-out of band before administrator removal. The operations return 204 on success,
+the provider inventory and passes it in the path. The recovery endpoints use the
+caller's active team membership. The ID and generation bind the request to the
+original row even if a replacement link starts at the same generation. Verify the
+affected member's request out of band before administrator removal. The operations
+return 204 on success,
 `sso_configuration_changed` for a stale live generation and `sso_not_found` for an
 already retired link. A verified current login mailbox supplies the independent
 email sign-in method, including when new sign-ups are closed. Retirement, link-specific
