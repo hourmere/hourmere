@@ -3147,4 +3147,7 @@ export const admin = {
   'Enter an amount with up to two decimal places.': '请输入最多保留两位小数的金额。',
   'Enter an amount from {min} to {max} {currency}.': '请输入{min}至{max} {currency}之间的金额。',
   'Check the price for every duration and try again.': '请检查每种时长的价格后重试。',
+  // Paid booking management
+  'Changes are unavailable for this paid booking. Contact your instance operator about cancellation or refunds.':
+    '此付费预约暂无法变更。如需取消或退款，请联系实例管理员。',
 } as const

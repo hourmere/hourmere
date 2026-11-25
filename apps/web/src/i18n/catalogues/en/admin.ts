@@ -3299,4 +3299,7 @@ export const admin = {
     'Enter an amount from {min} to {max} {currency}.',
   'Check the price for every duration and try again.':
     'Check the price for every duration and try again.',
+  // Paid booking management
+  'Changes are unavailable for this paid booking. Contact your instance operator about cancellation or refunds.':
+    'Changes are unavailable for this paid booking. Contact your instance operator about cancellation or refunds.',
 } as const

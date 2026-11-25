@@ -1028,7 +1028,13 @@ export function BookingDetail({
         </dd>
       </dl>
       {booking.status === 'confirmed' &&
-        (new Date(booking.start).getTime() > Date.now() ? (
+        (booking.paidManagementUnavailable === true ? (
+          <p className="hint">
+            {t(
+              'Changes are unavailable for this paid booking. Contact your instance operator about cancellation or refunds.',
+            )}
+          </p>
+        ) : new Date(booking.start).getTime() > Date.now() ? (
           <CancelBooking
             booking={booking}
             timeZone={timeZone}

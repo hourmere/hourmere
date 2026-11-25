@@ -45,6 +45,10 @@ export type TeamAdminBookingPage = z.infer<typeof TeamAdminBookingPageSchema>
 
 /** Read-only list additions; departure/removal projections retain their original contract. */
 export const TeamAdminBookingListItemSchema = TeamAdminBookingSchema.extend({
+  paidManagementUnavailable: z
+    .literal(true)
+    .optional()
+    .describe('The payment binding prevents cancellation of this confirmed booking'),
   isRescheduled: z
     .boolean()
     .describe(

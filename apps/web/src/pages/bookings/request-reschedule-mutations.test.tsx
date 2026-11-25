@@ -113,6 +113,7 @@ it('detects offering a reschedule request for a group seat in the detail source 
       react,
       readOnly: false,
       started: false,
+      paidManagementUnavailable: false,
       booking: booking({ isGroupSeat: true }),
       expectedOrganizationId: 'organization',
       updateBooking: () => {},
