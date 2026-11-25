@@ -1,5 +1,6 @@
 import { checkTeamManagementAccess, TeamManagementError } from '@hourmere/auth'
-import { sql } from 'kysely'
+import type { Database } from '@hourmere/db'
+import { sql, type TransactionBuilder } from 'kysely'
 import { bookingPageQuery, encodeBookingCursor } from './booking-page.ts'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
@@ -224,8 +225,6 @@ export async function exportBookingsCsv(
       'export_busy',
       'Too many exports are running. Try again shortly.',
     )
-  activeExports++
-  exportingUsers.add(userId)
   const ready = Promise.withResolvers<ReadableStream<Uint8Array>>()
   const done = Promise.withResolvers<void>()
   let controller: ReadableStreamDefaultController<Uint8Array> | undefined
@@ -252,10 +251,22 @@ export async function exportBookingsCsv(
     clearTimeout(stallTimer)
     done.resolve()
   }
-  const transaction = ctx.db
-    .transaction()
-    .setIsolationLevel('repeatable read')
-    .execute(async (trx) => {
+  async function withExportSlot(run: (builder: TransactionBuilder<Database>) => Promise<void>) {
+    activeExports++
+    exportingUsers.add(userId)
+    try {
+      await run(ctx.db.transaction().setIsolationLevel('repeatable read'))
+    } catch (error) {
+      ready.reject(error)
+      if (!stopped) controller?.error(error)
+      finish()
+    } finally {
+      activeExports--
+      exportingUsers.delete(userId)
+    }
+  }
+  const transaction = withExportSlot((builder) =>
+    builder.execute(async (trx) => {
       const options = await prepareBookingExport({ ...ctx, db: trx }, input)
       // Transaction-scoped lock releases on failure, disconnect, timeout and normal completion.
       const lock = await sql<{
@@ -473,15 +484,7 @@ export async function exportBookingsCsv(
       if (signal?.aborted) abort()
       ready.resolve(stream)
       await done.promise
-    })
-    .catch((error) => {
-      ready.reject(error)
-      if (!stopped) controller?.error(error)
-      finish()
-    })
-    .finally(() => {
-      activeExports--
-      exportingUsers.delete(userId)
-    })
+    }),
+  )
   return ready.promise
 }

@@ -1,3 +1,4 @@
+import type { CalDavCredentials } from './caldav-credentials.ts'
 import {
   CalDavError,
   type CalDavPrivateTarget,
@@ -24,10 +25,7 @@ export interface CalDavDiscoveryResult {
   calendars: CalDavCalendar[]
 }
 export interface CalDavDiscoveryClient {
-  discover(
-    credentials: { serverUrl: string; username: string; password: string },
-    signal?: AbortSignal,
-  ): Promise<CalDavDiscoveryResult>
+  discover(credentials: CalDavCredentials, signal?: AbortSignal): Promise<CalDavDiscoveryResult>
 }
 /** Pure orchestration with injected transport. No persistence, logging, busy reads or writes. */
 export function createCalDavDiscovery(
