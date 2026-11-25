@@ -17,11 +17,12 @@ export interface SsoCapabilities {
   readonly ssoOperatorSetting?: boolean | undefined
 }
 
-export function ssoProtocolEnabled(capabilities: SsoCapabilities, protocol: string): boolean {
-  return (
-    (protocol === 'oidc' && capabilities.ssoOidcEnabled) ||
-    (protocol === 'saml' && capabilities.ssoSamlEnabled)
-  )
+export function ssoProtocolEnabled(capabilities: SsoCapabilities, protocol?: string): boolean {
+  return protocol === 'oidc'
+    ? capabilities.ssoOidcEnabled
+    : protocol === 'saml'
+      ? capabilities.ssoSamlEnabled
+      : protocol === undefined && (capabilities.ssoOidcEnabled || capabilities.ssoSamlEnabled)
 }
 
 export function enabledSsoProtocols(capabilities: SsoCapabilities): ('oidc' | 'saml')[] {
@@ -37,11 +38,7 @@ export function enabledSsoProtocols(capabilities: SsoCapabilities): ('oidc' | 's
  * Omitting the protocol checks a protocol-neutral SSO operation; other values fail closed.
  */
 export function requireSsoEnabled(capabilities: SsoCapabilities, protocol?: 'oidc' | 'saml'): void {
-  if (
-    !(protocol === undefined
-      ? capabilities.ssoOidcEnabled || capabilities.ssoSamlEnabled
-      : ssoProtocolEnabled(capabilities, protocol))
-  )
+  if (!ssoProtocolEnabled(capabilities, protocol))
     throw new DomainError('not_found', 'sso_disabled')
 }
 
