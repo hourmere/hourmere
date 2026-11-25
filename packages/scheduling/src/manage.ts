@@ -13,6 +13,7 @@ import {
 import {
   assertBookingLocallyManaged,
   assertInviteeRescheduleAllowed,
+  assertPaidRescheduleDuration,
   type Booking,
   getHostBooking,
   getManagedBooking,
@@ -37,7 +38,7 @@ import { readManagedRoutingAnswers } from './routing-booking.ts'
 /** The booking behind a manage token, with what the invitee needs to recognize it. */
 export interface ManagedBooking extends Booking {
   branding?: PublicBranding
-  /** The event type as it is now; null once it is deleted (or for a booking without one). */
+  /** The current event type, with the purchased duration for paid bookings. */
   eventType: { title: string; durationMinutes: number; allowedDurationsMinutes?: number[] } | null
   /** The people the invitee meets: each host's name (their handle if they have no name). */
   hosts: { name: string }[]
@@ -89,11 +90,14 @@ async function readManagedBookingDetails(
     // Fold these projections into one statement to offset the transaction's two statements.
     ctx.db
       .selectFrom('bookings as b')
+      .leftJoin('payment_checkout_attempts as moved', 'moved.current_booking_id', 'b.id')
       .select([
         'b.organization_id',
         'b.reschedule_cutoff_minutes',
         'b.cancel_cutoff_minutes',
         'b.has_routing_snapshot',
+        'b.payment_hold_expires_at',
+        'moved.current_booking_id',
       ])
       .select(({ exists, selectFrom }) => [
         exists(
@@ -130,6 +134,13 @@ async function readManagedBookingDetails(
       ? await readManagedRoutingAnswers(ctx.db, booking.id, details.organization_id)
       : undefined
   const start = Temporal.Instant.from(booking.start)
+  const paid = details.payment_hold_expires_at || details.current_booking_id
+  const durationOptions =
+    !paid && eventType && eventType.allowed_durations_minutes.length > 1
+      ? {
+          allowedDurationsMinutes: [...eventType.allowed_durations_minutes].sort((a, b) => a - b),
+        }
+      : {}
   const instant = (minutes: number | null) => {
     const deadline = changeDeadline(start, minutes)
     return deadline && toIso(deadline)
@@ -140,10 +151,10 @@ async function readManagedBookingDetails(
     eventType: eventType
       ? {
           title: eventType.title,
-          durationMinutes: eventType.duration_minutes,
-          ...(eventType.allowed_durations_minutes.length > 1 && {
-            allowedDurationsMinutes: [...eventType.allowed_durations_minutes].sort((a, b) => a - b),
-          }),
+          durationMinutes: paid
+            ? Temporal.Instant.from(booking.end).since(start).total('minutes')
+            : eventType.duration_minutes,
+          ...durationOptions,
         }
       : null,
     hosts: details.hosts.map((h) => ({ name: h.name.trim() || h.handle || '' })),
@@ -204,7 +215,7 @@ async function listBookingSlots(
   }: { start: Temporal.Instant; end: Temporal.Instant; durationMinutes?: number },
   asInvitee = false,
 ): Promise<SlotView[]> {
-  await assertBookingLocallyManaged(ctx.db, booking.id)
+  const paid = await assertBookingLocallyManaged(ctx.db, booking.id, true)
   const now = ctx.now()
   if (booking.status === 'cancelled') {
     throw new DomainError('conflict', 'booking_cancelled', 'This booking is already cancelled')
@@ -263,11 +274,13 @@ async function listBookingSlots(
     false,
     ctx.scimResourcesEnabled === true,
   )
+  const originalDuration = Temporal.Instant.from(booking.end)
+    .since(Temporal.Instant.from(booking.start))
+    .total('minutes')
+  if (paid) assertPaidRescheduleDuration(originalDuration, durationMinutes)
   const selectedDuration =
-    durationMinutes === undefined
-      ? Temporal.Instant.from(booking.end)
-          .since(Temporal.Instant.from(booking.start))
-          .total('minutes')
+    paid || durationMinutes === undefined
+      ? originalDuration
       : selectDurationMinutes(
           {
             durationMinutes: eventType.duration_minutes,
@@ -291,6 +304,6 @@ async function listBookingSlots(
     now,
     booking.id,
     snapshot.hosts_use_default_schedule,
-    durationMinutes,
+    paid ? undefined : durationMinutes,
   )
 }

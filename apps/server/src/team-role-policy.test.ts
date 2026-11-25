@@ -1,6 +1,4 @@
 import { createHmac, randomBytes, randomUUID } from 'node:crypto'
-import { readFileSync } from 'node:fs'
-import { stripTypeScriptTypes } from 'node:module'
 import {
   type Auth,
   createAuth,
@@ -14,6 +12,7 @@ import { createTestDatabase, outsideAuthTransaction, type TestDatabase } from '@
 import { sql } from 'kysely'
 import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { fixedTeamRole } from '../../../packages/auth/src/team-role-policy.ts'
 import { createApp } from './app.ts'
 import { productRoutes } from './server.ts'
 
@@ -551,8 +550,19 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
     },
   )
 
-  it.each(['admin', 'owner', 'member,admin', 'member,owner', 'custom'])(
-    'refuses accepting a historical invitation with stored %s role',
+  const nonMemberInvitationRoles = [
+    ...ownerVariants,
+    'admin',
+    ' admin',
+    'ADMIN ',
+    ' member',
+    'MEMBER',
+    'member,admin',
+    'member,owner',
+    'custom',
+  ]
+  it.each(nonMemberInvitationRoles)(
+    'refuses accepting a historical invitation with stored %j role',
     async (storedRole) => {
       const f = await fixture()
       const recipient = await account()
@@ -834,53 +844,56 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
     }
   })
 
-  it('rechecks a stored invitation role changed after the acceptance before hook', async () => {
-    const f = await fixture()
-    const recipient = await account()
-    const invitation = await historicalInvitation(f, 'member', recipient.email)
-    const original = hooks.beforeAcceptInvitation
-    hooks.beforeAcceptInvitation = async (input) => {
-      const result = await original?.(input)
-      if (input.invitation?.id === invitation.id) {
-        // A concurrent change on its own connection while acceptance holds one.
-        await outsideAuthTransaction(() =>
-          db
-            .updateTable('auth.invitation')
-            .set({ role: 'admin' })
-            .where('id', '=', invitation.id)
-            .execute(),
-        )
+  it.each(['admin', ' member', 'MEMBER'])(
+    'rechecks a stored invitation role changed to %j after the acceptance before hook',
+    async (storedRole) => {
+      const f = await fixture()
+      const recipient = await account()
+      const invitation = await historicalInvitation(f, 'member', recipient.email)
+      const original = hooks.beforeAcceptInvitation
+      hooks.beforeAcceptInvitation = async (input) => {
+        const result = await original?.(input)
+        if (input.invitation?.id === invitation.id) {
+          // A concurrent change on its own connection while acceptance holds one.
+          await outsideAuthTransaction(() =>
+            db
+              .updateTable('auth.invitation')
+              .set({ role: storedRole })
+              .where('id', '=', invitation.id)
+              .execute(),
+          )
+        }
+        return result
       }
-      return result
-    }
-    try {
-      await refused(
-        await post(
-          f,
-          'accept-invitation',
-          { invitationId: invitation.id },
-          { cookie: recipient.cookie, expected: null },
-        ),
-      )
-      expect(
-        await db
-          .selectFrom('auth.invitation')
-          .select(['role', 'status'])
-          .where('id', '=', invitation.id)
-          .executeTakeFirstOrThrow(),
-      ).toEqual({ role: 'admin', status: 'pending' })
-      expect(
-        await db
-          .selectFrom('auth.member')
-          .select('id')
-          .where('organizationId', '=', f.teamId)
-          .where('userId', '=', recipient.id)
-          .executeTakeFirst(),
-      ).toBeUndefined()
-    } finally {
-      hooks.beforeAcceptInvitation = original as (input: HookInput) => unknown
-    }
-  })
+      try {
+        await refused(
+          await post(
+            f,
+            'accept-invitation',
+            { invitationId: invitation.id },
+            { cookie: recipient.cookie, expected: null },
+          ),
+        )
+        expect(
+          await db
+            .selectFrom('auth.invitation')
+            .select(['role', 'status'])
+            .where('id', '=', invitation.id)
+            .executeTakeFirstOrThrow(),
+        ).toEqual({ role: storedRole, status: 'pending' })
+        expect(
+          await db
+            .selectFrom('auth.member')
+            .select('id')
+            .where('organizationId', '=', f.teamId)
+            .where('userId', '=', recipient.id)
+            .executeTakeFirst(),
+        ).toBeUndefined()
+      } finally {
+        hooks.beforeAcceptInvitation = original as (input: HookInput) => unknown
+      }
+    },
+  )
 
   it('rechecks an owner target changed after the role before hook', async () => {
     const f = await fixture()
@@ -1053,39 +1066,10 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
   )
 })
 
-// Evaluate the production validator in memory; never alter the shared source tree.
-describe('owner role spelling source-copy regression', () => {
-  function validator(allowOwner = false): (value: unknown) => unknown {
-    const source = readFileSync(
-      new URL('../../../packages/auth/src/team-role-policy.ts', import.meta.url),
-      'utf8',
-    )
-    const start = source.indexOf('export function fixedTeamRole(')
-    const end = source.indexOf('\nfunction body(', start)
-    expect(start).toBeGreaterThan(-1)
-    expect(end).toBeGreaterThan(start)
-    let copy = source.slice(start, end).replace('export ', '')
-    if (allowOwner) {
-      const guard = "return role === 'admin' || role === 'member' ? role : undefined"
-      expect(copy).toContain(guard)
-      copy = copy.replace(
-        guard,
-        "return typeof role === 'string' ? role.trim().toLowerCase() : undefined",
-      )
-    }
-    return new Function(`${stripTypeScriptTypes(copy)}; return fixedTeamRole`)()
+it('validates fixed team role inputs and rejects owner spellings', () => {
+  for (const role of ['admin', 'member']) {
+    expect(fixedTeamRole(role)).toBe(role)
+    expect(fixedTeamRole([role])).toBe(role)
   }
-
-  function verify(check: (value: unknown) => unknown) {
-    expect(check('member')).toBe('member')
-    expect(check(['admin'])).toBe('admin')
-    for (const role of ownerInputs) expect(check(role)).toBeUndefined()
-  }
-
-  it('rejects owner spellings in the unmodified source copy', () => verify(validator()))
-  it('detects an allow-any-normalized-role mutant through a real assertion failure', () => {
-    const mutant = validator(true)
-    expect(() => verify(mutant)).toThrowError(expect.objectContaining({ name: 'AssertionError' }))
-    verify(validator())
-  })
+  for (const role of ownerInputs) expect(fixedTeamRole(role)).toBeUndefined()
 })

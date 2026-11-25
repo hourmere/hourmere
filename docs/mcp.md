@@ -475,6 +475,10 @@ The exact deadline instant is closed; 1 millisecond before it remains eligible, 
 to the other booking rules. Host actions still require the caller to host the booking;
 team-admin status alone grants no extra MCP/CLI or API-key access.
 
+Cancellation of a confirmed, Checkout-bound paid booking requests a full refund.
+Rescheduling keeps its original duration and payment. These actions keep the existing
+booking permissions and invitee deadlines. [Paid booking changes](https://hourmere.com/docs/payments#cancel-or-reschedule-a-paid-booking).
+
 ## Export bookings without filling agent context
 
 `export_bookings` validates the same bounded range and permissions as REST, then

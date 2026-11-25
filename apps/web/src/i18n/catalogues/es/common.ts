@@ -601,4 +601,7 @@ export const common = {
   // Rescheduled booking links
   'This booking was moved to a new time. The new booking has its own link.':
     'Esta reserva se cambió a otro horario. La nueva reserva tiene su propio enlace.',
+  // Booking location changes
+  'The meeting location has changed. Please choose a time again.':
+    'El lugar de la reunión ha cambiado. Vuelva a elegir un horario.',
 } as const

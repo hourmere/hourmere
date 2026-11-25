@@ -50,11 +50,16 @@ export function createRateLimiter(
      */
     maxKeys?: number
   } = {},
-): RateLimiter {
+): RateLimiter & {
+  /** Returns the wait for a full window without changing the counter or starting a window. */
+  peek(key: string): number | undefined
+} {
   const windowMs = windowSeconds * 1000
   const keysAfterEviction = Math.floor(maxKeys * 0.9)
   const windows = new Map<string, { count: number; resetAt: number }>()
   let nextSweep = now() + windowMs
+
+  const retryAfter = (resetAt: number, t: number) => Math.max(1, Math.ceil((resetAt - t) / 1000))
 
   function sweep(t: number) {
     for (const [key, w] of windows) if (w.resetAt <= t) windows.delete(key)
@@ -66,6 +71,11 @@ export function createRateLimiter(
   }
 
   return {
+    peek(key) {
+      const t = now()
+      const w = windows.get(key)
+      return w && w.resetAt > t && w.count >= limit ? retryAfter(w.resetAt, t) : undefined
+    },
     hit(key) {
       const t = now()
       if (t >= nextSweep || windows.size >= maxKeys) {
@@ -80,7 +90,7 @@ export function createRateLimiter(
         windows.set(key, w)
       }
       w.count++
-      return w.count > limit ? Math.max(1, Math.ceil((w.resetAt - t) / 1000)) : undefined
+      return w.count > limit ? retryAfter(w.resetAt, t) : undefined
     },
   }
 }

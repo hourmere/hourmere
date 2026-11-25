@@ -5,16 +5,23 @@ import { DOMImplementation, XMLSerializer } from '@xmldom/xmldom'
 import { sql } from 'kysely'
 import { Constants, IdentityProvider, ServiceProvider } from 'samlify'
 import { openSsoProviderConfiguration, type SsoProviderRevision } from './sso-configuration.ts'
+import { databaseInstantText } from './sso-database-clock.ts'
 import { browserBindingDigest, sha256 } from './sso-mailbox-proof.ts'
-import { lockOidcProvider, OidcAttemptRefused, type OidcTestActor } from './sso-oidc-attempt.ts'
+import {
+  lockOidcProvider,
+  lockSsoStepUpTarget,
+  OidcAttemptRefused,
+  type OidcTestActor,
+} from './sso-oidc-attempt.ts'
 import { authenticationAttemptLifetime } from './sso-oidc-limits.ts'
 import { samlIdentityProviderRedirectUrl } from './sso-saml-configuration.ts'
-import { samlDatabaseInstantText, samlDatabaseNow, samlRequestExpired } from './sso-saml-replay.ts'
+import { samlDatabaseNow, samlRequestExpired } from './sso-saml-replay.ts'
 import {
   samlLinkOperation,
   samlProviderConfig,
   samlServiceProviderUrls,
   samlStartOperation,
+  samlStepUpOperation,
   samlTestOperation,
 } from './sso-saml-state.ts'
 
@@ -32,12 +39,14 @@ interface SamlStartDependencies {
   configurationKey: Buffer
   privateTargets: SsoRequest['privateTargets']
   publicUrl: string
+  scimResourcesEnabled?: boolean | undefined
 }
 
 type SamlStartProvider = SsoProviderRevision & { issuer: string; configuration: Buffer }
 type SamlIntent =
   | { kind: 'test'; actor: OidcTestActor; enabled: boolean; deadline?: string | undefined }
   | { kind: 'link'; actor: OidcTestActor; deadline: string }
+  | { kind: 'step_up'; actor: OidcTestActor; attemptId: string }
 
 function redirectIdentityProvider(issuer: string, location: string) {
   // Build metadata locally from the pinned settings. Passing metadata lets samlify
@@ -54,9 +63,9 @@ function redirectIdentityProvider(issuer: string, location: string) {
   return IdentityProvider({ metadata: new XMLSerializer().serializeToString(metadata) })
 }
 
-/** Start an SP-initiated login, self-link or administrator test. */
+/** Start an SP-initiated login, self-link, step-up or administrator test. */
 export async function startSamlSignIn(
-  { db, configurationKey, privateTargets, publicUrl }: SamlStartDependencies,
+  { db, configurationKey, privateTargets, publicUrl, scimResourcesEnabled }: SamlStartDependencies,
   provider: SamlStartProvider,
   browserBinding: string,
   intent?: SamlIntent,
@@ -74,22 +83,27 @@ export async function startSamlSignIn(
     )
     const endpoint = samlIdentityProviderRedirectUrl(config.ssoEndpoint, privateTargets)
     if (!endpoint || (intent && !config.signingCertificates)) throw new SamlStartRefused()
-    if (intent?.kind === 'link' && !config.subjectAttribute) nameIDFormat = format.persistent
+    if (intent && intent.kind !== 'test' && !config.subjectAttribute)
+      nameIDFormat = format.persistent
     idp = redirectIdentityProvider(issuer, endpoint)
   } catch {
     throw new SamlStartRefused()
   }
 
   const start = async (trx: Db) => {
-    await lockOidcProvider(
-      trx,
-      provider,
-      intent?.kind === 'test' ? intent.enabled : true,
-      'saml',
-    ).catch((error: unknown) => {
-      if (error instanceof OidcAttemptRefused) throw new SamlStartRefused()
-      throw error
-    })
+    const target =
+      intent?.kind === 'step_up'
+        ? await lockSsoStepUpTarget(
+            trx,
+            { ...provider, browserBinding },
+            intent.actor,
+            intent.attemptId,
+            scimResourcesEnabled === true,
+            'saml',
+          )
+        : undefined
+    if (!target)
+      await lockOidcProvider(trx, provider, intent?.kind === 'test' ? intent.enabled : true, 'saml')
     const { id } = await trx.selectNoFrom(sql<string>`uuidv7()`.as('id')).executeTakeFirstOrThrow()
     // The UUID indexes the attempt. Its compact representation plus an independent secret
     // stays within the SAML binding's 80-byte RelayState limit. Store only the handle digest.
@@ -110,26 +124,33 @@ export async function startSamlSignIn(
     }
     const createdAt = await samlDatabaseNow(trx)
     const lifetime = createdAt.add({ seconds: authenticationAttemptLifetime })
-    const intentDeadline = intent?.deadline
-      ? Temporal.Instant.from(new Date(intent.deadline).toISOString())
+    const intentDeadlineValue =
+      intent?.kind === 'step_up' ? target?.attempt.expires_at : intent?.deadline
+    const intentDeadline = intentDeadlineValue
+      ? Temporal.Instant.from(new Date(intentDeadlineValue).toISOString())
       : undefined
     const deadline =
       intentDeadline && Temporal.Instant.compare(intentDeadline, lifetime) < 0
         ? intentDeadline
         : lifetime
     if (samlRequestExpired(deadline, createdAt)) throw new SamlStartRefused()
-    const request = ServiceProvider(spSettings).createLoginRequest(idp, 'redirect', { relayState })
+    const request = ServiceProvider(spSettings).createLoginRequest(idp, 'redirect', {
+      relayState,
+      ...(intent?.kind === 'step_up' && { forceAuthn: true }),
+    })
     const { expiresAt } = await trx
       .insertInto('sso_attempts')
       .values({
         id,
-        kind: intent?.kind ?? 'sign_in',
+        kind: intent?.kind === 'step_up' ? 'link' : (intent?.kind ?? 'sign_in'),
         operation:
           intent?.kind === 'test'
             ? samlTestOperation
-            : intent
-              ? samlLinkOperation
-              : samlStartOperation,
+            : intent?.kind === 'step_up'
+              ? samlStepUpOperation
+              : intent
+                ? samlLinkOperation
+                : samlStartOperation,
         organization_id: organizationId,
         provider_id: providerId,
         provider_revision: revision,
@@ -139,13 +160,18 @@ export async function startSamlSignIn(
         created_at: createdAt.toString(),
         expires_at: deadline.toString(),
       })
-      .returning(samlDatabaseInstantText(sql.ref('expires_at')).as('expiresAt'))
+      .returning(databaseInstantText(sql.ref('expires_at')).as('expiresAt'))
       .executeTakeFirstOrThrow()
     const now = await samlDatabaseNow(trx)
     if (samlRequestExpired(Temporal.Instant.from(expiresAt), now)) {
       throw new SamlStartRefused()
     }
-    return { id, url: request.context }
+    return { id, url: request.context, stepUpBinding: target?.binding }
   }
-  return db.isTransaction ? start(db) : db.transaction().execute(start)
+  try {
+    return await (db.isTransaction ? start(db) : db.transaction().execute(start))
+  } catch (error) {
+    if (error instanceof OidcAttemptRefused) throw new SamlStartRefused()
+    throw error
+  }
 }

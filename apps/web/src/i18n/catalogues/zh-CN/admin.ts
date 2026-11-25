@@ -557,7 +557,6 @@ export const admin = {
   'Offer each duration only once.': '每种时长只能提供一次。',
   'Include the default duration in the allowed durations.': '请在可选时长中包含默认时长。',
   'Added {0}.': '已添加{0}。',
-  'Removed {0}. Default duration: {1}.': '已移除{0}。默认时长：{1}。',
   Scope: '权限范围',
   'Bookings (read/write)': '预约读写',
   'Read only': '只读',
@@ -3120,4 +3119,7 @@ export const admin = {
   '{value} reschedule deadline': '须提前{value}改期',
   '{value} cancellation deadline': '须提前{value}取消',
   'Default timing rules': '默认预约时间规则',
+
+  // Additional durations
+  'Removed {0}. Selected length: {1}.': '已移除{0}。当前选中的时长为{1}。',
 } as const

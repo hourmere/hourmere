@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto'
+import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type pg from 'pg'
 import { describe, expect, it } from 'vitest'
+import { migrationsDir } from './migrate.ts'
 import { seedCheckoutHolds } from './payment-checkout-attempt-fixtures.ts'
 import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
 
@@ -62,11 +66,23 @@ async function assertCheckoutAttemptProtections(pool: pg.Pool) {
 
 describe.skipIf(!process.env.DATABASE_URL)('payment Checkout attempt constraints', () => {
   it('fails an assertion when any 0124 object is dropped', async () => {
-    const report = await checkConstraintCoverage({
-      serverUrl: process.env.DATABASE_URL as string,
-      migration: '0124_payment_checkout_attempts.sql',
-      assertions: assertCheckoutAttemptProtections,
-    })
-    expect(report.problems).toEqual([])
+    const directory = await mkdtemp(join(tmpdir(), 'hourmere-checkout-coverage-'))
+    try {
+      // The refund migration adds a foreign key to the Checkout attempt primary key.
+      // Test each independently in its own coverage suite.
+      for (const file of await readdir(migrationsDir)) {
+        if (file.endsWith('.sql') && file < '0190')
+          await copyFile(join(migrationsDir, file), join(directory, file))
+      }
+      const report = await checkConstraintCoverage({
+        serverUrl: process.env.DATABASE_URL as string,
+        migration: '0124_payment_checkout_attempts.sql',
+        migrationsDirectory: directory,
+        assertions: assertCheckoutAttemptProtections,
+      })
+      expect(report.problems).toEqual([])
+    } finally {
+      await rm(directory, { recursive: true })
+    }
   }, 600_000)
 })

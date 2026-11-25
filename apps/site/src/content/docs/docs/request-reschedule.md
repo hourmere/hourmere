@@ -110,8 +110,8 @@ status `confirmed`. Neither includes the note or private management link.
 
 - Imported bookings are read-only; request a change in their original system.
 - Group-seat bookings do not support this action.
-- Confirmed paid bookings remain readable, but management actions return
-  `paid_booking_management_unavailable`; payment management is not available yet.
+- Confirmed paid bookings with a bound Checkout Session keep the original duration
+  and payment when moved. [Paid booking changes](/docs/payments#cancel-or-reschedule-a-paid-booking).
 - The timeout is fixed at 48 hours, capped by the meeting start and the booking's
   effective reschedule deadline (including the cancel deadline); it is not configurable separately.
 - Expiry keeps the original meeting. It does not cancel the meeting or free the slot.

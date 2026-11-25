@@ -174,12 +174,12 @@ describe.skipIf(!process.env.DATABASE_URL)('payment foundation transport boundar
   it('detects current-status filtering in the shared list/export query', async () => {
     await expectKilled(copyPage(), pageHistory)
   })
-  it('refuses ordinary cancellation and rescheduling of confirmed paid bookings', async () => {
+  it('refuses cancellation and rescheduling of unbound paid bookings', async () => {
     await protectedMutation()
   })
-  it('detects removal of the ordinary paid-management guard', async () => {
+  it('detects removal of the unbound paid-management guard', async () => {
     await expectKilled(
-      await copy('if (paid?.payment_hold_expires_at)', 'if (false)'),
+      await copy('if (paid?.payment_hold_expires_at || paid?.attempt_id)', 'if (false)'),
       protectedMutation,
     )
   })

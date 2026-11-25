@@ -99,10 +99,41 @@ async function verifyRetention(factory: Factory) {
   expect(job.payload.safeParse({ versionsAfter: 'not-a-version' }).success).toBe(false)
 }
 
+async function verifyTimeBudget(factory: Factory) {
+  vi.useFakeTimers({ now: 0, toFake: ['Date'] })
+  try {
+    const backlog = handlers(0, [])
+    backlog.purgeReceipts.mockImplementation(async () => {
+      vi.setSystemTime(Date.now() + 15_000)
+      return { more: true }
+    })
+
+    await factory(backlog).handler({}, run)
+
+    // The third batch reaches the deadline. Neither loop can start another transaction.
+    expect(backlog.purgeReceipts.mock.calls.length, 'receipt batches before the deadline').toBe(3)
+    expect(Date.now()).toBe(45_000)
+    expect(backlog.cleanupVersions).not.toHaveBeenCalled()
+    expect(backlog.continueRetention.mock.calls).toEqual([[{}]])
+  } finally {
+    vi.useRealTimers()
+  }
+}
+
 it('drains receipts before versions in bounded runs and queues a successor for backlog', async () => {
   expect(ROUTING_RETENTION_CRON).toBe('*/15 * * * *')
   expect(ROUTING_RETENTION_RUN).toEqual({ transactions: 100, budgetMs: 45_000 })
   await verifyRetention(routingRetentionJob)
+})
+
+it('stops starting batches at the 45-second deadline and queues one successor', () =>
+  verifyTimeBudget(routingRetentionJob))
+
+it('detects source-copy removal of the retention time budget', async () => {
+  const copy = sourceCopy(' &&\n        Date.now() - started < ROUTING_RETENTION_RUN.budgetMs', '')
+  await expectKilled(copy, verifyTimeBudget, {
+    outcome: { actual: ROUTING_RETENTION_RUN.transactions, expected: 3 },
+  })
 })
 
 it('stops at once when the worker shuts down', async () => {

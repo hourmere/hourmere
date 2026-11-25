@@ -211,7 +211,7 @@ describe.skipIf(!databaseUrl)('SAML sign-in initiation', () => {
       [{ ...input, attemptId: randomUUID() }, {}, 400, 'invalid_request'],
       [{ ...input, returnTo: '//different.example.com' }, {}, 400, 'invalid_request'],
       [{ ...input, returnTo: '/outside-app' }, {}, 400, 'invalid_request'],
-      [{ ...input, intent: 'step_up', attemptId: randomUUID() }, {}, 400, 'invalid_request'],
+      [{ ...input, intent: 'step_up', attemptId: randomUUID() }, {}, 404, 'sso_not_found'],
     ] as const) {
       const response = await app.request(startPath, post(body, headers))
       expect(response.status).toBe(status)
@@ -313,6 +313,15 @@ describe.skipIf(!databaseUrl)('SAML sign-in initiation', () => {
     expect(disabled.status).toBe(404)
     expect(await disabled.json()).toEqual({ error: 'sso_disabled' })
     expect(disabled.headers.getSetCookie()).toEqual([])
+    for (let i = 0; i < 31; i++) {
+      const stepUp = await app.request(
+        startPath,
+        post({ providerId: samlId, intent: 'step_up', attemptId: randomUUID() }),
+      )
+      expect(stepUp.status).toBe(404)
+      expect(await stepUp.json()).toEqual({ error: 'sso_disabled' })
+      expect(stepUp.headers.getSetCookie()).toEqual([])
+    }
     expect(await attempts(samlId).execute()).toEqual([])
 
     const redirect = await redirectUrl(

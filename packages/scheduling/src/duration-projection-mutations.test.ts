@@ -181,6 +181,7 @@ function verifyPublic(project: ReturnType<typeof publicProjection>) {
 
 async function verifyManaged(project: typeof getManagedBookingDetails) {
   const query = {
+    leftJoin: () => query,
     select: () => query,
     where: () => query,
     executeTakeFirst: async () => ({
@@ -191,6 +192,8 @@ async function verifyManaged(project: typeof getManagedBookingDetails) {
     executeTakeFirstOrThrow: async () => ({
       reschedule_cutoff_minutes: null,
       cancel_cutoff_minutes: null,
+      payment_hold_expires_at: null,
+      current_booking_id: null,
       hosts: [{ name: 'Ada', handle: 'ada' }],
       link_request: null,
     }),

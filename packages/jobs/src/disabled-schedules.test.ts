@@ -7,12 +7,12 @@ const databaseUrl = process.env.DATABASE_URL
 
 describe.skipIf(!databaseUrl)('disabled feature schedules', () => {
   it.each([true, false])(
-    'removes persisted SMS schedule with work=%s and preserves unrelated schedules',
+    'removes a disabled persisted schedule with work=%s and preserves unrelated schedules',
     async (work) => {
       const owned = await createTestDatabase(databaseUrl as string, undefined, {
-        tag: 'sms_schedule',
+        tag: 'off_schedule',
       })
-      const definitions = ['sms-retention', 'unrelated-retention'].map((name) =>
+      const definitions = ['feature-recheck', 'unrelated-retention'].map((name) =>
         defineJob({
           name,
           payload: z.object({}),
@@ -32,14 +32,14 @@ describe.skipIf(!databaseUrl)('disabled feature schedules', () => {
         definitions: [],
         work,
         migrate: false,
-        disabledSchedules: ['sms-retention'],
+        disabledSchedules: ['feature-recheck'],
         maxConnections: 2,
       })
       try {
         await enabled.start()
         expect(
           (await owned.pool.query('SELECT name FROM pgboss.schedule ORDER BY name')).rows,
-        ).toEqual([{ name: 'sms-retention' }, { name: 'unrelated-retention' }])
+        ).toEqual([{ name: 'feature-recheck' }, { name: 'unrelated-retention' }])
         await enabled.stop()
         await disabled.start()
         expect(
@@ -58,13 +58,13 @@ describe.skipIf(!databaseUrl)('disabled feature schedules', () => {
       connectionString: 'postgres://unused/unused',
       definitions: [
         defineJob({
-          name: 'sms-retention',
+          name: 'feature-recheck',
           payload: z.object({}),
           schedule: { cron: '0 * * * *', payload: {} },
           async handler() {},
         }),
       ],
-      disabledSchedules: ['sms-retention'],
+      disabledSchedules: ['feature-recheck'],
       work: false,
       migrate: true,
     })
