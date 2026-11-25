@@ -122,7 +122,7 @@ function OneTimeBookingPageContent({ token }: { token: string }) {
   )
   if (state.status === 'loading')
     return (
-      <PublicLayout wide>
+      <PublicLayout wide languageDisabled>
         <PublicStatus>{t('Loading…')}</PublicStatus>
       </PublicLayout>
     )
@@ -243,7 +243,7 @@ function BookingPageContent({
 
   if (state.status === 'loading') {
     return (
-      <PublicLayout wide>
+      <PublicLayout wide languageDisabled>
         <PublicStatus>{t('Loading…')}</PublicStatus>
       </PublicLayout>
     )
