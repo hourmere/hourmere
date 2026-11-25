@@ -211,7 +211,7 @@ describe('imported browser capabilities', () => {
     'detects removal of the imported %s UI guard',
     (component) => {
       const path = 'apps/web/src/pages/bookings/BookingDetail.tsx'
-      const before = `{!readOnly && !cancelled && !started && (\n        <${component}`
+      const componentGuard = `!cancelled && !started && !paidManagementUnavailable && (\n        <${component}`
       const copy = sourceCopy<{
         BookingView: react.ComponentType<{
           booking: Booking
@@ -220,7 +220,7 @@ describe('imported browser capabilities', () => {
           fromProfile: boolean
           expectedOrganizationId: string
         }>
-      }>(path, before, `{!cancelled && !started && (\n        <${component}`)
+      }>(path, `{!readOnly && ${componentGuard}`, `{${componentGuard}`)
       const View = copy.BookingView
       render(
         <router.MemoryRouter>
