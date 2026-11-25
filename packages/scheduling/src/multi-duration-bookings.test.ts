@@ -11,10 +11,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import * as availability from './availability.ts'
+import { latestBookingId } from './booking-chain.ts'
 import * as bookingPage from './booking-page.ts'
 import {
   assertBookingLocallyManaged,
   assertInviteeRescheduleAllowed,
+  assertPaidRescheduleDuration,
   type CreateBookingInput,
   canonicalJson,
   createPublicBooking,
@@ -40,6 +42,7 @@ import {
 } from './meeting-poll-outcomes.ts'
 import * as notificationSettings from './notification-settings.ts'
 import { expirePaymentHolds } from './payment-expiry.ts'
+import { ensurePaymentRefund } from './payment-refunds.ts'
 import { parseQuestions, validateResponses } from './questions.ts'
 import * as recurringCapabilities from './recurring-capabilities.ts'
 import * as recurringMembers from './recurring-members.ts'
@@ -89,6 +92,7 @@ function manageSourceCopy(...changes: Change[]): ManageApi {
     ...availability,
     assertBookingLocallyManaged,
     assertInviteeRescheduleAllowed,
+    assertPaidRescheduleDuration,
     getHostBooking,
     getManagedBooking,
     ...changeDeadlines,
@@ -124,6 +128,7 @@ function sourceCopy(...changes: Change[]): Api {
     z,
     ...availability,
     ...bookingPage,
+    latestBookingId,
     ...changeDeadlines,
     ...conferences,
     ...locationOptions,
@@ -135,6 +140,7 @@ function sourceCopy(...changes: Change[]): Api {
     meetingPollChainLinked,
     ...notificationSettings,
     expirePaymentHolds,
+    ensurePaymentRefund,
     parseQuestions,
     validateResponses,
     ...recurringCapabilities,
