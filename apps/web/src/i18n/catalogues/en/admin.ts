@@ -191,8 +191,6 @@ export const admin = {
     'Choose a valid PNG, JPEG or WebP image up to 512 KiB and 2048 × 2048 pixels. SVG and animated images are not supported.',
   'Edit branding': 'Edit branding',
   'Primary colour': 'Primary colour',
-  'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against the white page background is reported separately.':
-    'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against the white page background is reported separately.',
   'Brand logo': 'Brand logo',
   'A logo is saved for this space.': 'A logo is saved for this space.',
   'Remove logo': 'Remove logo',
@@ -3267,4 +3265,8 @@ export const admin = {
   '{value} reschedule deadline': '{value} reschedule deadline',
   '{value} cancellation deadline': '{value} cancellation deadline',
   'Default timing rules': 'Default timing rules',
+
+  // Branding.
+  'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against white (#FFFFFF) is reported separately.':
+    'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against white (#FFFFFF) is reported separately.',
 } as const

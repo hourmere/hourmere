@@ -188,8 +188,6 @@ export const admin = {
     '请选择有效的 PNG、JPEG 或 WebP 图片，大小不超过 512 KiB，宽高均不超过 2048 像素。不支持 SVG 和动图。',
   'Edit branding': '编辑品牌设置',
   'Primary colour': '主色',
-  'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against the white page background is reported separately.':
-    '系统会自动选择黑色或白色按钮文字，确保对比度至少为 4.5:1。与白色页面背景的对比度会单独显示。',
   'Brand logo': '品牌标志',
   'A logo is saved for this space.': '此空间已保存标志。',
   'Remove logo': '移除标志',
@@ -3120,4 +3118,8 @@ export const admin = {
   '{value} reschedule deadline': '须提前{value}改期',
   '{value} cancellation deadline': '须提前{value}取消',
   'Default timing rules': '默认预约时间规则',
+
+  // Branding.
+  'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against white (#FFFFFF) is reported separately.':
+    '系统会自动选择黑色或白色按钮文字，确保对比度至少为 4.5:1。与白色（#FFFFFF）的对比度会单独显示。',
 } as const
