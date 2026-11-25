@@ -1162,9 +1162,10 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
   it('orders the SSO claim steps and keeps the explicit flow hard-off until release', () => {
     const plan = design.split('## Ordered implementation plan')[1]?.split('\n## ')[0] ?? ''
     const steps = [
-      'Claim provenance and implicit-link removal',
+      'Claim purpose and migration',
       'SCIM-to-SSO provider binding',
-      'Claim completion through explicit SSO linking',
+      'Explicit OIDC claim attachment',
+      'OIDC claim conflict and replay acceptance',
       'Invitation-free claim renewal',
       'Directory claim browser controls',
       'OIDC directory claim release',
@@ -1183,6 +1184,22 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
         expect(flag).toContain('requires SCIM on, SAML on and explicit owner binding')
       else expect(flag, step).toMatch(/^Explicit SSO claim flow hard-off/)
     }
+  })
+
+  it('documents the explicit SSO claim eligibility, side effects and switch rules', () => {
+    for (const sentence of [
+      'Implicit SCIM claim completion through ordinary OIDC self-link must be hard-off in production before any deployment.',
+      'Owner, admin and legacy compound roles are ineligible for directory attachment through this flow.',
+      'The member can omit `scimUserId` when the proven mailbox identifies exactly one eligible claim in the bound connection.',
+      'Require the ID only to disambiguate the intended entry.',
+      'The supplied ID never breaks a tie.',
+      'Neither occupied-address creation nor renewal queues mail or spends invitation budget.',
+      'Attachment creates no child membership and writes no child journal entry.',
+      'That write records `scim_membership.added` in the child journal in the same transaction as the roster addition.',
+      'Turning SCIM off refuses claim start, renewal and completion without doing an ordinary self-link, while ordinary SSO continues under its own policy.',
+      'Turning the bound SSO protocol off refuses claim start, renewal and completion with `404 sso_disabled`, even if SCIM and the other protocol are on.',
+    ])
+      expect(says(sentence), sentence).toBe(true)
   })
 
   it("completes a SCIM-issued invitation's claim on acceptance by its addressee", async () =>
