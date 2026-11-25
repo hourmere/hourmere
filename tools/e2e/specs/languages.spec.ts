@@ -487,13 +487,12 @@ for (const selected of ['en', 'zh-CN'] as const) {
       .click()
     await expect.poll(() => new URL(page.url()).pathname).toBe('/app/event-types')
     await language(page, selected)
-    await expect(page.getByText('Settings', { exact: true })).toBeVisible()
-    await page
-      .getByRole('link', {
-        name: selected === 'en' ? 'Edit Settings' : '编辑 Settings',
-        exact: true,
-      })
-      .click()
+    const savedEventLink = page.getByRole('link', {
+      name: selected === 'en' ? 'Edit Settings' : '编辑 Settings',
+      exact: true,
+    })
+    await expect(savedEventLink).toBeVisible()
+    await savedEventLink.click()
     await revealEventSetting(page.locator('#minimumNoticeMinutes'))
     for (const [unit, minutes, days, canonicalMinutes, canonicalDays] of [
       ['minutes', '90', '2880', 90, 2],

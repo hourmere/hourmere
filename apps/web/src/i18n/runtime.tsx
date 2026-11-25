@@ -63,18 +63,36 @@ export function MemoryLanguage({ children }: { children: ReactNode }) {
   return <LanguageScope memoryOnly>{children}</LanguageScope>
 }
 
+/** Follow the public preference until a language is chosen within the preview. */
+export function PreviewLanguage({ children }: { children: ReactNode }) {
+  const preference = useSyncExternalStore(subscribeLanguage, languageChoice, emptyPreference)
+  return (
+    <InterfaceScope surface="public">
+      <AccountDefault value={undefined}>
+        <LanguageScope fallbackLanguage={preference} memoryOnly>
+          {children}
+        </LanguageScope>
+      </AccountDefault>
+    </InterfaceScope>
+  )
+}
+
 function LanguageScope({
   language,
+  fallbackLanguage,
   memoryOnly,
   children,
 }: {
   language?: InterfaceLanguage | undefined
+  fallbackLanguage?: InterfaceLanguage | undefined
   memoryOnly: boolean
   children: ReactNode
 }) {
   const [current, setCurrent] = useState(language)
   return (
-    <ScopedLanguage value={{ language: current, setLanguage: setCurrent, memoryOnly }}>
+    <ScopedLanguage
+      value={{ language: current ?? fallbackLanguage, setLanguage: setCurrent, memoryOnly }}
+    >
       <ScopedRouteErrorBoundary>{children}</ScopedRouteErrorBoundary>
     </ScopedLanguage>
   )

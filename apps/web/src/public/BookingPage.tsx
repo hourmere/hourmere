@@ -3,8 +3,6 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Link, Navigate, useLocation, useParams } from 'react-router'
 import { ConferenceNotice } from '../components/ConferenceNotice.tsx'
 import { EmailDeliveryHint } from '../components/EmailDeliveryHint.tsx'
-import { TimeZoneName } from '../components/TimeZonePicker.tsx'
-import { isKnownTimeZone } from '../format.ts'
 import { usePageTitle } from '../hooks.ts'
 import { formatDuration } from '../i18n/duration.ts'
 import { formatList } from '../i18n/formatting.ts'
@@ -29,16 +27,16 @@ import {
   type Slot,
   type SlotLoader,
 } from './api.ts'
-import {
-  DetailList,
-  LocationDetails,
-  locationLabel,
-  locationText,
-  When,
-} from './BookingDetails.tsx'
+import { DetailList, LocationDetails, locationText, When } from './BookingDetails.tsx'
 import { BookingForm, type BookingFormValues, selectedLocation } from './BookingForm.tsx'
+import {
+  BookingDetailsStep,
+  BookingEventInfo,
+  BookingOptions,
+  BookingSelectedTime,
+  bookingHostTimeZone,
+} from './BookingPageParts.tsx'
 import { monthOf } from './calendar.ts'
-import { EventDescription } from './EventDescription.tsx'
 import {
   embedParentRedirectAllowed,
   notifyEmbedBooked,
@@ -63,15 +61,7 @@ import {
 } from './paths.ts'
 import { SlotPicker, type SlotPickerPosition } from './SlotPicker.tsx'
 import { parseSlotLink, type SlotIntent } from './slot-link.ts'
-import {
-  dateKeyIn,
-  formatDate,
-  formatTime,
-  formatTimeRange,
-  offsetAt,
-  offsetLabel,
-  zoneName,
-} from './time.ts'
+import { dateKeyIn, zoneName } from './time.ts'
 import {
   bookingErrors,
   bookingLocale,
@@ -687,121 +677,27 @@ function BookingFlow({
     }
   }
 
-  // Keep the breakable space and opening bracket outside the no-wrap numeric offset.
-  const chosenOffset = slot ? offsetLabel(timeZone, Date.parse(slot.start)) : ''
-  const chosenZoneLabel = t(' ({offset})', { offset: chosenOffset })
-  const chosenOffsetAt = chosenZoneLabel.lastIndexOf(chosenOffset)
-  const hostTimeZone =
-    event.schedulingType !== 'round_robin' && !event.hosts ? event.host.timeZone : undefined
-
   return (
     <PublicLayout wide branding={event.branding}>
       <div className="booking-layout">
-        <aside className="event-info" aria-label={t('About this event')}>
-          <h1 className="event-title">{event.title}</h1>
-          <div className="host-identity">
-            {!team && <HostAvatar name={event.host.name} image={event.host.image} />}
-            <p className="event-host">{event.team?.name ?? event.host.name}</p>
-          </div>
-          {event.schedulingType === 'round_robin' && (
-            <p className="event-description">
-              {t('An available team member will be assigned when you book.')}
-            </p>
-          )}
-          {event.hosts && (
-            <p className="event-description">
-              {t('Required hosts: {hosts}', {
-                hosts: formatList(
-                  event.hosts.map((host) =>
-                    t('{name} ({detail})', { name: host.name, detail: zoneName(host.timeZone) }),
-                  ),
-                  displayLocale,
-                ),
-              })}
-            </p>
-          )}
-          <ul className="event-facts">
-            <li>{formatDuration(durationMinutes, displayLocale)}</li>
-            {chosenLocation ? (
-              <li>{chosenLocation.label ?? ui(locationLabel(chosenLocation.kind))}</li>
-            ) : event.location ? (
-              <li>{ui(locationLabel(event.location.kind))}</li>
-            ) : null}
-            {hostTimeZone && (
-              <li className="user-content">
-                <TimeZoneName
-                  className="host-time-zone"
-                  name={zoneName(hostTimeZone)}
-                  label={t("Host's time zone: {zone}", { zone: zoneName(hostTimeZone) })}
-                />
-              </li>
-            )}
-          </ul>
-          {event.description && <EventDescription>{event.description}</EventDescription>}
+        <BookingEventInfo
+          event={event}
+          durationMinutes={durationMinutes}
+          chosenLocation={chosenLocation}
+          team={team}
+        >
           {slot && !directPending && !directError && (
-            <div className="chosen-time">
-              {directFlow ? (
-                <p>
-                  {[slot.start, slot.end].map((instant, index) => (
-                    <span key={instant}>
-                      {index > 0 && (
-                        <>
-                          <br />
-                          <span aria-hidden="true">– </span>
-                        </>
-                      )}
-                      <time dateTime={instant}>
-                        {t('{date}, {time}', {
-                          date: formatDate(Date.parse(instant), timeZone, locale),
-                          time: formatTime(Date.parse(instant), timeZone, locale),
-                        })}
-                      </time>
-                      <span className="muted">
-                        {t(' ({zone}, {offset})', {
-                          zone: zoneName(timeZone),
-                          offset: offsetLabel(timeZone, Date.parse(instant)),
-                        })}
-                      </span>
-                    </span>
-                  ))}
-                </p>
-              ) : (
-                <p>
-                  <strong>{formatDate(Date.parse(slot.start), timeZone, locale)}</strong>
-                  <br />
-                  {formatTimeRange(Date.parse(slot.start), Date.parse(slot.end), timeZone, locale)}
-                  <br />
-                  <span className="muted">
-                    {zoneName(timeZone)}
-                    {chosenZoneLabel.slice(0, chosenOffsetAt)}
-                    <span className="time-offset">{chosenZoneLabel.slice(chosenOffsetAt)}</span>
-                  </span>
-                </p>
-              )}
-              {hostTimeZone &&
-                isKnownTimeZone(hostTimeZone) &&
-                offsetAt(Date.parse(slot.start), hostTimeZone) !==
-                  offsetAt(Date.parse(slot.start), timeZone) && (
-                  <p className="host-local-time user-content">
-                    {t("That's {time} for the host", {
-                      time: t('{date}, {time}', {
-                        date: formatDate(Date.parse(slot.start), hostTimeZone, locale),
-                        time: formatTime(Date.parse(slot.start), hostTimeZone, locale),
-                      }),
-                    })}
-                  </p>
-                )}
-              <button
-                type="button"
-                className="button button-small"
-                onClick={changeTime}
-                disabled={submitting}
-              >
-                {t('Change time')}
-              </button>
-            </div>
+            <BookingSelectedTime
+              slot={slot}
+              hostTimeZone={bookingHostTimeZone(event)}
+              timeZone={timeZone}
+              locale={locale}
+              directFlow={directFlow}
+              submitting={submitting}
+              onChangeTime={changeTime}
+            />
           )}
-        </aside>
+        </BookingEventInfo>
         <div className="booking-main">
           {waitlist && (
             <p className="muted">
@@ -852,10 +748,7 @@ function BookingFlow({
               )}
             </section>
           ) : slot ? (
-            <section className="details-step" aria-labelledby="details-heading">
-              <FocusHeading level={2} id="details-heading" className="step-title">
-                {t('Your details')}
-              </FocusHeading>
+            <BookingDetailsStep headingId="details-heading">
               {directState.status === 'selected' && (
                 <p role="status">
                   {t(
@@ -891,7 +784,7 @@ function BookingFlow({
                 submitting={submitting}
                 onSubmit={submit}
               />
-            </section>
+            </BookingDetailsStep>
           ) : (
             <SlotPicker
               renderWaitlist={
@@ -916,76 +809,35 @@ function BookingFlow({
               load={loadSlots}
               durationMinutes={durationMinutes}
               afterTitle={
-                <>
-                  {(event.locations?.length ?? 0) > 1 && (
-                    <fieldset className="duration-picker">
-                      <legend>{t('Meeting location')}</legend>
-                      <div className="duration-options">
-                        {event.locations?.map((option) => (
-                          <label key={option.id} className="duration-option">
-                            <input
-                              type="radio"
-                              name="slotLocation"
-                              value={option.id}
-                              checked={locationOptionId === option.id}
-                              onChange={() => {
-                                dismissDirect()
-                                attempt.current = null
-                                setSlot(null)
-                                setValues((current) => ({
-                                  ...current,
-                                  locationOptionId: option.id,
-                                  inviteePhone: '',
-                                }))
-                                setNotice(null)
-                                setFormError(null)
-                              }}
-                            />
-                            <span>{option.label ?? ui(locationLabel(option.kind))}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </fieldset>
+                <BookingOptions
+                  event={event}
+                  durationMinutes={durationMinutes}
+                  locationOptionId={locationOptionId}
+                  onLocationChange={(id) => {
+                    dismissDirect()
+                    attempt.current = null
+                    setSlot(null)
+                    setValues((current) => ({
+                      ...current,
+                      locationOptionId: id,
+                      inviteePhone: '',
+                    }))
+                    setNotice(null)
+                    setFormError(null)
+                  }}
+                  onDurationChange={(minutes) => {
+                    dismissDirect()
+                    attempt.current = null
+                    setSlot(null)
+                    setDurationMinutes(minutes)
+                    setNotice(null)
+                    setFormError(null)
+                  }}
+                  showWaitlistHint={waitlistOfferEnabled(
+                    Boolean(oneTimeToken),
+                    'waitlist' in event ? event.waitlist?.enabled : undefined,
                   )}
-                  {hasDurationChoices ? (
-                    <fieldset className="duration-picker">
-                      <legend>{t('Meeting length')}</legend>
-                      <div className="duration-options">
-                        {event.allowedDurationsMinutes?.map((minutes) => (
-                          <label key={minutes} className="duration-option">
-                            <input
-                              type="radio"
-                              name="durationMinutes"
-                              value={minutes}
-                              checked={durationMinutes === minutes}
-                              onChange={() => {
-                                dismissDirect()
-                                attempt.current = null
-                                setSlot(null)
-                                setDurationMinutes(minutes)
-                                setNotice(null)
-                                setFormError(null)
-                              }}
-                            />
-                            <span>{formatDuration(minutes, displayLocale)}</span>
-                          </label>
-                        ))}
-                      </div>
-                      {waitlistOfferEnabled(
-                        Boolean(oneTimeToken),
-                        'waitlist' in event ? event.waitlist?.enabled : undefined,
-                      ) &&
-                        durationMinutes !== event.durationMinutes && (
-                          <p className="hint">
-                            {t(
-                              'To join the waitlist, choose the default meeting length ({duration}).',
-                              { duration: formatDuration(event.durationMinutes, displayLocale) },
-                            )}
-                          </p>
-                        )}
-                    </fieldset>
-                  ) : undefined}
-                </>
+                />
               }
               timeZone={timeZone}
               onTimeZoneChange={(zone) => {

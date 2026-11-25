@@ -586,4 +586,7 @@ export const common = {
     'Return to the tab where you requested verification to continue.',
   'Copy the link from your email and paste it into the tab where you requested verification.':
     'Copy the link from your email and paste it into the tab where you requested verification.',
+  // Booking page preview
+  'These are sample times. Booking is disabled in the preview.':
+    'These are sample times. Booking is disabled in the preview.',
 } as const
