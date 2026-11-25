@@ -31,9 +31,11 @@ const staleLink = 'This SSO link request is unavailable. Start again.'
 export function SsoMemberSettings({
   callbackAttemptId,
   onDismissCallback,
+  samlEnabled,
 }: {
   callbackAttemptId: string | null | undefined
   onDismissCallback: () => void
+  samlEnabled: boolean
 }) {
   const { t } = useI18n()
   const { organization, sso } = useMe()
@@ -61,7 +63,10 @@ export function SsoMemberSettings({
       attempt.mailboxProven &&
       Date.parse(attempt.expiresAt) > Date.now(),
   )
-  const completionProvider = sso?.providers.find(({ id }) => id === completion?.providerId)
+  // SAML completion uses the server's same-origin consent form. This callback is for OIDC.
+  const completionProvider = sso?.providers.find(
+    ({ id, protocol }) => id === completion?.providerId && protocol !== 'saml',
+  )
 
   useLayoutEffect(() => {
     function reset() {
@@ -206,8 +211,9 @@ export function SsoMemberSettings({
     })
   }
 
-  const providers = sso?.providers ?? []
-  const links = sso?.links ?? []
+  const providers =
+    sso?.providers.filter(({ protocol }) => samlEnabled || protocol !== 'saml') ?? []
+  const links = sso?.links.filter(({ protocol }) => samlEnabled || protocol !== 'saml') ?? []
   const unlinked = providers.filter(({ id }) => !links.some(({ providerId }) => providerId === id))
   const actionsBlocked = busy || pending !== null || authorization !== null || hasCallback
 
@@ -355,8 +361,7 @@ export function SsoMemberSettings({
                           {t('Identity link ID')} <code data-private>{link.id}</code>
                         </p>
                       </div>
-                      {link.protocol !== 'saml' &&
-                        methodAction({ kind: 'unlink', providerId: link.providerId, link }, name)}
+                      {methodAction({ kind: 'unlink', providerId: link.providerId, link }, name)}
                     </li>
                   )
                 })}

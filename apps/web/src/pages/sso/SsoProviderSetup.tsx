@@ -21,6 +21,9 @@ interface ProviderProps {
   reload: () => void
 }
 
+type ProviderProtocol = 'oidc' | 'saml'
+type ProviderEditor = { protocol: ProviderProtocol; provider: SsoProvider | null }
+
 const endpointFields = [
   ['authorizationEndpoint', 'Authorization endpoint'],
   ['tokenEndpoint', 'Token endpoint'],
@@ -31,17 +34,27 @@ export function SsoProviderSetup({
   providers,
   owner,
   addsTrust = true,
+  samlEnabled = false,
   ...props
-}: ProviderProps & { providers: SsoProvider[]; owner: boolean; addsTrust?: boolean }) {
+}: ProviderProps & {
+  providers: SsoProvider[]
+  owner: boolean
+  addsTrust?: boolean
+  samlEnabled?: boolean
+}) {
   const { t } = useI18n()
   const heading = useId()
-  const [editing, setEditing] = useState<'new' | SsoProvider | null>(null)
+  const [editor, setEditor] = useState<ProviderEditor | null>(null)
   const opener = useRef<HTMLButtonElement>(null)
-  const oidcProviders = providers.filter((provider) => provider.protocol === 'oidc')
+  const visibleProviders = providers.filter(
+    ({ protocol }) => protocol === 'oidc' || (protocol === 'saml' && samlEnabled),
+  )
+  const editing = (editor?.protocol === 'saml' ? samlEnabled : addsTrust) ? editor : null
 
   useEffect(() => {
-    if (!editing && opener.current) {
-      opener.current.focus()
+    if (!editing) {
+      setEditor(null)
+      opener.current?.focus()
       opener.current = null
     }
   }, [editing])
@@ -49,97 +62,124 @@ export function SsoProviderSetup({
   return (
     <section className="sso-providers" aria-labelledby={heading}>
       <h2 id={heading}>{t('Identity providers')}</h2>
-      {addsTrust && (
+      {(addsTrust || samlEnabled) && (
         <div className="form-actions">
-          <button
-            type="button"
-            className="button button-primary"
-            disabled={props.busy || editing !== null}
-            onClick={(event) => {
-              opener.current = event.currentTarget
-              setEditing('new')
-            }}
-          >
-            {t('Add provider')}
-          </button>
+          {addsTrust && (
+            <button
+              type="button"
+              className="button button-primary"
+              disabled={props.busy || editing !== null}
+              onClick={(event) => {
+                opener.current = event.currentTarget
+                setEditor({ protocol: 'oidc', provider: null })
+              }}
+            >
+              {t('Add provider')}
+            </button>
+          )}
+          {samlEnabled && (
+            <button
+              type="button"
+              className="button button-primary"
+              disabled={props.busy || editing !== null}
+              onClick={(event) => {
+                opener.current = event.currentTarget
+                setEditor({ protocol: 'saml', provider: null })
+              }}
+            >
+              {t('Add SAML provider')}
+            </button>
+          )}
         </div>
       )}
-      {editing && (
-        <ProviderForm
-          {...props}
-          provider={editing === 'new' ? null : editing}
-          onClose={() => setEditing(null)}
-        />
-      )}
-      {oidcProviders.length === 0 && !editing && (
+      {editing && <ProviderForm {...props} {...editing} onClose={() => setEditor(null)} />}
+      {visibleProviders.length === 0 && !editing && (
         <p className="empty">{t('No identity providers yet.')}</p>
       )}
-      {oidcProviders.map((provider) => (
-        <section key={provider.id} className="panel" aria-labelledby={`${heading}-${provider.id}`}>
-          <h3 id={`${heading}-${provider.id}`} className="user-content">
-            {provider.displayName}
-          </h3>
-          <p className="user-content">{provider.issuer}</p>
-          <p>
-            {t('Revision {revision}', { revision: provider.revision })} ·{' '}
-            {t(provider.enabled ? 'Enabled' : 'Disabled')}
-          </p>
-          <ProviderActivation
-            {...props}
-            busy={props.busy || editing !== null}
-            provider={provider}
-            owner={owner}
-            addsTrust={addsTrust}
-          />
-          <fieldset className="form-fieldset" disabled={props.busy || editing !== null}>
-            <div className="form-actions">
-              {addsTrust && (
-                <button
-                  type="button"
-                  className="button button-small"
-                  aria-label={t('Edit {name}', { name: provider.displayName })}
-                  onClick={(event) => {
-                    opener.current = event.currentTarget
-                    setEditing(provider)
-                  }}
-                >
-                  {t('Edit')}
-                </button>
-              )}
-              <ConfirmAction
-                label="Retire provider"
-                accessibleLabel={t('Retire provider {name}', { name: provider.displayName })}
-                prompt="Retire this provider? This action is permanent."
-                confirmLabel="Retire provider"
-                busyLabel="Retiring provider…"
-                failure="Could not save SSO settings."
-                onConfirm={() =>
-                  props.mutate(
-                    (signal, proofAttemptId) =>
-                      unwrapSsoWrite(
-                        api.DELETE('/api/v1/team/sso/providers/{providerId}', {
-                          signal,
-                          params: {
-                            path: { providerId: provider.id },
-                            header: { 'X-Expected-Organization-Id': props.organizationId },
-                          },
-                          body: { expectedRevision: provider.revision, proofAttemptId },
-                        }),
-                      ),
-                    props.reload,
-                  )
-                }
-              />
-            </div>
-          </fieldset>
-          <SsoLinkRetirement
-            provider={provider}
-            organizationId={props.organizationId}
-            busy={props.busy || editing !== null}
-            mutate={props.mutate}
-          />
-        </section>
-      ))}
+      {visibleProviders.map((provider) => {
+        const protocol = provider.protocol === 'saml' ? 'saml' : 'oidc'
+        const canEdit = protocol === 'saml' || addsTrust
+        return (
+          <section
+            key={provider.id}
+            className="panel"
+            aria-labelledby={`${heading}-${provider.id}`}
+          >
+            <h3 id={`${heading}-${provider.id}`} className="user-content">
+              {provider.displayName}
+            </h3>
+            <p className="user-content">{provider.issuer}</p>
+            <p>
+              {t('Revision {revision}', { revision: provider.revision })} ·{' '}
+              {t(provider.enabled ? 'Enabled' : 'Disabled')}
+            </p>
+            <ProviderActivation
+              {...props}
+              busy={props.busy || editing !== null}
+              provider={provider}
+              owner={owner}
+              addsTrust={canEdit}
+              samlEnabled={samlEnabled}
+            />
+            <fieldset className="form-fieldset" disabled={props.busy || editing !== null}>
+              <div className="form-actions">
+                {protocol === 'saml' && (
+                  <a
+                    className="button button-small"
+                    href={`/api/auth/sso/saml2/sp/metadata/${encodeURIComponent(provider.id)}`}
+                    download
+                  >
+                    {t('Download service provider metadata')}
+                  </a>
+                )}
+                {canEdit && (
+                  <button
+                    type="button"
+                    className="button button-small"
+                    aria-label={t('Edit {name}', { name: provider.displayName })}
+                    onClick={(event) => {
+                      opener.current = event.currentTarget
+                      setEditor({ protocol, provider })
+                    }}
+                  >
+                    {t('Edit')}
+                  </button>
+                )}
+                <ConfirmAction
+                  label="Retire provider"
+                  accessibleLabel={t('Retire provider {name}', { name: provider.displayName })}
+                  prompt="Retire this provider? This action is permanent."
+                  confirmLabel="Retire provider"
+                  busyLabel="Retiring provider…"
+                  failure="Could not save SSO settings."
+                  onConfirm={() =>
+                    props.mutate(
+                      (signal, proofAttemptId) =>
+                        unwrapSsoWrite(
+                          api.DELETE('/api/v1/team/sso/providers/{providerId}', {
+                            signal,
+                            params: {
+                              path: { providerId: provider.id },
+                              header: { 'X-Expected-Organization-Id': props.organizationId },
+                            },
+                            body: { expectedRevision: provider.revision, proofAttemptId },
+                          }),
+                        ),
+                      props.reload,
+                    )
+                  }
+                />
+              </div>
+            </fieldset>
+            <SsoLinkRetirement
+              provider={provider}
+              organizationId={props.organizationId}
+              busy={props.busy || editing !== null}
+              mutate={props.mutate}
+            />
+          </section>
+        )
+      })}
     </section>
   )
 }
@@ -158,10 +198,12 @@ function ProviderActivation({
   reload,
   owner,
   addsTrust,
+  samlEnabled,
 }: Pick<ProviderProps, 'organizationId' | 'busy' | 'mutate' | 'reload'> & {
   provider: SsoProvider
   owner: boolean
   addsTrust: boolean
+  samlEnabled: boolean
 }) {
   const { t } = useI18n()
   const [testUrl, setTestUrl] = useState<string | null>(null)
@@ -207,7 +249,12 @@ function ProviderActivation({
           }),
         ),
       reload,
-      activationErrors,
+      samlEnabled
+        ? {
+            ...activationErrors,
+            sso_last_provider: 'Enable another usable provider before disabling this provider.',
+          }
+        : activationErrors,
     )
   }
 
@@ -219,7 +266,9 @@ function ProviderActivation({
             ? 'Current revision passed its test.'
             : provider.testStatus === 'failed'
               ? 'Current revision failed its test.'
-              : 'No test result for the current revision.',
+              : provider.protocol !== 'saml' || provider.testStatus === 'not_tested'
+                ? 'No test result for the current revision.'
+                : 'Provider test status is unavailable.',
         )}
         {owner && enabling && provider.testStatus === 'passed' && !canEnable && (
           <>
@@ -298,12 +347,16 @@ export function ProviderForm({
   mutate,
   reload,
   provider,
+  protocol = provider?.protocol === 'saml' ? 'saml' : 'oidc',
   onClose,
-}: ProviderProps & { provider: SsoProvider | null; onClose: () => void }) {
+}: ProviderProps & {
+  provider: SsoProvider | null
+  protocol?: ProviderProtocol
+  onClose: () => void
+}) {
   const { t } = useI18n()
   const formId = useId()
   const heading = useRef<HTMLHeadingElement>(null)
-  const secretInput = useRef<HTMLInputElement>(null)
   const [replaceSecret, setReplaceSecret] = useState(false)
   const initialDomainIds = new Set(provider?.domains.map(({ id }) => id))
   const availableDomains = domains.filter(({ status }) => status !== 'retired')
@@ -314,7 +367,8 @@ export function ProviderForm({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (busy) return
-    const fields = new FormData(event.currentTarget)
+    const form = event.currentTarget
+    const fields = new FormData(form)
     const value = (name: string) => String(fields.get(name) ?? '')
     const domainIds = fields.getAll('domainIds').map(String)
     const domainsChanged = availableDomains.some(
@@ -325,7 +379,31 @@ export function ProviderForm({
     const overrides = Object.fromEntries(
       endpointFields.map(([name]) => [name, value(name).trim()]).filter(([, url]) => url),
     )
-    if (secretInput.current) secretInput.current.value = ''
+    const signingCertificates = fields
+      .getAll('signingCertificates')
+      .map((certificate) => String(certificate).trim())
+      .filter(Boolean)
+    const saml = {
+      ...Object.fromEntries(
+        ['entityId', 'ssoUrl', 'metadataDocument', 'metadataUrl', 'subjectAttribute']
+          .map((name) => [name, value(name).trim()])
+          .filter(([, input]) => input),
+      ),
+      ...(signingCertificates.length > 0 && { signingCertificates }),
+    }
+    // Keep write-only values out of the editor while a proof or response is pending.
+    for (const input of form.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+      '[data-private]',
+    )) {
+      input.value = ''
+    }
+    const samlErrors =
+      protocol === 'saml'
+        ? ({
+            invalid_request:
+              'Check the SAML metadata, sign-in URL and signing certificates, then try again.',
+          } as const)
+        : undefined
     const saved = () => {
       onClose()
       reload()
@@ -343,11 +421,13 @@ export function ProviderForm({
                 expectedRevision: provider.revision,
                 proofAttemptId,
                 ...(domainsChanged && { domainIds }),
-                ...(Object.keys(oidc).length > 0 && { oidc }),
+                ...(protocol === 'oidc' && Object.keys(oidc).length > 0 && { oidc }),
+                ...(protocol === 'saml' && Object.keys(saml).length > 0 && { saml }),
               },
             }),
           ),
         saved,
+        samlErrors,
       )
     } else {
       await mutate(
@@ -359,18 +439,23 @@ export function ProviderForm({
               body: {
                 displayName,
                 domainIds,
-                protocol: 'oidc',
+                protocol,
                 proofAttemptId,
-                oidc: {
-                  ...overrides,
-                  issuer: value('issuer').trim(),
-                  clientId: value('clientId'),
-                  clientSecret,
-                },
+                ...(protocol === 'saml'
+                  ? { saml: { ...saml, wantAssertionsSigned: true } }
+                  : {
+                      oidc: {
+                        ...overrides,
+                        issuer: value('issuer').trim(),
+                        clientId: value('clientId'),
+                        clientSecret,
+                      },
+                    }),
               },
             }),
           ),
         saved,
+        samlErrors,
       )
     }
   }
@@ -378,7 +463,13 @@ export function ProviderForm({
   return (
     <form className="panel editor" aria-labelledby={formId} onSubmit={submit}>
       <h3 id={formId} ref={heading} tabIndex={-1}>
-        {t(provider ? 'Edit provider' : 'Add OIDC provider')}
+        {t(
+          provider
+            ? 'Edit provider'
+            : protocol === 'saml'
+              ? 'Add SAML provider'
+              : 'Add OIDC provider',
+        )}
       </h3>
       <fieldset className="form-fieldset stack" disabled={busy}>
         <div className="field-grid">
@@ -393,81 +484,88 @@ export function ProviderForm({
               />
             )}
           </Field>
-          <Field id={`${formId}-issuer`} label={t('Issuer URL')}>
-            {(control) => (
-              <input
-                {...control}
-                name="issuer"
-                type="url"
-                defaultValue={provider?.issuer}
-                readOnly={!!provider}
-                required
-                maxLength={2048}
-              />
-            )}
-          </Field>
-          <Field id={`${formId}-client-id`} label={t('Client ID')}>
-            {(control) => (
-              <input
-                {...control}
-                name="clientId"
-                defaultValue={provider?.clientId ?? ''}
-                readOnly={!!provider}
-                spellCheck={false}
-                autoCapitalize="none"
-                required
-                maxLength={1024}
-              />
-            )}
-          </Field>
-          {provider && (
-            <div className="field">
-              <button
-                type="button"
-                className="button"
-                aria-controls={`${formId}-replace`}
-                aria-expanded={replaceSecret}
-                onClick={() => setReplaceSecret(!replaceSecret)}
-              >
-                {t(replaceSecret ? 'Keep current secret' : 'Replace client secret')}
-              </button>
-            </div>
-          )}
-          <div id={`${formId}-replace`} hidden={!!provider && !replaceSecret}>
-            {(!provider || replaceSecret) && (
-              <Field
-                id={`${formId}-secret`}
-                label={t(provider ? 'New client secret' : 'Client secret')}
-              >
+          {protocol === 'oidc' && (
+            <>
+              <Field id={`${formId}-issuer`} label={t('Issuer URL')}>
                 {(control) => (
                   <input
                     {...control}
-                    ref={secretInput}
-                    name="clientSecret"
-                    type="password"
-                    autoComplete="new-password"
-                    data-private
+                    name="issuer"
+                    type="url"
+                    defaultValue={provider?.issuer}
+                    readOnly={!!provider}
                     required
-                    maxLength={16384}
+                    maxLength={2048}
                   />
                 )}
               </Field>
-            )}
-          </div>
-        </div>
-        <fieldset className="form-fieldset">
-          <legend>{t('Endpoint overrides')}</legend>
-          {provider && (
-            <p className="hint">{t('Leave URLs blank to keep the current settings.')}</p>
-          )}
-          <div className="field-grid">
-            {endpointFields.map(([name, label]) => (
-              <Field key={name} id={`${formId}-${name}`} label={t(label)} optional>
-                {(control) => <input {...control} name={name} type="url" maxLength={2048} />}
+              <Field id={`${formId}-client-id`} label={t('Client ID')}>
+                {(control) => (
+                  <input
+                    {...control}
+                    name="clientId"
+                    defaultValue={provider?.clientId ?? ''}
+                    readOnly={!!provider}
+                    spellCheck={false}
+                    autoCapitalize="none"
+                    required
+                    maxLength={1024}
+                  />
+                )}
               </Field>
-            ))}
-          </div>
-        </fieldset>
+              {provider && (
+                <div className="field">
+                  <button
+                    type="button"
+                    className="button"
+                    aria-controls={`${formId}-replace`}
+                    aria-expanded={replaceSecret}
+                    onClick={() => setReplaceSecret(!replaceSecret)}
+                  >
+                    {t(replaceSecret ? 'Keep current secret' : 'Replace client secret')}
+                  </button>
+                </div>
+              )}
+              <div id={`${formId}-replace`} hidden={!!provider && !replaceSecret}>
+                {(!provider || replaceSecret) && (
+                  <Field
+                    id={`${formId}-secret`}
+                    label={t(provider ? 'New client secret' : 'Client secret')}
+                  >
+                    {(control) => (
+                      <input
+                        {...control}
+                        name="clientSecret"
+                        type="password"
+                        autoComplete="new-password"
+                        data-private
+                        required
+                        maxLength={16384}
+                      />
+                    )}
+                  </Field>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+        {protocol === 'saml' ? (
+          <SamlProviderFields formId={formId} provider={provider} />
+        ) : (
+          <fieldset className="form-fieldset">
+            <legend>{t('Endpoint overrides')}</legend>
+            {provider && (
+              <p className="hint">{t('Leave URLs blank to keep the current settings.')}</p>
+            )}
+            <div className="field-grid">
+              {endpointFields.map(([name, label]) => (
+                <Field key={name} id={`${formId}-${name}`} label={t(label)} optional>
+                  {(control) => <input {...control} name={name} type="url" maxLength={2048} />}
+                </Field>
+              ))}
+            </div>
+          </fieldset>
+        )}
         {availableDomains.length > 0 && (
           <fieldset className="form-fieldset">
             <legend>{t('Associated domains')}</legend>
@@ -494,5 +592,156 @@ export function ProviderForm({
         </div>
       </fieldset>
     </form>
+  )
+}
+
+function SamlProviderFields({
+  formId,
+  provider,
+}: {
+  formId: string
+  provider: SsoProvider | null
+}) {
+  const { t } = useI18n()
+  const [source, setSource] = useState('manual')
+  const [certificateCount, setCertificateCount] = useState(1)
+  const manual = source === 'manual'
+  const privateInput = {
+    autoComplete: 'off',
+    autoCapitalize: 'none',
+    spellCheck: false,
+    'data-private': true,
+  }
+
+  return (
+    <>
+      <p className="hint">{t('Signed assertions are required.')}</p>
+      {provider && (
+        <p className="hint">
+          {t('Leave blank to keep saved settings. Import metadata again to replace its settings.')}
+        </p>
+      )}
+      <Field id={`${formId}-saml-source`} label={t('SAML configuration source')}>
+        {(control) => (
+          <select {...control} value={source} onChange={(event) => setSource(event.target.value)}>
+            <option value="manual">{t('Enter configuration manually')}</option>
+            <option value="xml">{t('Paste identity provider metadata')}</option>
+            <option value="url">{t('Import metadata from a URL')}</option>
+          </select>
+        )}
+      </Field>
+      <div className="field-grid">
+        {(provider || manual) && (
+          <Field id={`${formId}-entity-id`} label={t('Identity provider entity ID')}>
+            {(control) => (
+              <input
+                {...control}
+                name={provider ? undefined : 'entityId'}
+                defaultValue={provider?.issuer}
+                readOnly={!!provider}
+                required={!provider}
+                autoCapitalize="none"
+                spellCheck={false}
+                maxLength={2048}
+              />
+            )}
+          </Field>
+        )}
+        {manual && (
+          <Field id={`${formId}-redirect-url`} label={t('HTTP-Redirect sign-in URL')}>
+            {(control) => (
+              <input
+                {...control}
+                {...privateInput}
+                name="ssoUrl"
+                type="url"
+                required={!provider}
+                maxLength={2048}
+              />
+            )}
+          </Field>
+        )}
+        {!provider && (
+          <Field
+            id={`${formId}-subject-attribute`}
+            label={t('Subject attribute')}
+            hint={t('Leave blank to use the persistent NameID.')}
+            optional
+          >
+            {(control) => (
+              <input {...control} {...privateInput} name="subjectAttribute" maxLength={512} />
+            )}
+          </Field>
+        )}
+      </div>
+      {source === 'xml' && (
+        <Field id={`${formId}-metadata-xml`} label={t('Identity provider metadata XML')}>
+          {(control) => (
+            <textarea
+              {...control}
+              {...privateInput}
+              name="metadataDocument"
+              required
+              maxLength={262144}
+            />
+          )}
+        </Field>
+      )}
+      {source === 'url' && (
+        <Field id={`${formId}-metadata-url`} label={t('Identity provider metadata URL')}>
+          {(control) => (
+            <input
+              {...control}
+              {...privateInput}
+              name="metadataUrl"
+              type="url"
+              required
+              maxLength={2048}
+            />
+          )}
+        </Field>
+      )}
+      <fieldset className="form-fieldset stack">
+        <legend>{t('Signing certificates')}</legend>
+        {provider && (
+          <p className="hint">
+            {t(
+              'To test a rotation, use a disabled draft. Submit the full set with both old and new certificates, test the new revision, then remove the old certificate after the identity provider switches.',
+            )}
+          </p>
+        )}
+        {!manual && (
+          <p className="hint">{t('Supply signing certificates if the metadata contains none.')}</p>
+        )}
+        {[1, 2, 3, 4].slice(0, certificateCount).map((number) => (
+          <Field
+            key={number}
+            id={`${formId}-certificate-${number}`}
+            label={t('Signing certificate {number}', { number })}
+          >
+            {(control) => (
+              <textarea
+                {...control}
+                {...privateInput}
+                name="signingCertificates"
+                required={!provider && manual && number === 1}
+                maxLength={16384}
+              />
+            )}
+          </Field>
+        ))}
+        {certificateCount < 4 && (
+          <div className="form-actions">
+            <button
+              type="button"
+              className="button button-small"
+              onClick={() => setCertificateCount(certificateCount + 1)}
+            >
+              {t('Add signing certificate')}
+            </button>
+          </div>
+        )}
+      </fieldset>
+    </>
   )
 }
