@@ -11,6 +11,7 @@ export const samlCompleteTestOperation = 'samlCompleteProviderTest'
 export const samlLinkOperation = 'samlLinkAccount'
 export const samlCompleteLinkOperation = 'samlCompleteLink'
 export const samlMailboxOperation = 'samlCompleteChangedMailbox'
+export const samlAdmissionOperation = 'samlCompleteAdmission'
 export const samlId = z.uuidv7()
 
 export const samlTestBinding = z.strictObject({

@@ -94,6 +94,8 @@ export function expiresDuringOidcWrite(error: unknown): boolean {
   )
 }
 
+export class SsoMailboxCompletionExpired extends Error {}
+
 /** Transfer a consumed callback to its own immutable, mailbox-bound completion attempt. */
 export async function stageOidcCompletion(
   { db, configurationKey, scimResourcesEnabled }: CompletionDependencies,
@@ -203,8 +205,11 @@ export async function stageSsoMailboxCompletion(
     }
     return await (db.isTransaction ? stage(db) : db.transaction().execute(stage))
   } catch (error) {
-    if (db.isTransaction) throw error
-    if (expiresDuringOidcWrite(error)) return { reason: 'attempt_expired' } as const
+    if (expiresDuringOidcWrite(error)) {
+      // The ACS must roll back the request and its replay writes with the failed insert.
+      if (db.isTransaction) throw new SsoMailboxCompletionExpired()
+      return { reason: 'attempt_expired' } as const
+    }
     throw error
   }
 }

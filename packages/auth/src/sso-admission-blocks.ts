@@ -13,7 +13,7 @@ export const SCIM_MANAGED_RESOURCE_MESSAGE = 'This resource is managed by your i
 
 /**
  * The caller holds the organization lock through the membership deletion. Every removal or
- * departure records its tombstone while OIDC is on (docs/sso.md, "Leaving/removal creates a
+ * departure records its tombstone while an SSO protocol is on (docs/sso.md, "Leaving/removal creates a
  * team-local admission tombstone"), whether or not the team has configured a provider or JIT
  * yet, so a later configuration cannot readmit a person removed before it.
  */
