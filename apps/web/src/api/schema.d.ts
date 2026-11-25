@@ -5972,9 +5972,9 @@ export interface components {
             /** @description Stable dotted action, e.g. membership.role_changed. New actions may appear; ignore unknown ones. */
             action: string;
             actor: {
-                /** @description Stored user, API key, OAuth client or SCIM token ID, or a system service name; null for anonymous and external actors */
+                /** @description Stored user, API key, OAuth client, SCIM token or SCIM connection ID, or a system service name; null for anonymous and external actors */
                 id: string | null;
-                /** @description Who acted: user, api_key, oauth_client, system, scim_token, anonymous, external_api_key, external_oauth_client, external_user. New types may appear. */
+                /** @description Who acted: user, api_key, oauth_client, system, scim_token, scim_connection, anonymous, external_api_key, external_oauth_client, external_user. New types may appear. */
                 type: string;
             };
             credential: {
@@ -9786,7 +9786,7 @@ export interface operations {
                 /** @description Only events by this actor ID (requires actorType) */
                 actorId?: string;
                 /** @description Only events by this actor type */
-                actorType?: "user" | "api_key" | "oauth_client" | "system" | "scim_token" | "anonymous" | "external_api_key" | "external_oauth_client" | "external_user";
+                actorType?: "user" | "api_key" | "oauth_client" | "system" | "scim_token" | "scim_connection" | "anonymous" | "external_api_key" | "external_oauth_client" | "external_user";
                 /** @description nextCursor from the previous page with the same filters */
                 cursor?: string;
                 /** @description Earliest time, inclusive: RFC 3339 instant with an offset */

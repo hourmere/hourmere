@@ -1,3 +1,4 @@
+import type { InvitationEmailBudgetRequest } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import { sql } from 'kysely'
 import {
@@ -11,12 +12,14 @@ export interface InvitationMailLimits extends NotificationMailLimits {
   invitationInviterMaxPerDay?: number | undefined
   invitationTeamMaxPerHour?: number | undefined
   invitationTeamMaxPerDay?: number | undefined
+  scimInvitationMaxPerHour?: number | undefined
+  scimInvitationMaxPerDay?: number | undefined
 }
 
 /** Read current admission capacity without locking or consuming a request slot. */
 export async function invitationEmailBudgetAvailable(
   db: Db,
-  invitation: { userId: string; organizationId: string; email: string },
+  invitation: InvitationEmailBudgetRequest,
   deps: InvitationMailLimits & { secret: string },
   /** The summary passes the same database time used for invitation expiry. */
   at?: Date,
@@ -26,48 +29,66 @@ export async function invitationEmailBudgetAvailable(
   if (!now) throw new Error('Invitation mail eligibility needs the database clock')
   const hour = new Date(now.getTime() - 3_600_000)
   const day = new Date(now.getTime() - 86_400_000)
-  const hash = invitationRecipientHash(invitation.email, deps.secret)
+  const { userId, organizationId, email } = invitation
+  const scim = userId === null
+  const hash = invitationRecipientHash(email, deps.secret)
   const counts = await db
     .selectFrom('invitation_email_requests')
-    .select((eb) => [
-      eb.fn.countAll<string>().filterWhere('user_id', '=', invitation.userId).as('inviterDay'),
-      eb.fn
+    .select((eb) => {
+      const sameTeam = eb('organization_id', '=', organizationId)
+      const human = eb('user_id', 'is not', null)
+      const sameRecipient = eb('recipient_hash', '=', hash)
+      const inviter = eb.fn.countAll<string>().filterWhere('user_id', '=', userId)
+      const team = eb.fn
         .countAll<string>()
-        .filterWhere('user_id', '=', invitation.userId)
-        .filterWhere('requested_at', '>', hour)
-        .as('inviterHour'),
-      eb.fn
-        .countAll<string>()
-        .filterWhere('organization_id', '=', invitation.organizationId)
-        .as('teamDay'),
-      eb.fn
-        .countAll<string>()
-        .filterWhere('organization_id', '=', invitation.organizationId)
-        .filterWhere('requested_at', '>', hour)
-        .as('teamHour'),
-      eb.fn.countAll<string>().filterWhere('recipient_hash', '=', hash).as('recipientDay'),
-      eb.fn
-        .countAll<string>()
-        .filterWhere('recipient_hash', '=', hash)
-        .filterWhere('requested_at', '>', hour)
-        .as('recipientHour'),
-    ])
+        .filterWhere(sameTeam)
+        .filterWhere(scim ? eb('user_id', 'is', null) : human)
+      const globalRecipient = eb.fn.countAll<string>().filterWhere(sameRecipient)
+      // SCIM shares its tenant's mailbox allowance with manual invitations. Manual
+      // invitations retain their own instance-wide allowance across administrators.
+      const recipient = globalRecipient.filterWhere(scim ? sameTeam : human)
+      return [
+        inviter.as('inviterDay'),
+        inviter.filterWhere('requested_at', '>', hour).as('inviterHour'),
+        team.as('teamDay'),
+        team.filterWhere('requested_at', '>', hour).as('teamHour'),
+        recipient.as('recipientDay'),
+        recipient.filterWhere('requested_at', '>', hour).as('recipientHour'),
+        globalRecipient.as('globalRecipientDay'),
+        globalRecipient.filterWhere('requested_at', '>', hour).as('globalRecipientHour'),
+      ]
+    })
     .where('requested_at', '>', day)
     .where((eb) =>
       eb.or([
-        eb('user_id', '=', invitation.userId),
-        eb('organization_id', '=', invitation.organizationId),
+        ...(userId === null ? [] : [eb('user_id', '=', userId)]),
+        eb('organization_id', '=', organizationId),
         eb('recipient_hash', '=', hash),
       ]),
     )
     .executeTakeFirstOrThrow()
+  const recipientMaxPerHour = deps.mailRecipientMaxPerHour ?? 5
+  const recipientMaxPerDay = deps.mailRecipientMaxPerDay ?? 20
+  // Keep an abuse ceiling across sources and tenants while leaving room for the
+  // same person to be provisioned into multiple organizations.
+  const globalRecipientMultiplier = 4
+  if (
+    Number(counts.recipientHour) >= recipientMaxPerHour ||
+    Number(counts.recipientDay) >= recipientMaxPerDay ||
+    Number(counts.globalRecipientHour) >= globalRecipientMultiplier * recipientMaxPerHour ||
+    Number(counts.globalRecipientDay) >= globalRecipientMultiplier * recipientMaxPerDay
+  )
+    return false
+  if (scim)
+    return (
+      Number(counts.teamHour) < (deps.scimInvitationMaxPerHour ?? 60) &&
+      Number(counts.teamDay) < (deps.scimInvitationMaxPerDay ?? 240)
+    )
   if (
     Number(counts.inviterHour) >= (deps.invitationInviterMaxPerHour ?? 20) ||
     Number(counts.inviterDay) >= (deps.invitationInviterMaxPerDay ?? 100) ||
     Number(counts.teamHour) >= (deps.invitationTeamMaxPerHour ?? 50) ||
-    Number(counts.teamDay) >= (deps.invitationTeamMaxPerDay ?? 200) ||
-    Number(counts.recipientHour) >= (deps.mailRecipientMaxPerHour ?? 5) ||
-    Number(counts.recipientDay) >= (deps.mailRecipientMaxPerDay ?? 20)
+    Number(counts.teamDay) >= (deps.invitationTeamMaxPerDay ?? 200)
   )
     return false
   return true
@@ -80,7 +101,7 @@ export async function invitationEmailBudgetAvailable(
  */
 export async function reserveInvitationEmailBudget(
   db: Db,
-  invitation: { userId: string; organizationId: string; email: string },
+  invitation: InvitationEmailBudgetRequest,
   deps: InvitationMailLimits & { secret: string },
   /** Optional deterministic clock for tests; production reads after the budget lock. */
   at?: Date,

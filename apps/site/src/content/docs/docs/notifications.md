@@ -739,18 +739,23 @@ successfully committed booking preserve the original result.
 
 ## Email abuse controls
 
-Team invitation creation and explicit resends are limited at admission:
+App invitation creation and explicit resends are limited at admission:
 `INVITATION_INVITER_MAX_PER_HOUR` (default 20) and `INVITATION_INVITER_MAX_PER_DAY`
 (default 100), shared across an inviter's teams; `INVITATION_TEAM_MAX_PER_HOUR` (default
 50) and `INVITATION_TEAM_MAX_PER_DAY` (default 200), shared across a team's inviters.
-Invitations use `MAIL_RECIPIENT_MAX_PER_HOUR` and
-`MAIL_RECIPIENT_MAX_PER_DAY` with an independent invitation HMAC domain. They share the
-global mail-budget lock, but admission does not debit `MAIL_MAX_PER_HOUR` or consume
-guest booking mail capacity. Ordinary request retries and exact
+App invitations count app requests for an address across teams against
+`MAIL_RECIPIENT_MAX_PER_HOUR` and `MAIL_RECIPIENT_MAX_PER_DAY`. SCIM admissions use the
+same settings to count an address's invitations within the organization and have a separate
+team budget. An instance-wide ceiling of four times each configured recipient limit
+counts all invitations for that address. [SCIM provisioning](/docs/scim#invitations-and-initial-sync)
+describes these limits for initial syncs. Invitations use their own recipient HMAC domain
+and share the global mail-budget lock. `MAIL_MAX_PER_HOUR` is debited at send time.
+Ordinary request retries and exact
 resend replays do not spend another slot; explicit resends never reset rolling counts.
 Deleting invitations or teams cannot reset those counts. Request counts expire from the
 two-day accounting ledger and do not indicate SMTP delivery. Admission stores only a
-purpose-separated recipient HMAC, the inviter/team identifiers and the request time.
+purpose-separated recipient HMAC, the team identifier, the request time and the inviter
+identifier for app invitations.
 
 Explicit resends require the invitation ID, expected generation and UUID request ID;
 they wait 60 seconds from the later of the generation start and latest delivery update,

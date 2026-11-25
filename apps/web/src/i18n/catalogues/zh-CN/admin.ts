@@ -3120,4 +3120,7 @@ export const admin = {
   '{value} reschedule deadline': '须提前{value}改期',
   '{value} cancellation deadline': '须提前{value}取消',
   'Default timing rules': '默认预约时间规则',
+
+  // SCIM invitation attribution
+  'SCIM connection': 'SCIM 连接',
 } as const

@@ -149,12 +149,15 @@ none of these selects, or that marks more than one address primary, gets 400 `in
 rather than losing the address.
 When an active User has a work address, the same transaction records a pending claim and issues
 its invitation through the existing invitation service, with the same address rules,
-member-role invitation, mail admission limits, pending cap and delivery queue as an
-invitation sent from the app: the earliest current owner of the organization whose email
+member role, pending cap and delivery queue as an invitation sent from the app. For
+invitation authorization, the earliest current owner of the organization whose email
 address is verified is the inviter (with no such owner the create gets 403, whatever the
-address), a pending invitation of that owner to the same address is reused rather than sent
-again, and its delivery generation is queued only after commit. Existing same-email accounts
-get the same claim flow: an address that already belongs to a member of the organization,
+address). A pending invitation of that owner to the same address is reused rather than sent
+again. An invitation email issued by SCIM is queued only after commit and names the identity
+provider acting on behalf of the team. The mail language follows the recorded owner's
+language preference, with the ordinary invitation fallback to English.
+Existing same-email accounts get the same claim flow: an address that already belongs to a
+member of the organization,
 that another administrator's, a legacy, a duplicated or a departed inviter's pending
 invitation holds, or whose pending invitation another entry's claim already holds, gets the
 same entry and a pending claim without an invitation, nothing is sent, and the answer is
@@ -166,11 +169,11 @@ policy is decided from the instance settings alone: a restricted instance (`SIGN
 `SIGNUP_ALLOWED_DOMAINS` with 403, whether or not an account exists. No account, membership
 or session is created, no address is marked verified and nothing is linked: admission waits
 for the claim. The entry, its claim, the invitation and the `scim_user.created` and
-`membership.invited` events commit or roll back together; the events name the provisioning
-token as their actor. When the address's pending invitation expires while the create waits for
-its delivery row, the mail budget or another administrator's invitation, admission runs once
-more from its savepoint: the expired invitation is retired and a new one issued, exactly as the
-provider's retry would get, never a claim without an invitation and so without an email.
+`membership.invited` events commit or roll back together. The User creation event names the
+provisioning token, and the invitation event names the SCIM connection. When the address's
+pending invitation expires while the create waits for its delivery row, the mail budget or
+another administrator's invitation, admission runs once more from its savepoint to retire
+the expired invitation and issue a new one.
 
 Claim completion rides on the existing acceptance of the invitation the create bound to the
 claim (`/organization/accept-invitation`); it adds no operation. The person proves the mailbox
@@ -509,6 +512,28 @@ the serialized writer shapes against the migration and against each weakened loc
 and hold a conflicting lock on each table the migration locks (derived from the migration
 source) against the bounded wait and its retry.
 
+## Invitation delivery and limits
+
+SCIM invitation email admissions have a separate budget of 60 per organization in a rolling
+hour and 240 in a rolling 24 hours. All credentials for the organization share it. The mail
+budget is smaller than the SCIM transport request budgets, which also cover reads and updates.
+App invitations and explicit resends use the existing `INVITATION_INVITER_*` and
+`INVITATION_TEAM_*` limits. An administrator who explicitly resends a SCIM invitation
+starts a new generation under their own invitation budget and name.
+
+For SCIM, the recipient limit counts all invitation requests for that address within the
+organization, using `MAIL_RECIPIENT_MAX_PER_HOUR` and `MAIL_RECIPIENT_MAX_PER_DAY`
+(5 and 20 by default). Scoping the normal cap to the organization lets a team provision
+an address that another team has invited. A separate instance-wide ceiling of four times
+each configured recipient limit (20 per hour and 80 per day by default) counts invitations
+from all teams and both sources to limit aggregate abuse. App invitations keep their
+instance-wide recipient cap for app requests. Both sources share the 100 pending-invitation
+cap per team and the instance-wide SMTP attempt budget.
+
+A SCIM create that would queue invitation email returns 429 with `Retry-After: 3600`
+when admission is limited. Honor the retry interval and stagger a larger initial sync.
+Pending capacity returns as invitations are accepted, canceled or expire after 48 hours.
+
 ## Known limitations
 
 - Account deletion is the privacy path and is never refused by admission storage. A
@@ -518,14 +543,6 @@ source) against the bounded wait and its retry.
   decision is already recorded as a live tombstone for the same organization, mailbox,
   authority and kind; the existing tombstone remains. Sign-up and sign-in do not yet cap
   account mailbox length; invitations cap it at 254 characters.
-- User creation issues invitations within the existing admission limits. The defaults
-  are 20 an hour and 100 a day per inviter, 50
-  an hour and 200 a day per team, 5 an hour and 20 a day per recipient address, and 100
-  pending invitations per team. The inviter is the earliest verified owner, so provisioning
-  spends that owner's own invitation budget too. An identity provider's first
-  synchronization of a larger organization therefore gets 429 with `Retry-After: 3600`
-  until capacity returns; the pending cap only frees up as invitations are accepted or
-  expire after 48 hours. The `INVITATION_*` limits can be raised.
 - User creation records an existing member's address, or one that another pending
   invitation or another entry's claim already holds, as an entry with a pending claim and no
   invitation, and sends nothing. These claims expire after 48 hours and require either the
@@ -538,9 +555,8 @@ source) against the bounded wait and its retry.
   email (a new invitation, or a first delivery for a legacy pending one) gets 429; one that
   reuses a pending invitation's delivery or records a claim without an invitation still gets
   201. A token holder can therefore tell, while the limits are exhausted, whether an address
-  needs a new invitation in the organization; the per-recipient limit also counts other
-  organizations' invitations, as it does for invitations sent from the app, and only
-  addresses that need a new invitation wait for the shared mail-budget lock.
+  needs a new invitation in the organization. Only admissions that would queue invitation
+  email wait for the shared mail-budget lock.
 - When creation reuses the inviting owner's pending invitation, that invitation keeps its
   delivery state; if its email already failed, an administrator resends it from the team's
   pending invitations.
@@ -933,7 +949,9 @@ The [audit journal](audit-log.md) records token administration as `scim_token.cr
 `scim_token.rotated` and `scim_token.revoked`: the token ID and the session that made the
 change, never the name, secret or digest. User creation records `scim_user.created` on the
 new resource ID, with the provisioning token as actor (`scim_token`, credential `none`) and
-empty details; the invitation it issues records `membership.invited` the same way. Claim
+empty details. The invitation it issues records `membership.invited` with the SCIM connection
+as actor (`scim_connection`, credential `none`) and empty details. Cancellation of a pending
+invitation when SCIM retires its claim uses the same connection attribution. Claim
 completion records `scim_user.claimed` on the resource ID with empty details, attributed to the
 accepting person's session like the `membership.accepted` event beside it, in the acceptance
 transaction. Profile replacement records `scim_user.updated` on the resource ID with the

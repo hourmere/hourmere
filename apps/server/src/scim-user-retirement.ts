@@ -49,7 +49,7 @@ async function retire(db: Db, request: ScimResourceRequest, id: string): Promise
         await suspendScimMembership(trx, { ...scope, userId: entry.linked_user_id }, actor, {
           reuseExistingBlock: true,
         })
-      await retireScimUserClaims(trx, scope, actor)
+      await retireScimUserClaims(trx, scope)
       await trx
         .updateTable('scim_users')
         .set({

@@ -86,6 +86,7 @@ export {
   admitInvitation,
   type EnqueueInvitationEmail,
   type InvitationAdmission,
+  type InvitationEmailBudgetRequest,
   type InvitationIssuer,
   invitationEmailAccepted,
   invitationLifetimeMs,

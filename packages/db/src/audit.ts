@@ -121,6 +121,8 @@ export interface AuditActor {
     | 'external_user'
     /** A SCIM provisioning token (its ID); the credential is then `none`. */
     | 'scim_token'
+    /** A SCIM provisioning connection (its ID); the credential is then `none`. */
+    | 'scim_connection'
   id?: string
 }
 export interface AuditCredential {

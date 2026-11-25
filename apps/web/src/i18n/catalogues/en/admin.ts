@@ -3267,4 +3267,7 @@ export const admin = {
   '{value} reschedule deadline': '{value} reschedule deadline',
   '{value} cancellation deadline': '{value} cancellation deadline',
   'Default timing rules': 'Default timing rules',
+
+  // SCIM invitation attribution
+  'SCIM connection': 'SCIM connection',
 } as const
