@@ -23,6 +23,7 @@ import * as publicApi from './api.ts'
 import * as details from './BookingDetails.tsx'
 import * as form from './BookingForm.tsx'
 import type { BookingPage, OneTimeBookingPage } from './BookingPage.tsx'
+import * as bookingParts from './BookingPageParts.tsx'
 import * as calendarDates from './calendar.ts'
 import * as description from './EventDescription.tsx'
 import * as embed from './embed-context.ts'
@@ -39,6 +40,7 @@ import * as waitlistLink from './waitlist-link.ts'
 import * as waitlistWindow from './waitlist-window.ts'
 
 const source = readFileSync('apps/web/src/public/BookingPage.tsx', 'utf8')
+const partsSource = readFileSync('apps/web/src/public/BookingPageParts.tsx', 'utf8')
 const API = '/api/v1/public/ada/intro'
 const START = '2026-11-02T14:00:00.000Z'
 const NEXT = '2026-11-02T15:00:00.000Z'
@@ -81,7 +83,22 @@ function compile<T>(file: string, text: string, dependencies: Record<string, unk
   return module.exports as T
 }
 
-function pageCopy(text = source): Pages {
+function partsCopy(text: string) {
+  return compile<typeof bookingParts>('apps/web/src/public/BookingPageParts.tsx', text, {
+    react,
+    '../components/TimeZonePicker.tsx': zonePicker,
+    '../format.ts': format,
+    '../i18n/duration.ts': duration,
+    '../i18n/formatting.ts': formatting,
+    '../i18n/runtime.tsx': runtime,
+    './BookingDetails.tsx': details,
+    './EventDescription.tsx': description,
+    './PublicLayout.tsx': layout,
+    './time.ts': time,
+  })
+}
+
+function pageCopy(text = source, parts = bookingParts): Pages {
   return compile<Pages>('apps/web/src/public/BookingPage.tsx', text, {
     '@hourmere/core/language': language,
     react,
@@ -99,6 +116,7 @@ function pageCopy(text = source): Pages {
     './api.ts': publicApi,
     './BookingDetails.tsx': details,
     './BookingForm.tsx': form,
+    './BookingPageParts.tsx': parts,
     './calendar.ts': calendarDates,
     './EventDescription.tsx': description,
     './embed-context.ts': embed,
@@ -121,17 +139,18 @@ function pageCopy(text = source): Pages {
   })
 }
 
-function mutate(before: string, after: string) {
-  expect(source.split(before), 'mutation must match exactly once').toHaveLength(2)
-  return source.replace(before, after)
-}
-
-async function killed(assertion: (text: string) => Promise<void>, before: string, after: string) {
-  await assertion(source)
-  await expect(assertion(mutate(before, after))).rejects.toMatchObject({
+async function killed(
+  assertion: (text: string) => Promise<void>,
+  before: string,
+  after: string,
+  original = source,
+) {
+  expect(original.split(before), 'mutation must match exactly once').toHaveLength(2)
+  await assertion(original)
+  await expect(assertion(original.replace(before, after))).rejects.toMatchObject({
     name: 'AssertionError',
   })
-  await assertion(source)
+  await assertion(original)
 }
 
 function Navigation() {
@@ -147,8 +166,13 @@ function Navigation() {
   )
 }
 
-function display(text: string, path = `/ada/intro${hint()}`, embedded = false) {
-  const { BookingPage: Page, OneTimeBookingPage: OneTime } = pageCopy(text)
+function display(
+  text: string,
+  path = `/ada/intro${hint()}`,
+  embedded = false,
+  parts = bookingParts,
+) {
+  const { BookingPage: Page, OneTimeBookingPage: OneTime } = pageCopy(text, parts)
   window.history.replaceState(null, '', path)
   return render(
     <runtime.InterfaceScope surface="public">
@@ -620,7 +644,7 @@ describe('public direct-slot protection source-copy controls', () => {
           [`GET ${API}/slots`]: slotsAnswer([start], 60),
         }),
       )
-      const view = display(text, `/ada/intro${hint(start, 60)}`)
+      const view = display(source, `/ada/intro${hint(start, 60)}`, false, partsCopy(text))
       try {
         await settled()
         const labels = document.querySelectorAll('.chosen-time time')
@@ -635,6 +659,7 @@ describe('public direct-slot protection source-copy controls', () => {
       assertion,
       'offset: offsetLabel(timeZone, Date.parse(instant)),',
       'offset: offsetLabel(timeZone, Date.parse(slot.start)),',
+      partsSource,
     )
   })
 
@@ -648,7 +673,7 @@ describe('public direct-slot protection source-copy controls', () => {
           [`GET ${API}/slots`]: slotsAnswer([start], 60),
         }),
       )
-      const view = display(text, `/ada/intro${hint(start, 60)}`)
+      const view = display(source, `/ada/intro${hint(start, 60)}`, false, partsCopy(text))
       try {
         await settled()
         const labels = document.querySelectorAll('.chosen-time time')
@@ -664,6 +689,7 @@ describe('public direct-slot protection source-copy controls', () => {
       assertion,
       'date: formatDate(Date.parse(instant), timeZone, locale),',
       'date: formatDate(Date.parse(slot.start), timeZone, locale),',
+      partsSource,
     )
   })
 })

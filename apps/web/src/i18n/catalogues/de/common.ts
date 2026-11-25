@@ -603,4 +603,7 @@ export const common = {
     'Kehren Sie zum Tab zurück, in dem Sie die Bestätigung angefordert haben.',
   'Copy the link from your email and paste it into the tab where you requested verification.':
     'Kopieren Sie den Link aus Ihrer E-Mail und fügen Sie ihn in den Tab ein, in dem Sie die Bestätigung angefordert haben.',
+  // Booking page preview
+  'These are sample times. Booking is disabled in the preview.':
+    'Dies sind Beispielzeiten. In der Vorschau lassen sich keine Termine buchen.',
 } as const
