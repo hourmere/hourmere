@@ -161,6 +161,15 @@ The earlier OIDC changes require `exp`, `iat` and a nonempty client ID and rejec
 
 The 1.7.20 SSO patch applies the default clock skew to samlify. The 1.7.21 patches decode the assertion ID before reserving it for replay protection and keep SAML logout records current during session refresh. The 1.7.24 patch recognises API errors across `better-call` copies. These changes leave the pre-session findings above in place. Hourmere uses local session revocation and does not enable the SSO plugin's single logout. [Versioned SSO changelog](https://github.com/better-auth/better-auth/blob/v1.7.25/packages/sso/CHANGELOG.md).
 
+Since Better Auth 1.7.22, database schema validation runs by default on each Better Auth
+instance's first auth call. A mismatch is cached as `SchemaMismatchError` and blocks every
+Better Auth endpoint until the schema is migrated and the cached result is cleared.
+Hourmere keeps validation enabled so that auth operations fail before touching an
+incompatible schema. This also protects the local session and account operations used by SSO.
+Apply Hourmere's migrations before serving auth traffic and restart any server that already
+cached a mismatch. [Better Auth 1.7.22 release](https://github.com/better-auth/better-auth/releases/tag/v1.7.22),
+[Auth data model](data-model.md#auth-better-auth-core--organization--api-key-plugins).
+
 The 1.7.25 OAuth provider release defaults `oauthProviderResourceClient(auth)` to in-process signing keys. Hourmere does not call that helper. Its separate OIDC adapter owns federation discovery and JWKS fetches. [Better Auth 1.7.25 release](https://github.com/better-auth/better-auth/releases/tag/v1.7.25).
 
 On 2026-11-24 the upstream GitHub repository advisory API reported 49 published advisories, with the newest from 2026-11-03. Of these, 43 name packages present in the root lockfile. Comparing the ranges to the locked Better Auth family yields zero matches for 1.7.25. [Better Auth security advisories](https://github.com/better-auth/better-auth/security/advisories).

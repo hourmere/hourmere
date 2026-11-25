@@ -148,6 +148,22 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
       .execute()
   }
 
+  async function waitForBlockedQuery(pid: number) {
+    await expect
+      .poll(
+        async () => {
+          const { rows } = await owned.pool.query<{ blocked: boolean }>(
+            `SELECT EXISTS (SELECT FROM pg_stat_activity
+              WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))) AS blocked`,
+            [pid],
+          )
+          return rows[0]?.blocked
+        },
+        { timeout: 3000 },
+      )
+      .toBe(true)
+  }
+
   async function raceSuspension(
     organizationId: string,
     userId: string,
@@ -165,19 +181,7 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
         await suspendScimMembership(trx, target, { type: 'system' })
         pending = request()
         void pending.catch(() => {})
-        await expect
-          .poll(
-            async () => {
-              const { rows } = await owned.pool.query<{ blocked: boolean }>(
-                `SELECT EXISTS (SELECT FROM pg_stat_activity
-                  WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))) AS blocked`,
-                [pid],
-              )
-              return rows[0]?.blocked
-            },
-            { timeout: 3000 },
-          )
-          .toBe(true)
+        await waitForBlockedQuery(pid)
       })
     } finally {
       await Promise.allSettled([pending])
@@ -564,6 +568,45 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
     ).rejects.toThrow(/native revocation status after disconnect/)
   })
   type FamilyPath = 'revoke' | 'token'
+  async function addFamilyTokens(
+    database: Db,
+    clientId: string,
+    userId: string,
+    referenceId: string,
+    revoked: Date | null = null,
+  ) {
+    const token = randomBytes(32).toString('base64url')
+    const refresh = await database
+      .insertInto('auth.oauthRefreshToken')
+      .values({
+        clientId,
+        userId,
+        referenceId,
+        token: createHash('sha256').update(token).digest('base64url'),
+        scopes: JSON.stringify(['mcp:tools', 'offline_access']),
+        createdAt: new Date(),
+        expiresAt: new Date(Date.now() + 86400000),
+        revoked,
+      })
+      .returning(['id', 'referenceId'])
+      .executeTakeFirstOrThrow()
+    const access = await database
+      .insertInto('auth.oauthAccessToken')
+      .values({
+        clientId,
+        userId,
+        referenceId,
+        refreshId: refresh.id,
+        token: randomBytes(32).toString('base64url'),
+        scopes: JSON.stringify(['mcp:tools']),
+        createdAt: new Date(),
+        expiresAt: new Date(Date.now() + 300000),
+      })
+      .returning(['id', 'referenceId'])
+      .executeTakeFirstOrThrow()
+    return { token, refresh, access }
+  }
+
   /** One client, one user, two grants in two organizations, each with refresh and access tokens. */
   async function familySetup(presentActiveTeam = false) {
     const actor = await account(),
@@ -607,40 +650,16 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
         updatedAt: new Date(),
       })
       .execute()
-    const tokens = grants.map(() => randomBytes(32).toString('base64url'))
-    for (const [index, grant] of grants.entries()) {
-      const refresh = await db
-        .insertInto('auth.oauthRefreshToken')
-        .values({
-          clientId,
-          userId: actor.user.id,
-          referenceId: grant.id,
-          token: createHash('sha256')
-            .update(tokens[index] as string)
-            .digest('base64url'),
-          scopes: JSON.stringify(['mcp:tools', 'offline_access']),
-          createdAt: new Date(),
-          expiresAt: new Date(Date.now() + 86400000),
-          // Presenting an already revoked refresh token is native reuse detection.
-          revoked: !presentActiveTeam && index === 0 ? new Date(Date.now() - 60000) : null,
-        })
-        .returning('id')
-        .executeTakeFirstOrThrow()
-      await db
-        .insertInto('auth.oauthAccessToken')
-        .values({
-          clientId,
-          userId: actor.user.id,
-          referenceId: grant.id,
-          refreshId: refresh.id,
-          token: randomBytes(32).toString('base64url'),
-          scopes: JSON.stringify(['mcp:tools']),
-          createdAt: new Date(),
-          expiresAt: new Date(Date.now() + 300000),
-        })
-        .execute()
-    }
-    return { actor, clientId, presented, sibling, token: tokens[0] as string }
+    // Presenting an already revoked refresh token is native reuse detection.
+    const { token, refresh } = await addFamilyTokens(
+      db,
+      clientId,
+      actor.user.id,
+      presented.id,
+      presentActiveTeam ? null : new Date(Date.now() - 60000),
+    )
+    await addFamilyTokens(db, clientId, actor.user.id, sibling.id)
+    return { actor, clientId, presented, sibling, token, refreshId: refresh.id }
   }
   function presentRevoked(auth: Auth, path: FamilyPath, clientId: string, token: string) {
     return auth.handler(
@@ -744,6 +763,56 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
     )
     await expect(preservesSiblingGrant(factory)).rejects.toThrow(
       /surviving grant keeps both tokens/,
+    )
+  })
+  async function preservesConcurrentFamilyTokens(factory = createAuth) {
+    const auth = instance(factory)
+    await auth.api.getSession({ headers: new Headers() })
+    const { actor, clientId, sibling, token, refreshId } = await familySetup()
+    let pending: Promise<Response> | undefined
+    const concurrent = await db
+      .transaction()
+      .execute(async (trx) => {
+        const { pid } = await trx
+          .selectNoFrom(sql<number>`pg_backend_pid()`.as('pid'))
+          .executeTakeFirstOrThrow()
+        await trx
+          .selectFrom('auth.oauthRefreshToken')
+          .select('id')
+          .where('id', '=', refreshId)
+          .forUpdate()
+          .executeTakeFirstOrThrow()
+        pending = presentRevoked(auth, 'revoke', clientId, token)
+        void pending.catch(() => {})
+        // The revocation has read its candidates and is waiting to lock the presented
+        // refresh row. Commit a new pair for the same client and user before releasing it.
+        await waitForBlockedQuery(pid)
+        return addFamilyTokens(trx, clientId, actor.user.id, sibling.id)
+      })
+      .catch(async (error) => {
+        await Promise.allSettled([pending])
+        throw error
+      })
+    const response = await pending
+    expect(response?.status, 'native family response').toBe(400)
+    const remaining = await familyTokens(clientId)
+    expect(remaining.refresh, 'refresh token created outside the snapshot survives').toEqual([
+      concurrent.refresh,
+    ])
+    expect(remaining.access, 'access token created outside the snapshot survives').toEqual([
+      concurrent.access,
+    ])
+  }
+  it('preserves OAuth tokens committed after the refresh-family snapshot', () =>
+    preservesConcurrentFamilyTokens())
+  it('detects a source copy that sweeps access tokens outside the locked refresh family', async () => {
+    const factory = await sourceCopy(
+      './audit.ts',
+      "                      { field: 'refreshId', operator: 'in', value: before.map((row) => row.id) },\n",
+      '',
+    )
+    await expect(preservesConcurrentFamilyTokens(factory)).rejects.toThrow(
+      /access token created outside the snapshot survives/,
     )
   })
   it.each(['revoke', 'token'] as const)(

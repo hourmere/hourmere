@@ -323,6 +323,15 @@ for limits and client instructions.
 | `organization`, `member`, `invitation` | Tenancy: personal and team organizations, roles, invitations |
 | `apikey` | Keys for agents (MCP, REST, CLI); hashed by Better Auth |
 
+Since Better Auth 1.7.22, database schema validation runs by default on each Better Auth
+instance's first auth call. A mismatch is cached as `SchemaMismatchError` and blocks every
+Better Auth endpoint until the schema is migrated and the cached result is cleared.
+Hourmere keeps validation enabled so that auth operations fail before touching an
+incompatible schema. `AUTO_MIGRATE=true` applies migrations before serving requests.
+With `AUTO_MIGRATE=false`, run `npm run db:migrate` before starting the upgraded server.
+If a running server has already cached a mismatch, restart it after applying Hourmere's
+SQL migrations so the new instance checks the repaired schema. [Better Auth 1.7.22 release](https://github.com/better-auth/better-auth/releases/tag/v1.7.22).
+
 Google and Microsoft sign-in ID tokens are used during authentication and are not stored:
 `account."idToken"` remains NULL on account creation and every update, including linking,
 repeat sign-in and token refresh. Migration 0031 clears existing values without changing
