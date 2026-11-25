@@ -448,7 +448,7 @@ describe.skipIf(!serverUrl)('API key scope migration', () => {
           [metadata],
         )
       for (const metadata of [null, '{}', '{"extra":"retained"}']) {
-        expect((await insert(metadata)).rows[0]?.metadata.scope).toBe('full')
+        expect((await insert(metadata)).rows[0]?.metadata).toMatchObject({ scope: 'full' })
       }
       for (const scope of ['full', 'read', 'bookings']) {
         const { id } = (await insert(JSON.stringify({ scope }))).rows[0] as { id: string }
