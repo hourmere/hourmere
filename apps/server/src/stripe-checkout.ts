@@ -106,8 +106,10 @@ export function createStripePaymentProvider(
               },
             ],
             expires_at: checkoutSessionExpiry(input.expiresAt),
-            success_url: returnUrl,
-            cancel_url: returnUrl,
+            success_url: input.publicReturn ? new URL('/booking/payment', origin).href : returnUrl,
+            cancel_url: input.publicReturn
+              ? new URL('/booking/payment?cancel=1', origin).href
+              : returnUrl,
             client_reference_id: input.attemptId,
             metadata: {
               hourmere_checkout_attempt_id: input.attemptId,

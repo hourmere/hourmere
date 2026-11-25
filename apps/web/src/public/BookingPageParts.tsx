@@ -1,3 +1,4 @@
+import { formatPaymentAmount } from '@hourmere/core/payment'
 import { type ReactNode, useId } from 'react'
 import { TimeZoneName } from '../components/TimeZonePicker.tsx'
 import { isKnownTimeZone } from '../format.ts'
@@ -34,8 +35,10 @@ export function BookingEventInfo({
   headingLevel?: 1 | 2
   children?: ReactNode
 }) {
-  const { t, ui, locale: displayLocale } = useI18n()
+  const { t, ui, locale: displayLocale, formatLocale } = useI18n()
   const hostTimeZone = bookingHostTimeZone(event)
+  const payment = 'payment' in event ? event.payment : undefined
+  const price = payment?.prices.find((entry) => entry.durationMinutes === durationMinutes)
   const Heading = headingLevel === 1 ? 'h1' : 'h2'
   return (
     <aside className="event-info" aria-label={t('About this event')}>
@@ -65,6 +68,16 @@ export function BookingEventInfo({
       )}
       <ul className="event-facts">
         <li>{formatDuration(durationMinutes, displayLocale)}</li>
+        {payment && price && (
+          <li>
+            {t('Price: {amount}', {
+              amount: formatPaymentAmount(
+                { amountMinor: price.amountMinor, currency: payment.currency },
+                formatLocale,
+              ),
+            })}
+          </li>
+        )}
         {chosenLocation ? (
           <li>{chosenLocation.label ?? ui(locationLabel(chosenLocation.kind))}</li>
         ) : event.location ? (

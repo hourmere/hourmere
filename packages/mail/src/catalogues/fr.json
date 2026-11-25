@@ -173,5 +173,12 @@
   "series.cancelled.member": "Annulée",
   "series.manage": "Gérer la série",
   "series.view": "Voir la série",
-  "series.repair": "Pour relancer la création du lien de réunion, ouvrez la réservation concernée dans Hourmere."
+  "series.repair": "Pour relancer la création du lien de réunion, ouvrez la réservation concernée dans Hourmere.",
+  "bookingPayment.label": "Paiement",
+  "bookingPayment.paid": "{amount} payés",
+  "bookingPayment.refund": "Remboursement",
+  "bookingPayment.requested": "Remboursement demandé",
+  "bookingPayment.pending": "Remboursement en cours",
+  "bookingPayment.succeeded": "Remboursement effectué",
+  "bookingPayment.failed": "Échec du remboursement"
 }

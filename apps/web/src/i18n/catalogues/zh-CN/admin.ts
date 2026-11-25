@@ -3120,4 +3120,32 @@ export const admin = {
   '{value} reschedule deadline': '须提前{value}改期',
   '{value} cancellation deadline': '须提前{value}取消',
   'Default timing rules': '默认预约时间规则',
+  // Paid booking details
+  'Open payment in Stripe': '在 Stripe 中查看付款',
+
+  // Paid booking settings
+  Payments: '收款设置',
+  'Charge for bookings': '收取预约费用',
+  'Payment required': '须付费',
+  'Free booking': '免费预约',
+  Currency: '币种',
+  'Price for {duration}': '{duration}的价格',
+  'Set a price for every duration. Invitees pay through Stripe Checkout.':
+    '请为每种时长设置价格。受邀人将通过 Stripe Checkout 付款。',
+  'Ask your instance operator to configure Stripe for paid bookings.':
+    '请联系实例管理员配置 Stripe，以启用付费预约。',
+  'This instance could not verify its Stripe configuration. Contact your instance operator.':
+    '此实例无法验证 Stripe 配置。请联系实例管理员。',
+  'Paid bookings are turned off on this instance.': '此实例已关闭付费预约。',
+  'Paid bookings are currently available in Stripe test mode only.':
+    '付费预约目前仅支持 Stripe 测试模式。',
+  'Paid booking settings are unavailable on this instance.': '此实例的付费预约设置暂不可用。',
+  'Paid bookings are available for personal, one-on-one events without additional guests, a waitlist, routing or recurring bookings. Use an in-person location, a saved meeting link or no location.':
+    '付费预约适用于一对一的个人活动，不支持额外来宾、候补名单、预约路由或重复预约。请选择线下地点、使用已有的会议链接，或留空。',
+  'Enter a price for this duration.': '请输入此时长的价格。',
+  'Enter a whole amount.': '请输入整数金额。',
+  'Enter an amount with up to two decimal places.': '请输入最多保留两位小数的金额。',
+  'Enter an amount from {min} to {max} {currency}.':
+    '请输入 {min} 至 {max} {currency} 之间的金额。',
+  'Check the price for every duration and try again.': '请检查每种时长的价格后重试。',
 } as const

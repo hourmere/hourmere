@@ -7,6 +7,7 @@ import {
   type InterfaceLanguage,
   interfaceLanguage,
 } from '@hourmere/core/language'
+import { formatPaymentAmount } from '@hourmere/core/payment'
 import { type MailKey, mailMessage as message } from './catalogue.ts'
 import { formatMailDateTime } from './date-time.ts'
 import type { MailAttachment, MailMessage } from './index.ts'
@@ -46,6 +47,13 @@ export interface BookingEmailMeeting {
   previous?: { start: Temporal.Instant; end: Temporal.Instant } | undefined
   /** For `cancelled`: the reason given, if any. */
   cancelReason?: string | null | undefined
+  payment?:
+    | {
+        amountMinor: number
+        currency: string
+        refundStatus: 'requested' | 'pending' | 'succeeded' | 'failed' | null
+      }
+    | undefined
 }
 
 /** Links of the invitee's manage page; the secret travels in the URL fragment. */
@@ -631,6 +639,15 @@ export function bookingEmail(
     field(t('What'), event),
     field(t('When'), formatMeetingTime(meeting.start, meeting.end, recipient.timeZone, language)),
   ]
+  if (meeting.payment && (kind === 'confirmed' || kind === 'rescheduled' || kind === 'cancelled')) {
+    const amount = formatPaymentAmount(meeting.payment, formattingLocale(language))
+    fields.push(field(t('bookingPayment.label'), t('bookingPayment.paid', { amount })))
+    if (kind === 'cancelled' && meeting.payment.refundStatus) {
+      fields.push(
+        field(t('bookingPayment.refund'), t(`bookingPayment.${meeting.payment.refundStatus}`)),
+      )
+    }
+  }
   if (isHost && comparisonZone(meeting.inviteeTimeZone) !== comparisonZone(recipient.timeZone)) {
     fields.push(
       field(t("Invitee's time"), formatShortTime(meeting.start, meeting.inviteeTimeZone, language)),

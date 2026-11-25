@@ -53,6 +53,36 @@ const recipients: Record<(typeof roles)[number], BookingEmailRecipient> = {
   guest: { role: 'attendee', email: 'charles@example.com', timeZone: 'Europe/Berlin' },
 }
 
+describe('paid booking mail', () => {
+  const paid = {
+    ...meeting,
+    payment: { amountMinor: 4242, currency: 'jpy', refundStatus: 'pending' as const },
+  }
+  it.each([
+    ['en', 'Paid', 'Refund pending'],
+    ['zh-CN', '已支付', '退款处理中'],
+    ['de', 'bezahlt', 'Rückerstattung ausstehend'],
+    ['es', 'pagados', 'Reembolso pendiente'],
+    ['fr', 'payés', 'Remboursement en cours'],
+    ['pt-BR', 'pagos', 'Reembolso pendente'],
+  ])('formats the original amount and refund state in %s', (locale, amountLabel, refundLabel) => {
+    for (const kind of kinds) {
+      const message = bookingEmail(kind, paid, { ...recipients.invitee, locale })
+      expect(message.text).toContain('JPY')
+      expect(message.text).toMatch(/4[,.\s]242|4242/)
+      expect(message.text).toContain(amountLabel)
+      expect(message.html).toContain(amountLabel)
+      if (kind === 'cancelled') {
+        expect(message.text).toContain(refundLabel)
+        expect(message.html).toContain(refundLabel)
+      } else {
+        expect(message.text).not.toContain(refundLabel)
+      }
+      expect(message.text).not.toContain('dashboard.stripe.com')
+    }
+  })
+})
+
 const receiptReasons = {
   en: {
     invitee: 'You received this email because you booked a meeting with Grace Hopper via Hourmere.',

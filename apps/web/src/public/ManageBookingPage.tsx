@@ -1,5 +1,6 @@
 import { type FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
+import { cancelledBookingPayment, useBookingPaymentItems } from '../components/booking-payment.ts'
 import { ConferenceNotice } from '../components/ConferenceNotice.tsx'
 import { EmailDeliveryHint } from '../components/EmailDeliveryHint.tsx'
 import { isKnownTimeZone } from '../format.ts'
@@ -653,7 +654,11 @@ function ManageView({
                     reason,
                     booking.pendingReschedule?.id,
                   )
-                  onCancelled({ ...booking, ...cancelled })
+                  onCancelled({
+                    ...booking,
+                    ...cancelled,
+                    ...(booking.payment && { payment: cancelledBookingPayment(booking.payment) }),
+                  })
                   setAnswerNotice(undefined)
                   setMode({
                     kind: 'view',
@@ -845,6 +850,7 @@ function BookingSummary({
   newToken: string | null
 }) {
   const { t, ui, locale: language } = useI18n()
+  const paymentItems = useBookingPaymentItems(booking.payment)
 
   const invitee = booking.attendees.find((a) => a.isBooker)
   const guests = booking.attendees.filter((a) => !a.isBooker)
@@ -886,6 +892,7 @@ function BookingSummary({
         items={[
           ['What', title],
           ['Status', cancelled ? t('Cancelled booking') : ended ? t('Ended') : t('Confirmed')],
+          ...paymentItems,
           [
             'When',
             <span key="when" className={cancelled ? 'struck' : undefined}>

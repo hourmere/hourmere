@@ -485,7 +485,8 @@ async function resolveBatch(
     .executeTakeFirst()
   if (!policy) throw eventTypeNotFound()
   if (policy.recurrence_revision !== request.preview.eventRevision) throw seriesChanged()
-  if (!policy.recurrence || event.bookingMode === 'group') throw recurrenceNotSupported()
+  if (!policy.recurrence || event.bookingMode === 'group' || event.payment)
+    throw recurrenceNotSupported()
 
   const { timeZone, maxOccurrences, allowedPatterns } = policy.recurrence as {
     timeZone: string

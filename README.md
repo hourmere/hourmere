@@ -447,6 +447,10 @@ Optional [automatic Google Meet](https://hourmere.com/docs/automatic-google-meet
 
 ## Known limitations
 
+- Paid bookings are off by default. Self-hosters can enable Stripe test-mode Checkout on
+  eligible personal events. Live checkout is pending rollout acceptance and payment-reference
+  cleanup. [Paid bookings](https://hourmere.com/docs/payments).
+
 - Organization OIDC single sign-on is off by default. The operator turns it on with
   `SSO_OIDC_ENABLED=true` (empty or unset follows the release default, which stays off
   until SSO ships; any other value prevents startup) and sets `SSO_ENCRYPTION_KEY`, an

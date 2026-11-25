@@ -3266,4 +3266,36 @@ export const admin = {
   '{value} reschedule deadline': '{value} reschedule deadline',
   '{value} cancellation deadline': '{value} cancellation deadline',
   'Default timing rules': 'Default timing rules',
+  // Paid booking details
+  'Open payment in Stripe': 'Open payment in Stripe',
+
+  // Paid booking settings
+  Payments: 'Payments',
+  'Charge for bookings': 'Charge for bookings',
+  'Payment required': 'Payment required',
+  'Free booking': 'Free booking',
+  Currency: 'Currency',
+  'Price for {duration}': 'Price for {duration}',
+  'Set a price for every duration. Invitees pay through Stripe Checkout.':
+    'Set a price for every duration. Invitees pay through Stripe Checkout.',
+  'Ask your instance operator to configure Stripe for paid bookings.':
+    'Ask your instance operator to configure Stripe for paid bookings.',
+  'This instance could not verify its Stripe configuration. Contact your instance operator.':
+    'This instance could not verify its Stripe configuration. Contact your instance operator.',
+  'Paid bookings are turned off on this instance.':
+    'Paid bookings are turned off on this instance.',
+  'Paid bookings are currently available in Stripe test mode only.':
+    'Paid bookings are currently available in Stripe test mode only.',
+  'Paid booking settings are unavailable on this instance.':
+    'Paid booking settings are unavailable on this instance.',
+  'Paid bookings are available for personal, one-on-one events without additional guests, a waitlist, routing or recurring bookings. Use an in-person location, a saved meeting link or no location.':
+    'Paid bookings are available for personal, one-on-one events without additional guests, a waitlist, routing or recurring bookings. Use an in-person location, a saved meeting link or no location.',
+  'Enter a price for this duration.': 'Enter a price for this duration.',
+  'Enter a whole amount.': 'Enter a whole amount.',
+  'Enter an amount with up to two decimal places.':
+    'Enter an amount with up to two decimal places.',
+  'Enter an amount from {min} to {max} {currency}.':
+    'Enter an amount from {min} to {max} {currency}.',
+  'Check the price for every duration and try again.':
+    'Check the price for every duration and try again.',
 } as const

@@ -244,6 +244,8 @@ Locations: create-event/update-event accept locations through JSON; slots/book a
 Booking limits: JSON maxBookingsPerDay, maxBookingsPerWeek, maxBookingsPerMonth;
                 integers 1–1000 or null. Set ceilings must not descend from day to week to month.
 Change deadlines: JSON rescheduleCutoffMinutes, cancelCutoffMinutes; minutes 1–525600 or null.
+Pricing: create-event/update-event accept payment {currency,prices: [{durationMinutes,amountMinor}]}.
+         Include every offered duration. Use null to make new bookings free.
 After booking: create-event/update-event accept --success-redirect-url URL,
                --success-redirect-parameters NAME,... (empty string clears the list),
                --success-redirect-include-invitee-personal-data true|false,

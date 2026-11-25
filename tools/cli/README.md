@@ -277,6 +277,13 @@ Disabling does not cancel existing bookings. Delete uses the web confirmation or
 There is currently no event-type deletion MCP tool or CLI command. See
 [creating and managing event types](https://hourmere.com/docs/event-types) for the editor, copying rules and limitations.
 
+For a supported personal event on an instance with Stripe test mode enabled, send
+`"payment":{"currency":"usd","prices":[{"durationMinutes":30,"amountMinor":5000}]}`
+in the create or update JSON. Include one integer minor-unit price for each offered duration.
+Use `"payment":null` to make future bookings free. The `event` command reads the saved
+price and availability. Invitees use the public page to go to Stripe Checkout. See
+[Paid bookings](https://hourmere.com/docs/payments) for setup, currencies and limits.
+
 中文：三个接口均需明确传入创建字段，不套用网页的链接建议或已连接会议服务默认值。
 用 `isActive` 启停不会取消已有预约；删除仅支持网页确认或 REST，目前没有 MCP／CLI 删除命令。
 

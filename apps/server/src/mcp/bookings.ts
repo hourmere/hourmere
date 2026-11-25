@@ -255,6 +255,7 @@ const ListBookingsInput = z.strictObject(ListBookingsQuery.shape)
 
 export interface BookingToolsDeps {
   db: Db
+  paidCheckoutAvailable?: boolean | undefined
   waitlistSecret?: string | undefined
   routingFormsEnabled?: boolean | undefined
   routingSecret?: string | undefined
@@ -284,6 +285,7 @@ export interface BookingToolsDeps {
  */
 export function bookingTools({
   db,
+  paidCheckoutAvailable,
   waitlistSecret,
   routingFormsEnabled,
   routingSecret,
@@ -300,6 +302,7 @@ export function bookingTools({
 }: BookingToolsDeps): Tool[] {
   const publicContext = (caller: McpCaller): PublicContext => ({
     db,
+    paidCheckoutAvailable,
     waitlistSecret,
     smtpConfigured,
     now,
@@ -341,7 +344,7 @@ export function bookingTools({
     scopeMode: (args) =>
       typeof args === 'object' && args !== null && 'teamSlug' in args ? 'team' : 'personal',
     title: 'Find available slots',
-    description: `Lists the times someone's event type can be booked between two dates, and the event type itself (title, default and allowed durations, selectable locations with public labels and phone collection requirements, the questions its booking form asks, and the host's time zone when applicable; round-robin metadata omits it). Choose locationOptionId from eventType.locations and pass the same id to create_booking; omission uses the default or first option. Host phone numbers, addresses and custom links are revealed only after booking. Choose durationMinutes from allowedDurationsMinutes when a different length is needed; omission uses the default. Use it before create_booking or reschedule_booking. The event type is identified by its booking link https://<host>/<handle>/<slug>. Each slot is given in UTC (start, end) and in the requested timeZone (localStart, localEnd); pass start unchanged to create_booking. Returns at most maxSlots slots (default 100, maximum 500) from a search of at most ${MAX_SLOT_RANGE_DAYS} days. If nextAfter is not null, pass it as after with the same query to continue. Availability can change between pages; recheck before booking.`,
+    description: `Lists the times someone's event type can be booked between two dates, and the event type itself (title, default and allowed durations, selectable locations with public labels and phone collection requirements, the questions its booking form asks, and the host's time zone when applicable; round-robin metadata omits it). Choose locationOptionId from eventType.locations and pass the same id to create_booking; omission uses the default or first option. Host phone numbers, addresses and custom links are revealed only after booking. Choose durationMinutes from allowedDurationsMinutes when a different length is needed; omission uses the default. Use it before create_booking or reschedule_booking. The event type is identified by its booking link https://<host>/<handle>/<slug>. Each slot is given in UTC (start, end) and in the requested timeZone (localStart, localEnd); pass start unchanged to create_booking. Returns at most maxSlots slots (default 100, maximum 500) from a search of at most ${MAX_SLOT_RANGE_DAYS} days. If nextAfter is not null, pass it as after with the same query to continue. Availability can change between pages; recheck before booking. Paid events require checkout through the public booking page.`,
     input: FindSlotsInput,
     output: FindSlotsOutput,
     annotations: {
@@ -425,7 +428,7 @@ export function bookingTools({
             : 'personal',
     title: 'Create a booking',
     description:
-      "Books a slot of someone's event type for an invitee, as their booking page would. start must be the exact start of a slot find_available_slots returned. Answer the event type's questions in responses, keyed by question id (required ones must be answered). Returns the booking and its manageToken: keep the token, it is shown only this once and is what reschedule_booking and cancel_booking need to act as the invitee. Fails with slot_unavailable if the time is not offered and slot_taken if someone else just booked it; then pick another slot. Fails with booking_changed if the round-robin host pool or activation changed while the call waited; call find_available_slots again before retrying. Choose locationOptionId from the event locations; askInvitee phone options require inviteePhone normalized to E.164 (common phone separators are removed). Use the same locationOptionId for slot lookup and booking. location_unavailable means the chosen option cannot be used by the assigned host. Pass the same durationMinutes used to find the slot; omission uses the event type’s default. Pass an idempotencyKey so that a retry after a lost response cannot book twice. For a one-time link, provide only oneTimeToken instead of handle/teamSlug/slug; it is consumed atomically with the booking. Unavailable links return the same one_time_link_not_found error; reschedule the resulting booking with its manageToken.",
+      "Books a slot of someone's event type for an invitee, as their booking page would. start must be the exact start of a slot find_available_slots returned. Answer the event type's questions in responses, keyed by question id (required ones must be answered). Returns the booking and its manageToken: keep the token, it is shown only this once and is what reschedule_booking and cancel_booking need to act as the invitee. Fails with slot_unavailable if the time is not offered and slot_taken if someone else just booked it; then pick another slot. Fails with booking_changed if the round-robin host pool or activation changed while the call waited; call find_available_slots again before retrying. Choose locationOptionId from the event locations; askInvitee phone options require inviteePhone normalized to E.164 (common phone separators are removed). Use the same locationOptionId for slot lookup and booking. location_unavailable means the chosen option cannot be used by the assigned host. Pass the same durationMinutes used to find the slot; omission uses the event type’s default. Pass an idempotencyKey so that a retry after a lost response cannot book twice. For a one-time link, provide only oneTimeToken instead of handle/teamSlug/slug; it is consumed atomically with the booking. Unavailable links return the same one_time_link_not_found error; reschedule the resulting booking with its manageToken. For paid events, send the invitee to the public booking page to complete Stripe Checkout.",
     input: CreateBookingInput,
     output: CreateBookingOutput,
     annotations: {

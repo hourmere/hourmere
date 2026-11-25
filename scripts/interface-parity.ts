@@ -8,6 +8,12 @@ const METHODS = ['get', 'head', 'options', 'trace', 'post', 'put', 'patch', 'del
 export type HttpMethod = (typeof METHODS)[number]
 const WRITE_METHODS: ReadonlySet<HttpMethod> = new Set(['post', 'put', 'patch', 'delete'])
 
+const INVITEE_CHECKOUT_ROUTES: Readonly<Record<string, string>> = {
+  startPublicCheckout: 'POST /api/v1/public/{handle}/{slug}/checkout',
+  getPublicCheckoutStatus: 'POST /api/v1/public/checkout/status',
+  cancelPublicCheckout: 'POST /api/v1/public/checkout/cancel',
+}
+
 // These reads explicitly ship on all three interfaces. Other reads remain
 // outside required parity coverage. Exact routes prevent an operation ID from moving silently.
 const REQUIRED_READS: Readonly<Record<string, string>> = {
@@ -72,6 +78,7 @@ export type InterfaceParityMapping = Record<
   string,
   | { mcp: string; cli: string }
   | { exemption: 'browser-session-only'; reason: string }
+  | { exemption: 'invitee-checkout'; reason: string }
   | { mcpReference: string; cliUpload: string; reason: string }
 >
 
@@ -147,6 +154,19 @@ function browserSessionOnly(security: unknown): boolean {
     Object.hasOwn(requirement, 'session') &&
     Array.isArray(requirement.session) &&
     requirement.session.length === 0
+  )
+}
+
+function optionalApiKey(security: unknown): boolean {
+  if (!Array.isArray(security) || security.length !== 2) return false
+  const [anonymous, credential]: unknown[] = security
+  return (
+    isRecord(anonymous) &&
+    Object.keys(anonymous).length === 0 &&
+    isRecord(credential) &&
+    Object.keys(credential).length === 1 &&
+    Array.isArray(credential.apiKey) &&
+    credential.apiKey.length === 0
   )
 }
 
@@ -288,6 +308,25 @@ export function interfaceParityErrors(
       if (operation && !browserSessionOnly(operation.security)) {
         errors.push(
           `${operationId}: browser-session-only exemption requires OpenAPI security exactly [{session: []}]; add the MCP tool and CLI command instead.`,
+        )
+      }
+      continue
+    }
+    if (
+      keys.length === 2 &&
+      entry.exemption === 'invitee-checkout' &&
+      Object.hasOwn(entry, 'reason')
+    ) {
+      const operation = writes.get(operationId)
+      if (
+        !Object.hasOwn(INVITEE_CHECKOUT_ROUTES, operationId) ||
+        !operation ||
+        operation.route !== INVITEE_CHECKOUT_ROUTES[operationId] ||
+        !optionalApiKey(operation.security) ||
+        !oneLineReason(entry.reason)
+      ) {
+        errors.push(
+          `${operationId}: invitee-checkout exemption requires a designated public Checkout route and optional API key security.`,
         )
       }
       continue

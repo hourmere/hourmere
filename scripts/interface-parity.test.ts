@@ -290,6 +290,24 @@ check('rejects an unregistered MCP tool', ({ interfaceParityErrors }) => {
   ).toContain('createBooking: MCP tool "nonexistent_tool" is not registered.')
 })
 
+it('limits the invitee checkout exemption to the published Stripe flow', () => {
+  const mapping = {
+    startPublicCheckout: { exemption: 'invitee-checkout', reason: 'Hosted payment.' },
+  }
+  const operation = {
+    method: 'post' as const,
+    path: '/api/v1/public/{handle}/{slug}/checkout',
+    operationId: 'startPublicCheckout',
+    security: [{}, { apiKey: [] }],
+  }
+  const check = (rest: InterfaceInventory['rest']) =>
+    interfaceParityErrors({ ...baseline, rest }, mapping)
+  expect(check([operation])).toEqual([])
+  expect(check([{ ...operation, path: '/api/v1/bookings' }])).toHaveLength(1)
+  expect(check([{ ...operation, security: [] }])).toHaveLength(1)
+  expect(check([{ ...operation, operationId: 'someOtherWrite' }])).not.toEqual([])
+})
+
 check('rejects a nonexistent CLI command', ({ interfaceParityErrors }) => {
   expect(
     interfaceParityErrors(baseline, {

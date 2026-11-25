@@ -173,5 +173,12 @@
   "series.cancelled.member": "已取消",
   "series.manage": "管理系列预约",
   "series.view": "查看系列预约",
-  "series.repair": "如需重试生成会议链接，请在 Hourmere 中打开对应的预约。"
+  "series.repair": "如需重试生成会议链接，请在 Hourmere 中打开对应的预约。",
+  "bookingPayment.label": "付款",
+  "bookingPayment.paid": "已支付 {amount}",
+  "bookingPayment.refund": "退款",
+  "bookingPayment.requested": "已申请退款",
+  "bookingPayment.pending": "退款处理中",
+  "bookingPayment.succeeded": "退款已发出",
+  "bookingPayment.failed": "退款失败"
 }

@@ -173,5 +173,12 @@
   "series.cancelled.member": "Cancelled",
   "series.manage": "Manage series",
   "series.view": "View series",
-  "series.repair": "To retry a meeting link, open the affected booking in Hourmere."
+  "series.repair": "To retry a meeting link, open the affected booking in Hourmere.",
+  "bookingPayment.label": "Payment",
+  "bookingPayment.paid": "Paid {amount}",
+  "bookingPayment.refund": "Refund",
+  "bookingPayment.requested": "Refund requested",
+  "bookingPayment.pending": "Refund pending",
+  "bookingPayment.succeeded": "Refund issued",
+  "bookingPayment.failed": "Refund failed"
 }

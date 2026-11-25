@@ -31,6 +31,7 @@ import {
 } from './availability.ts'
 import { latestBookingId } from './booking-chain.ts'
 import { bookingPageQuery, encodeBookingCursor, type ListBookingsInput } from './booking-page.ts'
+import { type HostBookingPayment, readBookingPayment } from './booking-payment-details.ts'
 import {
   assertInviteeChangeOpen,
   type ChangeCutoffs,
@@ -186,6 +187,7 @@ export interface BookingWithToken {
 
 export interface HostBookingDetail extends Booking {
   routing?: RoutingBookingSnapshot
+  payment?: HostBookingPayment
 }
 
 export const MAX_GUESTS = 10
@@ -1871,6 +1873,11 @@ async function createBookingInTransaction(
   if (!current || current.id !== et.id || current.organizationId !== et.organizationId) {
     throw bookingEventUnavailable(oneTimeLink !== undefined)
   }
+  if (current.payment) {
+    if (oneTimeLink) throw bookingEventUnavailable(true)
+    if (routing) throw routedBookingUnavailable()
+    throw new DomainError('conflict', 'payment_required')
+  }
   if (checkEvent) await checkEvent(current)
   if (current.schedulingType !== et.schedulingType) {
     throw bookingEventUnavailable(oneTimeLink !== undefined)
@@ -2958,15 +2965,27 @@ export async function getHostBookingDetail(
   if (!UUID.test(id)) throw bookingNotFound()
   const { db, principal } = ctx
   const row = await hostBookingDetailQuery(ctx, id)
-    .select('b.has_routing_snapshot')
+    .select(['b.has_routing_snapshot', 'b.payment_confirmed_at'])
     .executeTakeFirst()
   if (!row) throw bookingNotFound()
 
-  // Ordinary detail keeps its existing statement count and response shape.
   const routing = row.has_routing_snapshot ? await readBookingRoutingSnapshot(ctx, row.id) : null
   if (routing === undefined) throw bookingNotFound()
   const [booking] = await toBookings(db, [row], { userId: principal.user.id, now: ctx.now })
-  return routing ? { ...(booking as Booking), routing } : (booking as Booking)
+  const payment =
+    row.payment_confirmed_at || row.rescheduled_from_id
+      ? await readBookingPayment(db, row.id, principal.organization.id)
+      : undefined
+  return {
+    ...(booking as Booking),
+    ...(routing && { routing }),
+    ...(payment && {
+      payment: {
+        ...payment.summary,
+        ...(payment.stripeDashboardUrl && { stripeDashboardUrl: payment.stripeDashboardUrl }),
+      },
+    }),
+  }
 }
 
 /**

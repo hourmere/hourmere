@@ -173,5 +173,12 @@
   "series.cancelled.member": "Storniert",
   "series.manage": "Terminserie verwalten",
   "series.view": "Terminserie ansehen",
-  "series.repair": "Öffnen Sie die betroffene Buchung in Hourmere, um die Erstellung des Meetinglinks erneut zu versuchen."
+  "series.repair": "Öffnen Sie die betroffene Buchung in Hourmere, um die Erstellung des Meetinglinks erneut zu versuchen.",
+  "bookingPayment.label": "Zahlung",
+  "bookingPayment.paid": "{amount} bezahlt",
+  "bookingPayment.refund": "Rückerstattung",
+  "bookingPayment.requested": "Rückerstattung angefordert",
+  "bookingPayment.pending": "Rückerstattung ausstehend",
+  "bookingPayment.succeeded": "Rückerstattung veranlasst",
+  "bookingPayment.failed": "Rückerstattung fehlgeschlagen"
 }

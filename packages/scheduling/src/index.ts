@@ -75,6 +75,7 @@ export {
 } from './booking-export.ts'
 export { resolveBookingOrganization } from './booking-organization.ts'
 export { MAX_SEARCH_LENGTH } from './booking-page.ts'
+export { type BookingPaymentSummary, readBookingPayment } from './booking-payment-details.ts'
 export {
   type Attendee,
   type Booking,
@@ -325,13 +326,17 @@ export {
 } from './payment-refunds.ts'
 export {
   cancelPaymentHold,
+  cancelPublicCheckout,
   confirmPaymentHold,
   createPaymentCheckout,
   createPaymentHold,
+  getPublicCheckoutStatus,
   PAYMENT_HOLD_MINUTES,
   type PaymentContext,
   type PaymentPrice,
+  type PublicCheckoutStatus,
   recordStripePaymentEvent,
+  startPublicCheckout,
 } from './payments.ts'
 export {
   findLegacyHandleCollisions,

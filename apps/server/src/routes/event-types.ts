@@ -2,6 +2,11 @@ import { createRoute, z } from '@hono/zod-openapi'
 import type { Principal } from '@hourmere/auth'
 import { EVENT_TYPE_RULE_BOUNDS, MAX_ALLOWED_DURATIONS } from '@hourmere/core'
 import {
+  PAYMENT_CURRENCIES,
+  PAYMENT_MAX_MINOR,
+  PAYMENT_PROVIDER_AVAILABILITIES,
+} from '@hourmere/core/payment'
+import {
   activateRoundRobin,
   CHANGE_CUTOFF_MAX_MINUTES,
   createEventType,
@@ -300,6 +305,34 @@ const rule = (name: keyof typeof EVENT_TYPE_RULE_BOUNDS, description: string) =>
   z.int().openapi({ description, ...minMax(EVENT_TYPE_RULE_BOUNDS[name]) })
 const minMax = ({ min, max }: { min: number; max: number }) => ({ minimum: min, maximum: max })
 
+const paymentPriceFields = {
+  durationMinutes: rule('durationMinutes', 'The corresponding offered duration in whole minutes'),
+  amountMinor: z.int().openapi({
+    description:
+      'Amount in currency minor units. The minimum is 30 for GBP, 50 for other supported currencies. JPY has zero decimal places.',
+    minimum: 30,
+    maximum: PAYMENT_MAX_MINOR,
+  }),
+}
+const paymentDetails = {
+  description:
+    'Stripe Checkout price for every offered duration. Available for personal, individual events with one host and without recurrence, guests, waitlist, phone or automatic conferences. Omission preserves the saved price on update; null makes future bookings free.',
+}
+const PaymentInput = z
+  .strictObject({
+    currency: z.enum(PAYMENT_CURRENCIES),
+    prices: z.array(z.strictObject(paymentPriceFields)).min(1).max(MAX_ALLOWED_DURATIONS),
+  })
+  .nullable()
+  .openapi(paymentDetails)
+const Payment = z
+  .object({
+    currency: z.enum(PAYMENT_CURRENCIES),
+    prices: z.array(z.object(paymentPriceFields)),
+  })
+  .nullable()
+  .openapi(paymentDetails)
+
 export const WaitlistSettings = z.object({ enabled: z.boolean() }).openapi('WaitlistSettings')
 const WaitlistSettingsInput = z
   .strictObject({ enabled: z.boolean() })
@@ -449,6 +482,13 @@ export const EventType = z
     smsRemindersAvailable: z.boolean().optional(),
     notifications: NotificationSettings,
     waitlist: WaitlistSettings,
+    payment: Payment.optional(),
+    paymentAvailability: z
+      .string()
+      .optional()
+      .openapi({
+        description: `Known values: ${[...PAYMENT_PROVIDER_AVAILABILITIES, 'unsupported_event'].join(', ')}. Treat unknown values as unavailable.`,
+      }),
     successRedirect: SuccessRedirect.optional(),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
@@ -485,6 +525,7 @@ export const EventTypeInput = z
     questions: questions.optional(),
     notifications: NotificationSettingsInput.optional(),
     waitlist: WaitlistSettingsInput.optional(),
+    payment: PaymentInput.optional(),
     successRedirect: SuccessRedirectInput.optional(),
     isActive: fields.isActive.optional().openapi({ default: true }),
     isHidden: fields.isHidden.optional().openapi({ default: false }),
@@ -526,6 +567,7 @@ export const EventTypeUpdate = z
     questions: questions.optional(),
     notifications: NotificationSettingsInput.optional(),
     waitlist: WaitlistSettingsInput.optional(),
+    payment: PaymentInput.optional(),
     successRedirect: SuccessRedirectInput.optional(),
     isActive: fields.isActive.optional(),
     isHidden: fields.isHidden.optional(),
@@ -568,9 +610,11 @@ export const EVENT_TYPE_BODY_LIMIT = 2 * 1024 * 1024
 const notFound =
   'event_type_not_found: no such event type in the organization, or one the caller cannot see'
 const invalid =
-  'invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules)'
+  'invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, invalid_schedule_id (scheduleId is not one of the host’s schedules), invalid_payment_price, or payment_flow_unsupported'
 const forbidden = `insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; ${CROSS_ORIGIN_WRITE}`
 const slugTaken = 'slug_taken: another event type on the same page has this slug'
+const paymentSettingsUnavailable =
+  'payment_settings_unavailable: the instance does not currently accept new Checkout payments'
 const locationOptionsConflict =
   'location_options_conflict: changing legacy location would replace multiple or labelled options; use locations through an option-aware client'
 
@@ -620,7 +664,7 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
         responses: {
           200: { description: 'Saved settings', content: json(WaitlistSettings) },
           ...errorResponses({
-            400: 'invalid_request, waitlist_unsupported',
+            400: 'invalid_request, waitlist_unsupported, payment_flow_unsupported',
             403: forbidden,
             404: notFound,
             409: ORGANIZATION_CONTEXT_CHANGED,
@@ -824,7 +868,7 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
           ...errorResponses({
             400: invalid,
             403: forbidden,
-            409: `${slugTaken}; ${ORGANIZATION_CONTEXT_CHANGED}`,
+            409: `${slugTaken}; ${paymentSettingsUnavailable}; ${ORGANIZATION_CONTEXT_CHANGED}`,
           }),
         },
       }),
@@ -861,7 +905,7 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
             400: invalid,
             403: forbidden,
             404: notFound,
-            409: `${slugTaken}; ${ORGANIZATION_CONTEXT_CHANGED}`,
+            409: `${slugTaken}; ${paymentSettingsUnavailable}; ${ORGANIZATION_CONTEXT_CHANGED}`,
           }),
         },
       }),
@@ -917,7 +961,7 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
             400: invalid,
             403: forbidden,
             404: notFound,
-            409: `${slugTaken}; ${locationOptionsConflict}; ${ORGANIZATION_CONTEXT_CHANGED}`,
+            409: `${slugTaken}; ${locationOptionsConflict}; ${paymentSettingsUnavailable}; ${ORGANIZATION_CONTEXT_CHANGED}`,
           }),
         },
       }),

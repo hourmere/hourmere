@@ -39,6 +39,7 @@ import {
   BookingPage,
   BookingsPage,
   CalendarsPage,
+  CheckoutReturnPage,
   ConferencesPage,
   ConnectedAppsPage,
   CreateTeamPage,
@@ -78,6 +79,7 @@ import {
 import { BookingPanelContext } from './pages/bookings/BookingPanel.tsx'
 import { AppNotFoundPage, NotFoundPage } from './pages/NotFound.tsx'
 import { bookingPath, PATHS } from './paths.ts'
+import { CHECKOUT_RETURN_PATH } from './public/checkout-return.ts'
 import { useAdminPwa } from './pwa.ts'
 
 export const appRoutes = createRoutesFromElements(
@@ -151,6 +153,7 @@ export const appRoutes = createRoutesFromElements(
     <Route path="/poll/recover" element={<MeetingPollPage entry="recover" />} />
     <Route path="/poll/reminder-opt-out" element={<MeetingPollPage entry="optOut" />} />
     <Route path="/booking" element={<ManageBookingPage />} />
+    <Route path={CHECKOUT_RETURN_PATH} element={<CheckoutReturnPage />} />
     <Route
       path="/team/:teamSlug/:slug/waitlist/:waitlistToken/:suggestedStart/:previewExpiresAt"
       element={<TeamBookingPage />}

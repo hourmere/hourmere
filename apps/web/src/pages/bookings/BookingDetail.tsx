@@ -1,10 +1,14 @@
-import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from 'react'
+import { type FormEvent, Fragment, useCallback, useEffect, useId, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router'
 import { isReadOnlyBooking } from '../../api/booking-policy.ts'
 import { api, type Schemas, unwrap } from '../../api/client.ts'
 import { errorMessage, isOrganizationContextChanged, RequestError } from '../../api/errors.ts'
 import { type Booking, isNotFound, loadProfile } from '../../api/resources.ts'
 import { BreakableText } from '../../components/BreakableText.tsx'
+import {
+  cancelledBookingPayment,
+  useBookingPaymentItems,
+} from '../../components/booking-payment.ts'
 import { ConferenceNotice } from '../../components/ConferenceNotice.tsx'
 import { Field } from '../../components/forms.tsx'
 import { OrganizationContextConflict } from '../../components/OrganizationContextConflict.tsx'
@@ -49,6 +53,7 @@ type Question = Schemas['Question']
 interface Loaded {
   booking: Booking
   routing: Schemas['BookingRouting'] | undefined
+  payment: Schemas['HostBooking']['payment']
   /** The event type's questions, for labelling answers; [] if it is gone. */
   questions: Question[]
   timeZone: string
@@ -177,7 +182,7 @@ function BookingDetail({
       ])
       if (detail === 'missing' || detail === 'resolve') return detail
       // Keep the original snapshot separate from the booking updated by mutation and list responses.
-      const { routing, ...booking } = detail
+      const { routing, payment, ...booking } = detail
       let questions: Question[] = booking.questions ?? []
       if (booking.eventTypeId && !booking.questions) {
         // The event type may have been deleted since, or belong to another organization's
@@ -193,7 +198,7 @@ function BookingDetail({
           if (signal.aborted) throw err
         }
       }
-      return { booking, routing, questions, ...hostZone(profile) }
+      return { booking, routing, payment, questions, ...hostZone(profile) }
     },
     [id],
   )
@@ -241,6 +246,7 @@ function BookingDetail({
 function BookingView({
   booking: initial,
   routing,
+  payment: initialPayment,
   questions,
   timeZone,
   fromProfile,
@@ -257,6 +263,8 @@ function BookingView({
 
   const viewMounted = useMounted()
   const [booking, setBooking] = useState(initial)
+  const [payment, setPayment] = useState(initialPayment)
+  const paymentItems = useBookingPaymentItems(payment)
   const previousRow = useRef(rowBooking)
   useEffect(() => {
     if (rowBooking && previousRow.current !== rowBooking)
@@ -362,6 +370,22 @@ function BookingView({
             {format.dateTime(booking.createdAt)}
             {t(', through {0}', { '0': ui(SOURCE_LABELS[booking.source] ?? 'Unknown') })}
           </dd>
+          {paymentItems.map(([label, value]) => (
+            <Fragment key={label}>
+              <dt>{ui(label)}</dt>
+              <dd>{value}</dd>
+            </Fragment>
+          ))}
+          {payment?.stripeDashboardUrl && (
+            <>
+              <dt>Stripe</dt>
+              <dd>
+                <a href={payment.stripeDashboardUrl} target="_blank" rel="noreferrer">
+                  {t('Open payment in Stripe')}
+                </a>
+              </dd>
+            </>
+          )}
           {booking.rescheduledFromId && (
             <>
               <dt>{t('Rescheduled')}</dt>
@@ -431,6 +455,7 @@ function BookingView({
           onCancelled={(updated) => {
             updateBooking(updated)
             if (!viewMounted.current) return
+            setPayment((current) => current && cancelledBookingPayment(current))
             setStatus('The booking is cancelled.')
             statusRef.current?.focus()
           }}

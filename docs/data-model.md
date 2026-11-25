@@ -2449,7 +2449,7 @@ An immutable 30-minute deadline bounds the hold. Expiry releases host occupancy 
 confirmation after the deadline records refund intent without reviving the booking.
 The transition guard prevents changing retained deadlines/references or resurrecting terminal
 holds. Group seats and imported bookings cannot carry payment holds. See the
-[paid-booking design](payments.md) for the internal-only rollout boundary, refund
+[paid-booking design](payments.md) for the test-mode rollout boundary, refund
 ledger, retention and operator responsibilities. Stop old app and worker processes before
 migration and restart all roles together.
 
@@ -2481,6 +2481,11 @@ the leased operation and its provider refund ID. Booking changes atomically upda
 attempt's current booking association while keeping the original PaymentIntent reference
 on the root. The receiver retains the receipt, account, mode and provider IDs of a signed
 paid Session with a binding mismatch for operator reconciliation.
+
+Migration `0191_event_type_payment.sql` adds optional `event_types.payment` configuration
+with one currency and one integer minor-unit price per offered duration. Existing event
+types stay free. Service writes normalize the duration order and preserve it in the price
+list. The setting affects future holds only. Checkout attempts keep their own price snapshot.
 
 ## Private attendee no-show markers
 

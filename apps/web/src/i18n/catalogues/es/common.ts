@@ -598,4 +598,51 @@ export const common = {
   // Booking page preview
   'These are sample times. Booking is disabled in the preview.':
     'Estos horarios son de ejemplo. No se pueden hacer reservas en la vista previa.',
+  // Paid booking details
+  'bookingPayment.label': 'Pago',
+  'bookingPayment.paid': '{amount} pagados',
+  'bookingPayment.refund': 'Reembolso',
+  'bookingPayment.requested': 'Reembolso solicitado',
+  'bookingPayment.pending': 'Reembolso pendiente',
+  'bookingPayment.succeeded': 'Reembolso emitido',
+  'bookingPayment.failed': 'Error en el reembolso',
+  'bookingPayment.none': 'Sin reembolso',
+  'bookingPayment.unknown': 'Estado no disponible',
+  // Paid booking checkout
+  'Price: {amount}': 'Precio: {amount}',
+  'Starting Checkout…': 'Abriendo la página de pago…',
+  'Continue to payment': 'Ir al pago',
+  'Payment status': 'Estado del pago',
+  'Waiting for payment confirmation': 'Esperando la confirmación del pago',
+  'Reservation expired': 'La reserva ha caducado',
+  'Reservation cancelled': 'Reserva cancelada',
+  'A full refund has been requested.': 'Se ha solicitado un reembolso completo.',
+  'Stripe is processing the refund.': 'Stripe está tramitando el reembolso.',
+  'Stripe has sent your refund. Your bank may take time to post it.':
+    'Stripe ha enviado el reembolso. Tu banco puede tardar en abonarlo.',
+  'The refund could not be completed. Contact the host for help.':
+    'No se ha podido completar el reembolso. Ponte en contacto con la persona anfitriona.',
+  'We couldn’t find this payment attempt': 'No encontramos este intento de pago',
+  'Return to the tab where you started payment. If your booking was confirmed, use the link in your confirmation email.':
+    'Vuelve a la pestaña donde iniciaste el pago. Si se confirmó tu cita, usa el enlace del correo de confirmación.',
+  'We couldn’t check the payment. Try again before starting another booking.':
+    'No hemos podido comprobar el pago. Inténtalo de nuevo antes de reservar otra cita.',
+  'Your time is reserved for up to 30 minutes. Hourmere will confirm the booking after it receives the payment.':
+    'Tu horario queda reservado durante un máximo de 30 minutos. Hourmere confirmará la cita cuando reciba el pago.',
+  'Release unpaid reservation': 'Liberar la reserva sin pagar',
+  'Payment arrived after the reservation ended. Your booking was not confirmed.':
+    'El pago llegó cuando ya había terminado la reserva. Tu cita no se ha confirmado.',
+  'Manage booking': 'Gestionar la cita',
+  'Choose another time': 'Elegir otro horario',
+  'The price has changed. Review the updated price and choose a time again.':
+    'El precio ha cambiado. Revisa el nuevo precio y vuelve a elegir un horario.',
+  'Online payment is temporarily unavailable. Please contact the host.':
+    'El pago en línea no está disponible temporalmente. Ponte en contacto con la persona anfitriona.',
+  'We couldn’t open Stripe Checkout. Try again to continue this payment attempt.':
+    'No hemos podido abrir Stripe Checkout. Inténtalo de nuevo para continuar con este pago.',
+  'Open booking page to pay': 'Abrir la página de reserva para pagar',
+  'The suggested time is selected. Review the details before continuing to payment.':
+    'Se ha seleccionado el horario sugerido. Revisa los datos antes de ir al pago.',
+  'You’ll pay securely on Stripe. Your booking is confirmed only after Hourmere receives the payment. If you cancel the booking, a full refund is requested.':
+    'Pagarás de forma segura en Stripe. Hourmere no confirmará la cita hasta recibir el pago. Si cancelas la cita, se solicitará un reembolso completo.',
 } as const

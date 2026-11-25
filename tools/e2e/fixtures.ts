@@ -46,11 +46,13 @@ import { startFixtureServer } from './fixture-server.ts'
 import { listenOwned, type OwnedListener } from './listeners.ts'
 import { type PollAuditState, seedPollAuditData } from './meeting-poll-audit-data.ts'
 import { type ScreenshotFixtureState, seedScreenshotData } from './screenshot-data.ts'
+import { stripeFixture } from './stripe-fixture.ts'
 
 export interface FixtureApp {
   url: string
   parentUrl: string
   personalPath: string
+  stripe?: ReturnType<typeof stripeFixture>
   setEmbedSnippet: (snippet: string) => void
   configureGroupSeats: () => Promise<void>
   configureDurations: () => Promise<void>
@@ -127,6 +129,7 @@ export const test = base.extend<{
   notificationEditor: boolean
   slotSnippets: boolean
   waitlistSmtp: boolean
+  paidStripe: boolean
 }>({
   automaticMeet: [false, { option: true }],
   multiHostMeet: [false, { option: true }],
@@ -134,6 +137,7 @@ export const test = base.extend<{
   notificationEditor: [false, { option: true }],
   slotSnippets: [false, { option: true }],
   waitlistSmtp: [false, { option: true }],
+  paidStripe: [false, { option: true }],
   suppressFailureDom: [
     async ({ context }, use, testInfo) => {
       // Depending on context runs this teardown before its artifact finalization.
@@ -157,6 +161,7 @@ export const test = base.extend<{
       notificationEditor,
       slotSnippets,
       waitlistSmtp,
+      paidStripe,
     },
     use,
   ) => {
@@ -176,6 +181,7 @@ export const test = base.extend<{
         f = createFixtures(db),
         host = await f.host({ handle: 'fixture-host', name: 'Fixture Host', timeZone: 'UTC' })
       await f.schedule(host.userId, { timeZone: 'UTC' })
+      const stripe = paidStripe ? stripeFixture(url, db) : undefined
       const provider = fakeGoogle(),
         sent: MailMessage[] = []
       let meetResponse: 'pending' | 'success' | 'failure' | 'lost' = 'pending'
@@ -311,12 +317,21 @@ export const test = base.extend<{
           minimumNoticeMinutes: 30,
         })
       }
-      await f.eventType(host.organizationId, host.userId, {
+      const personalEvent = await f.eventType(host.organizationId, host.userId, {
         title: 'Fixture call',
         slug: 'call',
         allowGuests: false,
         minimumNoticeMinutes: 30,
+        ...(stripe && { location: { kind: 'link', url: 'https://video.example.test/fixture' } }),
       })
+      if (stripe)
+        await db
+          .updateTable('event_types')
+          .set({
+            payment: { currency: 'usd', prices: [{ durationMinutes: 30, amountMinor: 4242 }] },
+          })
+          .where('id', '=', personalEvent)
+          .execute()
       const team = await f.organization('FixtureTeam')
       await f.member(host.userId, team, 'owner')
       await f.eventType(team, null, {
@@ -468,31 +483,37 @@ export const test = base.extend<{
       parentListener = await listenOwned(parent)
       const parentUrl = parentListener.url
       const authSecret = randomBytes(32).toString('base64')
-      app = await startFixtureServer(appListener, {
-        DATABASE_URL: owned.url,
-        BETTER_AUTH_SECRET: authSecret,
-        SIGNUP: 'closed',
-        HOURMERE_ROLE: 'web',
-        // SMTP availability enables waitlist admission. This web-only fixture never
-        // runs delivery workers; explicit waitlist delivery uses the in-memory sink.
-        ...(waitlistSmtp && {
-          SMTP_URL: 'smtp://127.0.0.1:1',
-          MAIL_FROM: 'Hourmere Fixture <fixture@hourmere.invalid>',
-        }),
-        EMBED_ALLOWED_ORIGINS: parentUrl,
-        ...(uiAudit && { MCP_OAUTH_ENABLED: 'true' }),
-        ...(notificationEditor && { FOLLOW_UP_HOST_NOTES_ENABLED: 'true' }),
-        ...(slotSnippets && { SLOT_SNIPPETS_ENABLED: 'true' }),
-        ...(automaticMeet && {
-          GOOGLE_MEET_ENABLED: 'true',
-          GOOGLE_CALENDAR_CLIENT_ID: 'synthetic-client',
-          GOOGLE_CALENDAR_CLIENT_SECRET: 'synthetic-secret',
-          CALENDAR_ENCRYPTION_KEY: TEST_CALENDAR_KEY,
-        }),
-        WEB_DIST:
-          process.env.HOURMERE_E2E_WEB_DIST ??
-          fileURLToPath(new URL('../../apps/web/dist', import.meta.url)),
-      })
+      app = await startFixtureServer(
+        appListener,
+        {
+          DATABASE_URL: owned.url,
+          BETTER_AUTH_SECRET: authSecret,
+          SIGNUP: 'closed',
+          HOURMERE_ROLE: 'web',
+          ...stripe?.env,
+          // SMTP availability enables waitlist admission. This web-only fixture never
+          // runs delivery workers; explicit waitlist delivery uses the in-memory sink.
+          ...(waitlistSmtp && {
+            SMTP_URL: 'smtp://127.0.0.1:1',
+            MAIL_FROM: 'Hourmere Fixture <fixture@hourmere.invalid>',
+          }),
+          EMBED_ALLOWED_ORIGINS: parentUrl,
+          ...(uiAudit && { MCP_OAUTH_ENABLED: 'true' }),
+          ...(notificationEditor && { FOLLOW_UP_HOST_NOTES_ENABLED: 'true' }),
+          ...(slotSnippets && { SLOT_SNIPPETS_ENABLED: 'true' }),
+          ...(automaticMeet && {
+            GOOGLE_MEET_ENABLED: 'true',
+            GOOGLE_CALENDAR_CLIENT_ID: 'synthetic-client',
+            GOOGLE_CALENDAR_CLIENT_SECRET: 'synthetic-secret',
+            CALENDAR_ENCRYPTION_KEY: TEST_CALENDAR_KEY,
+          }),
+          WEB_DIST:
+            process.env.HOURMERE_E2E_WEB_DIST ??
+            fileURLToPath(new URL('../../apps/web/dist', import.meta.url)),
+        },
+        undefined,
+        stripe ? { stripeTransport: stripe.transport } : {},
+      )
       let externalRequests = 0
       let authorization: string | undefined
       await context.route('**/*', async (route) => {
@@ -524,6 +545,7 @@ export const test = base.extend<{
         url,
         parentUrl,
         personalPath: '/fixture-host/call',
+        ...(stripe && { stripe }),
         auditPollState: async (state) => {
           // Poll backing events must not change the existing host/list audit states.
           const pollHost = await f.host()

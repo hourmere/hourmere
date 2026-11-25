@@ -1,6 +1,7 @@
 // The event type form's state, its checks (the API's documented limits) and the mapping of
 // the server's error codes back to fields. Inputs hold text; toInput turns a checked draft
 // into the API's body.
+import { isPaidEventSupported } from '@hourmere/core/payment'
 import type { Schemas } from '../../api/client.ts'
 import { RequestError } from '../../api/errors.ts'
 import type { EventType } from '../../api/resources.ts'
@@ -18,6 +19,14 @@ import {
   notificationsInput,
   validateNotificationsDraft,
 } from './notifications-form.ts'
+import {
+  type PaymentDraft,
+  paymentAmountField,
+  paymentAmountLabel,
+  paymentFromSettings,
+  paymentInput,
+  unsupportedPayment,
+} from './payment-form.ts'
 
 export type QuestionType = Schemas['Question']['type']
 export type LocationKind = NonNullable<EventType['location']>['kind']
@@ -114,6 +123,7 @@ export interface EventTypeDraft {
   allowGuests: boolean
   smsRemindersEnabled: boolean
   waitlistEnabled: boolean
+  payment: PaymentDraft
   successRedirectUrl: string
   successRedirectParameters: SuccessRedirectParameter[]
   includeInviteePersonalData: boolean
@@ -176,6 +186,7 @@ export function emptyDraft(): EventTypeDraft {
     allowGuests: false,
     smsRemindersEnabled: false,
     waitlistEnabled: false,
+    payment: paymentFromSettings(),
     successRedirectUrl: '',
     successRedirectParameters: [],
     includeInviteePersonalData: false,
@@ -235,6 +246,7 @@ export function draftFromEventType(e: EventType): EventTypeDraft {
     allowGuests: e.allowGuests,
     smsRemindersEnabled: e.smsRemindersEnabled,
     waitlistEnabled: e.waitlist?.enabled ?? false,
+    payment: paymentFromSettings(e.payment),
     successRedirectUrl: e.successRedirect?.url ?? '',
     successRedirectParameters: [...(e.successRedirect?.parameters ?? [])],
     includeInviteePersonalData: e.successRedirect?.includeInviteePersonalData ?? false,
@@ -247,6 +259,14 @@ export function draftFromEventType(e: EventType): EventTypeDraft {
 export function comparable(draft: EventTypeDraft): string {
   return JSON.stringify({
     ...draft,
+    payment: draft.payment.enabled
+      ? {
+          currency: draft.payment.currency,
+          amounts: draft.allowedDurationsMinutes.map(
+            (duration) => draft.payment.amounts[duration] ?? '',
+          ),
+        }
+      : null,
     notifications: comparableNotifications(draft.notifications),
     questions: draft.questions.map(({ key: _key, options, ...q }) => ({
       ...q,
@@ -619,6 +639,18 @@ export function hasAutomaticLocation(draft: EventTypeDraft, kind: 'google_meet' 
   )
 }
 
+export function paidDraftSupported(draft: EventTypeDraft, personal: boolean): boolean {
+  return isPaidEventSupported({
+    personal,
+    schedulingType: draft.schedulingType,
+    bookingMode: draft.bookingMode,
+    hostCount: draft.hostUserIds.length || (personal ? 1 : 0),
+    allowGuests: draft.allowGuests,
+    waitlistEnabled: draft.waitlistEnabled,
+    locationKinds: orderedLocations(draft).map((option) => option.kind),
+  })
+}
+
 export function draftQuestions(questions: readonly QuestionDraft[]): Schemas['Question'][] {
   return questions.map((q) => ({
     id: q.id,
@@ -676,6 +708,9 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
     allowGuests: draft.allowGuests,
     smsRemindersEnabled: draft.smsRemindersEnabled,
     ...(draft.waitlistEnabled && { waitlist: { enabled: true } }),
+    ...(draft.payment.enabled && {
+      payment: paymentInput(draft.payment, draft.allowedDurationsMinutes),
+    }),
     ...(draft.successRedirectUrl !== '' && { successRedirect: redirectInput(draft) }),
     ...(comparableNotifications(draft.notifications) !==
       comparableNotifications(defaultNotificationsDraft()) && {
@@ -720,6 +755,13 @@ export function toPatchInput(draft: EventTypeDraft, baseline: EventTypeDraft): E
   // A metadata save must preserve waitlist changes made outside this editor session.
   if (draft.waitlistEnabled === baseline.waitlistEnabled) delete body.waitlist
   else body.waitlist = { enabled: draft.waitlistEnabled }
+  const payment = paymentInput(draft.payment, draft.allowedDurationsMinutes)
+  if (
+    JSON.stringify(payment) ===
+    JSON.stringify(paymentInput(baseline.payment, baseline.allowedDurationsMinutes))
+  )
+    delete body.payment
+  else body.payment = payment
   // Saved targets can stop meeting instance policy. Do not re-submit an untouched target,
   // or overwrite another client's redirect edit with this editor session's older copy.
   if (JSON.stringify(redirectInput(draft)) === JSON.stringify(redirectInput(baseline)))
@@ -793,6 +835,7 @@ export function fieldLabels(draft: EventTypeDraft): Record<string, UiText> {
     cancelCutoffMinutes: 'Invitee cancellation deadline',
     position: 'Position',
     waitlist: 'Booking waitlist',
+    payment: 'Payments',
     successRedirect: 'After booking',
     'successRedirect.url': 'Continue to URL',
     'successRedirect.parameters': 'URL parameters',
@@ -802,6 +845,8 @@ export function fieldLabels(draft: EventTypeDraft): Record<string, UiText> {
     'notifications.reminders': 'Pre-meeting reminders',
     'notifications.followUps': 'Post-meeting follow-ups',
   }
+  for (const duration of draft.allowedDurationsMinutes)
+    labels[paymentAmountField(duration)] = paymentAmountLabel(duration)
   for (const option of orderedLocations(draft)) {
     labels[`location-option-${option.id}-label`] = 'Location label'
     labels[`location-option-${option.id}-value`] = 'Location'
@@ -868,6 +913,12 @@ export function serverErrors(
     if (message) return field(err.field, message)
   }
   switch (err.code) {
+    case 'payment_settings_unavailable':
+      return field('payment', 'Paid booking settings are unavailable on this instance.')
+    case 'payment_flow_unsupported':
+      return field('payment', unsupportedPayment)
+    case 'invalid_payment_price':
+      return field('payment', 'Check the price for every duration and try again.')
     case 'invalid_group_configuration':
       return field(
         'bookingMode',
