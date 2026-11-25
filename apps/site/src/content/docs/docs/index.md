@@ -218,8 +218,8 @@ not grant host rescheduling or reschedule-request authority through REST, MCP or
   self-hosting, linking, enforcement and the remaining implementation sequence.
 - [Make](/docs/make) recipes require manual assembly; no import-verified blueprint or native
   Hourmere Make app is shipped. Verify signed webhooks before any downstream action.
-- The [n8n community node](/docs/n8n) is not yet published to npm or available on n8n Cloud.
-  Self-hosters can install its local package; downstream effects need durable idempotency.
+- The [n8n community node](/docs/n8n) supports self-hosted installations. n8n Cloud
+  installation requires verification by n8n. Downstream effects need durable idempotency.
 - [Zapier](/docs/zapier) is not yet published in the Zapier directory. The source app
   can be deployed privately with your own Zapier account.
 - Booking workflows are available and off by default. Self-hosted operators can opt in

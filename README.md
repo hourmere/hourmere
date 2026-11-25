@@ -22,8 +22,8 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
   [webhooks](https://hourmere.com/docs/webhooks), [Slack notifications](https://hourmere.com/docs/slack) and first-party [booking activity](https://hourmere.com/docs/analytics).
 - A source-built [Zapier app](https://hourmere.com/docs/zapier) for booking automation,
   available as a private integration until published.
-- A source-built [n8n community node](https://hourmere.com/docs/n8n) with booking actions
-  and signed triggers for self-hosted n8n, installed from source until published to npm.
+- An [n8n community node](https://hourmere.com/docs/n8n) with booking actions
+  and signed triggers for self-hosted n8n.
 
 ## Repository layout
 
@@ -470,8 +470,8 @@ and brand colours in booking email HTML. Email clients may override colours or h
 See the [consolidated limitations](https://hourmere.com/docs#known-limitations)
 and linked operating guides before deploying:
 
-- The [n8n community node](https://hourmere.com/docs/n8n) is not yet published to npm or available on n8n Cloud.
-  Self-hosters can build and install the package from source.
+- The [n8n community node](https://hourmere.com/docs/n8n) supports self-hosted installations.
+  n8n Cloud installation requires verification by n8n.
 - [Zapier](https://hourmere.com/docs/zapier) is not yet published in the Zapier directory.
   Self-hosters can deploy the source as a private integration using their own Zapier account.
 - [Booking limits](https://hourmere.com/docs/booking-limits) apply per event type and actual host, across

@@ -1,0 +1,77 @@
+name: Release n8n community node
+
+on:
+  workflow_dispatch:
+    inputs:
+      bootstrap:
+        description: Use the one-time npm token for the first package version
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: n8n-npm-release
+  cancel-in-progress: false
+
+jobs:
+  stage:
+    if: github.repository == 'hourmere/hourmere' && github.ref_type == 'tag' && startsWith(github.ref_name, 'n8n-v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: n8n-npm-release
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        shell: bash
+        working-directory: tools/n8n-nodes-hourmere
+    steps:
+      # GitHub can create a missing environment with no protection rules.
+      - name: Require the configured environment to have reviewers
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          reviewers=$(gh api repos/hourmere/hourmere/environments/n8n-npm-release \
+            --jq '[.protection_rules[] | select(.type == "required_reviewers") | .reviewers[]] | length')
+          test "$reviewers" -gt 0 || { echo 'Configure required reviewers before releasing.' >&2; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Require the version tag and changelog on main
+        run: node scripts/check-release.mjs
+      - run: npm ci --ignore-scripts
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+      - name: Pack and verify the exact release tarball
+        env:
+          HOURMERE_N8N_PUBLISH: "1"
+        run: |
+          node scripts/pack-smoke.mjs "$RUNNER_TEMP/hourmere-n8n-release.tgz"
+          digest=$(sha1sum "$RUNNER_TEMP/hourmere-n8n-release.tgz" | cut -d ' ' -f 1)
+          printf 'Verified n8n-nodes-hourmere tarball for `%s` (SHA-1 `%s`).\n' \
+            "$GITHUB_REF_NAME" "$digest" >> "$GITHUB_STEP_SUMMARY"
+      - name: Stage the verified tarball with npm provenance
+        env:
+          BOOTSTRAP: ${{ inputs.bootstrap }}
+          NODE_AUTH_TOKEN: ${{ inputs.bootstrap && secrets.N8N_NPM_BOOTSTRAP_TOKEN || '' }}
+        run: |
+          if [[ "$BOOTSTRAP" == true ]]; then
+            test "$GITHUB_REF" = refs/tags/n8n-v0.1.0
+            test -n "$NODE_AUTH_TOKEN" || { echo 'Configure the one-time npm stage token.' >&2; exit 1; }
+            status=$(curl --silent --show-error --max-time 30 --output /dev/null --write-out '%{http_code}' \
+              https://registry.npmjs.org/n8n-nodes-hourmere)
+            test "$status" = 404 || { echo 'Bootstrap requires an unclaimed package name.' >&2; exit 1; }
+          fi
+          npm stage publish "$RUNNER_TEMP/hourmere-n8n-release.tgz" --provenance --access public --ignore-scripts
