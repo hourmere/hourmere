@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -9,48 +10,105 @@ const root = resolve(import.meta.dirname, '..')
 const workflows = join(root, '.github/workflows')
 const releaseFile = 'n8n-release.yml'
 const release = parse(readFileSync(join(workflows, releaseFile), 'utf8'))
+const buildJob = release.jobs.build
 const releaseJob = release.jobs.stage
 const workdir = 'tools/n8n-nodes-hourmere'
-const tarball = '"$RUNNER_TEMP/hourmere-n8n-release.tgz"'
-const stageCommand = `npm stage publish ${tarball} --provenance --access public --ignore-scripts`
+const tarball = 'hourmere-n8n-release.tgz'
+const stageCommand = `npm stage publish "$RUNNER_TEMP/n8n-artifact/${tarball}" --registry=https://registry.npmjs.org/ --provenance --access public --ignore-scripts`
 
-it('requires manual tag dispatch, a reviewed environment and GitHub OIDC', () => {
+const runBash = (command: string, env: Record<string, string> = {}) =>
+  spawnSync('bash', ['-eo', 'pipefail', '-c', command], {
+    env: { PATH: process.env.PATH, ...env },
+    encoding: 'utf8',
+  })
+
+it('limits release credentials to the reviewed stage job after a successful manual tag build', () => {
   expect(Object.keys(release.on)).toEqual(['workflow_dispatch'])
   expect(release.on.workflow_dispatch.inputs.bootstrap).toMatchObject({
     type: 'boolean',
     default: false,
   })
   expect(release.permissions).toEqual({})
-  expect(Object.keys(release.jobs)).toEqual(['stage'])
-  expect(releaseJob).toMatchObject({
+  expect(Object.keys(release.jobs).sort()).toEqual(['build', 'stage'])
+  expect(buildJob).toMatchObject({
     if: "github.repository == 'hourmere/hourmere' && github.ref_type == 'tag' && startsWith(github.ref_name, 'n8n-v')",
-    'runs-on': 'ubuntu-latest',
-    environment: 'n8n-npm-release',
-    permissions: { actions: 'read', contents: 'read', 'id-token': 'write' },
     defaults: { run: { 'working-directory': workdir } },
   })
-  expect(releaseJob.steps[0].run).toContain('select(.type == "required_reviewers")')
+  expect(buildJob).not.toHaveProperty('environment')
+  expect(buildJob.permissions).toEqual({ contents: 'read' })
+  expect(JSON.stringify(buildJob)).not.toMatch(/secrets\.|NODE_AUTH_TOKEN|ACTIONS_ID_TOKEN/)
+  expect(releaseJob).toMatchObject({
+    needs: 'build',
+    'runs-on': 'ubuntu-latest',
+    environment: 'n8n-npm-release',
+  })
+  expect(releaseJob).not.toHaveProperty('if')
+  expect(releaseJob.permissions).toEqual({ actions: 'read', contents: 'read', 'id-token': 'write' })
 })
 
-it.each([
-  [0, 1],
-  [1, 0],
-])('exits %i-reviewer environments with status %i', (reviewers, exitCode) => {
-  const result = spawnSync(
-    'bash',
-    ['-e', '-c', `gh() { echo ${reviewers}; }\n${releaseJob.steps[0].run}`],
-    {
-      encoding: 'utf8',
-    },
-  )
-  expect(result.status, result.stderr).toBe(exitCode)
-  if (exitCode !== 0)
-    expect(result.stderr).toContain('Configure required reviewers before releasing')
+describe('deployment environment guard', () => {
+  const environment = {
+    can_admins_bypass: false,
+    protection_rules: [{ type: 'required_reviewers', reviewers: [{ type: 'User' }] }],
+    deployment_branch_policy: { custom_branch_policies: true, protected_branches: false },
+  }
+  const tagRule = { name: 'n8n-v*', type: 'tag' }
+  const policies = { total_count: 1, branch_policies: [tagRule] }
+  const check = (environmentResponse: unknown, policyResponse: unknown) =>
+    runBash(
+      `gh() {
+        case "$*" in
+          'api repos/hourmere/hourmere/environments/n8n-npm-release') printf '%s' "$ENVIRONMENT" ;;
+          'api repos/hourmere/hourmere/environments/n8n-npm-release/deployment-branch-policies') printf '%s' "$POLICIES" ;;
+          *) return 1 ;;
+        esac
+      }
+      ${releaseJob.steps[0].run}`,
+      {
+        ENVIRONMENT: JSON.stringify(environmentResponse),
+        POLICIES: JSON.stringify(policyResponse),
+      },
+    )
+
+  it('allows reviewers, disabled admin bypass and exactly one matching tag rule', () => {
+    const result = check(environment, policies)
+    expect(result.status, result.stderr).toBe(0)
+  })
+
+  it.each([
+    ['no reviewers', { protection_rules: [{ type: 'required_reviewers', reviewers: [] }] }],
+    ['admin bypass enabled', { can_admins_bypass: true }],
+    ['admin bypass missing', { can_admins_bypass: undefined }],
+    ['no custom policies', { deployment_branch_policy: undefined }],
+    [
+      'protected branches enabled',
+      { deployment_branch_policy: { custom_branch_policies: true, protected_branches: true } },
+    ],
+  ])('rejects an environment with %s', (_, overrides) => {
+    const result = check({ ...environment, ...overrides }, policies)
+    expect(result.status, result.stderr).toBe(1)
+    expect(result.stderr).toContain('Require reviewers, disable admin bypass')
+  })
+
+  it.each([
+    ['a missing tag rule', []],
+    ['a broad tag rule', [{ ...tagRule, name: '*' }]],
+    ['a branch rule instead of a tag rule', [{ ...tagRule, type: 'branch' }]],
+    ['an extra branch rule', [tagRule, { name: 'main', type: 'branch' }]],
+  ])('rejects %s', (_, rules) => {
+    const result = check(environment, { total_count: rules.length, branch_policies: rules })
+    expect(result.status, result.stderr).toBe(1)
+    expect(result.stderr).toContain('Configure n8n-v* as the only deployment tag policy')
+  })
+
+  it('fails closed when GitHub returns no environment or policy response', () => {
+    expect(check(null, policies).status).toBe(1)
+    expect(check(environment, null).status).toBe(1)
+  })
 })
 
 it('validates, builds and tests before staging the same verified tarball', () => {
-  const commands = releaseJob.steps.flatMap((step: { run?: string }) => step.run ?? []) as string[]
-  expect(commands.slice(1, -2)).toEqual([
+  expect(buildJob.steps.slice(2, -2).map((step: { run?: string }) => step.run)).toEqual([
     'node scripts/check-release.mjs',
     'npm ci --ignore-scripts',
     'npm run lint',
@@ -58,24 +116,136 @@ it('validates, builds and tests before staging the same verified tarball', () =>
     'npm run build',
     'npm test',
   ])
-  const pack = releaseJob.steps.at(-2)
+  const pack = buildJob.steps.at(-2)
+  const upload = buildJob.steps.at(-1)
+  expect(pack.id).toBe('pack')
   expect(pack.env).toEqual({ HOURMERE_N8N_PUBLISH: '1' })
-  expect(pack.run).toContain(`node scripts/pack-smoke.mjs ${tarball}`)
+  expect(pack.run).toContain(`node scripts/pack-smoke.mjs "$RUNNER_TEMP/${tarball}"`)
+  expect(upload).toMatchObject({
+    id: 'upload',
+    uses: expect.stringMatching(/^actions\/upload-artifact@[a-f0-9]{40}$/),
+    with: { path: `\${{ runner.temp }}/${tarball}`, archive: false, 'if-no-files-found': 'error' },
+  })
+  expect(buildJob.outputs).toEqual({
+    'artifact-id': '${{ steps.upload.outputs.artifact-id }}',
+    sha512: '${{ steps.pack.outputs.sha512 }}',
+    sha1: '${{ steps.pack.outputs.sha1 }}',
+  })
+  expect(
+    releaseJob.steps.map(
+      (step: { name?: string; uses?: string }) => step.uses?.split('@')[0] ?? step.name,
+    ),
+  ).toEqual([
+    'Require reviewers and restrict the environment to release tags',
+    'actions/download-artifact',
+    'Verify the downloaded tarball against the build SHA-512',
+    'actions/checkout',
+    'actions/setup-node',
+    'Require the version tag and changelog on main',
+    'Stage the verified tarball with npm provenance',
+  ])
+  const [, download, verify, checkout, setupNode, guard] = releaseJob.steps
+  expect(download).toMatchObject({
+    uses: expect.stringMatching(/^actions\/download-artifact@[a-f0-9]{40}$/),
+    with: {
+      'artifact-ids': '${{ needs.build.outputs.artifact-id }}',
+      path: '${{ runner.temp }}/n8n-artifact',
+      'skip-decompress': true,
+    },
+  })
+  expect(verify.env).toEqual({ BUILD_SHA512: '${{ needs.build.outputs.sha512 }}' })
+  expect(checkout.with).toEqual({ 'fetch-depth': 0, 'persist-credentials': false })
+  expect(setupNode.with).toMatchObject({ 'package-manager-cache': false })
+  expect(guard.run).toBe(`node ${workdir}/scripts/check-release.mjs`)
+
   const stage = releaseJob.steps.at(-1)
   expect(stage.env.NODE_AUTH_TOKEN).toBe(
-    `\${{ inputs.bootstrap && secrets.N8N_NPM_BOOTSTRAP_TOKEN || '' }}`,
+    "${{ inputs.bootstrap && secrets.N8N_NPM_BOOTSTRAP_TOKEN || '' }}",
   )
+  expect(stage['working-directory']).toBe('${{ runner.temp }}')
   expect(stage.run).toContain('test "$GITHUB_REF" = refs/tags/n8n-v0.1.0')
   expect(stage.run).toContain('test "$status" = 404')
-  expect(stage.run.trimEnd().endsWith(stageCommand)).toBe(true)
+  expect(stage.run.trimEnd().split('\n').at(-1)).toBe(stageCommand)
+  const stageCommands: string[] = releaseJob.steps.flatMap(
+    (step: { run?: string }) =>
+      step.run?.split('\n').filter((line) => /^\s*(npm|node)\s/.test(line)) ?? [],
+  )
+  expect(stageCommands.map((command) => command.trim())).toEqual([guard.run, stageCommand])
+})
+
+it('reports both build digests and fails to stage changed bytes or a missing build digest', () => {
+  const scratch = mkdtempSync(join(tmpdir(), 'hourmere-n8n-digest-test-'))
+  try {
+    const bytes = 'release tarball fixture'
+    const sha512 = createHash('sha512').update(bytes).digest('hex')
+    const sha1 = createHash('sha1').update(bytes).digest('hex')
+    const pack = buildJob.steps.at(-2).run
+    const output = join(scratch, 'output')
+    const summary = join(scratch, 'summary')
+    const built = runBash(`node() { printf '%s' "$BYTES" > "$2"; }\n${pack}`, {
+      RUNNER_TEMP: scratch,
+      BYTES: bytes,
+      GITHUB_OUTPUT: output,
+      GITHUB_STEP_SUMMARY: summary,
+      GITHUB_REF_NAME: 'n8n-v0.1.0',
+    })
+    expect(built.status, built.stderr).toBe(0)
+    expect(readFileSync(output, 'utf8')).toBe(`sha512=${sha512}\nsha1=${sha1}\n`)
+    const buildSummary = readFileSync(summary, 'utf8')
+    expect(buildSummary).toContain(`SHA-512 \`${sha512}\``)
+    expect(buildSummary).toContain(`SHA-1 \`${sha1}\``)
+
+    mkdirSync(join(scratch, 'n8n-artifact'))
+    const downloaded = join(scratch, 'n8n-artifact', tarball)
+    const verify = (digest: string) =>
+      runBash(releaseJob.steps[2].run, { RUNNER_TEMP: scratch, BUILD_SHA512: digest })
+    writeFileSync(downloaded, readFileSync(join(scratch, tarball)))
+    expect(verify(sha512).status).toBe(0)
+    writeFileSync(downloaded, 'changed tarball fixture')
+    const mismatch = verify(sha512)
+    expect(mismatch.status).toBe(1)
+    expect(mismatch.stderr).toContain('tarball SHA-512 differs from the build output')
+    expect(verify('').status).toBe(1)
+  } finally {
+    rmSync(scratch, { recursive: true, force: true })
+  }
 })
 
 it('reserves n8n npm credentials and publishing commands for the manual workflow', () => {
-  type Step = { run?: string; 'working-directory'?: string }
-  type Job = { if?: string; steps?: Step[] }
+  type Step = {
+    run?: string
+    uses?: string
+    'working-directory'?: string
+    with?: { publish?: string }
+  }
+  type Job = Step & { if?: string; steps?: Step[] }
   const registryWrite =
-    /\bnpm\s+(?:(?:stage\s+)?(?:publish|pu|pub)\b|run\s+release\b)|\bn8n-node\s+release\b/
+    /\b(?:npm|pnpm|yarn)(?=[ \t])[^;&|]*[ \t](?:publish|pub|pu|stage)(?=$|[\s;&|)<>])|\bnpm\s+run(?:-script)?\s+release\b|\bn8n-node\s+release\b/
   const releaseEntrypoints = /N8N_NPM_BOOTSTRAP_TOKEN|HOURMERE_N8N_PUBLISH|n8n-npm-release/
+  const publishCommands = (step: Step) => {
+    const commands = (step.run ?? '')
+      .replace(/\\\r?\n/g, '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => {
+        if (line.startsWith('#')) return false
+        // Keep commands in double-quoted substitutions visible while masking quoted prose.
+        const words = line.replace(/'[^']*'|"(?:\\.|[^"\\])*"/g, (quoted) => {
+          if (quoted.startsWith('"') && /\$\(|`/.test(quoted)) return quoted
+          return quoted.slice(1, -1).replace(/[\s;&|]/g, '_')
+        })
+        return registryWrite.test(words)
+      })
+    const action = step.uses?.split('@')[0]?.toLowerCase() ?? ''
+    if (
+      /publish|semantic-release/.test(action) ||
+      (action === 'changesets/action' && step.with?.publish)
+    ) {
+      commands.push(`uses: ${step.uses}`)
+    }
+    return commands
+  }
+
   const writes = []
   for (const file of readdirSync(workflows)
     .filter((file) => /\.ya?ml$/.test(file))
@@ -84,25 +254,44 @@ it('reserves n8n npm credentials and publishing commands for the manual workflow
     if (file !== releaseFile) expect(yaml, file).not.toMatch(releaseEntrypoints)
     const { jobs } = parse(yaml) as { jobs: Record<string, Job> }
     for (const [job, config] of Object.entries(jobs)) {
-      for (const step of config.steps ?? []) {
-        if (step.run && registryWrite.test(step.run)) {
-          writes.push({ file, job, condition: config.if, directory: step['working-directory'] })
+      for (const step of [config, ...(config.steps ?? [])]) {
+        for (const command of publishCommands(step)) {
+          writes.push({
+            file,
+            job,
+            condition: config.if,
+            directory: step['working-directory'],
+            command,
+          })
         }
       }
     }
   }
   expect(writes).toEqual([
-    { file: releaseFile, job: 'stage', condition: releaseJob.if, directory: undefined },
-    { file: 'release.yml', job: 'publish-cli', condition: `\${{ false }}`, directory: 'tools/cli' },
+    {
+      file: releaseFile,
+      job: 'stage',
+      condition: releaseJob.if,
+      directory: `\${{ runner.temp }}`,
+      command: stageCommand,
+    },
+    {
+      file: 'release.yml',
+      job: 'publish-cli',
+      condition: `\${{ false }}`,
+      directory: 'tools/cli',
+      command: 'npm publish --provenance --access public',
+    },
   ])
   const actions = join(root, '.github/actions')
   for (const file of readdirSync(actions, { encoding: 'utf8', recursive: true }).filter((file) =>
     /\.ya?ml$/.test(file),
   )) {
-    const { runs } = parse(readFileSync(join(actions, file), 'utf8'))
+    const yaml = readFileSync(join(actions, file), 'utf8')
+    expect(yaml, file).not.toMatch(releaseEntrypoints)
+    const { runs } = parse(yaml)
     for (const step of (runs.steps ?? []) as Step[]) {
-      expect(step.run ?? '', file).not.toMatch(registryWrite)
-      expect(step.run ?? '', file).not.toMatch(releaseEntrypoints)
+      expect(publishCommands(step), file).toEqual([])
     }
   }
 })

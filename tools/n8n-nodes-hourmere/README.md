@@ -119,14 +119,22 @@ There is no exactly-once guarantee or historical replay. Events may arrive out o
 ## Compatibility and language
 
 The package has no runtime dependencies and uses n8n's `n8n-workflow` peer. It pins
-`2.45.1` for development. The build uses `n8n-node`. Lint runs the official strict
-ESLint preset with warnings treated as errors and an exception for the MIT license rule.
+`2.45.1` for development. The build uses `n8n-node`. Lint uses the full official
+ESLint preset with the MIT license rule disabled and warnings treated as errors.
 Unit tests mock HTTP and OpenAPI contract tests detect incompatible Hourmere API changes.
 [n8n node tooling](https://docs.n8n.io/connect/create-nodes/build-your-node/using-the-n8n-node-tool.md).
 
 Node parameter translations include English and Simplified Chinese (`zh`/`zh-CN`).
 Use n8n's `N8N_DEFAULT_LOCALE=zh`. Community credential/header translation loading and
 runtime errors remain English. [Interface language details](https://hourmere.com/docs/n8n#interface-language).
+
+## Known limitations
+
+The package is ineligible for n8n Cloud verification while it is AGPL-3.0-only and
+ships Simplified Chinese parameter translations. n8n requires an MIT license and
+an English-only node interface and documentation for verified nodes.
+[n8n verification guidelines](https://docs.n8n.io/connect/create-nodes/build-your-node/reference/verification-guidelines.md),
+[n8n submission requirements](https://docs.n8n.io/connect/create-nodes/deploy-your-node/submit-community-nodes.md).
 
 ## Example workflows
 

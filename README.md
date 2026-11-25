@@ -473,7 +473,11 @@ See the [consolidated limitations](https://hourmere.com/docs#known-limitations)
 and linked operating guides before deploying:
 
 - The [n8n community node](https://hourmere.com/docs/n8n) supports self-hosted installations.
-  n8n Cloud installation requires verification by n8n.
+  It is ineligible for n8n Cloud verification while it is AGPL-3.0-only and ships Simplified
+  Chinese parameter translations. n8n requires an MIT license and an English-only node
+  interface and documentation for verified nodes.
+  [n8n verification guidelines](https://docs.n8n.io/connect/create-nodes/build-your-node/reference/verification-guidelines.md),
+  [n8n submission requirements](https://docs.n8n.io/connect/create-nodes/deploy-your-node/submit-community-nodes.md).
 - [Zapier](https://hourmere.com/docs/zapier) is not yet published in the Zapier directory.
   Self-hosters can deploy the source as a private integration using their own Zapier account.
 - [Booking limits](https://hourmere.com/docs/booking-limits) apply per event type and actual host, across

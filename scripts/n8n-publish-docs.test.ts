@@ -32,10 +32,35 @@ describe.each(guides)('%s', (path) => {
 it('documents the separate release and verification approvals for the owner', () => {
   const runbook = read('docs/n8n-release.md')
   expect(runbook).toContain('Required reviewers')
+  expect(runbook).toMatch(
+    /Turn off \*\*Allow administrators to bypass\s+configured protection rules/,
+  )
+  expect(runbook).toContain('a single **Tag** rule `n8n-v*`')
   expect(runbook).toContain('n8n-npm-release')
   expect(runbook).toMatch(/gh workflow run n8n-release\.yml .*--ref n8n-v0\.1\.0 -f bootstrap=true/)
   expect(runbook).toContain('Staged Packages')
+  expect(runbook).toContain('the SHA-1 in the `build` job summary')
   expect(runbook).toContain('the 2FA challenge')
+  expect(runbook).toMatch(
+    /On the first release, verify whether the version approved\s+after `npm stage` carries provenance/,
+  )
+  expect(runbook).toContain('the green check beside **Version**')
   expect(runbook).toContain('npx @n8n/scan-community-package n8n-nodes-hourmere')
   expect(runbook).toContain('https://creators.n8n.io/nodes')
 })
+
+it.each(['README.md', 'tools/n8n-nodes-hourmere/README.md', 'docs/n8n-release.md'])(
+  '%s documents the license and translation blockers for n8n Cloud verification',
+  (path) => {
+    const source = read(path).replace(/\s+/g, ' ')
+    expect(source).toContain(
+      'ineligible for n8n Cloud verification while it is AGPL-3.0-only and ships Simplified Chinese parameter translations',
+    )
+    expect(source).toContain(
+      'https://docs.n8n.io/connect/create-nodes/build-your-node/reference/verification-guidelines.md',
+    )
+    expect(source).toContain(
+      'https://docs.n8n.io/connect/create-nodes/deploy-your-node/submit-community-nodes.md',
+    )
+  },
+)
