@@ -213,8 +213,10 @@ same refresh, and reads see the change at once. Reads never trust a marker but r
 from the current event types: `get` returns each rule's and the fallback's target in the
 published version as `ok`, `unavailable` (with the eligibility reason) or `unknown`, and `list`
 the worst of them; a form with nothing published has no health (null). `unknown` means this
-release does not recognise how a target is stored. It is never reported as unavailable or as
-missing configuration.
+release does not recognise how a target is stored. Health reads use the publication validator's
+lowercase UUID format for event IDs. A stored uppercase ID yields `unknown` without an event
+lookup. A recognised target in another organization yields the same `unavailable` with
+`not_found` as a missing event.
 
 Cleanup runs every 15 minutes, also while routing is off. Each transaction deletes at most 500
 receipts that expired unconsumed, oldest first, together with their encrypted answers, or
