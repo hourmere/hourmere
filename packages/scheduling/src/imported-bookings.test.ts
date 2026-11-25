@@ -252,15 +252,15 @@ describe.skipIf(!serverUrl)('imported local-only booking protection', () => {
     [
       'cancellation',
       './bookings.ts',
-      'await assertBookingLocallyManaged(db, row.id)',
-      'void row.id',
+      'const paid = await assertBookingLocallyManaged(db, row.id, true)',
+      'const paid = undefined',
       verifyCancel,
     ],
     [
       'rescheduling',
       './bookings.ts',
-      'await assertBookingLocallyManaged(trx, old.id)',
-      'void old.id',
+      'const paid = await assertBookingLocallyManaged(trx, old.id, true)',
+      'const paid = undefined',
       verifyReschedule,
     ],
     [
@@ -273,8 +273,8 @@ describe.skipIf(!serverUrl)('imported local-only booking protection', () => {
     [
       'reschedule slots',
       './manage.ts',
-      'await assertBookingLocallyManaged(ctx.db, booking.id)',
-      'void booking.id',
+      'const paid = await assertBookingLocallyManaged(ctx.db, booking.id, true)',
+      'const paid = undefined',
       verifySlots,
     ],
     [

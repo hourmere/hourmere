@@ -233,6 +233,9 @@ not grant host rescheduling or reschedule-request authority through REST, MCP or
   block the batch, while daily/weekly/monthly limit differences are reported as warnings.
 - [Slack notifications](/docs/slack) support one incoming-webhook destination per organization,
   minimal booking data and at-least-once delivery; duplicate messages are possible.
+- [Signed booking webhooks](/docs/webhooks) use the endpoint list for lookup. To verify a
+  receiver, trigger a subscribed booking event and inspect delivery history.
+  中文：从列表查找签名 Webhook 端点。验证接收端时，请触发已订阅的预约事件并查看投递历史。
 - [Booking limits](/docs/booking-limits) apply per event type and actual host, across
   all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
   Lowering a limit does not cancel existing bookings.
@@ -256,8 +259,9 @@ not grant host rescheduling or reschedule-request authority through REST, MCP or
   includes internal busy-time sync and conditional booking writes, with no production
   worker registration or UI/API/MCP/CLI access. Real-account acceptance
   is still pending; see the [operator note](/docs/self-hosting#caldav-foundation).
-- [Paid bookings](/docs/payments) have internal holds and Stripe Checkout Session creation.
-  Public checkout, payment settings and automatic refunds remain future work.
+- [Paid bookings](/docs/payments) have internal holds, Stripe Checkout Session creation,
+  automatic refunds and read-only operator reconciliation. Public checkout and payment
+  settings remain future work.
 - [Requests to choose another time](/docs/request-reschedule) retain the original booking
   until it is moved or cancelled. Expiry keeps it confirmed; imported and group-seat
   bookings do not support requests.

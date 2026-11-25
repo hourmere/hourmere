@@ -232,7 +232,8 @@ async function enrichTeamBookings(
       .execute(),
     ctx.db
       .selectFrom('bookings as booking')
-      .select(['booking.id', 'booking.payment_hold_expires_at'])
+      .leftJoin('payment_checkout_attempts as moved', 'moved.current_booking_id', 'booking.id')
+      .select(['booking.id', 'booking.payment_hold_expires_at', 'moved.current_booking_id'])
       .select((eb) =>
         eb
           .exists(
@@ -254,7 +255,7 @@ async function enrichTeamBookings(
   )
   const paidIds = new Set(
     replacements
-      .filter((booking) => booking.payment_hold_expires_at !== null)
+      .filter((booking) => booking.payment_hold_expires_at !== null || booking.current_booking_id)
       .map((booking) => booking.id),
   )
   // Reuse public resolution, including current configured hosts and round-robin activation.

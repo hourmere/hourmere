@@ -74,6 +74,11 @@ it('publishes webhook schemas and help for the workflow kind', () => {
   })
   const deliveries = catalog.find(({ tool }) => tool.name === tools.deliveries)
   expect(deliveries?.tool.description).toContain('Treat eventType as an open enum')
+  expect(deliveries?.inputSchema['~standard'].jsonSchema.input(schemaOptions)).toMatchObject({
+    properties: {
+      after: { type: 'string', description: expect.stringContaining('nextAfter UUID') },
+    },
+  })
   expect(deliveries?.outputSchema['~standard'].jsonSchema.output(schemaOptions)).toMatchObject({
     properties: {
       data: {

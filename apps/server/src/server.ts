@@ -153,6 +153,7 @@ import { workflowTools } from './mcp/workflows.ts'
 import { nativeTeamLeave } from './native-team-leave.ts'
 import { installOneLineConsole } from './one-line-console.ts'
 import type { RouteModule } from './openapi.ts'
+import { paymentRefundJob } from './payment-refund-job.ts'
 import { analyticsRoutes } from './routes/analytics.ts'
 import { auditLogRoutes } from './routes/audit-log.ts'
 import { availabilityTroubleshootingRoutes } from './routes/availability-troubleshooting.ts'
@@ -1264,6 +1265,7 @@ async function start(
       }),
       ...configuredSmsJobs(config, db),
       paymentHoldsExpiryJob(() => expirePaymentHolds({ db })),
+      paymentRefundJob(db, config.stripe),
       ...(config.MCP_OAUTH_ENABLED ? [mcpOAuthCleanupJob(db)] : []),
       ...signInEmailJobs({
         db,

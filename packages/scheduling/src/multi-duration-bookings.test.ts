@@ -11,10 +11,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import * as availability from './availability.ts'
+import { latestBookingId } from './booking-chain.ts'
 import * as bookingPage from './booking-page.ts'
 import {
   assertBookingLocallyManaged,
   assertInviteeRescheduleAllowed,
+  assertPaidRescheduleDuration,
   type CreateBookingInput,
   canonicalJson,
   createPublicBooking,
@@ -41,6 +43,7 @@ import {
 import { microsoftTeamsLocation, requireMicrosoftTeamsHost } from './microsoft-teams.ts'
 import * as notificationSettings from './notification-settings.ts'
 import { expirePaymentHolds } from './payment-expiry.ts'
+import { ensurePaymentRefund } from './payment-refunds.ts'
 import { parseQuestions, validateResponses } from './questions.ts'
 import * as recurringCapabilities from './recurring-capabilities.ts'
 import * as recurringMembers from './recurring-members.ts'
@@ -91,6 +94,7 @@ function manageSourceCopy(...changes: Change[]): ManageApi {
     ...availability,
     assertBookingLocallyManaged,
     assertInviteeRescheduleAllowed,
+    assertPaidRescheduleDuration,
     getHostBooking,
     getManagedBooking,
     ...changeDeadlines,
@@ -126,6 +130,7 @@ function sourceCopy(...changes: Change[]): Api {
     z,
     ...availability,
     ...bookingPage,
+    latestBookingId,
     ...changeDeadlines,
     ...conferences,
     ...locationOptions,
@@ -137,6 +142,7 @@ function sourceCopy(...changes: Change[]): Api {
     meetingPollChainLinked,
     ...notificationSettings,
     expirePaymentHolds,
+    ensurePaymentRefund,
     parseQuestions,
     validateResponses,
     ...recurringCapabilities,
@@ -163,8 +169,8 @@ const BROKEN_BOOKINGS: Change = [
   'const email = unboundInSourceCopy(input.email)',
 ]
 const BROKEN_MANAGE: Change = [
-  'await assertBookingLocallyManaged(ctx.db, booking.id)',
-  'await unboundInSourceCopy(ctx.db, booking.id)',
+  'const paid = await assertBookingLocallyManaged(ctx.db, booking.id, true)',
+  'const paid = await unboundInSourceCopy(ctx.db, booking.id)',
 ]
 const BROKEN_COPY_FAILURE = {
   name: 'BrokenSourceCopyError',
@@ -555,7 +561,7 @@ describe.skipIf(!serverUrl)('multiple duration bookings', () => {
     [
       'managed duration forwarding',
       [
-        'snapshot.hosts_use_default_schedule,\n    durationMinutes,',
+        'snapshot.hosts_use_default_schedule,\n    paid ? undefined : durationMinutes,',
         'snapshot.hosts_use_default_schedule,',
       ],
       verifyManagedSelection,
@@ -563,8 +569,8 @@ describe.skipIf(!serverUrl)('multiple duration bookings', () => {
     [
       'original-duration candidate bounds',
       [
-        "Temporal.Instant.from(booking.end)\n          .since(Temporal.Instant.from(booking.start))\n          .total('minutes')",
-        'eventType.duration_minutes',
+        "const originalDuration = Temporal.Instant.from(booking.end)\n    .since(Temporal.Instant.from(booking.start))\n    .total('minutes')",
+        'const originalDuration = eventType.duration_minutes',
       ],
       verifyManagedSnapshotCap,
     ],
@@ -603,8 +609,8 @@ describe.skipIf(!serverUrl)('multiple duration bookings', () => {
     [
       'original duration snapshot',
       [
-        "toInstant(old.end_at).since(toInstant(old.start_at)).total({ unit: 'minutes' })",
-        'eventType.duration_minutes',
+        "const originalDuration = toInstant(old.end_at)\n    .since(toInstant(old.start_at))\n    .total({ unit: 'minutes' })",
+        'const originalDuration = eventType.duration_minutes',
       ],
       verifySnapshot,
     ],

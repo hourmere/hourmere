@@ -481,6 +481,8 @@ and linked operating guides before deploying:
   [n8n submission requirements](https://docs.n8n.io/connect/create-nodes/deploy-your-node/submit-community-nodes.md).
 - [Zapier](https://hourmere.com/docs/zapier) is not yet published in the Zapier directory.
   Self-hosters can deploy the source as a private integration using their own Zapier account.
+- [Signed booking webhooks](https://hourmere.com/docs/webhooks) use the endpoint list for
+  lookup. To verify a receiver, trigger a subscribed booking event and inspect delivery history.
 - [Booking limits](https://hourmere.com/docs/booking-limits) apply per event type and actual host, across
   all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
   Lowering a limit does not cancel existing bookings.

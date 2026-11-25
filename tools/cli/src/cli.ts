@@ -146,13 +146,15 @@ Webhook reads require read or full scope and writes require full scope.
 All webhook commands require personal ownership or a team owner/admin role.
 Create takes JSON {url, events, isActive?}. Rotate-secret takes JSON {id}.
 Both require --output FILE (new private file) or --json (stdout) and return the signing secret once.
+Use --input - for JSON containing destination credentials.
 Use a private file when stdout is logged.
 Update takes JSON {id, events?, isActive?}. The URL is immutable.
 Delete takes JSON {id} and requires --yes to confirm deletion of the endpoint and retained deliveries.
 Deliveries takes JSON {id, after?} and returns up to 50 metadata rows. Pass nextAfter as after for the next page.
 Events: booking.created, booking.rescheduled, booking.cancelled, booking.reschedule_requested,
         booking.reschedule_request_expired, booking.attendee_no_show_changed, workflow.executed.
-Adding workflow.executed on create or update is disabled (workflows_disabled, REST 404).
+Adding workflow.executed on create or update requires WORKFLOWS_ENABLED=true.
+Without it, the server returns workflows_disabled (REST 404).
 On create this takes precedence over webhooks_disabled (REST 409).
 Endpoint events and delivery eventType are open enums. Ignore unknown event kinds.
 Slack: slack create|list|update|delete|test (JSON input; list read/full, writes full).

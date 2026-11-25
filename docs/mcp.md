@@ -250,9 +250,10 @@ API key. IDs that are missing or belong to another organization return `webhook_
 
 `create_webhook` and `update_webhook` accept `booking.created`, `booking.rescheduled`,
 `booking.cancelled`, `booking.reschedule_requested`, `booking.reschedule_request_expired`,
-`booking.attendee_no_show_changed` and `workflow.executed` in `events`. While workflows
-are off, adding `workflow.executed` returns a tool error with `workflows_disabled`
-(REST 404). On create, it takes precedence over `webhooks_disabled` (REST 409).
+`booking.attendee_no_show_changed` and `workflow.executed` in `events`. Adding
+`workflow.executed` requires `WORKFLOWS_ENABLED=true`. While workflows are off, adding it
+returns `workflows_disabled` (REST 404). On create, it takes precedence over
+`webhooks_disabled` (REST 409).
 
 `rotate_webhook_secret` takes `{ id }` and requires a `full` API key. Each successful
 call replaces the signing secret and returns the new `{ secret }` once. Save it directly
@@ -474,6 +475,10 @@ saving changes: `1440` means exactly 24 hours. With `cancelCutoffMinutes: 1440` 
 The exact deadline instant is closed; 1 millisecond before it remains eligible, subject
 to the other booking rules. Host actions still require the caller to host the booking;
 team-admin status alone grants no extra MCP/CLI or API-key access.
+
+Cancellation of a confirmed, Checkout-bound paid booking requests a full refund.
+Rescheduling keeps its original duration and payment. These actions keep the existing
+booking permissions and invitee deadlines. [Paid booking changes](https://hourmere.com/docs/payments#cancel-or-reschedule-a-paid-booking).
 
 ## Export bookings without filling agent context
 

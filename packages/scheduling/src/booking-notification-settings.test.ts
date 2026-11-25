@@ -739,8 +739,8 @@ describe.skipIf(!serverUrl)('booking notification settings storage', () => {
   it.each<Replacement>([
     ['end_at: b.end.toString(),', 'end_at: b.start.add({ minutes: 30 }).toString(),'],
     [
-      "toInstant(old.end_at).since(toInstant(old.start_at)).total({ unit: 'minutes' })",
-      'eventType.duration_minutes',
+      "const originalDuration = toInstant(old.end_at)\n    .since(toInstant(old.start_at))\n    .total({ unit: 'minutes' })",
+      'const originalDuration = eventType.duration_minutes',
     ],
   ])(
     'detects default duration substitution in %s with a real assertion failure',
