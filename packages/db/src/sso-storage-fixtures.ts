@@ -298,8 +298,9 @@ export async function ssoFixture(db: pg.PoolClient): Promise<SsoFixture> {
   databaseClockOffsetMs = Number(clock.rows[0]?.ms) - Date.now()
   const users = (
     await db.query<{ id: string }>(
-      `INSERT INTO auth."user" (name,email,"emailVerified")
-      SELECT 'Synthetic SSO person ' || n, 'sso-' || n || '-' || $1 || '@example.test', true
+      `INSERT INTO auth."user" (name,email,"emailVerified","createdAt")
+      SELECT 'Synthetic SSO person ' || n, 'sso-' || n || '-' || $1 || '@example.test', true,
+        statement_timestamp() + (n - 1) * interval '1 microsecond'
       FROM generate_series(1,6) n ORDER BY n RETURNING id`,
       [randomUUID()],
     )
