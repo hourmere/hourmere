@@ -3269,4 +3269,8 @@ export const admin = {
   // Branding.
   'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against white (#FFFFFF) is reported separately.':
     'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against white (#FFFFFF) is reported separately.',
+
+  // Availability editor
+  'A schedule can have at most 10,000 date overrides, including past dates. Remove some overrides before saving.':
+    'A schedule can have at most 10,000 date overrides, including past dates. Remove some overrides before saving.',
 } as const

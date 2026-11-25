@@ -3122,4 +3122,8 @@ export const admin = {
   // Branding.
   'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against white (#FFFFFF) is reported separately.':
     '系统会自动选择黑色或白色按钮文字，确保对比度至少为 4.5:1。与白色（#FFFFFF）的对比度会单独显示。',
+
+  // Availability editor
+  'A schedule can have at most 10,000 date overrides, including past dates. Remove some overrides before saving.':
+    '每个日程最多可有 10,000 个特定日期安排（包括过去的日期）。请先移除一些安排再保存。',
 } as const
