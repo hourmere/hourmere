@@ -201,10 +201,11 @@ Disabling one definition is lazy, like the operator switch below: it changes no 
 row and stops new capture for that definition. A pending run that the dispatcher claims
 while its definition is disabled ends permanently as `workflow_disabled`. Re-enabling never
 revives terminal or skipped work; runs not yet claimed stay eligible, so a brief toggle loses
-only the runs claimed during it. The editor states this when disabling. Deletion is
-eager: the deleting transaction locks the organization, tombstones the definition and then
-retires every pending run of that definition. Imported bookings and their reschedule chains
-are excluded, matching existing import silence.
+only the runs claimed during it. The editor states this when disabling. Deletion is eager:
+the deleting transaction locks the organization, tombstones the definition and then retires
+every pending run of that definition. Retirement is a separate statement under READ
+COMMITTED so it sees runs committed while deletion waited for the definition. Imported
+bookings and their reschedule chains are excluded, matching existing import silence.
 
 | Condition | Rationale and comparison |
 | --- | --- |
@@ -497,8 +498,10 @@ Reconciliation recreates missing wakes without recreating intents. Lock in the e
 identity/organization/lifecycle order: after its identity locks, every workflow writer takes
 the organization lock first, before the mail-budget lock and before any definition or run
 row, and writers that touch both definitions and runs lock the definition before its runs
-(see [workflow execution storage](data-model.md#workflow-execution-storage)). Use claim
-tokens and fencing, and recheck authority, workflow enabled state, booking anchors/status,
+(see [workflow execution storage](data-model.md#workflow-execution-storage)). A due scan
+can find runs across organizations. The dispatcher claims one run per transaction, starting
+with that run's organization before locking its definition and run. Use claim tokens and
+fencing, and recheck authority, workflow enabled state, booking anchors/status,
 recipient eligibility and deadline after waiting. Cancellation/disable serializes with the
 marker transaction and checks any already committed dispatch marker (irreversible unless positively
 known not sent) to determine which operation won. For email,
@@ -509,6 +512,11 @@ dispatch. No workflow-held booking, workflow or budget row lock spans SMTP. Chec
 authority immediately before the marker, after all waits. Test both transaction orders,
 including a pause between marker commit and the SMTP call. Webhook delivery retains its
 existing endpoint/delivery locking and adds workflow checks without promising SMTP semantics.
+
+To test lock order inside a workflow writer, take the competitor's first lock, run the
+whole workflow writer as one step, then request the competitor's second lock. In production
+integration tests for mail admission, use the invitation creation path in
+`packages/auth/src/invitations.ts` so its team lock is part of the race.
 
 For email, a database transaction cannot atomically commit SMTP acceptance. Choose
 **at-most-once potentially accepted SMTP attempt**: commit the recipient's reservation and
