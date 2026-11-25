@@ -12,6 +12,8 @@ On standalone public pages and the email sign-in confirmation page, open the glo
 beside the current language to choose another language. The current choice has a check mark.
 Use Enter or Space to open the menu, arrow keys to move between languages, and Escape to
 close it and return focus to the button.
+On a booking page, the language button becomes available once the initial event details
+finish loading. While you wait, the page uses your current interface language.
 
 German, French, Spanish and Brazilian Portuguese translations are AI-assisted (machine-translated) and have not yet
 been reviewed by a native speaker. Corrections are welcome through a GitHub issue or pull request.
