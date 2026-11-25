@@ -681,8 +681,17 @@ function BookingFlow({
         )
         setNow(currentTime())
         setVersion((v) => v + 1)
-      } else if (code === 'invalid_location_choice') {
-        setNotice('Choose one of the available locations.')
+      } else if (
+        code === 'invalid_location_choice' ||
+        (code === 'invalid_invitee_phone' &&
+          !chosenLocation?.askInvitee &&
+          !(event.smsRemindersEnabled && values.smsConsent))
+      ) {
+        setNotice(
+          code === 'invalid_location_choice'
+            ? 'Choose one of the available locations.'
+            : 'The meeting location has changed. Please choose a time again.',
+        )
         await refreshDurations()
       } else if (code === 'payment_price_changed' || code === 'payment_required') {
         setNotice('The price has changed. Review the updated price and choose a time again.')

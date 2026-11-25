@@ -448,8 +448,8 @@ Slack 测试投递会在发送前复查发起者的会话。预约提醒、邮�
 Enabling enforcement requires a verified domain, an enabled tested provider of a protocol
 that is currently on and supports step-up, a successful owner SSO test against the exact
 current revision, and at least one usable recovery owner: a current owner with accepted
-recovery status. Until SAML step-up ships, only OIDC qualifies. A pending nomination does
-not count. An owner can enable enforcement before any owner or admin has linked an SSO
+recovery status. A pending nomination does not count. An owner can enable enforcement
+before any owner or admin has linked an SSO
 identity. The independent linking flow remains available, and an accepted recovery owner
 can turn enforcement off if nobody can finish linking. Only an owner can change
 enforcement or recovery. Owners and admins can prepare replacements, and an enforced team
@@ -581,13 +581,14 @@ ID-token `iat`. OIDC step-up sends `prompt=login` and `max_age=0` and requires a
 numeric `auth_time` no earlier than attempt creation minus `oidcClockSkew`, no later
 than now plus `oidcClockSkew`, and at most `freshAdministrationProof` before the
 callback. The lower bound uses the OIDC authorization attempt created at step-up initiation.
-SAML step-up sends `ForceAuthn="true"` and requires a signed AuthnStatement `AuthnInstant`
-within the same bounds, using `clockSkew`. An OIDC token with a missing `auth_time` proves
-only the linked identity and adds `mailbox`. A signed OIDC `auth_time` outside the allowed
-window is refused. The result must come from the attempt's own user
-and that user's existing link at that provider; it is recorded on the pending attempt
+SAML step-up sends `ForceAuthn="true"` and checks the signed AuthnStatement `AuthnInstant`
+against the same bounds, using `clockSkew` and the SAML authorization attempt. A missing
+OIDC `auth_time` or a missing or old SAML `AuthnInstant` proves only the linked identity
+and adds `mailbox`. A signed OIDC `auth_time` outside the allowed window, or a SAML
+`AuthnInstant` later than now plus `clockSkew`, is refused. The result must come from the
+attempt's own user and that user's existing link at that provider. It is recorded on the pending attempt
 and creates no session, browser proof or link. It expires at the earlier of attempt
-expiry and the authentication instant plus `freshAdministrationProof`. For the missing-claim
+expiry and the authentication instant plus `freshAdministrationProof`. For the mailbox
 fallback, receipt time caps the identity result until the mailbox is also proven. Silent IdP SSO,
 rolling sessions and refresh tokens never renew freshness.
 
@@ -1181,8 +1182,8 @@ passed test for the exact current revision and at least one associated, unexpire
 domain with a positive latest recheck. Disabling the last usable provider while enforcing
 SSO returns `409 sso_last_provider`. Another enabled, non-retired provider can satisfy the
 guard if its protocol is on, it supports step-up, and it has an unexpired verified domain.
-Until SAML step-up ships, only OIDC providers count. A failed recheck freezes
-new activation while the existing provider can still serve that domain until verification expires.
+A failed recheck freezes new activation while the existing provider can still serve that
+domain until verification expires.
 Changing activation state keeps the provider revision and records an audit event.
 Disabling also increments `trustGeneration`. An authorized request to enable an already
 enabled provider still checks the current prerequisites.
@@ -1261,8 +1262,8 @@ SSO 的团队使用管理员自己的 Hourmere 邮箱完成证明。重试成功
 关闭，接口返回 `404 sso_disabled`。
 
 SAML uses the same test operation, expected revision and fresh administration flow.
-An enforcing team uses OIDC step-up until SAML step-up ships. A recovery owner can
-update, test and re-activate the provider using three separate recovery grants.
+An enforcing team uses step-up through an enabled OIDC or SAML provider. A recovery owner
+can update, test and re-activate the provider using three separate recovery grants.
 Follow the authorization URL in the initiating browser, then select **Continue**
 on the SAML completion page. The ACS verifies the response and stages its result.
 Completion checks the initiating browser, session and administrator, the provider
@@ -1485,8 +1486,8 @@ must append that cookie and return the challenge as HTTP 403, after its attempt 
 Successful proof consumption and the protected mutation share one transaction; a failed
 mutation rolls back consumption. The database clock is read after the row locks, and an
 expired recorded mailbox proof requires a new attempt. Teams without enforcement need
-`mailbox`. A stored enforcement policy requires OIDC step-up for fresh administration.
-Satisfying that proof requires an available OIDC protocol and an enabled provider where the
+`mailbox`. A stored enforcement policy requires SSO step-up for fresh administration.
+Satisfying that proof requires an available protocol and an enabled provider where the
 caller has a live link. The gate rechecks the recorded result's deadline, provider, link and
 trust generation before consuming the attempt.
 Independent local proof still requires `mailbox`.
@@ -1607,8 +1608,17 @@ discovery, code exchange and signing-key fetches run outside database transactio
 OIDC 二次验证沿用登录发起和回调端点，并要求身份提供方重新认证。回调在兑换授权码前及记录
 结果时，都检查原写入尝试、浏览器、会话、提供方版本、身份关联和团队信任代数。完成后返回
 `returnTo`，客户端用原 `proofAttemptId` 重试写入。如果令牌缺少 `auth_time`，重试会要求在
-同一个尝试中补做邮箱证明。签名中的认证时间超出允许范围时，二次验证会被拒绝。只有 OIDC
-已启用且团队已强制 SSO 并有活动的 OIDC 提供方时，管理写入才要求此验证。
+同一个尝试中补做邮箱证明。签名中的认证时间超出允许范围时，二次验证会被拒绝。
+
+SAML step-up uses the same initiation, ACS and same-origin completion as other SAML
+intents. The ACS verifies the assertion and reserves the replay keys before staging the
+result. Select **Continue** in the initiating browser to record the result on the original
+write attempt. Retry the write with the same `proofAttemptId`. If the signed authentication
+instant is missing or too old, complete the requested mailbox proof before retrying.
+
+SAML 二次验证沿用 SAML 登录发起、ACS 和同源完成端点。ACS 验证签名断言并记录防重放键，
+然后暂存结果。在发起请求的浏览器中选择**继续**，将结果写入原尝试。使用同一个
+`proofAttemptId` 重试原写入。若签名断言缺少认证时间或时间过早，须先补做邮箱验证。
 
 When the OIDC callback sees a changed email for a linked identity, it stores a short-lived,
 frozen result for the original browser and hands off to `/app/mailbox-proof` with the opaque

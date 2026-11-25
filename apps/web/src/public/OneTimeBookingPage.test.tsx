@@ -315,6 +315,17 @@ describe('one-time public booking', () => {
   })
 })
 
+it('omits the singleton location from one-time availability queries', async () => {
+  const api = fakeApi(routes())
+  renderApp(PAGE)
+  await screen.findByRole('button', { name: 'Monday, November 2, available' })
+  const calls = api.to(`GET ${BASE}/slots`)
+  expect(calls.length).toBeGreaterThan(0)
+  for (const call of calls) {
+    expect(new URL(call.path, 'http://x').searchParams.has('locationOptionId')).toBe(false)
+  }
+})
+
 it('loads one-time availability for the selected location', async () => {
   const api = fakeApi(
     routes({

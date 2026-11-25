@@ -2,10 +2,11 @@ import { randomUUID } from 'node:crypto'
 import { createDb } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { createAuth, createAuthPool } from './index.ts'
+import { type Auth, createAuth, createAuthPool } from './index.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const origin = 'http://localhost:43827'
+const secret = 'synthetic-email-verification-test-secret-at-least-32-characters'
 const signup = { mode: 'open', allowedDomains: [] } as const
 const client = { clientId: 'synthetic-client', clientSecret: 'synthetic-secret' }
 const cookies = (response: Response) =>
@@ -28,6 +29,51 @@ describe.skipIf(!serverUrl)('social callback email verification', () => {
     await owned?.drop()
   })
 
+  describe('new-user creation hook', () => {
+    let beforeUserCreate: Auth['options']['databaseHooks']['user']['create']['before']
+    const user = {
+      id: 'synthetic-new-user',
+      name: 'Synthetic new user',
+      email: 'new-user@example.test',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }
+
+    beforeAll(() => {
+      const auth = createAuth({
+        pool: authPool,
+        db: createDb(owned.pool),
+        baseURL: origin,
+        secret,
+        signup,
+        mailer: { send: async () => {} },
+      })
+      beforeUserCreate = auth.options.databaseHooks.user.create.before
+    })
+
+    it.each([
+      { label: 'string false', value: 'false' },
+      { label: 'string true', value: 'true' },
+      { label: 'undefined', value: undefined },
+      { label: 'null', value: null },
+      { label: 'boolean false', value: false },
+    ])('rejects $label as email verification', async ({ value }) => {
+      // Call the hook before Better Auth can normalize the value.
+      await expect(
+        beforeUserCreate({ ...user, emailVerified: value as boolean }),
+      ).rejects.toMatchObject({
+        status: 'FORBIDDEN',
+        body: { code: 'EMAIL_NOT_VERIFIED' },
+      })
+    })
+
+    it('accepts boolean true as email verification', async () => {
+      await expect(beforeUserCreate({ ...user, emailVerified: true })).resolves.toMatchObject({
+        data: { emailVerified: true },
+      })
+    })
+  })
+
   describe.each(['google', 'microsoft'] as const)('%s', (provider) => {
     describe.each([
       { label: 'boolean false', value: false },
@@ -48,7 +94,7 @@ describe.skipIf(!serverUrl)('social callback email verification', () => {
             pool: authPool,
             db: createDb(owned.pool),
             baseURL: origin,
-            secret: 'synthetic-email-verification-test-secret-at-least-32-characters',
+            secret,
             signup,
             mailer: { send: async () => {} },
             socialProviders: { [provider]: client },

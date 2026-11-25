@@ -107,8 +107,9 @@ describe('team host setup navigation', () => {
       })
       renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
       await screen.findByRole('heading', { name: 'Edit “Intro call”', level: 1 })
-      const hosts = screen.getByRole('region', { name: 'Hosts' })
-      expect(within(hosts).queryByRole('status')?.textContent).toBe('Loading your team role…')
+      const loading = screen.getByText('Loading your team role…')
+      expect(loading.getAttribute('role')).toBe('status')
+      expect(screen.queryByText('Hosts', { selector: 'summary' })).toBeNull()
       expect(
         screen.queryByText('Only team owners and admins can change host assignments.'),
       ).toBeNull()
@@ -149,10 +150,9 @@ describe('team host setup navigation', () => {
               }),
       })
       renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
-      const hosts = await screen.findByRole('region', { name: 'Hosts' })
-      await waitFor(() =>
-        expect(within(hosts).queryByText('Could not load your team role.')).not.toBeNull(),
-      )
+      const failure = await screen.findByText('Could not load your team role.')
+      const alert = failure.closest('[role="alert"]') as HTMLElement
+      expect(screen.queryByText('Hosts', { selector: 'summary' })).toBeNull()
       expect(
         screen.queryByText('Only team owners and admins can change host assignments.'),
       ).toBeNull()
@@ -161,7 +161,7 @@ describe('team host setup navigation', () => {
       const failedAttempts = calls.to(MEMBERSHIP).length
 
       fail = false
-      await user.click(within(hosts).getByRole('button', { name: 'Try again' }))
+      await user.click(within(alert).getByRole('button', { name: 'Try again' }))
       await waitFor(() => expect(screen.queryByRole('checkbox', { name: 'Ada' })).not.toBeNull())
       expect(screen.queryByText('Could not load your team role.')).toBeNull()
       expect(

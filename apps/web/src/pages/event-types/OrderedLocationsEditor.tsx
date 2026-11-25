@@ -37,16 +37,24 @@ export function OrderedLocationsEditor({
       options.map((option) => (option.id === id ? change : option)),
     )
   }
-  function move(index: number, direction: number) {
-    // Reordering changes presentation, not the invitee's default choice.
-    const next = options.map((item) =>
-      item.id === defaultId ? { ...item, isDefault: true as const } : item,
-    )
+  function move(index: number, direction: 'up' | 'down') {
+    const next = [...options]
     const [option] = next.splice(index, 1)
     if (!option) return
-    next.splice(index + direction, 0, option)
-    pendingFocus.current = `location-option-${option.id}-label`
-    set('locationOptions', next)
+    const nextIndex = index + (direction === 'up' ? -1 : 1)
+    next.splice(nextIndex, 0, option)
+    const focusDirection =
+      nextIndex === 0 ? 'down' : nextIndex === next.length - 1 ? 'up' : direction
+    pendingFocus.current = `location-option-${option.id}-move-${focusDirection}`
+    // Keep the default explicit if a different option is now first.
+    set(
+      'locationOptions',
+      next.map((item) =>
+        next[0]?.id !== defaultId && item.id === defaultId
+          ? { ...item, isDefault: true as const }
+          : item,
+      ),
+    )
   }
   function add() {
     const kind = available.find((item) => item.value === addition)?.value ?? available[0]?.value
@@ -177,18 +185,20 @@ export function OrderedLocationsEditor({
             </label>
             <div className="row">
               <button
+                id={`${id}-move-up`}
                 className="button button-small"
                 type="button"
                 disabled={index === 0}
-                onClick={() => move(index, -1)}
+                onClick={() => move(index, 'up')}
               >
                 {t('Move location up')}
               </button>
               <button
+                id={`${id}-move-down`}
                 className="button button-small"
                 type="button"
                 disabled={index === options.length - 1}
-                onClick={() => move(index, 1)}
+                onClick={() => move(index, 'down')}
               >
                 {t('Move location down')}
               </button>

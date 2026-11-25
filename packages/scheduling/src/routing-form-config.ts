@@ -117,6 +117,10 @@ const BIDI_CONTROLS = /[‪-‮⁦-⁩]/
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
+export function isRoutingUuid(value: unknown): value is string {
+  return typeof value === 'string' && UUID.test(value)
+}
+
 /**
  * Text from an author or invitee: at most `max` UTF-16 code units as submitted, before
  * trimming, so every legal string is bounded; then trimmed, well-formed and free of control
@@ -168,8 +172,7 @@ function label<E extends Error>(
 
 /** A new identity: a UUID not used by any other question, option or rule of the version. */
 function identity(value: unknown, field: string, ids: Set<string>): string {
-  if (typeof value !== 'string' || !UUID.test(value))
-    throw invalidForm(field, 'must be a lowercase UUID')
+  if (!isRoutingUuid(value)) throw invalidForm(field, 'must be a lowercase UUID')
   if (ids.has(value)) throw invalidForm(field, 'must not repeat another ID of this form')
   ids.add(value)
   return value
@@ -344,7 +347,7 @@ function validateTarget(
   if (value.kind === 'event') {
     // No member, host, URL or redirect selector: an event is routed to as it stands.
     strict(value, ['kind', 'eventTypeId', 'mappings'], unsupported)
-    if (typeof value.eventTypeId !== 'string' || !UUID.test(value.eventTypeId))
+    if (!isRoutingUuid(value.eventTypeId))
       throw invalidTarget(`${field}.eventTypeId`, 'must be a lowercase UUID', 'not_found')
     const mappings = (
       value.mappings === undefined

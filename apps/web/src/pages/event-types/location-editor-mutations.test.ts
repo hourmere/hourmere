@@ -271,7 +271,7 @@ describe('ordered locations editor preservation controls', () => {
     )
   })
   it('sends reordered options and preserves their stable identities', () => {
-    detects('    delete body.locations', '    body.locations = null', (values) => {
+    detects('delete body.locations', 'body.locations = null', (values) => {
       const baseline = values.draftFromEventType(
         eventType({ locations: options, location: { kind: 'phone', askInvitee: true } }),
       )

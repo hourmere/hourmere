@@ -45,10 +45,12 @@ code; it is not a public API. Decrypted credential objects and discovery request
 objects redact username/password and Authorization fields under `JSON.stringify`,
 `util.inspect` and `String()`. Protected fields use non-enumerable getters: object
 spread, `Object.entries` and `structuredClone` omit them. Repeated redaction is safe.
-Direct field access remains usable internally and must not be logged; explicitly
-copying those field values creates unprotected plaintext. These protections apply to
-objects returned by the credential reader and wrapped discovery requests, not raw
-caller-supplied credential literals.
+Pass wrapped credentials directly to discovery and wrapped requests directly to transport.
+Never spread either object. Protected fields are read-only. Direct field access
+remains usable internally, and explicitly copying those values creates unprotected
+plaintext. These protections apply to objects returned by the credential reader and
+wrapped discovery requests. Raw caller-supplied credential literals retain ordinary
+JavaScript property behavior.
 Keep plaintext lifetime short; JavaScript does not provide
 a reliable guarantee of memory zeroization. Back up the encryption key separately from
 the database. Losing it requires reconnecting; rotation must explicitly decrypt and
@@ -165,8 +167,8 @@ recorded XML fixtures and controlled failures without real provider network traf
 The discovery client reuses the webhook outbound URL/address policy, with a stricter
 HTTPS-only boundary even for operator-approved private servers. Apply the policy to
 initial URLs, redirect locations, principal/home hrefs and calendar hrefs, including
-URLs returned as metadata for future use. Reject embedded userinfo, fragments, malformed
-URLs and unsupported ports. Public destinations use DNS hostnames and HTTPS port 443.
+URLs returned as metadata for future use. Reject embedded userinfo, queries, fragments,
+malformed URLs and unsupported ports. Public destinations use DNS hostnames and HTTPS port 443.
 
 Before **each** network request resolve all DNS answers, validate them all, and pin the
 validated address to the socket while preserving the original hostname for Host, SNI
