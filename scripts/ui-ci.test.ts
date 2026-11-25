@@ -26,6 +26,7 @@ interface Job {
   if?: string
   'continue-on-error'?: boolean
   env?: Record<string, string>
+  outputs?: Record<string, string>
   services?: { postgres: { options: string } }
   strategy?: { 'fail-fast'?: boolean; matrix?: { shard?: number[] } }
   steps: Step[]
@@ -81,7 +82,9 @@ function selectedSpecs(
 // Include indented declarations inside describe blocks. Modified declarations (skip,
 // only, fixme) deliberately do not satisfy the required smoke-path names.
 function testNames(source: string) {
-  return [...source.matchAll(/^\s*test\(\s*(['"`])([^'"`]+)\1/gm)].map((match) => match[2])
+  return [...source.matchAll(/^\s*test\(\s*(['"`])((?:\\.|(?!\1)[^\\])*)\1/gm)].map(
+    (match) => match[2],
+  )
 }
 
 function declaredTests(file: string) {
@@ -199,8 +202,8 @@ describe('UI measurement CI contract', () => {
     ['check-tests', '8b59583e0e92eb77d66a08cffe92d8fa0707033f2f7a390f4a63017876c68de8'],
     ['cli-compatibility', 'e6baff5e1cbf2e5b3339c961747ed5be373cc5d0b7874200d54b903f13a3e194'],
     // Shards preserve the fixture and privacy gates; the stable required job aggregates them.
-    ['e2e', '64426cc5d9fc305079bc1aa63370b1a9a6926173a169e82ee18053e7c2ef3618'],
-    ['e2e-shard', '5ec12675b7971bde3283f69176bcd88a818be470c7b3ca34b5811b44ad42def6'],
+    ['e2e', 'cb4f31c9aa29924d293ef531c8014df4987124efc79c905b186ca73c72298709'],
+    ['e2e-shard', '066535335da4857c0beba412509c97b51e5e1e52c370a0164747e8678da13e42'],
     ['docker', '2594f351267b97c37981b7889ae22495076c653543f5cd8ee11825ac4ed63d9a'],
   ])('preserves required job %s and its behavior', (id, digest) => {
     expect(requiredWorkflow.jobs[id ?? '']).toBeDefined()
@@ -352,12 +355,20 @@ describe('report-only browser command', () => {
       testNames(`
       test.describe('nested', () => {
         test('nested path', async () => {})
-        test("double-quoted path", async () => {})
+        test("host's path", async () => {})
+        test('choose "Phone"', async () => {})
+        test(\`host's "Phone"\`, async () => {})
         test.skip('skipped path', async () => {})
         test.only('focused path', async () => {})
       })
     `),
-    ).toEqual(['nested path', 'double-quoted path'])
+    ).toEqual(['nested path', "host's path", 'choose "Phone"', `host's "Phone"`])
+  })
+
+  it('keeps escaped matching quotes inside a smoke name', () => {
+    expect(testNames(String.raw`test('host\'s path', async () => {})`)).toEqual([
+      String.raw`host\'s path`,
+    ])
   })
 
   it('resolves native WebKit and Firefox projects without inheriting the Chrome channel', async () => {
@@ -468,12 +479,24 @@ describe('required browser shards', () => {
     expect(job?.['continue-on-error']).toBeUndefined()
     expect(job?.['timeout-minutes']).toBe(12)
     expect(job?.strategy).toEqual({ 'fail-fast': false, matrix: { shard: [1, 2, 3, 4, 5, 6] } })
+    expect(functionalConfig.fullyParallel).toBe(true)
     expect(job?.services?.postgres.options).not.toContain('max_connections')
     const browser = job?.steps.find(
       (step) => step.name === 'Build a disposable site fixture and run browser regressions',
     )
     expect(browser?.if).toBeUndefined()
     expect(browser?.['continue-on-error']).toBeUndefined()
+    expect(browser?.id).toBe('browser')
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub Actions expression is literal.
+    expect(browser?.env?.HOURMERE_E2E_SHARD).toBe('${{ matrix.shard }}')
+    expect(job?.outputs).toEqual(
+      Object.fromEntries(
+        [1, 2, 3, 4, 5, 6].map((shard) => [
+          `shard_${shard}`,
+          `\${{ steps.browser.outputs.shard_${shard} }}`,
+        ]),
+      ),
+    )
     expect(browser?.run).toContain('npm run build --workspace @hourmere/site')
     expect(browser?.run).toContain('trap restore_legal_source EXIT')
     expect(browser?.run?.split('\n').filter((line) => line.includes('npm run test'))).toEqual([
@@ -499,22 +522,64 @@ describe('required browser shards', () => {
     expect({ ...job?.env, ...job?.steps[0]?.env }).toEqual({
       // biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub Actions expression is literal.
       SHARD_RESULT: '${{ needs.e2e-shard.result }}',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub Actions expression is literal.
+      SHARD_COUNTS: '${{ toJSON(needs.e2e-shard.outputs) }}',
+      SHARD_COUNT: String(requiredWorkflow.jobs['e2e-shard']?.strategy?.matrix?.shard?.length),
     })
   })
 
+  const balancedCounts = {
+    shard_1: '101:600',
+    shard_2: '99:600',
+    shard_3: '100:600',
+    shard_4: '100:600',
+    shard_5: '100:600',
+    shard_6: '100:600',
+  }
+
+  function runShardSummary(result: string, counts: Record<string, string>) {
+    const script = requiredWorkflow.jobs.e2e?.steps[0]?.run
+    expect(script).toBeTypeOf('string')
+    const execution = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', script ?? 'exit 99'], {
+      encoding: 'utf8',
+      env: {
+        PATH: process.env.PATH,
+        SHARD_RESULT: result,
+        SHARD_COUNTS: JSON.stringify(counts),
+        SHARD_COUNT: requiredWorkflow.jobs.e2e?.env?.SHARD_COUNT,
+      },
+    })
+    expect(execution.error).toBeUndefined()
+    return execution
+  }
+
   it.each(['success', 'failure', 'cancelled', 'skipped', ''])(
-    'accepts the aggregated shard result only when successful (%s)',
+    'accepts balanced shard counts only when the jobs succeeded (%s)',
     (result) => {
-      const script = requiredWorkflow.jobs.e2e?.steps[0]?.run
-      expect(script).toBeTypeOf('string')
-      const execution = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', script ?? 'exit 99'], {
-        encoding: 'utf8',
-        env: { PATH: process.env.PATH, SHARD_RESULT: result },
-      })
-      expect(execution.error).toBeUndefined()
+      const execution = runShardSummary(result, balancedCounts)
       expect(execution.status, execution.stderr).toBe(result === 'success' ? 0 : 1)
     },
   )
+
+  it.each([
+    ['unsharded execution', { shard_3: '600:600' }, 'Shard 3 selected 600/600 tests'],
+    [
+      'uneven coverage',
+      { shard_1: '140:600', shard_2: '60:600' },
+      'Shard 1 selected 140/600 tests',
+    ],
+    ['missing output', { shard_3: '' }, 'Missing or invalid test count for shard 3'],
+    [
+      'inconsistent total',
+      { shard_3: '100:601' },
+      'Shard 3 discovered a different full suite size',
+    ],
+    ['incomplete coverage', { shard_3: '99:600' }, 'must add up to the full suite size'],
+  ] as const)('rejects %s even when every job succeeded', (_name, counts, diagnostic) => {
+    const execution = runShardSummary('success', { ...balancedCounts, ...counts })
+    expect(execution.status, execution.stderr).toBe(1)
+    expect(execution.stderr).toContain(diagnostic)
+  })
 
   it('uses the same unfiltered Playwright command locally and in CI, adding only sharding', () => {
     const rootPackage = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))

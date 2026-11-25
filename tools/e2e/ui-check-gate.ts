@@ -323,8 +323,7 @@ export function expectedFromPlaywrightList(
   return expected
 }
 
-export async function loadExpectedReports(suite: BlockingSuite, shard?: string) {
-  if (suite === 'cross-engine') return { expected: [], allExpected: [] }
+export async function listExpectedReports(suite: 'layout' | 'a11y', shard?: string) {
   if (shard && !/^[1-9]\d*\/[1-9]\d*$/.test(shard)) throw new Error('Invalid UI shard')
   const root = fileURLToPath(new URL('../../', import.meta.url))
   const previousSuite = process.env.HOURMERE_UI_SUITE
@@ -348,40 +347,42 @@ export async function loadExpectedReports(suite: BlockingSuite, shard?: string) 
   }
   // Playwright shards by test count and preparation tests occupy slots, so a shard
   // may legitimately select no measurement test; the unsharded matrix never may.
-  const list = (selectedShard?: string) => {
-    const child = spawnSync(
-      process.execPath,
-      [
-        fileURLToPath(import.meta.resolve('@playwright/test/cli')),
-        'test',
-        '--config',
-        'tools/e2e/playwright.audit.config.ts',
-        '--list',
-        '--reporter=json',
-        ...(selectedShard ? [`--shard=${selectedShard}`] : []),
-      ],
-      {
-        cwd: root,
-        env: { ...process.env, HOURMERE_UI_SUITE: suite },
-        encoding: 'utf8',
-        maxBuffer: 8 * 1024 * 1024,
-        timeout: 60_000,
-      },
-    )
-    if (child.status === 0) {
-      try {
-        return expectedFromPlaywrightList(JSON.parse(child.stdout), suite, projectViewports, {
-          allowEmpty: selectedShard !== undefined,
-        })
-      } catch {
-        // Parsing diagnostics can contain stdout; expose only the safe child metadata.
-      }
+  const child = spawnSync(
+    process.execPath,
+    [
+      fileURLToPath(import.meta.resolve('@playwright/test/cli')),
+      'test',
+      '--config',
+      'tools/e2e/playwright.audit.config.ts',
+      '--list',
+      '--reporter=json',
+      ...(shard ? [`--shard=${shard}`] : []),
+    ],
+    {
+      cwd: root,
+      env: { ...process.env, HOURMERE_UI_SUITE: suite },
+      encoding: 'utf8',
+      maxBuffer: 8 * 1024 * 1024,
+      timeout: 60_000,
+    },
+  )
+  if (child.status === 0) {
+    try {
+      return expectedFromPlaywrightList(JSON.parse(child.stdout), suite, projectViewports, {
+        allowEmpty: Boolean(shard),
+      })
+    } catch {
+      // Parsing diagnostics can contain stdout; expose only the safe child metadata.
     }
-    throw new UiMatrixEnumerationError(child)
   }
-  const allExpected = list()
-  if (!shard) return { expected: allExpected, allExpected }
-  const expected = list(shard)
+  throw new UiMatrixEnumerationError(child)
+}
+
+export async function loadExpectedReports(suite: BlockingSuite, shard?: string) {
+  if (suite === 'cross-engine') return { expected: [], allExpected: [] }
+  const expected = shard ? await listExpectedReports(suite, shard) : undefined
+  const allExpected = await listExpectedReports(suite)
+  if (!expected) return { expected: allExpected, allExpected }
   const allIds = new Set(allExpected.map(reportIdentity))
   if (expected.some((identity) => !allIds.has(reportIdentity(identity))))
     throw new Error('Unable to enumerate UI measurement matrix')

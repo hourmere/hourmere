@@ -569,7 +569,6 @@ export const admin = {
   'Include the default duration in the allowed durations.':
     'Include the default duration in the allowed durations.',
   'Added {0}.': 'Added {0}.',
-  'Removed {0}. Default duration: {1}.': 'Removed {0}. Default duration: {1}.',
   Scope: 'Scope',
   'Bookings (read/write)': 'Bookings (read/write)',
   'Read only': 'Read only',
@@ -3270,4 +3269,6 @@ export const admin = {
 
   // SCIM invitation attribution
   'SCIM connection': 'SCIM connection',
+  // Additional durations
+  'Removed {0}. Selected length: {1}.': 'Removed {0}. Selected length: {1}.',
 } as const

@@ -482,28 +482,21 @@ describe.skipIf(!serverUrl)('routing target lifecycle', () => {
     ])
   }
 
-  /**
-   * A target this release cannot read is `unknown`: neither unavailable nor missing, in `get`
-   * and in `list`; a form with nothing published has no health at all, which is not unknown.
-   */
-  async function unknownIsNeitherBrokenNorMissing(S: ServiceModule) {
-    const space = await personalSpace()
-    const event = await space.event()
-    const form = await publishedForm(space.ctx, [event], null)
-    const rule = randomUUID()
-    const unread = randomUUID()
+  /** Install a synthetic version to exercise health's defensive reads of stored data. */
+  async function installStoredVersion(
+    space: Awaited<ReturnType<typeof personalSpace>>,
+    formId: string,
+    versionNumber: number,
+    rules: unknown[],
+  ) {
     const { id: version } = await db
       .insertInto('routing_form_versions')
       .values({
         organization_id: space.organizationId,
-        form_id: form.formId,
-        version_number: 2,
+        form_id: formId,
+        version_number: versionNumber,
         questions: JSON.stringify([]),
-        // As a later release might store a kind this one does not know.
-        rules: JSON.stringify([
-          { id: rule, conditions: [], target: { kind: 'webhook', url: 'https://example.test' } },
-          { id: unread, conditions: [], target: { kind: 'event', eventTypeId: 42 } },
-        ]),
+        rules: JSON.stringify(rules),
         fallback: JSON.stringify({ kind: 'message', message: 'Thank you' }),
         published_by_user_id: space.user.id,
       })
@@ -512,8 +505,28 @@ describe.skipIf(!serverUrl)('routing target lifecycle', () => {
     await db
       .updateTable('routing_forms')
       .set({ published_version_id: version })
-      .where('id', '=', form.formId)
+      .where('id', '=', formId)
       .execute()
+    return version
+  }
+
+  /** A published target the current reader cannot interpret contributes `unknown` health. */
+  async function unknownIsNeitherBrokenNorMissing(S: ServiceModule) {
+    const space = await personalSpace()
+    const event = await space.event()
+    const form = await publishedForm(space.ctx, [event], null)
+    const rule = randomUUID()
+    const unread = randomUUID()
+    const uppercase = randomUUID()
+    const version = await installStoredVersion(space, form.formId, 2, [
+      { id: rule, conditions: [], target: { kind: 'webhook', url: 'https://example.test' } },
+      { id: unread, conditions: [], target: { kind: 'event', eventTypeId: 42 } },
+      {
+        id: uppercase,
+        conditions: [],
+        target: { kind: 'event', eventTypeId: event.toUpperCase() },
+      },
+    ])
     const read = await succeeds(() => S.getRoutingForm(space.ctx, form.formId))
     expect(read.health).toEqual({
       versionId: version,
@@ -521,6 +534,7 @@ describe.skipIf(!serverUrl)('routing target lifecycle', () => {
       targets: [
         { ruleId: rule, eventTypeId: null, health: 'unknown', reason: null },
         { ruleId: unread, eventTypeId: null, health: 'unknown', reason: null },
+        { ruleId: uppercase, eventTypeId: null, health: 'unknown', reason: null },
         { ruleId: 'fallback', eventTypeId: null, health: 'ok', reason: null },
       ],
     })
@@ -537,30 +551,56 @@ describe.skipIf(!serverUrl)('routing target lifecycle', () => {
       ]),
     )
     expect(listed).toEqual({ [form.formId]: 'unknown', [draftOnly.id]: null })
+
+    // The missing ID is the only unreadable part, so other unknown targets cannot mask it.
+    await installStoredVersion(space, form.formId, 3, [
+      { conditions: [], target: { kind: 'event', eventTypeId: event } },
+    ])
+    const unnamed = await S.getRoutingForm(space.ctx, form.formId)
+    expect(unnamed.health?.status, 'published rule without an ID in get').toBe('unknown')
+    const withUnnamedRule = (await S.listRoutingForms(space.ctx)).data.find(
+      (entry) => entry.id === form.formId,
+    )
+    expect(withUnnamedRule?.health, 'published rule without an ID in list').toBe('unknown')
+
     // A missed invalidation cannot hide a broken target: a mixed version reads unavailable.
     await sql`UPDATE event_types SET is_active = false WHERE id = ${event}`.execute(db)
-    const broken = await db
-      .insertInto('routing_form_versions')
-      .values({
-        organization_id: space.organizationId,
-        form_id: form.formId,
-        version_number: 3,
-        questions: JSON.stringify([]),
-        rules: JSON.stringify([
-          { id: rule, conditions: [], target: { kind: 'webhook' } },
-          { id: unread, conditions: [], target: { kind: 'event', eventTypeId: event } },
-        ]),
-        fallback: JSON.stringify({ kind: 'message', message: 'Thank you' }),
-        published_by_user_id: space.user.id,
-      })
-      .returning('id')
-      .executeTakeFirstOrThrow()
-    await db
-      .updateTable('routing_forms')
-      .set({ published_version_id: broken.id })
-      .where('id', '=', form.formId)
-      .execute()
+    await installStoredVersion(space, form.formId, 4, [
+      { id: rule, conditions: [], target: { kind: 'webhook' } },
+      { id: unread, conditions: [], target: { kind: 'event', eventTypeId: event } },
+    ])
     expect((await S.getRoutingForm(space.ctx, form.formId)).health?.status).toBe('unavailable')
+  }
+
+  async function foreignTargetsReadAsMissing(S: ServiceModule) {
+    const space = await personalSpace()
+    const foreign = await personalSpace()
+    const form = await publishedForm(space.ctx, [await space.event()], null)
+    const foreignIds = [
+      await foreign.event(),
+      await foreign.event({ isActive: false }),
+      await foreign.event({ deletedAt: '2025-01-01T00:00:00Z' }),
+      randomUUID(),
+    ]
+    const rules = foreignIds.map((eventTypeId) => ({
+      id: randomUUID(),
+      conditions: [],
+      target: { kind: 'event', eventTypeId },
+    }))
+    await installStoredVersion(space, form.formId, 2, rules)
+
+    const read = await S.getRoutingForm(space.ctx, form.formId)
+    expect(
+      read.health?.targets.slice(0, rules.length),
+      'foreign event states are indistinguishable from missing events',
+    ).toEqual(
+      rules.map(({ id, target }) => ({
+        ruleId: id,
+        eventTypeId: target.eventTypeId,
+        health: 'unavailable',
+        reason: 'not_found',
+      })),
+    )
   }
 
   /**
@@ -732,6 +772,9 @@ describe.skipIf(!serverUrl)('routing target lifecycle', () => {
 
   it('reports unknown targets as unknown, never as unavailable or as nothing published', () =>
     unknownIsNeitherBrokenNorMissing(Service))
+
+  it('reports active, disabled, deleted and absent foreign targets as not found', () =>
+    foreignTargetsReadAsMissing(Service))
 
   it('serializes publication with event deletion in both orders', () =>
     publishRacesDeletion(Service))
@@ -1031,6 +1074,29 @@ describe.skipIf(!serverUrl)('routing target lifecycle', () => {
       ]),
       unknownIsNeitherBrokenNorMissing,
     ))
+
+  it('fails when the missing rule ID does not affect health', async () => {
+    const copy = await importCopy<ServiceModule>(SERVICE, [
+      UNREADABLE_RULE,
+      `    if (target.ruleId !== null)
+      entry.health.targets.push({ ruleId: target.ruleId, ...targetHealth(target) })`,
+    ])
+    await expectKilled(copy, unknownIsNeitherBrokenNorMissing, {
+      outcome: { actual: 'ok', expected: 'unknown' },
+    })
+  })
+
+  it('fails when health uses the target event’s organization', async () => {
+    const copy = await importCopy<ServiceModule>(SERVICE, [
+      'const reason = routingTargetProblem(organizationId, events.get(target.eventTypeId))',
+      'const reason = routingTargetProblem(events.get(target.eventTypeId)?.organizationId ?? organizationId, events.get(target.eventTypeId))',
+    ])
+    await expectKilled(copy, foreignTargetsReadAsMissing, {
+      outcome: {
+        message: expect.stringContaining('foreign event states are indistinguishable'),
+      },
+    })
+  })
 
   it('fails when publication takes the form lock before the event locks', () =>
     killed(
