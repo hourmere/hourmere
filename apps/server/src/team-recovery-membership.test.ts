@@ -58,6 +58,8 @@ describe.skipIf(!databaseUrl)('team membership and SSO recovery ownership', () =
       leaveTeamMember: nativeTeamLeave(db),
       mailer: { send: async () => {} },
     })
+    // Complete Better Auth's one-time PostgreSQL schema check before counting route queries.
+    await auth.api.getSession({ headers: new Headers() })
     const appDeps = {
       publicUrl,
       checkDb: async () => {},
