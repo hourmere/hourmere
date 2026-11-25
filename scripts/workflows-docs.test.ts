@@ -64,9 +64,10 @@ describe('workflow webhook guides', () => {
     `${site}/cli.md`,
     'docs/mcp.md',
     'tools/cli/README.md',
-  ])('%s documents the event kinds and hard-off behavior', (path) => {
+  ])('%s documents the event kinds and disabled behavior', (path) => {
     const guide = read(path)
     for (const event of WEBHOOK_EVENTS) expect(guide).toContain(`\`${event}\``)
+    expect(guide).toContain('`WORKFLOWS_ENABLED=true`')
     expect(guide).toMatch(/`(?:404 )?workflows_disabled`/)
     expect(guide).toMatch(/`(?:409 )?webhooks_disabled`/)
     expect(guide).toContain('`Webhook.events`')

@@ -80,6 +80,10 @@ for (const locale of ['en', 'zh-CN'] as const) {
 
     await app.signOut()
     await page.goto(app.url + app.bookingPath)
+    // The loading layout has its own language menu, which is replaced when the event loads.
+    await expect(
+      page.getByRole('heading', { name: 'Reminder acceptance call', exact: true }),
+    ).toBeVisible()
     await selectPublicLanguage(page, locale)
     await chooseDay(page, '2030-05-09')
     await page.getByLabel(zh ? '你的姓名' : 'Your name', { exact: true }).fill('Reminder Invitee')

@@ -11,6 +11,7 @@ import type { ReportIdentity, UiCheckException } from '../tools/e2e/ui-check-gat
 const {
   evaluateUiGate,
   expectedFromPlaywrightList,
+  listExpectedReports,
   loadExpectedReports,
   reportIdentity,
   uiGateFindingsSummary,
@@ -476,13 +477,13 @@ describe('matrix-derived report completeness', () => {
   })
 
   it('partitions actual Playwright-selected shards without running browsers', async () => {
-    const matrices: Awaited<ReturnType<typeof loadExpectedReports>>[] = []
     // Mirrors the e2e-layout matrix in .github/workflows/ui-checks.yml.
-    // Each shard spawns its own Playwright listing, so this takes over 30 s on CI runners.
-    for (let shard = 1; shard <= 8; shard++)
-      matrices.push(await loadExpectedReports('layout', `${shard}/8`))
-    const allExpected = matrices[0]?.allExpected ?? []
-    const selected = matrices.flatMap((matrix) => matrix.expected)
+    // Enumerate the full report set once, then list only the remaining shards.
+    const { expected: firstShard, allExpected } = await loadExpectedReports('layout', '1/8')
+    const shards = [firstShard]
+    for (let shard = 2; shard <= 8; shard++)
+      shards.push(await listExpectedReports('layout', `${shard}/8`))
+    const selected = shards.flat()
     const reportsPerViewportAndTheme = auditPages.reduce(
       (total, page) => total + auditLocales(page.id).length,
       0,
@@ -491,8 +492,8 @@ describe('matrix-derived report completeness', () => {
     expect(new Set(selected.map(reportIdentity)).size).toBe(selected.length)
     expect(new Set(selected.map(reportIdentity))).toEqual(new Set(allExpected.map(reportIdentity)))
     // Preparation tests occupy shard slots but do not write measurement reports.
-    expect(new Set(matrices.map((matrix) => matrix.expected.length)).size).toBeGreaterThan(1)
-  }, 120_000)
+    expect(new Set(shards.map((shard) => shard.length)).size).toBeGreaterThan(1)
+  }, 30_000)
 
   it('partitions the full axe matrix across CI shards without running browsers', async () => {
     const matrices: Awaited<ReturnType<typeof loadExpectedReports>>[] = []

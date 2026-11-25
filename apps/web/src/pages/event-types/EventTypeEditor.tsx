@@ -193,6 +193,7 @@ function EventTypeForm({
   const access = useTeamManagementAccess()
   const canAssignHosts =
     me.principal.kind !== 'session' || (access.status === 'ready' && access.role !== null)
+  const teamRoleUnresolved = !canAssignHosts && access.status !== 'ready'
   const role = access.status === 'ready' ? (access.roles?.join(',') ?? null) : null
   // A form keeps the organization it started in; submitting never adopts another tab's
   // active organization. RequireSession remounts it after a confirmed context reload.
@@ -204,6 +205,8 @@ function EventTypeForm({
   const message = useFlash()
   const [shareFocusVersion, setShareFocusVersion] = useState(message ? 1 : 0)
   const [saved, setSaved] = useState<EventType | null>(eventType)
+  const showHosts =
+    !me.organization.personal && (!teamRoleUnresolved || saved?.schedulingType === 'round_robin')
   const [baseline, setBaseline] = useState(() =>
     eventType
       ? draftFromEventType(eventType)
@@ -245,8 +248,6 @@ function EventTypeForm({
       }
     }
     if (hiddenField) hiddenField.focus()
-    else if (Object.keys(errors).length === 1 && errors.durationMinutes)
-      document.getElementById('durationMinutes')?.focus()
   }, [attempt, errors])
   const mounted = useMounted()
   const [readiness, retryReadiness, invalidateReadiness, shareReadiness] = useEditorReadiness(
@@ -773,6 +774,18 @@ function EventTypeForm({
                 {noScheduleHint[1]}
               </p>
             )}
+          {!me.organization.personal &&
+            teamRoleUnresolved &&
+            (access.status === 'loading' ? (
+              <p role="status">{t('Loading your team role…')}</p>
+            ) : (
+              <div role="alert">
+                <p>{t('Could not load your team role.')}</p>
+                <button type="button" onClick={access.reload}>
+                  {t('Try again')}
+                </button>
+              </div>
+            ))}
           <SettingsGroup
             label="Description and visibility"
             summary={summaries.visibility}
@@ -928,22 +941,7 @@ function EventTypeForm({
               onDefaultChange={(value) => set('durationMinutes', value)}
             />
           </SettingsGroup>
-          {!me.organization.personal && !canAssignHosts && access.status !== 'ready' && (
-            <section className="panel" aria-labelledby="hosts-heading">
-              <h2 id="hosts-heading">{t('Hosts')}</h2>
-              {access.status === 'loading' ? (
-                <p role="status">{t('Loading your team role…')}</p>
-              ) : (
-                <div role="alert">
-                  <p>{t('Could not load your team role.')}</p>
-                  <button type="button" onClick={access.reload}>
-                    {t('Try again')}
-                  </button>
-                </div>
-              )}
-            </section>
-          )}
-          {!me.organization.personal && (
+          {showHosts && (
             <SettingsGroup label="Hosts" summary={summaries.hosts} initiallyOpen={editing}>
               {!me.organization.personal && canAssignHosts && (
                 <HostAssignment

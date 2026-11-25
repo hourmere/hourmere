@@ -25,6 +25,7 @@ import * as MeetingPollOutcomes from './meeting-poll-outcomes.ts'
 import * as NotificationSettings from './notification-settings.ts'
 import * as OneTimeLinks from './one-time-links.ts'
 import * as PaymentExpiry from './payment-expiry.ts'
+import * as PaymentRefunds from './payment-refunds.ts'
 import * as Questions from './questions.ts'
 import * as RecurringCapabilities from './recurring-capabilities.ts'
 import * as RecurringMembers from './recurring-members.ts'
@@ -63,6 +64,7 @@ const dependencies: Record<string, object> = {
   './notification-settings.ts': NotificationSettings,
   './one-time-links.ts': OneTimeLinks,
   './payment-expiry.ts': PaymentExpiry,
+  './payment-refunds.ts': PaymentRefunds,
   './questions.ts': Questions,
   './recurring-capabilities.ts': RecurringCapabilities,
   './recurring-members.ts': RecurringMembers,

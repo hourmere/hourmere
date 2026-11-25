@@ -20,7 +20,11 @@ import {
   MailboxProofEmailPayload,
   mailboxProofRoutes,
 } from '../../../apps/server/src/sso-mailbox-proof.ts'
-import { OIDC_CALLBACK_PATH, oidcSignInRoutes } from '../../../apps/server/src/sso-oidc-sign-in.ts'
+import {
+  OIDC_CALLBACK_PATH,
+  OIDC_SIGN_IN_PATH,
+  oidcSignInRoutes,
+} from '../../../apps/server/src/sso-oidc-sign-in.ts'
 import {
   createAuth,
   createAuthPool,
@@ -41,6 +45,7 @@ type KeycloakRealm = Awaited<ReturnType<KeycloakContainer['createRealm']>>
 type Keycloak = Omit<KeycloakRealm, 'close'> & { stop: () => Promise<void> }
 type TokenExchange = 'issued' | 'invalid_code' | 'failed'
 type Admission = 'invitation_only' | 'jit'
+type AuthorizationField = 'state' | 'nonce'
 
 interface AccountState {
   userId: string | null
@@ -95,6 +100,30 @@ function readSigningKeyId(response: SsoResponse): string {
     // Keep raw token data out of failures.
   }
   throw new Error('The Keycloak ID token did not identify its signing key')
+}
+
+async function tamperAuthorization(
+  response: Response,
+  endpoint: string,
+  field: AuthorizationField,
+) {
+  const data = await response.json().catch(() => null)
+  const url = typeof data?.url === 'string' ? URL.parse(data.url) : null
+  if (!url || url.origin + url.pathname !== endpoint)
+    throw new Error('Hourmere did not return the owned Keycloak authorization URL')
+  const original = url.searchParams.get(field)
+  if (!original) throw new Error(`Keycloak authorization request has no ${field}`)
+  // Change ciphertext while keeping the state envelope header and attempt ID.
+  // Keycloak signs the changed nonce into its genuine ID token.
+  const index = field === 'state' ? original.length - 2 : 0
+  const replacement = original[index] === 'A' ? 'B' : 'A'
+  url.searchParams.set(
+    field,
+    `${original.slice(0, index)}${replacement}${original.slice(index + 1)}`,
+  )
+  const headers = new Headers(response.headers)
+  headers.delete('content-length')
+  return Response.json({ ...data, url: url.href }, { status: response.status, headers })
 }
 
 async function seedSignIn(
@@ -399,6 +428,7 @@ export const test = base.extend<
     brokenProvider: boolean
     keyRotation: boolean
     dedicatedKeycloak: boolean
+    tamperedAuthorizationField: AuthorizationField | undefined
   },
   { getWorkerKeycloak: () => Promise<KeycloakContainer> }
 >({
@@ -409,6 +439,7 @@ export const test = base.extend<
   brokenProvider: [false, { option: true }],
   keyRotation: [false, { option: true }],
   dedicatedKeycloak: [false, { option: true }],
+  tamperedAuthorizationField: [undefined, { option: true }],
   getWorkerKeycloak: [
     // biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructuring fixture dependencies.
     async ({}, use) => {
@@ -438,6 +469,7 @@ export const test = base.extend<
         brokenProvider,
         keyRotation,
         dedicatedKeycloak,
+        tamperedAuthorizationField,
         getWorkerKeycloak,
       },
       use,
@@ -604,7 +636,25 @@ export const test = base.extend<
             },
           }),
         })
-        server.on('request', getRequestListener(app.fetch, { hostname: '127.0.0.1' }))
+        const handleRequest = tamperedAuthorizationField
+          ? async (request: Request, env: Parameters<typeof app.fetch>[1]) => {
+              const response = await app.fetch(request, env)
+              // Give the SPA the altered URL for every navigation. A one-shot
+              // Playwright override applies only to the first browser request.
+              if (
+                request.method === 'POST' &&
+                new URL(request.url).pathname === OIDC_SIGN_IN_PATH &&
+                response.ok
+              )
+                return tamperAuthorization(
+                  response,
+                  `${oidcEndpoint}/auth`,
+                  tamperedAuthorizationField,
+                )
+              return response
+            }
+          : app.fetch
+        server.on('request', getRequestListener(handleRequest, { hostname: '127.0.0.1' }))
         const checkBrowser = await guardBrowser(context, {
           url,
           idpOrigin: issuer.origin,
