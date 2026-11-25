@@ -1,4 +1,5 @@
 import type { OpenAPIHono } from '@hono/zod-openapi'
+import type { SignupPolicy } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import { type SsoAuditReason, writeSsoSecurityFailure } from '@hourmere/db/audit'
 import type { Context, MiddlewareHandler } from 'hono'
@@ -16,6 +17,12 @@ import {
   sha256,
 } from './sso-mailbox-proof.ts'
 import {
+  completeSsoAdmission,
+  ssoAdmissionCookie,
+  ssoAdmissionRefused,
+  stageSsoAdmission,
+} from './sso-oidc-admission.ts'
+import {
   lockOidcProvider,
   lockOidcTestActor,
   OidcAttemptRefused,
@@ -25,6 +32,7 @@ import {
 import {
   completeOidcSignIn,
   expiresDuringOidcWrite,
+  SsoMailboxCompletionExpired,
   stageSsoMailboxCompletion,
 } from './sso-oidc-completion.ts'
 import {
@@ -116,6 +124,7 @@ interface SamlSignInDeps {
   db: Db
   capabilities: SsoCapabilities
   configurationKey?: Buffer | undefined
+  signup: SignupPolicy
   session: OidcSessionOptions
   readSession?: (headers: Headers) => Promise<OidcTestActor | null | undefined>
 }
@@ -483,7 +492,28 @@ async function stageSamlCompletion(
       return { id: pending.id, result: pending.envelope, kind: 'link-result' as const }
     }
     const link = candidate
-    if (!link || link.retired_at) return undefined
+    if (link?.retired_at) return undefined
+    if (!link) {
+      const expiresAt = signInDeadline.round({ smallestUnit: 'microsecond', roundingMode: 'floor' })
+      const pending = await stageSsoAdmission(
+        { db: trx, configurationKey },
+        provider,
+        {
+          ...identity,
+          email: identity.mailbox,
+          sessionDeadline: sessionDeadline
+            ?.round({ smallestUnit: 'microsecond', roundingMode: 'floor' })
+            .toString(),
+        },
+        { expiresAt: expiresAt.toString(), requestId },
+        request.browser_binding_digest,
+      )
+      if (pending.reason === 'attempt_expired') throw new SamlTimingError('request_expired')
+      if (pending.reason !== undefined) return undefined
+      if (samlRequestExpired(expiresAt, await samlDatabaseNow(trx)))
+        throw new SamlTimingError('request_expired')
+      return { id: pending.id, result: pending.envelope, kind: 'admission' as const }
+    }
     if (link.proven_email !== identity.mailbox) {
       const pending = await stageSsoMailboxCompletion(
         { db: trx, configurationKey, scimResourcesEnabled },
@@ -494,6 +524,7 @@ async function stageSamlCompletion(
         { expiresAt: new Date(signInDeadline.epochMilliseconds), requestId },
         request.browser_binding_digest,
       )
+      if (pending.reason === 'attempt_expired') throw new SamlTimingError('request_expired')
       if (pending.reason !== undefined) return undefined
       return { id: pending.id, result: pending.envelope, kind: 'mailbox' as const }
     }
@@ -638,6 +669,7 @@ export function samlSignInRoutes({
   db,
   capabilities,
   configurationKey,
+  signup,
   session,
   readSession,
 }: SamlSignInDeps): SamlSignInModule {
@@ -751,14 +783,17 @@ export function samlSignInRoutes({
           const finish = (pending: {
             id: string
             result: string
-            kind?: 'result' | 'link-result' | 'mailbox'
+            kind?: 'result' | 'link-result' | 'mailbox' | 'admission'
           }) => {
-            const cookie = samlStateCookie(publicUrl, pending.kind ?? 'result', pending.id)
+            const cookie =
+              pending.kind === 'admission'
+                ? ssoAdmissionCookie(publicUrl, 'saml', pending.id)
+                : samlStateCookie(publicUrl, pending.kind ?? 'result', pending.id)
             setCookie(c, cookie.name, pending.result, {
               ...cookie.options,
               maxAge: completionLifetime.seconds,
             })
-            if (pending.kind === 'mailbox')
+            if (pending.kind === 'mailbox' || pending.kind === 'admission')
               return c.redirect(`${MAILBOX_PROOF_CONFIRM_PATH}#attempt=${pending.id}&saml=1`, 303)
             const intent = pending.kind === 'link-result' ? '&intent=link' : ''
             return c.redirect(`${SAML_COMPLETE_PATH}?attemptId=${pending.id}${intent}`, 303)
@@ -842,7 +877,8 @@ export function samlSignInRoutes({
               return fail(error.reason)
             }
             if (error instanceof OidcAttemptRefused) return fail('configuration_changed')
-            if (expiresDuringOidcWrite(error)) return fail('attempt_expired')
+            if (error instanceof SsoMailboxCompletionExpired || expiresDuringOidcWrite(error))
+              return fail('attempt_expired')
             throw error
           }
         },
@@ -923,6 +959,28 @@ export function samlSignInRoutes({
           return c.redirect(oidcLinkReturnPath, 303)
         }
         if (linkEnvelope !== undefined) return c.json(completionInvalid, 400)
+        const admissionCookie = ssoAdmissionCookie(publicUrl, 'saml', id.data)
+        const admissionEnvelope = getCookie(c, admissionCookie.name)
+        if (admissionEnvelope !== undefined) {
+          const completed = await completeSsoAdmission(
+            { db, configurationKey, signup },
+            { id: id.data, browserBinding, envelope: admissionEnvelope },
+            sessionOptions,
+            { kind: 'jit' },
+            'saml',
+            returnState,
+          )
+          if (completed.status !== 'completed' && completed.status !== 'link_required')
+            return ssoAdmissionRefused(c, completed.status, 'saml')
+          deleteCookie(c, admissionCookie.name, admissionCookie.options)
+          if (completed.requestId !== undefined) {
+            const returnCookie = samlStateCookie(publicUrl, 'return', completed.requestId)
+            deleteCookie(c, returnCookie.name, returnCookie.options)
+          }
+          if (completed.status === 'link_required') return c.json({ status: 'link_required' })
+          c.header('Set-Cookie', completed.cookie, { append: true })
+          return c.redirect(completed.returnPath, 303)
+        }
         const mailboxCookie = samlStateCookie(publicUrl, 'mailbox', id.data)
         const mailboxEnvelope = getCookie(c, mailboxCookie.name)
         if (mailboxEnvelope !== undefined) {
