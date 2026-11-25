@@ -21,6 +21,8 @@ import {
   mailboxProofRoutes,
 } from '../../../apps/server/src/sso-mailbox-proof.ts'
 import { OIDC_CALLBACK_PATH, oidcSignInRoutes } from '../../../apps/server/src/sso-oidc-sign-in.ts'
+import { samlSignInRoutes } from '../../../apps/server/src/sso-saml-sign-in.ts'
+import { samlServiceProviderUrls } from '../../../apps/server/src/sso-saml-state.ts'
 import {
   createAuth,
   createAuthPool,
@@ -35,6 +37,7 @@ import { createFixtures } from '../../../packages/scheduling/src/testing.ts'
 import { test as base, expect } from '../fixtures.ts'
 import { listenOwned, type OwnedListener } from '../listeners.ts'
 import { startKeycloak } from './keycloak.ts'
+import { startSamlPeer } from './saml-peer.ts'
 
 type KeycloakContainer = Awaited<ReturnType<typeof startKeycloak>>
 type KeycloakRealm = Awaited<ReturnType<KeycloakContainer['createRealm']>>
@@ -69,6 +72,7 @@ export interface KeycloakFixture {
   tokenExchanges: () => readonly TokenExchange[]
   signingKeyIds: () => readonly string[]
   jwksRequests: () => number
+  postSamlToPeer: (fields: URLSearchParams) => Promise<{ status: number; location: string | null }>
 }
 
 function tokenExchange(response: SsoResponse): TokenExchange {
@@ -151,25 +155,33 @@ async function seedSignIn(
       .values({ organization_id: organizationId, admission, require_sso: enforced })
       .execute()
 
-  const { issuer, clientId, clientSecret } = idp
+  const { saml, clientId, clientSecret } = idp
+  const issuer = saml?.entityId ?? idp.issuer
+  const configuration = saml
+    ? {
+        ssoEndpoint: saml.ssoEndpoint,
+        signingCertificates: saml.signingCertificates,
+        subjectAttribute: saml.subjectAttribute,
+      }
+    : {
+        issuer,
+        clientId,
+        clientSecret: brokenProvider ? randomBytes(32).toString('base64url') : clientSecret,
+      }
   const revision = 1
   await db
     .insertInto('sso_providers')
     .values({
       id: providerId,
       organization_id: organizationId,
-      protocol: 'oidc',
+      protocol: saml ? 'saml' : 'oidc',
       display_name: 'Fixture Keycloak',
       issuer,
-      client_id: clientId,
+      client_id: saml ? null : clientId,
       configuration: sealSsoProviderConfiguration(
         configurationKey,
         { providerId, organizationId, revision },
-        JSON.stringify({
-          issuer,
-          clientId,
-          clientSecret: brokenProvider ? randomBytes(32).toString('base64url') : clientSecret,
-        }),
+        JSON.stringify(configuration),
       ),
       enabled: true,
     })
@@ -392,7 +404,9 @@ export async function describeStrandedPage(page: Page, app: { url: string }) {
 export const test = base.extend<
   {
     keycloak: KeycloakFixture
+    protocol: 'oidc' | 'saml'
     oidcEnabled: boolean
+    samlEnabled: boolean
     admission: Admission
     signupMode: SignupPolicy['mode']
     enforced: boolean
@@ -402,7 +416,9 @@ export const test = base.extend<
   },
   { getWorkerKeycloak: () => Promise<KeycloakContainer> }
 >({
+  protocol: ['oidc', { option: true }],
   oidcEnabled: [true, { option: true }],
+  samlEnabled: [false, { option: true }],
   admission: ['invitation_only', { option: true }],
   signupMode: ['closed', { option: true }],
   enforced: [false, { option: true }],
@@ -431,7 +447,9 @@ export const test = base.extend<
       {
         context,
         page,
+        protocol,
         oidcEnabled,
+        samlEnabled,
         admission,
         signupMode,
         enforced,
@@ -450,6 +468,7 @@ export const test = base.extend<
       let dedicated: KeycloakContainer | undefined
       let closeRealm: (() => Promise<void>) | undefined
       let authPool: ReturnType<typeof createAuthPool> | undefined
+      let samlPeer: ReturnType<typeof startSamlPeer> | undefined
       const previousCAs = getCACertificates('default')
       try {
         listener = await listenOwned(createServer())
@@ -460,8 +479,10 @@ export const test = base.extend<
           .executeTakeFirstOrThrow()
         if (dedicatedKeycloak || keyRotation) dedicated = await startKeycloak()
         const container = dedicated ?? (await getWorkerKeycloak())
+        const samlSp = protocol === 'saml' ? samlServiceProviderUrls(url, providerId) : undefined
         const { close, rotateSigningKey, ...realm } = await container.createRealm(
           new URL(OIDC_CALLBACK_PATH.replace(':providerId', providerId), url).href,
+          samlSp,
         )
         closeRealm = close
         const idp: Keycloak = {
@@ -502,15 +523,15 @@ export const test = base.extend<
           }),
         }
         const mail = new Map<string, string>()
-        // The operator setting, parsed and derived exactly as the running server does it;
-        // nothing is injected. Empty is what a new install's .env and Compose pass.
+        // Parse the OIDC operator setting like production. Only this fixture injects SAML.
         const config = loadConfig({
           DATABASE_URL: owned.url,
           BETTER_AUTH_SECRET: secret,
           SSO_OIDC_ENABLED: oidcEnabled ? 'true' : '',
           SSO_ENCRYPTION_KEY: configurationKey.toString('base64'),
         })
-        const capabilities = productionSsoCapabilities(config)
+        const production = productionSsoCapabilities(config)
+        const capabilities = samlEnabled ? { ...production, ssoSamlEnabled: true } : production
         const ssoConfigurationKey = Buffer.from(config.SSO_ENCRYPTION_KEY ?? '', 'base64')
         const mailbox = mailboxProofSink({ db, capabilities, publicUrl: url, secret })
         authPool = createAuthPool(owned.url, signup)
@@ -548,6 +569,13 @@ export const test = base.extend<
         const exchanges: TokenExchange[] = []
         const signingKeyIds: string[] = []
         let jwksRequests = 0
+        const readSession = async (headers: Headers) =>
+          (
+            await auth.api.getSession({
+              headers,
+              query: { disableRefresh: true, disableCookieCache: true },
+            })
+          )?.session
         const app = createApp({
           publicUrl: url,
           checkDb: async () => {},
@@ -568,13 +596,7 @@ export const test = base.extend<
             privateTargets,
             signup,
             session: { secret },
-            readSession: async (headers) =>
-              (
-                await auth.api.getSession({
-                  headers,
-                  query: { disableRefresh: true, disableCookieCache: true },
-                })
-              )?.session,
+            readSession,
             send: async (request) => {
               if (new URL(request.url).origin !== issuer.origin)
                 throw new Error('Keycloak fixture transport refused an unowned origin')
@@ -588,6 +610,14 @@ export const test = base.extend<
               }
               return response
             },
+          }),
+          ssoSamlSignIn: samlSignInRoutes({
+            db,
+            capabilities,
+            configurationKey: ssoConfigurationKey,
+            signup,
+            session: { secret },
+            readSession,
           }),
           routes: productRoutes({
             db,
@@ -636,6 +666,19 @@ export const test = base.extend<
           tokenExchanges: () => [...exchanges],
           signingKeyIds: () => [...signingKeyIds],
           jwksRequests: () => jwksRequests,
+          postSamlToPeer: async (fields) => {
+            if (!samlSp || !samlEnabled) throw new Error('The Keycloak SAML fixture is disabled')
+            samlPeer ??= startSamlPeer({
+              databaseUrl: owned.url,
+              publicUrl: url,
+              capabilities,
+              configurationKey: ssoConfigurationKey,
+              signup,
+              secret,
+            })
+            const peer = await samlPeer
+            return peer.post(new URL(samlSp.acsUrl).pathname, fields)
+          },
         })
         // A failed sign-in round trip otherwise reports only a timeout. Name where it stopped.
         if (testInfo.status !== testInfo.expectedStatus)
@@ -643,7 +686,12 @@ export const test = base.extend<
         checkBrowser()
       } finally {
         try {
-          await listener?.close()
+          try {
+            await listener?.close()
+          } finally {
+            const peer = await samlPeer?.catch(() => undefined)
+            await peer?.close()
+          }
         } finally {
           setDefaultCACertificates(previousCAs)
           // An outage test may have stopped its IdP. Removing its dedicated container also
