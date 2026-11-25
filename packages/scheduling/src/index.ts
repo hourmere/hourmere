@@ -311,6 +311,7 @@ export { expirePaymentHolds } from './payment-expiry.ts'
 export {
   type CheckoutOperation,
   type CheckoutSession,
+  checkoutSessionExpiry,
   FakePaymentProvider,
   type PaymentMode,
   type PaymentProvider,
@@ -323,6 +324,7 @@ export {
   PAYMENT_HOLD_MINUTES,
   type PaymentContext,
   type PaymentPrice,
+  recordStripePaymentEvent,
 } from './payments.ts'
 export {
   findLegacyHandleCollisions,

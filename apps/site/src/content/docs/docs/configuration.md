@@ -524,12 +524,12 @@ for public apps; its private/development apps do not trigger those notifications
 
 ## Paid-booking foundation
 
-`PAID_BOOKINGS_ENABLED` defaults to `false` and is reserved for a future rollout. It has no
-runtime effect in this release. Setting it to `true` does not permit hold creation or enable
-payment collection. Existing holds expire regardless of this setting. Leave the optional
-server-only Stripe settings empty while Checkout is internal. Compose forwards them unset
-by default. When using a `_FILE` setting, supply the path inside the container and mount the
-secret file read-only for each server role.
+`PAID_BOOKINGS_ENABLED` defaults to `false`. Set it to `true` with a complete Stripe
+configuration to receive signed events at `POST /api/webhooks/stripe` in an isolated test
+instance. Paid hold admission and public Checkout remain disabled. Existing holds expire
+regardless of this setting. Compose forwards the optional Stripe settings unset by default.
+When using a `_FILE` setting, supply the path inside the container and mount the secret file
+read-only for each server role.
 See [the operator note and limitations](/docs/payments).
 
 ## SMS reminders

@@ -1,29 +1,26 @@
 ---
 title: Paid bookings foundation
-description: What the internal payment hold and Checkout foundation supports and where rollout stands.
+description: What the payment hold, Checkout and Stripe webhook foundation supports.
 ---
 
 **Paid booking admission remains disabled.** The internal foundation can reserve a slot
 and create a Stripe-hosted Checkout Session. Stripe credentials are optional server-only
-startup configuration. Public checkout, payment settings, an incoming Stripe webhook
-receiver and automatic refunds are future work. See the
+startup configuration. A signed Stripe webhook receiver is available for isolated testing.
+Public checkout, payment settings and automatic refunds are future work. See the
 [payment design](https://github.com/hourmere/hourmere/blob/main/docs/payments.md).
 
 ## Operator note
 
-`PAID_BOOKINGS_ENABLED` defaults to `false` and is reserved for a future rollout.
-It has no runtime effect in this release. Setting it to `true` does not permit hold creation
-or enable payment collection. Internal tests explicitly opt in through the service context.
-Existing holds expire regardless of this environment setting.
-The planned rollout safeguard will be available to every self-hosted instance, with no
-subscription or license requirement.
+`PAID_BOOKINGS_ENABLED` defaults to `false`. Setting it to `true` with Stripe configured
+enables `POST /api/webhooks/stripe` on a self-hosted instance. Paid hold admission and
+public Checkout stay disabled. Existing holds expire regardless of the receiver setting.
 
 An unpaid reservation holds capacity for 30 elapsed minutes and requires at least that
 much time before the meeting starts. It can become confirmed only
 before its database deadline; expiry or cancellation releases it. The deadline is unaffected
 by daylight-saving changes. The design chooses a full refund for any payment observed after
-expiry or cancellation, even if the slot is still free. Actual payment processing and refunds
-are future work, so this release must not be used to promise paid appointments.
+expiry or cancellation, even if the slot is still free. The receiver records a pending
+refund obligation. Automatic refund execution remains future work.
 
 Before upgrading the schema, back up and stop all old app and worker processes. Restart all
 roles with the new version together; old processes do not understand the new booking states.
@@ -47,23 +44,44 @@ disclosed before payment. A paid booking reschedules without a second charge whi
 its original duration and price. The design covers late-payment refunds, retry safety and
 operator intervention for failed refunds; none of those provider operations are wired yet.
 
-## Testing and known limitations
+## Test webhooks on a self-hosted instance
 
-Current automated tests use a fake payment provider, stubbed Stripe HTTP and throwaway
-PostgreSQL databases. After the receiver ships, self-hosters will be able to use their own
-test-mode account and the [Stripe CLI](https://docs.stripe.com/cli)
-to forward events to the local receiver. Use Stripe's
-[published test methods](https://docs.stripe.com/testing), synthetic attendees and matching
-test-mode secrets; never put credentials or card details in source files or support reports.
-The [design's test procedure](https://github.com/hourmere/hourmere/blob/main/docs/payments.md#self-hoster-testing-and-rollout)
-distinguishes CLI delivery tests from real test Checkout confirmation.
+Use an isolated database and your own Stripe test account. Set `PAID_BOOKINGS_ENABLED=true`,
+`STRIPE_MODE=test`, `STRIPE_ACCOUNT_ID` and the matching `STRIPE_API_KEY` or `_FILE` setting.
+Run the [Stripe CLI](https://docs.stripe.com/cli) from the machine running your test server.
+The example assumes the server listens on port 3100.
+
+```sh
+stripe login
+stripe listen --events checkout.session.completed,checkout.session.expired,payment_intent.succeeded,refund.updated,refund.failed --forward-to http://localhost:3100/api/webhooks/stripe
+```
+
+Put the signing secret printed by the CLI in `STRIPE_WEBHOOK_SIGNING_SECRET` or its `_FILE`
+counterpart, then start or restart the receiver. Use the Dashboard destination's own secret
+for deliveries from a Dashboard destination, and select **Events on your account** with
+snapshot payloads. Use Stripe's [published test methods](https://docs.stripe.com/testing)
+and synthetic attendees. Keep credentials and card details out of support reports and source files.
+
+To rotate a Dashboard signing secret, choose delayed expiration for the old secret and
+restart all receivers with the new secret during the overlap. Stripe sends a `v1` signature
+for each active secret until the old one expires. [Stripe webhook signing and rotation](https://docs.stripe.com/webhooks).
+
+CLI-triggered fixtures exercise delivery and signature validation. Confirmation also requires
+a matching Checkout attempt created through the internal hold service. Automated tests cover
+that path with a fake provider and throwaway PostgreSQL databases.
+
+## Known limitations
 
 Internal holds support personal individual events with one host only; guests, team and
 group events, waitlist conversion, automatic conferences and phone locations are unsupported.
-The foundation retains a supplied payment reference and refund-required marker, but has no
-authenticated Stripe receiver or refund executor. Ordinary booking cancellation and
-rescheduling reject paid foundation rows. Price and policy settings, provider expiry on
-release and background reconciliation remain future work. Tax calculation, subscriptions, deposits,
+Confirmation requires a paid Checkout Session bound to the local attempt. Late completion
+retains the payment reference and refund-required marker without reopening the slot.
+PaymentIntent and refund snapshots are acknowledged and deduplicated. Refund execution and
+reconciliation remain future work, as do receipt and Checkout attempt cleanup. The
+seven-day purge of expired or cancelled holds that never confirmed clears attendee data,
+the hold retry key and the request fingerprint. Ordinary booking cancellation and
+rescheduling reject paid foundation rows. Price and policy settings and automatic expiry of
+provider Sessions remain future work. Tax calculation, subscriptions, deposits,
 partial payments, currency conversion and Stripe Connect are out of scope. Payment-aware
 one-time links, waitlist conversion, shared group seats and the full paid reschedule flow
 must be implemented and tested before public rollout. No payment action is exposed through

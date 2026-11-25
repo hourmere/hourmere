@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import type { Db } from '@hourmere/db'
-import { sql } from 'kysely'
+import { type NotNull, sql } from 'kysely'
 import { findPublicEventType, selectDurationMinutes } from './availability.ts'
 import {
   type CreateBookingInput,
@@ -18,7 +18,13 @@ import { lockOrganization } from './hosts.ts'
 import { selectLocationOption } from './location-options.ts'
 import { createNotificationSnapshot } from './notification-settings.ts'
 import { expirePaymentHolds } from './payment-expiry.ts'
-import type { CheckoutOperation, CheckoutSession, PaymentProvider } from './payment-provider.ts'
+import {
+  type CheckoutOperation,
+  type CheckoutSession,
+  checkoutSessionExpiry,
+  type PaymentMode,
+  type PaymentProvider,
+} from './payment-provider.ts'
 import { validateResponses } from './questions.ts'
 
 export const PAYMENT_HOLD_MINUTES = 30
@@ -299,6 +305,79 @@ export async function createPaymentCheckout(ctx: PaymentContext, id: string) {
   return { sessionId: observedId, url }
 }
 
+async function lockPaymentHold(db: Db, id: string) {
+  return db
+    .selectFrom('bookings')
+    .select([
+      'id',
+      'status',
+      'start_at',
+      'payment_hold_expires_at',
+      'payment_reference',
+      'payment_confirmed_at',
+    ])
+    .where('id', '=', id)
+    .where('payment_hold_expires_at', 'is not', null)
+    .$narrowType<{ payment_hold_expires_at: NotNull }>()
+    .forUpdate()
+    .executeTakeFirst()
+}
+
+async function paymentTransaction<T>(db: Db, apply: (trx: Db) => Promise<T>): Promise<T> {
+  const run = () => db.transaction().execute(apply)
+  try {
+    return await run()
+  } catch (error) {
+    // The trigger can observe the deadline just after our read. Retry the whole write,
+    // including the event receipt, to record refund intent against the now-expired hold.
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'constraint' in error &&
+      error.constraint === 'bookings_payment_confirmation'
+    )
+      return run()
+    throw error
+  }
+}
+
+async function confirmLockedPaymentHold(
+  trx: Db,
+  ctx: Pick<PublicContext, 'notify' | 'now'>,
+  row: NonNullable<Awaited<ReturnType<typeof lockPaymentHold>>>,
+  paymentReference: string,
+): Promise<'confirmed' | 'refund_required'> {
+  if (row.payment_reference) {
+    if (row.payment_reference !== paymentReference)
+      throw new DomainError('conflict', 'payment_reference_mismatch')
+    return row.payment_confirmed_at ? 'confirmed' : 'refund_required'
+  }
+  const { rows } = await sql<{
+    active: boolean
+  }>`SELECT ${row.payment_hold_expires_at}::timestamptz > clock_timestamp() AS active`.execute(trx)
+  const confirm = row.status === 'pending_payment' && rows[0]?.active
+  await trx
+    .updateTable('bookings')
+    .set({
+      status: confirm ? 'confirmed' : row.status === 'cancelled' ? 'cancelled' : 'expired',
+      payment_reference: paymentReference,
+      payment_refund_required: !confirm,
+    })
+    .where('id', '=', row.id)
+    .execute()
+  if (confirm)
+    await ctx.notify?.(
+      trx,
+      {
+        type: 'created',
+        bookingId: row.id,
+        start: Temporal.Instant.from(row.start_at.toISOString()),
+      },
+      ctx.now(),
+    )
+  return confirm ? 'confirmed' : 'refund_required'
+}
+
 /** Verified provider success only. Late success records durable refund intent, never resurrects. */
 export async function confirmPaymentHold(
   ctx: PaymentContext,
@@ -307,59 +386,83 @@ export async function confirmPaymentHold(
 ): Promise<{ id: string; outcome: 'confirmed' | 'refund_required' }> {
   if (!/^pi_[A-Za-z0-9_]{1,200}$/.test(paymentReference))
     throw new DomainError('invalid', 'invalid_payment_reference')
-  return ctx.db
-    .transaction()
-    .execute(async (trx) => {
-      const row = await trx
-        .selectFrom('bookings')
-        .selectAll()
-        .where('id', '=', id)
-        .where('payment_hold_expires_at', 'is not', null)
-        .forUpdate()
-        .executeTakeFirst()
-      if (!row) throw new DomainError('not_found', 'booking_not_found')
-      if (row.payment_reference && row.payment_reference !== paymentReference)
-        throw new DomainError('conflict', 'payment_reference_mismatch')
-      const { rows } = await sql<{
-        active: boolean
-      }>`SELECT ${row.payment_hold_expires_at}::timestamptz > clock_timestamp() AS active`.execute(
-        trx,
-      )
-      const confirm =
-        row.status === 'confirmed' || (row.status === 'pending_payment' && rows[0]?.active)
+  return paymentTransaction(ctx.db, async (trx) => {
+    const row = await lockPaymentHold(trx, id)
+    if (!row) throw new DomainError('not_found', 'booking_not_found')
+    return { id, outcome: await confirmLockedPaymentHold(trx, ctx, row, paymentReference) }
+  })
+}
+
+interface StripeCheckoutObservation {
+  attemptId: string
+  bookingId: string
+  sessionId: string
+  amountMinor: number
+  currency: string
+  expiresAtSeconds: number
+  /** Only a completed, paid Session supplies a PaymentIntent. */
+  paymentReference: string | null
+}
+
+/** A receipt and its local effects commit together. No provider I/O happens here. */
+export async function recordStripePaymentEvent(
+  ctx: Pick<PublicContext, 'db' | 'notify' | 'now'>,
+  binding: { accountId: string; mode: PaymentMode },
+  eventId: string,
+  checkout?: StripeCheckoutObservation,
+): Promise<void> {
+  await paymentTransaction(ctx.db, async (trx) => {
+    const receipt = await trx
+      .insertInto('payment_stripe_events')
+      .values({ event_id: eventId })
+      .onConflict((conflict) => conflict.column('event_id').doNothing())
+      .returning('event_id')
+      .executeTakeFirst()
+    if (!receipt || !checkout) return
+
+    // Session creation, cancellation, expiry and confirmation serialize on the booking row.
+    const hold = await lockPaymentHold(trx, checkout.bookingId)
+    if (!hold) return
+    const attempt = await trx
+      .selectFrom('payment_checkout_attempts')
+      .selectAll()
+      .where('id', '=', checkout.attemptId)
+      .where('booking_id', '=', hold.id)
+      .executeTakeFirst()
+    if (
+      !attempt?.started_at ||
+      attempt.account_id !== binding.accountId ||
+      attempt.mode !== binding.mode ||
+      attempt.amount_minor !== checkout.amountMinor ||
+      attempt.currency !== checkout.currency ||
+      checkout.expiresAtSeconds !==
+        checkoutSessionExpiry(hold.payment_hold_expires_at.toISOString()) ||
+      (attempt.session_id !== null && attempt.session_id !== checkout.sessionId) ||
+      (checkout.paymentReference &&
+        hold.payment_reference &&
+        hold.payment_reference !== checkout.paymentReference)
+    )
+      return
+
+    // A signed snapshot can recover the Session binding after an ambiguous create response.
+    if (attempt.session_id === null)
+      await trx
+        .updateTable('payment_checkout_attempts')
+        .set({ session_id: checkout.sessionId })
+        .where('id', '=', attempt.id)
+        .execute()
+
+    if (checkout.paymentReference) {
+      await confirmLockedPaymentHold(trx, ctx, hold, checkout.paymentReference)
+    } else if (hold.status === 'pending_payment') {
       await trx
         .updateTable('bookings')
-        .set({
-          status: confirm ? 'confirmed' : row.status === 'cancelled' ? 'cancelled' : 'expired',
-          payment_reference: paymentReference,
-          payment_refund_required: !confirm,
-        })
-        .where('id', '=', id)
+        .set({ status: 'expired' })
+        .where('id', '=', hold.id)
+        .where('payment_hold_expires_at', '<=', sql<Date>`clock_timestamp()`)
         .execute()
-      if (confirm && row.status !== 'confirmed')
-        await ctx.notify?.(
-          trx,
-          {
-            type: 'created',
-            bookingId: id,
-            start: Temporal.Instant.from(row.start_at.toISOString()),
-          },
-          ctx.now(),
-        )
-      return { id, outcome: confirm ? ('confirmed' as const) : ('refund_required' as const) }
-    })
-    .catch((error: unknown) => {
-      // The authoritative trigger can observe the deadline just after our read.
-      // Roll back that attempt, then persist refund intent against the expired hold.
-      if (
-        typeof error === 'object' &&
-        error !== null &&
-        'constraint' in error &&
-        error.constraint === 'bookings_payment_confirmation'
-      )
-        return confirmPaymentHold(ctx, id, paymentReference)
-      throw error
-    })
+    }
+  })
 }
 
 export async function cancelPaymentHold(ctx: PaymentContext, id: string) {
