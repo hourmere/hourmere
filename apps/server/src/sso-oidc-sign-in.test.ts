@@ -4218,6 +4218,103 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     expect(await effects()).toEqual(before)
   })
 
+  it.each(['live', 'expired', 'ambiguous', 'blocked', 'paused'] as const)(
+    'binds only a single eligible uninvited User claim through OIDC self-link (%s)',
+    async (state) => {
+      const f = await enrollment()
+      const pending = await prepareLink(f)
+      const connection = await db
+        .insertInto('scim_connections')
+        .values({ organization_id: fixture.team })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      for (let index = 0; index < (state === 'ambiguous' ? 2 : 1); index++) {
+        const entry = await db
+          .insertInto('scim_users')
+          .values({
+            organization_id: fixture.team,
+            connection_id: connection.id,
+            user_name: `pending-${index}`,
+            work_email: f.email,
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+        await db
+          .insertInto('scim_user_claims')
+          .values({
+            organization_id: fixture.team,
+            connection_id: connection.id,
+            scim_user_id: entry.id,
+            work_email: f.email,
+            ...(state === 'expired' && { created_at: at(-49 * 3_600) }),
+            expires_at: state === 'expired' ? at(-3_600) : at(300),
+          })
+          .execute()
+      }
+      if (state === 'blocked')
+        await db
+          .insertInto('scim_membership_blocks')
+          .values({
+            organization_id: fixture.team,
+            identity_email: f.email,
+            source: 'local',
+            kind: 'removal',
+          })
+          .execute()
+
+      const oidcApp = instance({ scimClaims: state !== 'paused' })
+      const response = await complete(pending, {}, oidcApp)
+      if (state === 'blocked') await expectCompletionRefused(response)
+      else {
+        expect(response.status).toBe(302)
+        expect(response.headers.get('location')).toBe('/app/settings')
+        await expectCompletionRefused(await complete(pending, {}, oidcApp))
+      }
+      const claims = await db
+        .selectFrom('scim_user_claims as claim')
+        .innerJoin('scim_users as entry', 'entry.id', 'claim.scim_user_id')
+        .select([
+          'entry.id',
+          'entry.linked_user_id',
+          'entry.linked_member_id',
+          'claim.completed_at',
+        ])
+        .where('claim.connection_id', '=', connection.id)
+        .execute()
+      const events = await audit()
+      expect(events.filter(({ action }) => action === 'sso_link.linked')).toHaveLength(
+        state === 'blocked' ? 0 : 1,
+      )
+      const activity = events.filter(({ action }) => action === 'scim_user.claimed')
+      if (state === 'live') {
+        expect(claims).toEqual([
+          {
+            id: expect.any(String),
+            linked_user_id: fixture.member,
+            linked_member_id: fixture.memberMember,
+            completed_at: expect.any(Date),
+          },
+        ])
+        expect(activity).toEqual([
+          expect.objectContaining({
+            target_id: claims[0]?.id,
+            actor_id: fixture.member,
+            credential_type: 'session',
+          }),
+        ])
+      } else {
+        expect(claims.length).toBe(state === 'ambiguous' ? 2 : 1)
+        for (const claim of claims)
+          expect(claim).toMatchObject({
+            linked_user_id: null,
+            linked_member_id: null,
+            completed_at: null,
+          })
+        expect(activity).toEqual([])
+      }
+    },
+  )
+
   it.each(['its frozen mailbox changes', 'its team membership is suspended by SCIM'] as const)(
     'refuses link completion after %s',
     async (change) => {

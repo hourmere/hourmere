@@ -6,6 +6,7 @@ import {
 } from '@hourmere/db/scim-suspension'
 import { DomainError, hasTeamMemberDepartureImpact } from '@hourmere/scheduling'
 import { sql, type Transaction } from 'kysely'
+import { recordScimChildMembership } from './scim-child-journal.ts'
 
 export function lockMappingTeams(trx: Db, teams: string[]) {
   return trx
@@ -50,9 +51,12 @@ export async function retireScimTeamMapping(
 
   for (const { userId } of roster) await lockScimCredentialRevocation(trx, userId)
   for (const { id, userId } of roster) {
+    const membership = { childId: childOrganizationId, memberId: id }
     await revokeScimTeamCredentials(trx, childOrganizationId, userId)
+    await recordScimChildMembership(trx, membership, 'credentials_revoked')
     // Removes the provenance row via its scoped FK and retains ordinary admission blockers.
     await trx.deleteFrom('auth.member').where('id', '=', id).execute()
+    await recordScimChildMembership(trx, membership, 'removed')
   }
   await trx
     .updateTable('scim_team_mappings')

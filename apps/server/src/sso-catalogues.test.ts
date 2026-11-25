@@ -314,6 +314,8 @@ function productionOptions(db: Db, config = productionConfig) {
     enqueueCalendarSync: unavailable,
     enqueueCalendarWritebackRecovery: unavailable,
     mailboxProofQueue: { enqueue: unavailable },
+    scimMappingNotices: { enqueue: unavailable },
+    enqueueScimInvitation: unavailable,
   })
 }
 // HOURMERE_ROLE=worker serves this app instead of createApp; its routes are inventoried too.

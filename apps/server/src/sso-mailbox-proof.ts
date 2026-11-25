@@ -205,7 +205,7 @@ function jobError(error: unknown, label: string): Error {
 
 export interface MailboxProofDeliveryDeps {
   capabilities: SsoCapabilities
-  /** Only the SCIM resource test harness enables mailbox proof for mapping consent. */
+  /** Enabled with SCIM resources to deliver mailbox proof for mapping consent. */
   scimMappingConsentEnabled?: boolean
   db: Db
   mailer: Mailer
@@ -331,7 +331,7 @@ export async function deliverMailboxProof(
 
 export interface MailboxProofConsumeDeps {
   capabilities: SsoCapabilities
-  /** Only the SCIM resource test harness enables mailbox proof for mapping consent. */
+  /** Allow mailbox proof for SCIM mapping consent when provisioning is enabled. */
   scimMappingConsentEnabled?: boolean
   db: Db
   limits?: Partial<MailboxProofLimits> | undefined

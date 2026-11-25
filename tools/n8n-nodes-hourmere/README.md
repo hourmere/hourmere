@@ -1,11 +1,14 @@
 # n8n-nodes-hourmere
 
 Hourmere booking actions and signed webhook triggers for self-hosted n8n.
-**Not yet published to npm or verified for n8n Cloud.**
+The package is unverified. n8n Cloud installation requires approval from n8n.
 
 ## Installation
 
-Build and pack the standalone package (requires the repository’s pinned Node.js version):
+### Before npm publication
+
+Build and pack the standalone package from an Hourmere source checkout using the
+repository's pinned Node.js version.
 
 ```sh
 cd tools/n8n-nodes-hourmere
@@ -23,7 +26,7 @@ npm workspaces. Root installs never download the n8n toolchain. The separate
 OpenAPI contract without requiring this package’s `node_modules`.
 
 Copy the archive to your n8n host. As n8n's operating-system user, install the actual
-archive path in `~/.n8n/nodes`, then restart n8n:
+archive path in `~/.n8n/nodes`, then restart n8n.
 
 ```sh
 mkdir -p ~/.n8n/nodes
@@ -31,58 +34,18 @@ cd ~/.n8n/nodes
 npm install /absolute/path/n8n-nodes-hourmere-0.1.0.tgz
 ```
 
-Use a persistent directory in containers and install on all queue workers. The Hourmere
-Docker image excludes this package. Once published, self-hosted n8n owners/admins may
-install `n8n-nodes-hourmere` through Settings → Community nodes.
-See the [official manual installation guide](https://docs.n8n.io/integrations/community-nodes/installation-and-management/manual-installation.md).
+### After npm publication
 
-Publishing is a separate owner-approved step; building and packing do not publish.
-`package.json` sets `"private": true`, so npm refuses every real publication, whatever
-`--registry`, `--ignore-scripts` or `--force` options are used, and nothing is published.
-npm checks `private` only at its last step, though, so it can contact servers first:
+Once an installable version of `n8n-nodes-hourmere` is published on npm, sign in to
+self-hosted n8n as an owner or admin. With unverified community nodes enabled, open **Settings → Community Nodes →
+Install**, enter `n8n-nodes-hourmere`, acknowledge the unverified-code prompt and select
+**Install**. [n8n's GUI installation guide](https://docs.n8n.io/integrations/community-nodes/installation-and-management/gui-installation.md).
 
-1. In a CI job that offers an OIDC ID token, such as GitHub Actions with
-   `id-token: write`, npm obtains that token from the CI provider and exchanges it at the
-   target registry. `--force` and `--offline` do not skip this. When the exchange
-   succeeds, the CI job's repository is public and `provenance` is left at its default,
-   npm may then also ask the target registry for the package's visibility, sending the
-   new token. `--offline` skips that request, but `--force` does not.
-2. Without credentials for the target registry, npm then stops with `ENEEDAUTH`.
-3. Without `--force` or `--offline`, npm then reads the package's published versions from
-   the target registry, sending your npm token for that registry.
-4. Only then does npm refuse with `EPRIVATE`.
-
-Dry-runs never reach that check.
-
-`publishConfig.registry` also points to `https://registry.invalid/`, an unresolvable
-placeholder. It applies with scripts disabled and takes precedence over registries set in
-`.npmrc` files or the environment. An explicit `--registry` option on the command line
-overrides it, so never pass `--registry` to get past the placeholder. The `prepublishOnly`
-guard refuses publication unless `HOURMERE_N8N_PUBLISH=1` is set, but only when lifecycle
-scripts run. This directory's `.npmrc` turns them off, so `npm publish` here skips that
-guard unless scripts are turned back on, for example with `--ignore-scripts=false`.
-
-The reviewed change that approves publication removes `private` and the placeholder
-registry together. `dist` is not committed and no publish script builds it, so build it
-first: in this directory, run `npm ci --ignore-scripts` and `npm run build`, then run the
-release as `HOURMERE_N8N_PUBLISH=1 npm publish --ignore-scripts=false`, so the approval
-guard runs.
-
-A dry-run's exit code says nothing about where a publication would go. Without
-`--offline`, `npm publish --dry-run` queries the target registry for existing versions,
-ignores the failure and still exits 0, even for the unreachable placeholder. What counts
-is the `npm notice Publishing to <registry> … (dry-run)` line in its output.
-Outside CI, `npm publish --dry-run --ignore-scripts --offline` prints it without network
-access (in CI with an ID token, the OIDC exchange still runs), and
-the packaging tests assert that it names `https://registry.invalid/`. They also aim a
-non-dry-run publish with `--force` and `--offline`, outside CI, at a local sink and require
-`EPRIVATE` with no connection to it.
-
-Contributors must use `npm install --ignore-scripts` (or `npm ci --ignore-scripts`):
-the official CLI requires `eslint-plugin-n8n-nodes-base`, whose preinstall otherwise
-fetches and executes an unpinned `only-allow`. Native toolchain install scripts are
-also unnecessary for this package’s build and tests. This directory's `.npmrc` also sets
-`ignore-scripts=true`; scripts you name, such as `npm run build` and `npm test`, still run.
+For queue mode or an instance without the install UI, run `npm install n8n-nodes-hourmere`
+in `~/.n8n/nodes` as the n8n operating-system user and restart n8n. For either installation
+path, use a persistent directory in containers and install the same version on every queue
+worker. The Hourmere Docker image excludes this package.
+[n8n's manual installation guide](https://docs.n8n.io/integrations/community-nodes/installation-and-management/manual-installation.md).
 
 ## Credentials
 
@@ -155,15 +118,33 @@ There is no exactly-once guarantee or historical replay. Events may arrive out o
 
 ## Compatibility and language
 
-The package accepts `n8n-workflow: "*"` as its community-node peer and pins its
-development dependency to `2.45.1` (released 2026-10-22). Its build and lint use the official
-[`n8n-node` CLI](https://docs.n8n.io/connect/create-nodes/build-your-node/using-the-n8n-node-tool.md).
-Unit tests mock HTTP; OpenAPI contract tests detect incompatible Hourmere API changes.
+The package has no runtime dependencies and uses n8n's `n8n-workflow` peer. It pins
+`2.45.1` for development. The build uses `n8n-node`. Lint uses the full official
+ESLint preset with the MIT license rule disabled and warnings treated as errors.
+Unit tests mock HTTP and OpenAPI contract tests detect incompatible Hourmere API changes.
+[n8n node tooling](https://docs.n8n.io/connect/create-nodes/build-your-node/using-the-n8n-node-tool.md).
 
 Node parameter translations include English and Simplified Chinese (`zh`/`zh-CN`).
 Use n8n's `N8N_DEFAULT_LOCALE=zh`. Community credential/header translation loading and
-runtime errors remain English; see the [language details](https://hourmere.com/docs/n8n#interface-language).
-This package is licensed under AGPL-3.0-only.
+runtime errors remain English. [Interface language details](https://hourmere.com/docs/n8n#interface-language).
+
+## Known limitations
+
+The package is ineligible for n8n Cloud verification while it is AGPL-3.0-only and
+ships Simplified Chinese parameter translations. n8n requires an MIT license and
+an English-only node interface and documentation for verified nodes.
+[n8n verification guidelines](https://docs.n8n.io/connect/create-nodes/build-your-node/reference/verification-guidelines.md),
+[n8n submission requirements](https://docs.n8n.io/connect/create-nodes/deploy-your-node/submit-community-nodes.md).
+
+## Example workflows
+
+- **Daily booking report.** Connect a Schedule Trigger to **Hourmere → List Bookings**.
+  Use a `read` credential, set date and status filters and enable **Return All** to
+  retrieve all matching bookings.
+- **Sync attendance changes.** Configure **Hourmere Trigger** for **Attendee No-Show
+  Changed**. Pass the event `id` to a downstream store with a uniqueness constraint
+  and match the attendance record using `data.bookingId` and `data.attendeeId`. A null
+  `data.noShowMarkedAt` clears the mark.
 
 ## Documentation
 
@@ -171,3 +152,12 @@ This package is licensed under AGPL-3.0-only.
 limitations. [Webhook reference](https://hourmere.com/docs/webhooks) describes server
 configuration, payloads and retries. [API keys](https://hourmere.com/docs/api-keys)
 explains authorization and least privilege.
+
+Contributors install with `npm ci --ignore-scripts`, as CI does. This skips the lint
+plugin's preinstall download of an unpinned dependency. The source manifest stays private
+and packing creates a local tarball. Maintainers use the approved GitHub Actions release
+workflow. [Owner release runbook](https://github.com/hourmere/hourmere/blob/main/docs/n8n-release.md).
+
+## License
+
+[AGPL-3.0-only](LICENSE).

@@ -119,7 +119,14 @@ function verifySetting(capabilities = server.productionSsoCapabilities) {
       ['true', true],
     ] as const)
       expect(
-        capabilities(loadConfig({ ...settingBase, SSO_OIDC_ENABLED, SSO_SAML_ENABLED })),
+        capabilities(
+          loadConfig({
+            ...settingBase,
+            SCIM_PROVISIONING_ENABLED: 'off',
+            SSO_OIDC_ENABLED,
+            SSO_SAML_ENABLED,
+          }),
+        ),
       ).toEqual({ ssoOidcEnabled, ssoSamlEnabled: false, ssoOperatorSetting: true })
 }
 

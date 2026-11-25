@@ -14,7 +14,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
 import { bookingTools } from './mcp/bookings.ts'
 import { type McpCaller, runTool } from './mcp/tools.ts'
-import { scimDiscoveryWithGroups } from './scim-discovery.ts'
+import { scimDiscoveryWithGroups } from './scim-discovery-fixture.ts'
 import { scimGroups } from './scim-groups.ts'
 import { scimUserReplacement } from './scim-user-replace.ts'
 import { scimUserRetirement } from './scim-user-retirement.ts'
@@ -236,6 +236,33 @@ describe.skipIf(!databaseUrl)('SCIM Group membership changes', () => {
       .where('action', '=', 'scim_group.updated')
       .where('target_id', '=', groupId)
       .execute()
+  const childEvents = (childId: string) =>
+    db
+      .selectFrom('audit_events')
+      .select([
+        'action',
+        'actor_type',
+        'actor_id',
+        'credential_type',
+        'credential_id',
+        'target_type',
+        'target_id',
+        'details',
+      ])
+      .where('organization_id', '=', childId)
+      .where('action', 'like', 'scim_membership.%')
+      .orderBy('id')
+      .execute()
+  const childEvent = (memberId: string, change: string) => ({
+    action: `scim_membership.${change}`,
+    actor_type: 'system',
+    actor_id: 'scim',
+    credential_type: 'none',
+    credential_id: null,
+    target_type: 'member',
+    target_id: memberId,
+    details: {},
+  })
   const issueKey = (userId: string, organizationId: string) =>
     auth.api.createApiKey({ body: { userId, metadata: { organizationId, scope: 'bookings' } } })
   const keyAccess = (key: string) =>
@@ -270,12 +297,15 @@ describe.skipIf(!databaseUrl)('SCIM Group membership changes', () => {
     expect(await managed(f.child.id)).toEqual([
       { user_id: f.people[0]?.id, scim_user_id: a, suspended_at: null },
     ])
-    expect(await member(f.child.id, f.people[0] as TestUser)).toMatchObject({ role: 'member' })
+    const firstMembership = await member(f.child.id, f.people[0] as TestUser)
+    if (!firstMembership) throw new Error('Expected a directory-managed child membership')
+    expect(firstMembership).toMatchObject({ role: 'member' })
     expect(await updateEvents(f.group.id)).toEqual([
       { organization_id: f.parent.id, actor_type: 'scim_token', actor_id: f.token.id, details: {} },
     ])
     expect(await (await f.patch(add)).json()).toEqual(first)
     expect(await updateEvents(f.group.id)).toHaveLength(1)
+    expect(await childEvents(f.child.id)).toEqual([childEvent(firstMembership.id, 'added')])
 
     // Okta sends one object per added member and the standard filtered removal.
     await applied(await f.patch({ op: 'add', path: `${GROUP}:members`, value: { value: b } }), [
@@ -287,6 +317,13 @@ describe.skipIf(!databaseUrl)('SCIM Group membership changes', () => {
     expect(await member(f.child.id, f.people[0] as TestUser)).toBeUndefined()
     expect(await member(f.parent.id, f.people[0] as TestUser)).toBeDefined()
     expect(await (await f.patch(entraRemoval)).json()).toEqual(afterRemoval)
+    expect(
+      (await childEvents(f.child.id)).filter((event) => event.target_id === firstMembership.id),
+    ).toEqual(
+      ['added', 'credentials_revoked', 'removed'].map((change) =>
+        childEvent(firstMembership.id, change),
+      ),
+    )
     const empty = await applied(await f.patch({ op: 'remove', path: filtered(b) }), [])
     expect(empty).not.toHaveProperty('members')
     expect(await (await f.patch({ op: 'remove', path: filtered(b) })).json()).toEqual(empty)
@@ -477,24 +514,43 @@ describe.skipIf(!databaseUrl)('SCIM Group membership changes', () => {
     await applied(await f.patch({ op: 'remove', path: filtered(hostId) }), [promotedId])
   })
 
-  it('rolls back the roster when the audit event cannot be written', async () => {
-    const f = await directory(2)
-    const [kept, added] = f.ids as [string, string]
-    await applied(await f.patch({ op: 'add', path: 'members', value: values(kept) }), [kept])
-    const before = { group: await f.read(), rows: await managed(f.child.id) }
-    await sql`CREATE FUNCTION test_refuse_member_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+  it.each(['parent', 'child'] as const)(
+    'rolls back the roster and credentials when the %s audit event cannot be written',
+    async (side) => {
+      const f = await directory(2)
+      const [kept, added] = f.ids as [string, string]
+      const [person] = f.people as [TestUser]
+      await applied(await f.patch({ op: 'add', path: 'members', value: values(kept) }), [kept])
+      const key = await issueKey(person.id, f.child.id)
+      const before = {
+        group: await f.read(),
+        rows: await managed(f.child.id),
+        events: await childEvents(f.child.id),
+      }
+      const action = side === 'parent' ? 'scim_group.updated' : 'scim_membership.removed'
+      await sql`CREATE FUNCTION test_refuse_member_audit() RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN
-        IF NEW.action = 'scim_group.updated' AND NEW.organization_id = ${sql.lit(f.parent.id)}::uuid
+        IF NEW.action = ${sql.lit(action)} AND NEW.organization_id = ${sql.lit(f[side].id)}::uuid
         THEN RAISE EXCEPTION 'injected SCIM Group audit failure'; END IF;
         RETURN NEW;
       END $$`.execute(db)
-    await sql`CREATE TRIGGER test_refuse_member_audit BEFORE INSERT ON audit_events
+      await sql`CREATE TRIGGER test_refuse_member_audit BEFORE INSERT ON audit_events
       FOR EACH ROW EXECUTE FUNCTION test_refuse_member_audit()`.execute(db)
 
-    await expectError(await f.patch({ op: 'replace', path: 'members', value: values(added) }), 500)
-    expect(await f.read()).toEqual(before.group)
-    expect(await managed(f.child.id)).toEqual(before.rows)
-  })
+      try {
+        await expectError(
+          await f.patch({ op: 'replace', path: 'members', value: values(added) }),
+          500,
+        )
+        expect(await f.read()).toEqual(before.group)
+        expect(await managed(f.child.id)).toEqual(before.rows)
+        expect(await childEvents(f.child.id)).toEqual(before.events)
+        expect((await keyAccess(key.key)).status).toBe(200)
+      } finally {
+        await sql`DROP FUNCTION test_refuse_member_audit() CASCADE`.execute(db)
+      }
+    },
+  )
 
   it('serializes concurrent replacements and rechecks admission behind the team locks', async () => {
     const f = await directory(4)
@@ -563,6 +619,15 @@ describe.skipIf(!databaseUrl)('SCIM Group membership changes', () => {
     const [source, other] = f.people as [TestUser, TestUser]
     const second = await activate(f.token, [], [sourceId])
     await applied(await f.patch({ op: 'add', path: 'members', value: values(...f.ids) }), f.ids)
+    const firstMembership = (await member(f.child.id, source))?.id
+    const secondMembership = (await member(second.child.id, source))?.id
+    if (!firstMembership || !secondMembership) throw new Error('Expected both child memberships')
+    const sourceChildEvents = async () => [
+      (await childEvents(f.child.id)).filter((event) => event.target_id === firstMembership),
+      await childEvents(second.child.id),
+    ]
+    const suspendedChildEvents = (memberId: string) =>
+      ['added', 'credentials_revoked', 'suspended'].map((change) => childEvent(memberId, change))
     const key = await issueKey(source.id, f.child.id)
     const otherKey = await issueKey(other.id, f.child.id)
     expect((await keyAccess(key.key)).status).toBe(200)
@@ -600,19 +665,21 @@ describe.skipIf(!databaseUrl)('SCIM Group membership changes', () => {
     expect(await f.roster()).toEqual([...f.ids].sort())
     expect(await member(f.child.id, source)).toMatchObject({ role: 'member' })
     expect((await keyAccess(key.key)).status).toBe(401)
-    // A credential issued during the suspension is refused, and without the resource
-    // capability the statement does not read the child suspension at all.
+    // A persisted suspension still restricts access after the provisioning switch is off.
     await expect(issueKey(source.id, f.child.id)).rejects.toMatchObject({ status: 'FORBIDDEN' })
     await expect(
       db
         .selectNoFrom(scimSuspended(f.child.id, source.id, false).as('suspended'))
         .executeTakeFirst(),
-    ).resolves.toEqual({ suspended: false })
+    ).resolves.toEqual({ suspended: true })
+    const suspensionEvents = [firstMembership, secondMembership].map(suspendedChildEvents)
+    expect(await sourceChildEvents()).toEqual(suspensionEvents)
     expect((await keyAccess(otherKey.key)).status).toBe(200)
     // A replayed deactivation keeps the original suspension.
     const original = await managed(f.child.id)
     expect((await setActive(f.token, sourceId, false)).status).toBe(200)
     expect(await managed(f.child.id)).toEqual(original)
+    expect(await sourceChildEvents()).toEqual(suspensionEvents)
 
     // Stopped directory authority preserves that child's state in both directions.
     await db
@@ -646,6 +713,16 @@ describe.skipIf(!databaseUrl)('SCIM Group membership changes', () => {
     expect(await managed(f.child.id)).toEqual([
       { user_id: other.id, scim_user_id: otherId, suspended_at: null },
     ])
+    expect(await sourceChildEvents()).toEqual([
+      [
+        ...suspendedChildEvents(firstMembership),
+        ...['reactivated', 'credentials_revoked', 'removed'].map((change) =>
+          childEvent(firstMembership, change),
+        ),
+      ],
+      suspendedChildEvents(secondMembership),
+    ])
+    expect(await childEvents(f.parent.id)).toEqual([])
     expect((await keyAccess(otherKey.key)).status).toBe(200)
   })
 
@@ -811,7 +888,7 @@ describe.skipIf(!databaseUrl)('SCIM Group membership changes', () => {
     expect(await suspended(f.child.id, f.people[0] as TestUser)).toBe(false)
   })
 
-  it('withholds MCP public availability for a suspended directory host when resources are enabled', async () => {
+  it('withholds MCP public availability for a suspended directory host in both modes', async () => {
     const f = await directory(1)
     const [sourceId] = f.ids as [string]
     const [source] = f.people as [TestUser]
@@ -854,16 +931,19 @@ describe.skipIf(!databaseUrl)('SCIM Group membership changes', () => {
         () => expect.unreachable('Availability must return a structured result'),
       )
 
-    expect((await search(true)).structuredContent).toMatchObject({
-      slots: expect.arrayContaining([expect.objectContaining({ start: expect.any(String) })]),
-    })
+    for (const enabled of [false, true]) {
+      expect((await search(enabled)).structuredContent).toMatchObject({
+        slots: expect.arrayContaining([expect.objectContaining({ start: expect.any(String) })]),
+      })
+    }
     expect((await setActive(f.token, sourceId, false)).status).toBe(200)
-    expect(await search(true)).toMatchObject({
-      isError: true,
-      content: [{ type: 'text', text: expect.stringContaining('"error":"event_type_not_found"') }],
-    })
-    expect((await search(false)).structuredContent).toMatchObject({
-      slots: expect.arrayContaining([expect.objectContaining({ start: expect.any(String) })]),
-    })
+    for (const enabled of [false, true]) {
+      expect(await search(enabled)).toMatchObject({
+        isError: true,
+        content: [
+          { type: 'text', text: expect.stringContaining('"error":"event_type_not_found"') },
+        ],
+      })
+    }
   })
 })

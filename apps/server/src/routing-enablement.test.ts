@@ -36,6 +36,7 @@ function environment(url: string, value?: string): NodeJS.ProcessEnv {
     HOURMERE_ROLE: 'web',
     SIGNUP: 'closed',
     PORT: '0',
+    SCIM_PROVISIONING_ENABLED: 'false',
     ...(value !== undefined && { ROUTING_FORMS_ENABLED: value }),
   }
 }

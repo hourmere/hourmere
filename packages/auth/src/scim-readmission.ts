@@ -7,7 +7,7 @@ import { finishScimClaim } from './scim-claims.ts'
 import { TeamManagementError, teamSession, teamSessionUser } from './team-management.ts'
 import { teamRoleDenied } from './team-role-policy.ts'
 
-/** Only the resource test harness exposes this confirmation for a retained member. */
+/** Browser-session confirmation of a fresh SCIM entry for a retained member. */
 export function scimReadmission(db: Db) {
   return {
     id: 'scim-readmission',

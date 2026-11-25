@@ -7,8 +7,6 @@ import type { Tool } from './mcp/tools.ts'
 import type { RouteModule } from './openapi.ts'
 import { createRateLimiter, rateLimitKey } from './rate-limit.ts'
 
-// Worker and offline maintenance contexts have no request-scoped test capability.
-export const productionScimResourcesEnabled = false
 export const SCIM_ERROR_SCHEMA = 'urn:ietf:params:scim:api:messages:2.0:Error'
 
 /**
@@ -105,25 +103,36 @@ export async function readScimBody(request: Request): Promise<ScimBody> {
 
 /**
  * Resource handlers answer authenticated requests; undefined leaves the request to the
- * unavailable answer. This is the resource test flag in docs/scim.md: only test harnesses
- * pass handlers, in code. productionAppOptions never does, and no environment or operator
- * setting, request parameter or build option reaches it.
+ * unavailable answer. Tests can inject individual handlers. Production registers the
+ * complete set together when provisioning is enabled.
  */
 export type ScimResources = (request: ScimResourceRequest) => ScimReply | undefined
 /** A resource handler that may read storage before it answers; injected the same way. */
-export type ScimResourceHandler = (
+export type ScimResourceHandler = ((
   request: ScimResourceRequest,
-) => ScimReply | undefined | Promise<ScimReply | undefined>
+) => ScimReply | undefined | Promise<ScimReply | undefined>) &
+  ScimResourceRegistration
+
+/** Discovery reads only the capabilities of the installed handlers. */
+export interface ScimResourceRegistration {
+  resourceType?: 'User' | 'Group'
+  patch?: true
+  filter?: { maxResults: number }
+  bulk?: { maxOperations: number; maxPayloadSize: number }
+  changePassword?: true
+  sort?: true
+  etag?: true
+}
 
 export interface ScimOptions {
   db: Db
   enabled: boolean
   resources?: ScimResourceHandler | undefined
-  /** Injected with resource handlers by the in-process test harness. */
+  /** Mapping management is mounted only with the resource handlers. */
   mappingAdministration?: { route: RouteModule; tools: readonly Tool[] } | undefined
 }
 
-/** Separate protocol boundary. Production registers no SCIM resource handlers yet. */
+/** Separate protocol boundary for organization-scoped provisioning credentials. */
 export function mountScim(
   app: OpenAPIHono,
   options?: ScimOptions,
@@ -135,6 +144,9 @@ export function mountScim(
   const limit = createRateLimiter({ limit: 120, windowSeconds: 60 })
   const organizationLimit = options?.resources
     ? createRateLimiter({ limit: 120, windowSeconds: 60 })
+    : undefined
+  const credentialLimit = options?.resources
+    ? createRateLimiter({ limit: 90, windowSeconds: 60 })
     : undefined
   const send = (c: Context, status: Exclude<ScimReply['status'], 204> | 500, body: unknown) => {
     c.header('Content-Type', 'application/scim+json')
@@ -166,6 +178,8 @@ export function mountScim(
         c.header('WWW-Authenticate', 'Bearer')
         return respond(c, 401, 'A valid provisioning token is required.')
       }
+      const credentialRetry = credentialLimit?.hit(principal.tokenId)
+      if (credentialRetry !== undefined) return rateLimited(c, credentialRetry)
       const organizationRetry = organizationLimit?.hit(principal.organizationId)
       if (organizationRetry !== undefined) return rateLimited(c, organizationRetry)
       // Locations name the stored organization, never the URL's spelling of it.

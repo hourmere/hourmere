@@ -16,7 +16,7 @@ import { memberLeaveRoutes } from './routes/member-leave.ts'
 import { memberRemovalRoutes } from './routes/member-removal.ts'
 import { profileRoutes } from './routes/profile.ts'
 import { teamInvitationRoutes } from './routes/team-invitations.ts'
-import { scimDiscovery } from './scim-discovery.ts'
+import { scimDiscovery } from './scim-discovery-fixture.ts'
 
 const databaseUrl = process.env.DATABASE_URL
 const publicUrl = 'https://hourmere.example.test'
