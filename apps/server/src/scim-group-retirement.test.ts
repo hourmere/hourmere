@@ -18,7 +18,7 @@ import {
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
-import { scimDiscoveryWithGroups } from './scim-discovery.ts'
+import { scimDiscoveryWithGroups } from './scim-discovery-fixture.ts'
 import { scimGroupRetirement } from './scim-group-retirement.ts'
 import { scimGroups } from './scim-groups.ts'
 import type { ScimMappingNoticeQueue } from './scim-team-mapping-notices.ts'
@@ -322,6 +322,12 @@ describe.skipIf(!databaseUrl)('SCIM Group retirement', () => {
     const local = await createTestUser(db, 'Manual child member')
     const f = await directory(2, [local])
     const [first, second] = f.people as [TestUser, TestUser]
+    const childMembershipIds = await db
+      .selectFrom('scim_team_managed_memberships')
+      .select('member_id')
+      .where('child_organization_id', '=', f.child.id)
+      .orderBy('member_id')
+      .execute()
     const eventId = await createFixtures(db).eventType(f.child.id, null, {
       hosts: [{ userId: f.child.owner.id }],
     })
@@ -410,6 +416,27 @@ describe.skipIf(!databaseUrl)('SCIM Group retirement', () => {
         details: {},
       },
     ])
+    expect(
+      await db
+        .selectFrom('audit_events')
+        .select(['action', 'actor_type', 'actor_id', 'credential_type', 'target_id', 'details'])
+        .where('organization_id', '=', f.child.id)
+        .where('action', 'in', ['scim_membership.credentials_revoked', 'scim_membership.removed'])
+        .orderBy('target_id')
+        .orderBy('action')
+        .execute(),
+    ).toEqual(
+      childMembershipIds.flatMap(({ member_id }) =>
+        ['credentials_revoked', 'removed'].map((change) => ({
+          action: `scim_membership.${change}`,
+          actor_type: 'system',
+          actor_id: 'scim',
+          credential_type: 'none',
+          target_id: member_id,
+          details: {},
+        })),
+      ),
+    )
     expect(
       await db
         .selectFrom('audit_events')
@@ -744,12 +771,12 @@ describe.skipIf(!databaseUrl)('SCIM Group retirement', () => {
     expect(await events()).toEqual(beforeEvents)
   })
 
-  it('refuses a directory-suspended child member on the server paths that hold the capability', async () => {
+  it('refuses a directory-suspended child member after provisioning is disabled', async () => {
     const f = await directory(1)
     const [sourceId] = f.ids as [string]
     const [source] = f.people as [TestUser]
     expect((await setActive(f.token, sourceId, false)).status).toBe(200)
-    expect(await suspended(f.child.id, source, false)).toBe(false)
+    expect(await suspended(f.child.id, source, false)).toBe(true)
     expect(await suspended(f.child.id, source)).toBe(true)
     const browser = await db.transaction().execute((trx) =>
       createBrowserSession(
@@ -776,7 +803,9 @@ describe.skipIf(!databaseUrl)('SCIM Group retirement', () => {
       db
         .transaction()
         .execute((trx) => bookingWriteAccess(principal(capability), f.child.id)(trx, f.child.id))
-    await expect(bookingWrite(false)).resolves.toBeUndefined()
+    await expect(bookingWrite(false)).rejects.toMatchObject({
+      code: 'organization_context_changed',
+    })
     await expect(bookingWrite(true)).rejects.toMatchObject({ code: 'organization_context_changed' })
 
     // OIDC account linking.
@@ -786,7 +815,7 @@ describe.skipIf(!databaseUrl)('SCIM Group retirement', () => {
         .execute((trx) =>
           lockOidcLinkActor(trx, f.child.id, { userId: source.id, id: browser.id }, capability),
         )
-    expect((await link()).member.id).toBe((await member(f.child.id, source))?.id)
+    await expect(link()).rejects.toBeInstanceOf(OidcAttemptRefused)
     await expect(link(true)).rejects.toBeInstanceOf(OidcAttemptRefused)
 
     // Owner notices. A fixture role stands in for an owner whose suspension predates it.
@@ -800,7 +829,7 @@ describe.skipIf(!databaseUrl)('SCIM Group retirement', () => {
       (await ssoRecoveryTeamOwners(db, f.child.id, capability).execute())
         .map(({ userId }) => userId)
         .sort()
-    expect(await owners()).toEqual([f.child.owner.id, source.id].sort())
+    expect(await owners()).toEqual([f.child.owner.id])
     expect(await owners(true)).toEqual([f.child.owner.id])
   })
 })

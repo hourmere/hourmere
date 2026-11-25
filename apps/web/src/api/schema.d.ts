@@ -7385,7 +7385,7 @@ export interface components {
             publicUrl: string;
             /** @description Effective state of routing forms. ROUTING_FORMS_ENABLED defaults to false. A legacy route handle keeps routing forms off. Absent when unknown. */
             routingFormsEnabled?: boolean;
-            /** @description Whether administrators may manage SCIM provisioning tokens; resources are not available yet */
+            /** @description Whether the operator enabled SCIM provisioning and owner token creation and rotation */
             scimProvisioningEnabled?: boolean;
             /** @enum {boolean} */
             scimResourcesEnabled?: true;

@@ -56,6 +56,12 @@ for (const locale of ['en-US', 'zh-CN'] as const) {
         )
         expect(renamed).toBe(200)
         await page.goto(`${app.url}/app/settings`)
+        // Exercise the now-default provisioning action with larger system text metrics.
+        await page
+          .locator('[aria-labelledby="scim-heading"] button[type="submit"]')
+          .evaluate((button) => {
+            button.style.fontSize = '1.35rem'
+          })
         const trigger = page.getByRole('button', { name: /^(Switch space|切换空间)/ })
         const personal = page.getByRole('menuitemradio', { name: /^(Personal|个人空间)( |$)/ })
         const team = page.getByRole('menuitemradio', { name: new RegExp(`^${longName}`) })

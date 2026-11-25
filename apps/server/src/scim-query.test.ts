@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { describe, expect, it } from 'vitest'
 import { SCIM_ERROR_SCHEMA, scimError } from './scim.ts'
-import { SCIM_URN, scimDiscovery, scimUserSchemas } from './scim-discovery.ts'
+import { SCIM_URN, scimUserSchemas } from './scim-discovery.ts'
+import { scimDiscovery } from './scim-discovery-fixture.ts'
 import * as real from './scim-query.ts'
 
 type Query = typeof import('./scim-query.ts')

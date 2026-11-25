@@ -6,7 +6,7 @@ import type { Auth } from './index.ts'
 import { ensurePersonalOrganization, isUuid } from './organizations.ts'
 import { type SsoDelegationStatus, ssoDelegationStatus } from './sso-delegation-access.ts'
 import { type SsoRecoveryTeam, ssoRecoveryTeamsFor } from './sso-recovery-membership.ts'
-import { ssoHardOff, ssoRetained, type TeamSsoCapabilities } from './team-sso.ts'
+import { ssoHardOff, ssoRetained, type TeamSsoCapabilities, withScimResources } from './team-sso.ts'
 
 /** Every API key starts with this, so leaked keys are recognizable (e.g. by secret scanners). */
 export const API_KEY_PREFIX = 'hm_'
@@ -91,14 +91,13 @@ export function createCallerResolver({
   auth: Auth
   db: Db
   ssoCapabilities?: TeamSsoCapabilities
-  /** No production registration. The SCIM resource test harness supplies this flag. */
+  /** Whether directory resource management is enabled on this instance. */
   scimResourcesEnabled?: boolean
 }): CallerResolver {
-  // Off keeps the same object, so nothing downstream changes without the test flag.
-  const ssoCapabilities: TeamSsoCapabilities = scimResourcesEnabled
-    ? { ...protocolCapabilities, scimResourcesEnabled: true }
-    : protocolCapabilities
-  const resourceCapability = scimResourcesEnabled ? { scimResourcesEnabled: true as const } : {}
+  const ssoCapabilities = withScimResources(protocolCapabilities, scimResourcesEnabled)
+  const resourceCapability = ssoCapabilities.scimResourcesEnabled
+    ? { scimResourcesEnabled: true as const }
+    : {}
   type Membership = Pick<
     Principal,
     'user' | 'organization' | 'personalOrganizationId' | 'scimProvisioned'

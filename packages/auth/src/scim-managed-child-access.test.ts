@@ -1,5 +1,9 @@
 import { randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { createRequire, stripTypeScriptTypes } from 'node:module'
+import { pathToFileURL } from 'node:url'
 import { createDb, type Db } from '@hourmere/db'
+import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -26,8 +30,6 @@ const denied = (): never => {
   throw new Denied()
 }
 
-// Every membership check here embeds the shared suspension statement. Only a caller that
-// holds the resource capability reads a Group-sourced suspension of a child membership.
 describe.skipIf(!databaseUrl)('directory-managed child suspension in auth checks', () => {
   let owned: TestDatabase
   let db: Db
@@ -97,24 +99,26 @@ describe.skipIf(!databaseUrl)('directory-managed child suspension in auth checks
     await owned?.drop()
   })
 
-  it('refuses membership checks only for a caller that holds the capability', async () => {
-    expect(await isMember(db, suspended, child)).toBe(true)
-    expect(await isMember(db, suspended, child, false)).toBe(true)
+  it('refuses membership checks with provisioning enabled or disabled', async () => {
+    expect(await isMember(db, suspended, child)).toBe(false)
+    expect(await isMember(db, suspended, child, false)).toBe(false)
     expect(await isMember(db, suspended, child, true)).toBe(false)
+    expect(await isMember(db, active, child, false)).toBe(true)
     expect(await isMember(db, active, child, true)).toBe(true)
 
     const read = (userId: string, capability?: boolean) =>
       checkTeamManagementMembership(db, userId, child, false, false, true, false, false, capability)
-    expect(await read(suspended)).toMatchObject({ role: 'member' })
+    await expect(read(suspended)).rejects.toThrow()
     await expect(read(suspended, true)).rejects.toThrow()
     expect(await read(active, true)).toMatchObject({ role: 'member' })
   })
 
-  it('refuses SSO reads, proofs and delegations only with the capability', async () => {
+  it('refuses SSO reads, proofs and delegations with provisioning enabled or disabled', async () => {
     const identity = (userId: string) => ({ sessionId: randomUUID(), userId })
     expect(await teamSsoAccess({ db, capabilities: off }, identity(suspended), child)).toEqual({
-      allowed: true,
+      allowed: false,
       policy: null,
+      suspended: true,
     })
     expect(await teamSsoAccess({ db, capabilities: on }, identity(suspended), child)).toEqual({
       allowed: false,
@@ -126,7 +130,7 @@ describe.skipIf(!databaseUrl)('directory-managed child suspension in auth checks
       policy: null,
     })
 
-    expect((await lockTeamSsoPolicy(db, child, suspended)).suspended).toBe(false)
+    expect((await lockTeamSsoPolicy(db, child, suspended)).suspended).toBe(true)
     expect((await lockTeamSsoPolicy(db, child, suspended, false, undefined, true)).suspended).toBe(
       true,
     )
@@ -135,7 +139,7 @@ describe.skipIf(!databaseUrl)('directory-managed child suspension in auth checks
       db
         .transaction()
         .execute((trx) => lockTeamSsoProof({ capabilities }, trx, identity(userId), child, denied))
-    expect(await proof(off, suspended)).toBeUndefined()
+    await expect(proof(off, suspended)).rejects.toBeInstanceOf(Denied)
     await expect(proof(on, suspended)).rejects.toBeInstanceOf(Denied)
     expect(await proof(on, active)).toBeUndefined()
 
@@ -150,12 +154,12 @@ describe.skipIf(!databaseUrl)('directory-managed child suspension in auth checks
             denied,
           ),
         )
-    expect(await delegation(off, suspended)).toBeUndefined()
+    await expect(delegation(off, suspended)).rejects.toBeInstanceOf(Denied)
     await expect(delegation(on, suspended)).rejects.toBeInstanceOf(Denied)
     expect(await delegation(on, active)).toBeUndefined()
   })
 
-  it('reads Group storage in the embedded statements only with the capability', () => {
+  it('reads Group storage in the embedded statements with provisioning enabled or disabled', () => {
     const identity = { sessionId: randomUUID(), userId: suspended }
     const compiled = (fragment: ReturnType<typeof sql>) =>
       db.selectNoFrom(sql`${fragment}`.as('fragment')).compile().sql
@@ -180,9 +184,41 @@ describe.skipIf(!databaseUrl)('directory-managed child suspension in auth checks
           .compile().sql,
       ],
     ] as const) {
-      expect(without).not.toContain(GROUP_STORAGE)
+      expect(without).toBe(withCapability)
       expect(withCapability).toContain(GROUP_STORAGE)
       expect(withCapability).toContain('managed_source.suspended_at IS NOT NULL')
     }
+  })
+
+  it('detects a source copy that drops an existing child suspension on rollback', async () => {
+    const modulePath = new URL(import.meta.resolve('@hourmere/db/scim-suspension'))
+    const readChildSuspension = `  return sql<boolean>\`(\${suspended} OR EXISTS (`
+    const source = readFileSync(modulePath, 'utf8')
+    expect(source).toContain(readChildSuspension)
+    const require = createRequire(modulePath)
+    const copy = stripTypeScriptTypes(
+      source.replace(
+        readChildSuspension,
+        `  if (!_managedChildren) return suspended\n${readChildSuspension}`,
+      ),
+    ).replace(
+      /from '([^']+)'/g,
+      (_, specifier: string) =>
+        `from '${specifier.startsWith('.') ? new URL(specifier, modulePath).href : pathToFileURL(require.resolve(specifier)).href}'`,
+    )
+    const mutated: typeof import('@hourmere/db/scim-suspension') = await import(
+      `data:text/javascript;base64,${Buffer.from(copy).toString('base64')}`
+    )
+    const assertSuspended = async (predicate: typeof scimSuspended) => {
+      const row = await db
+        .selectNoFrom(predicate(child, suspended, false).as('suspended'))
+        .executeTakeFirstOrThrow()
+      expect(row.suspended).toBe(true)
+    }
+    await assertSuspended(scimSuspended)
+    await expect(assertSuspended(mutated.scimSuspended)).rejects.toMatchObject({
+      actual: false,
+      expected: true,
+    })
   })
 })

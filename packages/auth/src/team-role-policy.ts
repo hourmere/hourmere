@@ -296,7 +296,7 @@ export async function writeTeamInvitationAcceptance(
  * this policy's locks and writes join it, including administrative member removal.
  * Creation and acceptance add an enclosing native transaction. Policy writes without a
  * native transaction use their own short transaction; invitation admission/delivery is separate.
- * SCIM claim completion joins acceptance only when a test harness passes `scimClaims`.
+ * SCIM claim completion joins acceptance when the caller enables `scimClaims`.
  */
 export function createTeamRolePolicy(
   db: Db,
@@ -332,20 +332,19 @@ export function createTeamRolePolicy(
       nativeSsoRequired,
       {
         organizationLocked: true,
-        ...(scimResourcesEnabled &&
-          admissionUserId && {
-            admission: {
-              blocked: managedAdmissionBlock(
-                organizationId,
-                admissionUserId,
-                sql<string>`(SELECT lower(btrim(email)) FROM auth."user"
+        ...(admissionUserId && {
+          admission: {
+            blocked: managedAdmissionBlock(
+              organizationId,
+              admissionUserId,
+              sql<string>`(SELECT lower(btrim(email)) FROM auth."user"
                 WHERE id = ${admissionUserId}::uuid AND "emailVerified" IS TRUE)`,
-              ),
-              denied: () => {
-                throw teamRoleDenied()
-              },
+            ),
+            denied: () => {
+              throw teamRoleDenied()
             },
-          }),
+          },
+        }),
       },
     )
   }
@@ -455,7 +454,7 @@ export function createTeamRolePolicy(
       .where('organizationId', '=', facts.organizationId)
     if (lock) targetQuery = targetQuery.forUpdate()
     const target = await targetQuery
-      .$if(scimResourcesEnabled && lock && role === 'admin', (query) =>
+      .$if(lock && role === 'admin', (query) =>
         query.select(({ ref }) =>
           scimSuspended(facts.organizationId, ref('auth.member.userId'), true).as('scimBlocked'),
         ),
@@ -502,15 +501,14 @@ export function createTeamRolePolicy(
         userId: actor.user.id,
         email: user.email,
       },
-      // A bound SCIM invitation runs its own blocker check in claim completion.
-      scimResourcesEnabled
-        ? managedAdmissionBlock(
-            organization.id,
-            actor.user.id,
-            mailbox,
-            scimClaims ? invitationId : undefined,
-          )
-        : undefined,
+      // Stored blockers survive rollback. A bound SCIM invitation checks its own
+      // blockers when claim completion is enabled.
+      managedAdmissionBlock(
+        organization.id,
+        actor.user.id,
+        mailbox,
+        scimClaims ? invitationId : undefined,
+      ),
     )
     await requireProof(trx, ctx, organization.id)
     if (

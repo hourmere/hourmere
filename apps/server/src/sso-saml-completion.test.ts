@@ -1069,7 +1069,7 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
     expect(await protocolEffects(provider.id)).toEqual(before)
   })
 
-  it('refuses SAML link consent for a directory-suspended child member when SCIM resources are enabled', async () => {
+  it('refuses SAML link consent for a directory-suspended child member even after SCIM is disabled', async () => {
     const fixture = await seedTeam()
     const domainName = `directory-${randomUUID()}.example.com`
     const assertedMailbox = `member@${domainName}`
@@ -1121,9 +1121,15 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
       .execute()
 
     await expectRefusedCompletion(await complete(result, { request }))
+    await expectRefusedCompletion(await complete(result, { request: instance() }))
     expect(await storedLinks(provider)).toEqual([])
     expect(await protocolEffects(provider.id)).toEqual(before)
 
+    await db
+      .updateTable('scim_team_managed_memberships')
+      .set({ suspended_at: null })
+      .where('member_id', '=', fixture.memberMember)
+      .execute()
     const completed = await complete(result, { request: instance() })
     expect(completed.status).toBe(303)
     expect(completed.headers.get('location')).toBe('/app/settings')

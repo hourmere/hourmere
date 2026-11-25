@@ -56,33 +56,24 @@ function scanSuspensionCalls(source: string) {
   return calls
 }
 
-// The statement every production authorization path embeds while SCIM resources are off.
-const production = `select CASE WHEN EXISTS (
+const primarySuspension = `CASE WHEN EXISTS (
     SELECT 1 FROM scim_membership_blocks AS block
     WHERE block.organization_id = $1::uuid AND block.user_id = $2::uuid
       AND block.source = 'scim' AND block.kind = 'suspension' AND block.cleared_at IS NULL
   ) THEN NOT EXISTS (
     SELECT 1 FROM personal_organizations AS personal
     WHERE personal.organization_id = $3::uuid
-  ) ELSE false END as "suspended"`
+  ) ELSE false END`
 
 describe('SCIM suspension statement', () => {
-  it('is unchanged and reads no Group storage without the resource capability', () => {
-    const statement = compiled(false)
-    expect(statement.sql).toBe(production)
-    expect(statement.parameters).toEqual([organization, user, organization])
-    expect(statement.sql).not.toContain('scim_team_managed_memberships')
+  it('preserves existing suspensions with the resource capability disabled', () => {
+    expect(compiled(false)).toEqual(compiled(true))
   })
 
-  it('also reads a managed membership suspension with the resource capability', () => {
+  it('reads parent and child suspensions by organization and account', () => {
     const statement = compiled(true)
-    expect(statement.sql).toContain(production.slice('select '.length, -' as "suspended"'.length))
-    expect(statement.sql).toContain('scim_team_managed_memberships')
-    expect(statement.sql).toContain('managed_source.suspended_at IS NOT NULL')
     expect(statement.parameters).toEqual([organization, user, organization, organization, user])
-    expect(
-      statement.sql,
-    ).toBe(`select (${production.slice('select '.length, -' as "suspended"'.length)} OR EXISTS (
+    expect(statement.sql).toBe(`select (${primarySuspension} OR EXISTS (
     SELECT 1 FROM scim_team_managed_memberships AS managed_source
     WHERE managed_source.child_organization_id = $4::uuid
       AND managed_source.user_id = $5::uuid AND managed_source.suspended_at IS NOT NULL
@@ -90,8 +81,6 @@ describe('SCIM suspension statement', () => {
   })
 
   it('is given the capability decision by every caller', () => {
-    // A caller that drops the decision would keep a directory-suspended child member
-    // active on its path while the resource capability is on.
     const root = join(import.meta.dirname, '../../..')
     const sources = ['apps', 'packages'].flatMap((workspace) =>
       readdirSync(join(root, workspace), { recursive: true, encoding: 'utf8' })

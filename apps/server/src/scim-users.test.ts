@@ -9,7 +9,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createApp } from './app.ts'
 import { loadConfig } from './config.ts'
 import type { ScimResourceHandler } from './scim.ts'
-import { SCIM_URN, scimDiscovery } from './scim-discovery.ts'
+import { SCIM_URN } from './scim-discovery.ts'
+import { scimDiscovery } from './scim-discovery-fixture.ts'
 import { scimUserCreation } from './scim-user-create.ts'
 import { scimUsers } from './scim-users.ts'
 import { productionAppOptions } from './server.ts'
@@ -1019,19 +1020,19 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User reads over HTTP', () => {
     }
   })
 
-  // The production assembly, as startServer builds it, with the operator switch on.
-  async function productionAnswers(resources: string[], options = productionAppOptions) {
+  // The same assembly used by startServer.
+  async function productionAnswers(resources: string[], enabled: boolean) {
     const config = loadConfig({
       DATABASE_URL: owned.url,
       BETTER_AUTH_SECRET: signingSecret,
       PUBLIC_URL: publicUrl,
-      SCIM_PROVISIONING_ENABLED: 'true',
+      SCIM_PROVISIONING_ENABLED: String(enabled),
     })
     const unreachable = async (): Promise<never> => {
       throw new Error('SCIM User reads must not reach this collaborator')
     }
     const application = createApp(
-      options({
+      productionAppOptions({
         config,
         db,
         auth: { handler: unreachable },
@@ -1050,6 +1051,8 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User reads over HTTP', () => {
         enqueueCalendarSync: unreachable,
         enqueueCalendarWritebackRecovery: unreachable,
         mailboxProofQueue: { enqueue: unreachable },
+        scimMappingNotices: { enqueue: unreachable },
+        enqueueScimInvitation: unreachable,
       }),
     )
     expect(
@@ -1072,7 +1075,7 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User reads over HTTP', () => {
     'Users?startIndex=2&count=1',
   ]
 
-  it('stays unreachable without the flag, while disabled, and in the production assembly', async () => {
+  it('keeps pre-registration assemblies hard-off and exposes production User reads only when enabled', async () => {
     const resources = offResources()
     const answers = async (application: Application) => {
       const replies = []
@@ -1095,25 +1098,10 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User reads over HTTP', () => {
     expect(await answers(harness(flagged(scimUsers), false))).toEqual(
       off(errorBody(404, 'SCIM provisioning is disabled.')),
     )
-    expect(await productionAnswers(resources)).toEqual(off(unavailable))
-    // Controls: an unmutated copy of the assembly answers the same, and registered in
-    // production, User reads would answer.
-    const control = await sourceCopy<typeof import('./server.ts')>('./server.ts')
-    expect(await productionAnswers(resources, control.productionAppOptions)).toEqual(
-      off(unavailable),
+    expect(await productionAnswers(resources, false)).toEqual(
+      off(errorBody(404, 'SCIM provisioning is disabled.')),
     )
-    const mutant = await sourceCopy<typeof import('./server.ts')>(
-      './server.ts',
-      [
-        "import { type AppDeps, createApp } from './app.ts'",
-        "import { type AppDeps, createApp } from './app.ts'\nimport { scimUsers } from './scim-users.ts'",
-      ],
-      [
-        'scim: { db, enabled: config.SCIM_PROVISIONING_ENABLED },',
-        'scim: { db, enabled: config.SCIM_PROVISIONING_ENABLED, resources: scimUsers(db) },',
-      ],
-    )
-    const registered = await productionAnswers(resources, mutant.productionAppOptions)
+    const registered = await productionAnswers(resources, true)
     expect(registered.map(({ resource, status }) => ({ resource, status }))).toEqual(
       resources.map((resource, index) => ({ resource, status: index === 3 ? 404 : 200 })),
     )

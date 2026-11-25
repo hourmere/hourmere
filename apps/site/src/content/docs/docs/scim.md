@@ -1,87 +1,144 @@
 ---
-title: SCIM provisioning tokens
-description: Prepare organization-scoped provisioning credentials and understand the current SCIM limitations.
+title: SCIM provisioning
+description: Connect an identity provider to provision team users and mapped child-team groups.
 ---
 
-**SCIM user and group provisioning is not available yet.** This release provides the
-credential administration and internal identity storage only. Enabling it does not enable Users, Groups or discovery
-resources, and an identity provider's connection test cannot succeed yet.
+SCIM 2.0 lets an identity provider (IdP) manage a team's directory entries and mapped
+group rosters. Every Hourmere installation, including self-hosted instances, has the same
+feature without a subscription or license. SCIM governs provisioning. [SSO](/docs/sso)
+governs sign-in.
 
-The same foundation is available to every installation, including self-hosted instances,
-without a subscription or license requirement. SCIM will manage organization membership
-lifecycle; it is separate from SSO sign-in.
+## Connect your identity provider
 
-## Enable token administration
+1. In a team space, open **Settings → SCIM provisioning tokens**. A team owner can
+   create or rotate a token. Owners and admins can list or revoke tokens.
+2. Configure the IdP's SCIM 2.0 connector to use
+   `https://<hourmere-host>/scim/v2/<organization-id>` and bearer authentication.
+   Use the team UUID, available under **Settings → SCIM team mappings**, and keep the
+   token in the IdP's protected credential configuration.
+3. Test the connection. An authenticated `GET /ServiceProviderConfig` relative to the
+   base URL should return 200 with PATCH and filtering supported. Test a pilot user
+   before assigning a larger roster. Use `userName` for matching users.
+4. To sync a Group, first link its exact, case-sensitive directory `externalId` to an
+   existing child team in **Settings → SCIM team mappings**. The current owner of each
+   team must approve the same request with fresh proof in their own team. Assign the
+   Group in the IdP after the link is in place.
 
-`SCIM_PROVISIONING_ENABLED` defaults to `false`. An operator may set it to `true` and
-recreate the application to enable token creation and rotation. Listing and revocation
-remain available while the switch is off. See
-[configuration](/docs/configuration) for environment and Compose behavior.
+A provisioning token authenticates only to its own organization's SCIM URL. The
+complete value appears once, after creation or rotation. Keep it out of URLs, support
+tickets, screenshots, shell history and proxy or monitoring logs. Use HTTPS with a
+stable public URL. If you restrict source addresses at your reverse proxy, configure
+Hourmere to trust forwarded client addresses only from that proxy.
 
-Sign in as an owner or administrator of a team organization and open **Settings** (`/app/settings`), then **SCIM provisioning tokens**.
-Personal spaces and ordinary members cannot administer provisioning tokens. The page
-states that provisioning itself is unavailable; do not connect a production IdP yet.
+## Tested providers
 
-Only owners can create or rotate tokens; owners and administrators can list and revoke
-them, including while the switch is off.
+| Provider | Evidence |
+| --- | --- |
+| Keycloak 26.8.2 with the Shebang Labs outbound SCIM plugin v0.1.1 | A pinned local fixture with synthetic identities exercised User creation and updates, suspension, reactivation, retirement and Group roster changes. The suite also covers credential rotation and recovery. Some checks, including Group PUT, use direct Hourmere requests. |
+| Okta | Synthetic HTTP fixtures replay User GET and full PUT. A live tenant has yet to be tested. |
+| Microsoft Entra ID | Synthetic HTTP fixtures cover scheduled and legacy on-demand User PATCH and Group member-removal variants. A live tenant has yet to be tested. Use `userName` matching. |
+| Google Workspace and other connectors | Untested. Validate the connector with a pilot before assigning a production roster. |
 
-Create a token with a recognizable name and copy its complete value into a private
-secret store immediately. The complete value is shown only after creation or rotation.
-Closing that view, navigating away or switching organizations clears it. The list
-contains paginated safe metadata, not a way to recover the secret. The management API
-also records the creating and most recent rotating user IDs and timestamps. If you lose the value, rotate
-or replace it. Never include it in a URL, support ticket, screenshot or command history.
+The [local lifecycle acceptance matrix](https://github.com/hourmere/hourmere/blob/main/docs/scim.md#local-lifecycle-acceptance)
+lists the exact requests exercised by the Keycloak fixture.
 
-A provisioning token is bound to one organization and to the SCIM protocol. It cannot
-call REST `/api/v1`, MCP or the CLI, and an ordinary API key cannot authenticate SCIM.
-Token management itself requires your signed-in browser session, just like
-[API-key administration](/docs/api-keys); it has no MCP tool or CLI command.
+## Membership and Groups
 
-An organization can have at most 10 active tokens. This leaves room for staged IdP
-transitions and recovery while bounding live credentials. Revoke unused tokens before
-creating more.
-
-Credentials in one organization share a stable provisioning connection. Rotating a
-credential preserves this identity. Internal storage for future User profiles, claims
-and suspension records is present, but it does not create accounts, grant membership
-or change access in this release.
-
-## Rotate and revoke
-
-Rotation in Settings shows a new secret once and accepts the prior secret for one hour.
-The browser-session REST operation also accepts an overlap of 0–86,400 seconds; zero
-switches immediately. The current credential has no lifetime expiry. When provisioning
-becomes available, use the overlap to update the IdP and verify the replacement. A second
-rotation is refused while the previous overlap is active.
-
-Revocation immediately disables the credential, including any overlapping old secret.
-It cannot be undone. Last-used records credential authentication, not successful
-synchronization; it is not evidence that Users or Groups are working in this release.
-Turning off the feature flag disables creation, rotation and SCIM authentication but does
-not revoke tokens. Owners and administrators can still inspect and revoke them before
-re-enabling the flag; unrevoked tokens otherwise become usable again when enabled.
-
-Keep the instance behind HTTPS and prevent your proxy, monitoring and request logs from
-recording Authorization headers. An optional IP restriction can be applied at your
-reverse proxy; there is no application-managed SCIM IP allow-list yet. Backups contain
-hashes, not recoverable secrets. After restoring a backup, review and revoke or rotate
-restored tokens before allowing provisioning traffic, because old valid credentials
-may have been restored too.
+- An active User with an eligible work address can receive an invitation. The
+  person proves control of their verified mailbox and own account to claim the
+  membership. Existing signup policy and invitation limits apply. Claims expire
+  after 48 hours. Some existing accounts require OIDC linking or re-admission
+  proof instead of an invitation.
+- Deactivation blocks managed team access and revokes the member's team
+  sessions, API keys and MCP OAuth grants. User DELETE also retires the SCIM
+  resource. The person's account, personal space, other teams and booking
+  history are preserved. Reactivation can restore team access after applicable
+  blockers are cleared. Affected team credentials must be created again.
+- Groups manage only the directory-sourced roster of one explicitly mapped child
+  team. Nested groups and role mapping are unsupported. Group DELETE removes its
+  managed roster and keeps the child team, manual members and booking history.
+  Reassign hosted event types and unfinished bookings in the child before removing
+  a member whose departure would affect them.
+- If a child owner promotes a directory-managed member to admin, a parent
+  directory request to deactivate or DELETE that User fails in full with SCIM
+  403 `mutability`. Other memberships and the parent User stay as they were.
+  The child owner can resolve the role through ordinary team administration
+  before the IdP retries the whole request.
+- The child team's [audit log](/docs/audit-log) shows directory roster additions,
+  removals, suspensions, reactivations and team credential revocations. It
+  identifies the child membership and the SCIM system actor. The log omits
+  directory attributes and parent credential identifiers.
 
 ## Known limitations
 
-- `/scim/v2` has no Users, Groups, ServiceProviderConfig, ResourceTypes or Schemas
-  handlers yet. A token is preparation, not a working provisioning integration.
-- There is no automatic account creation, membership deactivation or group synchronization.
-- No Okta, Microsoft Entra, Google Workspace connector or Keycloak plugin has passed
-  interoperability acceptance. Do not interpret the design's request fixtures as certification.
-- Groups-to-teams requires a future hierarchy and permission model: today's team is
-  already an organization. Tokens cannot create or control unrelated teams.
-- Token creation, rotation and revocation are recorded in the [audit log](/docs/audit-log).
-  Audit events for provisioning requests and resources, resource rate limits and protocol
-  conformance testing remain planned work, so this is not a complete provisioning audit log.
+- Filters accept one quoted equality comparison on Users' `userName` or
+  `externalId`, or on Groups' `displayName` or `externalId`. Pages have at most 100
+  entries. Bulk operations, `/.search`, sorting, password changes and ETags are
+  unsupported. All discovery and resource requests require a provisioning token.
+- Each process limits requests to 120 per minute per source, 90 per authenticated
+  credential and 120 per organization. Overlapping secrets share a credential budget.
+  A 429 includes `Retry-After`. Honor it before retrying.
 
-The [repository design](https://github.com/hourmere/hourmere/blob/main/docs/scim.md)
-records the intended protocol subset, safe account-claim flow, organization-only
-revocation, provider quirks and implementation sequence. Those sections are future
-requirements, not currently available product behavior.
+## Rotate and revoke
+
+A team can have at most 10 active tokens. Rotation preserves the same provisioning
+connection and resource IDs. The UI keeps the previous secret usable for one hour.
+The browser-session REST operation accepts an overlap of 0–86,400 seconds. Use zero
+for immediate cutover. Verify the replacement in the IdP before the old value
+expires. A second rotation waits until the current overlap ends.
+
+Revocation disables both values of a rotated token immediately. If a token may have
+leaked, revoke it and create a new one. Last-use time records successful credential
+authentication, which can precede a failed provisioning operation. Backups retain
+only token hashes. Review restored tokens and revoke or rotate them before allowing
+provisioning traffic after a restore.
+
+## Rollback drill
+
+1. Pause provisioning in the IdP and leave its assignments in place. Removing
+   assignments before pausing can trigger deactivation or deletion. If you also
+   need to freeze all new admissions, cancel outstanding invitations in Hourmere.
+   Invitations with a live directory claim wait for provisioning to resume.
+   Ordinary invitations can still admit members.
+2. Set `SCIM_PROVISIONING_ENABLED=false` in the deployment environment and recreate
+   every app and separate worker process with the same setting. With the bundled
+   Compose setup, update the value in the private `.env` and run
+   `./scripts/compose-up.sh -d --wait` with the same Compose overlays. Unset any
+   exported value that would override `.env`. An unset or empty value enables SCIM.
+   Explicit `0` and `off` also disable it. An invalid value stops startup.
+3. Verify that `GET` requests to `/ServiceProviderConfig`, `/ResourceTypes`,
+   `/Schemas`, `/Users` and `/Groups` relative to the SCIM base URL all return the
+   same SCIM 404, with or without a previously valid bearer. Owners and admins can
+   still list and revoke provisioning tokens. Creation and rotation are disabled.
+4. Check a previously active and a previously suspended test member in Hourmere,
+   including a mapped child team. Provisioned records, mappings, memberships and
+   audit history are kept. Previously suspended members remain blocked, and stored
+   mailbox admission blockers still apply. Sessions, keys and grants revoked during
+   deprovisioning stay revoked. Directory-only editing restrictions on profiles
+   and mapped team names may pause while the switch is off.
+5. To resume, remove the explicit off value, or set it to `true`, and recreate
+   the same processes. Unrevoked provisioning tokens become usable again, subject to
+   their original overlap deadlines. Revoke old tokens before re-enabling if they
+   should remain unusable. Run the IdP connection and pilot checks before resuming
+   its scheduled sync.
+
+For more detail, see [instance configuration](/docs/configuration),
+[the supported protocol subset](https://github.com/hourmere/hourmere/blob/main/docs/scim.md#protocol-surface)
+and the [offline mapping recovery runbook](https://github.com/hourmere/hourmere/blob/main/docs/scim.md#offline-mapping-recovery-runbook).
+
+## 中文说明
+
+SCIM 默认开启，自托管实例无需订阅。团队所有者在「设置 → SCIM 预配令牌」中创建令牌，
+并在身份提供商的 SCIM 2.0 连接器中使用团队专属地址
+`https://<hourmere-host>/scim/v2/<organization-id>`。请先用少量测试用户验证连接。
+同步群组前，父团队和子团队的所有者须分别批准对同一个群组 `externalId` 的映射。
+
+目录停用成员时会暂停其受管团队访问，并撤销相关会话、API 密钥和 MCP OAuth 授权。
+如果子团队所有者已将该受管成员提升为管理员，父目录对该用户的停用或删除会整体返回 403，
+父子团队的状态均保持原样。子团队的审计日志会记录受管成员和访问凭证的变更。
+
+需要回退时，先暂停身份提供商的同步，再将所有应用和后台进程的
+`SCIM_PROVISIONING_ENABLED` 设为 `false` 并重建进程。验证发现、用户和群组入口都返回相同的 404。
+空值表示开启。用户、群组以及映射记录会保留，暂停的成员仍无法访问，已撤销的凭证不会恢复。
+如果还需暂停所有新成员加入，请取消未处理的邀请。关闭 SCIM 后，会完成有效目录认领的邀请须等待预配恢复，
+普通邀请仍可接受。团队所有者和管理员仍可查看或撤销预配令牌，尚未撤销的令牌在重新启用后可以继续使用。

@@ -349,6 +349,8 @@ function productionApp(db: Db, databaseUrl: string, operatorValue: string | unde
       enqueueCalendarSync: async () => null,
       enqueueCalendarWritebackRecovery: async () => null,
       mailboxProofQueue: { enqueue: async () => null },
+      scimMappingNotices: { enqueue: async () => null },
+      enqueueScimInvitation: async () => {},
     }),
   )
 }
