@@ -3,8 +3,7 @@
 // it is bound to, in its own organization, inactive entries included. Nothing here reads an
 // account, a membership or another organization, so neither a filter nor an ID can reveal
 // whether a personal account or another organization's entry exists. Representations follow
-// the advertised User schemas. Production registers no handler yet; see ScimResources in
-// scim.ts.
+// the advertised User schemas.
 import type { Database, Db, ScimUsers } from '@hourmere/db'
 import { type Expression, type ExpressionBuilder, type Selectable, type SqlBool, sql } from 'kysely'
 import {
@@ -18,6 +17,7 @@ import {
   parseScimListQuery,
   parseScimProjection,
   projectScimResource,
+  SCIM_PAGE_SIZE,
   type ScimFilter,
   scimListResponse,
   scimPageWindow,
@@ -271,13 +271,17 @@ async function readUser(db: Db, request: ScimResourceRequest, id: string): Promi
 
 /**
  * GET /Users and GET /Users/{id} for the token's connection; every other request is left to
- * the next handler. Writes belong to later steps and stay unavailable.
+ * the next handler.
  */
 export function scimUsers(db: Db): ScimResourceHandler {
-  return (request) => {
+  const handle: ScimResourceHandler = (request) => {
     const match = /^\/Users(?:\/([^/]*))?$/.exec(request.path)
     if (!match || (request.method !== 'GET' && request.method !== 'HEAD')) return undefined
     const [, id] = match
     return id === undefined ? listUsers(db, request) : readUser(db, request, id)
   }
+  return Object.assign(handle, {
+    resourceType: 'User',
+    filter: { maxResults: SCIM_PAGE_SIZE },
+  } as const)
 }

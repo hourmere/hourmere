@@ -1,4 +1,7 @@
+import { execFile } from 'node:child_process'
 import { randomBytes, randomUUID } from 'node:crypto'
+import { fileURLToPath } from 'node:url'
+import { promisify } from 'node:util'
 import {
   createAuth,
   createAuthPool,
@@ -39,6 +42,10 @@ import {
 } from './sso-mailbox-proof.ts'
 
 const databaseUrl = process.env.DATABASE_URL
+const recoveryCommand = fileURLToPath(
+  new URL('./scim-team-mapping-recovery-cli.ts', import.meta.url),
+)
+const execute = promisify(execFile)
 const publicUrl = 'https://hourmere.example.test'
 const secret = 'synthetic-scim-hierarchy-proof-secret-0000000000'
 const signup = { mode: 'open', allowedDomains: [] } as const
@@ -357,9 +364,22 @@ describe.skipIf(!databaseUrl)('SCIM team hierarchy transactions', () => {
         recoverScimTeamMapping(db, failQueue, true, { ...target, action: 'suspend' }),
       ).rejects.toThrow('could not be queued')
       expect((await mapping(mappingId)).suspended_at).toBeNull()
-      await expect(
-        recoverScimTeamMapping(db, jobs, true, { ...target, action: 'suspend' }),
-      ).resolves.toBe('suspended')
+      const suspendOffline = (setting: string) =>
+        execute(process.execPath, [recoveryCommand, 'suspend', mappingId, parent.id, child.id], {
+          env: {
+            DATABASE_URL: owned.url,
+            HOURMERE_SERVER_CONTAINER: '1',
+            SCIM_PROVISIONING_ENABLED: setting,
+          },
+        })
+      await expect(suspendOffline('off')).rejects.toMatchObject({
+        code: 1,
+        stderr: expect.stringContaining('SCIM provisioning is disabled'),
+      })
+      expect((await mapping(mappingId)).suspended_at).toBeNull()
+      await expect(suspendOffline('')).resolves.toMatchObject({
+        stdout: expect.stringContaining('Mapping suspended. Owner notices queued.'),
+      })
       await expect(
         recoverScimTeamMapping(db, jobs, true, { ...target, action: 'suspend' }),
       ).resolves.toBe('unchanged')
@@ -407,6 +427,24 @@ describe.skipIf(!databaseUrl)('SCIM team hierarchy transactions', () => {
       await expect(listScimTeamMappings(deps(), parent.owner.principal)).resolves.toMatchObject({
         mappings: [],
       })
+      expect(
+        await db
+          .selectFrom('audit_events')
+          .select(['action', 'actor_type', 'actor_id', 'credential_type', 'target_type', 'details'])
+          .where('organization_id', '=', child.id)
+          .where('target_id', '=', member.id)
+          .orderBy('action')
+          .execute(),
+      ).toEqual(
+        ['credentials_revoked', 'removed'].map((change) => ({
+          action: `scim_membership.${change}`,
+          actor_type: 'system',
+          actor_id: 'scim',
+          credential_type: 'none',
+          target_type: 'member',
+          details: {},
+        })),
+      )
 
       const journal = await db
         .selectFrom('audit_events')

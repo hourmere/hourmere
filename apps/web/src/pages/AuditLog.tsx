@@ -75,6 +75,11 @@ export const AUDIT_ACTIONS: readonly (readonly [MessageKey, readonly string[]])[
       'scim_token.revoked',
       'scim_user.created',
       'scim_user.claimed',
+      'scim_membership.added',
+      'scim_membership.removed',
+      'scim_membership.suspended',
+      'scim_membership.reactivated',
+      'scim_membership.credentials_revoked',
     ],
   ],
   [

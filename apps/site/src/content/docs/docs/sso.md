@@ -101,9 +101,9 @@ A team that never configured SSO sees no SSO controls while the setting is off.
 - OIDC only; SAML is not available yet and no setting enables it.
 - Microsoft Entra ID does not emit `auth_time` unless configured as an optional claim;
   without it, every fresh verification at Entra also asks for mailbox confirmation.
-- Signing out of the identity provider, or removing a person there, does not end their
-  Hourmere session before it expires. Remove the member in Hourmere, or use
-  [SCIM](/docs/scim) once provisioning is available.
+- Signing out of the identity provider leaves the Hourmere session active until it expires.
+  To revoke team access after someone leaves the identity provider, remove the member in
+  Hourmere or configure directory deprovisioning through [SCIM](/docs/scim).
 
 REST, MCP and CLI coverage is listed in the [API key](/docs/api-keys) and
 [MCP](/docs/mcp) scope tables; the full design is in

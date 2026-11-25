@@ -78,6 +78,9 @@ describe('SCIM provisioning credentials', () => {
       await waitFor(() => expect(api.to(`DELETE ${BASE}/token-1`)).toHaveLength(1))
       expect(screen.queryByRole('button', { name: 'Create provisioning token' })).toBeNull()
       expect(screen.queryByRole('button', { name: 'Rotate token' })).toBeNull()
+      const paused = screen.queryByText('SCIM provisioning is disabled on this instance.')
+      if (flag === false) expect(paused).not.toBeNull()
+      else expect(paused).toBeNull()
     },
   )
   it('lets admins list and revoke but never create or rotate tokens', async () => {

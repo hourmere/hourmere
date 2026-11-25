@@ -14,7 +14,12 @@ import { createApp } from './app.ts'
 import { loadConfig } from './config.ts'
 import { provisioningTokenRoutes } from './routes/provisioning-tokens.ts'
 import { type ScimResources, scimError } from './scim.ts'
-import { SCIM_URN, scimDiscovery } from './scim-discovery.ts'
+import { createScimDiscovery, SCIM_URN } from './scim-discovery.ts'
+import {
+  scimDiscovery,
+  scimDiscoveryWithGroups,
+  userDiscoveryRegistration,
+} from './scim-discovery-fixture.ts'
 import {
   parseScimListQuery,
   projectScimResource,
@@ -84,28 +89,32 @@ function body<T>(path: string, resources = scimDiscovery): T {
 // docs/scim.md, "Protocol surface": the ServiceProviderConfig row and the ETag paragraph.
 function designedCapabilities() {
   const row = /^\| `GET \/ServiceProviderConfig` \| (.+) \|$/m.exec(design)?.[1] ?? ''
-  const patch = /`patch\.supported=(true|false)`/.exec(row)?.[1]
-  const filter = /filter supported with maxResults (\d+)/.exec(row)?.[1]
-  const unsupported = /; ([A-Za-z, ]+?) unsupported;/.exec(row)?.[1]?.split(/, | and /) ?? []
+  const supported = /PATCH and list filtering are supported/.test(row)
+  const filter = /up to (\d+) filter results per page/.exec(row)?.[1]
+  const unsupported =
+    /\. ([A-Za-z, ]+?) are unsupported\./
+      .exec(row)?.[1]
+      ?.replace(/^Bulk/, 'bulk')
+      .split(/, | and /) ?? []
   const etag = /advertise `etag\.supported=(true|false)`/.exec(design)?.[1]
   const pageCap = /Offset pagination starts at 1, defaults to \d+, caps at (\d+)/.exec(design)?.[1]
   // Each statement must be found; its value then flows into the expectation below.
   expect({
-    patch,
+    supported,
     filter,
     pageCap,
-    bearer: /bearer authentication advertised/.test(row),
+    bearer: /Discovery advertises bearer authentication/.test(row),
     etagParagraphAgrees: etag === 'false' && unsupported.includes('etag'),
   }).toEqual({
-    patch: expect.stringMatching(/^(?:true|false)$/),
+    supported: true,
     filter: expect.stringMatching(/^\d+$/),
     pageCap: filter,
     bearer: true,
     etagParagraphAgrees: true,
   })
   return {
-    patch: { supported: patch === 'true' },
-    filter: { supported: true, maxResults: Number(filter) },
+    patch: { supported },
+    filter: { supported, maxResults: Number(filter) },
     ...Object.fromEntries(
       unsupported.map((name) => [
         name,
@@ -132,7 +141,7 @@ async function verifyCapabilities(resources: ScimResources) {
     resourceType: 'ServiceProviderConfig',
     location: `${base}/ServiceProviderConfig`,
   })
-  // "bearer authentication advertised": RFC 7643 names RFC 6750 bearer tokens
+  // RFC 7643 names RFC 6750 bearer tokens
   // "oauthbearertoken"; provisioning tokens are the only accepted credential.
   expect(authenticationSchemes).toEqual([
     {
@@ -204,12 +213,12 @@ function designedFields() {
   const core: string[] = []
   const enterprise: string[] = []
   const refused: string[] = []
-  const deferred: string[] = []
+  const unmapped: string[] = []
   const derived: string[] = []
   for (const [field = '', decision = ''] of rows) {
     const fields = [...field.matchAll(/`([^`]+)`/g)].map((match) => match[1] as string)
     const target = field.startsWith('Enterprise ') ? enterprise : core
-    if (/^Read-only derived membership once Groups ships/.test(decision)) deferred.push(...fields)
+    if (/^Unmapped on Users\./.test(decision)) unmapped.push(...fields)
     else if (/^No privilege mapping or password provisioning/.test(decision))
       refused.push(...fields)
     // id, externalId and meta are RFC 7643 section 3.1 common attributes, not schema fields.
@@ -227,7 +236,7 @@ function designedFields() {
     core: core.flatMap((name) => (name === 'emails' ? emails : [name])).sort(),
     enterprise: enterprise.sort(),
     refused,
-    deferred,
+    unmapped,
     derived,
   }
 }
@@ -253,7 +262,7 @@ async function verifySchemas(resources: ScimResources) {
     expect(body<Schema>(`/Schemas/${schema.id}`, resources)).toEqual(schema)
     const all = names(schema.attributes)
     expect(new Set(all).size, 'unique names').toBe(all.length)
-    for (const name of [...fields.refused, ...fields.deferred, 'id', 'externalId', 'meta'])
+    for (const name of [...fields.refused, ...fields.unmapped, 'id', 'externalId', 'meta'])
       expect(all, name).not.toContain(name)
   }
   const userLeaves = leaves(user?.attributes ?? [])
@@ -298,10 +307,8 @@ async function verifySchemas(resources: ScimResources) {
 
 async function verifyResourceTypes(resources: ScimResources) {
   const listed = body<Listed<Record<string, unknown>>>('/ResourceTypes', resources)
-  // "User and, only once implemented, Group resource descriptors": Groups are deferred.
-  expect(design).toMatch(
-    /^\| `GET \/Groups`.* \| Deferred until the hierarchy and authorization prerequisite/m,
-  )
+  // The release describes both resource types. This fixture registers User alone.
+  expect(design).toMatch(/^\| `GET \/ResourceTypes`.* \| User and Group resource descriptors/m)
   expect(listed.Resources).toEqual([
     {
       schemas: [SCIM_URN.resourceType],
@@ -397,21 +404,36 @@ describe('SCIM discovery representations', () => {
 
   it('detects any capability flag that drifts from the design (source-copy controls)', async () => {
     const control = await sourceCopy<typeof import('./scim-discovery.ts')>('./scim-discovery.ts')
-    await verifyCapabilities(control.scimDiscovery)
+    await verifyCapabilities(control.createScimDiscovery([userDiscoveryRegistration]))
     for (const mutation of [
-      ['bulk: { supported: false,', 'bulk: { supported: true,'],
-      ['sort: { supported: false }', 'sort: { supported: true }'],
-      ['changePassword: { supported: false }', 'changePassword: { supported: true }'],
-      ['etag: { supported: false }', 'etag: { supported: true }'],
-      ['patch: { supported: true }', 'patch: { supported: false }'],
-      ['maxResults: 100', 'maxResults: 200'],
+      ['supported: registrations.some((route) => route.bulk)', 'supported: true'],
+      [
+        'sort: { supported: registrations.some((route) => route.sort) }',
+        'sort: { supported: true }',
+      ],
+      [
+        'changePassword: { supported: registrations.some((route) => route.changePassword) }',
+        'changePassword: { supported: true }',
+      ],
+      [
+        'etag: { supported: registrations.some((route) => route.etag) }',
+        'etag: { supported: true }',
+      ],
+      [
+        'patch: { supported: registrations.some((route) => route.patch) }',
+        'patch: { supported: false }',
+      ],
+      ['maxResults: Math.max(0,', 'maxResults: Math.max(200,'],
       ["type: 'oauthbearertoken'", "type: 'httpbasic'"],
     ] as [string, string][]) {
       const mutant = await sourceCopy<typeof import('./scim-discovery.ts')>(
         './scim-discovery.ts',
         mutation,
       )
-      await expect(verifyCapabilities(mutant.scimDiscovery), mutation[1]).rejects.toMatchObject({
+      await expect(
+        verifyCapabilities(mutant.createScimDiscovery([userDiscoveryRegistration])),
+        mutation[1],
+      ).rejects.toMatchObject({
         name: 'AssertionError',
       })
     }
@@ -450,7 +472,10 @@ describe('SCIM discovery representations', () => {
         './scim-discovery.ts',
         mutation,
       )
-      await expect(verifySchemas(mutant.scimDiscovery), mutation[0]).rejects.toMatchObject({
+      await expect(
+        verifySchemas(mutant.createScimDiscovery([userDiscoveryRegistration])),
+        mutation[0],
+      ).rejects.toMatchObject({
         name: 'AssertionError',
       })
     }
@@ -462,7 +487,9 @@ describe('SCIM discovery representations', () => {
       'schemaExtensions: [{ schema: SCIM_URN.enterpriseUser, required: false }]',
       'schemaExtensions: []',
     ])
-    await expect(verifyResourceTypes(mutant.scimDiscovery)).rejects.toMatchObject({
+    await expect(
+      verifyResourceTypes(mutant.createScimDiscovery([userDiscoveryRegistration])),
+    ).rejects.toMatchObject({
       name: 'AssertionError',
     })
   })
@@ -485,62 +512,44 @@ describe('SCIM discovery representations', () => {
         mutation,
       )
       await expect(
-        (async () => verifyProtocol(mutant.scimDiscovery))(),
+        (async () => verifyProtocol(mutant.createScimDiscovery([userDiscoveryRegistration])))(),
         mutation[0],
       ).rejects.toMatchObject({ name: 'AssertionError' })
     }
   })
 
-  it('keeps resource test modules out of production imports', () => {
+  it('keeps synthetic discovery registrations out of production imports', () => {
     const root = fileURLToPath(new URL('.', import.meta.url))
     const sources = (directory: string): string[] =>
       readdirSync(directory).flatMap((entry) => {
         const path = join(directory, entry)
         if (statSync(path).isDirectory()) return sources(path)
-        return /\.tsx?$/.test(entry) && !/\.test\.tsx?$|testing\.ts$/.test(entry) ? [path] : []
+        return /\.tsx?$/.test(entry) && !/\.test\.tsx?$/.test(entry) ? [path] : []
       })
-    const files = sources(root)
-    // The modules only the resource test flag reaches; they may import each other.
-    const flagged = [
-      'scim-discovery',
-      'scim-patch',
-      'scim-query',
-      'scim-groups',
-      'scim-group-retirement',
-      'scim-managed-child-memberships',
-      'scim-users',
-      'scim-user-create',
-      'scim-user-lifecycle',
-      'scim-user-replace',
-      'scim-user-patch',
-      'scim-user-retirement',
-      'scim-user-retirement-claims',
-      'scim-user-write',
-      'scim-team-hierarchy',
-      'scim-team-hierarchy-proof',
-      'scim-team-mapping-notices',
-      'scim-team-mapping-recovery',
-      'scim-team-mapping-retirement',
-      'mcp/scim-team-mappings',
-      'routes/scim-team-mappings',
-    ]
-    expect(files.some((file) => file.endsWith('server.ts'))).toBe(true)
-    for (const name of flagged) expect(files).toContain(join(root, `${name}.ts`))
     expect(
-      files.filter((file) => {
-        if (flagged.some((name) => file === join(root, `${name}.ts`))) return false
-        const source = readFileSync(file, 'utf8')
-        // Generated client types include the same mapping module as the resource harness.
-        const production =
-          file === join(root, 'openapi-document.ts')
-            ? source.replace(
-                /scimResourcesEnabled\s*&&\s*\(?await import\('\.\/mcp\/scim-team-mappings\.ts'\)\)?/,
-                '',
-              )
-            : source
-        return flagged.some((name) => production.includes(name))
-      }),
+      sources(root).filter((file) =>
+        readFileSync(file, 'utf8').includes('scim-discovery-fixture.ts'),
+      ),
     ).toEqual([])
+  })
+
+  it('advertises an operation only when a handler declares support', () => {
+    const empty = createScimDiscovery([])
+    expect(body('/ServiceProviderConfig', empty)).toMatchObject({
+      patch: { supported: false },
+      filter: { supported: false, maxResults: 0 },
+      bulk: { supported: false, maxOperations: 0, maxPayloadSize: 0 },
+      changePassword: { supported: false },
+      sort: { supported: false },
+      etag: { supported: false },
+    })
+    expect(body('/ResourceTypes', empty)).toMatchObject({ Resources: [] })
+    const usersOnly = createScimDiscovery([{ resourceType: 'User', filter: { maxResults: 42 } }])
+    expect(body('/ServiceProviderConfig', usersOnly)).toMatchObject({
+      patch: { supported: false },
+      filter: { supported: true, maxResults: 42 },
+    })
+    expect(body('/ResourceTypes', usersOnly)).toMatchObject({ Resources: [{ id: 'User' }] })
   })
 })
 
@@ -921,14 +930,18 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM discovery over HTTP', () => {
     }
   })
 
-  // The production assembly, as startServer builds it, with the operator switch on.
-  async function productionAnswers(options = productionAppOptions, resources = discovery) {
+  // The same assembly used by startServer.
+  async function productionAnswers(
+    enabled: boolean,
+    resources = discovery,
+    options = productionAppOptions,
+  ) {
     const issued = await issue()
     const config = loadConfig({
       DATABASE_URL: owned.url,
       BETTER_AUTH_SECRET: signingSecret,
       PUBLIC_URL: origin,
-      SCIM_PROVISIONING_ENABLED: 'true',
+      SCIM_PROVISIONING_ENABLED: String(enabled),
     })
     const unavailable = async (): Promise<never> => {
       throw new Error('SCIM discovery must not reach this collaborator')
@@ -953,11 +966,11 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM discovery over HTTP', () => {
         enqueueCalendarSync: unavailable,
         enqueueCalendarWritebackRecovery: unavailable,
         mailboxProofQueue: { enqueue: unavailable },
+        scimMappingNotices: { enqueue: unavailable },
+        enqueueScimInvitation: unavailable,
       }),
     )
-    // Only SCIM-specific names: the unavailable handler is mounted and no discovery route or
-    // OpenAPI path sits beside it. Handlers would be dispatched inside /scim/*, so the
-    // answers below are what actually prove discovery absent.
+    // Protocol paths are dispatched under /scim/* and stay outside the REST document.
     const paths = application.routes.map((route) => route.path)
     expect(paths).toContain('/scim/*')
     expect(
@@ -975,58 +988,50 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM discovery over HTTP', () => {
     }
     return answers
   }
-  const unavailableAnswers = discovery.map((resource) => ({
-    resource,
-    status: 404,
-    body: scimError(404, 'SCIM resources are not available yet.'),
-  }))
+  const disabledAnswers = (resources: string[]) =>
+    resources.map((resource) => ({
+      resource,
+      status: 404,
+      body: scimError(404, 'SCIM provisioning is disabled.'),
+    }))
 
-  it('keeps the query parser unreachable in the production assembly with SCIM enabled', async () => {
-    // A handler using the parser would answer these with a list or a 400 SCIM Error.
+  it('runs the query parser only with the production switch enabled', async () => {
     const queries = [
       'Users?filter=userName+ne+%22x%22',
       'Users?attributes=password',
       'Users?count=ten',
       'Users?startIndex=2&count=0',
     ]
-    expect(await productionAnswers(productionAppOptions, queries)).toEqual(
-      queries.map((resource) => ({
-        resource,
-        status: 404,
-        body: scimError(404, 'SCIM resources are not available yet.'),
-      })),
-    )
+    expect(await productionAnswers(false, queries)).toEqual(disabledAnswers(queries))
+    expect((await productionAnswers(true, queries)).map(({ status }) => status)).toEqual([
+      400, 200, 400, 200,
+    ])
   })
 
-  it('keeps discovery unregistered in the production assembly with SCIM enabled', async () => {
-    expect(await productionAnswers()).toEqual(unavailableAnswers)
-    // Controls: an unmutated copy of the assembly answers the same, and the same token
-    // reads discovery through the harness.
-    const control = await sourceCopy<typeof import('./server.ts')>('./server.ts')
-    expect(await productionAnswers(control.productionAppOptions)).toEqual(unavailableAnswers)
-    const issued = await issue()
-    expect(
-      (await scim(harness(), organizationId, 'ServiceProviderConfig', bearer(issued.secret)))
-        .status,
-    ).toBe(200)
-    const mutant = await sourceCopy<typeof import('./server.ts')>(
-      './server.ts',
-      [
-        "import { type AppDeps, createApp } from './app.ts'",
-        "import { type AppDeps, createApp } from './app.ts'\nimport { scimDiscovery } from './scim-discovery.ts'",
-      ],
-      [
-        'scim: { db, enabled: config.SCIM_PROVISIONING_ENABLED },',
-        'scim: { db, enabled: config.SCIM_PROVISIONING_ENABLED, resources: scimDiscovery },',
-      ],
-    )
-    // Registered in production, every discovery path would answer.
-    expect(
-      (await productionAnswers(mutant.productionAppOptions)).map(({ resource, status }) => ({
-        resource,
-        status,
-      })),
-    ).toEqual(discovery.map((resource) => ({ resource, status: 200 })))
+  it('registers discovery only with the production switch enabled', async () => {
+    expect(await productionAnswers(false)).toEqual(disabledAnswers(discovery))
+    const verify = async (options = productionAppOptions) => {
+      const answers = await productionAnswers(true, discovery, options)
+      for (const { resource, status, body } of answers) {
+        const expected = scimDiscoveryWithGroups({
+          method: 'GET',
+          path: `/${resource}`,
+          query: new URLSearchParams(),
+          principal: { tokenId: 'unneeded', organizationId },
+          base: `${origin}/scim/v2/${organizationId}`,
+        })
+        expect(status, resource).toBe(200)
+        expect(body, resource).toEqual(expected?.body)
+      }
+    }
+    await verify()
+    const mutant = await sourceCopy<typeof import('./server.ts')>('./server.ts', [
+      'resources: scimResourceHandlers(',
+      'resources: () => undefined, ignored: scimResourceHandlers(',
+    ])
+    await expect(verify(mutant.productionAppOptions)).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
   })
 
   it('advertises only fields the connection identity storage holds', async () => {

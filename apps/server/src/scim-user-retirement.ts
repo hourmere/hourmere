@@ -76,7 +76,7 @@ async function retire(db: Db, request: ScimResourceRequest, id: string): Promise
   }
 }
 
-/** DELETE /Users/{id}, injected only by the SCIM resource test harness. */
+/** DELETE /Users/{id}. */
 export function scimUserRetirement(db: Db): ScimResourceHandler {
   return (request) => {
     if (request.method !== 'DELETE') return

@@ -130,11 +130,12 @@ async function replace(
   }
 }
 
-/** PUT and PATCH /Users/{id}, registered only by the SCIM resource test harness. */
+/** PUT and PATCH /Users/{id}. */
 export function scimUserReplacement(db: Db): ScimResourceHandler {
-  return (request) => {
+  const handle: ScimResourceHandler = (request) => {
     if (request.method !== 'PUT' && request.method !== 'PATCH') return
     const match = /^\/Users\/([^/]*)$/.exec(request.path)
     if (match?.[1] !== undefined) return replace(db, request, match[1], request.method)
   }
+  return Object.assign(handle, { patch: true } as const)
 }

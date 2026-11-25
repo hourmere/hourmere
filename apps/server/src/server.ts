@@ -13,6 +13,8 @@ import {
   createCallerResolver,
   createMcpOAuthResolver,
   recordSsoAdmissionRemoval,
+  scimClaimAdmissionOnly,
+  scimClaimCompletion,
   withScimResources,
 } from '@hourmere/auth'
 import {
@@ -140,6 +142,7 @@ import { mcpOAuthCleanupJob, mcpOAuthRoutes } from './mcp/oauth.ts'
 import { oneTimeLinkTools } from './mcp/one-time-links.ts'
 import { openTimeSnippetTools } from './mcp/open-time-snippets.ts'
 import { routingFormConfigurationTools } from './mcp/routing-forms.ts'
+import { scimMappingAdministration } from './mcp/scim-team-mappings.ts'
 import { slackDestinationTools } from './mcp/slack-destinations.ts'
 import { ssoReadTools } from './mcp/sso.ts'
 import type { Tool } from './mcp/tools.ts'
@@ -189,7 +192,8 @@ import { webhookRoutes } from './routes/webhooks.ts'
 import { workflowRoutes } from './routes/workflows.ts'
 import { zoomEventRoutes } from './routes/zoom-events.ts'
 import { parseRoutingFormsEnabled, resolveRoutingFormsEnabled } from './routing-form-setting.ts'
-import { productionScimResourcesEnabled } from './scim.ts'
+import { scimResourceHandlers } from './scim-resources.ts'
+import { type ScimMappingNoticeQueue, scimMappingNoticeJob } from './scim-team-mapping-notices.ts'
 import { closeConnectionsWhen, closeServer } from './shutdown.ts'
 import { configuredSmsJobs, createConfiguredSmsInbound } from './sms.ts'
 import { type SsoCapabilities, ssoRetained } from './sso.ts'
@@ -220,11 +224,11 @@ const ssoSamlEnabled = false
  * reducible (Setting-off behaviour in docs/sso.md).
  */
 export function productionSsoCapabilities(
-  config: Pick<Config, 'SSO_OIDC_ENABLED'>,
+  config: Pick<Config, 'SSO_OIDC_ENABLED' | 'SCIM_PROVISIONING_ENABLED'>,
 ): SsoCapabilities {
   return withScimResources(
     { ssoOidcEnabled: config.SSO_OIDC_ENABLED, ssoSamlEnabled, ssoOperatorSetting: true },
-    productionScimResourcesEnabled,
+    config.SCIM_PROVISIONING_ENABLED,
   )
 }
 
@@ -644,6 +648,7 @@ export function productTools({
 
 /** What the running server's app options need beyond the configuration. */
 export interface ProductionAppDeps extends RecurringBookingAdmissionDeps {
+  enqueueScimInvitation: ReturnType<typeof createInvitationEmailDispatcher>
   config: Config
   db: Db
   /** Effective state after the startup namespace check. */
@@ -670,6 +675,7 @@ export interface ProductionAppDeps extends RecurringBookingAdmissionDeps {
   enqueueCalendarWritebackRecovery: CalendarDeps['enqueueWritebackRecovery']
   /** The job queue SSO mailbox proof emails are enqueued on. */
   mailboxProofQueue: MailboxProofQueue
+  scimMappingNotices: ScimMappingNoticeQueue
   ssoLinkRemovalQueue?: SsoLinkRemovalQueue | undefined
   ssoRecoveryEnrollmentQueue?: SsoRecoveryEnrollmentQueue | undefined
 }
@@ -690,6 +696,7 @@ export function productionAppOptions({
   checkDb,
   waitlist,
   invitationMailLimits,
+  enqueueScimInvitation,
   webhookSettings,
   webhookQueue,
   notify,
@@ -701,6 +708,7 @@ export function productionAppOptions({
   enqueueCalendarSync,
   enqueueCalendarWritebackRecovery,
   mailboxProofQueue,
+  scimMappingNotices,
   ssoLinkRemovalQueue,
   ssoRecoveryEnrollmentQueue,
   recurringBookingsEnabled,
@@ -725,7 +733,28 @@ export function productionAppOptions({
     )?.session
   return {
     checkDb,
-    scim: { db, enabled: config.SCIM_PROVISIONING_ENABLED },
+    scim: {
+      db,
+      enabled: config.SCIM_PROVISIONING_ENABLED,
+      ...(config.SCIM_PROVISIONING_ENABLED && {
+        resources: scimResourceHandlers(
+          db,
+          {
+            signup: config.signup,
+            reserve: (trx, input) => reserveInvitationEmailBudget(trx, input, invitationMailLimits),
+            enqueue: enqueueScimInvitation,
+          },
+          scimMappingNotices,
+        ),
+        mappingAdministration: scimMappingAdministration({
+          db,
+          capabilities: sso,
+          publicUrl: config.PUBLIC_URL,
+          resourcesEnabled: true,
+          notices: scimMappingNotices,
+        }),
+      }),
+    },
     smsInbound: createConfiguredSmsInbound(config, db),
     stripeWebhook: { db, config: config.stripe, enabled: config.PAID_BOOKINGS_ENABLED, notify },
     authHandler: auth.handler,
@@ -751,6 +780,7 @@ export function productionAppOptions({
       configurationKey: ssoConfigurationKey,
       privateTargets: ssoPrivateTargets,
       signup: config.signup,
+      scimClaims: config.SCIM_PROVISIONING_ENABLED ? scimClaimCompletion : scimClaimAdmissionOnly,
       session: { secret: config.BETTER_AUTH_SECRET },
       readSession: readSsoSession,
     }),
@@ -886,6 +916,8 @@ export function productionAuthOptions({
     leaveTeamMember: nativeTeamLeave(db, recordAdmissionRemoval),
     recordAdmissionRemoval,
     ssoCapabilities: sso,
+    scimResourcesEnabled: config.SCIM_PROVISIONING_ENABLED,
+    scimClaims: config.SCIM_PROVISIONING_ENABLED ? scimClaimCompletion : scimClaimAdmissionOnly,
     baseURL: config.PUBLIC_URL,
     secret: config.BETTER_AUTH_SECRET,
     mailer,
@@ -1147,7 +1179,7 @@ async function start(
   }
   const waitlistDeps = {
     db,
-    scimResourcesEnabled: productionScimResourcesEnabled,
+    scimResourcesEnabled: config.SCIM_PROVISIONING_ENABLED,
     secret: config.BETTER_AUTH_SECRET,
     publicUrl: config.PUBLIC_URL,
     automaticMeet: config.GOOGLE_MEET_ENABLED,
@@ -1233,10 +1265,10 @@ async function start(
         signInMailMaxPerDay: config.SIGN_IN_MAIL_MAX_PER_DAY,
         mailMaxPerHour: config.MAIL_MAX_PER_HOUR,
       }),
-      // Delivery drops every job while hard-off; the attempt cleanup only deletes, so it runs
-      // in every state.
+      // Mailbox proofs follow the relevant protocol setting. Cleanup runs in every state.
       ...mailboxProofJobs({
         capabilities: sso,
+        scimMappingConsentEnabled: config.SCIM_PROVISIONING_ENABLED,
         db,
         mailer,
         publicUrl: config.PUBLIC_URL,
@@ -1259,8 +1291,9 @@ async function start(
       ssoOperatorRecoveryEmailJob(
         db,
         config.SMTP_URL && config.MAIL_FROM ? mailer : undefined,
-        productionScimResourcesEnabled,
+        config.SCIM_PROVISIONING_ENABLED,
       ),
+      scimMappingNoticeJob(db, mailer),
       bookingNotificationJob(notificationDeps),
       rescheduleRequestExpiryJob({
         db,
@@ -1296,7 +1329,7 @@ async function start(
                 {
                   ...workflowWorker,
                   mailer,
-                  scimResourcesEnabled: productionScimResourcesEnabled,
+                  scimResourcesEnabled: config.SCIM_PROVISIONING_ENABLED,
                   budget: {
                     secret: config.BETTER_AUTH_SECRET,
                     mailMaxPerHour: config.MAIL_MAX_PER_HOUR,
@@ -1474,6 +1507,7 @@ async function start(
         },
         invitationMailLimits,
         webhookSettings,
+        enqueueScimInvitation: createInvitationEmailDispatcher(invitationDeliveryDeps),
         webhookQueue: jobs,
         notify,
         notifyAttendeeNoShow,
@@ -1490,6 +1524,7 @@ async function start(
             { singletonKey: connectionId, transaction: trx },
           ),
         mailboxProofQueue: jobs,
+        scimMappingNotices: jobs,
         ssoLinkRemovalQueue: jobs,
         ssoRecoveryEnrollmentQueue: jobs,
       }),

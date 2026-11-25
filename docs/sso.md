@@ -374,12 +374,11 @@ keyed by IdP subject rather than mailbox needs an additional column there, owned
 SSO step that needs it. When enforcement ships, the privacy page
 (`apps/site/src/pages/privacy.astro`, retention section) must gain a sentence about
 team-local admission records that outlive the account.
-A new current invitation can explicitly reinstate access; SCIM suspension (planned)
-requires SCIM/admin reactivation as well. SCIM is not implemented here. Later SCIM
-must share these locks, tombstones and revocation services; it must not delete the
-person's personal account or other memberships. Without SCIM or logout delivery,
-disabling a person at the IdP takes effect on the next required authentication,
-not instantly. Local removal takes effect on the next authorization check.
+A new current invitation can explicitly reinstate access after local removal.
+[SCIM provisioning](scim.md) shares the locks, tombstones and revocation services.
+A separate SCIM suspension requires SCIM reactivation. Without SCIM provisioning or
+logout delivery, disabling a person at the IdP takes effect on the next required
+authentication. Local removal takes effect on the next authorization check.
 
 ## Enforcement, recovery and delegated clients
 
@@ -2271,12 +2270,13 @@ behaviour keeps available stay available.
 No product implementation or migration lands with this design. The Upgrade step adds one
 development dependency, `@better-auth/sso` at the pinned family version, which no shipped
 source imports or registers.
-SCIM, IdP group role mapping, service accounts, IdP-initiated SAML, SAML SLO, encrypted
+IdP group role mapping, service accounts, IdP-initiated SAML, SAML SLO, encrypted
 assertions, automatic domain transfers, wildcard domain claims, a separate
-recovery-owner withdrawal operation and global forced SSO
-are deferred. IdP deactivation is not immediate local revocation without SCIM; absolute
-proof expiry bounds that delay. Private IdP reachability remains operator-controlled.
-A successful provider test does not prove all accounts have valid immutable identifiers.
+recovery-owner withdrawal operation and global forced SSO are deferred.
+[SCIM provisioning](scim.md) is a separate feature. Without it, absolute proof expiry
+bounds the local revocation delay after IdP deactivation. Private IdP reachability
+remains operator-controlled. A successful provider test does not prove all accounts
+have valid immutable identifiers.
 
 The Upgrade step found that the upgraded plugin's pre-session hook cannot carry the
 OIDC JWKS and transport requirements or the SAML completion hop, and that OIDC algorithm

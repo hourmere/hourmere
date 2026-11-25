@@ -47,6 +47,23 @@ const bookingEvents = WEBHOOK_EVENTS.filter((event) => event !== 'workflow.execu
 const slackUrl = (team: string) =>
   `https://hooks.slack.com/services/T${team}/BUPGRADE/private-upgrade-secret`
 
+/** Bridge current authorization reads only while invoking services against the old schema. */
+async function withCurrentScimReads<T>(db: Db, write: () => Promise<T>): Promise<T> {
+  // The empty fixture has the columns used by the current suspension predicate. Remove it
+  // before running 0080 or comparing predecessor and fresh-install snapshots.
+  await db.schema
+    .createTable('scim_team_managed_memberships')
+    .addColumn('child_organization_id', 'uuid')
+    .addColumn('user_id', 'uuid')
+    .addColumn('suspended_at', 'timestamptz')
+    .execute()
+  try {
+    return await write()
+  } finally {
+    await db.schema.dropTable('scim_team_managed_memberships').execute()
+  }
+}
+
 /**
  * A journal as the application writes it today: webhook, Slack destination (including the
  * delivery worker's automatic pause), no-show, SCIM token and event-type rows come from their
@@ -272,7 +289,7 @@ it.skipIf(!serverUrl)(
       await runMigrations(pool, directory)
       await seedLater(pool)
       const db = createDb(pool)
-      const { ctx, oneWebhook } = await writeJournal(db)
+      const { ctx, oneWebhook } = await withCurrentScimReads(db, () => writeJournal(db))
       // One row per change above: all six webhook and all six Slack destination actions.
       expect(
         (
@@ -381,8 +398,10 @@ it.skipIf(!serverUrl)(
       expect(await records()).toEqual(before)
 
       // The application keeps writing after the upgrade, and the new check holds on both.
-      await updateWebhook(ctx, oneWebhook, { isActive: false })
-      await deleteWebhook(ctx, oneWebhook)
+      await withCurrentScimReads(db, async () => {
+        await updateWebhook(ctx, oneWebhook, { isActive: false })
+        await deleteWebhook(ctx, oneWebhook)
+      })
       await assertAuditEventListProtections(pool)
       await assertAuditEventListProtections(fresh.pool)
     } finally {

@@ -42,7 +42,7 @@ export interface FreshProofRequest {
   sessionId: string
   organizationId: string
   operation: string
-  /** Only the resource-test mapping service can request mailbox proof without SSO. */
+  /** Mapping consent can request mailbox proof without SSO. */
   scimMappingConsentEnabled?: boolean
   /** Trust reduction uses administration proof and points to recovery when step-up is unavailable. */
   proofMode?: 'mailbox' | 'sso' | 'administration' | 'trust_reduction'

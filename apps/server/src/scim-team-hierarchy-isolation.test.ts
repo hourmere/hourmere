@@ -13,7 +13,7 @@ import { createApp } from './app.ts'
 import { auditLogRoutes } from './routes/audit-log.ts'
 import { eventTypeRoutes } from './routes/event-types.ts'
 import { teamBookingRoutes } from './routes/team-bookings.ts'
-import { scimDiscovery } from './scim-discovery.ts'
+import { scimDiscovery } from './scim-discovery-fixture.ts'
 
 const databaseUrl = process.env.DATABASE_URL
 const publicUrl = 'https://hourmere.example.test'

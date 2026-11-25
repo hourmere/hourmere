@@ -190,14 +190,13 @@ export function scimManagedMember(
 /**
  * Embed the account's live team suspension in an existing authorization statement.
  *
- * `managedChildren` is the SCIM resource capability, passed by callers that hold it. Only
- * then does the statement also read the suspension of a membership a Group sourced; without
- * it the statement is unchanged and reads nothing that the Group storage added.
+ * Turning off SCIM resources stops directory writes. Both kinds of persisted suspension
+ * must still restrict access. Existing callers also pass their SCIM capability here.
  */
 export function scimSuspended(
   organizationId: Expression<string> | string,
   userId: Expression<string> | string,
-  managedChildren: boolean,
+  _managedChildren: boolean,
 ) {
   const suspended = sql<boolean>`CASE WHEN EXISTS (
     SELECT 1 FROM scim_membership_blocks AS block
@@ -207,7 +206,6 @@ export function scimSuspended(
     SELECT 1 FROM personal_organizations AS personal
     WHERE personal.organization_id = ${organizationId}::uuid
   ) ELSE false END`
-  if (!managedChildren) return suspended
   // A mapped child has no connection of its own. Its suspension follows the roster
   // source, so it is stored with the managed membership and ends with it.
   return sql<boolean>`(${suspended} OR EXISTS (
