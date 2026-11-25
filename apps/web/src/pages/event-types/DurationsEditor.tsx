@@ -68,7 +68,7 @@ export function DurationsEditor({
     onChange(remaining, nextDefault)
     setError(undefined)
     announce(
-      msg('Removed {0}. Default duration: {1}.', {
+      msg('Removed {0}. Selected length: {1}.', {
         '0': length(minutes),
         '1': length(Number(nextDefault)),
       }),
