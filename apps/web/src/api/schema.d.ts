@@ -21708,6 +21708,7 @@ export interface operations {
     listWebhookDeliveries: {
         parameters: {
             query?: {
+                /** @description Use the previous page’s nextAfter UUID. Omit for the first page. */
                 after?: string;
             };
             header?: {
@@ -21733,7 +21734,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description invalid_webhook or invalid_request */
+            /** @description invalid_request or invalid_cursor */
             400: {
                 headers: {
                     [name: string]: unknown;

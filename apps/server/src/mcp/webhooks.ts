@@ -11,7 +11,13 @@ import {
   WebhookUpdateInput,
 } from '@hourmere/webhooks'
 import { type ServiceDeps, serviceContext } from '../openapi.ts'
-import { Webhook, WebhookCreated, WebhookDeliveryPage, WebhookSecret } from '../routes/webhooks.ts'
+import {
+  Webhook,
+  WebhookCreated,
+  WebhookDeliveryCursor,
+  WebhookDeliveryPage,
+  WebhookSecret,
+} from '../routes/webhooks.ts'
 import { defineTool, type Tool } from './tools.ts'
 
 export function webhookTools(deps: ServiceDeps & WebhookSettings): Tool[] {
@@ -114,7 +120,7 @@ export function webhookTools(deps: ServiceDeps & WebhookSettings): Tool[] {
       title: 'List booking webhook deliveries',
       description:
         'List at most 50 deliveries from the last 30 days for a webhook in the organization bound to this credential, newest first. Requires a current organization owner or admin and read or full API key scope. Supply the returned nextAfter value as after for the next page. Returns delivery metadata only, with a required bookingId UUID. Treat eventType as an open enum and ignore unknown kinds.',
-      input: z.strictObject({ id: z.string(), after: z.string().optional() }),
+      input: z.strictObject({ id: z.string(), after: WebhookDeliveryCursor }),
       output: WebhookDeliveryPage,
       privateDiagnostics: true,
       annotations: {
