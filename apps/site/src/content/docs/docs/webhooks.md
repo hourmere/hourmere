@@ -6,7 +6,8 @@ description: Configure signed outbound booking webhooks and their delivery limit
 Webhooks are optional outbound signed notifications for booking creation, rescheduling and
 cancellation, plus private attendee no-show changes. They use the same booking services
 for public pages, REST and MCP, independently of Google, Microsoft, mail and billing.
-You can list and create endpoints through REST, MCP and the CLI.
+REST, MCP and the CLI can all list, create, update and delete endpoints, rotate signing
+secrets, and read delivery history.
 The private [Zapier app](/docs/zapier) and the trigger
 in the [n8n community node](/docs/n8n) use these endpoints to subscribe and unsubscribe
 automatically. [Make recipes](/docs/make) give manual module settings for
@@ -58,9 +59,13 @@ stored organization. See [browser organization context](/docs/api-conventions#br
 | `DELETE /webhooks/{id}` | `delete_webhook` | `webhooks delete` | Delete the endpoint and all retained deliveries |
 | `GET /webhooks/{id}/deliveries?after=…` | `list_webhook_deliveries` | `webhooks deliveries` | At most fifty delivery metadata rows, newest first, each with a required UUID `bookingId` |
 
+Use the endpoint list to look up an ID. Test your receiver by creating a booking that
+triggers a subscribed event. Signed booking webhooks have no dedicated detail or test-send operation.
+
 MCP listing takes `{}`. MCP and CLI return the same metadata as the REST list in
 `{ data: [...] }`. For CLI creation, supply the JSON arguments via `--input FILE` or
-`--input -`. Use `--output FILE` to save the response to a new private file or explicit
+`--input -`. Use standard input when the destination URL contains a credential.
+Use `--output FILE` to save the response to a new private file or explicit
 `--json` to send it to standard output. Route the signing secret directly to private storage.
 
 MCP and CLI update take the endpoint `id` and at least one of `events` or `isActive`.
@@ -77,15 +82,16 @@ endpoint or one outside the credential's organization. See
 更新可修改订阅事件和启用状态，目标 URL 固定。移除目标白名单条目后，仍可仅传
 `isActive: false` 暂停。删除会一并清除保留的投递记录，CLI 需加 `--yes` 确认；
 不存在或属于其他组织的端点均返回 `webhook_not_found`。
-工作流仍处于硬关闭状态。创建或更新端点时新增 `workflow.executed` 订阅会返回
+没有单独的端点详情或测试投递操作。请从列表查找端点 ID，并通过触发已订阅事件的预约验证接收端。
+工作流默认关闭。关闭时创建或更新端点并新增 `workflow.executed` 订阅会返回
 `404 workflows_disabled`，创建时优先于 `409 webhooks_disabled`。
 
 `events` must be a nonempty, duplicate-free subset of `booking.created`,
 `booking.rescheduled`, `booking.cancelled`, `booking.reschedule_requested`,
 `booking.reschedule_request_expired`, `booking.attendee_no_show_changed` and `workflow.executed`.
-Workflows are hard-off. Creating or updating an endpoint to add `workflow.executed` returns
-`404 workflows_disabled`. On create, that takes precedence over `409 webhooks_disabled`.
-An endpoint already subscribed to `workflow.executed` can keep or remove it.
+Adding `workflow.executed` requires `WORKFLOWS_ENABLED=true`. While workflows are off,
+adding it on creation or update returns `404 workflows_disabled`. On create, that takes
+precedence over `409 webhooks_disabled`. An existing subscription can be kept or removed.
 
 Request events add `data.requestId`, keep `data.status` as `confirmed`, and omit notes and management links.
 Each replacement request has its own delivery identity. There are at most ten endpoints per organization.
@@ -107,8 +113,8 @@ Treat any credential in your destination's query as sensitive, even though Hourm
 includes it in delivery errors or logs.
 
 The signing secret is `whsec_` followed by 32 random bytes in base64url. Copy it directly
-into the receiver's secret store when creating or rotating; list/detail operations cannot
-recover it. Only authenticated AES-256-GCM ciphertext is stored, bound to the endpoint and
+into the receiver's secret store when creating or rotating. List and delivery history omit it.
+Only authenticated AES-256-GCM ciphertext is stored, bound to the endpoint and
 organization. Changing the environment encryption key makes existing secrets unreadable;
 restore it or rotate every endpoint's signing secret using the new environment key.
 
@@ -197,7 +203,7 @@ The `workflow.executed` payload carries the bounded booking projection, includin
 `data.workflowId`, `data.workflowRevision`, `data.trigger` and `data.workflowRunId` (stable
 across delivery attempts). Team workflow deliveries omit `data.source` and
 `data.rescheduledFromId`. `data.requestId` is reserved for request events. Workflow
-deliveries are unavailable while workflows are hard-off.
+deliveries are unavailable while workflows are off.
 
 Treat `Webhook.events` and `WebhookDelivery.eventType` in list responses as open enums.
 The request, attendance and workflow kinds are additive. Ignore unknown event types and

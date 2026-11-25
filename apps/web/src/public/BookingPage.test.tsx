@@ -125,6 +125,40 @@ describe('public host identity', () => {
 })
 
 describe('the booking page', () => {
+  it.each([
+    { path: '/ada/intro', endpoint: '/api/v1/public/ada/intro', success: true },
+    { path: '/team/Alpha/intro', endpoint: '/api/v1/public/teams/Alpha/intro', success: false },
+  ])(
+    'enables the language menu after the initial event read at $path',
+    async ({ path, endpoint, success }) => {
+      const user = userEvent.setup()
+      vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['zh-CN'])
+      const event = Promise.withResolvers<Response>()
+      fakeApi({
+        [`GET ${endpoint}`]: () => event.promise,
+        [`GET ${endpoint}/slots`]: slotsAnswer(DST_SLOTS),
+      })
+      renderApp(path)
+
+      const language = { name: '语言：简体中文' }
+      const loadingPicker = await screen.findByRole<HTMLButtonElement>('button', language)
+      expect(within(screen.getByRole('main')).getByRole('status').textContent).toBe('正在加载…')
+      expect(document.documentElement.lang).toBe('zh-CN')
+      expect(loadingPicker.disabled).toBe(true)
+      await user.click(loadingPicker)
+      expect(screen.queryByRole('menu')).toBeNull()
+
+      await act(async () => {
+        event.resolve(success ? json(200, EVENT) : json(503, { error: 'service_unavailable' }))
+      })
+      if (success) await screen.findByRole('heading', { name: EVENT.title })
+      else await screen.findByRole('button', { name: '重试' })
+      expect(screen.getByRole<HTMLButtonElement>('button', language).disabled).toBe(false)
+      await selectPublicLanguage(user, 'en')
+      expect(screen.getByRole('button', { name: 'Language: English' })).toBeDefined()
+    },
+  )
+
   it.each(['Change time', 'conflict'])(
     'restores the month, day, time zone and complete draft after returning through %s',
     async (back) => {

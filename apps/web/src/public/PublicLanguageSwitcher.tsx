@@ -3,7 +3,13 @@ import { type KeyboardEvent, useEffect, useId, useRef, useState } from 'react'
 import { useI18n } from '../i18n/runtime.tsx'
 
 /** Public pages share the existing language preference without the permanent field label. */
-export function PublicLanguageSwitcher({ scoped = false }: { scoped?: boolean }) {
+export function PublicLanguageSwitcher({
+  scoped = false,
+  disabled = false,
+}: {
+  scoped?: boolean
+  disabled?: boolean
+}) {
   const { locale, t, available, setLanguage } = useI18n()
   const [open, setOpen] = useState(false)
   const container = useRef<HTMLDivElement>(null)
@@ -74,6 +80,7 @@ export function PublicLanguageSwitcher({ scoped = false }: { scoped?: boolean })
         type="button"
         className="button public-language-trigger"
         ref={trigger}
+        disabled={disabled}
         aria-label={label}
         aria-haspopup="menu"
         aria-expanded={open}

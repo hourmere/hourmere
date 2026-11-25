@@ -262,14 +262,15 @@ current team owner/admin. Denials retain REST codes such as `insufficient_scope`
 `insufficient_role`.
 
 Save the destination and subscriptions in a JSON file such as `webhook.json`, or
-pass the JSON on standard input with `--input -`.
+pass the JSON on standard input with `--input -`. Use standard input when the
+destination URL contains a credential.
 
 The `events` values for `webhooks create` and `webhooks update` are `booking.created`,
 `booking.rescheduled`, `booking.cancelled`, `booking.reschedule_requested`,
 `booking.reschedule_request_expired`, `booking.attendee_no_show_changed` and
-`workflow.executed`. Workflows are hard-off. Adding `workflow.executed` exits with
-status `1` and `workflows_disabled` on stderr (REST 404). On create, this takes
-precedence over `webhooks_disabled` (REST 409).
+`workflow.executed`. Adding `workflow.executed` requires `WORKFLOWS_ENABLED=true`.
+While workflows are off, adding it exits with status `1` and `workflows_disabled`
+on stderr (REST 404). On create, this takes precedence over `webhooks_disabled` (REST 409).
 
 ```json
 {
@@ -312,7 +313,8 @@ event types. Every delivery record has a required UUID `bookingId`.
 `webhooks rotate-secret` 使用 `full` 密钥，需指定 `--output` 或 `--json`，仅在本次响应中返回新密钥。
 `webhooks deliveries` 使用 `read` 或 `full` 密钥，每页最多返回 50 条投递元数据。
 将 `nextAfter` 作为 `after` 请求下一页，直至其为 null。
-工作流仍处于硬关闭状态。新增 `workflow.executed` 订阅时，CLI 退出码为 `1`，
+目标 URL 含凭证时，用 `--input -` 从标准输入传入 JSON。
+工作流关闭时，新增 `workflow.executed` 订阅会使 CLI 以状态码 `1` 退出，
 并在标准错误输出 `workflows_disabled`（对应 REST 404），创建时优先于 `webhooks_disabled`。
 
 ## Draft open-time email snippets
