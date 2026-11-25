@@ -1,7 +1,7 @@
 // Booking details for invitee links and reschedule slots shared by invitees and hosts.
 // Invitee reads share manage-token authorization, while host slots use getHostBooking so
 // the same availability rules retain each caller's authorization boundary.
-import { jsonArrayFrom } from 'kysely/helpers/postgres'
+import { jsonArrayFrom, jsonObjectFrom } from 'kysely/helpers/postgres'
 import {
   checkSlotRange,
   hasBookablePart,
@@ -110,9 +110,9 @@ async function readManagedBookingDetails(
             .whereRef('bh.booking_id', '=', 'b.id')
             .orderBy('bh.user_id'),
         ).as('hosts'),
-        managedLinkRescheduleRequestQuery(ctx.db, typeof token === 'string' ? token : undefined).as(
-          'link_request',
-        ),
+        jsonObjectFrom(
+          managedLinkRescheduleRequestQuery(ctx.db, typeof token === 'string' ? token : undefined),
+        ).as('link_request'),
       ])
       .where('b.id', '=', booking.id)
       .executeTakeFirstOrThrow(),

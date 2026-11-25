@@ -13,7 +13,6 @@ import {
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import { recordTeamWriteOrganizationLock, teamWriteTransaction } from '@hourmere/db/team-write'
 import { sql, type Transaction } from 'kysely'
-import { jsonObjectFrom } from 'kysely/helpers/postgres'
 import { parsePhoneNumberFromString } from 'libphonenumber-js/max'
 import { z } from 'zod'
 import {
@@ -2097,19 +2096,15 @@ const CLOSED_REQUEST_STATES: Readonly<Record<string, ManagedRescheduleRequestSta
 
 /** The request belongs to the email identified by this token and to that email's booking. */
 export function managedLinkRescheduleRequestQuery(db: Db, token: string | undefined) {
-  return jsonObjectFrom(
-    db
-      .selectFrom('booking_notifications as n')
-      .innerJoin('booking_reschedule_requests as r', (join) =>
-        join
-          .onRef('r.booking_id', '=', 'n.booking_id')
-          .on(sql<boolean>`r.id::text = n.message_key`),
-      )
-      .select(['r.id', 'r.state', 'r.expires_at', 'r.booking_id'])
-      .where('n.manage_token_hash', '=', manageTokenHash(token) ?? null)
-      .where('n.outcome', '=', 'sent')
-      .where('n.kind', '=', 'reschedule_requested'),
-  )
+  return db
+    .selectFrom('booking_notifications as n')
+    .innerJoin('booking_reschedule_requests as r', (join) =>
+      join.onRef('r.booking_id', '=', 'n.booking_id').on(sql<boolean>`r.id::text = n.message_key`),
+    )
+    .select(['r.id', 'r.state', 'r.expires_at', 'r.booking_id'])
+    .where('n.manage_token_hash', '=', manageTokenHash(token) ?? null)
+    .where('n.outcome', '=', 'sent')
+    .where('n.kind', '=', 'reschedule_requested')
 }
 
 /** A closed request reports a move when its email now opens a successor. */

@@ -5,7 +5,7 @@ import { createDb, type Db } from '@hourmere/db'
 import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
-import { jsonArrayFrom } from 'kysely/helpers/postgres'
+import { jsonArrayFrom, jsonObjectFrom } from 'kysely/helpers/postgres'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { groupFixture, occupiedSlot } from '../../db/src/group-seats-fixtures.ts'
@@ -216,6 +216,7 @@ describe.skipIf(!serverUrl)('group seat read models', () => {
       {
         getPublicBranding,
         jsonArrayFrom,
+        jsonObjectFrom,
         managedLinkRescheduleRequestQuery,
         managedLinkRescheduleRequestState,
         prepareManagedBookingRead,
