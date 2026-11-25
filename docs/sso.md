@@ -753,6 +753,43 @@ for SAML.
 其他账号使用，验证提示和邮件内容都相同。验证后才会向邮箱持有人告知冲突，原有关联保持不变。
 生产环境仍关闭 SAML，SAML 关联请求返回 `404 sso_disabled`。
 
+SAML identity recovery uses `unlinkSsoAccount` with independent mailbox proof and
+`removeSsoIdentityLink` with fresh administration proof. Both apply the same team and
+owner rules, exact link generation, and link-scoped revocation as OIDC. While SAML is
+enabled in-process, the browser-session provider inventory supplies the opaque SAML
+link IDs and generations for retirement. A conflicting subject stays bound until its
+link is explicitly retired. The member can then sign in locally and explicitly link
+the subject on a team without enforcement. While SAML is hard-off, both operations
+return `404 sso_disabled` for SAML links before creating a proof attempt. OIDC recovery
+remains available while `SSO_OIDC_ENABLED` is off.
+
+SAML 身份恢复沿用 `unlinkSsoAccount` 和 `removeSsoIdentityLink`。前者要求独立邮箱证明，后者要求
+新的管理权限证明。团队及所有者权限、精确关联代数和按关联撤销凭据的规则与 OIDC 相同。进程内
+启用 SAML 时，浏览器会话的提供方列表会显示解除关联所需的不透明关联标识符和代数。身份发生冲突时，
+须显式解除旧关联。未启用强制单点登录的团队成员随后可用原有方式登录，再显式关联 SAML 身份。
+SAML 保持关闭时，这两个操作对 SAML 关联均在创建证明尝试前返回 `404 sso_disabled`。关闭
+`SSO_OIDC_ENABLED` 时仍可恢复 OIDC 关联。
+
+For an unlinked subject, the SAML ACS redirects to `/app/mailbox-proof` with the
+opaque attempt ID and `saml=1` in the fragment. The redirect and queued verification
+email are identical for existing accounts and unclaimed addresses.
+After verifying the mailbox, submit the attempt from the original browser to the
+existing SAML completion endpoint. Each successful resolution consumes the result once.
+An existing account receives `link_required` and must sign in independently to link.
+An eligible new account can join through JIT or explicitly accept a current invitation
+using `X-Hourmere-Sso-Attempt` on the existing invitation endpoint. Both protocols apply
+the same signup, inviter, domain, capacity and removal checks. While SAML is hard-off,
+SAML completion and SAML invitation acceptance return `404 sso_disabled`, including
+when OIDC is enabled.
+
+未关联的 SAML 身份统一跳转到 `/app/mailbox-proof`，网址片段中包含不透明的尝试标识和
+`saml=1`。无论邮箱是否已有 Hourmere 账号，跳转和排队发送的验证邮件均相同。验证邮箱后，
+须在原浏览器向现有 SAML 确认端点提交尝试标识。每个结果只能成功使用一次。已有账号会收到
+`link_required`，须用原有方式登录后显式关联。符合条件的新用户可通过 JIT 入组，也可在现有
+邀请接受端点用 `X-Hourmere-Sso-Attempt` 显式接受有效邀请。两种协议采用相同的注册、邀请人、
+域名、团队名额和移除检查。生产环境仍关闭 SAML，即使启用了 OIDC，SAML 确认和 SAML 邀请接受
+仍返回 `404 sso_disabled`。
+
 ### Fetching, credentials and audit
 
 The outbound URL policy and pinned-socket transport that webhooks use now live in the
@@ -985,8 +1022,8 @@ The stable domain codes are exactly:
 | `sso_recovery_required` | 409 | Enforcement needs at least one usable recovery owner (a current owner with accepted status), the last recovery owner tries to leave, be removed or lose the owner role, or the account affected by a link retirement lacks a verified login mailbox |
 | `sso_mailbox_proof_invalid` | 400 | Mailbox proof consume refused: unknown, expired, consumed or another attempt's token, another browser, session or person, or a provider no longer at the attempt's revision, all with one identical response |
 | `sso_oidc_completion_invalid` | 400 | The OIDC completion result or its own mailbox proof is missing, expired, consumed, bound to a different browser or no longer current |
-| `sso_saml_completion_invalid` | 400 | The SAML completion result is missing, expired, consumed, bound to a different browser or no longer current |
-| `sso_invitation_required` | 409 | The proven OIDC subject needs explicit acceptance of a current team invitation |
+| `sso_saml_completion_invalid` | 400 | The SAML completion result or any required mailbox proof is missing, expired, consumed, bound to a different browser or no longer current |
+| `sso_invitation_required` | 409 | The proven SSO subject needs explicit acceptance of a current team invitation |
 | `sso_email_collision` | 409 | The independently proven new mailbox belongs to another account. Only the browser completing its own attempt can receive this response after proof |
 | `sso_not_found` | 404 | Unknown, other-team or retired provider, domain, link, nomination or delegation ID, all with one identical response; a nomination addressed to another owner and another person's delegation answer the same way. Only an authorized repeat delete of the team's own retired provider succeeds idempotently |
 
@@ -1061,17 +1098,17 @@ checks remain distinct. Validation status is currently `unknown`. Test status re
 the latest `passed` or `failed` receipt at the current revision, or `unknown` if no
 applicable receipt is retained. These reads use the audit journal without opening the
 sealed provider configuration. The active team's owner/admin browser sessions also receive
-`links: [{id, generation}]` for OIDC providers, limited to current members and live links.
+`links: [{id, generation}]` for OIDC providers and for SAML providers while the SAML
+capability is enabled, limited to current members and live links.
 `getSsoPolicy` returns `requireSso`, `admission`, `policyRevision` and `trustGeneration`;
 a team without a stored policy gets `false`, `invitation_only`, `1` and `1` respectively.
 No read creates a policy, changes trust or emits an audit event.
 
 当前草稿读取仅允许当前团队中已验证的所有者或管理员使用；API 密钥须具有 `read` 或
 `full` 范围，MCP OAuth 须具有 `mcp:tools` 权限。提供者列表按团队分页，不返回已退役
-提供者、密封配置、密钥或原始元数据。当前团队的所有者或管理员通过浏览器会话查看 OIDC
-提供者时，还可看到现有团队成员的有效关联不透明标识和代数。验证状态目前为 `unknown`，测试状态
-仅显示当前版本的最新收据。没有适用收据时，测试状态为 `unknown`。OIDC 和 SAML 仍在
-代码中保持关闭，读取返回 `sso_disabled`。
+提供者、密封配置、密钥或原始元数据。当前团队的所有者或管理员通过浏览器会话可查看现有成员的
+有效关联不透明标识和代数，适用于 OIDC 提供者和进程内启用 SAML 时的 SAML 提供者。验证状态
+目前为 `unknown`，测试状态仅显示当前版本的最新收据。没有适用收据时，测试状态为 `unknown`。
 
 Provider draft writes are registered as browser-session-only POST/PATCH/DELETE operations,
 with no MCP tool or CLI write command. Creating and updating require the provider's protocol
@@ -1399,10 +1436,11 @@ hard-off, the lists omit these fields and both delegation writes return `404 sso
 
 Both link-retirement operations take `{expectedLinkGeneration, proofAttemptId?}`.
 Self-unlink also takes `linkId` from `/me`; administrator removal takes `linkId` from
-the path. The OIDC recovery endpoints use the caller's active team membership. The ID
-and generation bind the request to the original row even if a
-replacement link starts at the same generation. Verify the affected member's request
-out of band before administrator removal. The operations return 204 on success,
+the provider inventory and passes it in the path. The recovery endpoints use the
+caller's active team membership. The ID and generation bind the request to the
+original row even if a replacement link starts at the same generation. Verify the
+affected member's request out of band before administrator removal. The operations
+return 204 on success,
 `sso_configuration_changed` for a stale live generation and `sso_not_found` for an
 already retired link. A verified current login mailbox supplies the independent
 email sign-in method, including when new sign-ups are closed. Retirement, link-specific

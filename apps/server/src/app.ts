@@ -476,7 +476,7 @@ export function createApp({
       )
       return
     }
-    const ssoTrust = c.var.oidcInvitationAcceptance || isSsoTrustPath(c.req.path, c.req.method)
+    const ssoTrust = c.var.ssoInvitationAcceptance || isSsoTrustPath(c.req.path, c.req.method)
     const text = isMeetingPollPath(c.req.path)
       ? 'private meeting poll request failed'
       : isCalDavConnectionPath(c.req.path)

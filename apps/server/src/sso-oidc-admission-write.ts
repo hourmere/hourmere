@@ -21,17 +21,17 @@ import { expiresDuringOidcWrite } from './sso-oidc-completion.ts'
 import { lockOidcLinkDomain, OidcLinkDomainUnverified } from './sso-oidc-link.ts'
 import { type OidcSessionRequest, oidcSignInTiming, writeOidcSession } from './sso-oidc-session.ts'
 
-export interface OidcAdmissionPending {
+interface SsoAdmissionPending {
   id: string
   provider: SsoProviderRevision
   issuer: string
   subject: string
   mailbox: string
-  deadline?: Date | undefined
-  expiresAt: Date
+  deadline?: string | undefined
+  expiresAt: string
 }
 
-export type OidcAdmissionDecision = { kind: 'jit' } | { kind: 'invitation'; invitationId: string }
+export type SsoAdmissionDecision = { kind: 'jit' } | { kind: 'invitation'; invitationId: string }
 
 type Refusal =
   | 'invalid'
@@ -61,18 +61,19 @@ const pgCode = (error: unknown, code: string) =>
  * Resolve a proved subject in its team. The caller verifies the browser capability before calling
  * this service. `lockProof` rechecks and spends that exact capability in this transaction.
  */
-export async function admitOidcAccount(
+export async function admitSsoAccount(
   db: Db,
-  { id, provider, issuer, subject, mailbox, deadline, expiresAt }: OidcAdmissionPending,
+  { id, provider, issuer, subject, mailbox, deadline, expiresAt }: SsoAdmissionPending,
   signup: SignupPolicy,
   options: OidcSessionRequest,
-  decision: OidcAdmissionDecision,
+  decision: SsoAdmissionDecision,
   lockProof: (trx: Db) => Promise<{ provenAt: string } | undefined>,
   /** The same SCIM claim completion native acceptance receives; production passes none. */
   scimClaims?: ScimClaimCompletion,
+  method: 'oidc' | 'saml' = 'oidc',
 ) {
   const { organizationId, providerId, revision } = provider
-  const details = { method: 'oidc', providerId, revision, correlationId: id } as const
+  const details = { method, providerId, revision, correlationId: id } as const
   const execute = (mayCreate: boolean) =>
     db
       .transaction()
@@ -86,18 +87,31 @@ export async function admitOidcAccount(
           .where('id', '=', organizationId)
           .forUpdate()
           .executeTakeFirst()
-        if ((await lockOidcProvider(trx, provider)).issuer !== issuer)
+        if ((await lockOidcProvider(trx, provider, true, method)).issuer !== issuer)
           throw new AdmissionRefused('invalid')
         const proof = await lockProof(trx)
         if (!proof) throw new AdmissionRefused('invalid')
 
+        const requireLiveProof = async () => {
+          const liveProof = await trx
+            .selectFrom('sso_attempts')
+            .select('id')
+            .where('id', '=', id)
+            .where('mailbox_proof_expires_at', '>', sql<Date>`clock_timestamp()`)
+            .executeTakeFirst()
+          if (!liveProof) throw new AdmissionRefused('invalid')
+        }
         const existingAccount = () =>
           trx
             .selectFrom('auth.user')
             .select('id')
             .where(sql<string>`lower(btrim(email))`, '=', mailbox)
             .executeTakeFirst()
-        if (await existingAccount()) return { status: 'link_required' } as const
+        const linkRequired = async () => {
+          if (method === 'saml') await requireLiveProof()
+          return { status: 'link_required' } as const
+        }
+        if (await existingAccount()) return linkRequired()
 
         // A subject previously linked or retired during the ceremony needs explicit recovery.
         const priorLink = await trx
@@ -152,7 +166,7 @@ export async function admitOidcAccount(
         }
         if (!mayCreate || !(await maySignUp(trx, signup, mailbox))) {
           // A local signup can commit between our mailbox lookup and the first-user check.
-          if (await existingAccount()) return { status: 'link_required' } as const
+          if (await existingAccount()) return linkRequired()
           throw new AdmissionRefused('signup_disabled')
         }
         if (
@@ -226,13 +240,7 @@ export async function admitOidcAccount(
         const timing = await oidcSignInTiming(trx, context, expiresAt, deadline, options)
         if (timing.reason === 'domain_unverified') throw new AdmissionRefused('domain_unverified')
         if (timing.reason !== undefined) throw new AdmissionRefused('invalid')
-        const liveProof = await trx
-          .selectFrom('sso_attempts')
-          .select('id')
-          .where('id', '=', id)
-          .where('mailbox_proof_expires_at', '>', sql<Date>`clock_timestamp()`)
-          .executeTakeFirst()
-        if (!liveProof) throw new AdmissionRefused('invalid')
+        await requireLiveProof()
         const { sessionId, cookie } = await writeOidcSession(
           trx,
           provider,
@@ -240,6 +248,7 @@ export async function admitOidcAccount(
           id,
           timing,
           options,
+          method,
         )
         const principal = { kind: 'session', sessionId, user } as const
         const audit = { organizationId, ...auditActor(principal), details }
@@ -273,6 +282,7 @@ export async function admitOidcAccount(
           if (claimDecision?.refused) throw new AdmissionRefused('blocked')
           await claimDecision?.finish?.(trx, member)
           const accepted = await writeTeamInvitationAcceptance(trx, invitation, principal)
+          if (method === 'saml') await requireLiveProof()
           return { status: 'completed', cookie, invitation: accepted, member } as const
         }
         await writeSsoAuditEvent(trx, {
@@ -281,6 +291,9 @@ export async function admitOidcAccount(
           targetType: 'member',
           targetId: member.id,
         })
+        // A wait in a session, invitation or audit write must not outlive SAML acceptance.
+        // The mailbox proof expiry is bounded by the attempt (request, assertion and IdP session).
+        if (method === 'saml') await requireLiveProof()
         return { status: 'completed', cookie } as const
       })
 
