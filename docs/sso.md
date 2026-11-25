@@ -830,10 +830,10 @@ with public syntax, a dotted DNS name without a special-use suffix, may instead 
 answer public: that is how a public IdP on a non-default port, such as
 `https://idp.example.com:8443`, is reached. A listed name without public syntax, a single
 label such as `keycloak` or a name under `.local`, `.internal`, `.localhost`, `.home.arpa`,
-`.test`, `.example`, `.invalid` or `.onion`, accepts only private or loopback answers. If a
-search domain, wildcard DNS or NXDOMAIN rewriting expands such a name to a public address,
-the request is therefore refused before any connection opens. Answers that mix the two, or
-that include metadata, link-local, IPv4-mapped or other reserved space, are refused. Hosts
+`.service.arpa`, `.alt`, `.test`, `.example`, `.invalid` or `.onion`, accepts only private or
+loopback answers. If a search domain, wildcard DNS or NXDOMAIN rewriting expands such a
+name to a public address, the request is refused before any connection opens. Answers that
+mix the two, or that include metadata, link-local, IPv4-mapped or other reserved space, are refused. Hosts
 that are not listed keep the default rules above: public answers only, on the default port
 only, and no private routing. HTTPS stays required, and a listed target is fetched like any
 other: the validated address is pinned to the socket and TLS verifies the original

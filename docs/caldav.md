@@ -166,7 +166,9 @@ The discovery client reuses the webhook outbound URL/address policy, with a stri
 HTTPS-only boundary even for operator-approved private servers. Apply the policy to
 initial URLs, redirect locations, principal/home hrefs and calendar hrefs, including
 URLs returned as metadata for future use. Reject embedded userinfo, fragments, malformed
-URLs and unsupported ports. Public destinations use DNS hostnames and HTTPS port 443.
+URLs and unsupported ports. Public destinations use dotted DNS hostnames and HTTPS port 443.
+The public hostname policy excludes names under `.local`, `.internal`, `.localhost`,
+`.home.arpa`, `.service.arpa`, `.alt`, `.test`, `.example`, `.invalid` or `.onion`.
 
 Before **each** network request resolve all DNS answers, validate them all, and pin the
 validated address to the socket while preserving the original hostname for Host, SNI
