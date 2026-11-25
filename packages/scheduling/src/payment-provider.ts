@@ -3,6 +3,11 @@ import { isDeepStrictEqual } from 'node:util'
 
 export type PaymentMode = 'test' | 'live'
 
+/** The Stripe deadline includes rounding and creation grace. Capacity uses the DB deadline. */
+export function checkoutSessionExpiry(expiresAt: string): number {
+  return Math.ceil(Date.parse(expiresAt) / 1000) + 15
+}
+
 /** Durable operation fields only. No attendee contact details or provider credentials. */
 export interface CheckoutOperation {
   attemptId: string

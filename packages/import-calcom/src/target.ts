@@ -179,7 +179,8 @@ export async function readTargetState(
     client,
     `SELECT b.id,b.organization_id,b.event_type_id,
     b.status,b.payment_hold_expires_at,
-    (b.payment_hold_expires_at>clock_timestamp()) AS payment_hold_active,
+    CASE WHEN b.status='pending_payment' THEN b.payment_hold_expires_at>clock_timestamp()
+      END AS payment_hold_active,
     b.start_at,b.end_at,b.title,b.location,b.responses,b.import_questions,b.source,
     b.rescheduled_from_id,b.hosts_use_default_schedule,b.required_host_user_ids,
     b.notification_snapshot,b.success_redirect,
@@ -250,6 +251,15 @@ export async function readTargetState(
   if (Buffer.byteLength(JSON.stringify(state)) > 32 * 1024 * 1024)
     throw new TargetRefusal('IMPORT_TARGET_LIMIT')
   return state
+}
+export function targetFingerprint(state: TargetState): string {
+  return fingerprint({
+    ...state,
+    // Occupancy uses current time, while the stored status and deadline identify a hold.
+    bookings: state.bookings.map((booking) =>
+      booking.status === 'pending_payment' ? { ...booking, payment_hold_active: null } : booking,
+    ),
+  })
 }
 /** Business state only: post-commit hashes do not recursively include ledger hashes. */
 export function businessFingerprint(state: TargetState): string {

@@ -1,0 +1,6 @@
+{
+  "migration": "0189_stripe_webhook_event_receipts.sql",
+  "objects": {
+    "constraint public.payment_stripe_events.payment_stripe_events_pkey": "PRIMARY KEY (event_id)"
+  }
+}

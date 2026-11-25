@@ -1,8 +1,8 @@
 # Paid bookings: design and foundation
 
-Status: design plus internal holds and Stripe Checkout Session creation. Paid booking
-admission stays off in deployed servers. Checkout UI, price settings, incoming webhooks,
-automatic Session expiry and refunds, and background reconciliation remain later work.
+Status: design plus internal holds, Stripe Checkout Session creation and a signed Stripe
+webhook receiver. Paid booking admission stays off in deployed servers. Checkout UI,
+price settings, automatic Session expiry, refunds and background reconciliation remain later work.
 See the [operator note](https://hourmere.com/docs/payments).
 
 ## Shipped foundation boundary
@@ -20,8 +20,7 @@ after committing the hold. There is no public Checkout UI, route, MCP tool or CL
 `pending_payment` can transition to `confirmed`, `expired` or `cancelled`. The immutable
 `payment_hold_expires_at` deadline and host exclusion protect capacity. Confirmation records
 a unique `payment_reference` and an immutable `payment_confirmed_at` marker; late success records `payment_refund_required=true` without
-reoccupying the slot. Confirmation invokes the injected notifier at most once. It has no
-verified Stripe event caller yet. Ordinary
+reoccupying the slot. The Stripe receiver invokes the booking notifier at most once. Ordinary
 booking cancel/reschedule paths reject paid rows because refund-aware lifecycle handling
 has not shipped. Internal confirmation, cancellation and expiry continue draining old holds
 when new admission is disabled.
@@ -59,8 +58,9 @@ Set `STRIPE_ACCOUNT_ID` to the single operator account. `STRIPE_MODE` defaults t
 outside production and requires an explicit `test` or `live` value in production whenever
 Stripe is configured. The adapter verifies the key's own Stripe account before operating
 on Sessions. A restricted key needs account read and Checkout Sessions write access,
-including Session reads. The webhook signing secret is loaded privately for future use.
-Credentials stay in server memory. Rotate them with coordinated web and worker restarts.
+including Session reads. The receiver uses the signing secret for the configured account's
+direct snapshot destination. Credentials stay in server memory. Rotate them with coordinated
+web and worker restarts.
 See [Stripe API keys](https://docs.stripe.com/keys).
 
 ## Prices and scope
@@ -113,7 +113,7 @@ Sessions and handle late-payment races under the refund rule below. See Stripe's
    an internal caller can get the Checkout URL, and only while the hold and Session are open.
 3. A verified payment observation can confirm only while database time is strictly before
    the deadline. The transaction locks and compares the reservation state. Confirmation
-   preserves the same reservation, price and hosts, and the later integration queues normal
+   preserves the same reservation, price and hosts, and the receiver queues normal
    confirmed-booking side effects exactly once in that transaction.
 4. At `now >= expires_at`, atomically transition to `expired` and release host occupancy.
    An explicit cancellation releases it as `cancelled`. Repeated expiry/cancel/confirmation
@@ -139,9 +139,9 @@ the future checkout page must explain that only Hourmere confirmation secures th
 
 The foundation persists `payment_reference` and `payment_refund_required` and returns a
 stable `refund_required` outcome for late confirmation attempts; actual refund execution
-and its durable leased outbox are later work. A future payment observation
-must persist the unique payment reference and refund intent before acknowledgement. Retries
-reuse the same intent and provider idempotency key. Expired/cancelled remains terminal even
+and its durable leased outbox are later work. The receiver persists the unique payment
+reference and refund intent before acknowledgement. Retries reuse the same intent. Future
+refund execution must reuse its provider idempotency key. Expired/cancelled remains terminal even
 if the refund is pending, failed or disputed. A fresh booking requires a fresh attempt and
 ordinary availability checks. Never silently charge again on retry.
 
@@ -166,19 +166,27 @@ normal hold expiry. It never issues a second create for that attempt, even if St
 pruned its key or the first request never arrived.
 See [Stripe idempotent requests](https://docs.stripe.com/api/idempotent_requests).
 
-The later endpoint verifies `Stripe-Signature` with the official SDK over the exact raw
-request bytes, its endpoint signing secret and a nonzero timestamp tolerance. Reject invalid
-signatures before parsing into trusted domain events. Keep payload limits and a synchronized
-clock. Deduplicate event IDs and also enforce unique business transitions by payment ID;
-different Stripe events can describe the same payment. Account, live/test mode, Session,
-PaymentIntent, amount, currency and local attempt bindings must all agree. A Session-completed
-event alone is insufficient if its payment is still unpaid. Initially enable only immediate
-card payment methods; delayed settlement methods need a separate product contract.
+`POST /api/webhooks/stripe` verifies `Stripe-Signature` with the official SDK over the exact
+raw UTF-8 body and the endpoint signing secret. The receiver accepts multiple `v1` signatures
+and checks a five-minute delivery timestamp window in either direction. Keep the server clock
+synchronized. Requests are limited to 64 KiB. A missing, invalid or stale signature gets the
+same `400` response. An off or unconfigured receiver returns `404`.
 
-Events may arrive repeatedly or out of order. Persist minimal verified event identity and
-durable work before a quick successful acknowledgement; a failed durable write gets a
-retryable error. Reconcile provider state for contradictory observations rather than moving
-a terminal local state backwards. Do not store complete webhook bodies. Follow Stripe's
+Only a `checkout.session.completed` snapshot with `status=complete` and `payment_status=paid`
+can confirm a hold. The account, mode, Checkout Session and its PaymentIntent, amount, currency,
+and local attempt binding must agree. A signed, fully bound Session can restore the Session ID
+if a dispatched create lost its response. `checkout.session.expired` releases a still-pending
+hold once its database deadline has passed. An expiry snapshot cannot undo a confirmation.
+`payment_intent.succeeded`, `refund.updated` and `refund.failed` receive event-ID receipts. A
+PaymentIntent snapshot lacks the required Session binding, and refund-state reconciliation is
+future work. Other event types are acknowledged without storage. Checkout uses immediate card
+methods; delayed settlement methods need a separate contract.
+
+The event ID's primary key deduplicates concurrent deliveries. The receipt, booking row
+transition, and any notification jobs or refund-required flag commit together. The unique
+payment reference and booking row lock protect against distinct events describing one payment.
+A failed transaction returns a retryable `503`. The receiver stores no webhook bodies and
+does no Stripe API I/O. Follow Stripe's
 [signature, retry and ordering guidance](https://docs.stripe.com/webhooks).
 
 ## Cancellations, refunds and rescheduling
@@ -222,7 +230,7 @@ Unpaid holds cannot be rescheduled; cancel the hold and begin a separate attempt
 | Round robin | Future paid admission must pin the selected host while holding capacity and preserve that host at confirmation. Fairness updates need one explicit reservation/confirmation policy; do not reassign after payment. Unsupported modes must fail closed until covered. |
 | Collective | A paid collective reservation must hold all required hosts atomically; partial host holds are not acceptable. No public paid collective flow ships here. |
 | Imported bookings | Remain local-only, read-only confirmed busy records. Never invent Stripe references, collect payment, refund or enable payment mutations for imported data. |
-| Reminders and emails | No confirmation, ICS, reminder, follow-up, conference or calendar writeback for a hold. Release sends no booking-cancelled mail for a meeting that was never confirmed. Future confirmation queues normal effects once; workers recheck confirmed state and existing delivery gates. Payment/refund notices need separate deduplication and localized text. |
+| Reminders and emails | No confirmation, ICS, reminder, follow-up, conference or calendar writeback for a hold. Release sends no booking-cancelled mail for a meeting that was never confirmed. Webhook confirmation queues normal effects once; workers recheck confirmed state and existing delivery gates. Payment/refund notices need separate deduplication and localized text. |
 | Redirects and embeds | Existing booking-success redirects are available only after confirmed payment. A Checkout return page polls protected local status; it must not leak payment IDs or tokens to an arbitrary redirect target or parent frame. |
 
 Every later public capability must share service behavior across REST, MCP and CLI, with
@@ -238,17 +246,17 @@ processed event IDs), account/mode binding and minimal local financial facts suc
 currency, policy snapshot, timestamps and safe operation status. Do not store PAN, CVC,
 expiry, card brand/last-four, billing addresses, raw provider payloads or checkout client
 secrets. IDs are private references, not authorization credentials: do not expose them in
-public booking catalogs, analytics or ordinary logs. The foundation stores a unique PaymentIntent-shaped `payment_reference` supplied by its
-trusted internal confirmation caller (synthetic in tests), alongside
-`payment_hold_expires_at` and `payment_refund_required`. It has no authenticated provider
-receiver, amount/currency validation or complete payment ledger yet; never wire an untrusted
-request directly to this internal function.
+public booking catalogs, analytics or ordinary logs. The foundation stores a unique
+`payment_reference` for the PaymentIntent, alongside `payment_hold_expires_at` and
+`payment_refund_required`. Confirmation from the receiver requires a signed, price-bound
+Checkout observation. The complete payment ledger remains future work.
 
 Migration 0124 retains one local Checkout attempt per priced hold. It stores the local ID,
 hold ID, account, mode, amount, currency, provider idempotency key, submission timestamp
 and optional Session ID. The hosted URL is returned from Stripe to the internal caller
-and is never stored. Current hold contact-data erasure preserves this dedupe record, and
-there is no automatic Checkout attempt purge yet.
+and is never stored. Hold contact-data erasure preserves this dedupe record. Migration 0189
+retains only the verified event ID in each receipt. Automatic purge of the Checkout attempts
+and event receipts remains future work.
 
 The later ledger retains unresolved payment/refund operations until resolution, including
 a minimal tombstone if booking contact data is erased. Resolved references default to
@@ -265,7 +273,8 @@ The shipped foundation also erases personal data from never-confirmed `expired` 
 The minute expiry worker processes at most 500 retention candidates per run, using database
 time and row locks. It deletes attendee rows (including names, email, time zones and locale), clears booking
 title, responses, location and its snapshot, cancellation reason, success redirect and manage
-token hash, and records `payment_pii_erased_at`; the audit row, request digest/key and payment
+token hash, nulls the hold retry key and request fingerprint that includes the invitee name
+and email in its input, and records `payment_pii_erased_at`. The audit row and payment
 reference/refund obligation remain. Confirmed-then-cancelled bookings are excluded by the
 durable confirmation marker. This policy applies even when hold creation is disabled;
 without a running worker, cleanup resumes when the worker returns. Admission-time expiry
@@ -285,33 +294,37 @@ operation, refund backlog and terminal failures without contact or credential lo
 
 ## Self-hoster testing and rollout
 
-Today, run the real-Postgres hold and Session tests with the fake provider and a throwaway
-database. The Stripe adapter has stubbed HTTP tests. These tests require no Stripe account
-or real credentials. Leave the optional Stripe settings empty for a deployed instance at
-this stage. `PAID_BOOKINGS_ENABLED=false` remains the default and the environment variable
-cannot enable admission. Internal tests explicitly opt in through the service context.
-Existing holds continue to expire regardless of either setting.
+The real-Postgres hold, Session and webhook tests use a fake provider, stubbed HTTP and a
+throwaway database. They require no Stripe account or real credentials. Leave Stripe settings
+empty and `PAID_BOOKINGS_ENABLED=false` on deployed instances at this stage. Existing holds
+continue to expire regardless of the receiver setting.
 
-Once the receive and confirm path is implemented, an operator can test with their own Stripe
-sandbox/test-mode account, isolated database and synthetic attendees. Use matching test keys
-and endpoint signing secret in private secret storage. Use Stripe's published
+To exercise delivery on an isolated test instance, set `PAID_BOOKINGS_ENABLED=true`,
+`STRIPE_MODE=test`, `STRIPE_ACCOUNT_ID` to your test account and use the matching
+`STRIPE_API_KEY` and `STRIPE_WEBHOOK_SIGNING_SECRET` or their `_FILE` counterparts. Use an
+isolated database, synthetic attendees and Stripe's published
 [test payment methods](https://docs.stripe.com/testing), never real card details or copied
 card numbers in repository fixtures. Confirm that no test object is accepted in live mode.
 
 Install the [Stripe CLI](https://docs.stripe.com/cli), authenticate to the operator's test
-account, and forward only selected events to the implemented local endpoint:
+account, and forward the selected snapshot events to the local server. The example uses
+port 3100. Replace the port if your test server listens elsewhere.
 
 ```sh
 stripe login
-stripe listen --events checkout.session.completed,checkout.session.expired,payment_intent.succeeded,refund.updated,refund.failed --forward-to "$LOCAL_PAYMENT_WEBHOOK_URL"
+stripe listen --events checkout.session.completed,checkout.session.expired,payment_intent.succeeded,refund.updated,refund.failed --forward-to http://localhost:3100/api/webhooks/stripe
 ```
 
-`LOCAL_PAYMENT_WEBHOOK_URL` is a placeholder for the future receiver; no receiver path is
-promised by this change. The CLI prints a listener signing secret: place it privately in
-the local receiver configuration, not in issue reports or screenshots. It differs from
-a Dashboard endpoint secret. CLI-triggered fixture events test delivery/signatures but do
-not establish a real Hourmere attempt binding. Exercise actual test Checkout Sessions for
-end-to-end confirmation. Cover duplicate/out-of-order delivery, wrong signature, wrong mode,
+The CLI prints a listener signing secret. Configure it privately, then start or restart the
+test receiver. Use the Dashboard destination's own secret when sending from a Dashboard
+destination. To rotate a Dashboard signing secret, select delayed expiration for the old
+secret, deploy the new secret during the overlap, then expire the old secret after every
+receiver has restarted. During the overlap Stripe includes a `v1` signature for each active
+secret. Keep the destination scoped to direct account events. See [Stripe webhook setup and rotation](https://docs.stripe.com/webhooks).
+
+CLI-triggered fixtures check delivery and signatures. End-to-end confirmation additionally
+requires a matching Checkout attempt created through the internal service. There is no public
+flow for creating one. Cover duplicate/out-of-order delivery, wrong signature, wrong mode,
 wrong amount, worker outage, exact deadline, cancellation races, delayed success/refund,
 lost create response, reschedule replay and DST-crossing slots before production rollout.
 

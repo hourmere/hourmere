@@ -12,6 +12,7 @@ import {
   TargetRefusal,
   type TargetRow,
   type TargetState,
+  targetFingerprint,
   targetUsers,
 } from './target.ts'
 import type { BookingDecision, SourceSnapshot, SourceVersion } from './types.ts'
@@ -676,7 +677,7 @@ export function buildPreview(
     sourceId: options.sourceId,
     options,
     sourceFingerprint,
-    targetFingerprint: fingerprint(state),
+    targetFingerprint: targetFingerprint(state),
     schemaFingerprint: snapshot.schemaFingerprint,
     targetVersionFingerprint: fingerprint(state.versions),
     cutoff: snapshot.cutoff,
