@@ -250,9 +250,10 @@ API key. IDs that are missing or belong to another organization return `webhook_
 
 `create_webhook` and `update_webhook` accept `booking.created`, `booking.rescheduled`,
 `booking.cancelled`, `booking.reschedule_requested`, `booking.reschedule_request_expired`,
-`booking.attendee_no_show_changed` and `workflow.executed` in `events`. While workflows
-are off, adding `workflow.executed` returns a tool error with `workflows_disabled`
-(REST 404). On create, it takes precedence over `webhooks_disabled` (REST 409).
+`booking.attendee_no_show_changed` and `workflow.executed` in `events`. Adding
+`workflow.executed` requires `WORKFLOWS_ENABLED=true`. While workflows are off, adding it
+returns `workflows_disabled` (REST 404). On create, it takes precedence over
+`webhooks_disabled` (REST 409).
 
 `rotate_webhook_secret` takes `{ id }` and requires a `full` API key. Each successful
 call replaces the signing secret and returns the new `{ secret }` once. Save it directly
