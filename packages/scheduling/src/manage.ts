@@ -1,6 +1,7 @@
 // Booking details for invitee links and reschedule slots shared by invitees and hosts.
 // Invitee reads share manage-token authorization, while host slots use getHostBooking so
 // the same availability rules retain each caller's authorization boundary.
+import { jsonArrayFrom } from 'kysely/helpers/postgres'
 import {
   checkSlotRange,
   hasBookablePart,
@@ -17,7 +18,8 @@ import {
   getManagedBooking,
   type ManagedBookingSelector,
   type ManagedRescheduleRequestState,
-  managedLinkRescheduleRequest,
+  managedLinkRescheduleRequestQuery,
+  managedLinkRescheduleRequestState,
   prepareManagedBookingRead,
 } from './bookings.ts'
 import { getPublicBranding, type PublicBranding } from './branding.ts'
@@ -75,7 +77,7 @@ async function readManagedBookingDetails(
   token: ManagedBookingSelector,
   booking: Booking,
 ): Promise<ManagedBooking> {
-  const [eventType, hosts, rescheduleRequest, cutoffs] = await Promise.all([
+  const [eventType, details] = await Promise.all([
     booking.eventTypeId === null
       ? undefined
       : ctx.db
@@ -84,40 +86,48 @@ async function readManagedBookingDetails(
           .where('id', '=', booking.eventTypeId)
           .where('deleted_at', 'is', null)
           .executeTakeFirst(),
+    // Fold these projections into one statement to offset the transaction's two statements.
     ctx.db
-      .selectFrom(resolvedBookingHosts(ctx.db).as('bh'))
-      .innerJoin('auth.user as u', 'u.id', 'bh.user_id')
-      .leftJoin('profiles as p', 'p.user_id', 'bh.user_id')
-      .select(['u.name', 'p.handle'])
-      .where('bh.booking_id', '=', booking.id)
-      .orderBy('bh.user_id')
-      .execute(),
-    typeof token !== 'object' ? managedLinkRescheduleRequest(ctx, token, booking.id) : undefined,
-    ctx.db
-      .selectFrom('bookings')
+      .selectFrom('bookings as b')
       .select([
-        'organization_id',
-        'reschedule_cutoff_minutes',
-        'cancel_cutoff_minutes',
-        'has_routing_snapshot',
+        'b.organization_id',
+        'b.reschedule_cutoff_minutes',
+        'b.cancel_cutoff_minutes',
+        'b.has_routing_snapshot',
       ])
-      .select(({ exists, selectFrom }) =>
+      .select(({ exists, selectFrom }) => [
         exists(
           selectFrom('bookings as successor')
             .select('successor.id')
-            .whereRef('successor.rescheduled_from_id', '=', 'bookings.id')
-            .whereRef('successor.organization_id', '=', 'bookings.organization_id'),
+            .whereRef('successor.rescheduled_from_id', '=', 'b.id')
+            .whereRef('successor.organization_id', '=', 'b.organization_id'),
         ).as('has_successor'),
-      )
-      .where('id', '=', booking.id)
+        jsonArrayFrom(
+          selectFrom(resolvedBookingHosts(ctx.db).as('bh'))
+            .innerJoin('auth.user as u', 'u.id', 'bh.user_id')
+            .leftJoin('profiles as p', 'p.user_id', 'bh.user_id')
+            .select(['u.name', 'p.handle'])
+            .whereRef('bh.booking_id', '=', 'b.id')
+            .orderBy('bh.user_id'),
+        ).as('hosts'),
+        managedLinkRescheduleRequestQuery(ctx.db, typeof token === 'string' ? token : undefined).as(
+          'link_request',
+        ),
+      ])
+      .where('b.id', '=', booking.id)
       .executeTakeFirstOrThrow(),
   ])
-  const branding = await getPublicBranding(ctx.db, cutoffs.organization_id)
+  const rescheduleRequest = managedLinkRescheduleRequestState(
+    details.link_request,
+    booking.id,
+    ctx.now(),
+  )
+  const branding = await getPublicBranding(ctx.db, details.organization_id)
   // Keep the same statements for ordinary bookings. Recurring member selectors have
   // their own authority, including guest links, and do not carry routing answers.
   const routingAnswers =
-    typeof token === 'string' && cutoffs.has_routing_snapshot
-      ? await readManagedRoutingAnswers(ctx.db, booking.id, cutoffs.organization_id)
+    typeof token === 'string' && details.has_routing_snapshot
+      ? await readManagedRoutingAnswers(ctx.db, booking.id, details.organization_id)
       : undefined
   const start = Temporal.Instant.from(booking.start)
   const instant = (minutes: number | null) => {
@@ -136,12 +146,12 @@ async function readManagedBookingDetails(
           }),
         }
       : null,
-    hosts: hosts.map((h) => ({ name: h.name.trim() || h.handle || '' })),
+    hosts: details.hosts.map((h) => ({ name: h.name.trim() || h.handle || '' })),
     ...(rescheduleRequest && { rescheduleRequest }),
-    ...(booking.status === 'cancelled' && cutoffs.has_successor && { wasRescheduled: true }),
+    ...(booking.status === 'cancelled' && details.has_successor && { wasRescheduled: true }),
     changeDeadlines: {
-      rescheduleBy: instant(effectiveRescheduleCutoff(cutoffsOf(cutoffs))),
-      cancelBy: instant(cutoffs.cancel_cutoff_minutes),
+      rescheduleBy: instant(effectiveRescheduleCutoff(cutoffsOf(details))),
+      cancelBy: instant(details.cancel_cutoff_minutes),
     },
     ...(routingAnswers && { routingAnswers }),
   }

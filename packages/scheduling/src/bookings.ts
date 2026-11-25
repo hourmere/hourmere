@@ -13,6 +13,7 @@ import {
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import { recordTeamWriteOrganizationLock, teamWriteTransaction } from '@hourmere/db/team-write'
 import { sql, type Transaction } from 'kysely'
+import { jsonObjectFrom } from 'kysely/helpers/postgres'
 import { parsePhoneNumberFromString } from 'libphonenumber-js/max'
 import { z } from 'zod'
 import {
@@ -2094,37 +2095,34 @@ const CLOSED_REQUEST_STATES: Readonly<Record<string, ManagedRescheduleRequestSta
   cancelled: 'cancelled',
 }
 
-/**
- * The request a reschedule request email's own link was sent for, and what became of it.
- * Undefined for every other manage token: only that email's token names its request, and
- * only a request of the booking the email was about. `bookingId` is the booking the token
- * resolves to now; a closed request whose booking has since moved reports the move.
- */
-export async function managedLinkRescheduleRequest(
-  ctx: PublicContext,
-  token: string | undefined,
+/** The request belongs to the email identified by this token and to that email's booking. */
+export function managedLinkRescheduleRequestQuery(db: Db, token: string | undefined) {
+  return jsonObjectFrom(
+    db
+      .selectFrom('booking_notifications as n')
+      .innerJoin('booking_reschedule_requests as r', (join) =>
+        join
+          .onRef('r.booking_id', '=', 'n.booking_id')
+          .on(sql<boolean>`r.id::text = n.message_key`),
+      )
+      .select(['r.id', 'r.state', 'r.expires_at', 'r.booking_id'])
+      .where('n.manage_token_hash', '=', manageTokenHash(token) ?? null)
+      .where('n.outcome', '=', 'sent')
+      .where('n.kind', '=', 'reschedule_requested'),
+  )
+}
+
+/** A closed request reports a move when its email now opens a successor. */
+export function managedLinkRescheduleRequestState(
+  row: { id: string; state: string; expires_at: string; booking_id: string } | null,
   bookingId: string,
-): Promise<{ id: string; state: ManagedRescheduleRequestState } | undefined> {
-  const hash = manageTokenHash(token)
-  if (!hash) return undefined
-  const { rows } = await sql<{
-    id: string
-    state: string
-    expires_at: Date
-    booking_id: string
-  }>`
-    SELECT r.id, r.state, r.expires_at, r.booking_id
-      FROM booking_notifications n
-      JOIN booking_reschedule_requests r
-        ON r.booking_id = n.booking_id AND r.id::text = n.message_key
-     WHERE n.manage_token_hash = ${hash} AND n.outcome = 'sent'
-       AND n.kind = 'reschedule_requested'`.execute(ctx.db)
-  const row = rows[0]
+  now: Temporal.Instant,
+): { id: string; state: ManagedRescheduleRequestState } | undefined {
   if (!row) return undefined
   // An expiry job can run late; the deadline alone closes the request.
   const state =
     row.state === 'pending'
-      ? row.expires_at.getTime() > ctx.now().epochMilliseconds
+      ? Date.parse(row.expires_at) > now.epochMilliseconds
         ? 'pending'
         : 'expired'
       : CLOSED_REQUEST_STATES[row.state]

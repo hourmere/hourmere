@@ -5,13 +5,18 @@ import { createDb, type Db } from '@hourmere/db'
 import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
+import { jsonArrayFrom } from 'kysely/helpers/postgres'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { groupFixture, occupiedSlot } from '../../db/src/group-seats-fixtures.ts'
 import { toIso } from './availability.ts'
 import { resolveBookingOrganization } from './booking-organization.ts'
 import { bookingPageQuery, encodeBookingCursor } from './booking-page.ts'
-import { getManagedBooking, managedLinkRescheduleRequest } from './bookings.ts'
+import {
+  managedLinkRescheduleRequestQuery,
+  managedLinkRescheduleRequestState,
+  prepareManagedBookingRead,
+} from './bookings.ts'
 import { getPublicBranding } from './branding.ts'
 import { checkedCatalogPage } from './catalog-page.ts'
 import { changeDeadline, cutoffsOf, effectiveRescheduleCutoff } from './change-deadlines.ts'
@@ -210,8 +215,10 @@ describe.skipIf(!serverUrl)('group seat read models', () => {
       'getManagedBookingDetails',
       {
         getPublicBranding,
-        getManagedBooking,
-        managedLinkRescheduleRequest,
+        jsonArrayFrom,
+        managedLinkRescheduleRequestQuery,
+        managedLinkRescheduleRequestState,
+        prepareManagedBookingRead,
         resolvedBookingHosts,
         changeDeadline,
         cutoffsOf,

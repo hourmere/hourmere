@@ -131,9 +131,8 @@ function managedProjection(change?: Change): typeof getManagedBookingDetails {
   )
   return new Function(
     'getPublicBranding',
-    'resolvedBookingHosts',
     'prepareManagedBookingRead',
-    'managedLinkRescheduleRequest',
+    'managedLinkRescheduleRequestState',
     'changeDeadline',
     'cutoffsOf',
     'effectiveRescheduleCutoff',
@@ -141,14 +140,13 @@ function managedProjection(change?: Change): typeof getManagedBookingDetails {
     `${copy}; return getManagedBookingDetails`,
   )(
     async () => undefined,
-    () => ({ as: () => 'booking_hosts' }),
     async () => async () => ({
       id: 'synthetic-booking',
       eventTypeId: 'synthetic-event',
       start: '2030-01-01T10:00:00Z',
     }),
     // A token from no reschedule request email.
-    async () => undefined,
+    () => undefined,
     changeDeadline,
     cutoffsOf,
     effectiveRescheduleCutoff,
@@ -184,10 +182,7 @@ function verifyPublic(project: ReturnType<typeof publicProjection>) {
 async function verifyManaged(project: typeof getManagedBookingDetails) {
   const query = {
     select: () => query,
-    innerJoin: () => query,
-    leftJoin: () => query,
     where: () => query,
-    orderBy: () => query,
     executeTakeFirst: async () => ({
       title: 'Call',
       duration_minutes: 30,
@@ -196,8 +191,9 @@ async function verifyManaged(project: typeof getManagedBookingDetails) {
     executeTakeFirstOrThrow: async () => ({
       reschedule_cutoff_minutes: null,
       cancel_cutoff_minutes: null,
+      hosts: [{ name: 'Ada', handle: 'ada' }],
+      link_request: null,
     }),
-    execute: async () => [{ name: 'Ada', handle: 'ada' }],
   }
   const transaction = {
     setIsolationLevel: () => transaction,
