@@ -595,4 +595,7 @@ export const common = {
     'Para continuar, vuelva a la pestaña donde solicitó la verificación.',
   'Copy the link from your email and paste it into the tab where you requested verification.':
     'Copie el enlace del correo y péguelo en la pestaña donde solicitó la verificación.',
+  // Booking page preview
+  'These are sample times. Booking is disabled in the preview.':
+    'Estos horarios son de ejemplo. No se pueden hacer reservas en la vista previa.',
 } as const

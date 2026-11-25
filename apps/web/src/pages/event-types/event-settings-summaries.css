@@ -1,0 +1,28 @@
+.event-settings-summary {
+  display: block;
+  margin-block: var(--space-1) 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#basics-heading {
+  margin-bottom: 0;
+}
+
+p.event-settings-summary {
+  margin-block-end: var(--space-4);
+}
+
+.event-settings-group > summary > .event-settings-summary {
+  margin-inline-start: 1em;
+}
+
+.event-settings-group > summary:focus-visible > .event-settings-summary,
+.panel:has(:focus-visible) > p.event-settings-summary {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}

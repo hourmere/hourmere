@@ -9,6 +9,23 @@ export type Booking = Schemas['Booking']
 
 export const loadInstance = (signal: AbortSignal) => unwrap(api.GET('/api/v1/instance', { signal }))
 
+/** The saved space logo, as an image source that does not trigger another request. */
+export async function loadBrandLogo(
+  organizationId: string,
+  hash: string,
+  signal: AbortSignal,
+): Promise<string> {
+  const bytes = await unwrap(
+    api.GET('/api/v1/branding/logo/{hash}', {
+      params: { path: { hash } },
+      headers: { 'X-Expected-Organization-Id': organizationId },
+      signal,
+      parseAs: 'arrayBuffer',
+    }),
+  )
+  return `data:image/png;base64,${btoa(Array.from(new Uint8Array(bytes), (byte) => String.fromCharCode(byte)).join(''))}`
+}
+
 /** The caller's profile, or null before they have created one (404 profile_not_found). */
 export async function loadProfile(signal: AbortSignal): Promise<Profile | null> {
   const { data, error, response } = await api.GET('/api/v1/profile', { signal })

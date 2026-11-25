@@ -50,8 +50,10 @@ interface BookingFormProps {
   /** Errors from the server, by field id (see validation.ts). */
   serverErrors: FieldErrors
   formError: UiText | null
-  submitting: boolean
-  onSubmit: () => void
+  submitting?: boolean
+  onSubmit?: () => void
+  /** Visible explanation when a preview has disabled submission. */
+  submissionDisabledBy?: string
 }
 
 /** Client-side checks, by field id; empty when the form may be sent. */
@@ -104,8 +106,9 @@ export function BookingForm({
   onChange,
   serverErrors,
   formError,
-  submitting,
+  submitting = false,
   onSubmit,
+  submissionDisabledBy,
 }: BookingFormProps) {
   const { t, ui, locale } = useI18n()
 
@@ -132,6 +135,7 @@ export function BookingForm({
 
   function submit(event: FormEvent) {
     event.preventDefault()
+    if (!onSubmit) return
     setSubmitted(true)
     setAttempt((current) => current + 1)
     const found = validateBookingForm(questions, values, locations)
@@ -367,7 +371,12 @@ export function BookingForm({
         </fieldset>
       )}
 
-      <button type="submit" className="button button-primary button-block" disabled={submitting}>
+      <button
+        type={onSubmit ? 'submit' : 'button'}
+        className="button button-primary button-block"
+        aria-describedby={submissionDisabledBy}
+        disabled={!onSubmit || submitting}
+      >
         {submitting ? t('Booking…') : t('Confirm booking')}
       </button>
     </form>
