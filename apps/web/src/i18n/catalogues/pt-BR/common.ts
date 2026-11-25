@@ -597,4 +597,7 @@ export const common = {
   // Booking page preview
   'These are sample times. Booking is disabled in the preview.':
     'Estes horários são exemplos. Não é possível fazer agendamentos na prévia.',
+  // Rescheduled booking links
+  'This booking was moved to a new time. The new booking has its own link.':
+    'Esta reserva foi remarcada para outro horário. A nova reserva tem seu próprio link.',
 } as const

@@ -7471,6 +7471,11 @@ export interface components {
                 answer: string;
                 label: string;
             }[];
+            /**
+             * @description Present when the manage link still resolves to a cancelled booking that was moved to a new time.
+             * @enum {boolean}
+             */
+            wasRescheduled?: true;
         };
         /** @description The enrollment view for a session without the required team proof keeps the active organization ID and omits its metadata by returning empty name and slug strings. */
         Me: {

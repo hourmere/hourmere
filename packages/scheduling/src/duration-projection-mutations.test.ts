@@ -199,7 +199,12 @@ async function verifyManaged(project: typeof getManagedBookingDetails) {
     }),
     execute: async () => [{ name: 'Ada', handle: 'ada' }],
   }
-  const db = { selectFrom: () => query } as unknown as Db
+  const transaction = {
+    setIsolationLevel: () => transaction,
+    setAccessMode: () => transaction,
+    execute: (read: (trx: Db) => Promise<unknown>) => read(db),
+  }
+  const db = { selectFrom: () => query, transaction: () => transaction } as unknown as Db
   expect(await project({ db, now: () => Temporal.Now.instant() }, 'synthetic-token')).toMatchObject(
     {
       eventType: { durationMinutes: 30, allowedDurationsMinutes: [5, 30, 60] },

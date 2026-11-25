@@ -2428,6 +2428,12 @@ reason even when the retry supplies a different reason. A replaced or expired re
 a different picked time or the opposite action fails with `reschedule_request_changed`. Keep the
 existing private email link when replay returns `manageToken: null`.
 
+The managed booking read uses one read-only, repeatable-read transaction for the booking,
+its pending request and the linked request state. Only a request email's token includes
+that email's `rescheduleRequest`. A link that resolves to a cancelled predecessor with a
+successor in the same organization returns `wasRescheduled: true` without the successor's
+ID or token.
+
 Notes follow follow-up host-note write sanitization: CRLF becomes LF, bidi embedding/isolate
 controls are removed, other controls (including tabs) are rejected, and the result must be
 well-formed Unicode of at most 2000 UTF-16 code units. The sender defensively normalizes

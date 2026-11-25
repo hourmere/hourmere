@@ -42,6 +42,8 @@ export interface ManagedBooking extends Booking {
   routingAnswers?: { label: string; answer: string }[]
   /** Only for a reschedule request email's link: what became of that request. */
   rescheduleRequest?: { id: string; state: ManagedRescheduleRequestState }
+  /** True when this link still resolves to a cancelled predecessor with a successor. */
+  wasRescheduled?: true
   /**
    * The invitee's change deadlines this booking keeps (the ones that applied when it was
    * booked): from these instants on, the invitee can no longer reschedule or cancel it
@@ -55,11 +57,20 @@ export async function getManagedBookingDetails(
   ctx: PublicContext,
   token: ManagedBookingSelector,
 ): Promise<ManagedBooking> {
-  // One decision time for the request deadline in both reads (they are separate statements,
-  // so a write committing between them can still show a moment apart).
+  // Resolve the token, booking and request at one database snapshot and decision time.
   const now = ctx.now()
-  const at = { ...ctx, now: () => now }
-  const booking = await getManagedBooking(at, token)
+  return ctx.db
+    .transaction()
+    .setIsolationLevel('repeatable read')
+    .setAccessMode('read only')
+    .execute((db) => readManagedBookingDetails({ ...ctx, db, now: () => now }, token))
+}
+
+async function readManagedBookingDetails(
+  ctx: PublicContext,
+  token: ManagedBookingSelector,
+): Promise<ManagedBooking> {
+  const booking = await getManagedBooking(ctx, token)
   const [eventType, hosts, rescheduleRequest, cutoffs] = await Promise.all([
     booking.eventTypeId === null
       ? undefined
@@ -77,7 +88,7 @@ export async function getManagedBookingDetails(
       .where('bh.booking_id', '=', booking.id)
       .orderBy('bh.user_id')
       .execute(),
-    typeof token !== 'object' ? managedLinkRescheduleRequest(at, token, booking.id) : undefined,
+    typeof token !== 'object' ? managedLinkRescheduleRequest(ctx, token, booking.id) : undefined,
     ctx.db
       .selectFrom('bookings')
       .select([
@@ -86,6 +97,14 @@ export async function getManagedBookingDetails(
         'cancel_cutoff_minutes',
         'has_routing_snapshot',
       ])
+      .select(({ exists, selectFrom }) =>
+        exists(
+          selectFrom('bookings as successor')
+            .select('successor.id')
+            .whereRef('successor.rescheduled_from_id', '=', 'bookings.id')
+            .whereRef('successor.organization_id', '=', 'bookings.organization_id'),
+        ).as('has_successor'),
+      )
       .where('id', '=', booking.id)
       .executeTakeFirstOrThrow(),
   ])
@@ -115,6 +134,7 @@ export async function getManagedBookingDetails(
       : null,
     hosts: hosts.map((h) => ({ name: h.name.trim() || h.handle || '' })),
     ...(rescheduleRequest && { rescheduleRequest }),
+    ...(booking.status === 'cancelled' && cutoffs.has_successor && { wasRescheduled: true }),
     changeDeadlines: {
       rescheduleBy: instant(effectiveRescheduleCutoff(cutoffsOf(cutoffs))),
       cancelBy: instant(cutoffs.cancel_cutoff_minutes),

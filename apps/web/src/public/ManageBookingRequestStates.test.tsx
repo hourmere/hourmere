@@ -157,6 +157,28 @@ describe('closed reschedule requests on the invitee page', () => {
     expect(api.to('GET /api/v1/bookings/manage')).toHaveLength(state === 'cancelled' ? 3 : 2)
   })
 
+  it('explains a moved predecessor and its new link after a stale pick from the booking API link', async () => {
+    const user = userEvent.setup()
+    const api = server(managed({ pendingReschedule: pending() }), () => ({
+      ...managed({ status: 'cancelled', cancelledAt: '2026-11-01T04:31:00.000Z' }),
+      wasRescheduled: true,
+    }))
+    renderApp(`/booking#token=${TOKEN}`)
+    await pickAndConfirm(user)
+    expect(
+      await screen.findByText(
+        'This booking was moved to a new time. The new booking has its own link.',
+      ),
+    ).toBeDefined()
+    expect(screen.queryByText(COPY.en.cancelled)).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Reschedule' })).toBeNull()
+    expect(api.to('POST /api/v1/bookings/manage/reschedule')).toHaveLength(1)
+    expect(api.to('GET /api/v1/bookings/manage')).toHaveLength(2)
+
+    await selectPublicLanguage(user, 'zh-CN')
+    expect(await screen.findByText('此预约已改期。新预约有自己的链接。')).toBeDefined()
+  })
+
   it('prefers the link’s own request state, and explains a stale cancellation in Chinese', async () => {
     const user = userEvent.setup()
     // No newer request is open any more, but the link reports its request was replaced.
