@@ -1,20 +1,18 @@
-import type { CheckoutOperation, CheckoutSession, PaymentProvider } from '@hourmere/scheduling'
+import {
+  type CheckoutOperation,
+  type CheckoutSession,
+  checkoutSessionExpiry,
+  type PaymentProvider,
+} from '@hourmere/scheduling'
 import { DomainError } from '@hourmere/scheduling/errors'
 import Stripe from 'stripe'
 import type { StripeConfig } from './stripe-config.ts'
 
 const STRIPE_MIN_LIFETIME_SECONDS = 30 * 60
-const STRIPE_EXPIRY_GRACE_SECONDS = 15
 const MAX_HOLD_AGE_SECONDS = 5
 const REQUEST_TIMEOUT_MS = 3000
 const MAX_RECONCILIATION_PAGES = 3
 const RECONCILIATION_CLOCK_SKEW_SECONDS = 5
-
-// Stripe requires at least 30 minutes from its creation time. Hourmere holds are already
-// committed by then and retain their original deadline. Only the provider deadline gets grace.
-function stripeExpiry(input: CheckoutOperation): number {
-  return Math.ceil(Date.parse(input.expiresAt) / 1000) + STRIPE_EXPIRY_GRACE_SECONDS
-}
 
 function bindingMismatch(): DomainError {
   return new DomainError('conflict', 'payment_provider_binding_mismatch')
@@ -41,7 +39,7 @@ function boundSession(input: CheckoutOperation, session: Stripe.Checkout.Session
     session.ui_mode !== 'hosted_page' ||
     session.amount_total !== input.amountMinor ||
     session.currency !== input.currency ||
-    session.expires_at !== stripeExpiry(input) ||
+    session.expires_at !== checkoutSessionExpiry(input.expiresAt) ||
     session.client_reference_id !== input.attemptId ||
     session.metadata?.hourmere_checkout_attempt_id !== input.attemptId ||
     session.metadata?.hourmere_booking_id !== input.bookingId
@@ -120,7 +118,7 @@ export function createStripePaymentProvider(
                 },
               },
             ],
-            expires_at: stripeExpiry(input),
+            expires_at: checkoutSessionExpiry(input.expiresAt),
             success_url: returnUrl,
             cancel_url: returnUrl,
             client_reference_id: input.attemptId,
@@ -138,7 +136,7 @@ export function createStripePaymentProvider(
       await verifyAccount(input)
       const created = {
         gte: Math.floor(Date.parse(input.startedAt) / 1000) - RECONCILIATION_CLOCK_SKEW_SECONDS,
-        lte: stripeExpiry(input) - STRIPE_MIN_LIFETIME_SECONDS,
+        lte: checkoutSessionExpiry(input.expiresAt) - STRIPE_MIN_LIFETIME_SECONDS,
       }
       let cursor: string | undefined
       let found: CheckoutSession | null = null

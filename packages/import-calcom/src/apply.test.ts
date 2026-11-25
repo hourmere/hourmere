@@ -337,20 +337,20 @@ describe.skipIf(!process.env.DATABASE_URL)('authorized target preview and atomic
     }
   })
 
-  async function overdueHoldImport(api = applyExtractedImport) {
-    const f = await setup()
+  function insertTargetHold(
+    f: Awaited<ReturnType<typeof setup>>,
+    deadline: string,
+    shiftHours = 0,
+  ) {
     const booking = required(f.plan.plan.bookings[0])
-    const clock = await target.pool.query<{ deadline: string }>(
-      "SELECT (clock_timestamp()-interval '1 minute')::text AS deadline",
-    )
-    const hold = await createDb(target.pool)
+    return createDb(target.pool)
       .transaction()
       .execute((trx) =>
         insertBooking(trx, {
           organizationId: f.user.principal.organization.id,
           eventTypeId: null,
-          start: Temporal.Instant.from(booking.start),
-          end: Temporal.Instant.from(booking.end),
+          start: Temporal.Instant.from(booking.start).add({ hours: shiftHours }),
+          end: Temporal.Instant.from(booking.end).add({ hours: shiftHours }),
           title: 'Abandoned checkout',
           location: null,
           responses: {},
@@ -362,9 +362,16 @@ describe.skipIf(!process.env.DATABASE_URL)('authorized target preview and atomic
           notificationSnapshot: notificationSnapshot(null),
           changeCutoffs: { rescheduleCutoffMinutes: null, cancelCutoffMinutes: null },
           manageTokenHash: null,
-          paymentHoldExpiresAt: Temporal.Instant.from(required(clock.rows[0]).deadline).toString(),
+          paymentHoldExpiresAt: Temporal.Instant.from(deadline).toString(),
         }),
       )
+  }
+  async function overdueHoldImport(api = applyExtractedImport) {
+    const f = await setup()
+    const clock = await target.pool.query<{ deadline: string }>(
+      "SELECT (clock_timestamp()-interval '1 minute')::text AS deadline",
+    )
+    const hold = await insertTargetHold(f, required(clock.rows[0]).deadline)
     f.plan = await repreview(f)
     expect(f.plan.blocked).toBe(false)
     const result = await api(target.pool, f.plan, f.input, async () => f.snapshot)
@@ -375,6 +382,41 @@ describe.skipIf(!process.env.DATABASE_URL)('authorized target preview and atomic
   }
   it('imports over an unswept overdue payment hold and releases its occupancy', async () => {
     await overdueHoldImport()
+  })
+  it('applies an unchanged preview when an unrelated payment hold crosses its deadline', async () => {
+    const f = await setup()
+    const deadline = '2040-01-01T00:00:00.000Z'
+    const { id } = await insertTargetHold(f, deadline, 3)
+    const clock = { now: '2039-12-31T23:59:59.000Z' }
+    const pool = withDatabaseClock(target.pool, clock)
+    const { connectionString: _connectionString, ...options } = f.input
+    const client = await pool.connect()
+    try {
+      const state = await readTargetState(
+        client,
+        f.input.sourceId,
+        f.input.authorization,
+        f.snapshot.cutoff,
+      )
+      expect(state.bookings).toContainEqual(
+        expect.objectContaining({ id, status: 'pending_payment', payment_hold_active: true }),
+      )
+      f.plan = buildPreview(f.snapshot, state, options)
+    } finally {
+      client.release()
+    }
+    expect(f.plan.blocked).toBe(false)
+    clock.now = deadline
+    expect(await applyExtractedImport(pool, f.plan, f.input, async () => f.snapshot)).toMatchObject(
+      {
+        code: 'IMPORT_APPLIED',
+        status: 'applied',
+        committed: true,
+      },
+    )
+    expect((await target.pool.query('SELECT status FROM bookings WHERE id=$1', [id])).rows).toEqual(
+      [{ status: 'expired' }],
+    )
   })
   it('detects omission of import admission cleanup in an isolated source copy', async () => {
     await checkSourceMutation(

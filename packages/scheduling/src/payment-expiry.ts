@@ -33,6 +33,7 @@ export async function eraseUnpaidHoldPersonalData(db: Db): Promise<number> {
     )
     UPDATE bookings b SET title='Unpaid booking', responses='{}'::jsonb, location=NULL,
       location_option=NULL, success_redirect=NULL, manage_token_hash=NULL, cancel_reason=NULL,
+      payment_idempotency_key=NULL, idempotency_fingerprint=NULL,
       payment_pii_erased_at=clock_timestamp()
     FROM due WHERE b.id=due.id
     RETURNING b.id`.execute(db)

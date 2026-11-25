@@ -377,8 +377,12 @@ describe.skipIf(!process.env.DATABASE_URL)('payment source-copy protection mutat
     const mutant = await copy(
       './payments.ts',
       'confirmPaymentHold',
-      "if (confirm && row.status !== 'confirmed')",
-      'if (confirm)',
+      "return row.payment_confirmed_at ? 'confirmed' : 'refund_required'",
+      `if (row.payment_confirmed_at) await ctx.notify?.(trx, {
+        type: 'created', bookingId: row.id,
+        start: Temporal.Instant.from(row.start_at.toISOString()),
+      }, ctx.now())
+      return row.payment_confirmed_at ? 'confirmed' : 'refund_required'`,
     )
     await expectKilled(mutant, (copy) =>
       replay(copy.confirmPaymentHold as typeof confirmPaymentHold),
@@ -450,6 +454,9 @@ describe.skipIf(!process.env.DATABASE_URL)('payment source-copy protection mutat
   })
   async function retention(api = eraseUnpaidHoldPersonalData) {
     const { ctx, host, q } = await fixture()
+    const digest = createHash('sha256')
+      .update(JSON.stringify({ name: 'Private Invitee', email: 'private@example.com' }))
+      .digest()
     const make = async (days: number, status: 'expired' | 'cancelled' | 'pending_payment') => {
       const { id } = await db.transaction().execute((trx) =>
         insertBooking(trx, {
@@ -482,12 +489,16 @@ describe.skipIf(!process.env.DATABASE_URL)('payment source-copy protection mutat
             .toString(),
         }),
       )
-      if (status !== 'pending_payment')
-        await db
-          .updateTable('bookings')
-          .set({ status, cancelled_at: status === 'cancelled' ? sql`clock_timestamp()` : null })
-          .where('id', '=', id)
-          .execute()
+      await db
+        .updateTable('bookings')
+        .set({
+          status,
+          cancelled_at: status === 'cancelled' ? sql`clock_timestamp()` : null,
+          payment_idempotency_key: `retry_${id}`,
+          idempotency_fingerprint: digest,
+        })
+        .where('id', '=', id)
+        .execute()
       return id
     }
     const oldExpired = await make(8, 'expired')
@@ -526,7 +537,12 @@ describe.skipIf(!process.env.DATABASE_URL)('payment source-copy protection mutat
       .execute()
     await db
       .updateTable('bookings')
-      .set({ status: 'cancelled', cancelled_at: sql`clock_timestamp()` })
+      .set({
+        status: 'cancelled',
+        cancelled_at: sql`clock_timestamp()`,
+        payment_idempotency_key: `retry_${confirmed.id}`,
+        idempotency_fingerprint: digest,
+      })
       .where('id', '=', confirmed.id)
       .execute()
     for (const id of [recent, confirmed.id])
@@ -542,7 +558,14 @@ describe.skipIf(!process.env.DATABASE_URL)('payment source-copy protection mutat
       expect(
         await db
           .selectFrom('bookings')
-          .select(['title', 'responses', 'location', 'payment_pii_erased_at'])
+          .select([
+            'title',
+            'responses',
+            'location',
+            'payment_pii_erased_at',
+            'payment_idempotency_key',
+            'idempotency_fingerprint',
+          ])
           .where('id', '=', id)
           .executeTakeFirstOrThrow(),
       ).toEqual({
@@ -550,6 +573,8 @@ describe.skipIf(!process.env.DATABASE_URL)('payment source-copy protection mutat
         responses: {},
         location: null,
         payment_pii_erased_at: expect.any(Date),
+        payment_idempotency_key: null,
+        idempotency_fingerprint: null,
       })
       expect(
         await db
@@ -561,14 +586,16 @@ describe.skipIf(!process.env.DATABASE_URL)('payment source-copy protection mutat
     }
     for (const id of [recent, pending, confirmed.id]) {
       expect(
-        (
-          await db
-            .selectFrom('bookings')
-            .select('payment_pii_erased_at')
-            .where('id', '=', id)
-            .executeTakeFirstOrThrow()
-        ).payment_pii_erased_at,
-      ).toBeNull()
+        await db
+          .selectFrom('bookings')
+          .select(['payment_pii_erased_at', 'payment_idempotency_key', 'idempotency_fingerprint'])
+          .where('id', '=', id)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({
+        payment_pii_erased_at: null,
+        payment_idempotency_key: `retry_${id}`,
+        idempotency_fingerprint: digest,
+      })
       expect(
         await db
           .selectFrom('booking_attendees')

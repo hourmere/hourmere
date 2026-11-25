@@ -153,8 +153,8 @@ unchanged. The migration also indexes the provenance rows by source User
 and, for suspended rows, by child team and account.
 
 The [paid-booking design](payments.md) describes pending-payment holds, bounded slot
-occupancy, terminal transitions and the future Stripe/refund integration. Checkout is not
-available in this foundation release.
+occupancy, terminal transitions and the Stripe webhook receiver. Public Checkout and
+automatic refunds remain outside this foundation release.
 
 ## Principles
 
@@ -2458,6 +2458,9 @@ trigger. Booking lists, details and activity include hold-backed rows only after
 is present, including paid bookings later cancelled. Unconfirmed terminal holds remain hidden.
 Payment hold retry keys use a separate `payment_idempotency_key` column and organization-scoped
 unique index, so they cannot collide with ordinary booking idempotency keys.
+The seven-day personal-data purge for terminal, never-confirmed holds clears this retry key
+and the request fingerprint alongside attendee data. Checkout and payment references use
+separate identities and remain available for reconciliation.
 
 Migration `0124_payment_checkout_attempts.sql` adds one optional Checkout attempt per hold.
 It stores the amount and currency snapshot, account and mode, a random attempt ID and its
@@ -2465,6 +2468,11 @@ creation key, and the operation start time and Session ID as they become known. 
 holds stay unchanged. The booking's deadline still governs capacity and payment acceptance.
 The attempt survives hold contact erasure. Its foreign key blocks booking deletion while
 the attempt is retained. Checkout URLs and provider credentials are kept out of storage.
+
+Migration `0189_stripe_webhook_event_receipts.sql` stores only the verified Stripe event ID
+as the receipt's primary key. The receiver inserts the receipt in the transaction that
+applies any hold transition. Rolling back the transition also rolls back the receipt, so a
+delivery can retry.
 
 ## Private attendee no-show markers
 

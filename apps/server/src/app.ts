@@ -62,6 +62,7 @@ import { restTeamReadAccess } from './sso-read-routes.ts'
 import type { SamlSignInModule } from './sso-saml-sign-in.ts'
 import { ssoStorageDiagnostic } from './sso-storage-errors.ts'
 import type { SsoTeamReadDeps } from './sso-team-reads.ts'
+import { mountStripeWebhook, type StripeWebhookDeps } from './stripe-webhook.ts'
 import {
   successRedirectErrorField,
   successRedirectIssueField,
@@ -75,6 +76,7 @@ export interface AppDeps {
   checkDb: () => Promise<void>
   scim?: ScimOptions | undefined
   smsInbound?: ((request: Request) => Promise<Response>) | undefined
+  stripeWebhook?: StripeWebhookDeps | undefined
   /** Minimal confirmation transports for emailed waitlist capabilities. */
   waitlist?:
     | {
@@ -422,6 +424,7 @@ export function createApp({
   checkDb,
   scim,
   smsInbound,
+  stripeWebhook,
   authHandler,
   resolveCaller,
   publicUrl,
@@ -672,6 +675,7 @@ export function createApp({
   app.use('/.well-known/*', resolveClientIp)
 
   app.post('/api/sms/twilio', (c) => (smsInbound ? smsInbound(c.req.raw) : c.notFound()))
+  mountStripeWebhook(app, stripeWebhook)
 
   app.openapi(healthRoute, async (c) => {
     try {

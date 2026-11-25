@@ -1150,6 +1150,10 @@ export interface PaymentCheckoutAttempts {
   started_at: Timestamp | null;
 }
 
+export interface PaymentStripeEvents {
+  event_id: string;
+}
+
 export interface PersonalOrganizations {
   organization_id: string;
   user_id: string;
@@ -1949,6 +1953,7 @@ export interface DB {
   organization_branding: OrganizationBranding;
   organization_operations: OrganizationOperations;
   payment_checkout_attempts: PaymentCheckoutAttempts;
+  payment_stripe_events: PaymentStripeEvents;
   personal_organizations: PersonalOrganizations;
   profiles: Profiles;
   round_robin_state: RoundRobinState;

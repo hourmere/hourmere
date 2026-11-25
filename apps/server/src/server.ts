@@ -727,6 +727,7 @@ export function productionAppOptions({
     checkDb,
     scim: { db, enabled: config.SCIM_PROVISIONING_ENABLED },
     smsInbound: createConfiguredSmsInbound(config, db),
+    stripeWebhook: { db, config: config.stripe, enabled: config.PAID_BOOKINGS_ENABLED, notify },
     authHandler: auth.handler,
     resolveCaller,
     publicUrl: config.PUBLIC_URL,

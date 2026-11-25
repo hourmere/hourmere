@@ -44,7 +44,7 @@ function readSecret(
   }
 }
 
-/** Loaded on startup for every server role, independently of the reserved paid-booking flag. */
+/** Loaded on startup for every server role, independently of the receiver's on/off flag. */
 export function loadStripeConfig(env: NodeJS.ProcessEnv): StripeConfig | undefined {
   const accountId = env.STRIPE_ACCOUNT_ID
   const selectedMode = env.STRIPE_MODE || undefined
