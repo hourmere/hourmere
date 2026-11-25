@@ -107,9 +107,9 @@ const session = (principal: Principal): Principal => ({
   organization: principal.organization,
 })
 
-const oauth = (principal: Principal): Principal => ({
+const oauth = (principal: Principal, oauthConsentId: string = randomUUID()): Principal => ({
   kind: 'oauth',
-  oauthConsentId: randomUUID(),
+  oauthConsentId,
   clientId: 'synthetic-agent',
   scopes: ['mcp'],
   user: principal.user,
@@ -184,11 +184,16 @@ describe.skipIf(!serverUrl)('idempotent routing form configuration writes', () =
   }
 
   /** A full API key of `user` in `organizationId`, stored so that writes can recheck it. */
-  async function apiKey(user: TestUser, organization: Principal['organization']) {
+  async function apiKey(
+    user: TestUser,
+    organization: Principal['organization'],
+    apiKeyId?: string,
+  ) {
     const now = new Date()
     const { id } = await db
       .insertInto('auth.apikey')
       .values({
+        id: apiKeyId,
         configId: 'default',
         referenceId: user.id,
         key: randomUUID(),
@@ -466,6 +471,31 @@ describe.skipIf(!serverUrl)('idempotent routing form configuration writes', () =
       expect(version.id).not.toBe(initial.version.id)
     }
     expect(await counts(space.team.id)).toEqual({ forms: 4, versions: 4, operations: 8 })
+  }
+
+  /** The credential kind still separates requests when their actor IDs collide. */
+  async function equalActorIdsNeverMatch(S: ServiceModule) {
+    const { user, principal, organizationId } = await personalSpace()
+    const key = await apiKey(user, principal.organization, user.id)
+    const grant = testContext(db, oauth(principal, user.id))
+
+    for (const [actor, other] of [
+      [key, grant],
+      [grant, key],
+    ] as const) {
+      const creation = { requestId: randomUUID(), slug: slug(), title: 'Shared ID', ...content() }
+      const form = await S.createRoutingForm(actor, creation)
+      const otherCreation = await settle(S.createRoutingForm(other, creation))
+      expect(otherCreation.value, 'cross-credential creation must not replay').toBeUndefined()
+      expect(otherCreation.error).toMatchObject({ code: 'slug_taken' })
+
+      const publication = { expectedRevision: 1, requestId: randomUUID() }
+      await S.publishRoutingForm(actor, form.id, publication)
+      expect(await failure(() => S.publishRoutingForm(other, form.id, publication))).toMatchObject({
+        code: 'routing_revision_conflict',
+      })
+    }
+    expect(await counts(organizationId)).toEqual({ forms: 2, versions: 2, operations: 4 })
   }
 
   /** One user's key in their personal organization never matches it in a team. */
@@ -786,6 +816,8 @@ describe.skipIf(!serverUrl)('idempotent routing form configuration writes', () =
   describe('scope and lifecycle', () => {
     it('never matches a key of another actor or credential', () =>
       keysOfOtherActorsNeverMatch(Service))
+    it('keeps API key and OAuth replays separate when their IDs equal the user ID', () =>
+      equalActorIdsNeverMatch(Service))
     it('never matches a key of the same user in another organization', () =>
       keysOfOtherOrganizationsNeverMatch(Service))
     it('waits for a version cleanup that removes the record of a retry', () =>
@@ -863,6 +895,15 @@ describe.skipIf(!serverUrl)('idempotent routing form configuration writes', () =
   })
 
   // --- Source-copy mutation controls --------------------------------------------------------
+
+  it('detects a key lookup without the credential kind', async () => {
+    const copy = await sourceCopy(["    .where('actor_kind', '=', operation.actorKind)\n", ''])
+    await expect(equalActorIdsNeverMatch(copy)).rejects.toMatchObject({
+      name: 'AssertionError',
+      message: expect.stringContaining('cross-credential creation must not replay'),
+      actual: expect.objectContaining({ title: 'Shared ID' }),
+    })
+  })
 
   it.each([
     {
