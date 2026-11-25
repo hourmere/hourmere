@@ -268,6 +268,21 @@ describe.skipIf(!url)('payment holds', () => {
     })
     expect(ctx.notify).not.toHaveBeenCalled()
   })
+  it('requires a bound Stripe Session observation for a priced hold', async () => {
+    const { ctx, input } = await setup()
+    const { id } = await createPaymentHold(
+      { ...ctx, paymentProvider: new FakePaymentProvider() },
+      input,
+      price,
+    )
+    await cancelPaymentHold(ctx, id)
+    await expect(confirmPaymentHold(ctx, id, 'pi_unverified')).rejects.toMatchObject({
+      code: 'payment_provider_binding_mismatch',
+    })
+    await expect(
+      db.selectFrom('payment_refund_obligations').select('id').execute(),
+    ).resolves.toEqual([])
+  })
   it('pins the event notification policy when the hold starts', async () => {
     const { ctx, input, eventTypeId } = await setup()
     const disabledRules = { reminders: [], followUps: [] }
