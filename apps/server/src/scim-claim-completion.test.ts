@@ -1155,9 +1155,34 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
       'Claims without an invitation expire after 48 hours without renewal',
       "No address is marked verified, and neither the account's profile, address or sign-in methods nor the entry's provisioned profile or timestamps change.",
       '| Claim completion through invitation acceptance | User creation and claim intent | Existing invitation acceptance; no new operation/tool/command | Resource test flag only |',
-      '| Claim completion through SSO linking | Claim completion through invitation acceptance; SSO design PR #247 and accepted linking implementation | SSO linking completion; no new operation/tool/command | Resource test flag only |',
     ])
       expect(says(sentence), sentence).toBe(true)
+  })
+
+  it('orders the SSO claim steps and keeps the explicit flow hard-off until release', () => {
+    const plan = design.split('## Ordered implementation plan')[1]?.split('\n## ')[0] ?? ''
+    const steps = [
+      'Claim provenance and implicit-link removal',
+      'SCIM-to-SSO provider binding',
+      'Claim completion through explicit SSO linking',
+      'Invitation-free claim renewal',
+      'Directory claim browser controls',
+      'OIDC directory claim release',
+      'SAML directory claim release',
+    ]
+    let previous = -1
+    for (const step of steps) {
+      const index = plan.indexOf(`| ${step} |`)
+      expect(index, step).toBeGreaterThan(previous)
+      previous = index
+      const [row = ''] = plan.slice(index).split('\n', 1)
+      const flag = row.split(' | ')[3]
+      if (step === 'OIDC directory claim release')
+        expect(flag).toContain('requires SCIM on, OIDC on and explicit owner binding')
+      else if (step === 'SAML directory claim release')
+        expect(flag).toContain('requires SCIM on, SAML on and explicit owner binding')
+      else expect(flag, step).toMatch(/^Explicit SSO claim flow hard-off/)
+    }
   })
 
   it("completes a SCIM-issued invitation's claim on acceptance by its addressee", async () =>
