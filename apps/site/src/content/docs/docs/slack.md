@@ -119,7 +119,9 @@ pending (including retries), another test receives HTTP 409 `slack_test_pending`
 MCP share a limit of five test requests per minute per organization in each server process
 (HTTP 429 on REST). Only requests from a current owner/admin for an existing destination
 count; refused (403) and unknown-destination (404) requests do not, so team members cannot
-use up the admins' limit. The pending-sample guard applies across all server instances.
+use up the admins' limit. Once the limit is reached, authorized requests receive the
+rate-limit response before the destination lookup, without waiting for an active delivery.
+The pending-sample guard applies across all server instances.
 
 API keys need `read` or `full` to list and `full` to create, update, delete or test;
 organization ownership/admin permission still applies. Browser-session writes require
