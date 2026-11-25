@@ -17,7 +17,7 @@ must approve publication through the [release workflow](https://github.com/hourm
   separately with `SSO_OIDC_ENABLED=true` and `SSO_SAML_ENABLED=true`. Turning a protocol off
   suspends its browser proofs and delegations while stored team enforcement continues. Enrolled
   owners can recover through their Hourmere mailbox, and operators can turn off enforcement
-  without reaching the identity provider. See the [single sign-on guide](https://hourmere.com/docs/sso).
+  without reaching the identity provider. See the [single sign-on guide](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/sso.md).
 
 - SCIM 2.0 provisioning for team Users and explicitly mapped child-team Groups,
   available on every instance without a paid plan. Discovery, directory membership
