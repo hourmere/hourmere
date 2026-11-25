@@ -12,12 +12,12 @@ registerHooks({
       : nextResolve(specifier, context)
   },
 })
-const { configWithoutCloudSupport } = await import('@n8n/node-cli/eslint')
+const { config } = await import('@n8n/node-cli/eslint')
 
-// Node's crypto implements Hourmere's signed delivery protocol. This local community
-// package does not claim n8n Cloud verification, whose rules prohibit built-in imports.
+// The full n8n rules are active. The CLI's manifest strict flag requires the
+// unmodified scaffold config, which cannot load the compiler hook or license rule override.
 export default [
-  ...configWithoutCloudSupport,
+  ...config,
   { ignores: ['**/*.test.ts', 'scripts/**'] },
   {
     files: ['package.json'],
