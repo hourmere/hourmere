@@ -5,7 +5,11 @@
   "license": "AGPL-3.0-only",
   "private": true,
   "keywords": [
-    "n8n-community-node-package"
+    "n8n-community-node-package",
+    "hourmere",
+    "scheduling",
+    "bookings",
+    "webhooks"
   ],
   "author": {
     "name": "Cobaltmere, LLC",
@@ -17,14 +21,16 @@
     "directory": "tools/n8n-nodes-hourmere"
   },
   "homepage": "https://hourmere.com/docs/n8n",
+  "bugs": "https://github.com/hourmere/hourmere/issues",
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "n8n-node build && npm run pack:smoke",
-    "lint": "n8n-node lint",
+    "lint": "eslint . --max-warnings 0",
     "typecheck": "tsc --noEmit",
     "pack:smoke": "node scripts/pack-smoke.mjs",
     "prepublishOnly": "node -e \"if (process.env.HOURMERE_N8N_PUBLISH !== '1') { console.error('Publishing requires separate approval and HOURMERE_N8N_PUBLISH=1'); process.exit(1); }\"",
@@ -47,6 +53,7 @@
   "devDependencies": {
     "@n8n/node-cli": "0.54.2",
     "@types/node": "26.6.6",
+    "eslint": "9.29.0",
     "n8n-workflow": "2.45.1",
     "typescript": "5.9.3",
     "vitest": "5.1.0"

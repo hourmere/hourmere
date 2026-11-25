@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { constants } from 'node:fs'
+import { copyFile, cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -8,6 +9,8 @@ import { fileURLToPath } from 'node:url'
 
 const packageDirectory = fileURLToPath(new URL('..', import.meta.url))
 const require = createRequire(new URL('../package.json', import.meta.url))
+const documentation = ['README.md', 'CHANGELOG.md', 'LICENSE']
+const [releaseTarball] = process.argv.slice(2)
 const scratch = await mkdtemp(join(tmpdir(), 'hourmere-n8n-pack-'))
 try {
   await writeFile(join(scratch, 'user.npmrc'), '')
@@ -24,16 +27,41 @@ try {
   }
   const npm = (args, cwd = packageDirectory) =>
     execFileSync('npm', args, { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  const manifest = JSON.parse(await readFile(join(packageDirectory, 'package.json'), 'utf8'))
+  assert.equal(manifest.private, true)
+  assert.deepEqual(manifest.publishConfig, { registry: 'https://registry.invalid/' })
+  let packDirectory = packageDirectory
+  if (releaseTarball) {
+    // Run the committed guard explicitly: npm skips prepublishOnly for a tarball.
+    execFileSync('npm', ['run', 'prepublishOnly', '--ignore-scripts=false'], {
+      cwd: packageDirectory,
+      env: { ...env, HOURMERE_N8N_PUBLISH: process.env.HOURMERE_N8N_PUBLISH },
+      stdio: 'inherit',
+    })
+    packDirectory = join(scratch, 'release')
+    await mkdir(packDirectory)
+    await cp(join(packageDirectory, 'dist'), join(packDirectory, 'dist'), { recursive: true })
+    for (const file of documentation) {
+      await copyFile(join(packageDirectory, file), join(packDirectory, file))
+    }
+    delete manifest.private
+    delete manifest.scripts.prepublishOnly
+    manifest.publishConfig = { registry: 'https://registry.npmjs.org/' }
+    await writeFile(join(packDirectory, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`)
+  }
   const [pack] = JSON.parse(
-    npm(['pack', '--json', '--ignore-scripts', '--pack-destination', scratch]),
+    npm(['pack', '--json', '--ignore-scripts', '--pack-destination', scratch], packDirectory),
   )
+  const paths = pack.files.map(({ path }) => path)
+  const rootFiles = [...documentation, 'package.json']
+  assert.deepEqual(paths.filter((path) => !path.includes('/')).sort(), rootFiles.sort())
   assert(
-    pack.files.every(
-      ({ path }) =>
-        ['README.md', 'LICENSE', 'package.json'].includes(path) || path.startsWith('dist/'),
+    paths.every(
+      (path) => rootFiles.includes(path) || /^dist\/.+\.(?:js|d\.ts|json|svg)$/.test(path),
     ),
+    'Tarball contains an unexpected file',
   )
-  assert(pack.files.every(({ path }) => !/\.test\.|\.env|mutation/.test(path)))
+  assert(paths.every((path) => !/\.test\.|\.env|mutation/.test(path)))
   const install = join(scratch, 'install')
   // n8n supplies its own workflow peer. Keep this smoke install offline and install
   // the exact tested peer by linking the standalone copy after the tarball is unpacked.
@@ -56,8 +84,9 @@ try {
     join(hostModules, 'n8n-workflow'),
   )
   const installed = join(hostModules, 'n8n-nodes-hourmere')
-  const manifest = JSON.parse(await readFile(join(installed, 'package.json'), 'utf8'))
-  assert.equal(manifest.peerDependencies['n8n-workflow'], '*')
+  const installedManifest = JSON.parse(await readFile(join(installed, 'package.json'), 'utf8'))
+  assert.deepEqual(installedManifest, manifest)
+  assert.deepEqual(installedManifest.peerDependencies, { 'n8n-workflow': '*' })
   const script = `
     const assert = require('node:assert/strict');
     const fs = require('node:fs');
@@ -88,6 +117,9 @@ try {
   console.log(
     `Packed install smoke passed: ${pack.files.length} files; both nodes, credentials, icons and translations load.`,
   )
+  if (releaseTarball) {
+    await copyFile(join(scratch, pack.filename), releaseTarball, constants.COPYFILE_EXCL)
+  }
 } finally {
   await rm(scratch, { recursive: true, force: true })
 }
