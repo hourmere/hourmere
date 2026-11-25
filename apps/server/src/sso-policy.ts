@@ -5,7 +5,12 @@ import { DomainError } from '@hourmere/scheduling'
 import { HTTPException } from 'hono/http-exception'
 import { sql } from 'kysely'
 import { z } from 'zod'
-import { requireSsoEnabled, requireSsoRetained, type SsoCapabilities } from './sso.ts'
+import {
+  requireSsoEnabled,
+  requireSsoRetained,
+  type SsoCapabilities,
+  ssoProtocolEnabled,
+} from './sso.ts'
 import { lockSsoDomain } from './sso-domains.ts'
 import { type FreshProofDeps, runWithFreshProof } from './sso-fresh-proof.ts'
 import { providerTestStatus } from './sso-oidc-test-receipts.ts'
@@ -23,7 +28,7 @@ export type SsoPolicyDeps = FreshProofDeps
 const denied = () => new DomainError('forbidden', 'team_management_access_denied')
 
 async function getTestedProviders(db: Db, capabilities: SsoCapabilities, organizationId: string) {
-  requireSsoEnabled(capabilities, 'oidc')
+  requireSsoEnabled(capabilities)
   // The organization lock serializes new test receipts. Lock both current results
   // under that lock so they also survive retention through the policy commit.
   const enabled = await db
@@ -38,8 +43,7 @@ async function getTestedProviders(db: Db, capabilities: SsoCapabilities, organiz
     .where('retired_at', 'is', null)
     .where('enabled', '=', true)
     .execute()
-  // Only OIDC supports step-up today, even when SAML is enabled.
-  const available = enabled.filter(({ protocol }) => protocol === 'oidc')
+  const available = enabled.filter(({ protocol }) => ssoProtocolEnabled(capabilities, protocol))
   if (enabled.length && !available.length) throw new DomainError('not_found', 'sso_disabled')
   const tested = available.filter(
     ({ testStatus, ownerTestStatus }) => testStatus === 'passed' && ownerTestStatus === 'passed',
