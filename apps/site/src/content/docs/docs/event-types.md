@@ -21,8 +21,9 @@ availability before expecting bookable times; calendar connections are optional.
 The remaining settings start folded: **Additional durations**, **Description and visibility**,
 **Location options and conferencing**, **Booking waitlist**, **Reminders and follow-ups**,
 **Booking form**, **After booking**, and **When people can book**. Team events also have
-host and scheduling controls and initially select you as the host. Open a section only
-when you need its settings. Its header summarizes the current values, even while the
+host and scheduling controls and initially select you as the host. The first screen
+shows progress or a retry action while the editor checks your team role. Open a section
+only when you need its settings. Its header summarizes the current values, even while the
 section is closed. The same controls are available on phones and desktop, in English
 and Simplified Chinese.
 
@@ -32,6 +33,7 @@ and Simplified Chinese.
 时间表、零提前预约时间和前后缓冲、不限制预约窗口与预约数量、不设置受邀人改期或取消截止。
 新事件默认启用且列出；创建事件不会创建工作时间。空账号需另设可用时间，连接日历不是必需条件。
 即使设置组处于折叠状态，标题下方也会显示当前设置摘要。
+团队活动的首屏会显示角色检查进度，检查失败时可在此重试。
 
 ## Preview the booking page
 
@@ -56,11 +58,12 @@ the editor.
 ## Edit and save
 
 Choose the event title or **Edit** in the list. Sections with saved non-default values
-open automatically. Closing a section keeps its values; a validation error opens the
-relevant section and focuses the affected field. Saving an untouched form reports that
-there are no changes and sends no update. Changing only a timing unit also leaves the
-form unchanged. For actual edits, save before sharing: **View and share** uses the saved
-booking link, not an unsaved address.
+open automatically. Closing a section keeps its values. Validation focuses the error
+summary for visible fields and opens a closed section to focus its first invalid field.
+Saving an untouched form reports that there are no changes and sends no update. Changing
+only a timing unit or moving locations back to their original order also leaves the
+form unchanged. Save edits before sharing. **View and share** uses the saved booking
+link.
 
 Under **When people can book**, minimum notice means how far ahead a meeting must be
 booked; the booking window limits how far into the future invitees can book. Notice and
@@ -85,8 +88,9 @@ See [meeting location choices](/docs/location-choices). Reschedule and cancel de
 inputs remain in whole minutes; each booking keeps its original deadlines. See
 [change deadlines](/docs/change-deadlines), including the earlier effective reschedule cutoff.
 
-中文：在列表点标题或“编辑”，已保存且非默认的设置组会自动展开。收起不会清空数据，校验失败
-会展开出错组并聚焦字段。未修改时保存会提示无需保存，不发送更新；只切换时间单位也不算修改。
+中文：在列表点标题或“编辑”，已保存且非默认的设置组会自动展开。收起不会清空数据。可见字段
+校验失败时，焦点移到错误摘要。折叠组内有错时，会展开该组并聚焦第一个出错的字段。未修改时
+保存会提示无需保存，也不会发送更新。只切换时间单位或把地点移回原顺序都不算修改。
 保存后用“查看与分享”复制已保存链接。提前预约时间和缓冲值打开时，正数能被 1440 整除则显示天，
 否则能被 60 整除则显示小时，其余（含零）显示分钟；预约窗口始终先显示天。单位选择不保存，
 提示中的等值是当前草稿。列表和时长选项则按天、小时、分钟组合显示，例如 90 分钟显示为

@@ -569,7 +569,6 @@ export const admin = {
   'Include the default duration in the allowed durations.':
     'Include the default duration in the allowed durations.',
   'Added {0}.': 'Added {0}.',
-  'Removed {0}. Default duration: {1}.': 'Removed {0}. Default duration: {1}.',
   Scope: 'Scope',
   'Bookings (read/write)': 'Bookings (read/write)',
   'Read only': 'Read only',
@@ -3300,4 +3299,7 @@ export const admin = {
     'An enabled identity provider with a verified domain is required.',
   'Before requiring SSO, have an owner test the identity provider draft, then enable that revision with a verified domain. A current owner must also accept recovery enrollment.':
     'Before requiring SSO, have an owner test the identity provider draft, then enable that revision with a verified domain. A current owner must also accept recovery enrollment.',
+
+  // Additional durations
+  'Removed {0}. Selected length: {1}.': 'Removed {0}. Selected length: {1}.',
 } as const

@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { chooseLanguage } from '../i18n/store.ts'
@@ -62,6 +62,23 @@ async function pick(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('one-time public booking', () => {
+  it('enables the language menu after the one-time event details load', async () => {
+    const event = Promise.withResolvers<Response>()
+    fakeApi(routes({ [`GET ${BASE}`]: () => event.promise }))
+    renderApp(PAGE)
+
+    const language = { name: 'Language: English' }
+    const loadingPicker = await screen.findByRole<HTMLButtonElement>('button', language)
+    expect(within(screen.getByRole('main')).getByRole('status').textContent).toBe('Loading…')
+    expect(loadingPicker.disabled).toBe(true)
+
+    await act(async () => {
+      event.resolve(json(200, { eventType: ONE_TIME_EVENT, prefill: PREFILL }))
+    })
+    await screen.findByRole('heading', { name: ONE_TIME_EVENT.title })
+    expect(screen.getByRole<HTMLButtonElement>('button', language).disabled).toBe(false)
+  })
+
   it('uses the token only in API paths, with editable prefill and the normal duration/questions/manage flow', async () => {
     const user = userEvent.setup()
     const api = fakeApi(routes())
@@ -296,6 +313,17 @@ describe('one-time public booking', () => {
       PREFILL.name,
     )
   })
+})
+
+it('omits the singleton location from one-time availability queries', async () => {
+  const api = fakeApi(routes())
+  renderApp(PAGE)
+  await screen.findByRole('button', { name: 'Monday, November 2, available' })
+  const calls = api.to(`GET ${BASE}/slots`)
+  expect(calls.length).toBeGreaterThan(0)
+  for (const call of calls) {
+    expect(new URL(call.path, 'http://x').searchParams.has('locationOptionId')).toBe(false)
+  }
 })
 
 it('loads one-time availability for the selected location', async () => {

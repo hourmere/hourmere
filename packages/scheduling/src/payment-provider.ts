@@ -8,6 +8,14 @@ export function checkoutSessionExpiry(expiresAt: string): number {
   return Math.ceil(Date.parse(expiresAt) / 1000) + 15
 }
 
+/** Bound discovery of a Checkout Session whose create response was lost. */
+export function checkoutReconciliationWindow(input: { startedAt: string; expiresAt: string }) {
+  return {
+    gte: Math.floor(Date.parse(input.startedAt) / 1000) - 5,
+    lte: checkoutSessionExpiry(input.expiresAt) - 30 * 60,
+  }
+}
+
 /** Durable operation fields only. No attendee contact details or provider credentials. */
 export interface CheckoutOperation {
   attemptId: string

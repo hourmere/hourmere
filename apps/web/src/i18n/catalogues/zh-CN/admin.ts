@@ -557,7 +557,6 @@ export const admin = {
   'Offer each duration only once.': '每种时长只能提供一次。',
   'Include the default duration in the allowed durations.': '请在可选时长中包含默认时长。',
   'Added {0}.': '已添加{0}。',
-  'Removed {0}. Default duration: {1}.': '已移除{0}。默认时长：{1}。',
   Scope: '权限范围',
   'Bookings (read/write)': '预约读写',
   'Read only': '只读',
@@ -3153,4 +3152,7 @@ export const admin = {
     '需要一个已启用且关联了已验证域名的身份提供方。',
   'Before requiring SSO, have an owner test the identity provider draft, then enable that revision with a verified domain. A current owner must also accept recovery enrollment.':
     '强制单点登录前，请让团队所有者测试身份提供方草稿，并在关联已验证的域名后启用该版本。还须有一位现任所有者接受恢复登记。',
+
+  // Additional durations
+  'Removed {0}. Selected length: {1}.': '已移除{0}。当前选中的时长为{1}。',
 } as const
