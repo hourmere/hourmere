@@ -25,7 +25,6 @@ import * as mailbox from './sso-mailbox-proof.ts'
 const PUBLIC_URL = 'http://localhost:4321'
 const ON: SsoCapabilities = { ssoOidcEnabled: true, ssoSamlEnabled: false }
 const OFF: SsoCapabilities = { ssoOidcEnabled: false, ssoSamlEnabled: false }
-const SAML_ONLY: SsoCapabilities = { ssoOidcEnabled: false, ssoSamlEnabled: true }
 const schema = z.object({
   name: z.string().min(1),
   nested: z.object({ a: z.number(), b: z.number() }).optional(),
@@ -562,8 +561,8 @@ describe.skipIf(!databaseUrl)('SSO fresh proof', () => {
     }
   })
 
-  it('refuses fresh administration on an enforced team while OIDC is unavailable', async () => {
-    const h = harness(real, SAML_ONLY)
+  it('refuses fresh administration on an enforced team while both protocols are off', async () => {
+    const h = harness(real, { ...OFF, ssoOperatorSetting: true })
     const attempts = await count('sso_attempts')
     const response = await write(
       h,

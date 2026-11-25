@@ -28,6 +28,23 @@ const denied = () => new DomainError('forbidden', 'team_management_access_denied
 const missing = () => new DomainError('not_found', 'sso_not_found')
 const changed = () => new DomainError('conflict', 'sso_configuration_changed')
 
+function recoveryProvider(db: Db, organizationId: string, providerId: string) {
+  return db
+    .selectFrom('sso_providers')
+    .select(['protocol', 'revision', 'retired_at'])
+    .where('organization_id', '=', organizationId)
+    .where('id', '=', providerId)
+}
+
+function requireRecoveryProtocol(
+  capabilities: SsoCapabilities,
+  protocol: string,
+): asserts protocol is 'oidc' | 'saml' {
+  // OIDC recovery survives setting-off. SAML remains unavailable while hard-off.
+  if (protocol !== 'oidc' && (protocol !== 'saml' || !capabilities.ssoSamlEnabled))
+    throw new DomainError('not_found', 'sso_disabled')
+}
+
 const notificationJob = 'sso-link-removal-email'
 const notificationPayload = z.strictObject({ userId: z.uuid(), language: z.enum(localeCodes) })
 export interface SsoLinkRemovalQueue {
@@ -40,6 +57,37 @@ export interface SsoLinkRemovalQueue {
 
 export interface SsoIdentityRecoveryDeps extends FreshProofDeps {
   notificationQueue?: SsoLinkRemovalQueue | undefined
+}
+
+/** A known hard-off SAML provider takes precedence over the team's browser-proof gate. */
+export async function refuseHardOffSamlLinkRemoval(
+  deps: SsoIdentityRecoveryDeps,
+  principal: Principal,
+  headers: Headers,
+  providerId: string,
+) {
+  const organizationId = principal.organization.id
+  const expectedOrganizationId = headers.get(EXPECTED_ORGANIZATION_HEADER)?.toLowerCase()
+  if (
+    deps.capabilities.ssoSamlEnabled ||
+    principal.kind !== 'session' ||
+    principal.organization.personal ||
+    headers.has('authorization') ||
+    headers.get('origin') !== new URL(deps.publicUrl).origin ||
+    expectedOrganizationId !== organizationId
+  )
+    return
+  try {
+    await checkTeamManagementAccess(deps.db, principal, organizationId, false, {
+      expectedOrganizationId,
+      allowPersonal: false,
+    })
+  } catch (error) {
+    if (error instanceof TeamManagementError) return
+    throw error
+  }
+  const provider = await recoveryProvider(deps.db, organizationId, providerId).executeTakeFirst()
+  if (provider) requireRecoveryProtocol(deps.capabilities, provider.protocol)
 }
 
 export function ssoLinkRemovalEmailJob({
@@ -139,17 +187,15 @@ export async function retireSsoIdentityLink(
       {
         authorize: async (trx) => {
           const actorAccess = await checkAccess(trx, true)
-          const provider = await trx
-            .selectFrom('sso_providers')
-            .select(['protocol', 'revision'])
-            .where('organization_id', '=', organizationId)
-            .where('id', '=', providerId)
-            .where('retired_at', 'is', null)
+          const provider = await recoveryProvider(trx, organizationId, providerId)
             .forShare()
             .executeTakeFirst()
+          if (!provider) throw missing()
+          const { protocol } = provider
+          requireRecoveryProtocol(deps.capabilities, protocol)
+          if (provider.retired_at) throw missing()
           const link = await findLink(trx).forUpdate().executeTakeFirst()
-          if (!provider || !link || link.retired_at || link.user_id !== affectedUserId)
-            throw missing()
+          if (!link || link.retired_at || link.user_id !== affectedUserId) throw missing()
           if (!self) {
             if (link.user_id === actor.userId) throw denied()
             const member = await trx
@@ -168,10 +214,6 @@ export async function retireSsoIdentityLink(
             )
               throw denied()
           }
-          // OIDC recovery survives setting-off. SAML remains unavailable while hard-off.
-          const { protocol } = provider
-          if (protocol !== 'oidc' && (protocol !== 'saml' || !deps.capabilities.ssoSamlEnabled))
-            throw new DomainError('not_found', 'sso_disabled')
           if (link.generation !== request.expectedLinkGeneration) throw changed()
           target = { userId: link.user_id, revision: provider.revision, protocol }
         },

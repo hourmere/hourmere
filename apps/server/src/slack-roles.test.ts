@@ -38,30 +38,37 @@ describe.skipIf(!process.env.DATABASE_URL)('Slack owner/admin checks through RES
     })
     const enqueue = vi.fn(async () => randomUUID())
     const deps = { db, ...settings, queue: { enqueue } }
-    const sessionId = randomUUID()
+    const ownerSessionId = randomUUID()
+    const memberSessionId = randomUUID()
     await db
       .insertInto('auth.session')
-      .values({
-        id: sessionId,
-        userId: member.id,
-        token: randomUUID(),
-        activeOrganizationId: team.id,
-        expiresAt: new Date(Date.now() + 3600000),
-        updatedAt: new Date(),
-      })
+      .values(
+        [
+          { id: ownerSessionId, userId: owner.id },
+          { id: memberSessionId, userId: member.id },
+        ].map((session) => ({
+          ...session,
+          token: randomUUID(),
+          activeOrganizationId: team.id,
+          expiresAt: new Date(Date.now() + 3600000),
+          updatedAt: new Date(),
+        })),
+      )
       .execute()
     const memberKey = team.as(member)
+    const ownerKey = team.as(owner)
     const principals = new Map<string, Principal>([
-      ['hm_owner', team.as(owner)],
+      ['hm_owner', ownerKey],
       ['hm_member', memberKey],
-      ['member_session', { ...memberKey, kind: 'session', sessionId }],
+      ['owner_session', { ...ownerKey, kind: 'session', sessionId: ownerSessionId }],
+      ['member_session', { ...memberKey, kind: 'session', sessionId: memberSessionId }],
     ])
     const app = productApp(db, principals, [slackDestinationRoutes(deps)])
     const rest = (token: string, path: string, method: string, body?: unknown) =>
       app.request(`/api/v1/slack-destinations${path}`, {
         method,
         headers: {
-          ...(token === 'member_session'
+          ...(principals.get(token)?.kind === 'session'
             ? {
                 cookie: syntheticSessionCookie(token),
                 origin: 'http://localhost:3000',
@@ -88,7 +95,15 @@ describe.skipIf(!process.env.DATABASE_URL)('Slack owner/admin checks through RES
         { caller, rateLimit: () => {} },
         () => {},
       )
-    return { team, destination, enqueue, rest, mcp, oauth, memberKey: memberKey as McpCaller }
+    return {
+      destination,
+      enqueue,
+      rest,
+      mcp,
+      oauth,
+      ownerKey: ownerKey as McpCaller,
+      memberKey: memberKey as McpCaller,
+    }
   }
 
   async function snapshot(id: string) {
@@ -117,6 +132,7 @@ describe.skipIf(!process.env.DATABASE_URL)('Slack owner/admin checks through RES
       ['member_session', 'team_management_access_denied'],
     ] as const) {
       for (const [path, method, body] of [
+        ['', 'POST', { url: attacker, events: ['booking.created'] }],
         [`/${id}`, 'PATCH', { url: attacker, isActive: false }],
         [`/${id}`, 'DELETE', undefined],
         [`/${id}/test`, 'POST', undefined],
@@ -131,6 +147,7 @@ describe.skipIf(!process.env.DATABASE_URL)('Slack owner/admin checks through RES
     }
     for (const caller of [memberKey, oauth])
       for (const [name, args] of [
+        ['create_slack_destination', { url: attacker, events: ['booking.created'] }],
         ['update_slack_destination', { id, url: attacker, isActive: false }],
         ['delete_slack_destination', { id }],
         ['test_slack_destination', { id }],
@@ -171,6 +188,66 @@ describe.skipIf(!process.env.DATABASE_URL)('Slack owner/admin checks through RES
     expect(refused.status).toBe(429)
     expect(Number(refused.headers.get('Retry-After'))).toBeGreaterThan(0)
     expect(await refused.json()).toEqual({ error: 'rate_limited' })
+    expect(enqueue).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects an exhausted test budget after authorization without waiting for delivery', async () => {
+    const { destination, enqueue, rest, mcp, ownerKey, oauth } = await fixture()
+    const id = destination.id
+    const path = `/${id}/test`
+    for (let i = 0; i < 5; i++)
+      expect((await rest('hm_owner', path, 'POST')).status).toBe(i === 0 ? 202 : 409)
+
+    const client = await owned.pool.connect()
+    let pending: Promise<unknown> | undefined
+    try {
+      await client.query('BEGIN')
+      // This is the destination row lock held by a delivery during its transport call.
+      await client.query('SELECT id FROM webhooks WHERE id = $1 FOR SHARE', [id])
+      const { pid } = (await client.query<{ pid: number }>('SELECT pg_backend_pid() AS pid'))
+        .rows[0] as { pid: number }
+      async function withoutWaiting<T>(name: string, run: () => T | Promise<T>): Promise<T> {
+        let settled = false
+        const request = Promise.resolve(run()).finally(() => {
+          settled = true
+        })
+        pending = request
+        while (!settled) {
+          const blocked = await owned.pool.query(
+            'SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND $1::int = ANY(pg_blocking_pids(pid))',
+            [pid],
+          )
+          expect(blocked.rows, `${name} queued behind delivery`).toHaveLength(0)
+        }
+        return request
+      }
+
+      for (const token of ['hm_owner', 'owner_session']) {
+        const refused = await withoutWaiting(`REST ${token}`, () => rest(token, path, 'POST'))
+        expect(refused.status).toBe(429)
+        expect(Number(refused.headers.get('Retry-After'))).toBeGreaterThan(0)
+        expect(await refused.json()).toEqual({ error: 'rate_limited' })
+      }
+      const mcpRefused = await withoutWaiting('MCP owner', () =>
+        mcp(ownerKey, 'test_slack_destination', { id }),
+      )
+      expect(mcpRefused.content).toMatchObject([
+        { text: expect.stringContaining('"error":"rate_limited"') },
+      ])
+
+      for (const token of ['hm_member', 'member_session'])
+        expect((await withoutWaiting(token, () => rest(token, path, 'POST'))).status).toBe(403)
+      const mcpMember = await withoutWaiting('MCP OAuth member', () =>
+        mcp(oauth, 'test_slack_destination', { id }),
+      )
+      expect(mcpMember.content).toMatchObject([
+        { text: expect.stringContaining('"error":"insufficient_role"') },
+      ])
+    } finally {
+      await client.query('ROLLBACK')
+      client.release()
+      await pending
+    }
     expect(enqueue).toHaveBeenCalledTimes(1)
   })
 })

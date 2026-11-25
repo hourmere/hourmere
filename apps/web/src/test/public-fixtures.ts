@@ -12,7 +12,7 @@ export const EVENT: Schemas['PublicEventType'] = {
   title: 'Intro call',
   description: 'A first conversation.',
   durationMinutes: 30,
-  locations: [{ id: 'legacy', kind: 'phone', isDefault: true }],
+  locations: [{ id: 'legacy', kind: 'phone' }],
   location: { kind: 'phone' },
   questions: [],
   // Guest-form scenarios explicitly model a host that opted in.

@@ -528,7 +528,8 @@ for public apps; its private/development apps do not trigger those notifications
 `PAID_BOOKINGS_ENABLED` defaults to `false`. Set it to `true` with a complete Stripe
 configuration to receive signed events at `POST /api/webhooks/stripe` in an isolated test
 instance. Paid hold admission and public Checkout remain disabled. Existing holds expire
-regardless of this setting. Compose forwards the optional Stripe settings unset by default.
+regardless of this setting. Retained refunds for a configured Stripe account and mode
+also continue to run. Compose forwards the optional Stripe settings unset by default.
 When using a `_FILE` setting, supply the path inside the container and mount the secret file
 read-only for each server role.
 See [the operator note and limitations](/docs/payments).

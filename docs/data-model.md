@@ -158,8 +158,8 @@ suspension even when SCIM provisioning is disabled. The provenance rows are inde
 source User and, for suspended rows, by child team and account.
 
 The [paid-booking design](payments.md) describes pending-payment holds, bounded slot
-occupancy, terminal transitions and the Stripe webhook receiver. Public Checkout and
-automatic refunds remain outside this foundation release.
+occupancy, the Stripe webhook receiver, leased refund obligations and operator reconciliation.
+Public Checkout remains disabled.
 
 ## Principles
 
@@ -2454,8 +2454,8 @@ An immutable 30-minute deadline bounds the hold. Expiry releases host occupancy 
 confirmation after the deadline records refund intent without reviving the booking.
 The transition guard prevents changing retained deadlines/references or resurrecting terminal
 holds. Group seats and imported bookings cannot carry payment holds. See the
-[paid-booking design](payments.md) for the internal-only rollout boundary, future refund
-ledger/retention and operator responsibilities. Stop old app and worker processes before
+[paid-booking design](payments.md) for the internal-only rollout boundary, refund
+ledger, retention and operator responsibilities. Stop old app and worker processes before
 migration and restart all roles together.
 
 Paid hold confirmation records an immutable `payment_confirmed_at` timestamp through a database
@@ -2478,6 +2478,14 @@ Migration `0189_stripe_webhook_event_receipts.sql` stores only the verified Stri
 as the receipt's primary key. The receiver inserts the receipt in the transaction that
 applies any hold transition. Rolling back the transition also rolls back the receipt, so a
 delivery can retry.
+
+Migration `0190_payment_refund_obligations.sql` retains one obligation per attempt and
+PaymentIntent. It backfills historically bound late payments and preserves all existing
+records. The obligation stores the immutable account, mode, amount and currency alongside
+the leased operation and its provider refund ID. Booking changes atomically update the
+attempt's current booking association while keeping the original PaymentIntent reference
+on the root. The receiver retains the receipt, account, mode and provider IDs of a signed
+paid Session with a binding mismatch for operator reconciliation.
 
 ## Private attendee no-show markers
 
