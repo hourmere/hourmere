@@ -1,6 +1,7 @@
 import { Kysely, PostgresDialect } from 'kysely'
 import pg from 'pg'
 import type { DB } from './tables.ts'
+import { trackTransaction } from './transaction-context.ts'
 
 export { importedBookingCondition } from './imported-booking-condition.ts'
 export { importedBookingIds, isImportedBooking } from './imported-bookings.ts'
@@ -98,6 +99,12 @@ export function createPool(connectionString: string, options: PoolOptions = {}):
   return pool
 }
 
+class AppDb extends Kysely<Database> {
+  override transaction() {
+    return trackTransaction(super.transaction())
+  }
+}
+
 export function createDb(pool: pg.Pool): Db {
-  return new Kysely<Database>({ dialect: new PostgresDialect({ pool }) })
+  return new AppDb({ dialect: new PostgresDialect({ pool }) })
 }

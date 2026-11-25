@@ -19,6 +19,8 @@ export const SSO_AUDIT_LIMITS = Object.freeze({
   ssoSecurityFailureEvents: 20,
   /** The sliding window those events are counted in, in seconds. */
   ssoSecurityFailureWindow: 3600,
+  /** Seconds of dropped failures accumulated in each process log report. */
+  ssoSecurityFailureDropReportWindow: 60,
 })
 
 export const SSO_AUDIT_METHODS = ['oidc', 'saml'] as const
