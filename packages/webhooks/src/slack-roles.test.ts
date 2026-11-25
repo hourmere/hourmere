@@ -208,48 +208,45 @@ describe.skipIf(!process.env.DATABASE_URL)(
       },
     )
 
-    it('refuses a member before it takes or waits for the destination or organization lock', async () => {
-      const { member, team, destination, queue, enqueue } = await fixture()
-      const before = await snapshot(destination.id)
-      const principal = team.as(member)
-      const calls: [string, string, string, () => Promise<unknown>][] = [
-        ...Object.entries(operations(principal, destination.id, queue)).map(
-          ([name, run]) =>
-            [name, destinationLock, destination.id, run] as [
-              string,
-              string,
-              string,
-              () => Promise<unknown>,
-            ],
-        ),
-        [
-          'create',
-          organizationLock,
-          team.id,
-          () =>
-            createSlackDestination(testContext(db, principal), settings, {
-              url: attacker,
-              events: ['booking.created'],
-            }),
-        ],
-      ]
-      for (const [name, lock, id, run] of calls) {
-        const { client, queued } = await hold(lock, id)
-        let outcome: Promise<{ error: unknown }> | undefined
-        try {
-          const result = await settleWithoutQueueing(run, queued)
-          outcome = result.outcome
-          expect(result.queuedBehindLock, name).toBe(false)
-          expect((await outcome).error, name).toMatchObject({ code: 'insufficient_role' })
-        } finally {
-          await client.query('ROLLBACK')
-          client.release()
-          await outcome
+    it.each(['api_key', 'oauth'] as const)(
+      'refuses a %s member before it takes or waits for the destination or organization lock',
+      async (kind) => {
+        const { member, team, destination, queue, enqueue } = await fixture()
+        const before = await snapshot(destination.id)
+        const principal = as(team.as(member), kind)
+        const calls = [
+          ...Object.entries(operations(principal, destination.id, queue)).map(
+            ([name, run]) => [name, destinationLock, destination.id, run] as const,
+          ),
+          [
+            'create',
+            organizationLock,
+            team.id,
+            () =>
+              createSlackDestination(testContext(db, principal), settings, {
+                url: attacker,
+                events: ['booking.created'],
+              }),
+          ] as const,
+        ]
+        for (const [name, lock, id, run] of calls) {
+          const { client, queued } = await hold(lock, id)
+          let outcome: Promise<{ error: unknown }> | undefined
+          try {
+            const result = await settleWithoutQueueing(run, queued)
+            outcome = result.outcome
+            expect(result.queuedBehindLock, name).toBe(false)
+            expect((await outcome).error, name).toMatchObject({ code: 'insufficient_role' })
+          } finally {
+            await client.query('ROLLBACK')
+            client.release()
+            await outcome
+          }
         }
-      }
-      expect(await snapshot(destination.id)).toBe(before)
-      expect(enqueue).not.toHaveBeenCalled()
-    })
+        expect(await snapshot(destination.id)).toBe(before)
+        expect(enqueue).not.toHaveBeenCalled()
+      },
+    )
 
     it.each(['api_key', 'oauth'] as const)(
       'refuses a %s owner demoted while waiting for the destination lock',
@@ -313,6 +310,41 @@ describe.skipIf(!process.env.DATABASE_URL)(
           .where('organization_id', '=', team.id)
           .execute(),
       ).toEqual([])
+    })
+
+    it('rechecks session authorization after waiting to create a destination', async () => {
+      const owner = await createTestUser(db)
+      const team = await createTestTeam(db, [{ user: owner, role: 'owner' }])
+      const ctx = testContext(db, team.as(owner), () => now)
+      const revoked = new Error('session revoked')
+      let allowed = true
+      const checkSession = async () => {
+        if (!allowed) throw revoked
+      }
+      const sessionCtx = {
+        ...ctx,
+        principal: { ...ctx.principal, kind: 'session' as const, sessionId: randomUUID() },
+        prepareOrganizationWrite: checkSession,
+        authorizeOrganizationWrite: checkSession,
+      }
+      const { client, queued } = await hold(organizationLock, team.id)
+      let call: Promise<unknown> | undefined
+      try {
+        call = createSlackDestination(sessionCtx, settings, {
+          url,
+          events: ['booking.created'],
+        }).catch((error: unknown) => error)
+        await vi.waitFor(async () => expect(await queued()).toBe(true), probe)
+        // The owner still has an admin role, but the session is no longer authorized.
+        allowed = false
+        await client.query('COMMIT')
+        expect(await call).toBe(revoked)
+        expect(await listSlackDestinations(ctx)).toEqual([])
+      } finally {
+        await client.query('ROLLBACK')
+        client.release()
+        await call
+      }
     })
 
     it('counts a test attempt only after the final owner/admin check found the destination', async () => {
