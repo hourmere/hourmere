@@ -370,9 +370,9 @@ export async function revokeSsoDelegation(
       .where('b.user_id', '=', userId)
       .forUpdate('b')
       .executeTakeFirst()
-    if (binding?.protocol === 'saml') {
-      requireSsoEnabled(deps.capabilities, 'saml')
-    } else if (!deps.capabilities.ssoOidcEnabled) {
+    // SAML revocation uses the retained-state guard above. Preserve the OIDC-off
+    // enforcement check for OIDC bindings and unknown IDs.
+    if (binding?.protocol !== 'saml' && !deps.capabilities.ssoOidcEnabled) {
       const policy = await trx
         .selectFrom('sso_policies')
         .select('require_sso')

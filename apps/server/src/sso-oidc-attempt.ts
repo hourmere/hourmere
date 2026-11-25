@@ -299,6 +299,8 @@ export async function lockSsoStepUpTarget(
     .where('l.issuer', '=', issuer)
     .where('l.user_id', '=', actor.userId)
     .where('l.retired_at', 'is', null)
+  // SAML checks SCIM suspension before starting the ceremony and recording proof.
+  // The shared helper preserves the existing OIDC membership check.
   const link = await (protocol === 'saml'
     ? linkedMember.where((eb) =>
         eb.not(scimSuspended(provider.organizationId, actor.userId, scimResourcesEnabled)),
