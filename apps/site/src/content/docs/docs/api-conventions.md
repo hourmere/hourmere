@@ -441,6 +441,35 @@ then restart all roles with the new code before using scoped keys. Never run old
 servers side by side once scoped keys exist: old code treats them as full access. Use the
 supported backup/restore procedure for rollback.
 
+### Team single sign-on
+
+Read provider summaries at `GET /api/v1/team/sso/providers` and the team policy at
+`GET /api/v1/team/sso/policy` as a current, verified team owner or administrator.
+REST accepts a browser session or a `read` or `full` API key for the team. On an
+enforced team use a session with live SSO proof or a key with a usable delegation.
+A machine request missing that delegation gets `403 sso_required`. An enrolled
+owner can also read these two resources from the browser with a live recovery grant.
+When recovering from another space, send the grant's team ID in `X-Expected-Organization-Id`.
+
+SSO writes under `/api/v1/team/sso` require a browser session, its exact same-origin
+`Origin` and `X-Expected-Organization-Id` for the intended team. Omit the
+`Authorization` header. Follow the operation's proof and revision requirements.
+When a write returns `403 sso_reauthentication_required`, complete its returned
+`proofMethods` in the same browser and retry the same input with the returned
+`attemptId` as `proofAttemptId`. Use a fresh recovery verification for each
+recovery-authorized write.
+
+Both protocol settings default to off. The two reads remain available to authorized
+callers in every settings combination. Trust-adding requests through an off protocol
+return `404 sso_disabled` and stored team enforcement continues.
+See the [REST quickstart](/docs/rest#read-team-single-sign-on-configuration)
+and [operation contracts](https://github.com/hourmere/hourmere/blob/main/docs/sso.md#proposed-rest-mcp-and-cli-contracts).
+
+中文：读取提供方与策略需要当前团队所有者或管理员权限。强制 SSO 的团队还要求浏览器证明，
+或密钥的有效委托。SSO 写入仅接受同源浏览器会话，须提供目标团队的
+`X-Expected-Organization-Id` 并省略 `Authorization`。如需新鲜证明，在同一浏览器完成后
+用原输入及 `proofAttemptId` 重试。两种协议默认关闭，已有强制策略继续生效。
+
 ### Browser organization context
 
 Better Auth's `/api/auth/organization/*` endpoints require browser sessions. Any

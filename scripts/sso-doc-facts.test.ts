@@ -1,5 +1,6 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { loadConfig } from '../apps/server/src/config.ts'
 import { SSO_DOMAIN_LIMITS } from '../apps/server/src/sso-domains.ts'
 import {
   authenticationAttemptLifetime,
@@ -8,10 +9,16 @@ import {
   ssoProofLifetime,
 } from '../apps/server/src/sso-oidc-limits.ts'
 import { maximumSamlAssertionLifetime, samlClockSkew } from '../apps/server/src/sso-saml-limits.ts'
+import {
+  API_KEY_CLI_OPERATIONS,
+  API_KEY_MCP_OPERATIONS,
+} from '../packages/auth/src/api-key-operations.ts'
 import { SSO_AUDIT_LIMITS } from '../packages/db/src/sso-audit.ts'
 import { SSO_TRANSPORT_LIMITS } from '../packages/outbound/src/sso.ts'
 
-const source = readFileSync(new URL('../docs/sso.md', import.meta.url), 'utf8')
+const read = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8')
+const source = read('docs/sso.md')
+const siteDocs = 'apps/site/src/content/docs/docs'
 const limits = {
   clockSkew: samlClockSkew,
   oidcClockSkew,
@@ -24,6 +31,86 @@ const limits = {
   ...SSO_DOMAIN_LIMITS,
   jwksCacheMaximum,
 } as const
+
+function guideSection(document: string, heading: string) {
+  return document.split(`\n## ${heading}\n`)[1]?.split('\n## ')[0] ?? ''
+}
+
+describe('SSO release guides', () => {
+  const protocols = [
+    ['SSO_OIDC_ENABLED', 'ssoOidcEnabled'],
+    ['SSO_SAML_ENABLED', 'ssoSamlEnabled'],
+  ] as const
+  const env = {
+    DATABASE_URL: 'postgres://localhost/sso_docs_unused',
+    BETTER_AUTH_SECRET: 'sso-docs-synthetic-secret-32-characters',
+  }
+
+  it.each(protocols)('documents %s with the runtime default and effective field', (key, field) => {
+    const defaultValue = loadConfig(env)[key]
+    expect(loadConfig({ ...env, [key]: '' })[key]).toBe(defaultValue)
+    expect(loadConfig({ ...env, [key]: 'true' })[key]).toBe(true)
+    expect(loadConfig({ ...env, [key]: 'false' })[key]).toBe(false)
+    expect(() => loadConfig({ ...env, [key]: 'yes' })).toThrow(key)
+    const settingRow = read(`${siteDocs}/configuration.md`)
+      .split('\n')
+      .find((line) => line.startsWith(`| \`${key}\` |`))
+    expect(settingRow).toContain(`| \`${key}\` | \`${defaultValue}\` |`)
+    const rest = guideSection(read(`${siteDocs}/rest.md`), 'Instance capabilities')
+    expect(rest).toContain(`\`${field}\``)
+    expect(rest).toContain(`\`${key}=true\``)
+    expect(read('.env.example').split('\n')).toContain(`${key}=`)
+    expect(read('docker-compose.yml').split('\n')).toContain(`      ${key}: \${${key}:-}`)
+  })
+
+  it('shows the registered REST, MCP and CLI team reads in public examples', () => {
+    const heading = 'Read team single sign-on configuration'
+    const rest = guideSection(read(`${siteDocs}/rest.md`), heading)
+    const cli = guideSection(read(`${siteDocs}/cli.md`), heading)
+    const mcp = guideSection(read(`${siteDocs}/mcp.md`), 'Inspect team single sign-on')
+    const restPaths = [...rest.matchAll(/curl [^\n]*?\$HOURMERE_URL([^?"\s]+)/g)].map(
+      ([, path]) => `GET ${path}`,
+    )
+    const mcpNames = [...mcp.matchAll(/^- `(\{.+\})`$/gm)].map(
+      ([, value]) => JSON.parse(value ?? '').name,
+    )
+    const cliExamples = [...cli.matchAll(/```sh\s+([\s\S]*?)```/g)]
+      .map(([, code]) => code)
+      .join('\n')
+    const cliCommands = [...cliExamples.matchAll(/\bhourmere (sso [a-z ]+?)(?= --|\n)/g)].map(
+      ([, command]) => command,
+    )
+    const operations = API_KEY_MCP_OPERATIONS.filter(({ tool }) =>
+      ['list_sso_providers', 'get_sso_policy'].includes(tool),
+    )
+    expect(restPaths).toEqual(operations.flatMap(({ rest }) => rest))
+    expect(mcpNames).toEqual(operations.map(({ tool }) => tool))
+    expect(cliCommands).toEqual(
+      API_KEY_CLI_OPERATIONS.filter(({ tool }) =>
+        operations.some((operation) => operation.tool === tool),
+      ).map(({ command }) => command),
+    )
+  })
+
+  it('shows both server-container maintenance commands in the recovery drill', () => {
+    const drill = guideSection(read(`${siteDocs}/self-hosting.md`), 'SSO backup and recovery drill')
+    const invocations = [...drill.matchAll(/^ +docker compose exec app node (\S+) (.+)$/gm)].map(
+      ([, path, args]) => {
+        expect(existsSync(new URL(`../${path}`, import.meta.url)), path).toBe(true)
+        return [path, args]
+      },
+    )
+    expect(invocations).toEqual([
+      ['apps/server/src/sso-operator-recovery-cli.ts', 'TEAM_UUID'],
+      [
+        'apps/server/src/sso-domain-retirement-cli.ts',
+        'challenge OLD_CLAIM_ID EXPECTED_GENERATION REQUESTING_TEAM_ID',
+      ],
+      ['apps/server/src/sso-domain-retirement-cli.ts', 'retire CHALLENGE_ID'],
+      ['apps/server/src/sso-domain-retirement-cli.ts', 'notify CHALLENGE_ID'],
+    ])
+  })
+})
 
 function assertLimits(document: string) {
   const table =

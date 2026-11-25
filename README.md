@@ -41,7 +41,7 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 | `packages/mail` | Outgoing email: SMTP, or the server log when SMTP is not configured; booking email templates and calendar invitations. |
 | `packages/jobs` | Background jobs on Postgres (pg-boss): typed job definitions, enqueueing inside a transaction, workers. |
 | `packages/webhooks` | Signed organization booking webhooks and encrypted Slack destinations, transactional delivery and bounded retries. See [webhooks](https://hourmere.com/docs/webhooks). |
-| `packages/outbound` | Shared outbound destination policy: special-use address checks, operator private targets, URL syntax, DNS answer validation and pinned connections with TLS hostname verification. Webhooks send through it; CalDAV reuses its address and private-target policy. The hard-off SSO paths use the profile for domain-proof TXT queries and OIDC discovery and signing keys. |
+| `packages/outbound` | Shared outbound destination policy: special-use address checks, operator private targets, URL syntax, DNS answer validation and pinned connections with TLS hostname verification. Webhooks and CalDAV use it. SSO uses its profile for domain-proof TXT queries, OIDC provider requests and SAML metadata URL imports. |
 | `packages/notifications` | Durable booking and sign-in email delivery, retries and the encrypted credential outbox. See [notifications](https://hourmere.com/docs/notifications). |
 | `packages/workflows` | Booking workflow definitions and execution. The operator can enable workflows with `WORKFLOWS_ENABLED=true`. See the [operating guide](docs/workflows.md#operating-guide). |
 | `tools/api-types` | Generates the web app's API types from the server's OpenAPI document (`npm run api:types`). |
@@ -454,9 +454,10 @@ Optional [automatic Google Meet](https://hourmere.com/docs/automatic-google-meet
   follows the release default, `false` keeps the protocol off, and other values prevent
   startup. Set a stable, independent 32-byte base64 `SSO_ENCRYPTION_KEY` to seal provider
   configuration and back it up privately. Turning a protocol off stops its sign-in, linking
-  and new configuration. Stored team requirements still apply, and recovery and
-  trust-reducing operations remain available. See the
-  [single sign-on guide](https://hourmere.com/docs/sso).
+  and new configuration, and suspends its existing browser proofs and delegations. Stored
+  team requirements still apply. Recovery and trust-reducing operations keep their normal
+  authorization. See the [single sign-on guide](https://hourmere.com/docs/sso) and
+  [self-hosting recovery drill](https://hourmere.com/docs/self-hosting#sso-backup-and-recovery-drill).
 
 - Prebuilt image installs have no runtime PWA off switch. Setting `VITE_PWA_ENABLED=false`
   and restarting cannot change a compiled image. Disabling installation requires a source

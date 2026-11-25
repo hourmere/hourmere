@@ -61,7 +61,7 @@ includes PostgreSQL 18.
 | `WEBHOOK_PRIVATE_TARGETS` | Unset | Self-hosting only: up to 32 comma-separated exact `hostname:port`, `IPv4[/CIDR]:port[-port]` or `[IPv6[/CIDR]]:port[-port]` entries permitting private HTTP(S) webhook destinations. Empty preserves public HTTPS-only delivery. Set identically on web and worker. |
 | `SSO_OIDC_ENABLED` | `false` | Turn on [organization OIDC single sign-on](/docs/sso). Unset or empty uses the release default, currently off. A nonempty value must be `true` or `false` for startup to succeed. Set identically on web and worker. Turning it off preserves the team's stored SSO requirement. See [what off means](/docs/sso#what-off-means). |
 | `SSO_SAML_ENABLED` | `false` | Turn on [organization SAML single sign-on](/docs/sso). Unset or empty uses the release default, currently off. A nonempty value must be `true` or `false` for startup to succeed. Set identically on web and worker. Turning it off preserves the team's stored SSO requirement. See [what off means](/docs/sso#what-off-means). |
-| `SSO_ENCRYPTION_KEY` | Unset | Independent canonical 32-byte base64 key that seals identity provider configuration; required before a team can save a provider. Keep stable and back up privately; losing it makes saved configuration unreadable. Does not enable SSO by itself. |
+| `SSO_ENCRYPTION_KEY` | Unset | Independent canonical 32-byte base64 key that seals identity provider configuration, required before a team can save a provider. Keep it stable and back it up privately, separately from the database dump. The original key is required to read saved configuration. See the [SSO backup and recovery drill](/docs/self-hosting#sso-backup-and-recovery-drill). |
 | `SSO_PRIVATE_TARGETS` | Unset | Used by server-side requests to providers for an enabled SSO protocol. Validated at startup in every state. Self-hosting only: up to 32 comma-separated exact `hostname:port`, `IPv4:port` or `[IPv6]:port` entries, one port each, for identity providers on a private network, or public ones on a port other than 443 listed by their public DNS name. HTTPS stays required. Separate from `WEBHOOK_PRIVATE_TARGETS`. See [private identity providers](#private-identity-providers). |
 | `SCIM_PROVISIONING_ENABLED` | `true` (also unset or empty) | Enable Users, Groups and discovery for team organizations, plus owner-only provisioning token creation and rotation. Set `false`, `0` or `off` to disable. An invalid value stops startup. Owners and admins can list and revoke tokens while disabled. See [SCIM provisioning](/docs/scim). |
 | `MCP_OAUTH_ENABLED` | `false` | Enable MCP OAuth connectors alongside API keys. Requires HTTPS except on loopback; explicit organization approval and revocation at `/app/connected-apps`. No calendar/provider client credentials needed. Set identically on web and worker. |
@@ -168,10 +168,9 @@ mix the two, or include metadata, link-local or other reserved addresses, are re
 the checked address is pinned to the socket. A hostname that is not listed keeps the
 default rules: public addresses only, on port 443 only.
 
-The setting permits these exact destinations, not plain HTTP: identity providers still need
-HTTPS with a certificate for their hostname that the server process trusts, and
-`http://keycloak:8080` is refused even when listed. See the [SSO design](https://github.com/hourmere/hourmere/blob/main/docs/sso.md)
-for the planned transport rules.
+These exact destinations still require HTTPS with a certificate for their hostname that
+the server process trusts. `http://keycloak:8080` is refused even when listed. See the
+[single sign-on guide](/docs/sso) for provider setup and recovery.
 
 ## Email and registration
 
