@@ -1744,17 +1744,17 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     expect(recoveryJobs).toEqual([])
   })
 
-  it('refuses administrative link retirement without OIDC step-up on an enforced team', async () => {
+  it('refuses administrative link retirement when step-up is off on an enforced team', async () => {
     const f = await stepUpFixture()
     const target = await recoveryTarget(f, fixture.member)
     await enforceSso()
     // Exercise the route's fresh-proof gate independently of the outer team gate.
-    const samlOnly = instance({ enabled: false, samlEnabled: true, enforceTeamSso: false })
+    const settingOff = instance({ enabled: false, operatorSetting: true, enforceTeamSso: false })
     const response = await recoveryRequest(
       removeLinkPath(f.providerId, target.link.id),
       f.owner.cookie,
       {},
-      { request: samlOnly },
+      { request: settingOff },
     )
     expect(response.status).toBe(403)
     expect(await response.json()).toEqual({ error: 'sso_required' })

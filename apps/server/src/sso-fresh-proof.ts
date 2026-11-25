@@ -11,6 +11,7 @@ import { HTTPException } from 'hono/http-exception'
 import { sql } from 'kysely'
 import { z } from 'zod'
 import {
+  enabledSsoProtocols,
   requireSsoEnabled,
   requireSsoRetained,
   SCIM_MAPPING_CONSENT,
@@ -51,13 +52,17 @@ export interface FreshProofRequest {
   schema: z.ZodObject
 }
 
-export function requireSsoStepUpAvailable(
+function requireSsoStepUpAvailable(
   capabilities: SsoCapabilities,
   proofMode: FreshProofRequest['proofMode'],
 ) {
-  if (proofMode === 'trust_reduction' && !capabilities.ssoOidcEnabled)
+  if (
+    proofMode === 'trust_reduction' &&
+    !capabilities.ssoOidcEnabled &&
+    !capabilities.ssoSamlEnabled
+  )
     throw new DomainError('forbidden', 'sso_required')
-  requireSsoEnabled(capabilities, 'oidc')
+  requireSsoEnabled(capabilities)
 }
 
 export type FreshProofResult<T> =
@@ -282,7 +287,8 @@ export async function runWithFreshProof<T>(
               SELECT 1 FROM sso_identity_links l JOIN sso_providers p ON p.id = l.provider_id
               WHERE l.id = step_up_link_id AND l.user_id = sso_attempts.user_id
                 AND l.organization_id = sso_attempts.organization_id
-                AND p.id = step_up_provider_id AND p.protocol = 'oidc'
+                AND p.id = step_up_provider_id
+                AND p.protocol = ANY(${enabledSsoProtocols(deps.capabilities)}::text[])
                 AND l.retired_at IS NULL AND p.enabled AND p.retired_at IS NULL
             )
           ))`.execute(trx)

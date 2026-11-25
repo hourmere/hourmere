@@ -7,6 +7,7 @@ import { requireSsoRetained } from '../sso.ts'
 import {
   REMOVE_SSO_IDENTITY_LINK,
   RemoveSsoIdentityLinkInput,
+  refuseHardOffSamlLinkRemoval,
   retireSsoIdentityLink,
   type SsoIdentityRecoveryDeps,
   UNLINK_SSO_ACCOUNT,
@@ -27,6 +28,18 @@ export function ssoIdentityRecoveryRoutes(deps: SsoIdentityRecoveryDeps): RouteM
       description: 'Required for writes and must match the current team.',
     }),
   })
+  const removalParams = z.object({ providerId: z.uuid(), linkId: z.uuid() })
+  const removalProtocolGuard: MiddlewareHandler<CallerEnv> = async (c, next) => {
+    const params = removalParams.safeParse(c.req.param())
+    if (params.success)
+      await refuseHardOffSamlLinkRemoval(
+        deps,
+        c.var.principal,
+        c.req.raw.headers,
+        params.data.providerId,
+      )
+    await next()
+  }
   const responses = {
     ...errorResponses({
       400: 'invalid_request',
@@ -86,10 +99,10 @@ export function ssoIdentityRecoveryRoutes(deps: SsoIdentityRecoveryDeps): RouteM
         description:
           'Team owner/admin browser session with fresh administration proof and the link generation from the provider inventory. Another owner must retire an owner’s link. Stays available while SSO_OIDC_ENABLED is off.',
         security: [{ session: [] }],
-        middleware: [...middleware] as const,
+        middleware: [...middleware, removalProtocolGuard] as const,
         request: {
           headers,
-          params: z.object({ providerId: z.uuid(), linkId: z.uuid() }),
+          params: removalParams,
           body: { required: true, content: json(RemoveSsoIdentityLinkInput) },
         },
         responses: {

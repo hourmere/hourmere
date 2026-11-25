@@ -36,7 +36,8 @@ import {
   OidcStateReplay,
   type OidcTestActor,
   oidcReturnDestination,
-  recordOidcStepUp,
+  recordSsoStepUp,
+  ssoStepUpSubjectDigest,
   startOidcAttempt,
   TEST_SSO_PROVIDER,
 } from './sso-oidc-attempt.ts'
@@ -585,6 +586,13 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
         if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
         const returnPath = oidcReturnDestination(parsed.data.returnTo ?? '/app')
         if (!returnPath) return c.json({ error: 'invalid_request' }, 400)
+        const provider = await findProvider(db, parsed.data.providerId)
+        // Disabled SAML traffic must not spend the shared OIDC/SAML start quota.
+        if (
+          provider?.protocol === 'saml' &&
+          ((provider.enabled && !provider.retiredAt) || parsed.data.intent === 'step_up')
+        )
+          requireSsoEnabled(capabilities, 'saml')
         const wait = starts.hit(rateLimitKey(c.var.clientIp))
         if (wait !== undefined) {
           c.header('Retry-After', String(wait))
@@ -593,40 +601,42 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
         const currentBinding = getCookie(c, cookie)
         const reuse = currentBinding !== undefined && browserBindingDigest(currentBinding) !== null
         const browserBinding = reuse ? currentBinding : randomBytes(32).toString('base64url')
-        const provider = await findProvider(db, parsed.data.providerId)
         if (!provider?.enabled || provider.retiredAt) return c.json({ error: 'sso_not_found' }, 404)
-        if (provider.protocol === 'oidc' || provider.protocol === 'saml') {
-          requireSsoEnabled(capabilities, provider.protocol)
-        }
+        if (provider.protocol === 'oidc') requireSsoEnabled(capabilities, 'oidc')
         if (!configurationKey) return c.json({ error: 'sso_not_found' }, 404)
-        if (provider.protocol === 'saml') {
-          if (parsed.data.intent !== 'sign_in') return c.json({ error: 'invalid_request' }, 400)
-          if (!returnPath.startsWith('/app')) return c.json({ error: 'invalid_request' }, 400)
-          try {
-            const { id, url } = await startSamlSignIn(
-              { db, configurationKey, privateTargets, publicUrl },
-              provider,
-              browserBinding,
-            )
-            const result = samlStateCookie(publicUrl, 'return', id)
-            setCookie(c, cookie, browserBinding, startBindingOptions)
-            setCookie(c, result.name, sealSamlState(configurationKey, 'return', id, returnPath), {
-              ...result.options,
-              maxAge: authenticationAttemptLifetime,
-            })
-            return c.json({ url, redirect: true })
-          } catch (error) {
-            if (error instanceof SamlStartRefused) return c.json({ error: 'sso_not_found' }, 404)
-            throw error
-          }
-        }
-        if (provider.protocol !== 'oidc') return c.json({ error: 'sso_not_found' }, 404)
         let ceremony: { kind: 'step_up'; actor: OidcTestActor; attemptId: string } | undefined
         if (parsed.data.intent === 'step_up') {
           const actor = reuse && (await deps.readSession(c.req.raw.headers))
           if (!actor) return c.json({ error: 'sso_not_found' }, 404)
           ceremony = { kind: 'step_up', actor, attemptId: parsed.data.attemptId }
         }
+        if (provider.protocol === 'saml') {
+          if (!returnPath.startsWith('/app')) return c.json({ error: 'invalid_request' }, 400)
+          try {
+            const { id, url, stepUpBinding } = await startSamlSignIn(
+              { db, configurationKey, privateTargets, publicUrl, scimResourcesEnabled },
+              provider,
+              browserBinding,
+              ceremony,
+            )
+            const kind = stepUpBinding ? 'step-up' : 'return'
+            const result = samlStateCookie(publicUrl, kind, id)
+            const state = stepUpBinding
+              ? JSON.stringify({ binding: stepUpBinding, returnPath })
+              : returnPath
+            setCookie(c, cookie, browserBinding, startBindingOptions)
+            setCookie(c, result.name, sealSamlState(configurationKey, kind, id, state), {
+              ...result.options,
+              maxAge: authenticationAttemptLifetime,
+            })
+            return c.json({ url, redirect: true })
+          } catch (error) {
+            if (error instanceof SamlStartRefused || (ceremony && expiresDuringOidcWrite(error)))
+              return c.json({ error: 'sso_not_found' }, 404)
+            throw error
+          }
+        }
+        if (provider.protocol !== 'oidc') return c.json({ error: 'sso_not_found' }, 404)
         let endpoints: Awaited<ReturnType<typeof providerEndpoints>>
         try {
           endpoints = await providerEndpoints(provider, configurationKey, transport)
@@ -797,12 +807,17 @@ export function oidcSignInRoutes(deps: OidcSignInDeps): OidcSignInModule {
         try {
           if (attempt.stepUp) {
             const browserBinding = getCookie(c, cookie)
-            const result = await recordOidcStepUp(
+            const result = await recordSsoStepUp(
               db,
               { ...provider, browserBinding },
               attempt.stepUp,
               attempt.createdAt,
-              identity,
+              {
+                subjectDigest: ssoStepUpSubjectDigest(identity.issuer, identity.subject),
+                authTimeMs: identity.authTime === undefined ? undefined : identity.authTime * 1000,
+                sessionDeadline: identity.sessionDeadline,
+              },
+              scimResourcesEnabled,
             )
             if (result.failure) return fail(result.failure)
             if (result.delegation) {

@@ -13,14 +13,15 @@ import { DomainError } from '@hourmere/scheduling'
 import { HTTPException } from 'hono/http-exception'
 import { sql } from 'kysely'
 import { z } from 'zod'
-import { requireSsoEnabled, requireSsoRetained } from './sso.ts'
+import {
+  enabledSsoProtocols,
+  requireSsoEnabled,
+  requireSsoRetained,
+  type SsoCapabilities,
+} from './sso.ts'
 import { BIND_SSO_DELEGATION, openDelegationProof } from './sso-delegation-proof.ts'
 import { normalizeSsoDomain } from './sso-domains.ts'
-import {
-  type FreshProofDeps,
-  requireSsoStepUpAvailable,
-  runWithFreshProof,
-} from './sso-fresh-proof.ts'
+import { type FreshProofDeps, runWithFreshProof } from './sso-fresh-proof.ts'
 import { browserBindingDigest, databaseClock } from './sso-mailbox-proof.ts'
 import { EXPECTED_ORGANIZATION_HEADER } from './team-management.ts'
 
@@ -143,7 +144,12 @@ async function lockCredential(
   }
 }
 
-async function lockReliance(trx: Db, actor: DelegationActor, attemptId: string) {
+async function lockReliance(
+  trx: Db,
+  actor: DelegationActor,
+  attemptId: string,
+  capabilities: SsoCapabilities,
+) {
   const { organizationId, userId } = actor
   return trx
     .selectFrom('sso_attempts as a')
@@ -157,6 +163,7 @@ async function lockReliance(trx: Db, actor: DelegationActor, attemptId: string) 
       'l.generation as linkGeneration',
       'l.proven_email as mailbox',
       'p.id as providerId',
+      'p.protocol',
       'p.revision',
       'm.id as memberId',
       'a.expires_at as attemptDeadline',
@@ -167,7 +174,7 @@ async function lockReliance(trx: Db, actor: DelegationActor, attemptId: string) 
     .where('l.user_id', '=', userId)
     .where('l.organization_id', '=', organizationId)
     .where('l.retired_at', 'is', null)
-    .where('p.protocol', '=', 'oidc')
+    .where('p.protocol', 'in', enabledSsoProtocols(capabilities))
     .where('p.enabled', '=', true)
     .where('p.retired_at', 'is', null)
     .forShare(['l', 'p', 'm'])
@@ -202,7 +209,7 @@ export async function bindSsoDelegation(
   input: z.infer<typeof BindSsoDelegationInput>,
   envelope: string | undefined,
 ) {
-  requireSsoEnabled(deps.capabilities, 'oidc')
+  requireSsoEnabled(deps.capabilities)
   const actor = delegationActor(deps, principal, headers)
   const { organizationId, userId } = actor
   let credential: Awaited<ReturnType<typeof lockCredential>>
@@ -234,7 +241,7 @@ export async function bindSsoDelegation(
             throw missing()
         },
         mutate: async (trx, _input, browserBinding, _mailbox, attemptId) => {
-          const link = await lockReliance(trx, actor, attemptId)
+          const link = await lockReliance(trx, actor, attemptId, deps.capabilities)
           const digest = browserBindingDigest(browserBinding)
           if (!link || !digest) throw invalidProof()
           const proof = openDelegationProof(
@@ -297,7 +304,7 @@ export async function bindSsoDelegation(
             targetType: 'sso_delegation',
             targetId: binding.id,
             details: {
-              method: 'oidc',
+              method: z.enum(['oidc', 'saml']).parse(link.protocol),
               providerId: link.providerId,
               revision: link.revision,
               correlationId: attemptId,
@@ -354,22 +361,27 @@ export async function revokeSsoDelegation(
   const { organizationId, userId } = actor
   await deps.db.transaction().execute(async (trx) => {
     await lockActor(trx, actor)
-    if (!deps.capabilities.ssoOidcEnabled) {
+    const binding = await trx
+      .selectFrom('sso_delegation_bindings as b')
+      .innerJoin('sso_providers as p', 'p.id', 'b.provider_id')
+      .select(['b.id', 'b.organization_id', 'b.provider_id', 'p.protocol'])
+      .where('b.id', '=', bindingId)
+      .where('b.organization_id', '=', organizationId)
+      .where('b.user_id', '=', userId)
+      .forUpdate('b')
+      .executeTakeFirst()
+    if (binding?.protocol === 'saml') {
+      requireSsoEnabled(deps.capabilities, 'saml')
+    } else if (!deps.capabilities.ssoOidcEnabled) {
       const policy = await trx
         .selectFrom('sso_policies')
         .select('require_sso')
         .where('organization_id', '=', organizationId)
         .executeTakeFirst()
-      if (policy?.require_sso) requireSsoStepUpAvailable(deps.capabilities, 'trust_reduction')
+      if (policy?.require_sso) throw new DomainError('forbidden', 'sso_required')
     }
-    const binding = await trx
-      .deleteFrom('sso_delegation_bindings')
-      .where('id', '=', bindingId)
-      .where('organization_id', '=', organizationId)
-      .where('user_id', '=', userId)
-      .returning(['id', 'organization_id', 'provider_id'])
-      .executeTakeFirst()
     if (!binding) throw missing()
+    await trx.deleteFrom('sso_delegation_bindings').where('id', '=', binding.id).execute()
     await auditDelegationRevocation(trx, principal, binding)
   })
 }

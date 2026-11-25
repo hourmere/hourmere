@@ -77,6 +77,26 @@ export function samlSessionDeadline(assertion: VerifiedSamlResponse['assertion']
   return deadline
 }
 
+/** Take the earliest signed authentication event when every statement supplies a time. */
+export function samlStepUpAuthTime(
+  assertion: VerifiedSamlResponse['assertion'],
+  now: Temporal.Instant,
+) {
+  let earliest: Temporal.Instant | undefined
+  let missing = false
+  const latest = now.add(skew)
+  for (const { authnInstant } of assertion.authnStatements) {
+    if (authnInstant === null) {
+      missing = true
+      continue
+    }
+    const instant = parseTime(authnInstant)
+    if (compare(instant, latest) > 0) throw new SamlTimingError('timing_invalid')
+    if (!earliest || compare(instant, earliest) < 0) earliest = instant
+  }
+  return missing ? undefined : earliest?.epochMilliseconds
+}
+
 type OutstandingSamlRequest = {
   id: string
   organizationId: string
