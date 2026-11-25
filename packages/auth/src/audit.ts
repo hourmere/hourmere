@@ -116,7 +116,10 @@ export function authAuditRecords(scimResourcesEnabled = false): BetterAuthPlugin
       // invalidation.
       const presentedRefreshTokens = new WeakMap<object, Row>()
       // Family access-token deletion waits for the family's refresh-token transaction.
-      const deferredFamilyAccessTokens = new WeakMap<object, { model: string }>()
+      const deferredFamilyAccessTokens = new WeakMap<
+        object,
+        { model: string; where: Condition[] } | null
+      >()
       const wrap = (adapter: DBTransactionAdapter, inTransaction: boolean) => {
         // Synthetic adapters in unit harnesses may omit reads.
         const findOne = adapter.findOne?.bind(adapter)
@@ -166,8 +169,13 @@ export function authAuditRecords(scimResourcesEnabled = false): BetterAuthPlugin
               familyPath &&
               request.model === 'oauthAccessToken' &&
               method === 'deleteMany' &&
+              where.some((condition) => condition.field === 'clientId') &&
+              where.some((condition) => condition.field === 'userId') &&
               where.some(
-                (condition) => condition.field === 'refreshId' && condition.operator === 'in',
+                (condition) =>
+                  condition.field === 'refreshId' &&
+                  condition.operator === 'ne' &&
+                  condition.value === null,
               )
             // Native key endpoints also bulk-delete expired keys across the instance.
             // Expiry housekeeping is not a user management action; audit only the target.
@@ -195,12 +203,12 @@ export function authAuditRecords(scimResourcesEnabled = false): BetterAuthPlugin
                   '/sign-out',
                 ].includes(path)) ||
               (request.model === 'account' && (path === '/unlink-account' || method === 'create'))
-            if (familyAccessTokens && !inTransaction && endpoint) {
-              // Better Auth deletes these on the base adapter, committed on their own just
-              // before the refresh tokens. Run the deletion inside the refresh tokens'
-              // transaction instead, so the deletions and the family events commit together.
-              // Never hold this connection while asking the pool for another.
-              deferredFamilyAccessTokens.set(endpoint, request)
+            if (familyAccessTokens && endpoint) {
+              // Better Auth 1.7.25 sweeps linked access tokens before and after deleting
+              // the refresh family. Defer the first sweep to the audited transaction and
+              // skip the trailing sweep, which could delete tokens outside its snapshot.
+              if (!deferredFamilyAccessTokens.has(endpoint))
+                deferredFamilyAccessTokens.set(endpoint, { ...request, where })
               return 0
             }
             if (!relevant) return (original as (r: unknown) => Promise<unknown>)(request)
@@ -314,7 +322,7 @@ export function authAuditRecords(scimResourcesEnabled = false): BetterAuthPlugin
                 // SCIM removed the presented token while the provider was using it.
                 // The provider will refuse it, but its fallback family deletion
                 // would also revoke tokens for the client's surviving grants.
-                deferredFamilyAccessTokens.delete(endpoint)
+                deferredFamilyAccessTokens.set(endpoint, null)
                 return 0
               }
               // Bind mutation to the locked snapshot. A session created concurrently after
@@ -337,8 +345,16 @@ export function authAuditRecords(scimResourcesEnabled = false): BetterAuthPlugin
                     }
               const deferred = refreshFamily && endpoint && deferredFamilyAccessTokens.get(endpoint)
               if (deferred && endpoint) {
-                deferredFamilyAccessTokens.delete(endpoint)
-                await (original as (r: unknown) => Promise<unknown>)(deferred)
+                deferredFamilyAccessTokens.set(endpoint, null)
+                if (before.length) {
+                  await (original as (r: unknown) => Promise<unknown>)({
+                    ...deferred,
+                    where: [
+                      ...deferred.where,
+                      { field: 'refreshId', operator: 'in', value: before.map((row) => row.id) },
+                    ],
+                  })
+                }
               }
               const result = await (original as (r: unknown) => Promise<unknown>)(actualRequest)
               if (refreshFamily) {

@@ -29,11 +29,11 @@ describe.skipIf(!databaseUrl)('Native organization deletion and SCIM team links'
     })
     db = createDb(owned.pool)
     pool = createAuthPool(owned.url, signup)
-    app = instance(false)
-    resourceApp = instance(true)
+    app = await instance(false)
+    resourceApp = await instance(true)
   })
 
-  function instance(scimResourcesEnabled: boolean) {
+  async function instance(scimResourcesEnabled: boolean) {
     const auth = createAuth({
       db,
       pool,
@@ -43,6 +43,8 @@ describe.skipIf(!databaseUrl)('Native organization deletion and SCIM team links'
       scimResourcesEnabled,
       mailer: { send: async () => expect.unreachable('Deletion does not send mail') },
     })
+    // Complete Better Auth's one-time PostgreSQL schema check before counting route queries.
+    await auth.api.getSession({ headers: new Headers() })
     return createApp({
       publicUrl,
       checkDb: async () => {},

@@ -323,6 +323,15 @@ for limits and client instructions.
 | `organization`, `member`, `invitation` | Tenancy: personal and team organizations, roles, invitations |
 | `apikey` | Keys for agents (MCP, REST, CLI); hashed by Better Auth |
 
+Since Better Auth 1.7.22, database schema validation runs by default on each Better Auth
+instance's first auth call. A mismatch is cached as `SchemaMismatchError` and blocks every
+Better Auth endpoint until the schema is migrated and the cached result is cleared.
+Hourmere keeps validation enabled so that auth operations fail before touching an
+incompatible schema. `AUTO_MIGRATE=true` applies migrations before serving requests.
+With `AUTO_MIGRATE=false`, run `npm run db:migrate` before starting the upgraded server.
+If a running server has already cached a mismatch, restart it after applying Hourmere's
+SQL migrations so the new instance checks the repaired schema. [Better Auth 1.7.22 release](https://github.com/better-auth/better-auth/releases/tag/v1.7.22).
+
 Google and Microsoft sign-in ID tokens are used during authentication and are not stored:
 `account."idToken"` remains NULL on account creation and every update, including linking,
 repeat sign-in and token refresh. Migration 0031 clears existing values without changing
@@ -1696,12 +1705,13 @@ After admission commits, the request dispatches its current queued generation th
 injected dependency. A second short transaction locks invitation before delivery and
 commits the exclusive pg-boss job together with `last_job_id`. A queue exception or null
 enqueue rolls back only that dispatch; the admitted queued record and its due time remain
-available for request retry or periodic repair. A narrow adapter pinned to pg-boss 12.38.0
+available for request retry or periodic repair. A narrow adapter pinned to pg-boss 12.38.2
 checks job identity, exact payload, singleton key, live state and expiry without a foreign
 key into pg-boss, using pg-boss's own clock for job expiry. An unsupported pg-boss version
 fails job startup with a compatibility message. Startup and minute repair scans use bounded,
 fair cursor batches. A failed startup scan is logged and the minute schedule retries it.
-The repairer skips obsolete business states before enqueueing. If a job's 24-hour waiting
+The repairer skips obsolete business states before enqueueing. pg-boss moves the waiting
+retention deadline forward with the scheduled start on retry. If a job's 24-hour waiting
 retention or active expiry has passed, an exact-identity adapter cancels that expired job
 inside the replacement transaction, preserving its history and releasing the exclusive
 key without waiting for maintenance. Live jobs and completed, canceled or failed history

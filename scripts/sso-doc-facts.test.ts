@@ -12,6 +12,26 @@ import { SSO_AUDIT_LIMITS } from '../packages/db/src/sso-audit.ts'
 import { SSO_TRANSPORT_LIMITS } from '../packages/outbound/src/sso.ts'
 
 const source = readFileSync(new URL('../docs/sso.md', import.meta.url), 'utf8')
+const dataModel = readFileSync(new URL('../docs/data-model.md', import.meta.url), 'utf8')
+
+describe('Better Auth schema validation documentation', () => {
+  it.each([
+    ['SSO design', source],
+    ['data model', dataModel],
+  ])('records first-use validation and fail-closed migration behavior in the %s', (_, document) => {
+    const normalized = document.replace(/\s+/g, ' ')
+    expect(normalized).toContain(
+      "Since Better Auth 1.7.22, database schema validation runs by default on each Better Auth instance's first auth call.",
+    )
+    expect(normalized).toContain(
+      'A mismatch is cached as `SchemaMismatchError` and blocks every Better Auth endpoint until the schema is migrated and the cached result is cleared.',
+    )
+    expect(normalized).toContain(
+      'Hourmere keeps validation enabled so that auth operations fail before touching an incompatible schema.',
+    )
+  })
+})
+
 const limits = {
   clockSkew: samlClockSkew,
   oidcClockSkew,

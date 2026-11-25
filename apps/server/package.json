@@ -8,7 +8,7 @@
   },
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "9.1.0",
-    "@hono/node-server": "2.1.6",
+    "@hono/node-server": "2.1.9",
     "@hono/zod-openapi": "1.6.3",
     "@hourmere/auth": "*",
     "@hourmere/calendars": "*",
@@ -24,18 +24,18 @@
     "@hourmere/workflows": "*",
     "@modelcontextprotocol/server": "2.4.0",
     "@xmldom/xmldom": "0.9.12",
-    "hono": "4.13.16",
-    "jose": "6.2.12",
-    "kysely": "0.29.7",
+    "hono": "4.13.19",
+    "jose": "6.2.17",
+    "kysely": "0.29.9",
     "samlify": "2.15.1",
     "stripe": "23.1.0",
-    "tldts": "7.4.18",
+    "tldts": "7.5.4",
     "xml-crypto": "6.4.0",
     "zod": "4.6.7"
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "2.4.0",
     "ical.js": "2.2.1",
-    "parse5": "8.0.1"
+    "parse5": "8.1.1"
   }
 }

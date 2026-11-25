@@ -332,7 +332,7 @@ describe.skipIf(!serverUrl)('createJobs', () => {
       pgBossPackage.version = 'unsupported-test-version'
       const attempt = jobs.start()
       await expect(attempt).rejects.toThrow(
-        'background jobs require pg-boss 12.38.0; found unsupported-test-version. Review the invitation job lookup before upgrading',
+        'background jobs require pg-boss 12.38.2; found unsupported-test-version. Review the mail job lookups before upgrading',
       )
       await expect(attempt).rejects.not.toThrow('npm run db:migrate')
       expect(jobs.running).toBe(false)
@@ -344,7 +344,7 @@ describe.skipIf(!serverUrl)('createJobs', () => {
   it('detects source-copy removal of the version-specific startup message', async () => {
     const copy = await sourceCopy([
       {
-        before: "if (pgBossPackage.version !== '12.38.0')",
+        before: "if (pgBossPackage.version !== '12.38.2')",
         after: "if (pgBossPackage.version !== 'intentionally-unsupported')",
       },
       {
