@@ -8,8 +8,8 @@ const METHODS = ['get', 'head', 'options', 'trace', 'post', 'put', 'patch', 'del
 export type HttpMethod = (typeof METHODS)[number]
 const WRITE_METHODS: ReadonlySet<HttpMethod> = new Set(['post', 'put', 'patch', 'delete'])
 
-// These reads explicitly ship on all three interfaces. Other reads remain
-// outside required parity coverage. Exact routes prevent an operation ID from moving silently.
+// These reads explicitly ship on all three interfaces. Webhook reads are also covered by path.
+// Exact routes prevent an operation ID from moving silently.
 const REQUIRED_READS: Readonly<Record<string, string>> = {
   listMeetingPolls: 'GET /api/v1/meeting-polls',
   getMeetingPoll: 'GET /api/v1/meeting-polls/{id}',
@@ -200,7 +200,10 @@ export function interfaceParityErrors(
   for (const operation of inventory.rest) {
     const route = `${operation.method.toUpperCase()} ${operation.path}`
     const write = WRITE_METHODS.has(operation.method)
-    if (operation.operationId === undefined && !write) continue
+    const webhookRead =
+      operation.method === 'get' &&
+      (operation.path === '/api/v1/webhooks' || operation.path.startsWith('/api/v1/webhooks/'))
+    if (operation.operationId === undefined && !write && !webhookRead) continue
     if (!identifier(operation.operationId)) {
       errors.push(`${route}: missing or malformed operationId; use a stable identifier.`)
       continue
@@ -214,7 +217,7 @@ export function interfaceParityErrors(
       : undefined
     if (requiredRead && route !== requiredRead)
       errors.push(`${operation.operationId}: expected ${requiredRead}, received ${route}.`)
-    if (write || requiredRead)
+    if (write || webhookRead || requiredRead)
       writes.set(operation.operationId, { route, security: operation.security })
   }
 
