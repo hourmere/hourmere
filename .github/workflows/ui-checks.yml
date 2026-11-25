@@ -102,9 +102,13 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
-  e2e-a11y:
+  e2e-a11y-shard:
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     services:
       postgres:
         image: postgres:18-alpine
@@ -133,19 +137,30 @@ jobs:
       - name: Run a11y measurement
         env:
           HOURMERE_UI_FAIL_ON_EXIT: "1"
-        run: node tools/e2e/run-audit.ts a11y
+        run: node tools/e2e/run-audit.ts a11y --shard=${{ matrix.shard }}/4
       - name: Summarize measurements
         if: always()
-        run: node tools/e2e/reports-summary.ts --suite=a11y
+        run: node tools/e2e/reports-summary.ts --suite=a11y --shard=${{ matrix.shard }}/4
       - name: Upload sanitized measurements
         if: always()
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: ui-a11y
+          name: ui-a11y-${{ matrix.shard }}
           path: temp/ui-audit-reports/
           retention-days: 7
           if-no-files-found: warn
+
+  e2e-a11y:
+    needs: e2e-a11y-shard
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    env:
+      SHARD_RESULT: ${{ needs.e2e-a11y-shard.result }}
+    steps:
+      - name: Require every a11y shard to succeed
+        run: test "$SHARD_RESULT" = success
 
   e2e-cross-engine:
     # The browser cache key does not include the OS release, and Playwright's WebKit build

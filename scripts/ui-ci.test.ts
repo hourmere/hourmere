@@ -154,6 +154,7 @@ describe('UI measurement CI contract', () => {
     })
     expect(Object.keys(workflow.jobs).sort()).toEqual([
       'e2e-a11y',
+      'e2e-a11y-shard',
       'e2e-cross-engine',
       'e2e-layout',
       'e2e-visual',
@@ -164,6 +165,18 @@ describe('UI measurement CI contract', () => {
       'fail-fast': false,
       matrix: { shard: [1, 2, 3, 4, 5, 6, 7, 8] },
     })
+  })
+
+  it('keeps the axe time limit and makes e2e-a11y depend on every shard', () => {
+    const shard = workflow.jobs['e2e-a11y-shard']
+    expect(shard?.['timeout-minutes']).toBe(35)
+    expect(shard?.strategy).toEqual({ 'fail-fast': false, matrix: { shard: [1, 2, 3, 4] } })
+    const aggregate = workflow.jobs['e2e-a11y']
+    expect(aggregate?.needs).toBe('e2e-a11y-shard')
+    expect(aggregate?.if).toBe('always()')
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub Actions expression is literal.
+    expect(aggregate?.env?.SHARD_RESULT).toBe('${{ needs.e2e-a11y-shard.result }}')
+    expect(aggregate?.steps[0]?.run).toBe('test "$SHARD_RESULT" = success')
   })
 
   it('isolates UI jobs from reusable CI and releases', () => {
@@ -215,15 +228,17 @@ describe('UI measurement CI contract', () => {
     expect(workflow.jobs[id]?.services?.postgres.options ?? '').not.toContain('max_connections')
   })
 
-  it.each(['e2e-layout', 'e2e-a11y', 'e2e-cross-engine'])(
+  it.each([
+    ['e2e-layout', 'layout', 8],
+    ['e2e-a11y-shard', 'a11y', 4],
+    ['e2e-cross-engine', 'cross-engine', undefined],
+  ] as const)(
     'makes %s fail on the terminal gate while preserving reports on failure',
-    (id) => {
+    (id, suite, shardCount) => {
       const job = workflow.jobs[id]
       expect(job?.['continue-on-error']).toBeUndefined()
-      const suite = id.slice('e2e-'.length)
       const summary = job?.steps.find((step) => step.name === 'Summarize measurements')
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub Actions expression is literal.
-      const shard = suite === 'layout' ? ' --shard=${{ matrix.shard }}/8' : ''
+      const shard = shardCount ? ` --shard=\${{ matrix.shard }}/${shardCount}` : ''
       expect(summary?.run).toBe(`node tools/e2e/reports-summary.ts --suite=${suite}${shard}`)
       expect(summary?.if).toBe('always()')
       const browser = job?.steps.find((step) => step.run?.includes('node tools/e2e/run-audit.ts'))
@@ -248,7 +263,7 @@ describe('UI measurement CI contract', () => {
     },
   )
 
-  it.each(['e2e-layout', 'e2e-a11y', 'e2e-cross-engine', 'e2e-visual'])(
+  it.each(['e2e-layout', 'e2e-a11y-shard', 'e2e-cross-engine', 'e2e-visual'])(
     'publishes only sanitized reports after %s even on failures',
     (id) => {
       const steps = workflow.jobs[id]?.steps ?? []

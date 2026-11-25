@@ -325,6 +325,8 @@ serious/critical violations.
 A CI-only canary with known violations verifies the in-browser scan pipeline. Cross-engine
 smoke covers booking, sign-in and the embed popup in desktop WebKit, iPhone WebKit and
 Firefox. These measurements use synthetic data and the disposable-database fixture.
+Axe splits registry states into batches of up to 32 per browser session and runs the
+batches in four parallel CI shards. The `e2e-a11y` job passes only when all shards pass.
 Every audit page pins the browser clock to the fixture's `AUDIT_NOW` before navigation,
 including form submissions that create rows read by later pages. After content readiness,
 audits await `document.fonts.ready` and 100 ms of stable DOM and geometry across paints;
@@ -339,6 +341,7 @@ Playwright installs system packages only when its dry-run check finds packages m
 CI 和发布工作流都不调用它，发布标签不会运行这些检测。
 布局检测覆盖 16 种 CSS 视口、明暗主题、中英文，预约页另测英式英语；axe 记录通过、待人工确认、
 中等和轻微项数，并报告严重和致命问题；漏扫也会导致失败。
+axe 每个浏览器会话最多扫描 32 个状态，CI 并行执行四个分片。所有分片通过后，`e2e-a11y` 才通过。
 检测涵盖预约表单、确认页、时区面板、嵌入页、团队预约和 OAuth 授权页。
 跨引擎冒烟覆盖 WebKit 桌面版、iPhone 预设和 Firefox 的预约、登录及嵌入弹窗。
 
@@ -358,9 +361,9 @@ export HOURMERE_E2E_BOOTSTRAP_URL=postgres://hourmere:hourmere@localhost:5432/ho
 ) # repeat 2/4, 3/4, 4/4 in new directories / 其余分片各用新目录
 (
   export HOURMERE_UI_REPORT_DIR="$(mktemp -d)"
-  node tools/e2e/run-audit.ts a11y
-  node tools/e2e/reports-summary.ts --suite=a11y
-)
+  node tools/e2e/run-audit.ts a11y --shard=1/4
+  node tools/e2e/reports-summary.ts --suite=a11y --shard=1/4
+) # repeat 2/4, 3/4, 4/4 in new directories / 其余分片各用新目录
 npx playwright install --with-deps webkit firefox
 (
   export HOURMERE_UI_REPORT_DIR="$(mktemp -d)"
@@ -371,7 +374,7 @@ npx playwright install --with-deps webkit firefox
 
 Reports go to ignored `temp/ui-audit-reports/` (override `HOURMERE_UI_REPORT_DIR`). Each
 **UI checks** job appends per-page finding counts and execution status to its GitHub Actions
-summary. Download the `ui-layout-*`, `ui-a11y`, `ui-cross-engine` and `ui-visual` artifacts
+summary. Download the `ui-layout-*`, `ui-a11y-*`, `ui-cross-engine` and `ui-visual` artifacts
 from that workflow run for sanitized JSON/Markdown; artifacts are retained for seven days.
 The `ui-visual` artifact contains browser execution metadata only. Local masked expected,
 actual and diff PNGs from failed screenshot comparisons are in `temp/ui-visual-results/`;
@@ -425,7 +428,7 @@ with exact `suite` (`layout` or `a11y`), `page`, `viewport: {width, height}`, `l
 finding `category`, an axe `rule` when applicable, a nonempty `reason` and ISO `expires` date.
 Unknown keys are rejected, including extra keys inside `viewport`; DOM selectors cannot
 narrow an exception. Expired, invalid and stale entries fail; a stale entry no longer matches a finding in its
-selected state. Each layout shard checks the exceptions for its own selected states, and
+selected state. Each measurement shard checks the exceptions for its own selected states, and
 selectors absent from the full matrix fail in every shard. Scan errors, lost reports and
 browser failures cannot be excepted. Legacy scan-time `a11y-exemptions.json` suppressions
 are rejected by the gate; use this shared file so every accepted finding remains visible.
