@@ -389,7 +389,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       SIGNUP: 'open',
     })
     const unavailable = async (): Promise<never> => {
-      throw new Error('Unexpected collaborator in OIDC self-link')
+      throw new Error('Unexpected collaborator in production OIDC flow')
     }
     const invitationMailLimits = { secret }
     const authentication = createAuth(
@@ -3641,6 +3641,46 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       .execute()
     return { invitationId: invitation.id, entryId: entry.id }
   }
+
+  it('completes the SCIM claim through production OIDC invitation acceptance', async () => {
+    vi.mocked(sendSsoRequest).mockImplementation(idp.send)
+    app = productionInstance()
+    const f = await provider()
+    const invitation = await issueInvitation(f.email, true)
+    const { pending } = await pendingAdmission(f, { email_verified: true })
+    await expectCompletionRefused(await acceptInvitation(pending, invitation.invitationId))
+    await proveMailbox(pending)
+
+    const accepted = await acceptInvitation(pending, invitation.invitationId)
+    expect(accepted.status).toBe(200)
+    const result = (await accepted.json()) as { member: { id: string; userId: string } }
+    expect(result).toMatchObject({
+      invitation: { id: invitation.invitationId, status: 'accepted' },
+      member: { id: expect.any(String), userId: expect.any(String), organizationId: fixture.team },
+    })
+    const claim = await db
+      .selectFrom('scim_user_claims as claim')
+      .innerJoin('scim_users as entry', 'entry.id', 'claim.scim_user_id')
+      .select([
+        'entry.id',
+        'entry.linked_user_id',
+        'entry.linked_member_id',
+        'claim.completed_at',
+        'claim.invalidated_at',
+      ])
+      .where('claim.invitation_id', '=', invitation.invitationId)
+      .executeTakeFirstOrThrow()
+    expect(claim).toEqual({
+      id: invitation.entryId,
+      linked_user_id: result.member.userId,
+      linked_member_id: result.member.id,
+      completed_at: expect.any(Date),
+      invalidated_at: null,
+    })
+    expect((await audit()).filter(({ action }) => action === 'scim_user.claimed')).toEqual([
+      expect.objectContaining({ target_id: claim.id, actor_id: result.member.userId }),
+    ])
+  })
 
   async function claimLinked(entryId: string | undefined) {
     if (!entryId) return null
