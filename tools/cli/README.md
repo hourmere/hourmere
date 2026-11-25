@@ -415,9 +415,10 @@ verified personal owner or a current team owner/admin and use REST's error codes
 The subscription kinds are `booking.created`, `booking.rescheduled`, `booking.cancelled`,
 `booking.reschedule_requested`, `booking.reschedule_request_expired`,
 `booking.attendee_no_show_changed` and `workflow.executed`. Adding `workflow.executed`
-through create or update is disabled. The CLI exits `1` with `workflows_disabled` on stderr,
-the equivalent of REST's HTTP 404. On create this takes precedence over `webhooks_disabled`
-(REST HTTP 409). Existing subscriptions to that kind can be kept or removed.
+through create or update requires `WORKFLOWS_ENABLED=true` on the server. While workflows
+are off, the CLI exits `1` with `workflows_disabled` on stderr, the equivalent of REST's
+HTTP 404. On create this takes precedence over `webhooks_disabled` (REST HTTP 409).
+Existing subscriptions to that kind can be kept or removed while workflows are off.
 
 ```sh
 hourmere webhooks list --json
@@ -429,6 +430,7 @@ printf '%s\n' '{"id":"WEBHOOK_UUID"}' | hourmere webhooks deliveries --input - -
 hourmere --help
 ```
 
+Pipe JSON containing destination credentials on stdin with `--input -`.
 Creation returns `{ webhook, secret }` once. `webhooks rotate-secret` requires `full`,
 takes `{ id }` and returns the replacement `{ secret }` once. Both commands require
 `--output FILE` to save the full response in a new `0600` file, or explicit `--json`
@@ -454,8 +456,9 @@ event types and continue processing known ones. Every delivery has a required `b
 
 中文：`webhooks rotate-secret` 使用 `full` 密钥，仅在本次响应中返回新签名密钥，需指定
 `--output` 或 `--json`。`webhooks deliveries` 使用 `read` 或 `full` 密钥，按 `nextAfter`
-分页，每页最多返回 50 条投递元数据，每条均有必填的 `bookingId`（UUID）。创建或更新时
-新增 `workflow.executed` 订阅会返回 `workflows_disabled`（对应 REST 404）。创建时该错误
+分页，每页最多返回 50 条投递元数据，每条均有必填的 `bookingId`（UUID）。目标地址包含凭证时，
+请通过 `--input -` 从标准输入读取 JSON。工作流关闭时，创建或更新端点并新增
+`workflow.executed` 订阅会返回 `workflows_disabled`（对应 REST 404）。创建时该错误
 优先于 `webhooks_disabled`（对应 REST 409）。`Webhook.events` 和投递的 `eventType`
 均为开放枚举，请忽略未知事件类型。
 

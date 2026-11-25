@@ -116,6 +116,7 @@ function PublicFrame({
   branding,
   embedded = false,
   preview = false,
+  languageDisabled = false,
   logo,
   footer,
 }: {
@@ -124,13 +125,16 @@ function PublicFrame({
   branding?: PublicBrand
   embedded?: boolean
   preview?: boolean
+  languageDisabled?: boolean
   logo?: ReactNode
   footer?: ReactNode
 }) {
   const { locale } = useI18n()
   const palette = brandPalette(branding?.primaryColor)
   const Content = preview ? 'div' : 'main'
-  const language = !embedded && <PublicLanguageSwitcher scoped={preview} />
+  const language = !embedded && (
+    <PublicLanguageSwitcher scoped={preview} disabled={languageDisabled} />
+  )
   return (
     <div
       className={`public${embedded ? ' public-embedded' : ''}${palette ? ' public-branded' : ''}${preview ? ' public-preview' : ''}`}
@@ -185,10 +189,12 @@ export function PublicLayout({
   children,
   wide = false,
   branding,
+  languageDisabled = false,
 }: {
   children: ReactNode
   wide?: boolean
   branding?: PublicBrand
+  languageDisabled?: boolean
 }) {
   const { t, locale } = useI18n()
   // Interpolate first so Han/Latin boundary spacing also applies around the logo.
@@ -222,6 +228,7 @@ export function PublicLayout({
         wide={wide}
         branding={branding}
         embedded={embedded}
+        languageDisabled={languageDisabled}
         logo={branding && <BrandLogo branding={branding} />}
         footer={
           <footer className="public-footer">

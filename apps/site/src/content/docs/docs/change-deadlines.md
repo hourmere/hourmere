@@ -153,9 +153,9 @@ first. Once that deadline has passed, sending a request is refused with
 - **Booking window** is unaffected.
 - **Invitee reschedule limit** (five moves per booking chain by default) still applies
   independently.
-- **Paid bookings:** invitee management of paid bookings is not available yet
-  (`409 paid_booking_management_unavailable`). Their deadlines are stored but change
-  nothing yet.
+- **Paid bookings:** the same invitee change deadlines apply to confirmed bookings with
+  a bound Checkout Session. An eligible cancellation requests a full refund.
+  [Paid booking changes](/docs/payments#cancel-or-reschedule-a-paid-booking).
 - **Group seats:** each seat booking keeps its own deadlines. After the deadline, an
   invitee cannot move a seat to another time; choosing the same time again is not refused,
   because it changes nothing.

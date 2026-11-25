@@ -311,11 +311,18 @@ export { expirePaymentHolds } from './payment-expiry.ts'
 export {
   type CheckoutOperation,
   type CheckoutSession,
+  checkoutReconciliationWindow,
   checkoutSessionExpiry,
   FakePaymentProvider,
   type PaymentMode,
   type PaymentProvider,
 } from './payment-provider.ts'
+export {
+  type PaymentRefundProvider,
+  PaymentRefundProviderError,
+  runPaymentRefunds,
+  type StripeRefundObservation,
+} from './payment-refunds.ts'
 export {
   cancelPaymentHold,
   confirmPaymentHold,

@@ -5,6 +5,7 @@ import Stripe from 'stripe'
 import { routeBodyLimit } from './body-limit.ts'
 import { ErrorBody, json } from './openapi.ts'
 import type { StripeConfig } from './stripe-config.ts'
+import { parseStripeRefundObservation } from './stripe-refunds.ts'
 
 const MAX_BODY_BYTES = 64 * 1024
 const TOLERANCE_SECONDS = 300
@@ -49,6 +50,34 @@ const sessionSnapshot = z.object({
 })
 
 const paymentIntentId = z.string().regex(/^pi_[A-Za-z0-9_]{1,200}$/)
+const attemptId = z.uuid()
+const paidSessionIdentity = sessionSnapshot.pick({ object: true, id: true }).extend({
+  status: z.literal('complete'),
+  payment_status: z.literal('paid'),
+  payment_intent: paymentIntentId,
+  client_reference_id: z.unknown(),
+  metadata: z.unknown(),
+})
+const localCheckoutTags = z.object({
+  hourmere_booking_id: z.unknown(),
+  hourmere_checkout_attempt_id: z.unknown(),
+})
+
+function paidCheckoutIdentity(event: z.infer<typeof eventEnvelope>) {
+  if (event.type !== 'checkout.session.completed') return
+  const parsed = paidSessionIdentity.safeParse(event.data.object)
+  if (!parsed.success) return
+  const session = parsed.data
+  const metadata = localCheckoutTags.safeParse(session.metadata).data
+  return {
+    sessionId: session.id,
+    paymentReference: session.payment_intent,
+    tagged:
+      attemptId.safeParse(metadata?.hourmere_checkout_attempt_id).success ||
+      attemptId.safeParse(metadata?.hourmere_booking_id).success,
+    clientReferenceId: attemptId.safeParse(session.client_reference_id).data,
+  }
+}
 
 function checkoutObservation(event: z.infer<typeof eventEnvelope>) {
   const parsed = sessionSnapshot.safeParse(event.data.object)
@@ -163,14 +192,21 @@ export function mountStripeWebhook(app: OpenAPIHono, deps?: StripeWebhookDeps) {
       switch (event.type) {
         case 'checkout.session.completed':
         case 'checkout.session.expired':
-          await recordStripePaymentEvent(ctx, config, event.id, checkoutObservation(event))
+          await recordStripePaymentEvent(ctx, config, event.id, {
+            checkout: checkoutObservation(event),
+            paidCheckout: paidCheckoutIdentity(event),
+          })
           break
         case 'payment_intent.succeeded':
+          // A PaymentIntent snapshot cannot bind a Checkout Session on its own.
+          await recordStripePaymentEvent(ctx, config, event.id)
+          break
+        case 'refund.created':
         case 'refund.updated':
         case 'refund.failed':
-          // These snapshots cannot bind a Checkout Session on their own. Refund execution
-          // and reconciliation will manage refund state; do not clear a pending obligation.
-          await recordStripePaymentEvent(ctx, config, event.id)
+          await recordStripePaymentEvent(ctx, config, event.id, {
+            refund: parseStripeRefundObservation(event.data.object, config.mode),
+          })
           break
       }
     } catch {

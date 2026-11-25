@@ -25,7 +25,7 @@ export async function setAttendeeNoShow(
   return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, bookingId)
     const booking = await authorizeBookingNoShow(trx, ctx, bookingId)
-    // Confirmed paid bookings: paid_booking_management_unavailable, as for other host actions.
+    // Attendance changes remain unavailable for paid bookings.
     await assertBookingLocallyManaged(trx, bookingId)
     // Only confirmed and cancelled rows are visible; anything else stays booking_not_found.
     if (booking.status !== 'confirmed')
