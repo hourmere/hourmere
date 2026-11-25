@@ -1,0 +1,30 @@
+{
+  "migration": "0190_payment_refund_obligations.sql",
+  "objects": {
+    "constraint public.payment_checkout_attempts.payment_checkout_attempts_current_booking_id_fkey": "FOREIGN KEY (current_booking_id) REFERENCES bookings(id) ON DELETE RESTRICT",
+    "constraint public.payment_checkout_attempts.payment_checkout_attempts_current_booking_id_key": "UNIQUE (current_booking_id)",
+    "constraint public.payment_refund_obligations.payment_refund_obligations_attempt_id_fkey": "FOREIGN KEY (attempt_id) REFERENCES payment_checkout_attempts(id) ON DELETE RESTRICT",
+    "constraint public.payment_refund_obligations.payment_refund_obligations_attempt_id_key": "UNIQUE (attempt_id)",
+    "constraint public.payment_refund_obligations.payment_refund_obligations_attempts": "CHECK ((((attempts = 0) AND (first_attempted_at IS NULL)) OR ((attempts > 0) AND (first_attempted_at IS NOT NULL))))",
+    "constraint public.payment_refund_obligations.payment_refund_obligations_binding": "CHECK (((mode = ANY (ARRAY['test'::text, 'live'::text])) AND (amount_minor > 0) AND (currency ~ '^[a-z]{3}$'::text)))",
+    "constraint public.payment_refund_obligations.payment_refund_obligations_lease": "CHECK ((((lease_token IS NULL) AND (lease_expires_at IS NULL)) OR ((lease_token IS NOT NULL) AND (lease_expires_at IS NOT NULL) AND (state = 'requested'::text))))",
+    "constraint public.payment_refund_obligations.payment_refund_obligations_payment_reference_key": "UNIQUE (payment_reference)",
+    "constraint public.payment_refund_obligations.payment_refund_obligations_pkey": "PRIMARY KEY (id)",
+    "constraint public.payment_refund_obligations.payment_refund_obligations_state": "CHECK ((((state = 'requested'::text) AND (stripe_refund_id IS NULL)) OR ((state = ANY (ARRAY['pending'::text, 'succeeded'::text])) AND (stripe_refund_id IS NOT NULL)) OR (state = 'failed'::text)))",
+    "constraint public.payment_refund_obligations.payment_refund_obligations_stripe_refund_id_key": "UNIQUE (stripe_refund_id)",
+    "constraint public.payment_stripe_events.payment_stripe_events_finding_shape": "CHECK ((num_nonnulls(finding, account_id, mode, session_id, payment_reference) = ANY (ARRAY[0, 5])))",
+    "index public.bookings.bookings_payment_reconciliation_scan": "CREATE INDEX bookings_payment_reconciliation_scan ON public.bookings USING btree (id) WHERE (payment_hold_expires_at IS NOT NULL)",
+    "index public.payment_refund_obligations.payment_refund_obligations_due": "CREATE INDEX payment_refund_obligations_due ON public.payment_refund_obligations USING btree (account_id, mode, next_attempt_at, id) WHERE (state = 'requested'::text)",
+    "index public.payment_stripe_events.payment_stripe_events_findings": "CREATE INDEX payment_stripe_events_findings ON public.payment_stripe_events USING btree (account_id, mode, event_id) WHERE (finding IS NOT NULL)",
+    "not_null public.payment_refund_obligations.account_id": "NOT NULL",
+    "not_null public.payment_refund_obligations.amount_minor": "NOT NULL",
+    "not_null public.payment_refund_obligations.attempt_id": "NOT NULL",
+    "not_null public.payment_refund_obligations.attempts": "NOT NULL DEFAULT 0",
+    "not_null public.payment_refund_obligations.created_at": "NOT NULL DEFAULT clock_timestamp()",
+    "not_null public.payment_refund_obligations.currency": "NOT NULL",
+    "not_null public.payment_refund_obligations.mode": "NOT NULL",
+    "not_null public.payment_refund_obligations.next_attempt_at": "NOT NULL DEFAULT clock_timestamp()",
+    "not_null public.payment_refund_obligations.payment_reference": "NOT NULL",
+    "not_null public.payment_refund_obligations.state": "NOT NULL DEFAULT 'requested'::text"
+  }
+}

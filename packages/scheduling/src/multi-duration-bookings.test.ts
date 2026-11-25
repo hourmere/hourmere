@@ -158,8 +158,8 @@ const BROKEN_BOOKINGS: Change = [
   'const email = unboundInSourceCopy(input.email)',
 ]
 const BROKEN_MANAGE: Change = [
-  'await assertBookingLocallyManaged(ctx.db, booking.id)',
-  'await unboundInSourceCopy(ctx.db, booking.id)',
+  'const paid = await assertBookingLocallyManaged(ctx.db, booking.id, true)',
+  'const paid = await unboundInSourceCopy(ctx.db, booking.id)',
 ]
 const BROKEN_COPY_FAILURE = {
   name: 'BrokenSourceCopyError',
@@ -550,7 +550,7 @@ describe.skipIf(!serverUrl)('multiple duration bookings', () => {
     [
       'managed duration forwarding',
       [
-        'snapshot.hosts_use_default_schedule,\n    durationMinutes,',
+        'snapshot.hosts_use_default_schedule,\n    paid ? undefined : durationMinutes,',
         'snapshot.hosts_use_default_schedule,',
       ],
       verifyManagedSelection,
@@ -558,8 +558,8 @@ describe.skipIf(!serverUrl)('multiple duration bookings', () => {
     [
       'original-duration candidate bounds',
       [
-        "Temporal.Instant.from(booking.end)\n          .since(Temporal.Instant.from(booking.start))\n          .total('minutes')",
-        'eventType.duration_minutes',
+        "const originalDuration = Temporal.Instant.from(booking.end)\n    .since(Temporal.Instant.from(booking.start))\n    .total('minutes')",
+        'const originalDuration = eventType.duration_minutes',
       ],
       verifyManagedSnapshotCap,
     ],
@@ -598,8 +598,8 @@ describe.skipIf(!serverUrl)('multiple duration bookings', () => {
     [
       'original duration snapshot',
       [
-        "toInstant(old.end_at).since(toInstant(old.start_at)).total({ unit: 'minutes' })",
-        'eventType.duration_minutes',
+        "const originalDuration = toInstant(old.end_at)\n    .since(toInstant(old.start_at))\n    .total({ unit: 'minutes' })",
+        'const originalDuration = eventType.duration_minutes',
       ],
       verifySnapshot,
     ],

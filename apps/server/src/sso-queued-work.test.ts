@@ -363,6 +363,7 @@ it('classifies every production worker by its source of authority', () => {
     'notificationEmailCleanupJob',
     'oneTimeBookingLinksRetentionJob',
     'paymentHoldsExpiryJob',
+    'paymentRefundJob',
     'routingRetentionJob',
     'signInEmailJobs',
     'ssoDomainRecheckJob',
