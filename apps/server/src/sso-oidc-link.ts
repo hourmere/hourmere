@@ -1,3 +1,4 @@
+import type { ScimClaimCompletion } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import { auditActor, writeSsoAuditEvent, writeSsoSecurityFailure } from '@hourmere/db/audit'
 import { scimSuspended } from '@hourmere/db/scim-suspension'
@@ -34,6 +35,7 @@ export async function lockOidcLinkActor(
   organizationId: string,
   actor: OidcTestActor,
   scimResourcesEnabled = false,
+  lockTeamForClaim = false,
 ) {
   const user = await trx
     .selectFrom('auth.user')
@@ -43,16 +45,15 @@ export async function lockOidcLinkActor(
     .forShare()
     .executeTakeFirst()
   if (!user) throw new OidcAttemptRefused()
-  const organization = await trx
-    .selectFrom('auth.organization')
-    .select('id')
-    .where('id', '=', organizationId)
-    .forShare()
-    .executeTakeFirst()
+  const team = trx.selectFrom('auth.organization').select('id').where('id', '=', organizationId)
+  const organization = await (lockTeamForClaim
+    ? team.forUpdate()
+    : team.forShare()
+  ).executeTakeFirst()
   if (!organization) throw new OidcAttemptRefused()
   const member = await trx
     .selectFrom('auth.member')
-    .select('id')
+    .select(['id', 'role'])
     .where('organizationId', '=', organizationId)
     .where('userId', '=', user.id)
     .where((eb) => eb.not(scimSuspended(organizationId, user.id, scimResourcesEnabled)))
@@ -154,8 +155,15 @@ async function lockLinkContext(
   { actor, binding }: LinkActor,
   scimResourcesEnabled: boolean,
   protocol: 'oidc' | 'saml' = 'oidc',
+  lockTeamForClaim = false,
 ) {
-  const context = await lockOidcLinkActor(trx, provider.organizationId, actor, scimResourcesEnabled)
+  const context = await lockOidcLinkActor(
+    trx,
+    provider.organizationId,
+    actor,
+    scimResourcesEnabled,
+    lockTeamForClaim,
+  )
   const { issuer } = await lockOidcProvider(trx, provider, true, protocol)
   if (context.member.id !== binding.memberId || sha256(context.mailbox) !== binding.mailboxDigest)
     throw new OidcAttemptRefused()
@@ -215,7 +223,12 @@ export async function stageOidcLink(
 const invalid = { status: 'invalid' } as const
 
 export async function completeOidcLink(
-  { db, configurationKey, scimResourcesEnabled }: LinkDeps,
+  {
+    db,
+    configurationKey,
+    scimResourcesEnabled,
+    scimClaims,
+  }: LinkDeps & { scimClaims?: ScimClaimCompletion | undefined },
   {
     id,
     browserBinding,
@@ -229,6 +242,7 @@ export async function completeOidcLink(
   readSamlBinding?: (requestId: string) => unknown,
 ) {
   const protocol = readSamlBinding ? 'saml' : 'oidc'
+  const completesScimClaim = protocol === 'oidc' && scimClaims?.link !== undefined
   const binding = browserBindingDigest(browserBinding)
   if (!binding || !isOidcCompletionEnvelope(envelope)) return invalid
   const digest = sha256(envelope)
@@ -282,6 +296,7 @@ export async function completeOidcLink(
         { actor, binding: projection },
         scimResourcesEnabled === true,
         protocol,
+        completesScimClaim,
       )
       const attempt = await attempts(trx)
         .select(sql<string>`expires_at::text`.as('expires_at'))
@@ -304,6 +319,19 @@ export async function completeOidcLink(
       if (!timing.live) return invalid
       if (!timing.domainLive) return { status: 'domain_unverified' } as const
 
+      const audit = auditActor({ kind: 'session', sessionId: actor.id, user: context.user })
+      const claim =
+        completesScimClaim && context.member.role === 'member'
+          ? await scimClaims?.link?.(trx, {
+              organizationId: provider.organizationId,
+              userId: actor.userId,
+              mailbox: context.mailbox,
+              checkedAt: now,
+              audit,
+            })
+          : undefined
+      if (claim?.refused) return invalid
+
       await trx.updateTable('sso_attempts').set({ consumed_at: now }).where('id', '=', id).execute()
       // The unique indexes arbitrate simultaneous links of a subject or person.
       const link = await trx
@@ -322,12 +350,17 @@ export async function completeOidcLink(
         .executeTakeFirst()
       if (!link) return { status: 'conflict' } as const
       await writeSsoAuditEvent(trx, {
-        ...auditActor({ kind: 'session', sessionId: actor.id, user: context.user }),
+        ...audit,
         organizationId: provider.organizationId,
         targetType: 'sso_link',
         targetId: link.id,
         action: 'sso_link.linked',
         details,
+      })
+      await claim?.finish?.(trx, {
+        id: context.member.id,
+        organizationId: provider.organizationId,
+        userId: actor.userId,
       })
       if (readSamlBinding) {
         const { live } = await trx

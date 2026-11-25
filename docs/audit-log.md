@@ -81,6 +81,7 @@ allow-lists and value checks.
 | SCIM provisioning tokens | `scim_token.created`, `scim_token.rotated`, `scim_token.revoked` |
 | SCIM Users | `scim_user.created`, `scim_user.claimed`, `scim_user.updated`, `scim_user.deactivated`, `scim_user.credentials_revoked`, `scim_user.reactivated`, `scim_user.retired` |
 | SCIM Groups | `scim_group.created`, `scim_group.updated`, `scim_group.deleted` |
+| SCIM managed child memberships | `scim_membership.added`, `scim_membership.removed`, `scim_membership.suspended`, `scim_membership.reactivated`, `scim_membership.credentials_revoked` |
 | SCIM team mappings | `scim_mapping.linked`, `scim_mapping.unlinked`, `scim_mapping.suspended` |
 | Webhooks | `webhook.created`, `webhook.updated`, `webhook.paused`, `webhook.resumed`, `webhook.deleted`, `webhook.secret_rotated` |
 | Slack destinations | `slack_destination.created`, `slack_destination.updated`, `slack_destination.paused`, `slack_destination.resumed`, `slack_destination.tested`, `slack_destination.deleted` |
@@ -180,7 +181,7 @@ admin session that made the change, with empty details: like API keys, no token 
 secret or digest is recorded. Revoking an already revoked token records nothing, and a
 refused rotation (a revoked token or an active overlap) records nothing.
 
-SCIM User creation (`POST /Users`, which production does not register yet) records
+SCIM User creation (`POST /Users`) records
 `scim_user.created` on the new resource ID, attributed to the provisioning token that made the
 request (actor `scim_token`, credential `none`), with empty details: no `userName`, address,
 name or other attribute value is recorded. The invitation it issues records
@@ -190,7 +191,7 @@ name or other attribute value is recorded. The invitation it issues records
 creates the entry, its claim and the invitation, so a create that fails or is refused records
 nothing.
 
-Accepting the invitation of a SCIM User's pending claim (which production does not wire yet)
+While SCIM provisioning is enabled, accepting the invitation of a pending SCIM User claim
 completes the claim and records `scim_user.claimed` on the resource ID, beside the usual
 `membership.accepted`, both attributed to the accepting person's session, with empty details.
 They are written in the acceptance transaction, with the new membership and the link, so a
@@ -203,11 +204,18 @@ the provisioning token as actor. Suspension of a linked account also records
 They commit with the state change, the team suspension or release, and any credential
 revocations. An identical retry creates no additional lifecycle event.
 
-SCIM User retirement (`DELETE /Users/{id}`, available through the resource test flag)
+SCIM User retirement (`DELETE /Users/{id}`)
 records `scim_user.retired` with the provisioning token as actor and empty details. It
 commits with the resource tombstone, claim invalidation, any credential revocation and
 any pending invitation cancellation. The corresponding revocation and cancellation audit
 events use the same actor. A refused deletion or a retry of a retired ID writes no events.
+
+Directory changes write membership additions, removals, suspensions, reactivations and
+child-team credential revocation in the child team's own journal. The events identify
+the child-local membership ID with an actor of type `system` and ID `scim`, credential
+`none` and empty details. They omit the parent's provisioning token ID, its SCIM resource
+IDs and all directory attribute values. The events share the roster or lifecycle change's
+transaction, including changes made through User deactivation or retirement.
 
 SCIM mapping changes record the same mapping UUID in both teams' journals, with empty
 details and no credential IDs. Each ordinary link or unlink records the owner who

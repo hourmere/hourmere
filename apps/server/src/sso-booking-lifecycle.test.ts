@@ -133,6 +133,8 @@ it.skipIf(!serverUrl)(
           enqueueCalendarSync: unavailable,
           enqueueCalendarWritebackRecovery: unavailable,
           mailboxProofQueue: { enqueue: unavailable },
+          scimMappingNotices: { enqueue: unavailable },
+          enqueueScimInvitation: unavailable,
         }),
       )
       const session = await db.transaction().execute((trx) =>

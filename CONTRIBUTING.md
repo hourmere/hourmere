@@ -467,10 +467,10 @@ The write-parity guard in
 CI `check` job. It inventories every `POST`, `PUT`, `PATCH` and `DELETE` under `/api/v1`
 from the server's generated `openApiDocument`, the tools registered by `productTools` in
 `apps/server/src/server.ts`, and the actual `COMMANDS` table in `tools/cli/src/cli.ts`.
-Read operations are outside this guard's required coverage except the explicitly mapped
-SSO provider and policy reads, which must ship on all three interfaces together.
+Every GET under `/api/v1/webhooks` and the other reads named in
+[`scripts/interface-parity.ts`](scripts/interface-parity.ts) also require coverage.
 
-When adding or changing a write operation:
+When adding or changing an operation covered by the guard:
 
 1. Give the REST route a stable, unique OpenAPI `operationId` and implement the corresponding MCP
    tool and CLI command using the shared service behavior.

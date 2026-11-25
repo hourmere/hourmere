@@ -108,17 +108,12 @@ export const COMMANDS = {
   'workflows list': 'list_workflows',
   'workflows get': 'get_workflow',
   'workflows runs': 'list_workflow_runs',
-} as const
-
-const SCIM_MAPPING_COMMANDS = {
   'scim-team-mappings create': 'create_scim_team_mapping',
   'scim-team-mappings delete': 'delete_scim_team_mapping',
 } as const
-const RESOURCE_TEST_COMMANDS = { ...COMMANDS, ...SCIM_MAPPING_COMMANDS }
 
-/** The executable uses the production registry. Resource tests may opt in in-process. */
-export function cliCommands(scimResourcesEnabled = false) {
-  return scimResourcesEnabled ? RESOURCE_TEST_COMMANDS : COMMANDS
+export function cliCommands() {
+  return COMMANDS
 }
 
 export const REST_COMMANDS = { 'branding upload': 'POST /api/v1/branding/logo' } as const
@@ -133,6 +128,7 @@ export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [-
        hourmere audit-log list|settings|set-retention [--input FILE|-] [--url ORIGIN]
        hourmere sso providers list [--input FILE|-] [--url ORIGIN]
        hourmere sso policy [--input FILE|-] [--url ORIGIN]
+       hourmere scim-team-mappings create|delete --input FILE|-
        hourmere routing-forms list|get|create|update|archive|publish|preview|public [--input FILE|-] [--url ORIGIN]
        hourmere routing-forms route --input FILE|- [--output FILE] [--url ORIGIN]
        hourmere routing-forms resolve|slots --input FILE|- [--output FILE] [--url ORIGIN]
@@ -150,13 +146,15 @@ Webhook reads require read or full scope and writes require full scope.
 All webhook commands require personal ownership or a team owner/admin role.
 Create takes JSON {url, events, isActive?}. Rotate-secret takes JSON {id}.
 Both require --output FILE (new private file) or --json (stdout) and return the signing secret once.
+Use --input - for JSON containing destination credentials.
 Use a private file when stdout is logged.
 Update takes JSON {id, events?, isActive?}. The URL is immutable.
 Delete takes JSON {id} and requires --yes to confirm deletion of the endpoint and retained deliveries.
 Deliveries takes JSON {id, after?} and returns up to 50 metadata rows. Pass nextAfter as after for the next page.
 Events: booking.created, booking.rescheduled, booking.cancelled, booking.reschedule_requested,
         booking.reschedule_request_expired, booking.attendee_no_show_changed, workflow.executed.
-Adding workflow.executed on create or update is disabled (workflows_disabled, REST 404).
+Adding workflow.executed on create or update requires WORKFLOWS_ENABLED=true.
+Without it, the server returns workflows_disabled (REST 404).
 On create this takes precedence over webhooks_disabled (REST 409).
 Endpoint events and delivery eventType are open enums. Ignore unknown event kinds.
 Slack: slack create|list|update|delete|test (JSON input; list read/full, writes full).
@@ -280,7 +278,7 @@ See https://hourmere.com/docs/cli for complete usage.
 `
 
 interface Options {
-  command: keyof typeof RESOURCE_TEST_COMMANDS | keyof typeof REST_COMMANDS
+  command: keyof typeof COMMANDS | keyof typeof REST_COMMANDS
   file?: string
   contentType?: string
   input?: string
@@ -292,7 +290,7 @@ interface Options {
   clearSuccessRedirect?: boolean
 }
 
-function parse(argv: readonly string[], scimResourcesEnabled: boolean | undefined): Options {
+function parse(argv: readonly string[]): Options {
   const parts = [...argv]
   const first = parts.shift()
   const command =
@@ -312,11 +310,7 @@ function parse(argv: readonly string[], scimResourcesEnabled: boolean | undefine
         ? `${first} ${parts.shift() ?? ''}`
         : first
   const rest = parts
-  if (
-    !command ||
-    (!Object.hasOwn(cliCommands(scimResourcesEnabled), command) &&
-      !Object.hasOwn(REST_COMMANDS, command))
-  )
+  if (!command || (!Object.hasOwn(COMMANDS, command) && !Object.hasOwn(REST_COMMANDS, command)))
     throw new CliError('invalid_command')
   const options: Options = { command: command as Options['command'] }
   const seen = new Set<string>()
@@ -494,19 +488,13 @@ export async function runCli(options: {
   stdout: (text: string) => unknown | Promise<unknown>
   stderr: (text: string) => void
   fetch?: typeof fetch
-  /** In-process test capability; no environment variable or CLI switch enables it. */
-  scimResourcesEnabled?: boolean
 }): Promise<number> {
   if (options.argv.length === 1 && options.argv[0] === '--version') {
     options.stdout(`${version}\n`)
     return 0
   }
   if (options.argv.length === 0 || (options.argv.length === 1 && options.argv[0] === '--help')) {
-    options.stdout(
-      options.scimResourcesEnabled
-        ? `${HELP}SCIM mappings (resource test): scim-team-mappings create | delete --input FILE|-\n`
-        : HELP,
-    )
+    options.stdout(HELP)
     return 0
   }
   let output: Awaited<ReturnType<typeof open>> | undefined
@@ -516,7 +504,7 @@ export async function runCli(options: {
   let idempotencyKey: string | undefined
   const secrets = [options.env.HOURMERE_API_KEY ?? '']
   try {
-    const args = parse(options.argv, options.scimResourcesEnabled)
+    const args = parse(options.argv)
     command = args.command
     const url = endpoint(args.url ?? options.env.HOURMERE_URL)
     const key = options.env.HOURMERE_API_KEY ?? ''
@@ -634,7 +622,7 @@ export async function runCli(options: {
         : await callTool({
             url,
             key,
-            tool: RESOURCE_TEST_COMMANDS[args.command],
+            tool: COMMANDS[args.command],
             input,
             fetch: options.fetch,
           })

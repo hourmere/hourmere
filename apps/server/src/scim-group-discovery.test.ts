@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ScimResources } from './scim.ts'
-import { SCIM_URN, scimDiscovery, scimDiscoveryWithGroups } from './scim-discovery.ts'
+import { SCIM_URN } from './scim-discovery.ts'
+import { scimDiscovery, scimDiscoveryWithGroups } from './scim-discovery-fixture.ts'
 import { parseScimListQuery, projectScimResource, scimGroupQuery } from './scim-query.ts'
 
 const organizationId = '00000000-0000-4000-8000-0000000000a1'

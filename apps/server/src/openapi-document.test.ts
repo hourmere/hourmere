@@ -237,6 +237,28 @@ describe('openApiDocument', () => {
     expect(WebhookDelivery.required).toContain('bookingId')
   })
 
+  it('documents the webhook delivery cursor and its validation error', async () => {
+    const doc = (await openApiDocument()) as {
+      paths: Record<
+        string,
+        { get: { parameters: unknown[]; responses: Record<string, { description: string }> } }
+      >
+    }
+    const operation = doc.paths['/api/v1/webhooks/{id}/deliveries']?.get
+    expect(operation?.parameters).toContainEqual(
+      expect.objectContaining({
+        name: 'after',
+        in: 'query',
+        required: false,
+        schema: expect.objectContaining({
+          type: 'string',
+          description: expect.stringContaining('nextAfter UUID'),
+        }),
+      }),
+    )
+    expect(operation?.responses[400]?.description).toContain('invalid_cursor')
+  })
+
   it("lists every route group's paths, without a database", async () => {
     const doc = (await openApiDocument()) as { openapi: string; paths: Record<string, unknown> }
     expect(doc.openapi).toBe('3.1.0')

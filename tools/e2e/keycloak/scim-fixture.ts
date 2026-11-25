@@ -15,14 +15,8 @@ import { createFixtures } from '@hourmere/scheduling/testing'
 import { test as base, expect } from '@playwright/test'
 import { createApp } from '../../../apps/server/src/app.ts'
 import { provisioningTokenRoutes } from '../../../apps/server/src/routes/provisioning-tokens.ts'
-import { scimDiscoveryWithGroups } from '../../../apps/server/src/scim-discovery.ts'
-import { scimGroupRetirement } from '../../../apps/server/src/scim-group-retirement.ts'
-import { scimGroups } from '../../../apps/server/src/scim-groups.ts'
+import { scimResourceHandlers } from '../../../apps/server/src/scim-resources.ts'
 import type { ScimMappingNoticeQueue } from '../../../apps/server/src/scim-team-mapping-notices.ts'
-import { scimUserCreation } from '../../../apps/server/src/scim-user-create.ts'
-import { scimUserReplacement } from '../../../apps/server/src/scim-user-replace.ts'
-import { scimUserRetirement } from '../../../apps/server/src/scim-user-retirement.ts'
-import { scimUsers } from '../../../apps/server/src/scim-users.ts'
 import { listenOwned } from '../listeners.ts'
 import { startKeycloak } from './keycloak.ts'
 import { createScimCapture } from './scim-capture.ts'
@@ -140,12 +134,6 @@ export async function withScimScenario(
           },
         },
       })
-      const groups = scimGroups(db)
-      const retireGroup = scimGroupRetirement(db, noticeQueue)
-      const create = scimUserCreation({ db, signup })
-      const replace = scimUserReplacement(db)
-      const retireUser = scimUserRetirement(db)
-      const read = scimUsers(db)
       const app = createApp({
         publicUrl,
         checkDb: async () => {},
@@ -157,14 +145,7 @@ export async function withScimScenario(
         scim: {
           db,
           enabled: true,
-          resources: (request) =>
-            scimDiscoveryWithGroups(request) ??
-            retireGroup(request) ??
-            groups(request) ??
-            create(request) ??
-            replace(request) ??
-            retireUser(request) ??
-            read(request),
+          resources: scimResourceHandlers(db, { signup }, noticeQueue),
         },
       })
       listener.server.on(

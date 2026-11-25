@@ -110,6 +110,31 @@ check('accepts real MCP/CLI equivalents and a reasoned exemption', ({ interfaceP
   ).toEqual([])
 })
 
+check('requires parity for newly added webhook reads', ({ interfaceParityErrors }) => {
+  const path = '/api/v1/webhooks/{id}'
+  const operationId = 'getWebhook'
+  const inventory: InterfaceInventory = {
+    rest: [{ path, method: 'get', operationId }],
+    mcp: ['get_webhook'],
+    cli: { 'webhooks get': 'get_webhook' },
+  }
+  expect(
+    interfaceParityErrors(inventory, { getWebhook: { mcp: 'get_webhook', cli: 'webhooks get' } }),
+  ).toEqual([])
+  expect(interfaceParityErrors(inventory, {})).toContainEqual(
+    `getWebhook (GET ${path}): ${missingMapping}`,
+  )
+  expect(
+    interfaceParityErrors({ ...inventory, rest: [{ path, method: 'get' }] }, {}),
+  ).toContainEqual(`GET ${path}: missing or malformed operationId; use a stable identifier.`)
+  expect(
+    interfaceParityErrors(
+      { ...inventory, rest: [{ path: '/api/v1/webhooks-other', method: 'get', operationId }] },
+      {},
+    ),
+  ).toEqual([])
+})
+
 check(
   'requires all three interfaces for the declared private reads',
   ({ interfaceParityErrors }) => {
@@ -833,6 +858,7 @@ describe('source-copy parity guard mutation checks', () => {
       "new Set(['post', 'put', 'patch'])",
     ],
     ['REST prefix', "path !== '/api/v1' && !path.startsWith('/api/v1/')", 'false'],
+    ['webhook read parity', "operation.path.startsWith('/api/v1/webhooks/')", 'false'],
     ['OpenAPI document shape', '!isRecord(document) || !isRecord(document.paths)', 'false'],
     ['OpenAPI path shape', '!isRecord(item)', 'false'],
     ['binary mapping shape', 'Object.keys(entry).length !== 3', 'false'],

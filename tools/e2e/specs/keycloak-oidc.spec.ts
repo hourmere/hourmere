@@ -70,31 +70,18 @@ test('linked Keycloak sign-in coexists with personal email, Google and Microsoft
 })
 
 for (const field of ['state', 'nonce'] as const) {
-  test(`Keycloak sign-in refuses a tampered ${field}`, async ({ page, keycloak: app }) => {
-    await page.route(
-      (url) => isAuthorization(url, app),
-      async (route) => {
-        const authorization = new URL(route.request().url())
-        const original = authorization.searchParams.get(field)
-        if (!original) throw new Error(`Keycloak authorization request has no ${field}`)
-        // Change ciphertext while keeping the state envelope header and attempt ID.
-        // Keycloak signs the changed nonce into its genuine ID token.
-        const index = field === 'state' ? original.length - 2 : 0
-        const replacement = original[index] === 'A' ? 'B' : 'A'
-        authorization.searchParams.set(
-          field,
-          `${original.slice(0, index)}${replacement}${original.slice(index + 1)}`,
-        )
-        await route.continue({ url: authorization.href })
-      },
-      { times: 1 },
-    )
-    await page.goto(signInUrl(app))
-    await signInAtKeycloak(page, app)
-    await expectRefusal(page, app)
-    // State fails before the exchange. Nonce fails after a successful real exchange.
-    expect(app.tokenExchanges()).toEqual(field === 'state' ? [] : ['issued'])
-  })
+  const testTamperedAuthorization = test.extend({ tamperedAuthorizationField: field })
+
+  testTamperedAuthorization(
+    `Keycloak sign-in refuses a tampered ${field}`,
+    async ({ page, keycloak: app }) => {
+      await page.goto(signInUrl(app))
+      await signInAtKeycloak(page, app)
+      await expectRefusal(page, app)
+      // State fails before the exchange. Nonce fails after a successful real exchange.
+      expect(app.tokenExchanges()).toEqual(field === 'state' ? [] : ['issued'])
+    },
+  )
 }
 
 test('Keycloak sign-in refuses a used authorization code with consumed or fresh state', async ({

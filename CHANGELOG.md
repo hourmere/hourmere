@@ -12,6 +12,13 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Added
 
+- SCIM 2.0 provisioning for team Users and explicitly mapped child-team Groups,
+  available on every instance without a paid plan. Discovery, directory membership
+  lifecycle, team credential revocation and child-team audit records ship together.
+  Provisioning is enabled by default, including on upgrades with an empty
+  `SCIM_PROVISIONING_ENABLED`. Operators can disable it while keeping existing
+  records and suspensions. See the [provider matrix and rollback drill](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/scim.md).
+
 - Audit log reading and retention: owners and admins filter their team's or personal
   space's audit log by time, actor and action on a new admin page and through REST, MCP and
   the CLI (full-scope API keys only). Owners choose to keep it forever or 30–3650 days over

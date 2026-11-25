@@ -1,32 +1,18 @@
-# SCIM provisioning design and token foundation
+# SCIM provisioning
 
-Status: token administration and identity storage; design sources reviewed on **2026-11-06**.
-The connection identity and User schema step now provides internal storage, including
-credential bindings, claim intents and retained resource identities. It adds no resource
-handlers or membership lifecycle behavior. The discovery representations step adds
-ServiceProviderConfig, ResourceTypes and Schemas handlers that only test harnesses inject,
-under the resource test flag described in the implementation plan; production registers none.
-The query parser step adds the shared filter, projection and pagination parser those handlers
-will use; it adds no endpoint, and production imports none of it. The User reads step adds
-`GET /Users` and `GET /Users/{id}` handlers under the same resource test flag, and the User
-creation step adds `POST /Users` under it, with pending claims and invitations through the
-existing invitation service; production registers none of them either. The claim completion
-step completes a claim when its invitation is accepted, through a dependency that only test
-harnesses pass to `createAuth`; production acceptance completes none.
-The User profile replacement step adds `PUT /Users/{id}` under the resource test flag.
-The User PATCH normalization step adds `PATCH /Users/{id}` under that same flag.
-The User retirement step adds `DELETE /Users/{id}` under the resource test flag.
-The Group reads and creation step adds `GET /Groups`, `GET /Groups/{id}`, `POST /Groups`
-and the Group discovery entries under the same test flag.
-The Group membership step adds member operations to `PATCH /Groups/{id}` under that flag,
-and applies the source User's deactivation, reactivation and retirement to the child
-memberships it sourced.
-`SCIM_PROVISIONING_ENABLED` defaults to off (an empty value means "use the default"). Enabling
-it permits credential creation and rotation, not user provisioning. Listing and revocation remain
-available while it is off, and every `/scim/v2` resource remains unavailable either way.
-The proposed protocol and lifecycle sections below are implementation requirements,
-not a description of shipped Users or Groups handlers. Every instance, including
-self-hosted installations, gets the same feature without a license or subscription.
+The release registers SCIM 2.0 Users, Groups and authenticated discovery for team
+organizations. Team mappings use explicit owner consent. All installations, including
+self-hosted instances, have the same feature without a license or subscription.
+
+`SCIM_PROVISIONING_ENABLED` defaults to on. An unset or empty value follows the default,
+including when an upgrade reuses an earlier `.env.example` with an empty value.
+`true` enables provisioning. `false`, `0` and `off` disable it, and an invalid value
+stops startup. Owners can create and rotate provisioning tokens while enabled. Owners
+and admins can list and revoke them in either state.
+
+For setup, provider evidence and the disable-and-reenable procedure, see the
+[operator guide](https://hourmere.com/docs/scim). The sections below describe the
+protocol subset, lifecycle and historical rollout.
 
 ## Sources and interoperability boundaries
 
@@ -46,38 +32,36 @@ connector remains a future test target. Keycloak coverage is limited to the
 The RFC Editor pages list later updates to these RFCs; this first implementation
 explicitly targets the bounded RFC 7643/7644 subset below, not every newer extension.
 
-The accepted [SSO design](sso.md) defines shared admission tombstones and identity
-linking; its authentication and admission implementation remains a prerequisite.
-SCIM controls membership lifecycle; SSO controls authentication proof. Before enabling
-Users, reconcile its exact linking, admission tombstones and revocation transactions
-with the accepted SSO implementation. Token administration does not depend on SSO.
+SCIM controls membership lifecycle. SSO controls authentication proof. An instance can
+use SCIM with verified mailbox and invitation acceptance alone. SCIM can also use the
+existing OIDC linking proof and shares admission tombstones with SSO. See the
+[SSO design](sso.md) for linking and admission.
 
-## Protocol surface planned for the next tasks
+## Protocol surface
 
 Use `<PUBLIC_URL>/scim/v2/{organizationId}` as the organization base URL. The bearer
 token selects one immutable organization and must match that exact URL organization;
 no body, query parameter, cookie or alternate URL organization can override it.
-Separate credentials for independent IdPs must eventually refer to a stable
-provisioning-connection identity; rotating a credential must never change resource IDs
-or ownership. Initially support one authoritative connection per organization.
+An organization has one authoritative provisioning connection. Multiple credentials
+share that connection. Rotation preserves resource IDs and ownership.
 
 All discovery and resource requests require SCIM authentication. Use
 `application/scim+json`, opaque non-reusable resource IDs, absolute `meta.location`,
 server-owned `meta.created` and `meta.lastModified`. Never expose auth user IDs as
 SCIM identifiers or enumerate another organization's resources.
 
-| Surface | Planned subset |
+| Surface | Supported subset |
 |---|---|
-| `GET /ServiceProviderConfig` | `patch.supported=true`, filter supported with maxResults 100; bulk, sort, changePassword and etag unsupported; bearer authentication advertised. Advertise only implemented capabilities. |
-| `GET /ResourceTypes`, `GET /ResourceTypes/{id}` | User and, only once implemented, Group resource descriptors and supported schema extensions. |
+| `GET /ServiceProviderConfig` | The registered resource operations determine the capability flags. PATCH and list filtering are supported, with up to 100 filter results per page. Bulk, sort, changePassword and etag are unsupported. Discovery advertises bearer authentication. |
+| `GET /ResourceTypes`, `GET /ResourceTypes/{id}` | User and Group resource descriptors and supported schema extensions. |
 | `GET /Schemas`, `GET /Schemas/{id}` | Exact implemented User/core enterprise fields and Group fields; no unsupported writable attributes advertised. |
 | `GET /Users`, `GET /Users/{id}` | Scoped list/read, including inactive managed entries; never a global email lookup. |
 | `POST /Users` | Create a managed provisioning entry; 201 with representation and Location; duplicate live scoped identity gets 409; retired entries do not conflict. |
 | `PUT /Users/{id}` | Full replacement of writable mapped fields, preserving server identity and local authorization controls; necessary for Okta. |
 | `PATCH /Users/{id}` | Atomic ordered add/replace/remove of supported fields and compatible forms below; return 200 with current representation. |
 | `DELETE /Users/{id}` | Retire the scoped entry and deactivate its membership; 204; no account or personal-data deletion. |
-| `GET /Groups`, `GET /Groups/{id}`, `POST /Groups`, `PUT /Groups/{id}`, `PATCH /Groups/{id}`, `DELETE /Groups/{id}` | Deferred until the hierarchy and authorization prerequisite below; scoped managed teams only. |
-| `/Bulk`, `/.search`, sorting, passwords | Unsupported initially; do not advertise these operations. |
+| `GET /Groups`, `GET /Groups/{id}`, `POST /Groups`, `PUT /Groups/{id}`, `PATCH /Groups/{id}`, `DELETE /Groups/{id}` | Scoped to explicitly mapped teams. See the Group operations and authorization rules below. |
+| `/Bulk`, `/.search`, sorting, passwords | Unsupported. |
 
 List filters support a single quoted equality expression: Users `userName eq` and
 `externalId eq`; Groups `displayName eq` and `externalId eq`. Attribute/operator casing
@@ -91,14 +75,14 @@ Discovery follows RFC 7644 section 4. `/Schemas` and `/ResourceTypes` answer wit
 `ListResponse`, and their IDs return the single resource (a schema URI may arrive with its
 colons percent-encoded). Paging, sorting and projection parameters are ignored there; a
 `filter` parameter is refused with 403, any method other than GET or HEAD with 501, and an
-unknown resource type or schema ID with 404. Schemas lists the User schema and the enterprise
-extension with exactly the mapped fields of the table below, without the deferred `groups` or
-the refused `roles`, `entitlements` and `password`; `id`, `externalId` and `meta` are common
-attributes, not schema fields. `userName` is the one required field and is returned always;
-derived `manager.displayName` is read-only. ResourceTypes lists User only, with the
-enterprise extension optional, until Groups ship. Discovery representations carry
-`meta.resourceType` and an absolute `meta.location`, without `created`, `lastModified` or
-`version`.
+unknown resource type or schema ID with 404. Schemas lists the User schema, its enterprise
+extension and the Group schema. It lists only mapped fields, leaving out `groups`, `roles`,
+`entitlements` and `password` on Users. The common attributes `id`, `externalId` and `meta`
+are represented separately from the schema fields. `userName` is required on Users and
+`displayName` on Groups. Both fields are always returned. Derived `manager.displayName` is
+read-only. ResourceTypes lists User with its optional enterprise extension, and Group.
+Discovery representations carry `meta.resourceType` and an absolute `meta.location`,
+without `created`, `lastModified` or `version`.
 
 Use `ListResponse` with integer `totalResults`, `startIndex`, `itemsPerPage` and
 `Resources`. Offset pagination starts at 1, defaults to 100, caps at 100, uses stable
@@ -213,8 +197,8 @@ invitation admits the person as an ordinary acceptance, the administrator's rese
 consent, and the entry stays unlinked. An account that
 another live entry of the connection already links is admitted the same way, without a second
 link. Claims without an invitation expire after 48 hours without renewal. They require the
-retirement re-admission proof below or the planned SSO linking proof. `ScimClaimCompletion` in
-`packages/auth/src/scim-claims.ts` is the extension point where that step adds its proof.
+retirement re-admission proof below or the OIDC linking proof in deployments with OIDC
+enabled.
 
 User profile replacement requires `userName` and replaces the mapped profile, including
 `userName`, `externalId` and the work address, on a live User in the token's connection.
@@ -299,7 +283,7 @@ replacement, profile PUT, group member adds/removes and repeated identical reque
 
 ## Identity, membership and trust
 
-A future `scim_users` row belongs to `(organization, connection)` with its own ID,
+A `scim_users` row belongs to `(organization, connection)` with its own ID,
 externalId, normalized userName, lifecycle status and nullable linked account/membership.
 The mapping is not keyed solely by email. Persist uniqueness among nondeleted entries within the connection and
 never recycle retired IDs. A provisioned entry can exist before the person claims an
@@ -314,7 +298,7 @@ account; SCIM `active` describes desired lifecycle state, not proof of login eli
 | `locale`, `timezone`, `title`, `userType` | Optional organization-local profile metadata, validated and bounded; no scheduling availability or global preference changes. |
 | Enterprise `employeeNumber`, `costCenter`, `organization`, `division`, `department` | Optional local profile metadata, not authority or tenant selectors. |
 | Enterprise `manager.value` | Optional same-connection SCIM User reference; no permission inheritance; unresolved references fail validation. `manager.displayName` is derived, not trusted. |
-| `groups` | Read-only derived membership once Groups ships. |
+| `groups` | Unmapped on Users. The managed roster is exposed through Group `members`. |
 | `roles`, `entitlements`, `password`, unsupported extension fields | No privilege mapping or password provisioning. Empty roles from provider fixtures may be ignored; nonempty role/entitlement writes are rejected, not silently escalated. |
 
 Default admission is **invitation/claim**, not direct creation of a login-capable auth
@@ -374,11 +358,9 @@ it returns 403 `mutability`. An unchanged `active:true` echo updates only the di
 and preserves any local removal or suspension. On an unlinked User, `active:true` changes only
 the directory entry. It does not make a new invitation or claim.
 
-Production still registers no SCIM resource handler. Preserve global social sign-in
-accounts, calendar connections, personal bookings, historical bookings and attribution.
-Existing departure and booking-host handling policy must be reused: suspend eligibility for
-new team work and surface outstanding-booking handling to authorized admins; do not silently
-cancel meetings.
+Deactivation preserves global social sign-in accounts, calendar connections, personal
+bookings, historical bookings and attribution. It suspends eligibility for new team work.
+Authorized admins manage any outstanding bookings through the existing departure rules.
 
 DELETE performs the same team-scoped revocation, keeps the membership blocked, and
 permanently tombstones the SCIM resource. Success returns 204 with an empty body.
@@ -408,7 +390,7 @@ or a claim from a different account refuses confirmation. Ordinary invitations a
 continue to check the same blockers. The person can select the team after confirmation
 subject to its usual SSO requirements. Revoked credentials stay revoked.
 Database retention and purge follow the eventual audited retention policy.
-Retirement and confirmation are available only through the resource test flag.
+Retirement and confirmation are available while SCIM provisioning is enabled.
 
 SCIM never grants owner or admin, and never deactivates, deletes or demotes a member
 who currently has either role, even if other owners remain. This applies to User and
@@ -443,7 +425,7 @@ checks live admission blockers under the organization lock. A newer ordinary inv
 can clear local removal. SCIM suspension and local suspension each require clearance by
 the authority that recorded them. SSO JIT uses the same blockers for the proven mailbox.
 
-With the resource test flag enabled, **Settings → Team members** labels directory-managed
+With SCIM provisioning enabled, **Settings → Team members** labels directory-managed
 memberships and shows any active directory suspension, local suspension or local removal.
 Owners and admins can see these labels for the requested team rows. Other members can see
 them on their own row. A directory-suspended member cannot be promoted to admin until the
@@ -466,7 +448,7 @@ cascades), and the account reference may only become null once that account no l
 exists. One live tombstone exists per organization, normalized mailbox, authority and
 kind, mirroring the per-account rule for live blockers.
 
-The later shared SSO/SCIM admission service must check live blockers by both current
+The shared SSO/SCIM admission checks look up live blockers by both current
 account ID and proven normalized mailbox under the organization lock. A newly registered
 account with the same proven mailbox must therefore still encounter the retained local
 removal decision. It cannot gain access merely by claiming a fresh SCIM resource or
@@ -475,8 +457,7 @@ specified by SSO; SCIM suspension still needs its own authority's reactivation. 
 matching happens only after independent proof and cannot auto-link accounts. The retained
 mailbox is organization-local personal data, limited to 320 characters, not exposed through
 SCIM resources or logged; whole-organization deletion removes it, and any later purge
-requires the audited retention policy. This foundation adds storage only, not admission
-handlers or enforcement.
+requires the audited retention policy.
 
 Retired resource rows are immutable, including their profile and timestamps. Native
 account/member deletion may only clear their nullable links; it cannot relink a retired
@@ -537,8 +518,8 @@ source) against the bounded wait and its retry.
   decision is already recorded as a live tombstone for the same organization, mailbox,
   authority and kind; the existing tombstone remains. Sign-up and sign-in do not yet cap
   account mailbox length; invitations cap it at 254 characters.
-- User creation, available only to test harnesses so far, issues its invitations within the
-  existing invitation admission limits: by default 20 an hour and 100 a day per inviter, 50
+- User creation issues invitations within the existing admission limits. The defaults
+  are 20 an hour and 100 a day per inviter, 50
   an hour and 200 a day per team, 5 an hour and 20 a day per recipient address, and 100
   pending invitations per team. The inviter is the earliest verified owner, so provisioning
   spends that owner's own invitation budget too. An identity provider's first
@@ -548,7 +529,7 @@ source) against the bounded wait and its retry.
 - User creation records an existing member's address, or one that another pending
   invitation or another entry's claim already holds, as an entry with a pending claim and no
   invitation, and sends nothing. These claims expire after 48 hours and require either the
-  retained-member re-admission confirmation or the planned SSO linking proof.
+  retained-member re-admission confirmation or the OIDC linking proof.
 - A claim also lasts 48 hours when it has an invitation. An administrator who resends or
   replaces that invitation gives it a new lifetime but not the claim: once the claim has
   expired, accepting the invitation admits the person as an ordinary member and leaves the
@@ -578,8 +559,6 @@ source) against the bounded wait and its retry.
   can stop directory authority for one mapping offline and detach it when departure is safe.
 - Existing manual memberships stay manual. Group retirement and unlink preserve the teams
   and their history. Team deletion requires all affected links to be detached first.
-
-SCIM resources remain hard-off during design.
 
 ### Scope and topology
 
@@ -672,7 +651,7 @@ returns the same 409 `uniqueness`. A nested Group request returns 400 `invalidVa
 name, initial roster and parent journal's `scim_group.created` event commit together.
 The event identifies the token and opaque Group ID without recording request attributes.
 
-In the resource test harness, `PUT /Groups/{id}` replaces the Group's non-member fields
+`PUT /Groups/{id}` replaces the Group's non-member fields
 and requires `displayName`. `PATCH /Groups/{id}` applies name and member operations in
 order and commits them together. The mapping's exact, case-sensitive `externalId` is retained
 when omitted or echoed. Changing or removing it returns 400 `mutability`. PUT and PATCH
@@ -716,19 +695,10 @@ admission blocker, so the User can be added again. Any refusal rolls back the wh
 The source User's lifecycle follows its managed memberships on mappings with directory
 authority. `active:false` keeps the child memberships and suspends them, and revokes the
 child credentials. The suspension is stored on the membership's provenance row
-(`scim_team_managed_memberships.suspended_at`). The shared suspension check reads it only
-when its caller passes the resource test flag; without the flag the authorization
-statements are the same as before and read no Group storage. In the resource test
-harness every caller of the check passes the flag: REST and MCP caller resolution,
-API-key writes, admin role changes and readiness, native team selection and membership
-checks, team management and booking-write checks, SSO proofs, delegations, sign-in,
-account linking and recovery, MCP OAuth grants, host eligibility, recurring
-availability and booking routing. The caller resolver marks the principals it resolves,
-and the protocol capabilities, service contexts and public booking contexts carry the
-flag to the checks behind them, including public booking and waitlist contexts built by
-MCP tools, meeting-poll eligibility and waitlist writes. Background jobs and offline
-operator recovery carry the same capability through their checks, with production set
-to off. The shared suspension check requires callers to pass the capability decision.
+(`scim_team_managed_memberships.suspended_at`). Persisted suspensions continue to
+deny access when provisioning is switched off. The web process, background workers
+and offline operator recovery use the same configured SCIM setting for operations that
+require directory authority.
 
 A successful reactivation lifts the suspension. A parent-local blocker or missing
 parent membership refuses reactivation with 403 `mutability` and rolls back the entire
@@ -738,9 +708,13 @@ or restores the parent membership, the IdP still reads `active:false` and can re
 `active:true`. Only that successful write resumes access. A subsequent `active:false`
 suspends the memberships again. `DELETE /Users/{id}` removes those child memberships through the
 same departure checks as a Group removal, and advances `meta.lastModified` of every
-Group whose roster listed the User. A User write that would suspend or remove a current owner or admin of a child
-returns 403 `mutability`, and a retirement that would strand hosted event types or
-unfinished bookings returns 409. In both cases nothing changes in the parent either. A
+Group whose roster listed the User. If a child owner promotes a managed member to
+admin, parent-directory deactivation and DELETE of the source User both return 403
+`mutability` for the whole request. The parent User and all managed child memberships
+keep their previous state. Resolve the protected role in the child through ordinary team
+administration before retrying. The same protection applies to child owners. A retirement
+that would strand hosted event types or unfinished bookings returns 409 without changing
+either team. A
 mapping whose directory authority was stopped keeps its memberships and suspensions
 unchanged. User PUT, PATCH and DELETE lock the parent and those child teams in ascending
 ID order before reading the User, and restart if a Group write added another child in
@@ -750,7 +724,16 @@ preconditions. A name or roster change records `scim_group.updated` in the paren
 same transaction. The event identifies the token and Group ID and omits request attributes.
 A no-op preserves `meta.lastModified` and adds no audit event.
 
-In the resource test harness, `DELETE /Groups/{id}` retires the Group. Under the same
+Roster additions, removals, suspensions, reactivations and team credential revocation
+record child-local `scim_membership.*` events in the same transaction. Authorized mapping
+unlink and offline detachment also record roster removals and related revocation.
+Mapping suspension keeps the roster and records a mapping-level event. A roster or
+lifecycle retry with no state change adds no child membership event. Each event
+identifies the child membership and a `system` actor named `scim`, with empty details.
+The journal omits the parent's token ID, SCIM User ID, profile attributes and secrets.
+See the [audit log](audit-log.md) for the action names.
+
+`DELETE /Groups/{id}` retires the Group. Under the same
 locks as the other Group writes (both teams in ascending ID order, then the token, then
 the mapping and its Group), it removes every child membership the mapping sourced through
 the departure checks above, retires the mapping and with it the hierarchy link, and
@@ -761,7 +744,7 @@ keys and MCP grants for the child are revoked. The child team, its other members
 blockers, its current name, and its bookings and audit history are kept, and the name
 returns to manual control. The parent journal records `scim_group.deleted` and
 `scim_mapping.unlinked` with the token actor. The child journal records
-`scim_mapping.unlinked` with the `system` actor and no token ID. The owners of both
+`scim_mapping.unlinked` with the `system` actor and the affected membership events. The owners of both
 teams are sent the unlink notice. All of it commits together or not at all. Afterwards
 every operation on that Group ID, a repeated DELETE included, returns the same 404 as an
 unknown ID, and the ID is never assigned again. A live Group returns 412 for an
@@ -771,15 +754,15 @@ retired reservation takes no part in `externalId` uniqueness: once both owners a
 a new mapping, the same `externalId` can be activated again and gets a new Group ID
 with an empty roster. Without that approval a POST still returns 409 `uniqueness`.
 
-资源测试环境中的 `DELETE /Groups/{id}` 停用该群组：在与其他群组写入相同的锁顺序下，移除该映射带来的全部子团队成员资格，
+`DELETE /Groups/{id}` 停用该群组：在与其他群组写入相同的锁顺序下，移除该映射带来的全部子团队成员资格，
 停用映射并解除层级关联，成功返回 204 且无响应体。名单中有子团队当前的所有者或管理员时返回 403 `mutability`，
 仍主持活动类型或有未完成预约的成员返回 409，任一拒绝都不产生任何变化。被移除成员在子团队的会话、API 密钥和 MCP 授权同时撤销。
 子团队本身、其余成员与拦截记录、当前名称、预约和审计历史全部保留，名称恢复为手动管理。
-父团队审计日志记录 `scim_group.deleted` 和 `scim_mapping.unlinked`（令牌为操作者），子团队只记录 `scim_mapping.unlinked`（系统操作者，不含令牌 ID），
+父团队审计日志记录 `scim_group.deleted` 和 `scim_mapping.unlinked`（令牌为操作者），子团队记录 `scim_mapping.unlinked` 及成员变更和团队凭证撤销事件（系统操作者，不含令牌 ID），
 并向两个团队的所有者发送解除关联通知，以上全部在同一事务提交。此后对该群组 ID 的任何操作（包括再次 DELETE）都返回 404，该 ID 不会再被分配。
 已停用的预留不再参与 `externalId` 唯一性判断：双方所有者重新批准映射后，可用相同的 `externalId` 再次创建群组，并获得新的群组 ID。
 
-资源测试环境中的 `PUT /Groups/{id}` 完整替换非成员字段，必须提供 `displayName`。
+`PUT /Groups/{id}` 完整替换非成员字段，必须提供 `displayName`。
 `PATCH /Groups/{id}` 按顺序应用名称和成员操作，全部成功后才提交。省略或原样传回 `externalId`
 会保留映射中区分大小写的原值，修改或移除该字段会返回 400 `mutability`。PUT 和 PATCH 与 POST 使用相同的名称规则。
 名称去除首尾空白后必须为非空单行，最多 200 个 UTF-16 代码单元。团队可以同名，名称由目录管理或手动管理均可。
@@ -789,6 +772,8 @@ PATCH 可用 `add`、`replace` 和 `remove` 更改映射成员：`remove` 可带
 也可用 `members[value eq "<id>"]` 路径，只移除列出的用户。重复的添加或移除不产生变化，也不写审计事件。
 新成员必须是同一连接中已关联且启用的用户，否则返回 400 `invalidValue`。子团队当前的所有者或管理员不能被移除，
 返回 403 `mutability`。仍主持活动类型或有未完成预约的成员返回 409，需由子团队管理员先行交接。
+如果子团队所有者将受管成员提升为管理员，父目录对该用户的停用或删除会整体返回 403，
+父团队用户和所有受管子团队成员资格均无变化。
 来源用户停用时，其受管子团队成员资格保留并暂停，重新启用后恢复，删除来源用户会移除这些成员资格并更新相关群组的 `meta.lastModified`。
 父团队的本地拦截或缺少父团队成员资格会以 403 `mutability` 拒绝重新启用，并回滚整个请求。
 用户仍显示为 `active:false`，受管子团队成员资格仍暂停，审计日志不新增记录。
@@ -933,13 +918,13 @@ Reject SCIM tokens on `/api/v1`, `/mcp`, `/api/auth` and every other authenticat
 do not fall back to a cookie when an Authorization header is present. Keep SCIM and API
 key stores/verifiers separate even though they share a hash primitive.
 
-The SCIM transport limits every source to 120 requests per minute, including failed
-authentication. With resource handlers registered in the test harness, it also limits
-authenticated traffic to 120 requests per minute per organization across all sources
-and tokens. Either limit returns a SCIM 429 with `Retry-After`. These fixed windows
-are process-local. Each replica has its own budget. Shared mutation budgets would
-require durable storage. Optional IP allow-listing is initially an operator reverse-proxy control, not an
-application feature; trust forwarded addresses only through configured trusted proxies.
+The SCIM transport limits each source to 120 requests per minute, including failed
+authentication. Authenticated requests also share a 90-per-minute budget per credential
+and a 120-per-minute budget per organization across all sources and credentials. Both
+generations of a rotating token count against the same credential budget. Reaching a limit
+returns SCIM 429 with `Retry-After`. These fixed windows are process-local, so each replica
+has its own budgets. Apply optional IP allow-listing at the reverse proxy and trust
+forwarded addresses only through configured trusted proxies.
 
 Ordinary access logs retain method, route and response status for token administration,
 never bearer values, bodies or secret-bearing responses.
@@ -959,16 +944,8 @@ transition records `scim_user.deactivated` or `scim_user.reactivated`. These eve
 empty details and identify the SCIM resource and the provisioning token actor. The profile,
 active state, blocker, credential deletions and corresponding audit rows commit or roll back
 together. Repeating a write with the same state adds no lifecycle audit row.
-Token foundation must never claim full audit coverage. SCIM action names follow the journal's
-one-dot form `<resource>.<past-tense verb>`, as `scim_user.created` does, because the action
-check allows exactly one dot. Required future actions:
-`scim_connection.authentication_failed` and `scim_connection.rate_limited` (bounded
-aggregation); `scim_group.member_added`, `scim_group.member_removed`; `scim_user.conflicted`;
-`scim_user.privileged_member_blocked`; `scim_user.last_owner_blocked`;
-`scim_user.membership_suspended`.
-Record organization/connection, safe credential ID or human actor, target opaque ID,
-request correlation ID, result and time; omit bearer, digest, attribute values and bodies.
-Transactional lifecycle audit integration is a release prerequisite for Users/Groups.
+Authentication failures, rate-limit responses and refused resource writes do not create
+lifecycle journal events.
 
 ## REST, MCP, CLI and browser classification
 
@@ -1007,23 +984,22 @@ on accepted [PR #246](https://github.com/hourmere/hourmere/pull/246); admission 
 suspension integration depend on accepted [SSO design PR #247](https://github.com/hourmere/hourmere/pull/247)
 and its implemented linking contract.
 
-**Resource test flag** means code-only dependency injection in the test harness. It is
-not an environment setting, operator setting, public parameter or production-build option.
-The harness also passes `scimResourcesEnabled: true` to `createAuth` so native team API key
-writes serialize with suspension even when a connection is created concurrently.
-Users, Groups and discovery handlers remain unregistered in production code until all
-Users, Groups, conformance and release acceptance rows are complete. Every intermediate
-main commit can be released safely: `SCIM_PROVISIONING_ENABLED` enables credential
-creation/rotation only and cannot activate these resource handlers. The final release row
-alone owns changing production registration and changes the default of
-`SCIM_PROVISIONING_ENABLED` to on. `.env.example` writes the setting empty and Compose passes
-`${SCIM_PROVISIONING_ENABLED:-}`, so installs copied from `.env.example` follow that new default
-without editing `.env`; the release row's acceptance checks this. Test-only injection is never
-operator-accessible.
+The table describes each step's release boundary. Through Local lifecycle acceptance,
+the **resource test flag** injected handlers and authorization dependencies only into
+the in-process harness. Production registered no Users, Groups or discovery handlers
+at those revisions, even when `SCIM_PROVISIONING_ENABLED=true` allowed credential
+creation and rotation. No environment or build setting could activate the test injection.
+
+The final release registers the complete User, Group and discovery paths together. Its
+production-path checks exercise the switch in both states. While off, all SCIM paths
+return the same 404 before authentication. While on, authenticated requests reach the
+registered handlers. `.env.example` leaves the setting empty and Compose passes
+`${SCIM_PROVISIONING_ENABLED:-}`, so an earlier template picks up the new default without
+editing `.env`.
 
 | Step | Earlier / external dependencies | Owned endpoints / tools / commands | Flag state | Acceptance checks |
 |---|---|---|---|---|
-| Token foundation (this change) | None | Four `/api/v1/organizations/{organizationId}/provisioning-tokens` routes above; SCIM unavailable handler; no MCP/CLI | Create/rotate switch off by default; list/revoke available; resources hard-off | Owner-only mint/rotate, owner/admin list/revoke while off, hash-only, one-time display, attribution, cap/pagination, scope isolation, races, migration, en/zh-CN UI, source-copy mutations |
+| Token foundation | None | Four `/api/v1/organizations/{organizationId}/provisioning-tokens` routes above; SCIM unavailable handler; no MCP/CLI | Create/rotate switch off by default; list/revoke available; resources hard-off | Owner-only mint/rotate, owner/admin list/revoke while off, hash-only, one-time display, attribution, cap/pagination, scope isolation, races, migration, en/zh-CN UI, source-copy mutations |
 | Connection identity and User schema | Token foundation | No new endpoint/tool/command; connection/resource/claim/tombstone storage | Resources hard-off | Predecessor migration, live identity uniqueness, retired identifiers reusable with fresh IDs, cross-org references rejected, rotation retains connection |
 | Discovery representations | Connection identity and User schema | GET ServiceProviderConfig, ResourceTypes and Schemas (collections and IDs); no MCP/CLI | Resource test flag only | Exact schemas, truthful capabilities, organization scope, other-token refusal |
 | Query parser | Discovery representations | Shared filter/projection/pagination parser; no new endpoint/tool/command | Resource test flag only | Bounded quoted equality and escaped strings, projections, count/startIndex edge cases, SCIM errors |
@@ -1052,15 +1028,11 @@ operator-accessible.
 | [Local lifecycle acceptance](#local-lifecycle-acceptance) | Local Keycloak harness; audit log PR #246; SSO design PR #247 and accepted linking implementation | Local fixture scenarios; no new interface | Resources hard-off | Create/rename/deactivate/reactivate/delete/groups, owner/admin refusal, credential rotation/revocation, recovery, rate limits and audit acceptance |
 | Release documentation and registration | Local lifecycle acceptance | Operator/provider docs and production resource registration; no new protocol operation | Enable only after all prior acceptance; same feature for self-hosters | Tested-provider matrix, limitations, rollback drill documented, any intermediate release hard-off proven; complete Users/Groups/conformance before registering handlers; default of `SCIM_PROVISIONING_ENABLED` changed to on, and an install whose `.env` was copied from an earlier `.env.example` (empty value) is on after upgrade without editing `.env` |
 
-The retirement flow above defines proof for a retained member's re-admission. The SSO linking
-completion row still needs to define how to prove the other claims without invitations and
-apply their 48-hour expiry.
-
 Mapping administration is ordinary product configuration, not credential minting, so it
 ships MCP and CLI parity rather than borrowing the browser-only exemption. Additional
 writes discovered during implementation need their own row and interfaces before coding.
 
-## Mapping administration in the resource test harness
+## Mapping administration
 
 Open **Settings → SCIM team mappings** from the team you administer. Owners and admins
 can see that team's live mappings. To link an existing team, the child owner privately
@@ -1080,24 +1052,19 @@ an approved request, send `{ "intentId": "…" }` to `POST /api/v1/scim/team-map
 `DELETE /api/v1/scim/team-mappings/{id}`. Browser sessions bind the request to their
 current team with `X-Expected-Organization-Id`. The matching MCP tools are
 `create_scim_team_mapping` and `delete_scim_team_mapping`. The latter takes `id` and
-`intentId`. The test CLI exposes `scim-team-mappings create` and
+`intentId`. The CLI exposes `scim-team-mappings create` and
 `scim-team-mappings delete` with the same JSON inputs as MCP. Machine writes require
 the normal write scope and live delegation for an enforced team.
 
 ### Offline mapping recovery runbook
 
-Use the resource test checkout and confirm the database, mapping UUID and both organization
-UUIDs. Prepare the database and background jobs schema with the usual migrations and
-use the harness's configured database connection. The resource-enabled harness passes its
-job queue to `scimMappingAdministration` as `notices` and injects that module as
-`scim.mappingAdministration` in `createApp`. On its background worker, use
-`scimMappingResourceJobs` in place of the ordinary mailbox-proof job definitions so the
-same worker handles SSO proof, mapping proof, and mapping owner notices. Use the configured
-mailer for delivery. The offline script uses the existing queue without running migrations.
+Confirm the instance, mapping UUID and both team UUIDs. Run the command in the
+Hourmere app container. It requires SCIM provisioning to be enabled and the application
+and job schemas to be current. It uses the existing queue without running migrations.
 
 ```sh
-node scripts/scim-team-mapping-recovery.ts --resource-test suspend MAPPING_UUID PARENT_UUID CHILD_UUID
-node scripts/scim-team-mapping-recovery.ts --resource-test detach MAPPING_UUID PARENT_UUID CHILD_UUID
+docker compose exec app node apps/server/src/scim-team-mapping-recovery-cli.ts suspend MAPPING_UUID PARENT_UUID CHILD_UUID
+docker compose exec app node apps/server/src/scim-team-mapping-recovery-cli.ts detach MAPPING_UUID PARENT_UUID CHILD_UUID
 ```
 
 1. Suspend the mapping to stop its directory authority immediately. Existing membership
@@ -1118,7 +1085,7 @@ node scripts/scim-team-mapping-recovery.ts --resource-test detach MAPPING_UUID P
 请求。解除关联时，从已有映射准备请求。双方所有者在各自团队内核对并验证同一份请求，
 然后由任一批准人提交。即使同一人拥有两个团队，也要分别批准。批准过期后，须重新准备请求。
 
-需要离线恢复时，先核对测试数据库和三个 UUID，再用上述 `suspend` 命令暂停目录管理。现有
+需要离线恢复时，先核对实例和三个 UUID，再用上述 `suspend` 命令暂停目录管理。现有
 成员关系和暂停状态会保留。若要解除映射，请运行 `detach`。如存在受保护的角色、主持安排或
 尚未结束的预约，请由子团队的授权管理员先通过常规管理流程处理，再重试。成功后，双方团队
 都会在审计日志中看到系统操作，后台任务会向当前所有者的已验证邮箱发送通知。
@@ -1135,13 +1102,35 @@ revocation operation. If either generation is compromised, revoke that row and c
 a fresh credential. Backups contain only hashes, so operators cannot recover lost tokens.
 Revocation after a restored backup needs explicit review because restoring old state can
 restore a formerly valid credential; revoke/rotate restored credentials before reopening
-provisioning ingress. Disabling the flag is not token revocation. Owners/admins can still list and revoke
-credentials while disabled, before re-enabling; existing unrevoked rows otherwise become
-usable again when the flag is enabled.
+provisioning ingress.
 
-Current releases cannot pass an IdP connection test or synchronize users/groups, even
-with the flag enabled. Do not configure production provisioning yet. The
-[operator guide](https://hourmere.com/docs/scim) states this same limitation.
+### Rollback
+
+Pause the IdP's scheduled provisioning before changing its assignments. Set
+`SCIM_PROVISIONING_ENABLED=false` and recreate every app and worker with the same setting.
+Probe ServiceProviderConfig, ResourceTypes, Schemas, Users and Groups to confirm uniform
+404, including with a previously valid bearer. Check that the organization can still list or revoke tokens and
+that a previously suspended member cannot regain access, including in mapped child teams.
+
+Turning off the switch preserves Users, Groups, mappings, memberships and audit history.
+Stored suspensions and mailbox admission blockers keep applying. Deleted sessions, API
+keys and grants stay revoked. Invitations that would complete a live directory claim wait
+until provisioning resumes. Ordinary invitations can still admit members. Cancel those
+invitations first if the drill requires all new admissions to stop. Directory-only editing
+restrictions can pause while provisioning is off. Unrevoked credentials become usable again when the switch is
+enabled, subject to the original rotation deadlines. Revoke obsolete tokens before
+re-enabling and verify a representative pilot before resuming scheduled synchronization.
+The [public rollback drill](https://hourmere.com/docs/scim#rollback-drill) includes
+the Compose command and the checks to run in the IdP and Hourmere.
+
+### Provider matrix
+
+| Provider | Evidence |
+|---|---|
+| Keycloak 26.8.2 with Shebang Labs outbound SCIM plugin v0.1.1 | Local container and synthetic realm. The lifecycle matrix below distinguishes plugin traffic from direct Hourmere requests. |
+| Okta | Synthetic User GET and full PUT fixtures. Live tenant untested. |
+| Microsoft Entra ID | Synthetic scheduled and legacy on-demand User PATCH and Group member-removal fixtures. Live tenant untested. Set the connector to match on `userName`. |
+| Google Workspace and other connectors | Untested. |
 
 The HTTP corpus covers the supported RFC 7643/7644 schema, error, filter and PATCH
 behavior and replays synthetic Okta PUT and Entra PATCH fixtures against a throwaway
@@ -1163,8 +1152,9 @@ official JAR against SHA-256
 
 The opt-in Playwright suite shares one Keycloak container across eight scenarios.
 Each scenario owns a synthetic realm, a PostgreSQL database and an in-process
-Hourmere listener. The fixture uses the existing SCIM resource test flag.
-Production continues to register no SCIM resource handlers.
+Hourmere listener. The suite validates the pre-release lifecycle through the in-process
+resource harness. The final release separately tests the production registration and
+the authenticated credential and organization budgets.
 
 | Capability | Driver and observed result |
 |---|---|
@@ -1187,4 +1177,4 @@ and [fixture commands and capture fields](../tools/e2e/keycloak/README.md#outbou
 
 本地验收用固定版本的 Keycloak 和插件覆盖用户及群组生命周期。矩阵列明哪些请求由插件发送，
 以及哪些检查直接调用现有 SCIM、凭证或认领接口，或使用离线映射恢复服务。审计检查包括操作、
-来源和许可字段，协议记录仅保留经过筛选的测试值。验收需要显式运行，生产环境仍不注册 SCIM 资源。
+来源和许可字段，协议记录仅保留经过筛选的测试值。该套件需显式运行，正式发布另有测试验证生产入口和请求限额。

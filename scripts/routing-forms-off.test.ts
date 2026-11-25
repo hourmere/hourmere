@@ -774,6 +774,8 @@ describe('routing forms remain hard-off with configuration and public metadata i
           enqueueCalendarSync: async () => null,
           enqueueCalendarWritebackRecovery: async () => null,
           mailboxProofQueue: { enqueue: async () => null },
+          scimMappingNotices: { enqueue: async () => null },
+          enqueueScimInvitation: async () => {},
         }),
       )
       const paths = app.routes.map(({ path }) => path)

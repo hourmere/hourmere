@@ -27,7 +27,7 @@ export function ssoRetained(capabilities: TeamSsoCapabilities): boolean {
 
 export const ssoHardOff: TeamSsoCapabilities = { ssoOidcEnabled: false, ssoSamlEnabled: false }
 
-/** Off returns the same object, so nothing downstream changes without the test flag. */
+/** Add the provisioning capability while preserving an existing grant of it. */
 export function withScimResources(
   capabilities: TeamSsoCapabilities,
   scimResourcesEnabled: boolean | undefined,

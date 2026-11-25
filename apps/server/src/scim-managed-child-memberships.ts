@@ -7,6 +7,7 @@ import {
 import { hasTeamMemberDepartureImpact } from '@hourmere/scheduling'
 import { sql, type Transaction } from 'kysely'
 import type { ScimResourceRequest } from './scim.ts'
+import { recordScimChildMembership } from './scim-child-journal.ts'
 import { lockMappingTeams } from './scim-team-mapping-retirement.ts'
 import { lockScimWriteConnection, refuse } from './scim-user-write.ts'
 
@@ -175,8 +176,10 @@ async function revokeChildCredentials(
 ) {
   for (const userId of new Set(memberships.map((membership) => membership.userId)))
     await lockScimCredentialRevocation(trx, userId)
-  for (const { childId, userId } of memberships)
-    await revokeScimTeamCredentials(trx, childId, userId)
+  for (const membership of memberships) {
+    await revokeScimTeamCredentials(trx, membership.childId, membership.userId)
+    await recordScimChildMembership(trx, membership, 'credentials_revoked')
+  }
 }
 
 /**
@@ -203,6 +206,9 @@ export async function removeManagedChildMemberships(
       memberships.map(({ memberId }) => memberId),
     )
     .execute()
+  for (const membership of memberships) {
+    await recordScimChildMembership(trx, membership, 'removed')
+  }
 }
 
 /** Deactivating the source User suspends the child memberships it sourced. */
@@ -211,8 +217,7 @@ export async function suspendManagedChildMemberships(
   memberships: ManagedChildMembership[],
 ) {
   if (memberships.length === 0) return
-  await revokeChildCredentials(trx, memberships)
-  await trx
+  const changed = await trx
     .updateTable('scim_team_managed_memberships')
     .set({ suspended_at: sql<Date>`clock_timestamp()` })
     .where(
@@ -221,12 +226,19 @@ export async function suspendManagedChildMemberships(
       memberships.map(({ memberId }) => memberId),
     )
     .where('suspended_at', 'is', null)
+    .returning('member_id')
     .execute()
+  const changedIds = new Set(changed.map(({ member_id }) => member_id))
+  const newlySuspended = memberships.filter(({ memberId }) => changedIds.has(memberId))
+  await revokeChildCredentials(trx, newlySuspended)
+  for (const membership of newlySuspended) {
+    await recordScimChildMembership(trx, membership, 'suspended')
+  }
 }
 
 /** Reactivation lifts only this source's suspension, on mappings with directory authority. */
 export async function resumeManagedChildMemberships(trx: Transaction<Database>, entry: SourceUser) {
-  await trx
+  const resumed = await trx
     .updateTable('scim_team_managed_memberships')
     .set({ suspended_at: null })
     .where('scim_user_id', '=', entry.id)
@@ -239,7 +251,11 @@ export async function resumeManagedChildMemberships(trx: Transaction<Database>, 
         .where('live_connection_id', '=', entry.connection_id)
         .where('suspended_at', 'is', null),
     )
+    .returning(['child_organization_id as childId', 'member_id as memberId'])
     .execute()
+  for (const membership of resumed) {
+    await recordScimChildMembership(trx, membership, 'reactivated')
+  }
 }
 
 /** Retiring a User takes it off every roster it was on, which changes those Groups. */

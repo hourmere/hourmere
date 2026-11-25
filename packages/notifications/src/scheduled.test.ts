@@ -26,11 +26,6 @@ import {
 } from './scheduled.ts'
 import { alignSmtpDateNowWithDatabase } from './testing-clock.ts'
 
-// pg-boss compares job retention against the database's real clock, so a fixture date that falls
-// into the past makes repaired jobs look expired. Keep it far in the future.
-const NOW = Temporal.Instant.from('2036-11-01T12:00:00Z')
-const START = NOW.add({ hours: 72 })
-const END = START.add({ minutes: 30 })
 const roles = { host: true, invitee: true, guests: true }
 const rule = (id: string, offsetMinutes: number, recipients = roles) => ({
   id,
@@ -54,6 +49,9 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
   let f: Fixtures
   let jobs: ReturnType<typeof createJobs>
   let sent: MailMessage[]
+  let baseline: Temporal.Instant
+  let bookingStart: Temporal.Instant
+  let bookingEnd: Temporal.Instant
   let now: Temporal.Instant
   let deps: NotificationDeps
   let during: ((m: MailMessage) => Promise<void>) | undefined
@@ -88,6 +86,14 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
       log: () => {},
     })
     await jobs.start()
+    // Queue retention uses the real database clock. Anchor the simulated schedule to the same
+    // clock so repaired jobs still count as live when this suite runs on a later date.
+    const clock = required(
+      (await fixture.pool.query<{ now: Date }>('SELECT pgboss.job_now() AS now')).rows[0],
+    )
+    baseline = Temporal.Instant.fromEpochMilliseconds(clock.now.getTime())
+    bookingStart = baseline.add({ hours: 72 })
+    bookingEnd = bookingStart.add({ minutes: 30 })
   })
   afterAll(async () => {
     await jobs?.stop()
@@ -96,7 +102,7 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
   beforeEach(async () => {
     await alignSmtpDateNowWithDatabase(db)
     sent = []
-    now = NOW
+    now = baseline
     during = undefined
     refuse = undefined
     await db.deleteFrom('notification_email_sends').execute()
@@ -104,8 +110,8 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
   afterEach(() => vi.restoreAllMocks())
   async function setup(
     settings = policy(),
-    start = START,
-    end = END,
+    start = bookingStart,
+    end = bookingEnd,
     guests = false,
     timeZone?: string,
     inviteePhone?: string,
@@ -202,7 +208,7 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
       reminders: [3000, 2000, 1000, 600, 120].map((v, i) => rule(`before-${i}`, v)),
       followUps: [5, 60, 120].map((v, i) => rule(`after-${i}`, v)),
     }
-    const { bookingId } = await setup(settings, START, END, true)
+    const { bookingId } = await setup(settings, bookingStart, bookingEnd, true)
     const messages = await rows(bookingId)
     expect(messages).toHaveLength(8)
     expect(
@@ -238,8 +244,8 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
         reminders: [rule('phone-reminder', 120)],
         followUps: [rule('phone-followup', 5)],
       },
-      START,
-      END,
+      bookingStart,
+      bookingEnd,
       true,
       undefined,
       number,
@@ -307,7 +313,7 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
   })
 
   it('keeps strict reminder equality and records ineligible rows without catch-up', async () => {
-    const start = NOW.add({ hours: 25 })
+    const start = baseline.add({ hours: 25 })
     const { bookingId } = await setup(
       { reminders: [rule('equal', 1440), rule('past', 2000), rule('valid', 1439)], followUps: [] },
       start,
@@ -332,8 +338,8 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
     const bookingId = await f.booking(
       host.organizationId,
       [host.userId],
-      START.toString(),
-      END.toString(),
+      bookingStart.toString(),
+      bookingEnd.toString(),
     )
     await db
       .updateTable('bookings')
@@ -352,7 +358,7 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
         await enqueueBookingNotifications(
           jobs,
           trx,
-          { type: 'created', bookingId, start: START },
+          { type: 'created', bookingId, start: bookingStart },
           now,
         )
         throw Error('rollback')
@@ -383,7 +389,7 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
           enqueueBookingNotifications(
             nullQueue,
             trx,
-            { type: 'created', bookingId, start: START },
+            { type: 'created', bookingId, start: bookingStart },
             now,
           ),
         ),
@@ -414,7 +420,7 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
     expect((await rows(bookingId))[0]).toMatchObject({ attempts: 1, state: 'completed' })
   })
   it('retries only missing recipients, preserves permanent rejection and bounds all-permanent failures', async () => {
-    const { bookingId } = await setup(policy(), START, END, true)
+    const { bookingId } = await setup(policy(), bookingStart, bookingEnd, true)
     const m = required((await rows(bookingId))[0])
     let rejected = false
     refuse = (message) => {
@@ -451,12 +457,12 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
       followUps: [rule('ended', 5), rule('expire', 10)],
     })
     const [one, two] = firstTwo(await rows(bookingId))
-    await run(one.id, END)
+    await run(one.id, bookingEnd)
     expect(sent).toEqual([])
     expect((await rows(bookingId))[0]?.attempts).toBe(0)
-    await run(one.id, END.add({ minutes: 5 }))
+    await run(one.id, bookingEnd.add({ minutes: 5 }))
     expect(sent).toHaveLength(2)
-    await run(two.id, END.add({ minutes: 10, hours: 24 }))
+    await run(two.id, bookingEnd.add({ minutes: 10, hours: 24 }))
     expect((await rows(bookingId))[1]).toMatchObject({
       state: 'skipped',
       skip_reason: 'delivery_window_expired',
@@ -471,7 +477,7 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
         followUps: [rule('after', 5, { host: false, invitee: true, guests: false })],
       })
       const m = required((await rows(bookingId))[0])
-      now = END.add({ minutes: 5 })
+      now = bookingEnd.add({ minutes: 5 })
       let held!: () => void
       let release!: () => void
       const acquired = new Promise<void>((r) => (held = r))
@@ -504,7 +510,7 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
       else
         await db
           .updateTable('bookings')
-          .set({ end_at: date(END.add({ minutes: 1 })) })
+          .set({ end_at: date(bookingEnd.add({ minutes: 1 })) })
           .where('id', '=', bookingId)
           .execute()
       release()
@@ -529,10 +535,10 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
     const [one, two] = firstTwo(await rows(bookingId))
     await db
       .insertInto('notification_email_sends')
-      .values({ recipient_hash: null, sent_at: date(START.subtract({ minutes: 121 })) })
+      .values({ recipient_hash: null, sent_at: date(bookingStart.subtract({ minutes: 121 })) })
       .execute()
     const limits = { ...deps, mailMaxPerHour: 1 }
-    now = START.subtract({ minutes: 120 })
+    now = bookingStart.subtract({ minutes: 120 })
     await deliverScheduledBookingEmail(limits, one.id)
     expect((await receipts(bookingId))[0]).toMatchObject({
       message_key: 'a',
@@ -544,7 +550,7 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
       .set({ state: 'pending' })
       .where('id', '=', one.id)
       .execute()
-    now = START.subtract({ minutes: 60 })
+    now = bookingStart.subtract({ minutes: 60 })
     await deliverScheduledBookingEmail({ ...deps, mailMaxPerHour: 0 }, one.id)
     expect(sent).toEqual([])
     await deliverScheduledBookingEmail({ ...deps, mailMaxPerHour: 0 }, two.id)
@@ -563,7 +569,7 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
     })
     const [one, two] = firstTwo(await rows(bookingId))
     const limits = { ...deps, mailMaxPerHour: 1 }
-    now = START.subtract({ minutes: 120 })
+    now = bookingStart.subtract({ minutes: 120 })
     await deliverScheduledBookingEmail(limits, one.id)
     expect(sent).toHaveLength(1)
     const original = required((await receipts(bookingId))[0])
@@ -574,7 +580,7 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
     const context = { db, now: () => now }
     expect((await getManagedBooking(context, token)).id).toBe(bookingId)
 
-    now = START.subtract({ minutes: 60 })
+    now = bookingStart.subtract({ minutes: 60 })
     await db
       .insertInto('notification_email_sends')
       .values({ recipient_hash: null, sent_at: date(now.subtract({ minutes: 1 })) })
@@ -740,7 +746,7 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
       followUps: [rule('after', 5)],
     })
     const [before, after] = firstTwo(await rows(bookingId))
-    await run(before.id, START)
+    await run(before.id, bookingStart)
     expect((await rows(bookingId))[0]).toMatchObject({
       state: 'skipped',
       skip_reason: 'meeting_started',
@@ -751,7 +757,7 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
       .set({ emailVerified: false })
       .where('id', '=', host.userId)
       .execute()
-    await run(after.id, END.add({ minutes: 5 }))
+    await run(after.id, bookingEnd.add({ minutes: 5 }))
     expect((await rows(bookingId))[1]).toMatchObject({
       state: 'skipped',
       skip_reason: 'no_organizer',
@@ -767,8 +773,8 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
       .values(
         Array.from({ length: 101 }, () => ({
           organization_id: host.organizationId,
-          start_at: date(START),
-          end_at: date(END),
+          start_at: date(bookingStart),
+          end_at: date(bookingEnd),
           title: 'Fair repair',
           manage_token_hash: Buffer.from(randomUUID()),
           source: 'api',
@@ -787,11 +793,11 @@ describe.skipIf(!process.env.DATABASE_URL)('durable configured booking messages'
           booking_id: booking.id,
           kind: 'reminder',
           rule_id: 'fair',
-          anchor_start_at: date(START),
-          anchor_end_at: date(END),
-          due_at: date(NOW),
-          expires_at: date(START),
-          next_attempt_at: date(NOW),
+          anchor_start_at: date(bookingStart),
+          anchor_end_at: date(bookingEnd),
+          due_at: date(baseline),
+          expires_at: date(bookingStart),
+          next_attempt_at: date(baseline),
         })),
       )
       .execute()
