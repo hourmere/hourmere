@@ -126,7 +126,10 @@ export function SsoProviderSetup({
                 {protocol === 'saml' && (
                   <a
                     className="button button-small"
-                    href={`/api/auth/sso/saml2/sp/metadata/${encodeURIComponent(provider.id)}`}
+                    href={'/api/auth/sso/saml2/sp/metadata/:providerId'.replace(
+                      ':providerId',
+                      encodeURIComponent(provider.id),
+                    )}
                     download
                   >
                     {t('Download service provider metadata')}

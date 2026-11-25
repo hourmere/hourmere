@@ -3133,7 +3133,7 @@ export const admin = {
   'Subject attribute': '主体属性',
   'Leave blank to use the persistent NameID.': '留空时使用持久 NameID。',
   'Signing certificates': '签名证书',
-  'Signing certificate {number}': '签名证书 {number}',
+  'Signing certificate {number}': '签名证书{number}',
   'Add signing certificate': '添加签名证书',
   'Leave blank to keep saved settings. Import metadata again to replace its settings.':
     '留空可保留已保存的设置。重新导入元数据可更新相应设置。',
