@@ -12,6 +12,7 @@ import {
 import {
   assertBookingLocallyManaged,
   assertInviteeRescheduleAllowed,
+  assertPaidRescheduleDuration,
   type Booking,
   getHostBooking,
   getManagedBooking,
@@ -34,7 +35,7 @@ import { readManagedRoutingAnswers } from './routing-booking.ts'
 /** The booking behind a manage token, with what the invitee needs to recognize it. */
 export interface ManagedBooking extends Booking {
   branding?: PublicBranding
-  /** The event type as it is now; null once it is deleted (or for a booking without one). */
+  /** The current event type, with the purchased duration for paid bookings. */
   eventType: { title: string; durationMinutes: number; allowedDurationsMinutes?: number[] } | null
   /** The people the invitee meets: each host's name (their handle if they have no name). */
   hosts: { name: string }[]
@@ -79,14 +80,17 @@ export async function getManagedBookingDetails(
       .execute(),
     typeof token !== 'object' ? managedLinkRescheduleRequest(at, token, booking.id) : undefined,
     ctx.db
-      .selectFrom('bookings')
+      .selectFrom('bookings as booking')
+      .leftJoin('payment_checkout_attempts as moved', 'moved.current_booking_id', 'booking.id')
       .select([
-        'organization_id',
-        'reschedule_cutoff_minutes',
-        'cancel_cutoff_minutes',
-        'has_routing_snapshot',
+        'booking.organization_id',
+        'booking.reschedule_cutoff_minutes',
+        'booking.cancel_cutoff_minutes',
+        'booking.has_routing_snapshot',
+        'booking.payment_hold_expires_at',
+        'moved.current_booking_id',
       ])
-      .where('id', '=', booking.id)
+      .where('booking.id', '=', booking.id)
       .executeTakeFirstOrThrow(),
   ])
   const branding = await getPublicBranding(ctx.db, cutoffs.organization_id)
@@ -97,6 +101,13 @@ export async function getManagedBookingDetails(
       ? await readManagedRoutingAnswers(ctx.db, booking.id, cutoffs.organization_id)
       : undefined
   const start = Temporal.Instant.from(booking.start)
+  const paid = cutoffs.payment_hold_expires_at || cutoffs.current_booking_id
+  const durationOptions =
+    !paid && eventType && eventType.allowed_durations_minutes.length > 1
+      ? {
+          allowedDurationsMinutes: [...eventType.allowed_durations_minutes].sort((a, b) => a - b),
+        }
+      : {}
   const instant = (minutes: number | null) => {
     const deadline = changeDeadline(start, minutes)
     return deadline && toIso(deadline)
@@ -107,10 +118,10 @@ export async function getManagedBookingDetails(
     eventType: eventType
       ? {
           title: eventType.title,
-          durationMinutes: eventType.duration_minutes,
-          ...(eventType.allowed_durations_minutes.length > 1 && {
-            allowedDurationsMinutes: [...eventType.allowed_durations_minutes].sort((a, b) => a - b),
-          }),
+          durationMinutes: paid
+            ? Temporal.Instant.from(booking.end).since(start).total('minutes')
+            : eventType.duration_minutes,
+          ...durationOptions,
         }
       : null,
     hosts: hosts.map((h) => ({ name: h.name.trim() || h.handle || '' })),
@@ -170,7 +181,7 @@ async function listBookingSlots(
   }: { start: Temporal.Instant; end: Temporal.Instant; durationMinutes?: number },
   asInvitee = false,
 ): Promise<SlotView[]> {
-  await assertBookingLocallyManaged(ctx.db, booking.id)
+  const paid = await assertBookingLocallyManaged(ctx.db, booking.id, true)
   const now = ctx.now()
   if (booking.status === 'cancelled') {
     throw new DomainError('conflict', 'booking_cancelled', 'This booking is already cancelled')
@@ -229,11 +240,13 @@ async function listBookingSlots(
     false,
     ctx.scimResourcesEnabled === true,
   )
+  const originalDuration = Temporal.Instant.from(booking.end)
+    .since(Temporal.Instant.from(booking.start))
+    .total('minutes')
+  if (paid) assertPaidRescheduleDuration(originalDuration, durationMinutes)
   const selectedDuration =
-    durationMinutes === undefined
-      ? Temporal.Instant.from(booking.end)
-          .since(Temporal.Instant.from(booking.start))
-          .total('minutes')
+    paid || durationMinutes === undefined
+      ? originalDuration
       : selectDurationMinutes(
           {
             durationMinutes: eventType.duration_minutes,
@@ -257,6 +270,6 @@ async function listBookingSlots(
     now,
     booking.id,
     snapshot.hosts_use_default_schedule,
-    durationMinutes,
+    paid ? undefined : durationMinutes,
   )
 }

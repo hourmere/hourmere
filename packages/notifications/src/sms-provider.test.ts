@@ -283,7 +283,7 @@ it('source-copy mutations detect weakened provider protections', async () => {
     ],
     [
       'const body = new URLSearchParams({ To: to, Body: input.body })',
-      'console.warn("twilio send", to, input.body); const body = new URLSearchParams({ To: to, Body: input.body })',
+      'const body = new URLSearchParams({ To: to, Body: input.body }); console.warn("twilio send", String(body))',
       async (module) => {
         await assertSmsLogsPrivate(async () => {
           await module

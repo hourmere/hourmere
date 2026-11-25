@@ -33,6 +33,7 @@ import { createMiddleware } from 'hono/factory'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, type TestContext } from 'vitest'
 import * as availability from '../../../packages/scheduling/src/availability.ts'
+import { latestBookingId } from '../../../packages/scheduling/src/booking-chain.ts'
 import * as bookingPage from '../../../packages/scheduling/src/booking-page.ts'
 import * as changeDeadlines from '../../../packages/scheduling/src/change-deadlines.ts'
 import * as conferences from '../../../packages/scheduling/src/conferences.ts'
@@ -45,6 +46,7 @@ import {
 } from '../../../packages/scheduling/src/meeting-poll-outcomes.ts'
 import * as notificationSettings from '../../../packages/scheduling/src/notification-settings.ts'
 import { expirePaymentHolds } from '../../../packages/scheduling/src/payment-expiry.ts'
+import { ensurePaymentRefund } from '../../../packages/scheduling/src/payment-refunds.ts'
 import * as questions from '../../../packages/scheduling/src/questions.ts'
 import * as recurringCapabilities from '../../../packages/scheduling/src/recurring-capabilities.ts'
 import * as recurringMembers from '../../../packages/scheduling/src/recurring-members.ts'
@@ -102,6 +104,7 @@ async function guestRoutesCopy(before: string, after: string): Promise<GuestRout
       sql,
       z,
       ...availability,
+      latestBookingId,
       ...bookingPage,
       ...changeDeadlines,
       ...conferences,
@@ -112,6 +115,7 @@ async function guestRoutesCopy(before: string, after: string): Promise<GuestRout
       meetingPollChainLinked,
       ...notificationSettings,
       expirePaymentHolds,
+      ensurePaymentRefund,
       ...questions,
       ...recurringCapabilities,
       ...recurringMembers,
