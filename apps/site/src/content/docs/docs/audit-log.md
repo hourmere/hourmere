@@ -4,7 +4,7 @@ description: Management events recorded for every Hourmere instance.
 ---
 
 Hourmere records audit events for sign-in session and sign-in method, team creation and
-settings, membership, API-key, [SCIM provisioning token](/docs/scim), OAuth, booking
+settings, membership, API-key, [SCIM provisioning](/docs/scim), OAuth, booking
 management, [no-show mark](/docs/no-shows), webhook, [Slack destination](/docs/slack),
 event-type and branding changes on every self-hosted and Cloud instance.
 There is no enterprise-plan requirement. Only those changes are recorded: personal profile
@@ -29,6 +29,11 @@ Public invitee actions retain entity IDs only. A no-show change keeps the attend
 whether it marked or unmarked them; a Slack destination change keeps its subscribed events,
 never its URL; a provisioning token change keeps the token ID, never its name or secret. A
 Slack 404/410 pause is recorded with the delivery system as its actor.
+
+A mapped child team's audit log records directory-managed roster additions, removals,
+suspensions, reactivations and team credential revocation. Each event identifies the
+child membership and the SCIM system actor. It omits the parent's token and resource IDs
+and any directory profile values.
 
 The journal supports workflow definition changes, synthetic previews and execution. Definition
 events keep the workflow ID and revision, with a trigger type for creation and updates to

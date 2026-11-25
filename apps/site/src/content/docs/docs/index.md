@@ -51,6 +51,8 @@ The website at hourmere.com is separate from your Hourmere instance.
   choose busy-time calendars and a booking destination.
 - [Microsoft Calendar](/docs/microsoft-calendar): register an Entra application, connect
   Outlook and choose calendars for busy-time conflict checks and booking copies.
+- [SCIM provisioning](/docs/scim): connect an identity provider, manage mapped child-team
+  rosters and test the rollback procedure.
 
 - [Marking no-shows](/docs/no-shows): record private attendance per invitee or guest.
 - [Booking waitlists](/docs/booking-waitlist): let invitees confirm an empty period and
@@ -211,8 +213,6 @@ not grant host rescheduling or reschedule-request authority through REST, MCP or
 - Prebuilt image installs have no runtime switch to disable app installation or the
   offline shell. Changing `VITE_PWA_ENABLED` requires rebuilding from source and replacing
   the deployed image; see [conversion steps](/docs/self-hosting#turn-off-app-installation).
-- [SCIM](/docs/scim) provides provisioning-token administration only; creation/rotation is disabled by default.
-  Users, Groups, discovery and IdP synchronization are not available yet.
 - Organization [OIDC single sign-on](/docs/sso) is off by default: the operator turns it
   on with `SSO_OIDC_ENABLED=true`, on every instance and without a paid-plan requirement.
   SAML is being built and is not available yet. The
@@ -220,8 +220,8 @@ not grant host rescheduling or reschedule-request authority through REST, MCP or
   self-hosting, linking, enforcement and the remaining implementation sequence.
 - [Make](/docs/make) recipes require manual assembly; no import-verified blueprint or native
   Hourmere Make app is shipped. Verify signed webhooks before any downstream action.
-- The [n8n community node](/docs/n8n) is not yet published to npm or available on n8n Cloud.
-  Self-hosters can install its local package; downstream effects need durable idempotency.
+- The [n8n community node](/docs/n8n) supports self-hosted installations. n8n Cloud
+  installation requires verification by n8n. Downstream effects need durable idempotency.
 - [Zapier](/docs/zapier) is not yet published in the Zapier directory. The source app
   can be deployed privately with your own Zapier account.
 - Booking workflows are available and off by default. Self-hosted operators can opt in

@@ -11,8 +11,8 @@ import { createApp } from './app.ts'
 import { loadConfig } from './config.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
 import { provisioningTokenRoutes } from './routes/provisioning-tokens.ts'
-import { scimDiscoveryWithGroups } from './scim-discovery.ts'
-import { productionAppOptions } from './server.ts'
+import { scimDiscoveryWithGroups } from './scim-discovery-fixture.ts'
+import { productionAppOptions, productionSsoCapabilities } from './server.ts'
 
 const origin = 'http://localhost'
 const signingSecret = 'synthetic-scim-http-cookie-signing-secret'
@@ -31,22 +31,25 @@ async function sourceCopy<T>(file: string, mutation?: [string, string]): Promise
   return import(`data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`)
 }
 
-it('requires explicit SCIM operator opt-in', () => {
+it('enables SCIM by default and honors explicit operator opt-outs', () => {
   const env = {
     DATABASE_URL: 'postgres://unused@localhost/unused',
     BETTER_AUTH_SECRET: signingSecret,
   }
-  expect(loadConfig(env).SCIM_PROVISIONING_ENABLED).toBe(false)
-  expect(loadConfig({ ...env, SCIM_PROVISIONING_ENABLED: 'false' }).SCIM_PROVISIONING_ENABLED).toBe(
-    false,
-  )
-  expect(loadConfig({ ...env, SCIM_PROVISIONING_ENABLED: 'true' }).SCIM_PROVISIONING_ENABLED).toBe(
-    true,
-  )
-  expect(() => loadConfig({ ...env, SCIM_PROVISIONING_ENABLED: 'yes' })).toThrow()
-  // An empty value (as written in .env.example) means "use the release default".
-  expect(loadConfig({ ...env, SCIM_PROVISIONING_ENABLED: '' }).SCIM_PROVISIONING_ENABLED).toBe(
-    false,
+  expect(loadConfig(env).SCIM_PROVISIONING_ENABLED).toBe(true)
+  // An empty value copied from .env.example follows the release default.
+  for (const value of ['', 'true']) {
+    expect(loadConfig({ ...env, SCIM_PROVISIONING_ENABLED: value }).SCIM_PROVISIONING_ENABLED).toBe(
+      true,
+    )
+  }
+  for (const value of ['false', '0', 'off']) {
+    expect(loadConfig({ ...env, SCIM_PROVISIONING_ENABLED: value }).SCIM_PROVISIONING_ENABLED).toBe(
+      false,
+    )
+  }
+  expect(() => loadConfig({ ...env, SCIM_PROVISIONING_ENABLED: 'garbage' })).toThrow(
+    'SCIM_PROVISIONING_ENABLED must be true, false, 0, off or empty',
   )
 })
 
@@ -392,19 +395,24 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM credential HTTP boundaries', ()
       expect(response.headers.get('content-type')).toContain('application/scim+json')
     }
   })
-  it('keeps SCIM resources unavailable in the production app with provisioning enabled', async () => {
+  function productionApp(setting: string) {
     const unavailable = async (): Promise<never> => expect.unreachable('Unexpected dependency')
-    const application = createApp(
+    const config = loadConfig({
+      DATABASE_URL: owned.url,
+      BETTER_AUTH_SECRET: signingSecret,
+      PUBLIC_URL: origin,
+      SCIM_PROVISIONING_ENABLED: setting,
+    })
+    return createApp(
       productionAppOptions({
-        config: loadConfig({
-          DATABASE_URL: owned.url,
-          BETTER_AUTH_SECRET: signingSecret,
-          PUBLIC_URL: origin,
-          SCIM_PROVISIONING_ENABLED: 'true',
-        }),
+        config,
         db,
         auth,
-        resolveCaller: createCallerResolver({ auth, db }),
+        resolveCaller: createCallerResolver({
+          auth,
+          db,
+          ssoCapabilities: productionSsoCapabilities(config),
+        }),
         resolveMcpOAuth: unavailable,
         checkDb: unavailable,
         waitlist: { verify: unavailable, remove: unavailable },
@@ -419,33 +427,79 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM credential HTTP boundaries', ()
         enqueueCalendarSync: unavailable,
         enqueueCalendarWritebackRecovery: unavailable,
         mailboxProofQueue: { enqueue: unavailable },
+        scimMappingNotices: { enqueue: unavailable },
+        enqueueScimInvitation: unavailable,
       }),
     )
+  }
+  it('passes the production SCIM capability to browser and API-key principals', async () => {
+    for (const enabled of [false, true]) {
+      const ssoCapabilities = productionSsoCapabilities({
+        SSO_OIDC_ENABLED: false,
+        SCIM_PROVISIONING_ENABLED: enabled,
+      })
+      const resolve = createCallerResolver({ auth, db, ssoCapabilities })
+      for (const headers of [
+        new Headers({ cookie }),
+        new Headers({ authorization: `Bearer ${apiKey}` }),
+      ]) {
+        const result = await resolve(headers)
+        expect(result.ok).toBe(true)
+        if (result.ok)
+          expect(result.principal.scimResourcesEnabled).toBe(enabled ? true : undefined)
+      }
+    }
+  })
+  it('exposes production SCIM only when the operator setting is on', async () => {
+    const application = productionApp('')
+    const paused = productionApp('off')
     expect(await (await application.request('/api/v1/instance')).json()).toHaveProperty(
       'scimProvisioningEnabled',
       true,
     )
+    expect(await (await paused.request('/api/v1/instance')).json()).toMatchObject({
+      scimProvisioningEnabled: false,
+    })
     const issued = await issue(application)
     const resourceId = '00000000-0000-4000-8000-000000000001'
-    for (const [method, resource] of [
-      ['GET', 'ServiceProviderConfig'],
-      ['GET', 'ResourceTypes'],
-      ['GET', 'Schemas'],
-      ['GET', 'Users'],
-      ['GET', 'Groups'],
-      ['POST', 'Users'],
-      ['POST', 'Groups'],
-      ['PUT', `Users/${resourceId}`],
-      ['PATCH', `Users/${resourceId}`],
-      ['DELETE', `Users/${resourceId}`],
-    ]) {
-      const response = await application.request(`/scim/v2/${organizationId}/${resource}`, {
-        method,
-        headers: { authorization: `Bearer ${issued.secret}` },
-      })
-      expect(response.status).toBe(404)
-      expect(response.headers.get('content-type')).toContain('application/scim+json')
-      expect(await response.json()).toMatchObject({ status: '404' })
+    for (const [method, resource, enabledStatus] of [
+      ['GET', 'ServiceProviderConfig', 200],
+      ['GET', 'ResourceTypes', 200],
+      ['GET', 'Schemas', 200],
+      ['GET', 'Users', 200],
+      ['GET', 'Groups', 200],
+      ['POST', 'Users', 400],
+      ['POST', 'Groups', 400],
+      ['PUT', `Users/${resourceId}`, 404],
+      ['PATCH', `Users/${resourceId}`, 404],
+      ['DELETE', `Users/${resourceId}`, 404],
+    ] as const) {
+      const target = `/scim/v2/${organizationId}/${resource}`
+      const valid = { authorization: `Bearer ${issued.secret}` }
+      for (const headers of [{}, valid]) {
+        const response = await paused.request(target, { method, headers })
+        expect(response.status).toBe(404)
+        expect(response.headers.get('content-type')).toBe('application/scim+json')
+        expect(response.headers.get('www-authenticate')).toBeNull()
+        expect(await response.json()).toEqual({
+          schemas: ['urn:ietf:params:scim:api:messages:2.0:Error'],
+          status: '404',
+          detail: 'SCIM provisioning is disabled.',
+        })
+      }
+      const response = await application.request(target, { method, headers: valid })
+      expect(response.status, `${method} ${resource}`).toBe(enabledStatus)
+      expect(response.headers.get('content-type')).toBe('application/scim+json')
+      expect((await application.request(target, { method })).status).toBe(401)
+    }
+    for (const [app, enabled] of [
+      [application, true],
+      [paused, false],
+    ] as const) {
+      const api = (await (await app.request('/api/v1/openapi.json')).json()) as {
+        paths: Record<string, unknown>
+      }
+      expect(Object.hasOwn(api.paths, '/api/v1/scim/team-mappings')).toBe(enabled)
     }
   })
   it('redacts credential-shaped validation input and unexpected driver failures', async () => {
@@ -520,6 +574,38 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM credential HTTP boundaries', ()
     expect(response.status).toBe(429)
     expect(response.headers.get('retry-after')).toBeTruthy()
   })
+  const probeScim = (application: ReturnType<typeof app>, bearer: string, address: number) =>
+    application.fetch(
+      new Request(`${origin}/scim/v2/${organizationId}/ServiceProviderConfig`, {
+        headers: { authorization: `Bearer ${bearer}` },
+      }),
+      { incoming: { socket: { remoteAddress: `192.0.2.${address}` } } },
+    )
+
+  async function expectScimRateLimit(refused: Response) {
+    expect(refused.status).toBe(429)
+    expect(refused.headers.get('retry-after')).toMatch(/^\d+$/)
+    expect(await refused.json()).toMatchObject({ status: '429' })
+  }
+
+  it('limits each production credential across different source addresses', async () => {
+    const first = await issue()
+    const second = await issue()
+    const application = productionApp('true')
+    const rotated = await request(application, `${path()}/${first.token.id}/rotate`, 'POST', {
+      overlapSeconds: 3600,
+    })
+    expect(rotated.status).toBe(200)
+    const replacement = (await rotated.json()) as { secret: string }
+    for (let i = 0; i < 90; i++)
+      expect(
+        (await probeScim(application, i < 45 ? first.secret : replacement.secret, i < 45 ? 1 : 2))
+          .status,
+      ).toBe(200)
+    await expectScimRateLimit(await probeScim(application, replacement.secret, 3))
+    expect((await probeScim(application, second.secret, 3)).status).toBe(200)
+  })
+
   it('shares the authenticated SCIM budget across an organization’s sources and tokens', async () => {
     const first = await issue()
     const second = await issue()
@@ -540,6 +626,12 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM credential HTTP boundaries', ()
       expect(refused.headers.get('retry-after')).toMatch(/^\d+$/)
       expect(await refused.json()).toMatchObject({ status: '429' })
     }
+    const production = productionApp('true')
+    for (let i = 0; i < 60; i++) {
+      expect((await probeScim(production, first.secret, 1)).status).toBe(200)
+      expect((await probeScim(production, second.secret, 2)).status).toBe(200)
+    }
+    await expectScimRateLimit(await probeScim(production, second.secret, 3))
     await verify((await import('./scim.ts')).mountScim)
     const mutant = await sourceCopy<typeof import('./scim.ts')>('./scim.ts', [
       'organizationLimit?.hit(principal.organizationId)',

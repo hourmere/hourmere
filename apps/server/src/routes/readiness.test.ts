@@ -15,6 +15,7 @@ import {
   ssoDelegationStatus,
   ssoHardOff,
   type TeamManagementError,
+  withScimResources,
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { scimProvisioned, scimSuspended } from '@hourmere/db/scim-suspension'
@@ -375,6 +376,7 @@ describe.skipIf(!process.env.DATABASE_URL)('booking readiness real authenticatio
           ssoDelegationStatus,
           ssoHardOff,
           ssoRecoveryTeamsFor,
+          withScimResources,
         },
         'createCallerResolver',
         mutation,

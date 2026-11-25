@@ -1243,6 +1243,7 @@ async function expectProductionAvailable(module: typeof server) {
       // Unset, empty and false are the same setting-off state; SAML is not a setting.
       SSO_OIDC_ENABLED: '',
       SSO_SAML_ENABLED: 'true',
+      SCIM_PROVISIONING_ENABLED: 'false',
     })
     const app = nativeCreateApp(
       module.productionAppOptions({
@@ -1264,6 +1265,8 @@ async function expectProductionAvailable(module: typeof server) {
         enqueueCalendarSync: unavailable,
         enqueueCalendarWritebackRecovery: unavailable,
         mailboxProofQueue: { enqueue: unavailable },
+        scimMappingNotices: { enqueue: unavailable },
+        enqueueScimInvitation: unavailable,
       }),
     )
     for (const path of [real.MAILBOX_PROOF_SEND_PATH, real.MAILBOX_PROOF_CONSUME_PATH])

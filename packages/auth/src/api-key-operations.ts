@@ -676,7 +676,7 @@ const mappingTools = Object.freeze([
   mcp('delete_scim_team_mapping', 'other_write', ['DELETE /api/v1/scim/team-mappings/{id}']),
 ])
 
-/** Scope classifications for the in-process resource test only. */
+/** Scope classifications for the optional SCIM mapping interfaces. */
 export const SCIM_MAPPING_SCOPE_OPERATIONS = Object.freeze({
   rest: Object.freeze([
     rest('GET', '/api/v1/scim/team-mappings', 'other_read', 'key'),

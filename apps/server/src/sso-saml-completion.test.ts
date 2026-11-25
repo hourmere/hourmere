@@ -25,7 +25,9 @@ import {
 } from '../../../packages/db/src/sso-storage-fixtures.ts'
 import { createApp } from './app.ts'
 import { loadConfig } from './config.ts'
+import { type SsoProviderPage, ssoRoutes } from './routes/sso.ts'
 import { ssoDraftRoutes } from './routes/sso-drafts.ts'
+import { ssoIdentityRecoveryRoutes } from './routes/sso-link-recovery.ts'
 import { ssoRecoveryEnrollmentRoutes } from './routes/sso-recovery-enrollment.ts'
 import { productionSsoCapabilities } from './server.ts'
 import type { SsoCapabilities } from './sso.ts'
@@ -169,6 +171,7 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
     mailboxJobs?: MailboxProofEmailPayload[],
     signupPolicy: SignupPolicy = signup,
     database = db,
+    removalNotices: string[] = [],
   ) {
     const deps = {
       db: database,
@@ -193,7 +196,20 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
       publicUrl,
       ...(mailboxJobs && {
         routes: [
+          ssoRoutes({ db: database, capabilities }),
           ssoDraftRoutes({ ...deps, publicUrl, privateTargets: [] }),
+          ssoIdentityRecoveryRoutes({
+            ...deps,
+            publicUrl,
+            notificationQueue: {
+              async enqueue(name, payload, options) {
+                expect(name).toBe('sso-link-removal-email')
+                expect(options.transaction).toMatchObject({ isTransaction: true })
+                removalNotices.push(payload.userId)
+                return 'link-removal-notice'
+              },
+            },
+          }),
           ssoRecoveryEnrollmentRoutes({
             ...deps,
             publicUrl,
@@ -279,20 +295,29 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
 
   async function linkedProvider() {
     const provider = await enabledProvider()
-    const link = await db
+    const link = await seedLink(provider, team.member)
+    return { ...provider, link }
+  }
+
+  async function seedLink(provider: Provider, userId: string) {
+    const user = await db
+      .selectFrom('auth.user')
+      .select('email')
+      .where('id', '=', userId)
+      .executeTakeFirstOrThrow()
+    return db
       .insertInto('sso_identity_links')
       .values({
         organization_id: team.team,
         provider_id: provider.id,
-        user_id: team.member,
+        user_id: userId,
         issuer: provider.issuer,
         subject: provider.subject,
-        proven_email: mailbox,
+        proven_email: user.email,
         email_proven_at: at(-60),
       })
-      .returning(['id', 'generation'])
+      .returningAll()
       .executeTakeFirstOrThrow()
-    return { ...provider, link }
   }
 
   function signIn(providerId: string, request: App) {
@@ -565,7 +590,8 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
     signupPolicy: SignupPolicy = signup,
   ) {
     const jobs: MailboxProofEmailPayload[] = []
-    const request = instance(capabilities, jobs, signupPolicy)
+    const removalNotices: string[] = []
+    const request = instance(capabilities, jobs, signupPolicy, db, removalNotices)
     const json = (
       path: string,
       cookies: string[],
@@ -648,7 +674,16 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
       }
     }
 
-    return { request, json, jobs, deliverProof, consumeProof, mailboxProof, withMailbox }
+    return {
+      request,
+      json,
+      jobs,
+      removalNotices,
+      deliverProof,
+      consumeProof,
+      mailboxProof,
+      withMailbox,
+    }
   }
 
   const receipts = (id: string) =>
@@ -674,6 +709,32 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
   }
 
   const linkPath = (provider: Provider) => `${providersPath}/${provider.id}/link`
+  const removeLinkPath = (provider: Provider, linkId: string) =>
+    `${providersPath}/${provider.id}/links/${linkId}`
+
+  async function providerInventory(request: App, cookies: string[]) {
+    const response = await request.request(new URL(providersPath, publicUrl), {
+      headers: { cookie: cookies.join('; ') },
+    })
+    expect(response.status).toBe(200)
+    return (await response.json()) as ReturnType<typeof SsoProviderPage.parse>
+  }
+
+  const identityLink = (linkId: string) =>
+    db
+      .selectFrom('sso_identity_links')
+      .selectAll()
+      .where('id', '=', linkId)
+      .executeTakeFirstOrThrow()
+
+  const linkAudit = (id: string) =>
+    db
+      .selectFrom('audit_events')
+      .select(['actor_id', 'action', 'details'])
+      .where('target_id', '=', id)
+      .orderBy('occurred_at')
+      .orderBy('id')
+      .execute()
 
   function storedLinks(provider: Provider) {
     return db
@@ -699,6 +760,18 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
       attempt,
       'link',
     )
+  }
+
+  async function completeLinkedSignIn(provider: Provider, request: App) {
+    const attempt = await readStart(provider, await signIn(provider.id, request))
+    const signed = await signedResponse(attempt)
+    const result = await pending(
+      await acs(provider.id, signed.encoded, attempt.relayState, request),
+      attempt,
+    )
+    const response = await complete(result, { request })
+    expect(response.status).toBe(303)
+    expect(response.headers.get('location')).toBe(returnPath)
   }
 
   async function stageMailbox(request: App, provider: Provider, options?: SignedResponseOptions) {
@@ -996,7 +1069,7 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
     expect(await protocolEffects(provider.id)).toEqual(before)
   })
 
-  it('refuses SAML link consent for a directory-suspended child member when SCIM resources are enabled', async () => {
+  it('refuses SAML link consent for a directory-suspended child member even after SCIM is disabled', async () => {
     const fixture = await seedTeam()
     const domainName = `directory-${randomUUID()}.example.com`
     const assertedMailbox = `member@${domainName}`
@@ -1048,9 +1121,15 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
       .execute()
 
     await expectRefusedCompletion(await complete(result, { request }))
+    await expectRefusedCompletion(await complete(result, { request: instance() }))
     expect(await storedLinks(provider)).toEqual([])
     expect(await protocolEffects(provider.id)).toEqual(before)
 
+    await db
+      .updateTable('scim_team_managed_memberships')
+      .set({ suspended_at: null })
+      .where('member_id', '=', fixture.memberMember)
+      .execute()
     const completed = await complete(result, { request: instance() })
     expect(completed.status).toBe(303)
     expect(completed.headers.get('location')).toBe('/app/settings')
@@ -2176,5 +2255,323 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
         .where('id', '=', link.attemptId)
         .executeTakeFirst(),
     ).toEqual({ kind: 'link' })
+  })
+
+  it('allows only another owner to retire an owner’s SAML link administratively', async () => {
+    const provider = await enabledProvider()
+    const link = await seedLink(provider, team.coOwner)
+    const admin = await browserSession(team.admin)
+    const target = await browserSession(team.coOwner)
+    const owner = await browserSession(team.owner)
+    const path = removeLinkPath(provider, link.id)
+    const body = { expectedLinkGeneration: link.generation }
+    const { request, json, withMailbox, removalNotices } = management()
+    expect((await providerInventory(request, owner.cookies)).data).toContainEqual(
+      expect.objectContaining({
+        id: provider.id,
+        links: [{ id: link.id, generation: link.generation }],
+      }),
+    )
+    for (const { cookies } of [admin, target]) {
+      const refused = await json(path, cookies, body, 'DELETE')
+      expect(refused.status).toBe(403)
+      expect(await refused.json()).toEqual({ error: 'team_management_access_denied' })
+      expect(refused.headers.getSetCookie()).toEqual([])
+    }
+    expect(await identityLink(link.id)).toEqual(link)
+    expect(await linkAudit(link.id)).toEqual([])
+    expect(removalNotices).toEqual([])
+
+    const { response } = await withMailbox(path, owner.cookies, body, 'DELETE')
+    expect(response.status).toBe(204)
+    expect(await identityLink(link.id)).toEqual({
+      ...link,
+      generation: link.generation + 1,
+      retired_at: expect.any(Date),
+    })
+    expect(await linkAudit(link.id)).toEqual([
+      {
+        actor_id: team.owner,
+        action: 'sso_link.unlinked',
+        details: expect.objectContaining({ method: 'saml', providerId: provider.id }),
+      },
+    ])
+    expect(removalNotices).toEqual([team.coOwner])
+    expect((await providerInventory(request, owner.cookies)).data).toContainEqual(
+      expect.objectContaining({ id: provider.id, links: [] }),
+    )
+  })
+
+  it('rechecks the exact SAML link generation after waiting for a concurrent team write', async () => {
+    const provider = await linkedProvider()
+    const member = await browserSession(team.member)
+    const { json, mailboxProof, removalNotices } = management()
+    const path = linkPath(provider)
+    const body = { linkId: provider.link.id, expectedLinkGeneration: provider.link.generation }
+    const proof = await mailboxProof(
+      await json(path, member.cookies, body, 'DELETE'),
+      member.cookies,
+    )
+    const blocker = await owned.pool.connect()
+    let retry: Promise<Response> | undefined
+    try {
+      await blocker.query('BEGIN')
+      const { rows } = await blocker.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+      await blocker.query('SELECT id FROM auth.organization WHERE id = $1 FOR UPDATE', [team.team])
+      await blocker.query(
+        'UPDATE sso_identity_links SET generation = generation + 1 WHERE id = $1',
+        [provider.link.id],
+      )
+      retry = Promise.resolve(
+        json(path, proof.cookies, { ...body, proofAttemptId: proof.attemptId }, 'DELETE'),
+      )
+      await vi.waitFor(
+        async () => {
+          const waiting = await owned.pool.query<{ blocked: boolean }>(
+            `SELECT EXISTS (SELECT FROM pg_stat_activity WHERE datname = current_database()
+             AND $1 = ANY(pg_blocking_pids(pid))) AS blocked`,
+            [rows[0]?.pid],
+          )
+          expect(waiting.rows[0]?.blocked).toBe(true)
+        },
+        { timeout: 2500, interval: 10 },
+      )
+      await blocker.query('COMMIT')
+    } finally {
+      await blocker.query('ROLLBACK')
+      blocker.release()
+    }
+    const refused = await retry
+    expect(refused.status).toBe(409)
+    expect(await refused.json()).toEqual({ error: 'sso_configuration_changed' })
+    expect(await identityLink(provider.link.id)).toEqual({
+      ...provider.link,
+      generation: body.expectedLinkGeneration + 1,
+    })
+    expect(
+      await db
+        .selectFrom('sso_attempts')
+        .select('consumed_at')
+        .where('id', '=', proof.attemptId)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ consumed_at: null })
+    expect(await linkAudit(provider.link.id)).toEqual([])
+    expect(removalNotices).toEqual([])
+  })
+
+  it('revokes only the SAML browser proofs that relied on the caller’s retired link', async () => {
+    const provider = await linkedProvider()
+    const otherProvider = await linkedProvider()
+    const manager = management()
+    const fixture = await seedTeam()
+    const peer = {
+      ...provider,
+      subject: `peer-${randomUUID()}`,
+      mailbox: `peer-${randomUUID()}@${verifiedDomain}`,
+    }
+    await db
+      .updateTable('auth.user')
+      .set({ email: peer.mailbox })
+      .where('id', '=', fixture.member)
+      .execute()
+    await db
+      .insertInto('auth.member')
+      .values({
+        organizationId: team.team,
+        userId: fixture.member,
+        role: 'member',
+        createdAt: at(0),
+      })
+      .execute()
+    const peerLink = await seedLink(peer, fixture.member)
+    for (const identity of [provider, provider, peer, otherProvider]) {
+      await completeLinkedSignIn(identity, manager.request)
+    }
+    const proofs = () =>
+      db
+        .selectFrom('sso_browser_proofs')
+        .selectAll()
+        .where('provider_id', 'in', [provider.id, otherProvider.id])
+        .orderBy('session_id')
+        .execute()
+    const priorProofs = await proofs()
+    expect(priorProofs.map(({ link_id }) => link_id).sort()).toEqual(
+      [provider.link.id, provider.link.id, peerLink.id, otherProvider.link.id].sort(),
+    )
+    const member = await browserSession(team.member)
+    const before = await identityEffects()
+    const { response } = await manager.withMailbox(
+      linkPath(provider),
+      member.cookies,
+      { linkId: provider.link.id, expectedLinkGeneration: provider.link.generation },
+      'DELETE',
+    )
+    expect(response.status).toBe(204)
+    expect(await proofs()).toEqual(
+      priorProofs.filter(({ link_id }) => link_id !== provider.link.id),
+    )
+    expect(await identityLink(peerLink.id)).toEqual(peerLink)
+    expect(await identityLink(otherProvider.link.id)).toEqual(otherProvider.link)
+    expect(await identityEffects()).toMatchObject({
+      sessions: before.sessions,
+      members: before.members,
+      proofs: String(Number(before.proofs) - 2),
+    })
+    expect(manager.removalNotices).toEqual([team.member])
+  })
+
+  it('keeps a conflicting SAML subject bound until retirement and fresh explicit consent', async () => {
+    const provider = await enabledProvider()
+    const oldLink = await seedLink(provider, team.admin)
+    const manager = management()
+    const member = await browserSession(team.member)
+    const owner = await browserSession(team.owner)
+    const { request } = manager
+
+    const conflicted = await stageLink(request, await startLink(provider, member.cookies, manager))
+    await expectRefusedCompletion(await complete(conflicted, { request }))
+    expect(await storedLinks(provider)).toEqual([
+      expect.objectContaining({ id: oldLink.id, user_id: team.admin }),
+    ])
+    expect(await identityLink(oldLink.id)).toEqual(oldLink)
+    expect(await linkAudit(provider.id)).toContainEqual({
+      actor_id: team.member,
+      action: 'sso_link.conflicted',
+      details: {
+        method: 'saml',
+        providerId: provider.id,
+        revision: 1,
+        correlationId: conflicted.id,
+      },
+    })
+
+    const { response } = await manager.withMailbox(
+      removeLinkPath(provider, oldLink.id),
+      owner.cookies,
+      { expectedLinkGeneration: oldLink.generation },
+      'DELETE',
+    )
+    expect(response.status).toBe(204)
+    const retired = await identityLink(oldLink.id)
+    expect(retired).toEqual({
+      ...oldLink,
+      generation: oldLink.generation + 1,
+      retired_at: expect.any(Date),
+    })
+    await expectRefusedCompletion(await complete(conflicted, { request }))
+    expect(await storedLinks(provider)).toHaveLength(1)
+
+    const staged = await stageLink(request, await startLink(provider, member.cookies, manager))
+    const before = await identityEffects()
+    const relinked = await complete(staged, { request })
+    expect(relinked.status).toBe(303)
+    expect(relinked.headers.get('location')).toBe('/app/settings')
+    const links = await storedLinks(provider)
+    expect(links).toHaveLength(2)
+    expect(links).toContainEqual({
+      id: expect.any(String),
+      user_id: team.member,
+      issuer: provider.issuer,
+      subject: oldLink.subject,
+      generation: 1,
+      proven_email: mailbox,
+    })
+    expect(await identityLink(oldLink.id)).toEqual(retired)
+    expect(await identityEffects()).toEqual({
+      ...before,
+      links: String(Number(before.links) + 1),
+    })
+  })
+
+  it('refuses recovery for hard-off SAML links without writing and keeps OIDC recovery available', async () => {
+    const provider = await linkedProvider()
+    const { request, json, mailboxProof } = management()
+    const member = await browserSession(team.member)
+    const owner = await browserSession(team.owner)
+    const path = linkPath(provider)
+    const body = { linkId: provider.link.id, expectedLinkGeneration: provider.link.generation }
+    const proof = await mailboxProof(
+      await json(path, member.cookies, body, 'DELETE'),
+      member.cookies,
+    )
+    await completeLinkedSignIn(provider, request)
+    const oidc = await db
+      .insertInto('sso_providers')
+      .values({ ...oidcProviderValues(team.team), enabled: true })
+      .returning(['id', 'issuer'])
+      .executeTakeFirstOrThrow()
+    const oidcProvider = { ...oidc, subject: `oidc-${randomUUID()}`, mailbox }
+    const oidcLink = await seedLink(oidcProvider, team.member)
+
+    const capability = (oidcEnabled: string) =>
+      productionSsoCapabilities(
+        loadConfig({
+          DATABASE_URL: owned.url,
+          PUBLIC_URL: publicUrl,
+          BETTER_AUTH_SECRET: secret,
+          SSO_OIDC_ENABLED: oidcEnabled,
+          SSO_SAML_ENABLED: 'true',
+        }),
+      )
+    const attempts = () =>
+      db
+        .selectFrom('sso_attempts')
+        .select(['id', 'consumed_at'])
+        .where('organization_id', '=', team.team)
+        .orderBy('id')
+        .execute()
+    const before = await identityEffects()
+    const priorAttempts = await attempts()
+    for (const oidcEnabled of ['false', 'true']) {
+      const off = management(team.team, capability(oidcEnabled))
+      const inventory = await providerInventory(off.request, owner.cookies)
+      const saml = inventory.data.find(({ id }) => id === provider.id)
+      expect(saml).toBeDefined()
+      expect(saml).not.toHaveProperty('links')
+      expect(inventory.data).toContainEqual(
+        expect.objectContaining({
+          id: oidc.id,
+          links: [{ id: oidcLink.id, generation: oidcLink.generation }],
+        }),
+      )
+      for (const response of [
+        await off.json(path, member.cookies, body, 'DELETE'),
+        await off.json(path, proof.cookies, { ...body, proofAttemptId: proof.attemptId }, 'DELETE'),
+        await off.json(
+          removeLinkPath(provider, provider.link.id),
+          owner.cookies,
+          { expectedLinkGeneration: provider.link.generation },
+          'DELETE',
+        ),
+      ]) {
+        expect(response.status).toBe(404)
+        expect(await response.json()).toEqual({ error: 'sso_disabled' })
+        expect(response.headers.getSetCookie()).toEqual([])
+      }
+      expect(off.jobs).toEqual([])
+      expect(off.removalNotices).toEqual([])
+    }
+    expect(await identityEffects()).toEqual(before)
+    expect(await attempts()).toEqual(priorAttempts)
+    expect(await identityLink(provider.link.id)).toEqual(provider.link)
+    expect(await linkAudit(provider.link.id)).toEqual([])
+
+    const { response } = await management(team.team, capability('false')).withMailbox(
+      linkPath(oidcProvider),
+      member.cookies,
+      { linkId: oidcLink.id, expectedLinkGeneration: oidcLink.generation },
+      'DELETE',
+    )
+    expect(response.status).toBe(204)
+    expect(await identityLink(oidcLink.id)).toEqual({
+      ...oidcLink,
+      generation: oidcLink.generation + 1,
+      retired_at: expect.any(Date),
+    })
+    expect(await linkAudit(oidcLink.id)).toContainEqual({
+      actor_id: team.member,
+      action: 'sso_link.unlinked',
+      details: expect.objectContaining({ method: 'oidc', providerId: oidc.id }),
+    })
   })
 })

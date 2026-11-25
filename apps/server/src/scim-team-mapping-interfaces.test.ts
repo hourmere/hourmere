@@ -23,7 +23,7 @@ import { whoamiTool } from './mcp/whoami.ts'
 import { openApiRouteInventory } from './openapi-document.ts'
 import { instanceRoutes } from './routes/instance.ts'
 import { SCIM_TEAM_MAPPINGS_PATH as path } from './routes/scim-team-mappings.ts'
-import { scimDiscovery } from './scim-discovery.ts'
+import { scimDiscovery } from './scim-discovery-fixture.ts'
 import type { ScimTeamMappingApprovalInput } from './scim-team-hierarchy.ts'
 import {
   deliverMailboxProof,
@@ -71,7 +71,6 @@ async function cli(
   app: App,
   command: string[],
   input: object = {},
-  scimResourcesEnabled?: boolean,
   fetcher = appFetch(app),
   auth = key,
 ) {
@@ -82,7 +81,6 @@ async function cli(
     env: {
       HOURMERE_API_KEY: auth,
       HOURMERE_URL: publicUrl,
-      SCIM_PROVISIONING_ENABLED: 'true',
     },
     stdin: (async function* () {
       yield JSON.stringify(input)
@@ -94,7 +92,6 @@ async function cli(
       stderr += value
     },
     fetch: fetcher,
-    ...(scimResourcesEnabled === undefined ? {} : { scimResourcesEnabled }),
   })
   return { exit, stdout, stderr }
 }
@@ -119,7 +116,7 @@ it('keeps every management interface unreachable with the production resource sw
       mcp: mcpEndpoint({ tools: [whoamiTool] }),
     })
   const baseline = app()
-  const production = app({ db, enabled: true })
+  const intermediate = app({ db, enabled: true })
   const mappingAdministration = scimMappingAdministration({
     db,
     publicUrl,
@@ -127,13 +124,14 @@ it('keeps every management interface unreachable with the production resource sw
     resourcesEnabled: true,
   })
   const withoutResources = app({ db, enabled: true, mappingAdministration })
+  const production = app({ db, enabled: false, resources: scimDiscovery, mappingAdministration })
   for (const [method, url] of [
     ['GET', path],
     ['POST', path],
     ['DELETE', `${path}/${randomUUID()}`],
     ['POST', `${path}/consent`],
   ] as const) {
-    for (const server of [production, withoutResources]) {
+    for (const server of [production, intermediate, withoutResources]) {
       const result = await server.request(url, { method, headers: headers(key) })
       expect(result.status).toBe(404)
       expect(await result.json()).toEqual({ error: 'not_found' })
@@ -162,20 +160,25 @@ it('keeps every management interface unreachable with the production resource sw
     expect(result).toEqual(await rpc(baseline, 'tools/call', params))
   }
   const fetcher = vi.fn(appFetch(production))
-  expect(await cli(production, ['--help'], {}, false, fetcher)).toMatchObject({ stdout: HELP })
-  expect(HELP).not.toContain('scim-team-mappings')
-  for (const command of ['create', 'delete']) {
-    const result = await cli(production, ['scim-team-mappings', command], {}, false, fetcher)
-    expect(result).toEqual({
-      exit: 1,
-      stdout: '',
-      stderr: `${JSON.stringify({ error: 'invalid_command' }, null, 2)}\n`,
-    })
-  }
+  expect(await cli(production, ['--help'], {}, fetcher)).toMatchObject({ stdout: HELP })
+  expect(HELP).toContain('scim-team-mappings')
   expect(fetcher).not.toHaveBeenCalled()
+  for (const command of ['create', 'delete']) {
+    const result = await cli(
+      production,
+      ['scim-team-mappings', command, '--input', '-'],
+      {
+        intentId: randomUUID(),
+      },
+      fetcher,
+    )
+    expect(result).toMatchObject({ exit: 1, stdout: '' })
+    expect(JSON.parse(result.stderr)).toHaveProperty('error')
+  }
+  expect(fetcher).toHaveBeenCalled()
 })
 
-it('classifies the actual resource-test REST routes, MCP tools and CLI commands with equivalent scopes', async () => {
+it('classifies the SCIM REST routes, MCP tools and CLI commands with equivalent scopes', async () => {
   const { document, routes, scimMappingTools } = await openApiRouteInventory({
     scimResourcesEnabled: true,
   })
@@ -186,7 +189,7 @@ it('classifies the actual resource-test REST routes, MCP tools and CLI commands 
         registeredRest: routes.filter((route) => route.path.startsWith(path)),
         mcp: scimMappingTools,
         cli: Object.fromEntries(
-          Object.entries(cliCommands(true)).filter(([command]) =>
+          Object.entries(cliCommands()).filter(([command]) =>
             command.startsWith('scim-team-mappings '),
           ),
         ),
@@ -413,7 +416,6 @@ describe.skipIf(!databaseUrl)('mapping administration transports', () => {
       app,
       ['scim-team-mappings', 'create', '--input', '-'],
       request,
-      true,
       appFetch(app),
       parentKey,
     )
@@ -465,7 +467,6 @@ describe.skipIf(!databaseUrl)('mapping administration transports', () => {
         app,
         ['scim-team-mappings', 'delete', '--input', '-'],
         { id: mappingId, ...unlinkRequest },
-        true,
         appFetch(app),
         parentKey,
       ),
@@ -509,7 +510,6 @@ describe.skipIf(!databaseUrl)('mapping administration transports', () => {
       app,
       ['scim-team-mappings', 'create', '--input', '-'],
       { intentId: link.intentId },
-      true,
       appFetch(app),
       childKey,
     )

@@ -58,7 +58,7 @@ export const ScimTeamMappingApproval = z.discriminatedUnion('action', [
 export type ScimTeamMappingApprovalInput = z.input<typeof ScimTeamMappingApproval>
 
 export interface ScimTeamHierarchyDeps extends FreshProofDeps {
-  /** No production registration. The SCIM resource test harness supplies this flag. */
+  /** Whether directory resources and their management interfaces are enabled. */
   resourcesEnabled: boolean
   notices?: ScimMappingNoticeQueue | undefined
 }

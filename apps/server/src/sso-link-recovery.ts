@@ -122,7 +122,7 @@ export async function retireSsoIdentityLink(
     const affectedUserId = self
       ? actor.userId
       : (await findLink(deps.db).executeTakeFirst())?.user_id
-    let target: { userId: string; revision: number } | undefined
+    let target: { userId: string; revision: number; protocol: 'oidc' | 'saml' } | undefined
     return await runWithFreshProof(
       deps,
       {
@@ -168,9 +168,12 @@ export async function retireSsoIdentityLink(
             )
               throw denied()
           }
-          if (provider.protocol !== 'oidc') throw new DomainError('not_found', 'sso_disabled')
+          // OIDC recovery survives setting-off. SAML remains unavailable while hard-off.
+          const { protocol } = provider
+          if (protocol !== 'oidc' && (protocol !== 'saml' || !deps.capabilities.ssoSamlEnabled))
+            throw new DomainError('not_found', 'sso_disabled')
           if (link.generation !== request.expectedLinkGeneration) throw changed()
-          target = { userId: link.user_id, revision: provider.revision }
+          target = { userId: link.user_id, revision: provider.revision, protocol }
         },
         mutate: async (trx, _input, _browser, _mailbox, attemptId) => {
           if (!target || !deps.notificationQueue) throw new Error('SSO link removal is unavailable')
@@ -196,7 +199,7 @@ export async function retireSsoIdentityLink(
             targetId: linkId,
             action: 'sso_link.unlinked',
             details: {
-              method: 'oidc',
+              method: target.protocol,
               providerId,
               revision: target.revision,
               correlationId: attemptId,

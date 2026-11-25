@@ -1,9 +1,11 @@
 // SCIM discovery (RFC 7644 section 4; representations from RFC 7643 sections 5–7).
-// docs/scim.md is the source for every value here: the capabilities its
-// ServiceProviderConfig row names and exactly the mapped User, enterprise and Group
-// fields. Group discovery is injected with the Group resource handler. Production
-// registers no handler yet; see ScimResources in scim.ts.
-import { type ScimReply, type ScimResourceRequest, type ScimResources, scimError } from './scim.ts'
+import {
+  type ScimReply,
+  type ScimResourceRegistration,
+  type ScimResourceRequest,
+  type ScimResources,
+  scimError,
+} from './scim.ts'
 
 export const SCIM_URN = {
   user: 'urn:ietf:params:scim:schemas:core:2.0:User',
@@ -100,14 +102,24 @@ const enterpriseAttributes: ScimAttribute[] = [
   }),
 ]
 
-const serviceProviderConfig = (base: string) => ({
+const serviceProviderConfig = (
+  base: string,
+  registrations: readonly ScimResourceRegistration[],
+) => ({
   schemas: [SCIM_URN.serviceProviderConfig],
-  patch: { supported: true },
-  bulk: { supported: false, maxOperations: 0, maxPayloadSize: 0 },
-  filter: { supported: true, maxResults: 100 },
-  changePassword: { supported: false },
-  sort: { supported: false },
-  etag: { supported: false },
+  patch: { supported: registrations.some((route) => route.patch) },
+  bulk: {
+    supported: registrations.some((route) => route.bulk),
+    maxOperations: Math.max(0, ...registrations.map((route) => route.bulk?.maxOperations ?? 0)),
+    maxPayloadSize: Math.max(0, ...registrations.map((route) => route.bulk?.maxPayloadSize ?? 0)),
+  },
+  filter: {
+    supported: registrations.some((route) => route.filter),
+    maxResults: Math.max(0, ...registrations.map((route) => route.filter?.maxResults ?? 0)),
+  },
+  changePassword: { supported: registrations.some((route) => route.changePassword) },
+  sort: { supported: registrations.some((route) => route.sort) },
+  etag: { supported: registrations.some((route) => route.etag) },
   authenticationSchemes: [
     {
       type: 'oauthbearertoken',
@@ -180,17 +192,21 @@ export const scimGroupSchemas = [
   { id: SCIM_URN.group, name: 'Group', description: 'Group', attributes: groupAttributes },
 ]
 
-const schemas = (base: string, includeGroups: boolean) =>
-  [...scimUserSchemas, ...(includeGroups ? scimGroupSchemas : [])].map((schema) => ({
-    schemas: [SCIM_URN.schema],
-    ...schema,
-    meta: { resourceType: 'Schema', location: `${base}/Schemas/${schema.id}` },
-  }))
+const schemas = (base: string, includeUsers: boolean, includeGroups: boolean) =>
+  [...(includeUsers ? scimUserSchemas : []), ...(includeGroups ? scimGroupSchemas : [])].map(
+    (schema) => ({
+      schemas: [SCIM_URN.schema],
+      ...schema,
+      meta: { resourceType: 'Schema', location: `${base}/Schemas/${schema.id}` },
+    }),
+  )
 
 const ok = (body: unknown): ScimReply => ({ status: 200, body })
 
 function discover(
   { method, path, query, base }: ScimResourceRequest,
+  registrations: readonly ScimResourceRegistration[],
+  includeUsers: boolean,
   includeGroups: boolean,
 ): ScimReply | undefined {
   const match = /^\/(ServiceProviderConfig|ResourceTypes|Schemas)(?:\/([^/]+))?$/.exec(path)
@@ -202,11 +218,14 @@ function discover(
   // client cannot assume that its conditions matched.
   if (query.has('filter'))
     return { status: 403, body: scimError(403, 'Discovery endpoints do not support filtering.') }
-  if (endpoint === 'ServiceProviderConfig') return ok(serviceProviderConfig(base))
+  if (endpoint === 'ServiceProviderConfig') return ok(serviceProviderConfig(base, registrations))
   const resources: { id: string }[] =
     endpoint === 'ResourceTypes'
-      ? [...resourceTypes(base), ...(includeGroups ? [groupResourceType(base)] : [])]
-      : schemas(base, includeGroups)
+      ? [
+          ...(includeUsers ? resourceTypes(base) : []),
+          ...(includeGroups ? [groupResourceType(base)] : []),
+        ]
+      : schemas(base, includeUsers, includeGroups)
   if (id === undefined)
     return ok({
       schemas: [SCIM_URN.listResponse],
@@ -224,7 +243,10 @@ function discover(
   return resource ? ok(resource) : { status: 404, body: scimError(404, 'Resource not found.') }
 }
 
-export const scimDiscovery: ScimResources = (request) => discover(request, false)
-
-/** Discovery for test harnesses that also inject the Group resource handler. */
-export const scimDiscoveryWithGroups: ScimResources = (request) => discover(request, true)
+export function createScimDiscovery(
+  registrations: readonly ScimResourceRegistration[],
+): ScimResources {
+  const includeUsers = registrations.some((route) => route.resourceType === 'User')
+  const includeGroups = registrations.some((route) => route.resourceType === 'Group')
+  return (request) => discover(request, registrations, includeUsers, includeGroups)
+}

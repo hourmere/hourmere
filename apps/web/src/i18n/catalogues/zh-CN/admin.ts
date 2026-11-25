@@ -113,8 +113,6 @@ export const admin = {
   'Location options and conferencing': '地点选项与视频会议',
   'Duration (minutes)': '时长（分钟）',
   'SCIM provisioning tokens': 'SCIM 预配令牌',
-  'Provisioning is not available yet. These tokens prepare your organization for a future SCIM connection.':
-    '预配功能尚未开放。这些令牌用于为组织未来的 SCIM 连接做准备。',
   'Tokens only authorize SCIM for this organization. Keep them private.':
     '令牌仅授权访问此组织的 SCIM 服务。请妥善保管。',
   'Could not update provisioning tokens. Check the token list before trying again.':
@@ -3076,6 +3074,8 @@ export const admin = {
     'Microsoft 报告预约副本存在冲突。请在 Outlook 中检查日历。',
   'Hourmere will retry syncing a booking copy.': 'Hourmere 将重试同步预约副本。',
   'A booking copy has a pending change.': '有一个预约副本的变更尚待处理。',
+  // SCIM provisioning
+  'SCIM provisioning is disabled on this instance.': '此实例已禁用 SCIM 预配。',
   // Event type editor summaries and booking page preview
   'Preview booking page': '预览预约页面',
   'Duration not set': '未设置时长',
