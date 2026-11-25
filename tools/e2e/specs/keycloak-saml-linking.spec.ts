@@ -19,7 +19,7 @@ import { expect, test } from '../keycloak/fixture.ts'
 
 test.use({ protocol: 'saml', oidcEnabled: false })
 
-test.describe('with SAML injected into the fixture', () => {
+test.describe('with the SAML setting on', () => {
   test.use({ samlEnabled: true })
 
   test('a team member proves their Hourmere mailbox and consents to a Keycloak SAML link', async ({
@@ -74,7 +74,7 @@ test.describe('with SAML injected into the fixture', () => {
   })
 })
 
-test('without injection the same seeded fixture offers no SAML link entry', async ({
+test('with the SAML setting off the same seeded fixture offers no SAML link entry', async ({
   page,
   keycloak: app,
 }) => {

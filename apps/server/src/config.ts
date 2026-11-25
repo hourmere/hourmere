@@ -170,8 +170,7 @@ const schema = z
         return z.NEVER
       }
     }),
-    // Reserved for SSO, which is not available yet: parsed and validated at startup, read by
-    // nothing else, so it routes nothing. Never the webhook allowlist, never team-editable.
+    // Operator-only SSO destinations. Independent of the webhook allowlist and team settings.
     SSO_PRIVATE_TARGETS: optional(z.string()).transform((value, ctx) => {
       try {
         return parseSsoPrivateTargets(value)
@@ -194,10 +193,12 @@ const schema = z
       ),
     ),
     SCIM_PROVISIONING_ENABLED: scimProvisioningEnabled,
-    // Organization OIDC sign-in. Empty or unset follows the release default, which is off
-    // until SSO ships. SSO_SAML_ENABLED is not a setting yet and is not read.
+    // Organization single sign-on. Empty or unset follows the release default, currently off.
     SSO_OIDC_ENABLED: optional(
       z.enum(['true', 'false'], { error: 'SSO_OIDC_ENABLED must be true, false or empty' }),
+    ).transform((value) => value === 'true'),
+    SSO_SAML_ENABLED: optional(
+      z.enum(['true', 'false'], { error: 'SSO_SAML_ENABLED must be true, false or empty' }),
     ).transform((value) => value === 'true'),
     MCP_OAUTH_ENABLED: optional(z.enum(['true', 'false'])).transform((v) => v === 'true'),
     PORT: z.preprocess(

@@ -311,18 +311,53 @@ describe('SSO provider setup', () => {
 })
 
 describe('SAML provider setup', () => {
-  it('hides all SAML provider controls and preserves the OIDC form when SAML is off', async () => {
+  it('retains saved SAML providers for trust reduction while OIDC setup stays available', async () => {
+    const otherLink = { id: '00000000-0000-7000-8000-000000000023', generation: 3 }
+    const deleteLink = `DELETE ${samlDetail}/links/${otherLink.id}`
     const requests = fakeApi({
       ...base,
-      [`GET ${list}`]: () => providerPage(provider, samlProvider),
+      'GET /api/v1/me': () =>
+        json(200, {
+          ...ME,
+          organization,
+          sso: {
+            requireSso: false,
+            providers: [],
+            links: [],
+            attempts: [],
+            proofs: [],
+          },
+        }),
+      [`GET ${list}`]: () =>
+        providerPage(provider, { ...samlProvider, enabled: true, links: [otherLink] }),
+      [deleteLink]: () => new Response(null, { status: 204 }),
     })
     const user = userEvent.setup()
     renderApp(PATHS.sso)
 
     const add = await screen.findByRole('button', { name: 'Add provider' })
     expect(screen.queryByRole('button', { name: 'Add SAML provider' })).toBeNull()
-    expect(screen.queryByText(samlProvider.displayName)).toBeNull()
-    expect(screen.queryByRole('link', { name: 'Download service provider metadata' })).toBeNull()
+    const saved = within(screen.getByRole('region', { name: samlProvider.displayName }))
+    for (const action of ['Edit', 'Test provider', 'Enable provider']) {
+      expect(
+        saved.queryByRole('button', { name: `${action} ${samlProvider.displayName}` }),
+      ).toBeNull()
+    }
+    expect(saved.queryByRole('link', { name: 'Download service provider metadata' })).toBeNull()
+    expect(
+      saved.getByRole('button', { name: `Disable provider ${samlProvider.displayName}` }),
+    ).toBeTruthy()
+    expect(
+      saved.getByRole('button', { name: `Retire provider ${samlProvider.displayName}` }),
+    ).toBeTruthy()
+    await user.selectOptions(saved.getByRole('combobox', { name: 'Identity link' }), otherLink.id)
+    await user.click(saved.getByRole('button', { name: 'Retire identity link' }))
+    const confirmation = within(saved.getByRole('group', { name: 'Retire this identity link?' }))
+    await user.click(confirmation.getByRole('button', { name: 'Retire identity link' }))
+    await saved.findByText('Identity link retired.')
+    expect(requests.to(deleteLink).map(({ body }) => body)).toEqual([
+      { expectedLinkGeneration: otherLink.generation },
+    ])
     await user.click(add)
     const form = within(screen.getByRole('form', { name: 'Add OIDC provider' }))
     expect(form.getByLabelText('Client secret')).toBeTruthy()

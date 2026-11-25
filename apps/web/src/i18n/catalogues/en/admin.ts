@@ -3300,4 +3300,7 @@ export const admin = {
     'An enabled identity provider with a verified domain is required.',
   'Before requiring SSO, have an owner test the identity provider draft, then enable that revision with a verified domain. A current owner must also accept recovery enrollment.':
     'Before requiring SSO, have an owner test the identity provider draft, then enable that revision with a verified domain. A current owner must also accept recovery enrollment.',
+  // SAML recovery
+  'If you are replacing signing certificates, enter the full set your identity provider uses.':
+    'If you are replacing signing certificates, enter the full set your identity provider uses.',
 } as const

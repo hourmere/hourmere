@@ -211,14 +211,16 @@ rules and, when configuration is introduced, keep web and worker policy consiste
 
 ## Private identity providers
 
-Organization OIDC sign-in is off unless you set `SSO_OIDC_ENABLED=true`; see
-[single sign-on](/docs/sso). `SSO_PRIVATE_TARGETS` lists identity
+Organization sign-in is off by default. Set `SSO_OIDC_ENABLED=true` or
+`SSO_SAML_ENABLED=true` to enable that protocol. See [single sign-on](/docs/sso).
+`SSO_PRIVATE_TARGETS` lists identity
 providers on a private network or on a port other than 443, and is empty by default; leave
 it empty unless your identity provider needs it. It accepts only exact `host:port` entries
 and permits private routing for exactly those entries, or a public non-default port for an
 entry with a public DNS name (never a single label such as `keycloak` or a special-use name
 such as `idp.internal`), but never plain HTTP. It is separate from
-`WEBHOOK_PRIVATE_TARGETS`. An invalid value stops startup; a valid one routes nothing while OIDC is off.
+`WEBHOOK_PRIVATE_TARGETS`. An invalid value stops startup. A valid entry applies only
+to outbound requests for an enabled protocol.
 See the [configuration reference](/docs/configuration#private-identity-providers).
 
 ## Proxy behavior and an existing proxy

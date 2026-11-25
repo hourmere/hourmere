@@ -213,9 +213,9 @@ not grant host rescheduling or reschedule-request authority through REST, MCP or
 - Prebuilt image installs have no runtime switch to disable app installation or the
   offline shell. Changing `VITE_PWA_ENABLED` requires rebuilding from source and replacing
   the deployed image; see [conversion steps](/docs/self-hosting#turn-off-app-installation).
-- Organization [OIDC single sign-on](/docs/sso) is off by default: the operator turns it
-  on with `SSO_OIDC_ENABLED=true`, on every instance and without a paid-plan requirement.
-  SAML is being built and is not available yet. The
+- Organization single sign-on is off by default. Operators can enable OIDC and SAML
+  independently with `SSO_OIDC_ENABLED=true` and `SSO_SAML_ENABLED=true` on any instance
+  without a paid-plan requirement. See the [single sign-on guide](/docs/sso). The
   [SSO design](https://github.com/hourmere/hourmere/blob/main/docs/sso.md) covers
   self-hosting, linking, enforcement and the remaining implementation sequence.
 - [Make](/docs/make) recipes require manual assembly; no import-verified blueprint or native

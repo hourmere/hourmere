@@ -93,7 +93,7 @@ export function ssoDelegationRoutes(deps: SsoDelegationDeps): RouteModule {
         tags: ['SSO'],
         summary: 'Revoke the caller’s exact SSO delegation',
         description:
-          'Requires a current team browser session. Stays available while SSO_OIDC_ENABLED is off.',
+          'Requires a current team browser session. Stays available while the protocol settings are off.',
         security: [{ session: [] }],
         middleware: [...revokeMiddleware] as const,
         request: { headers, params: z.object({ bindingId: z.uuid() }) },

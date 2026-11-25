@@ -13,7 +13,12 @@ import { DomainError } from '@hourmere/scheduling'
 import { HTTPException } from 'hono/http-exception'
 import { sql } from 'kysely'
 import { z } from 'zod'
-import { requireSsoRetained, type SsoCapabilities, ssoRetained } from './sso.ts'
+import {
+  requireSsoRetained,
+  type SsoCapabilities,
+  samlLinkRecoveryAvailable,
+  ssoRetained,
+} from './sso.ts'
 import { type FreshProofDeps, runWithFreshProof } from './sso-fresh-proof.ts'
 import { EXPECTED_ORGANIZATION_HEADER } from './team-management.ts'
 
@@ -40,8 +45,7 @@ function requireRecoveryProtocol(
   capabilities: SsoCapabilities,
   protocol: string,
 ): asserts protocol is 'oidc' | 'saml' {
-  // OIDC recovery survives setting-off. SAML remains unavailable while hard-off.
-  if (protocol !== 'oidc' && (protocol !== 'saml' || !capabilities.ssoSamlEnabled))
+  if (protocol !== 'oidc' && (protocol !== 'saml' || !samlLinkRecoveryAvailable(capabilities)))
     throw new DomainError('not_found', 'sso_disabled')
 }
 
@@ -69,7 +73,7 @@ export async function refuseHardOffSamlLinkRemoval(
   const organizationId = principal.organization.id
   const expectedOrganizationId = headers.get(EXPECTED_ORGANIZATION_HEADER)?.toLowerCase()
   if (
-    deps.capabilities.ssoSamlEnabled ||
+    samlLinkRecoveryAvailable(deps.capabilities) ||
     principal.kind !== 'session' ||
     principal.organization.personal ||
     headers.has('authorization') ||

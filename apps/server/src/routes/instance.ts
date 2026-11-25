@@ -45,7 +45,8 @@ const Instance = z
         'The effective SSO_OIDC_ENABLED operator setting (off by default); absent when unknown',
     }),
     ssoSamlEnabled: z.boolean().optional().openapi({
-      description: 'Whether SAML SSO is enabled: always false for now; absent when unknown',
+      description:
+        'The effective SSO_SAML_ENABLED operator setting (off by default); absent when unknown',
     }),
     routingFormsEnabled: z.boolean().optional().openapi({
       description:

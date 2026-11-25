@@ -3153,4 +3153,7 @@ export const admin = {
     '需要一个已启用且关联了已验证域名的身份提供方。',
   'Before requiring SSO, have an owner test the identity provider draft, then enable that revision with a verified domain. A current owner must also accept recovery enrollment.':
     '强制单点登录前，请让团队所有者测试身份提供方草稿，并在关联已验证的域名后启用该版本。还须有一位现任所有者接受恢复登记。',
+  // SAML recovery
+  'If you are replacing signing certificates, enter the full set your identity provider uses.':
+    '如需更换签名证书，请填写身份提供方使用的全部证书。',
 } as const

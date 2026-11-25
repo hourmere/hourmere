@@ -197,18 +197,21 @@ and booking examples.
 
 <!-- api-key-scope-table:end -->
 
-OIDC single sign-on is off unless the operator sets `SSO_OIDC_ENABLED=true`; SAML is
-being built and no setting enables it. While OIDC is off, the SSO operations in these
-tables that add trust (sign-in, linking, provider and domain setup, enabling enforcement,
-delegation binding) return `404 sso_disabled`. The reads `list_sso_providers` and
-`get_sso_policy` (CLI `sso providers list` / `sso policy`), recovery and trust-reducing
-operations stay available to a team's owners and administrators, so stored configuration
-can still be inspected and removed.
+OIDC and SAML single sign-on are off by default. The operator enables them separately
+with `SSO_OIDC_ENABLED=true` and `SSO_SAML_ENABLED=true`. Requests that add trust through
+a disabled protocol return `404 sso_disabled`, including sign-in, linking, provider
+setup and delegation binding. Domain setup, just-in-time admission and recovery enrollment
+require at least one enabled protocol. A team needs a usable provider on an enabled
+protocol to start requiring SSO. The reads `list_sso_providers` and `get_sso_policy`
+(CLI `sso providers list` / `sso policy`) remain available to team owners and administrators.
+Stored enforcement still applies. Enrolled owners can use recovery, and trust-reducing
+operations remain available with their usual authorization.
 
-除非运营者设置 `SSO_OIDC_ENABLED=true`，否则 OIDC 单点登录保持关闭；SAML 仍在开发中，
-没有可启用它的设置。OIDC 关闭时，表中增加信任的 SSO 操作（登录、关联、身份提供方和域名
-配置、开启强制、委托绑定）返回 `404 sso_disabled`；上述两个读取操作、恢复操作和降低信任的
-操作对团队所有者和管理员保持可用，已保存的配置仍可查看和移除。
+OIDC 和 SAML 单点登录默认关闭。运营者可分别设置 `SSO_OIDC_ENABLED=true` 和
+`SSO_SAML_ENABLED=true`。通过已关闭协议增加信任的请求（如登录、关联、配置身份提供方和绑定
+委托）返回 `404 sso_disabled`。设置域名、即时入组和恢复登记需要至少启用一种协议；开启强制单点
+登录需要该协议上有可用的身份提供方。上述两个读取操作对团队所有者和管理员保持可用。已保存的
+强制要求继续生效；已登记的所有者仍可使用恢复流程，降低信任的操作仍需通过原有权限验证。
 
 The operator can enable booking workflows with `WORKFLOWS_ENABLED=true`. While off,
 `tools/list` omits workflow tools. Direct calls can still read workflows and run

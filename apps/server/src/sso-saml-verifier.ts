@@ -2,7 +2,7 @@ import { createHash, timingSafeEqual, X509Certificate } from 'node:crypto'
 import { DOMParser, type Element } from '@xmldom/xmldom'
 import { SignedXml } from 'xml-crypto'
 
-// SAML response verifier (docs/sso.md, "SAML"). SAML remains hard-off in production.
+// SAML response verifier (docs/sso.md, "SAML").
 //
 // The verifier writes no cryptography, canonicalization or XML signature code: xml-crypto
 // verifies the signature and returns the canonical bytes it digested, and every value handed

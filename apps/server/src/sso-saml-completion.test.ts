@@ -7,6 +7,7 @@ import {
   createCallerResolver,
   recordSsoAdmissionRemoval,
   type SignupPolicy,
+  ssoDelegationStatus,
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
@@ -251,6 +252,18 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
       }),
       ssoSamlSignIn: samlSignInRoutes({ ...deps, readSession }),
     })
+  }
+
+  function productionCapabilities(saml?: string, oidc?: string) {
+    return productionSsoCapabilities(
+      loadConfig({
+        DATABASE_URL: owned.url,
+        PUBLIC_URL: publicUrl,
+        BETTER_AUTH_SECRET: secret,
+        SSO_OIDC_ENABLED: oidc,
+        SSO_SAML_ENABLED: saml,
+      }),
+    )
   }
 
   async function providerId() {
@@ -770,6 +783,17 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
   const removeLinkPath = (provider: Provider, linkId: string) =>
     `${providersPath}/${provider.id}/links/${linkId}`
 
+  async function me(request: App, cookies: string[]) {
+    const response = await request.request(new URL('/api/v1/me', publicUrl), {
+      headers: { cookie: cookies.join('; ') },
+    })
+    expect(response.status).toBe(200)
+    return (await response.json()) as {
+      organization: { id: string; name: string }
+      sso: Record<string, unknown>
+    }
+  }
+
   async function providerInventory(request: App, cookies: string[]) {
     const response = await request.request(new URL(providersPath, publicUrl), {
       headers: { cookie: cookies.join('; ') },
@@ -1090,7 +1114,7 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
       expect(await identityEffects()).toEqual(before)
     })
 
-    it('leaves an in-flight SAML step-up and replay cache untouched while SAML is hard-off', async () => {
+    it('leaves an in-flight SAML step-up and replay cache untouched while the SAML setting is off', async () => {
       const {
         manager: { request },
         provider,
@@ -1107,11 +1131,7 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
         await acs(provider.id, assertion.encoded, attempt.relayState, request),
         attempt,
       )
-      const off = instance({
-        ssoOidcEnabled: true,
-        ssoSamlEnabled: false,
-        ssoOperatorSetting: true,
-      })
+      const off = instance(productionCapabilities('', 'true'))
       const before = await protocolEffects(provider.id)
       const effects = await identityEffects()
       const proof = await readProof(write.attemptId)
@@ -1395,18 +1415,13 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
     const member = await browserSession(team.member)
     const otherSession = await browserSession(team.member)
     const otherMember = await browserSession(team.admin)
-    const me = async (cookies: string[], application = request) => {
-      const response = await application.request(new URL('/api/v1/me', publicUrl), {
-        headers: { cookie: cookies.join('; ') },
-      })
-      expect(response.status).toBe(200)
-      return ((await response.json()) as { sso: Record<string, unknown> }).sso
-    }
+    const ownSso = async (cookies: string[], application = request) =>
+      (await me(application, cookies)).sso
     const before = await identityEffects()
     const challenge = await json(linkPath(provider), member.cookies, {})
     expect(await protocolEffects(provider.id)).toEqual([[], []])
     expect(await identityEffects()).toEqual(before)
-    expect(await me(mergeCookies(member.cookies, cookiesFrom(challenge)))).toMatchObject({
+    expect(await ownSso(mergeCookies(member.cookies, cookiesFrom(challenge)))).toMatchObject({
       attempts: [{ phase: 'fresh_proof', mailboxProven: false }],
     })
     const proof = await mailboxProof(challenge, member.cookies)
@@ -1416,7 +1431,7 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
       proof.cookies,
     )
     const authorizationId = attempt.requestId.slice(1)
-    const authorizationSummary = await me(attempt.cookies)
+    const authorizationSummary = await ownSso(attempt.cookies)
     expect(authorizationSummary).toMatchObject({
       providers: expect.arrayContaining([
         { id: provider.id, revision: 1, displayName: 'Synthetic AD FS', protocol: 'saml' },
@@ -1457,20 +1472,20 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
     expect(localizedForm).toContain('<button type="submit">Associer le compte</button>')
     expect(await identityEffects()).toEqual(beforeConsent)
     expect(await storedLinks(provider)).toEqual([])
-    expect(await me(staged.cookies)).toMatchObject({
+    expect(await ownSso(staged.cookies)).toMatchObject({
       attempts: [
         { id: staged.id, providerId: provider.id, phase: 'completion', mailboxProven: true },
       ],
     })
     const off = management(team.team, { ssoOidcEnabled: true, ssoSamlEnabled: false }).request
-    expect(await me(staged.cookies, off)).toMatchObject({ providers: [], attempts: [] })
+    expect(await ownSso(staged.cookies, off)).toMatchObject({ providers: [], attempts: [] })
     const wrongBrowser = mergeCookies(staged.cookies, [
       `${bindingCookie}=${randomBytes(32).toString('base64url')}`,
     ])
     const wrongSession = mergeCookies(staged.cookies, otherSession.cookies)
     const wrongUser = mergeCookies(staged.cookies, otherMember.cookies)
     for (const cookies of [wrongBrowser, wrongSession, wrongUser]) {
-      expect(await me(cookies)).toMatchObject({ attempts: [] })
+      expect(await ownSso(cookies)).toMatchObject({ attempts: [] })
       await expectRefusedCompletion(await complete(staged, { request, cookies }))
     }
     await expectRefusedCompletion(await complete(staged, { request, intent: null }))
@@ -1493,7 +1508,7 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
       generation: 1,
       proven_email: mailbox,
     })
-    const summary = await me(staged.cookies)
+    const summary = await ownSso(staged.cookies)
     expect(summary).toMatchObject({
       attempts: [],
       links: [{ id: link?.id, generation: 1, providerId: provider.id }],
@@ -1501,7 +1516,7 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
     })
     expect(JSON.stringify(summary)).not.toContain(provider.subject)
     expect(JSON.stringify(summary)).not.toContain(mailbox)
-    expect(await me(wrongUser)).toMatchObject({ links: [], attempts: [] })
+    expect(await ownSso(wrongUser)).toMatchObject({ links: [], attempts: [] })
   })
 
   it('refuses transient NameID, uses only a single pinned immutable attribute and still needs a matching mailbox', async () => {
@@ -1905,7 +1920,7 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
     expect(new Set(uses.map(({ details }) => JSON.stringify(details))).size).toBe(3)
   })
 
-  it('refuses tests of a hard-off SAML provider before writing while OIDC administration still requests proof', async () => {
+  it('refuses SAML provider trust additions while the SAML setting is off and OIDC is on', async () => {
     const saml = await samlDraft(team.team)
     const oidc = await db
       .insertInto('sso_providers')
@@ -1913,17 +1928,25 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
       .returning('id')
       .executeTakeFirstOrThrow()
     const owner = await browserSession(team.owner)
-    const { json } = management(team.team, {
-      ssoOidcEnabled: true,
-      ssoSamlEnabled: false,
-      ssoOperatorSetting: true,
-    })
+    const { json } = management(team.team, productionCapabilities('false', 'true'))
     const before = await protocolEffects(saml.id)
-    const response = await json(`${providersPath}/${saml.id}/test`, owner.cookies, {
-      expectedRevision: 1,
-    })
-    expect(response.status).toBe(404)
-    expect(await response.json()).toEqual({ error: 'sso_disabled' })
+    const path = `${providersPath}/${saml.id}`
+    const signing = { signingCertificates: [rotatedIdp.pem] }
+    for (const response of [
+      await json(providersPath, owner.cookies, {
+        protocol: 'saml',
+        displayName: 'Disabled fixture',
+        domainIds: [],
+        saml: signing,
+      }),
+      await json(path, owner.cookies, { expectedRevision: 1, saml: signing }, 'PATCH'),
+      await json(path, owner.cookies, { expectedRevision: 1, displayName: 'Still off' }, 'PATCH'),
+      await json(`${path}/test`, owner.cookies, { expectedRevision: 1 }),
+      await json(`${path}/activation`, owner.cookies, { expectedRevision: 1, enabled: true }),
+    ]) {
+      expect(response.status).toBe(404)
+      expect(await response.json()).toEqual({ error: 'sso_disabled' })
+    }
     expect(await protocolEffects(saml.id)).toEqual(before)
     expect(await receipts(saml.id)).toEqual([])
     const challenge = await json(`${providersPath}/${oidc.id}/test`, owner.cookies, {
@@ -1934,6 +1957,85 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
       error: 'sso_reauthentication_required',
       proofMethods: ['mailbox'],
     })
+  })
+
+  it('retains mailbox recovery and trust reductions for an enforced SAML team with both settings off', async () => {
+    const fixture = await seedTeam()
+    const claim = await db
+      .insertInto('sso_domains')
+      .values(claimedDomainValues(fixture.team))
+      .returning(['id', 'generation'])
+      .executeTakeFirstOrThrow()
+    const provider = await enabledProvider({ organizationId: fixture.team, domainId: claim.id })
+    const owner = await browserSession(fixture.owner, fixture.team)
+    const off = management(fixture.team, productionCapabilities())
+    await db.insertInto('sso_recovery_owners').values(recoveryOwnerValues(fixture)).execute()
+    await db
+      .insertInto('sso_policies')
+      .values({ organization_id: fixture.team, require_sso: true })
+      .execute()
+    const providerPath = `${providersPath}/${provider.id}`
+    const revision = { expectedRevision: 1 }
+    const blocked = await off.json(providerPath, owner.cookies, revision, 'DELETE')
+    expect(blocked.status).toBe(403)
+    expect(await blocked.json()).toEqual({ error: 'sso_required' })
+    const { response: grant, cookies } = await off.withMailbox(
+      recoveryUsePath,
+      owner.cookies,
+      revision,
+    )
+    expect(grant.status).toBe(204)
+    expect(await providerInventory(off.request, cookies)).toMatchObject({
+      data: [{ id: provider.id, protocol: 'saml', enabled: true }],
+    })
+    const policyPath = '/api/v1/team/sso/policy'
+    const disabled = await off.json(
+      policyPath,
+      cookies,
+      {
+        ...revision,
+        requireSso: false,
+        admission: 'invitation_only',
+      },
+      'PUT',
+    )
+    expect(disabled.status).toBe(200)
+    expect(await disabled.json()).toMatchObject({ requireSso: false, policyRevision: 2 })
+
+    const oidcOn = management(fixture.team, productionCapabilities('false', 'true'))
+    const cannotEnforce = await oidcOn.json(
+      policyPath,
+      owner.cookies,
+      {
+        expectedRevision: 2,
+        requireSso: true,
+        admission: 'invitation_only',
+      },
+      'PUT',
+    )
+    expect(cannotEnforce.status).toBe(404)
+    expect(await cannotEnforce.json()).toEqual({ error: 'sso_disabled' })
+    const deactivation = await off.withMailbox(`${providerPath}/activation`, owner.cookies, {
+      ...revision,
+      enabled: false,
+    })
+    expect(deactivation.response.status).toBe(200)
+    expect(await deactivation.response.json()).toMatchObject({ provider: { enabled: false } })
+    expect(
+      (await off.withMailbox(providerPath, owner.cookies, revision, 'DELETE')).response.status,
+    ).toBe(200)
+    expect(
+      (
+        await off.withMailbox(
+          `/api/v1/team/sso/domains/${claim.id}`,
+          owner.cookies,
+          {
+            expectedGeneration: claim.generation,
+          },
+          'DELETE',
+        )
+      ).response.status,
+    ).toBe(200)
   })
 
   it('only issues the linked native session and browser proof at the original browser POST', async () => {
@@ -2705,7 +2807,7 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
     expect((await tombstone()).cleared_at).toBeInstanceOf(Date)
   })
 
-  it('keeps the SAML routes hard-off with no writes and OIDC sign-in available', async () => {
+  it('keeps the SAML routes off with no writes and OIDC sign-in available', async () => {
     const provider = await linkedProvider()
     const attempt = await start(provider)
     const signed = await signedResponse(attempt)
@@ -2715,15 +2817,7 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
     )
     const fresh = await start(provider)
     const freshResponse = await signedResponse(fresh)
-    const capabilities = productionSsoCapabilities(
-      loadConfig({
-        DATABASE_URL: owned.url,
-        PUBLIC_URL: publicUrl,
-        BETTER_AUTH_SECRET: secret,
-        SSO_OIDC_ENABLED: 'true',
-        SSO_SAML_ENABLED: 'true',
-      }),
-    )
+    const capabilities = productionCapabilities('false', 'true')
     const admissionProvider = await enabledProvider({
       assertedMailbox: `off-${randomUUID()}@${verifiedDomain}`,
     })
@@ -3078,7 +3172,9 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
         assertedMailbox: memberMailbox,
       })
       await seedLink(provider, fixture.member, fixture.team)
-      const { request, json } = management(fixture.team, { ...samlOnly, ssoOidcEnabled })
+      const oidcSetting = String(ssoOidcEnabled)
+      const on = productionCapabilities('true', oidcSetting)
+      const { request, json } = management(fixture.team, on)
       const browser = cookiesFrom(await completeLinkedSignIn(provider, request))
       await db
         .insertInto('sso_policies')
@@ -3105,16 +3201,43 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
       const binding = () =>
         db
           .selectFrom('sso_delegation_bindings')
-          .select(['provider_id', 'api_key_id'])
+          .select(['provider_id', 'api_key_id', 'expires_at'])
           .where('id', '=', id)
           .execute()
-      expect(await binding()).toEqual([{ provider_id: provider.id, api_key_id: key.id }])
+      const before = await binding()
+      expect(before).toEqual([
+        { provider_id: provider.id, api_key_id: key.id, expires_at: expect.any(Date) },
+      ])
 
-      const off = management(fixture.team, {
-        ssoOidcEnabled,
-        ssoSamlEnabled: false,
-        ssoOperatorSetting: true,
+      const offCapabilities = productionCapabilities('false', oidcSetting)
+      const off = management(fixture.team, offCapabilities)
+      const delegationStatus = (capabilities: SsoCapabilities) =>
+        db
+          .selectNoFrom(
+            ssoDelegationStatus(
+              sql<string>`${fixture.team}`,
+              sql<string>`${fixture.member}`,
+              'api_key',
+              sql<string>`${key.id}`,
+              capabilities,
+            ).as('status'),
+          )
+          .executeTakeFirstOrThrow()
+      const original = await me(request, browser)
+      expect(original.sso).toMatchObject({
+        requireSso: true,
+        proofs: [{ providerId: provider.id, expiresAt: expect.any(String) }],
       })
+      expect(await delegationStatus(on)).toEqual({ status: 'valid' })
+      expect(await me(off.request, browser)).toMatchObject({
+        organization: { id: fixture.team, name: '' },
+        sso: { requireSso: true, proofs: [] },
+      })
+      expect(await delegationStatus(offCapabilities)).toEqual({ status: 'required' })
+      expect(await binding()).toEqual(before)
+      expect(await delegationStatus(on)).toEqual({ status: 'valid' })
+      expect((await me(request, browser)).sso.proofs).toEqual(original.sso.proofs)
+      expect(await binding()).toEqual(before)
       const revoked = await off.json(`${SSO_DELEGATIONS_PATH}/${id}`, browser, {}, 'DELETE')
       expect(revoked.status).toBe(204)
       expect(await binding()).toEqual([])
@@ -3441,95 +3564,104 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
     expect(off.removalNotices).toEqual([])
   })
 
-  it('refuses recovery for hard-off SAML links without writing and keeps OIDC recovery available', async () => {
-    const provider = await linkedProvider()
-    const { request, json, mailboxProof } = management()
-    const member = await browserSession(team.member)
-    const owner = await browserSession(team.owner)
-    const path = linkPath(provider)
-    const body = { linkId: provider.link.id, expectedLinkGeneration: provider.link.generation }
-    const proof = await mailboxProof(
-      await json(path, member.cookies, body, 'DELETE'),
-      member.cookies,
-    )
-    await completeLinkedSignIn(provider, request)
+  it('keeps OIDC self-unlink available with both settings off', async () => {
+    const fixture = await seedTeam()
     const oidc = await db
       .insertInto('sso_providers')
-      .values({ ...oidcProviderValues(team.team), enabled: true })
+      .values({ ...oidcProviderValues(fixture.team), enabled: true })
       .returning(['id', 'issuer'])
       .executeTakeFirstOrThrow()
-    const oidcProvider = { ...oidc, subject: `oidc-${randomUUID()}`, mailbox }
-    const oidcLink = await seedLink(oidcProvider, team.member)
-
-    const capability = (oidcEnabled: string) =>
-      productionSsoCapabilities(
-        loadConfig({
-          DATABASE_URL: owned.url,
-          PUBLIC_URL: publicUrl,
-          BETTER_AUTH_SECRET: secret,
-          SSO_OIDC_ENABLED: oidcEnabled,
-          SSO_SAML_ENABLED: 'true',
-        }),
-      )
-    const attempts = () =>
-      db
-        .selectFrom('sso_attempts')
-        .select(['id', 'consumed_at'])
-        .where('organization_id', '=', team.team)
-        .orderBy('id')
-        .execute()
-    const before = await identityEffects()
-    const priorAttempts = await attempts()
-    for (const oidcEnabled of ['false', 'true']) {
-      const off = management(team.team, capability(oidcEnabled))
-      const inventory = await providerInventory(off.request, owner.cookies)
-      const saml = inventory.data.find(({ id }) => id === provider.id)
-      expect(saml).toBeDefined()
-      expect(saml).not.toHaveProperty('links')
-      expect(inventory.data).toContainEqual(
-        expect.objectContaining({
-          id: oidc.id,
-          links: [{ id: oidcLink.id, generation: oidcLink.generation }],
-        }),
-      )
-      for (const response of [
-        await off.json(path, member.cookies, body, 'DELETE'),
-        await off.json(path, proof.cookies, { ...body, proofAttemptId: proof.attemptId }, 'DELETE'),
-        await off.json(
-          removeLinkPath(provider, provider.link.id),
-          owner.cookies,
-          { expectedLinkGeneration: provider.link.generation },
-          'DELETE',
-        ),
-      ]) {
-        expect(response.status).toBe(404)
-        expect(await response.json()).toEqual({ error: 'sso_disabled' })
-        expect(response.headers.getSetCookie()).toEqual([])
-      }
-      expect(off.jobs).toEqual([])
-      expect(off.removalNotices).toEqual([])
-    }
-    expect(await identityEffects()).toEqual(before)
-    expect(await attempts()).toEqual(priorAttempts)
-    expect(await identityLink(provider.link.id)).toEqual(provider.link)
-    expect(await linkAudit(provider.link.id)).toEqual([])
-
-    const { response } = await management(team.team, capability('false')).withMailbox(
-      linkPath(oidcProvider),
+    const provider = { ...oidc, subject: `oidc-${randomUUID()}`, mailbox }
+    const link = await seedLink(provider, fixture.member, fixture.team)
+    const member = await browserSession(fixture.member, fixture.team)
+    const off = management(fixture.team, productionCapabilities('false', 'false'))
+    const { response } = await off.withMailbox(
+      linkPath(provider),
       member.cookies,
-      { linkId: oidcLink.id, expectedLinkGeneration: oidcLink.generation },
+      { linkId: link.id, expectedLinkGeneration: link.generation },
       'DELETE',
     )
     expect(response.status).toBe(204)
-    expect(await identityLink(oidcLink.id)).toEqual({
-      ...oidcLink,
-      generation: oidcLink.generation + 1,
+    expect(await identityLink(link.id)).toEqual({
+      ...link,
+      generation: link.generation + 1,
       retired_at: expect.any(Date),
     })
-    expect(await linkAudit(oidcLink.id)).toContainEqual({
-      actor_id: team.member,
+    expect(await linkAudit(link.id)).toContainEqual({
+      actor_id: fixture.member,
       action: 'sso_link.unlinked',
-      details: expect.objectContaining({ method: 'oidc', providerId: oidc.id }),
+      details: expect.objectContaining({ method: 'oidc', providerId: provider.id }),
     })
   })
+
+  it.each(['false', 'true'] as const)(
+    'keeps SAML link recovery available with SAML off and SSO_OIDC_ENABLED=%s',
+    async (oidc) => {
+      const fixture = await seedTeam()
+      const claim = await db
+        .insertInto('sso_domains')
+        .values(claimedDomainValues(fixture.team))
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      const provider = await enabledProvider({ organizationId: fixture.team, domainId: claim.id })
+      const ownLink = await seedLink(provider, fixture.member, fixture.team)
+      const other = { ...provider, subject: `admin-${randomUUID()}` }
+      const otherLink = await seedLink(other, fixture.admin, fixture.team)
+      const member = await browserSession(fixture.member, fixture.team)
+      const owner = await browserSession(fixture.owner, fixture.team)
+      const off = management(fixture.team, productionCapabilities('false', oidc))
+      const summary = (await me(off.request, member.cookies)).sso
+      expect(summary).toEqual({
+        requireSso: false,
+        providers: [],
+        attempts: [],
+        links: [
+          {
+            id: ownLink.id,
+            providerId: provider.id,
+            generation: ownLink.generation,
+            protocol: 'saml',
+          },
+        ],
+        proofs: [],
+      })
+      const inventory = await providerInventory(off.request, owner.cookies)
+      const stored = inventory.data.find(({ id }) => id === provider.id)
+      expect(stored).toMatchObject({
+        protocol: 'saml',
+        links: expect.arrayContaining([
+          { id: ownLink.id, generation: ownLink.generation },
+          { id: otherLink.id, generation: otherLink.generation },
+        ]),
+      })
+      expect(stored?.links).toHaveLength(2)
+      const adminPath = removeLinkPath(provider, otherLink.id)
+      const adminBody = { expectedLinkGeneration: otherLink.generation }
+      const denied = await off.json(adminPath, member.cookies, adminBody, 'DELETE')
+      expect(denied.status).toBe(403)
+      expect(await denied.json()).toEqual({ error: 'team_management_access_denied' })
+      expect(await identityLink(otherLink.id)).toEqual(otherLink)
+      const results = [
+        await off.withMailbox(
+          linkPath(provider),
+          member.cookies,
+          {
+            linkId: ownLink.id,
+            expectedLinkGeneration: ownLink.generation,
+          },
+          'DELETE',
+        ),
+        await off.withMailbox(adminPath, owner.cookies, adminBody, 'DELETE'),
+      ]
+      for (const { response } of results) expect(response.status).toBe(204)
+      for (const link of [ownLink, otherLink]) {
+        expect(await identityLink(link.id)).toEqual({
+          ...link,
+          generation: link.generation + 1,
+          retired_at: expect.any(Date),
+        })
+      }
+      expect(off.removalNotices).toEqual([fixture.member, fixture.admin])
+    },
+  )
 })

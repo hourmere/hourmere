@@ -5191,7 +5191,7 @@ export interface paths {
         post?: never;
         /**
          * Revoke the caller’s exact SSO delegation
-         * @description Requires a current team browser session. Stays available while SSO_OIDC_ENABLED is off.
+         * @description Requires a current team browser session. Stays available while the protocol settings are off.
          */
         delete: operations["revokeSsoDelegation"];
         options?: never;
@@ -5210,7 +5210,7 @@ export interface paths {
         put?: never;
         /**
          * Create or rotate a DNS domain challenge
-         * @description Verified team owner/admin browser session with fresh proof only. The TXT challenge is returned once; only its digest is stored. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.
+         * @description Verified team owner/admin browser session with fresh proof only. The TXT challenge is returned once; only its digest is stored. Returns 404 sso_disabled while both protocol settings are off.
          */
         post: operations["createSsoDomainChallenge"];
         delete?: never;
@@ -5231,7 +5231,7 @@ export interface paths {
         post?: never;
         /**
          * Retire a domain claim
-         * @description Verified team owner/admin browser session with fresh proof and expected generation. Stays available while SSO_OIDC_ENABLED is off.
+         * @description Verified team owner/admin browser session with fresh proof and expected generation. Stays available while both protocol settings are off.
          */
         delete: operations["deleteSsoDomain"];
         options?: never;
@@ -5250,7 +5250,7 @@ export interface paths {
         put?: never;
         /**
          * Verify an exact domain through trusted DNS
-         * @description Verified team owner/admin browser session with fresh proof and expected generation. DNS errors return unknown status. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.
+         * @description Verified team owner/admin browser session with fresh proof and expected generation. DNS errors return unknown status. Returns 404 sso_disabled while both protocol settings are off.
          */
         post: operations["verifySsoDomain"];
         delete?: never;
@@ -5268,12 +5268,12 @@ export interface paths {
         };
         /**
          * Read the current team SSO policy
-         * @description Owner/admin only; read/full API key or authorized MCP OAuth. An unconfigured team has invitation-only admission and no SSO requirement. OIDC SSO is off unless the operator sets SSO_OIDC_ENABLED=true; while off, this read still answers for stored configuration.
+         * @description Owner/admin only; read/full API key or authorized MCP OAuth. An unconfigured team has invitation-only admission and no SSO requirement. This read remains available while both SSO protocol settings are off.
          */
         get: operations["getSsoPolicy"];
         /**
          * Set the current team SSO policy
-         * @description Requires a verified team owner or administrator browser session and fresh administration proof. An enrolled owner can spend recovery authority to turn off enforcement without enabling JIT. While SSO_OIDC_ENABLED is off, requiring SSO or JIT admission returns 404 sso_disabled; turning the requirement off stays available.
+         * @description Requires a verified team owner or administrator browser session and fresh administration proof. An enrolled owner can spend recovery authority to turn off enforcement without enabling JIT. Starting enforcement requires a usable provider on an enabled protocol. Enabling JIT requires at least one protocol to be on. Turning the requirement off stays available.
          */
         put: operations["setSsoPolicy"];
         post?: never;
@@ -5292,13 +5292,13 @@ export interface paths {
         };
         /**
          * List safe SSO provider drafts for the current team
-         * @description Owner/admin only; read/full API key or authorized MCP OAuth. OIDC SSO is off unless the operator sets SSO_OIDC_ENABLED=true; while off, this read still answers for stored configuration. Follow nextCursor for all providers. Opaque links and generations are only returned to browser sessions. Configuration, secrets, raw metadata and identity claims are never returned. Objects and status strings may gain values.
+         * @description Owner/admin only; read/full API key or authorized MCP OAuth. This read remains available while both SSO protocol settings are off. Follow nextCursor for all providers. Opaque links and generations are only returned to browser sessions. Configuration, secrets, raw metadata and identity claims are never returned. Objects and status strings may gain values.
          */
         get: operations["listSsoProviders"];
         put?: never;
         /**
          * Create a disabled SSO provider draft
-         * @description Verified team owner/admin browser session with fresh proof. An enrolled owner can spend one recovery grant on an enforced team. Provider credentials and raw metadata are write-only. Returns 404 sso_disabled when the requested protocol is off. SAML is unavailable.
+         * @description Verified team owner/admin browser session with fresh proof. An enrolled owner can spend one recovery grant on an enforced team. Provider credentials and raw metadata are write-only. Returns 404 sso_disabled when the requested protocol is off.
          */
         post: operations["createSsoProvider"];
         delete?: never;
@@ -5319,14 +5319,14 @@ export interface paths {
         post?: never;
         /**
          * Retire an SSO provider
-         * @description Verified team owner/admin browser session with fresh proof and expected revision. An enforced team must keep a usable provider. An authorized repeat retirement is idempotent. Stays available while SSO_OIDC_ENABLED is off.
+         * @description Verified team owner/admin browser session with fresh proof and expected revision. An enforced team must keep a usable provider. An authorized repeat retirement is idempotent. Stays available while the provider’s protocol setting is off.
          */
         delete: operations["deleteSsoProvider"];
         options?: never;
         head?: never;
         /**
          * Update an SSO provider draft
-         * @description Verified team owner/admin browser session with fresh proof and expected revision. An enrolled owner can spend one recovery grant on an enforced team. Omitted secrets are preserved. Provider credentials and raw metadata are write-only. Returns 404 sso_disabled when the requested protocol is off. SAML is unavailable.
+         * @description Verified team owner/admin browser session with fresh proof and expected revision. An enrolled owner can spend one recovery grant on an enforced team. Omitted secrets are preserved. Provider credentials and raw metadata are write-only. Returns 404 sso_disabled when the requested protocol is off.
          */
         patch: operations["updateSsoProvider"];
         trace?: never;
@@ -5367,7 +5367,7 @@ export interface paths {
         post: operations["linkSsoAccount"];
         /**
          * Retire the caller’s exact SSO identity link
-         * @description Current team member browser session with independent mailbox proof and the link ID and generation from /me. Stays available while SSO_OIDC_ENABLED is off.
+         * @description Current team member browser session with independent mailbox proof and the link ID and generation from /me. Stays available while the protocol setting is off.
          */
         delete: operations["unlinkSsoAccount"];
         options?: never;
@@ -5387,7 +5387,7 @@ export interface paths {
         post?: never;
         /**
          * Retire another member’s exact SSO identity link
-         * @description Team owner/admin browser session with fresh administration proof and the link generation from the provider inventory. Another owner must retire an owner’s link. Stays available while SSO_OIDC_ENABLED is off.
+         * @description Team owner/admin browser session with fresh administration proof and the link generation from the provider inventory. Another owner must retire an owner’s link. Stays available while the protocol setting is off.
          */
         delete: operations["removeSsoIdentityLink"];
         options?: never;
@@ -5426,7 +5426,7 @@ export interface paths {
         put?: never;
         /**
          * Nominate a current team owner for SSO recovery
-         * @description Requires a team owner browser session and fresh administration proof. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.
+         * @description Requires a team owner browser session and fresh administration proof. Returns 404 sso_disabled while both protocol settings are off.
          */
         post: operations["configureSsoRecovery"];
         delete?: never;
@@ -5446,7 +5446,7 @@ export interface paths {
         put?: never;
         /**
          * Accept the caller’s SSO recovery nomination
-         * @description Requires the nominated owner’s browser session and independent mailbox proof. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.
+         * @description Requires the nominated owner’s browser session and independent mailbox proof. Returns 404 sso_disabled while both protocol settings are off.
          */
         post: operations["acceptSsoRecoveryEnrollment"];
         delete?: never;
@@ -5466,7 +5466,7 @@ export interface paths {
         put?: never;
         /**
          * Start SSO recovery for the specified team
-         * @description Requires an enrolled owner’s browser session and fresh mailbox proof. Permits inspecting SSO configuration and one provider repair write or one write turning off enforcement. Stays available while SSO_OIDC_ENABLED is off.
+         * @description Requires an enrolled owner’s browser session and fresh mailbox proof. Permits inspecting SSO configuration and one provider repair write or one write turning off enforcement. Stays available while both protocol settings are off.
          */
         post: operations["useSsoRecovery"];
         delete?: never;
@@ -7401,7 +7401,7 @@ export interface components {
             smsRemindersAvailable?: boolean;
             /** @description The effective SSO_OIDC_ENABLED operator setting (off by default); absent when unknown */
             ssoOidcEnabled?: boolean;
-            /** @description Whether SAML SSO is enabled: always false for now; absent when unknown */
+            /** @description The effective SSO_SAML_ENABLED operator setting (off by default); absent when unknown */
             ssoSamlEnabled?: boolean;
             /**
              * Format: uri
