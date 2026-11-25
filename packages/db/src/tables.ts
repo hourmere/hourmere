@@ -1143,6 +1143,7 @@ export interface PaymentCheckoutAttempts {
   amount_minor: number;
   booking_id: string;
   currency: string;
+  current_booking_id: string | null;
   id: string;
   idempotency_key: string;
   mode: string;
@@ -1150,8 +1151,32 @@ export interface PaymentCheckoutAttempts {
   started_at: Timestamp | null;
 }
 
+export interface PaymentRefundObligations {
+  account_id: string;
+  amount_minor: number;
+  attempt_id: string;
+  attempts: Generated<number>;
+  created_at: Generated<Timestamp>;
+  currency: string;
+  first_attempted_at: Timestamp | null;
+  id: Generated<string>;
+  last_error: string | null;
+  lease_expires_at: Timestamp | null;
+  lease_token: string | null;
+  mode: string;
+  next_attempt_at: Generated<Timestamp>;
+  payment_reference: string;
+  state: Generated<string>;
+  stripe_refund_id: string | null;
+}
+
 export interface PaymentStripeEvents {
+  account_id: string | null;
   event_id: string;
+  finding: string | null;
+  mode: string | null;
+  payment_reference: string | null;
+  session_id: string | null;
 }
 
 export interface PersonalOrganizations {
@@ -1953,6 +1978,7 @@ export interface DB {
   organization_branding: OrganizationBranding;
   organization_operations: OrganizationOperations;
   payment_checkout_attempts: PaymentCheckoutAttempts;
+  payment_refund_obligations: PaymentRefundObligations;
   payment_stripe_events: PaymentStripeEvents;
   personal_organizations: PersonalOrganizations;
   profiles: Profiles;

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
+import { copyFile, mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -137,8 +137,18 @@ async function writeJournal(db: Db) {
     .where('booking_id', '=', bookingId)
     .executeTakeFirstOrThrow()
   const marking = { ...testContext(db, team.as(host), () => now), requestId: randomUUID() }
-  await setAttendeeNoShow(marking, bookingId, attendee.id, true)
-  await setAttendeeNoShow(marking, bookingId, attendee.id, false)
+  // The current no-show writer checks the later Checkout association. Give it the empty
+  // table for the journal writes and restore the exact predecessor before applying 0080.
+  await sql
+    .raw(await readFile(join(migrations, '0124_payment_checkout_attempts.sql'), 'utf8'))
+    .execute(db)
+  try {
+    await sql`ALTER TABLE payment_checkout_attempts ADD COLUMN current_booking_id uuid`.execute(db)
+    await setAttendeeNoShow(marking, bookingId, attendee.id, true)
+    await setAttendeeNoShow(marking, bookingId, attendee.id, false)
+  } finally {
+    await sql`DROP TABLE payment_checkout_attempts`.execute(db)
+  }
 
   // A SCIM provisioning token created, rotated and revoked by the team owner's session.
   const scimOwner = await createTestUser(db, 'SCIM Owner')

@@ -110,19 +110,24 @@ describe.skipIf(!databaseUrl)('Stripe webhook (real Postgres, fake Checkout)', (
     })
   }
 
-  async function paidHold(provider = new FakePaymentProvider(accountId)) {
+  async function paidHold(
+    provider = new FakePaymentProvider(accountId),
+    admission?: Temporal.Instant,
+  ) {
     const f = createFixtures(db)
     const host = await f.host()
     await f.schedule(host.userId)
     const slug = 'paid'
     await f.eventType(host.organizationId, host.userId, { slug, durationMinutes: 30 })
-    let date = Temporal.Now.plainDateISO('UTC').add({ days: 3 })
+    const today =
+      admission?.toZonedDateTimeISO('UTC').toPlainDate() ?? Temporal.Now.plainDateISO('UTC')
+    let date = today.add({ days: 3 })
     while (date.dayOfWeek !== 1) date = date.add({ days: 1 })
     const start = date
       .toZonedDateTime({ timeZone: 'Europe/Berlin', plainTime: '12:00' })
       .toInstant()
     const ctx = {
-      db,
+      db: admission ? timedDb : db,
       paidBookingsEnabled: true,
       paymentProvider: provider,
       now: () => Temporal.Now.instant(),
@@ -193,6 +198,20 @@ describe.skipIf(!databaseUrl)('Stripe webhook (real Postgres, fake Checkout)', (
     await sql`UPDATE stripe_test_clock.frozen SET at = ${hold.expiresAt}::timestamptz + interval '16 seconds'`.execute(
       db,
     )
+  }
+
+  async function freezeDatabaseClock(instant: Temporal.Instant) {
+    await sql`UPDATE stripe_test_clock.frozen SET at = ${instant.toString()}::timestamptz`.execute(
+      db,
+    )
+  }
+
+  function obligations(attemptId: string) {
+    return db
+      .selectFrom('payment_refund_obligations')
+      .selectAll()
+      .where('attempt_id', '=', attemptId)
+      .execute()
   }
 
   it('confirms a priced hold with a rotated signature on the exact UTF-8 body', async () => {
@@ -368,12 +387,33 @@ describe.skipIf(!databaseUrl)('Stripe webhook (real Postgres, fake Checkout)', (
     expect(notify).toHaveBeenCalledOnce()
   })
 
+  it('keeps a manually expired Stripe Session held until its database deadline across DST', async () => {
+    const zone = 'Europe/Berlin'
+    const year = Temporal.Now.plainDateISO(zone).year + 1
+    let sunday = Temporal.PlainDate.from({ year, month: 3, day: 31 })
+    while (sunday.dayOfWeek !== 7) sunday = sunday.subtract({ days: 1 })
+    const admitted = sunday.toZonedDateTime({ timeZone: zone, plainTime: '01:45' }).toInstant()
+    await freezeDatabaseClock(admitted)
+    const { hold, expired } = await paidHold(undefined, admitted)
+    const deadline = Temporal.Instant.from(hold.expiresAt)
+    expect(deadline.equals(admitted.add({ minutes: 30 }))).toBe(true)
+    expect(deadline.toZonedDateTimeISO(zone).toPlainTime().toString()).toBe('03:15:00')
+    const app = composition()
+    await freezeDatabaseClock(deadline.subtract({ milliseconds: 1 }))
+    await expectAcknowledged(await post(app, event('checkout.session.expired', expired)))
+    expect((await booking(hold.id)).status).toBe('pending_payment')
+
+    await freezeDatabaseClock(deadline)
+    await expectAcknowledged(await post(app, event('checkout.session.expired', expired)))
+    expect((await booking(hold.id)).status).toBe('expired')
+  })
+
   it.each(['overdue', 'expired', 'cancelled'] as const)(
     'records late success as refundable without reviving the %s hold',
     async (state) => {
       const notify = vi.fn<BookingNotifier>(async () => {})
       const app = composition({ notify })
-      const { hold, ctx, complete, expired, intent } = await paidHold()
+      const { hold, ctx, attempt, complete, expired, intent } = await paidHold()
       if (state === 'cancelled') {
         await cancelPaymentHold(ctx, hold.id)
       } else {
@@ -391,6 +431,7 @@ describe.skipIf(!databaseUrl)('Stripe webhook (real Postgres, fake Checkout)', (
           : event('checkout.session.completed', complete)
       await expectAcknowledged(await post(app, completed))
       await expectAcknowledged(await post(app, completed))
+      await expectAcknowledged(await post(app, event('checkout.session.completed', complete)))
       expect(await booking(hold.id)).toEqual({
         status: state === 'cancelled' ? 'cancelled' : 'expired',
         payment_reference: intent,
@@ -398,6 +439,9 @@ describe.skipIf(!databaseUrl)('Stripe webhook (real Postgres, fake Checkout)', (
         payment_refund_required: true,
       })
       expect(await receipts(completed.id)).toEqual([completed.id])
+      expect(await obligations(attempt.id)).toMatchObject([
+        { state: 'requested', payment_reference: intent, amount_minor: price.amountMinor },
+      ])
       expect(notify).not.toHaveBeenCalled()
     },
   )
@@ -430,6 +474,163 @@ describe.skipIf(!databaseUrl)('Stripe webhook (real Postgres, fake Checkout)', (
       payment_reference: null,
     })
     expect(notify).not.toHaveBeenCalled()
+  })
+
+  it('records a signed paid Session with mismatched expires_at for reconciliation without confirming or refunding it', async () => {
+    const app = composition()
+    const { hold, attempt, complete, intent } = await paidHold()
+    const mismatched = event('checkout.session.completed', {
+      ...complete,
+      expires_at: complete.expires_at + 1,
+    })
+    await expectAcknowledged(await post(app, mismatched))
+    await expectAcknowledged(await post(app, mismatched))
+    expect(await booking(hold.id)).toMatchObject({
+      status: 'pending_payment',
+      payment_reference: null,
+    })
+    expect(await obligations(attempt.id)).toEqual([])
+    expect(
+      await db
+        .selectFrom('payment_stripe_events')
+        .selectAll()
+        .where('event_id', '=', mismatched.id)
+        .executeTakeFirstOrThrow(),
+    ).toMatchObject({
+      finding: 'paid_checkout_binding_mismatch',
+      account_id: accountId,
+      mode: 'test',
+      session_id: complete.id,
+      payment_reference: intent,
+    })
+  })
+
+  it('records malformed Hourmere bindings without retaining unrelated Checkout identifiers', async () => {
+    const app = composition()
+    const { complete } = await paidHold()
+    const missingMetadata = event('checkout.session.completed', {
+      ...complete,
+      client_reference_id: null,
+      metadata: {},
+    })
+    const unrelated = event('checkout.session.completed', {
+      ...missingMetadata.data.object,
+      id: 'cs_unrelated',
+    })
+    await expectAcknowledged(await post(app, missingMetadata))
+    await expectAcknowledged(await post(app, unrelated))
+    const findings = await db
+      .selectFrom('payment_stripe_events')
+      .select(['event_id', 'session_id', 'payment_reference', 'finding'])
+      .where('event_id', 'in', [missingMetadata.id, unrelated.id])
+      .execute()
+    expect(findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event_id: missingMetadata.id,
+          session_id: complete.id,
+          payment_reference: complete.payment_intent,
+          finding: 'paid_checkout_binding_mismatch',
+        }),
+        {
+          event_id: unrelated.id,
+          session_id: null,
+          payment_reference: null,
+          finding: null,
+        },
+      ]),
+    )
+  })
+
+  it('reports concurrent observations that try to bind one PaymentIntent to two holds', async () => {
+    const notify = vi.fn<BookingNotifier>(async () => {})
+    const app = composition({ notify })
+    const first = await paidHold()
+    const second = await paidHold()
+    const completed = [
+      event('checkout.session.completed', first.complete),
+      event('checkout.session.completed', { ...second.complete, payment_intent: first.intent }),
+    ]
+    for (const response of await Promise.all(completed.map((snapshot) => post(app, snapshot))))
+      await expectAcknowledged(response)
+
+    const bookings = await Promise.all([booking(first.hold.id), booking(second.hold.id)])
+    expect(bookings.map(({ status }) => status).sort()).toEqual(['confirmed', 'pending_payment'])
+    const findings = await db
+      .selectFrom('payment_stripe_events')
+      .select(['finding', 'payment_reference'])
+      .where(
+        'event_id',
+        'in',
+        completed.map(({ id }) => id),
+      )
+      .where('finding', 'is not', null)
+      .execute()
+    expect(findings).toEqual([
+      {
+        finding: 'paid_checkout_binding_mismatch',
+        payment_reference: first.intent,
+      },
+    ])
+    expect(notify).toHaveBeenCalledOnce()
+  })
+
+  it('applies only bound Refund snapshots and keeps terminal state through out-of-order events', async () => {
+    const app = composition()
+    const { hold, ctx, attempt, complete, intent } = await paidHold()
+    await cancelPaymentHold(ctx, hold.id)
+    await expectAcknowledged(await post(app, event('checkout.session.completed', complete)))
+    const [obligation] = await obligations(attempt.id)
+    expect(obligation?.state).toBe('requested')
+    if (!obligation) throw new Error('Missing refund obligation')
+    const id = `re_${randomUUID().replaceAll('-', '')}`
+    // https://docs.stripe.com/api/refunds/object
+    // https://docs.stripe.com/refunds#refund-events
+    const refund = {
+      object: 'refund',
+      id,
+      amount: price.amountMinor,
+      currency: price.currency,
+      payment_intent: intent,
+      status: 'succeeded',
+      metadata: { hourmere_refund_obligation_id: obligation.id },
+    }
+    await expectAcknowledged(await post(app, event('refund.updated', refund)))
+    expect((await obligations(attempt.id))[0]?.state).toBe('requested')
+    // Represent a committed worker dispatch whose Stripe response was lost after the POST.
+    await db
+      .updateTable('payment_refund_obligations')
+      .set({ attempts: 1, first_attempted_at: sql`clock_timestamp()` })
+      .where('id', '=', obligation.id)
+      .execute()
+    for (const mismatched of [
+      event('refund.updated', { ...refund, amount: price.amountMinor - 1 }),
+      event('refund.updated', { ...refund, payment_intent: 'pi_other' }),
+      event('refund.updated', { ...refund, metadata: {} }),
+      { ...event('refund.updated', refund), account: 'acct_other' },
+      { ...event('refund.updated', refund), livemode: true },
+    ])
+      await expectAcknowledged(await post(app, mismatched))
+    expect((await obligations(attempt.id))[0]?.state).toBe('requested')
+
+    const succeeded = event('refund.updated', refund)
+    await expectAcknowledged(await post(app, succeeded))
+    await expectAcknowledged(
+      await post(app, event('refund.created', { ...refund, status: 'pending' })),
+    )
+    await expectAcknowledged(
+      await post(app, event('refund.failed', { ...refund, status: 'failed' }, succeeded.id)),
+    )
+    expect(await obligations(attempt.id)).toMatchObject([
+      { state: 'succeeded', stripe_refund_id: id },
+    ])
+
+    const failed = event('refund.failed', { ...refund, status: 'failed' })
+    await expectAcknowledged(await post(app, failed))
+    await expectAcknowledged(await post(app, failed))
+    await expectAcknowledged(await post(app, event('refund.updated', refund)))
+    expect(await receipts(succeeded.id, failed.id)).toEqual([succeeded.id, failed.id].sort())
+    expect(await obligations(attempt.id)).toMatchObject([{ state: 'failed', stripe_refund_id: id }])
   })
 
   it('acknowledges unrelated events and handles non-Session notifications without changing the hold', async () => {
