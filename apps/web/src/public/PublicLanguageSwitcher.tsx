@@ -3,7 +3,7 @@ import { type KeyboardEvent, useEffect, useId, useRef, useState } from 'react'
 import { useI18n } from '../i18n/runtime.tsx'
 
 /** Public pages share the existing language preference without the permanent field label. */
-export function PublicLanguageSwitcher() {
+export function PublicLanguageSwitcher({ scoped = false }: { scoped?: boolean }) {
   const { locale, t, available, setLanguage } = useI18n()
   const [open, setOpen] = useState(false)
   const container = useRef<HTMLDivElement>(null)
@@ -14,9 +14,10 @@ export function PublicLanguageSwitcher() {
   const label = t('Language: {0}', { '0': localeRegistry[locale].nativeName })
 
   useEffect(() => {
+    if (scoped) return
     document.documentElement.lang = locale
     document.documentElement.dir = localeRegistry[locale].direction
-  }, [locale])
+  }, [locale, scoped])
 
   useEffect(() => {
     if (open) items.current[selected]?.focus()

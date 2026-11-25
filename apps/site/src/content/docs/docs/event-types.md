@@ -22,14 +22,36 @@ The remaining settings start folded: **Additional durations**, **Description and
 **Location options and conferencing**, **Booking waitlist**, **Reminders and follow-ups**,
 **Booking form**, **After booking**, and **When people can book**. Team events also have
 host and scheduling controls and initially select you as the host. Open a section only
-when you need its settings. The same controls are available on phones and desktop, in
-English and Simplified Chinese.
+when you need its settings. Its header summarizes the current values, even while the
+section is closed. The same controls are available on phones and desktop, in English
+and Simplified Chinese.
 
 中文：进入“事件类型 → 新建事件类型”，首屏只需检查标题、预约链接、时长（分钟）和会议地点。
 默认时长为 30 分钟，可选 15、30、45、60 分钟预设或自定义 1–1440 整分钟；地点可留空。
 预约链接会随标题和时长生成，手动编辑后不再自动改动。其余设置默认折叠，直接创建会使用默认
 时间表、零提前预约时间和前后缓冲、不限制预约窗口与预约数量、不设置受邀人改期或取消截止。
 新事件默认启用且列出；创建事件不会创建工作时间。空账号需另设可用时间，连接日历不是必需条件。
+即使设置组处于折叠状态，标题下方也会显示当前设置摘要。
+
+## Preview the booking page
+
+On wide screens the booking page preview sits to the right of the settings. On a
+narrow screen choose **Preview booking page** to open it full screen. Close it with
+**Close** or Escape to return to the editor. The preview shows your draft title,
+description, durations and locations using the space’s saved branding and your
+device’s light or dark theme. Pick a sample time to see the booking form and its
+questions. The language menu lets you check the invitee interface in any supported
+public language without changing your account or browser preference.
+
+Sample times are illustrative. The preview neither checks availability nor submits
+bookings, and it does not record booking activity. Draft changes stay in this browser
+tab until you save them. This includes preview interactions, which reset if you leave
+the editor.
+
+中文：宽屏右侧会实时显示预约页预览，窄屏可点“预览预约页面”全屏查看。点“关闭”或按 Esc
+返回编辑器。预览使用当前草稿内容、空间已保存的品牌样式和设备的浅色或深色主题。选择示例时间
+即可查看预约表单和问题，也可通过语言菜单查看其他受支持语言的受邀人界面。预览不会检查实际
+可用时间、提交预约或记录预约活动。保存前，草稿仅保留在当前浏览器标签页内。
 
 ## Edit and save
 
@@ -169,6 +191,8 @@ or REST. Round-robin activation likewise remains a separate web/REST operation.
 - Creating or enabling an event does not guarantee available slots. Working hours,
   calendars and other booking rules still apply. An unavailable readiness check means
   the result is unknown, not that setup is missing.
+- Preview times do not account for working hours, calendars, booking rules or capacity.
+  Use the saved booking page to check actual invitee availability.
 - Timing units are display preferences only; REST, MCP and CLI continue using whole
   minutes for notice/buffers and whole calendar days for the booking window.
 - Copying revalidates settings under current creation rules. Repair stale hosts, schedules

@@ -127,8 +127,8 @@ describe('admin shell layout', () => {
     ['/app/connected-apps', 'main-content-wide'],
     ['/app/audit-log', 'main-content-wide'],
     ['/app/settings', 'main-content'],
-    ['/app/event-types/new', 'main-content'],
-    ['/app/event-types/example', 'main-content'],
+    ['/app/event-types/new', 'main-content-wide'],
+    ['/app/event-types/example', 'main-content-wide'],
     ['/app/availability/example', 'main-content'],
     ['/app/bookings/example', 'main-content'],
   ])('applies the content width for %s', (path, className) => {
