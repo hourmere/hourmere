@@ -20,6 +20,7 @@ import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { eligibleHostIds, hasValidHostShape } from './hosts.ts'
 import { isUuid } from './internal.ts'
+import { isMicrosoftTeamsDestination, microsoftTeamsLocation } from './microsoft-teams.ts'
 import { cleanText } from './text.ts'
 
 export const ReadinessStateSchema = z.enum([
@@ -174,6 +175,10 @@ const MemberHealth = z.object({
   defaultSchedule: ReadinessStateSchema,
   selectedCalendars: ReadinessStateSchema,
   conferenceAccounts: z.enum(['connected', 'attention_required', 'not_connected', 'check_failed']),
+  microsoftTeams: z
+    .enum(['ready', 'unavailable', 'check_failed'])
+    .optional()
+    .describe('Cached eligibility of the member’s selected Microsoft writeback destination.'),
 })
 const MembershipBlocker = z.enum(['scim_suspension', 'local_suspension', 'local_removal'])
 const ManagedMembership = z
@@ -232,6 +237,7 @@ export interface ReadinessTeamContext {
   now: () => Temporal.Instant
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
+  microsoftCalendarEnabled?: boolean | undefined
 }
 
 /** Construct only from teamManagementAccess.readMember's freshly authorized actor. */
@@ -506,10 +512,29 @@ export async function getTeamMemberReadiness(
             now,
           ).state,
           conferenceAccounts: memberConferenceAccounts(facts, member.userId),
+          ...(ctx.microsoftCalendarEnabled !== undefined && {
+            microsoftTeams: ctx.microsoftCalendarEnabled
+              ? microsoftTeamsDestinationState(facts, member.userId)
+              : ('unavailable' as const),
+          }),
         },
       }
     }),
   }
+}
+
+function microsoftTeamsDestinationState(
+  facts: Facts,
+  userId: string,
+  eventDestination?: string | null,
+): NonNullable<z.infer<typeof MemberHealth>['microsoftTeams']> {
+  if (!facts.profiles.ok || !facts.calendars.ok) return 'check_failed'
+  const profile = facts.profiles.value.find((p) => p.user_id === userId)
+  const destination = eventDestination ?? profile?.destination_calendar_id
+  const calendar = profile
+    ? facts.calendars.value.find((c) => c.id === destination && c.user_id === userId)
+    : undefined
+  return isMicrosoftTeamsDestination(calendar) ? 'ready' : 'unavailable'
 }
 
 function memberConferenceAccounts(
@@ -868,10 +893,11 @@ function conferenceCheck(
   hosts: Host[],
   userId: string,
   now: Temporal.Instant,
-  ctx: Pick<ServiceContext, 'automaticMeet' | 'automaticZoom'>,
+  ctx: Pick<ServiceContext, 'automaticMeet' | 'automaticZoom' | 'microsoftCalendarEnabled'>,
 ): Check {
   const id = 'optional_conference_dependency'
-  if (!automaticMeet(event.location) && !automaticZoom(event.location)) return na(id, now)
+  const teams = microsoftTeamsLocation(event.location)
+  if (!teams && !automaticMeet(event.location) && !automaticZoom(event.location)) return na(id, now)
   // Personal public resolution always derives its single host from the owner.
   const personal = event.owner_user_id !== null
   const mode = personal ? 'individual' : event.scheduling_type
@@ -885,6 +911,14 @@ function conferenceCheck(
       'event_editor',
       'event_owner',
     )
+  if (teams) {
+    if (!ctx.microsoftCalendarEnabled || mode !== 'individual' || hostIds.length !== 1)
+      return blocker()
+    const host = hosts.find((h) => h.user_id === userId)
+    const state = microsoftTeamsDestinationState(facts, userId, host?.destination_calendar_id)
+    if (state === 'check_failed') return failed(id, now)
+    return state === 'ready' ? check(id, 'satisfied', now) : blocker()
+  }
   if (automaticZoom(event.location)) {
     if (!ctx.automaticZoom || mode !== 'individual' || hostIds.length !== 1) return blocker()
     if (!facts.conferences.ok) return failed(id, now)
@@ -937,7 +971,7 @@ function evaluateEvent(
   event: Event,
   facts: Facts,
   now: Temporal.Instant,
-  ctx: Pick<ServiceContext, 'automaticMeet' | 'automaticZoom'>,
+  ctx: Pick<ServiceContext, 'automaticMeet' | 'automaticZoom' | 'microsoftCalendarEnabled'>,
 ): View {
   const signals = baseSignals(now)
   const personal = event.owner_user_id !== null

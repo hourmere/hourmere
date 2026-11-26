@@ -1,6 +1,7 @@
 // Calendar invitations (iCalendar, RFC 5545; methods from iTIP, RFC 5546) attached to booking
 // emails, so the meeting lands in the recipient's calendar and later updates replace it.
 import { interfaceLanguage } from '@hourmere/core/language'
+import { type MeetingLocation, teamsMeetingNotice } from './booking.ts'
 import { mailMessage } from './catalogue.ts'
 import type { MailAttachment } from './index.ts'
 
@@ -20,6 +21,21 @@ export function calendarSummary(event: string, other: string, locale?: string | 
 /** Public context only; this description never contains a booking management link. */
 export function calendarBookingDescription(name: string, locale?: string | null): string {
   return mailMessage(interfaceLanguage(locale) ?? 'en', 'calendar.booked', { name })
+}
+
+/** Teams meeting details for an invitation that has already been scoped to its recipient. */
+export function calendarTeamsDescription(
+  location: MeetingLocation | null,
+  method: IcsEvent['method'],
+  locale?: string | null,
+): string | undefined {
+  if (location?.kind !== 'microsoft_teams') return
+  if (location.status !== 'ready') return teamsMeetingNotice(location, locale, method === 'CANCEL')
+  const language = interfaceLanguage(locale) ?? 'en'
+  return mailMessage(language, 'format.field', {
+    label: method === 'CANCEL' ? 'Microsoft Teams' : mailMessage(language, 'Join Teams meeting'),
+    value: location.url,
+  })
 }
 
 export interface IcsPerson {

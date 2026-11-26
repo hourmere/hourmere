@@ -66,12 +66,7 @@ const pending = (now: number): WriteState => ({
 })
 
 /** Save the host's selected destination in the booking transaction, even if access was lost. */
-export async function recordMicrosoftBookingDestinations(
-  db: Db,
-  bookingId: string,
-  now: number,
-  microsoftTeamsForTest?: CalendarDeps['microsoftTeamsForTest'],
-) {
+export async function recordMicrosoftBookingDestinations(db: Db, bookingId: string, now: number) {
   const destinations = await db
     .selectFrom('booking_hosts as bh')
     .innerJoin('bookings as b', 'b.id', 'bh.booking_id')
@@ -86,19 +81,11 @@ export async function recordMicrosoftBookingDestinations(
       join.onRef('cc.id', '=', 'c.connection_id').onRef('cc.user_id', '=', 'bh.user_id'),
     )
     .select(['bh.user_id', 'c.id'])
-    .$if(microsoftTeamsForTest !== undefined, (query) =>
-      query
-        .select(['b.event_type_id'])
-        .select(({ not, exists, selectFrom }) =>
-          not(
-            exists(
-              selectFrom('booking_hosts as other')
-                .select('other.user_id')
-                .whereRef('other.booking_id', '=', 'b.id')
-                .whereRef('other.user_id', '!=', 'bh.user_id'),
-            ),
-          ).as('singleHost'),
-        ),
+    .select(
+      sql<boolean>`b.location->>'kind' = 'microsoft_teams' AND NOT EXISTS (
+      SELECT 1 FROM booking_hosts other
+      WHERE other.booking_id = b.id AND other.user_id <> bh.user_id
+    )`.as('teams'),
     )
     .where('bh.booking_id', '=', bookingId)
     .where('cc.provider', '=', 'microsoft')
@@ -115,10 +102,7 @@ export async function recordMicrosoftBookingDestinations(
         calendar_id: destination.id,
         microsoft_writeback: JSON.stringify({
           ...pending(now),
-          // Production does not pass a selector until event types can choose Teams.
-          ...(destination.singleHost &&
-            destination.event_type_id &&
-            microsoftTeamsForTest?.(destination.event_type_id) && { teamsStatus: 'pending' }),
+          ...(destination.teams && { teamsStatus: 'pending' }),
         } satisfies WriteState),
       })),
     )
@@ -129,7 +113,9 @@ export async function recordMicrosoftBookingDestinations(
 
 export async function recordMicrosoftGroupDestination(db: Db, groupSlotId: string, now: number) {
   const { numAffectedRows } = await sql`
-    UPDATE group_slots s SET microsoft_writeback=${JSON.stringify(pending(now))}::jsonb
+    UPDATE group_slots s SET microsoft_writeback=${JSON.stringify(pending(now))}::jsonb ||
+      CASE WHEN s.location->>'kind'='microsoft_teams' THEN '{"teamsStatus":"pending"}'::jsonb
+        ELSE '{}'::jsonb END
     FROM calendars c JOIN calendar_connections cc ON cc.id=c.connection_id
     WHERE s.id=${groupSlotId} AND s.destination_calendar_id=c.id AND cc.user_id=s.host_user_id
       AND cc.provider='microsoft' AND s.microsoft_writeback IS NULL
@@ -267,16 +253,24 @@ async function desiredEvent(
     return booking && { ...booking, revision: bookingRevision(booking.bookingId, booking.active) }
   }
   const slot = await groupIntent(db, payload.groupSlotId, target)
-    .select([
-      'title',
-      'start_at as start',
-      'end_at as end',
-      'active_seats as seatCount',
-      'count_revision as countRevision',
-    ])
+    .select(['title', 'start_at as start', 'end_at as end', 'count_revision as countRevision'])
+    // Graph owns the body of an online meeting. Only plain appointments can
+    // use it to mirror the seat count.
+    .select(
+      sql<number | null>`CASE WHEN microsoft_writeback->>'teamsStatus' IS NULL
+      OR microsoft_writeback->>'teamsStatus' = 'teams_unavailable' THEN active_seats END`.as(
+        'seatCount',
+      ),
+    )
     .select(sql<boolean>`state='open' AND active_seats>0`.as('active'))
     .executeTakeFirst()
-  return slot && { ...slot, revision: groupRevision(slot.countRevision, slot.active) }
+  return (
+    slot && {
+      ...slot,
+      seatCount: slot.seatCount ?? undefined,
+      revision: groupRevision(slot.countRevision, slot.active),
+    }
+  )
 }
 
 const bookingMappings = (db: Db, bookingId: string, calendarId: string) =>
@@ -911,7 +905,7 @@ async function writeDestination(
             onPatch,
           )
       }
-      if (event && includeTeams && !event.teamsJoinUrl) {
+      if (event && includeTeams && !event.teamsJoinUrl && !lease.teamsJoinUrl) {
         // Graph confirmed the copy. Retry its meeting details using the saved event ID.
         return complete(
           writeFailure(
@@ -961,7 +955,9 @@ async function writeDestination(
         return finish('calendar_unavailable')
       return finish('provider_unavailable', backoff, posted || possiblyCreated)
     }
-    const joinUrl = includeTeams ? event?.teamsJoinUrl : undefined
+    // Keep the last acknowledged participant URL for asynchronous cancellation mail.
+    // Cancelled booking views and connection diagnostics never show it.
+    const joinUrl = includeTeams ? (event?.teamsJoinUrl ?? lease.teamsJoinUrl) : undefined
     return complete(
       {
         status: 'succeeded',
@@ -972,8 +968,8 @@ async function writeDestination(
         seatCount: event ? desired.seatCount : undefined,
         teamsStatus: joinUrl
           ? 'ready'
-          : event && lease.teamsStatus === 'teams_unavailable'
-            ? 'teams_unavailable'
+          : lease.teamsStatus === 'teams_unavailable' || lease.teamsStatus === 'join_url_pending'
+            ? lease.teamsStatus
             : undefined,
         teamsJoinUrl: joinUrl,
       },

@@ -35,6 +35,90 @@ describe('pure conference location presentation', () => {
   })
 })
 
+describe('Microsoft Teams location details', () => {
+  const url = 'https://teams.microsoft.com/l/meetup-join/fake-meeting/0'
+  it.each([
+    [
+      'en',
+      'Join Microsoft Teams',
+      'The Teams link isn’t ready yet.',
+      'The booking is still scheduled without a Teams link.',
+    ],
+    [
+      'zh-CN',
+      '加入 Microsoft Teams 会议',
+      'Teams 会议链接尚未就绪。',
+      '预约仍然有效，但没有 Teams 会议链接。',
+    ],
+    [
+      'de',
+      'Über Microsoft Teams teilnehmen',
+      'Der Teams-Link ist noch nicht verfügbar.',
+      'Die Buchung bleibt auch ohne Teams-Link bestehen.',
+    ],
+    [
+      'fr',
+      'Rejoindre la réunion Microsoft Teams',
+      'Le lien Teams n’est pas encore disponible.',
+      'La réservation reste confirmée, sans lien Teams.',
+    ],
+    [
+      'es',
+      'Unirse a la reunión de Microsoft Teams',
+      'El enlace de Teams aún no está listo.',
+      'La reserva sigue confirmada, sin enlace de Teams.',
+    ],
+    [
+      'pt-BR',
+      'Participar da reunião no Microsoft Teams',
+      'O link do Teams ainda não está pronto.',
+      'A reserva continua confirmada, sem um link do Teams.',
+    ],
+  ] as const)('renders Teams meeting locations in %s', (locale, join, pending, fallback) => {
+    chooseLanguage(locale)
+    const { rerender } = render(
+      <LocationDetails location={{ kind: 'microsoft_teams', status: 'join_url_pending', url }} />,
+    )
+    expect(screen.getByText(pending)).toBeDefined()
+    expect(screen.queryByRole('link')).toBeNull()
+    expect(locationText({ kind: 'microsoft_teams', status: 'join_url_pending', url })).toBe(
+      'Microsoft Teams',
+    )
+    rerender(
+      <LocationDetails location={{ kind: 'microsoft_teams', status: 'teams_unavailable' }} />,
+    )
+    expect(screen.getByText(fallback)).toBeDefined()
+    expect(screen.queryByRole('link')).toBeNull()
+    rerender(
+      <LocationDetails location={{ kind: 'microsoft_teams', status: 'writeback_failed', url }} />,
+    )
+    expect(screen.getByText(fallback)).toBeDefined()
+    expect(screen.queryByText(pending)).toBeNull()
+    expect(screen.queryByRole('link')).toBeNull()
+    expect(locationText({ kind: 'microsoft_teams', status: 'writeback_failed', url })).toBe(
+      'Microsoft Teams',
+    )
+    rerender(<LocationDetails location={{ kind: 'microsoft_teams', status: 'ready', url }} />)
+    const link = screen.getByRole('link', { name: join })
+    expect(link.getAttribute('href')).toBe(url)
+    expect(link.getAttribute('rel')).toContain('noreferrer')
+    expect(locationText({ kind: 'microsoft_teams', status: 'ready', url })).toBe(
+      `Microsoft Teams: ${url}`,
+    )
+    rerender(
+      <LocationDetails location={{ kind: 'microsoft_teams', status: 'ready', url }} cancelled />,
+    )
+    expect(screen.queryByRole('link')).toBeNull()
+  })
+
+  it('never renders a look-alike Teams URL', () => {
+    const url = 'https://teams.microsoft.com.evil.invalid/l/meetup-join/fake-meeting/0'
+    render(<LocationDetails location={{ kind: 'microsoft_teams', status: 'ready', url }} />)
+    expect(screen.queryByRole('link')).toBeNull()
+    expect(locationText({ kind: 'microsoft_teams', status: 'ready', url })).toBe('Microsoft Teams')
+  })
+})
+
 describe('localized booking detail punctuation', () => {
   it.each([
     [{ kind: 'phone', number: '+14155550123' }, '电话会议：+14155550123'],

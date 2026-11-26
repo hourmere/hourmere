@@ -33,6 +33,9 @@ const TeamAdminBooking = z
     attendees: z.array(z.object(TeamAdminBookingListItemSchema.shape.attendees.element.shape)),
   })
   .openapi('TeamAdminBooking')
+const TeamAdminBookingDetail = TeamAdminBooking.extend({
+  location: z.object({ kind: z.literal('microsoft_teams') }).optional(),
+}).openapi('TeamAdminBookingDetail')
 const TeamAdminBookingPage = z
   .object({
     ...TeamAdminBookingListPageSchema.shape,
@@ -118,7 +121,7 @@ export function teamBookingRoutes(
           }),
         },
         responses: {
-          200: { description: 'The team booking', content: json(TeamAdminBooking) },
+          200: { description: 'The team booking', content: json(TeamAdminBookingDetail) },
           ...errorResponses({
             400: 'Invalid parameters (invalid_request)',
             403: 'team_management_access_denied: requires a current team owner/admin session without Authorization',
