@@ -191,8 +191,6 @@ export const admin = {
     'Choose a valid PNG, JPEG or WebP image up to 512 KiB and 2048 × 2048 pixels. SVG and animated images are not supported.',
   'Edit branding': 'Edit branding',
   'Primary colour': 'Primary colour',
-  'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against the white page background is reported separately.':
-    'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against the white page background is reported separately.',
   'Brand logo': 'Brand logo',
   'A logo is saved for this space.': 'A logo is saved for this space.',
   'Remove logo': 'Remove logo',
@@ -3219,6 +3217,25 @@ export const admin = {
     'Microsoft reported a conflict with the booking copy. Check the calendar in Outlook.',
   'Hourmere will retry syncing a booking copy.': 'Hourmere will retry syncing a booking copy.',
   'A booking copy has a pending change.': 'A booking copy has a pending change.',
+  // Microsoft Teams meeting locations
+  'Microsoft Teams requires individual scheduling with one host.':
+    'Microsoft Teams requires individual scheduling with one host.',
+  'Could not verify Microsoft Teams availability for the host.':
+    'Could not verify Microsoft Teams availability for the host.',
+  'Checking Microsoft Teams availability…': 'Checking Microsoft Teams availability…',
+  'Microsoft Calendar is unavailable on this instance.':
+    'Microsoft Calendar is unavailable on this instance.',
+  'Connect a Microsoft 365 work or school calendar and select it for booking write-back.':
+    'Connect a Microsoft 365 work or school calendar and select it for booking write-back.',
+  'Reconnect Microsoft Calendar and allow calendar event writes to use Teams.':
+    'Reconnect Microsoft Calendar and allow calendar event writes to use Teams.',
+  'The host needs a Microsoft 365 work or school calendar selected for booking write-back.':
+    'The host needs a Microsoft 365 work or school calendar selected for booking write-back.',
+  'Microsoft Teams creates a meeting link for each booking on the host’s Microsoft 365 work or school calendar.':
+    'Microsoft Teams creates a meeting link for each booking on the host’s Microsoft 365 work or school calendar.',
+  'Remove a location option before adding another.':
+    'Remove a location option before adding another.',
+  'Open host booking details': 'Open host booking details',
   // SCIM provisioning
   'SCIM provisioning is disabled on this instance.':
     'SCIM provisioning is disabled on this instance.',
@@ -3299,10 +3316,19 @@ export const admin = {
     'An enabled identity provider with a verified domain is required.',
   'Before requiring SSO, have an owner test the identity provider draft, then enable that revision with a verified domain. A current owner must also accept recovery enrollment.':
     'Before requiring SSO, have an owner test the identity provider draft, then enable that revision with a verified domain. A current owner must also accept recovery enrollment.',
-  // SAML recovery
-  'If you are replacing signing certificates, enter the full set your identity provider uses.':
-    'If you are replacing signing certificates, enter the full set your identity provider uses.',
+
+  // Branding.
+  'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against white (#FFFFFF) is reported separately.':
+    'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against white (#FFFFFF) is reported separately.',
+
+  // Availability editor
+  'A schedule can have at most 10,000 date overrides, including past dates. Remove some overrides before saving.':
+    'A schedule can have at most 10,000 date overrides, including past dates. Remove some overrides before saving.',
 
   // Additional durations
   'Removed {0}. Selected length: {1}.': 'Removed {0}. Selected length: {1}.',
+
+  // SAML recovery
+  'If you are replacing signing certificates, enter the full set your identity provider uses.':
+    'If you are replacing signing certificates, enter the full set your identity provider uses.',
 } as const

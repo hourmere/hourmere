@@ -6,6 +6,7 @@ import { formatList } from '../i18n/formatting.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import type { OneTimeBookingPage, PublicEventType, Slot } from './api.ts'
 import { locationLabel } from './BookingDetails.tsx'
+import { BookingFactIcon } from './BookingFactIcon.tsx'
 import type { BookingLocationOption } from './BookingForm.tsx'
 import { EventDescription } from './EventDescription.tsx'
 import { FocusHeading, HostAvatar } from './PublicLayout.tsx'
@@ -36,6 +37,7 @@ export function BookingEventInfo({
 }) {
   const { t, ui, locale: displayLocale } = useI18n()
   const hostTimeZone = bookingHostTimeZone(event)
+  const location = chosenLocation ?? event.location
   const Heading = headingLevel === 1 ? 'h1' : 'h2'
   return (
     <aside className="event-info" aria-label={t('About this event')}>
@@ -64,14 +66,21 @@ export function BookingEventInfo({
         </p>
       )}
       <ul className="event-facts">
-        <li>{formatDuration(durationMinutes, displayLocale)}</li>
-        {chosenLocation ? (
-          <li>{chosenLocation.label ?? ui(locationLabel(chosenLocation.kind))}</li>
-        ) : event.location ? (
-          <li>{ui(locationLabel(event.location.kind))}</li>
-        ) : null}
+        <li>
+          <BookingFactIcon name="clock" />
+          <span>{formatDuration(durationMinutes, displayLocale)}</span>
+        </li>
+        {location && (
+          <li>
+            <BookingFactIcon name="pin" />
+            <span className="user-content">
+              {chosenLocation?.label ?? ui(locationLabel(location.kind))}
+            </span>
+          </li>
+        )}
         {hostTimeZone && (
           <li className="user-content">
+            <BookingFactIcon name="globe" />
             <TimeZoneName
               className="host-time-zone"
               name={zoneName(hostTimeZone)}

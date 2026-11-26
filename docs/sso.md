@@ -331,6 +331,12 @@ mismatch, provider change, logout, stale session, conflicting links and concurre
 attempts with different users.
 Do not enable the disabled general `/api/auth/link-social` route to implement this.
 
+Ordinary SSO self-linking leaves the member's directory-management status unchanged.
+New-enrollment SCIM claims complete only through explicit acceptance of a SCIM-issued
+invitation with Hourmere mailbox proof, including when SSO supplies the sign-in flow.
+Claim completion through SSO linking is hard-off in production until the corresponding
+work ships. See [SCIM claim completion and rollout](scim.md#ordered-implementation-plan).
+
 An unlinked IdP subject never creates a second user or an automatic link. Whether or
 not its email matches an existing account, and whatever `email_verified` says, the
 callback stores a frozen pending result and returns one generic outcome: “Complete
@@ -819,10 +825,10 @@ with public syntax, a dotted DNS name without a special-use suffix, may instead 
 answer public: that is how a public IdP on a non-default port, such as
 `https://idp.example.com:8443`, is reached. A listed name without public syntax, a single
 label such as `keycloak` or a name under `.local`, `.internal`, `.localhost`, `.home.arpa`,
-`.test`, `.example`, `.invalid` or `.onion`, accepts only private or loopback answers. If a
-search domain, wildcard DNS or NXDOMAIN rewriting expands such a name to a public address,
-the request is therefore refused before any connection opens. Answers that mix the two, or
-that include metadata, link-local, IPv4-mapped or other reserved space, are refused. Hosts
+`.service.arpa`, `.alt`, `.test`, `.example`, `.invalid` or `.onion`, accepts only private or
+loopback answers. If a search domain, wildcard DNS or NXDOMAIN rewriting expands such a
+name to a public address, the request is refused before any connection opens. Answers that
+mix the two, or that include metadata, link-local, IPv4-mapped or other reserved space, are refused. Hosts
 that are not listed keep the default rules above: public answers only, on the default port
 only, and no private routing. HTTPS stays required, and a listed target is fetched like any
 other: the validated address is pinned to the socket and TLS verifies the original
@@ -875,6 +881,8 @@ The Audit actions step built this vocabulary. The [SSO actions](audit-log.md#sso
 are defined in `packages/db/src/sso-audit.ts` and checked by migration 0085. Later steps call
 `writeSsoAuditEvent` inside the transaction of the change they record, so a rollback removes
 the event with the change, and `writeSsoSecurityFailure` for a security failure. The
+change writer checks the stored-ID shape of user, API-key, OAuth-client and SCIM-token
+actors and any supplied session or API-key credential ID. System actors use service names. The
 provider and correlation IDs must be stored provider and attempt IDs (UUIDv7); the checks
 enforce that shape, which refuses a secret, a token, an assertion, a mailbox capability or an
 IdP subject of any other shape. The source of a security failure is its action: a failed
@@ -944,6 +952,7 @@ imports to pin this table.
 |---|---:|---|
 | `ssoSecurityFailureEvents` | 20 | events |
 | `ssoSecurityFailureWindow` | 3600 | seconds |
+| `ssoSecurityFailureDropReportWindow` | 60 | seconds |
 
 `writeSsoSecurityFailure` records a failure only while fewer than `ssoSecurityFailureEvents`
 failures of the same provider and source were recorded in the last `ssoSecurityFailureWindow`
@@ -951,11 +960,19 @@ seconds, by the database clock; it drops the rest and reports that it did. With 
 provider records at most 80 failures an hour, however many attempts fail. A transaction-level
 advisory lock per provider and source serializes the count and the insert, so a burst of
 parallel failures cannot exceed the bound, and a failure already past the bound is dropped from
-an unlocked count without waiting for that lock. Callers write a failure after the request's
-own transaction has settled, with the team, provider and protocol of the provider they loaded.
-A provider's successes and changes are never dropped: only security failures are bounded. The
-cost is that junk failures can fill a window and hide later failures of the same source until
-the window slides.
+an unlocked count without waiting for that lock.
+
+Callers use the team, ID and protocol of the provider they loaded and wait for any
+request transaction to settle. Passing the outer database handle from inside a transaction
+callback is invalid because the failure writer needs its own pool connection. Before inserting,
+the writer confirms under a row lock that the provider still exists in that team and uses that
+protocol. A missing or mismatched provider produces no event.
+
+Each process counts dropped failures by source and emits one structured
+`sso.security_failures_dropped` warning `ssoSecurityFailureDropReportWindow` seconds after
+the first drop in a batch. Reports contain counts only, with no provider, team or
+request identifiers. Pending counts are process-local and reset when the process exits.
+A provider's successes and changes are outside the failure bound.
 
 ## Proposed REST, MCP and CLI contracts
 

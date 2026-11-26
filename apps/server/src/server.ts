@@ -233,6 +233,9 @@ export function productionSsoCapabilities(
   )
 }
 
+// Production completes SCIM claims through invitation acceptance only.
+const productionScimClaims = { invitation: scimClaimCompletion.invitation }
+
 /**
  * The /api/v1 route groups, each created with what it needs. The OpenAPI document (and with
  * it the web app's types, `npm run api:types`) is made from this same list. Route groups hold
@@ -438,6 +441,7 @@ export function productRoutes({
       smsRemindersAvailable,
       automaticMeet,
       automaticZoom,
+      microsoftCalendarEnabled: microsoftCalendar !== undefined,
       successRedirectPolicy,
       recurringBookingsEnabled,
     }),
@@ -509,7 +513,12 @@ export function productRoutes({
       recordAdmissionRemoval: oidcEnabled || samlEnabled ? recordSsoAdmissionRemoval : undefined,
     }),
     analyticsRoutes({ db }),
-    readinessRoutes({ db, automaticMeet, automaticZoom }),
+    readinessRoutes({
+      db,
+      automaticMeet,
+      automaticZoom,
+      microsoftCalendarEnabled: microsoftCalendar !== undefined,
+    }),
     // Recovery operations stay available when the operator pauses workflows.
     workflowRoutes({
       db,
@@ -546,6 +555,7 @@ export function productTools({
   automaticZoom,
   bookingMaxInviteeReschedules,
   googleCalendar,
+  microsoftCalendar,
   caldavCalendar,
   zoomConference,
   auditLogRetentionDays = null,
@@ -575,6 +585,7 @@ export function productTools({
   automaticZoom?: boolean | undefined
   bookingMaxInviteeReschedules?: number | undefined
   googleCalendar?: CalendarDeps['google']
+  microsoftCalendar?: CalendarDeps['microsoft']
   caldavCalendar?: CalendarDeps['caldav']
   zoomConference?: ConferenceDeps['zoom']
 } & WorkflowSettings): Tool[] {
@@ -601,6 +612,7 @@ export function productTools({
       db,
       automaticMeet,
       automaticZoom,
+      microsoftCalendarEnabled: microsoftCalendar !== undefined,
       smsRemindersAvailable,
       followUpHostNotesEnabled,
       successRedirectPolicy,
@@ -781,7 +793,7 @@ export function productionAppOptions({
       configurationKey: ssoConfigurationKey,
       privateTargets: ssoPrivateTargets,
       signup: config.signup,
-      scimClaims: config.SCIM_PROVISIONING_ENABLED ? scimClaimCompletion : scimClaimAdmissionOnly,
+      scimClaims: config.SCIM_PROVISIONING_ENABLED ? productionScimClaims : scimClaimAdmissionOnly,
       session: { secret: config.BETTER_AUTH_SECRET },
       readSession: readSsoSession,
     }),
@@ -866,6 +878,7 @@ export function productionAppOptions({
         bookingMaxInviteeReschedules: config.BOOKING_MAX_INVITEE_RESCHEDULES,
         auditLogRetentionDays: config.AUDIT_LOG_RETENTION_DAYS,
         googleCalendar,
+        microsoftCalendar,
         caldavCalendar,
         zoomConference,
         webhooks: webhookSettings,
@@ -918,7 +931,7 @@ export function productionAuthOptions({
     recordAdmissionRemoval,
     ssoCapabilities: sso,
     scimResourcesEnabled: config.SCIM_PROVISIONING_ENABLED,
-    scimClaims: config.SCIM_PROVISIONING_ENABLED ? scimClaimCompletion : scimClaimAdmissionOnly,
+    scimClaims: config.SCIM_PROVISIONING_ENABLED ? productionScimClaims : scimClaimAdmissionOnly,
     baseURL: config.PUBLIC_URL,
     secret: config.BETTER_AUTH_SECRET,
     mailer,

@@ -221,6 +221,7 @@ describe('SSO transport limits (bound to the runtime constants)', () => {
 const auditUnits: Record<keyof typeof SSO_AUDIT_LIMITS, string> = {
   ssoSecurityFailureEvents: 'events',
   ssoSecurityFailureWindow: 'seconds',
+  ssoSecurityFailureDropReportWindow: 'seconds',
 }
 
 function assertAuditLimits(

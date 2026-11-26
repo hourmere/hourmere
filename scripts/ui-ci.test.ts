@@ -134,11 +134,13 @@ describe('UI measurement CI contract', () => {
     }
   })
 
-  it('runs UI measurements only for pull requests, main pushes and manual baseline review', () => {
+  it('accepts PR label events and updates, main pushes and manual dispatches', () => {
     expect(Object.keys(workflow.on).sort()).toEqual(['pull_request', 'push', 'workflow_dispatch'])
     expect(workflow.on.push).toEqual({ branches: ['main'] })
-    // Pull requests run the UI checks by default; only listed paths can skip them.
-    expect(workflow.on.pull_request).toEqual({ paths: uiPullRequestPaths })
+    expect(workflow.on.pull_request).toEqual({
+      types: ['opened', 'synchronize', 'reopened', 'labeled'],
+      paths: uiPullRequestPaths,
+    })
     expect(workflow.on.workflow_dispatch).toEqual({
       inputs: {
         visual_baselines: {
@@ -155,18 +157,37 @@ describe('UI measurement CI contract', () => {
       group: 'ui-checks-${{ github.ref }}',
       'cancel-in-progress': true,
     })
-    expect(Object.keys(workflow.jobs).sort()).toEqual([
-      'e2e-a11y',
-      'e2e-cross-engine',
-      'e2e-layout',
-      'e2e-visual',
-      'visual-baseline-status',
-      'visual-baselines',
-    ])
     expect(workflow.jobs['e2e-layout']?.strategy).toEqual({
       'fail-fast': false,
       matrix: { shard: [1, 2, 3, 4, 5, 6, 7, 8] },
     })
+  })
+
+  it('skips every job on unlabeled PRs while allowing labeled PRs and main pushes', () => {
+    const gate =
+      "github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ui-checks')"
+    expect(
+      Object.fromEntries(Object.entries(workflow.jobs).map(([id, job]) => [id, job.if])),
+    ).toEqual({
+      'e2e-layout': gate,
+      'e2e-a11y-shard': gate,
+      'e2e-a11y': `always() && (${gate})`,
+      'e2e-cross-engine': gate,
+      'visual-baseline-status': gate,
+      'e2e-visual': `(${gate}) && needs.visual-baseline-status.outputs.present == 'true'`,
+      'visual-baselines': "github.event_name == 'workflow_dispatch' && inputs.visual_baselines",
+    })
+  })
+
+  it('keeps the axe time limit and makes e2e-a11y depend on every shard', () => {
+    const shard = workflow.jobs['e2e-a11y-shard']
+    expect(shard?.['timeout-minutes']).toBe(35)
+    expect(shard?.strategy).toEqual({ 'fail-fast': false, matrix: { shard: [1, 2, 3, 4] } })
+    const aggregate = workflow.jobs['e2e-a11y']
+    expect(aggregate?.needs).toBe('e2e-a11y-shard')
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub Actions expression is literal.
+    expect(aggregate?.env?.SHARD_RESULT).toBe('${{ needs.e2e-a11y-shard.result }}')
+    expect(aggregate?.steps[0]?.run).toBe('test "$SHARD_RESULT" = success')
   })
 
   it('isolates UI jobs from reusable CI and releases', () => {
@@ -219,15 +240,17 @@ describe('UI measurement CI contract', () => {
     expect(workflow.jobs[id]?.services?.postgres.options ?? '').not.toContain('max_connections')
   })
 
-  it.each(['e2e-layout', 'e2e-a11y', 'e2e-cross-engine'])(
+  it.each([
+    ['e2e-layout', 'layout', 8],
+    ['e2e-a11y-shard', 'a11y', 4],
+    ['e2e-cross-engine', 'cross-engine', undefined],
+  ] as const)(
     'makes %s fail on the terminal gate while preserving reports on failure',
-    (id) => {
+    (id, suite, shardCount) => {
       const job = workflow.jobs[id]
       expect(job?.['continue-on-error']).toBeUndefined()
-      const suite = id.slice('e2e-'.length)
       const summary = job?.steps.find((step) => step.name === 'Summarize measurements')
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub Actions expression is literal.
-      const shard = suite === 'layout' ? ' --shard=${{ matrix.shard }}/8' : ''
+      const shard = shardCount ? ` --shard=\${{ matrix.shard }}/${shardCount}` : ''
       expect(summary?.run).toBe(`node tools/e2e/reports-summary.ts --suite=${suite}${shard}`)
       expect(summary?.if).toBe('always()')
       const browser = job?.steps.find((step) => step.run?.includes('node tools/e2e/run-audit.ts'))
@@ -252,7 +275,7 @@ describe('UI measurement CI contract', () => {
     },
   )
 
-  it.each(['e2e-layout', 'e2e-a11y', 'e2e-cross-engine', 'e2e-visual'])(
+  it.each(['e2e-layout', 'e2e-a11y-shard', 'e2e-cross-engine', 'e2e-visual'])(
     'publishes only sanitized reports after %s even on failures',
     (id) => {
       const steps = workflow.jobs[id]?.steps ?? []
@@ -265,15 +288,9 @@ describe('UI measurement CI contract', () => {
     },
   )
 
-  it('skips visual comparison until reviewed baselines exist; generation is dispatch-only', () => {
+  it('uses the baseline status for comparison and uploads masked baselines for review', () => {
     expect(workflow.jobs['e2e-visual']?.needs).toBe('visual-baseline-status')
-    expect(workflow.jobs['e2e-visual']?.if).toBe(
-      "needs.visual-baseline-status.outputs.present == 'true'",
-    )
     const generation = workflow.jobs['visual-baselines']
-    expect(generation?.if).toBe(
-      "github.event_name == 'workflow_dispatch' && inputs.visual_baselines",
-    )
     expect(generation?.steps.some((step) => step.run?.includes('--update-snapshots'))).toBe(true)
     expect(generation?.steps.some((step) => step.run === 'npm run test:e2e:privacy')).toBe(true)
     expect(
@@ -613,7 +630,7 @@ describe('required browser shards', () => {
   })
 })
 
-/** The reviewed pull-request filter: run by default, skip only these, re-include the workflow. */
+/** Paths eligible for labeled PR audits, including the audit workflow itself. */
 const uiPullRequestPaths = [
   '**',
   '!docs/**',
@@ -659,8 +676,8 @@ function filterGlob(pattern: string): RegExp {
   return new RegExp(`^${source}$`)
 }
 
-/** Whether a pull request changing `files` triggers the workflow: the last matching pattern wins. */
-function triggers(paths: string[], files: string[]): boolean {
+/** Whether any changed file passes the path filter, with the last matching pattern winning. */
+function matchesPaths(paths: string[], files: string[]): boolean {
   return files.some((file) => {
     let included = false
     for (const pattern of paths) {
@@ -698,9 +715,9 @@ describe('UI checks pull-request filter', () => {
     'tsconfig.base.json',
     'packages/new-package/src/index.ts',
     'new-directory/file.ts',
-  ])('runs for a pull request that changes %s', (file) => {
-    expect(triggers(paths, [file])).toBe(true)
-    expect(triggers(paths, ['docs/sso.md', file])).toBe(true)
+  ])('includes a pull request that changes %s', (file) => {
+    expect(matchesPaths(paths, [file])).toBe(true)
+    expect(matchesPaths(paths, ['docs/sso.md', file])).toBe(true)
   })
 
   it.each([
@@ -724,15 +741,15 @@ describe('UI checks pull-request filter', () => {
     'Caddyfile',
     'server.json',
     'vitest.config.ts',
-  ])('skips a pull request that changes only %s', (file) => {
-    expect(triggers(paths, [file])).toBe(false)
+  ])('excludes a pull request that changes only %s', (file) => {
+    expect(matchesPaths(paths, [file])).toBe(false)
   })
 
   it('skips nothing that the audited server, web app or fixtures import', () => {
     const imported = readFileSync(join(root, 'tools/e2e/fixture-server.ts'), 'utf8')
     expect(imported).toContain('apps/server')
     for (const file of ['apps/server/src/server.ts', 'apps/server/src/app.ts']) {
-      expect(triggers(paths, [file]), file).toBe(true)
+      expect(matchesPaths(paths, [file]), file).toBe(true)
     }
   })
 })

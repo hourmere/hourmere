@@ -161,9 +161,9 @@ a dotted name without a special-use suffix, may instead have them all public. Th
 public identity provider on a non-default port, such as `idp.example.com:8443`, is reached;
 list it by hostname, since public IP entries are refused. A single-label entry such as
 `keycloak:8443` or `localhost:8443`, or one under `.local`, `.internal`, `.localhost`,
-`.home.arpa`, `.test`, `.example`, `.invalid` or `.onion` such as `idp.internal:8443`,
-accepts only private or loopback answers. So if a search domain or wildcard DNS expands
-such a name to a public address, the request is refused before any connection. Answers that
+`.home.arpa`, `.service.arpa`, `.alt`, `.test`, `.example`, `.invalid` or `.onion`, accepts
+only private or loopback answers. If a search domain or wildcard DNS expands such a name
+to a public address, the request is refused before any connection. Answers that
 mix the two, or include metadata, link-local or other reserved addresses, are refused, and
 the checked address is pinned to the socket. A hostname that is not listed keeps the
 default rules: public addresses only, on port 443 only.
@@ -379,8 +379,9 @@ settings as the web process.
 | `CALDAV_PRIVATE_TARGETS` | Unset | Operator-only private host/port or CIDR/port exceptions, using the same syntax as `WEBHOOK_PRIVATE_TARGETS`. This is a separate allowlist; webhook exceptions do not permit CalDAV traffic. |
 | `CALDAV_ALLOWED_ORIGINS` | Unset | At most 32 comma-separated exact HTTPS origins allowed to receive CalDAV Basic credentials in addition to the submitted server origin. No wildcards, userinfo, paths, queries or fragments. Approve only origins you trust with every affected connection's credentials. |
 
-Public destinations require a DNS hostname and HTTPS port 443. Private exceptions do
-not permit link-local or cloud metadata targets and never disable TLS verification.
+Public destinations follow the [CalDAV hostname policy](/docs/caldav#known-limitations)
+and require HTTPS on port 443. Private exceptions keep TLS verification and block
+link-local and cloud metadata targets.
 An allowed private address does not authorize credentials to cross origins; an allowed
 origin does not bypass address checks. Both policies apply to discovery, sync and writes.
 An iCloud account may require exact shard origins to be approved; no generic Apple-domain

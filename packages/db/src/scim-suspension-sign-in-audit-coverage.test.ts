@@ -1,13 +1,17 @@
 import { randomUUID } from 'node:crypto'
-import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { copyFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type pg from 'pg'
 import { describe, expect, it } from 'vitest'
 import { detailsCheckBranches, latestDetailsCheckMigration } from './audit-details-check-source.ts'
 import { migrationsDir, runMigrations } from './migrate.ts'
 import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
-import { createTestDatabase, type TestDatabase } from './testing.ts'
+import {
+  MIGRATION_COVERAGE_TIMEOUT,
+  MIGRATION_REPLAY_TIMEOUT,
+  useMigrationReplay,
+} from './testing/migration-replay.ts'
+import type { TestDatabase } from './testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const migration = '0171_scim_suspension_sign_in_audit.sql'
@@ -84,58 +88,60 @@ const checkDefinition = async (pool: pg.Pool) =>
   ).rows
 
 describe.skipIf(!serverUrl)('SCIM suspension sign-in audit details', () => {
-  it('fails a redaction assertion when the details check is dropped', async () => {
-    const report = await checkConstraintCoverage({
-      serverUrl: serverUrl as string,
-      migration,
-      assertions: assertSuspensionDetails,
-    })
-    expect(report.problems).toEqual([])
-    expect(report.results.map(({ key, status }) => [key, status])).toEqual([
-      [`constraint public.audit_events.${constraint}`, 'covered'],
-    ])
-  }, 600_000)
+  const replay = useMigrationReplay(serverUrl as string, migration)
 
-  it('preserves a populated audit journal and matches a fresh install on no-op rerun', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'hourmere-scim-sign-in-audit-'))
-    let upgraded: TestDatabase | undefined
-    let fresh: TestDatabase | undefined
-    try {
-      for (const file of await readdir(migrationsDir)) {
-        if (file.endsWith('.sql') && file < migration) {
-          await copyFile(join(migrationsDir, file), join(directory, file))
-        }
-      }
-      upgraded = await createTestDatabase(serverUrl as string, directory, { tag: 'scim_audit_up' })
-      const organizationId = randomUUID()
-      const insert = journalFixture(upgraded.pool, organizationId)
-      await insert(authenticationFailure, { ...details, reason: 'mailbox_unproven' })
-      await insert(jitRefusal, { ...details, reason: 'jit_disabled' })
-      await insert('sso_authentication.succeeded', details)
-      const before = await journalRows(upgraded.pool, organizationId)
-      expect(before).toHaveLength(3)
-      await expect(
-        insert(authenticationFailure, { ...details, reason: suspension }),
-      ).rejects.toMatchObject(refused)
-
-      await copyFile(join(migrationsDir, migration), join(directory, migration))
-      await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([migration])
-      fresh = await createTestDatabase(serverUrl as string, directory, { tag: 'scim_audit_new' })
-      const freshCheck = await checkDefinition(fresh.pool)
-      expect(freshCheck).toEqual([{ definition: expect.any(String), validated: true }])
-      expect(await checkDefinition(upgraded.pool)).toEqual(freshCheck)
-      expect(await journalRows(upgraded.pool, organizationId)).toEqual(before)
-      await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([])
-      await expect(runMigrations(fresh.pool, directory)).resolves.toEqual([])
-      expect(await journalRows(upgraded.pool, organizationId)).toEqual(before)
-      await assertSuspensionDetails(upgraded.pool)
-      await assertSuspensionDetails(fresh.pool)
-    } finally {
-      await Promise.all([
-        upgraded?.drop(),
-        fresh?.drop(),
-        rm(directory, { recursive: true, force: true }),
+  it(
+    'fails a redaction assertion when the details check is dropped',
+    async () => {
+      const report = await checkConstraintCoverage({
+        serverUrl: serverUrl as string,
+        migration,
+        predecessorTemplate: replay.predecessor,
+        assertions: assertSuspensionDetails,
+      })
+      expect(report.problems).toEqual([])
+      expect(report.results.map(({ key, status }) => [key, status])).toEqual([
+        [`constraint public.audit_events.${constraint}`, 'covered'],
       ])
-    }
-  }, 120_000)
+    },
+    MIGRATION_COVERAGE_TIMEOUT,
+  )
+
+  it(
+    'preserves a populated audit journal and matches a fresh install on no-op rerun',
+    async () => {
+      const { directory, predecessor } = replay
+      let upgraded: TestDatabase | undefined
+      let fresh: TestDatabase | undefined
+      try {
+        upgraded = await predecessor.clone(undefined, { migrate: false, tag: 'scim_audit_up' })
+        const organizationId = randomUUID()
+        const insert = journalFixture(upgraded.pool, organizationId)
+        await insert(authenticationFailure, { ...details, reason: 'mailbox_unproven' })
+        await insert(jitRefusal, { ...details, reason: 'jit_disabled' })
+        await insert('sso_authentication.succeeded', details)
+        const before = await journalRows(upgraded.pool, organizationId)
+        expect(before).toHaveLength(3)
+        await expect(
+          insert(authenticationFailure, { ...details, reason: suspension }),
+        ).rejects.toMatchObject(refused)
+
+        await copyFile(join(migrationsDir, migration), join(directory, migration))
+        await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([migration])
+        fresh = await predecessor.clone(directory, { tag: 'scim_audit_new' })
+        const freshCheck = await checkDefinition(fresh.pool)
+        expect(freshCheck).toEqual([{ definition: expect.any(String), validated: true }])
+        expect(await checkDefinition(upgraded.pool)).toEqual(freshCheck)
+        expect(await journalRows(upgraded.pool, organizationId)).toEqual(before)
+        await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([])
+        await expect(runMigrations(fresh.pool, directory)).resolves.toEqual([])
+        expect(await journalRows(upgraded.pool, organizationId)).toEqual(before)
+        await assertSuspensionDetails(upgraded.pool)
+        await assertSuspensionDetails(fresh.pool)
+      } finally {
+        await Promise.all([upgraded?.drop(), fresh?.drop()])
+      }
+    },
+    MIGRATION_REPLAY_TIMEOUT,
+  )
 })

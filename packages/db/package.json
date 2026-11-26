@@ -5,6 +5,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./testing": "./src/testing.ts",
+    "./migration-replay": "./src/testing/migration-replay.ts",
     "./test-database-registry": "./src/test-database-registry.ts",
     "./audit": "./src/audit.ts",
     "./scim-suspension": "./src/scim-suspension.ts",

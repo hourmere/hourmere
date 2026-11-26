@@ -118,7 +118,7 @@ async function verify(step: number, locale: 'en' | 'zh-CN' = 'en') {
     within(proof).getByRole('button', { name: zh ? '发送验证邮件' : 'Send verification email' }),
   )
   const input = await within(proof).findByLabelText(zh ? '邮箱验证链接' : 'Email verification link')
-  expect(document.activeElement).toBe(input)
+  await waitFor(() => expect(document.activeElement).toBe(input))
   await user.paste(
     `${window.location.origin}${PATHS.mailboxProof}#attempt=${attemptId(step)}&token=${TOKEN}`,
   )

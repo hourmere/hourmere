@@ -218,6 +218,32 @@ provider update for them. `cancel`, `reschedule`, `retry-meeting` and
 它们继续占用主持人的时间，仍由原预约系统管理。Hourmere 不为这些记录签发管理链接、发送日历邀请或
 更新外部服务。取消、改期、重试会议和重试日历副本命令均返回 `imported_booking_read_only`。
 
+## Export bookings
+
+`hourmere export --input export.json --output bookings.csv` streams CSV into a new
+0600 file. Omit `--output` to stream CSV to stdout (including pipes); output writes
+apply backpressure. Existing files are refused. A failed download can leave a partial
+file; remove that file before retrying. The command never retries automatically.
+
+Example `export.json`:
+
+```json
+{"from":"2026-11-01T00:00:00Z","to":"2026-12-01T00:00:00Z","timeZone":"America/Los_Angeles","bom":true}
+```
+
+The range is at most 366 days. Optional `status`, `eventTypeId`, `hostUserId`,
+`endAfter`, `endTo` and `order` match export/list filtering. `bom` defaults to false;
+choose true for Excel. Requires a `read` or `full` key and personal ownership or
+team owner/admin permissions. The MCP call returns a small pointer; the CLI streams
+its same-instance authenticated REST download without buffering the CSV in memory.
+Files contain attendee personal data; store and share them privately. See
+[CSV exports](https://hourmere.com/docs/booking-export) for columns and limitations.
+
+With routing forms enabled, set `"includeRoutingAnswers": true` in the JSON input or
+pass `--include-routing-answers true` to add saved routing answers to a personal export.
+Use `false` or omit the option for the standard columns. If routing forms are disabled,
+requesting the extra columns returns `routing_forms_disabled`.
+
 ## Draft open-time email snippets
 
 Save a request such as the following to `snippet-request.json`, using future instants:
@@ -585,33 +611,6 @@ emails do not yet apply the theme.
 ## License
 
 GNU Affero General Public License version 3 only (`AGPL-3.0-only`); see [LICENSE](LICENSE).
-
-### Export bookings
-
-`hourmere export --input export.json --output bookings.csv` streams CSV into a new
-0600 file. Omit `--output` to stream CSV to stdout (including pipes); output writes
-apply backpressure. Existing files are refused. A failed download can leave a partial
-file; remove that file before retrying. The command never retries automatically.
-
-Example `export.json`:
-
-```json
-{"from":"2026-11-01T00:00:00Z","to":"2026-12-01T00:00:00Z","timeZone":"America/Los_Angeles","bom":true}
-```
-
-The range is at most 366 days. Optional `status`, `eventTypeId`, `hostUserId`,
-`endAfter`, `endTo` and `order` match export/list filtering. `bom` defaults to false;
-choose true for Excel. Requires a `read` or `full` key and personal ownership or
-team owner/admin permissions. The MCP call returns a small pointer; the CLI streams
-its same-instance authenticated REST download without buffering the CSV in memory.
-Files contain attendee personal data; store and share them privately. See
-[CSV exports](https://hourmere.com/docs/booking-export) for columns and limitations.
-
-With routing forms enabled, set `"includeRoutingAnswers": true` in the JSON input or
-pass `--include-routing-answers true` to add saved routing answers to a personal export.
-Use `false` or omit the option for the standard columns. If routing forms are disabled,
-requesting the extra columns returns `routing_forms_disabled`.
-
 
 `update_workflow` / `workflows update` requires `full` scope and accepts `id`,
 `expectedRevision` and changed definition fields. REST uses `PATCH /api/v1/workflows/{id}`
