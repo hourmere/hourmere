@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
+import { MIGRATION_COVERAGE_TIMEOUT } from './testing/migration-replay.ts'
 import {
   assertExecutionStorageProtections,
   executionMigration,
@@ -16,16 +17,20 @@ const allowList: Record<string, string> = {
 }
 
 describe.skipIf(!serverUrl)('workflow execution storage constraint coverage', () => {
-  it('fails a protection assertion when any object created by 0079 is dropped', async () => {
-    const report = await checkConstraintCoverage({
-      serverUrl: serverUrl as string,
-      migration: executionMigration,
-      assertions: assertExecutionStorageProtections,
-      allowList,
-    })
-    expect(report.problems).toEqual([])
-    expect(report.results.filter((result) => result.status === 'covered')).toHaveLength(
-      report.objects.length - Object.keys(allowList).length,
-    )
-  }, 600_000)
+  it(
+    'fails a protection assertion when any object created by 0079 is dropped',
+    async () => {
+      const report = await checkConstraintCoverage({
+        serverUrl: serverUrl as string,
+        migration: executionMigration,
+        assertions: assertExecutionStorageProtections,
+        allowList,
+      })
+      expect(report.problems).toEqual([])
+      expect(report.results.filter((result) => result.status === 'covered')).toHaveLength(
+        report.objects.length - Object.keys(allowList).length,
+      )
+    },
+    MIGRATION_COVERAGE_TIMEOUT,
+  )
 })

@@ -2,7 +2,7 @@ import { appendFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type pg from 'pg'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { migrationsDir } from './migrate.ts'
 import {
   copyIdentityPredecessor,
@@ -13,7 +13,10 @@ import {
 import { type IdentityProtection, identityProtections } from './sso-identity-protections.ts'
 import { checkLinkIdentityRace, checkReplayRace } from './sso-identity-races.ts'
 import { inRolledBackTransaction } from './sso-storage-fixtures.ts'
-import { createTestDatabase, type TestDatabase } from './testing.ts'
+import { MIGRATION_REPLAY_TIMEOUT, useMigrationReplay } from './testing/migration-replay.ts'
+import type { TestDatabase } from './testing.ts'
+
+vi.setConfig({ testTimeout: MIGRATION_REPLAY_TIMEOUT, hookTimeout: MIGRATION_REPLAY_TIMEOUT })
 
 const serverUrl = process.env.DATABASE_URL
 // Optional local report of which assertion each mutation failed (one JSON line each).
@@ -24,6 +27,8 @@ const cases = Object.entries(identityProtections).flatMap(([protection, { mutant
 )
 
 describe.skipIf(!serverUrl)('SSO identity storage source-copy mutations', () => {
+  const replay = useMigrationReplay(serverUrl as string, identityMigration)
+
   let directory: string
   let predecessor: TestDatabase
   let source: string
@@ -33,7 +38,7 @@ describe.skipIf(!serverUrl)('SSO identity storage source-copy mutations', () => 
   beforeAll(async () => {
     directory = await mkdtemp(join(tmpdir(), 'hourmere-sso-identity-mutation-'))
     await copyIdentityPredecessor(directory)
-    predecessor = await createTestDatabase(serverUrl as string, directory, {
+    predecessor = await replay.predecessor.clone(directory, {
       tag: 'sso_id_mutation',
     })
     source = await readFile(join(migrationsDir, identityMigration), 'utf8')
@@ -88,7 +93,7 @@ describe.skipIf(!serverUrl)('SSO identity storage source-copy mutations', () => 
     try {
       await copyIdentityPredecessor(mutated)
       await writeFile(join(mutated, identityMigration), `${source}\n${drop}\n`)
-      owned = await createTestDatabase(serverUrl as string, mutated, { tag: 'sso_id_race' })
+      owned = await replay.predecessor.clone(mutated, { tag: 'sso_id_race' })
       await expect(race(owned.pool)).rejects.toMatchObject({ name: 'AssertionError' })
       expect(owned.pool.totalCount).toBeLessThanOrEqual(3)
     } finally {

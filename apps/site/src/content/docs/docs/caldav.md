@@ -107,6 +107,10 @@ reconnection; changing the key alone is not a supported rotation procedure.
   RSVP processing or scheduling inbox/outbox delivery is implemented.
 - Authentication is Basic with a password over verified HTTPS. Other authentication schemes
   and per-connection certificate bypasses are unsupported.
+- Public connections use dotted DNS names and HTTPS on port 443. The public hostname
+  policy excludes `.local`, `.internal`, `.localhost`, `.home.arpa`, `.service.arpa`, `.alt`,
+  `.test`, `.example`, `.invalid` and `.onion`. An eligible private server under one of
+  these suffixes requires an operator exception.
 
 ## 中文：连接与限制
 
@@ -139,3 +143,7 @@ Hourmere 加密保存服务器地址、用户名和密码，只保留忙碌时�
 逐个批准；私有 Nextcloud 地址需要运营者例外设置，仍须验证 TLS 证书。仅使用首个日历
 主目录；服务器须展开重复事件，无法解释的时区或重复规则会使同步失败。暂不支持日历
 创建、共享管理、任务、附件、推送及 RSVP。自托管功能相同，不设托管服务付费门槛。
+
+公网连接使用带点的 DNS 名称和 HTTPS 443 端口。`.local`、`.internal`、`.localhost`、
+`.home.arpa`、`.service.arpa`、`.alt`、`.test`、`.example`、`.invalid` 和 `.onion`
+不适用于公网连接。这些后缀下符合条件的私有服务器需要运营者配置例外。
