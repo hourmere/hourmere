@@ -1004,7 +1004,14 @@ function Confirmation({
                 locale={locale}
               />,
             ],
-            ['Where', <LocationDetails key="where" location={booking.location} />],
+            [
+              'Where',
+              <LocationDetails
+                key="where"
+                location={booking.location}
+                cancelled={booking.status === 'cancelled'}
+              />,
+            ],
           ]}
         />
         <ConferenceNotice

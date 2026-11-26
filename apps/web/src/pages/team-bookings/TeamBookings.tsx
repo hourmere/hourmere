@@ -22,7 +22,7 @@ import { useLoad, useMounted, usePageTitle } from '../../hooks.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import { msg, type UiText } from '../../i18n/translate.ts'
 import { BOOKING } from '../../limits.ts'
-import { PATHS } from '../../paths.ts'
+import { bookingPath, PATHS } from '../../paths.ts'
 import { offsetAt, wallTime } from '../../public/time.ts'
 import { useMe, useSession } from '../../session.tsx'
 import { useTeamManagementAccess } from '../../team-management.tsx'
@@ -920,6 +920,7 @@ function bookingStatus(booking: Booking): 'Rescheduled' | 'Cancelled' | 'Confirm
 
 export function BookingDetail({
   booking,
+  teamsLocation = false,
   timeZone,
   expectedOrganizationId,
   conflict,
@@ -933,6 +934,7 @@ export function BookingDetail({
 }: {
   embedded?: boolean
   booking: Booking
+  teamsLocation?: boolean
   timeZone: string
   expectedOrganizationId: string
   conflict: unknown
@@ -944,6 +946,7 @@ export function BookingDetail({
   onCancelled: (background?: boolean) => void
 }) {
   const { t, formatLocale } = useI18n()
+  const me = useMe()
   const heading = useRef<HTMLHeadingElement>(null)
   const format = zoned(timeZone, formatLocale)
   useEffect(() => {
@@ -991,6 +994,20 @@ export function BookingDetail({
         </dd>
         <dt>{t('Status')}</dt>
         <dd>{t(bookingStatus(booking))}</dd>
+        {teamsLocation && (
+          <>
+            <dt>{t('Location')}</dt>
+            <dd>
+              {t('Microsoft Teams')}
+              {booking.hosts.some((host) => host.userId === me.user.id) && (
+                <>
+                  {' '}
+                  <Link to={bookingPath(booking.id)}>{t('Open host booking details')}</Link>
+                </>
+              )}
+            </dd>
+          </>
+        )}
         {booking.status === 'cancelled' && (
           <>
             <dt>{t(bookingStatus(booking))}</dt>

@@ -166,9 +166,7 @@ function BrandForm({ organizationId, initial }: { organizationId: string; initia
             error.code ?? '',
           )
           ? 'Choose a valid PNG, JPEG or WebP image up to 512 KiB and 2048 × 2048 pixels. SVG and animated images are not supported.'
-          : error instanceof RequestError && error.code === 'invalid_brand_color'
-            ? 'Enter a colour in #RRGGBB format, or leave it empty to clear it.'
-            : errorMessage(error),
+          : errorMessage(error),
       )
     } finally {
       if (mounted.current) setBusy(false)
@@ -204,7 +202,7 @@ function BrandForm({ organizationId, initial }: { organizationId: string; initia
         </Field>
         <p className="hint">
           {t(
-            'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against the white page background is reported separately.',
+            'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against white (#FFFFFF) is reported separately.',
           )}
         </p>
         <Field

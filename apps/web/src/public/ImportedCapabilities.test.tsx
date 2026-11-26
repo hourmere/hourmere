@@ -66,6 +66,7 @@ function sourceCopy<T>(path: string, before: string, after: string): T {
     '../../i18n/formatting.ts': formatting,
     '../../i18n/translate.ts': translate,
     '../../paths.ts': paths,
+    '../../public/BookingDetails.tsx': publicDetails,
     '../../limits.ts': limits,
     '../../text.ts': text,
     '../../unsaved-changes.tsx': unsaved,

@@ -678,6 +678,14 @@ describe('a booking', () => {
     expect(values).toEqual(['Acme', 'الخطة [Pro], צוות', 'Yes', 'Old answer'])
   })
 
+  it('shows the Teams link on the host booking detail', async () => {
+    const url = 'https://teams.microsoft.com/l/meetup-join/fake-meeting/0'
+    bookingServer(booking({ location: { kind: 'microsoft_teams', status: 'ready', url } }))
+    renderApp(`/app/bookings/${BOOKING_ID}`)
+    const link = await screen.findByRole('link', { name: 'Join Microsoft Teams' })
+    expect(link.getAttribute('href')).toBe(url)
+  })
+
   it('shows the date at both ends when the invitee’s local meeting crosses midnight', async () => {
     bookingServer(booking({ start: '2030-03-05T04:45:00.000Z', end: '2030-03-05T05:15:00.000Z' }))
     renderApp(`/app/bookings/${BOOKING_ID}`)
@@ -714,16 +722,18 @@ describe('a booking', () => {
     expect(api.to(`POST /api/v1/bookings/${BOOKING_ID}/cancel`)).toHaveLength(0)
 
     await user.click(within(section).getByRole('button', { name: 'Cancel booking…' }))
-    await user.type(within(section).getByLabelText(/Reason/), 'Sick, sorry.{Enter}Next week?')
+    await user.type(within(section).getByLabelText(/Reason/), 'آسف (Sorry).{Enter}Next week?')
     await user.click(within(section).getByRole('button', { name: 'Cancel booking' }))
 
     const status = await screen.findByText('The booking is cancelled.')
     expect(document.activeElement).toBe(status)
     expect(api.to(`POST /api/v1/bookings/${BOOKING_ID}/cancel`).map((c) => c.body)).toEqual([
-      { reason: 'Sick, sorry.\nNext week?' },
+      { reason: 'آسف (Sorry).\nNext week?' },
     ])
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Intro callCancelled')
-    expect(screen.getByText(/Reason: Sick, sorry\./)).toBeDefined()
+    const firstLine = screen.getByText('آسف (Sorry).')
+    expect(firstLine.tagName).toBe('BDI')
+    expect(firstLine.parentElement?.textContent).toBe('Reason: آسف (Sorry).\nNext week?')
     expect(screen.queryByRole('region', { name: 'Cancel this booking' })).toBeNull()
   })
 
