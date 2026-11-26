@@ -1,14 +1,20 @@
 import { randomUUID } from 'node:crypto'
-import { createDb, type Db } from '@hourmere/db'
+import { createDb, type Db, guardPoolErrors } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs } from '@hourmere/jobs'
-import { cancelHostBooking } from '@hourmere/scheduling'
+import {
+  type BookingNotifier,
+  cancelHostBooking,
+  rescheduleHostBooking,
+} from '@hourmere/scheduling'
+import { createFixtures } from '@hourmere/scheduling/testing'
 import {
   type WorkflowAuditPort,
   type WorkflowAuditRecord,
   workflowAuditPort,
 } from '@hourmere/workflows'
-import { ColumnNode, type QueryId, sql } from 'kysely'
+import { ColumnNode, type QueryId, sql, TableNode } from 'kysely'
+import pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { captureBookingWorkflows } from '../../workflows/src/capture.ts'
 import {
@@ -199,6 +205,73 @@ describe.skipIf(!serverUrl)('workflow webhook delivery fences', () => {
     },
   )
 
+  it('does not let an overlapping worker reuse a fresh marker before the first send', async () => {
+    const fixture = await workflowDeliveryFixture(db, jobs)
+    const began = expiry.subtract({ milliseconds: 1 })
+    fixture.clock.now = began
+    const entered = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    const endpointReads = new WeakSet<QueryId>()
+    let reads = 0
+    const pausedDb = db.withPlugin({
+      transformQuery({ node, queryId }) {
+        if (
+          node.kind === 'SelectQueryNode' &&
+          node.from?.froms.some(
+            (source) => TableNode.is(source) && source.table.identifier.name === 'webhooks',
+          )
+        )
+          endpointReads.add(queryId)
+        return node
+      },
+      async transformResult({ queryId, result }) {
+        if (endpointReads.has(queryId) && ++reads === 2) {
+          entered.resolve()
+          await release.promise
+        }
+        return result
+      },
+    })
+    const receiver = vi.fn(async () => 204)
+    const first = deliverWorkflowWebhook(
+      { db: pausedDb, ...fixture.settings, now: fixture.ctx.now, transport: receiver },
+      fixture.delivery.id,
+      signal(),
+    )
+    let overlap: Promise<unknown> | undefined
+    let overlapError: unknown
+    try {
+      await Promise.race([
+        entered.promise,
+        first.then(() => {
+          throw new Error('Delivery finished before taking its sender lock')
+        }),
+      ])
+      expect(await saved(fixture.delivery.id)).toMatchObject({
+        last_attempt_at: new Date(began.epochMilliseconds),
+        attempts: 0,
+      })
+      fixture.clock.now = expiry
+      overlap = send(fixture, receiver, 2).catch((error: unknown) => {
+        overlapError = error
+      })
+      await expect
+        .poll(() => overlapError, { timeout: 3000 })
+        .toEqual(new Error('Webhook delivery failed'))
+      expect(receiver).not.toHaveBeenCalled()
+    } finally {
+      release.resolve()
+      await Promise.all([first, overlap])
+    }
+    expect(receiver).not.toHaveBeenCalled()
+    expect(await saved(fixture.delivery.id)).toMatchObject({
+      status: 'skipped',
+      last_error: 'expired',
+      last_attempt_at: null,
+      attempts: 0,
+    })
+  })
+
   it('retries a timely delivery past expiry with the original ID for receiver deduplication', async () => {
     const fixture = await workflowDeliveryFixture(db, jobs)
     const accepted = new Map<string, string>()
@@ -348,6 +421,67 @@ describe.skipIf(!serverUrl)('workflow webhook delivery fences', () => {
     },
   )
 
+  it.each(['cancel', 'reschedule'] as const)(
+    'allows a concurrent %s to commit while the receiver is still waiting',
+    async (operation) => {
+      const fixture = await workflowDeliveryFixture(db, jobs)
+      const { bookingId } = fixture
+      const start = fixture.clock.now.add({ hours: 24 })
+      if (operation === 'reschedule')
+        await createFixtures(db).schedule(fixture.ctx.principal.user.id)
+      const entered = Promise.withResolvers<void>()
+      const response = Promise.withResolvers<number>()
+      const receiver = vi.fn(async () => {
+        entered.resolve()
+        return response.promise
+      })
+      const notify: BookingNotifier = async (trx, event, now) => {
+        await captureBookingWorkflows(trx, event, now, 'synthetic-workflow-fixture')
+      }
+      const delivery = send(fixture, receiver)
+      let change: Promise<unknown> | undefined
+      try {
+        await Promise.race([
+          entered.promise,
+          delivery.then(() => {
+            throw new Error('Delivery finished before calling the receiver')
+          }),
+        ])
+        const ctx = { ...fixture.ctx, notify }
+        change =
+          operation === 'cancel'
+            ? cancelHostBooking(ctx, bookingId)
+            : rescheduleHostBooking(ctx, bookingId, { start })
+        const savedBooking = () =>
+          db.selectFrom('bookings').select('status').where('id', '=', bookingId).executeTakeFirst()
+        await expect
+          .poll(async () => (await savedBooking())?.status, { timeout: 3000 })
+          .toBe('cancelled')
+        if (operation === 'reschedule')
+          expect(
+            await db
+              .selectFrom('bookings')
+              .select(['status', 'start_at'])
+              .where('rescheduled_from_id', '=', bookingId)
+              .executeTakeFirst(),
+          ).toEqual({
+            status: 'confirmed',
+            start_at: new Date(start.epochMilliseconds),
+          })
+        expect(await saved(fixture.delivery.id)).toMatchObject({
+          status: 'pending',
+          attempts: 0,
+          last_attempt_at: new Date(fixture.clock.now.epochMilliseconds),
+        })
+      } finally {
+        response.resolve(204)
+        await Promise.all([change, delivery])
+      }
+      expect(receiver).toHaveBeenCalledOnce()
+      expect(await saved(fixture.delivery.id)).toMatchObject({ status: 'delivered', attempts: 1 })
+    },
+  )
+
   it('rechecks workflow eligibility during a post-expiry retry and consumes the pending delivery', async () => {
     const fixture = await workflowDeliveryFixture(db, jobs)
     const audit = await createRecordingWorkflowAudit(db)
@@ -383,6 +517,40 @@ describe.skipIf(!serverUrl)('workflow webhook delivery fences', () => {
         occurredAt: fixture.clock.now,
       },
     ])
+  })
+
+  it('admits and delivers a first workflow attempt with a one-connection worker pool', async () => {
+    const fixture = await workflowDeliveryFixture(db, jobs)
+    const pool = new pg.Pool({
+      connectionString: owned.url,
+      max: 1,
+      connectionTimeoutMillis: 3000,
+    })
+    guardPoolErrors(pool)
+    try {
+      const receiver = vi.fn(async () => 204)
+      const worker = webhookDeliveryJob({
+        db: createDb(pool),
+        ...fixture.settings,
+        workflowsEnabled: true,
+        now: fixture.ctx.now,
+        transport: receiver,
+      })
+      await expect(
+        worker.handler(
+          { deliveryId: fixture.delivery.id },
+          { id: randomUUID(), signal: signal(), attempt: 1 },
+        ),
+      ).resolves.toBeUndefined()
+      expect(receiver).toHaveBeenCalledOnce()
+      expect(await saved(fixture.delivery.id)).toMatchObject({
+        status: 'delivered',
+        attempts: 1,
+        last_attempt_at: new Date(fixture.clock.now.epochMilliseconds),
+      })
+    } finally {
+      await pool.end()
+    }
   })
 
   it('reuses bounded reconciliation for a workflow delivery that lost its queue job', async () => {

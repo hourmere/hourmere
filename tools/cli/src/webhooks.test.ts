@@ -124,9 +124,11 @@ describe('webhook CLI', () => {
     )
     for (const event of [...input.events, 'workflow.executed']) expect(eventList).toContain(event)
     expect(result.stdout).toContain(
-      'Adding workflow.executed on create or update requires WORKFLOWS_ENABLED=true.',
+      'Adding workflow.executed on create or update requires enabled workflows.',
     )
-    expect(result.stdout).toContain('Without it, the server returns workflows_disabled (REST 404).')
+    expect(result.stdout).toContain(
+      'With WORKFLOWS_ENABLED=false, the server returns workflows_disabled (REST 404).',
+    )
     expect(result.stdout).toContain(
       'On create this takes precedence over webhooks_disabled (REST 409).',
     )
