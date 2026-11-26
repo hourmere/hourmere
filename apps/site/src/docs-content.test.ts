@@ -684,15 +684,14 @@ describe('complete public documentation', () => {
     expect(license).toBe('[AGPL-3.0](LICENSE)')
   })
 
-  it('documents the committed legal publication date and fixture build policy', () => {
+  it('documents the committed legal publication date and CI build policy', () => {
     const readme = normalize(read('README.md'))
     const legal = read('apps/site/src/data/legal.ts')
     const date = legal.match(/LEGAL_PUBLICATION_DATE[^=]*=\s*'([^']+)'/)?.[1]
     expect(date).toBe('2026-10-22')
     expect(readme).toContain('2026-10-22')
     expect(readme).toContain('change it only when publishing revised legal text')
-    expect(readme).toContain('CI retains a fixture-date substitution')
-    expect(readme).toContain('with the current committed date, that substitution makes no change')
+    expect(readme).toContain('CI builds the site using the committed date')
     expect(readme).toContain('A placeholder or invalid date stops the site build')
     expect(readme).not.toContain('SET_ON_PUBLICATION_DAY')
     expect(legal).toContain(

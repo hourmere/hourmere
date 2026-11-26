@@ -2,11 +2,19 @@ import { AUDIT_NOW } from '../audit-data.ts'
 import { type AuditPageId, openAuditPage, visualScreenshotOptions } from '../audit-pages.ts'
 import { expect, test } from '../fixtures.ts'
 
-// Linux owns these baselines. workflow_dispatch generates them for review; this task
-// deliberately adds no PNGs. Project names distinguish 1280px and 390px captures.
+// Linux generates these baselines for review. Project names distinguish desktop and phone.
+const bookingStates = [
+  'booking', // Icon alignment, shared type scale and the full-width phone layout.
+  'booking-time-zone', // Globe alignment and the type scale inside the expanded zone picker.
+  'booking-form', // The phone confirmation bar and the form's shared type scale.
+  'booking-confirmation', // The same type scale on the completed booking.
+  'team-booking', // Shared metadata beside the long team name.
+  'embedded-booking', // Shared metadata and typography within the embedded frame.
+] as const satisfies readonly AuditPageId[]
+
 const states = [
   'host',
-  'booking',
+  ...bookingStates,
   'manage',
   'manage-reschedule',
   'sign-in',
@@ -33,7 +41,7 @@ for (const theme of ['light', 'dark'] as const)
 // Chinese text wrapping is represented alongside the full English state set.
 for (const theme of ['light', 'dark'] as const)
   for (const id of [
-    'booking',
+    ...bookingStates,
     'event-type-editor',
     'bookings',
     'admin-account-menu',
