@@ -82,6 +82,7 @@ export interface ServiceDeps extends RecurringBookingAdmissionDeps {
   scimResourcesEnabled?: ServiceContext['scimResourcesEnabled']
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
+  microsoftCalendarEnabled?: boolean | undefined
   /** The clock; defaults to the real one. */
   now?: () => Temporal.Instant
 }
@@ -93,6 +94,7 @@ export function serviceContext(
     now = () => Temporal.Now.instant(),
     automaticMeet,
     automaticZoom,
+    microsoftCalendarEnabled,
     successRedirectPolicy,
     smsRemindersAvailable,
     paidBookingAvailability,
@@ -108,6 +110,7 @@ export function serviceContext(
     now,
     automaticMeet,
     automaticZoom,
+    microsoftCalendarEnabled,
     successRedirectPolicy,
     smsRemindersAvailable,
     paidBookingAvailability,

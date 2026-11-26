@@ -238,6 +238,7 @@ Event settings: create-event/update-event use JSON durationMinutes and allowedDu
                 minimumNoticeMinutes: 0–525600; bufferBeforeMinutes/bufferAfterMinutes: 0–1440,
                 all whole minutes. bookingWindowDays: 1–3650 whole calendar days or null (unlimited).
 Locations: create-event/update-event accept locations through JSON; slots/book accept locationOptionId.
+Use microsoft_teams for one host with a writable Microsoft calendar selected for booking events.
            book also accepts inviteePhone (normalized E.164). Reschedule preserves the choice.
 Booking limits: JSON maxBookingsPerDay, maxBookingsPerWeek, maxBookingsPerMonth;
                 integers 1–1000 or null. Set ceilings must not descend from day to week to month.

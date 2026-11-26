@@ -4,11 +4,33 @@ import type { MessageKey } from '../../i18n/translate.ts'
 export type SsoProvider = Schemas['SsoProviderPage']['data'][number]
 export type SsoDomain = SsoProvider['domains'][number]
 
-export function oidcStepUpProviders(sso: Schemas['MeSso'] | undefined) {
+type ProtocolAvailability = {
+  ssoOidcEnabled: boolean | undefined
+  ssoSamlEnabled: boolean | undefined
+}
+
+export function ssoStepUpProviders(
+  sso: Schemas['MeSso'] | undefined,
+  availability: ProtocolAvailability | null,
+) {
   const linked = new Set(
-    sso?.links.filter(({ protocol }) => protocol !== 'saml').map(({ providerId }) => providerId),
+    sso?.links
+      .filter(({ protocol }) =>
+        protocol === 'saml'
+          ? availability?.ssoSamlEnabled === true
+          : availability?.ssoOidcEnabled === true,
+      )
+      .map(({ providerId }) => providerId),
   )
-  return sso?.providers.filter(({ id }) => linked.has(id)) ?? []
+  return (
+    sso?.providers.filter(
+      ({ id, protocol }) =>
+        linked.has(id) &&
+        (protocol === 'saml'
+          ? availability?.ssoSamlEnabled === true
+          : availability?.ssoOidcEnabled === true),
+    ) ?? []
+  )
 }
 
 export async function loadSsoProviders(organizationId: string, signal: AbortSignal) {

@@ -463,9 +463,8 @@ async function verifySwitchedSecret({ K, V }: Modules) {
 }
 
 /**
- * The startup check that the transport step will call. Without keyed data a different secret
- * is recorded; with any keyed data (a voter row or a removal tombstone) it is refused and
- * nothing changes.
+ * Startup records a different secret while no keyed data exists. A voter row or mailbox
+ * counter, including one without a removal tombstone, makes startup refuse and write nothing.
  */
 async function verifyStartupCheck({ K, V }: Modules) {
   await scenario(async (db) => {
@@ -497,6 +496,17 @@ async function verifyStartupCheck({ K, V }: Modules) {
       })
       .execute()
     await refused('a removal tombstone only')
+    // A mailbox can retain its mail budget after its voter row is gone.
+    await db
+      .updateTable('meeting_poll_mailbox_counters')
+      .set({
+        removed_at: null,
+        recovery_count: 1,
+        last_recovery_at: sql<string>`clock_timestamp()`,
+      })
+      .where('poll_id', '=', p.pollId)
+      .execute()
+    await refused('a mail recovery count only')
     // No keyed data is left (the poll stays): the other secret is recorded again.
     await db.deleteFrom('meeting_poll_mailbox_counters').execute()
     await succeeds(() => start(K, db, A))
@@ -1069,6 +1079,18 @@ describe.skipIf(!serverUrl)('meeting poll key fence', { timeout: 60_000 }, () =>
       'the fence ignores removal tombstones',
       verifyStartupCheck,
       { key: [['\n      OR EXISTS (SELECT FROM meeting_poll_mailbox_counters)', '']] },
+    ],
+    [
+      'the fence counts only mailbox removal tombstones',
+      verifyStartupCheck,
+      {
+        key: [
+          [
+            'OR EXISTS (SELECT FROM meeting_poll_mailbox_counters)',
+            'OR EXISTS (SELECT FROM meeting_poll_mailbox_counters WHERE removed_at IS NOT NULL)',
+          ],
+        ],
+      },
     ],
     [
       'the fingerprint ignores letter case',

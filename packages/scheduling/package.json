@@ -15,6 +15,7 @@
     "./routing-form-targets": "./src/routing-form-targets.ts",
     "./sealed-secret": "./src/sealed-secret.ts",
     "./series-confirmation": "./src/series-confirmation.ts",
+    "./teams-meeting-locations": "./src/teams-meeting-locations.ts",
     "./testing": "./src/testing.ts",
     "./conference-url": "./src/conference-url.ts"
   },

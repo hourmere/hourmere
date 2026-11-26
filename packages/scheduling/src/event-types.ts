@@ -53,6 +53,7 @@ import {
   locationOptionsFromLegacy,
   validateLocationOptions,
 } from './location-options.ts'
+import { hasMicrosoftTeamsDestination, microsoftTeamsLocation } from './microsoft-teams.ts'
 import {
   type NotificationSettings,
   parseNotifications,
@@ -1389,6 +1390,9 @@ function validLocation(value: unknown): LocationSettings | null {
       if (value.autoCreate !== undefined && value.autoCreate !== true)
         return fail('autoCreate must be true when specified')
       return value.autoCreate === true ? { kind, autoCreate: true } : { kind }
+    case 'microsoft_teams':
+      expect([])
+      return { kind }
     case 'phone': {
       expect(['number', 'askInvitee'])
       if (value.askInvitee !== undefined)
@@ -1688,6 +1692,24 @@ async function validateConference(
       'invalid_conference_organizer',
       'Choose an organizer from the required hosts.',
     )
+  if (locations?.some(microsoftTeamsLocation)) {
+    const [host] = hosts
+    if (mode !== 'individual' || !host || hosts.length !== 1)
+      throw new DomainError(
+        'invalid',
+        'microsoft_teams_host_policy',
+        'Microsoft Teams requires individual scheduling with one host.',
+      )
+    if (
+      !ctx.microsoftCalendarEnabled ||
+      !(await hasMicrosoftTeamsDestination(db, host, eventTypeId))
+    )
+      throw new DomainError(
+        'conflict',
+        'microsoft_teams_calendar_unavailable',
+        'The host needs a connected Microsoft calendar selected for booking writeback.',
+      )
+  }
   if (locations?.some(automaticZoom)) {
     if (mode !== 'individual' || hosts.length !== 1)
       throw new DomainError(

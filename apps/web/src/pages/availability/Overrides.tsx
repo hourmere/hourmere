@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { Field, type FieldErrors } from '../../components/forms.tsx'
-import { isKnownTimeZone } from '../../format.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
-import { msg, type UiText } from '../../i18n/translate.ts'
+import { dateMessage, literal, msg, type UiText } from '../../i18n/translate.ts'
 import { IntervalsEditor } from './IntervalsEditor.tsx'
 import {
   type IntervalDraft,
   intervalDraft,
   intervalField,
+  scheduleTimeZoneLabel,
   todayIn,
   toIntervals,
   validateIntervals,
@@ -35,6 +35,12 @@ export const overridesBody = (drafts: OverrideDraft[]) =>
     .sort((a, b) => a.date.localeCompare(b.date))
 export const comparableOverrides = (drafts: OverrideDraft[]) =>
   JSON.stringify(overridesBody(drafts))
+
+function overrideDateText(date: string) {
+  // Keep invalid drafts, including years beyond four digits, renderable for validation.
+  return Number.isNaN(Date.parse(`${date}T00:00:00Z`)) ? literal(date) : dateMessage(date)
+}
+
 export function overrideErrors(drafts: OverrideDraft[]): FieldErrors {
   const errors: FieldErrors = {}
   const dates = new Set<string>()
@@ -57,11 +63,19 @@ export function overrideLabels(drafts: OverrideDraft[]): Record<string, UiText> 
   const labels: Record<string, UiText> = {}
   for (const d of drafts) {
     const prefix = `override-${d.key}`
-    labels[`${prefix}-date`] = 'Date'
-    labels[prefix] = 'Hours'
+    const date = d.date ? overrideDateText(d.date) : undefined
+    const label = date ?? msg('That date')
+    labels[`${prefix}-date`] = date ?? 'Date'
+    labels[prefix] = date ?? 'Hours'
     d.intervals.forEach((i, n) => {
-      labels[intervalField(prefix, i, 'start')] = msg('Hours {0}, from', { '0': n + 1 })
-      labels[intervalField(prefix, i, 'end')] = msg('Hours {0}, until', { '0': n + 1 })
+      labels[intervalField(prefix, i, 'start')] = msg('{label}, hours {count}, from', {
+        label,
+        count: n + 1,
+      })
+      labels[intervalField(prefix, i, 'end')] = msg('{label}, hours {count}, until', {
+        label,
+        count: n + 1,
+      })
     })
   }
   return labels
@@ -79,35 +93,15 @@ export function Overrides({
   errors: FieldErrors
   timeZone: string
 }) {
-  const { t, formatLocale } = useI18n()
-  const zoneLabel = isKnownTimeZone(timeZone)
-    ? (new Intl.DateTimeFormat(formatLocale, {
-        timeZone,
-        timeZoneName: 'longGeneric',
-      })
-        .formatToParts()
-        .find((part) => part.type === 'timeZoneName')?.value ?? timeZone.replaceAll('_', ' '))
-    : timeZone.replaceAll('_', ' ')
+  const { t, ui, locale } = useI18n()
+  const zoneLabel = scheduleTimeZoneLabel(timeZone, locale)
   const today = todayIn(timeZone)
   const isPast = (d: OverrideDraft) => !!d.originalDate && d.originalDate < today
   const past = drafts.filter(isPast)
   const upcoming = drafts
     .filter((d) => !isPast(d))
     .sort((a, b) => a.originalDate.localeCompare(b.originalDate))
-  const dateLabel = (date: string) => {
-    const parsed = new Date(`${date}T00:00:00Z`)
-    // Native date inputs can supply years beyond the supported four-digit range.
-    // Keep the draft renderable so ordinary field validation can explain the error.
-    if (Number.isNaN(parsed.getTime())) return date
-    return new Intl.DateTimeFormat(formatLocale, {
-      weekday: 'short',
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      timeZone: 'UTC',
-      calendar: 'gregory',
-    }).format(parsed)
-  }
+  const dateLabel = (date: string) => ui(overrideDateText(date))
   const [focus, setFocus] = useState<string | null>(null)
   const add = useRef<HTMLButtonElement>(null)
   useEffect(() => {

@@ -44,6 +44,14 @@ const viewer: Schemas['Me'] = {
   },
 }
 const withoutSso = { ...ME, organization: team }
+const samlViewer: Schemas['Me'] = {
+  ...viewer,
+  sso: viewer.sso && {
+    ...viewer.sso,
+    providers: [{ ...provider, protocol: 'saml' }],
+    links: viewer.sso.links.map((link) => ({ ...link, protocol: 'saml' })),
+  },
+}
 const key: ApiKey = {
   id: '00000000-0000-7000-8000-0000000000d4',
   name: 'Team scanner',
@@ -103,29 +111,45 @@ function showCredentials(path: string, routes: Routes, me = viewer) {
 
 describe('SSO credential delegation', () => {
   it.each([
-    { path: PATHS.apiKeys, kind: 'api_key', credentialId: key.id },
-    { path: PATHS.connectedApps, kind: 'oauth_grant', credentialId: connection.credentialId },
+    { path: PATHS.apiKeys, kind: 'api_key', credentialId: key.id, saml: false },
+    {
+      path: PATHS.connectedApps,
+      kind: 'oauth_grant',
+      credentialId: connection.credentialId,
+      saml: false,
+    },
+    { path: PATHS.apiKeys, kind: 'api_key', credentialId: key.id, saml: true },
   ])(
-    'binds the exact $kind credential after an explicit verification retry',
+    'binds the exact $kind credential after an explicit verification retry (SAML $saml)',
     async (credential) => {
       let ssoDelegation: typeof binding | undefined
-      const { requests, user } = showCredentials(credential.path, {
-        [getKeys]: () => json(200, { apiKeys: [{ ...key, ssoDelegation }, personalKey], total: 2 }),
-        [getConnections]: () => json(200, { data: [{ ...connection, ssoDelegation }] }),
-        [getPolicy]: () => json(200, policy),
-        [bind]: ({ body }) => {
-          if (!(body as { proofAttemptId?: string }).proofAttemptId)
-            return json(403, {
-              error: 'sso_reauthentication_required',
-              attemptId,
-              expiresAt: new Date(Date.now() + 60_000).toISOString(),
-              proofMethods: ['sso'],
-            })
-          ssoDelegation = binding
-          return json(201, binding)
+      const { requests, user } = showCredentials(
+        credential.path,
+        {
+          'GET /api/v1/instance': () =>
+            json(200, {
+              ssoOidcEnabled: !credential.saml,
+              ssoSamlEnabled: credential.saml,
+            }),
+          [getKeys]: () =>
+            json(200, { apiKeys: [{ ...key, ssoDelegation }, personalKey], total: 2 }),
+          [getConnections]: () => json(200, { data: [{ ...connection, ssoDelegation }] }),
+          [getPolicy]: () => json(200, policy),
+          [bind]: ({ body }) => {
+            if (!(body as { proofAttemptId?: string }).proofAttemptId)
+              return json(403, {
+                error: 'sso_reauthentication_required',
+                attemptId,
+                expiresAt: new Date(Date.now() + 60_000).toISOString(),
+                proofMethods: ['sso'],
+              })
+            ssoDelegation = binding
+            return json(201, binding)
+          },
+          [stepUp]: () => json(200, { url: providerUrl, redirect: true }),
         },
-        [stepUp]: () => json(200, { url: providerUrl, redirect: true }),
-      })
+        credential.saml ? samlViewer : viewer,
+      )
 
       const section = within(await screen.findByRole('region', { name: 'SSO delegation' }))
       const choices = section.getByLabelText<HTMLSelectElement>('Credential')

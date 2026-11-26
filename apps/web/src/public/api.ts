@@ -81,6 +81,11 @@ async function call<T>(
 
 /** What to tell people about a failed request on a public page. */
 export function failureMessage(err: unknown): UiText {
+  if (
+    codeOf(err) === 'microsoft_teams_calendar_unavailable' ||
+    codeOf(err) === 'microsoft_teams_host_policy'
+  )
+    return 'This location is unavailable. Contact the host to book.'
   if (err instanceof PublicRequestError && err.status === 429) {
     return err.retryAfter
       ? msg('Too many requests from your network. Try again in {duration}.', {
