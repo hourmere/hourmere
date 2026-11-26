@@ -1,12 +1,15 @@
-import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { copyFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type pg from 'pg'
 import { describe, expect, it } from 'vitest'
-import { createPool } from './index.ts'
 import { migrationsDir, runMigrations } from './migrate.ts'
 import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
-import { createTestDatabase, type TestDatabase } from './testing.ts'
+import {
+  MIGRATION_COVERAGE_TIMEOUT,
+  MIGRATION_REPLAY_TIMEOUT,
+  useMigrationReplay,
+} from './testing/migration-replay.ts'
+import type { TestDatabase } from './testing.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -138,67 +141,55 @@ async function originalRows(pool: pg.Pool) {
 }
 
 describe.skipIf(!serverUrl)('Microsoft calendar writeback migration', () => {
-  it('fails an assertion when either due-work index is dropped', async () => {
-    const report = await checkConstraintCoverage({
-      serverUrl: serverUrl as string,
-      migration,
-      assertions: assertDispatchIndexes,
-    })
-    expect(report.problems).toEqual([])
-    expect(report.results.map(({ status }) => status)).toEqual(['covered', 'covered'])
-  })
+  const replay = useMigrationReplay(serverUrl as string, migration)
 
-  it('preserves historical destinations and mirrors, matches a fresh schema, and reruns as a no-op', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'hourmere-graph-writeback-'))
-    let upgraded: TestDatabase | undefined
-    let fresh: TestDatabase | undefined
-    try {
-      for (const file of await readdir(migrationsDir)) {
-        if (file.endsWith('.sql') && file < migration)
-          await copyFile(join(migrationsDir, file), join(directory, file))
-      }
-      fresh = await createTestDatabase(serverUrl as string, undefined, {
-        migrate: false,
-        tag: 'graph_write_new',
+  it(
+    'fails an assertion when either due-work index is dropped',
+    async () => {
+      const report = await checkConstraintCoverage({
+        serverUrl: serverUrl as string,
+        migration,
+        predecessorTemplate: replay.predecessor,
+        assertions: assertDispatchIndexes,
       })
-      // Replay the common history on the empty reference. Close the setup pool before
-      // cloning it, since PostgreSQL requires the template database to have no connections.
-      const predecessorPool = createPool(fresh.url)
+      expect(report.problems).toEqual([])
+      expect(report.results.map(({ status }) => status)).toEqual(['covered', 'covered'])
+    },
+    MIGRATION_COVERAGE_TIMEOUT,
+  )
+
+  it(
+    'preserves historical destinations and mirrors, matches a fresh schema, and reruns as a no-op',
+    async () => {
+      const { directory, predecessor } = replay
+      let upgraded: TestDatabase | undefined
+      let fresh: TestDatabase | undefined
       try {
-        await runMigrations(predecessorPool, directory)
-      } finally {
-        await predecessorPool.end()
-      }
-      upgraded = await createTestDatabase(serverUrl as string, undefined, {
-        migrate: false,
-        tag: 'graph_write_up',
-        template: new URL(fresh.url).pathname.slice(1),
-      })
-      await seedPredecessor(upgraded.pool)
-      const before = await originalRows(upgraded.pool)
-      expect(before).toHaveLength(8)
+        upgraded = await predecessor.clone(undefined, { migrate: false, tag: 'graph_write_up' })
+        await seedPredecessor(upgraded.pool)
+        const before = await originalRows(upgraded.pool)
+        expect(before).toHaveLength(8)
 
-      await copyFile(join(migrationsDir, migration), join(directory, migration))
-      await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([migration])
-      expect(await originalRows(upgraded.pool)).toEqual(before)
-      await expect(
-        upgraded.pool.query(`SELECT microsoft_writeback FROM booking_calendar_targets
+        await copyFile(join(migrationsDir, migration), join(directory, migration))
+        await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([migration])
+        expect(await originalRows(upgraded.pool)).toEqual(before)
+        await expect(
+          upgraded.pool.query(`SELECT microsoft_writeback FROM booking_calendar_targets
           UNION ALL SELECT microsoft_writeback FROM group_slots`),
-      ).resolves.toMatchObject({
-        rows: [{ microsoft_writeback: null }, { microsoft_writeback: null }],
-      })
+        ).resolves.toMatchObject({
+          rows: [{ microsoft_writeback: null }, { microsoft_writeback: null }],
+        })
 
-      await expect(runMigrations(fresh.pool, directory)).resolves.toEqual([migration])
-      expect(await snapshotSchema(upgraded.pool)).toEqual(await snapshotSchema(fresh.pool))
-      await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([])
-      await expect(runMigrations(fresh.pool, directory)).resolves.toEqual([])
-      expect(await originalRows(upgraded.pool)).toEqual(before)
-    } finally {
-      try {
-        await Promise.all([upgraded?.drop(), fresh?.drop()])
+        fresh = await predecessor.clone(undefined, { migrate: false, tag: 'graph_write_new' })
+        await expect(runMigrations(fresh.pool, directory)).resolves.toEqual([migration])
+        expect(await snapshotSchema(upgraded.pool)).toEqual(await snapshotSchema(fresh.pool))
+        await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([])
+        await expect(runMigrations(fresh.pool, directory)).resolves.toEqual([])
+        expect(await originalRows(upgraded.pool)).toEqual(before)
       } finally {
-        await rm(directory, { recursive: true, force: true })
+        await Promise.all([upgraded?.drop(), fresh?.drop()])
       }
-    }
-  }, 120_000)
+    },
+    MIGRATION_REPLAY_TIMEOUT,
+  )
 })

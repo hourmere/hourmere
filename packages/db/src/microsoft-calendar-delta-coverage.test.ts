@@ -1,16 +1,16 @@
 import { randomUUID } from 'node:crypto'
-import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { copyFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type pg from 'pg'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { migrationsDir, runMigrations } from './migrate.ts'
 import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
 import {
-  createTestDatabaseTemplate,
-  type TestDatabase,
-  type TestDatabaseTemplate,
-} from './testing.ts'
+  MIGRATION_COVERAGE_TIMEOUT,
+  MIGRATION_REPLAY_TIMEOUT,
+  useMigrationReplay,
+} from './testing/migration-replay.ts'
+import type { TestDatabase } from './testing.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -145,85 +145,66 @@ async function originalRows(pool: pg.Pool) {
 }
 
 describe.skipIf(!serverUrl)('Microsoft calendar delta migration', () => {
-  let directory: string
-  let predecessor: TestDatabaseTemplate
+  const replay = useMigrationReplay(serverUrl as string, migration)
 
-  beforeAll(async () => {
-    directory = await mkdtemp(join(tmpdir(), 'hourmere-graph-delta-'))
-    const files = await readdir(migrationsDir)
-    await Promise.all(
-      files
-        .filter((file) => file.endsWith('.sql') && file < migration)
-        .map((file) => copyFile(join(migrationsDir, file), join(directory, file))),
-    )
-    // Replay the common history once. The coverage and upgrade checks take independent
-    // copies before recording catalog changes or seeding any calendar rows.
-    predecessor = await createTestDatabaseTemplate(
-      serverUrl as string,
-      async (pool) => {
-        await runMigrations(pool, directory)
-      },
-      { tag: 'graph_delta_prev' },
-    )
-  })
+  it(
+    'fails an assertion when any new protection is dropped',
+    async () => {
+      const report = await checkConstraintCoverage({
+        serverUrl: serverUrl as string,
+        migration,
+        assertions: assertDeltaProtections,
+        predecessorTemplate: replay.predecessor,
+      })
+      expect(report.problems).toEqual([])
+      expect(report.results.map(({ status }) => status)).toEqual(Array(7).fill('covered'))
+    },
+    MIGRATION_COVERAGE_TIMEOUT,
+  )
 
-  afterAll(async () => {
-    try {
-      await predecessor?.drop()
-    } finally {
-      if (directory) await rm(directory, { recursive: true, force: true })
-    }
-  })
-
-  it('fails an assertion when any new protection is dropped', async () => {
-    const report = await checkConstraintCoverage({
-      serverUrl: serverUrl as string,
-      migration,
-      assertions: assertDeltaProtections,
-      predecessorTemplate: predecessor,
-    })
-    expect(report.problems).toEqual([])
-    expect(report.results.map(({ status }) => status)).toEqual(Array(7).fill('covered'))
-  })
-
-  it('preserves busy snapshots and settings, matches a fresh schema, and reruns as a no-op', async () => {
-    let upgraded: TestDatabase | undefined
-    let fresh: TestDatabase | undefined
-    try {
-      upgraded = await predecessor.clone(undefined, { migrate: false, tag: 'graph_delta_up' })
-      await seedCalendars(upgraded.pool)
-      await upgraded.pool.query(
-        `INSERT INTO calendar_busy (calendar_id, external_event_id, period, all_day_start, all_day_end) VALUES
+  it(
+    'preserves busy snapshots and settings, matches a fresh schema, and reruns as a no-op',
+    async () => {
+      const { directory, predecessor } = replay
+      let upgraded: TestDatabase | undefined
+      let fresh: TestDatabase | undefined
+      try {
+        upgraded = await predecessor.clone(undefined, { migrate: false, tag: 'graph_delta_up' })
+        await seedCalendars(upgraded.pool)
+        await upgraded.pool.query(
+          `INSERT INTO calendar_busy (calendar_id, external_event_id, period, all_day_start, all_day_end) VALUES
           ($1, 'legacy-graph-event', '[2026-10-23T15:00:00.123456Z,2026-10-23T16:00:00Z)', NULL, NULL),
           ($1, 'legacy-graph-all-day', '[2026-11-01T07:00:00Z,2026-11-02T08:00:00Z)', NULL, NULL),
           ($2, 'google-floating-date', NULL, '2026-10-23', '2026-10-24')`,
-        [graphCalendar, googleCalendar],
-      )
-      const before = await originalRows(upgraded.pool)
-      expect(before.calendars).toHaveLength(3)
-      expect(before.busy).toHaveLength(3)
+          [graphCalendar, googleCalendar],
+        )
+        const before = await originalRows(upgraded.pool)
+        expect(before.calendars).toHaveLength(3)
+        expect(before.busy).toHaveLength(3)
 
-      await copyFile(join(migrationsDir, migration), join(directory, migration))
-      await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([migration])
-      expect(await originalRows(upgraded.pool)).toEqual(before)
-      await expect(
-        upgraded.pool.query('SELECT * FROM calendar_microsoft_changes'),
-      ).resolves.toMatchObject({ rows: [] })
-      await expect(
-        upgraded.pool.query(
-          `SELECT external_event_id FROM calendar_busy
+        await copyFile(join(migrationsDir, migration), join(directory, migration))
+        await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([migration])
+        expect(await originalRows(upgraded.pool)).toEqual(before)
+        await expect(
+          upgraded.pool.query('SELECT * FROM calendar_microsoft_changes'),
+        ).resolves.toMatchObject({ rows: [] })
+        await expect(
+          upgraded.pool.query(
+            `SELECT external_event_id FROM calendar_busy
           WHERE microsoft_series_id IS NOT NULL OR microsoft_original_start IS NOT NULL`,
-        ),
-      ).resolves.toMatchObject({ rows: [] })
+          ),
+        ).resolves.toMatchObject({ rows: [] })
 
-      fresh = await predecessor.clone(undefined, { migrate: false, tag: 'graph_delta_new' })
-      await expect(runMigrations(fresh.pool, directory)).resolves.toEqual([migration])
-      expect(await snapshotSchema(upgraded.pool)).toEqual(await snapshotSchema(fresh.pool))
-      await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([])
-      await expect(runMigrations(fresh.pool, directory)).resolves.toEqual([])
-      expect(await originalRows(upgraded.pool)).toEqual(before)
-    } finally {
-      await Promise.all([upgraded?.drop(), fresh?.drop()])
-    }
-  })
+        fresh = await predecessor.clone(undefined, { migrate: false, tag: 'graph_delta_new' })
+        await expect(runMigrations(fresh.pool, directory)).resolves.toEqual([migration])
+        expect(await snapshotSchema(upgraded.pool)).toEqual(await snapshotSchema(fresh.pool))
+        await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([])
+        await expect(runMigrations(fresh.pool, directory)).resolves.toEqual([])
+        expect(await originalRows(upgraded.pool)).toEqual(before)
+      } finally {
+        await Promise.all([upgraded?.drop(), fresh?.drop()])
+      }
+    },
+    MIGRATION_REPLAY_TIMEOUT,
+  )
 })
