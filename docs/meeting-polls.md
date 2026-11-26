@@ -428,15 +428,23 @@ voter services take the fence.
 
 Operators must keep the meeting-poll secret stable and back it up with the instance's other
 secrets. If it changes while keyed data exists, the startup check and every voter operation
-fail closed with `MeetingPollKeyMismatchError` until the operator either:
+fail closed with `MeetingPollKeyMismatchError`. With keyed data present, a missing fingerprint
+causes the same refusal. Choose the recovery procedure that matches the key state:
 
-1. restores the previous secret. Nothing was written under the new one, so service resumes
-   unchanged; this is the only way to keep rosters, ballots, tombstones and counters; or
-2. invalidates the old data when the previous secret is lost or must be retired, for example
-   after a leak: delete every meeting poll that has voters or mailbox counters (deleting an
-   organization deletes its polls). Once no voter row or mailbox counter remains, the next
-   start records the new secret. Those polls' rosters, ballots, tombstones, mail counters and
-   queued credential mail are gone; polls without voters stay.
+1. **The fingerprint is present and the original secret is available.** Restore that secret
+   on every process. Service resumes with the existing poll data.
+2. **The fingerprint is missing and the original secret is available.** With all Hourmere
+   processes stopped, retrieve the fingerprint from a backup taken while that secret was
+   in use, or derive it locally from the original secret using `fingerprintOf` in
+   `packages/scheduling/src/meeting-poll-key.ts`. Insert the missing row in
+   `meeting_poll_key_state` with `singleton = true` and the 32-byte fingerprint in
+   `secret_fingerprint`. Restart with the original secret. This preserves rosters, ballots,
+   tombstones, mail counters and queued credential mail.
+3. **The original secret is lost or must be retired.** Delete every meeting poll that has
+   voters or mailbox counters (deleting an organization deletes its polls). Once no voter
+   row or mailbox counter remains, the next start records the new secret. Those polls'
+   rosters, ballots, tombstones, mail counters and queued credential mail are gone. Polls
+   without voters or counters stay.
 
 The [operator recovery procedure](https://hourmere.com/docs/self-hosting#meeting-poll-credentials-and-recovery)
 covers the shutdown, backup and coordinated restart. There is no dedicated invalidation command.

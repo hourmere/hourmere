@@ -4,8 +4,9 @@ import { copyFile, mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { setTimeout } from 'node:timers/promises'
+import { Kysely, PostgresDialect } from 'kysely'
 import pg from 'pg'
-import { createPool, guardPoolErrors } from './index.ts'
+import { createPool, type Database, type Db, guardPoolErrors } from './index.ts'
 import { migrationsDir, runMigrations } from './migrate.ts'
 import {
   MIGRATED_TEMPLATE_ENV,
@@ -16,6 +17,37 @@ import {
 } from './test-database-registry.ts'
 
 export { cleanupTestDatabases } from './test-database-registry.ts'
+
+/**
+ * Runs Kysely statements on a checked-out client. The caller owns the connection and any
+ * open transaction, so the callback must not open another transaction or release the client.
+ */
+export async function withBorrowedConnection<T>(
+  client: pg.PoolClient,
+  run: (db: Db) => Promise<T>,
+): Promise<T> {
+  const db = new Kysely<Database>({
+    dialect: new PostgresDialect({
+      pool: {
+        options: {},
+        connect: async () =>
+          new Proxy(client, {
+            get(target, property) {
+              if (property === 'release') return () => {}
+              const value = Reflect.get(target, property)
+              return typeof value === 'function' ? value.bind(target) : value
+            },
+          }),
+        end: async () => {},
+      },
+    }),
+  })
+  try {
+    return await run(db)
+  } finally {
+    await db.destroy()
+  }
+}
 
 /**
  * Runs `fn` outside any native auth transaction the caller is in, for a test's simulated
