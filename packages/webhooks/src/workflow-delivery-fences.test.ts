@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { createDb, type Db, guardPoolErrors } from '@hourmere/db'
+import { createDb, type Database, type Db, guardPoolErrors } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs } from '@hourmere/jobs'
 import {
@@ -13,7 +13,7 @@ import {
   type WorkflowAuditRecord,
   workflowAuditPort,
 } from '@hourmere/workflows'
-import { ColumnNode, type QueryId, sql, TableNode } from 'kysely'
+import { ColumnNode, Kysely, PostgresDialect, type QueryId, sql, TableNode } from 'kysely'
 import pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { captureBookingWorkflows } from '../../workflows/src/capture.ts'
@@ -30,6 +30,7 @@ import {
   webhookCleanupJob,
   webhookDeliveryJob,
 } from './delivery.ts'
+import { updateWebhook } from './service.ts'
 import type { WebhookRequest, WebhookTransport } from './transport.ts'
 import { workflowDeliveryDueAt, workflowDeliveryFixture } from './workflow-delivery-fixture.ts'
 
@@ -272,6 +273,63 @@ describe.skipIf(!serverUrl)('workflow webhook delivery fences', () => {
     })
   })
 
+  it.each(['endpoint pause', 'event removal', 'event-type filter change'] as const)(
+    'skips a first send when an %s commits after admission',
+    async (change) => {
+      const fixture = await workflowDeliveryFixture(db, jobs)
+      const receiver = vi.fn(async () => 204)
+      const webhookId = fixture.webhook.id
+      let transactions = 0
+      class SenderDialect extends PostgresDialect {
+        override createDriver() {
+          const driver = super.createDriver()
+          const begin = driver.beginTransaction.bind(driver)
+          driver.beginTransaction = async (connection, settings) => {
+            if (++transactions === 2) {
+              // Use the fixture DB to verify the marker has committed on the sender connection.
+              expect(await saved(fixture.delivery.id)).toMatchObject({
+                status: 'pending',
+                attempts: 0,
+                last_attempt_at: new Date(fixture.clock.now.epochMilliseconds),
+              })
+              expect(receiver).not.toHaveBeenCalled()
+              if (change === 'endpoint pause') {
+                await updateWebhook(fixture.ctx, webhookId, { isActive: false })
+              } else if (change === 'event removal') {
+                await updateWebhook(fixture.ctx, webhookId, { events: ['booking.created'] })
+              } else {
+                const { organization, user } = fixture.ctx.principal
+                const otherEventType = await createFixtures(db).eventType(organization.id, user.id)
+                await db
+                  .updateTable('webhooks')
+                  .set({ event_type_id: otherEventType })
+                  .where('id', '=', webhookId)
+                  .executeTakeFirstOrThrow()
+              }
+            }
+            await begin(connection, settings)
+          }
+          return driver
+        }
+      }
+      // Both DB handles borrow the pool owned by the suite's TestDatabase.
+      const senderDb = new Kysely<Database>({ dialect: new SenderDialect({ pool: owned.pool }) })
+      await deliverWorkflowWebhook(
+        { db: senderDb, ...fixture.settings, now: fixture.ctx.now, transport: receiver },
+        fixture.delivery.id,
+        signal(),
+      )
+      expect(transactions).toBe(2)
+      expect(receiver).toHaveBeenCalledTimes(0)
+      expect(await saved(fixture.delivery.id)).toMatchObject({
+        status: 'skipped',
+        last_error: 'disabled',
+        attempts: 0,
+        last_attempt_at: null,
+      })
+    },
+  )
+
   it('retries a timely delivery past expiry with the original ID for receiver deduplication', async () => {
     const fixture = await workflowDeliveryFixture(db, jobs)
     const accepted = new Map<string, string>()
@@ -421,7 +479,7 @@ describe.skipIf(!serverUrl)('workflow webhook delivery fences', () => {
     },
   )
 
-  it.each(['cancel', 'reschedule'] as const)(
+  it.each(['cancel', 'reschedule', 'disable'] as const)(
     'allows a concurrent %s to commit while the receiver is still waiting',
     async (operation) => {
       const fixture = await workflowDeliveryFixture(db, jobs)
@@ -447,16 +505,36 @@ describe.skipIf(!serverUrl)('workflow webhook delivery fences', () => {
             throw new Error('Delivery finished before calling the receiver')
           }),
         ])
-        const ctx = { ...fixture.ctx, notify }
-        change =
-          operation === 'cancel'
-            ? cancelHostBooking(ctx, bookingId)
-            : rescheduleHostBooking(ctx, bookingId, { start })
-        const savedBooking = () =>
-          db.selectFrom('bookings').select('status').where('id', '=', bookingId).executeTakeFirst()
-        await expect
-          .poll(async () => (await savedBooking())?.status, { timeout: 3000 })
-          .toBe('cancelled')
+        if (operation === 'disable') {
+          change = updateWorkflowDefinition(fixture.ctx, fixture.workflow.id, {
+            expectedRevision: fixture.workflow.revision,
+            enabled: false,
+          })
+          const savedWorkflow = () =>
+            db
+              .selectFrom('workflow_definitions')
+              .select('enabled')
+              .where('id', '=', fixture.workflow.id)
+              .executeTakeFirstOrThrow()
+          await expect
+            .poll(async () => (await savedWorkflow()).enabled, { timeout: 3000 })
+            .toBe(false)
+        } else {
+          const ctx = { ...fixture.ctx, notify }
+          change =
+            operation === 'cancel'
+              ? cancelHostBooking(ctx, bookingId)
+              : rescheduleHostBooking(ctx, bookingId, { start })
+          const savedBooking = () =>
+            db
+              .selectFrom('bookings')
+              .select('status')
+              .where('id', '=', bookingId)
+              .executeTakeFirst()
+          await expect
+            .poll(async () => (await savedBooking())?.status, { timeout: 3000 })
+            .toBe('cancelled')
+        }
         if (operation === 'reschedule')
           expect(
             await db
