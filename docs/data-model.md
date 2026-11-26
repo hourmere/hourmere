@@ -1862,6 +1862,11 @@ The phases within that organization boundary are:
   order, then share-locks their member rows in sorted user-ID order. Round-robin bookings
   next lock their assignment state. A changed host set is refused; do not append newly
   discovered advisory locks out of order.
+- Internal departure handoff takes the actor's user share lock, the organization share lock,
+  and the actor's member and session share locks before checking SSO proof. It locks the
+  source booking and then the offer before taking the source and candidate host advisory locks
+  in sorted user-ID order. The organization share lock fences membership changes while allowing
+  other team booking writers to take their organization locks.
 - Routing form creation takes the organization share lock, then the transaction advisory
   lock `hashtextextended('hourmere.routing-form-quota:' || organizationId, 0)` before
   inserting the form. It never upgrades or writes the organization row. Any transaction

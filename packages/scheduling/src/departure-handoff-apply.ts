@@ -295,7 +295,7 @@ export async function applyDepartureHandoff(
     ctx.db.transaction().setIsolationLevel('read committed'),
     async (trx) => {
       await ctx.lockOrganizationContext?.(trx)
-      const actor = await checkTeamManagementAccess(trx, principal, input.teamId, true, {
+      const actor = await checkTeamManagementAccess(trx, principal, input.teamId, 'share', {
         expectedOrganizationId: input.expectedOrganizationId,
         allowPersonal: false,
       }).catch(rethrowTeamManagementError)

@@ -269,6 +269,24 @@ describe.skipIf(!serverUrl)('internal departure handoff apply', () => {
     await expectUnchanged(f)
   })
 
+  it('refuses approval from the previous offer version even when the terms are unchanged', async () => {
+    const f = await setup()
+    const original = await bookings(f)
+    await approve(f)
+
+    const revised = { ...f, input: { ...f.input, version: f.input.version + 1 } }
+    await sql`UPDATE test_handoff_offers
+      SET offer = jsonb_set(offer, '{version}', to_jsonb(${revised.input.version}::int))
+      WHERE organization_id = ${f.team.id} AND source_id = ${f.booking.id}
+        AND offer_id = ${f.input.offerId}`.execute(db)
+
+    await expect(apply(revised)).rejects.toMatchObject({
+      kind: 'conflict',
+      code: 'handoff_consent_required',
+    })
+    await expectUnchanged(f, original)
+  })
+
   it('refuses expired offers and changes to terms since approval', async () => {
     const f = await setup()
     await storage.offer(f.ctx, f.input, { departingUserId: f.departing.id }, (offer) => ({
@@ -403,9 +421,13 @@ describe.skipIf(!serverUrl)('internal departure handoff apply', () => {
       const winner = Promise.allSettled([first()])
       requests = [winner]
       const winnerPid = await waitForLock(holderPid, 'bookings', signal)
+      // The pending writer must leave room for other team booking writers.
+      await holder.query('SELECT id FROM auth.organization WHERE id = $1 FOR SHARE NOWAIT', [
+        f.team.id,
+      ])
       const loser = Promise.allSettled([second()])
       requests.push(loser)
-      await waitForLock(winnerPid, 'auth.organization', signal)
+      await waitForLock(winnerPid, 'bookings', signal)
       await expectUnchanged(f)
       await holder.query('COMMIT')
       const [[firstResult], [secondResult]] = await Promise.all([winner, loser])
