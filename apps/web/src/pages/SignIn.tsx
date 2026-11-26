@@ -1,15 +1,15 @@
 import { type FormEvent, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Navigate, useSearchParams } from 'react-router'
 import { type SocialProvider, sendSignInLink, startSocialSignIn } from '../api/auth.ts'
-import { api, unwrap } from '../api/client.ts'
+import { api, type Schemas, unwrap } from '../api/client.ts'
 import { errorMessage, RequestError } from '../api/errors.ts'
 import { goTo } from '../browser.ts'
 import { EmailDeliveryHint } from '../components/EmailDeliveryHint.tsx'
 import { LegalLinks } from '../components/LegalLinks.tsx'
 import { Logo } from '../components/Logo.tsx'
 import { SocialSignInButton } from '../components/SocialSignInButton.tsx'
-import { useLoad, usePageTitle } from '../hooks.ts'
-import { LanguageSwitcher, useI18n } from '../i18n/runtime.tsx'
+import { type Loaded, useLoad, usePageTitle } from '../hooks.ts'
+import { InterfaceScope, LanguageSwitcher, useI18n } from '../i18n/runtime.tsx'
 import { msg, type UiText } from '../i18n/translate.ts'
 import { safeNextPath, signInPath } from '../next-path.ts'
 import { PATHS } from '../paths.ts'
@@ -96,18 +96,44 @@ type Phase =
 type ResendState = 'idle' | 'sending' | 'success' | 'limited' | 'error'
 
 export function SignInPage() {
-  const { t } = useI18n()
-
-  usePageTitle('Sign in')
   const { state } = useSession()
   const [params] = useSearchParams()
   const next = safeNextPath(params.get('next'))
-  const sso = params.getAll('sso')
-  const requestedProvider = sso.length === 1 ? oidcAttemptId(sso[0]) : null
-  if (state.status === 'loading') return <PageStatus>{t('Loading…')}</PageStatus>
+  if (state.status === 'loading') return <SignInLoading />
   if (state.status === 'signed-in') return <Navigate to={next} replace />
   const expired = state.status === 'signed-out' && state.reason === 'expired'
-  return <SignInForm next={next} expired={expired} requestedProvider={requestedProvider} />
+  return <SignInEntry next={next} expired={expired} />
+}
+
+function SignInLoading() {
+  const { t } = useI18n()
+  usePageTitle('Sign in')
+  return <PageStatus>{t('Loading…')}</PageStatus>
+}
+
+function SignInEntry({ next, expired }: { next: string; expired: boolean }) {
+  const [instance] = useLoad(loadInstance)
+  const [params] = useSearchParams()
+  const sso = params.getAll('sso')
+  const samlValues = params.getAll('saml')
+  const saml = samlValues.length === 1 && samlValues[0] === '1'
+  const ssoAvailable =
+    instance.status === 'ready' &&
+    (saml
+      ? instance.data.ssoSamlEnabled === true
+      : samlValues.length === 0 && instance.data.ssoOidcEnabled === true)
+  const ssoProvider = ssoAvailable && sso.length === 1 ? oidcAttemptId(sso[0]) : null
+  return (
+    <InterfaceScope surface={saml && ssoProvider ? 'public' : 'admin'}>
+      <SignInForm
+        next={next}
+        expired={expired}
+        instance={instance}
+        saml={saml}
+        ssoProvider={ssoProvider}
+      />
+    </InterfaceScope>
+  )
 }
 
 /**
@@ -117,13 +143,18 @@ export function SignInPage() {
 function SignInForm({
   next,
   expired,
-  requestedProvider,
+  instance,
+  saml,
+  ssoProvider,
 }: {
   next: string
   expired: boolean
-  requestedProvider: string | null
+  instance: Loaded<Schemas['Instance']>
+  saml: boolean
+  ssoProvider: string | null
 }) {
   const { t, text, ui } = useI18n()
+  usePageTitle('Sign in')
 
   const [params, setParams] = useSearchParams()
   const [phase, setPhase] = useState<Phase>(() => ({
@@ -136,6 +167,7 @@ function SignInForm({
   const ssoRequest = useRef<{
     controller: AbortController
     providerId: string
+    saml: boolean
     next: string
   } | null>(null)
   const ssoButton = useRef<HTMLButtonElement>(null)
@@ -144,24 +176,24 @@ function SignInForm({
   const resendInFlight = useRef(false)
   const resendButton = useRef<HTMLButtonElement>(null)
   const restoreResendFocus = useRef(false)
-  const [instance] = useLoad(loadInstance)
   const sentHeading = useRef<HTMLHeadingElement>(null)
   const emailInput = useRef<HTMLInputElement>(null)
   const submitButton = useRef<HTMLButtonElement>(null)
   const restoreSubmitFocus = useRef(false)
   const focusEmail = useRef(false)
 
-  const ssoProvider =
-    instance.status === 'ready' && instance.data.ssoOidcEnabled === true ? requestedProvider : null
-
   useLayoutEffect(() => () => ssoRequest.current?.controller.abort(), [])
   useLayoutEffect(() => {
     const pending = ssoRequest.current
-    if (!pending || (pending.providerId === ssoProvider && pending.next === next)) return
+    if (
+      !pending ||
+      (pending.providerId === ssoProvider && pending.saml === saml && pending.next === next)
+    )
+      return
     pending.controller.abort()
     ssoRequest.current = null
     setOpeningSso(false)
-  }, [next, ssoProvider])
+  }, [next, saml, ssoProvider])
   useEffect(() => {
     if (!ssoProvider) return
     function restoreAfterProvider(event: PageTransitionEvent) {
@@ -258,7 +290,7 @@ function SignInForm({
   async function continueWithSso() {
     if (!ssoProvider || ssoRequest.current) return
     const controller = new AbortController()
-    ssoRequest.current = { controller, providerId: ssoProvider, next }
+    ssoRequest.current = { controller, providerId: ssoProvider, saml, next }
     restoreSsoFocus.current = document.activeElement === ssoButton.current
     setOpeningSso(true)
     setPhase({ kind: 'form', error: null })

@@ -1711,6 +1711,23 @@ identifies the team's provider. The sign-in page offers no email or domain looku
 for SSO. Continue using your existing sign-in method for your personal space. If
 you are already signed in, sign out before using the team's SSO link.
 
+SAML remains off in production. Where SAML is enabled in an in-process fixture,
+team owners and admins can add a SAML provider under **Settings → Single sign-on**.
+Enter the IdP's details manually, paste its metadata XML, or import that metadata from
+a URL. The form shows the provider revision and offers the service provider metadata
+for configuring the IdP. Saved IdP metadata and certificates are write-only. To test a
+certificate rotation, use a disabled draft. Submit the complete overlapping list, test
+the new revision, then save a list without the old certificate after the IdP switches.
+Keep another usable provider enabled if the team requires single sign-on.
+
+A team's SAML sign-in link uses `/sign-in?sso=<providerId>&saml=1` and opens the same
+sign-in screen. In **Your team sign-in**, verify your mailbox to start linking and
+confirm **Link account** after returning from the IdP. When a write calls for fresh
+SSO verification, choose your linked provider, complete its verification in the new
+tab, then return to the original tab and select **Continue**. If prompted for email
+verification, complete it there before continuing. SAML controls only appear when
+the instance reports SAML as enabled.
+
 If prompted to verify your email, request a verification message. In the same
 browser, open the email link in another tab and explicitly verify it, then return
 to the tab where you started. You can also copy and paste the email link into
@@ -1733,6 +1750,19 @@ member who already has a link can still unlink it.
 OIDC 可用时，打开团队提供的登录链接（`/sign-in?sso=<providerId>`），选择
 **使用单点登录**。链接指定团队的身份提供方。登录页不会通过邮箱地址或域名查找单点登录
 提供方。个人空间仍可使用原有方式登录。如果你已经登录，请先退出，再使用团队的单点登录链接。
+
+生产环境中的 SAML 保持关闭。在启用 SAML 的进程内测试环境中，团队所有者和管理员可在
+**设置 → 单点登录**中添加 SAML 提供方。可以手动填写身份提供方信息、粘贴元数据 XML，
+或从网址导入。表单显示提供方版本，并提供配置身份提供方所需的服务提供方元数据下载。
+已保存的身份提供方元数据和证书只写。请在已停用的草稿上测试证书轮换。提交包含新旧证书的
+完整列表，测试新版本，等身份提供方切换后再保存去掉旧证书的列表。若团队强制使用单点登录，
+请保持另一个可用的提供方处于启用状态。
+
+团队 SAML 登录链接使用 `/sign-in?sso=<providerId>&saml=1`，打开同一个登录页面。
+在**你的团队登录方式**中验证邮箱后发起关联，从身份提供方返回后选择**关联账号**。
+写入操作要求重新验证身份时，选择已关联的提供方，在新标签页完成验证，再返回原标签页选择
+**继续**。若提示验证邮箱，请在原标签页完成后继续。仅当实例报告 SAML 已启用时，页面才显示
+相关选项。
 
 如需验证邮箱，请先发送验证邮件。在同一浏览器的新标签页中打开邮件链接，确认验证后返回
 发起请求的标签页。也可以把邮件链接粘贴到原标签页验证。如果浏览器无法跨标签页确认，请将链接
