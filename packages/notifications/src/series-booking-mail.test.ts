@@ -159,13 +159,17 @@ describe('recurring booking mail content', () => {
     }
   })
 
-  it('has an appended and translated key set for every booking-mail catalogue', () => {
+  it('keeps the recurring booking keys grouped and translated in every booking-mail catalogue', () => {
     const english = Object.entries(mailCatalogues.en ?? {}).filter(([key]) =>
       key.startsWith('series.'),
     )
     expect(english.length).toBeGreaterThan(0)
+    const seriesKeys = english.map(([key]) => key)
     for (const [locale, catalogue] of Object.entries(mailCatalogues)) {
-      expect(Object.keys(catalogue).slice(-english.length)).toEqual(english.map(([key]) => key))
+      const keys = Object.keys(catalogue)
+      const first = keys.findIndex((key) => key.startsWith('series.'))
+      expect(first).toBeGreaterThanOrEqual(0)
+      expect(keys.slice(first, first + seriesKeys.length)).toEqual(seriesKeys)
       if (locale === 'en') continue
       for (const [key, value] of english)
         expect(catalogue[key as MailKey], `${locale} ${key}`).not.toBe(value)

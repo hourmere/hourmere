@@ -18,6 +18,7 @@ import { useI18n } from '../../i18n/runtime.tsx'
 import { msg, type UiText } from '../../i18n/translate.ts'
 import { BOOKING } from '../../limits.ts'
 import { bookingPath, PATHS } from '../../paths.ts'
+import { LocationDetails } from '../../public/BookingDetails.tsx'
 import { useMe } from '../../session.tsx'
 import { isMultiLineText } from '../../text.ts'
 import { useUnsavedChanges } from '../../unsaved-changes.tsx'
@@ -337,7 +338,9 @@ function BookingView({
         <dl className="details">
           <dt>{t('Location')}</dt>
           <dd>
-            {location ? (
+            {booking.location?.kind === 'microsoft_teams' ? (
+              <LocationDetails location={booking.location} cancelled={cancelled} />
+            ) : location ? (
               <>
                 {ui(location.label)}
                 {location.detail && (

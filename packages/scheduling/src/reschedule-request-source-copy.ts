@@ -19,6 +19,7 @@ import * as GroupSeatAdmission from './group-seat-admission.ts'
 import * as Hosts from './hosts.ts'
 import * as LocationOptions from './location-options.ts'
 import * as MeetingPollOutcomes from './meeting-poll-outcomes.ts'
+import * as MicrosoftTeams from './microsoft-teams.ts'
 import * as NotificationSettings from './notification-settings.ts'
 import * as OneTimeLinks from './one-time-links.ts'
 import * as PaymentExpiry from './payment-expiry.ts'
@@ -29,6 +30,7 @@ import * as RecurringMembers from './recurring-members.ts'
 import * as RoundRobin from './round-robin.ts'
 import * as RoutingBooking from './routing-booking.ts'
 import * as SuccessRedirect from './success-redirect.ts'
+import * as TeamsMeetingLocations from './teams-meeting-locations.ts'
 import * as Text from './text.ts'
 import * as Waitlist from './waitlist.ts'
 import * as WaitlistBooking from './waitlist-booking.ts'
@@ -61,6 +63,7 @@ const dependencies: Record<string, object> = {
   './location-options.ts': LocationOptions,
   './group-seat-admission.ts': GroupSeatAdmission,
   './meeting-poll-outcomes.ts': MeetingPollOutcomes,
+  './microsoft-teams.ts': MicrosoftTeams,
   './notification-settings.ts': NotificationSettings,
   './one-time-links.ts': OneTimeLinks,
   './payment-expiry.ts': PaymentExpiry,
@@ -71,6 +74,7 @@ const dependencies: Record<string, object> = {
   './round-robin.ts': RoundRobin,
   './routing-booking.ts': RoutingBooking,
   './success-redirect.ts': SuccessRedirect,
+  './teams-meeting-locations.ts': TeamsMeetingLocations,
   './text.ts': Text,
   './waitlist.ts': Waitlist,
   './waitlist-booking.ts': WaitlistBooking,

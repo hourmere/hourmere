@@ -61,6 +61,7 @@
     "electron-to-chromium": "1.5.463",
     "flow-estree": "0.337.0",
     "flow-parser": "0.337.0",
+    "glob": "14.0.4",
     "ip-address": "10.7.4",
     "magic-string": "1.4.3",
     "make-dir": {
@@ -79,9 +80,6 @@
     "simple-git": "4.0.2",
     "tmp": "0.2.7",
     "minimatch@^9": "11.0.8",
-    "minimatch@^10": "11.0.8",
-    "archiver-utils": {
-      "glob": "13.0.7"
-    }
+    "minimatch@^10": "11.0.8"
   }
 }

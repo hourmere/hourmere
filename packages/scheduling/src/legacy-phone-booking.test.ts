@@ -12,6 +12,7 @@ import {
   resolveLocationChoice,
   selectLocationOption,
 } from './location-options.ts'
+import { microsoftTeamsLocation, requireMicrosoftTeamsHost } from './microsoft-teams.ts'
 import { createOneTimeBookingLink } from './one-time-links.ts'
 import { createFixtures } from './testing.ts'
 
@@ -142,6 +143,8 @@ function copiedBooking(change?: readonly [string, string]) {
     resolveLocationChoice,
     selectLocationOption,
     selectBookableLocationOption,
+    microsoftTeamsLocation,
+    requireMicrosoftTeamsHost,
     automaticMeet: () => false,
     automaticZoom: () => false,
     eventTypeNotFound: () => new DomainError('not_found', 'event_type_not_found'),
