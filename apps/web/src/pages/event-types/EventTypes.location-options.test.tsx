@@ -66,8 +66,13 @@ describe('Microsoft Teams location availability', () => {
     ).toBe(true)
   })
 
-  it('uses coarse readiness for the assigned team host and disables Teams for collective scheduling', async () => {
+  it('uses readiness for the signed-in team host and disables Teams for other hosts and collective scheduling', async () => {
     const memberId = '22222222-2222-4222-8222-222222222222'
+    const otherHost = {
+      id: '44444444-4444-4444-8444-444444444444',
+      memberId: '55555555-5555-4555-8555-555555555555',
+      name: 'Other team host',
+    }
     const team = {
       ...ME,
       organization: {
@@ -81,11 +86,17 @@ describe('Microsoft Teams location availability', () => {
       ...profile(),
       'GET /api/v1/schedules': () => json(200, { data: [schedule()] }),
       'GET /api/v1/event-type-hosts': () =>
-        json(200, { data: [{ id: ME.user.id, memberId, name: ME.user.name }], nextAfter: null }),
+        json(200, {
+          data: [{ id: ME.user.id, memberId, name: ME.user.name }, otherHost],
+          nextAfter: null,
+        }),
       [`GET /api/v1/teams/${team.organization.id}/member-readiness`]: () =>
         json(200, {
           organizationId: team.organization.id,
-          members: [{ memberId, health: { microsoftTeams: 'ready' } }],
+          members: [memberId, otherHost.memberId].map((memberId) => ({
+            memberId,
+            health: { microsoftTeams: 'ready' },
+          })),
         }),
     })
     const user = userEvent.setup()
@@ -96,6 +107,15 @@ describe('Microsoft Teams location availability', () => {
     })
     await waitFor(() => expect(teams.disabled).toBe(false))
     await user.click(screen.getByText('Hosts', { selector: 'summary' }))
+    await user.click(await screen.findByRole('checkbox', { name: otherHost.name }))
+    expect(teams.disabled).toBe(true)
+    expect(
+      screen.getByRole('combobox', {
+        name: 'Where the meeting happens',
+        description:
+          'The assigned host must configure Microsoft Teams in their own signed-in session.',
+      }),
+    ).toBe(primary)
     await user.selectOptions(await screen.findByLabelText('Scheduling'), 'collective')
     expect(teams.disabled).toBe(true)
     expect(

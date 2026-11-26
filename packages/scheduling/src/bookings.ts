@@ -843,7 +843,7 @@ async function loadBooking(
  * share it so a hold stores the chosen option exactly as its confirmed booking would.
  */
 export async function resolveBookingLocation(
-  ctx: Pick<PublicContext, 'automaticMeet' | 'automaticZoom'>,
+  ctx: Pick<PublicContext, 'automaticMeet' | 'automaticZoom' | 'microsoftCalendarEnabled'>,
   db: Db,
   event: PublicEventTypeRecord,
   hosts: string[],
@@ -857,7 +857,14 @@ export async function resolveBookingLocation(
   const zoomReady: string[] = []
   try {
     if (microsoftTeamsLocation(chosen)) {
-      await requireMicrosoftTeamsHost(db, event.schedulingType, hosts, event.id, true)
+      await requireMicrosoftTeamsHost(
+        db,
+        event.schedulingType,
+        hosts,
+        event.id,
+        ctx.microsoftCalendarEnabled,
+        true,
+      )
     }
     if (organizer && automaticMeet(chosen)) {
       await requireMeetDestination(db, organizer, event.id, ctx.automaticMeet)

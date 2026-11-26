@@ -509,6 +509,7 @@ export interface BookingRoutesDeps {
   automaticMeet?: boolean | undefined
   smsRemindersAvailable?: boolean | undefined
   automaticZoom?: boolean | undefined
+  microsoftCalendarEnabled?: boolean | undefined
   now?: () => Temporal.Instant
   notifyAttendeeNoShow?: AttendeeNoShowNotifier | undefined
   /** Queues the booking emails in the transaction of each change; none are sent without it. */
@@ -535,6 +536,7 @@ export function bookingRoutes({
   automaticMeet,
   smsRemindersAvailable,
   automaticZoom,
+  microsoftCalendarEnabled,
   rateLimits = {},
   hostRateLimits = {},
 }: BookingRoutesDeps): RouteModule {
@@ -545,6 +547,7 @@ export function bookingRoutes({
     automaticMeet,
     smsRemindersAvailable,
     automaticZoom,
+    microsoftCalendarEnabled,
     bookingMaxInviteeReschedules,
   }
   const manageLimit = rateLimit(createRateLimiter(rateLimits.manage ?? PUBLIC_RATE_LIMITS.manage))
@@ -587,6 +590,7 @@ export function bookingRoutes({
       automaticMeet,
       smsRemindersAvailable,
       automaticZoom,
+      microsoftCalendarEnabled,
       bookingExportMaxConcurrent,
       routingFormsEnabled,
       authorizeOrganizationWrite: bookingWriteAccess(principal, expectedOrganizationId),

@@ -178,14 +178,21 @@ calendar they own. Collective and round-robin event types cannot use it. A group
 with one host has one Teams meeting shared by its booked seats. The seat count stays in
 Hourmere.
 
-For REST, MCP and CLI, send `location: {"kind":"microsoft_teams"}` or use
-`{"id":"teams","kind":"microsoft_teams"}` in `locations`. Choosing the location enables
-automatic Teams creation for bookings that use it. Self-hosted deployments use the same
-Microsoft Calendar setup and event type setting. See [meeting location choices](/docs/location-choices).
+The assigned host must use their own signed-in session to add Teams, duplicate a Teams
+event type, or reactivate one. Changing the host of a Teams event type also requires the
+new host's session. The host needs the usual event type edit permissions, including owner or
+admin access for a team event type.
 
-The host and the invitee can open the Teams link from their booking details. Confirmation,
-reschedule and cancellation emails to those recipients include a known link in the message and
-any calendar attachment. An individual reschedule keeps the same meeting.
+In a session-authenticated REST request, send `location: {"kind":"microsoft_teams"}` or use
+`{"id":"teams","kind":"microsoft_teams"}` in `locations`. If the caller lacks the host's
+session, REST returns `403 microsoft_teams_host_session_required`, and MCP and CLI report
+the same error code. Existing Teams events remain bookable through the usual booking
+surfaces. See [meeting location choices](/docs/location-choices).
+
+The host and the invitee can open the Teams link from their booking details. Confirmation and
+reschedule emails to those recipients include a known link in the message and any calendar
+attachment. Cancellation emails and calendar attachments show only the Microsoft Teams label.
+An individual reschedule keeps the same meeting.
 Moving a group seat uses the destination occurrence's meeting. Cancelling removes the
 Outlook copy when the last active seat is cancelled, or when an individual booking is cancelled.
 

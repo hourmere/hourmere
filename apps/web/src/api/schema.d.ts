@@ -12594,7 +12594,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
+            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin; microsoft_teams_host_session_required: adding a Microsoft Teams location, changing its host, reactivating or duplicating it requires the assigned host’s signed-in session. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -12889,7 +12889,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
+            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin; microsoft_teams_host_session_required: adding a Microsoft Teams location, changing its host, reactivating or duplicating it requires the assigned host’s signed-in session. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -13054,7 +13054,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
+            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin; microsoft_teams_host_session_required: adding a Microsoft Teams location, changing its host, reactivating or duplicating it requires the assigned host’s signed-in session. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;

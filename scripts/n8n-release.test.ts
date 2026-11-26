@@ -211,40 +211,67 @@ it('reports both build digests and fails to stage changed bytes or a missing bui
   }
 })
 
-it('reserves n8n npm credentials and publishing commands for the manual workflow', () => {
-  type Step = {
-    run?: string
-    uses?: string
-    'working-directory'?: string
-    with?: { publish?: string }
-  }
-  type Job = Step & { if?: string; steps?: Step[] }
-  const registryWrite =
-    /\b(?:npm|pnpm|yarn)(?=[ \t])[^;&|]*[ \t](?:publish|pub|pu|stage)(?=$|[\s;&|)<>])|\bnpm\s+run(?:-script)?\s+release\b|\bn8n-node\s+release\b/
-  const releaseEntrypoints = /N8N_NPM_BOOTSTRAP_TOKEN|HOURMERE_N8N_PUBLISH|n8n-npm-release/
-  const publishCommands = (step: Step) => {
-    const commands = (step.run ?? '')
-      .replace(/\\\r?\n/g, '')
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => {
-        if (line.startsWith('#')) return false
+type Step = {
+  run?: string
+  uses?: string
+  'working-directory'?: string
+  with?: { publish?: string }
+}
+
+const registryWrite =
+  /\b(?:npm(?:@[^\s;&|]+)?|pnpm|yarn|bun)(?=[ \t])[^;&|]*[ \t](?:publish|pub|pu|stage)(?=$|[\s;&|)<>])|\bnpm\s+run(?:-script)?\s+release\b|\bn8n-node\s+release\b/
+const inlineNodeEval = /\bnode[ \t]+(?:-e|--eval)(?:[ \t]+|=)$/
+const execSyncLiteral = /\bexecSync\s*\(\s*(['"])(.*?)\1/g
+
+function publishCommands(step: Step): string[] {
+  const commands = (step.run ?? '')
+    .replace(/\\\r?\n/g, '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => {
+      if (line.startsWith('#')) return false
+      let inlineRegistryWrite = false
+      const words = line.replace(/'[^']*'|"(?:\\.|[^"\\])*"/g, (quoted, offset: number) => {
+        const contents = quoted.slice(1, -1)
+        if (inlineNodeEval.test(line.slice(0, offset))) {
+          const source = quoted.startsWith('"') ? contents.replace(/\\(["\\$`])/g, '$1') : contents
+          inlineRegistryWrite ||= [...source.matchAll(execSyncLiteral)].some(
+            ([, , command]) => command !== undefined && registryWrite.test(command),
+          )
+        }
         // Keep commands in double-quoted substitutions visible while masking quoted prose.
-        const words = line.replace(/'[^']*'|"(?:\\.|[^"\\])*"/g, (quoted) => {
-          if (quoted.startsWith('"') && /\$\(|`/.test(quoted)) return quoted
-          return quoted.slice(1, -1).replace(/[\s;&|]/g, '_')
-        })
-        return registryWrite.test(words)
+        if (quoted.startsWith('"') && /\$\(|`/.test(quoted)) return quoted
+        return contents.replace(/[\s;&|]/g, '_')
       })
-    const action = step.uses?.split('@')[0]?.toLowerCase() ?? ''
-    if (
-      /publish|semantic-release/.test(action) ||
-      (action === 'changesets/action' && step.with?.publish)
-    ) {
-      commands.push(`uses: ${step.uses}`)
-    }
-    return commands
+      return inlineRegistryWrite || registryWrite.test(words)
+    })
+  const action = step.uses?.split('@')[0]?.toLowerCase() ?? ''
+  if (
+    /publish|semantic-release/.test(action) ||
+    (action === 'changesets/action' && step.with?.publish)
+  ) {
+    commands.push(`uses: ${step.uses}`)
   }
+  return commands
+}
+
+it.each([
+  ['versioned npm via npx', 'npx -y npm@11 publish'],
+  ['Bun', 'bun publish'],
+  ['Node execSync', `node -e "require('node:child_process').execSync('npm publish')"`],
+])('flags %s publishing in a workflow step', (_, run) => {
+  const { steps } = parse(`steps:\n  - run: |\n      ${run}\n`) as { steps: Step[] }
+  expect(steps.flatMap(publishCommands)).toEqual([run])
+})
+
+it('allows quoted publishing examples in shell and Node output', () => {
+  const run = `echo 'bun publish'\nnode -e "console.log('npm publish')"`
+  expect(publishCommands({ run })).toEqual([])
+})
+
+it('reserves n8n npm credentials and publishing commands for the manual workflow', () => {
+  type Job = Step & { if?: string; steps?: Step[] }
+  const releaseEntrypoints = /N8N_NPM_BOOTSTRAP_TOKEN|HOURMERE_N8N_PUBLISH|n8n-npm-release/
 
   const writes = []
   for (const file of readdirSync(workflows)
