@@ -604,4 +604,7 @@ export const common = {
   // Booking page preview
   'These are sample times. Booking is disabled in the preview.':
     'Estos horarios son de ejemplo. No se pueden hacer reservas en la vista previa.',
+  // Booking location changes
+  'The meeting location has changed. Please choose a time again.':
+    'El lugar de la reunión ha cambiado. Vuelva a elegir un horario.',
 } as const

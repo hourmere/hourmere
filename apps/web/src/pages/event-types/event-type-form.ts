@@ -248,6 +248,7 @@ export function draftFromEventType(e: EventType): EventTypeDraft {
 export function comparable(draft: EventTypeDraft): string {
   return JSON.stringify({
     ...draft,
+    locationOptions: comparableLocations(draft),
     notifications: comparableNotifications(draft.notifications),
     questions: draft.questions.map(({ key: _key, options, ...q }) => ({
       ...q,
@@ -361,7 +362,7 @@ export function validateDraft(draft: EventTypeDraft, baseline?: EventTypeDraft):
     if (
       locations.length > 1 &&
       (baseline?.bookingMode !== 'group' ||
-        JSON.stringify(orderedLocations(baseline)) !== JSON.stringify(locations))
+        comparableLocations(baseline) !== comparableLocations(draft))
     )
       errors['location-kind'] =
         'Group events use one shared location for every seat. Remove the other location options.'
@@ -613,6 +614,16 @@ export function orderedLocations(draft: EventTypeDraft): LocationOption[] {
   return result
 }
 
+/** The first option is the default whether its marker is explicit or implicit. */
+function comparableLocations(draft: EventTypeDraft): string {
+  return JSON.stringify(
+    orderedLocations(draft).map(({ isDefault, ...option }, index) => ({
+      ...option,
+      ...(index > 0 && isDefault && { isDefault }),
+    })),
+  )
+}
+
 /** Conference controls apply to every offered provider, including a non-default choice. */
 export function hasAutomaticLocation(draft: EventTypeDraft, kind: 'google_meet' | 'zoom'): boolean {
   return orderedLocations(draft).some(
@@ -716,8 +727,7 @@ export function toPatchInput(draft: EventTypeDraft, baseline: EventTypeDraft): E
   // untouched, so metadata saves also preserve options configured by a newer client.
   if (JSON.stringify(body.location) === JSON.stringify(toInput(baseline).location))
     delete body.location
-  if (JSON.stringify(orderedLocations(draft)) === JSON.stringify(orderedLocations(baseline)))
-    delete body.locations
+  if (comparableLocations(draft) === comparableLocations(baseline)) delete body.locations
   // A metadata save must preserve waitlist changes made outside this editor session.
   if (draft.waitlistEnabled === baseline.waitlistEnabled) delete body.waitlist
   else body.waitlist = { enabled: draft.waitlistEnabled }

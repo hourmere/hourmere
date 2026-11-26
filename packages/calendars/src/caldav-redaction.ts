@@ -1,10 +1,13 @@
 import { inspect } from 'node:util'
 
-const protectedFields = new WeakMap<object, Set<PropertyKey>>()
+// Keep the marker on the wrapped object so another module instance can reuse it.
+const protectedFields = Symbol.for('hourmere.caldav.protectedFields')
 
 /** Hide secrets from routine copies/logging; explicit internal field access still works. */
 export function redactCalDavField<T extends object>(value: T, field: keyof T): T {
-  const existing = protectedFields.get(value)
+  const existing = Object.getOwnPropertyDescriptor(value, protectedFields)?.value as
+    | Set<PropertyKey>
+    | undefined
   if (existing?.has(field)) return value
   const fields = existing ?? new Set<PropertyKey>()
   if (!existing) {
@@ -16,8 +19,8 @@ export function redactCalDavField<T extends object>(value: T, field: keyof T): T
       toJSON: { value: redacted },
       [inspect.custom]: { value: redacted },
       toString: { value: () => JSON.stringify(redacted()) },
+      [protectedFields]: { value: fields },
     })
-    protectedFields.set(value, fields)
   }
   // A closure, rather than an own data property, also keeps the value out of
   // descriptor inspection. Spread and structuredClone ignore non-enumerable keys.

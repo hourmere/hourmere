@@ -2075,43 +2075,124 @@ describe('booking a chosen location', () => {
   })
 })
 
-it.each([false, true])(
-  'sends a default location identity only for multiple options (single: %s) and recovers removed choices',
-  async (single) => {
+it('uses the default identity with multiple choices and refreshes when it is removed', async () => {
+  const user = userEvent.setup()
+  let loaded = 0
+  const office = { id: 'office', kind: 'in_person' as const, label: 'Our office' }
+  const video = { id: 'video', kind: 'google_meet' as const, isDefault: true as const }
+  const api = fakeApi({
+    ...eventRoutes(EVENT, DST_SLOTS),
+    'GET /api/v1/public/ada/intro': () => {
+      const first = ++loaded === 1
+      return json(200, {
+        ...EVENT,
+        location: { kind: first ? video.kind : office.kind },
+        locations: first ? [office, video] : [office],
+      })
+    },
+    'POST /api/v1/public/ada/intro/bookings': ({ body }) =>
+      (body as { locationOptionId?: string }).locationOptionId === video.id
+        ? json(400, { error: 'invalid_location_choice' })
+        : json(201, {
+            booking: booking({ location: { kind: 'in_person', address: '100 Example Street' } }),
+            manageToken: TOKEN,
+          }),
+  })
+  renderApp('/ada/intro')
+  await chooseSlot(user, /November 2, available/, '9:00 AM')
+  await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
+  await user.type(screen.getByLabelText('Email'), 'grace@example.com')
+  await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+  await chooseSlot(user, /November 2, available/, '9:00 AM')
+  expect(screen.getByLabelText<HTMLInputElement>('Your name').value).toBe('Grace Hopper')
+  await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+  await screen.findByRole('heading', { name: 'You’re booked' })
+  const requests = api.to('POST /api/v1/public/ada/intro/bookings')
+  expect(requests).toHaveLength(2)
+  expect(requests[0]?.body).toMatchObject({ locationOptionId: 'video' })
+  expect(requests[1]?.body).not.toHaveProperty('locationOptionId')
+})
+
+it.each(['in_person', 'phone'] as const)(
+  'refreshes a stale singleton %s location when the host starts requiring the invitee phone',
+  async (kind) => {
     const user = userEvent.setup()
-    let loaded = 0
-    const requests: unknown[] = []
-    const options = [
-      { id: 'office', kind: 'in_person' as const, label: 'Our office' },
-      { id: 'video', kind: 'google_meet' as const, isDefault: true as const },
-    ]
-    fakeApi({
+    let event: typeof EVENT = {
+      ...EVENT,
+      location: { kind },
+      locations: [{ id: 'legacy', kind }],
+    }
+    const phone = {
+      id: kind === 'phone' ? 'legacy' : 'updated-phone',
+      kind: 'phone',
+      askInvitee: true,
+    } as const
+    const api = fakeApi({
       ...eventRoutes(EVENT, DST_SLOTS),
-      'GET /api/v1/public/ada/intro': () =>
-        json(200, {
-          ...EVENT,
-          locations: ++loaded === 1 ? (single ? options.slice(1) : options) : [options[0]],
-        }),
-      'POST /api/v1/public/ada/intro/bookings': (call) => {
-        requests.push(call.body)
-        if (requests.length === 1) return json(422, { error: 'invalid_location_choice' })
-        return json(201, { booking: booking(), manageToken: TOKEN })
+      'GET /api/v1/public/ada/intro': () => json(200, event),
+      'POST /api/v1/public/ada/intro/bookings': ({ body }) => {
+        const { inviteePhone, locationOptionId } = body as {
+          inviteePhone?: string
+          locationOptionId?: string
+        }
+        if (locationOptionId && locationOptionId !== phone.id)
+          return json(400, { error: 'invalid_location_choice' })
+        if (!inviteePhone) return json(400, { error: 'invalid_invitee_phone' })
+        return json(201, {
+          booking: booking({ location: { kind: 'phone', number: inviteePhone } }),
+          manageToken: TOKEN,
+        })
       },
     })
     renderApp('/ada/intro')
     await chooseSlot(user, /November 2, available/, '9:00 AM')
+    expect(screen.queryByLabelText('Your phone number')).toBeNull()
     await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
     await user.type(screen.getByLabelText('Email'), 'grace@example.com')
+    event = { ...event, location: { kind: phone.kind }, locations: [phone] }
     await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    await waitFor(() => expect(api.to('GET /api/v1/public/ada/intro')).toHaveLength(2))
+    await screen.findByText('The meeting location has changed. Please choose a time again.')
     await chooseSlot(user, /November 2, available/, '9:00 AM')
-    expect((screen.getByLabelText('Your name') as HTMLInputElement).value).toBe('Grace Hopper')
+    expect(screen.getByLabelText<HTMLInputElement>('Your name').value).toBe('Grace Hopper')
+    expect(screen.getByLabelText<HTMLInputElement>('Email').value).toBe('grace@example.com')
+    await user.type(screen.getByLabelText('Your phone number'), '+1 (415) 555-0123')
     await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
     await screen.findByRole('heading', { name: 'You’re booked' })
-    if (single) expect(requests[0]).not.toHaveProperty('locationOptionId')
-    else expect(requests[0]).toMatchObject({ locationOptionId: 'video' })
-    expect(requests[1]).not.toHaveProperty('locationOptionId')
+    const requests = api.to('POST /api/v1/public/ada/intro/bookings')
+    expect(requests).toHaveLength(2)
+    expect(requests[0]?.body).not.toHaveProperty('locationOptionId')
+    expect(requests[0]?.body).not.toHaveProperty('inviteePhone')
+    expect(requests[1]?.body).not.toHaveProperty('locationOptionId')
+    expect(requests[1]?.body).toHaveProperty('inviteePhone', '+14155550123')
   },
 )
+
+it('marks a visible phone field invalid without reloading the event type', async () => {
+  const user = userEvent.setup()
+  const api = fakeApi({
+    ...eventRoutes(
+      {
+        ...EVENT,
+        smsRemindersEnabled: true,
+        locations: [{ id: 'phone', kind: 'phone', askInvitee: true }],
+      },
+      DST_SLOTS,
+    ),
+    'POST /api/v1/public/ada/intro/bookings': () => json(400, { error: 'invalid_invitee_phone' }),
+  })
+  renderApp('/ada/intro')
+  await chooseSlot(user, /November 2, available/, '9:00 AM')
+  await user.click(screen.getByRole('checkbox', { name: /I agree to SMS booking reminders/ }))
+  const phone = screen.getByLabelText('Your phone number')
+  await user.type(phone, '+1234567')
+  await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
+  await user.type(screen.getByLabelText('Email'), 'grace@example.com')
+  await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+  await screen.findByText('Check the highlighted fields.')
+  expect(phone.getAttribute('aria-invalid')).toBe('true')
+  expect(api.to('GET /api/v1/public/ada/intro')).toHaveLength(1)
+})
 
 it.each([false, true])(
   'reconciles explicit location choices during duration refresh (removed: %s)',

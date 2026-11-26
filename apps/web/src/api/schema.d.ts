@@ -4517,7 +4517,7 @@ export interface paths {
         put?: never;
         /**
          * Queue one sample notification through the delivery outbox
-         * @description At most five authorized attempts per organization per minute, shared with MCP on this server; refused (403) and unknown-destination (404) calls are not counted. Returns 409 slack_test_pending while a sample is pending.
+         * @description At most five authorized attempts per organization per minute, shared with MCP on this server. An exhausted budget returns 429 after authorization, before the destination lookup. Refused (403) and unknown-destination (404) calls are not counted. Returns 409 slack_test_pending while a sample is pending.
          */
         post: operations["testSlackDestination"];
         delete?: never;
@@ -5170,7 +5170,7 @@ export interface paths {
         put?: never;
         /**
          * Bind delegated SSO proof to an owned team credential
-         * @description Requires fresh SSO step-up in the current team. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.
+         * @description Requires fresh SSO step-up in the current team. Returns 404 sso_disabled while both protocols are off.
          */
         post: operations["bindSsoDelegation"];
         delete?: never;

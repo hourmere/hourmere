@@ -141,6 +141,11 @@ Choosing that option explicitly through an API client uses `location_unavailable
 Retain the same idempotency key and input for retries; changing the choice or phone with
 the same key is a different request.
 
+If your open booking form has no phone field and the host starts requiring your
+phone number, submitting the form reloads the event details and asks you to choose
+a time again. Your draft stays in the form, and you can enter your phone number
+before confirming.
+
 The booking stores the selected option and resolved details. Confirmation and management
 pages, host booking details, host/invitee emails and calendar invitations use the saved
 location. An invitee-provided phone number is visible only to hosts, authorized host

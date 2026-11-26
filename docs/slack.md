@@ -47,7 +47,9 @@ therefore unsupported until the exact host has an official source.
 Test requests have a shared per-organization limit of five per minute across REST and MCP
 in each server process. The service counts an attempt (`admit` callback) only after the
 final owner/admin check found the destination, so refused or unknown-ID calls never use
-the admins' budget. A durable destination lock rejects another sample with HTTP 409 `slack_test_pending` while a sample
+the admins' budget. Once the budget is exhausted, authorized requests are rate-limited
+before the destination lookup and can return while a delivery still holds the row lock.
+A durable destination lock rejects another sample with HTTP 409 `slack_test_pending` while a sample
 is pending, including retries. Sample enqueue shares the delivery-row transaction.
 A definitive Slack 404/410 pauses the destination after one attempt and sets
 `pause_reason = 'url_rejected'`; replacing the URL or enabling the destination clears it.

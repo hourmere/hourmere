@@ -4,6 +4,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import { useState } from 'react'
 import { describe, expect, it } from 'vitest'
 import { InterfaceScope } from '../../i18n/runtime.tsx'
+import { compileSourceCopy } from '../../test/compile-source-copy.ts'
 import { emptyDraft, toInput } from './event-type-form.ts'
 import { OrderedLocationsEditor } from './OrderedLocationsEditor.tsx'
 
@@ -52,7 +53,9 @@ describe('ordered location options', () => {
     expect(
       within(office).getByRole<HTMLInputElement>('radio', { name: 'Default location' }).checked,
     ).toBe(false)
-    expect(document.activeElement).toBe(within(office).getByLabelText('Location label (optional)'))
+    expect(document.activeElement).toBe(
+      within(office).getByRole('button', { name: 'Move location down' }),
+    )
     fireEvent.click(
       screen.getAllByRole('radio', { name: 'Default location' })[1] as HTMLInputElement,
     )
@@ -64,7 +67,9 @@ describe('ordered location options', () => {
       true,
     )
     fireEvent.click(within(office).getByRole('button', { name: 'Move location down' }))
-    expect(document.activeElement).toBe(within(office).getByLabelText('Location label (optional)'))
+    expect(document.activeElement).toBe(
+      within(office).getByRole('button', { name: 'Move location up' }),
+    )
     fireEvent.click(within(office).getByRole('button', { name: 'Remove location option' }))
     expect(document.activeElement).toBe(screen.getByLabelText('Location label (optional)'))
     expect(JSON.parse(screen.getByTestId('body').textContent ?? '{}').locations).toEqual([
@@ -109,19 +114,14 @@ it('detects losing focus or changing the implicit default while moving source-co
   const source = readFileSync('apps/web/src/pages/event-types/OrderedLocationsEditor.tsx', 'utf8')
   const move = source.slice(source.indexOf('  function move('), source.indexOf('  function add('))
   const check = (code: string) => {
-    const input = document.createElement('input')
-    input.id = 'location-option-second-label'
-    document.body.append(input)
+    const button = document.createElement('button')
+    button.id = 'location-option-second-move-down'
+    document.body.append(button)
     let result: unknown
     const pendingFocus = { current: null }
     try {
-      new Function(
-        'options',
-        'defaultId',
-        'set',
-        'pendingFocus',
-        `${code.replace('index: number, direction: number', 'index, direction').replace(' as const', '')}; move(1, -1)`,
-      )(
+      const compiled = compileSourceCopy('move', code, { loader: 'ts', format: 'cjs' })
+      new Function('options', 'defaultId', 'set', 'pendingFocus', `${compiled}; move(1, 'up')`)(
         [{ id: 'first' }, { id: 'second' }],
         'first',
         (_key: string, value: unknown) => {
@@ -130,16 +130,16 @@ it('detects losing focus or changing the implicit default while moving source-co
         pendingFocus,
       )
       if (pendingFocus.current) document.getElementById(pendingFocus.current)?.focus()
-      expect(document.activeElement).toBe(input)
+      expect(document.activeElement).toBe(button)
       expect(result).toEqual([{ id: 'second' }, { id: 'first', isDefault: true }])
     } finally {
-      input.remove()
+      button.remove()
     }
   }
   check(move)
   for (const mutant of [
-    move.replace(/pendingFocus.current = `location-option-.*-label`/, ''),
-    move.replace('item.id === defaultId ? { ...item, isDefault: true as const } : item', 'item'),
+    move.replace(/pendingFocus.current = .+/, ''),
+    move.replace('{ ...item, isDefault: true as const }', 'item'),
   ])
     expect(() => check(mutant)).toThrowError(expect.objectContaining({ name: 'AssertionError' }))
   check(move)
