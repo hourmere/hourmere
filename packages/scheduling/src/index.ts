@@ -495,6 +495,7 @@ export {
   getTeamAdminBooking,
   listTeamAdminBookings,
 } from './team-bookings.ts'
+export { readTeamsMeetingLocations, type TeamsMeetingLocation } from './teams-meeting-locations.ts'
 export {
   cleanText,
   isMultiLineText,

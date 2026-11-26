@@ -14,18 +14,18 @@ with that runtime; it does not import Hourmere's Node.js 26 server packages. Rep
 development and the generated-OpenAPI contract test still use Node.js 26. Test the runtime
 under Node.js 22 before uploading a version.
 
-Both `zapier-platform-core` and `zapier-platform-cli` are pinned to **19.2.1** (released
-October 14, 2026), more than two weeks before selection on November 6, 2026. CLI 19 uses
-`zapier-platform`; it removed the older `zapier` command. Dependencies are recorded in
+Both `zapier-platform-core` and `zapier-platform-cli` are pinned to **19.3.0** (released
+October 30, 2026). This core release includes the multipart header fix in `form-data`
+4.0.6. CLI 19 uses `zapier-platform`; it removed the older `zapier` command. Dependencies are recorded in
 this package's committed `package-lock.json`. It is outside the root npm workspaces;
 root installs do not download Zapier's Platform Agreement–licensed dependencies.
 `index.js` reads `platformVersion` from the exact `zapier-platform-core` pin in
 `package.json` instead of loading the package, so the root contract test runs without
 the Zapier packages.
-The `overrides` keep development-only transitive packages on releases at least two weeks
-old; they do not change any production dependency. When you bump `zapier-platform-*`,
-check that no production package now matches an override, and compare the lock's
-production versions and integrity hashes before and after.
+The `overrides` apply to development-only transitive packages. When updating those pins,
+select releases at least two weeks old. When you bump `zapier-platform-*`, check that no
+production package matches an override, and compare the lock's production versions and
+integrity hashes before and after.
 
 Official references checked for this implementation:
 
@@ -33,7 +33,7 @@ Official references checked for this implementation:
 - [Core API: rawRequest, subscribeData and errors](https://docs.zapier.com/integrations/build-cli/core).
 - [appTester and mocked HTTP with nock](https://docs.zapier.com/integrations/build-cli/testing-and-debugging).
 - [CLI commands](https://github.com/zapier/zapier-platform/blob/main/packages/cli/docs/cli.md).
-- [Pinned platform release](https://github.com/zapier/zapier-platform/releases/tag/zapier-platform-core%4019.2.1).
+- [Pinned platform release](https://github.com/zapier/zapier-platform/releases/tag/zapier-platform-core%4019.3.0).
 
 ## Local checks
 
