@@ -42,11 +42,11 @@ const Instance = z
     }),
     ssoOidcEnabled: z.boolean().optional().openapi({
       description:
-        'The effective SSO_OIDC_ENABLED operator setting (off by default); absent when unknown',
+        'The effective SSO_OIDC_ENABLED operator setting (on by default); absent when unknown',
     }),
     ssoSamlEnabled: z.boolean().optional().openapi({
       description:
-        'The effective SSO_SAML_ENABLED operator setting (off by default); absent when unknown',
+        'The effective SSO_SAML_ENABLED operator setting (on by default); absent when unknown',
     }),
     routingFormsEnabled: z.boolean().optional().openapi({
       description:

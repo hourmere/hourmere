@@ -181,10 +181,10 @@ describe('published API key scope tables', () => {
     '$path explains both SSO settings and their off state outside generated tables',
     ({ document }) => {
       const after = document.slice(document.indexOf(SCOPE_TABLE_END) + SCOPE_TABLE_END.length)
-      expect(after).toContain('OIDC and SAML single sign-on are off by default.')
-      expect(after).toContain('`SSO_OIDC_ENABLED=true` and `SSO_SAML_ENABLED=true`')
+      expect(after).toContain('OIDC and SAML single sign-on are on by default.')
+      expect(after).toContain('`SSO_OIDC_ENABLED=false` or `SSO_SAML_ENABLED=false`')
       expect(after).toContain('404 sso_disabled')
-      expect(after).toContain('OIDC 和 SAML 单点登录默认关闭。')
+      expect(after).toContain('OIDC 和 SAML 单点登录默认开启。')
       expect(after).toContain('Stored enforcement still applies.')
       for (const name of [
         'list_sso_providers',
@@ -249,14 +249,12 @@ describe('published API key scope tables', () => {
       new URL('../apps/site/src/content/docs/docs/index.md', import.meta.url),
       'utf8',
     )
-    expect(site).toContain('Organization single sign-on is off by default.')
+    expect(site).toContain('Organization single sign-on is on by default.')
     const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8')
-    expect(readme).toContain(
-      'Organization single sign-on is off by default for both OIDC and SAML.',
-    )
+    expect(readme).toContain('Organization single sign-on is on by default for both OIDC and SAML')
     for (const doc of [site, readme]) {
-      expect(doc).toContain('`SSO_OIDC_ENABLED=true`')
-      expect(doc).toContain('`SSO_SAML_ENABLED=true`')
+      expect(doc).toContain('`SSO_OIDC_ENABLED=false`')
+      expect(doc).toContain('`SSO_SAML_ENABLED=false`')
     }
   })
 

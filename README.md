@@ -449,13 +449,14 @@ Optional [automatic Google Meet](https://hourmere.com/docs/automatic-google-meet
 
 - [Microsoft Calendar](https://hourmere.com/docs/microsoft-calendar#known-limitations) supports
   Outlook booking writeback. Event types cannot select automatic Microsoft Teams meetings yet.
-- Organization single sign-on is off by default for both OIDC and SAML. Turn on either
-  protocol with `SSO_OIDC_ENABLED=true` or `SSO_SAML_ENABLED=true`. Empty or unset
-  follows the release default, `false` keeps the protocol off, and other values prevent
-  startup. Set a stable, independent 32-byte base64 `SSO_ENCRYPTION_KEY` to seal provider
-  configuration and back it up privately. Turning a protocol off stops its sign-in, linking
-  and new configuration, and suspends its existing browser proofs and delegations. Stored
-  team requirements still apply. Recovery and trust-reducing operations keep their normal
+- Organization single sign-on is on by default for both OIDC and SAML, including upgrades
+  with unset or empty settings. Teams configure a provider and enable enforcement separately.
+  Turn off either protocol with `SSO_OIDC_ENABLED=false` or `SSO_SAML_ENABLED=false`.
+  Use `true` to enable a protocol explicitly. Invalid settings prevent startup. Before saving
+  provider configuration, set and back up a stable, independent 32-byte base64
+  `SSO_ENCRYPTION_KEY`. Turning a protocol off stops its sign-in, linking and new
+  configuration, and suspends its existing browser proofs and delegations. Stored team
+  requirements still apply. Recovery and trust-reducing operations keep their normal
   authorization. See the [single sign-on guide](https://hourmere.com/docs/sso) and
   [self-hosting recovery drill](https://hourmere.com/docs/self-hosting#sso-backup-and-recovery-drill).
 

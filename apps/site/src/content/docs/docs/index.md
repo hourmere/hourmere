@@ -213,11 +213,12 @@ not grant host rescheduling or reschedule-request authority through REST, MCP or
 - Prebuilt image installs have no runtime switch to disable app installation or the
   offline shell. Changing `VITE_PWA_ENABLED` requires rebuilding from source and replacing
   the deployed image; see [conversion steps](/docs/self-hosting#turn-off-app-installation).
-- Organization single sign-on is off by default. Operators can enable OIDC and SAML
-  independently with `SSO_OIDC_ENABLED=true` and `SSO_SAML_ENABLED=true` on any instance
-  without a paid-plan requirement. See the [single sign-on guide](/docs/sso). The
+- Organization single sign-on is on by default. Teams configure a provider and enable
+  enforcement separately. Operators can turn OIDC or SAML off with
+  `SSO_OIDC_ENABLED=false` or `SSO_SAML_ENABLED=false`. SAML sign-in starts at Hourmere
+  and requires signed, unencrypted assertions. See the [single sign-on guide](/docs/sso). The
   [SSO design](https://github.com/hourmere/hourmere/blob/main/docs/sso.md) covers
-  self-hosting, linking, enforcement and the remaining implementation sequence.
+  self-hosting, linking, enforcement and the implementation sequence.
 - [Make](/docs/make) recipes require manual assembly; no import-verified blueprint or native
   Hourmere Make app is shipped. Verify signed webhooks before any downstream action.
 - The [n8n community node](/docs/n8n) supports self-hosted installations. n8n Cloud

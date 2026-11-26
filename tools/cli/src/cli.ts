@@ -202,7 +202,7 @@ Meeting polls
 Waitlists: event-waitlist, set-event-waitlist, waitlist-entries, remove-waitlist-entry,
            join-waitlist, resend-waitlist-verification (arguments through JSON input).
 SSO: sso providers list (optional limit 1–100, cursor), sso policy. Team owner/admin only,
-     with read/full scope. OIDC SSO is off unless the operator sets SSO_OIDC_ENABLED=true.
+     with read/full scope. These reads remain available when the operator disables OIDC or SAML.
 Routing forms are off by default. The server operator can enable them with ROUTING_FORMS_ENABLED=true.
 Pass id, expectedRevision and an optional requestId (UUID) as JSON to routing-forms publish.
 Publication requires full scope. Repeat the same input with the same requestId to recover its version.

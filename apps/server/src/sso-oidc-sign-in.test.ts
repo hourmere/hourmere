@@ -57,6 +57,7 @@ import {
 } from './sso-mailbox-proof.ts'
 import { oidcSignInRoutes } from './sso-oidc-sign-in.ts'
 import { samlSigningIdentity } from './sso-saml-fixtures.ts'
+import { configuredSsoCapabilities } from './sso-setting-fixtures.ts'
 
 const databaseUrl = process.env.DATABASE_URL
 const publicUrl = 'https://hourmere.example.test'
@@ -272,7 +273,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     scimClaims = false,
     failRecoveryNotification = false,
     nativeAuth,
-    operatorSetting,
+    operatorSetting = false,
   }: {
     enabled?: boolean
     samlEnabled?: boolean
@@ -285,11 +286,9 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     failRecoveryNotification?: boolean
     nativeAuth?: typeof auth
   } = {}) {
-    const capabilities = {
-      ssoOidcEnabled: enabled,
-      ssoSamlEnabled: samlEnabled,
-      ssoOperatorSetting: operatorSetting,
-    }
+    const capabilities = operatorSetting
+      ? configuredSsoCapabilities(enabled ? 'true' : 'false', samlEnabled ? 'true' : 'false')
+      : { ssoOidcEnabled: enabled, ssoSamlEnabled: samlEnabled }
     const authentication = nativeAuth ?? (scimClaims ? scimAuth : auth)
     return createApp({
       checkDb: async () => {},

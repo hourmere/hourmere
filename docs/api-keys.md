@@ -455,9 +455,9 @@ These routes keep their own authentication; API key scopes do not authorize them
 
 <!-- api-key-scope-table:end -->
 
-OIDC and SAML single sign-on are off by default. The operator enables them separately
-with `SSO_OIDC_ENABLED=true` and `SSO_SAML_ENABLED=true`. Requests that add trust through
-a disabled protocol return `404 sso_disabled`, including sign-in, linking, provider
+OIDC and SAML single sign-on are on by default. The operator can turn either protocol
+off with `SSO_OIDC_ENABLED=false` or `SSO_SAML_ENABLED=false`. Requests that add trust
+through a disabled protocol return `404 sso_disabled`, including sign-in, linking, provider
 setup and delegation binding. Domain setup, just-in-time admission and recovery enrollment
 require at least one enabled protocol. A team needs a usable provider on an enabled
 protocol to start requiring SSO. The reads `list_sso_providers` and `get_sso_policy`
@@ -468,8 +468,8 @@ meet the other validity checks. Machine reads without a usable delegation on an 
 team return `sso_required`. Enrolled owners can use browser recovery, and trust-reducing
 operations retain their usual authorization and proof requirements.
 
-OIDC 和 SAML 单点登录默认关闭。运营者可分别设置 `SSO_OIDC_ENABLED=true` 和
-`SSO_SAML_ENABLED=true`。通过已关闭协议增加信任的请求（如登录、关联、配置身份提供方和绑定
+OIDC 和 SAML 单点登录默认开启。运营者可设置 `SSO_OIDC_ENABLED=false` 或
+`SSO_SAML_ENABLED=false` 来关闭对应协议。通过已关闭协议增加信任的请求（如登录、关联、配置身份提供方和绑定
 委托）返回 `404 sso_disabled`。设置域名、即时入组和恢复登记需要至少启用一种协议；开启强制单点
 登录需要该协议上有可用的身份提供方。上述两个读取操作对团队所有者和管理员保持可用。已保存的
 强制要求继续生效。关闭协议会暂停其证明和委托，在原到期时间前重新启用且证明或委托仍有效时

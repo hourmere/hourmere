@@ -84,7 +84,8 @@ export async function startFixtureServer(
     incoming.pipe(socket).pipe(incoming)
   }
   listener.server.on('connection', forward)
-  listener.server.once('close', () => listener.server.off('connection', forward))
+  const stopForwarding = () => listener.server.off('connection', forward)
+  listener.server.once('close', stopForwarding)
 
   return {
     port: listener.port,
@@ -94,6 +95,8 @@ export async function startFixtureServer(
           await backend.close(() => running.close())
           await backend.assertClosed()
         } finally {
+          stopForwarding()
+          listener.server.off('close', stopForwarding)
           for (const socket of outbound) socket.destroy()
           await Promise.all(pendingClose)
         }

@@ -20,7 +20,7 @@ import { expect, type KeycloakFixture, test } from '../keycloak/fixture.ts'
 
 const refusal = { status: 303, location: '/sign-in?error=unable_to_create_session' }
 
-test.use({ protocol: 'saml', oidcEnabled: false })
+test.use({ protocol: 'saml' })
 
 function callbackFields(request: Request) {
   const fields = new URLSearchParams(request.postData() ?? '')
@@ -122,9 +122,7 @@ function tamperSignature(response: string) {
   return Buffer.from(tampered).toString('base64')
 }
 
-test.describe('with the SAML setting on', () => {
-  test.use({ samlEnabled: true })
-
+test.describe('with the default SAML setting', () => {
   test('Keycloak document-only signing is refused while signed assertions allow SAML completion', async ({
     page,
     context,
@@ -196,22 +194,23 @@ test.describe('with the SAML setting on', () => {
   })
 })
 
-test('with the SAML setting off the same fixture offers no SAML sign-in', async ({
-  page,
-  keycloak: app,
-}) => {
-  const [instance] = await Promise.all([
-    page.waitForResponse((response) => response.url() === `${app.url}/api/v1/instance`),
-    page.goto(samlSignInUrl(app)),
-  ])
-  expect(instance.status()).toBe(200)
-  expect(await instance.json()).toMatchObject({ ssoOidcEnabled: false, ssoSamlEnabled: false })
-  await expect(button(page, emailLinkLabel)).toBeVisible()
-  await expect(button(page, ssoLabel)).toHaveCount(0)
-  const start = await page.request.post(`${app.url}/api/auth/sign-in/sso`, {
-    headers: { origin: app.url },
-    data: { providerId: app.providerId, intent: 'sign_in', returnTo: returnPath },
+test.describe('with the SSO settings explicitly off', () => {
+  test.use({ oidcEnabled: false, samlEnabled: false })
+
+  test('the same fixture offers no SAML sign-in', async ({ page, keycloak: app }) => {
+    const [instance] = await Promise.all([
+      page.waitForResponse((response) => response.url() === `${app.url}/api/v1/instance`),
+      page.goto(samlSignInUrl(app)),
+    ])
+    expect(instance.status()).toBe(200)
+    expect(await instance.json()).toMatchObject({ ssoOidcEnabled: false, ssoSamlEnabled: false })
+    await expect(button(page, emailLinkLabel)).toBeVisible()
+    await expect(button(page, ssoLabel)).toHaveCount(0)
+    const start = await page.request.post(`${app.url}/api/auth/sign-in/sso`, {
+      headers: { origin: app.url },
+      data: { providerId: app.providerId, intent: 'sign_in', returnTo: returnPath },
+    })
+    expect(start.status()).toBe(404)
+    expect(await start.json()).toMatchObject({ error: 'sso_disabled' })
   })
-  expect(start.status()).toBe(404)
-  expect(await start.json()).toMatchObject({ error: 'sso_disabled' })
 })

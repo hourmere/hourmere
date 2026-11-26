@@ -211,10 +211,11 @@ rules and, when configuration is introduced, keep web and worker policy consiste
 
 ## Private identity providers
 
-Organization single sign-on is available on self-hosted instances and both protocols
-are off by default. Set `SSO_OIDC_ENABLED=true` or `SSO_SAML_ENABLED=true` to enable that
-protocol. Unset or empty uses the release default, `false` explicitly turns a protocol
-off, and other values prevent startup. Use identical settings for web and worker. Set
+Organization single sign-on is available on self-hosted instances. Unset, empty or `true`
+enables each protocol. Set `SSO_OIDC_ENABLED=false` or `SSO_SAML_ENABLED=false` to turn
+that protocol off. Other values prevent startup. Existing `.env` files with unset or
+empty settings use the on-by-default configuration after upgrade through both direct
+startup and Compose. Use identical settings for web and worker. Set
 `SSO_ENCRYPTION_KEY` before saving a provider, and configure working SMTP for mailbox
 verification and recovery. See [single sign-on](/docs/sso).
 `SSO_PRIVATE_TARGETS` lists identity

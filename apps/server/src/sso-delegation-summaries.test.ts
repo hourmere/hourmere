@@ -18,6 +18,7 @@ import {
 import { insert } from '../../../packages/db/src/sso-storage-fixtures.ts'
 import { createApp } from './app.ts'
 import { productRoutes } from './server.ts'
+import { configuredSsoCapabilities } from './sso-setting-fixtures.ts'
 
 const databaseUrl = process.env.DATABASE_URL
 const publicUrl = 'https://hourmere.example.test'
@@ -39,8 +40,11 @@ describe.skipIf(!databaseUrl)('owned SSO delegation inventories', () => {
   let on: ReturnType<typeof instance>
   const statements: string[] = []
 
-  function instance(enabled: boolean, ssoOperatorSetting?: boolean) {
-    const ssoCapabilities = { ssoOidcEnabled: enabled, ssoSamlEnabled: false, ssoOperatorSetting }
+  function instance(enabled: boolean | 'setting-off') {
+    const ssoCapabilities =
+      enabled === 'setting-off'
+        ? configuredSsoCapabilities('false', 'false')
+        : { ssoOidcEnabled: enabled, ssoSamlEnabled: false }
     const auth = createAuth({
       pool: authPool,
       db,
@@ -219,7 +223,7 @@ describe.skipIf(!databaseUrl)('owned SSO delegation inventories', () => {
       JSON.stringify({ data: [memberGrant.connection, personalGrant.connection] }),
     )
     // With the OIDC setting off and nothing bound, both inventories keep the same bytes.
-    const settingOff = instance(false, true)
+    const settingOff = instance('setting-off')
     expect(await read(settingOff, listKeys, member)).toBe(keyBytes)
     expect(await read(settingOff, listGrants, member)).toBe(grantBytes)
 

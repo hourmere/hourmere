@@ -58,7 +58,7 @@ describe('SSO release guides', () => {
     expect(settingRow).toContain(`| \`${key}\` | \`${defaultValue}\` |`)
     const rest = guideSection(read(`${siteDocs}/rest.md`), 'Instance capabilities')
     expect(rest).toContain(`\`${field}\``)
-    expect(rest).toContain(`\`${key}=true\``)
+    expect(rest).toContain(`\`${key}=false\``)
     expect(read('.env.example').split('\n')).toContain(`${key}=`)
     expect(read('docker-compose.yml').split('\n')).toContain(`      ${key}: \${${key}:-}`)
   })

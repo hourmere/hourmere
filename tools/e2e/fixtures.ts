@@ -102,6 +102,7 @@ export interface FixtureApp {
   rows: () => Promise<{ source: string; status: string }[]>
   authorizeHost: (teamRole?: 'owner' | 'member') => Promise<void>
   authorizeTeamSession: () => Promise<{ teamId: string; personalId: string }>
+  restartWithDefaultSso: () => Promise<void>
   eventTypeTitles: () => Promise<string[]>
   bookingState: () => Promise<{
     total: number
@@ -126,6 +127,7 @@ export const test = base.extend<{
   uiAudit: boolean
   notificationEditor: boolean
   slotSnippets: boolean
+  ssoOptOut: boolean
   waitlistSmtp: boolean
 }>({
   automaticMeet: [false, { option: true }],
@@ -133,6 +135,7 @@ export const test = base.extend<{
   uiAudit: [false, { option: true }],
   notificationEditor: [false, { option: true }],
   slotSnippets: [false, { option: true }],
+  ssoOptOut: [false, { option: true }],
   waitlistSmtp: [false, { option: true }],
   suppressFailureDom: [
     async ({ context }, use, testInfo) => {
@@ -156,6 +159,7 @@ export const test = base.extend<{
       uiAudit,
       notificationEditor,
       slotSnippets,
+      ssoOptOut,
       waitlistSmtp,
     },
     use,
@@ -468,7 +472,7 @@ export const test = base.extend<{
       parentListener = await listenOwned(parent)
       const parentUrl = parentListener.url
       const authSecret = randomBytes(32).toString('base64')
-      app = await startFixtureServer(appListener, {
+      const serverEnvironment = {
         DATABASE_URL: owned.url,
         BETTER_AUTH_SECRET: authSecret,
         SIGNUP: 'closed',
@@ -492,7 +496,13 @@ export const test = base.extend<{
         WEB_DIST:
           process.env.HOURMERE_E2E_WEB_DIST ??
           fileURLToPath(new URL('../../apps/web/dist', import.meta.url)),
-      })
+      }
+      const startApp = (listener: OwnedListener, optOut: boolean) =>
+        startFixtureServer(listener, {
+          ...serverEnvironment,
+          ...(optOut && { SSO_OIDC_ENABLED: 'false', SSO_SAML_ENABLED: 'false' }),
+        })
+      app = await startApp(appListener, ssoOptOut)
       let externalRequests = 0
       let authorization: string | undefined
       await context.route('**/*', async (route) => {
@@ -1360,6 +1370,11 @@ export const test = base.extend<{
             },
           ])
           return { teamId: team, personalId: host.organizationId }
+        },
+        restartWithDefaultSso: async () => {
+          if (!appListener || !app) throw new Error('The fixture server has not started')
+          await app.close()
+          app = await startApp(appListener, false)
         },
         eventTypeTitles: async () =>
           (await db.selectFrom('event_types').select('title').orderBy('title').execute()).map(

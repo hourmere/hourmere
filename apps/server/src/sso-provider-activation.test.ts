@@ -40,6 +40,7 @@ import {
 } from './sso-mailbox-proof.ts'
 import { disableSsoEnforcement } from './sso-operator-recovery.ts'
 import type { SsoPolicyDeps } from './sso-policy.ts'
+import { configuredSsoCapabilities } from './sso-setting-fixtures.ts'
 
 const databaseUrl = process.env.DATABASE_URL
 const publicUrl = 'https://sso-activation.example.test'
@@ -51,8 +52,7 @@ const on = { ssoOidcEnabled: true, ssoSamlEnabled: false }
 const off = { ssoOidcEnabled: false, ssoSamlEnabled: false }
 const bothOn = { ssoOidcEnabled: true, ssoSamlEnabled: true }
 const samlOnly = { ssoOidcEnabled: false, ssoSamlEnabled: true }
-// What the running server passes while SSO_OIDC_ENABLED is unset, empty or false.
-const settingOff = { ssoOidcEnabled: false, ssoSamlEnabled: false, ssoOperatorSetting: true }
+const settingOff = configuredSsoCapabilities('false', 'false')
 const providerPath = (id: string) => `/api/v1/team/sso/providers/${id}`
 const activationPath = (id: string) => `${providerPath(id)}/activation`
 const activate = { expectedRevision: 1, enabled: true }
