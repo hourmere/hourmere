@@ -63,7 +63,6 @@ import {
   RouteBookingToken,
   Slot,
 } from '../routes/public.ts'
-import { hasRouteToken } from '../routing-form-privacy.ts'
 import { defineTool, type McpCaller, type Tool } from './tools.ts'
 
 const handle = PageParams.shape.handle.openapi({
@@ -198,6 +197,9 @@ const CreateBookingInput = z
       ),
     { message: 'Use routeToken without any public booking selector or waitlistToken' },
   )
+
+const hasRouteToken = (args: unknown) =>
+  typeof args === 'object' && args !== null && 'routeToken' in args
 
 const CreateBookingOutput = BookingWithToken.extend({
   replayed: z.boolean().openapi({

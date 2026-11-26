@@ -34,7 +34,6 @@ import { hasUnsafeJsonText } from '../app.ts'
 import { MeetingPollHostOutput } from '../meeting-poll-host-schemas.ts'
 import { redactOneTimeLogDetails } from '../one-time-link-privacy.ts'
 import type { RateLimiter } from '../rate-limit.ts'
-import { hasRouteToken } from '../routing-form-privacy.ts'
 import type { TeamReadAccess } from '../sso-team-reads.ts'
 import {
   type SuccessRedirectErrorField,
@@ -349,8 +348,12 @@ export async function runTool(
       // The lower-level error a service wrapped is for us, not the client.
       if (err.cause !== undefined)
         logError(`${tool.name}: ${err.code} caused by `, diagnostic(err.cause))
+      // Only a routed create_booking call uses private diagnostics in this tool.
       const field = privateInput
-        ? err instanceof InvalidBookingAnswerError && hasRouteToken(args) && err.field
+        ? tool.name === 'create_booking' &&
+          privateDiagnostics &&
+          err instanceof InvalidBookingAnswerError &&
+          err.field
         : err.detail && successRedirectErrorField(err.code, err.detail)
       return errorResult({
         error: err.code,

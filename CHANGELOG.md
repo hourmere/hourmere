@@ -16,7 +16,7 @@ must approve publication through the [release workflow](https://github.com/hourm
   their answers. Hosts can manage forms, inspect saved answers and include them in
   personal booking exports. Routing is on by default for unset or empty
   `ROUTING_FORMS_ENABLED`. Explicit `false` or a legacy personal `route` handle
-  keeps routing off. See the [routing forms guide](https://hourmere.com/docs/routing-forms).
+  keeps routing off. See the [routing forms guide](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/routing-forms.md).
 
 - SCIM 2.0 provisioning for team Users and explicitly mapped child-team Groups,
   available on every instance without a paid plan. Discovery, directory membership
