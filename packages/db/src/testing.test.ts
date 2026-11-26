@@ -1,6 +1,6 @@
 import { type ChildProcess, spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { copyFile, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -8,6 +8,8 @@ import pg from 'pg'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as databaseModule from './index.ts'
 import * as migrationModule from './migrate.ts'
+import { MIGRATED_PREFIX_LAST_FILE } from './test-database-registry.ts'
+import { MIGRATION_REPLAY_TIMEOUT } from './testing/migration-replay.ts'
 import {
   cleanupTestDatabases,
   createTestDatabase,
@@ -565,6 +567,45 @@ describe.skipIf(!serverUrl)('real test database cleanup', () => {
       await owned.drop()
     }
   }, 30_000)
+
+  it(
+    "copies the run's historical prefix on the first compatible fixture and applies changed SQL",
+    async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'hourmere-predecessor-test-'))
+      directories.push(directory)
+      const checkpoint = join(directory, MIGRATED_PREFIX_LAST_FILE)
+      const files = (await readdir(migrationModule.migrationsDir))
+        .filter((file) => file.endsWith('.sql') && file <= MIGRATED_PREFIX_LAST_FILE)
+        .sort()
+      for (const file of files) {
+        await copyFile(join(migrationModule.migrationsDir, file), join(directory, file))
+      }
+      const since = new Date()
+      const original = await createTestDatabase(serverUrl as string, directory)
+      try {
+        const { entries, copied } = await ledger(original, since)
+        expect(entries.map(([name]) => name)).toEqual(files)
+        expect(copied).toBe(true)
+      } finally {
+        await original.drop()
+      }
+
+      const sql = await readFile(checkpoint, 'utf8')
+      await writeFile(checkpoint, `${sql}\nCREATE TABLE changed_checkpoint (id integer);\n`)
+      const changed = await createTestDatabase(serverUrl as string, directory)
+      try {
+        expect((await ledger(changed, since)).copied).toBe(false)
+        await expect(changed.pool.query('SELECT * FROM changed_checkpoint')).resolves.toMatchObject(
+          {
+            rows: [],
+          },
+        )
+      } finally {
+        await changed.drop()
+      }
+    },
+    MIGRATION_REPLAY_TIMEOUT,
+  )
 
   it('migrates repeated source copies from one template of their unchanged predecessors', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'hourmere-predecessor-test-'))

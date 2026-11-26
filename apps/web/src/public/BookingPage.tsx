@@ -694,7 +694,7 @@ function BookingFlow({
 
   return (
     <PublicLayout wide branding={event.branding}>
-      <div className="booking-layout">
+      <div className="booking-layout booking-page">
         <BookingEventInfo
           event={event}
           durationMinutes={durationMinutes}
@@ -855,6 +855,7 @@ function BookingFlow({
                 />
               }
               timeZone={timeZone}
+              showTimeZoneIcon
               onTimeZoneChange={(zone) => {
                 rememberVisitorTimeZone(zone)
                 setTimeZone(zone)

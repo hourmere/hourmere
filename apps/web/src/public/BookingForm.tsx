@@ -4,6 +4,7 @@ import { UserContentMessage } from '../components/UserContent.tsx'
 import { useI18n } from '../i18n/runtime.tsx'
 import { literal, msg, type UiText } from '../i18n/translate.ts'
 import { locationLabel } from './BookingDetails.tsx'
+import { BookingFormActions } from './BookingFormActions.tsx'
 import {
   type Answer,
   answerError,
@@ -385,14 +386,16 @@ export function BookingForm({
         </fieldset>
       )}
 
-      <button
-        type={onSubmit ? 'submit' : 'button'}
-        className="button button-primary button-block"
-        aria-describedby={submissionDisabledBy}
-        disabled={!onSubmit || submitting}
-      >
-        {submitting ? t('Booking…') : t('Confirm booking')}
-      </button>
+      <BookingFormActions active={Boolean(onSubmit)}>
+        <button
+          type={onSubmit ? 'submit' : 'button'}
+          className="button button-primary button-block"
+          aria-describedby={submissionDisabledBy}
+          disabled={!onSubmit || submitting}
+        >
+          {submitting ? t('Booking…') : t('Confirm booking')}
+        </button>
+      </BookingFormActions>
     </form>
   )
 }

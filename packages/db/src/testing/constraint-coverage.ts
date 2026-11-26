@@ -66,6 +66,7 @@
  * only touch rows it creates, because one database serves the whole suite):
  *
  *   import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
+ *   import { MIGRATION_COVERAGE_TIMEOUT } from './testing/migration-replay.ts'
  *
  *   it('fails an assertion when any 0072 object is dropped', async () => {
  *     const report = await checkConstraintCoverage({
@@ -75,7 +76,7 @@
  *       allowList: { 'constraint public.t.t_key': 'One-line reason it is not a protection' },
  *     })
  *     expect(report.problems).toEqual([])
- *   }, 600_000)
+ *   }, MIGRATION_COVERAGE_TIMEOUT)
  *
  * The expectation file defaults to `testing/migration-objects/<migration>.json` (not a
  * `coverage` directory, which .gitignore excludes). Keep the allow-list to objects that are
@@ -93,6 +94,7 @@ import { createPool } from '../index.ts'
 import { migrationsDir, runMigrations } from '../migrate.ts'
 import {
   createTestDatabaseTemplate,
+  findTestMigrationPrefix,
   passesCallback,
   reuseConnectionsAfterErrors,
   type TestDatabaseTemplate,
@@ -130,6 +132,8 @@ export interface ConstraintCoverageOptions {
   expectationFile?: string
   /** Defaults to the repository's migration directory. */
   migrationsDirectory?: string
+  /** Optional template on serverUrl with a prefix of these migrations, before the target. */
+  predecessorTemplate?: TestDatabaseTemplate
   /** Parallel copies; each holds the suite's connections plus one during setup. Default 4. */
   concurrency?: number
   /** Per-object budget for one suite run. Default 120 s. */
@@ -214,17 +218,21 @@ async function prepareTemplate(
   serverUrl: string,
   migration: string,
   migrationsDirectory: string,
+  predecessorTemplate: TestDatabaseTemplate | undefined,
 ): Promise<{ template: TestDatabaseTemplate; objects: CoverageObject[] }> {
   const files = (await readdir(migrationsDirectory)).filter((file) => file.endsWith('.sql')).sort()
   if (!files.includes(migration)) throw new Error(`Unknown migration ${migration}`)
   const staging = await mkdtemp(join(tmpdir(), 'hourmere-coverage-'))
   let objects: CoverageObject[] = []
   try {
+    await Promise.all(
+      files
+        .filter((file) => file < migration)
+        .map((file) => copyFile(join(migrationsDirectory, file), join(staging, file))),
+    )
     const template = await createTestDatabaseTemplate(
       serverUrl,
       async (pool) => {
-        for (const file of files.filter((file) => file < migration))
-          await copyFile(join(migrationsDirectory, file), join(staging, file))
         await runMigrations(pool, staging)
         const before = await catalog(pool)
         await copyFile(join(migrationsDirectory, migration), join(staging, migration))
@@ -236,7 +244,10 @@ async function prepareTemplate(
         const current = await catalog(pool)
         objects = created.flatMap((key) => current.get(key) ?? []).sort(byKey)
       },
-      { tag: 'coverage' },
+      {
+        tag: 'coverage',
+        template: predecessorTemplate?.name ?? (await findTestMigrationPrefix(serverUrl, staging)),
+      },
     )
     return { template, objects }
   } finally {
@@ -528,6 +539,7 @@ export async function checkConstraintCoverage(
     options.serverUrl,
     options.migration,
     migrationsDirectory,
+    options.predecessorTemplate,
   )
   try {
     const keys = objects.map((object) => object.key)

@@ -941,7 +941,7 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
       expect(body).toMatchObject({
         synthetic: true,
         match: 'matched',
-        emails: [{ text: '<Hi>', html: '<p>&lt;Hi&gt;</p>' }],
+        emails: [{ text: '<Hi>', html: '<p><span dir="auto">&lt;Hi&gt;</span></p>' }],
       })
       const result = await previewTool(token, input)
       expect(result.isError).not.toBe(true)
