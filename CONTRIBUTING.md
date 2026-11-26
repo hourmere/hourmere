@@ -300,13 +300,14 @@ The Keycloak OIDC spec runs in the required browser suite and needs Docker and O
 See the [Keycloak fixture README](tools/e2e/keycloak/README.md) for its image pin, local
 command and resource ownership.
 
-CI also builds a disposable static-site fixture and checks documentation table geometry at
-360px and 1280px, including page overflow, identifier line counts and mid-word header wraps.
-Touch copy controls are checked at both widths. These site tests use only a local static
-server, block external requests and create no database. Rendered negative controls verify
-that the assertions detect the rejected wrapping, overflow and copy-button overlap. The site
-tests are skipped outside CI; any local browser run requires an escalated shell. CI restores
-the legal-date source and deletes the fixture output after the browser suite.
+CI builds the static site from committed sources and checks documentation table geometry at
+360px and 1280px across the published guides. The configuration guide also covers the
+1200px layout with both sidebars, URL breakpoints, and the 320px layout with long identifiers
+and visually hidden, accessible table headers. Touch copy controls are checked at 320px and
+1280px. These site tests use only a local static server, block external requests and create no
+database. Rendered negative controls verify that the assertions detect rejected wrapping,
+overflow and copy-button overlap. The site tests are skipped outside CI. Any local browser
+run requires an escalated shell.
 
 Traces, videos, screenshots and automatic failure DOM snapshots are disabled to keep
 one-time management capabilities out of artifacts. Playwright's pinned
@@ -331,7 +332,7 @@ The reusable [CI workflow](.github/workflows/ci.yml) runs the first three alongs
 jobs, and the [DCO workflow](.github/workflows/dco.yml) runs `sign-off`. Six `e2e-shard` jobs run the
 complete functional browser suite in parallel; the `e2e` aggregator succeeds only
 when every shard succeeds, including on merge-queue runs. Each shard builds its own
-web and disposable site fixture and retains the browser-artifact privacy check. The optional
+web and static site and retains the browser-artifact privacy check. The optional
 [UI checks workflow](.github/workflows/ui-checks.yml) runs on pushes to `main` and manual
 dispatches. To request the audits on a pull request, add the `ui-checks` label. Adding the
 label or pushing new commits while it is present runs the audits when the changed files match
