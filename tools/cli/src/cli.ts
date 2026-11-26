@@ -55,6 +55,7 @@ export const COMMANDS = {
   whoami: 'whoami',
   profile: 'get_profile',
   catalog: 'list_event_types',
+  'team-home': 'get_public_team',
   event: 'get_event_type',
   'create-event': 'create_event_type',
   'duplicate-event': 'duplicate_event_type',
@@ -129,6 +130,7 @@ export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [-
        hourmere sso providers list [--input FILE|-] [--url ORIGIN]
        hourmere sso policy [--input FILE|-] [--url ORIGIN]
        hourmere scim-team-mappings create|delete --input FILE|-
+       hourmere team-home --input FILE|- [--url ORIGIN]
        hourmere routing-forms list|get|create|update|archive|publish|preview|public [--input FILE|-] [--url ORIGIN]
        hourmere routing-forms route --input FILE|- [--output FILE] [--url ORIGIN]
        hourmere routing-forms resolve|slots --input FILE|- [--output FILE] [--url ORIGIN]
@@ -170,6 +172,8 @@ Commands: whoami, profile, catalog, event, create-event, duplicate-event, update
           one-time-links create|list|revoke
 Read booking details with booking --input FILE|- and JSON {bookingId}.
 Requires a full, read or bookings key with access to the booking.
+Read a public team directory with team-home --input FILE|- and JSON {handle}.
+Use the exact-case team slug. Accepts read, bookings or full keys.
 Meeting polls
   Every poll command requires JSON on stdin (--input -). Input files and --output are refused.
   Keep tokens, invitation addresses and idempotency keys out of command arguments and shell history.

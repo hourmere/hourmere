@@ -257,6 +257,18 @@ const schema = z
     SLOT_SNIPPETS_ENABLED: optional(z.enum(['true', 'false'])).transform(
       (value) => value === 'true',
     ),
+    TEAM_PUBLIC_HOME_ORGANIZATION_IDS: optional(z.string()).transform((value, ctx) => {
+      const ids = value === undefined ? [] : value.split(',').map((id) => id.trim())
+      const uuid = z.uuid()
+      if (ids.length > 256 || ids.some((id) => !uuid.safeParse(id).success)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'TEAM_PUBLIC_HOME_ORGANIZATION_IDS must be at most 256 comma-separated UUIDs',
+        })
+        return z.NEVER
+      }
+      return [...new Set(ids.map((id) => id.toLowerCase()))]
+    }),
     FOLLOW_UP_HOST_NOTES_ENABLED: optional(z.enum(['true', 'false'])).transform(
       (value) => value !== 'false',
     ),

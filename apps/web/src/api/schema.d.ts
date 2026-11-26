@@ -3632,6 +3632,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/public/teams/{handle}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A team’s public booking directory
+         * @description The saved public name, exact-case slug and listed event summaries of an opted-in team. An enabled team with no eligible events returns an empty list. Hidden events remain accessible only through their existing direct or private links.
+         */
+        get: operations["getPublicTeam"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/public/teams/{handle}/{slug}": {
         parameters: {
             query?: never;
@@ -8226,6 +8246,23 @@ export interface components {
             title: string;
             /** Format: uuid */
             versionId: string;
+        };
+        PublicTeam: {
+            eventTypes: {
+                description: string | null;
+                durationMinutes: number;
+                location: {
+                    /** @enum {string} */
+                    kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+                } | null;
+                /** @description The booking page is /team/{handle}/{slug} */
+                slug: string;
+                title: string;
+            }[];
+            team: {
+                name: string;
+                slug: string;
+            };
         };
         PublishRoutingForm: {
             expectedRevision: number;
@@ -16923,6 +16960,65 @@ export interface operations {
             };
             /** @description meeting_poll_key_mismatch: installation secret does not match retained data */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getPublicTeam: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Exact-case organization slug (1–64 ASCII letters/digits/inner hyphens) */
+                handle: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The public team and its listed events */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicTeam"];
+                };
+            };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such public team page (`team_not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

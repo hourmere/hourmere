@@ -43,6 +43,7 @@ export {
   getOneTimeBookingPage,
   getPublicEventType,
   getPublicHost,
+  getPublicTeam,
   getPublicTeamEventType,
   LOCATION_KINDS,
   type Location,
@@ -57,6 +58,7 @@ export {
   type PublicEventType,
   type PublicEventTypeSummary,
   type PublicHost,
+  type PublicTeam,
   type SlotView,
 } from './availability.ts'
 export {

@@ -87,6 +87,7 @@
   "previewRoutingForm": { "mcp": "preview_routing_form", "cli": "routing-forms preview" },
   "getPublicRoutingForm": { "mcp": "get_public_routing_form", "cli": "routing-forms public" },
   "getPublicTeamRoutingForm": { "mcp": "get_public_routing_form", "cli": "routing-forms public" },
+  "getPublicTeam": { "mcp": "get_public_team", "cli": "team-home" },
   "routeLead": { "mcp": "route_lead", "cli": "routing-forms route" },
   "routeTeamLead": { "mcp": "route_lead", "cli": "routing-forms route" },
   "resolveRoutingContinuation": {

@@ -66,6 +66,7 @@ const classes = {
     'GET /api/v1/public/{handle}/{slug}',
     'GET /api/v1/public/{handle}/{slug}/slots',
     'GET /api/v1/public/teams/{handle}/{slug}',
+    'GET /api/v1/public/teams/{handle}',
     'GET /api/v1/public/teams/{handle}/{slug}/slots',
   ],
   booking_write: [
@@ -418,6 +419,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
         routes: productRoutes({
           db,
           slotSnippetsEnabled: true,
+          teamPublicHomeOrganizationIds: [teamId],
           routingFormsEnabled: true,
           routingSecret: secret,
           scimProvisioningEnabled: true,
@@ -1052,14 +1054,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 189-operation contract and all 567 scope combinations', () => {
+    it('covers the exact 190-operation contract and all 570 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(189)
-      expect(new Set(ids).size).toBe(189)
+      expect(ids).toHaveLength(190)
+      expect(new Set(ids).size).toBe(190)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(567)
+      expect(cases).toHaveLength(570)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
