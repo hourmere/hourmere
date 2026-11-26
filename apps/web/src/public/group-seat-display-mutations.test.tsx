@@ -7,6 +7,7 @@ import * as runtime from '../i18n/runtime.tsx'
 import { compileSourceCopy } from '../test/compile-source-copy.ts'
 import { slot } from '../test/public-fixtures.ts'
 import * as api from './api.ts'
+import * as factIcon from './BookingFactIcon.tsx'
 import * as calendar from './calendar.ts'
 import * as month from './MonthCalendar.tsx'
 import type { SlotPicker } from './SlotPicker.tsx'
@@ -21,6 +22,7 @@ function copy(text: string): typeof SlotPicker {
     '../components/TimeZonePicker.tsx': zone,
     '../i18n/runtime.tsx': runtime,
     './api.ts': api,
+    './BookingFactIcon.tsx': factIcon,
     './calendar.ts': calendar,
     './MonthCalendar.tsx': month,
     './time.ts': time,

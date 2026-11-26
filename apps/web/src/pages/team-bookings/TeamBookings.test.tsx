@@ -123,6 +123,30 @@ async function confirmCancellation(user: ReturnType<typeof userEvent.setup>) {
 // This is an integration boundary: only the team list/detail DTOs and cancel route are
 // scripted. fakeApi fails the test if a personal detail route is fetched.
 describe('team bookings access and context', () => {
+  it.each([false, true])(
+    'keeps the Teams link out of the narrow team detail (host: %s)',
+    async (host) => {
+      const url = 'https://teams.microsoft.com/l/meetup-join/fake-meeting/0'
+      const seed = teamBooking()
+      const booking = host
+        ? teamBooking({ hosts: seed.hosts.map((member) => ({ ...member, userId: ME.user.id })) })
+        : seed
+      server({
+        [LIST]: () => json(200, { data: [booking], nextCursor: null }),
+        [`GET /api/v1/team/bookings/${BOOKING_ID}`]: () =>
+          json(200, { ...booking, location: { kind: 'microsoft_teams', status: 'ready', url } }),
+      })
+      renderApp(PAGE)
+      await openDetail()
+      expect(await within(detail()).findByText('Microsoft Teams')).toBeDefined()
+      expect(detail().innerHTML).not.toContain(url)
+      const hostDetail = within(detail()).queryByRole('link', { name: 'Open host booking details' })
+      expect(hostDetail?.getAttribute('href')).toBe(
+        host ? `/app/bookings/${BOOKING_ID}` : undefined,
+      )
+    },
+  )
+
   it.each(['owner', 'admin', 'member, admin'])(
     'shows %s the team context, scope, bookings and navigation entry',
     async (role) => {

@@ -25,6 +25,11 @@ import {
   type PaymentMode,
   type PaymentProvider,
 } from './payment-provider.ts'
+import {
+  applyStripeRefundObservation,
+  ensurePaymentRefund,
+  type StripeRefundObservation,
+} from './payment-refunds.ts'
 import { validateResponses } from './questions.ts'
 
 export const PAYMENT_HOLD_MINUTES = 30
@@ -328,13 +333,15 @@ async function paymentTransaction<T>(db: Db, apply: (trx: Db) => Promise<T>): Pr
   try {
     return await run()
   } catch (error) {
-    // The trigger can observe the deadline just after our read. Retry the whole write,
-    // including the event receipt, to record refund intent against the now-expired hold.
+    // Retry the receipt transaction if the confirmation deadline or another attempt's
+    // unique binding changed after the read. The next pass sees the committed state.
     if (
       typeof error === 'object' &&
       error !== null &&
       'constraint' in error &&
-      error.constraint === 'bookings_payment_confirmation'
+      (error.constraint === 'bookings_payment_confirmation' ||
+        error.constraint === 'bookings_payment_reference' ||
+        error.constraint === 'payment_checkout_attempts_session_id_key')
     )
       return run()
     throw error
@@ -378,7 +385,7 @@ async function confirmLockedPaymentHold(
   return confirm ? 'confirmed' : 'refund_required'
 }
 
-/** Verified provider success only. Late success records durable refund intent, never resurrects. */
+/** Internal hold foundation. Priced Checkout requires a bound Session observation below. */
 export async function confirmPaymentHold(
   ctx: PaymentContext,
   id: string,
@@ -389,6 +396,12 @@ export async function confirmPaymentHold(
   return paymentTransaction(ctx.db, async (trx) => {
     const row = await lockPaymentHold(trx, id)
     if (!row) throw new DomainError('not_found', 'booking_not_found')
+    const checkout = await trx
+      .selectFrom('payment_checkout_attempts')
+      .select('id')
+      .where('booking_id', '=', id)
+      .executeTakeFirst()
+    if (checkout) throw new DomainError('conflict', 'payment_provider_binding_mismatch')
     return { id, outcome: await confirmLockedPaymentHold(trx, ctx, row, paymentReference) }
   })
 }
@@ -404,12 +417,74 @@ interface StripeCheckoutObservation {
   paymentReference: string | null
 }
 
+interface PaidCheckoutIdentity {
+  sessionId: string
+  paymentReference: string
+  tagged: boolean
+  clientReferenceId: string | undefined
+}
+
+async function ensureCheckoutRefund(
+  trx: Db,
+  attempt: { id: string; account_id: string; mode: string; amount_minor: number; currency: string },
+  paymentReference: string,
+) {
+  await ensurePaymentRefund(trx, {
+    attemptId: attempt.id,
+    accountId: attempt.account_id,
+    mode: attempt.mode,
+    amountMinor: attempt.amount_minor,
+    currency: attempt.currency,
+    paymentReference,
+  })
+}
+
+async function recordPaidCheckoutMismatch(
+  trx: Db,
+  binding: { accountId: string; mode: PaymentMode },
+  eventId: string,
+  paid: PaidCheckoutIdentity | undefined,
+) {
+  if (!paid) return
+  if (!paid.tagged) {
+    const known = await trx
+      .selectFrom('payment_checkout_attempts')
+      .select('id')
+      .where('account_id', '=', binding.accountId)
+      .where('mode', '=', binding.mode)
+      .where((eb) =>
+        eb.or([
+          eb('session_id', '=', paid.sessionId),
+          ...(paid.clientReferenceId ? [eb('id', '=', paid.clientReferenceId)] : []),
+        ]),
+      )
+      .executeTakeFirst()
+    if (!known) return
+  }
+  // A mismatched observation cannot authorize a refund or a booking transition.
+  await trx
+    .updateTable('payment_stripe_events')
+    .set({
+      finding: 'paid_checkout_binding_mismatch',
+      account_id: binding.accountId,
+      mode: binding.mode,
+      session_id: paid.sessionId,
+      payment_reference: paid.paymentReference,
+    })
+    .where('event_id', '=', eventId)
+    .execute()
+}
+
 /** A receipt and its local effects commit together. No provider I/O happens here. */
 export async function recordStripePaymentEvent(
   ctx: Pick<PublicContext, 'db' | 'notify' | 'now'>,
   binding: { accountId: string; mode: PaymentMode },
   eventId: string,
-  checkout?: StripeCheckoutObservation,
+  observations: {
+    checkout?: StripeCheckoutObservation | undefined
+    paidCheckout?: PaidCheckoutIdentity | undefined
+    refund?: StripeRefundObservation | undefined
+  } = {},
 ): Promise<void> {
   await paymentTransaction(ctx.db, async (trx) => {
     const receipt = await trx
@@ -418,11 +493,17 @@ export async function recordStripePaymentEvent(
       .onConflict((conflict) => conflict.column('event_id').doNothing())
       .returning('event_id')
       .executeTakeFirst()
-    if (!receipt || !checkout) return
+    if (!receipt) return
+    const { checkout, paidCheckout, refund } = observations
+    if (refund) {
+      await applyStripeRefundObservation(trx, binding, refund)
+      return
+    }
+    if (!checkout) return recordPaidCheckoutMismatch(trx, binding, eventId, paidCheckout)
 
     // Session creation, cancellation, expiry and confirmation serialize on the booking row.
     const hold = await lockPaymentHold(trx, checkout.bookingId)
-    if (!hold) return
+    if (!hold) return recordPaidCheckoutMismatch(trx, binding, eventId, paidCheckout)
     const attempt = await trx
       .selectFrom('payment_checkout_attempts')
       .selectAll()
@@ -442,18 +523,40 @@ export async function recordStripePaymentEvent(
         hold.payment_reference &&
         hold.payment_reference !== checkout.paymentReference)
     )
-      return
+      return recordPaidCheckoutMismatch(trx, binding, eventId, paidCheckout)
+
+    if (
+      checkout.paymentReference &&
+      !hold.payment_reference &&
+      (await trx
+        .selectFrom('bookings')
+        .select('id')
+        .where('payment_reference', '=', checkout.paymentReference)
+        .where('id', '!=', hold.id)
+        .executeTakeFirst())
+    )
+      return recordPaidCheckoutMismatch(trx, binding, eventId, paidCheckout)
 
     // A signed snapshot can recover the Session binding after an ambiguous create response.
-    if (attempt.session_id === null)
+    if (attempt.session_id === null) {
+      const other = await trx
+        .selectFrom('payment_checkout_attempts')
+        .select('id')
+        .where('session_id', '=', checkout.sessionId)
+        .where('id', '!=', attempt.id)
+        .executeTakeFirst()
+      if (other) return recordPaidCheckoutMismatch(trx, binding, eventId, paidCheckout)
       await trx
         .updateTable('payment_checkout_attempts')
         .set({ session_id: checkout.sessionId })
         .where('id', '=', attempt.id)
         .execute()
+    }
 
     if (checkout.paymentReference) {
-      await confirmLockedPaymentHold(trx, ctx, hold, checkout.paymentReference)
+      const outcome = await confirmLockedPaymentHold(trx, ctx, hold, checkout.paymentReference)
+      if (outcome === 'refund_required')
+        await ensureCheckoutRefund(trx, attempt, checkout.paymentReference)
     } else if (hold.status === 'pending_payment') {
       await trx
         .updateTable('bookings')

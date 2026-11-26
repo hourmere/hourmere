@@ -7,7 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { createTestDatabase, type TestDatabase } from '../../db/src/testing.ts'
 import { assertSmsLogsPrivate } from './sms-log-test-utils.ts'
 import { createTwilioSmsProvider, SmsError, type SmsProvider } from './sms-provider.ts'
-import { createSmsService, purgeSmsDeliveryDetails, type SmsLimits } from './sms-service.ts'
+import { createSmsService, digest, purgeSmsDeliveryDetails, type SmsLimits } from './sms-service.ts'
 
 async function sourceCopy(source: string) {
   const directory = await mkdtemp(
@@ -218,6 +218,9 @@ describe.skipIf(!process.env.DATABASE_URL)('durable SMS dispatch', () => {
   it('retries definite rate limits only after backoff and charges only actual dispatches', async () => {
     await verifyRetry(createSmsService)
   })
+  it('charges a new budget slot when retrying a rate limit more than 24 hours old', async () => {
+    await verifyRetry(createSmsService, true)
+  })
   async function verifyRetry(factory: typeof createSmsService, aged = false) {
     const input = request()
     const providerMessageId = `SM${'2'.repeat(32)}`
@@ -296,6 +299,43 @@ describe.skipIf(!process.env.DATABASE_URL)('durable SMS dispatch', () => {
       { code: 'sms_rate_limited' },
     )
     expect(sendSms).toHaveBeenCalledTimes(2)
+  }
+  it('refuses dispatch when another writer re-reserves the rate-limited row after the read', async () => {
+    await verifyConflictingReservation(createSmsService)
+  })
+  async function verifyConflictingReservation(factory: typeof createSmsService) {
+    const input = request()
+    const sendSms = vi
+      .fn<SmsProvider['sendSms']>()
+      .mockRejectedValueOnce(new SmsError('sms_rate_limited'))
+      .mockResolvedValue({ providerMessageId: 'SMsynthetic' })
+    await expect(setup(roomy, { sendSms }).service.sendSms(input)).rejects.toMatchObject({
+      code: 'sms_rate_limited',
+    })
+    await db
+      .updateTable('sms_deliveries')
+      .set({ retry_not_before: sql`clock_timestamp()-interval '1 second'` })
+      .execute()
+    const staleRead = db.withPlugin({
+      transformQuery: ({ node }) => node,
+      async transformResult({ result }) {
+        if (result.rows.some((row) => 'status' in row && row.status === 'rate_limited')) {
+          // Model a writer that does not share the advisory fence, after the SELECT.
+          await db
+            .updateTable('sms_deliveries')
+            .set({ status: 'dispatching', retry_not_before: null })
+            .where('key_hash', '=', digest(secret, 'job', input.idempotencyKey))
+            .execute()
+        }
+        return result
+      },
+    })
+    const service = factory({ db: staleRead, hashSecret: secret, provider: { sendSms } })
+    await expect(service.sendSms(input)).rejects.toMatchObject({ code: 'sms_delivery_unknown' })
+    expect(sendSms).toHaveBeenCalledTimes(1)
+    expect(await db.selectFrom('sms_deliveries').select('status').execute()).toEqual([
+      { status: 'dispatching' },
+    ])
   }
   it('never logs destinations or bodies across success, failures, and retries', async () => {
     await verifyLogs(createSmsService)
@@ -548,7 +588,7 @@ describe.skipIf(!process.env.DATABASE_URL)('durable SMS dispatch', () => {
       ],
       [
         'created_at: sql`clock_timestamp()`,',
-        'created_at: sql`created_at`,',
+        'created_at: sql`sms_deliveries.created_at`,',
         async (module) => verifyRetry(module.createSmsService, true),
       ],
       [
@@ -650,20 +690,9 @@ describe.skipIf(!process.env.DATABASE_URL)('durable SMS dispatch', () => {
         },
       ],
       [
-        'if (existing) {',
-        "if (existing && existing.status !== 'dispatching') {",
-        async (module) => {
-          const service = make(module)
-          const input = request()
-          await service.sendSms(input)
-          await db
-            .updateTable('sms_deliveries')
-            .set({ status: 'dispatching', provider_message_id: null })
-            .execute()
-          await expect(service.sendSms(input)).rejects.toMatchObject({
-            code: 'sms_delivery_unknown',
-          })
-        },
+        ".where('sms_deliveries.status', '=', 'rate_limited'),",
+        ',',
+        async (module) => verifyConflictingReservation(module.createSmsService),
       ],
       [
         "throw error instanceof SmsError ? error : new SmsError('sms_delivery_unknown')",
@@ -784,6 +813,9 @@ describe.skipIf(!process.env.DATABASE_URL)('durable SMS dispatch', () => {
               failure,
               `Mutation must fail a real assertion: ${before} -> ${after}`,
             ).toMatchObject({ name: 'AssertionError' })
+            expect(String(failure), 'SQL errors must never count as mutation kills').not.toMatch(
+              /\bcode['"]?\s*:\s*['"](?:22|23|42)[0-9A-Z]{3}['"]/,
+            )
           } else await verify(module)
         } finally {
           await cleanup()

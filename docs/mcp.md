@@ -437,6 +437,7 @@ Configure an ordered `locations` list through the event-type create/update opera
 and choose `locationOptionId` for slot availability and booking. An invitee-phone option additionally requires
 `inviteePhone`, normalized to E.164 after removing common phone separators.
 CLI `slots` and `book` accept `locationOptionId` in their JSON input files.
+Use `kind: "microsoft_teams"` for a single-host event with a Microsoft writeback destination.
 Rescheduling keeps the original choice. See [meeting location choices](https://hourmere.com/docs/location-choices)
 for configuration examples, public discovery, compatibility and conference rules.
 
@@ -474,6 +475,10 @@ saving changes: `1440` means exactly 24 hours. With `cancelCutoffMinutes: 1440` 
 The exact deadline instant is closed; 1 millisecond before it remains eligible, subject
 to the other booking rules. Host actions still require the caller to host the booking;
 team-admin status alone grants no extra MCP/CLI or API-key access.
+
+Cancellation of a confirmed, Checkout-bound paid booking requests a full refund.
+Rescheduling keeps its original duration and payment. These actions keep the existing
+booking permissions and invitee deadlines. [Paid booking changes](https://hourmere.com/docs/payments#cancel-or-reschedule-a-paid-booking).
 
 ## Export bookings without filling agent context
 

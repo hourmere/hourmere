@@ -1,6 +1,8 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { Field, type FieldErrors } from '../../components/forms.tsx'
 import { useI18n } from '../../i18n/runtime.tsx'
+import type { MessageKey } from '../../i18n/translate.ts'
+import { EVENT_TYPE } from '../../limits.ts'
 import {
   type EventTypeDraft,
   LOCATION_KINDS,
@@ -12,10 +14,12 @@ export function OrderedLocationsEditor({
   draft,
   errors,
   set,
+  teamsIssue,
 }: {
   draft: EventTypeDraft
   errors: FieldErrors
   set: <K extends keyof EventTypeDraft>(name: K, value: EventTypeDraft[K]) => void
+  teamsIssue?: MessageKey | undefined
 }) {
   const { t, ui } = useI18n()
   const [addition, setAddition] = useState('')
@@ -31,26 +35,37 @@ export function OrderedLocationsEditor({
   const available = LOCATION_KINDS.filter(
     (kind) => kind.value && !options.some((option) => option.kind === kind.value),
   )
+  const enabled = available.filter((kind) => kind.value !== 'microsoft_teams' || !teamsIssue)
+  const newKind = enabled.find((kind) => kind.value === addition)?.value ?? enabled[0]?.value
+  const atLimit = options.length === EVENT_TYPE.maxLocationOptions
   function update(id: string, change: LocationOption) {
     set(
       'locationOptions',
       options.map((option) => (option.id === id ? change : option)),
     )
   }
-  function move(index: number, direction: number) {
-    // Reordering changes presentation, not the invitee's default choice.
-    const next = options.map((item) =>
-      item.id === defaultId ? { ...item, isDefault: true as const } : item,
-    )
+  function move(index: number, direction: 'up' | 'down') {
+    const next = [...options]
     const [option] = next.splice(index, 1)
     if (!option) return
-    next.splice(index + direction, 0, option)
-    pendingFocus.current = `location-option-${option.id}-label`
-    set('locationOptions', next)
+    const nextIndex = index + (direction === 'up' ? -1 : 1)
+    next.splice(nextIndex, 0, option)
+    const focusDirection =
+      nextIndex === 0 ? 'down' : nextIndex === next.length - 1 ? 'up' : direction
+    pendingFocus.current = `location-option-${option.id}-move-${focusDirection}`
+    // Keep the default explicit if a different option is now first.
+    set(
+      'locationOptions',
+      next.map((item) =>
+        next[0]?.id !== defaultId && item.id === defaultId
+          ? { ...item, isDefault: true as const }
+          : item,
+      ),
+    )
   }
   function add() {
-    const kind = available.find((item) => item.value === addition)?.value ?? available[0]?.value
-    if (!kind) return
+    const kind = newKind
+    if (!kind || atLimit) return
     const id = `location_${Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('')}`
     const option: LocationOption =
       kind === 'phone'
@@ -73,6 +88,14 @@ export function OrderedLocationsEditor({
             <legend>
               {ui(LOCATION_KINDS.find((kind) => kind.value === option.kind)?.label ?? '')}
             </legend>
+            {option.kind === 'microsoft_teams' && (
+              <p className="hint">
+                {t(
+                  teamsIssue ??
+                    'Microsoft Teams creates a meeting link for each booking on the host’s Microsoft 365 work or school calendar.',
+                )}
+              </p>
+            )}
             <Field
               id={`${id}-label`}
               label={t('Location label')}
@@ -177,18 +200,20 @@ export function OrderedLocationsEditor({
             </label>
             <div className="row">
               <button
+                id={`${id}-move-up`}
                 className="button button-small"
                 type="button"
                 disabled={index === 0}
-                onClick={() => move(index, -1)}
+                onClick={() => move(index, 'up')}
               >
                 {t('Move location up')}
               </button>
               <button
+                id={`${id}-move-down`}
                 className="button button-small"
                 type="button"
                 disabled={index === options.length - 1}
-                onClick={() => move(index, 1)}
+                onClick={() => move(index, 'down')}
               >
                 {t('Move location down')}
               </button>
@@ -213,20 +238,30 @@ export function OrderedLocationsEditor({
           </fieldset>
         )
       })}
-      <Field id="location-option-add-kind" label={t('Add location option')}>
+      <Field
+        id="location-option-add-kind"
+        label={t('Add location option')}
+        hint={
+          atLimit
+            ? t('Remove a location option before adding another.')
+            : teamsIssue &&
+              available.some((kind) => kind.value === 'microsoft_teams') &&
+              t(teamsIssue)
+        }
+      >
         {(props) => (
           <select
             {...props}
-            disabled={available.length === 0}
-            value={
-              available.some((item) => item.value === addition)
-                ? addition
-                : (available[0]?.value ?? '')
-            }
+            disabled={atLimit || enabled.length === 0}
+            value={newKind ?? available[0]?.value ?? ''}
             onChange={(event) => setAddition(event.target.value)}
           >
             {available.map((item) => (
-              <option key={item.value} value={item.value}>
+              <option
+                key={item.value}
+                value={item.value}
+                disabled={item.value === 'microsoft_teams' && Boolean(teamsIssue)}
+              >
                 {ui(item.label)}
               </option>
             ))}
@@ -236,7 +271,7 @@ export function OrderedLocationsEditor({
       <button
         className="button button-small"
         type="button"
-        disabled={available.length === 0}
+        disabled={atLimit || !newKind}
         onClick={add}
       >
         {t('Add location option')}

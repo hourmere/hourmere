@@ -786,7 +786,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Cancel a booking the caller hosts */
+        /**
+         * Cancel a booking the caller hosts
+         * @description Cancelling a paid booking requests a full refund.
+         */
         post: operations["cancelHostBooking"];
         delete?: never;
         options?: never;
@@ -936,7 +939,7 @@ export interface paths {
         put?: never;
         /**
          * Reschedule a booking the caller hosts
-         * @description Cancels the old booking and creates its successor in one transaction. The caller must host the booking in their acting organization. Invitee links keep working, and manageToken is always null: host authority does not reveal an invitee bearer secret. Retrying the old id gets booking_cancelled.
+         * @description Cancels the old booking and creates its successor in one transaction. A paid booking keeps its duration and payment without another charge or a refund. The caller must host the booking in their acting organization. Invitee links keep working, and manageToken is always null: host authority does not reveal an invitee bearer secret. Retrying the old id gets booking_cancelled.
          */
         post: operations["rescheduleHostBooking"];
         delete?: never;
@@ -954,7 +957,7 @@ export interface paths {
         };
         /**
          * Times a booking the caller hosts can move to
-         * @description The same reschedule slots as the invitee sees, with the current booking ignored so a new time may overlap it. The caller must host this booking in their acting organization. The range is at most 62 days.
+         * @description The same reschedule slots as the invitee sees, with the current booking ignored so a new time may overlap it. Paid bookings keep their original duration. The caller must host this booking in their acting organization. The range is at most 62 days.
          */
         get: {
             parameters: {
@@ -1154,7 +1157,7 @@ export interface paths {
         put?: never;
         /**
          * Cancel with the manage token
-         * @description When answering a host request, pass pendingReschedule.id as rescheduleRequestId. Repeating cancellation returns the cancelled booking without changing the saved reason. A request already answered by a pick, replaced request or expired pending request returns reschedule_request_changed. Without that request ID, retrying a cancelled booking returns booking_cancelled.
+         * @description Cancelling a paid booking requests a full refund. When answering a host request, pass pendingReschedule.id as rescheduleRequestId. Repeating cancellation returns the cancelled booking without changing the saved reason. A request already answered by a pick, replaced request or expired pending request returns reschedule_request_changed. Without that request ID, retrying a cancelled booking returns booking_cancelled.
          */
         post: operations["cancelManagedBooking"];
         delete?: never;
@@ -1174,7 +1177,7 @@ export interface paths {
         put?: never;
         /**
          * Reschedule with the manage token
-         * @description Cancels the booking and books the new time in one step. The new time may overlap the old one. Returns the new booking and its manage token. Invitee moves are limited across the entire chain (default five); reaching the instance limit returns 409 `booking_reschedule_limit`, while cancellation stays available. Host moves do not consume that limit. When answering a host request, pass pendingReschedule.id as rescheduleRequestId: an identical pick replay returns the saved successor with manageToken null; a changed answer, replaced request or expired request returns reschedule_request_changed. Without that request ID, the token returned for the old booking shows the cancelled booking, so a retry after a lost response gets 409 `booking_cancelled`; tokens from booking emails open the new booking (and would move it again). Group seats require an Idempotency-Key; an exact replay returns the same successor seat without a new manage token.
+         * @description Cancels the booking and books the new time in one step. The new time may overlap the old one. A paid booking keeps its duration and payment without another charge or a refund. Returns the new booking and its manage token. Invitee moves are limited across the entire chain (default five); reaching the instance limit returns 409 `booking_reschedule_limit`, while cancellation stays available. Host moves do not consume that limit. When answering a host request, pass pendingReschedule.id as rescheduleRequestId: an identical pick replay returns the saved successor with manageToken null; a changed answer, replaced request or expired request returns reschedule_request_changed. Without that request ID, the token returned for the old booking shows the cancelled booking, so a retry after a lost response gets 409 `booking_cancelled`; tokens from booking emails open the new booking (and would move it again). Group seats require an Idempotency-Key; an exact replay returns the same successor seat without a new manage token.
          */
         post: operations["rescheduleManagedBooking"];
         delete?: never;
@@ -1192,7 +1195,7 @@ export interface paths {
         };
         /**
          * Times the booking can move to
-         * @description The slots the booking behind the manage token can be rescheduled to, fully inside [start, end]: its event type's slots with the booking itself ignored, so they may overlap its current time. The same range limits as public slots (at most 62 days).
+         * @description The slots the booking behind the manage token can be rescheduled to, fully inside [start, end]: its event type's slots with the booking itself ignored, so they may overlap its current time. Paid bookings keep their original duration. The same range limits as public slots (at most 62 days).
          */
         get: {
             parameters: {
@@ -4514,7 +4517,7 @@ export interface paths {
         put?: never;
         /**
          * Queue one sample notification through the delivery outbox
-         * @description At most five authorized attempts per organization per minute, shared with MCP on this server; refused (403) and unknown-destination (404) calls are not counted. Returns 409 slack_test_pending while a sample is pending.
+         * @description At most five authorized attempts per organization per minute, shared with MCP on this server. An exhausted budget returns 429 after authorization, before the destination lookup. Refused (403) and unknown-destination (404) calls are not counted. Returns 409 slack_test_pending while a sample is pending.
          */
         post: operations["testSlackDestination"];
         delete?: never;
@@ -4640,7 +4643,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["TeamAdminBooking"];
+                        "application/json": components["schemas"]["TeamAdminBookingDetail"];
                     };
                 };
                 /** @description Invalid parameters (invalid_request) */
@@ -6222,10 +6225,14 @@ export interface components {
                 noShowMarkedBy: string | null;
             }[];
         };
-        /** @description Where the meeting happens. Details depend on the kind: `number` (phone), `address` (in_person), `url` (link) */
+        /** @description Where the meeting happens. Details depend on the kind: `number` (phone), `address` (in_person), `url` (link or a ready online meeting). A Teams join URL requires host access or the invitee’s booking capability. */
         BookingLocation: ({
             /** @enum {string} */
-            kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+            kind: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
+            /** @description Microsoft Teams meeting state when available: join_url_pending, ready, teams_unavailable or writeback_failed. Clients must tolerate additional values. */
+            status?: unknown;
+            /** @description A ready Teams booking includes a validated HTTPS participant URL. */
+            url?: unknown;
         } & {
             [key: string]: unknown;
         }) | null;
@@ -6562,7 +6569,7 @@ export interface components {
                 /** @enum {string} */
                 operator: "equals";
                 /** @enum {string} */
-                value: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+                value: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
             } | {
                 /** @enum {string} */
                 field: "guest_count";
@@ -6684,7 +6691,7 @@ export interface components {
             isActive: boolean;
             /** @description Hidden from public listings; anyone with the direct link can still book it. This is not access control. */
             isHidden: boolean;
-            /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location. Configure invitee phone collection through locations. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client. */
+            /** @description Where the meeting happens, by kind. Microsoft Teams uses microsoft_teams with no other settings, requires individual scheduling with one host, and uses that host’s selected writable Microsoft calendar. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location. Configure invitee phone collection through locations. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client. */
             location: {
                 /** @enum {boolean} */
                 autoCreate?: true;
@@ -6717,8 +6724,11 @@ export interface components {
                  * @description An http or https URL, stored as parsed (normalized)
                  */
                 url: string;
+            } | {
+                /** @enum {string} */
+                kind: "microsoft_teams";
             } | null;
-            /** @description Ordered list of 1–5 options with distinct ids and kinds, and at most one default. Omitted on update preserves options; null clears. Cannot be supplied together with location. Phone requires either number or askInvitee: true; the latter collects an invitee phone number at booking. */
+            /** @description Ordered list of 1–5 options with distinct ids and kinds, and at most one default. Omitted on update preserves options; null clears. Cannot be supplied together with location. Phone requires either number or askInvitee: true; the latter collects an invitee phone number at booking. microsoft_teams requires individual scheduling with one host and a writable Microsoft calendar selected for booking events. */
             locations: ({
                 /** @enum {boolean} */
                 autoCreate?: true;
@@ -6776,6 +6786,14 @@ export interface components {
                  * @description An http or https URL, stored as parsed (normalized)
                  */
                 url: string;
+            } | {
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "microsoft_teams";
+                label?: string;
             })[] | null;
             /** @description Bookings per host's day; null = no limit */
             maxBookingsPerDay: number | null;
@@ -6881,7 +6899,7 @@ export interface components {
              * @default false
              */
             isHidden: boolean;
-            /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location. Configure invitee phone collection through locations. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client. */
+            /** @description Where the meeting happens, by kind. Microsoft Teams uses microsoft_teams with no other settings, requires individual scheduling with one host, and uses that host’s selected writable Microsoft calendar. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location. Configure invitee phone collection through locations. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client. */
             location?: {
                 /** @enum {boolean} */
                 autoCreate?: true;
@@ -6914,8 +6932,11 @@ export interface components {
                  * @description An http or https URL, stored as parsed (normalized)
                  */
                 url: string;
+            } | {
+                /** @enum {string} */
+                kind: "microsoft_teams";
             } | null;
-            /** @description Ordered list of 1–5 options with distinct ids and kinds, and at most one default. Omitted on update preserves options; null clears. Cannot be supplied together with location. Phone requires either number or askInvitee: true; the latter collects an invitee phone number at booking. */
+            /** @description Ordered list of 1–5 options with distinct ids and kinds, and at most one default. Omitted on update preserves options; null clears. Cannot be supplied together with location. Phone requires either number or askInvitee: true; the latter collects an invitee phone number at booking. microsoft_teams requires individual scheduling with one host and a writable Microsoft calendar selected for booking events. */
             locations?: ({
                 /** @enum {boolean} */
                 autoCreate?: true;
@@ -6973,6 +6994,14 @@ export interface components {
                  * @description An http or https URL, stored as parsed (normalized)
                  */
                 url: string;
+            } | {
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "microsoft_teams";
+                label?: string;
             })[] | null;
             /** @description Bookings per host's day; null = no limit */
             maxBookingsPerDay?: number | null;
@@ -7129,7 +7158,7 @@ export interface components {
             isActive?: boolean;
             /** @description Hidden from public listings; anyone with the direct link can still book it. This is not access control. */
             isHidden?: boolean;
-            /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location. Configure invitee phone collection through locations. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client. */
+            /** @description Where the meeting happens, by kind. Microsoft Teams uses microsoft_teams with no other settings, requires individual scheduling with one host, and uses that host’s selected writable Microsoft calendar. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location. Configure invitee phone collection through locations. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client. */
             location?: {
                 /** @enum {boolean} */
                 autoCreate?: true;
@@ -7162,8 +7191,11 @@ export interface components {
                  * @description An http or https URL, stored as parsed (normalized)
                  */
                 url: string;
+            } | {
+                /** @enum {string} */
+                kind: "microsoft_teams";
             } | null;
-            /** @description Ordered list of 1–5 options with distinct ids and kinds, and at most one default. Omitted on update preserves options; null clears. Cannot be supplied together with location. Phone requires either number or askInvitee: true; the latter collects an invitee phone number at booking. */
+            /** @description Ordered list of 1–5 options with distinct ids and kinds, and at most one default. Omitted on update preserves options; null clears. Cannot be supplied together with location. Phone requires either number or askInvitee: true; the latter collects an invitee phone number at booking. microsoft_teams requires individual scheduling with one host and a writable Microsoft calendar selected for booking events. */
             locations?: ({
                 /** @enum {boolean} */
                 autoCreate?: true;
@@ -7221,6 +7253,14 @@ export interface components {
                  * @description An http or https URL, stored as parsed (normalized)
                  */
                 url: string;
+            } | {
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "microsoft_teams";
+                label?: string;
             })[] | null;
             /** @description Bookings per host's day; null = no limit */
             maxBookingsPerDay?: number | null;
@@ -7796,6 +7836,11 @@ export interface components {
                     conferenceAccounts: "connected" | "attention_required" | "not_connected" | "check_failed";
                     /** @enum {string} */
                     defaultSchedule: "satisfied" | "not_applicable" | "configuration_blocker" | "dependency_unavailable" | "not_checked" | "check_failed";
+                    /**
+                     * @description Cached eligibility of the member’s selected Microsoft writeback destination.
+                     * @enum {string}
+                     */
+                    microsoftTeams?: "ready" | "unavailable" | "check_failed";
                     /** @enum {string} */
                     selectedCalendars: "satisfied" | "not_applicable" | "configuration_blocker" | "dependency_unavailable" | "not_checked" | "check_failed";
                 };
@@ -7971,7 +8016,7 @@ export interface components {
             /** @description Only the kind; details such as a phone number come with the booking */
             location: {
                 /** @enum {string} */
-                kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+                kind: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
             } | null;
             /** @description Ordered location choices; private host details are disclosed only after booking. */
             locations: {
@@ -7981,7 +8026,7 @@ export interface components {
                 /** @enum {boolean} */
                 isDefault?: true;
                 /** @enum {string} */
-                kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+                kind: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
                 label?: string;
             }[] | null;
             /** @description Booking-form fields beyond name and email */
@@ -8097,7 +8142,7 @@ export interface components {
             /** @description Only the kind; details such as a phone number come with the booking */
             location: {
                 /** @enum {string} */
-                kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+                kind: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
             } | null;
             /** @description Ordered location choices; private host details are disclosed only after booking. */
             locations: {
@@ -8107,7 +8152,7 @@ export interface components {
                 /** @enum {boolean} */
                 isDefault?: true;
                 /** @enum {string} */
-                kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+                kind: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
                 label?: string;
             }[] | null;
             /** @description Booking-form fields beyond name and email */
@@ -8137,7 +8182,7 @@ export interface components {
                 durationMinutes: number;
                 location: {
                     /** @enum {string} */
-                    kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+                    kind: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
                 } | null;
                 /** @description Owning team space name; omitted for personal event types */
                 organizationName?: string;
@@ -8186,7 +8231,7 @@ export interface components {
                 /** @enum {boolean} */
                 isDefault?: true;
                 /** @enum {string} */
-                kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+                kind: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
                 label?: string;
             }[] | null;
             ownBallot: components["schemas"]["MeetingPollOwnBallot"];
@@ -8401,7 +8446,7 @@ export interface components {
                 /** @description Only the kind; details such as a phone number come with the booking */
                 location: {
                     /** @enum {string} */
-                    kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+                    kind: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
                 } | null;
                 /** @description Ordered location choices; private host details are disclosed only after booking. */
                 locations: {
@@ -8411,7 +8456,7 @@ export interface components {
                     /** @enum {boolean} */
                     isDefault?: true;
                     /** @enum {string} */
-                    kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+                    kind: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
                     label?: string;
                 }[] | null;
                 /** @description Booking-form fields beyond name and email */
@@ -9173,6 +9218,12 @@ export interface components {
             /** @enum {string} */
             status: "confirmed" | "cancelled";
         };
+        TeamAdminBookingDetail: components["schemas"]["TeamAdminBooking"] & {
+            location?: {
+                /** @enum {string} */
+                kind: "microsoft_teams";
+            };
+        };
         TeamAdminBookingPage: {
             data: components["schemas"]["TeamAdminBooking"][];
             nextCursor: string | null;
@@ -9425,7 +9476,7 @@ export interface components {
                 /** @enum {string} */
                 operator: "equals";
                 /** @enum {string} */
-                value: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+                value: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
             } | {
                 /** @enum {string} */
                 field: "guest_count";
@@ -9671,7 +9722,7 @@ export interface components {
             /** @enum {string} */
             operator: "equals";
             /** @enum {string} */
-            value: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+            value: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
         } | {
             /** @enum {string} */
             field: "guest_count";
@@ -12525,7 +12576,7 @@ export interface operations {
                     "application/json": components["schemas"]["EventType"];
                 };
             };
-            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
+            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, microsoft_teams_host_policy, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12552,7 +12603,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description slug_taken: another event type on the same page has this slug; organization_context_changed: reload the page before trying this team write again */
+            /** @description slug_taken: another event type on the same page has this slug; microsoft_teams_calendar_unavailable: the host needs a connected Microsoft calendar selected for booking writeback; organization_context_changed: reload the page before trying this team write again */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -12820,7 +12871,7 @@ export interface operations {
                     "application/json": components["schemas"]["EventType"];
                 };
             };
-            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
+            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, microsoft_teams_host_policy, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12856,7 +12907,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description slug_taken: another event type on the same page has this slug; location_options_conflict: changing legacy location would replace multiple or labelled options; use locations through an option-aware client; organization_context_changed: reload the page before trying this team write again */
+            /** @description slug_taken: another event type on the same page has this slug; location_options_conflict: changing legacy location would replace multiple or labelled options; use locations through an option-aware client; microsoft_teams_calendar_unavailable: the host needs a connected Microsoft calendar selected for booking writeback; organization_context_changed: reload the page before trying this team write again */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -12985,7 +13036,7 @@ export interface operations {
                     "application/json": components["schemas"]["EventType"];
                 };
             };
-            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
+            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, microsoft_teams_host_policy, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13021,7 +13072,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description slug_taken: another event type on the same page has this slug; organization_context_changed: reload the page before trying this team write again */
+            /** @description slug_taken: another event type on the same page has this slug; microsoft_teams_calendar_unavailable: the host needs a connected Microsoft calendar selected for booking writeback; organization_context_changed: reload the page before trying this team write again */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -13153,7 +13204,7 @@ export interface operations {
                     "application/json": components["schemas"]["EventType"];
                 };
             };
-            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
+            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, microsoft_teams_host_policy, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -22396,7 +22447,7 @@ export interface operations {
                         /** @enum {string} */
                         operator: "equals";
                         /** @enum {string} */
-                        value: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+                        value: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
                     } | {
                         /** @enum {string} */
                         field: "guest_count";
@@ -22419,7 +22470,7 @@ export interface operations {
                         guestCount?: number;
                         locale?: string;
                         /** @enum {string|null} */
-                        locationKind?: "google_meet" | "zoom" | "phone" | "in_person" | "link" | null;
+                        locationKind?: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams" | null;
                         publicPath?: string;
                         recipientName?: string;
                         /** @enum {string} */

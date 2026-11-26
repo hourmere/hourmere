@@ -204,7 +204,7 @@ not grant host rescheduling or reschedule-request authority through REST, MCP or
 ## Known limitations
 
 - [Microsoft Calendar](/docs/microsoft-calendar#known-limitations) supports Outlook booking
-  writeback. Event types cannot select automatic Microsoft Teams meetings yet.
+  writeback and Teams meetings for single-host event types. Real-tenant Teams acceptance is pending.
 - Event-type timing units are a web display preference and are not persisted. Notice and
   buffers require whole minutes; booking windows require whole calendar days, even when
   shown in hours or minutes. REST, MCP and CLI retain their existing units.
@@ -259,8 +259,9 @@ not grant host rescheduling or reschedule-request authority through REST, MCP or
   includes internal busy-time sync and conditional booking writes, with no production
   worker registration or UI/API/MCP/CLI access. Real-account acceptance
   is still pending; see the [operator note](/docs/self-hosting#caldav-foundation).
-- [Paid bookings](/docs/payments) have internal holds and Stripe Checkout Session creation.
-  Public checkout, payment settings and automatic refunds remain future work.
+- [Paid bookings](/docs/payments) have internal holds, Stripe Checkout Session creation,
+  automatic refunds and read-only operator reconciliation. Public checkout and payment
+  settings remain future work.
 - [Requests to choose another time](/docs/request-reschedule) retain the original booking
   until it is moved or cancelled. Expiry keeps it confirmed; imported and group-seat
   bookings do not support requests.

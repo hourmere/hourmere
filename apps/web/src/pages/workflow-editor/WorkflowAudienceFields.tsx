@@ -35,6 +35,7 @@ const sourceLabels = {
 const locationLabels = {
   google_meet: 'Automatic Google Meet',
   zoom: 'Automatic Zoom',
+  microsoft_teams: 'Microsoft Teams',
   phone: 'Phone call',
   in_person: 'In person',
   link: 'Custom link',

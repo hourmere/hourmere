@@ -99,10 +99,21 @@ const ExpectedOrganizationHeaders = z.object({
   }),
 })
 
-export const BookingLocation = z.looseObject({ kind: LocationKind }).openapi('BookingLocation', {
-  description:
-    'Where the meeting happens. Details depend on the kind: `number` (phone), `address` (in_person), `url` (link)',
-})
+export const BookingLocation = z
+  .looseObject({
+    kind: LocationKind,
+    url: z.unknown().optional().openapi({
+      description: 'A ready Teams booking includes a validated HTTPS participant URL.',
+    }),
+    status: z.unknown().optional().openapi({
+      description:
+        'Microsoft Teams meeting state when available: join_url_pending, ready, teams_unavailable or writeback_failed. Clients must tolerate additional values.',
+    }),
+  })
+  .openapi('BookingLocation', {
+    description:
+      'Where the meeting happens. Details depend on the kind: `number` (phone), `address` (in_person), `url` (link or a ready online meeting). A Teams join URL requires host access or the invitee’s booking capability.',
+  })
 
 const Attendee = z
   .object({
@@ -893,7 +904,7 @@ export function bookingRoutes({
         method: 'get',
         path: '/api/v1/bookings/manage/slots',
         summary: 'Times the booking can move to',
-        description: `The slots the booking behind the manage token can be rescheduled to, fully inside [start, end]: its event type's slots with the booking itself ignored, so they may overlap its current time. The same range limits as public slots (at most ${MAX_SLOT_RANGE_DAYS} days).`,
+        description: `The slots the booking behind the manage token can be rescheduled to, fully inside [start, end]: its event type's slots with the booking itself ignored, so they may overlap its current time. Paid bookings keep their original duration. The same range limits as public slots (at most ${MAX_SLOT_RANGE_DAYS} days).`,
         middleware: manageSlotsLimit,
         request: {
           headers: ManageToken,
@@ -936,7 +947,7 @@ export function bookingRoutes({
         operationId: 'cancelManagedBooking',
         summary: 'Cancel with the manage token',
         description:
-          'When answering a host request, pass pendingReschedule.id as rescheduleRequestId. Repeating cancellation returns the cancelled booking without changing the saved reason. A request already answered by a pick, replaced request or expired pending request returns reschedule_request_changed. Without that request ID, retrying a cancelled booking returns booking_cancelled.',
+          'Cancelling a paid booking requests a full refund. When answering a host request, pass pendingReschedule.id as rescheduleRequestId. Repeating cancellation returns the cancelled booking without changing the saved reason. A request already answered by a pick, replaced request or expired pending request returns reschedule_request_changed. Without that request ID, retrying a cancelled booking returns booking_cancelled.',
         middleware: manageLimit,
         request: {
           headers: ManageToken,
@@ -972,7 +983,7 @@ export function bookingRoutes({
         operationId: 'rescheduleManagedBooking',
         summary: 'Reschedule with the manage token',
         description:
-          'Cancels the booking and books the new time in one step. The new time may overlap the old one. Returns the new booking and its manage token. Invitee moves are limited across the entire chain (default five); reaching the instance limit returns 409 `booking_reschedule_limit`, while cancellation stays available. Host moves do not consume that limit. When answering a host request, pass pendingReschedule.id as rescheduleRequestId: an identical pick replay returns the saved successor with manageToken null; a changed answer, replaced request or expired request returns reschedule_request_changed. Without that request ID, the token returned for the old booking shows the cancelled booking, so a retry after a lost response gets 409 `booking_cancelled`; tokens from booking emails open the new booking (and would move it again). Group seats require an Idempotency-Key; an exact replay returns the same successor seat without a new manage token.',
+          'Cancels the booking and books the new time in one step. The new time may overlap the old one. A paid booking keeps its duration and payment without another charge or a refund. Returns the new booking and its manage token. Invitee moves are limited across the entire chain (default five); reaching the instance limit returns 409 `booking_reschedule_limit`, while cancellation stays available. Host moves do not consume that limit. When answering a host request, pass pendingReschedule.id as rescheduleRequestId: an identical pick replay returns the saved successor with manageToken null; a changed answer, replaced request or expired request returns reschedule_request_changed. Without that request ID, the token returned for the old booking shows the cancelled booking, so a retry after a lost response gets 409 `booking_cancelled`; tokens from booking emails open the new booking (and would move it again). Group seats require an Idempotency-Key; an exact replay returns the same successor seat without a new manage token.',
         middleware: manageLimit,
         request: {
           headers: ManageToken.extend({
@@ -1019,7 +1030,7 @@ export function bookingRoutes({
         method: 'get',
         path: '/api/v1/bookings/{id}/slots',
         summary: 'Times a booking the caller hosts can move to',
-        description: `The same reschedule slots as the invitee sees, with the current booking ignored so a new time may overlap it. The caller must host this booking in their acting organization. The range is at most ${MAX_SLOT_RANGE_DAYS} days.`,
+        description: `The same reschedule slots as the invitee sees, with the current booking ignored so a new time may overlap it. Paid bookings keep their original duration. The caller must host this booking in their acting organization. The range is at most ${MAX_SLOT_RANGE_DAYS} days.`,
         security: authenticated,
         middleware: hostSlots,
         request: {
@@ -1064,7 +1075,7 @@ export function bookingRoutes({
         operationId: 'rescheduleHostBooking',
         summary: 'Reschedule a booking the caller hosts',
         description:
-          'Cancels the old booking and creates its successor in one transaction. The caller must host the booking in their acting organization. Invitee links keep working, and manageToken is always null: host authority does not reveal an invitee bearer secret. Retrying the old id gets booking_cancelled.',
+          'Cancels the old booking and creates its successor in one transaction. A paid booking keeps its duration and payment without another charge or a refund. The caller must host the booking in their acting organization. Invitee links keep working, and manageToken is always null: host authority does not reveal an invitee bearer secret. Retrying the old id gets booking_cancelled.',
         security: authenticated,
         middleware: hostManage,
         request: {
@@ -1274,6 +1285,7 @@ export function bookingRoutes({
         path: '/api/v1/bookings/{id}/cancel',
         operationId: 'cancelHostBooking',
         summary: 'Cancel a booking the caller hosts',
+        description: 'Cancelling a paid booking requests a full refund.',
         security: authenticated,
         middleware: caller,
         request: {

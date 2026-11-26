@@ -63,6 +63,7 @@ import {
   selectLocationOption,
 } from './location-options.ts'
 import { enqueueMeetingPollBookingUpdate, meetingPollChainLinked } from './meeting-poll-outcomes.ts'
+import { microsoftTeamsLocation, requireMicrosoftTeamsHost } from './microsoft-teams.ts'
 import {
   createNotificationSnapshot,
   type NotificationSnapshot,
@@ -75,6 +76,7 @@ import {
   resolveOneTimeBookingLink,
 } from './one-time-links.ts'
 import { expirePaymentHolds } from './payment-expiry.ts'
+import { ensurePaymentRefund } from './payment-refunds.ts'
 import { parseQuestions, type Question, type Responses, validateResponses } from './questions.ts'
 import {
   resolveSeriesMember,
@@ -108,6 +110,7 @@ import {
   type SuccessRedirect,
   validateSuccessRedirect,
 } from './success-redirect.ts'
+import { readTeamsMeetingLocations } from './teams-meeting-locations.ts'
 import { cleanInviteeEmail, cleanText } from './text.ts'
 import { ensureWaitlistKey } from './waitlist.ts'
 import { attributeWaitlistBooking } from './waitlist-booking.ts'
@@ -509,7 +512,7 @@ async function findReplay(
     throw reusedBookingIdempotencyKey()
   }
   return {
-    booking: await loadBooking(db, row.id),
+    booking: await loadBooking(db, row.id, undefined, false),
     manageToken: null,
     ...(row.success_redirect && {
       successRedirect: row.success_redirect as unknown as BookingSuccessRedirect,
@@ -544,6 +547,7 @@ const BOOKING_COLUMNS = [
 ] as const
 
 interface BookingRow {
+  paid_successor_id?: string | null
   payment_hold_expires_at: Date | null
   id: string
   group_slot_id: string | null
@@ -571,6 +575,7 @@ async function toBookings(
   rows: readonly BookingRow[],
   host?: { userId: string; now: () => Temporal.Instant },
   readNow?: Temporal.Instant,
+  includeTeamsLink = true,
 ): Promise<Booking[]> {
   if (!rows.length) return []
   const requests = await db
@@ -722,6 +727,18 @@ async function toBookings(
         timeZone: host.time_zone,
       })
   }
+  const teamsLocations = includeTeamsLink
+    ? await readTeamsMeetingLocations(
+        db,
+        rows.flatMap((row) => {
+          const view = conferences.get(row.id)
+          return (view?.bookingStatus ?? row.status) === 'confirmed' && !imported.has(row.id)
+            ? [{ id: row.id, location: view ? view.location : row.location }]
+            : []
+        }),
+        { activeOnly: true },
+      )
+    : undefined
   const now = host?.now()
   return rows.map((row) => {
     const view = imported.has(row.id) ? undefined : conferences.get(row.id)
@@ -747,14 +764,16 @@ async function toBookings(
       end: toIso(toInstant(r.end_at)),
       title: r.title,
       ...(host ? { eventTypeTitle: r.event_type_title ?? null } : {}),
-      location: parseLocation(
-        (automaticZoom(location) || automaticMeet(location)) &&
-          (r.status !== 'confirmed' ||
-            view?.bookingStatus !== 'confirmed' ||
-            view?.conference?.status !== 'ready')
-          ? unresolvedLocation(location)
-          : location,
-      ),
+      location: microsoftTeamsLocation(location)
+        ? (teamsLocations?.get(r.id) ?? { kind: 'microsoft_teams' })
+        : parseLocation(
+            (automaticZoom(location) || automaticMeet(location)) &&
+              (r.status !== 'confirmed' ||
+                view?.bookingStatus !== 'confirmed' ||
+                view?.conference?.status !== 'ready')
+              ? unresolvedLocation(location)
+              : location,
+          ),
       ...(view?.conference ? { conference: view.conference } : {}),
       ...(now && view?.calendarCopy
         ? {
@@ -779,6 +798,7 @@ async function toBookings(
             canManageNoShow:
               r.status === 'confirmed' &&
               r.payment_hold_expires_at === null &&
+              !r.paid_successor_id &&
               !imported.has(r.id) &&
               Temporal.Instant.compare(host.now(), toInstant(r.start_at)) > 0,
           }
@@ -801,13 +821,18 @@ async function toBookings(
   })
 }
 
-async function loadBooking(db: Db, id: string, now?: Temporal.Instant): Promise<Booking> {
+async function loadBooking(
+  db: Db,
+  id: string,
+  now?: Temporal.Instant,
+  includeTeamsLink = true,
+): Promise<Booking> {
   const row = await db
     .selectFrom('bookings as b')
     .select(BOOKING_COLUMNS)
     .where('b.id', '=', id)
     .executeTakeFirstOrThrow()
-  const [booking] = await toBookings(db, [row], undefined, now)
+  const [booking] = await toBookings(db, [row], undefined, now, includeTeamsLink)
   return booking as Booking
 }
 
@@ -831,6 +856,9 @@ export async function resolveBookingLocation(
   const meetReady: string[] = []
   const zoomReady: string[] = []
   try {
+    if (microsoftTeamsLocation(chosen)) {
+      await requireMicrosoftTeamsHost(db, event.schedulingType, hosts, event.id, true)
+    }
     if (organizer && automaticMeet(chosen)) {
       await requireMeetDestination(db, organizer, event.id, ctx.automaticMeet)
       meetReady.push(organizer)
@@ -1101,18 +1129,80 @@ export async function insertBooking(
   return { id, manageToken: token }
 }
 
-export async function assertBookingLocallyManaged(db: Db, id: string): Promise<void> {
+/** Paid lifecycle writes call this after locking an authorized booking. */
+export async function assertBookingLocallyManaged(db: Db, id: string, allowPaid = false) {
   const paid = await db
-    .selectFrom('bookings')
-    .select('payment_hold_expires_at')
-    .where('id', '=', id)
-    .executeTakeFirst()
-  if (paid?.payment_hold_expires_at)
-    throw new DomainError(
-      'conflict',
-      'paid_booking_management_unavailable',
-      'Paid booking management is not available yet',
+    .selectFrom('bookings as booking')
+    .leftJoin('payment_checkout_attempts as attempt', (join) =>
+      join.on((eb) =>
+        eb.or([
+          eb('attempt.booking_id', '=', eb.ref('booking.id')),
+          eb('attempt.current_booking_id', '=', eb.ref('booking.id')),
+        ]),
+      ),
     )
+    .leftJoin('bookings as root', (join) =>
+      join
+        .onRef('root.id', '=', 'attempt.booking_id')
+        .onRef('root.organization_id', '=', 'booking.organization_id'),
+    )
+    .select([
+      'booking.id',
+      'booking.status',
+      'attempt.id as attempt_id',
+      'attempt.current_booking_id',
+      'attempt.session_id',
+      'attempt.account_id',
+      'attempt.mode',
+      'attempt.amount_minor',
+      'attempt.currency',
+      'root.payment_reference',
+      'root.payment_confirmed_at',
+    ])
+    .select(({ fn, ref }) =>
+      fn
+        .coalesce(ref('booking.payment_hold_expires_at'), ref('root.payment_hold_expires_at'))
+        .as('payment_hold_expires_at'),
+    )
+    .select(
+      sql<boolean>`CASE WHEN attempt.current_booking_id = booking.id
+        THEN ${latestBookingId(sql.ref('root.id'))} = booking.id ELSE true END`.as(
+        'current_matches_chain',
+      ),
+    )
+    .where('booking.id', '=', id)
+    .executeTakeFirst()
+  if (paid?.payment_hold_expires_at || paid?.attempt_id) {
+    if (
+      !allowPaid ||
+      !paid.attempt_id ||
+      !paid.payment_hold_expires_at ||
+      !paid.session_id ||
+      !paid.payment_confirmed_at ||
+      !paid.payment_reference ||
+      !paid.account_id ||
+      !paid.mode ||
+      paid.amount_minor === null ||
+      !paid.currency ||
+      !paid.current_matches_chain ||
+      (paid.status !== 'cancelled' &&
+        paid.current_booking_id &&
+        paid.current_booking_id !== paid.id)
+    )
+      throw new DomainError(
+        'conflict',
+        'paid_booking_management_unavailable',
+        'Paid booking management is not available yet',
+      )
+    return {
+      attemptId: paid.attempt_id,
+      accountId: paid.account_id,
+      mode: paid.mode,
+      paymentReference: paid.payment_reference,
+      amountMinor: paid.amount_minor,
+      currency: paid.currency,
+    }
+  }
   if (await isImportedBooking(db, id)) {
     throw new DomainError(
       'conflict',
@@ -1120,6 +1210,12 @@ export async function assertBookingLocallyManaged(db: Db, id: string): Promise<v
       'This imported booking is read-only and managed in the original system.',
     )
   }
+}
+
+/** Paid reschedules keep the purchased duration even after the offered lengths change. */
+export function assertPaidRescheduleDuration(original: number, selected?: number): void {
+  if (selected !== undefined && selected !== original)
+    throw new DomainError('invalid', 'invalid_duration', 'Use the original booking duration')
 }
 
 const bookingCancelled = () =>
@@ -1159,7 +1255,7 @@ async function cancelLocked(
   asInvitee = false,
   seriesAction?: 'bulk_cancel',
 ): Promise<Booking> {
-  await assertBookingLocallyManaged(db, row.id)
+  const paid = await assertBookingLocallyManaged(db, row.id, true)
   const seat = await db
     .selectFrom('bookings')
     .select([
@@ -1188,6 +1284,7 @@ async function cancelLocked(
     })
     .where('id', '=', row.id)
     .execute()
+  if (paid) await ensurePaymentRefund(db, paid)
   await db
     .insertInto('organization_operations')
     .values({
@@ -1922,6 +2019,7 @@ async function createBookingInTransaction(
     inviteeName: invitee.name,
     inviteeEmail: invitee.email,
   })
+  const location = groupSlot ? groupSlot.location : choice.location
   const { id, manageToken } = await insertBooking(trx, {
     successRedirect,
     groupSlotId: groupSlot?.id,
@@ -1933,7 +2031,7 @@ async function createBookingInTransaction(
     start: input.start,
     end,
     title: `${current.title} with ${invitee.name}`,
-    location: groupSlot ? groupSlot.location : choice.location,
+    location,
     locationOption: groupSlot ? groupSlot.locationOption : choice.locationOption,
     responses,
     source: origin.source,
@@ -1981,6 +2079,7 @@ async function createBookingInTransaction(
       type: 'created',
       bookingId: id,
       start: input.start,
+      ...(location?.kind === 'microsoft_teams' && { teamsMeeting: true }),
       ...(seriesOccurrence && { seriesAction: 'create' as const }),
     },
     now,
@@ -2328,7 +2427,7 @@ async function rescheduleLocked(
   /** meetingPollChainLinked, read before the first lock; false skips the poll lookup. */
   meetingPollLinked = true,
 ): Promise<BookingWithToken> {
-  await assertBookingLocallyManaged(trx, old.id)
+  const paid = await assertBookingLocallyManaged(trx, old.id, true)
   // The status cannot change while the row is locked; the time check waits for the locks.
   if (old.status === 'cancelled') throw bookingCancelled()
   if (old.group_slot_id)
@@ -2393,9 +2492,13 @@ async function rescheduleLocked(
   }
   // The persisted endpoints are the duration snapshot. A later default/list edit must
   // not silently change a meeting when its invitee or host only chooses another time.
+  const originalDuration = toInstant(old.end_at)
+    .since(toInstant(old.start_at))
+    .total({ unit: 'minutes' })
+  if (paid) assertPaidRescheduleDuration(originalDuration, selectedDuration)
   const durationMinutes =
-    selectedDuration === undefined
-      ? toInstant(old.end_at).since(toInstant(old.start_at)).total({ unit: 'minutes' })
+    paid || selectedDuration === undefined
+      ? originalDuration
       : selectDurationMinutes(
           {
             durationMinutes: eventType.duration_minutes,
@@ -2411,17 +2514,17 @@ async function rescheduleLocked(
       start,
       end,
       now,
-      durationMinutes: selectedDuration,
+      durationMinutes: paid ? undefined : selectedDuration,
       excludeBookingId: old.id,
       useDefaultSchedule: old.hosts_use_default_schedule || hostUserIds.length > 1,
     })
   }
 
   // Cancel first: the trigger frees the old host rows, so the new time may overlap them.
-  // Series roots have no occurrence API token. Keep a discarded hash on the first
-  // invitee-moved predecessor so the ordinary invitee move counter also counts that edge.
+  // Paid holds and series roots have no API manage token. Keep a discarded hash on
+  // the first invitee-moved predecessor so the ordinary move counter counts that edge.
   const inviteeMoveHash =
-    !carryManageToken && old.series_occurrence_id && old.manage_token_hash === null
+    !carryManageToken && (paid || old.series_occurrence_id) && old.manage_token_hash === null
       ? newManageToken().hash
       : undefined
   await trx
@@ -2468,6 +2571,12 @@ async function rescheduleLocked(
       smsConsent: a.sms_consent,
     })),
   })
+  if (paid)
+    await trx
+      .updateTable('payment_checkout_attempts')
+      .set({ current_booking_id: id })
+      .where('id', '=', paid.attemptId)
+      .execute()
   if (old.has_routing_snapshot) await copyBookingRoutingSnapshot(trx, old, id)
   await resolveRescheduleRequest(trx, old.id, 'picked', now)
   await trx
@@ -2819,8 +2928,9 @@ export async function listHostBookings(
     .leftJoin('event_types as et', (join) =>
       join.onRef('et.id', '=', 'b.event_type_id').on('et.deleted_at', 'is', null),
     )
+    .leftJoin('payment_checkout_attempts as moved', 'moved.current_booking_id', 'b.id')
     .select(BOOKING_COLUMNS)
-    .select('et.title as event_type_title')
+    .select(['et.title as event_type_title', 'moved.current_booking_id as paid_successor_id'])
     .where('bh.user_id', '=', ctx.principal.user.id)
     .where('b.organization_id', '=', ctx.principal.organization.id)
     .execute()
@@ -2840,8 +2950,9 @@ function hostBookingDetailQuery(ctx: ServiceContext, id: string) {
     .leftJoin('event_types as et', (join) =>
       join.onRef('et.id', '=', 'b.event_type_id').on('et.deleted_at', 'is', null),
     )
+    .leftJoin('payment_checkout_attempts as moved', 'moved.current_booking_id', 'b.id')
     .select(BOOKING_COLUMNS)
-    .select('et.title as event_type_title')
+    .select(['et.title as event_type_title', 'moved.current_booking_id as paid_successor_id'])
     .where('b.id', '=', id)
     .where('b.status', 'in', ['confirmed', 'cancelled'])
     .where((eb) =>
@@ -3306,7 +3417,7 @@ export async function requestReschedule(
       .forUpdate()
       .executeTakeFirst()
     if (!row) throw bookingNotFound()
-    await assertBookingLocallyManaged(trx, id)
+    await assertBookingLocallyManaged(trx, id, true)
     if (row.group_slot_id)
       throw new DomainError(
         'conflict',

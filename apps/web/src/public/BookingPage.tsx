@@ -640,8 +640,17 @@ function BookingFlow({
         )
         setNow(currentTime())
         setVersion((v) => v + 1)
-      } else if (code === 'invalid_location_choice') {
-        setNotice('Choose one of the available locations.')
+      } else if (
+        code === 'invalid_location_choice' ||
+        (code === 'invalid_invitee_phone' &&
+          !chosenLocation?.askInvitee &&
+          !(event.smsRemindersEnabled && values.smsConsent))
+      ) {
+        setNotice(
+          code === 'invalid_location_choice'
+            ? 'Choose one of the available locations.'
+            : 'The meeting location has changed. Please choose a time again.',
+        )
         await refreshDurations()
       } else if (code === 'invalid_duration') {
         setNotice(
@@ -679,7 +688,7 @@ function BookingFlow({
 
   return (
     <PublicLayout wide branding={event.branding}>
-      <div className="booking-layout">
+      <div className="booking-layout booking-page">
         <BookingEventInfo
           event={event}
           durationMinutes={durationMinutes}
@@ -840,6 +849,7 @@ function BookingFlow({
                 />
               }
               timeZone={timeZone}
+              showTimeZoneIcon
               onTimeZoneChange={(zone) => {
                 rememberVisitorTimeZone(zone)
                 setTimeZone(zone)
@@ -982,7 +992,14 @@ function Confirmation({
                 locale={locale}
               />,
             ],
-            ['Where', <LocationDetails key="where" location={booking.location} />],
+            [
+              'Where',
+              <LocationDetails
+                key="where"
+                location={booking.location}
+                cancelled={booking.status === 'cancelled'}
+              />,
+            ],
           ]}
         />
         <ConferenceNotice

@@ -28,14 +28,15 @@ export class CalDavError extends Error {
     this.code = code
   }
 }
+/** Pass redacted requests directly to the transport; spread omits authorization and body. */
 export interface CalDavRequest {
   url: string
   method?: 'PROPFIND' | 'REPORT' | 'GET' | 'PUT' | 'DELETE'
   ifMatch?: string
   ifNoneMatch?: '*'
   contentType?: 'text/calendar; charset=utf-8'
-  body: string
-  authorization: string
+  readonly body: string
+  readonly authorization: string
   depth: '0' | '1'
   signal: AbortSignal
   privateTargets: readonly CalDavPrivateTarget[]
@@ -55,7 +56,12 @@ export function calDavUrl(
   privateTargets: readonly CalDavPrivateTarget[] = [],
 ): string {
   const normalized = webhookUrl(value, privateTargets)
-  if (!normalized || new URL(normalized).protocol !== 'https:' || normalized.includes('?'))
+  if (
+    !normalized ||
+    new URL(normalized).protocol !== 'https:' ||
+    normalized.includes('?') ||
+    normalized.includes('#')
+  )
     throw new CalDavError('destination_refused')
   return normalized
 }
