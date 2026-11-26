@@ -2,7 +2,12 @@ import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { createRequire, stripTypeScriptTypes } from 'node:module'
 import { pathToFileURL } from 'node:url'
-import { invitationEligibilityDenial, invitationResendDenial, maySignUp } from '@hourmere/auth'
+import {
+  invitationEligibilityDenial,
+  invitationResendDenial,
+  maySignUp,
+  type ReserveInvitationEmail,
+} from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import type { MailMessage } from '@hourmere/mail'
@@ -810,11 +815,7 @@ describe.skipIf(!serverUrl)('invitation generation recovery with PostgreSQL', ()
   it('applies the normal admission budget before replacement and rolls back without canceling the old invitation', async () => {
     const row = await invitation()
     await expire(row.id)
-    const reserve = (
-      trx: Db,
-      identity: { userId: string; organizationId: string; email: string },
-      at: Date,
-    ) =>
+    const reserve: ReserveInvitationEmail = (trx, identity, at) =>
       reserveInvitationEmailBudget(
         trx,
         identity,

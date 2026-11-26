@@ -450,6 +450,7 @@ describe.skipIf(!serverUrl)('invitation delivery migration', () => {
         'expiry_duration_ms',
         'last_attempt_at',
         'authorized_by_user_id',
+        'scim_issued',
       ])
       expect(
         (

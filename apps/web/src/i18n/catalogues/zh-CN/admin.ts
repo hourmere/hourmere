@@ -3120,6 +3120,8 @@ export const admin = {
   '{value} cancellation deadline': '须提前{value}取消',
   'Default timing rules': '默认预约时间规则',
 
+  // SCIM invitation attribution
+  'SCIM connection': 'SCIM 连接',
   // Additional durations
   'Removed {0}. Selected length: {1}.': '已移除{0}。当前选中的时长为{1}。',
 } as const

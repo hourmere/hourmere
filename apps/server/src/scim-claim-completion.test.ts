@@ -8,6 +8,7 @@ import {
   createAuthPool,
   createCallerResolver,
   ensurePersonalOrganization,
+  type ReserveInvitationEmail,
   type ScimClaimCompletion,
   type SignupPolicy,
   scimClaimCompletion,
@@ -670,13 +671,8 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
    */
   async function verifyExpiredClaim(served: Served) {
     const organization = await team()
-    const reserve = {
-      reserve: (
-        trx: Db,
-        input: { userId: string; organizationId: string; email: string },
-        now: Date,
-      ) => reserveInvitationEmailBudget(trx, input, roomy, now),
-    }
+    const reserve: ReserveInvitationEmail = (trx, input, now) =>
+      reserveInvitationEmailBudget(trx, input, roomy, now)
     const resend = async (invitationId: string, email: string) => {
       const { sessionId } = await signIn(organization.people.owner, organization.id)
       return manageInvitation(
@@ -690,7 +686,7 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
           expectedGeneration: 1,
           requestId: randomUUID(),
         },
-        reserve,
+        { reserve },
       )
     }
     const ageClaim = (id: string) =>
@@ -1439,8 +1435,8 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
       ])
       expect(retired.events).toContainEqual({
         action: 'membership.invitation_cancelled',
-        actor_type: 'scim_token',
-        actor_id: expect.any(String),
+        actor_type: 'scim_connection',
+        actor_id: first.claim.connection_id,
         credential_type: 'none',
         credential_id: null,
         target_type: 'invitation',

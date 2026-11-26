@@ -181,13 +181,13 @@ for the planned transport rules.
 | `BOOKING_MAX_INVITEE_RESCHEDULES` | `5` | Maximum invitee-initiated reschedules across one booking chain, including through old email links. `0` disables invitee rescheduling. Hosts may still reschedule; cancellation remains available. |
 | `SLOT_SNIPPETS_ENABLED` | `false` | Enable the saved-event open-times picker and [agent snippet generation](/docs/open-time-snippets) through REST, MCP and CLI. Available in full to self-hosters. Enable only after public direct-slot booking pages are deployed on this same instance. Generation creates no reservation. |
 | `FOLLOW_UP_HOST_NOTES_ENABLED` | `true` | Permit host-written follow-up notes. `false` rejects notification writes containing notes and omits notes from all outgoing follow-ups, including existing booking snapshots. Set identically on web and worker. Hourmere Cloud must set `false` until reviewed host-text abuse controls are implemented. |
-| `MAIL_RECIPIENT_MAX_PER_HOUR` | `5` | Maximum invitee/guest notification emails sent to the same trimmed, lowercased address in a rolling hour. Positive integer. Host emails are exempt. |
-| `MAIL_RECIPIENT_MAX_PER_DAY` | `20` | Same per-recipient limit over a rolling 24 hours. Positive integer. |
+| `MAIL_RECIPIENT_MAX_PER_HOUR` | `5` | Maximum invitee/guest notification emails sent to the same trimmed, lowercased address in a rolling hour. Host emails are exempt. Also sets the separate app and SCIM invitation recipient caps and, at four times this value, the ceiling across all invitations to the address. Positive integer. |
+| `MAIL_RECIPIENT_MAX_PER_DAY` | `20` | Same per-recipient limits over a rolling 24 hours. Positive integer. |
 | `SIGN_IN_MAIL_MAX_PER_HOUR` | `5` | Maximum sign-in emails sent to the same trimmed, lowercased address in a rolling hour, separate from booking recipient limits. Positive integer. |
 | `SIGN_IN_MAIL_MAX_PER_DAY` | `20` | Same sign-in recipient limit over a rolling 24 hours. Positive integer. |
-| `INVITATION_INVITER_MAX_PER_HOUR` | `20` | Maximum admitted team invitation creations and explicit resends per inviter in a rolling hour, across all their teams. Positive integer. |
+| `INVITATION_INVITER_MAX_PER_HOUR` | `20` | Maximum admitted app invitation creations and explicit resends per inviter in a rolling hour, across all their teams. Positive integer. |
 | `INVITATION_INVITER_MAX_PER_DAY` | `100` | Same per-inviter admission limit over a rolling 24 hours. Positive integer. |
-| `INVITATION_TEAM_MAX_PER_HOUR` | `50` | Maximum admitted invitation creations and explicit resends per team in a rolling hour, across its inviters. Positive integer. |
+| `INVITATION_TEAM_MAX_PER_HOUR` | `50` | Maximum admitted app invitation creations and explicit resends per team in a rolling hour, across its inviters. Positive integer. [SCIM invitations](/docs/scim#invitations-and-initial-sync) use a separate organization budget. |
 | `INVITATION_TEAM_MAX_PER_DAY` | `200` | Same per-team admission limit over a rolling 24 hours. Positive integer. |
 | `MAIL_MAX_PER_HOUR` | `100` | Instance-wide booking notification/sign-in sends and team invitation attempt reservations in a rolling hour. `0` is unlimited. Invitee/guest/team invitation mail stops at this cap; host and sign-in mail may use up to 120% (rounded down), counting all these sends and reservations. |
 | `WORKFLOWS_ENABLED` | `false` | Set `true` to enable booking workflows, including on self-hosted instances without a paid plan. Only `true`, `false` and an empty value are accepted. Empty uses the server default. |

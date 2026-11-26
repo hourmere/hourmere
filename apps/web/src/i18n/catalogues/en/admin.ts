@@ -3267,6 +3267,8 @@ export const admin = {
   '{value} cancellation deadline': '{value} cancellation deadline',
   'Default timing rules': 'Default timing rules',
 
+  // SCIM invitation attribution
+  'SCIM connection': 'SCIM connection',
   // Additional durations
   'Removed {0}. Selected length: {1}.': 'Removed {0}. Selected length: {1}.',
 } as const

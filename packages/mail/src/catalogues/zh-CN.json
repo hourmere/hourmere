@@ -81,6 +81,7 @@
   "teamInvitation.defaultInviter": "团队成员",
   "teamInvitation.subject": "邀请你加入团队：{team}",
   "teamInvitation.introduction": "{inviter} 邀请你加入 Hourmere 上的团队「{team}」。",
+  "teamInvitation.scimIntroduction": "你的身份提供商代表 Hourmere 上的团队「{team}」向你发送了此邀请。",
   "teamInvitation.identity": "请使用受邀邮箱 {email} 登录并完成邮箱验证，然后在邀请页面接受邀请。邮箱别名不能代替此地址。",
   "teamInvitation.acceptance": "仅登录不会加入团队；你需要在页面上明确接受邀请。",
   "teamInvitation.expiry": "邀请有效期至：{expiry}。",
