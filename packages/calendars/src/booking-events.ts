@@ -195,11 +195,7 @@ export async function recoverBookingCalendarPage(
 /** Stately queue keeps one follow-up when another change commits during an in-flight write. */
 export function calendarBookingNotifier(
   queue: CalendarBookingQueue,
-  {
-    google = true,
-    now = Date.now,
-    microsoftTeamsForTest,
-  }: Pick<CalendarDeps, 'now' | 'microsoftTeamsForTest'> & { google?: boolean } = {},
+  { google = true, now = Date.now }: Pick<CalendarDeps, 'now'> & { google?: boolean } = {},
 ) {
   return async (trx: Db, event: BookingEvent) => {
     if (!trx.isTransaction) throw new Error('Calendar jobs require the booking transaction')
@@ -243,7 +239,7 @@ export function calendarBookingNotifier(
       if (google && !automatic && event.type !== 'cancelled')
         await recordBookingDestinations(trx, event.bookingId, root)
       if (!automatic && event.bookingId === root && event.type !== 'cancelled')
-        await recordMicrosoftBookingDestinations(trx, root, now(), microsoftTeamsForTest)
+        await recordMicrosoftBookingDestinations(trx, root, now())
       if (!google && (automatic || !(await hasMicrosoftBookingDestination(trx, root)))) return
       await queue.enqueue(
         BOOKING_CALENDAR_JOB,

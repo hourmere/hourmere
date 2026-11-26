@@ -434,7 +434,8 @@ export async function deliverScheduledBookingEmail(
                       : undefined,
                   },
                 ),
-                sensitive: data.automaticConference,
+                sensitive:
+                  data.automaticConference || data.booking.location?.kind === 'microsoft_teams',
                 replyTo,
               }
             const followUp = followUpEmail(

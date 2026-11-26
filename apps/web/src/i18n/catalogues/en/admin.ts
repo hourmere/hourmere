@@ -3219,6 +3219,25 @@ export const admin = {
     'Microsoft reported a conflict with the booking copy. Check the calendar in Outlook.',
   'Hourmere will retry syncing a booking copy.': 'Hourmere will retry syncing a booking copy.',
   'A booking copy has a pending change.': 'A booking copy has a pending change.',
+  // Microsoft Teams meeting locations
+  'Microsoft Teams requires individual scheduling with one host.':
+    'Microsoft Teams requires individual scheduling with one host.',
+  'Could not verify Microsoft Teams availability for the host.':
+    'Could not verify Microsoft Teams availability for the host.',
+  'Checking Microsoft Teams availability…': 'Checking Microsoft Teams availability…',
+  'Microsoft Calendar is unavailable on this instance.':
+    'Microsoft Calendar is unavailable on this instance.',
+  'Connect a Microsoft 365 work or school calendar and select it for booking write-back.':
+    'Connect a Microsoft 365 work or school calendar and select it for booking write-back.',
+  'Reconnect Microsoft Calendar and allow calendar event writes to use Teams.':
+    'Reconnect Microsoft Calendar and allow calendar event writes to use Teams.',
+  'The host needs a Microsoft 365 work or school calendar selected for booking write-back.':
+    'The host needs a Microsoft 365 work or school calendar selected for booking write-back.',
+  'Microsoft Teams creates a meeting link for each booking on the host’s Microsoft 365 work or school calendar.':
+    'Microsoft Teams creates a meeting link for each booking on the host’s Microsoft 365 work or school calendar.',
+  'Remove a location option before adding another.':
+    'Remove a location option before adding another.',
+  'Open host booking details': 'Open host booking details',
   // SCIM provisioning
   'SCIM provisioning is disabled on this instance.':
     'SCIM provisioning is disabled on this instance.',

@@ -3073,6 +3073,23 @@ export const admin = {
     'Microsoft 报告预约副本存在冲突。请在 Outlook 中检查日历。',
   'Hourmere will retry syncing a booking copy.': 'Hourmere 将重试同步预约副本。',
   'A booking copy has a pending change.': '有一个预约副本的变更尚待处理。',
+  // Microsoft Teams meeting locations
+  'Microsoft Teams requires individual scheduling with one host.':
+    'Microsoft Teams 仅支持由一位主持人负责的独立排期。',
+  'Could not verify Microsoft Teams availability for the host.':
+    '暂时无法确认主持人能否使用 Microsoft Teams。',
+  'Checking Microsoft Teams availability…': '正在检查 Microsoft Teams 是否可用…',
+  'Microsoft Calendar is unavailable on this instance.': '此实例无法使用 Microsoft 日历。',
+  'Connect a Microsoft 365 work or school calendar and select it for booking write-back.':
+    '请连接 Microsoft 365 工作或学校账户的日历，并选作预约写入目标。',
+  'Reconnect Microsoft Calendar and allow calendar event writes to use Teams.':
+    '请重新连接 Microsoft 日历并授予日历活动写入权限，以使用 Teams。',
+  'The host needs a Microsoft 365 work or school calendar selected for booking write-back.':
+    '主持人需将 Microsoft 365 工作或学校账户的日历选作预约写入目标。',
+  'Microsoft Teams creates a meeting link for each booking on the host’s Microsoft 365 work or school calendar.':
+    'Microsoft Teams 会在主持人的 Microsoft 365 工作或学校日历中为每次预约创建会议链接。',
+  'Remove a location option before adding another.': '请移除一个地点选项后再添加。',
+  'Open host booking details': '打开主持人预约详情',
   // SCIM provisioning
   'SCIM provisioning is disabled on this instance.': '此实例已禁用 SCIM 预配。',
   // Event type editor summaries and booking page preview
