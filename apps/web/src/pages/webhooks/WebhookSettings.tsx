@@ -8,6 +8,7 @@ import { useI18n } from '../../i18n/runtime.tsx'
 import type { MessageKey } from '../../i18n/translate.ts'
 import { useSession } from '../../session.tsx'
 import { useUnsavedChanges } from '../../unsaved-changes.tsx'
+import { WebhookHistory } from './WebhookHistory.tsx'
 import {
   isWebhookEvent,
   WebhookConfirm,
@@ -35,6 +36,7 @@ type List =
 type Form =
   | { type: 'create'; draft: WebhookDraft }
   | { type: 'edit'; id: string; events: WebhookEvent[] }
+  | { type: 'history'; id: string }
 
 type Notice = { key: MessageKey; error?: true }
 type ReturnCheck = { result: Promise<WebhookEndpoint[] | null>; controller: AbortController }
@@ -138,7 +140,7 @@ export function WebhookSettings({
   }, [form, secret])
 
   const selected =
-    form?.type === 'edit' && list.status === 'ready'
+    form && form.type !== 'create' && list.status === 'ready'
       ? (list.endpoints.find(({ id }) => id === form.id) ?? null)
       : null
   const eventsChanged =
@@ -282,6 +284,28 @@ export function WebhookSettings({
     }
   }, [boundary, organizationId, recheck])
 
+  const staleEndpoint = useCallback(() => {
+    clearWorkspace()
+    setNotice({ key: 'This webhook endpoint is no longer available.', error: true })
+    void load()
+  }, [clearWorkspace, load])
+
+  const historyBoundary = useCallback(
+    (error: unknown) => {
+      if (boundary(error)) return true
+      if (
+        error instanceof RequestError &&
+        error.status === 404 &&
+        error.code === 'webhook_not_found'
+      ) {
+        staleEndpoint()
+        return true
+      }
+      return false
+    },
+    [boundary, staleEndpoint],
+  )
+
   useEffect(() => {
     void load()
     return () => read.current?.abort()
@@ -365,9 +389,7 @@ export function WebhookSettings({
     const code = error instanceof RequestError ? error.code : undefined
     switch (code) {
       case 'webhook_not_found':
-        clearWorkspace()
-        setNotice({ key: 'This webhook endpoint is no longer available.', error: true })
-        void load()
+        staleEndpoint()
         break
       case 'workflows_disabled':
         setRejectedInstance(instance)
@@ -528,6 +550,11 @@ export function WebhookSettings({
                 setNotice(null)
                 setForm({ type: 'edit', id, events: endpoint.events.filter(isWebhookEvent) })
               }}
+              onHistory={(id, opener) => {
+                formOpener.current = opener
+                setNotice(null)
+                setForm({ type: 'history', id })
+              }}
             />
           </div>
         )}
@@ -539,6 +566,14 @@ export function WebhookSettings({
             onChange={(draft) => setForm({ type: 'create', draft })}
             onSave={() => void save({ type: 'create', draft: form.draft })}
             onCancel={closeForm}
+          />
+        )}
+        {form?.type === 'history' && selected && (
+          <WebhookHistory
+            key={`${userId}:${organizationId}:${selected.id}`}
+            endpoint={selected}
+            onClose={closeForm}
+            onBoundaryError={historyBoundary}
           />
         )}
         {form?.type === 'edit' && selected && (

@@ -46,6 +46,7 @@ import { startFixtureServer } from './fixture-server.ts'
 import { listenOwned, type OwnedListener } from './listeners.ts'
 import { type PollAuditState, seedPollAuditData } from './meeting-poll-audit-data.ts'
 import { type ScreenshotFixtureState, seedScreenshotData } from './screenshot-data.ts'
+import { seedWebhookDeliveryHistory } from './webhook-delivery-fixtures.ts'
 
 export interface FixtureApp {
   url: string
@@ -64,6 +65,10 @@ export interface FixtureApp {
   waitlistState: () => Promise<{ states: string[]; acceptedEmails: number; messages: number }>
   auditState: () => Promise<AuditFixtureState>
   auditPollState: (state: PollAuditState) => ReturnType<typeof seedPollAuditData>
+  seedWebhookHistory: (
+    fixture: AuditFixtureState,
+    space?: 'team',
+  ) => ReturnType<typeof seedWebhookDeliveryHistory>
   meetingPollVerificationLink: (email: string) => Promise<URL>
   screenshotState: () => Promise<ScreenshotFixtureState>
   auditSignIn: (signedIn: boolean, locale?: string, space?: 'team') => Promise<void>
@@ -524,6 +529,7 @@ export const test = base.extend<{
         url,
         parentUrl,
         personalPath: '/fixture-host/call',
+        seedWebhookHistory: (fixture, space) => seedWebhookDeliveryHistory(db, fixture, space),
         auditPollState: async (state) => {
           // Poll backing events must not change the existing host/list audit states.
           const pollHost = await f.host()
