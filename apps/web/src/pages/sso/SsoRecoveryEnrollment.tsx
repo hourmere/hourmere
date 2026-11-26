@@ -3,6 +3,7 @@ import { useOutletContext } from 'react-router'
 import { api, unwrap } from '../../api/client.ts'
 import { isOrganizationContextChanged, RequestError } from '../../api/errors.ts'
 import type { AppShellContext } from '../../components/AppShell.tsx'
+import { UserContentMessage } from '../../components/UserContent.tsx'
 import { useI18n } from '../../i18n/runtime.tsx'
 import type { MessageKey } from '../../i18n/translate.ts'
 import { useMe, useSession } from '../../session.tsx'
@@ -180,7 +181,10 @@ export function SsoRecoveryNomination({
       ) : (
         <>
           <p className="user-content">
-            {t('Nominate {name} to become a recovery owner.', { name: nominee.name })}
+            <UserContentMessage
+              message="Nominate {name} to become a recovery owner."
+              values={{ name: nominee.name }}
+            />
           </p>
           <p>{t('The nominee has 72 hours to accept using their Hourmere email.')}</p>
         </>

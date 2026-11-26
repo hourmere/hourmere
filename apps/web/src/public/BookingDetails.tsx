@@ -1,5 +1,6 @@
 import { displayConferenceUrl } from '@hourmere/core/conference-url'
 import type { ReactNode } from 'react'
+import { UserContentMessage } from '../components/UserContent.tsx'
 import { useI18n } from '../i18n/runtime.tsx'
 import type { Booking } from './api.ts'
 import { formatDate, formatTimeRange, offsetLabel, zoneName } from './time.ts'
@@ -43,24 +44,36 @@ export function LocationDetails({ location }: { location: Booking['location'] })
       {number && (
         <>
           {t(': ')}
-          <a href={`tel:${number.replace(/[^+\d]/g, '')}`}>{number}</a>
+          <a href={`tel:${number.replace(/[^+\d]/g, '')}`}>
+            <bdi dir="ltr">{number}</bdi>
+          </a>
         </>
       )}
       {address && (
         <>
           {t(': ')}
-          {address}
+          <bdi>{address}</bdi>
         </>
       )}
       {url && (
         <>
           {t(': ')}
           <a href={url} target="_blank" rel="noopener noreferrer">
-            {url}
+            <bdi dir="ltr">{url}</bdi>
           </a>
         </>
       )}
     </>
+  )
+}
+
+export function BookingPerson({ name, email }: { name: string; email: string }) {
+  return (
+    <UserContentMessage
+      message="{name} ({detail})"
+      values={{ name, detail: email }}
+      renderValues={{ detail: <bdi dir="ltr">{email}</bdi> }}
+    />
   )
 }
 
@@ -122,7 +135,7 @@ export function When({
   )
 }
 
-export function DetailList({ items }: { items: [string, ReactNode][] }) {
+export function DetailList({ items }: { items: readonly (readonly [string, ReactNode])[] }) {
   const { ui } = useI18n()
 
   return (

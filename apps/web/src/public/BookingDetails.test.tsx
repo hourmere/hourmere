@@ -22,6 +22,9 @@ describe('pure conference location presentation', () => {
     render(<LocationDetails location={{ kind: 'zoom', autoCreate: true, url }} />)
     expect(screen.getByRole('link').getAttribute('href')).toBe(url)
     expect(screen.getByRole('link').getAttribute('rel')).toContain('noreferrer')
+    expect(screen.getByRole('link', { name: url }).querySelector('bdi[dir=ltr]')?.textContent).toBe(
+      url,
+    )
     expect(locationText({ kind: 'zoom', autoCreate: true, url })).toBe(`Zoom: ${url}`)
   })
   it.each([

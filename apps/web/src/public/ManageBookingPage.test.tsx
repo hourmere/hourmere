@@ -110,7 +110,7 @@ function manageServer(
 
 describe('the invitee’s manage page', () => {
   const routingAnswers = [
-    { label: '<strong>Appointment topic</strong>', answer: '<img src=x> & planning' },
+    { label: '<strong>Appointment topic</strong>', answer: 'שלום (Planning)\n\n<img src=x>' },
     { label: 'Support tier', answer: 'Individual consultation' },
   ]
 
@@ -142,6 +142,12 @@ describe('the invitee’s manage page', () => {
     expect([...section.querySelectorAll('dd')].map((definition) => definition.textContent)).toEqual(
       routingAnswers.map(({ answer }) => answer),
     )
+    expect(section.querySelectorAll('dt[dir=auto]')).toHaveLength(routingAnswers.length)
+    expect(Array.from(section.querySelectorAll('dd bdi'), (answer) => answer.textContent)).toEqual([
+      'שלום (Planning)',
+      '<img src=x>',
+      'Individual consultation',
+    ])
     expect(section.querySelector('img, strong')).toBeNull()
     expect(screen.queryByText('Final booking answer')).toBeNull()
   })
@@ -535,9 +541,17 @@ describe('the invitee’s manage page', () => {
     })
     renderApp(`/booking#token=${TOKEN}`)
     await screen.findByRole('heading', { name: '你的预约' })
-    expect(screen.getByText('王小明、李小红')).toBeDefined()
-    expect(screen.getByText('周小刚、赵小华')).toBeDefined()
-    expect(screen.getByText('Grace Hopper（grace@example.com）')).toBeDefined()
+    const hosts = screen.getByText('主持人', { selector: 'dt' }).nextElementSibling
+    expect(hosts?.textContent).toBe('王小明、李小红')
+    expect(Array.from(hosts?.querySelectorAll('bdi') ?? [], (host) => host.textContent)).toEqual([
+      '王小明',
+      '李小红',
+    ])
+    expect(screen.getByText('来宾', { selector: 'dt' }).nextElementSibling?.textContent).toBe(
+      '周小刚、赵小华',
+    )
+    const invitee = screen.getByText('grace@example.com', { selector: 'bdi[dir=ltr]' })
+    expect(invitee.parentElement?.textContent).toBe('Grace Hopper（grace@example.com）')
   })
 
   it.each(['pending', 'failed'] as const)(
@@ -600,7 +614,9 @@ describe('the invitee’s manage page', () => {
     expect(plain(screen.getByText(/Monday, November 2, 2026/).parentElement?.textContent)).toMatch(
       /9:00 – 9:30 AM \(America\/New York, GMT-05:00\)/,
     )
-    expect(screen.getByText('Grace Hopper (grace@example.com)')).toBeDefined()
+    expect(screen.getByText('Booked by', { selector: 'dt' }).nextElementSibling?.textContent).toBe(
+      'Grace Hopper (grace@example.com)',
+    )
     // Nothing on the page links anywhere with the token.
     for (const link of document.querySelectorAll('a')) {
       expect(link.getAttribute('href') ?? '').not.toContain(TOKEN)
@@ -609,14 +625,20 @@ describe('the invitee’s manage page', () => {
 
   it('cancels, with an optional reason, when the email link asks for it', async () => {
     const user = userEvent.setup()
-    const api = manageServer()
+    const title = 'שלום (Intro call)'
+    const cancellationReason = '🙂 موعد (Schedule)'
+    const api = manageServer({ ...managed(), eventType: { title, durationMinutes: 30 } })
     openLink(`/booking#token=${TOKEN}&action=cancel`)
 
     const heading = await screen.findByRole('heading', { name: 'Cancel this booking?' })
     await waitFor(() => expect(document.activeElement).toBe(heading))
     expect(window.location.hash).toBe('')
+    expect(screen.getByText(title, { selector: 'bdi' }).parentElement?.textContent).toMatch(
+      /^שלום \(Intro call\), Monday, November 2, 2026,/,
+    )
     const reason = screen.getByLabelText(/Reason/)
-    await user.type(reason, 'Something came up.')
+    expect(reason.getAttribute('dir')).toBe('auto')
+    await user.type(reason, cancellationReason)
     await user.click(screen.getByRole('button', { name: 'Cancel booking' }))
 
     expect(await screen.findByRole('heading', { name: 'Cancelled booking' })).toBeDefined()
@@ -626,13 +648,13 @@ describe('the invitee’s manage page', () => {
         'Didn’t get the email? Check spam or junk and add the sender to your contacts.',
       ),
     ).toBeDefined()
-    expect(screen.getByText('Something came up.')).toBeDefined()
+    expect(screen.getByText(cancellationReason, { selector: 'bdi' })).toBeDefined()
     expect(screen.queryByRole('button', { name: 'Reschedule' })).toBeNull()
     expect(
       screen.queryByText(/Accepting or declining the calendar invitation does not cancel/),
     ).toBeNull()
     const [call] = api.to('POST /api/v1/bookings/manage/cancel')
-    expect(call?.body).toEqual({ reason: 'Something came up.' })
+    expect(call?.body).toEqual({ reason: cancellationReason })
     expect(call?.headers.get('x-manage-token')).toBe(TOKEN)
   })
 

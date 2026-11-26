@@ -91,7 +91,11 @@ async function openRole(user: ReturnType<typeof userEvent.setup>, name = 'Team m
 }
 
 function noSuccess() {
-  expect(screen.queryByText(/is now (Admin|Member)\./)).toBeNull()
+  expect(
+    screen
+      .queryAllByRole('status')
+      .some((status) => /is now (Admin|Member)\./.test(status.textContent)),
+  ).toBe(false)
 }
 
 describe('team role management in settings', () => {
@@ -204,7 +208,11 @@ describe('team role management in settings', () => {
     })
     render(contents())
     await openRole(user)
-    expect(screen.getByText('Change Team member from Member to Admin?')).toBeDefined()
+    expect(
+      within(screen.getByRole('region', { name: 'Change team role' })).getByText('Team member', {
+        selector: 'bdi',
+      }).parentElement?.textContent,
+    ).toBe('Change Team member from Member to Admin?')
     expect(screen.getByText('They will gain admin permissions.')).toBeDefined()
     expect(screen.getByText(/Admins can.*invit|Admins can.*team events/i)).toBeDefined()
     expect(screen.getByText(/Members can.*own|Members can.*personal/i)).toBeDefined()
@@ -226,7 +234,11 @@ describe('team role management in settings', () => {
     await user.click(screen.getByRole('button', { name: 'Changing role…' }))
     expect(api.to(ROLE_ROUTE)).toHaveLength(1)
     await response.answer(json(200, { ...ordinaryMember, role: 'admin' }))
-    await screen.findByText('Team member is now Admin.')
+    await waitFor(() =>
+      expect(screen.getAllByRole('status').map((status) => status.textContent)).toContain(
+        'Team member is now Admin.',
+      ),
+    )
     expect(memberRow('Team member').getByText('Admin')).toBeDefined()
     expect(memberRow('Team member').queryByText('Member')).toBeNull()
     expect(await screen.findByRole('button', { name: 'Make member: Team member' })).toBeDefined()
@@ -243,7 +255,14 @@ describe('team role management in settings', () => {
     const api = teamServer({ [ROLE_ROUTE]: () => json(200, { ...admin, role: 'member' }) })
     render(contents())
     await user.click(await screen.findByRole('button', { name: 'Make member: Team admin' }))
-    expect(await screen.findByText('Change Team admin from Admin to Member?')).toBeDefined()
+    expect(
+      within(await screen.findByRole('region', { name: 'Change team role' })).getByText(
+        'Team admin',
+        {
+          selector: 'bdi',
+        },
+      ).parentElement?.textContent,
+    ).toBe('Change Team admin from Admin to Member?')
     expect(
       screen.getByText('They will lose admin permissions and keep member access.'),
     ).toBeDefined()
@@ -251,7 +270,11 @@ describe('team role management in settings', () => {
     expect(screen.getByText(/Members can.*own|Members can.*personal/i)).toBeDefined()
     expect(memberRow('Team admin').getByText('Admin')).toBeDefined()
     await user.click(screen.getByRole('button', { name: 'Confirm role change' }))
-    await screen.findByText('Team admin is now Member.')
+    await waitFor(() =>
+      expect(screen.getAllByRole('status').map((status) => status.textContent)).toContain(
+        'Team admin is now Member.',
+      ),
+    )
     expect(memberRow('Team admin').getByText('Member')).toBeDefined()
     expect(memberRow('Team admin').queryByText('Admin')).toBeNull()
     expect(api.to(ROLE_ROUTE)[0]?.body).toEqual({
@@ -565,7 +588,10 @@ describe('team role management in settings', () => {
       await screen.findByRole('button', { name: 'Make admin: Team member' })
       await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
       await user.click(await screen.findByRole('button', { name: /设为管理员.*Team member/ }))
-      expect(screen.getByText(/Team member.*成员.*管理员/)).toBeDefined()
+      const review = within(screen.getByRole('region', { name: '更改团队角色' }))
+      expect(review.getByText('Team member', { selector: 'bdi' }).parentElement?.textContent).toBe(
+        '将 Team member 从成员改为管理员？',
+      )
       expect(screen.getByText(/管理员.*邀请|管理员.*团队活动/)).toBeDefined()
       expect(screen.getByText(/成员.*自己|成员.*个人/)).toBeDefined()
       await user.click(screen.getByRole('button', { name: /确认.*角色/ }))

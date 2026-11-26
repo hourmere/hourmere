@@ -10,10 +10,14 @@ import { Field } from '../../components/forms.tsx'
 import { OrganizationContextConflict } from '../../components/OrganizationContextConflict.tsx'
 import { PageHeader } from '../../components/PageHeader.tsx'
 import { PageSkeleton } from '../../components/PageSkeleton.tsx'
+import {
+  UserContentLines,
+  UserContentList,
+  UserContentMessage,
+} from '../../components/UserContent.tsx'
 import { useFlash } from '../../flash.ts'
 import { zoned } from '../../format.ts'
 import { useLoad, useMounted, usePageTitle } from '../../hooks.ts'
-import { formatList } from '../../i18n/formatting.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import { msg, type UiText } from '../../i18n/translate.ts'
 import { BOOKING } from '../../limits.ts'
@@ -30,8 +34,8 @@ import {
   useBookingPanelTitle,
   useCloseBookingPanel,
 } from './BookingPanel.tsx'
+import { BookingAnswer, BookingTitle } from './BookingUserContent.tsx'
 import {
-  answerText,
   bookingTitle,
   bookingUpdate,
   describeLocation,
@@ -252,7 +256,7 @@ function BookingView({
   onChanged?: (booking: Booking) => void
   rowBooking?: Booking
 }) {
-  const { t, ui, locale, formatLocale: displayLocale } = useI18n()
+  const { t, ui, formatLocale: displayLocale } = useI18n()
   const flash = useFlash()
 
   const viewMounted = useMounted()
@@ -279,6 +283,7 @@ function BookingView({
   const [invitee, ...guests] = [...booking.attendees].sort(
     (a, b) => Number(b.isBooker) - Number(a.isBooker),
   )
+  const coHosts = booking.coHosts?.map(({ name }) => name.trim()) ?? []
   const location = describeLocation(booking.location)
   const readOnly = isReadOnlyBooking(booking)
   const cancelled = booking.status === 'cancelled'
@@ -300,7 +305,7 @@ function BookingView({
       <PageHeader
         title={
           <>
-            {ui(bookingTitle(booking))}
+            <BookingTitle booking={booking} />
             {readOnly && <span className="badge heading-badge">{t('Imported')}</span>}
             {cancelled && (
               <span className={`badge heading-badge${rescheduled ? '' : ' badge-danger'}`}>
@@ -345,10 +350,12 @@ function BookingView({
                     {t(': ')}
                     {location.href ? (
                       <a href={location.href} target="_blank" rel="noreferrer">
-                        <BreakableText>{location.detail}</BreakableText>
+                        <bdi dir="ltr">
+                          <BreakableText>{location.detail}</BreakableText>
+                        </bdi>
                       </a>
                     ) : (
-                      location.detail
+                      <bdi>{location.detail}</bdi>
                     )}
                   </>
                 )}
@@ -473,14 +480,15 @@ function BookingView({
       <section className="panel user-content" aria-labelledby="people-heading">
         <h2 id="people-heading">{t('People')}</h2>
         <dl className="details">
-          {booking.coHosts && booking.coHosts.length > 0 && (
+          {coHosts.length > 0 && (
             <>
               <dt>{t('Co-hosts')}</dt>
               <dd>
-                {formatList(
-                  booking.coHosts.map((host) => host.name.trim() || t('Host')),
-                  displayLocale ?? locale,
-                )}
+                <UserContentList
+                  values={coHosts.map((name) => name || t('Host'))}
+                  formatLocale={displayLocale}
+                  renderValue={(value, index) => (coHosts[index] ? <bdi>{value}</bdi> : value)}
+                />
               </dd>
             </>
           )}
@@ -488,10 +496,12 @@ function BookingView({
           <dd>
             {invitee ? (
               <>
-                {invitee.name}
+                <bdi>{invitee.name}</bdi>
                 <br />
                 <a href={`mailto:${invitee.email}`}>
-                  <BreakableText>{invitee.email}</BreakableText>
+                  <bdi dir="ltr">
+                    <BreakableText>{invitee.email}</BreakableText>
+                  </bdi>
                 </a>
                 <br />
                 <span className="muted">
@@ -517,8 +527,14 @@ function BookingView({
               <ul className="plain-list">
                 {guests.map((g) => (
                   <li key={g.email}>
-                    {g.name}
-                    <span className="muted">{t(' ({detail})', { detail: g.email })}</span>
+                    <bdi>{g.name}</bdi>
+                    <span className="muted">
+                      <UserContentMessage
+                        message=" ({detail})"
+                        values={{ detail: g.email }}
+                        renderValues={{ detail: <bdi dir="ltr">{g.email}</bdi> }}
+                      />
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -536,13 +552,12 @@ function BookingView({
           <dl className="details details-stacked">
             {answerIds.map((qid) => (
               <div key={qid} className="detail-pair">
-                <dt>{labels.get(qid) ?? qid}</dt>
+                <dt>{labels.has(qid) ? <bdi>{labels.get(qid)}</bdi> : qid}</dt>
                 <dd className="multiline">
-                  {(typeof booking.responses[qid] === 'boolean'
-                    ? t(booking.responses[qid] ? 'Yes' : 'No')
-                    : answerText(booking.responses[qid], locale)) ?? (
-                    <span className="muted">{t('No answer')}</span>
-                  )}
+                  <BookingAnswer
+                    value={booking.responses[qid]}
+                    fallback={<span className="muted">{t('No answer')}</span>}
+                  />
                 </dd>
               </div>
             ))}
@@ -573,8 +588,10 @@ function RoutingAnswers({ routing }: { routing: Schemas['BookingRouting'] }) {
         <dl className="details details-stacked">
           {answers.map(({ id, label, answer }) => (
             <div key={id} className="detail-pair">
-              <dt>{label}</dt>
-              <dd className="multiline">{answer}</dd>
+              <dt dir="auto">{label}</dt>
+              <dd className="multiline">
+                <UserContentLines text={answer ?? ''} />
+              </dd>
             </div>
           ))}
         </dl>
@@ -716,6 +733,7 @@ function CancelBooking({
             {(props) => (
               <textarea
                 {...props}
+                dir="auto"
                 rows={3}
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}

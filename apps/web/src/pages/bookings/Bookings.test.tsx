@@ -74,7 +74,9 @@ describe('the bookings list', () => {
   })
 
   it.each([
+    ['en', '🗓 12 مراجعة [QA]', 'רות (Ada)', '🗓 12 مراجعة [QA] with רות (Ada)'],
     ['en', '初次通话', 'Grace Hopper', '初次通话 with Grace Hopper'],
+    ['zh-CN', '🗓 12 مراجعة [QA]', 'רות (Ada)', '与רות (Ada)的🗓 12 مراجعة [QA]'],
     ['zh-CN', '初次通话', 'Grace Hopper', '与 Grace Hopper 的初次通话'],
     ['zh-CN', 'Ada’s review', 'Grace Hopper', '与 Grace Hopper 的 Ada’s review'],
     ['zh-CN', 'Ada’s review', '王小明', '与王小明的 Ada’s review'],
@@ -101,10 +103,17 @@ describe('the bookings list', () => {
       const title = await screen.findByRole('rowheader', { name: expected })
       const link = within(title).getByRole('link', { name: expected })
       expect(link.textContent).toBe(expected)
+      expect(Array.from(link.querySelectorAll('bdi'), (part) => part.textContent)).toEqual(
+        locale === 'en' ? [event, name] : [name, event],
+      )
       // Apostrophes in Latin titles are never widened as Chinese quotes.
       expect(link.querySelector('.cjk-quote')).toBeNull()
-      expect(screen.getByRole('rowheader', { name: 'Design with my team' })).toBeDefined()
-      expect(screen.getByRole('rowheader', { name: 'Old with Grace Hopper' })).toBeDefined()
+      for (const title of ['Design with my team', 'Old with Grace Hopper']) {
+        const custom = screen.getByRole('link', { name: title })
+        expect(Array.from(custom.querySelectorAll('bdi'), (part) => part.textContent)).toEqual([
+          title,
+        ])
+      }
     },
   )
 
@@ -461,7 +470,9 @@ describe('a booking', () => {
   })
 
   it.each([
+    ['en', '🗓 12 مراجعة [QA]', 'רות (Ada)', '🗓 12 مراجعة [QA] with רות (Ada)'],
     ['en', '初次通话', 'Grace Hopper', '初次通话 with Grace Hopper'],
+    ['zh-CN', '🗓 12 مراجعة [QA]', 'רות (Ada)', '与רות (Ada)的🗓 12 مراجعة [QA]'],
     ['zh-CN', '初次通话', 'Grace Hopper', '与 Grace Hopper 的初次通话'],
     ['zh-CN', 'Ada’s review', 'Grace Hopper', '与 Grace Hopper 的 Ada’s review'],
     ['zh-CN', 'Ada’s review', '王小明', '与王小明的 Ada’s review'],
@@ -475,6 +486,9 @@ describe('a booking', () => {
       renderApp(`/app/bookings/${BOOKING_ID}`)
       const heading = await screen.findByRole('heading', { level: 1, name: expected })
       expect(heading.textContent).toBe(expected)
+      expect(Array.from(heading.querySelectorAll('bdi'), (part) => part.textContent)).toEqual(
+        locale === 'en' ? [event, name] : [name, event],
+      )
       expect(heading.querySelector('.cjk-quote')).toBeNull()
     },
   )
@@ -487,7 +501,10 @@ describe('a booking', () => {
     chooseLanguage('zh-CN')
     bookingServer(booking(overrides))
     renderApp(`/app/bookings/${BOOKING_ID}`)
-    expect(await screen.findByRole('heading', { level: 1, name: overrides.title })).toBeDefined()
+    const heading = await screen.findByRole('heading', { level: 1, name: overrides.title })
+    expect(Array.from(heading.querySelectorAll('bdi'), (part) => part.textContent)).toEqual([
+      overrides.title,
+    ])
   })
 
   it('localizes Chinese location, time zone, guest and multi-select punctuation', async () => {
@@ -501,16 +518,27 @@ describe('a booking', () => {
     expect(people.textContent).toContain('，当地时间）')
     expect(people.textContent).toContain('Alan Turing（alan@example.com）')
     const answers = within(screen.getByRole('region', { name: '回答' }))
+    expect(
+      Array.from(
+        answers.getAllByRole('definition')[1]?.querySelectorAll('bdi') ?? [],
+        (part) => part.textContent,
+      ),
+    ).toEqual(['الخطة [Pro]', 'צוות'])
     expect(answers.getAllByRole('definition').map((dd) => dd.textContent)).toEqual([
       'Acme',
-      'Pro、Team',
+      'الخطة [Pro]、צוות',
       '是',
       'Old answer',
     ])
   })
 
   const withAnswers = booking({
-    responses: { plan: ['Pro', 'Team'], company: 'Acme', agree: true, retired: 'Old answer' },
+    responses: {
+      plan: ['الخطة [Pro]', 'צוות'],
+      company: 'Acme',
+      agree: true,
+      retired: 'Old answer',
+    },
   })
   const asks = eventType({
     questions: [
@@ -520,7 +548,7 @@ describe('a booking', () => {
         label: 'Plans',
         type: 'multi_select',
         required: false,
-        options: ['Pro', 'Team'],
+        options: ['الخطة [Pro]', 'צוות'],
       },
       { id: 'agree', label: 'I agree', type: 'checkbox', required: true },
       { id: 'phone', label: 'Phone', type: 'phone', required: false },
@@ -647,7 +675,7 @@ describe('a booking', () => {
     // In the order of the questions; answers to questions no longer asked last, by id.
     expect(terms).toEqual(['Company', 'Plans', 'I agree', 'retired'])
     const values = answers.getAllByRole('definition').map((dd) => dd.textContent)
-    expect(values).toEqual(['Acme', 'Pro, Team', 'Yes', 'Old answer'])
+    expect(values).toEqual(['Acme', 'الخطة [Pro], צוות', 'Yes', 'Old answer'])
   })
 
   it('shows the date at both ends when the invitee’s local meeting crosses midnight', async () => {

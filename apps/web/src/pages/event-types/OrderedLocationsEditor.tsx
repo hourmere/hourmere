@@ -90,6 +90,7 @@ export function OrderedLocationsEditor({
               {(props) => (
                 <input
                   {...props}
+                  dir="auto"
                   value={option.label ?? ''}
                   maxLength={100}
                   onChange={(event) => {
@@ -146,6 +147,7 @@ export function OrderedLocationsEditor({
                 {(props) => (
                   <input
                     {...props}
+                    dir="auto"
                     value={option.address}
                     onChange={(event) =>
                       update(option.id, { ...option, address: event.target.value })

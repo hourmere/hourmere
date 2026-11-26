@@ -53,4 +53,13 @@ describe('the .ics file', () => {
     expect(outlook.searchParams.get('startdt')).toBe('2026-11-02T08:00:00.000Z')
     expect(outlook.searchParams.get('location')).toBe(event.location)
   })
+
+  it('preserves mixed-direction values in exports and provider links', () => {
+    const mixed = { ...event, title: '🗓 12 موعد; English', description: '中文\n\nנועה (Noa)' }
+    const ics = buildIcs(mixed, 0)
+    expect(ics).toContain('SUMMARY:🗓 12 موعد\\; English\r\n')
+    expect(ics).toContain('DESCRIPTION:中文\\n\\nנועה (Noa)\r\n')
+    expect(new URL(googleCalendarUrl(mixed)).searchParams.get('text')).toBe(mixed.title)
+    expect(new URL(outlookCalendarUrl(mixed)).searchParams.get('body')).toBe(mixed.description)
+  })
 })

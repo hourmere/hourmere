@@ -4,6 +4,7 @@ import { errorMessage, isOrganizationContextChanged, RequestError } from '../../
 import { changeTeamMemberRole, type ManageableTeamRole } from '../../api/team-roles.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import { BreakableText } from '../BreakableText.tsx'
+import { UserContentMessage } from '../UserContent.tsx'
 import './TeamMemberRole.css'
 
 function knownRoles(role: string | null) {
@@ -240,10 +241,11 @@ function RoleChange({
       )}
       {savedRole && (
         <p role="status">
-          {t('{name} is now {role}.', {
-            name,
-            role: savedRole === 'admin' ? t('Admin') : t('Member'),
-          })}
+          <UserContentMessage
+            message="{name} is now {role}."
+            values={{ name }}
+            otherValues={{ role: savedRole === 'admin' ? t('Admin') : t('Member') }}
+          />
         </p>
       )}
       {open && (
@@ -264,12 +266,21 @@ function RoleChange({
             {t('Change team role')}
           </h3>
           <p className="user-content">
-            <BreakableText>
-              {t('Change {name} from {oldRole} to {newRole}?', { name, oldRole, newRole })}
-            </BreakableText>
+            <UserContentMessage
+              message="Change {name} from {oldRole} to {newRole}?"
+              values={{ name }}
+              otherValues={{ oldRole, newRole }}
+              renderValues={{
+                name: (
+                  <bdi>
+                    <BreakableText>{name}</BreakableText>
+                  </bdi>
+                ),
+              }}
+            />
           </p>
           {member.user.email && (
-            <p className="user-content">
+            <p className="user-content" dir="ltr">
               <BreakableText>{member.user.email}</BreakableText>
             </p>
           )}

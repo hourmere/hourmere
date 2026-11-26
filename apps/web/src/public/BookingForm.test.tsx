@@ -211,6 +211,12 @@ describe('public booking form polish', () => {
       'What would you like to discuss? This answer is required.',
       'Your name: Enter your name.',
     ],
+    [
+      'en',
+      '🙂 42 مرحبا (Topic)?',
+      '🙂 42 مرحبا (Topic)? This answer is required.',
+      'Your name: Enter your name.',
+    ],
     ['zh-CN', '你想讨论什么？', '你想讨论什么？此问题为必答项。', '你的姓名：请输入你的姓名。'],
     ['zh-CN', '请补充：', '请补充：此问题为必答项。', '你的姓名：请输入你的姓名。'],
     ['zh-CN', '请补充。', '请补充。此问题为必答项。', '你的姓名：请输入你的姓名。'],
@@ -242,10 +248,50 @@ describe('public booking form polish', () => {
         screen.getByRole('button', { name: language === 'en' ? 'Confirm booking' : '确认预约' }),
       )
       const summary = screen.getByRole('alert')
-      expect(within(summary).getByRole('link', { name: expected })).toBeDefined()
+      const link = within(summary).getByRole('link', { name: expected })
+      expect(link.querySelector('bdi')?.textContent).toBe(label)
+      await user.click(link)
+      expect(document.activeElement).toBe(screen.getByLabelText(label))
       expect(within(summary).getByRole('link', { name: plainLabel })).toBeDefined()
     },
   )
+
+  it('uses automatic direction for names, free-text answers and custom option labels', async () => {
+    const user = userEvent.setup()
+    const onSubmit = vi.fn()
+    const name = '🙂 42 مرحبا (Name)'
+    const notes = 'שלום (Details)\n\n中文'
+    const option = 'العربية (Option 1)'
+    render(
+      <Form
+        initial={{ ...valid, name, guests: [{ name: 'אביגיל', email: 'guest@example.invalid' }] }}
+        questions={[
+          { id: 'notes', label: 'تفاصيل (Notes)', type: 'long_text', required: true },
+          {
+            id: 'choice',
+            label: '选择 (Choice)',
+            type: 'select',
+            required: true,
+            options: [option],
+          },
+        ]}
+        onSubmit={onSubmit}
+      />,
+    )
+    expect(screen.getByLabelText('Your name').getAttribute('dir')).toBe('auto')
+    expect(screen.getByLabelText('Guest 1 name').getAttribute('dir')).toBe('auto')
+    const answer = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'تفاصيل (Notes)' })
+    expect(answer.getAttribute('dir')).toBe('auto')
+    fireEvent.change(answer, { target: { value: notes } })
+    expect(answer.value).toBe(notes)
+    const choice = screen.getByRole<HTMLSelectElement>('combobox', { name: '选择 (Choice)' })
+    expect(screen.getByRole('option', { name: option }).getAttribute('dir')).toBe('auto')
+    await user.selectOptions(choice, option)
+    expect(choice.value).toBe(option)
+    expect(screen.getByLabelText<HTMLInputElement>('Your name').value).toBe(name)
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    expect(onSubmit).toHaveBeenCalledOnce()
+  })
 
   it('shows form-wide failures once in the same summary and localizes public headings', () => {
     chooseLanguage('zh-CN')
