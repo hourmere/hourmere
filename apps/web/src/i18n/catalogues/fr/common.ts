@@ -608,4 +608,8 @@ export const common = {
   // Booking location changes
   'The meeting location has changed. Please choose a time again.':
     'Le lieu de la réunion a changé. Veuillez choisir à nouveau un créneau.',
+
+  // Microsoft Teams host authorization
+  'The assigned host must configure Microsoft Teams in their own signed-in session.':
+    'L’hôte désigné doit se connecter à son propre compte pour configurer Microsoft Teams.',
 } as const
