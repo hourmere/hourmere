@@ -35,6 +35,16 @@ and Simplified Chinese.
 即使设置组处于折叠状态，标题下方也会显示当前设置摘要。
 团队活动的首屏会显示角色检查进度，检查失败时可在此重试。
 
+## Book on a phone
+
+Personal, team and one-time booking links use the full screen width on phones. The
+summary shows the meeting length, location and time-zone information with icons beside
+the text. After you choose a time, **Confirm booking** stays at the bottom as you scroll
+through your details.
+
+中文：个人、团队和一次性预约链接在手机上使用全宽布局。摘要中的时长、地点和时区信息旁
+有图标。选定时间后，滚动填写资料时，“确认预约”按钮保持在屏幕底部。
+
 ## Preview the booking page
 
 On wide screens the booking page preview sits to the right of the settings. On a
