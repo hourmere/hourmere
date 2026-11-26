@@ -17,7 +17,7 @@ export default defineConfig({
   forbidOnly: Boolean(process.env.CI),
   timeout: 45000,
   expect: { timeout: 8000 },
-  reporter: 'line',
+  reporter: process.env.HOURMERE_E2E_SHARD ? [['line'], ['./shard-count-reporter.ts']] : 'line',
   preserveOutput: 'never',
   outputDir: '../../temp/playwright-results',
   use: {

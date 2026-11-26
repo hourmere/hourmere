@@ -1,9 +1,10 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { readFileSync } from 'node:fs'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import type { EventType } from '../../api/resources.ts'
 import { chooseLanguage } from '../../i18n/store.ts'
-import { fakeApi, json, ME, profile, renderApp, signedInAs } from '../../test/fake-api.tsx'
+import { fakeApi, json, later, ME, profile, renderApp, signedInAs } from '../../test/fake-api.tsx'
 import { EVENT_TYPE_ID, eventType, schedule } from '../../test/fixtures.ts'
 
 function setup(saved = eventType()) {
@@ -43,6 +44,14 @@ it('shows precisely four editable controls outside closed settings on create', a
     'durationMinutes',
     'location-kind',
   ])
+  const index = readFileSync('apps/site/src/content/docs/docs/index.md', 'utf8')
+  const fields = ['Title', 'Booking link', 'Duration (minutes)', 'Where the meeting happens']
+  expect(controls.map((control) => control.id)).toEqual(
+    fields.map((label) => screen.getByLabelText(label, { exact: true }).id),
+  )
+  expect(index.replace(/\s+/g, ' ')).toContain(
+    'things: **Title**, **Booking link**, **Duration (minutes)** and **Where the meeting happens**.',
+  )
   const groups = [...view.container.querySelectorAll('details')]
   expect(groups.length).toBeGreaterThanOrEqual(8)
   expect(groups.every((group) => !group.open)).toBe(true)
@@ -193,6 +202,50 @@ it('opens nondefault settings and preserves their values after a collapsed title
   expect({ ...original, ...body }).toEqual({ ...original, title: 'Renamed' })
 })
 
+it('keeps move controls focused and omits locations when their original order is restored', async () => {
+  chooseLanguage('en')
+  const api = setup(
+    eventType({
+      location: { kind: 'google_meet' },
+      locations: [
+        { id: 'meet', kind: 'google_meet' },
+        { id: 'zoom', kind: 'zoom' },
+        { id: 'office', kind: 'in_person', address: '42 Main Street' },
+      ],
+    }),
+  )
+  const user = userEvent.setup()
+  renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
+  const title = await screen.findByLabelText('Title', { exact: true })
+  const office = await screen.findByRole('group', { name: 'In person' })
+  const up = within(office).getByRole('button', { name: 'Move location up' })
+  const down = within(office).getByRole('button', { name: 'Move location down' })
+  const save = screen.getByRole('button', { name: 'Save changes' })
+  const patch = `PATCH /api/v1/event-types/${EVENT_TYPE_ID}` as const
+
+  up.focus()
+  await user.keyboard('{Enter}')
+  expect(document.activeElement).toBe(up)
+  await user.keyboard('{Enter}')
+  expect(document.activeElement).toBe(down)
+  expect(screen.getByText('Save your changes before sharing this address.')).toBeTruthy()
+  await user.keyboard('{Enter}')
+  expect(document.activeElement).toBe(down)
+  await user.keyboard('{Enter}')
+  expect(document.activeElement).toBe(up)
+  expect(screen.queryByText('Save your changes before sharing this address.')).toBeNull()
+
+  await user.click(save)
+  await screen.findByText('No changes to save.')
+  expect(api.to(patch)).toHaveLength(0)
+  await user.type(title, ' updated')
+  await user.click(save)
+  await screen.findByText('Saved.')
+  expect(api.to(patch)).toHaveLength(1)
+  expect(api.to(patch)[0]?.body).toMatchObject({ title: 'Intro call updated' })
+  expect(api.to(patch)[0]?.body).not.toHaveProperty('locations')
+})
+
 it('reopens a group when returning from the error summary after it was collapsed again', async () => {
   chooseLanguage('en')
   setup()
@@ -214,7 +267,7 @@ it('reopens a group when returning from the error summary after it was collapsed
 })
 
 describe.each(['en', 'zh-CN'] as const)('first-screen feedback in %s', (language) => {
-  it('keeps an invalid single duration error on the duration input', async () => {
+  it('focuses the summary for a visible duration error and links to the invalid input', async () => {
     chooseLanguage(language)
     setup()
     const user = userEvent.setup()
@@ -230,17 +283,17 @@ describe.each(['en', 'zh-CN'] as const)('first-screen feedback in %s', (language
         name: language === 'en' ? 'Create event type' : '创建活动类型',
       }),
     )
-    expect(document.activeElement).toBe(duration)
+    const summary = document.querySelector('.error-summary') as HTMLElement
+    expect(document.activeElement).toBe(summary)
     expect(duration.getAttribute('aria-invalid')).toBe('true')
     expect(document.querySelectorAll('.field-error')).toHaveLength(1)
     expect(
       disclosureFor(document.getElementById('allowedDurationsMinutes') as HTMLElement).open,
     ).toBe(false)
-    const links = document.querySelectorAll('.error-summary a')
-    expect(links).toHaveLength(1)
-    expect(links[0]?.textContent).toContain(
-      language === 'en' ? 'Duration (minutes)' : '时长（分钟）',
-    )
+    const link = within(summary).getByRole('link')
+    expect(link.textContent).toContain(language === 'en' ? 'Duration (minutes)' : '时长（分钟）')
+    await user.click(link)
+    expect(document.activeElement).toBe(duration)
   })
 })
 
@@ -279,18 +332,29 @@ it('shows the no-schedule notice on create without opening settings', async () =
   expect(screen.getByRole('link', { name: 'Set your availability' })).toBeTruthy()
 })
 
-it('shows a team-role failure on create without opening settings', async () => {
+it('shows team-role loading and failure on create without an empty Hosts group', async () => {
   chooseLanguage('en')
   const me = { ...ME, organization: { ...ME.organization, personal: false } }
+  const membership = later()
   fakeApi({
     ...signedInAs(me),
     ...profile(),
     'GET /api/v1/schedules': () => json(200, { data: [schedule()] }),
-    'GET /api/auth/organization/get-active-member': () => json(500, { message: 'Unavailable' }),
+    'GET /api/auth/organization/get-active-member': () =>
+      membership.response.then((response) => response.clone()),
   })
   renderApp('/app/event-types/new')
   await screen.findByLabelText('Title', { exact: true })
+  const loading = screen.getByText('Loading your team role…')
+  expect(loading.closest('details')).toBeNull()
+  expect(loading.getAttribute('role')).toBe('status')
+  expect(screen.queryByText('Hosts', { selector: 'summary' })).toBeNull()
+  expect(screen.queryByRole('heading', { name: 'Hosts' })).toBeNull()
+
+  await membership.answer(json(500, { message: 'Unavailable' }))
   const notice = await screen.findByText('Could not load your team role.')
   expect(notice.closest('details')).toBeNull()
   expect(notice.closest('[role="alert"]')).not.toBeNull()
+  expect(screen.queryByText('Hosts', { selector: 'summary' })).toBeNull()
+  expect(screen.queryByRole('heading', { name: 'Hosts' })).toBeNull()
 })

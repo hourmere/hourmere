@@ -270,7 +270,10 @@ origins are blocked. No real mailbox, calendar credentials or external API is re
 and cancellation, a stale-form booking conflict, cross-origin popup/privacy behavior and
 the account sign-in gate. Each scenario runs at desktop and mobile viewport sizes. These
 are genuine SPA/HTTP/PostgreSQL flows, without API response mocks. CI runs the suite in a
-separate job with its own PostgreSQL service and the runner's installed Chrome.
+matrix with a PostgreSQL service and the runner's installed Chrome for each shard. The
+required `e2e` job checks that each shard succeeds and selects about one sixth of the full
+Playwright suite. The shard counts must add up to the full suite size. Only numeric counts
+are passed to that job.
 
 The Keycloak OIDC spec runs in the required browser suite and needs Docker and OpenSSL.
 See the [Keycloak fixture README](tools/e2e/keycloak/README.md) for its image pin, local

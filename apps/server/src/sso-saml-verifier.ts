@@ -135,7 +135,7 @@ export type VerifiedSamlResponse = {
     conditions: { notBefore: string | null; notOnOrAfter: string | null }
     audiences: string[]
     authnStatements: {
-      authnInstant: string
+      authnInstant: string | null
       sessionIndex: string | null
       sessionNotOnOrAfter: string | null
     }[]
@@ -601,7 +601,11 @@ function responseParts(response: Element) {
 }
 
 /** Reads the assertion. Only ever called with the root of the verified canonical bytes. */
-function readAssertion(assertion: Element, trust: Trust): VerifiedSamlResponse['assertion'] {
+function readAssertion(
+  assertion: Element,
+  trust: Trust,
+  allowMissingAuthnInstant: boolean,
+): VerifiedSamlResponse['assertion'] {
   if (!is(assertion, SAML, 'Assertion')) throw reject('verified_node_mismatch')
   if (optional(assertion, 'Version') !== '2.0') throw reject('unexpected_structure')
   const parts = children(assertion)
@@ -647,7 +651,9 @@ function readAssertion(assertion: Element, trust: Trust): VerifiedSamlResponse['
   for (const statement of parts) {
     if (is(statement, SAML, 'AuthnStatement')) {
       authnStatements.push({
-        authnInstant: required(statement, 'AuthnInstant'),
+        authnInstant: allowMissingAuthnInstant
+          ? optional(statement, 'AuthnInstant')
+          : required(statement, 'AuthnInstant'),
         sessionIndex: optional(statement, 'SessionIndex'),
         sessionNotOnOrAfter: optional(statement, 'SessionNotOnOrAfter'),
       })
@@ -720,6 +726,7 @@ function decode(samlResponse: unknown): string {
 export function verifySamlResponse(
   config: SamlVerifierConfig,
   samlResponse: unknown,
+  { allowMissingAuthnInstant = false } = {},
 ): VerifiedSamlResponse {
   const trust = trustFrom(config)
   try {
@@ -759,6 +766,7 @@ export function verifySamlResponse(
     const assertion = readAssertion(
       parseStrict(signedBytes(xml, assertionSignature, assertionId, trust)),
       trust,
+      allowMissingAuthnInstant,
     )
     if (assertion.id !== assertionId) throw reject('verified_node_mismatch')
     if (assertion.subjectConfirmation.inResponseTo !== response.inResponseTo)

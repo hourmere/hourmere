@@ -10,6 +10,8 @@ import { apiBodyLimit, routeBodyLimit } from './body-limit.ts'
 import { createRateLimiter, rateLimitKey } from './rate-limit.ts'
 import { requireSsoEnabled, type SsoCapabilities } from './sso.ts'
 import { openSsoProviderConfiguration, type SsoProviderRevision } from './sso-configuration.ts'
+import { databaseInstantText } from './sso-database-clock.ts'
+import { delegationProofCookie, sealDelegationProof } from './sso-delegation-proof.ts'
 import {
   bindingCookieName,
   browserBindingDigest,
@@ -28,6 +30,9 @@ import {
   OidcAttemptRefused,
   type OidcTestActor,
   oidcReturnDestination,
+  recordSsoStepUp,
+  ssoStepUpBinding,
+  ssoStepUpSubjectDigest,
 } from './sso-oidc-attempt.ts'
 import {
   completeOidcSignIn,
@@ -57,10 +62,10 @@ import {
   consumeSamlReplay,
   SamlTimingError,
   samlAcceptanceExpired,
-  samlDatabaseInstantText,
   samlDatabaseNow,
   samlRequestExpired,
   samlSessionDeadline,
+  samlStepUpAuthTime,
 } from './sso-saml-replay.ts'
 import {
   openSamlState,
@@ -68,6 +73,7 @@ import {
   SAML_COMPLETE_PATH,
   SAML_METADATA_PATH,
   samlCompleteOperation,
+  samlCompleteStepUpOperation,
   samlCompleteTestOperation,
   samlId,
   samlLinkOperation,
@@ -76,6 +82,7 @@ import {
   samlServiceProviderUrls,
   samlStartOperation,
   samlStateCookie,
+  samlStepUpOperation,
   samlTestBinding,
   samlTestOperation,
   sealSamlState,
@@ -103,6 +110,18 @@ const projectionSchema = z.strictObject({
   mailboxDigest: z.hex().length(64),
   acceptanceDeadline: z.iso.datetime(),
   sessionDeadline: z.iso.datetime().optional(),
+})
+const stepUpResultSchema = z.strictObject({
+  requestId: samlId,
+  subjectDigest: z.hex().length(64),
+  authTimeMs: z.int().optional(),
+  ceremonyCreatedAt: z.iso.datetime(),
+  acceptanceDeadline: z.iso.datetime(),
+  sessionDeadline: z.iso.datetime().optional(),
+})
+const samlStepUpState = z.strictObject({
+  binding: ssoStepUpBinding,
+  returnPath: z.string(),
 })
 const testFailureSchema = z.enum([
   'algorithm_refused',
@@ -171,21 +190,19 @@ function correlatedSamlRequest(
   { organizationId, providerId, revision }: SsoProviderRevision,
   requestId: string,
   relayState: string,
-  kind: 'test' | 'link' | 'sign_in',
+  kind: 'test' | 'link' | 'sign_in' | 'step_up',
 ) {
+  const operations = {
+    test: samlTestOperation,
+    link: samlLinkOperation,
+    sign_in: samlStartOperation,
+    step_up: samlStepUpOperation,
+  }
   return db
     .selectFrom('sso_attempts')
     .where('id', '=', requestId)
-    .where('kind', '=', kind)
-    .where(
-      'operation',
-      '=',
-      kind === 'test'
-        ? samlTestOperation
-        : kind === 'link'
-          ? samlLinkOperation
-          : samlStartOperation,
-    )
+    .where('kind', '=', kind === 'step_up' ? 'link' : kind)
+    .where('operation', '=', operations[kind])
     .where('organization_id', '=', organizationId)
     .where('provider_id', '=', providerId)
     .where('provider_revision', '=', revision)
@@ -229,7 +246,7 @@ async function stageSamlTest(
       .select([
         'browser_binding_digest',
         'consumed_at',
-        samlDatabaseInstantText(sql.ref('expires_at')).as('expiresAt'),
+        databaseInstantText(sql.ref('expires_at')).as('expiresAt'),
       ])
       .forUpdate()
       .executeTakeFirst()
@@ -330,7 +347,7 @@ async function completeSamlTest(
       'saml',
     )
     const attempt = await pending(trx)
-      .select(samlDatabaseInstantText(sql.ref('expires_at')).as('expiresAt'))
+      .select(databaseInstantText(sql.ref('expires_at')).as('expiresAt'))
       .forUpdate()
       .executeTakeFirst()
     if (!attempt) return false
@@ -363,14 +380,11 @@ async function completeSamlTest(
   })
 }
 
-function stableSamlIdentity(
+function stableSamlSubject(
   { assertion: { nameId, attributes, issuer } }: VerifiedSamlResponse,
   spEntityId: string,
   subjectAttribute: string | undefined,
 ) {
-  const [email, ...otherEmails] = Object.hasOwn(attributes, 'email') ? (attributes.email ?? []) : []
-  const mailbox = email && normalizeOidcMailbox(email)
-  if (!mailbox || otherEmails.length || !emailAddress.safeParse(mailbox).success) return
   let subject: string | undefined
   if (subjectAttribute !== undefined) {
     const values = Object.hasOwn(attributes, subjectAttribute)
@@ -390,7 +404,7 @@ function stableSamlIdentity(
     z.email().safeParse(subject.trim()).success
   )
     return
-  return { issuer, subject, mailbox }
+  return subject
 }
 
 /** Enforce SP initiation and commit the replay keys and pending result together. */
@@ -402,10 +416,18 @@ async function stageSamlCompletion(
   relayState: string,
   response: VerifiedSamlResponse,
   scimResourcesEnabled: boolean,
-  actor?: OidcTestActor,
+  ceremony?: { kind: 'link' | 'step_up'; actor: OidcTestActor },
 ) {
   const { organizationId, providerId, revision } = provider
-  const identity = stableSamlIdentity(response, provider.spEntityId, provider.subjectAttribute)
+  const { actor } = ceremony ?? {}
+  const { issuer, attributes } = response.assertion
+  const subject = stableSamlSubject(response, provider.spEntityId, provider.subjectAttribute)
+  const [email, ...otherEmails] = Object.hasOwn(attributes, 'email') ? (attributes.email ?? []) : []
+  const mailbox = email && normalizeOidcMailbox(email)
+  const identity =
+    subject && mailbox && !otherEmails.length && emailAddress.safeParse(mailbox).success
+      ? { issuer, subject, mailbox }
+      : undefined
   const candidate = !actor && identity ? await findOidcLink(db, provider, identity) : undefined
   const sessionDeadline = samlSessionDeadline(response.assertion)
   return db.transaction().execute(async (trx) => {
@@ -426,7 +448,7 @@ async function stageSamlCompletion(
       provider,
       requestId,
       relayState,
-      actor ? 'link' : 'sign_in',
+      ceremony?.kind ?? 'sign_in',
     )
     const request = await (actor
       ? correlated.where('user_id', '=', actor.userId).where('session_id', '=', actor.id)
@@ -435,7 +457,8 @@ async function stageSamlCompletion(
       .select([
         'browser_binding_digest',
         'consumed_at',
-        samlDatabaseInstantText(sql.ref('expires_at')).as('expiresAt'),
+        databaseInstantText(sql.ref('created_at')).as('createdAt'),
+        databaseInstantText(sql.ref('expires_at')).as('expiresAt'),
       ])
       .forUpdate()
       .executeTakeFirst()
@@ -456,9 +479,56 @@ async function stageSamlCompletion(
       .where('id', '=', requestId)
       .execute()
 
-    if (!identity) return undefined
     const deadline = now.add(completionLifetime)
     const pendingExpiry = Temporal.Instant.compare(deadline, expiresAt) < 0 ? deadline : expiresAt
+    const stageResult = async (
+      projection: z.infer<typeof projectionSchema> | z.infer<typeof stepUpResultSchema>,
+      stepUpActor?: OidcTestActor,
+    ) => {
+      const { id } = await trx
+        .selectNoFrom(sql<string>`uuidv7()`.as('id'))
+        .executeTakeFirstOrThrow()
+      const result = sealSamlState(configurationKey, 'result', id, JSON.stringify(projection))
+      await trx
+        .insertInto('sso_attempts')
+        .values({
+          id,
+          kind: stepUpActor ? 'link' : 'sign_in',
+          operation: stepUpActor ? samlCompleteStepUpOperation : samlCompleteOperation,
+          organization_id: organizationId,
+          provider_id: providerId,
+          provider_revision: revision,
+          ...(stepUpActor && { user_id: stepUpActor.userId, session_id: stepUpActor.id }),
+          browser_binding_digest: request.browser_binding_digest,
+          input_digest: sha256(result),
+          created_at: now.toString(),
+          expires_at: pendingExpiry.toString(),
+        })
+        .execute()
+      const stagedAt = await samlDatabaseNow(trx)
+      if (samlRequestExpired(pendingExpiry, stagedAt)) throw new SamlTimingError('request_expired')
+      if (samlAcceptanceExpired(acceptanceDeadline, stagedAt))
+        throw new SamlTimingError('timing_invalid')
+      return { id, result, kind: 'result' as const }
+    }
+    const serializedSessionDeadline = sessionDeadline
+      ?.round({ smallestUnit: 'microsecond', roundingMode: 'floor' })
+      .toString()
+    if (ceremony?.kind === 'step_up') {
+      if (!subject) return undefined
+      return stageResult(
+        {
+          requestId,
+          subjectDigest: ssoStepUpSubjectDigest(issuer, subject),
+          authTimeMs: samlStepUpAuthTime(response.assertion, now),
+          ceremonyCreatedAt: request.createdAt,
+          acceptanceDeadline: acceptanceDeadline.toString(),
+          sessionDeadline: serializedSessionDeadline,
+        },
+        ceremony.actor,
+      )
+    }
+    if (!identity) return undefined
     const signInDeadline = [
       pendingExpiry,
       acceptanceDeadline.add({ seconds: samlClockSkew }),
@@ -472,7 +542,7 @@ async function stageSamlCompletion(
       if (local?.mailbox !== identity.mailbox) return undefined
       const { expiresAt } = await trx
         .selectNoFrom(
-          samlDatabaseInstantText(sql`least(
+          databaseInstantText(sql`least(
             ${signInDeadline.round({ smallestUnit: 'microsecond', roundingMode: 'floor' }).toString()}::timestamptz,
             ${local.session.deadline}::timestamptz
           )`).as('expiresAt'),
@@ -501,9 +571,7 @@ async function stageSamlCompletion(
         {
           ...identity,
           email: identity.mailbox,
-          sessionDeadline: sessionDeadline
-            ?.round({ smallestUnit: 'microsecond', roundingMode: 'floor' })
-            .toString(),
+          sessionDeadline: serializedSessionDeadline,
         },
         { expiresAt: expiresAt.toString(), requestId },
         request.browser_binding_digest,
@@ -528,43 +596,15 @@ async function stageSamlCompletion(
       if (pending.reason !== undefined) return undefined
       return { id: pending.id, result: pending.envelope, kind: 'mailbox' as const }
     }
-    const { id } = await trx.selectNoFrom(sql<string>`uuidv7()`.as('id')).executeTakeFirstOrThrow()
-    const result = sealSamlState(
-      configurationKey,
-      'result',
-      id,
-      JSON.stringify({
-        requestId,
-        linkId: link.id,
-        userId: link.user_id,
-        linkGeneration: link.generation,
-        mailboxDigest: sha256(link.proven_email),
-        acceptanceDeadline: acceptanceDeadline.toString(),
-        sessionDeadline: sessionDeadline
-          ?.round({ smallestUnit: 'microsecond', roundingMode: 'floor' })
-          .toString(),
-      } satisfies z.infer<typeof projectionSchema>),
-    )
-    await trx
-      .insertInto('sso_attempts')
-      .values({
-        id,
-        kind: 'sign_in',
-        operation: samlCompleteOperation,
-        organization_id: organizationId,
-        provider_id: providerId,
-        provider_revision: revision,
-        browser_binding_digest: request.browser_binding_digest,
-        input_digest: sha256(result),
-        created_at: now.toString(),
-        expires_at: pendingExpiry.toString(),
-      })
-      .execute()
-    const stagedAt = await samlDatabaseNow(trx)
-    if (samlRequestExpired(pendingExpiry, stagedAt)) throw new SamlTimingError('request_expired')
-    if (samlAcceptanceExpired(acceptanceDeadline, stagedAt))
-      throw new SamlTimingError('timing_invalid')
-    return { id, result, kind: 'result' as const }
+    return stageResult({
+      requestId,
+      linkId: link.id,
+      userId: link.user_id,
+      linkGeneration: link.generation,
+      mailboxDigest: sha256(link.proven_email),
+      acceptanceDeadline: acceptanceDeadline.toString(),
+      sessionDeadline: serializedSessionDeadline,
+    })
   })
 }
 
@@ -622,7 +662,7 @@ async function completeSamlSignIn(
       if (context.reason !== undefined || context.link.proven_email !== link.proven_email)
         return undefined
       const attempt = await readAttempt(trx)
-        .select(samlDatabaseInstantText(sql.ref('expires_at')).as('expiresAt'))
+        .select(databaseInstantText(sql.ref('expires_at')).as('expiresAt'))
         .forUpdate()
         .executeTakeFirst()
       if (!attempt) return undefined
@@ -663,6 +703,84 @@ async function completeSamlSignIn(
       return undefined
     throw error
   }
+}
+
+async function completeSamlStepUp(
+  db: Db,
+  { id, browserBinding, envelope }: { id: string; browserBinding: string; envelope: string },
+  result: z.infer<typeof stepUpResultSchema>,
+  actor: OidcTestActor,
+  state: z.infer<typeof samlStepUpState>,
+  scimResourcesEnabled: boolean,
+) {
+  const binding = browserBindingDigest(browserBinding)
+  const returnPath = oidcReturnDestination(state.returnPath)
+  if (!binding || !returnPath?.startsWith('/app')) return
+  const readAttempt = (executor: Db) =>
+    executor
+      .selectFrom('sso_attempts')
+      .where('id', '=', id)
+      .where('kind', '=', 'link')
+      .where('operation', '=', samlCompleteStepUpOperation)
+      .where('user_id', '=', actor.userId)
+      .where('session_id', '=', actor.id)
+      .where('browser_binding_digest', '=', binding)
+      .where('input_digest', '=', sha256(envelope))
+      .where('consumed_at', 'is', null)
+      .where('expires_at', '>', sql<Date>`clock_timestamp()`)
+  const pending = await readAttempt(db)
+    .select(['organization_id', 'provider_id', 'provider_revision', 'created_at'])
+    .executeTakeFirst()
+  if (!pending?.provider_id || pending.provider_revision === null) return
+  const provider = {
+    organizationId: pending.organization_id,
+    providerId: pending.provider_id,
+    revision: pending.provider_revision,
+  }
+  const acceptanceDeadline = Temporal.Instant.from(result.acceptanceDeadline)
+  const sessionDeadline = result.sessionDeadline ? new Date(result.sessionDeadline) : undefined
+  return db.transaction().execute(async (trx) => {
+    // Take the shared lock on the account, team and write challenge before consuming the result.
+    const recorded = await recordSsoStepUp(
+      trx,
+      { ...provider, browserBinding },
+      { actor, binding: state.binding },
+      result.ceremonyCreatedAt,
+      {
+        subjectDigest: result.subjectDigest,
+        authTimeMs: result.authTimeMs,
+        sessionDeadline,
+        receivedAt: pending.created_at,
+      },
+      scimResourcesEnabled,
+      'saml',
+    )
+    if (recorded.failure) return
+    const attempt = await readAttempt(trx)
+      .select(databaseInstantText(sql.ref('expires_at')).as('expiresAt'))
+      .forUpdate()
+      .executeTakeFirst()
+    if (!attempt) throw new OidcAttemptRefused()
+    const expiry = Temporal.Instant.from(attempt.expiresAt)
+    const requireLive = (now: Temporal.Instant) => {
+      if (
+        samlRequestExpired(expiry, now) ||
+        recorded.proofExpiresAt.getTime() <= now.epochMilliseconds
+      )
+        throw new SamlTimingError('request_expired')
+      if (samlAcceptanceExpired(acceptanceDeadline, now))
+        throw new SamlTimingError('timing_invalid')
+    }
+    const now = await samlDatabaseNow(trx)
+    requireLive(now)
+    await trx
+      .updateTable('sso_attempts')
+      .set({ consumed_at: now.toString() })
+      .where('id', '=', id)
+      .execute()
+    requireLive(await samlDatabaseNow(trx))
+    return { returnPath, provider, delegation: recorded.delegation }
+  })
 }
 
 export function samlSignInRoutes({
@@ -759,10 +877,11 @@ export function samlSignInRoutes({
           if (!request) return refuse()
           const test = request.kind === 'test' && request.operation === samlTestOperation
           const link = request.kind === 'link' && request.operation === samlLinkOperation
+          const stepUp = request.kind === 'link' && request.operation === samlStepUpOperation
           const signIn = request.kind === 'sign_in' && request.operation === samlStartOperation
           if (
-            (!test && (!provider.enabled || (!link && !signIn))) ||
-            (link && (!request.user_id || !request.session_id))
+            (!test && (!provider.enabled || (!link && !signIn && !stepUp))) ||
+            ((link || stepUp) && (!request.user_id || !request.session_id))
           )
             return refuse()
           const fail = async (reason: SsoAuditReason | 'replay') => {
@@ -832,6 +951,7 @@ export function samlSignInRoutes({
                   algorithms: samlInitialAlgorithms,
                 },
                 samlResponse,
+                { allowMissingAuthnInstant: stepUp },
               )
               return { response, subjectAttribute: config.subjectAttribute }
             } catch (error) {
@@ -864,8 +984,11 @@ export function samlSignInRoutes({
               relayState,
               verified.response,
               scimResourcesEnabled,
-              link && request.user_id && request.session_id
-                ? { userId: request.user_id, id: request.session_id }
+              (link || stepUp) && request.user_id && request.session_id
+                ? {
+                    kind: stepUp ? 'step_up' : 'link',
+                    actor: { userId: request.user_id, id: request.session_id },
+                  }
                 : undefined,
             )
             if (!pending) return fail('mailbox_unproven')
@@ -922,7 +1045,7 @@ export function samlSignInRoutes({
         }
         const browserBinding = getCookie(c, bindingName)
         const binding = browserBindingDigest(browserBinding)
-        if (!configurationKey || !binding) return c.json(completionInvalid, 400)
+        if (!configurationKey || !browserBinding || !binding) return c.json(completionInvalid, 400)
         const sessionOptions = {
           ...session,
           scimResourcesEnabled,
@@ -1007,6 +1130,53 @@ export function samlSignInRoutes({
         const plaintext = openSamlState(configurationKey, 'result', id.data, envelope)
         if (plaintext === undefined) return c.json(completionInvalid, 400)
         const projection: unknown = JSON.parse(plaintext)
+        const stepUp = stepUpResultSchema.safeParse(projection)
+        if (stepUp.success) {
+          const startCookie = samlStateCookie(publicUrl, 'step-up', stepUp.data.requestId)
+          const startEnvelope = getCookie(c, startCookie.name)
+          const startState =
+            startEnvelope &&
+            openSamlState(configurationKey, 'step-up', stepUp.data.requestId, startEnvelope)
+          if (!startState) return c.json(completionInvalid, 400)
+          const actor = await readSession?.(c.req.raw.headers)
+          if (!actor) return c.json(completionInvalid, 400)
+          const state = samlStepUpState.parse(JSON.parse(startState))
+          const completed = await completeSamlStepUp(
+            db,
+            { id: id.data, browserBinding, envelope },
+            stepUp.data,
+            actor,
+            state,
+            scimResourcesEnabled,
+          ).catch((error: unknown) => {
+            if (
+              error instanceof OidcAttemptRefused ||
+              error instanceof SamlTimingError ||
+              expiresDuringOidcWrite(error)
+            )
+              return undefined
+            throw error
+          })
+          if (!completed) return c.json(completionInvalid, 400)
+          if (completed.delegation) {
+            const { attemptId, linkGeneration, expiresAt } = completed.delegation
+            const proofCookie = delegationProofCookie(publicUrl, attemptId)
+            const proof = sealDelegationProof(
+              configurationKey,
+              completed.provider,
+              attemptId,
+              binding,
+              {
+                linkGeneration,
+                sessionDeadline: stepUp.data.sessionDeadline,
+              },
+            )
+            setCookie(c, proofCookie.name, proof, { ...proofCookie.options, expires: expiresAt })
+          }
+          deleteCookie(c, startCookie.name, startCookie.options)
+          deleteCookie(c, cookie.name, cookie.options)
+          return c.redirect(completed.returnPath, 303)
+        }
         const test = testResultSchema.safeParse(projection)
         if (test.success) {
           const testCookie = samlStateCookie(publicUrl, 'test', test.data.requestId)
