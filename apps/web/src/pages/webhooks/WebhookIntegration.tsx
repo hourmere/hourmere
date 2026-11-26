@@ -50,7 +50,10 @@ export function WebhookIntegration() {
         {session && !personal && access.status === 'loading' ? (
           <p role="status">{t('Checking webhook access…')}</p>
         ) : (
-          <div className="alert alert-error" role="alert">
+          <div
+            className={denied ? 'alert alert-error' : undefined}
+            role={denied ? 'alert' : undefined}
+          >
             <p>{t('Webhook endpoints are unavailable.')}</p>
             {session && !personal && access.status === 'error' && (
               <button className="button" type="button" onClick={access.reload}>
