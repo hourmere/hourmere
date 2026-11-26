@@ -89,3 +89,4 @@ Assigning an owner role and full ownership transfer remain unavailable at launch
 `/organization/delete` is refused with `403 TEAM_OPERATION_NOT_SUPPORTED` for HTTP and
 trusted server-side calls before any booking-history cascade. There is no separate
 ownership-transfer endpoint on this instance.
+See the [post-launch transfer design](team-ownership-transfer.md) for the proposed confirmation flow.
