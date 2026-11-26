@@ -556,13 +556,13 @@ const a11yReportPipeline = (replacement?: [string, string]) => {
   }
   // The spec turns any scan error into a scan-error finding. Record the engine errors it
   // catches there, so a broken copy is not read as a lost field.
-  const scanError = '} catch {\n            report.findings.push('
+  const scanError = '} catch {\n              report.findings.push('
   expect(source.split(scanError), 'scan error anchor').toHaveLength(2)
   source = stripTypeScriptTypes(
     source
       .replace(
         scanError,
-        '} catch (error) {\n            recordFault(error)\n            report.findings.push(',
+        '} catch (error) {\n              recordFault(error)\n              report.findings.push(',
       )
       .replace(/^import[\s\S]*? from ['"].+?['"]\n/gm, '')
       .replaceAll('import.meta.url', "'file:///tmp/a11y.spec.ts'"),
@@ -578,12 +578,11 @@ const a11yReportPipeline = (replacement?: [string, string]) => {
   )
   const reports: AuditReport[] = []
   new Function(
-    'test, auditPages, auditLocales, readFile, openAuditPage, scanA11y, a11yFindings, writeAuditReport, assertAuditFindings, recordFault',
+    'test, a11yPageBatches, readFile, openAuditPage, scanA11y, a11yFindings, writeAuditReport, assertAuditFindings, recordFault',
     source,
   )(
     test,
-    [{ id: 'booking' }],
-    () => ['en-US'],
+    () => [[{ id: 'booking' }]],
     async () => '[]',
     async () => {},
     async () => ({

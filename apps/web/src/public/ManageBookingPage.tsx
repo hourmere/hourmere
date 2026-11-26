@@ -901,7 +901,10 @@ function BookingSummary({
               <When start={booking.start} end={booking.end} timeZone={timeZone} locale={locale} />
             </span>,
           ],
-          ['Where', <LocationDetails key="where" location={booking.location} />],
+          [
+            'Where',
+            <LocationDetails key="where" location={booking.location} cancelled={cancelled} />,
+          ],
           ...(hosts ? ([['Host', hosts]] as [string, string][]) : []),
           ...(invitee
             ? ([

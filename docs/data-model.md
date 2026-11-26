@@ -52,14 +52,18 @@ attempts to bring the Outlook copy into line with the current booking or group o
 worker commits a checkpoint before calling Graph and uses the stable booking marker to recover an
 ambiguous create. Acknowledged writes retain the provider event ID and any ETag Graph supplies.
 The ID uses the same format as the busy snapshot.
-For a test-enabled Teams booking, the pinned destination also records `teamsStatus`.
+When a single-host booking chooses `microsoft_teams`, the pinned destination also records
+`teamsStatus`. Single-host group seats use the shared occurrence's destination and meeting.
 The worker checks the selected calendar's `allowedOnlineMeetingProviders` and persists the
 result before creating the event so job replays keep the same payload and `transactionId`.
 `ready` stores `teamsJoinUrl` in the private writeback record. `join_url_pending` records a
 confirmed event without a valid Teams link. The event mapping is saved so bounded retries can
 read the same event by ID. `teams_unavailable` records a calendar without Teams support, with
-an ordinary Outlook event still written. The link is
-cleared when cancellation reconciles; calendar connection summaries exclude it.
+an ordinary Outlook event still written. The last known link stays in the private writeback
+record for cancellation email delivery. Cancelled booking views and calendar connection
+summaries exclude it. Public event-type metadata exposes only the location option kind and label.
+The booking and notification views project `writeback_failed` when the writeback has failed
+and has no validated join URL.
 See [Microsoft Calendar](https://hourmere.com/docs/microsoft-calendar).
 
 `calendar_busy` stores each event ID with exactly one representation: a nonempty
@@ -802,6 +806,7 @@ booking flow without showing a choice.
 | Kind | Settings |
 |---|---|
 | `google_meet`, `zoom` | Optional `autoCreate: true`, preserving today's explicit conference opt-in. Without it, retain today's passive kind-only behavior. Generated URLs are never event-type settings. |
+| `microsoft_teams` | No kind-specific settings. Selecting it requests a Teams meeting through the single host's Microsoft writeback calendar. |
 | `phone` | Exactly one of `number` (the host's E.164 number, `+` and 7–15 digits, first digit nonzero) or `askInvitee: true` (collect the invitee's E.164 number at booking). |
 | `in_person` | Required single-line `address`, 1–500 characters. |
 | `link` | Required absolute HTTP(S) `url`, at most 2000 characters before and after normalization. |
@@ -810,6 +815,7 @@ Unknown keys, false default/opt-in flags, malformed Unicode and control characte
 in text are rejected. Labels and addresses are trimmed; link URLs are normalized
 using the URL parser. Validation belongs to the shared scheduling service; database
 constraints also enforce the list envelope, identities, kinds and default count.
+Migration 0188 adds `microsoft_teams` to the allowed kinds without rewriting existing rows.
 Option IDs survive settings edits within the same kind and reordering. A kind change
 replaces the option identity. Removing and recreating an option must allocate a new ID
 so a stale page cannot accidentally select a different option under the old ID.
@@ -918,7 +924,7 @@ Validated by the application (zod), not by the database:
 - `event_types.locations`: ordered nullable option list, as specified above;
   `event_types.location` is its default/only compatibility projection.
 - `bookings.location_option`: chosen option snapshot; `bookings.location` is the
-  resolved `{ "kind": "google_meet" | "zoom" | "phone" | "in_person" | "link", ... }`.
+  resolved `{ "kind": "google_meet" | "zoom" | "microsoft_teams" | "phone" | "in_person" | "link", ... }`.
 - `event_types.questions`: booking-form fields beyond name and email, at most 20:
   `[{ "id": "company", "label": "Company", "type": "short_text", "required": true }]`.
   `id` is 1–64 letters, digits, `_` or `-`, unique within the event type, and not

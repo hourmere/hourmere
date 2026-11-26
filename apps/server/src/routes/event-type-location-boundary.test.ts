@@ -12,6 +12,7 @@ import { catalogTools } from '../mcp/catalog.ts'
 import { mcpEndpoint } from '../mcp/endpoint.ts'
 import { eventTypeTools } from '../mcp/event-types.ts'
 import { type McpCaller, prepareTools } from '../mcp/tools.ts'
+import { BookingLocation } from './bookings.ts'
 import * as routes from './event-types.ts'
 import { openApiDocument } from './test-app.ts'
 
@@ -143,9 +144,12 @@ async function verifyPublishedLocation(schemas: Schemas) {
   const variants = (
     properties.location as { oneOf: { properties?: { kind?: { enum?: string[] } } }[] }
   ).oneOf
-  expect(variants).toHaveLength(6)
+  expect(variants).toHaveLength(7)
   expect(
     variants.filter((variant) => variant.properties?.kind?.enum?.[0] === 'phone'),
+  ).toHaveLength(1)
+  expect(
+    variants.filter((variant) => variant.properties?.kind?.enum?.[0] === 'microsoft_teams'),
   ).toHaveLength(1)
   expect(doc.paths['/api/v1/event-types/{id}']?.patch?.responses['409']).toHaveProperty(
     'description',
@@ -159,6 +163,12 @@ describe('event location options transport schemas', () => {
     expect(routes.EventTypeUpdate.safeParse({ locations: options }).success).toBe(true)
     expect(routes.EventType.shape).toHaveProperty('locations')
   })
+
+  it('keeps historical booking location details open when adding Teams fields', () => {
+    const legacy = { kind: 'zoom', url: null, status: { source: 'import' } }
+    expect(BookingLocation.parse(legacy)).toEqual(legacy)
+  })
+
   async function verifyOptionInputs(schemas: Schemas) {
     expect(schemas.EventTypeInput.safeParse({ ...base, locations: options }).success).toBe(true)
     expect(schemas.EventTypeUpdate.safeParse({ locations: options }).success).toBe(true)

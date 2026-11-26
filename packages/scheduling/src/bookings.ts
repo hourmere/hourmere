@@ -63,6 +63,7 @@ import {
   selectLocationOption,
 } from './location-options.ts'
 import { enqueueMeetingPollBookingUpdate, meetingPollChainLinked } from './meeting-poll-outcomes.ts'
+import { microsoftTeamsLocation, requireMicrosoftTeamsHost } from './microsoft-teams.ts'
 import {
   createNotificationSnapshot,
   type NotificationSnapshot,
@@ -109,6 +110,7 @@ import {
   type SuccessRedirect,
   validateSuccessRedirect,
 } from './success-redirect.ts'
+import { readTeamsMeetingLocations } from './teams-meeting-locations.ts'
 import { cleanInviteeEmail, cleanText } from './text.ts'
 import { ensureWaitlistKey } from './waitlist.ts'
 import { attributeWaitlistBooking } from './waitlist-booking.ts'
@@ -510,7 +512,7 @@ async function findReplay(
     throw reusedBookingIdempotencyKey()
   }
   return {
-    booking: await loadBooking(db, row.id),
+    booking: await loadBooking(db, row.id, undefined, false),
     manageToken: null,
     ...(row.success_redirect && {
       successRedirect: row.success_redirect as unknown as BookingSuccessRedirect,
@@ -573,6 +575,7 @@ async function toBookings(
   rows: readonly BookingRow[],
   host?: { userId: string; now: () => Temporal.Instant },
   readNow?: Temporal.Instant,
+  includeTeamsLink = true,
 ): Promise<Booking[]> {
   if (!rows.length) return []
   const requests = await db
@@ -724,6 +727,18 @@ async function toBookings(
         timeZone: host.time_zone,
       })
   }
+  const teamsLocations = includeTeamsLink
+    ? await readTeamsMeetingLocations(
+        db,
+        rows.flatMap((row) => {
+          const view = conferences.get(row.id)
+          return (view?.bookingStatus ?? row.status) === 'confirmed' && !imported.has(row.id)
+            ? [{ id: row.id, location: view ? view.location : row.location }]
+            : []
+        }),
+        { activeOnly: true },
+      )
+    : undefined
   const now = host?.now()
   return rows.map((row) => {
     const view = imported.has(row.id) ? undefined : conferences.get(row.id)
@@ -749,14 +764,16 @@ async function toBookings(
       end: toIso(toInstant(r.end_at)),
       title: r.title,
       ...(host ? { eventTypeTitle: r.event_type_title ?? null } : {}),
-      location: parseLocation(
-        (automaticZoom(location) || automaticMeet(location)) &&
-          (r.status !== 'confirmed' ||
-            view?.bookingStatus !== 'confirmed' ||
-            view?.conference?.status !== 'ready')
-          ? unresolvedLocation(location)
-          : location,
-      ),
+      location: microsoftTeamsLocation(location)
+        ? (teamsLocations?.get(r.id) ?? { kind: 'microsoft_teams' })
+        : parseLocation(
+            (automaticZoom(location) || automaticMeet(location)) &&
+              (r.status !== 'confirmed' ||
+                view?.bookingStatus !== 'confirmed' ||
+                view?.conference?.status !== 'ready')
+              ? unresolvedLocation(location)
+              : location,
+          ),
       ...(view?.conference ? { conference: view.conference } : {}),
       ...(now && view?.calendarCopy
         ? {
@@ -812,13 +829,23 @@ function readBookingRow(db: Db, id: string): Promise<BookingRow> {
     .executeTakeFirstOrThrow()
 }
 
-async function hydrateBooking(db: Db, row: BookingRow, now?: Temporal.Instant): Promise<Booking> {
-  const [booking] = await toBookings(db, [row], undefined, now)
+async function hydrateBooking(
+  db: Db,
+  row: BookingRow,
+  now?: Temporal.Instant,
+  includeTeamsLink = true,
+): Promise<Booking> {
+  const [booking] = await toBookings(db, [row], undefined, now, includeTeamsLink)
   return booking as Booking
 }
 
-async function loadBooking(db: Db, id: string, now?: Temporal.Instant): Promise<Booking> {
-  return hydrateBooking(db, await readBookingRow(db, id), now)
+async function loadBooking(
+  db: Db,
+  id: string,
+  now?: Temporal.Instant,
+  includeTeamsLink = true,
+): Promise<Booking> {
+  return hydrateBooking(db, await readBookingRow(db, id), now, includeTeamsLink)
 }
 
 // --- Writing bookings -------------------------------------------------------------------
@@ -841,6 +868,9 @@ export async function resolveBookingLocation(
   const meetReady: string[] = []
   const zoomReady: string[] = []
   try {
+    if (microsoftTeamsLocation(chosen)) {
+      await requireMicrosoftTeamsHost(db, event.schedulingType, hosts, event.id, true)
+    }
     if (organizer && automaticMeet(chosen)) {
       await requireMeetDestination(db, organizer, event.id, ctx.automaticMeet)
       meetReady.push(organizer)
@@ -2001,6 +2031,7 @@ async function createBookingInTransaction(
     inviteeName: invitee.name,
     inviteeEmail: invitee.email,
   })
+  const location = groupSlot ? groupSlot.location : choice.location
   const { id, manageToken } = await insertBooking(trx, {
     successRedirect,
     groupSlotId: groupSlot?.id,
@@ -2012,7 +2043,7 @@ async function createBookingInTransaction(
     start: input.start,
     end,
     title: `${current.title} with ${invitee.name}`,
-    location: groupSlot ? groupSlot.location : choice.location,
+    location,
     locationOption: groupSlot ? groupSlot.locationOption : choice.locationOption,
     responses,
     source: origin.source,
@@ -2060,6 +2091,7 @@ async function createBookingInTransaction(
       type: 'created',
       bookingId: id,
       start: input.start,
+      ...(location?.kind === 'microsoft_teams' && { teamsMeeting: true }),
       ...(seriesOccurrence && { seriesAction: 'create' as const }),
     },
     now,

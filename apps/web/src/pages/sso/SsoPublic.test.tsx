@@ -14,6 +14,7 @@ const secondProviderId = '00000000-0000-7000-8000-000000000011'
 const attemptId = '00000000-0000-7000-8000-000000000020'
 const token = 'x'.repeat(43)
 const signIn = `${PATHS.signIn}?sso=${providerId}&next=%2Fapp%2Fsettings`
+const samlSignIn = `${signIn}&saml=1`
 const proof = `${PATHS.mailboxProof}#attempt=${attemptId}`
 const emailedLink = `${proof}&token=${token}`
 const authorization = 'https://identity.example/authorize'
@@ -26,13 +27,14 @@ const start = 'POST /api/auth/sign-in/sso'
 const send = 'POST /api/auth/sso/mailbox-proof/send'
 const consume = 'POST /api/auth/sso/mailbox-proof/consume'
 const complete = 'POST /api/auth/sso/oidc/complete'
+const ssoButtonName = 'Sign in with single sign-on'
 
 afterEach(() => sessionStorage.clear())
 
-function instance(ssoOidcEnabled = true) {
+function instance(ssoOidcEnabled = true, ssoSamlEnabled = false) {
   return json(200, {
     ssoOidcEnabled,
-    ssoSamlEnabled: false,
+    ssoSamlEnabled,
     signIn: { email: true, google: true, microsoft: false },
   })
 }
@@ -57,6 +59,7 @@ function testRouter(path: string) {
     <MemoryRouter initialEntries={[path]}>
       <App />
       <Link to={`${PATHS.signIn}?sso=${secondProviderId}`}>Switch sign-in link</Link>
+      <Link to={signIn}>Open OIDC sign-in link</Link>
       <Link to={emailedLink}>Open verification link</Link>
       <FragmentIndicator />
     </MemoryRouter>,
@@ -111,6 +114,99 @@ describe('public SSO sign-in', () => {
     expect(api.to(start).map(({ body }) => body)).toEqual([
       { providerId, intent: 'sign_in', returnTo: '/app/settings' },
     ])
+  })
+
+  it('keeps the OIDC sign-in link available while a direct SAML link shows only personal choices', async () => {
+    const api = fakeApi({
+      ...signedOut,
+      'GET /api/v1/instance': () => instance(),
+    })
+    const user = userEvent.setup()
+    testRouter(samlSignIn)
+    await screen.findByRole('button', { name: 'Continue with Google' })
+    expect(screen.getByRole('button', { name: 'Email me a sign-in link' })).toBeDefined()
+    expect(screen.queryByRole('button', { name: ssoButtonName })).toBeNull()
+    const language = screen.getByRole('combobox', { name: 'Interface language' })
+    expect(within(language).getAllByRole('option')).toHaveLength(2)
+    await user.click(screen.getByRole('link', { name: 'Open OIDC sign-in link' }))
+    await screen.findByRole('button', { name: ssoButtonName })
+    expect(within(language).getAllByRole('option')).toHaveLength(2)
+    expect(api.to(start)).toEqual([])
+  })
+
+  it.each([403, 503])(
+    'keeps SAML unavailable while instance readiness loads or returns %i',
+    async (status) => {
+      const readiness = later()
+      const api = fakeApi({ ...signedOut, 'GET /api/v1/instance': () => readiness.response })
+      renderApp(samlSignIn)
+      await screen.findByRole('button', { name: 'Email me a sign-in link' })
+      expect(screen.queryByRole('button', { name: ssoButtonName })).toBeNull()
+      await readiness.answer(json(status, { error: 'unavailable' }))
+      expect(screen.queryByRole('button', { name: ssoButtonName })).toBeNull()
+      expect(api.to(start)).toEqual([])
+    },
+  )
+
+  it.each([
+    ['en', 'Sign in with single sign-on'],
+    ['zh-CN', '使用单点登录'],
+    ['de', 'Mit Single Sign-on anmelden'],
+    ['es', 'Acceder con inicio de sesión único'],
+    ['fr', 'Se connecter avec l’authentification unique'],
+    ['pt-BR', 'Entrar com login único'],
+  ])('starts SAML with OIDC off using the public %s sign-in text', async (locale, label) => {
+    const api = fakeApi({
+      ...signedOut,
+      'GET /api/v1/instance': () => instance(false, true),
+      [start]: () => json(200, { redirect: true, url: authorization }),
+    })
+    const user = userEvent.setup()
+    renderApp(samlSignIn)
+    await screen.findByRole('button', { name: ssoButtonName })
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Interface language' }), locale)
+    const button = await screen.findByRole('button', { name: label })
+    expect(document.documentElement.lang).toBe(locale)
+    expect(api.to(start)).toEqual([])
+    await user.click(button)
+    await waitFor(() => expect(goTo).toHaveBeenCalledWith(authorization))
+    expect(api.to(start).map(({ body }) => body)).toEqual([
+      { providerId, intent: 'sign_in', returnTo: PATHS.settings },
+    ])
+  })
+
+  it('discards a pending SAML handoff when switching protocol for the same provider and destination', async () => {
+    const pending = later()
+    const api = fakeApi({
+      ...signedOut,
+      'GET /api/v1/instance': () => instance(true, true),
+      [start]: () => pending.response,
+    })
+    const user = userEvent.setup()
+    testRouter(samlSignIn)
+    await user.click(await screen.findByRole('button', { name: ssoButtonName }))
+    await waitFor(() => expect(api.to(start)).toHaveLength(1))
+    await user.click(screen.getByRole('link', { name: 'Open OIDC sign-in link' }))
+    await pending.answer(json(200, { redirect: true, url: authorization }))
+    expect(goTo).not.toHaveBeenCalled()
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: ssoButtonName }).disabled).toBe(
+      false,
+    )
+  })
+
+  it('reports an unavailable SAML provider without exposing private response details', async () => {
+    const api = fakeApi({
+      ...signedOut,
+      'GET /api/v1/instance': () => instance(false, true),
+      [start]: () => json(403, { error: 'forbidden', message: 'Private response detail' }),
+    })
+    renderApp(samlSignIn)
+    await userEvent.click(await screen.findByRole('button', { name: ssoButtonName }))
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'Single sign-on is unavailable. Try again or use another sign-in method.',
+    )
+    expect(api.to(start)).toHaveLength(1)
+    expect(goTo).not.toHaveBeenCalled()
   })
 
   it('ignores a late redirect after the sign-in link or its destination changes', async () => {
@@ -170,6 +266,15 @@ describe('SSO mailbox proof', () => {
   const verify = 'Verify email link'
   const verified = 'Email verification complete.'
   const sendEmail = 'Send verification email'
+
+  it('does not offer SAML mailbox continuation while OIDC alone is enabled', async () => {
+    const api = fakeApi({ 'GET /api/v1/instance': () => instance() })
+    renderApp(`${proof}&saml=1`)
+    await screen.findByText(unavailable)
+    expect(screen.queryByRole('button', { name: sendEmail })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull()
+    expect(api.to(send)).toEqual([])
+  })
 
   it('uses the SAML completion form after proving a changed mailbox with OIDC off', async () => {
     const api = fakeApi({

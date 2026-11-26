@@ -1419,7 +1419,7 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
     const authorizationSummary = await me(attempt.cookies)
     expect(authorizationSummary).toMatchObject({
       providers: expect.arrayContaining([
-        { id: provider.id, revision: 1, displayName: 'Synthetic AD FS' },
+        { id: provider.id, revision: 1, displayName: 'Synthetic AD FS', protocol: 'saml' },
       ]),
       attempts: [
         {
@@ -1444,6 +1444,17 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
     const form = await page.text()
     expect(form).toContain('Link account')
     expect(form).toContain('name="intent" value="link"')
+    const localized = await request.request(staged.location, {
+      headers: {
+        cookie: [...staged.cookies, 'hourmere-language=fr'].join('; '),
+        'accept-language': 'en',
+      },
+    })
+    expect(localized.status).toBe(200)
+    expect(localized.headers.get('vary')).toBe('Accept-Language, Cookie')
+    const localizedForm = await localized.text()
+    expect(localizedForm).toContain('<html lang="fr">')
+    expect(localizedForm).toContain('<button type="submit">Associer le compte</button>')
     expect(await identityEffects()).toEqual(beforeConsent)
     expect(await storedLinks(provider)).toEqual([])
     expect(await me(staged.cookies)).toMatchObject({

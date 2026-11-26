@@ -14,6 +14,7 @@ import { activateRoundRobin, assertCanExplainEventType, createEventType } from '
 import { assertHosts, hasValidHostShape } from './hosts.ts'
 import { LOCATION_KINDS } from './location-kinds.ts'
 import { selectLocationOption } from './location-options.ts'
+import { microsoftTeamsLocation, requireMicrosoftTeamsHost } from './microsoft-teams.ts'
 import { parseQuestions } from './questions.ts'
 import { eligibleRoundRobinHosts } from './round-robin.ts'
 import {
@@ -58,6 +59,8 @@ function sourceCopy(
     DomainError,
     LOCATION_KINDS,
     selectLocationOption,
+    microsoftTeamsLocation,
+    requireMicrosoftTeamsHost,
     assertHosts,
     hasValidHostShape,
     parseQuestions,

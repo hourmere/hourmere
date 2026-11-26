@@ -12,7 +12,12 @@ export const MeSso = z
   .object({
     requireSso: z.boolean(),
     providers: z.array(
-      z.object({ id: z.uuid(), revision: z.int().positive(), displayName: z.string() }),
+      z.object({
+        id: z.uuid(),
+        revision: z.int().positive(),
+        displayName: z.string(),
+        protocol: z.literal('saml').optional(),
+      }),
     ),
     attempts: z.array(
       z.object({
@@ -77,7 +82,10 @@ export async function readSsoMe(
     )
     SELECT ${policy?.require_sso ?? false}::boolean AS "requireSso",
       to_json(ARRAY(
-        SELECT json_build_object('id', p.id, 'revision', p.revision, 'displayName', p.display_name)
+        SELECT json_strip_nulls(json_build_object(
+          'id', p.id, 'revision', p.revision, 'displayName', p.display_name,
+          'protocol', CASE WHEN p.protocol = 'saml' THEN 'saml' END
+        ))
         FROM sso_providers p
         WHERE p.organization_id = c.organization_id
           AND p.enabled AND p.retired_at IS NULL
