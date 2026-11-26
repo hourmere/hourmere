@@ -48,8 +48,8 @@ function endpointFrom(
   if (endpoint.organizationId !== organizationId || (expectedId && endpoint.id !== expectedId)) {
     throw webhookContextError()
   }
-  const url = URL.parse(endpoint.url)
-  if (!url || (url.protocol !== 'https:' && url.protocol !== 'http:')) {
+  const url = new URL(endpoint.url)
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
     throw new Error('Invalid webhook metadata')
   }
   return {

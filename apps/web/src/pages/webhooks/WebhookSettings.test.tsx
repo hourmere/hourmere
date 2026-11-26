@@ -748,4 +748,38 @@ describe('webhook session and organization boundaries', () => {
     expect(endpointVisible()).toBe(false)
     expectPrivateDataAbsent()
   })
+
+  it('requires reconciliation when the session check fails during a pending rotation', async () => {
+    const rotation = later()
+    let online = true
+    setVisibility('visible')
+    const { api, user } = open({
+      [ME_ROUTE]: () => {
+        if (!online) throw new TypeError('Failed to fetch')
+        return json(200, ME)
+      },
+      [ROTATE]: () => rotation.response,
+    })
+    await requestRotation(user)
+    await waitFor(() => expect(api.to(ROTATE)).toHaveLength(1))
+
+    setVisibility('hidden')
+    online = false
+    setVisibility('visible')
+    const notice = await screen.findByText(ROTATE_UNKNOWN)
+    expect(notice.closest('[role="alert"]')).toBeTruthy()
+    expect(api.to(LIST)).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: 'Edit webhook' })).toBeNull()
+    expect(secretVisible()).toBe(false)
+
+    online = true
+    await user.click(button('Refresh webhook endpoints'))
+    await findButton('Edit webhook')
+    expect(api.to(LIST)).toHaveLength(2)
+    await rotation.answer(json(200, secretValue))
+    expect(api.to(ROTATE)).toHaveLength(1)
+    expect(secretVisible()).toBe(false)
+    expect(screen.queryByRole('button', { name: 'Copy signing secret' })).toBeNull()
+    expectPrivateDataAbsent()
+  })
 })

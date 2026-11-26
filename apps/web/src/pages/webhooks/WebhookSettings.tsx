@@ -38,6 +38,7 @@ type Form =
 
 type Notice = { key: MessageKey; error?: true }
 type ReturnCheck = { result: Promise<WebhookEndpoint[] | null>; controller: AbortController }
+type PendingWrite = { type: WebhookAction['type']; controller: AbortController }
 
 const newDraft = (): WebhookDraft => ({ url: '', events: [], isActive: true })
 const readInstance = (signal: AbortSignal) =>
@@ -113,7 +114,7 @@ export function WebhookSettings({
         : undefined
 
   const read = useRef<AbortController | null>(null)
-  const write = useRef<AbortController | null>(null)
+  const write = useRef<PendingWrite | null>(null)
   const stopped = useRef(false)
   const returnCheck = useRef<ReturnCheck | null>(null)
   const needsSessionCheck = useRef(false)
@@ -165,7 +166,7 @@ export function WebhookSettings({
   const clearWorkspace = useCallback(() => {
     read.current?.abort()
     read.current = null
-    write.current?.abort()
+    write.current?.controller.abort()
     write.current = null
     returnCheck.current?.controller.abort()
     returnCheck.current = null
@@ -180,6 +181,15 @@ export function WebhookSettings({
     confirmOpener.current = null
     pendingFocus.current = { target: null }
   }, [])
+
+  const requireReconciliation = useCallback(
+    (type: WebhookAction['type']) => {
+      clearWorkspace()
+      setNotice({ key: uncertain[type], error: true })
+      setList({ status: 'unconfirmed' })
+    },
+    [clearWorkspace],
+  )
 
   const boundary = useCallback(
     (error: unknown) => {
@@ -237,8 +247,11 @@ export function WebhookSettings({
         return endpoints
       } catch (error) {
         if (!signal.aborted && !stopped.current && !boundary(error)) {
-          clearWorkspace()
-          setList({ status: 'error' })
+          if (write.current) requireReconciliation(write.current.type)
+          else {
+            clearWorkspace()
+            setList({ status: 'error' })
+          }
         }
         return null
       } finally {
@@ -247,7 +260,7 @@ export function WebhookSettings({
     })()
     returnCheck.current = { result, controller }
     return result
-  }, [boundary, clearWorkspace, isAway, organizationId, verifySession])
+  }, [boundary, clearWorkspace, isAway, organizationId, requireReconciliation, verifySession])
 
   const load = useCallback(async () => {
     if (stopped.current) return
@@ -327,7 +340,7 @@ export function WebhookSettings({
       returnCheck.current?.controller.abort()
       returnCheck.current = null
       read.current?.abort()
-      write.current?.abort()
+      write.current?.controller.abort()
     }
   }, [clearWorkspace, recheck])
 
@@ -381,9 +394,7 @@ export function WebhookSettings({
         setNotice({ key: 'Check the webhook settings and try again.', error: true })
         break
       default:
-        clearWorkspace()
-        setNotice({ key: uncertain[action.type], error: true })
-        setList({ status: 'unconfirmed' })
+        requireReconciliation(action.type)
     }
   }
 
@@ -398,7 +409,7 @@ export function WebhookSettings({
     )
       return
     const controller = new AbortController()
-    write.current = controller
+    write.current = { type: action.type, controller }
     const { signal } = controller
     const started = background.current
     setBusy(true)
