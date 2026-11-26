@@ -134,8 +134,8 @@ omit these fields; clients should treat absence as unknown, keep SSO entry point
 tolerate unknown response fields. No SSO operations are exposed in this release.
 
 `GET /api/v1/instance` also reports whether routing forms are effectively enabled
-as `routingFormsEnabled`. Routing is off by default. A self-hosted operator can set
-`ROUTING_FORMS_ENABLED=true` and restart the server. A legacy personal `route` handle
+as `routingFormsEnabled`. Routing is on by default. A self-hosted operator can turn it
+off by setting `ROUTING_FORMS_ENABLED=false` and restarting the server. A legacy personal `route` handle
 can still keep the effective state off.
 
 ## Use routing forms

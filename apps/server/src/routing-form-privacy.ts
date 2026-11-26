@@ -1,5 +1,8 @@
 const privateRoutingApiPrefixes = ['/api/v1/public/-/routing', '/api/v1/routing-continuations']
 
+export const hasRouteToken = (args: unknown) =>
+  typeof args === 'object' && args !== null && 'routeToken' in args
+
 /** Cover encoded addresses and refused requests without changing request routing. */
 function decodedPath(path: string): string {
   try {

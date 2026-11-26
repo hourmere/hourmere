@@ -12,6 +12,12 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Added
 
+- Routing forms ask invitees questions and offer a booking or show a message based on
+  their answers. Hosts can manage forms, inspect saved answers and include them in
+  personal booking exports. Routing is on by default for unset or empty
+  `ROUTING_FORMS_ENABLED`. Explicit `false` or a legacy personal `route` handle
+  keeps routing off. See the [routing forms guide](https://hourmere.com/docs/routing-forms).
+
 - SCIM 2.0 provisioning for team Users and explicitly mapped child-team Groups,
   available on every instance without a paid plan. Discovery, directory membership
   lifecycle, team credential revocation and child-team audit records ship together.

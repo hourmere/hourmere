@@ -1158,7 +1158,7 @@ export function bookingRoutes({
               bom: z.enum(['true', 'false']).optional(),
               includeRoutingAnswers: z.enum(['true', 'false']).optional().openapi({
                 description:
-                  'Append routing provenance and saved answers to personal exports only. Requires routing forms to be enabled (ROUTING_FORMS_ENABLED=true, off by default). False is equivalent to omitting the option.',
+                  'Append routing provenance and saved answers to personal exports only. Requires routing forms to be enabled, which is the default. False is equivalent to omitting the option.',
               }),
             })
             .strict(),
