@@ -220,7 +220,7 @@ not grant host rescheduling or reschedule-request authority through REST, MCP or
 ## Known limitations
 
 - [Microsoft Calendar](/docs/microsoft-calendar#known-limitations) supports Outlook booking
-  writeback. Event types cannot select automatic Microsoft Teams meetings yet.
+  writeback and Teams meetings for single-host event types. Real-tenant Teams acceptance is pending.
 - Event-type timing units are a web display preference and are not persisted. Notice and
   buffers require whole minutes; booking windows require whole calendar days, even when
   shown in hours or minutes. REST, MCP and CLI retain their existing units.

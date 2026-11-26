@@ -188,8 +188,6 @@ export const admin = {
     '请选择有效的 PNG、JPEG 或 WebP 图片，大小不超过 512 KiB，宽高均不超过 2048 像素。不支持 SVG 和动图。',
   'Edit branding': '编辑品牌设置',
   'Primary colour': '主色',
-  'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against the white page background is reported separately.':
-    '系统会自动选择黑色或白色按钮文字，确保对比度至少为 4.5:1。与白色页面背景的对比度会单独显示。',
   'Brand logo': '品牌标志',
   'A logo is saved for this space.': '此空间已保存标志。',
   'Remove logo': '移除标志',
@@ -3071,6 +3069,23 @@ export const admin = {
     'Microsoft 报告预约副本存在冲突。请在 Outlook 中检查日历。',
   'Hourmere will retry syncing a booking copy.': 'Hourmere 将重试同步预约副本。',
   'A booking copy has a pending change.': '有一个预约副本的变更尚待处理。',
+  // Microsoft Teams meeting locations
+  'Microsoft Teams requires individual scheduling with one host.':
+    'Microsoft Teams 仅支持由一位主持人负责的独立排期。',
+  'Could not verify Microsoft Teams availability for the host.':
+    '暂时无法确认主持人能否使用 Microsoft Teams。',
+  'Checking Microsoft Teams availability…': '正在检查 Microsoft Teams 是否可用…',
+  'Microsoft Calendar is unavailable on this instance.': '此实例无法使用 Microsoft 日历。',
+  'Connect a Microsoft 365 work or school calendar and select it for booking write-back.':
+    '请连接 Microsoft 365 工作或学校账户的日历，并选作预约写入目标。',
+  'Reconnect Microsoft Calendar and allow calendar event writes to use Teams.':
+    '请重新连接 Microsoft 日历并授予日历活动写入权限，以使用 Teams。',
+  'The host needs a Microsoft 365 work or school calendar selected for booking write-back.':
+    '主持人需将 Microsoft 365 工作或学校账户的日历选作预约写入目标。',
+  'Microsoft Teams creates a meeting link for each booking on the host’s Microsoft 365 work or school calendar.':
+    'Microsoft Teams 会在主持人的 Microsoft 365 工作或学校日历中为每次预约创建会议链接。',
+  'Remove a location option before adding another.': '请移除一个地点选项后再添加。',
+  'Open host booking details': '打开主持人预约详情',
   // SCIM provisioning
   'SCIM provisioning is disabled on this instance.': '此实例已禁用 SCIM 预配。',
   // Event type editor summaries and booking page preview
@@ -3150,6 +3165,14 @@ export const admin = {
     '需要一个已启用且关联了已验证域名的身份提供方。',
   'Before requiring SSO, have an owner test the identity provider draft, then enable that revision with a verified domain. A current owner must also accept recovery enrollment.':
     '强制单点登录前，请让团队所有者测试身份提供方草稿，并在关联已验证的域名后启用该版本。还须有一位现任所有者接受恢复登记。',
+
+  // Branding.
+  'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against white (#FFFFFF) is reported separately.':
+    '系统会自动选择黑色或白色按钮文字，确保对比度至少为 4.5:1。与白色（#FFFFFF）的对比度会单独显示。',
+
+  // Availability editor
+  'A schedule can have at most 10,000 date overrides, including past dates. Remove some overrides before saving.':
+    '每个日程最多可有 10,000 个特定日期安排（包括过去的日期）。请先移除一些安排再保存。',
 
   // Additional durations
   'Removed {0}. Selected length: {1}.': '已移除{0}。当前选中的时长为{1}。',
