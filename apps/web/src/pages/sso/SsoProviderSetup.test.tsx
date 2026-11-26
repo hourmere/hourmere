@@ -121,9 +121,8 @@ describe('SSO provider setup', () => {
     const confirmation = screen.getByRole('group', {
       name: 'Retire this provider? This action is permanent.',
     })
-    expect(document.activeElement).toBe(
-      within(confirmation).getByRole('button', { name: 'Cancel' }),
-    )
+    const cancel = within(confirmation).getByRole('button', { name: 'Cancel' })
+    await waitFor(() => expect(document.activeElement).toBe(cancel))
     await user.click(within(confirmation).getByRole('button', { name: 'Retire provider' }))
     await waitFor(() =>
       expect(screen.queryByRole('heading', { name: created.displayName })).toBeNull(),

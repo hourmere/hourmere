@@ -139,13 +139,14 @@ async function openConsent(user: User, action: 'Link' | 'Unlink') {
     await screen.findByRole('button', { name: `${action} account (${provider.displayName})` }),
   )
   const group = within(screen.getByRole('group', { name: `${action} this sign-in method?` }))
-  expect(document.activeElement).toBe(group.getByRole('button', { name: 'Cancel' }))
+  const cancel = group.getByRole('button', { name: 'Cancel' })
+  await waitFor(() => expect(document.activeElement).toBe(cancel))
   return group
 }
 
 async function openMailbox(user: User) {
   const heading = await screen.findByRole('heading', { name: proofHeading })
-  expect(document.activeElement).toBe(heading)
+  await waitFor(() => expect(document.activeElement).toBe(heading))
   expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Continue' }).disabled).toBe(true)
   await user.click(screen.getByRole('button', { name: 'Send verification email' }))
   return screen.findByLabelText('Email verification link')
@@ -293,7 +294,7 @@ describe('Member SSO settings', () => {
     })
 
     const heading = await screen.findByRole('heading', { name: finishHeading })
-    expect(document.activeElement).toBe(heading)
+    await waitFor(() => expect(document.activeElement).toBe(heading))
     expect(screen.getByTestId('current-hash').textContent).toBe('')
     expect(requests.to(complete)).toHaveLength(0)
     await user.click(screen.getByRole('button', { name: 'Confirm link' }))
