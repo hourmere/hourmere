@@ -171,6 +171,19 @@ document the reason and assert the exact expected change or backfill instead of 
 excluding the affected columns from preservation checks. Keep migration-specific tests for
 behavior that needs additional fixtures.
 
+Vitest prepares the empty 0012 checkpoint once and builds the latest-schema template from
+it. `createTestDatabase` uses the checkpoint for staged directories with the same leading
+migrations and verifies the copied checksums. A source-copy mutation before or within the
+checkpoint uses its changed SQL. For multiple fixtures at the same later predecessor, use
+`useMigrationReplay` or `createTestDatabaseTemplate`, then clone the empty predecessor
+before seeding or applying the target. Keep historical-data, fresh-schema and no-op rerun
+assertions. Use an empty database when the assertion specifically exercises applying the
+entire history from scratch.
+
+Use `MIGRATION_REPLAY_TIMEOUT` (120 seconds) on tests and hooks that replay migrations.
+Replay-only files can set their own `testTimeout` and `hookTimeout` with `vi.setConfig`.
+In files with other tests, apply the timeout to the migration cases or hooks.
+
 ### Constraint coverage for new migrations
 
 A migration that adds constraints, NOT NULL columns, indexes or triggers gets a constraint
@@ -183,6 +196,8 @@ with their definitions, to the committed
 own `CREATE DATABASE … TEMPLATE` copy and requires your assertion suite to fail:
 
 ```ts
+import { MIGRATION_COVERAGE_TIMEOUT } from './testing/migration-replay.ts'
+
 const serverUrl = process.env.DATABASE_URL
 
 describe.skipIf(!serverUrl)('routing form constraint coverage', () => {
@@ -194,9 +209,15 @@ describe.skipIf(!serverUrl)('routing form constraint coverage', () => {
       allowList: { 'constraint public.t.t_key': 'One-line reason it is not a protection' },
     })
     expect(report.problems).toEqual([])
-  }, 600_000)
+  }, MIGRATION_COVERAGE_TIMEOUT)
 })
 ```
+
+Give each `checkConstraintCoverage` case `MIGRATION_COVERAGE_TIMEOUT` (600 seconds).
+The helper prepares a single isolated template for its baseline and dropped-object copies.
+When a coverage file also checks a historical upgrade, use `useMigrationReplay` to stage
+the predecessor, clone it in the upgrade test, and pass it as `predecessorTemplate` to
+`checkConstraintCoverage`. The migration test convention guard checks new coverage files.
 
 Write the suite as checks that create their own rows, because one copy serves the whole
 suite: rejected and accepted writes, cascades, defaults and, for an index that has no other

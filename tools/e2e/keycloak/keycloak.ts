@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import { text } from 'node:stream/consumers'
 import { setTimeout as delay } from 'node:timers/promises'
 import { promisify } from 'node:util'
+import { resolveSamlProviderInput } from '../../../apps/server/src/sso-saml-configuration.ts'
 import realm from './realm.json' with { type: 'json' }
 import { createScimRealm, type KeycloakAdminOptions, prepareScimPlugin } from './scim-plugin.ts'
 
@@ -18,6 +19,8 @@ const run = promisify(execFile)
 const ownerLabel = 'com.hourmere.e2e.keycloak-owner'
 const containerId = /^[a-f0-9]{64}$/
 const adminClientId = 'fixture-admin'
+const documentSigning = 'saml.server.signature'
+const assertionSigning = 'saml.assertion.signature'
 
 function persona(users: typeof realm.users, name: string) {
   const user = users.find((entry) => entry.username === name)
@@ -180,27 +183,125 @@ function keycloakAdmin(origin: string, ca: string, adminSecret: string) {
   return { admin, authorize }
 }
 
-function realmFactory(
-  origin: string,
+function ownedCallback(redirectUri: string) {
+  const callback = URL.parse(redirectUri)
+  if (
+    callback?.protocol !== 'http:' ||
+    callback.hostname !== '127.0.0.1' ||
+    !callback.port ||
+    [3000, 3998].includes(Number(callback.port)) ||
+    callback.username ||
+    callback.password ||
+    callback.search ||
+    callback.hash ||
+    callback.href.includes('*')
+  )
+    throw new Error('Keycloak requires an exact callback on an owned Hourmere loopback port')
+  return callback
+}
+
+interface SamlServiceProvider {
+  spEntityId: string
+  acsUrl: string
+}
+
+async function createSamlClient(
+  issuer: string,
   ca: string,
+  clientsPath: string,
+  { spEntityId, acsUrl }: SamlServiceProvider,
   { admin, authorize }: ReturnType<typeof keycloakAdmin>,
 ) {
-  return async (redirectUri: string) => {
-    const callback = new URL(redirectUri)
-    if (
-      callback.protocol !== 'http:' ||
-      callback.hostname !== '127.0.0.1' ||
-      !callback.port ||
-      [3000, 3998].includes(Number(callback.port)) ||
-      callback.username ||
-      callback.password ||
-      callback.search ||
-      callback.hash ||
-      callback.href.includes('*')
-    )
-      throw new Error('Keycloak requires one exact callback on an owned Hourmere loopback port')
+  const template = realm.clients.find((client) => client.protocol === 'saml')
+  const subjectAttribute = template?.protocolMappers?.find(
+    (mapper) => mapper.config['user.attribute'] === 'id',
+  )?.config['attribute.name']
+  if (!template || !subjectAttribute)
+    throw new Error('The Keycloak realm lacks a mapped SAML client')
 
-    const client = realm.clients[0]
+  // Creating a client via the admin API applies the pinned version's own signing defaults.
+  const location = await admin(clientsPath, {
+    action: 'create the owned Keycloak SAML client',
+    expectedStatus: 201,
+    method: 'POST',
+    authorization: await authorize(),
+    contentType: 'application/json',
+    readLocation: true,
+    body: JSON.stringify({
+      ...template,
+      clientId: spEntityId,
+      redirectUris: [acsUrl],
+      attributes: { ...template.attributes, saml_assertion_consumer_url_post: acsUrl },
+    }),
+  })
+  const id = location.split('/').at(-1) ?? ''
+  if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(id))
+    throw new Error('The owned Keycloak SAML client did not return an identifier')
+  const clientPath = `${clientsPath}/${id}`
+  const ssoEndpoint = `${issuer}/protocol/saml`
+  const metadataDocument = await keycloakRequest(`${ssoEndpoint}/descriptor`, ca, {
+    action: 'read the owned Keycloak SAML descriptor',
+    expectedStatus: 200,
+  })
+  const { hostname, port } = new URL(issuer)
+  const { entityId, configuration } = await resolveSamlProviderInput(
+    { metadataDocument, entityId: issuer, ssoUrl: ssoEndpoint, subjectAttribute },
+    { privateTargets: [{ host: hostname, port: Number(port) }] },
+  )
+
+  const readAttributes = async (authorization: string) => {
+    const action = 'read the owned Keycloak SAML client attributes'
+    const payload = await admin(clientPath, { action, expectedStatus: 200, authorization })
+    try {
+      const client = JSON.parse(payload)
+      if (client.id === id && client.clientId === spEntityId && client.protocol === 'saml')
+        return client.attributes as Record<string, string>
+    } catch {
+      // Keep the full client representation out of failures.
+    }
+    throw new Error(`Unable to ${action}`)
+  }
+  return {
+    entityId,
+    ...configuration,
+    subjectAttribute,
+    async signingSettings() {
+      const attributes = await readAttributes(await authorize())
+      return {
+        signDocuments: attributes[documentSigning] === 'true',
+        signAssertions: attributes[assertionSigning] === 'true',
+      }
+    },
+    async setSignAssertions(enabled: boolean) {
+      const authorization = await authorize()
+      const attributes = await readAttributes(authorization)
+      await admin(clientPath, {
+        action: 'set assertion signing on the owned Keycloak SAML client',
+        expectedStatus: 204,
+        method: 'PUT',
+        authorization,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          clientId: spEntityId,
+          attributes: { ...attributes, [assertionSigning]: String(enabled) },
+        }),
+      })
+    },
+  }
+}
+
+function realmFactory(origin: string, ca: string, connection: ReturnType<typeof keycloakAdmin>) {
+  const { admin, authorize } = connection
+  return async (redirectUri: string, samlServiceProvider?: SamlServiceProvider) => {
+    const callback = ownedCallback(redirectUri)
+    if (
+      samlServiceProvider &&
+      (ownedCallback(samlServiceProvider.acsUrl).origin !== callback.origin ||
+        ownedCallback(samlServiceProvider.spEntityId).origin !== callback.origin)
+    )
+      throw new Error('Keycloak SAML URLs must belong to the owned Hourmere listener')
+
+    const client = realm.clients.find((template) => template.protocol === 'openid-connect')
     if (!client) throw new Error('The Keycloak realm is missing its OIDC client')
     const name = `${realm.realm}-${randomUUID()}`
     const issuer = `${origin}/realms/${name}`
@@ -249,6 +350,7 @@ function realmFactory(
       })
     }
 
+    let saml: Awaited<ReturnType<typeof createSamlClient>> | undefined
     try {
       const action = 'read the owned Keycloak test realm discovery'
       const discovery = await keycloakRequest(discoveryUrl, ca, { action, expectedStatus: 200 })
@@ -266,6 +368,14 @@ function realmFactory(
         warm(authorizeUrl.href, ca),
         warm(`${issuer}/protocol/openid-connect/certs`, ca),
       ])
+      if (samlServiceProvider)
+        saml = await createSamlClient(
+          issuer,
+          ca,
+          `${adminRealm}/clients`,
+          samlServiceProvider,
+          connection,
+        )
     } catch (error) {
       await close()
       throw error
@@ -277,6 +387,7 @@ function realmFactory(
       clientSecret,
       certificate: ca,
       password,
+      saml,
       ...personas,
       close,
       async rotateSigningKey() {

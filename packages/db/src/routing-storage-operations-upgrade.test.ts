@@ -2,13 +2,16 @@ import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type pg from 'pg'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { migrationsDir, runMigrations } from './migrate.ts'
 import { operationsMigration, operationsTable } from './routing-storage-operations-protections.ts'
+import { MIGRATION_REPLAY_TIMEOUT } from './testing/migration-replay.ts'
 import { createTestDatabase, type TestDatabase } from './testing.ts'
 import { seedEarly } from './upgrade-path-seed-early.ts'
 import { seedLater } from './upgrade-path-seed-later.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
+
+vi.setConfig({ testTimeout: MIGRATION_REPLAY_TIMEOUT, hookTimeout: MIGRATION_REPLAY_TIMEOUT })
 
 const serverUrl = process.env.DATABASE_URL
 const quote = (value: string) => `"${value.replaceAll('"', '""')}"`
@@ -166,7 +169,9 @@ describe.skipIf(!serverUrl)('routing form operation storage upgrade', () => {
       const after = await records(upgraded.pool)
       expect(after.rows[`public.${operationsTable}`]).toEqual([])
 
-      fresh = await createTestDatabase(serverUrl as string, directory, { tag: 'routing_op_fresh' })
+      fresh = await createTestDatabase(serverUrl as string, directory, {
+        tag: 'routing_op_fresh',
+      })
       const schema = await snapshotSchema(upgraded.pool)
       expect(schema).toEqual(await snapshotSchema(fresh.pool))
       expect(JSON.stringify(schema)).toContain(`${operationsTable}_request_key`)
@@ -189,5 +194,5 @@ describe.skipIf(!serverUrl)('routing form operation storage upgrade', () => {
       await rm(directory, { recursive: true, force: true })
       await rm(early, { recursive: true, force: true })
     }
-  }, 120_000)
+  })
 })

@@ -4,18 +4,23 @@
 import { copyFile, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { groupFixture } from './group-seats-fixtures.ts'
 import {
   type Protection,
   groupSourceProtections as protections,
 } from './group-seats-source-mutations.ts'
 import { migrationsDir } from './migrate.ts'
-import { createTestDatabase, type TestDatabase } from './testing.ts'
+import { MIGRATION_REPLAY_TIMEOUT, useMigrationReplay } from './testing/migration-replay.ts'
+import type { TestDatabase } from './testing.ts'
+
+vi.setConfig({ testTimeout: MIGRATION_REPLAY_TIMEOUT, hookTimeout: MIGRATION_REPLAY_TIMEOUT })
 
 const serverUrl = process.env.DATABASE_URL
 const migration = '0059_group_seats.sql'
 describe.skipIf(!serverUrl)('group storage source-copy protections', () => {
+  const replay = useMigrationReplay(serverUrl as string, migration)
+
   it.each(Object.keys(protections))(
     'detects broken %s and passes with restored source',
     async (name) => {
@@ -30,7 +35,7 @@ describe.skipIf(!serverUrl)('group storage source-copy protections', () => {
         const target = protections[name] as Protection
         const check = async (sql: string) => {
           await writeFile(join(directory, migration), sql)
-          owned = await createTestDatabase(serverUrl as string, directory, {
+          owned = await replay.predecessor.clone(directory, {
             tag: 'group_mutation',
           })
           try {

@@ -1,9 +1,17 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import type { Schemas } from '../../api/client.ts'
 import type { EventType, Schedule } from '../../api/resources.ts'
 import { chooseLanguage } from '../../i18n/store.ts'
+import {
+  AppShell,
+  EventTypeEditorPage,
+  EventTypesPage,
+  RequireSession,
+  SessionLayout,
+  SettingsPage,
+} from '../../lazy-pages.tsx'
 import {
   fakeApi,
   json,
@@ -16,7 +24,19 @@ import {
   signedInAs,
 } from '../../test/fake-api.tsx'
 import { EVENT_TYPE_ID, eventType, OTHER_SCHEDULE_ID, schedule } from '../../test/fixtures.ts'
+import { resolveLazy } from '../../test/resolve-lazy.ts'
 import { LEAVE_WITH_UNSAVED_CHANGES } from '../../unsaved-changes.tsx'
+
+beforeAll(() =>
+  resolveLazy(
+    SessionLayout,
+    RequireSession,
+    AppShell,
+    EventTypeEditorPage,
+    EventTypesPage,
+    SettingsPage,
+  ),
+)
 
 const CREATED_ID = 'e0000000-0000-7000-8000-000000000002'
 const CREATE_ROUTE = 'POST /api/v1/event-types'
@@ -145,12 +165,11 @@ describe('viewing and sharing the saved event type', () => {
     server([eventType()], {
       'GET /api/v1/profile': () => json(200, { ...PROFILE, handle: 'waitlist' }),
     })
-    await openExisting()
-    expect(
-      within(share())
-        .getByRole('link', { name: /View booking page/ })
-        .getAttribute('href'),
-    ).toBe(`${window.location.origin}/waitlist/intro-call`)
+    renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
+    const link = await waitFor(() =>
+      within(share()).getByRole('link', { name: /View booking page/ }),
+    )
+    expect(link.getAttribute('href')).toBe(`${window.location.origin}/waitlist/intro-call`)
     expect(
       within(share()).queryByText('Set a handle in Settings before sharing this event type.'),
     ).toBeNull()
@@ -527,15 +546,18 @@ describe('viewing and sharing the saved event type', () => {
       TEAM,
     )
     await openExisting()
+    await within(share()).findByText('Checking configuration…')
     await waitFor(() => expect(api.to(TEAM_ROUTE)).toHaveLength(1))
     expect(within(share()).getByRole('button', { name: 'Copy booking link' })).toBeDefined()
-    expect(within(share()).getByText('Checking configuration…')).toBeDefined()
     expect(share().querySelector('a[href="#saved-readiness-heading"]')).not.toBeNull()
     await pending.answer(json(200, teamPage()))
+    await within(screen.getByRole('region', { name: 'Saved event checks' })).findByText(
+      'Configuration checks passed',
+    )
     expect(
-      (await within(share()).findByRole('link', { name: /View booking page/ })).getAttribute(
-        'href',
-      ),
+      within(share())
+        .getByRole('link', { name: /View booking page/ })
+        .getAttribute('href'),
     ).toBe(`${window.location.origin}/team/design-team/intro-call`)
   })
 
@@ -582,14 +604,17 @@ describe('viewing and sharing the saved event type', () => {
           name: 'Retry checks',
         }),
       )
+      await within(share()).findByText('Checking configuration…')
       await waitFor(() => expect(api.to(TEAM_ROUTE)).toHaveLength(2))
-      expect(within(share()).getByText('Checking configuration…')).toBeDefined()
       expect(within(share()).getByRole('button', { name: 'Copy booking link' })).toBeDefined()
       await recovery.answer(json(200, teamPage()))
+      await within(screen.getByRole('region', { name: 'Saved event checks' })).findByText(
+        'Configuration checks passed',
+      )
       expect(
-        (await within(share()).findByRole('link', { name: /View booking page/ })).getAttribute(
-          'href',
-        ),
+        within(share())
+          .getByRole('link', { name: /View booking page/ })
+          .getAttribute('href'),
       ).toBe(`${window.location.origin}/team/design-team/intro-call`)
       expect(within(share()).getByRole('button', { name: 'Copy booking link' })).toBeDefined()
     },
@@ -660,7 +685,10 @@ describe('viewing and sharing the saved event type', () => {
       TEAM,
     )
     await openExisting()
-    const link = await within(share()).findByRole('link', { name: /View booking page/ })
+    await within(screen.getByRole('region', { name: 'Saved event checks' })).findByText(
+      'Some hosts need attention',
+    )
+    const link = within(share()).getByRole('link', { name: /View booking page/ })
     const expected = `${window.location.origin}/team/design-team/intro-call`
     expect(link.getAttribute('href')).toBe(expected)
     await user.click(within(share()).getByRole('button', { name: 'Copy booking link' }))
