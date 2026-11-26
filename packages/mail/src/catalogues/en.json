@@ -174,5 +174,11 @@
   "series.cancelled.member": "Cancelled",
   "series.manage": "Manage series",
   "series.view": "View series",
-  "series.repair": "To retry a meeting link, open the affected booking in Hourmere."
+  "series.repair": "To retry a meeting link, open the affected booking in Hourmere.",
+  "teams.linkPending": "The Teams link will appear in the booking details when it’s ready.",
+  "teams.linkPendingCancelled": "The Teams link was still pending when this booking was cancelled.",
+  "teams.unavailable": "Microsoft Teams is unavailable. This booking falls back to the Outlook calendar event.",
+  "teams.unavailableCancelled": "Microsoft Teams was unavailable. The Outlook calendar event was the fallback for this booking.",
+  "teams.writebackFailed": "The Teams link is unavailable. This booking is still scheduled.",
+  "teams.writebackFailedCancelled": "The Teams link was unavailable when this booking was cancelled."
 }

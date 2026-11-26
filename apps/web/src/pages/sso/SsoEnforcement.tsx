@@ -17,6 +17,13 @@ const enforcementErrors = {
   sso_disabled: 'Could not change the team’s SSO enforcement.',
 } as const satisfies Record<string, MessageKey>
 
+const samlEnforcementErrors = {
+  ...enforcementErrors,
+  sso_test_required:
+    'A team owner must pass a test of the current version of an enabled identity provider.',
+  sso_domain_unverified: 'An enabled identity provider with a verified domain is required.',
+} as const satisfies Record<string, MessageKey>
+
 type PolicyLoad =
   | { status: 'loading' | 'error' | 'unavailable' | 'team-changed' }
   | { status: 'ready'; data: Schemas['SsoPolicy'] }
@@ -41,9 +48,11 @@ export function SsoEnforcement({
   mutate,
   reload,
   addsTrust = true,
+  samlEnabled = false,
 }: {
   /** False while the operator setting is off: enforcement and JIT can only be turned off. */
   addsTrust?: boolean
+  samlEnabled?: boolean
   organizationId: string
   owner: boolean
   busy: boolean
@@ -125,7 +134,9 @@ export function SsoEnforcement({
             sso_domain_unverified: 'Verify a team domain before enabling just-in-time admission.',
             sso_disabled: 'Could not save SSO settings.',
           }
-        : enforcementErrors,
+        : samlEnabled
+          ? samlEnforcementErrors
+          : enforcementErrors,
     )
   }
 
@@ -156,7 +167,9 @@ export function SsoEnforcement({
                   {!requireSso && (
                     <p className="hint">
                       {t(
-                        'Before requiring SSO, have an owner test the OIDC draft, then enable that revision with a verified domain. A current owner must also accept recovery enrollment.',
+                        samlEnabled
+                          ? 'Before requiring SSO, have an owner test the identity provider draft, then enable that revision with a verified domain. A current owner must also accept recovery enrollment.'
+                          : 'Before requiring SSO, have an owner test the OIDC draft, then enable that revision with a verified domain. A current owner must also accept recovery enrollment.',
                       )}
                     </p>
                   )}

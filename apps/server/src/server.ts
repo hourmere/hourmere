@@ -441,6 +441,7 @@ export function productRoutes({
       smsRemindersAvailable,
       automaticMeet,
       automaticZoom,
+      microsoftCalendarEnabled: microsoftCalendar !== undefined,
       successRedirectPolicy,
       recurringBookingsEnabled,
     }),
@@ -512,7 +513,12 @@ export function productRoutes({
       recordAdmissionRemoval: oidcEnabled || samlEnabled ? recordSsoAdmissionRemoval : undefined,
     }),
     analyticsRoutes({ db }),
-    readinessRoutes({ db, automaticMeet, automaticZoom }),
+    readinessRoutes({
+      db,
+      automaticMeet,
+      automaticZoom,
+      microsoftCalendarEnabled: microsoftCalendar !== undefined,
+    }),
     // Recovery operations stay available when the operator pauses workflows.
     workflowRoutes({
       db,
@@ -549,6 +555,7 @@ export function productTools({
   automaticZoom,
   bookingMaxInviteeReschedules,
   googleCalendar,
+  microsoftCalendar,
   caldavCalendar,
   zoomConference,
   auditLogRetentionDays = null,
@@ -578,6 +585,7 @@ export function productTools({
   automaticZoom?: boolean | undefined
   bookingMaxInviteeReschedules?: number | undefined
   googleCalendar?: CalendarDeps['google']
+  microsoftCalendar?: CalendarDeps['microsoft']
   caldavCalendar?: CalendarDeps['caldav']
   zoomConference?: ConferenceDeps['zoom']
 } & WorkflowSettings): Tool[] {
@@ -604,6 +612,7 @@ export function productTools({
       db,
       automaticMeet,
       automaticZoom,
+      microsoftCalendarEnabled: microsoftCalendar !== undefined,
       smsRemindersAvailable,
       followUpHostNotesEnabled,
       successRedirectPolicy,
@@ -869,6 +878,7 @@ export function productionAppOptions({
         bookingMaxInviteeReschedules: config.BOOKING_MAX_INVITEE_RESCHEDULES,
         auditLogRetentionDays: config.AUDIT_LOG_RETENTION_DAYS,
         googleCalendar,
+        microsoftCalendar,
         caldavCalendar,
         zoomConference,
         webhooks: webhookSettings,

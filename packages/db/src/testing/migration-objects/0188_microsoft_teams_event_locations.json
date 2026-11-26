@@ -1,0 +1,4 @@
+{
+  "migration": "0188_microsoft_teams_event_locations.sql",
+  "objects": {}
+}

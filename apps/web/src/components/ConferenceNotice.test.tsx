@@ -35,6 +35,36 @@ const advance = async (ms = 2500) => {
 }
 
 describe('protected meeting link status', () => {
+  it.each(['ready', 'writeback_failed'] as const)(
+    'reads a pending Teams link only through the protected booking capability until %s',
+    async (status) => {
+      const pendingTeams = booking({
+        location: { kind: 'microsoft_teams', status: 'join_url_pending' },
+      })
+      const resolvedTeams = booking({
+        location: {
+          kind: 'microsoft_teams',
+          status,
+          ...(status === 'ready' && {
+            url: 'https://teams.microsoft.com/l/meetup-join/fake-meeting/0',
+          }),
+        },
+      })
+      const api = fakeApi({ 'GET /api/v1/bookings/manage': () => json(200, resolvedTeams) })
+      const onChange = vi.fn()
+      const { rerender } = render(<ConferenceNotice booking={pendingTeams} onChange={onChange} />)
+      await advance(60_000)
+      expect(api.calls).toHaveLength(0)
+      rerender(<ConferenceNotice booking={pendingTeams} onChange={onChange} manageToken={TOKEN} />)
+      await advance()
+      expect(onChange).toHaveBeenCalledExactlyOnceWith(resolvedTeams)
+      await advance(60_000)
+      expect(api.calls).toHaveLength(1)
+      expect(api.calls[0]?.headers.get('x-manage-token')).toBe(TOKEN)
+      expect(api.calls[0]?.path).toBe('/api/v1/bookings/manage')
+    },
+  )
+
   it('polls with the private capability in a header only, then stops when ready', async () => {
     const api = fakeApi({ 'GET /api/v1/bookings/manage': () => json(200, ready()) }),
       changed = vi.fn()

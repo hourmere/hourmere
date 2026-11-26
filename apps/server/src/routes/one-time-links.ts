@@ -35,17 +35,11 @@ export const CreateOneTimeLink = z
     }),
     prefill: z
       .strictObject({
-        name: z
-          .string()
-          .nullable()
-          .optional()
-          .openapi({ maxLength: ONE_TIME_LINK_PREFILL_NAME_MAX })
-          .meta({ maxLength: ONE_TIME_LINK_PREFILL_NAME_MAX }),
+        name: z.string().nullable().optional().meta({ maxLength: ONE_TIME_LINK_PREFILL_NAME_MAX }),
         email: z
           .string()
           .nullable()
           .optional()
-          .openapi({ maxLength: ONE_TIME_LINK_PREFILL_EMAIL_MAX })
           .meta({ maxLength: ONE_TIME_LINK_PREFILL_EMAIL_MAX }),
       })
       .optional(),

@@ -15,7 +15,13 @@ import { ME, PROFILE } from '../../test/fake-api.tsx'
 import { eventType } from '../../test/fixtures.ts'
 import { validSchedule } from '../availability/valid-default.ts'
 import { teamReadinessBlocksSharing } from './event-readiness.ts'
-import { emptyDraft, slugify, suggestedBookingSlug } from './event-type-form.ts'
+import {
+  draftFromEventType,
+  emptyDraft,
+  orderedLocations,
+  slugify,
+  suggestedBookingSlug,
+} from './event-type-form.ts'
 import type { SavedEventShare } from './SavedEventShare.tsx'
 
 const editor = readFileSync('apps/web/src/pages/event-types/EventTypeEditor.tsx', 'utf8')
@@ -336,11 +342,19 @@ it('detects hiding configured location options in a closed group', () => {
     opening.indexOf('initiallyOpen={') + 'initiallyOpen={'.length,
     opening.lastIndexOf('}'),
   )
+  const saved = eventType({
+    location: { kind: 'zoom' },
+    locations: [
+      { id: 'a', kind: 'zoom' },
+      { id: 'b', kind: 'google_meet' },
+    ],
+  })
   detects(expression, '(saved?.locations?.length ?? 0) > 1', 'false', (code) => {
     const isOpen = copy<() => boolean>(`function isOpen() { return (${code}) }`, 'isOpen', {
       editing: true,
-      baseline: { autoCreateZoom: false, autoCreateMeet: false },
-      saved: { locations: [{ id: 'a' }, { id: 'b' }] },
+      baseline: draftFromEventType(saved),
+      orderedLocations,
+      saved,
     })
     expect(isOpen()).toBe(true)
   })

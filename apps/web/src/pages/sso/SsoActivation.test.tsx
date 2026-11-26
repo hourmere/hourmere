@@ -93,7 +93,7 @@ const linkedMe: Schemas['Me'] = {
   sso: {
     requireSso: false,
     attempts: [],
-    providers: [enabled],
+    providers: [{ id: enabled.id, displayName: enabled.displayName, revision: enabled.revision }],
     proofs: [],
     links: [{ id: ownLinkId, providerId: enabled.id, generation: 1 }],
   },
@@ -141,7 +141,7 @@ async function confirm(user: ReturnType<typeof userEvent.setup>, label: string, 
   await user.click(await screen.findByRole('button', { name: label }))
   const group = screen.getByRole('group', { name: question })
   const cancel = within(group).getByRole('button', { name: 'Cancel' })
-  expect(document.activeElement).toBe(cancel)
+  await waitFor(() => expect(document.activeElement).toBe(cancel))
   await user.click(within(group).getByRole('button', { name: label }))
 }
 
@@ -237,7 +237,8 @@ describe('SSO provider activation', () => {
       await screen.findByRole('button', { name: `Enable provider ${draft.displayName}` }),
     )
     const confirmation = within(screen.getByRole('group', { name: 'Enable this provider?' }))
-    expect(document.activeElement).toBe(confirmation.getByRole('button', { name: 'Cancel' }))
+    const cancel = confirmation.getByRole('button', { name: 'Cancel' })
+    await waitFor(() => expect(document.activeElement).toBe(cancel))
     expect(requests.to(activateProvider)).toHaveLength(0)
     await user.click(confirmation.getByRole('button', { name: 'Enable provider' }))
     await screen.findByRole('button', { name: `Disable provider ${draft.displayName}` })
@@ -471,92 +472,104 @@ describe('Fresh SSO administration proof', () => {
     ])
   })
 
-  it('uses the viewer’s linked OIDC provider and handles a mailbox fallback on the same policy attempt', async () => {
-    const enforcing = { ...policy, requireSso: true }
-    let policyState = enforcing
-    let writes = 0
-    const { requests, user } = showSso(
-      {
-        [getProviders]: () => page(draft, enabled, unlinked, saml),
-        [getPolicy]: () => json(200, policyState),
-        [putPolicy]: () => {
-          writes += 1
-          if (writes === 1) return challenge('sso')
-          if (writes === 2) return challenge('mailbox')
-          policyState = {
-            ...enforcing,
-            requireSso: false,
-            policyRevision: policy.policyRevision + 1,
-          }
-          return json(200, policyState)
+  it.each([
+    { protocol: 'OIDC', flags: { ssoOidcEnabled: true, ssoSamlEnabled: false }, provider: enabled },
+    { protocol: 'SAML', flags: { ssoOidcEnabled: false, ssoSamlEnabled: true }, provider: saml },
+  ])(
+    'uses the viewer’s linked $protocol provider and handles mailbox fallback on the same policy attempt',
+    async ({ flags, provider }) => {
+      const enforcing = { ...policy, requireSso: true }
+      let policyState = enforcing
+      let writes = 0
+      const { requests, user } = showSso(
+        {
+          'GET /api/v1/instance': () => json(200, flags),
+          [getProviders]: () => page(draft, enabled, unlinked, saml),
+          [getPolicy]: () => json(200, policyState),
+          [putPolicy]: () => {
+            writes += 1
+            if (writes === 1) return challenge('sso')
+            if (writes === 2) return challenge('mailbox')
+            policyState = {
+              ...enforcing,
+              requireSso: false,
+              policyRevision: policy.policyRevision + 1,
+            }
+            return json(200, policyState)
+          },
+          [stepUp]: () => json(200, { url: idpUrl, redirect: true }),
+          [sendEmail]: () => json(202, { status: 'queued' }),
+          [consumeEmail]: () => json(200, { status: 'proven' }),
         },
-        [stepUp]: () => json(200, { url: idpUrl, redirect: true }),
-        [sendEmail]: () => json(202, { status: 'queued' }),
-        [consumeEmail]: () => json(200, { status: 'proven' }),
-      },
-      {
-        ...me,
-        sso: {
-          requireSso: true,
-          attempts: [],
-          links: [
-            { id: proofAttemptId, providerId: enabled.id, generation: 1 },
-            { id: draft.id, providerId: saml.id, generation: 1 },
-          ],
-          proofs: [],
-          providers: [enabled, unlinked, saml].map(({ id, displayName, revision }) => ({
-            id,
-            displayName,
-            revision,
-          })),
+        {
+          ...me,
+          sso: {
+            requireSso: true,
+            attempts: [],
+            links: [
+              { id: proofAttemptId, providerId: enabled.id, generation: 1 },
+              { id: draft.id, providerId: saml.id, generation: 1, protocol: 'saml' },
+            ],
+            proofs: [],
+            providers: [enabled, unlinked, saml].map(({ id, displayName, revision }) => ({
+              id,
+              displayName,
+              revision,
+            })),
+          },
         },
-      },
-    )
+      )
 
-    await confirm(user, 'Stop requiring SSO', 'Stop requiring single sign-on for this team?')
-    await screen.findByRole('heading', { name: proofHeading })
-    expect(screen.queryByRole('button', { name: 'Send verification email' })).toBeNull()
-    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Continue' }).disabled).toBe(true)
-    const options = screen.getAllByRole('option')
-    expect(options.map((option) => option.textContent)).toContain(enabled.displayName)
-    expect(options.map((option) => option.textContent)).not.toContain(unlinked.displayName)
-    expect(options.map((option) => option.textContent)).not.toContain(saml.displayName)
-    await user.selectOptions(screen.getByLabelText('Identity provider'), enabled.id)
-    expect(requests.to(stepUp)).toHaveLength(0)
-    await user.click(screen.getByRole('button', { name: 'Start SSO verification' }))
-    const idp = await screen.findByRole('link', {
-      name: 'Open identity provider (opens in a new tab)',
-    })
-    expect(idp.getAttribute('href')).toBe(idpUrl)
-    expect(idp.getAttribute('target')).toBe('_blank')
-    expectTeamWrites(requests.to(stepUp), [
-      {
-        attemptId: proofAttemptId,
-        providerId: enabled.id,
-        intent: 'step_up',
-        returnTo: '/app/settings',
-      },
-    ])
-    await user.click(idp)
-    await user.click(screen.getByRole('button', { name: 'Continue' }))
+      await confirm(user, 'Stop requiring SSO', 'Stop requiring single sign-on for this team?')
+      await screen.findByRole('heading', { name: proofHeading })
+      expect(screen.queryByRole('button', { name: 'Send verification email' })).toBeNull()
+      expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Continue' }).disabled).toBe(
+        true,
+      )
+      const options = screen.getAllByRole('option')
+      expect(options.map((option) => option.textContent)).toContain(provider.displayName)
+      expect(options.map((option) => option.textContent)).not.toContain(unlinked.displayName)
+      const unavailable = flags.ssoSamlEnabled ? enabled : saml
+      expect(options.map((option) => option.textContent)).not.toContain(unavailable.displayName)
+      await user.selectOptions(screen.getByLabelText('Identity provider'), provider.id)
+      expect(requests.to(stepUp)).toHaveLength(0)
+      await user.click(screen.getByRole('button', { name: 'Start SSO verification' }))
+      const idp = await screen.findByRole('link', {
+        name: 'Open identity provider (opens in a new tab)',
+      })
+      expect(idp.getAttribute('href')).toBe(idpUrl)
+      expect(idp.getAttribute('target')).toBe('_blank')
+      expectTeamWrites(requests.to(stepUp), [
+        {
+          attemptId: proofAttemptId,
+          providerId: provider.id,
+          intent: 'step_up',
+          returnTo: '/app/settings',
+        },
+      ])
+      await user.click(idp)
+      await user.click(screen.getByRole('button', { name: 'Continue' }))
 
-    const link = await openMailboxPrompt(user)
-    const next = await verifyEmail(user, link)
-    await user.click(next)
-    await screen.findByRole('button', { name: 'Require SSO' })
-    const change = {
-      expectedRevision: policy.policyRevision,
-      requireSso: false,
-      admission: policy.admission,
-    }
-    expectTeamWrites(requests.to(putPolicy), [
-      change,
-      { ...change, proofAttemptId },
-      { ...change, proofAttemptId },
-    ])
-    expect(requests.to(stepUp)).toHaveLength(1)
-    expect(requests.to(sendEmail).map(({ body }) => body)).toEqual([{ attemptId: proofAttemptId }])
-  })
+      const link = await openMailboxPrompt(user)
+      const next = await verifyEmail(user, link)
+      await user.click(next)
+      await screen.findByRole('button', { name: 'Require SSO' })
+      const change = {
+        expectedRevision: policy.policyRevision,
+        requireSso: false,
+        admission: policy.admission,
+      }
+      expectTeamWrites(requests.to(putPolicy), [
+        change,
+        { ...change, proofAttemptId },
+        { ...change, proofAttemptId },
+      ])
+      expect(requests.to(stepUp)).toHaveLength(1)
+      expect(requests.to(sendEmail).map(({ body }) => body)).toEqual([
+        { attemptId: proofAttemptId },
+      ])
+    },
+  )
 
   it('discards pending proof when switching to another team', async () => {
     const otherTeam = { ...team, id: unlinked.id, name: 'Other team', slug: 'other-team' }

@@ -379,6 +379,34 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
   it('lets non-host owners/admins open one booking through the same minimal whitelist', () =>
     verifyDetail())
 
+  it('shows the Teams location without releasing booking links to a non-host admin', async () => {
+    const host = seeded.hosts[0] as TestUser
+    const id = await createFixtures(db).booking(
+      seeded.team.id,
+      [host.id],
+      '2026-11-10T13:00:00Z',
+      '2026-11-10T13:30:00Z',
+    )
+    const joinUrl = 'https://teams.microsoft.com/meet/synthetic-admin-test'
+    try {
+      await db
+        .updateTable('bookings')
+        .set({
+          location: JSON.stringify({ kind: 'microsoft_teams', status: 'ready', url: joinUrl }),
+        })
+        .where('id', '=', id)
+        .execute()
+      const response = await get(seeded.adminSession.cookie, `/${id}`)
+      expect(response.status).toBe(200)
+      const detail = await response.json()
+      expect(detail).toMatchObject({ id, location: { kind: 'microsoft_teams' } })
+      expect(detail).toHaveProperty('location', { kind: 'microsoft_teams' })
+      expect(JSON.stringify(detail)).not.toContain(joinUrl)
+    } finally {
+      await db.deleteFrom('bookings').where('id', '=', id).execute()
+    }
+  })
+
   it('denies members, non-members and agent credentials access to admin detail', async () => {
     const outsider = await managerFixture()
     for (const id of [seeded.ids[0], seeded.otherBooking, randomUUID()]) {

@@ -188,8 +188,6 @@ export const admin = {
     '请选择有效的 PNG、JPEG 或 WebP 图片，大小不超过 512 KiB，宽高均不超过 2048 像素。不支持 SVG 和动图。',
   'Edit branding': '编辑品牌设置',
   'Primary colour': '主色',
-  'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against the white page background is reported separately.':
-    '系统会自动选择黑色或白色按钮文字，确保对比度至少为 4.5:1。与白色页面背景的对比度会单独显示。',
   'Brand logo': '品牌标志',
   'A logo is saved for this space.': '此空间已保存标志。',
   'Remove logo': '移除标志',
@@ -3073,6 +3071,23 @@ export const admin = {
     'Microsoft 报告预约副本存在冲突。请在 Outlook 中检查日历。',
   'Hourmere will retry syncing a booking copy.': 'Hourmere 将重试同步预约副本。',
   'A booking copy has a pending change.': '有一个预约副本的变更尚待处理。',
+  // Microsoft Teams meeting locations
+  'Microsoft Teams requires individual scheduling with one host.':
+    'Microsoft Teams 仅支持由一位主持人负责的独立排期。',
+  'Could not verify Microsoft Teams availability for the host.':
+    '暂时无法确认主持人能否使用 Microsoft Teams。',
+  'Checking Microsoft Teams availability…': '正在检查 Microsoft Teams 是否可用…',
+  'Microsoft Calendar is unavailable on this instance.': '此实例无法使用 Microsoft 日历。',
+  'Connect a Microsoft 365 work or school calendar and select it for booking write-back.':
+    '请连接 Microsoft 365 工作或学校账户的日历，并选作预约写入目标。',
+  'Reconnect Microsoft Calendar and allow calendar event writes to use Teams.':
+    '请重新连接 Microsoft 日历并授予日历活动写入权限，以使用 Teams。',
+  'The host needs a Microsoft 365 work or school calendar selected for booking write-back.':
+    '主持人需将 Microsoft 365 工作或学校账户的日历选作预约写入目标。',
+  'Microsoft Teams creates a meeting link for each booking on the host’s Microsoft 365 work or school calendar.':
+    'Microsoft Teams 会在主持人的 Microsoft 365 工作或学校日历中为每次预约创建会议链接。',
+  'Remove a location option before adding another.': '请移除一个地点选项后再添加。',
+  'Open host booking details': '打开主持人预约详情',
   // SCIM provisioning
   'SCIM provisioning is disabled on this instance.': '此实例已禁用 SCIM 预配。',
   // Event type editor summaries and booking page preview
@@ -3119,6 +3134,47 @@ export const admin = {
   '{value} reschedule deadline': '须提前{value}改期',
   '{value} cancellation deadline': '须提前{value}取消',
   'Default timing rules': '默认预约时间规则',
+  // SAML provider setup and enforcement
+  'Add SAML provider': '添加 SAML 提供方',
+  'Identity provider entity ID': '身份提供方实体 ID',
+  'SAML configuration source': 'SAML 配置来源',
+  'Enter configuration manually': '手动填写配置',
+  'Paste identity provider metadata': '粘贴身份提供方元数据',
+  'Import metadata from a URL': '从网址导入元数据',
+  'Identity provider metadata XML': '身份提供方元数据 XML',
+  'Identity provider metadata URL': '身份提供方元数据网址',
+  'HTTP-Redirect sign-in URL': 'HTTP-Redirect 登录网址',
+  'Subject attribute': '主体属性',
+  'Leave blank to use the persistent NameID.': '留空时使用持久 NameID。',
+  'Signing certificates': '签名证书',
+  'Signing certificate {number}': '签名证书{number}',
+  'Add signing certificate': '添加签名证书',
+  'Leave blank to keep saved settings. Import metadata again to replace its settings.':
+    '留空可保留已保存的设置。重新导入元数据可更新相应设置。',
+  'To test a rotation, use a disabled draft. Submit the full set with both old and new certificates, test the new revision, then remove the old certificate after the identity provider switches.':
+    '请在已停用的草稿上测试证书轮换。提交包含新旧证书的完整列表，测试新版本，等身份提供方切换后再移除旧证书。',
+  'Supply signing certificates if the metadata contains none.':
+    '若元数据未包含签名证书，请单独填写。',
+  'Signed assertions are required.': '必须使用已签名的断言。',
+  'Download service provider metadata': '下载服务提供方元数据',
+  'Check the SAML metadata, sign-in URL and signing certificates, then try again.':
+    '请检查 SAML 元数据、登录网址和签名证书，然后重试。',
+  'Enable another usable provider before disabling this provider.':
+    '请先启用另一个可用的提供方，再停用此提供方。',
+  'A team owner must pass a test of the current version of an enabled identity provider.':
+    '团队所有者必须对已启用的身份提供方的当前版本完成测试。',
+  'An enabled identity provider with a verified domain is required.':
+    '需要一个已启用且关联了已验证域名的身份提供方。',
+  'Before requiring SSO, have an owner test the identity provider draft, then enable that revision with a verified domain. A current owner must also accept recovery enrollment.':
+    '强制单点登录前，请让团队所有者测试身份提供方草稿，并在关联已验证的域名后启用该版本。还须有一位现任所有者接受恢复登记。',
+
+  // Branding.
+  'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against white (#FFFFFF) is reported separately.':
+    '系统会自动选择黑色或白色按钮文字，确保对比度至少为 4.5:1。与白色（#FFFFFF）的对比度会单独显示。',
+
+  // Availability editor
+  'A schedule can have at most 10,000 date overrides, including past dates. Remove some overrides before saving.':
+    '每个日程最多可有 10,000 个特定日期安排（包括过去的日期）。请先移除一些安排再保存。',
 
   // SCIM invitation attribution
   'SCIM connection': 'SCIM 连接',
