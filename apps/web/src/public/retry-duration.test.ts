@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { errorMessage, RequestError } from '../api/errors.ts'
 import { durationMessage } from '../i18n/duration.ts'
 import { msg, translateMessage } from '../i18n/translate.ts'
-import { failureMessage, PublicRequestError } from './api.ts'
+import { codeOf, failureMessage, PublicRequestError } from './api.ts'
 
 const error = (seconds: number) =>
   new PublicRequestError(new RequestError(429, 'rate_limited', 'rate_limited'), seconds)
@@ -20,8 +20,9 @@ function copyFailure(value: string): typeof failureMessage {
     'durationMessage',
     'msg',
     'errorMessage',
+    'codeOf',
     `return function (err) {${body}}`,
-  )(PublicRequestError, durationMessage, msg, errorMessage) as typeof failureMessage
+  )(PublicRequestError, durationMessage, msg, errorMessage, codeOf) as typeof failureMessage
 }
 
 const waits = {
