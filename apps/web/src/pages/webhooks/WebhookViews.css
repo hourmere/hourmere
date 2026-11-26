@@ -1,0 +1,71 @@
+.webhook-list,
+.webhook-subpanel,
+.webhook-endpoint,
+.webhook-events {
+  min-width: 0;
+}
+
+.webhook-endpoints {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.webhook-endpoint,
+.webhook-subpanel {
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+}
+
+.webhook-subpanel > h4:first-child,
+.webhook-list > p:first-child {
+  margin-top: 0;
+}
+
+.webhook-actions {
+  margin: 0;
+}
+
+.webhook-status-hint,
+.webhook-status-hint + .webhook-actions {
+  margin-top: var(--space-3);
+}
+
+.webhook-events {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+}
+
+.webhook-events legend {
+  max-width: 100%;
+  font-weight: 600;
+}
+
+.webhook-events input[type="checkbox"],
+.webhook-enabled input[type="checkbox"] {
+  min-width: 24px;
+  min-height: 24px;
+}
+
+.webhook-secret-value {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--surface-muted);
+  user-select: text;
+}
+
+@media (max-width: 479px) {
+  .webhook-actions,
+  .webhook-actions .copy {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

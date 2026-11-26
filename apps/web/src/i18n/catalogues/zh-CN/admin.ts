@@ -3178,4 +3178,61 @@ export const admin = {
 
   // Additional durations
   'Removed {0}. Selected length: {1}.': '已移除{0}。当前选中的时长为{1}。',
+
+  // Signed webhook administration
+  'Checking webhook access…': '正在检查 Webhook 管理权限…',
+  'No webhook endpoints yet.': '尚未添加 Webhook 端点。',
+  'Add webhook': '添加 Webhook',
+  'Create webhook': '创建 Webhook',
+  'Edit webhook': '编辑 Webhook',
+  'Destination origin': '目标源站',
+  'Destination URL': '目标网址',
+  'Endpoint ID': '端点 ID',
+  'Webhook events': 'Webhook 事件',
+  'Choose at least one event.': '请至少选择一种事件。',
+  'Booking reschedule requested': '已请求预约改期',
+  'Booking reschedule request expired': '预约改期请求已过期',
+  'Attendee no-show changed': '参会者的未到场标记已变更',
+  'Workflow executed': '工作流已执行',
+  'Unknown event': '未知事件',
+  Paused: '已暂停',
+  'Pause webhook': '暂停 Webhook',
+  'Resume webhook': '恢复 Webhook',
+  'A delivery in progress may finish after you pause this endpoint.':
+    '暂停此端点后，正在进行的投递仍可能完成。',
+  'Skipped deliveries stay skipped after resuming.': '恢复后，已跳过的投递将保持跳过状态。',
+  'Save subscriptions': '保存订阅',
+  'Subscription editing is unavailable for this endpoint.': '当前无法编辑此端点的事件订阅。',
+  'Rotate signing secret…': '轮换签名密钥…',
+  'Rotate signing secret': '轮换签名密钥',
+  'Delete webhook…': '删除 Webhook…',
+  'Delete webhook': '删除 Webhook',
+  'Prepare your receiver to install the new signing secret immediately. All subsequent attempts, including retries, use the new secret.':
+    '请准备在接收端立即更换签名密钥。后续所有投递都将使用新密钥，包括重试。',
+  'Deleting this endpoint permanently removes its retained deliveries. Workflows that reference this ID must be updated separately.':
+    '删除此端点后，保留的投递记录也将永久删除。请另行更新引用此端点 ID 的工作流。',
+  'Signing secret': '签名密钥',
+  'Save this signing secret in your receiver’s secret store. You can see it only here.':
+    '请将签名密钥保存到接收端的密钥存储中。仅此处可查看该密钥。',
+  'Copy signing secret': '复制签名密钥',
+  'Webhook endpoint created.': '已创建 Webhook 端点。',
+  'Webhook endpoint updated.': '已更新 Webhook 端点。',
+  'Webhook endpoint deleted.': '已删除 Webhook 端点。',
+  'Webhook signing secret rotated.': '已轮换 Webhook 签名密钥。',
+  'This webhook endpoint is no longer available.': '此 Webhook 端点已不可用。',
+  'Workflow events are unavailable on this instance.': '此实例当前无法使用工作流事件。',
+  'Creating webhooks and rotating signing secrets are unavailable on this instance.':
+    '此实例当前无法创建 Webhook 或轮换签名密钥。',
+  'This space can have up to ten webhook endpoints, including paused endpoints.':
+    '此空间最多可有 10 个 Webhook 端点，包含已暂停的端点。',
+  'Check the webhook settings and try again.': '请检查 Webhook 设置后重试。',
+  'The webhook change could not be confirmed. Refresh the list before taking another action.':
+    '无法确认 Webhook 是否已更改。请先刷新列表，再进行下一项操作。',
+  'Creation could not be confirmed. Refresh the list and confirm the endpoint ID before rotating its secret.':
+    '无法确认端点是否已创建。如需轮换签名密钥，请先刷新列表并确认端点 ID。',
+  'Rotation could not be confirmed. The previous secret may already have been replaced. Refresh the list before taking another action.':
+    '无法确认密钥是否已轮换。旧密钥可能已被替换。请先刷新列表，再进行下一项操作。',
+  'Refreshing webhook endpoints…': '正在刷新 Webhook 端点…',
+  'Saving webhook settings…': '正在保存 Webhook 设置…',
+  'Refresh webhook endpoints': '刷新 Webhook 端点',
 } as const

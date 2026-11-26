@@ -14,6 +14,26 @@ automatically. [Make recipes](/docs/make) give manual module settings for
 `booking.created` and `booking.cancelled`. [Slack notifications](/docs/slack) provide a
 separate incoming-webhook destination in Settings → Integrations, reusing this delivery machinery.
 
+## Manage endpoints in Settings
+
+Select the personal or team space you want to manage, then open **Settings → Integrations →
+Webhooks**. The list shows each endpoint's destination origin, ID, events and enabled or
+paused configuration. A space can have up to ten endpoints, including paused endpoints.
+To change a destination URL, create a replacement and update any workflow that references
+the old endpoint ID before deleting it.
+
+Copy the signing secret to your receiver's secret store when you create an endpoint or rotate
+its secret. The dashboard displays it once, until you dismiss it or leave the view. Rotation
+replaces the old secret immediately, including for retry attempts. Before deleting, check
+the endpoint ID and confirm that you can lose its retained delivery history. If a write
+cannot be confirmed, refresh the list and verify the endpoint ID before taking another action.
+
+中文：选择个人或团队空间，然后打开 **设置 → 集成 → Webhook**。列表显示目标站点、端点 ID、
+订阅事件及启用或暂停状态。每个空间最多有十个端点，包含暂停的端点。更换目标 URL 时，请先
+新建端点，再更新引用旧端点 ID 的工作流，最后删除旧端点。创建或轮换后，请立即将仅展示一次的
+签名密钥复制到接收端的密钥存储。轮换立即替换旧密钥，也适用于重试。删除会永久清除保留的投递
+记录。若无法确认操作结果，请刷新列表并核对端点 ID，再采取下一步操作。
+
 ## Enable and configure
 
 Set `WEBHOOKS_ENABLED=true` and an independent `WEBHOOK_ENCRYPTION_KEY` containing exactly
