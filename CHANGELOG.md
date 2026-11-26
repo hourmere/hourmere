@@ -161,6 +161,9 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Security
 
+- OIDC account self-linking leaves pending SCIM claims and directory attachments unchanged.
+  New SCIM enrollment claims complete only through invitation acceptance with Hourmere
+  mailbox proof until explicit SCIM claim completion through SSO linking ships.
 - Public booking and sign-in email abuse is bounded by a chain-wide invitee reschedule cap
   (default 5), separate rolling recipient limits for booking and sign-in mail (each 5/hour
   and 20/day), and one instance-wide mail cap (100/hour with a 20% reserve shared by host
