@@ -786,7 +786,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Cancel a booking the caller hosts */
+        /**
+         * Cancel a booking the caller hosts
+         * @description Cancelling a paid booking requests a full refund.
+         */
         post: operations["cancelHostBooking"];
         delete?: never;
         options?: never;
@@ -936,7 +939,7 @@ export interface paths {
         put?: never;
         /**
          * Reschedule a booking the caller hosts
-         * @description Cancels the old booking and creates its successor in one transaction. The caller must host the booking in their acting organization. Invitee links keep working, and manageToken is always null: host authority does not reveal an invitee bearer secret. Retrying the old id gets booking_cancelled.
+         * @description Cancels the old booking and creates its successor in one transaction. A paid booking keeps its duration and payment without another charge or a refund. The caller must host the booking in their acting organization. Invitee links keep working, and manageToken is always null: host authority does not reveal an invitee bearer secret. Retrying the old id gets booking_cancelled.
          */
         post: operations["rescheduleHostBooking"];
         delete?: never;
@@ -954,7 +957,7 @@ export interface paths {
         };
         /**
          * Times a booking the caller hosts can move to
-         * @description The same reschedule slots as the invitee sees, with the current booking ignored so a new time may overlap it. The caller must host this booking in their acting organization. The range is at most 62 days.
+         * @description The same reschedule slots as the invitee sees, with the current booking ignored so a new time may overlap it. Paid bookings keep their original duration. The caller must host this booking in their acting organization. The range is at most 62 days.
          */
         get: {
             parameters: {
@@ -1154,7 +1157,7 @@ export interface paths {
         put?: never;
         /**
          * Cancel with the manage token
-         * @description When answering a host request, pass pendingReschedule.id as rescheduleRequestId. Repeating cancellation returns the cancelled booking without changing the saved reason. A request already answered by a pick, replaced request or expired pending request returns reschedule_request_changed. Without that request ID, retrying a cancelled booking returns booking_cancelled.
+         * @description Cancelling a paid booking requests a full refund. When answering a host request, pass pendingReschedule.id as rescheduleRequestId. Repeating cancellation returns the cancelled booking without changing the saved reason. A request already answered by a pick, replaced request or expired pending request returns reschedule_request_changed. Without that request ID, retrying a cancelled booking returns booking_cancelled.
          */
         post: operations["cancelManagedBooking"];
         delete?: never;
@@ -1174,7 +1177,7 @@ export interface paths {
         put?: never;
         /**
          * Reschedule with the manage token
-         * @description Cancels the booking and books the new time in one step. The new time may overlap the old one. Returns the new booking and its manage token. Invitee moves are limited across the entire chain (default five); reaching the instance limit returns 409 `booking_reschedule_limit`, while cancellation stays available. Host moves do not consume that limit. When answering a host request, pass pendingReschedule.id as rescheduleRequestId: an identical pick replay returns the saved successor with manageToken null; a changed answer, replaced request or expired request returns reschedule_request_changed. Without that request ID, the token returned for the old booking shows the cancelled booking, so a retry after a lost response gets 409 `booking_cancelled`; tokens from booking emails open the new booking (and would move it again). Group seats require an Idempotency-Key; an exact replay returns the same successor seat without a new manage token.
+         * @description Cancels the booking and books the new time in one step. The new time may overlap the old one. A paid booking keeps its duration and payment without another charge or a refund. Returns the new booking and its manage token. Invitee moves are limited across the entire chain (default five); reaching the instance limit returns 409 `booking_reschedule_limit`, while cancellation stays available. Host moves do not consume that limit. When answering a host request, pass pendingReschedule.id as rescheduleRequestId: an identical pick replay returns the saved successor with manageToken null; a changed answer, replaced request or expired request returns reschedule_request_changed. Without that request ID, the token returned for the old booking shows the cancelled booking, so a retry after a lost response gets 409 `booking_cancelled`; tokens from booking emails open the new booking (and would move it again). Group seats require an Idempotency-Key; an exact replay returns the same successor seat without a new manage token.
          */
         post: operations["rescheduleManagedBooking"];
         delete?: never;
@@ -1192,7 +1195,7 @@ export interface paths {
         };
         /**
          * Times the booking can move to
-         * @description The slots the booking behind the manage token can be rescheduled to, fully inside [start, end]: its event type's slots with the booking itself ignored, so they may overlap its current time. The same range limits as public slots (at most 62 days).
+         * @description The slots the booking behind the manage token can be rescheduled to, fully inside [start, end]: its event type's slots with the booking itself ignored, so they may overlap its current time. Paid bookings keep their original duration. The same range limits as public slots (at most 62 days).
          */
         get: {
             parameters: {
@@ -4514,7 +4517,7 @@ export interface paths {
         put?: never;
         /**
          * Queue one sample notification through the delivery outbox
-         * @description At most five authorized attempts per organization per minute, shared with MCP on this server; refused (403) and unknown-destination (404) calls are not counted. Returns 409 slack_test_pending while a sample is pending.
+         * @description At most five authorized attempts per organization per minute, shared with MCP on this server. An exhausted budget returns 429 after authorization, before the destination lookup. Refused (403) and unknown-destination (404) calls are not counted. Returns 409 slack_test_pending while a sample is pending.
          */
         post: operations["testSlackDestination"];
         delete?: never;
@@ -21710,6 +21713,7 @@ export interface operations {
     listWebhookDeliveries: {
         parameters: {
             query?: {
+                /** @description Use the previous page’s nextAfter UUID. Omit for the first page. */
                 after?: string;
             };
             header?: {
@@ -21735,7 +21739,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description invalid_webhook or invalid_request */
+            /** @description invalid_request or invalid_cursor */
             400: {
                 headers: {
                     [name: string]: unknown;

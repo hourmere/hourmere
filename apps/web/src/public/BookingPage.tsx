@@ -122,7 +122,7 @@ function OneTimeBookingPageContent({ token }: { token: string }) {
   )
   if (state.status === 'loading')
     return (
-      <PublicLayout wide>
+      <PublicLayout wide languageDisabled>
         <PublicStatus>{t('Loading…')}</PublicStatus>
       </PublicLayout>
     )
@@ -243,7 +243,7 @@ function BookingPageContent({
 
   if (state.status === 'loading') {
     return (
-      <PublicLayout wide>
+      <PublicLayout wide languageDisabled>
         <PublicStatus>{t('Loading…')}</PublicStatus>
       </PublicLayout>
     )
@@ -640,8 +640,17 @@ function BookingFlow({
         )
         setNow(currentTime())
         setVersion((v) => v + 1)
-      } else if (code === 'invalid_location_choice') {
-        setNotice('Choose one of the available locations.')
+      } else if (
+        code === 'invalid_location_choice' ||
+        (code === 'invalid_invitee_phone' &&
+          !chosenLocation?.askInvitee &&
+          !(event.smsRemindersEnabled && values.smsConsent))
+      ) {
+        setNotice(
+          code === 'invalid_location_choice'
+            ? 'Choose one of the available locations.'
+            : 'The meeting location has changed. Please choose a time again.',
+        )
         await refreshDurations()
       } else if (code === 'invalid_duration') {
         setNotice(
