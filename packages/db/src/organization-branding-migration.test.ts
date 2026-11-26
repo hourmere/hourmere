@@ -2,14 +2,19 @@ import { randomUUID } from 'node:crypto'
 import { copyFile, mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { migrationsDir, runMigrations } from './migrate.ts'
-import { createTestDatabase, type TestDatabase } from './testing.ts'
+import { MIGRATION_REPLAY_TIMEOUT, useMigrationReplay } from './testing/migration-replay.ts'
+import type { TestDatabase } from './testing.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
+
+vi.setConfig({ testTimeout: MIGRATION_REPLAY_TIMEOUT, hookTimeout: MIGRATION_REPLAY_TIMEOUT })
 
 const serverUrl = process.env.DATABASE_URL
 const migration = '0063_organization_branding.sql'
 describe.skipIf(!serverUrl)('branding migration', () => {
+  const replay = useMigrationReplay(serverUrl as string, migration)
+
   it('preserves populated predecessor organizations, membership and bookings; matches fresh and no-op rerun', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'hourmere-brand-predecessor-'))
     let owned: TestDatabase | undefined
@@ -19,7 +24,7 @@ describe.skipIf(!serverUrl)('branding migration', () => {
         (f) => f.endsWith('.sql') && f < migration,
       ))
         await copyFile(join(migrationsDir, file), join(directory, file))
-      owned = await createTestDatabase(serverUrl as string, directory)
+      owned = await replay.predecessor.clone(directory)
       const pool = owned.pool,
         org = randomUUID(),
         user = randomUUID(),
@@ -58,7 +63,7 @@ describe.skipIf(!serverUrl)('branding migration', () => {
       expect((await pool.query('SELECT * FROM organization_branding')).rows).toEqual([])
       // Compare against a fresh install of the same migration set: later migrations on main
       // (for example 0064 and 0065) change other tables and have their own tests.
-      fresh = await createTestDatabase(serverUrl as string, directory)
+      fresh = await replay.predecessor.clone(directory)
       expect(await snapshotSchema(pool)).toEqual(await snapshotSchema(fresh.pool))
       expect(await runMigrations(pool, directory)).toEqual([])
       expect(await records()).toEqual(before)
@@ -76,7 +81,7 @@ describe.skipIf(!serverUrl)('branding migration', () => {
         (f) => f.endsWith('.sql') && f < migration,
       ))
         await copyFile(join(migrationsDir, file), join(directory, file))
-      owned = await createTestDatabase(serverUrl as string, directory)
+      owned = await replay.predecessor.clone(directory)
       const client = await owned.pool.connect()
       try {
         const source = await readFile(join(migrationsDir, migration), 'utf8')

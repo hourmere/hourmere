@@ -9,6 +9,8 @@ import pg from 'pg'
 import { createPool, type Database, type Db, guardPoolErrors } from './index.ts'
 import { migrationsDir, runMigrations } from './migrate.ts'
 import {
+  MIGRATED_PREFIX_ENV,
+  MIGRATED_PREFIX_LAST_FILE,
   MIGRATED_TEMPLATE_ENV,
   MIGRATED_TEMPLATE_SERVER_ENV,
   registerTestDatabaseCleanup,
@@ -231,10 +233,44 @@ let repositoryMigrations: Promise<MigrationFile[]> | undefined
 const predecessorRequests = new Map<string, number>()
 const predecessorTemplates = new Map<string, Promise<TestDatabaseTemplate>>()
 
+/** Compare contents as well as names so a copied SQL mutation must still run. */
+async function sharedMigrationFiles(directory: string): Promise<MigrationFile[]> {
+  try {
+    repositoryMigrations ??= migrationFiles(migrationsDir)
+    const [files, repository] = await Promise.all([migrationFiles(directory), repositoryMigrations])
+    const difference = files.findIndex(
+      (file, index) =>
+        file.name !== repository[index]?.name || file.checksum !== repository[index]?.checksum,
+    )
+    return difference === -1 ? files : files.slice(0, difference)
+  } catch {
+    // Unreadable directories fail in runMigrations with their real error.
+    return []
+  }
+}
+
+function runMigrationPrefix(serverUrl: string): string | undefined {
+  const name = process.env[MIGRATED_PREFIX_ENV]
+  if (name === undefined || !TEMPLATE_NAME.test(name)) return undefined
+  return process.env[MIGRATED_TEMPLATE_SERVER_ENV] === templateServer(serverUrl) ? name : undefined
+}
+
+/** The run's 0012 template, when the staged SQL starts with that exact repository prefix. */
+export async function findTestMigrationPrefix(
+  serverUrl: string,
+  directory: string,
+): Promise<string | undefined> {
+  const name = runMigrationPrefix(serverUrl)
+  if (!name) return undefined
+  const shared = await sharedMigrationFiles(directory)
+  return shared.some((file) => file.name === MIGRATED_PREFIX_LAST_FILE) ? name : undefined
+}
+
 async function createPredecessorTemplate(
   serverUrl: string,
   files: MigrationFile[],
   key: string,
+  runPrefix: string | undefined,
 ): Promise<TestDatabaseTemplate> {
   // The template is dropped with the file's other fixtures (it owns a cleanup like any
   // fixture). Registered first, so a cleanup that starts while the template is still being
@@ -255,7 +291,7 @@ async function createPredecessorTemplate(
       async (pool) => {
         await runMigrations(pool, directory)
       },
-      { tag: 'predecessor' },
+      { tag: 'predecessor', template: runPrefix },
     )
   } catch (error) {
     unregister()
@@ -267,10 +303,9 @@ async function createPredecessorTemplate(
 
 /**
  * Source-copy and upgrade tests migrate a directory that starts with byte-identical copies of
- * the repository's first migrations and then holds a changed or later file. From the second
- * such fixture in a test file on, the shared leading migrations are applied once to a
- * template and copied; `runMigrations` then verifies their checksums and applies only the
- * rest, so each fixture ends in the same state as a full replay.
+ * the repository's first migrations and then holds a changed or later file. Use the run's
+ * 0012 checkpoint when compatible. For repeated longer histories, prepare and copy their
+ * shared leading migrations. The runner verifies all copied checksums before applying the rest.
  */
 function predecessorTemplate(
   serverUrl: string,
@@ -289,49 +324,33 @@ async function sharedPredecessorTemplate(
   migrationsDirectory: string,
   options: TestDatabaseOptions,
 ): Promise<string | undefined> {
-  let files: MigrationFile[]
-  let repository: MigrationFile[]
-  try {
-    repositoryMigrations ??= migrationFiles(migrationsDir)
-    ;[files, repository] = await Promise.all([
-      migrationFiles(migrationsDirectory),
-      repositoryMigrations,
-    ])
-  } catch {
-    // Unreadable directories fail in runMigrations with their real error.
-    return undefined
-  }
-  let shared = 0
-  while (
-    shared < files.length &&
-    shared < repository.length &&
-    files[shared]?.name === repository[shared]?.name &&
-    files[shared]?.checksum === repository[shared]?.checksum
-  ) {
-    shared += 1
-  }
-  if (shared === 0) return undefined
+  const files = await sharedMigrationFiles(migrationsDirectory)
+  if (files.length === 0) return undefined
   // Every repository migration, possibly followed by more files: the run's template applies.
-  if (shared === repository.length) {
+  if (files.length === (await repositoryMigrations)?.length) {
     const template = migratedTemplate(serverUrl, undefined, options)
     if (template) return template
   }
-  const key = `${templateServer(serverUrl)} ${shared}`
+  const runPrefix = files.some((file) => file.name === MIGRATED_PREFIX_LAST_FILE)
+    ? runMigrationPrefix(serverUrl)
+    : undefined
+  if (runPrefix && files.at(-1)?.name === MIGRATED_PREFIX_LAST_FILE) return runPrefix
+  const key = `${templateServer(serverUrl)} ${files.length}`
   const requests = (predecessorRequests.get(key) ?? 0) + 1
   predecessorRequests.set(key, requests)
-  // A single fixture replays as before; only repeated fixtures pay for a template.
-  if (requests < 2) return undefined
+  // Only repeated fixtures pay for a new template.
+  if (requests < 2) return runPrefix
   let template = predecessorTemplates.get(key)
   if (!template) {
-    template = createPredecessorTemplate(serverUrl, repository.slice(0, shared), key)
+    template = createPredecessorTemplate(serverUrl, files, key, runPrefix)
     predecessorTemplates.set(key, template)
   }
   try {
     return (await template).name
   } catch {
     predecessorTemplates.delete(key)
-    // The fixture replays every migration and reports a real setup failure itself.
-    return undefined
+    // The fixture applies the remaining migrations itself and reports any setup failure.
+    return runPrefix
   }
 }
 
@@ -449,7 +468,7 @@ export async function createTestDatabase(
 export async function createTestDatabaseTemplate(
   serverUrl: string,
   prepare: (pool: pg.Pool) => Promise<void>,
-  options: Pick<TestDatabaseOptions, 'tag'> = {},
+  options: Pick<TestDatabaseOptions, 'tag' | 'template'> = {},
 ): Promise<TestDatabaseTemplate> {
   const template = await createTestDatabase(serverUrl, undefined, { ...options, migrate: false })
   const name = new URL(template.url).pathname.slice(1)

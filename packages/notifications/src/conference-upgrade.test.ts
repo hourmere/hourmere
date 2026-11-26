@@ -2,12 +2,15 @@ import { cp, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createDb } from '@hourmere/db'
+import { MIGRATION_REPLAY_TIMEOUT } from '@hourmere/db/migration-replay'
 import { createTestDatabase } from '@hourmere/db/testing'
 import { createFixtures } from '@hourmere/scheduling/testing'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { migrationsDir, runMigrations } from '../../db/src/migrate.ts'
 
 const serverUrl = process.env.DATABASE_URL
+
+vi.setConfig({ testTimeout: MIGRATION_REPLAY_TIMEOUT })
 
 describe.skipIf(!serverUrl)('conference migrations preserve populated predecessor data', () => {
   it('upgrades0023 without changing historical values, then does nothing', async () => {
