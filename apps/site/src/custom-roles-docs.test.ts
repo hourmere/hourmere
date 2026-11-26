@@ -4,6 +4,10 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { apiKeyOperation } from '../../../packages/auth/src/api-key-operations.ts'
 import { fixedTeamRole } from '../../../packages/auth/src/team-role-policy.ts'
+import {
+  customRoleCatalogueV1,
+  isCustomRolePermission,
+} from '../../../packages/core/src/custom-role-catalogue.ts'
 
 const root = process.env.HOURMERE_DOCS_ROOT ?? fileURLToPath(new URL('../../../', import.meta.url))
 const read = (path: string) => readFileSync(join(root, path), 'utf8')
@@ -23,11 +27,14 @@ function row(label: string) {
   return line as string
 }
 
-function grantsForPhase(catalogue: string, phase: string) {
-  return [...catalogue.matchAll(/\*\*Custom \(([^)]+)\)\*\* ((?:`[a-z_.]+`(?:, )?)+)/g)]
-    .filter((match) => match[1] === phase)
-    .flatMap((match) => match[2]?.match(/`[a-z_.]+`/g) ?? [])
-    .map((id) => id.slice(1, -1))
+function permissionIds(text: string) {
+  return (text.match(/`[a-z0-9_.]+`/g) ?? []).map((id) => id.slice(1, -1))
+}
+
+function classifiedPermissionIds(catalogue: string, classification: string) {
+  return [...catalogue.matchAll(/\*\*(Fixed|Custom \([^)]+\))\*\* ((?:`[a-z0-9_.]+`(?:, )?)+)/g)]
+    .filter((match) => match[1] === classification)
+    .flatMap((match) => permissionIds(match[2] ?? ''))
     .sort()
 }
 
@@ -160,6 +167,9 @@ describe('custom roles design facts', () => {
       'Fixed roles keep their current decision path and credentials across enable, disable and re-enable.',
     )
     expect(versions).toContain(
+      'Existing fixed-role browser sessions, API keys, OAuth grants and integrations, including Zapier and n8n, continue to authorize the same operations without renewal.',
+    )
+    expect(versions).toContain(
       'Apply the version boundary only to memberships with a custom assignment change.',
     )
     expect(versions).toContain(
@@ -182,32 +192,12 @@ describe('custom roles design facts', () => {
     expect(new Set(customLabels)).toEqual(
       new Set(['Custom (phase one)', 'Custom (phase two, personal data)']),
     )
-    expect(grantsForPhase(design, 'phase one')).toEqual([
-      'analytics.read',
-      'branding.read',
-      'branding.update',
-      'branding.upload_logo',
-      'event_notifications.update',
-      'event_types.activate_round_robin',
-      'event_types.assign_hosts',
-      'event_types.create',
-      'event_types.delete',
-      'event_types.duplicate',
-      'event_types.list_host_candidates',
-      'event_types.update',
-      'readiness.read_team',
-      'routing_forms.preview',
-      'routing_forms.read',
-      'workflows.preview',
-      'workflows.read',
-      'workflows.read_runs',
-    ])
-    expect(grantsForPhase(design, 'phase two, personal data')).toEqual([
-      'event_types.generate_open_time_snippet',
-      'team_bookings.read',
-      'waitlists.read_settings',
-      'waitlists.update_settings',
-    ])
+    expect(classifiedPermissionIds(catalogue, 'Custom (phase one)')).toEqual(
+      customRoleCatalogueV1.phaseOne,
+    )
+    expect(classifiedPermissionIds(catalogue, 'Custom (phase two, personal data)')).toEqual(
+      customRoleCatalogueV1.phaseTwoPersonalData,
+    )
     expect(asProse(catalogue)).toContain(
       'For phase-one event type creation and duplication, a disabled waitlist and absent redirect are neutral defaults. Enabling a waitlist or setting a redirect, including when copied from the source event type, requires its separate authorization.',
     )
@@ -219,6 +209,24 @@ describe('custom roles design facts', () => {
     expect(interfaces).toContain(
       'Record the personal-data permission IDs in assignment and clearance events when the role includes them.',
     )
+  })
+
+  it('recognizes only explicit custom permission IDs in the frozen catalogue version', () => {
+    const catalogue = section('## Current gates and proposed catalogue')
+    const identity = section('### Identity, directory and credential operations')
+    const identityIds = [...identity.matchAll(/^\| (`[^|]+) \|/gm)].flatMap((match) =>
+      permissionIds(match[1] ?? ''),
+    )
+    const { version, fixed, phaseOne, phaseTwoPersonalData } = customRoleCatalogueV1
+    expect(version).toBe(1)
+    expect(fixed).toEqual([...classifiedPermissionIds(catalogue, 'Fixed'), ...identityIds].sort())
+    for (const id of [...phaseOne, ...phaseTwoPersonalData]) {
+      expect(isCustomRolePermission(version, id), id).toBe(true)
+      expect(isCustomRolePermission(version + 1, id), id).toBe(false)
+    }
+    for (const id of [...fixed, '*', 'event_types.*', 'analytics.future', 'ANALYTICS.READ']) {
+      expect(isCustomRolePermission(version, id), id).toBe(false)
+    }
   })
 
   it('defaults uncatalogued operations to their current checks and requires registry coverage', () => {
@@ -245,6 +253,9 @@ describe('custom roles design facts', () => {
     const interfaces = asProse(section('## Interfaces and acceptance'))
     expect(interfaces).toContain(
       'Role definitions, assignments and team enablement are managed only through browser REST by a freshly verified fixed Owner.',
+    )
+    expect(interfaces).toContain(
+      'API keys, MCP and CLI cannot manage role definitions, assignments or team enablement.',
     )
     expect(interfaces).toContain(
       'A later release may expose only read-only self-permissions to MCP and CLI.',

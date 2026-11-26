@@ -107,6 +107,36 @@ export const auditDetails = {
   'workflow.webhook_completed': ['revision', 'trigger'],
   'workflow.webhook_failed': ['revision', 'trigger', 'reason'],
   'audit_log.retention_updated': [],
+  'custom_role.created': ['roleId', 'newRevision', 'policyEpoch', 'masterEpoch', 'outcome'],
+  'custom_role.revised': [
+    'roleId',
+    'oldRevision',
+    'newRevision',
+    'policyEpoch',
+    'masterEpoch',
+    'outcome',
+  ],
+  'custom_role.archived': ['roleId', 'oldRevision', 'policyEpoch', 'masterEpoch', 'outcome'],
+  'membership.custom_role_assigned': [
+    'roleId',
+    'oldRoleId',
+    'oldRevision',
+    'newRevision',
+    'policyEpoch',
+    'masterEpoch',
+    'outcome',
+    'personalDataPermissionIds',
+  ],
+  'membership.custom_role_cleared': [
+    'roleId',
+    'oldRevision',
+    'policyEpoch',
+    'masterEpoch',
+    'outcome',
+    'personalDataPermissionIds',
+  ],
+  'team.custom_roles_enabled': ['oldPolicyEpoch', 'newPolicyEpoch', 'masterEpoch', 'outcome'],
+  'team.custom_roles_disabled': ['oldPolicyEpoch', 'newPolicyEpoch', 'masterEpoch', 'outcome'],
 } as const
 export type AuditAction = keyof typeof auditDetails
 export interface AuditActor {
