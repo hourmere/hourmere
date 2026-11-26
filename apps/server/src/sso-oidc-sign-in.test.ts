@@ -2962,6 +2962,31 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     expect((await audit()).map(({ action }) => action)).toEqual([failureAction])
   })
 
+  it('does not audit a callback failure for a provider deleted during token exchange', async () => {
+    const f = await provider()
+    const attempt = await start(f.providerId)
+    const code = idp.issue(
+      attempt,
+      { sub: 'synthetic-subject', nonce: 'wrong-nonce' },
+      async () => {
+        // The provider is retained until its owning team is deleted.
+        await db.deleteFrom('auth.organization').where('id', '=', fixture.team).execute()
+      },
+    )
+
+    await refusal(await callback(attempt, code))
+
+    expect(idp.exchange).toHaveBeenCalledOnce()
+    expect(
+      await db
+        .selectFrom('sso_providers')
+        .select('id')
+        .where('id', '=', f.providerId)
+        .executeTakeFirst(),
+    ).toBeUndefined()
+    expect(await audit()).toEqual([])
+  })
+
   it('rolls back the session and proof when the success event cannot commit', async () => {
     const f = await linked()
     const attempt = await start(f.providerId)
