@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto'
-import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import type pg from 'pg'
 import { describe, expect, it } from 'vitest'
 import { detailsCheckBranches } from './audit-details-check-source.ts'
-import { migrationsDir, runMigrations } from './migrate.ts'
+import { runMigrations } from './migrate.ts'
 import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
+import {
+  MIGRATION_COVERAGE_TIMEOUT,
+  MIGRATION_REPLAY_TIMEOUT,
+  useMigrationReplay,
+} from './testing/migration-replay.ts'
 import { createTestDatabase, type TestDatabase } from './testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -99,49 +101,51 @@ it('preserves all predecessor audit details branches', () => {
 })
 
 describe.skipIf(!serverUrl)('SCIM User PATCH audit details migration', () => {
-  it('fails an assertion when the audit details check is dropped', async () => {
-    const report = await checkConstraintCoverage({
-      serverUrl: serverUrl as string,
-      migration,
-      assertions: assertPatchAuditProtections,
-    })
-    expect(report.problems).toEqual([])
-    expect(report.results.map(({ key, status }) => [key, status])).toEqual([
-      [`constraint public.audit_events.${constraint}`, 'covered'],
-    ])
-  }, 600_000)
+  const replay = useMigrationReplay(serverUrl as string, migration)
 
-  it('preserves the populated predecessor journal and reruns as a no-op after upgrade or fresh install', async () => {
-    const predecessor = await mkdtemp(join(tmpdir(), 'hourmere-scim-patch-'))
-    let upgraded: TestDatabase | undefined
-    let fresh: TestDatabase | undefined
-    try {
-      for (const file of await readdir(migrationsDir))
-        if (file.endsWith('.sql') && file < migration)
-          await copyFile(join(migrationsDir, file), join(predecessor, file))
-      upgraded = await createTestDatabase(serverUrl as string, predecessor, {
-        tag: 'scim_patch_up',
+  it(
+    'fails an assertion when the audit details check is dropped',
+    async () => {
+      const report = await checkConstraintCoverage({
+        serverUrl: serverUrl as string,
+        migration,
+        predecessorTemplate: replay.predecessor,
+        assertions: assertPatchAuditProtections,
       })
-      const pool = upgraded.pool
-      const scope = await seedJournal(pool)
-      const before = (await journal(pool, scope)).rows
-      expect(before).toHaveLength(3)
-      await expect(insert(pool, validDetails)).rejects.toMatchObject(refused)
-      expect(await runMigrations(pool)).toContain(migration)
-      expect((await journal(pool, scope)).rows).toEqual(before)
-      expect(await runMigrations(pool)).toEqual([])
-      expect((await journal(pool, scope)).rows).toEqual(before)
-      await assertPatchAuditProtections(pool)
-
-      fresh = await createTestDatabase(serverUrl as string, undefined, { tag: 'scim_patch_new' })
-      expect(await runMigrations(fresh.pool)).toEqual([])
-      await assertPatchAuditProtections(fresh.pool)
-    } finally {
-      await Promise.all([
-        fresh?.drop(),
-        upgraded?.drop(),
-        rm(predecessor, { recursive: true, force: true }),
+      expect(report.problems).toEqual([])
+      expect(report.results.map(({ key, status }) => [key, status])).toEqual([
+        [`constraint public.audit_events.${constraint}`, 'covered'],
       ])
-    }
-  }, 120_000)
+    },
+    MIGRATION_COVERAGE_TIMEOUT,
+  )
+
+  it(
+    'preserves the populated predecessor journal and reruns as a no-op after upgrade or fresh install',
+    async () => {
+      const { predecessor } = replay
+      let upgraded: TestDatabase | undefined
+      let fresh: TestDatabase | undefined
+      try {
+        upgraded = await predecessor.clone(undefined, { migrate: false, tag: 'scim_patch_up' })
+        const pool = upgraded.pool
+        const scope = await seedJournal(pool)
+        const before = (await journal(pool, scope)).rows
+        expect(before).toHaveLength(3)
+        await expect(insert(pool, validDetails)).rejects.toMatchObject(refused)
+        expect(await runMigrations(pool)).toContain(migration)
+        expect((await journal(pool, scope)).rows).toEqual(before)
+        expect(await runMigrations(pool)).toEqual([])
+        expect((await journal(pool, scope)).rows).toEqual(before)
+        await assertPatchAuditProtections(pool)
+
+        fresh = await createTestDatabase(serverUrl as string, undefined, { tag: 'scim_patch_new' })
+        expect(await runMigrations(fresh.pool)).toEqual([])
+        await assertPatchAuditProtections(fresh.pool)
+      } finally {
+        await Promise.all([fresh?.drop(), upgraded?.drop()])
+      }
+    },
+    MIGRATION_REPLAY_TIMEOUT,
+  )
 })

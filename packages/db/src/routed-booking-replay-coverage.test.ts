@@ -1,5 +1,4 @@
-import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { copyFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type pg from 'pg'
 import { describe, expect, it } from 'vitest'
@@ -12,7 +11,12 @@ import {
   versionValues,
 } from './routing-storage-fixtures.ts'
 import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
-import { createTestDatabase, type TestDatabase } from './testing.ts'
+import {
+  MIGRATION_COVERAGE_TIMEOUT,
+  MIGRATION_REPLAY_TIMEOUT,
+  useMigrationReplay,
+} from './testing/migration-replay.ts'
+import type { TestDatabase } from './testing.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -120,53 +124,55 @@ async function routingRows(pool: pg.Pool) {
 }
 
 describe.skipIf(!serverUrl)('routed booking replay migration', () => {
-  it('fails an assertion when either replay protection is dropped', async () => {
-    const report = await checkConstraintCoverage({
-      serverUrl: serverUrl as string,
-      migration,
-      assertions: assertReplayProtections,
-    })
-    expect(report.problems).toEqual([])
-    expect(report.results.filter((result) => result.status === 'covered')).toHaveLength(2)
-  }, 600_000)
+  const replay = useMigrationReplay(serverUrl as string, migration)
 
-  it('preserves predecessor rows, matches a fresh installation and reruns as a no-op', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'hourmere-routing-replay-upgrade-'))
-    let upgraded: TestDatabase | undefined
-    let fresh: TestDatabase | undefined
-    try {
-      const predecessors = (await readdir(migrationsDir)).filter(
-        (file) => file.endsWith('.sql') && file < migration,
-      )
-      for (const file of predecessors) {
-        await copyFile(join(migrationsDir, file), join(directory, file))
-      }
-      upgraded = await createTestDatabase(serverUrl as string, directory, {
-        tag: 'routed_replay_up',
+  it(
+    'fails an assertion when either replay protection is dropped',
+    async () => {
+      const report = await checkConstraintCoverage({
+        serverUrl: serverUrl as string,
+        migration,
+        predecessorTemplate: replay.predecessor,
+        assertions: assertReplayProtections,
       })
-      await seedRoutingSnapshot(upgraded.pool)
-      const before = await routingRows(upgraded.pool)
-      expect(before.booking_routing).toHaveLength(1)
-      expect(before.routing_receipts).toHaveLength(2)
+      expect(report.problems).toEqual([])
+      expect(report.results.filter((result) => result.status === 'covered')).toHaveLength(2)
+    },
+    MIGRATION_COVERAGE_TIMEOUT,
+  )
 
-      await copyFile(join(migrationsDir, migration), join(directory, migration))
-      expect(await runMigrations(upgraded.pool, directory)).toEqual([migration])
-      expect(await routingRows(upgraded.pool)).toEqual(before)
-      await expect(
-        upgraded.pool.query('SELECT replay_fingerprint FROM booking_routing'),
-      ).resolves.toMatchObject({ rows: [{ replay_fingerprint: null }] })
+  it(
+    'preserves predecessor rows, matches a fresh installation and reruns as a no-op',
+    async () => {
+      const { directory, predecessor } = replay
+      let upgraded: TestDatabase | undefined
+      let fresh: TestDatabase | undefined
+      try {
+        upgraded = await predecessor.clone(undefined, { migrate: false, tag: 'routed_replay_up' })
+        await seedRoutingSnapshot(upgraded.pool)
+        const before = await routingRows(upgraded.pool)
+        expect(before.booking_routing).toHaveLength(1)
+        expect(before.routing_receipts).toHaveLength(2)
 
-      fresh = await createTestDatabase(serverUrl as string, directory, { tag: 'route_replay_new' })
-      const schema = await snapshotSchema(upgraded.pool)
-      expect(schema).toEqual(await snapshotSchema(fresh.pool))
-      expect(await runMigrations(upgraded.pool, directory)).toEqual([])
-      expect(await runMigrations(fresh.pool, directory)).toEqual([])
-      expect(await snapshotSchema(upgraded.pool)).toEqual(schema)
-      expect(await routingRows(upgraded.pool)).toEqual(before)
-    } finally {
-      await fresh?.drop()
-      await upgraded?.drop()
-      await rm(directory, { recursive: true, force: true })
-    }
-  }, 120_000)
+        await copyFile(join(migrationsDir, migration), join(directory, migration))
+        expect(await runMigrations(upgraded.pool, directory)).toEqual([migration])
+        expect(await routingRows(upgraded.pool)).toEqual(before)
+        await expect(
+          upgraded.pool.query('SELECT replay_fingerprint FROM booking_routing'),
+        ).resolves.toMatchObject({ rows: [{ replay_fingerprint: null }] })
+
+        fresh = await predecessor.clone(directory, { tag: 'route_replay_new' })
+        const schema = await snapshotSchema(upgraded.pool)
+        expect(schema).toEqual(await snapshotSchema(fresh.pool))
+        expect(await runMigrations(upgraded.pool, directory)).toEqual([])
+        expect(await runMigrations(fresh.pool, directory)).toEqual([])
+        expect(await snapshotSchema(upgraded.pool)).toEqual(schema)
+        expect(await routingRows(upgraded.pool)).toEqual(before)
+      } finally {
+        await fresh?.drop()
+        await upgraded?.drop()
+      }
+    },
+    MIGRATION_REPLAY_TIMEOUT,
+  )
 })

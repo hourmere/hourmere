@@ -4,6 +4,7 @@ import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createPool } from './index.ts'
 import { runMigrations } from './migrate.ts'
+import { MIGRATION_REPLAY_TIMEOUT } from './testing/migration-replay.ts'
 import { createTestDatabase, type TestDatabase } from './testing.ts'
 
 const url = process.env.DATABASE_URL
@@ -113,9 +114,13 @@ describe.skipIf(!url)('schema', () => {
       [bookingId, userId],
     )
 
-  it('is fully applied and a second run does nothing', async () => {
-    expect(await runMigrations(pool)).toEqual([])
-  })
+  it(
+    'is fully applied and a second run does nothing',
+    async () => {
+      expect(await runMigrations(pool)).toEqual([])
+    },
+    MIGRATION_REPLAY_TIMEOUT,
+  )
 
   describe('double-booking', () => {
     it('rejects an overlapping booking for the same host', async () => {

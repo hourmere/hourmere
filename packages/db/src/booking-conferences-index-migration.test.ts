@@ -2,9 +2,12 @@ import { copyFile, mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type pg from 'pg'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { migrationsDir, runMigrations } from './migrate.ts'
-import { createTestDatabase, type TestDatabase } from './testing.ts'
+import { MIGRATION_REPLAY_TIMEOUT, useMigrationReplay } from './testing/migration-replay.ts'
+import type { TestDatabase } from './testing.ts'
+
+vi.setConfig({ testTimeout: MIGRATION_REPLAY_TIMEOUT, hookTimeout: MIGRATION_REPLAY_TIMEOUT })
 
 const serverUrl = process.env.DATABASE_URL
 const migration = '0032_booking_conferences_booking_id_index.sql'
@@ -130,12 +133,14 @@ async function explain(pool: pg.Pool) {
 }
 
 describe.skipIf(!serverUrl)('booking conference booking index migration', () => {
+  const replay = useMigrationReplay(serverUrl as string, migration)
+
   it('preserves predecessor records and target semantics, matches fresh schema and reruns without writes', async () => {
     const predecessor = await predecessorDirectory()
     let upgraded: TestDatabase | undefined
     let fresh: TestDatabase | undefined
     try {
-      upgraded = await createTestDatabase(serverUrl as string, predecessor)
+      upgraded = await replay.predecessor.clone(predecessor)
       const pool = upgraded.pool
       expect(
         (await pool.query('SELECT name FROM schema_migrations ORDER BY name')).rows.at(-1),
@@ -177,7 +182,7 @@ describe.skipIf(!serverUrl)('booking conference booking index migration', () => 
       expect(await records(pool)).toEqual(before)
       expect(await schema(pool)).toEqual(upgradedSchema)
 
-      fresh = await createTestDatabase(serverUrl as string, predecessor)
+      fresh = await replay.predecessor.clone(predecessor)
       expect(await schema(fresh.pool)).toEqual(upgradedSchema)
       const ledger = 'SELECT name,checksum FROM schema_migrations ORDER BY name'
       expect((await fresh.pool.query(ledger)).rows).toEqual((await pool.query(ledger)).rows)
@@ -193,7 +198,7 @@ describe.skipIf(!serverUrl)('booking conference booking index migration', () => 
     const predecessor = await predecessorDirectory()
     let database: TestDatabase | undefined
     try {
-      database = await createTestDatabase(serverUrl as string, predecessor)
+      database = await replay.predecessor.clone(predecessor)
       const pool = database.pool
       await seed(pool, 100_000)
       await pool.query('ANALYZE bookings; ANALYZE booking_conferences')

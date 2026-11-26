@@ -3,14 +3,17 @@ import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type pg from 'pg'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { assertMeetingPollKeyStateProtections } from './meeting-poll-key-state-protections.ts'
 import { fixture, insert } from './meeting-poll-protections.ts'
 import { migrationsDir, runMigrations } from './migrate.ts'
+import { MIGRATION_REPLAY_TIMEOUT } from './testing/migration-replay.ts'
 import { createTestDatabase, type TestDatabase } from './testing.ts'
 import { seedEarly } from './upgrade-path-seed-early.ts'
 import { seedLater } from './upgrade-path-seed-later.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
+
+vi.setConfig({ testTimeout: MIGRATION_REPLAY_TIMEOUT, hookTimeout: MIGRATION_REPLAY_TIMEOUT })
 
 const serverUrl = process.env.DATABASE_URL
 const migration = '0084_meeting_poll_key_state.sql'
@@ -110,5 +113,5 @@ describe.skipIf(!serverUrl)('meeting poll key state migration', () => {
       await upgraded?.drop()
       await rm(directory, { recursive: true, force: true })
     }
-  }, 120_000)
+  })
 })
