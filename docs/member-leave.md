@@ -1,5 +1,8 @@
 # Safe team departure
 
+The [proposed custom roles design](custom-roles.md) carries the current team departure,
+owner continuity and recovery-owner protections into the future permission model.
+
 `POST /api/v1/teams/{teamId}/leave` accepts an empty JSON object and requires a current,
 verified browser session. Bind the action to its original team with
 `X-Expected-Organization-Id`. Missing or changed context returns
