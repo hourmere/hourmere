@@ -245,9 +245,10 @@ them as full access. Follow the supported backup/restore procedure for rollback.
 ## Inspect team single sign-on
 
 Call `list_sso_providers` and `get_sso_policy` in the team bound to your connection.
-You must be a current, verified team owner or administrator and use a `read` or `full`
-API key or an authorized MCP OAuth connection with `mcp:tools`. Both tools remain
-available with both protocol settings off, subject to scope, role and team enforcement.
+You must be a current team owner or administrator with a verified Hourmere email.
+Use a `read` or `full` API key or an authorized MCP OAuth connection with `mcp:tools`.
+Both tools remain available with both protocol settings off, subject to scope, role
+and team enforcement.
 
 Send either of these as the `params` object in a `tools/call` request.
 
