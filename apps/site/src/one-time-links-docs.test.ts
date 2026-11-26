@@ -62,14 +62,14 @@ const numericFacts = [
   },
   {
     name: 'prefill name bound',
-    module: 'packages/scheduling/src/one-time-links.ts',
+    module: 'packages/core/src/one-time-links.ts',
     key: 'ONE_TIME_LINK_PREFILL_NAME_MAX',
     value: Links.ONE_TIME_LINK_PREFILL_NAME_MAX,
     phrase: (value: number) => `names allow up to ${value} characters`,
   },
   {
     name: 'prefill email bound',
-    module: 'packages/scheduling/src/one-time-links.ts',
+    module: 'packages/core/src/one-time-links.ts',
     key: 'ONE_TIME_LINK_PREFILL_EMAIL_MAX',
     value: Links.ONE_TIME_LINK_PREFILL_EMAIL_MAX,
     phrase: (value: number) => `email addresses up to ${value}`,
@@ -367,7 +367,9 @@ describe('one-time booking link documentation', () => {
     checkMcp(guide())
     expect(() => checkMcp(guide().replaceAll('"eventTypeId":', '"eventId":'))).toThrow(assertion)
     expect(() =>
-      checkMcp(guide().replaceAll('"limit": 50', `"limit": ${Links.ONE_TIME_LINK_PAGE_MAX + 1}`)),
+      checkMcp(
+        guide().replace(/"limit"\s*:\s*\d+/g, `"limit": ${Links.ONE_TIME_LINK_PAGE_MAX + 1}`),
+      ),
     ).toThrow(assertion)
     expect(() => checkMcp(guide().replaceAll('"idempotencyKey":', '"retryKey":'))).toThrow(
       assertion,

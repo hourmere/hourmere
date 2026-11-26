@@ -1,12 +1,16 @@
 import { randomUUID } from 'node:crypto'
-import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { copyFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type pg from 'pg'
 import { describe, expect, it } from 'vitest'
 import { migrationsDir, runMigrations } from './migrate.ts'
 import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
-import { createTestDatabase, type TestDatabase } from './testing.ts'
+import {
+  MIGRATION_COVERAGE_TIMEOUT,
+  MIGRATION_REPLAY_TIMEOUT,
+  useMigrationReplay,
+} from './testing/migration-replay.ts'
+import type { TestDatabase } from './testing.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -170,61 +174,67 @@ async function assertDeliveryStorage(pool: pg.Pool) {
 }
 
 describe.skipIf(!serverUrl)('workflow webhook outbox migration', () => {
-  it('keeps populated predecessor tuples, matches fresh schema and reruns without writes', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'hourmere-workflow-webhook-outbox-'))
-    let upgraded: TestDatabase | undefined
-    let fresh: TestDatabase | undefined
-    try {
-      for (const file of await readdir(migrationsDir)) {
-        if (file.endsWith('.sql') && file < migration)
-          await copyFile(join(migrationsDir, file), join(directory, file))
+  const replay = useMigrationReplay(serverUrl as string, migration)
+
+  it(
+    'keeps populated predecessor tuples, matches fresh schema and reruns without writes',
+    async () => {
+      const { directory, predecessor } = replay
+      let upgraded: TestDatabase | undefined
+      let fresh: TestDatabase | undefined
+      try {
+        upgraded = await predecessor.clone(undefined, { migrate: false })
+        const pool = upgraded.pool
+        await seedPredecessor(pool)
+        const before = await snapshotDeliveries(pool)
+        expect(before).toHaveLength(7)
+
+        await copyFile(join(migrationsDir, migration), join(directory, migration))
+        expect(await runMigrations(pool, directory)).toEqual([migration])
+        expect(await snapshotDeliveries(pool)).toEqual(before)
+        await expect(
+          pool.query('SELECT count(workflow_run_id)::int AS runs FROM webhook_deliveries'),
+        ).resolves.toMatchObject({ rows: [{ runs: 0 }] })
+
+        fresh = await predecessor.clone(undefined, { migrate: false })
+        expect(await runMigrations(fresh.pool, directory)).toEqual([migration])
+        const upgradedSchema = await snapshotSchema(pool)
+        expect(await snapshotSchema(fresh.pool)).toEqual(upgradedSchema)
+        const ledger = 'SELECT name,checksum FROM schema_migrations ORDER BY name'
+        expect((await fresh.pool.query(ledger)).rows).toEqual((await pool.query(ledger)).rows)
+
+        const applied = 'SELECT * FROM schema_migrations ORDER BY name'
+        const beforeRerun = (await pool.query(applied)).rows
+        expect(await runMigrations(pool, directory)).toEqual([])
+        expect(await runMigrations(fresh.pool, directory)).toEqual([])
+        expect((await pool.query(applied)).rows).toEqual(beforeRerun)
+        expect(await snapshotDeliveries(pool)).toEqual(before)
+        expect(await snapshotSchema(pool)).toEqual(upgradedSchema)
+      } finally {
+        await fresh?.drop()
+        await upgraded?.drop()
       }
-      upgraded = await createTestDatabase(serverUrl as string, directory)
-      const pool = upgraded.pool
-      await seedPredecessor(pool)
-      const before = await snapshotDeliveries(pool)
-      expect(before).toHaveLength(7)
+    },
+    MIGRATION_REPLAY_TIMEOUT,
+  )
 
-      await copyFile(join(migrationsDir, migration), join(directory, migration))
-      expect(await runMigrations(pool, directory)).toEqual([migration])
-      expect(await snapshotDeliveries(pool)).toEqual(before)
-      await expect(
-        pool.query('SELECT count(workflow_run_id)::int AS runs FROM webhook_deliveries'),
-      ).resolves.toMatchObject({ rows: [{ runs: 0 }] })
-
-      fresh = await createTestDatabase(serverUrl as string, directory, { migrate: false })
-      expect((await runMigrations(fresh.pool, directory)).at(-1)).toBe(migration)
-      const upgradedSchema = await snapshotSchema(pool)
-      expect(await snapshotSchema(fresh.pool)).toEqual(upgradedSchema)
-      const ledger = 'SELECT name,checksum FROM schema_migrations ORDER BY name'
-      expect((await fresh.pool.query(ledger)).rows).toEqual((await pool.query(ledger)).rows)
-
-      const applied = 'SELECT * FROM schema_migrations ORDER BY name'
-      const beforeRerun = (await pool.query(applied)).rows
-      expect(await runMigrations(pool, directory)).toEqual([])
-      expect(await runMigrations(fresh.pool, directory)).toEqual([])
-      expect((await pool.query(applied)).rows).toEqual(beforeRerun)
-      expect(await snapshotDeliveries(pool)).toEqual(before)
-      expect(await snapshotSchema(pool)).toEqual(upgradedSchema)
-    } finally {
-      await fresh?.drop()
-      await upgraded?.drop()
-      await rm(directory, { recursive: true, force: true })
-    }
-  }, 60_000)
-
-  it('fails a storage assertion when any 0147 object is dropped', async () => {
-    const report = await checkConstraintCoverage({
-      serverUrl: serverUrl as string,
-      migration,
-      assertions: assertDeliveryStorage,
-    })
-    expect(report.problems).toEqual([])
-    expect(report.results.map(({ status }) => status)).toEqual([
-      'covered',
-      'covered',
-      'covered',
-      'covered',
-    ])
-  }, 600_000)
+  it(
+    'fails a storage assertion when any 0147 object is dropped',
+    async () => {
+      const report = await checkConstraintCoverage({
+        serverUrl: serverUrl as string,
+        migration,
+        predecessorTemplate: replay.predecessor,
+        assertions: assertDeliveryStorage,
+      })
+      expect(report.problems).toEqual([])
+      expect(report.results.map(({ status }) => status)).toEqual([
+        'covered',
+        'covered',
+        'covered',
+        'covered',
+      ])
+    },
+    MIGRATION_COVERAGE_TIMEOUT,
+  )
 })

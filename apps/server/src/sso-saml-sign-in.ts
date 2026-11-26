@@ -1,5 +1,11 @@
 import type { OpenAPIHono } from '@hono/zod-openapi'
 import type { SignupPolicy } from '@hourmere/auth'
+import {
+  acceptLanguage,
+  cookieLanguage,
+  type InterfaceLanguage,
+  interfaceLanguages,
+} from '@hourmere/core/language'
 import type { Db } from '@hourmere/db'
 import { type SsoAuditReason, writeSsoSecurityFailure } from '@hourmere/db/audit'
 import type { Context, MiddlewareHandler } from 'hono'
@@ -96,6 +102,14 @@ import {
 } from './sso-saml-verifier.ts'
 
 const persistentNameId = 'urn:oasis:names:tc:SAML:2.0:nameid-format:persistent'
+const confirmationLabels: Record<InterfaceLanguage, { link: string; continue: string }> = {
+  en: { link: 'Link account', continue: 'Continue' },
+  'zh-CN': { link: '关联账号', continue: '继续' },
+  de: { link: 'Konto verknüpfen', continue: 'Weiter' },
+  fr: { link: 'Associer le compte', continue: 'Continuer' },
+  es: { link: 'Vincular cuenta', continue: 'Continuar' },
+  'pt-BR': { link: 'Vincular conta', continue: 'Continuar' },
+}
 const emailAddress = z.email().max(320)
 const errorPath = '/sign-in?error=unable_to_create_session'
 const completionInvalid = { error: 'sso_saml_completion_invalid' } as const
@@ -1013,20 +1027,18 @@ export function samlSignInRoutes({
           const id = samlId.safeParse(query.get('attemptId'))
           const link = query.get('intent') === 'link'
           if (!id.success || query.size !== (link ? 2 : 1)) return c.json(completionInvalid, 400)
-          const chinese = /^(zh)(?:[-;,]|$)/i.test(c.req.header('accept-language') ?? '')
-          const label = link
-            ? chinese
-              ? '关联账号'
-              : 'Link account'
-            : chinese
-              ? '继续'
-              : 'Continue'
+          const preference = cookieLanguage(c.req.header('cookie'))
+          const language =
+            preference && interfaceLanguages('public').includes(preference)
+              ? preference
+              : acceptLanguage(c.req.header('accept-language'), 'public')
+          const label = confirmationLabels[language][link ? 'link' : 'continue']
           const consent = link ? '<input type="hidden" name="intent" value="link">' : ''
           // This origin-only policy lets a native form POST send Origin without the attempt URL.
           c.header('Referrer-Policy', 'strict-origin')
-          c.header('Vary', 'Accept-Language')
+          c.header('Vary', 'Accept-Language, Cookie')
           return c.html(
-            `<!doctype html><html lang="${chinese ? 'zh-CN' : 'en'}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${label}</title></head><body><main><form action="${SAML_COMPLETE_PATH}" method="post"><input type="hidden" name="attemptId" value="${id.data}">${consent}<button type="submit">${label}</button></form></main></body></html>`,
+            `<!doctype html><html lang="${language}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${label}</title></head><body><main><form action="${SAML_COMPLETE_PATH}" method="post"><input type="hidden" name="attemptId" value="${id.data}">${consent}<button type="submit">${label}</button></form></main></body></html>`,
           )
         }
         if (c.req.method !== 'POST') return c.json({ error: 'method_not_allowed' }, 405)

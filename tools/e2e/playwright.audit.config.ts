@@ -27,8 +27,8 @@ export default defineConfig<FixtureOptions>({
     suite === 'cross-engine'
       ? ['**/cross-engine.spec.ts', '**/host-slot-picker.spec.ts']
       : `**/${suite}.spec.ts`,
-  // Each viewport and locale scans the shared registry in one browser session; a full
-  // en-US or zh-CN a11y scan of the routing and workflow states takes about six minutes.
+  // Layout uses one browser session per viewport and locale. Axe batches registry
+  // states so they have time to finish within the same deadline.
   timeout: ['layout', 'a11y'].includes(suite) ? 480_000 : 120_000,
   // Preserve only masked visual comparisons, never traces, video or failure DOM.
   preserveOutput: suite === 'visual' ? 'failures-only' : 'never',

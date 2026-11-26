@@ -262,7 +262,8 @@ stack includes PostgreSQL 18.
   including the delivery worker's automatic pause after Slack answers 404 or 410, fail with
   SQLSTATE 23514 (`audit_events_details_check`) and change nothing. Replacing the check
   makes writes to `audit_events` wait while existing rows are validated; that time grows
-  with the journal.
+  with the journal. See the
+  [audit event journal](https://github.com/hourmere/hourmere/blob/main/docs/audit-log.md#stable-actions-and-detail-allow-lists).
 - **Attendee no-show markers (migration 0070) upgrade in place.** The migration is safe to
   apply while the previous version is still running: it adds nullable attendee columns and
   only widens the webhook event checks, keeping the delivery uniqueness key from 0064. Apply
