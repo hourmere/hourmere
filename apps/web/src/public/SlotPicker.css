@@ -1,6 +1,6 @@
 .picker .picker-title {
   margin: 0 0 var(--space-4);
-  font-size: 1.2rem;
+  font-size: var(--text-lg);
 }
 
 /* Slot picker: calendar and the chosen day's times side by side from 640px */
@@ -16,7 +16,7 @@
 }
 
 .picker .picker-calendar {
-  /* Sized by its track, so day labels can scale with the column width (cqw) below. */
+  /* Size labels from the calendar track, including in narrow previews and embeds. */
   container-type: inline-size;
   width: 100%;
   max-width: 360px;
@@ -38,7 +38,7 @@
 
 .picker .calendar-month {
   margin: 0;
-  font-size: 1.05rem;
+  font-size: var(--text-md);
 }
 
 .picker .calendar-nav {
@@ -55,7 +55,7 @@
   border-radius: 999px;
   background: var(--surface);
   color: var(--text);
-  font-size: 1.4rem;
+  font-size: var(--text-xl);
   line-height: 1;
   cursor: pointer;
 }
@@ -81,7 +81,7 @@
 .picker .calendar-grid th {
   padding: var(--space-1) 0;
   color: var(--muted);
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
   font-weight: 600;
   text-align: center;
 }
@@ -104,15 +104,25 @@
   background: transparent;
   color: var(--muted);
   font: inherit;
-  /* At most 37% of a column, so bold 22日 stays on one line inside the 2px border of 36px cells. */
-  font-size: min(1rem, 5.3cqw);
+  font-size: var(--text-sm);
   cursor: default;
 }
 
-/* Chinese labels carry the 日 suffix: smaller, column-bound and never broken over two lines. */
+/* Chinese labels carry the 日 suffix and stay on one line. */
 .picker .day:lang(zh) {
-  font-size: min(0.875rem, 5cqw);
   white-space: nowrap;
+}
+
+@container (max-width: 264px) {
+  .picker .day {
+    font-size: var(--text-xs);
+  }
+}
+
+@container (min-width: 308px) {
+  .picker .day:not(:lang(zh)) {
+    font-size: var(--text-md);
+  }
 }
 
 .picker .day-available {
@@ -129,8 +139,8 @@
 
 /*
  * Touch targets: the calendar fills its track (never wider), so seven 44px columns need a
- * 308px track, which 390px phones provide. Narrower tracks share their width across the
- * seven columns (36px at 320px, 42px at 360px), above the 24px minimum and inside the card.
+ * 308px track, which 360px full-width booking pages provide. Narrower tracks share their
+ * width across seven columns, above the 24px minimum at supported phone sizes.
  */
 @media (pointer: coarse) {
   .picker .calendar-grid {
@@ -180,7 +190,7 @@
   min-height: 1.55em;
   margin: var(--space-2) 0 var(--space-3);
   color: var(--muted);
-  font-size: 0.9rem;
+  font-size: var(--text-sm);
 }
 
 .picker .picker-error {
@@ -207,7 +217,7 @@
 
 .picker .slots-day {
   margin: 0 0 var(--space-3);
-  font-size: 1rem;
+  font-size: var(--text-md);
   scroll-margin-top: var(--space-5);
 }
 
@@ -310,7 +320,7 @@
 :is(.public, .picker) .tz-caption {
   grid-column: 1;
   color: var(--muted);
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
 }
 
 :is(.public, .picker) .tz-current {
@@ -325,7 +335,7 @@
 
 :is(.public, .picker) .tz-offset {
   color: var(--muted);
-  font-size: 0.9rem;
+  font-size: var(--text-sm);
   white-space: nowrap;
 }
 
@@ -378,7 +388,7 @@
 :is(.public, .picker) .tz-group-label {
   margin: var(--space-2) var(--space-3);
   color: var(--muted);
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
   font-weight: 600;
 }
 
@@ -414,7 +424,7 @@
 .picker .slot-seats {
   display: block;
   padding: var(--space-1);
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
   font-weight: 400;
   overflow-wrap: anywhere;
 }

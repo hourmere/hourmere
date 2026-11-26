@@ -1,5 +1,6 @@
 import { interfaceLanguage } from '@hourmere/core/language'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ConferenceNotice } from '../components/ConferenceNotice.tsx'
 import { EmailDeliveryHint } from '../components/EmailDeliveryHint.tsx'
 import { usePageTitle } from '../hooks.ts'
 import { formatDuration } from '../i18n/duration.ts'
@@ -542,13 +543,14 @@ function ContinuationBooking({
 }
 
 function ContinuationConfirmation({
-  result: { booking, manageToken, replayed, timeZone },
+  result: { booking: initialBooking, manageToken, replayed, timeZone },
   locale,
 }: {
   result: RoutedBookingResult & { replayed: boolean; timeZone: string }
   locale: string
 }) {
   const { t } = useI18n()
+  const [booking, setBooking] = useState(initialBooking)
   const cancelled = booking.status === 'cancelled'
   const ended = Date.parse(booking.end) <= currentTime()
   const conference = booking.conference?.status
@@ -587,12 +589,23 @@ function ContinuationConfirmation({
                 locale={locale}
               />,
             ],
-            ['Where', <LocationDetails key="where" location={booking.location} />],
+            [
+              'Where',
+              <LocationDetails key="where" location={booking.location} cancelled={cancelled} />,
+            ],
             ...(booking.assignedHost
               ? [['Host', booking.assignedHost.name] as [string, string]]
               : []),
           ]}
         />
+        {booking.location?.kind === 'microsoft_teams' && (
+          <ConferenceNotice
+            key={booking.id}
+            booking={booking}
+            manageToken={manageToken}
+            onChange={setBooking}
+          />
+        )}
         <div className="confirmation-secondary stack">
           {manageToken && (
             <ManageLink

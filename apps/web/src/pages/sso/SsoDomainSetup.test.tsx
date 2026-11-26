@@ -1,4 +1,4 @@
-import { act, screen, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { PATHS } from '../../paths.ts'
@@ -76,7 +76,8 @@ describe('SSO domain setup', () => {
     const clipboard = vi.spyOn(navigator.clipboard, 'writeText')
     const api = renderDomains()
     const challenge = await enterDomain(user)
-    expect(document.activeElement).toBe(within(challenge).getByRole('heading'))
+    const challengeHeading = within(challenge).getByRole('heading')
+    await waitFor(() => expect(document.activeElement).toBe(challengeHeading))
     expect(within(challenge).queryByText(record.txtValue)?.hasAttribute('data-private')).toBe(true)
     expect(clipboard).not.toHaveBeenCalled()
     expect(
@@ -136,7 +137,8 @@ describe('SSO domain setup', () => {
     })
     await user.click(rotate)
     const rotation = screen.getByRole('group', { name: 'Rotate DNS challenge?' })
-    expect(document.activeElement).toBe(within(rotation).getByRole('button', { name: 'Cancel' }))
+    const cancel = within(rotation).getByRole('button', { name: 'Cancel' })
+    await waitFor(() => expect(document.activeElement).toBe(cancel))
     expect(api.to(generateChallenge)).toHaveLength(0)
     await user.click(within(rotation).getByRole('button', { name: 'Rotate challenge' }))
     await screen.findByRole('region', { name: 'DNS TXT record' })
