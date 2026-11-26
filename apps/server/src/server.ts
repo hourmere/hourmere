@@ -864,7 +864,6 @@ export function productionAppOptions({
       tools: productTools({
         db,
         slotSnippetsEnabled: config.SLOT_SNIPPETS_ENABLED,
-        teamPublicHomeOrganizationIds: config.TEAM_PUBLIC_HOME_ORGANIZATION_IDS,
         waitlistSecret: config.BETTER_AUTH_SECRET,
         meetingPollSecret: config.BETTER_AUTH_SECRET,
         publicUrl: config.PUBLIC_URL,
@@ -887,6 +886,7 @@ export function productionAppOptions({
         routingSecret: config.BETTER_AUTH_SECRET,
         workflowRunCursorSecret: config.BETTER_AUTH_SECRET,
         workflowsEnabled,
+        teamPublicHomeOrganizationIds: config.TEAM_PUBLIC_HOME_ORGANIZATION_IDS,
         ssoCapabilities: sso,
       }),
     }),
