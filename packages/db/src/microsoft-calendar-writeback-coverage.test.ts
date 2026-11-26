@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type pg from 'pg'
 import { describe, expect, it } from 'vitest'
+import { createPool } from './index.ts'
 import { migrationsDir, runMigrations } from './migrate.ts'
 import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
 import { createTestDatabase, type TestDatabase } from './testing.ts'
@@ -156,7 +157,23 @@ describe.skipIf(!serverUrl)('Microsoft calendar writeback migration', () => {
         if (file.endsWith('.sql') && file < migration)
           await copyFile(join(migrationsDir, file), join(directory, file))
       }
-      upgraded = await createTestDatabase(serverUrl as string, directory, { tag: 'graph_write_up' })
+      fresh = await createTestDatabase(serverUrl as string, undefined, {
+        migrate: false,
+        tag: 'graph_write_new',
+      })
+      // Replay the common history on the empty reference. Close the setup pool before
+      // cloning it, since PostgreSQL requires the template database to have no connections.
+      const predecessorPool = createPool(fresh.url)
+      try {
+        await runMigrations(predecessorPool, directory)
+      } finally {
+        await predecessorPool.end()
+      }
+      upgraded = await createTestDatabase(serverUrl as string, undefined, {
+        migrate: false,
+        tag: 'graph_write_up',
+        template: new URL(fresh.url).pathname.slice(1),
+      })
       await seedPredecessor(upgraded.pool)
       const before = await originalRows(upgraded.pool)
       expect(before).toHaveLength(8)
@@ -171,7 +188,7 @@ describe.skipIf(!serverUrl)('Microsoft calendar writeback migration', () => {
         rows: [{ microsoft_writeback: null }, { microsoft_writeback: null }],
       })
 
-      fresh = await createTestDatabase(serverUrl as string, directory, { tag: 'graph_write_new' })
+      await expect(runMigrations(fresh.pool, directory)).resolves.toEqual([migration])
       expect(await snapshotSchema(upgraded.pool)).toEqual(await snapshotSchema(fresh.pool))
       await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([])
       await expect(runMigrations(fresh.pool, directory)).resolves.toEqual([])
@@ -183,5 +200,5 @@ describe.skipIf(!serverUrl)('Microsoft calendar writeback migration', () => {
         await rm(directory, { recursive: true, force: true })
       }
     }
-  })
+  }, 120_000)
 })
