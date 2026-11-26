@@ -6,6 +6,15 @@ import { isOrganizationContextChanged } from '../api/errors.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 
 type Booking = Schemas['Booking']
+
+function teamsLinkPending(booking: Booking): boolean {
+  return (
+    booking.status === 'confirmed' &&
+    booking.location?.kind === 'microsoft_teams' &&
+    booking.location.status === 'join_url_pending'
+  )
+}
+
 /** No session/profile requests on public pages; the capability stays in memory and a header. */
 export function ConferenceNotice({
   booking,
@@ -34,7 +43,7 @@ export function ConferenceNotice({
   // A cancellation can retain the booking id and remain conference-pending. A response
   // started before that lifecycle change must never restore its old confirmed state.
   // Stable fields, rather than the refreshed object, keep the bounded polling budget.
-  const lifecycle = `${booking.id}:${booking.status}:${booking.start}:${booking.end}:${booking.conference?.status ?? ''}`
+  const lifecycle = `${booking.id}:${booking.status}:${booking.start}:${booking.end}:${booking.conference?.status ?? ''}:${teamsLinkPending(booking)}`
   const currentLifecycle = useRef(lifecycle)
   currentLifecycle.current = lifecycle
   const changed = useRef(onChange)
@@ -49,11 +58,12 @@ export function ConferenceNotice({
   }, [lifecycle])
   const readOnly = isReadOnlyBooking(booking) || isReadOnlyBooking(current)
   const status = current.conference?.status
+  const pending = status === 'pending' || teamsLinkPending(current)
   const canRead = !readOnly && (Boolean(manageToken) || host)
   useEffect(() => {
     const forced = refresh !== consumedRefresh.current
     consumedRefresh.current = refresh
-    if (!canRead || !status || (status !== 'pending' && !forced)) return
+    if (!canRead || (!pending && !forced)) return
     const request = new AbortController()
     let active = true
     let timer: ReturnType<typeof setTimeout>
@@ -79,9 +89,10 @@ export function ConferenceNotice({
         setCurrent(data)
         changed.current?.(data)
         count++
-        if (data.conference?.status === 'pending' && count < 30)
+        const stillPending = data.conference?.status === 'pending' || teamsLinkPending(data)
+        if (stillPending && count < 30)
           timer = setTimeout(read, Math.min(10_000, 2_000 + count * 500))
-        else if (data.conference?.status === 'pending') setPaused(true)
+        else if (stillPending) setPaused(true)
       } catch {
         if (active && currentLifecycle.current === lifecycle) {
           setReadError(true)
@@ -95,7 +106,7 @@ export function ConferenceNotice({
       request.abort()
       clearTimeout(timer)
     }
-  }, [canRead, current.id, manageToken, status, refresh, lifecycle])
+  }, [canRead, current.id, manageToken, pending, refresh, lifecycle])
 
   async function retry() {
     if (retrying || conflict) return

@@ -38,6 +38,7 @@ import {
   type ScheduleDraft,
   scheduleLabels,
   scheduleServerErrors,
+  scheduleTimeZoneLabel,
   summarize,
   toScheduleBody,
   validateSchedule,
@@ -337,7 +338,7 @@ function ScheduleForm({
               <>
                 <h2>{t('Latest saved version')}</h2>
                 <p>
-                  {latest.schedule.name} · {latest.schedule.timeZone}
+                  {latest.schedule.name} · {scheduleTimeZoneLabel(latest.schedule.timeZone, locale)}
                 </p>
                 <p>{summarize(latest.schedule.weeklyHours, locale)}</p>
                 <ul>
