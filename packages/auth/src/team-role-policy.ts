@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { tryGetCurrentAuthEndpointContext } from '@better-auth/core/context'
+import { isPublicTeamSlugFormat } from '@hourmere/core'
 import type { Database, Db } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import { scimManagedMember, scimProvisioned, scimSuspended } from '@hourmere/db/scim-suspension'
@@ -13,7 +14,7 @@ import {
   MemberDepartureOwnerRequiredError,
 } from './member-departure.ts'
 import { recordTeamRoleChange } from './organization-operations.ts'
-import { isMember, isUuid } from './organizations.ts'
+import { blockNullSlug, isMember, isUuid, mapOrganizationSlugConflict } from './organizations.ts'
 import type { ScimClaimCompletion, ScimClaimFinish } from './scim-claims.ts'
 import {
   checkSsoAdmissionBlocks,
@@ -595,8 +596,12 @@ export function createTeamRolePolicy(
       )
         state.ctx = ctx
       if (!protectedPaths.has(ctx.path)) return
-      if (!(await getSessionFromCtx(ctx))) return
       const input = body(ctx)
+      if (ctx.path === createOrganization) blockNullSlug(input.slug)
+      if (ctx.path === updateOrganization && input.data && typeof input.data === 'object') {
+        blockNullSlug((input.data as Record<string, unknown>).slug)
+      }
+      if (!(await getSessionFromCtx(ctx))) return
       await asAuthError(async () => {
         // Self-removal keeps the safe leave policy, including member access and the
         // locked final-owner refusal. Other targets require administrative removal.
@@ -1046,6 +1051,11 @@ export function createTeamRolePolicy(
                 .executeTakeFirst()
               if (managedName) throw managedResource()
             }
+            const previous = await trx
+              .selectFrom('auth.organization')
+              .select(['name', 'slug'])
+              .where('id', '=', facts.organizationId)
+              .executeTakeFirstOrThrow()
             let update = trx
               .updateTable('auth.organization')
               .set(patch)
@@ -1062,25 +1072,17 @@ export function createTeamRolePolicy(
               action: 'organization.updated',
               targetType: 'organization',
               targetId: facts.organizationId,
+              details: {
+                ...(previous.name !== updated.name && { nameChanged: true }),
+                ...(previous.slug !== updated.slug && {
+                  oldSlug: isPublicTeamSlugFormat(previous.slug) ? previous.slug : null,
+                  newSlug: updated.slug,
+                }),
+              },
             })
             await requireProof(trx, ctx, facts.organizationId)
             return updated as never
-          }).catch((error: unknown) => {
-            // Two teams can pass Better Auth's slug lookup before either takes the address.
-            if (
-              error instanceof Error &&
-              'code' in error &&
-              error.code === '23505' &&
-              'constraint' in error &&
-              error.constraint === 'organization_slug_key'
-            ) {
-              throw new APIError('BAD_REQUEST', {
-                code: 'ORGANIZATION_SLUG_ALREADY_TAKEN',
-                message: 'Organization slug already taken',
-              })
-            }
-            throw error
-          })
+          }).catch(mapOrganizationSlugConflict)
         }
         if (ctx?.path === changeRole && request.model === 'member') {
           return write(async (trx) => {

@@ -561,9 +561,14 @@ with `encodeURIComponent`, as `X-Expected-Team-Name` and `X-Expected-Team-Slug`.
 `POST /api/auth/organization/update` compares both under the organization write lock.
 A failed comparison returns HTTP 409 `TEAM_SETTINGS_CHANGED`, with guidance to reload
 the details. Send both headers together. Omitting both preserves the existing protocol
-for callers that supply only the expected organization. An address already claimed returns
-HTTP 400 `ORGANIZATION_SLUG_ALREADY_TAKEN`, including concurrent claims. Address edits
-move public links to the new address immediately and old links do not redirect.
+for callers that supply only the expected organization. Creating or changing an address
+requires 1–64 ASCII letters, digits or inner hyphens, starting and ending with a letter
+or digit. Invalid addresses return HTTP 400 `ORGANIZATION_SLUG_INVALID` and reserved
+names return HTTP 400 `ORGANIZATION_SLUG_RESERVED`. New and edited slugs are saved in lowercase.
+An update to an address claimed or held by another team returns HTTP 400
+`ORGANIZATION_SLUG_ALREADY_TAKEN`, including concurrent claims. The previous address is
+held for the same team to reclaim for 90 days. Public links move to the new address
+immediately. Old links, including booking links in sent waitlist emails, do not redirect.
 Team settings use the browser-session organization endpoint. MCP and CLI credentials
 cannot change team details.
 
@@ -1404,9 +1409,9 @@ after a lost response before deciding to move the successor.
 Individual, collective and explicitly activated round-robin team event types have a public page at `/team/{teamSlug}/{slug}`. The matching
 API is `GET /api/v1/public/teams/{handle}/{slug}`, with `/slots` and `POST /bookings` suffixes
 as on personal pages; `handle` here is the organization slug in its exact stored case.
-Organization slug uniqueness is case-sensitive, so these routes preserve case and never
-choose a different team by lowercasing it. Event type slugs remain lowercase. Team slugs
-are 1–64 ASCII letters/digits/inner hyphens and may not be reserved names.
+Organization slug uniqueness is case-insensitive. New and edited team slugs are lowercase,
+and links to legacy slugs still use the stored case. Event type slugs remain lowercase.
+Team slugs are 1–64 ASCII letters, digits or inner hyphens and may not be reserved names.
 
 The event response includes `team: { name, slug }` in addition to its host and the usual
 public fields. Personal organizations and personal event types cannot be reached through

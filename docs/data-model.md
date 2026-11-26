@@ -327,6 +327,17 @@ for limits and client instructions.
 | `organization`, `member`, `invitation` | Tenancy: personal and team organizations, roles, invitations |
 | `apikey` | Keys for agents (MCP, REST, CLI); hashed by Better Auth |
 
+Migration 0194 preserves existing organization slugs and adds a unique index on
+`lower(slug)`. It stops before changing the schema if existing rows collide, reporting
+their organization IDs so the operator can resolve the conflict before retrying.
+The organization trigger serializes slug inserts and changes using transaction advisory
+locks on the folded slugs, acquired in lock-key order for a rename. It records each
+released address in `public.team_slug_reservations` with the releasing organization ID
+and an expiry 90 elapsed days later. A claim consumes an expired hold or the same
+organization's hold in the claim transaction. Deleting the releasing organization
+clears its ID from the hold and leaves the expiration intact. Public lookup uses only
+the stored organization slug.
+
 Google and Microsoft sign-in ID tokens are used during authentication and are not stored:
 `account."idToken"` remains NULL on account creation and every update, including linking,
 repeat sign-in and token refresh. Migration 0031 clears existing values without changing

@@ -1636,6 +1636,12 @@ export interface SsoReplayCache {
   retain_until: Timestamp;
 }
 
+export interface TeamSlugReservations {
+  expires_at: Timestamp;
+  organization_id: string | null;
+  slug: string;
+}
+
 export interface WaitlistCandidates {
   accepted_at: Timestamp | null;
   attempts: Generated<number>;
@@ -2021,6 +2027,7 @@ export interface DB {
   sso_recovery_nominations: SsoRecoveryNominations;
   sso_recovery_owners: SsoRecoveryOwners;
   sso_replay_cache: SsoReplayCache;
+  team_slug_reservations: TeamSlugReservations;
   waitlist_candidates: WaitlistCandidates;
   waitlist_capabilities: WaitlistCapabilities;
   waitlist_cohorts: WaitlistCohorts;

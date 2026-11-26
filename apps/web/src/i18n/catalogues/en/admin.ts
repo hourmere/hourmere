@@ -1021,8 +1021,6 @@ export const admin = {
     'Choose a name and public address for your team.',
   'Use a name your teammates will recognize, up to 200 characters.':
     'Use a name your teammates will recognize, up to 200 characters.',
-  'Team addresses preserve letter case and are separate from personal handles.':
-    'Team addresses preserve letter case and are separate from personal handles.',
   'Team booking URL preview': 'Team booking URL preview',
   'Each team event gets its own address at the end of this URL. Creating a team does not publish a booking page.':
     'Each team event gets its own address at the end of this URL. Creating a team does not publish a booking page.',
@@ -1331,8 +1329,6 @@ export const admin = {
   'Choose a date.': 'Choose a date.',
   'Choose a handle to get booking links. Check the suggestions below and save.':
     'Choose a handle to get booking links. Check the suggestions below and save.',
-  'Choose a non-reserved team slug of 1–64 letters, numbers or hyphens, starting and ending with a letter or number.':
-    'Choose a non-reserved team slug of 1–64 letters, numbers or hyphens, starting and ending with a letter or number.',
   'Choose a time zone from the list, e.g. Europe/Berlin.':
     'Choose a time zone from the list, e.g. Europe/Berlin.',
   'Choose a time zone.': 'Choose a time zone.',
@@ -3335,6 +3331,10 @@ export const admin = {
   'Reload team details': 'Reload team details',
   'Team details changed since you opened this page. Reload team details before saving again.':
     'Team details changed since you opened this page. Reload team details before saving again.',
-  'Changing the public address changes this team’s public booking links. Links using the old address will no longer reach this team. Replace shared links and embeds after saving.':
-    'Changing the public address changes this team’s public booking links. Links using the old address will no longer reach this team. Replace shared links and embeds after saving.',
+  'Old booking links, embeds, routing links and booking links in sent waitlist emails will stop working. Replace shared links and embeds after saving. For 90 days, only this team can reclaim the old address.':
+    'Old booking links, embeds, routing links and booking links in sent waitlist emails will stop working. Replace shared links and embeds after saving. For 90 days, only this team can reclaim the old address.',
+  'Choose a non-reserved team slug of 1–64 ASCII letters, digits or hyphens. Start and end with a letter or digit. New slugs are saved in lowercase.':
+    'Choose a non-reserved team slug of 1–64 ASCII letters, digits or hyphens. Start and end with a letter or digit. New slugs are saved in lowercase.',
+  'Team addresses are separate from personal handles.':
+    'Team addresses are separate from personal handles.',
 } as const

@@ -31,7 +31,7 @@ const MEMBER = {
   createdAt: '2026-10-27T10:00:00.000Z',
 }
 const LINK_WARNING =
-  'Changing the public address changes this team’s public booking links. Links using the old address will no longer reach this team. Replace shared links and embeds after saving.'
+  'Old booking links, embeds, routing links and booking links in sent waitlist emails will stop working. Replace shared links and embeds after saving. For 90 days, only this team can reclaim the old address.'
 const STALE_DETAILS =
   'Team details changed since you opened this page. Reload team details before saving again.'
 const nameInput = () => screen.getByRole<HTMLInputElement>('textbox', { name: 'Team name' })
@@ -88,14 +88,14 @@ describe('editing team details in Settings', () => {
     expect(addressInput().value).toBe(TEAM.slug)
   })
 
-  it('shows the link impact before an admin saves a case-sensitive address change', async () => {
+  it('shows the link impact before an admin saves a lowercase address change', async () => {
     const user = userEvent.setup()
     const updated = { ...TEAM, slug: 'research-team' }
     const { api, state } = settings('admin', () => {
       state.organization = updated
       return json(200, updated)
     })
-    await editAddress(user, updated.slug)
+    await editAddress(user, 'RESEARCH-TEAM')
     expect(screen.getByText(LINK_WARNING)).toBeDefined()
     expect(api.to(UPDATE)).toHaveLength(0)
     await user.click(save())
@@ -189,7 +189,7 @@ describe('editing team details in Settings', () => {
     await user.type(address, 'new-address')
     expect(
       screen.getByText(
-        '更改公开地址会改变此团队的公开预约链接。使用旧地址的链接将不再指向此团队。保存后请更新已分享的链接和嵌入内容。',
+        '原有的预约链接、嵌入内容、路由链接以及已发送候补邮件中的预约链接将无法使用。保存后请更新已分享的链接和嵌入内容。旧地址将在 90 天内仅供此团队重新启用。',
       ),
     ).toBeDefined()
     expect(screen.queryByText(LINK_WARNING)).toBeNull()

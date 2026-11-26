@@ -981,8 +981,6 @@ export const admin = {
   'Choose a name and public address for your team.': '为团队选择名称和公开地址。',
   'Use a name your teammates will recognize, up to 200 characters.':
     '使用团队成员熟悉的名称，最多 200 个字符。',
-  'Team addresses preserve letter case and are separate from personal handles.':
-    '团队地址区分字母大小写，与个人用户名互相独立。',
   'Team booking URL preview': '团队预约网址预览',
   'Each team event gets its own address at the end of this URL. Creating a team does not publish a booking page.':
     '每个团队活动都会在此网址末尾使用独立的活动地址。创建团队不会发布预约页面。',
@@ -1276,8 +1274,6 @@ export const admin = {
   'Choose a date.': '请选择日期。',
   'Choose a handle to get booking links. Check the suggestions below and save.':
     '请选择用户名以获得预约链接。请查看下方建议并保存。',
-  'Choose a non-reserved team slug of 1–64 letters, numbers or hyphens, starting and ending with a letter or number.':
-    '请选择未被保留的团队标识，使用 1–64 个字母、数字或连字符，首尾须为字母或数字。',
   'Choose a time zone from the list, e.g. Europe/Berlin.':
     '请从列表中选择时区，例如 Europe/Berlin。',
   'Choose a time zone.': '请选择时区。',
@@ -3186,6 +3182,9 @@ export const admin = {
   'Reload team details': '重新加载团队资料',
   'Team details changed since you opened this page. Reload team details before saving again.':
     '打开此页面后，团队资料已更改。请重新加载团队资料后再保存。',
-  'Changing the public address changes this team’s public booking links. Links using the old address will no longer reach this team. Replace shared links and embeds after saving.':
-    '更改公开地址会改变此团队的公开预约链接。使用旧地址的链接将不再指向此团队。保存后请更新已分享的链接和嵌入内容。',
+  'Old booking links, embeds, routing links and booking links in sent waitlist emails will stop working. Replace shared links and embeds after saving. For 90 days, only this team can reclaim the old address.':
+    '原有的预约链接、嵌入内容、路由链接以及已发送候补邮件中的预约链接将无法使用。保存后请更新已分享的链接和嵌入内容。旧地址将在 90 天内仅供此团队重新启用。',
+  'Choose a non-reserved team slug of 1–64 ASCII letters, digits or hyphens. Start and end with a letter or digit. New slugs are saved in lowercase.':
+    '请选择未被保留的团队标识，使用 1–64 个英文字母、数字或连字符，首尾须为字母或数字。新标识将以小写保存。',
+  'Team addresses are separate from personal handles.': '团队地址与个人用户名互相独立。',
 } as const

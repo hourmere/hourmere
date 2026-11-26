@@ -55,4 +55,4 @@ export const publicTeamPageUrl = (teamSlug: string, slug: string) =>
   `${window.location.origin}/team/${encodeURIComponent(teamSlug)}/${encodeURIComponent(slug)}`
 
 export const TEAM_LINK_SLUG_HINT =
-  'Choose a non-reserved team slug of 1–64 letters, numbers or hyphens, starting and ending with a letter or number.'
+  'Choose a non-reserved team slug of 1–64 ASCII letters, digits or hyphens. Start and end with a letter or digit. New slugs are saved in lowercase.'

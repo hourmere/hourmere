@@ -3,6 +3,7 @@ import { createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createFixtures, createTestTeam, createTestUser } from '@hourmere/scheduling/testing'
+import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
 import { publicRoutes } from './routes/public.ts'
@@ -82,6 +83,7 @@ describe.skipIf(!serverUrl)('team settings through HTTP and PostgreSQL', () => {
     return {
       team: team.as(owner).organization,
       ownerId: owner.id,
+      adminId: admin.id,
       ownerCookie: await cookieFor(owner.id, team.id),
       adminCookie: await cookieFor(admin.id, team.id),
       memberCookie: await cookieFor(member.id, team.id),
@@ -120,6 +122,33 @@ describe.skipIf(!serverUrl)('team settings through HTTP and PostgreSQL', () => {
       .executeTakeFirstOrThrow()
   }
 
+  function slugRequest(path: 'create' | 'check-slug', cookie: string, slug: string) {
+    return app.request(`/api/auth/organization/${path}`, {
+      method: 'POST',
+      headers: { cookie, origin, 'content-type': 'application/json' },
+      body: JSON.stringify(
+        path === 'create'
+          ? { name: 'New team', slug, keepCurrentActiveOrganization: true }
+          : { slug },
+      ),
+    })
+  }
+
+  function updates(teamId: string) {
+    return db
+      .selectFrom('audit_events')
+      .select(['actor_id', 'details'])
+      .where('organization_id', '=', teamId)
+      .where('action', '=', 'organization.updated')
+      .orderBy('id')
+      .execute()
+  }
+
+  async function expectSlugError(response: Response, code: string) {
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ code })
+  }
+
   it('applies a name and address change to the existing public event without a redirect', async () => {
     const f = await fixture()
     const events = createFixtures(db)
@@ -140,6 +169,12 @@ describe.skipIf(!serverUrl)('team settings through HTTP and PostgreSQL', () => {
     expect(saved.status).toBe(200)
     expect(await saved.json()).toMatchObject({ id: f.team.id, ...edited })
     expect(await settings(f.team.id)).toEqual(edited)
+    expect(await updates(f.team.id)).toEqual([
+      {
+        actor_id: f.adminId,
+        details: { oldSlug: f.team.slug, newSlug: edited.slug, nameChanged: true },
+      },
+    ])
 
     const current = await publicEvent(edited.slug)
     expect(current.status).toBe(200)
@@ -231,9 +266,56 @@ describe.skipIf(!serverUrl)('team settings through HTTP and PostgreSQL', () => {
     const response = await update(f.team.id, f.ownerCookie, { name: 'Renamed legacy team' }, legacy)
     expect(response.status).toBe(200)
     expect(await settings(f.team.id)).toEqual({ name: 'Renamed legacy team', slug: legacy.slug })
+    expect(await updates(f.team.id)).toEqual([
+      { actor_id: f.ownerId, details: { nameChanged: true } },
+    ])
   })
 
-  it('returns the same address-in-use error for a PostgreSQL race and an existing claim', async () => {
+  it.each(['two words', 'nested/team', 'acme%20', 'tеam', 'a'.repeat(65), 'team\0space'])(
+    'validates slug format on both native writes (%j)',
+    async (slug) => {
+      const f = await fixture()
+      const refused = await update(
+        f.team.id,
+        f.ownerCookie,
+        { name: 'Must not save', slug },
+        f.team,
+      )
+      await expectSlugError(refused, 'ORGANIZATION_SLUG_INVALID')
+      await expectSlugError(
+        await slugRequest('create', f.ownerCookie, slug),
+        'ORGANIZATION_SLUG_INVALID',
+      )
+      expect(await settings(f.team.id)).toEqual({ name: f.team.name, slug: f.team.slug })
+      expect(await updates(f.team.id)).toEqual([])
+      await expect(
+        db.selectFrom('auth.organization').select('id').where('name', '=', 'New team').execute(),
+      ).resolves.toEqual([])
+    },
+  )
+
+  it('normalizes valid mixed-case slugs on creation and update', async () => {
+    const f = await fixture()
+    const created = await slugRequest('create', f.ownerCookie, 'NeW-TEAM')
+    expect(created.status).toBe(200)
+    const { id, slug } = (await created.json()) as { id: string; slug: string }
+    expect(slug).toBe('new-team')
+    expect(await settings(id)).toEqual({ name: 'New team', slug: 'new-team' })
+    await expectSlugError(
+      await slugRequest('check-slug', f.ownerCookie, 'NEw-TEAM'),
+      'ORGANIZATION_SLUG_ALREADY_TAKEN',
+    )
+
+    const renamed = await update(f.team.id, f.ownerCookie, { slug: 'MiXeD-Case' }, f.team)
+    expect(renamed.status).toBe(200)
+    expect(await renamed.json()).toMatchObject({ slug: 'mixed-case' })
+    expect(await settings(f.team.id)).toEqual({ name: f.team.name, slug: 'mixed-case' })
+    expect(await updates(f.team.id)).toEqual([
+      { actor_id: f.ownerId, details: { oldSlug: f.team.slug, newSlug: 'mixed-case' } },
+    ])
+  })
+
+  it('returns the address-in-use error for a case-collision race with a legacy spelling', async () => {
     const f = await fixture()
     const rival = await createTestTeam(db, [])
     const slug = 'raced-public-address'
@@ -241,14 +323,16 @@ describe.skipIf(!serverUrl)('team settings through HTTP and PostgreSQL', () => {
     let pending: Promise<Response> | undefined
     try {
       await holder.query('BEGIN')
-      await holder.query('UPDATE auth.organization SET slug = $1 WHERE id = $2', [slug, rival.id])
+      await holder.query('UPDATE auth.organization SET slug = $1 WHERE id = $2', [
+        'Raced-Public-Address',
+        rival.id,
+      ])
       const result = await holder.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
       const blocker = result.rows[0]?.pid
       pending = Promise.resolve(
         update(f.team.id, f.ownerCookie, { name: 'Must not save', slug }, f.team),
       )
-      // The rival's uncommitted slug is invisible to the native precheck, but blocks the
-      // unique constraint check until that transaction commits.
+      // The rival's uncommitted, case-variant slug is invisible to the native precheck.
       await vi.waitFor(
         async () => {
           const result = await owned.pool.query<{ blocked: boolean }>(
@@ -267,10 +351,98 @@ describe.skipIf(!serverUrl)('team settings through HTTP and PostgreSQL', () => {
       const raced = await pending
       const taken = await update(f.team.id, f.ownerCookie, { slug }, f.team)
       for (const refused of [raced, taken]) {
-        expect(refused.status).toBe(400)
-        expect(await refused.json()).toMatchObject({ code: 'ORGANIZATION_SLUG_ALREADY_TAKEN' })
+        await expectSlugError(refused, 'ORGANIZATION_SLUG_ALREADY_TAKEN')
       }
       expect(await settings(f.team.id)).toEqual({ name: f.team.name, slug: f.team.slug })
+    } finally {
+      await holder.query('ROLLBACK')
+      holder.release()
+      await Promise.allSettled(pending ? [pending] : [])
+    }
+  })
+
+  it('allows the releasing team to reclaim its address and another team to take it after expiry', async () => {
+    const f = await fixture()
+    const rival = await fixture()
+    const renamed = { name: f.team.name, slug: 'reservation-replacement' }
+    expect((await update(f.team.id, f.ownerCookie, renamed, f.team)).status).toBe(200)
+
+    const { held } = await db
+      .selectFrom('team_slug_reservations')
+      .select(
+        sql<boolean>`expires_at BETWEEN clock_timestamp() + interval '2159 hours'
+          AND clock_timestamp() + interval '2160 hours'`.as('held'),
+      )
+      .where('organization_id', '=', f.team.id)
+      .where('slug', '=', f.team.slug)
+      .executeTakeFirstOrThrow()
+    expect(held).toBe(true)
+    await expectSlugError(
+      await update(rival.team.id, rival.ownerCookie, { slug: f.team.slug }, rival.team),
+      'ORGANIZATION_SLUG_ALREADY_TAKEN',
+    )
+    await expectSlugError(
+      await slugRequest('create', rival.ownerCookie, f.team.slug.toUpperCase()),
+      'ORGANIZATION_SLUG_ALREADY_TAKEN',
+    )
+    await expectSlugError(
+      await slugRequest('check-slug', rival.ownerCookie, f.team.slug.toUpperCase()),
+      'ORGANIZATION_SLUG_ALREADY_TAKEN',
+    )
+    expect((await update(f.team.id, f.ownerCookie, { slug: f.team.slug }, renamed)).status).toBe(
+      200,
+    )
+    expect(await settings(f.team.id)).toEqual({ name: f.team.name, slug: f.team.slug })
+
+    await db
+      .updateTable('team_slug_reservations')
+      .set({ expires_at: sql<Date>`clock_timestamp() - interval '1 second'` })
+      .where('slug', '=', renamed.slug)
+      .execute()
+    const available = await slugRequest('check-slug', rival.ownerCookie, renamed.slug)
+    expect(available.status).toBe(200)
+    expect(await available.json()).toEqual({ status: true })
+    expect(
+      (await update(rival.team.id, rival.ownerCookie, { slug: renamed.slug }, rival.team)).status,
+    ).toBe(200)
+    expect(await settings(rival.team.id)).toEqual({ name: rival.team.name, slug: renamed.slug })
+  })
+
+  it('checks the newly committed hold when a create races the address release', async () => {
+    const f = await fixture()
+    const rival = await fixture()
+    const holder = await owned.pool.connect()
+    let pending: Promise<Response> | undefined
+    try {
+      await holder.query('BEGIN')
+      await holder.query('UPDATE auth.organization SET slug = $1 WHERE id = $2', [
+        'released-in-race',
+        f.team.id,
+      ])
+      const result = await holder.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+      const blocker = result.rows[0]?.pid
+      // The old exact spelling is still visible to Better Auth's precheck. Use a case
+      // variant so the request reaches the persistence boundary while the rename is open.
+      pending = Promise.resolve(slugRequest('create', rival.ownerCookie, f.team.slug.toUpperCase()))
+      await vi.waitFor(
+        async () => {
+          const result = await owned.pool.query<{ blocked: boolean }>(
+            `SELECT EXISTS (
+              SELECT 1 FROM pg_stat_activity
+              WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))
+            ) AS blocked`,
+            [blocker],
+          )
+          expect(result.rows[0]?.blocked).toBe(true)
+        },
+        { timeout: 3000, interval: 10 },
+      )
+      await holder.query('COMMIT')
+      await expectSlugError(await pending, 'ORGANIZATION_SLUG_ALREADY_TAKEN')
+      expect(await settings(f.team.id)).toEqual({ name: f.team.name, slug: 'released-in-race' })
+      await expect(
+        db.selectFrom('auth.organization').select('id').where('slug', '=', f.team.slug).execute(),
+      ).resolves.toEqual([])
     } finally {
       await holder.query('ROLLBACK')
       holder.release()

@@ -14,12 +14,12 @@ const teamErrors = [
     english: 'Your team context changed. Reload before making changes.',
     chinese: '你的团队上下文已改变。请重新加载后再进行修改。',
   })),
-  {
+  ...['ORGANIZATION_ALREADY_EXISTS', 'ORGANIZATION_SLUG_ALREADY_TAKEN'].map((code) => ({
     status: 400,
-    code: 'ORGANIZATION_ALREADY_EXISTS',
+    code,
     english: 'This team address is already in use. Choose another one.',
     chinese: '此团队地址已被使用。请选择其他地址。',
-  },
+  })),
   {
     status: 400,
     code: 'ORGANIZATION_SLUG_RESERVED',

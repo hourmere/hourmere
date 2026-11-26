@@ -33,7 +33,11 @@ export function TeamDetailsSettings({
   const [conflict, setConflict] = useState<RequestError | null>(null)
   const teamChanged = conflict?.code === 'TEAM_SETTINGS_CHANGED'
   const name = draft.name === baseline.name ? baseline.name : draft.name.trim()
-  const slug = draft.slug === baseline.slug ? baseline.slug : draft.slug.trim()
+  const trimmedSlug = draft.slug === baseline.slug ? baseline.slug : draft.slug.trim()
+  const slug =
+    trimmedSlug !== baseline.slug && isPublicTeamSlug(trimmedSlug)
+      ? trimmedSlug.toLowerCase()
+      : trimmedSlug
   const nameChanged = name !== baseline.name
   const slugChanged = slug !== baseline.slug
   const dirty = nameChanged || slugChanged
@@ -81,6 +85,10 @@ export function TeamDetailsSettings({
         }
         if (cause.code === 'ORGANIZATION_SLUG_RESERVED') {
           setErrors({ teamSlug: reserved })
+          return
+        }
+        if (cause.code === 'ORGANIZATION_SLUG_INVALID') {
+          setErrors({ teamSlug: TEAM_LINK_SLUG_HINT })
           return
         }
       }
@@ -158,7 +166,7 @@ export function TeamDetailsSettings({
           {slugChanged && (
             <p className="alert" id="team-address-impact">
               {t(
-                'Changing the public address changes this team’s public booking links. Links using the old address will no longer reach this team. Replace shared links and embeds after saving.',
+                'Old booking links, embeds, routing links and booking links in sent waitlist emails will stop working. Replace shared links and embeds after saving. For 90 days, only this team can reclaim the old address.',
               )}
             </p>
           )}

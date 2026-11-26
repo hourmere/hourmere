@@ -180,6 +180,7 @@ export function errorMessage(err: unknown): UiText {
       'Review your existing schedules and choose a valid default in Availability.',
     session_required: 'Your session has ended. Sign in again.',
     ORGANIZATION_ALREADY_EXISTS: 'This team address is already in use. Choose another one.',
+    ORGANIZATION_SLUG_ALREADY_TAKEN: 'This team address is already in use. Choose another one.',
     ORGANIZATION_SLUG_RESERVED: 'This team address is reserved. Choose another one.',
     YOU_ARE_NOT_ALLOWED_TO_CREATE_A_NEW_ORGANIZATION: "You don't have permission to create a team.",
     USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION:

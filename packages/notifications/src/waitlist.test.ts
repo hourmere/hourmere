@@ -81,12 +81,15 @@ describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
     await owned?.drop()
   })
 
-  async function setup(locale = 'en', at = NOW) {
+  async function setup(locale = 'en', at = NOW, teamSlug?: string) {
     const host = await f.host({ timeZone: 'Europe/Berlin' })
     const scheduleId = await f.schedule(host.userId, { timeZone: 'Europe/Berlin', weeklyHours: {} })
-    const eventTypeId = await f.eventType(host.organizationId, host.userId, {
+    const organizationId = teamSlug ? await f.organization(teamSlug) : host.organizationId
+    if (teamSlug) await f.member(host.userId, organizationId)
+    const eventTypeId = await f.eventType(organizationId, teamSlug ? null : host.userId, {
       slug: 'intro',
       minimumNoticeMinutes: 0,
+      ...(teamSlug && { hosts: [{ userId: host.userId }] }),
     })
     await db
       .updateTable('event_types')
@@ -116,7 +119,8 @@ describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
     }
     const join = async (email = `${randomUUID()}@example.test`) => {
       await scheduling.joinWaitlist(deps, {
-        handle: host.handle,
+        handle: teamSlug ?? host.handle,
+        team: teamSlug !== undefined,
         slug: 'intro',
         email,
         consent: true,
@@ -159,6 +163,7 @@ describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
     }
     return {
       ...host,
+      organizationId,
       eventTypeId,
       scheduleId,
       deps,
@@ -235,6 +240,29 @@ describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
       expect(s.logs.join('\n')).not.toMatch(/[a-f\d-]{36}\.[A-Za-z0-9_-]{43}/)
     },
   )
+
+  it('uses the current team address when a queued notification is sent after a rename', async () => {
+    const s = await setup('en', NOW, 'Legacy-Notice-Team')
+    const entry = await s.activate()
+    const [candidate] = await s.open()
+    expect(candidate).toBeDefined()
+    await db
+      .updateTable('auth.organization')
+      .set({ slug: 'renamed-notice-team' })
+      .where('id', '=', s.organizationId)
+      .execute()
+    await deliverWaitlistEmail(s.deps, { kind: 'notification', id: candidate?.id as string })
+    expect(s.messages).toHaveLength(1)
+    const links = s.messages[0]?.text.match(/https:\/\/\S+/g) ?? []
+    const paths = links.map((link) => new URL(link).pathname)
+    expect(paths).toContain('/team/renamed-notice-team/intro')
+    expect(
+      paths.filter((path) =>
+        path.startsWith(`/team/renamed-notice-team/intro/waitlist/${entry.id}.`),
+      ),
+    ).toHaveLength(3)
+    expect(paths.every((path) => !path.startsWith('/team/Legacy-Notice-Team/'))).toBe(true)
+  })
 
   async function verificationTimeZoneScenario(send: Sender) {
     const s = await setup('de')

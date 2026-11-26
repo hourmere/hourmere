@@ -169,7 +169,7 @@ export function BookingPage({ team = false }: { team?: boolean } = {}) {
   if (handle !== rawHandle || slug !== rawSlug)
     return (
       <Navigate
-        to={`${embedded ? '/embed' : ''}${team ? '/team' : ''}/${handle}/${slug}${params.waitlistToken !== undefined ? `/waitlist/${encodeURIComponent(params.waitlistToken)}/${encodeURIComponent(params.suggestedStart ?? '')}/${encodeURIComponent(params.previewExpiresAt ?? '')}` : ''}${location.search}`}
+        to={`${embedded ? '/embed' : ''}${team ? '/team' : ''}/${encodeURIComponent(handle)}/${encodeURIComponent(slug)}${params.waitlistToken !== undefined ? `/waitlist/${encodeURIComponent(params.waitlistToken)}/${encodeURIComponent(params.suggestedStart ?? '')}/${encodeURIComponent(params.previewExpiresAt ?? '')}` : ''}${location.search}`}
         replace
       />
     )

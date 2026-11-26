@@ -271,8 +271,8 @@ async function findPersonalEventType(
 }
 
 /**
- * A team link has its own namespace, /team/{teamSlug}/{slug}. Organization slugs use exact
- * stored case (their unique constraint is case-sensitive), unlike lowercase personal handles.
+ * A team link has its own namespace, /team/{teamSlug}/{slug}. The lookup keeps the
+ * stored case for existing links. New team slugs are lowercase.
  * Only existing individual types with exactly one current team member as host are served.
  */
 export async function findPublicTeamEventType(
