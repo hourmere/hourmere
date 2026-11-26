@@ -3243,7 +3243,7 @@ export const admin = {
   'Loading older deliveries…': '正在加载更早的投递记录…',
   'Load older deliveries': '加载更早的投递记录',
   'No deliveries retained in the last 30 days.': '最近 30 天没有保留的投递记录。',
-  '{count} deliveries shown.': '已显示 {count} 条投递记录。',
+  '{count} deliveries shown.': '已显示{count}条投递记录。',
   'Could not load webhook deliveries.': '无法加载 Webhook 投递记录。',
   'Could not load older deliveries.': '无法加载更早的投递记录。',
   'This delivery history page is no longer available. Refresh history to start again.':
