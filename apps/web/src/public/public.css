@@ -215,10 +215,11 @@
 
 .public .public-footer .legal-links {
   margin: 0;
+  font-size: var(--text-sm);
 }
 
 .public .public-footer .logo-word {
-  font-size: 0.95rem;
+  font-size: var(--text-md);
 }
 
 .public .public-footer > a {
@@ -226,7 +227,7 @@
   align-items: center;
   gap: 0.4rem;
   color: var(--muted);
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   text-decoration: none;
 }
 
@@ -238,7 +239,7 @@
 
 .public .public-signup {
   margin-top: var(--space-5);
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
 }
 
 .public .public-signup a {
@@ -261,7 +262,7 @@
 .public .field-error {
   margin: 0;
   color: var(--danger);
-  font-size: 0.9rem;
+  font-size: var(--text-sm);
   font-weight: 600;
 }
 
@@ -373,7 +374,7 @@
 
 .public .event-card-title {
   color: var(--link);
-  font-size: 1.1rem;
+  font-size: var(--text-lg);
   font-weight: 700;
 }
 
@@ -411,6 +412,22 @@
   padding: 0 var(--space-4) var(--space-5);
 }
 
+@media screen and (max-width: 639px) {
+  .public:not(.public-embedded) .public-main:has(> .booking-page) {
+    padding: 0;
+  }
+
+  .public:not(.public-embedded) .public-main:has(> .booking-page) > .public-brand-logo {
+    margin: var(--space-4) var(--space-4) 0;
+  }
+
+  .public:not(.public-embedded) .booking-page {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
+
 @container public-page (min-width: 900px) {
   .public .booking-layout {
     grid-template-columns: 300px minmax(0, 1fr);
@@ -442,7 +459,7 @@
 
 .public .event-title {
   margin: var(--space-1) 0 var(--space-3);
-  font-size: 1.5rem;
+  font-size: var(--text-xl);
 }
 
 .public .event-title:has(+ .host-identity) {
@@ -457,6 +474,23 @@
   padding: 0;
   color: var(--muted);
   list-style: none;
+}
+
+.public .event-facts > li,
+.public .tz-caption:has(> .booking-fact-icon) {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.public .event-facts > li > span {
+  min-width: 0;
+}
+
+.public .booking-fact-icon {
+  flex: none;
+  align-self: start;
+  margin-top: max(0px, calc((1lh - 18px) / 2));
 }
 
 .public .event-description {
@@ -500,7 +534,7 @@
 
 .public .step-title {
   margin: 0 0 var(--space-4);
-  font-size: 1.2rem;
+  font-size: var(--text-lg);
 }
 
 .public .duration-picker {
@@ -557,6 +591,11 @@
   border: 0;
 }
 
+.public .booking-form .guests {
+  container: booking-guests / inline-size;
+  min-width: 0;
+}
+
 .public .booking-form legend {
   padding: 0;
   margin-bottom: var(--space-2);
@@ -585,10 +624,10 @@
 }
 
 .public .guest label {
-  font-size: 0.875rem;
+  font-size: var(--text-sm);
 }
 
-@container public-page (min-width: 480px) {
+@container booking-guests (min-width: 448px) {
   .public .guest {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
     /* Labels and inputs line up; an error only extends its own field downwards. */
@@ -601,9 +640,9 @@
 
   .public .guest-remove {
     grid-column: auto;
-    /* Level with the inputs: one label line (0.875rem at the 1.55 body line height) plus the field gap. */
+    /* Level with the inputs: one label line plus the field gap. */
     align-self: start;
-    margin-top: calc(0.875rem * 1.55 + var(--space-1));
+    margin-top: calc(var(--text-sm) * 1.55 + var(--space-1));
   }
 }
 
@@ -667,7 +706,7 @@
 .public .manage-link h2,
 .public .manage-routing-answers h2 {
   margin-top: var(--space-5);
-  font-size: 1.05rem;
+  font-size: var(--text-md);
 }
 
 .public .manage-link {
@@ -708,7 +747,7 @@
   border-radius: 50%;
   background: var(--success-soft);
   color: var(--success-text);
-  font-size: 1.5rem;
+  font-size: var(--text-xl);
 }
 
 .public .calendar-links {
