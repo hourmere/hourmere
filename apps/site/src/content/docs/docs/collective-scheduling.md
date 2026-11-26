@@ -45,6 +45,14 @@ stored case. Public metadata includes all required hosts' names/time zones, with
 user IDs, email addresses, hours or calendar details. Location details remain private until
 booking, as on personal pages.
 
+In your team space, owners and admins can edit the name and public address under
+**Settings → Team details**. Teams can share a display name. Changing the name alone keeps
+existing URLs. Changing the public address changes links that contain the team slug, including
+public event pages, embeds and team routing links. Replace old links in shared messages and
+anywhere they are embedded.
+Old addresses are released and may be claimed again. If another administrator saved changes
+while your form was open, reload team details, then review and reapply your edits.
+
 MCP `find_available_slots` / `create_booking`, and the corresponding CLI commands, accept
 exactly one of `handle` (personal) or `teamSlug` (team), plus the existing `slug` and booking
 arguments. Existing handle inputs are unchanged. Pass the exact-case team slug in both calls.

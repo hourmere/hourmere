@@ -83,6 +83,28 @@ const managedResource = () =>
     message: SCIM_MANAGED_RESOURCE_MESSAGE,
   })
 
+const teamSettingsChanged = () =>
+  new APIError('CONFLICT', {
+    code: 'TEAM_SETTINGS_CHANGED',
+    message:
+      'Team details changed since you opened this page. Reload team details before saving again.',
+  })
+
+function expectedTeamDetails(headers: Headers) {
+  const name = headers.get('x-expected-team-name')
+  const slug = headers.get('x-expected-team-slug')
+  if (name === null && slug === null) return undefined
+  if (name === null || slug === null) throw teamSettingsChanged()
+  let decoded: { name: string; slug: string }
+  try {
+    decoded = { name: decodeURIComponent(name), slug: decodeURIComponent(slug) }
+  } catch {
+    throw teamSettingsChanged()
+  }
+  if (decoded.name.includes('\0') || decoded.slug.includes('\0')) throw teamSettingsChanged()
+  return decoded
+}
+
 /** After the organization lock, find a live account or proven mailbox admission decision. */
 function managedAdmissionBlock(
   organizationId: string,
@@ -1001,6 +1023,7 @@ export function createTeamRolePolicy(
               )
             )
               throw teamRoleDenied()
+            const expected = ctx.request && expectedTeamDetails(ctx.request.headers)
             const patch = request.update as {
               name?: string
               slug?: string
@@ -1023,12 +1046,14 @@ export function createTeamRolePolicy(
                 .executeTakeFirst()
               if (managedName) throw managedResource()
             }
-            const updated = await trx
+            let update = trx
               .updateTable('auth.organization')
               .set(patch)
               .where('id', '=', facts.organizationId)
-              .returningAll()
-              .executeTakeFirstOrThrow()
+            if (expected)
+              update = update.where('name', '=', expected.name).where('slug', '=', expected.slug)
+            const updated = await update.returningAll().executeTakeFirst()
+            if (!updated) throw teamSettingsChanged()
             const actor = await principal(ctx)
             if (!actor) throw teamRoleDenied()
             await writeAuditEvent(trx, {
@@ -1040,6 +1065,21 @@ export function createTeamRolePolicy(
             })
             await requireProof(trx, ctx, facts.organizationId)
             return updated as never
+          }).catch((error: unknown) => {
+            // Two teams can pass Better Auth's slug lookup before either takes the address.
+            if (
+              error instanceof Error &&
+              'code' in error &&
+              error.code === '23505' &&
+              'constraint' in error &&
+              error.constraint === 'organization_slug_key'
+            ) {
+              throw new APIError('BAD_REQUEST', {
+                code: 'ORGANIZATION_SLUG_ALREADY_TAKEN',
+                message: 'Organization slug already taken',
+              })
+            }
+            throw error
           })
         }
         if (ctx?.path === changeRole && request.model === 'member') {

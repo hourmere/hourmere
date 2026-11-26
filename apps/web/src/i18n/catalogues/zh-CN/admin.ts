@@ -3155,4 +3155,14 @@ export const admin = {
 
   // Additional durations
   'Removed {0}. Selected length: {1}.': '已移除{0}。当前选中的时长为{1}。',
+
+  // Team details
+  'Team details': '团队资料',
+  'Save team details': '保存团队资料',
+  'Team details saved.': '团队资料已保存。',
+  'Reload team details': '重新加载团队资料',
+  'Team details changed since you opened this page. Reload team details before saving again.':
+    '打开此页面后，团队资料已更改。请重新加载团队资料后再保存。',
+  'Changing the public address changes this team’s public booking links. Links using the old address will no longer reach this team. Replace shared links and embeds after saving.':
+    '更改公开地址会改变此团队的公开预约链接。使用旧地址的链接将不再指向此团队。保存后请更新已分享的链接和嵌入内容。',
 } as const

@@ -32,6 +32,7 @@ import {
 import { SsoMemberSettings } from './sso/SsoMemberSettings.tsx'
 import { SsoRecoveryAcceptance } from './sso/SsoRecoveryEnrollment.tsx'
 import { ssoStepUpProviders } from './sso/setup.ts'
+import { TeamDetailsSettings } from './TeamDetailsSettings.tsx'
 import { TeamMembers } from './TeamMembers.tsx'
 
 export function SettingsPage() {
@@ -127,8 +128,9 @@ export function SettingsPage() {
       : membership
   const roles =
     role.status === 'ready' ? (role.data?.split(',').map((value) => value.trim()) ?? []) : []
-  const currentOwner =
-    roles.includes('owner') && roles.every((value) => ['owner', 'admin', 'member'].includes(value))
+  const knownRoles = roles.every((value) => ['owner', 'admin', 'member'].includes(value))
+  const currentOwner = knownRoles && roles.includes('owner')
+  const canEditTeamDetails = currentOwner || (knownRoles && roles.includes('admin'))
   const canStartRecovery = recoveryEnabled && (currentOwner || Boolean(me.ssoRecoveryTeams?.length))
   const blockedBySso =
     membership.status === 'ready' && typeof membership.data === 'object' && membership.data !== null
@@ -209,6 +211,12 @@ export function SettingsPage() {
         </p>
         <p className="hint">{t('Your email comes from how you sign in.')}</p>
       </section>
+      {!personal && me.principal.kind === 'session' && canEditTeamDetails && (
+        <TeamDetailsSettings
+          key={`team-details-${organizationId}`}
+          organization={me.organization}
+        />
+      )}
       <BrandSettings
         key={organizationId}
         organizationId={organizationId}

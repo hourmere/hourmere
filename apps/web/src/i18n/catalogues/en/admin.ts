@@ -3302,4 +3302,14 @@ export const admin = {
 
   // Additional durations
   'Removed {0}. Selected length: {1}.': 'Removed {0}. Selected length: {1}.',
+
+  // Team details
+  'Team details': 'Team details',
+  'Save team details': 'Save team details',
+  'Team details saved.': 'Team details saved.',
+  'Reload team details': 'Reload team details',
+  'Team details changed since you opened this page. Reload team details before saving again.':
+    'Team details changed since you opened this page. Reload team details before saving again.',
+  'Changing the public address changes this team’s public booking links. Links using the old address will no longer reach this team. Replace shared links and embeds after saving.':
+    'Changing the public address changes this team’s public booking links. Links using the old address will no longer reach this team. Replace shared links and embeds after saving.',
 } as const

@@ -556,6 +556,17 @@ and prevents a switch into a team from retargeting an unsaved personal draft.
 Organization writes and context transitions in the same browser session are ordered across
 server processes, so a switch cannot overtake an already checked organization write.
 
+**Team details.** The settings form sends the exact name and slug it opened with, encoded
+with `encodeURIComponent`, as `X-Expected-Team-Name` and `X-Expected-Team-Slug`.
+`POST /api/auth/organization/update` compares both under the organization write lock.
+A failed comparison returns HTTP 409 `TEAM_SETTINGS_CHANGED`, with guidance to reload
+the details. Send both headers together. Omitting both preserves the existing protocol
+for callers that supply only the expected organization. An address already claimed returns
+HTTP 400 `ORGANIZATION_SLUG_ALREADY_TAKEN`, including concurrent claims. Address edits
+move public links to the new address immediately and old links do not redirect.
+Team settings use the browser-session organization endpoint. MCP and CLI credentials
+cannot change team details.
+
 Session webhook writes require the same header, including personal-organization writes,
 and recheck the live session context inside the locked mutation transaction. Missing or
 malformed write expectations retain the event-type 409 reload response. Supplied read
