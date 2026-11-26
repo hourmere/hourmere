@@ -3,6 +3,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { PATHS } from '../paths.ts'
+import { selectAdminLanguage } from '../test/account-menu.ts'
 import {
   emptyTeamLists,
   fakeApi,
@@ -60,7 +61,7 @@ describe('branding settings', () => {
       }
     }
     expect(api.to(WRITE)).toHaveLength(0)
-    await userEvent.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    await selectAdminLanguage(userEvent, 'zh-CN')
     expect(within(form).getByRole('region', { name: '浅色预览' })).toBeDefined()
     expect(within(form).getByRole('region', { name: '深色预览' })).toBeDefined()
     expect(within(form).getByText(/最长边不超过 512 像素/)).toBeDefined()
@@ -280,7 +281,7 @@ describe('branding settings', () => {
     ).toBe(true)
     await userEvent.click(within(form).getByRole('button', { name: 'Save branding' }))
     expect(api.to(WRITE)).toHaveLength(1)
-    await userEvent.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    await selectAdminLanguage(userEvent, 'zh-CN')
     expect(within(form).getByLabelText('主色')).toBeDefined()
     expect(within(form).getByRole('alert').textContent).not.toMatch(/[A-Za-z]{3}/)
     expect(within(form).getByText(/系统会自动选择黑色或白色按钮文字/)).toBeDefined()

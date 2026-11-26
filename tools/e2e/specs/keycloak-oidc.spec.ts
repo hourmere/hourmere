@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test'
+import { accountMenuButton, accountMenuPanel } from '../account-menu.ts'
 import {
   button,
   clickPrivate,
@@ -327,7 +328,9 @@ test.describe('JIT team admission', () => {
       await proveMailbox(page, app, email)
       expect(await app.account(email)).toEqual(noAccount)
       await button(page, 'Continue').click()
-      await expect(button(page, 'Sign out')).toBeVisible()
+      await accountMenuButton(page).click()
+      await expect(accountMenuPanel(page).getByRole('button', { name: 'Sign out' })).toBeVisible()
+      await accountMenuButton(page).click()
       const admitted = await app.account(email)
       expect(admitted).toMatchObject({
         teamRole: 'member',

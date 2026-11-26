@@ -7,6 +7,7 @@ import type { Schemas } from '../api/client.ts'
 import { TeamMemberActions } from '../components/team-members/TeamMemberActions.tsx'
 import { InterfaceScope } from '../i18n/runtime.tsx'
 import { bookingPath, eventTypePath, PATHS } from '../paths.ts'
+import { selectAdminLanguage } from '../test/account-menu.ts'
 import {
   fakeApi,
   json,
@@ -1025,7 +1026,7 @@ describe('member action recovery and accessibility', () => {
     })
     renderApp(PATHS.settings)
     await screen.findByRole('button', { name: 'Leave team' })
-    await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    await selectAdminLanguage(user, 'zh-CN')
     await user.click(screen.getByRole('button', { name: '退出团队' }))
     await screen.findByText(eventType().title)
     expect(screen.queryByRole('heading', { name: 'Review leaving this team' })).toBeNull()

@@ -11,6 +11,8 @@ const states = [
   'manage-reschedule',
   'sign-in',
   'event-types',
+  'admin-account-menu',
+  'admin-integrations',
   'event-type-editor',
   'availability-editor',
   'bookings',
@@ -30,7 +32,13 @@ for (const theme of ['light', 'dark'] as const)
 
 // Chinese text wrapping is represented alongside the full English state set.
 for (const theme of ['light', 'dark'] as const)
-  for (const id of ['booking', 'event-type-editor', 'bookings'] as const)
+  for (const id of [
+    'booking',
+    'event-type-editor',
+    'bookings',
+    'admin-account-menu',
+    'admin-integrations',
+  ] as const)
     test(`${id} zh-CN ${theme}`, async ({ page, app }) => {
       await page.clock.setFixedTime(new Date(AUDIT_NOW))
       await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
