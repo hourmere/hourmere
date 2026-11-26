@@ -183,6 +183,10 @@ it; the create's answer and the invitation are the same whether or not that acco
 After the organization and invitation locks, acceptance locks the claim and then its entry.
 A live inactive entry pauses acceptance of its SCIM-issued invitation. Reactivation leaves
 the original invitation usable until its normal expiration.
+A retired entry or invalidated claim cannot admit the person through an invitation still
+authorized by SCIM. Acceptance uses the same 403 `TEAM_MANAGEMENT_ACCESS_DENIED` refusal.
+An invitation independently issued or renewed by an administrator can still admit the
+person under ordinary invitation rules, with the entry left unlinked.
 A SCIM-issued invitation never clears an admission blocker: while a live local or SCIM
 suspension or removal names the accepting account or the proven mailbox, admission is refused
 with the acceptance's uniform 403 `TEAM_MANAGEMENT_ACCESS_DENIED` and nothing is written.
@@ -214,8 +218,9 @@ fields belong to the directory entry. The linked account, email and role are man
 ordinary team administration.
 
 A different normalized work address, or clearing the address, invalidates any unfinished
-claim atomically with the profile change. An existing invitation can still be accepted
-under its usual rules, but its old mailbox proof cannot complete the invalidated claim.
+claim atomically with the profile change. An invitation still authorized by SCIM is refused.
+An invitation independently issued or renewed by an administrator remains usable under its
+usual rules and cannot complete the invalidated claim.
 Replacement issues no invitation, creates no claim, and preserves any completed claim and
 its link. The organization lock serializes replacement with invitation acceptance. If
 acceptance completes the claim first, replacement keeps that link and stores the new work
@@ -325,11 +330,12 @@ does not resend invitations indefinitely. SCIM is never a signup-domain authorit
 ### Deactivation, deletion and manual control
 
 For `active:false`, lock the organization then membership/resource in the established
-order, set a persistent SCIM suspension, remove effective team access and revoke that
-organization's session authorization, API keys and MCP OAuth grants/bindings in the
-same transaction. Persist revocation work before success if an existing integration
-needs an outbox. Every REST/MCP/native auth path must check current membership/suspension;
-a previously issued token or cached proof must not keep granting access.
+order. For a linked account, record a persistent SCIM suspension, remove effective team
+access and revoke that organization's session authorization, API keys and MCP OAuth
+grants/bindings in the same transaction. An unlinked entry pauses acceptance of the
+invitation bound to its claim while inactive. Persist revocation work before success if
+an existing integration needs an outbox. Every REST/MCP/native auth path must check
+current membership and suspension before granting access to a token or cached proof.
 
 Authorization uses the live SCIM suspension for the account and team. Existing team API
 keys, SSO delegation and MCP OAuth tokens lose authorization for that team. REST and
@@ -1033,8 +1039,8 @@ editing `.env`.
 | Suspension checks on authorization | User PATCH normalization; SSO design PR #247 and accepted linking implementation | Shared REST/MCP/native membership authorization; no new interface | Resource test flag only | Every credential/cached proof refuses suspended team, personal/other-team preservation, native selection and JIT cannot bypass |
 | Session authorization revocation | Suspension checks on authorization | Shared session and team-proof revocation; no new interface | Resource test flag only | Active-team sessions revoked, other sessions cannot reselect suspended team, transaction/lock races, bounded pools |
 | API-key and OAuth revocation | Session authorization revocation; audit log PR #246 | Organization API-key and MCP grant/binding revocation; no new interface | Resource test flag only | Both credential types revoked atomically or durable outbox persisted before success, other-team credentials preserved, audit atomicity |
-| User lifecycle: suspension and reactivation | API-key and OAuth revocation; audit log PR #246 | Enable active writes on POST/PUT/PATCH; no MCP/CLI | Resource test flag only | Every owner/admin deactivation or demotion and role grant returns 403 mutability, role-change races serialize, no key/grant resurrection, local blockers win, audit atomicity |
-| User lifecycle: retirement and re-admission | User lifecycle: suspension and reactivation | DELETE Users/{id}; native POST /organization/complete-scim-readmission; no MCP/CLI | Resource test flag only | Unsupported If-Match returns 412, owner/admin deletion returns 403 mutability, retired IDs return 404, the original account can claim a fresh entry, live SCIM and local blockers deny re-admission, history retained, audit atomicity |
+| User lifecycle: suspension and reactivation | API-key and OAuth revocation; audit log PR #246 | Enable active writes on POST/PUT/PATCH; no MCP/CLI | Resource test flag only | Deactivation records a suspension for the linked account, or pauses claim-bound invitation acceptance while an unlinked entry is inactive. Every owner/admin deactivation or demotion and role grant returns 403 mutability, role-change races serialize, no key/grant resurrection, local blockers win, audit atomicity |
+| User lifecycle: retirement and re-admission | User lifecycle: suspension and reactivation | DELETE Users/{id}; native POST /organization/complete-scim-readmission; no MCP/CLI | Resource test flag only | Retirement records or retains the linked account's suspension and cancels pending invitations still authorized by SCIM for unfinished claims. Unsupported If-Match returns 412, owner/admin deletion returns 403 mutability, retired IDs return 404, the original account can claim a fresh entry, live SCIM and local blockers deny re-admission, history retained, audit atomicity |
 | Managed membership server guards | User lifecycle: retirement; SSO design PR #247 and accepted linking implementation | Existing member/invitation/role management REST and native Better Auth writes and shared MCP services; no new operation/tool/command | Resource test flag only | Manual profile/membership changes cannot bypass management, local suspension wins, native/JIT and concurrent reactivation checks, protected owner/admin authority |
 | Managed membership UI | Managed membership server guards | Existing member-management UI; no new endpoint/tool/command | Resource test flag only | en/zh-CN managed status and blockers, forbidden manual actions explained, unknown readiness stays neutral, generated-client errors handled |
 | [Hierarchy authorization design](#groups-to-teams-hierarchy-authorization) | Managed membership UI | No runtime interface; parent/child permission contract | Resources hard-off | Lead accepts scope, owner/admin recovery, explicit linking and existing-team conflicts |

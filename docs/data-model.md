@@ -121,7 +121,9 @@ names the invitation it issued or reused. That reference is null when the addres
 already belongs to a member or another pending invitation holds it. The new resource
 starts without an account or membership link. While provisioning is enabled, accepting
 the attached invitation sets both links and the claim's `completed_at`, subject to
-the live account and mailbox blockers. Re-admission confirmation can complete a claim
+the entry and claim lifecycle and the live account and mailbox blockers. A retired entry
+or invalid claim refuses admission through an invitation still authorized by SCIM.
+Re-admission confirmation can complete a claim
 without an invitation for a retained ordinary member and clear that account's matching
 retired SCIM suspension in the same organization transaction. User replacement updates
 the mapped profile and timestamp in the existing row. If the normalized work address
