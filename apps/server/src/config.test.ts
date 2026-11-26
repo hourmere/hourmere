@@ -14,15 +14,25 @@ describe('loadConfig', () => {
   it('requires explicit organization IDs to publish team directories', () => {
     const id = '4ef4e257-e71a-4430-a73f-a1985dac9cca'
     expect(loadConfig(base).TEAM_PUBLIC_HOME_ORGANIZATION_IDS).toEqual([])
+    for (const value of ['', '  ', ', ,']) {
+      expect(
+        loadConfig({ ...base, TEAM_PUBLIC_HOME_ORGANIZATION_IDS: value })
+          .TEAM_PUBLIC_HOME_ORGANIZATION_IDS,
+      ).toEqual([])
+    }
     expect(
-      loadConfig({ ...base, TEAM_PUBLIC_HOME_ORGANIZATION_IDS: '' })
-        .TEAM_PUBLIC_HOME_ORGANIZATION_IDS,
-    ).toEqual([])
-    expect(
-      loadConfig({ ...base, TEAM_PUBLIC_HOME_ORGANIZATION_IDS: ` ${id.toUpperCase()}, ${id} ` })
-        .TEAM_PUBLIC_HOME_ORGANIZATION_IDS,
+      loadConfig({
+        ...base,
+        TEAM_PUBLIC_HOME_ORGANIZATION_IDS: `, ${id.toUpperCase()} , , ${id} ,`,
+      }).TEAM_PUBLIC_HOME_ORGANIZATION_IDS,
     ).toEqual([id])
-    for (const invalid of ['*', 'team-slug', `${id},`, Array(257).fill(id).join(',')]) {
+    expect(
+      loadConfig({
+        ...base,
+        TEAM_PUBLIC_HOME_ORGANIZATION_IDS: `${Array(256).fill(id).join(',')},`,
+      }).TEAM_PUBLIC_HOME_ORGANIZATION_IDS,
+    ).toEqual([id])
+    for (const invalid of ['*', 'team-slug', `${id}, ,garbage,`, Array(257).fill(id).join(',')]) {
       expect(() => loadConfig({ ...base, TEAM_PUBLIC_HOME_ORGANIZATION_IDS: invalid })).toThrow(
         /TEAM_PUBLIC_HOME_ORGANIZATION_IDS/,
       )

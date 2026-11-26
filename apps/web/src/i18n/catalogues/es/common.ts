@@ -607,4 +607,9 @@ export const common = {
   // Booking location changes
   'The meeting location has changed. Please choose a time again.':
     'El lugar de la reunión ha cambiado. Vuelva a elegir un horario.',
+  // Team public home
+  'This team has no public events right now.':
+    'Este equipo no tiene eventos públicos en este momento.',
+  'This team page is unavailable.': 'Esta página de equipo no está disponible.',
+  'Couldn’t load this team page.': 'No se pudo cargar esta página de equipo.',
 } as const

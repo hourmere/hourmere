@@ -118,6 +118,11 @@ export interface FixtureOptions {
   slotSnippets: boolean
   waitlistSmtp: boolean
 }
+
+export const TEAM_DIRECTORY_SLUG = `Public${'Directory'.repeat(6)}`
+export const EMPTY_TEAM_DIRECTORY_SLUG = 'EmptyDirectory'
+export const DISABLED_TEAM_DIRECTORY_SLUG = 'DisabledDirectory'
+
 export const test = base.extend<{
   app: FixtureApp
   suppressFailureDom: undefined
@@ -127,6 +132,7 @@ export const test = base.extend<{
   notificationEditor: boolean
   slotSnippets: boolean
   waitlistSmtp: boolean
+  teamPublicHome: boolean
 }>({
   automaticMeet: [false, { option: true }],
   multiHostMeet: [false, { option: true }],
@@ -134,6 +140,7 @@ export const test = base.extend<{
   notificationEditor: [false, { option: true }],
   slotSnippets: [false, { option: true }],
   waitlistSmtp: [false, { option: true }],
+  teamPublicHome: [false, { option: true }],
   suppressFailureDom: [
     async ({ context }, use, testInfo) => {
       // Depending on context runs this teardown before its artifact finalization.
@@ -157,6 +164,7 @@ export const test = base.extend<{
       notificationEditor,
       slotSnippets,
       waitlistSmtp,
+      teamPublicHome,
     },
     use,
   ) => {
@@ -419,6 +427,41 @@ export const test = base.extend<{
         .insertInto('round_robin_state')
         .values({ event_type_id: roundId, enabled: true })
         .execute()
+      const directoryIds: string[] = []
+      if (teamPublicHome) {
+        const directory = await f.organization(TEAM_DIRECTORY_SLUG)
+        const emptyDirectory = await f.organization(EMPTY_TEAM_DIRECTORY_SLUG)
+        const disabledDirectory = await f.organization(DISABLED_TEAM_DIRECTORY_SLUG)
+        directoryIds.push(directory, emptyDirectory)
+        await db
+          .updateTable('auth.organization')
+          .set({ name: AUDIT_TEAM_NAME })
+          .where('id', '=', directory)
+          .execute()
+        await f.member(host.userId, directory, 'owner')
+        await f.eventType(directory, null, {
+          slug: 'public-event',
+          title: AUDIT_TITLE,
+          description: AUDIT_DESCRIPTION,
+          hosts: [{ userId: host.userId }],
+        })
+        const unlisted = await f.eventType(directory, null, {
+          slug: 'unlisted-event',
+          title: 'Unlisted fixture event',
+          hosts: [{ userId: host.userId }],
+        })
+        await db
+          .updateTable('event_types')
+          .set({ is_hidden: true })
+          .where('id', '=', unlisted)
+          .execute()
+        await f.member(host.userId, disabledDirectory, 'owner')
+        await f.eventType(disabledDirectory, null, {
+          slug: 'direct-event',
+          title: 'Direct fixture event',
+          hosts: [{ userId: host.userId }],
+        })
+      }
       let embedSnippet = ''
       parent = createHttpServer((request, response) => {
         if (request.url === '/generated-embed') {
@@ -483,6 +526,7 @@ export const test = base.extend<{
         ...(uiAudit && { MCP_OAUTH_ENABLED: 'true' }),
         ...(notificationEditor && { FOLLOW_UP_HOST_NOTES_ENABLED: 'true' }),
         ...(slotSnippets && { SLOT_SNIPPETS_ENABLED: 'true' }),
+        ...(teamPublicHome && { TEAM_PUBLIC_HOME_ORGANIZATION_IDS: directoryIds.join(',') }),
         ...(automaticMeet && {
           GOOGLE_MEET_ENABLED: 'true',
           GOOGLE_CALENDAR_CLIENT_ID: 'synthetic-client',
