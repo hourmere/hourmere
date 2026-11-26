@@ -60,7 +60,7 @@ Every event carries the snapshot fields shown in
 [Booking webhooks](/docs/webhooks#payload-and-signatures); the last column lists the
 fields an event adds.
 
-The Make recipes do not offer `workflow.executed`. Workflows are hard-off.
+The Make recipes do not offer `workflow.executed`.
 
 | Event | Make recipe | Additional payload fields |
 | --- | --- | --- |

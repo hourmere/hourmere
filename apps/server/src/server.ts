@@ -1039,8 +1039,8 @@ async function start(
     }
     await db.transaction().execute((trx) => ensureWaitlistKey(trx, config.BETTER_AUTH_SECRET))
     await db.transaction().execute((trx) => ensureMeetingPollKey(trx, config.BETTER_AUTH_SECRET))
-    // A paused worker still skips due runs from an earlier opt-in. A fresh default
-    // install has no workflow schedule or worker, and web roles never consume wakes.
+    // An explicitly paused worker still skips previously captured runs as they come due.
+    // A paused install without work to recover needs no workflow jobs. Web roles never consume wakes.
     runWorkflowJobs = role !== 'web' && (await shouldRunWorkflowJobs(db, { workflowsEnabled }))
   } catch (error) {
     await db.destroy()

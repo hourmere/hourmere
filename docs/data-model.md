@@ -1374,8 +1374,8 @@ run IDs and never recreates identities or intents. The internal email attempt se
 commits the reservation and shared ledger charge with the recipient marker, then calls
 SMTP outside the transaction. Only the matching marker token can schedule a known-not-sent
 retry. Retry admission restamps both rows under the same organization and mail-budget locks.
-Expired marker leases resolve to `delivery_unknown`. `WORKFLOWS_ENABLED` opts the instance
-into capture and delivery. The worker installs workflow repair and retention when enabled
+Expired marker leases resolve to `delivery_unknown`. `WORKFLOWS_ENABLED` defaults to true
+and controls capture and delivery. The worker installs workflow repair and retention when enabled
 or when startup finds unfinished work or an interrupted attempt to recover.
 
 - **Enrollments** record a booking's capture of one workflow revision at one lifecycle
@@ -1537,14 +1537,6 @@ kinds to `Principal['kind']` of `@hourmere/auth`: typecheck fails when a princip
 or renamed, and the test fails until the check accepts exactly those kinds.
 
 ## Planned additions (each a new migration)
-
-The [booking workflows design](workflows.md) specifies proposed triggers, conditions,
-email and webhook actions, durable execution records and workflow sub-caps within the shared mail budget.
-Only its definition, execution and creation key storage exist ([workflow definition
-storage](#workflow-definition-storage), [workflow execution storage](#workflow-execution-storage),
-[workflow creation key storage](#workflow-creation-key-storage)),
-with definition read, creation, update and deletion operations that answer `workflows_disabled` while hard-off;
-no worker or runtime enablement exists yet.
 
 | When | Change |
 |---|---|

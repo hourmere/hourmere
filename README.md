@@ -43,7 +43,7 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 | `packages/webhooks` | Signed organization booking webhooks and encrypted Slack destinations, transactional delivery and bounded retries. See [webhooks](https://hourmere.com/docs/webhooks). |
 | `packages/outbound` | Shared outbound destination policy: special-use address checks, operator private targets, URL syntax, DNS answer validation and pinned connections with TLS hostname verification. Webhooks send through it; CalDAV reuses its address and private-target policy. The hard-off SSO paths use the profile for domain-proof TXT queries and OIDC discovery and signing keys. |
 | `packages/notifications` | Durable booking and sign-in email delivery, retries and the encrypted credential outbox. See [notifications](https://hourmere.com/docs/notifications). |
-| `packages/workflows` | Booking workflow definitions and execution. The operator can enable workflows with `WORKFLOWS_ENABLED=true`. See the [operating guide](docs/workflows.md#operating-guide). |
+| `packages/workflows` | Booking workflow definitions and execution. Workflows are enabled by default. The operator can pause them with `WORKFLOWS_ENABLED=false`. See the [operating guide](docs/workflows.md#operating-guide). |
 | `tools/api-types` | Generates the web app's API types from the server's OpenAPI document (`npm run api:types`). |
 | `tools/cli` | API-key command-line client using the existing MCP tools (`npm run --silent cli -- --help`). See [CLI](https://hourmere.com/docs/cli). |
 | `tools/n8n-nodes-hourmere` | Self-hosted n8n community node with its own npm lockfile and install, outside the root workspaces; installed separately and excluded from the Docker image. See [n8n](https://hourmere.com/docs/n8n). |
