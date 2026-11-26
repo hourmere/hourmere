@@ -401,7 +401,7 @@ describe('follow-up email templates', () => {
       'private-answer omission',
       [
         'answers: [],\n    bookingUrl,',
-        "answers: recipient.role === 'host' ? recipient.answers : [],\n    bookingUrl,",
+        "answers: recipient.role === 'host' ? recipient.answers.map(({ question, answer }) => ({ question, answer: bookingAnswerContent(answer, language) })) : [],\n    bookingUrl,",
       ],
       verifyPrivacy,
     ],
