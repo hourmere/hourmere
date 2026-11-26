@@ -1,9 +1,10 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import type { Schemas } from '../../api/client.ts'
 import type { EventType, Schedule } from '../../api/resources.ts'
 import { chooseLanguage } from '../../i18n/store.ts'
+import { AppShell, EventTypeEditorPage, RequireSession, SessionLayout } from '../../lazy-pages.tsx'
 import {
   fakeApi,
   json,
@@ -16,7 +17,10 @@ import {
   signedInAs,
 } from '../../test/fake-api.tsx'
 import { EVENT_TYPE_ID, eventType, OTHER_SCHEDULE_ID, schedule } from '../../test/fixtures.ts'
+import { resolveLazy } from '../../test/resolve-lazy.ts'
 import { LEAVE_WITH_UNSAVED_CHANGES } from '../../unsaved-changes.tsx'
+
+beforeAll(() => resolveLazy(SessionLayout, RequireSession, AppShell, EventTypeEditorPage))
 
 const CREATED_ID = 'e0000000-0000-7000-8000-000000000002'
 const CREATE_ROUTE = 'POST /api/v1/event-types'

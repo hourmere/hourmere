@@ -1,11 +1,12 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import type { ListedOrganizationMember } from '../api/auth.ts'
 import type { Schemas } from '../api/client.ts'
 import { TeamMemberActions } from '../components/team-members/TeamMemberActions.tsx'
 import { InterfaceScope } from '../i18n/runtime.tsx'
+import { AppShell, RequireSession, SessionLayout, SettingsPage } from '../lazy-pages.tsx'
 import { bookingPath, eventTypePath, PATHS } from '../paths.ts'
 import { selectAdminLanguage } from '../test/account-menu.ts'
 import {
@@ -19,6 +20,9 @@ import {
   renderApp,
   signedInAs,
 } from '../test/fake-api.tsx'
+import { resolveLazy } from '../test/resolve-lazy.ts'
+
+beforeAll(() => resolveLazy(SessionLayout, RequireSession, AppShell, SettingsPage))
 
 const TEAM_ID = '00000000-0000-7000-8000-000000000010'
 const TEAM_ME: Schemas['Me'] = {
