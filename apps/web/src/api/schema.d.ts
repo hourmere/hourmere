@@ -5170,7 +5170,7 @@ export interface paths {
         put?: never;
         /**
          * Bind delegated SSO proof to an owned team credential
-         * @description Requires fresh SSO step-up in the current team. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.
+         * @description Requires fresh SSO step-up in the current team. Returns 404 sso_disabled while both protocols are off.
          */
         post: operations["bindSsoDelegation"];
         delete?: never;

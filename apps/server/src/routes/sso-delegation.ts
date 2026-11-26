@@ -21,7 +21,7 @@ import { teamManagementSessionCaller } from '../team-management.ts'
 import { FreshProofChallenge } from './sso-drafts.ts'
 
 export function ssoDelegationRoutes(deps: SsoDelegationDeps): RouteModule {
-  // Binding adds trust through OIDC; revoking stays available while its setting is off.
+  // Binding adds trust through an available protocol.
   const guard =
     (require: () => void): MiddlewareHandler<CallerEnv> =>
     async (c, next) => {
@@ -38,7 +38,7 @@ export function ssoDelegationRoutes(deps: SsoDelegationDeps): RouteModule {
   })
   return ({ app, caller }) => {
     const session = teamManagementSessionCaller(caller)
-    const middleware = [guard(() => requireSsoEnabled(deps.capabilities, 'oidc')), session] as const
+    const middleware = [guard(() => requireSsoEnabled(deps.capabilities)), session] as const
     const revokeMiddleware = [guard(() => requireSsoRetained(deps.capabilities)), session] as const
     app.openapi(
       createRoute({
@@ -48,7 +48,7 @@ export function ssoDelegationRoutes(deps: SsoDelegationDeps): RouteModule {
         tags: ['SSO'],
         summary: 'Bind delegated SSO proof to an owned team credential',
         description:
-          'Requires fresh SSO step-up in the current team. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.',
+          'Requires fresh SSO step-up in the current team. Returns 404 sso_disabled while both protocols are off.',
         security: [{ session: [] }],
         middleware: [...middleware] as const,
         request: { headers, body: { required: true, content: json(BindSsoDelegationInput) } },

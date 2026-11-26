@@ -12,6 +12,8 @@ export const samlLinkOperation = 'samlLinkAccount'
 export const samlCompleteLinkOperation = 'samlCompleteLink'
 export const samlMailboxOperation = 'samlCompleteChangedMailbox'
 export const samlAdmissionOperation = 'samlCompleteAdmission'
+export const samlStepUpOperation = 'samlStepUp'
+export const samlCompleteStepUpOperation = 'samlCompleteStepUp'
 export const samlId = z.uuidv7()
 
 export const samlTestBinding = z.strictObject({
@@ -46,7 +48,7 @@ export function samlRelayAttemptId(relayState: string) {
   if (samlId.safeParse(id).success) return id
 }
 
-type StateKind = 'return' | 'result' | 'test' | 'link' | 'link-result' | 'mailbox'
+type StateKind = 'return' | 'result' | 'test' | 'link' | 'link-result' | 'mailbox' | 'step-up'
 
 export function samlStateCookie(publicUrl: string, kind: StateKind, id: string) {
   const secure = new URL(publicUrl).protocol === 'https:'
