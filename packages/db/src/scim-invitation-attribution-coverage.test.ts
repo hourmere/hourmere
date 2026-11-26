@@ -1,12 +1,16 @@
 import { randomUUID } from 'node:crypto'
-import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { copyFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type pg from 'pg'
 import { describe, expect, it } from 'vitest'
 import { migrationsDir, runMigrations } from './migrate.ts'
 import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
-import { createTestDatabase, type TestDatabase } from './testing.ts'
+import {
+  MIGRATION_COVERAGE_TIMEOUT,
+  MIGRATION_REPLAY_TIMEOUT,
+  useMigrationReplay,
+} from './testing/migration-replay.ts'
+import type { TestDatabase } from './testing.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -118,62 +122,67 @@ async function originalRows(pool: pg.Pool) {
 }
 
 describe.skipIf(!serverUrl)('SCIM invitation attribution migration', () => {
-  it('fails an assertion when any 0192 catalogued object is dropped', async () => {
-    const report = await checkConstraintCoverage({
-      serverUrl: serverUrl as string,
-      migration,
-      assertions: assertAttributionProtections,
-    })
-    expect(report.problems).toEqual([])
-    expect(report.results.map(({ status }) => status)).toEqual(['covered', 'covered', 'covered'])
-  })
+  const replay = useMigrationReplay(serverUrl as string, migration)
 
-  it('backfills only the original live SCIM generation and preserves populated predecessor data', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'hourmere-scim-invitation-'))
-    let upgraded: TestDatabase | undefined
-    let fresh: TestDatabase | undefined
-    try {
-      for (const file of await readdir(migrationsDir)) {
-        if (file.endsWith('.sql') && file < migration)
-          await copyFile(join(migrationsDir, file), join(directory, file))
+  it(
+    'fails an assertion when any 0192 catalogued object is dropped',
+    async () => {
+      const report = await checkConstraintCoverage({
+        serverUrl: serverUrl as string,
+        migration,
+        predecessorTemplate: replay.predecessor,
+        assertions: assertAttributionProtections,
+      })
+      expect(report.problems).toEqual([])
+      expect(report.results.map(({ status }) => status)).toEqual(['covered', 'covered', 'covered'])
+    },
+    MIGRATION_COVERAGE_TIMEOUT,
+  )
+
+  it(
+    'backfills only the original live SCIM generation and preserves populated predecessor data',
+    async () => {
+      const { directory, predecessor } = replay
+      let upgraded: TestDatabase | undefined
+      let fresh: TestDatabase | undefined
+      try {
+        upgraded = await predecessor.clone(undefined, { migrate: false })
+        const pool = upgraded.pool
+        await seedPredecessor(pool)
+        const before = await originalRows(pool)
+        expect(before).toHaveLength(19)
+
+        await copyFile(join(migrationsDir, migration), join(directory, migration))
+        expect(await runMigrations(pool, directory)).toEqual([migration])
+        expect(await originalRows(pool)).toEqual(before)
+        expect(
+          (
+            await pool.query(`
+              SELECT i.email
+              FROM invitation_deliveries d JOIN auth.invitation i ON i.id = d.invitation_id
+              WHERE d.scim_issued
+            `)
+          ).rows,
+        ).toEqual([{ email: 'scim@example.test' }])
+
+        fresh = await predecessor.clone(directory)
+        expect(await snapshotSchema(pool)).toEqual(await snapshotSchema(fresh.pool))
+        expect(await runMigrations(pool, directory)).toEqual([])
+        expect(await runMigrations(fresh.pool, directory)).toEqual([])
+        expect(await originalRows(pool)).toEqual(before)
+        for (const database of [upgraded, fresh]) {
+          await expect(
+            database.pool.query(`
+              INSERT INTO invitation_email_requests (organization_id, recipient_hash, requested_at)
+              VALUES (gen_random_uuid(), decode(repeat('cd', 32), 'hex'), now())
+              RETURNING user_id
+            `),
+          ).resolves.toMatchObject({ rows: [{ user_id: null }] })
+        }
+      } finally {
+        await Promise.all([fresh?.drop(), upgraded?.drop()])
       }
-      upgraded = await createTestDatabase(serverUrl as string, directory)
-      const pool = upgraded.pool
-      await seedPredecessor(pool)
-      const before = await originalRows(pool)
-      expect(before).toHaveLength(19)
-
-      await copyFile(join(migrationsDir, migration), join(directory, migration))
-      expect(await runMigrations(pool, directory)).toEqual([migration])
-      expect(await originalRows(pool)).toEqual(before)
-      expect(
-        (
-          await pool.query(`
-            SELECT i.email
-            FROM invitation_deliveries d JOIN auth.invitation i ON i.id = d.invitation_id
-            WHERE d.scim_issued
-          `)
-        ).rows,
-      ).toEqual([{ email: 'scim@example.test' }])
-
-      fresh = await createTestDatabase(serverUrl as string, directory)
-      expect(await snapshotSchema(pool)).toEqual(await snapshotSchema(fresh.pool))
-      expect(await runMigrations(pool, directory)).toEqual([])
-      expect(await runMigrations(fresh.pool, directory)).toEqual([])
-      expect(await originalRows(pool)).toEqual(before)
-      for (const database of [upgraded, fresh]) {
-        await expect(
-          database.pool.query(`
-            INSERT INTO invitation_email_requests (organization_id, recipient_hash, requested_at)
-            VALUES (gen_random_uuid(), decode(repeat('cd', 32), 'hex'), now())
-            RETURNING user_id
-          `),
-        ).resolves.toMatchObject({ rows: [{ user_id: null }] })
-      }
-    } finally {
-      await fresh?.drop()
-      await upgraded?.drop()
-      await rm(directory, { recursive: true, force: true })
-    }
-  })
+    },
+    MIGRATION_REPLAY_TIMEOUT,
+  )
 })
