@@ -12,9 +12,9 @@ import { PATHS } from '../../paths.ts'
 import { useMe, useSession } from '../../session.tsx'
 import { SsoFreshProof } from './SsoFreshProof.tsx'
 import {
-  oidcStepUpProviders,
   type SsoProofChallenge,
   SsoProofRequired,
+  ssoStepUpProviders,
   unwrapSsoWrite,
 } from './setup.ts'
 import './sso-setup.css'
@@ -44,12 +44,13 @@ export function SsoDelegation(props: Props) {
   const me = useMe()
   const shell = useOutletContext<AppShellContext | null>()
   // With the setting off, binding is refused: only an existing delegation can be revoked.
-  const stored = shell?.ssoOidcEnabled !== true && shell?.ssoStored === true
+  const enabled = shell?.ssoOidcEnabled === true || shell?.ssoSamlEnabled === true
+  const stored = !enabled && shell?.ssoStored === true
   const credentials = stored
     ? props.credentials.filter(({ ssoDelegation }) => ssoDelegation !== undefined)
     : props.credentials
   if (
-    (shell?.ssoOidcEnabled !== true && !stored) ||
+    (!enabled && !stored) ||
     me.organization.personal ||
     me.principal.kind !== 'session' ||
     credentials.length === 0
@@ -67,6 +68,7 @@ export function SsoDelegation(props: Props) {
 function DelegationForm({ kind, credentials, reload }: Props) {
   const { t, formatLocale } = useI18n()
   const { organization, sso } = useMe()
+  const shell = useOutletContext<AppShellContext | null>()
   const { confirmReload } = useSession()
   const heading = useRef<HTMLHeadingElement>(null)
   const active = useRef<AbortController | null>(null)
@@ -89,7 +91,7 @@ function DelegationForm({ kind, credentials, reload }: Props) {
     saved?.inventory === credentials && saved.credentialId === credential?.id
       ? saved.binding
       : credential?.ssoDelegation
-  const stepUpProviders = oidcStepUpProviders(sso)
+  const stepUpProviders = ssoStepUpProviders(sso, shell)
 
   useLayoutEffect(() => {
     function interrupt() {

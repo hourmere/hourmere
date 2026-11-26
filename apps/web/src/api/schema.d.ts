@@ -7910,6 +7910,8 @@ export interface components {
                 displayName: string;
                 /** Format: uuid */
                 id: string;
+                /** @enum {string} */
+                protocol?: "saml";
                 revision: number;
             }[];
             requireSso: boolean;

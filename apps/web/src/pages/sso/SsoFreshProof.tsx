@@ -41,7 +41,9 @@ export function SsoFreshProof({
   const [error, setError] = useState<MessageKey | null>(null)
   const [mailbox, setMailbox] = useState<'start' | 'queued' | 'proven'>('start')
   const [selectedProvider, setSelectedProvider] = useState('')
-  const [stepUpUrl, setStepUpUrl] = useState<string | null>(null)
+  const [authorization, setAuthorization] = useState<{ providerId: string; url: string } | null>(
+    null,
+  )
   const [expired, setExpired] = useState(false)
   const [submittedChallenge, setSubmittedChallenge] = useState<SsoProofChallenge | null>(null)
   const mailboxRequired = challenge.proofMethods.includes('mailbox')
@@ -50,6 +52,8 @@ export function SsoFreshProof({
   const disabled = busy || working
   const providerId =
     stepUpProviders.find(({ id }) => id === selectedProvider)?.id ?? stepUpProviders[0]?.id
+  const stepUpUrl =
+    authorization && authorization.providerId === providerId ? authorization.url : null
   const canVerify =
     challenge.proofMethods.length > 0 &&
     challenge.proofMethods.every((method) => method === 'mailbox' || method === 'sso') &&
@@ -149,7 +153,7 @@ export function SsoFreshProof({
 
   function startStepUp() {
     if (!providerId) return
-    setStepUpUrl(null)
+    setAuthorization(null)
     setSubmittedChallenge(null)
     void request(async (signal) => {
       const { url } = await unwrap(
@@ -160,7 +164,7 @@ export function SsoFreshProof({
         }),
       )
       if (signal.aborted) return
-      setStepUpUrl(ssoAuthorizationUrl(url))
+      setAuthorization({ providerId, url: ssoAuthorizationUrl(url) })
     }, startError)
   }
 
@@ -201,7 +205,7 @@ export function SsoFreshProof({
                     value={providerId}
                     onChange={(event) => {
                       setSelectedProvider(event.currentTarget.value)
-                      setStepUpUrl(null)
+                      setAuthorization(null)
                     }}
                   >
                     {stepUpProviders.map((provider) => (
