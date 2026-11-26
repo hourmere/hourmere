@@ -85,6 +85,9 @@ npm run dev --workspace @hourmere/web
 Signed-in pages live under `/app` (`/app/event-types`, `/app/availability`, `/app/bookings`, `/app/api-keys`, `/app/settings`); `/sign-in` stays at the top level, and the rest of the root is for public booking pages (`/{handle}/{slug}` for personal types and
 `/team/{teamSlug}/{slug}` for individual, collective and activated round-robin team types). After signing in, people only return to pages under `/app`.
 
+See the [public booking week-view design evaluation](docs/booking-week-view.md)
+for a proposed alternate layout and its implementation estimate.
+
 Public meeting-poll pages live at `/poll` and `/poll/voter`, with private credentials
 in URL fragments and POST bodies. They support verification, voting and read-only closed
 ballots without login. Personal event owners and current team owners or admins can
