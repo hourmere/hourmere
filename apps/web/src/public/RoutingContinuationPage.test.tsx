@@ -7,6 +7,7 @@ import { commonCatalogues } from '../i18n/common.ts'
 import { fakeApi, json } from '../test/fake-api.tsx'
 import { booking, NEW_TOKEN, slot, TOKEN } from '../test/public-fixtures.ts'
 import { selectPublicLanguage } from '../test/public-language.ts'
+import { createRoutedBooking } from './api.ts'
 import { RoutingContinuationPage } from './RoutingContinuationPage.tsx'
 
 vi.mock('./env.ts', async (original) => ({
@@ -306,6 +307,48 @@ describe('routing continuation', () => {
       })
     },
   )
+
+  it('discards prose in the field of a private booking error', async () => {
+    const user = userEvent.setup()
+    const field = 'responses.Unexpected private detail'
+    const message = 'Unfiltered server error detail'
+    fakeApi({
+      [resolveRoute]: () => json(200, projection),
+      [slotsRoute]: slotsResponse,
+      [bookingsRoute]: () => json(400, { error: 'invalid_responses', field, message }),
+    })
+
+    await expect(
+      createRoutedBooking(
+        {
+          routeToken: TOKEN,
+          start,
+          durationMinutes: 30,
+          invitee: { name: 'Test invitee', email: 'invitee@example.invalid', timeZone: 'UTC' },
+          responses: { topic: 'Original topic', reference: 'PRJ-42' },
+        },
+        crypto.randomUUID(),
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({
+      name: 'PublicRequestError',
+      code: 'invalid_responses',
+      field: undefined,
+    })
+
+    render(<RoutingContinuationPage routeToken={TOKEN} />)
+    await chooseTime(user)
+    const reference = screen.getByRole('textbox', { name: 'Project reference' })
+    await user.type(reference, 'PRJ-42')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+
+    expect(
+      await screen.findByText('This form has changed. Review your answers before continuing.'),
+    ).toBeDefined()
+    expect(document.querySelector('[aria-invalid="true"]')).toBeNull()
+    expect(document.body.textContent).not.toContain(field)
+    expect(document.body.textContent).not.toContain(message)
+  })
 
   it('refreshes changed questions and keeps compatible answers and the chosen time', async () => {
     const user = userEvent.setup()
