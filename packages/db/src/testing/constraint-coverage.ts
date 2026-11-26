@@ -130,6 +130,8 @@ export interface ConstraintCoverageOptions {
   expectationFile?: string
   /** Defaults to the repository's migration directory. */
   migrationsDirectory?: string
+  /** Optional template on serverUrl with a prefix of these migrations, before the target. */
+  predecessorTemplate?: TestDatabaseTemplate
   /** Parallel copies; each holds the suite's connections plus one during setup. Default 4. */
   concurrency?: number
   /** Per-object budget for one suite run. Default 120 s. */
@@ -214,6 +216,7 @@ async function prepareTemplate(
   serverUrl: string,
   migration: string,
   migrationsDirectory: string,
+  predecessorTemplate: TestDatabaseTemplate | undefined,
 ): Promise<{ template: TestDatabaseTemplate; objects: CoverageObject[] }> {
   const files = (await readdir(migrationsDirectory)).filter((file) => file.endsWith('.sql')).sort()
   if (!files.includes(migration)) throw new Error(`Unknown migration ${migration}`)
@@ -236,7 +239,7 @@ async function prepareTemplate(
         const current = await catalog(pool)
         objects = created.flatMap((key) => current.get(key) ?? []).sort(byKey)
       },
-      { tag: 'coverage' },
+      { tag: 'coverage', template: predecessorTemplate?.name },
     )
     return { template, objects }
   } finally {
@@ -528,6 +531,7 @@ export async function checkConstraintCoverage(
     options.serverUrl,
     options.migration,
     migrationsDirectory,
+    options.predecessorTemplate,
   )
   try {
     const keys = objects.map((object) => object.key)
