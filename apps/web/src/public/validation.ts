@@ -207,6 +207,8 @@ export function bookingErrors(
       }
     }
     case 'location_unavailable':
+    case 'microsoft_teams_calendar_unavailable':
+    case 'microsoft_teams_host_policy':
       return { fields, form: 'This location is unavailable. Contact the host to book.' }
     case 'invalid_location_choice':
       fields.locationOptionId = 'Choose one of the available locations.'
