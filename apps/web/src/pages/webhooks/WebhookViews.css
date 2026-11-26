@@ -25,8 +25,14 @@
   margin-top: 0;
 }
 
-.webhook-actions {
+.webhook-actions.form-actions {
   margin: 0;
+}
+
+.webhook-actions.form-actions,
+.webhook-actions .copy {
+  align-items: stretch;
+  flex-direction: column;
 }
 
 .webhook-status-hint,
@@ -62,10 +68,10 @@
   user-select: text;
 }
 
-@media (max-width: 479px) {
-  .webhook-actions,
+@media (min-width: 480px) {
+  .webhook-actions.form-actions,
   .webhook-actions .copy {
-    align-items: stretch;
-    flex-direction: column;
+    align-items: center;
+    flex-direction: row;
   }
 }
