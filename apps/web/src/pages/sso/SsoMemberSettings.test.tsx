@@ -32,11 +32,13 @@ const provider = {
   displayName: 'Company identity',
   revision: 3,
 }
+const samlProvider = { ...provider, protocol: 'saml' as const }
 const linked = {
   id: '00000000-0000-7000-8000-000000000043',
   providerId: provider.id,
   generation: 7,
 }
+const samlLink = { ...linked, protocol: 'saml' as const }
 const proofAttemptId = '00000000-0000-7000-8000-000000000044'
 const callbackId = '00000000-0000-7000-8000-000000000045'
 const anotherAttemptId = '00000000-0000-7000-8000-000000000046'
@@ -71,11 +73,13 @@ function CurrentHash() {
 function showSettings({
   viewer = teamMe,
   enabled = true,
+  samlEnabled = false,
   hash = '',
   routes = {},
 }: {
   viewer?: Schemas['Me']
   enabled?: boolean
+  samlEnabled?: boolean
   hash?: string
   routes?: Routes
 } = {}) {
@@ -83,7 +87,8 @@ function showSettings({
     ...signedInAs(viewer),
     ...emptyTeamLists,
     ...profile(),
-    'GET /api/v1/instance': () => json(200, { ssoOidcEnabled: enabled, ssoSamlEnabled: true }),
+    'GET /api/v1/instance': () =>
+      json(200, { ssoOidcEnabled: enabled, ssoSamlEnabled: samlEnabled }),
     'GET /api/auth/organization/get-active-member': () =>
       json(200, { organizationId: team.id, userId: viewer.user.id, role: 'member' }),
     ...routes,
@@ -166,8 +171,12 @@ function expectTeamWrites(calls: Call[], bodies: unknown[]) {
 }
 
 describe('Member SSO settings', () => {
-  it('asks for consent and a matching mailbox proof before handing off to the provider', async () => {
+  it.each(['OIDC', 'SAML'])('proves the mailbox before %s linking', async (protocol) => {
+    const samlEnabled = protocol === 'SAML'
     const { requests, user } = showSettings({
+      enabled: !samlEnabled,
+      samlEnabled,
+      viewer: samlEnabled ? { ...teamMe, sso: { ...empty, providers: [samlProvider] } } : teamMe,
       routes: {
         ...mailRoutes,
         [startLink]: ({ body }) =>
@@ -207,10 +216,20 @@ describe('Member SSO settings', () => {
     expect(requests.to(complete)).toHaveLength(0)
   })
 
-  it('unlinks the exact owned generation only on the explicitly approved mailbox retry', async () => {
-    let active = { ...teamMe, sso: { ...empty, providers: [provider], links: [linked] } }
+  it.each(['OIDC', 'SAML'])('unlinks the exact %s generation', async (protocol) => {
+    const samlEnabled = protocol === 'SAML'
+    let active = {
+      ...teamMe,
+      sso: {
+        ...empty,
+        providers: [samlEnabled ? samlProvider : provider],
+        links: [samlEnabled ? samlLink : linked],
+      },
+    }
     const { requests, user } = showSettings({
       viewer: active,
+      enabled: !samlEnabled,
+      samlEnabled,
       routes: {
         ...mailRoutes,
         'GET /api/v1/me': () => json(200, active),
@@ -362,6 +381,10 @@ describe('Member SSO settings', () => {
   it.each([
     // Off, the server sends no summary for a team without stored SSO state.
     { viewer: { ...ME, organization: team }, enabled: false },
+    {
+      viewer: { ...teamMe, sso: { ...empty, providers: [samlProvider], links: [samlLink] } },
+      enabled: false,
+    },
     { viewer: { ...ME, sso: teamMe.sso }, enabled: true },
   ])(
     'keeps ordinary account settings and omits member SSO outside enabled team sessions',
@@ -382,21 +405,34 @@ describe('Member SSO settings', () => {
     },
   )
 
-  it('shows the self-link action on a SAML-only team', async () => {
-    showSettings({ enabled: false })
-    await screen.findByRole('button', { name: `Link account (${provider.displayName})` })
-  })
-
-  it('shows a SAML link without offering identity recovery', async () => {
-    showSettings({
-      enabled: false,
+  it('hides SAML choices and links from a retained projection while OIDC remains enabled', async () => {
+    const oidc = { ...provider, id: anotherAttemptId, displayName: 'OIDC identity' }
+    const { requests } = showSettings({
       viewer: {
         ...teamMe,
-        sso: { ...empty, providers: [provider], links: [{ ...linked, protocol: 'saml' }] },
+        sso: { ...empty, providers: [samlProvider, oidc], links: [samlLink] },
       },
     })
-    await screen.findByText(linked.id)
-    expect(screen.queryByRole('button', { name: /^(Link|Unlink) account/ })).toBeNull()
+    await screen.findByRole('button', { name: `Link account (${oidc.displayName})` })
+    expect(screen.queryByText(samlProvider.displayName)).toBeNull()
+    expect(screen.queryByText(samlLink.id)).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Unlink account/ })).toBeNull()
+    expect(requests.to(startLink)).toEqual([])
+    expect(requests.to(unlink)).toEqual([])
+  })
+
+  it('uses only native completion consent for an enabled SAML link', async () => {
+    const viewer = callbackViewer()
+    if (!viewer.sso) throw new Error('Missing test SSO projection')
+    const { requests } = showSettings({
+      enabled: false,
+      samlEnabled: true,
+      viewer: { ...viewer, sso: { ...viewer.sso, providers: [samlProvider] } },
+      hash: `#sso-link=${callbackId}`,
+    })
+    await screen.findByText('This SSO link request is unavailable. Start again.')
+    expect(screen.queryByRole('button', { name: 'Confirm link' })).toBeNull()
+    expect(requests.to(complete)).toEqual([])
   })
 
   it('uses neutral unavailable and loading states when the SSO projection cannot be loaded', async () => {

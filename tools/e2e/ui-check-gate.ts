@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { a11yPageBatches } from './a11y-batches.ts'
 import { auditLocales, auditPages } from './audit-pages.ts'
 import {
   type AuditFinding,
@@ -169,7 +170,7 @@ export function evaluateUiGate({
         failures.push(`Expired UI check exception: ${index + 1}`)
         continue
       }
-      // Exact selectors assign each entry to one report, hence one layout shard.
+      // Exact selectors assign each entry to one report, hence one measurement shard.
       // Missing selectors fail everywhere; valid selectors are stale-checked by
       // their owning shard only, rather than falsely failing unrelated shards.
       if (entry.suite !== suite) continue
@@ -284,11 +285,10 @@ export function expectedFromPlaywrightList(
   const visit = (node: ListedSuite, parents: string[]) => {
     const titles = [...parents, node.title]
     for (const spec of node.specs ?? []) {
-      if (
-        spec.title !==
-        (suite === 'layout' ? 'measure every page' : 'scan serious and critical WCAG violations')
+      const batch = /^scan serious and critical WCAG violations \(batch ([1-9]\d*)\)$/.exec(
+        spec.title,
       )
-        continue
+      if (suite === 'layout' ? spec.title !== 'measure every page' : !batch) continue
       const state = titles
         .map((title) =>
           suite === 'layout'
@@ -297,6 +297,12 @@ export function expectedFromPlaywrightList(
         )
         .find((match) => match !== null)
       if (!state) throw new Error('Unknown UI measurement test state')
+      const theme = state[suite === 'layout' ? 3 : 1] as AuditReport['theme']
+      const locale = state[suite === 'layout' ? 4 : 2] as AuditReport['locale']
+      const pages = batch
+        ? a11yPageBatches(locale)[Number(batch[1]) - 1]
+        : auditPages.filter(({ id }) => auditLocales(id).includes(locale))
+      if (!pages) throw new Error('Unknown axe page batch')
       for (const test of spec.tests) {
         const viewport =
           suite === 'layout'
@@ -304,10 +310,7 @@ export function expectedFromPlaywrightList(
             : projectViewports.get(test.projectName)
         if (!viewport || !positiveInteger(viewport.width) || !positiveInteger(viewport.height))
           throw new Error('Unknown UI measurement project viewport')
-        const theme = state[suite === 'layout' ? 3 : 1] as AuditReport['theme']
-        const locale = state[suite === 'layout' ? 4 : 2] as AuditReport['locale']
-        for (const page of auditPages) {
-          if (!(auditLocales(page.id) as readonly string[]).includes(locale)) continue
+        for (const page of pages) {
           expected.push({ kind: suite, page: page.id, theme, locale, viewport })
         }
       }
@@ -366,16 +369,22 @@ export async function listExpectedReports(suite: 'layout' | 'a11y', shard?: stri
       timeout: 60_000,
     },
   )
-  if (child.status === 0) {
-    try {
-      return expectedFromPlaywrightList(JSON.parse(child.stdout), suite, projectViewports, {
-        allowEmpty: Boolean(shard),
-      })
-    } catch {
-      // Parsing diagnostics can contain stdout; expose only the safe child metadata.
-    }
+  if (child.status !== 0) throw new UiMatrixEnumerationError(child)
+  let expected: ReportIdentity[]
+  try {
+    expected = expectedFromPlaywrightList(JSON.parse(child.stdout), suite, projectViewports, {
+      allowEmpty: Boolean(shard),
+    })
+  } catch {
+    // Parsing diagnostics can contain stdout; expose only the safe child metadata.
+    throw new UiMatrixEnumerationError(child)
   }
-  throw new UiMatrixEnumerationError(child)
+  if (!shard && suite === 'a11y') {
+    const pageLocales = auditPages.reduce((total, page) => total + auditLocales(page.id).length, 0)
+    if (expected.length !== pageLocales * themes.size * projectViewports.size)
+      throw new Error('Incomplete axe measurement matrix')
+  }
+  return expected
 }
 
 export async function loadExpectedReports(suite: BlockingSuite, shard?: string) {
