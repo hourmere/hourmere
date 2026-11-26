@@ -1091,7 +1091,17 @@ describe('routing forms remain hard-off with configuration and public metadata i
     ).toBe(true)
     const referencing = sources
       .filter((file) => !STORAGE_LAYER.test(file))
-      .filter((file) => STORAGE_NAMES.test(readFileSync(new URL(file, root), 'utf8')))
+      .filter((file) => {
+        const source = readFileSync(new URL(file, root), 'utf8')
+        if (file !== 'packages/core/src/custom-role-catalogue.ts') return STORAGE_NAMES.test(source)
+        // These standalone catalogue entries are operation IDs. Scan the rest of the file.
+        return STORAGE_NAMES.test(
+          source.replace(
+            /^\s*'routing_forms\.(archive|create|preview|publish|read|update)',\s*$/gm,
+            '',
+          ),
+        )
+      })
     // The lifecycle storage and shared services name the tables (so the matcher
     // sees them), and no other source does; which of them production loads is asserted above.
     expect([...referencing].sort()).toEqual([...STORAGE_SERVICES].sort())
