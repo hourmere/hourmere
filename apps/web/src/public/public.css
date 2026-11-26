@@ -412,7 +412,7 @@
   padding: 0 var(--space-4) var(--space-5);
 }
 
-@media screen and (max-width: 639px) {
+@media screen {
   .public:not(.public-embedded) .public-main:has(> .booking-page) {
     padding: 0;
   }
@@ -425,6 +425,22 @@
     border: 0;
     border-radius: 0;
     box-shadow: none;
+  }
+}
+
+@media screen and (min-width: 640px) {
+  .public:not(.public-embedded) .public-main:has(> .booking-page) {
+    padding: var(--space-5) var(--space-4) var(--space-6);
+  }
+
+  .public:not(.public-embedded) .public-main:has(> .booking-page) > .public-brand-logo {
+    margin: 0 0 var(--space-4);
+  }
+
+  .public:not(.public-embedded) .booking-page {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
   }
 }
 
