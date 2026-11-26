@@ -65,7 +65,7 @@ covers sharing required answers, show the booker which saved answers will be sha
 new hosts through their own authorized flow. Refuse incompatible questions or answers and
 use manual rebooking when the current form requires new information.
 
-Read via the link without changing consent; accept or decline by explicit POST. The emailed
+Reading via the link leaves consent unchanged. Accept or decline by explicit POST. The emailed
 link is a bearer capability for that mailbox's decision, so the page and email must say to
 keep it private. Keep secrets out of query strings, logs, analytics, job payloads and
 administrator responses. Use a fragment, clear it before fetching, and use a no-referrer,
@@ -79,8 +79,8 @@ proposed start. Reissuing an offer revokes the previous version and its approval
 Keep one live offer for a source and
 stop offering decisions once it is committed, declined, expired, withdrawn or superseded.
 Repeat submission of the same decision can return the saved outcome without another
-side effect. Applying twice returns the same limited result after authorization; the
-result supplies no management token, conference link or provider details.
+side effect. Applying twice returns the same limited result after authorization.
+The result excludes management tokens, conference links and provider details.
 Internal administrator status shows outstanding approvals and neutral failure states within
 the existing [team booking field boundary](team-admin-bookings.md).
 
@@ -102,10 +102,11 @@ Keep earlier source-chain rows, attendees, answers, provider history and mail re
 their existing retention and deletion rules. Do not store duplicate attendee data in the
 committed edge. Keep the opaque booking/team identifiers, actor and offer identifiers,
 timestamp, and consent outcome evidence. Expire unneeded offer data and capability digests
-in bounded cleanup; follow existing deletion and privacy rules for dependent records.
+in bounded cleanup. Follow existing deletion and privacy rules for dependent records.
 The source's manage links resolve only within the old chain, whose terminal booking is
 cancelled. New links authorize only the new chain. Ordinary future rescheduling of that
-chain follows its own new root and host snapshot. Never transfer old booking or email
+chain follows its own new root and host snapshot. No handoff path may issue an
+`UPDATE` of `required_host_user_ids`. Never transfer old booking or email
 token hashes, provider references, no-show data, or SMS consent. Copy only validated
 booking details and the approved attendee information from the source.
 
@@ -114,8 +115,8 @@ mode through the shared team-management path. Follow the existing actor and orga
 ordering, then lock the source booking before the offer and the sorted advisory host locks.
 Take host locks for the complete pre-read union of source and target event hosts, including
 the round-robin candidate pool. Lock and reread current event and eligibility facts in the
-established order. Membership, leave, event edits and duplicate applies must serialize;
-never add a late host lock to the pre-read sorted set. Consent and offer
+established order. Serialize membership, leave, event edits and duplicate applies.
+Refuse a changed host set instead of adding a late lock. Consent and offer
 invalidation use the same organization → source → offer lock order when they touch those
 rows. See the [team lock order](data-model.md#team-membership-and-host-lock-order).
 
@@ -132,7 +133,7 @@ delivery work. Provider and mail I/O runs after commit.
 Use the normal admission and schedule evaluator with the **current** event configuration.
 Check that each selected host is still a verified, eligible team member, including current
 SCIM suspension restrictions where applicable. Individual events use the selected configured
-host; collective events require all current configured hosts. Round robin proposes an
+host. Collective events require all current configured hosts. Round robin proposes an
 eligible host via its ordinary assignment inputs and pins the displayed host for consent.
 Recheck assignment eligibility under its state lock, failing if normal selection would pick
 another host. Advance assignment state only on successful admission.
@@ -164,8 +165,8 @@ Provider organizer ownership is separate from the iTIP
 A known ineligible connection requires a new offer with supported logistics. A transient
 post-commit creation failure follows the normal bounded provider recovery path. While it
 is pending or failed, follow the existing confirmation/failure policy, with no stale join
-URL or misleading calendar attachment. Old cleanup uses only the old authorized grant;
-if revoked access or ambiguous creation leaves an orphan, surface a safe status and direct
+URL or misleading calendar attachment. Old cleanup uses only the old authorized grant.
+If revoked access or ambiguous creation leaves an orphan, surface a safe status and direct
 the original authorized provider owner to clean it up. A provider failure cannot roll back
 either booking or give an administrator organizer credentials or start/retry capabilities.
 
@@ -179,7 +180,7 @@ handoff cancellation skips the attachment and skips pinning a fallback organizer
 Workers check booking status and conference
 revision before sending. Retain the old delivery history and dedupe replay independently
 on each root. Invitees and guests receive a cancellation and a separate confirmation that
-explain the replacement; notices may arrive out of order. The distinct UIDs allow calendar
+explain the replacement. Notices may arrive out of order. The distinct UIDs allow calendar
 clients to reconcile either order. Old host mail follows current eligibility, so a removed
 host may receive no app notice. Follow existing mail budgets, recipient eligibility and the
 known in-flight SMTP duplicate window. See the [notification guide](notifications.md),
@@ -190,16 +191,16 @@ known in-flight SMTP duplicate window. See the [notification guide](notification
 
 | Operation | REST proposal | MCP and CLI |
 | --- | --- | --- |
-| Propose and inspect | `POST /api/v1/team/bookings/{id}/handoff-offers`, `GET /api/v1/team/bookings/{id}/handoff-offers/{offerId}` | Browser-session-only; no tool or command. |
-| Withdraw or apply the approved version | `POST /api/v1/team/bookings/{id}/handoff-offers/{offerId}/withdraw` or `/apply` | Browser-session-only; no tool or command. |
-| Read own terms and answer | `POST /api/v1/booking-handoffs/offer`, `POST /api/v1/booking-handoffs/answer` with the recipient capability in the body | `read_booking_handoff_offer` and `answer_booking_handoff_offer`; CLI `booking-handoff offer` and `booking-handoff answer` via JSON input. The recipient capability is required in every transport. |
+| Propose and inspect | `POST /api/v1/team/bookings/{id}/handoff-offers`, `GET /api/v1/team/bookings/{id}/handoff-offers/{offerId}` | Browser session only. |
+| Withdraw or apply the approved version | `POST /api/v1/team/bookings/{id}/handoff-offers/{offerId}/withdraw` or `/apply` | Browser session only. |
+| Read own terms and answer | `POST /api/v1/booking-handoffs/offer`, `POST /api/v1/booking-handoffs/answer` with the recipient capability in the body | MCP `read_booking_handoff_offer` and `answer_booking_handoff_offer`. CLI `booking-handoff offer` and `booking-handoff answer` via JSON input. The recipient capability is required in every transport. |
 
 Use shared service operations and explicit OpenAPI IDs and operation scopes. Register
 administrator writes with the existing session-only exemption in
 [`scripts/interface-parity.json`](../scripts/interface-parity.json). Register the two
 recipient operations with real MCP/CLI mappings, following the meeting-poll
 capability pattern. Scope tool discovery and direct calls as booking read/write
-respectively; valid agent credentials only permit transport usage and confer no recipient
+respectively. Valid agent credentials only permit transport usage and confer no recipient
 authority. A supplied invalid bearer fails without fallback. Existing departure preview,
 REST booking management, MCP reschedule and CLI reschedule gain no new capability.
 
@@ -207,8 +208,8 @@ REST booking management, MCP reschedule and CLI reschedule gain no new capabilit
 
 | Situation | Outcome |
 | --- | --- |
-| A recipient declines, never approves, or uses a superseded link | No booking write. The current or expired offer state gives the administrator guidance; a different offer needs new approvals. |
-| The administering session is revoked, switched or demoted, or the source starts, is cancelled or moves before apply | Refuse. Reauthorize in the correct team or reassess the current booking; a started meeting remains offline coordination. |
+| A recipient declines, never approves, or uses a superseded link | No booking write. The current or expired offer state gives the administrator guidance. A different offer needs new approvals. |
+| The administering session is revoked, switched or demoted, or the source starts, is cancelled or moves before apply | Refuse. Reauthorize in the correct team or reassess the current booking. A started meeting remains offline coordination. |
 | A new host leaves, is suspended, becomes busy, or provider eligibility changes | Refuse and preserve the source. Recheck current readiness and propose again. Calendar uncertainty is reported as unknown. |
 | Concurrent apply, cancel or reschedule | At most one valid source transition. A committed apply replay returns the saved limited result without minting new capabilities or duplicating work. |
 | Post-commit worker or provider failure | Keep both committed booking states. Reconcile only the affected root through its normal bounded jobs and safe status. |
