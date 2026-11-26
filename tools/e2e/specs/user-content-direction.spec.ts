@@ -138,9 +138,9 @@ test('mixed public content keeps visual order, accessible names, and submitted v
     .locator('dd')
     .filter({ hasText: `${inviteeName}（${inviteeEmail}）` })
   await expect(invitee.locator('bdi[dir="ltr"]')).toHaveText(inviteeEmail)
-  const snapshot = await confirmation.ariaSnapshot()
-  expect(snapshot).toContain(inviteeName)
-  expect(snapshot).toContain(inviteeEmail)
+  const snapshot = await invitee.ariaSnapshot()
+  expect(snapshot.includes(inviteeName)).toBe(true)
+  expect(snapshot.indexOf(inviteeEmail)).toBeGreaterThan(snapshot.indexOf(inviteeName))
 })
 
 test('mixed content stays isolated in the dashboard, draft preview and embedded booking', async ({
