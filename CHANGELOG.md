@@ -15,7 +15,8 @@ must approve publication through the [release workflow](https://github.com/hourm
 - Booking workflows are enabled by default for unset or empty `WORKFLOWS_ENABLED`, including
   on upgrades. Set `WORKFLOWS_ENABLED=false` across web and worker to pause capture and
   delivery admissions. A slow workflow webhook receiver can no longer delay a booking's
-  cancellation or reschedule. See the [workflow operating guide](docs/workflows.md#operating-guide).
+  cancellation or reschedule. See the
+  [workflow operating guide](https://github.com/hourmere/hourmere/blob/main/docs/workflows.md#operating-guide).
 
 - SCIM 2.0 provisioning for team Users and explicitly mapped child-team Groups,
   available on every instance without a paid plan. Discovery, directory membership
