@@ -227,6 +227,8 @@ test('a team member proves their Hourmere mailbox and explicitly links Keycloak'
   expect(await app.account(email)).toEqual({ ...before, linkedSubjects: [subject] })
   expect(app.tokenExchanges()).toEqual(['issued'])
 
+  // Finishing the linking callback returns focus to the settings heading.
+  await expect(page.getByRole('heading', { name: 'Your team sign-in', exact: true })).toBeFocused()
   await signOut(page, app)
   await context.clearCookies()
   await page.goto(signInUrl(app))
