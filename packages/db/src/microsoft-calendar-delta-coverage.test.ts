@@ -3,10 +3,14 @@ import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type pg from 'pg'
-import { describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { migrationsDir, runMigrations } from './migrate.ts'
 import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
-import { createTestDatabase, type TestDatabase } from './testing.ts'
+import {
+  createTestDatabaseTemplate,
+  type TestDatabase,
+  type TestDatabaseTemplate,
+} from './testing.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -141,27 +145,52 @@ async function originalRows(pool: pg.Pool) {
 }
 
 describe.skipIf(!serverUrl)('Microsoft calendar delta migration', () => {
+  let directory: string
+  let predecessor: TestDatabaseTemplate
+
+  beforeAll(async () => {
+    directory = await mkdtemp(join(tmpdir(), 'hourmere-graph-delta-'))
+    const files = await readdir(migrationsDir)
+    await Promise.all(
+      files
+        .filter((file) => file.endsWith('.sql') && file < migration)
+        .map((file) => copyFile(join(migrationsDir, file), join(directory, file))),
+    )
+    // Replay the common history once. The coverage and upgrade checks take independent
+    // copies before recording catalog changes or seeding any calendar rows.
+    predecessor = await createTestDatabaseTemplate(
+      serverUrl as string,
+      async (pool) => {
+        await runMigrations(pool, directory)
+      },
+      { tag: 'graph_delta_prev' },
+    )
+  })
+
+  afterAll(async () => {
+    try {
+      await predecessor?.drop()
+    } finally {
+      if (directory) await rm(directory, { recursive: true, force: true })
+    }
+  })
+
   it('fails an assertion when any new protection is dropped', async () => {
     const report = await checkConstraintCoverage({
       serverUrl: serverUrl as string,
       migration,
       assertions: assertDeltaProtections,
+      predecessorTemplate: predecessor,
     })
     expect(report.problems).toEqual([])
     expect(report.results.map(({ status }) => status)).toEqual(Array(7).fill('covered'))
   })
 
   it('preserves busy snapshots and settings, matches a fresh schema, and reruns as a no-op', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'hourmere-graph-delta-'))
     let upgraded: TestDatabase | undefined
     let fresh: TestDatabase | undefined
     try {
-      for (const file of await readdir(migrationsDir)) {
-        if (file.endsWith('.sql') && file < migration) {
-          await copyFile(join(migrationsDir, file), join(directory, file))
-        }
-      }
-      upgraded = await createTestDatabase(serverUrl as string, directory, { tag: 'graph_delta_up' })
+      upgraded = await predecessor.clone(undefined, { migrate: false, tag: 'graph_delta_up' })
       await seedCalendars(upgraded.pool)
       await upgraded.pool.query(
         `INSERT INTO calendar_busy (calendar_id, external_event_id, period, all_day_start, all_day_end) VALUES
@@ -187,17 +216,14 @@ describe.skipIf(!serverUrl)('Microsoft calendar delta migration', () => {
         ),
       ).resolves.toMatchObject({ rows: [] })
 
-      fresh = await createTestDatabase(serverUrl as string, directory, { tag: 'graph_delta_new' })
+      fresh = await predecessor.clone(undefined, { migrate: false, tag: 'graph_delta_new' })
+      await expect(runMigrations(fresh.pool, directory)).resolves.toEqual([migration])
       expect(await snapshotSchema(upgraded.pool)).toEqual(await snapshotSchema(fresh.pool))
       await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([])
       await expect(runMigrations(fresh.pool, directory)).resolves.toEqual([])
       expect(await originalRows(upgraded.pool)).toEqual(before)
     } finally {
-      try {
-        await Promise.all([upgraded?.drop(), fresh?.drop()])
-      } finally {
-        await rm(directory, { recursive: true, force: true })
-      }
+      await Promise.all([upgraded?.drop(), fresh?.drop()])
     }
   })
 })

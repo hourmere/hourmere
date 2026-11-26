@@ -1,7 +1,10 @@
 import '@hono/zod-openapi'
-import { createHmac, randomBytes, randomUUID } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { createRequire, stripTypeScriptTypes } from 'node:module'
+import { tmpdir } from 'node:os'
+import { basename, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { type Auth, type AuthConfig, createAuthPool, createCallerResolver } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
@@ -14,13 +17,14 @@ import {
   type TestUser,
 } from '@hourmere/scheduling/testing'
 import type pg from 'pg'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const origin = 'http://localhost:43871'
 const secret = 'synthetic-native-departure-mutation-secret-at-least-32-characters'
 const signup = { mode: 'open', allowedDomains: [] } as const
+let copyDirectory: string
 type Mutation = readonly [string, string]
 type AuthFactory = (config: AuthConfig) => Auth
 interface NativeCopy {
@@ -43,7 +47,12 @@ function moduleUrl(source: string, location: URL, replacements: Record<string, s
       (specifier.startsWith('.') ? new URL(specifier, location).href : resolvePackage(specifier))
     return `from '${resolved}'`
   })
-  return `data:text/javascript;base64,${Buffer.from(code).toString('base64')}`
+  // File URLs keep stack frames readable even when Node reports the module's full URL.
+  // Identical copies share a filename and native module instance within this suite.
+  const hash = createHash('sha256').update(code).digest('hex').slice(0, 16)
+  const copy = join(copyDirectory, `${basename(location.pathname, '.ts')}-${hash}.mjs`)
+  writeFileSync(copy, code)
+  return pathToFileURL(copy).href
 }
 
 /** Native requests run a copied auth factory and policy without modifying any working file. */
@@ -99,6 +108,7 @@ describe.skipIf(!serverUrl)('native safe departure source-copy protections', () 
   let pool: pg.Pool
 
   beforeAll(async () => {
+    copyDirectory = await mkdtemp(join(tmpdir(), 'hourmere-native-copy-'))
     owned = await createTestDatabase(serverUrl as string, undefined, { tag: 'leave_native' })
     db = createDb(owned.pool)
     // All source copies share one auth pool and its bounded organization-lock pool.
@@ -106,8 +116,12 @@ describe.skipIf(!serverUrl)('native safe departure source-copy protections', () 
   })
 
   afterAll(async () => {
-    await pool?.end()
-    await owned?.drop()
+    try {
+      await pool?.end()
+      await owned?.drop()
+    } finally {
+      if (copyDirectory) await rm(copyDirectory, { recursive: true, force: true })
+    }
   })
 
   async function fixture(impact = true) {
@@ -431,12 +445,20 @@ describe.skipIf(!serverUrl)('native safe departure source-copy protections', () 
   })
 
   it('detects an omitted native owner refusal mapping with a real assertion failure', async () => {
-    await expect(
-      assertOwnerRequired(
-        await sourceCopy(['error instanceof MemberDepartureOwnerRequiredError', 'false']),
-        true,
-      ),
-    ).rejects.toMatchObject({ name: 'AssertionError' })
+    const diagnostics = vi.spyOn(console, 'error')
+    try {
+      await expect(
+        assertOwnerRequired(
+          await sourceCopy(['error instanceof MemberDepartureOwnerRequiredError', 'false']),
+          true,
+        ),
+      ).rejects.toMatchObject({ name: 'AssertionError', actual: 500, expected: 409 })
+      const error = diagnostics.mock.calls.flat().join('\n')
+      expect(Buffer.byteLength(error)).toBeLessThan(64 * 1024)
+      expect(error).toMatch(/team-role-policy-[a-f0-9]+\.mjs/)
+    } finally {
+      diagnostics.mockRestore()
+    }
   })
 
   it.each([

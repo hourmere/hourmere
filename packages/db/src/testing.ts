@@ -449,7 +449,7 @@ export async function createTestDatabase(
 export async function createTestDatabaseTemplate(
   serverUrl: string,
   prepare: (pool: pg.Pool) => Promise<void>,
-  options: Pick<TestDatabaseOptions, 'tag'> = {},
+  options: Pick<TestDatabaseOptions, 'tag' | 'template'> = {},
 ): Promise<TestDatabaseTemplate> {
   const template = await createTestDatabase(serverUrl, undefined, { ...options, migrate: false })
   const name = new URL(template.url).pathname.slice(1)
