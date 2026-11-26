@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -12,6 +13,44 @@ import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 const serverUrl = process.env.DATABASE_URL as string
 const migration = '0194_team_slug_reservations.sql'
 const heldSlug = { code: '23505', constraint: 'team_slug_reserved' }
+const selfHosting = readFileSync(
+  new URL('../../../apps/site/src/content/docs/docs/self-hosting.md', import.meta.url),
+  'utf8',
+)
+const upgradeNote =
+  selfHosting
+    .split('### Resolve team address collisions (migration 0194)\n')[1]
+    ?.split('\n### ')[0] ?? ''
+const [preflightSql = '', recoverySql = ''] = [...upgradeNote.matchAll(/```sql\n([^`]+)```/g)].map(
+  ([, sql]) => sql?.trim(),
+)
+
+it('documents the migration 0194 preflight and recovery in the upgrade notes', () => {
+  const prose = upgradeNote.replace(/\s+/g, ' ')
+  expect(prose).toContain('the migration rolls back and reports the conflicting organization IDs')
+  expect(prose).toContain('startup stops until the collision is fixed')
+  expect(prose).toContain('**Before upgrading**, run this read-only query')
+  expect(preflightSql).toMatch(/^SELECT [^;]+;$/)
+  expect(preflightSql).toContain('GROUP BY lower(slug COLLATE pg_catalog.pg_unicode_fast)')
+  expect(prose).toMatch(
+    /On the old version,.*open \*\*Settings → Team profile\*\*.*per colliding pair/,
+  )
+  expect(prose).toContain('If a group has more than two teams, change all but one')
+  expect(prose).toContain('stop the app and every separate worker')
+  expect(recoverySql).toBe("UPDATE auth.organization SET slug = '<new>' WHERE id = '<id>';")
+  expect(prose).toContain('unused across all organizations regardless of case')
+  expect(prose).toMatch(/1–64 characters drawn from ASCII lowercase letters.*digits.*hyphens/)
+  expect(prose).toContain('Start and end with a letter or digit, and avoid reserved names')
+  expect(prose).toContain('Restart the upgraded app and workers')
+  expect(prose).toContain('migration 0194 reruns cleanly on startup')
+  expect(prose).toContain("The renamed team's published links change")
+
+  for (const path of ['CHANGELOG.md', 'README.md']) {
+    const source = readFileSync(new URL(`../../../${path}`, import.meta.url), 'utf8')
+    expect(source).toContain('#resolve-team-address-collisions-migration-0194)')
+    expect(source).toContain("The renamed teams' published links change")
+  }
+})
 
 function createTeam(pool: pg.Pool, slug: string, id = randomUUID()) {
   return pool.query(
@@ -215,7 +254,7 @@ describe.skipIf(!serverUrl)('Team slug reservations migration', () => {
     }
   })
 
-  it('reports case collisions, preserves predecessor rows, matches a fresh install and reruns as a no-op', async () => {
+  it('reports case collisions, recovers with the documented SQL, matches a fresh install and reruns as a no-op', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'hourmere-team-slugs-'))
     let upgraded: TestDatabase | undefined
     let fresh: TestDatabase | undefined
@@ -230,9 +269,22 @@ describe.skipIf(!serverUrl)('Team slug reservations migration', () => {
       const conflictId = randomUUID()
       await createTeam(pool, 'Legacy-Studio', teamId)
       await createTeam(pool, 'legacy-studio', conflictId)
+      await createTeam(pool, 'another-studio')
       await seedPredecessor(pool, teamId)
       const before = await predecessorRows(pool, teamId)
       expect(before).toHaveLength(1)
+      const organizationIds = [teamId, conflictId].sort()
+      await expect(pool.query(preflightSql)).resolves.toMatchObject({
+        rows: [
+          {
+            folded_slug: 'legacy-studio',
+            organization_ids: organizationIds,
+            addresses: organizationIds.map((id) =>
+              id === teamId ? 'Legacy-Studio' : 'legacy-studio',
+            ),
+          },
+        ],
+      })
 
       await copyFile(join(migrationsDir, migration), join(directory, migration))
       await expect(runMigrations(pool, directory)).rejects.toMatchObject({
@@ -240,22 +292,31 @@ describe.skipIf(!serverUrl)('Team slug reservations migration', () => {
           code: '23505',
           message:
             'Case-insensitive organization slug collisions must be resolved before upgrading',
-          detail: `Conflicting organization IDs by slug: ${[teamId, conflictId].sort().join(', ')}`,
+          detail: `Conflicting organization IDs by slug: ${organizationIds.join(', ')}`,
         },
       })
       await expect(
         pool.query('SELECT slug FROM auth.organization ORDER BY id'),
       ).resolves.toMatchObject({
-        rowCount: 2,
+        rowCount: 3,
       })
       await expect(
         pool.query(`SELECT to_regclass('public.team_slug_reservations') AS reservations`),
       ).resolves.toMatchObject({ rows: [{ reservations: null }] })
       expect(await predecessorRows(pool, teamId)).toEqual(before)
 
-      await pool.query('DELETE FROM auth.organization WHERE id = $1', [conflictId])
+      const renameSql = recoverySql.replace("'<new>'", '$1').replace("'<id>'", '$2')
+      await expect(
+        pool.query(renameSql, ['studio-replacement', conflictId]),
+      ).resolves.toMatchObject({
+        rowCount: 1,
+      })
+      await expect(pool.query(preflightSql)).resolves.toMatchObject({ rows: [] })
       await expect(runMigrations(pool, directory)).resolves.toEqual([migration])
       expect(await predecessorRows(pool, teamId)).toEqual(before)
+      await expect(
+        pool.query('SELECT slug FROM auth.organization WHERE id = $1', [conflictId]),
+      ).resolves.toMatchObject({ rows: [{ slug: 'studio-replacement' }] })
       await expect(pool.query('SELECT slug FROM team_slug_reservations')).resolves.toMatchObject({
         rows: [],
       })

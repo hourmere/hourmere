@@ -207,16 +207,23 @@ Give containers at least 35 seconds to stop.
 
 Before upgrading, take a full backup, including the host `Caddyfile` with any operator
 customizations, and record the current branch name or tag alongside
-the backup's saved commit. A checkout-only rollback with
+the backup's saved commit. Migration 0194 stops if existing team addresses collide when
+compared case-insensitively. Check for collisions before upgrading and change the affected
+addresses on the old version. The renamed teams' published links change. If startup
+already stopped at migration 0194, stop the app and any worker and follow the
+[team address preflight and recovery steps](https://hourmere.com/docs/self-hosting#resolve-team-address-collisions-migration-0194).
+
+A checkout-only rollback with
 `git checkout <previous branch or tag>` is safe if a guard, `docker compose pull` or
 `docker compose stop` fails before the new-version `docker compose up` command runs.
-Once that `up` is attempted, follow [Back up and restore](https://hourmere.com/docs/self-hosting#back-up-and-restore),
-even if it fails: a new app or worker may already have applied migrations; old code against
-the new schema is unsafe. In the supplied Compose files, `AUTO_MIGRATE=true` runs application
+If you need to roll back after attempting that `up`, follow
+[Back up and restore](https://hourmere.com/docs/self-hosting#back-up-and-restore) even if startup
+fails. A new app or worker may already have applied migrations; old code against the new
+schema is unsafe. In the supplied Compose files, `AUTO_MIGRATE=true` runs application
 and pg-boss migrations at process startup for every role (`all`, `web` and `worker`),
 not during `pull` or `stop`; there is no separate migrate service. A separately started
 new-version worker, `npm run db:migrate` or a custom migration job can migrate earlier;
-if any has started, use backup/restore even before this Compose `up`.
+if any has started, use backup/restore for rollback even before this Compose `up`.
 For a failed main-tracking pull, the backup's saved commit identifies
 the exact pre-upgrade revision: `git pull` advances `main`, so its branch name alone does
 not undo the update. If rollback leaves a pre-1.0 `main`-tracking checkout detached, run

@@ -264,6 +264,42 @@ describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
     expect(paths.every((path) => !path.startsWith('/team/Legacy-Notice-Team/'))).toBe(true)
   })
 
+  it('passes a historical team slug as one encoded segment to the notification renderer', async () => {
+    const teamSlug = 'legacy-notice-path'
+    const s = await setup('en', NOW, teamSlug)
+    await s.activate()
+    const [candidate] = await s.open()
+    const event = await scheduling.resolveWaitlistEventById(db, s.eventTypeId)
+    if (!candidate || !event?.team) throw new Error('Expected a queued team notification')
+
+    // Current public lookup and rendering reject malformed historical slugs. Supply a
+    // legacy event at the lookup boundary and check the path handed to the renderer.
+    const legacySlug = 'Legacy Team%20'
+    const listSlots = scheduling.listPublicTeamSlots
+    const renderNotice = mail.waitlistNotificationEmail
+    const resolve = vi.spyOn(scheduling, 'resolveWaitlistEventById').mockResolvedValue({
+      ...event,
+      team: { ...event.team, slug: legacySlug },
+    })
+    const availability = vi
+      .spyOn(scheduling, 'listPublicTeamSlots')
+      .mockImplementation((ctx, input) => listSlots(ctx, { ...input, handle: teamSlug }))
+    const render = vi
+      .spyOn(mail, 'waitlistNotificationEmail')
+      .mockImplementation((options) =>
+        renderNotice({ ...options, bookingPath: `/team/${teamSlug}/intro` }),
+      )
+    try {
+      await deliverWaitlistEmail(s.deps, { kind: 'notification', id: candidate.id })
+      expect(s.messages).toHaveLength(1)
+      expect(render.mock.calls[0]?.[0].bookingPath).toBe('/team/Legacy%20Team%2520/intro')
+    } finally {
+      render.mockRestore()
+      availability.mockRestore()
+      resolve.mockRestore()
+    }
+  })
+
   async function verificationTimeZoneScenario(send: Sender) {
     const s = await setup('de')
     const entry = await s.join()
