@@ -5,6 +5,8 @@
  */
 export const MIGRATED_TEMPLATE_ENV = 'HOURMERE_TEST_MIGRATED_TEMPLATE'
 export const MIGRATED_TEMPLATE_SERVER_ENV = 'HOURMERE_TEST_MIGRATED_TEMPLATE_SERVER'
+export const MIGRATED_PREFIX_ENV = 'HOURMERE_TEST_MIGRATED_PREFIX'
+export const MIGRATED_PREFIX_LAST_FILE = '0012_invited_signup.sql'
 
 /** The server identity of a PostgreSQL URL: protocol, user, host and port, without database. */
 export function templateServer(url: string): string {

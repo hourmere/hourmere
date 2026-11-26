@@ -3,7 +3,7 @@ import { copyFile, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/pro
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type pg from 'pg'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
   attempts,
   digest,
@@ -16,6 +16,7 @@ import {
   transaction,
 } from './meeting-poll-protections.ts'
 import { migrationsDir, runMigrations } from './migrate.ts'
+import { MIGRATION_REPLAY_TIMEOUT } from './testing/migration-replay.ts'
 import {
   createTestDatabase,
   createTestDatabaseTemplate,
@@ -25,6 +26,8 @@ import {
 import { seedEarly } from './upgrade-path-seed-early.ts'
 import { seedLater } from './upgrade-path-seed-later.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
+
+vi.setConfig({ testTimeout: MIGRATION_REPLAY_TIMEOUT, hookTimeout: MIGRATION_REPLAY_TIMEOUT })
 
 const serverUrl = process.env.DATABASE_URL
 const migration = '0071_meeting_polls.sql'

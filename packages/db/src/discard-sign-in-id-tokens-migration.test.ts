@@ -2,9 +2,12 @@ import { copyFile, mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type pg from 'pg'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { migrationsDir, runMigrations } from './migrate.ts'
-import { createTestDatabase, type TestDatabase } from './testing.ts'
+import { MIGRATION_REPLAY_TIMEOUT, useMigrationReplay } from './testing/migration-replay.ts'
+import type { TestDatabase } from './testing.ts'
+
+vi.setConfig({ testTimeout: MIGRATION_REPLAY_TIMEOUT, hookTimeout: MIGRATION_REPLAY_TIMEOUT })
 
 const serverUrl = process.env.DATABASE_URL
 const migration = '0031_discard_sign_in_id_tokens.sql'
@@ -80,6 +83,8 @@ async function schema(pool: pg.Pool) {
 }
 
 describe.skipIf(!serverUrl)('discard sign-in ID tokens migration', () => {
+  const replay = useMigrationReplay(serverUrl as string, migration)
+
   it('clears only retained ID tokens, preserves all other bytes, matches a fresh install and reruns without writes', async () => {
     const predecessor = await mkdtemp(join(tmpdir(), 'hourmere-id-token-predecessor-'))
     let upgraded: TestDatabase | undefined
@@ -90,7 +95,7 @@ describe.skipIf(!serverUrl)('discard sign-in ID tokens migration', () => {
           await copyFile(join(migrationsDir, file), join(predecessor, file))
         }
       }
-      upgraded = await createTestDatabase(serverUrl as string, predecessor)
+      upgraded = await replay.predecessor.clone(predecessor)
       const pool = upgraded.pool
       await seed(pool, true)
       const before = await preservedColumns(pool)
@@ -125,7 +130,7 @@ describe.skipIf(!serverUrl)('discard sign-in ID tokens migration', () => {
       expect(await accounts(pool)).toEqual(cleaned)
       expect(await tuples(pool)).toEqual(cleanedTuples)
 
-      fresh = await createTestDatabase(serverUrl as string, predecessor)
+      fresh = await replay.predecessor.clone(predecessor)
       await seed(fresh.pool, false)
       expect(await accounts(fresh.pool)).toEqual(cleaned)
       expect(await schema(fresh.pool)).toEqual(schemaBefore)
