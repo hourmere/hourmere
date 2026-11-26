@@ -2,9 +2,12 @@ import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type pg from 'pg'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { migrationsDir, runMigrations } from './migrate.ts'
+import { MIGRATION_REPLAY_TIMEOUT } from './testing/migration-replay.ts'
 import { createTestDatabase, type TestDatabase } from './testing.ts'
+
+vi.setConfig({ testTimeout: MIGRATION_REPLAY_TIMEOUT, hookTimeout: MIGRATION_REPLAY_TIMEOUT })
 
 const serverUrl = process.env.DATABASE_URL
 const migration = '0027_nontransitive_invited_signup.sql'
@@ -15,18 +18,14 @@ describe.skipIf(!serverUrl)('non-transitive invitation migration', () => {
   let predecessor: string
 
   beforeAll(async () => {
-    owned = await createTestDatabase(serverUrl as string, undefined, {
-      migrate: false,
-      tag: 'signup',
-    })
-    pool = owned.pool
     predecessor = await mkdtemp(join(tmpdir(), 'hourmere-signup-predecessor-'))
     for (const file of await readdir(migrationsDir)) {
       if (file.endsWith('.sql') && file < migration) {
         await copyFile(join(migrationsDir, file), join(predecessor, file))
       }
     }
-    await runMigrations(pool, predecessor)
+    owned = await createTestDatabase(serverUrl as string, predecessor, { tag: 'signup' })
+    pool = owned.pool
   })
 
   afterAll(async () => {

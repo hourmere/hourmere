@@ -191,8 +191,6 @@ export const admin = {
     'Choose a valid PNG, JPEG or WebP image up to 512 KiB and 2048 × 2048 pixels. SVG and animated images are not supported.',
   'Edit branding': 'Edit branding',
   'Primary colour': 'Primary colour',
-  'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against the white page background is reported separately.':
-    'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against the white page background is reported separately.',
   'Brand logo': 'Brand logo',
   'A logo is saved for this space.': 'A logo is saved for this space.',
   'Remove logo': 'Remove logo',
@@ -3219,6 +3217,25 @@ export const admin = {
     'Microsoft reported a conflict with the booking copy. Check the calendar in Outlook.',
   'Hourmere will retry syncing a booking copy.': 'Hourmere will retry syncing a booking copy.',
   'A booking copy has a pending change.': 'A booking copy has a pending change.',
+  // Microsoft Teams meeting locations
+  'Microsoft Teams requires individual scheduling with one host.':
+    'Microsoft Teams requires individual scheduling with one host.',
+  'Could not verify Microsoft Teams availability for the host.':
+    'Could not verify Microsoft Teams availability for the host.',
+  'Checking Microsoft Teams availability…': 'Checking Microsoft Teams availability…',
+  'Microsoft Calendar is unavailable on this instance.':
+    'Microsoft Calendar is unavailable on this instance.',
+  'Connect a Microsoft 365 work or school calendar and select it for booking write-back.':
+    'Connect a Microsoft 365 work or school calendar and select it for booking write-back.',
+  'Reconnect Microsoft Calendar and allow calendar event writes to use Teams.':
+    'Reconnect Microsoft Calendar and allow calendar event writes to use Teams.',
+  'The host needs a Microsoft 365 work or school calendar selected for booking write-back.':
+    'The host needs a Microsoft 365 work or school calendar selected for booking write-back.',
+  'Microsoft Teams creates a meeting link for each booking on the host’s Microsoft 365 work or school calendar.':
+    'Microsoft Teams creates a meeting link for each booking on the host’s Microsoft 365 work or school calendar.',
+  'Remove a location option before adding another.':
+    'Remove a location option before adding another.',
+  'Open host booking details': 'Open host booking details',
   // SCIM provisioning
   'SCIM provisioning is disabled on this instance.':
     'SCIM provisioning is disabled on this instance.',
@@ -3266,6 +3283,47 @@ export const admin = {
   '{value} reschedule deadline': '{value} reschedule deadline',
   '{value} cancellation deadline': '{value} cancellation deadline',
   'Default timing rules': 'Default timing rules',
+  // SAML provider setup and enforcement
+  'Add SAML provider': 'Add SAML provider',
+  'Identity provider entity ID': 'Identity provider entity ID',
+  'SAML configuration source': 'SAML configuration source',
+  'Enter configuration manually': 'Enter configuration manually',
+  'Paste identity provider metadata': 'Paste identity provider metadata',
+  'Import metadata from a URL': 'Import metadata from a URL',
+  'Identity provider metadata XML': 'Identity provider metadata XML',
+  'Identity provider metadata URL': 'Identity provider metadata URL',
+  'HTTP-Redirect sign-in URL': 'HTTP-Redirect sign-in URL',
+  'Subject attribute': 'Subject attribute',
+  'Leave blank to use the persistent NameID.': 'Leave blank to use the persistent NameID.',
+  'Signing certificates': 'Signing certificates',
+  'Signing certificate {number}': 'Signing certificate {number}',
+  'Add signing certificate': 'Add signing certificate',
+  'Leave blank to keep saved settings. Import metadata again to replace its settings.':
+    'Leave blank to keep saved settings. Import metadata again to replace its settings.',
+  'To test a rotation, use a disabled draft. Submit the full set with both old and new certificates, test the new revision, then remove the old certificate after the identity provider switches.':
+    'To test a rotation, use a disabled draft. Submit the full set with both old and new certificates, test the new revision, then remove the old certificate after the identity provider switches.',
+  'Supply signing certificates if the metadata contains none.':
+    'Supply signing certificates if the metadata contains none.',
+  'Signed assertions are required.': 'Signed assertions are required.',
+  'Download service provider metadata': 'Download service provider metadata',
+  'Check the SAML metadata, sign-in URL and signing certificates, then try again.':
+    'Check the SAML metadata, sign-in URL and signing certificates, then try again.',
+  'Enable another usable provider before disabling this provider.':
+    'Enable another usable provider before disabling this provider.',
+  'A team owner must pass a test of the current version of an enabled identity provider.':
+    'A team owner must pass a test of the current version of an enabled identity provider.',
+  'An enabled identity provider with a verified domain is required.':
+    'An enabled identity provider with a verified domain is required.',
+  'Before requiring SSO, have an owner test the identity provider draft, then enable that revision with a verified domain. A current owner must also accept recovery enrollment.':
+    'Before requiring SSO, have an owner test the identity provider draft, then enable that revision with a verified domain. A current owner must also accept recovery enrollment.',
+
+  // Branding.
+  'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against white (#FFFFFF) is reported separately.':
+    'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against white (#FFFFFF) is reported separately.',
+
+  // Availability editor
+  'A schedule can have at most 10,000 date overrides, including past dates. Remove some overrides before saving.':
+    'A schedule can have at most 10,000 date overrides, including past dates. Remove some overrides before saving.',
 
   // SCIM invitation attribution
   'SCIM connection': 'SCIM connection',

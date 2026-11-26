@@ -59,10 +59,10 @@ transaction and may drop failures past its bound (see [SSO actions](#sso-actions
 The application and database reject extra detail keys. Role changes allow only
 `oldRole` and `newRole`; API key creation and the reserved rotation action allow
 only `scope`; all webhook and Slack destination actions allow only `events` (the
-subscribed event list), which the database checks is an array of distinct event names
-from that destination's catalogue, at least one and at most the catalogue size (Slack's
-leaves out the attendee no-show change); OAuth token revocation allows only `familySize`
-(see below).
+subscribed event list). When present, the database checks that `events` is an array of
+distinct event names from that destination's catalogue, at least one and at most the catalogue
+size (Slack's leaves out the attendee no-show change). OAuth token revocation allows only
+`familySize` (see below).
 Branding updates allow only `logo` (`uploaded`, `selected` or `removed`) and
 `primaryColor` (`set` or `cleared`), at least one of them; the database also checks
 these values. Attendee no-show changes require exactly `attendeeId` (the attendee's

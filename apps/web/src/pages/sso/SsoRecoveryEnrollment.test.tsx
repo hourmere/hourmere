@@ -110,7 +110,7 @@ function challenge() {
 
 async function finishProof(user: ReturnType<typeof userEvent.setup>) {
   const heading = await screen.findByRole('heading', { name: proofHeading })
-  expect(document.activeElement).toBe(heading)
+  await waitFor(() => expect(document.activeElement).toBe(heading))
   const next = screen.getByRole<HTMLButtonElement>('button', { name: 'Continue' })
   expect(next.disabled).toBe(true)
   await user.click(screen.getByRole('button', { name: 'Send verification email' }))
@@ -185,7 +185,7 @@ describe('SSO recovery enrollment in team settings', () => {
     ])
     expect(requests.to(acceptPath)).toHaveLength(0)
     await user.click(form.getByRole('button', { name: 'Close' }))
-    expect(document.activeElement).toBe(nominate)
+    await waitFor(() => expect(document.activeElement).toBe(nominate))
   })
 
   it('accepts a nomination in the enforced team only after the nominee consents and verifies their own mailbox', async () => {

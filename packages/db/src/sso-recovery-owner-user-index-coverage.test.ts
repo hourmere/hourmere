@@ -1,12 +1,16 @@
-import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { copyFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type pg from 'pg'
 import { describe, expect, it } from 'vitest'
 import { migrationsDir, runMigrations } from './migrate.ts'
 import { ssoFixture } from './sso-storage-fixtures.ts'
 import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
-import { createTestDatabase, type TestDatabase } from './testing.ts'
+import {
+  MIGRATION_COVERAGE_TIMEOUT,
+  MIGRATION_REPLAY_TIMEOUT,
+  useMigrationReplay,
+} from './testing/migration-replay.ts'
+import type { TestDatabase } from './testing.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -56,58 +60,60 @@ async function recoveryRows(pool: pg.Pool) {
 }
 
 describe.skipIf(!serverUrl)('SSO recovery owner user index', () => {
-  it('has a valid user_id index and fails the assertion when it is dropped', async () => {
-    const report = await checkConstraintCoverage({
-      serverUrl: serverUrl as string,
-      migration,
-      assertions: assertUserIndex,
-    })
-    expect(report.problems).toEqual([])
-    expect(report.results.map(({ key, status }) => [key, status])).toEqual([
-      [`index public.sso_recovery_owners.${index}`, 'covered'],
-    ])
-  }, 600_000)
+  const replay = useMigrationReplay(serverUrl as string, migration)
 
-  it('bounds the write-lock wait, preserves predecessor rows and matches a fresh install', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'hourmere-sso-owner-index-'))
-    let upgraded: TestDatabase | undefined
-    let fresh: TestDatabase | undefined
-    try {
-      for (const file of await readdir(migrationsDir)) {
-        if (file.endsWith('.sql') && file < migration) {
-          await copyFile(join(migrationsDir, file), join(directory, file))
-        }
-      }
-      upgraded = await createTestDatabase(serverUrl as string, directory, { tag: 'sso_owner_up' })
-      await seedRecoveryOwners(upgraded.pool)
-      const before = await recoveryRows(upgraded.pool)
-      expect(before).toHaveLength(2)
-      await copyFile(join(migrationsDir, migration), join(directory, migration))
-
-      const writer = await upgraded.pool.connect()
-      try {
-        await writer.query('BEGIN')
-        await writer.query('LOCK TABLE sso_recovery_owners IN ROW EXCLUSIVE MODE')
-        await expect(runMigrations(upgraded.pool, directory)).rejects.toMatchObject({
-          cause: { code: '55P03' },
-        })
-      } finally {
-        await writer.query('ROLLBACK').finally(() => writer.release())
-      }
-
-      await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([migration])
-      fresh = await createTestDatabase(serverUrl as string, directory, { tag: 'sso_owner_new' })
-      expect(await snapshotSchema(upgraded.pool)).toEqual(await snapshotSchema(fresh.pool))
-      expect(await recoveryRows(upgraded.pool)).toEqual(before)
-      await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([])
-      await expect(runMigrations(fresh.pool, directory)).resolves.toEqual([])
-      expect(await recoveryRows(upgraded.pool)).toEqual(before)
-    } finally {
-      await Promise.all([
-        upgraded?.drop(),
-        fresh?.drop(),
-        rm(directory, { recursive: true, force: true }),
+  it(
+    'has a valid user_id index and fails the assertion when it is dropped',
+    async () => {
+      const report = await checkConstraintCoverage({
+        serverUrl: serverUrl as string,
+        migration,
+        predecessorTemplate: replay.predecessor,
+        assertions: assertUserIndex,
+      })
+      expect(report.problems).toEqual([])
+      expect(report.results.map(({ key, status }) => [key, status])).toEqual([
+        [`index public.sso_recovery_owners.${index}`, 'covered'],
       ])
-    }
-  }, 120_000)
+    },
+    MIGRATION_COVERAGE_TIMEOUT,
+  )
+
+  it(
+    'bounds the write-lock wait, preserves predecessor rows and matches a fresh install',
+    async () => {
+      const { directory, predecessor } = replay
+      let upgraded: TestDatabase | undefined
+      let fresh: TestDatabase | undefined
+      try {
+        upgraded = await predecessor.clone(undefined, { migrate: false, tag: 'sso_owner_up' })
+        await seedRecoveryOwners(upgraded.pool)
+        const before = await recoveryRows(upgraded.pool)
+        expect(before).toHaveLength(2)
+        await copyFile(join(migrationsDir, migration), join(directory, migration))
+
+        const writer = await upgraded.pool.connect()
+        try {
+          await writer.query('BEGIN')
+          await writer.query('LOCK TABLE sso_recovery_owners IN ROW EXCLUSIVE MODE')
+          await expect(runMigrations(upgraded.pool, directory)).rejects.toMatchObject({
+            cause: { code: '55P03' },
+          })
+        } finally {
+          await writer.query('ROLLBACK').finally(() => writer.release())
+        }
+
+        await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([migration])
+        fresh = await predecessor.clone(directory, { tag: 'sso_owner_new' })
+        expect(await snapshotSchema(upgraded.pool)).toEqual(await snapshotSchema(fresh.pool))
+        expect(await recoveryRows(upgraded.pool)).toEqual(before)
+        await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([])
+        await expect(runMigrations(fresh.pool, directory)).resolves.toEqual([])
+        expect(await recoveryRows(upgraded.pool)).toEqual(before)
+      } finally {
+        await Promise.all([upgraded?.drop(), fresh?.drop()])
+      }
+    },
+    MIGRATION_REPLAY_TIMEOUT,
+  )
 })

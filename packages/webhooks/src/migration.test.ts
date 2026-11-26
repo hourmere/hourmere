@@ -4,33 +4,45 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { createDb, runMigrations } from '@hourmere/db'
-import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { MIGRATION_REPLAY_TIMEOUT } from '@hourmere/db/migration-replay'
+import {
+  createTestDatabaseTemplate,
+  type TestDatabase,
+  type TestDatabaseTemplate,
+} from '@hourmere/db/testing'
 import { createFixtures, createTestUser } from '@hourmere/scheduling/testing'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { encryptWebhookSecret } from './crypto.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const migration = '0028_webhook_interrupted_deliveries.sql'
+
+vi.setConfig({ testTimeout: MIGRATION_REPLAY_TIMEOUT })
 
 it.skipIf(!serverUrl)(
   'preserves predecessor webhook data, supports fresh installs and reruns safely',
   async () => {
     const dir = await mkdtemp(join(tmpdir(), 'hourmere-webhook-predecessor-'))
     let owned: TestDatabase | undefined
+    let fresh: TestDatabase | undefined
+    let template: TestDatabaseTemplate | undefined
     try {
-      owned = await createTestDatabase(serverUrl as string, undefined, {
-        migrate: false,
-        tag: 'webhook_upgrade',
-      })
-      const pool = owned.pool
       const source = new URL('../../db/migrations/', import.meta.url)
       const predecessors = (await readdir(source))
         .filter((file) => file.endsWith('.sql') && file < migration)
         .sort()
       for (const file of predecessors) await copyFile(new URL(file, source), join(dir, file))
-      const predecessor = await runMigrations(pool, dir)
-      expect(predecessor).toEqual(predecessors)
-      expect(predecessor.at(-1)).toBe('0027_nontransitive_invited_signup.sql')
+      template = await createTestDatabaseTemplate(
+        serverUrl as string,
+        async (pool) => {
+          const applied = await runMigrations(pool, dir)
+          expect(applied).toEqual(predecessors)
+          expect(applied.at(-1)).toBe('0027_nontransitive_invited_signup.sql')
+        },
+        { tag: 'webhook_prev' },
+      )
+      owned = await template.clone(undefined, { migrate: false, tag: 'webhook_upgrade' })
+      const pool = owned.pool
       const db = createDb(pool)
       const user = await createTestUser(db)
       const key = Buffer.alloc(32, 9).toString('base64')
@@ -108,18 +120,21 @@ it.skipIf(!serverUrl)(
           .where('webhook_id', '=', webhook.id)
           .execute(),
       ).rejects.toMatchObject({ code: '23514' })
-      await pool.query('DROP SCHEMA public CASCADE')
-      await pool.query('DROP SCHEMA auth CASCADE')
-      await pool.query('CREATE SCHEMA public')
-      expect(await runMigrations(pool, dir)).toEqual([...predecessors, migration])
-      expect(await runMigrations(pool, dir)).toEqual([])
+      fresh = await template.clone(undefined, { migrate: false, tag: 'webhook_fresh' })
+      expect(await runMigrations(fresh.pool, dir)).toEqual([migration])
+      const installed = await fresh.pool.query<{ name: string }>(
+        'SELECT name FROM schema_migrations ORDER BY name',
+      )
+      expect(installed.rows.map(({ name }) => name)).toEqual([...predecessors, migration])
+      expect(await runMigrations(fresh.pool, dir)).toEqual([])
       expect(
-        (await pool.query('SELECT count(*)::int AS n FROM webhook_deliveries')).rows[0].n,
+        (await fresh.pool.query('SELECT count(*)::int AS n FROM webhook_deliveries')).rows[0].n,
       ).toBe(0)
     } finally {
       try {
-        await owned?.drop()
+        await Promise.all([owned?.drop(), fresh?.drop()])
       } finally {
+        await template?.drop()
         await rm(dir, { recursive: true, force: true })
       }
     }

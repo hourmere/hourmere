@@ -2,10 +2,13 @@ import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type pg from 'pg'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { migrationsDir, runMigrations } from './migrate.ts'
-import { createTestDatabase, type TestDatabase } from './testing.ts'
+import { MIGRATION_REPLAY_TIMEOUT, useMigrationReplay } from './testing/migration-replay.ts'
+import type { TestDatabase } from './testing.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
+
+vi.setConfig({ testTimeout: MIGRATION_REPLAY_TIMEOUT, hookTimeout: MIGRATION_REPLAY_TIMEOUT })
 
 const serverUrl = process.env.DATABASE_URL
 const migration = '0033_conference_authorization_time.sql'
@@ -105,6 +108,8 @@ async function authorizationColumn(pool: pg.Pool) {
 }
 
 describe.skipIf(!serverUrl)('conference authorization time migration', () => {
+  const replay = useMigrationReplay(serverUrl as string, migration)
+
   it('preserves populated 0032 grants verbatim, matches a fresh install and reruns without writes', async () => {
     const predecessor = await mkdtemp(join(tmpdir(), 'hourmere-authorization-predecessor-'))
     let upgraded: TestDatabase | undefined
@@ -115,7 +120,7 @@ describe.skipIf(!serverUrl)('conference authorization time migration', () => {
           await copyFile(join(migrationsDir, file), join(predecessor, file))
         }
       }
-      upgraded = await createTestDatabase(serverUrl as string, predecessor)
+      upgraded = await replay.predecessor.clone(predecessor)
       const pool = upgraded.pool
       expect(
         (await pool.query('SELECT name FROM schema_migrations ORDER BY name')).rows.at(-1),
@@ -144,7 +149,7 @@ describe.skipIf(!serverUrl)('conference authorization time migration', () => {
       expect((await pool.query(ledger)).rows).toEqual(recorded)
       expect(await snapshotSchema(pool)).toEqual(upgradedSchema)
 
-      fresh = await createTestDatabase(serverUrl as string, predecessor)
+      fresh = await replay.predecessor.clone(predecessor)
       expect(await snapshotSchema(fresh.pool)).toEqual(upgradedSchema)
       expect(await authorizationColumn(fresh.pool)).toEqual(await authorizationColumn(pool))
       expect(
