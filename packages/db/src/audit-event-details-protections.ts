@@ -81,11 +81,17 @@ export function refusedEventLists(catalogue: readonly string[]): unknown[] {
  * Throws when a webhook or Slack destination action accepts an `events` value other than one
  * to all distinct names of its catalogue, or when any 0078 branch has changed.
  */
-export async function assertAuditEventListProtections(pool: pg.Pool): Promise<void> {
+export async function assertAuditEventListProtections(
+  pool: pg.Pool,
+  { webhook, slack }: { webhook: readonly string[]; slack: readonly string[] } = {
+    webhook: webhookAuditEvents,
+    slack: slackAuditEvents,
+  },
+): Promise<void> {
   await assertAuditDetailProtections(pool)
   for (const [actions, catalogue] of [
-    [webhookAuditActions, webhookAuditEvents],
-    [slackAuditActions, slackAuditEvents],
+    [webhookAuditActions, webhook],
+    [slackAuditActions, slack],
   ] as const) {
     const accepted: unknown[] = [
       undefined,
@@ -110,13 +116,11 @@ export async function assertAuditEventListProtections(pool: pg.Pool): Promise<vo
         ).rejects.toMatchObject(refused)
     }
   }
-  // The attendee no-show change is a signed-webhook event only: Slack never records it.
+  const webhookOnly = webhook.filter((event) => !slack.includes(event))
+  if (webhookOnly.length === 0) return
+  const rejectedOnSlack = [...webhookOnly.flatMap((event) => [[event], [slack[0], event]]), webhook]
   for (const action of slackAuditActions)
-    for (const events of [
-      ['booking.attendee_no_show_changed'],
-      ['booking.created', 'booking.attendee_no_show_changed'],
-      [...webhookAuditEvents],
-    ])
+    for (const events of rejectedOnSlack)
       await expect(
         insert(pool, action, { events }),
         `${action} ${JSON.stringify({ events })}`,
