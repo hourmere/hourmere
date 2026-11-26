@@ -6,7 +6,13 @@ import { DomainError } from '@hourmere/scheduling'
 import { HTTPException } from 'hono/http-exception'
 import { sql } from 'kysely'
 import { z } from 'zod'
-import { requireSsoEnabled, requireSsoRetained, type SsoCapabilities } from './sso.ts'
+import {
+  enabledSsoProtocols,
+  requireSsoEnabled,
+  requireSsoRetained,
+  type SsoCapabilities,
+  ssoProtocolEnabled,
+} from './sso.ts'
 import { openSsoProviderConfiguration, sealSsoProviderConfiguration } from './sso-configuration.ts'
 import { lockSsoDomain } from './sso-domains.ts'
 import { type FreshProofDeps, runWithFreshProof } from './sso-fresh-proof.ts'
@@ -328,7 +334,7 @@ async function checkActivation(
 }
 
 async function requireUsableReplacement(db: Db, capabilities: SsoCapabilities, row: Provider) {
-  if (!row.enabled || row.protocol !== 'oidc' || !capabilities.ssoOidcEnabled) return
+  if (!row.enabled || !ssoProtocolEnabled(capabilities, row.protocol)) return
   const enforced = await db
     .selectFrom('sso_policies')
     .select('organization_id')
@@ -348,7 +354,7 @@ async function requireUsableReplacement(db: Db, capabilities: SsoCapabilities, r
     .where('p.id', '!=', row.id)
     .where('p.enabled', '=', true)
     .where('p.retired_at', 'is', null)
-    .where('p.protocol', '=', 'oidc')
+    .where('p.protocol', 'in', enabledSsoProtocols(capabilities))
     .limit(1)
     .executeTakeFirst()
   if (!alternative) throw new DomainError('conflict', 'sso_last_provider')

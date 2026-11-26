@@ -185,7 +185,7 @@ it('detects location actions losing their usable target size', () => {
       const Action = compile<react.ComponentType>(
         `function Action() { return (${copy}) }`,
         'Action',
-        { index: 1, move: () => {}, t: (text: string) => text },
+        { id: 'location-option-test', index: 1, move: () => {}, t: (text: string) => text },
       )
       const view = render(<Action />)
       try {

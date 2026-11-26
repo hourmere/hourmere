@@ -589,4 +589,7 @@ export const common = {
   // Booking page preview
   'These are sample times. Booking is disabled in the preview.':
     'These are sample times. Booking is disabled in the preview.',
+  // Booking location changes
+  'The meeting location has changed. Please choose a time again.':
+    'The meeting location has changed. Please choose a time again.',
 } as const
