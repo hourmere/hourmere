@@ -20,10 +20,13 @@ Cancel is the existing team management action that administrators can apply to s
 appointments for the same operational reason. The bulk interface has no free-text reason
 field. The existing individual interfaces retain their own access rules for rescheduling,
 deleting, changing hosts, attendance, refunds and provider or notification retries.
-Imported records, payment holds and bookings governed by an online payment policy or
-linked to a payment record are ineligible. Determine payment eligibility from stored
-booking facts under lock, including the booking's immutable payment terms if present.
-Today's event-type price is insufficient.
+Imported records are ineligible. Paid bookings are excluded from bulk cancellation.
+Reuse the shared paid-binding predicate from `assertBookingLocallyManaged` and
+`unavailablePaidManagementIds`. A booking is excluded if it has a stored payment hold
+deadline or a Checkout attempt references it as the root (`booking_id`) or the current
+booking (`current_booking_id`). The current booking reference also covers rescheduled
+paid successors. Immutable online payment terms on the booking also make it ineligible.
+Use these stored facts under lock. Paid events are personal-only.
 Cancellation of a selected seat or occurrence uses existing group or series rules, including
 any required slot or series bookkeeping. It never adds a sibling, successor, other series
 member or other group seat to the selection.
@@ -128,6 +131,14 @@ existing organization and booking cancellation lock order, including series and 
 as applicable. Check the current start time, state, import status and payment eligibility
 after locking the booking, using the current time after any lock wait. Keep the item
 claim lock after the team authorization locks and before booking-related locks.
+For each pending item, recheck current team membership of the booking's saved required
+hosts while holding the organization and booking locks. Member leave and administrative
+removal serialize on the organization lock. If the departure has committed first, a
+booking already cancelled by the time of the check returns `already_cancelled`. An
+otherwise eligible booking with a departed required host returns `booking_host_departed`
+without cancellation side effects. Continue processing other items while the actor
+retains authority. A blocked leave leaves membership intact and the item follows ordinary
+eligibility rules.
 Stop pending writes on loss of authority or team context and finalize the unprocessed rows
 with `authorization_lost`; completed rows stand. A transient database/lock failure is not a
 loss-of-authority result.
@@ -145,11 +156,13 @@ Each entry has one of these codes.
 | `booking_started` | The same-team booking was confirmed but had already started at eligibility check. |
 | `booking_not_supported` | The same-team entry was imported, held for payment or otherwise ineligible by its stored payment or lifecycle policy. |
 | `booking_unavailable` | No booking with this ID exists in the bound team. Missing and outside-team rows share the same code, with no foreign metadata. |
+| `booking_host_departed` | An otherwise eligible booking has a saved required host who is no longer a member of the team. No host identity is added to the result. |
 | `authorization_lost` | The original authority or active team stopped permitting write work. |
 | `processing_failed` | A transient failure exhausted item retries, or the execution window ended before an outcome could be committed. The booking transaction did not commit through this batch. |
 
 Evaluate in order: owned row exists, current state is already cancelled, state or policy
-is unsupported, scheduled start has passed, then eligible. A worker must distinguish an
+is unsupported, scheduled start has passed, a required host has departed, then eligible.
+Use the same outcome precedence in preview and execution. A worker must distinguish an
 already-cancelled group seat from a cancellation, even when a shared helper otherwise
 returns a no-op. A terminal result never changes. An expected item rejection can be recorded
 without rolling back earlier items. If an unexpected write error occurs, roll back that
@@ -158,8 +171,9 @@ commit leaves the outcome unknown. Re-read the result under the item claim fence
 retrying or recording failure, and keep any committed result. A successfully committed
 cancellation and its successful item result are inseparable.
 
-After admission there is no stop or undo operation. Closing a progress dialog stops only
-viewing. Committed cancellation releases the booking's occupancy or group seat under
+Accepted batches cannot be undone. After admission there is no stop operation.
+Closing the progress dialog only ends viewing. Committed cancellation releases the
+booking's occupancy or group seat under
 existing scheduling rules and may enqueue attendee notices, webhooks, calendar and
 conference cleanup or other existing cancellation effects. A `cancelled` result describes
 the database change, with delivery tracked by existing
@@ -248,5 +262,6 @@ UI off through the earlier slices.
 | --- | --- | --- |
 | 1. Scope and proof | Session-only opted-in list, selected-page proof, and preview receipt schema with constraint coverage. | Real PostgreSQL fixtures for two teams and multiple pages. Verify search/sort and cursor changes, forged or expired proof, unseen IDs and UUID duplicates. Cover admin, owner, host-only member, personal, removed, expired and unverified sessions, API keys, MCP OAuth and credential-plus-cookie requests. |
 | 2. Durable admission | Confirm/status, shared rate, queue and journal admission, using day 1 proof and receipts. | Test parallel submission and lost response, same-key replay after a new sign-in, stale unsubmitted receipt, quotas across processes and rollback of enqueue or audit writes. Test receipt privacy and authorization before existence checks. Run generated type and parity gates. |
-| 3. Item processing | Existing cancellation service integration and recovery, using day 2 receipts. | Mix eligible, cancelled, started, unavailable, imported and paid rows. Check a deadline crossed while locked, session or role revocation, team switch, SCIM suspension and SSO proof expiry or revocation during work. Exercise concurrent host cancellation, per-item rollback and worker crash/redelivery. Verify group/series isolation, one journal/cancellation intent per success, no extra writes, result retention and bounded concurrency with real PostgreSQL and fake providers. |
+| 3a. Item processing and results | Existing cancellation service integration, using day 2 receipts. | Mix eligible, cancelled, started, unavailable, imported and paid rows, including rescheduled paid successors. Check a start deadline crossed while locked, concurrent host cancellation and per-item rollback. Verify group/series isolation, one journal event and normal cancellation intent per success, and no extra writes, with real PostgreSQL and fake providers. |
+| 3b. Revocation, recovery and redelivery | Worker recovery and authority changes, using day 3a item processing. | Check session or role revocation, team switch, SCIM suspension and SSO proof expiry or revocation during work. Race host departure or removal with an item and verify `booking_host_departed` for an otherwise eligible booking, `already_cancelled` for a booking cancelled first, and continuation for unaffected items. Exercise worker crash, redelivery and unknown-commit recovery under the claim fence. Verify no duplicate side effects, result retention and concurrency bounds with real PostgreSQL and fake providers. |
 | 4. Browser and release gate | Selection, confirmation and results UI in en and zh-CN, using all prior slices. | Keyboard and multi-role browser acceptance. Check that page/filter/team changes clear selection, stale async results cannot submit, a lost response recovers the existing batch, and the completion screen explains skipped and committed rows. Verify the existing single-booking and host agent paths still behave as before. Enable only after authorization, privacy, recovery and operator acceptance pass. |

@@ -33,4 +33,18 @@ describe('team booking bulk cancellation design facts', () => {
     )
     expect(prose).toContain('The same confirmation ID always refers to the same batch.')
   })
+
+  it('excludes paid bookings, including rescheduled successors, using the shared predicate', () => {
+    expect(prose).toContain('Paid bookings are excluded from bulk cancellation.')
+    expect(prose).toContain(
+      'Reuse the shared paid-binding predicate from `assertBookingLocallyManaged` and `unavailablePaidManagementIds`.',
+    )
+    expect(prose).toContain(
+      'the root (`booking_id`) or the current booking (`current_booking_id`).',
+    )
+  })
+
+  it('makes accepted batches irreversible', () => {
+    expect(prose).toContain('Accepted batches cannot be undone.')
+  })
 })
