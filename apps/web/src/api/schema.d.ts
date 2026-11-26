@@ -8295,7 +8295,7 @@ export interface components {
                 durationMinutes: number;
                 location: {
                     /** @enum {string} */
-                    kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+                    kind: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
                 } | null;
                 /** @description The booking page is /team/{handle}/{slug} */
                 slug: string;
