@@ -132,6 +132,15 @@ the mapped profile and timestamp in the existing row. If the normalized work add
 changes, the same transaction sets the unfinished claim's `invalidated_at` and keeps its
 mailbox and invitation reference.
 
+With either SSO protocol enabled, a member removal writes a team-local admission block
+in `scim_membership_blocks` for the removed member's normalized account email, even if
+that team has never configured an identity provider. Distinct verified emails on active
+SSO links in that team each get their own block. The records identify a local removal
+(`source = 'local'`, `kind = 'removal'`). Active blocks prevent automatic readmission
+through SSO or SCIM, including after the team adopts either feature. The mailbox records
+have no expiration and are kept until that team is deleted, even after the account is
+deleted or the block is cleared.
+
 Migration `0181_scim_team_hierarchy.sql` adds storage for the
 [SCIM Groups-to-teams hierarchy](scim.md#groups-to-teams-hierarchy-authorization).
 Each live `scim_team_mappings` row is both a hierarchy edge and a reservation for

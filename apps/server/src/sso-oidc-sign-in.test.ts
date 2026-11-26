@@ -58,7 +58,7 @@ import {
   type MailboxProofQueue,
   mailboxProofRoutes,
 } from './sso-mailbox-proof.ts'
-import { oidcSignInRoutes } from './sso-oidc-sign-in.ts'
+import * as oidcSignIn from './sso-oidc-sign-in.ts'
 import { samlSigningIdentity } from './sso-saml-fixtures.ts'
 import { configuredSsoCapabilities } from './sso-setting-fixtures.ts'
 
@@ -357,7 +357,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
         capabilities,
         queue: mailboxProofQueue,
       }),
-      ssoOidcSignIn: oidcSignInRoutes({
+      ssoOidcSignIn: oidcSignIn.oidcSignInRoutes({
         db,
         capabilities,
         configurationKey,
@@ -382,8 +382,6 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       DATABASE_URL: owned.url,
       BETTER_AUTH_SECRET: secret,
       PUBLIC_URL: publicUrl,
-      SCIM_PROVISIONING_ENABLED: 'true',
-      SSO_OIDC_ENABLED: 'true',
       SSO_ENCRYPTION_KEY: configurationKey.toString('base64'),
       SIGNUP: 'open',
     })
@@ -391,25 +389,24 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       throw new Error('Unexpected collaborator in production OIDC flow')
     }
     const invitationMailLimits = { secret }
-    const authentication = createAuth(
-      productionAuthOptions({
-        config,
-        pool: authPool,
+    const authOptions = productionAuthOptions({
+      config,
+      pool: authPool,
+      db,
+      mailer: { send: unavailable },
+      invitationDelivery: {
         db,
-        mailer: { send: unavailable },
-        invitationDelivery: {
-          db,
-          queue: {
-            enqueue: unavailable,
-            retireExpiredInvitationEmailJobs: unavailable,
-            hasLiveInvitationEmailJob: unavailable,
-          },
+        queue: {
+          enqueue: unavailable,
+          retireExpiredInvitationEmailJobs: unavailable,
+          hasLiveInvitationEmailJob: unavailable,
         },
-        invitationMailLimits,
-        jobs: { enqueue: unavailable },
-      }),
-    )
-    return createApp(
+      },
+      invitationMailLimits,
+      jobs: { enqueue: unavailable },
+    })
+    const authentication = createAuth(authOptions)
+    const productionApp = createApp(
       productionAppOptions({
         config,
         db,
@@ -433,6 +430,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
         enqueueScimInvitation: unavailable,
       }),
     )
+    return { app: productionApp, authOptions }
   }
 
   function configuration(
@@ -3666,9 +3664,29 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     return { invitationId: invitation.id, entryId: entry.id }
   }
 
+  it('wires invitation-only SCIM claims into OIDC and Better Auth with production defaults', () => {
+    const oidcRoutes = vi.spyOn(oidcSignIn, 'oidcSignInRoutes')
+    try {
+      const { authOptions } = productionInstance()
+      const invitationOnly = { invitation: scimClaimCompletion.invitation }
+      expect(oidcRoutes).toHaveBeenCalledTimes(1)
+      const oidcOptions = oidcRoutes.mock.lastCall?.[0]
+      expect(oidcOptions?.capabilities).toMatchObject({
+        ssoOidcEnabled: true,
+        ssoSamlEnabled: true,
+        scimResourcesEnabled: true,
+      })
+      expect(authOptions.scimResourcesEnabled).toBe(true)
+      expect(oidcOptions?.scimClaims).toStrictEqual(invitationOnly)
+      expect(authOptions.scimClaims).toStrictEqual(invitationOnly)
+    } finally {
+      oidcRoutes.mockRestore()
+    }
+  })
+
   it('completes the SCIM claim through production OIDC invitation acceptance', async () => {
     vi.mocked(sendSsoRequest).mockImplementation(idp.send)
-    app = productionInstance()
+    app = productionInstance().app
     const f = await provider()
     const invitation = await issueInvitation(f.email, true)
     const { pending } = await pendingAdmission(f, { email_verified: true })
@@ -4386,7 +4404,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       }
       if (state === 'production') {
         vi.mocked(sendSsoRequest).mockImplementation(idp.send)
-        app = productionInstance()
+        app = productionInstance().app
       }
       const pending = await prepareLink(f)
       if (state === 'blocked')
