@@ -32,13 +32,19 @@ only changes the draft until the main save succeeds. Upcoming rows follow their 
 dates, so editing a date does not move its row. New rows stay in insertion order at
 the top until you save; a successful save sorts the rows by their saved dates again.
 Past overrides are collapsed and read-only, and are preserved unchanged when saving.
-Dates, including time-field accessible names, follow your interface locale. Hours use
-the readable time-zone label shown in the section; partial time-zone searches keep
-the last valid selection until you choose another zone.
+Dates, including time-field accessible names, follow your selected language. The default
+English interface keeps the browser’s regional date format. The overrides section and
+conflict panel show time-zone names in your interface language. Partial time-zone searches
+keep the last valid selection until you choose another zone.
+When the form flags an override, the error summary links to the field and names its
+date if one was entered.
 
 The server commits everything in one database transaction. If any part fails,
 none of the changes are saved and your draft remains available to correct or retry.
 A saved confirmation means both the week and the overrides were saved.
+
+A schedule can include up to 10,000 date overrides, counting past dates. If a draft
+exceeds the limit, remove overrides from the draft before saving.
 
 If another tab or client changes the schedule after you opened it, saving reports
 a conflict instead of replacing that newer state. Your draft stays in the editor.

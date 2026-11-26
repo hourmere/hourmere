@@ -82,13 +82,16 @@ describe('new event location defaults', () => {
     ).toBe('')
   })
 
-  it('preserves existing location and does not load defaults while editing', async () => {
-    const api = setup()
+  it('preserves the saved location while checking whether Teams can be selected', async () => {
+    const api = setup({
+      'GET /api/v1/calendar-connections': () =>
+        json(200, { data: [{ provider: 'google', status: 'active', syncAuthorized: true }] }),
+    })
     renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
     expect(
       ((await screen.findByLabelText('Where the meeting happens')) as HTMLSelectElement).value,
     ).toBe('')
-    expect(api.to('GET /api/v1/calendar-connections')).toHaveLength(0)
+    expect(api.to('GET /api/v1/calendar-connections')).toHaveLength(1)
     expect(api.to('GET /api/v1/conference-connections')).toHaveLength(0)
   })
 })
