@@ -1,3 +1,7 @@
+import {
+  ONE_TIME_LINK_PREFILL_EMAIL_MAX,
+  ONE_TIME_LINK_PREFILL_NAME_MAX,
+} from '@hourmere/core/one-time-links'
 import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from 'react'
 import { api, type Schemas, unwrap } from '../../api/client.ts'
 import { isOrganizationContextChanged, RequestError } from '../../api/errors.ts'
@@ -303,7 +307,7 @@ function OneTimeLinkManager({ event }: { event: EventType }) {
                 <input
                   {...props}
                   value={name}
-                  maxLength={200}
+                  maxLength={ONE_TIME_LINK_PREFILL_NAME_MAX}
                   autoComplete="off"
                   onChange={(e) => setName(e.target.value)}
                 />
@@ -315,7 +319,7 @@ function OneTimeLinkManager({ event }: { event: EventType }) {
                   {...props}
                   type="email"
                   value={email}
-                  maxLength={254}
+                  maxLength={ONE_TIME_LINK_PREFILL_EMAIL_MAX}
                   autoComplete="off"
                   onChange={(e) => setEmail(e.target.value)}
                 />

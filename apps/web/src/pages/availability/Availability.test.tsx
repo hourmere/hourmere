@@ -574,13 +574,66 @@ describe('one availability save', () => {
     await user.click(screen.getByRole('button', { name: 'Save changes' }))
     expect(screen.getByRole('alert').textContent).toContain('These hours overlap')
     const overlap = within(screen.getByRole('alert')).getByRole('link', {
-      name: /These hours overlap/,
+      name: /^Tue, Dec 31, 2030: These hours overlap/,
     })
     await user.click(overlap)
     expect(document.activeElement).toBe(
       document.querySelector(overlap.getAttribute('href') ?? 'missing'),
     )
     expect(api.to(`PUT /api/v1/schedules/${SCHEDULE_ID}/availability`)).toHaveLength(0)
+  })
+  it('identifies and focuses the date-specific fields in the error summary', async () => {
+    const user = userEvent.setup()
+    scheduleServer([schedule()], {
+      overrides: ['2030-12-24', '2030-12-25'].map((date) => ({
+        date,
+        intervals: [{ start: '09:00', end: '17:00' }],
+      })),
+    })
+    renderApp(`/app/availability/${SCHEDULE_ID}`)
+    const labels = [
+      'Tue, Dec 24, 2030, hours 1, until',
+      'Wed, Dec 25, 2030, hours 1, until',
+    ] as const
+    await screen.findByLabelText(labels[0])
+    for (const label of labels) {
+      fireEvent.change(input(label), { target: { value: '08:00' } })
+    }
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    const summary = within(await screen.findByRole('alert'))
+    for (const label of labels) {
+      const link = summary.getByRole('link', { name: `${label}: End after the start time.` })
+      expect(link.getAttribute('href')).toBe(`#${input(label).id}`)
+      await user.click(link)
+      expect(document.activeElement).toBe(input(label))
+    }
+  })
+  it.each([
+    {
+      locale: 'en' as const,
+      save: 'Save changes',
+      error:
+        'A schedule can have at most 10,000 date overrides, including past dates. Remove some overrides before saving.',
+    },
+    {
+      locale: 'zh-CN' as const,
+      save: '保存更改',
+      error: '每个日程最多可有 10,000 个特定日期安排（包括过去的日期）。请先移除一些安排再保存。',
+    },
+  ])('explains the override limit when saving in $locale', async ({ locale, save, error }) => {
+    chooseLanguage(locale)
+    const user = userEvent.setup()
+    scheduleServer([schedule()], {
+      extra: {
+        [`PUT /api/v1/schedules/${SCHEDULE_ID}/availability`]: () =>
+          json(400, { error: 'too_many_overrides' }),
+      },
+    })
+    renderApp(`/app/availability/${SCHEDULE_ID}`)
+    await user.click(await screen.findByRole('button', { name: save }))
+    const alert = await screen.findByRole('alert')
+    expect(alert.querySelector('p')?.textContent).toContain(error)
+    expect(alert.textContent).not.toMatch(/Try again|重试/i)
   })
   it.each([409, 503])(
     'retains all drafts and dirty protection when the whole save fails (%s)',
@@ -771,6 +824,7 @@ it('keeps a long override history collapsed and read-only with add first at 320p
 })
 
 it('reviews latest changes and reapplies the retained draft with the new version', async () => {
+  browserLocale('ja-JP')
   const user = userEvent.setup()
   let reads = 0
   let writes = 0
@@ -778,7 +832,10 @@ it('reviews latest changes and reapplies the retained draft with the new version
     extra: {
       [`GET /api/v1/schedules/${SCHEDULE_ID}/availability`]: () =>
         json(200, {
-          schedule: schedule({ name: ++reads === 1 ? 'Original' : 'Other client' }),
+          schedule:
+            ++reads === 1
+              ? schedule({ name: 'Original', timeZone: 'Asia/Tokyo' })
+              : schedule({ name: 'Other client', timeZone: 'America/New_York' }),
           overrides: [],
           version: reads === 1 ? '0' : 'new-version',
         }),
@@ -794,17 +851,15 @@ it('reviews latest changes and reapplies the retained draft with the new version
   })
   renderApp(`/app/availability/${SCHEDULE_ID}`)
   fireEvent.change(await screen.findByLabelText('Name'), { target: { value: 'My draft' } })
+  expect(screen.getByText('Times are in Japan Standard Time.')).toBeDefined()
   await user.click(screen.getByRole('button', { name: 'Add a date override' }))
   fireEvent.change(input('Date'), { target: { value: '2030-12-31' } })
   await user.click(screen.getByRole('button', { name: 'Save changes' }))
   expect((await screen.findByRole('alert')).textContent).toContain('API, MCP or CLI client')
   await user.click(screen.getByRole('button', { name: 'Review latest version' }))
-  await screen.findByText(/Other client/)
-  expect(
-    screen
-      .getByRole('region', { name: 'Latest saved version' })
-      .classList.contains('availability-conflict'),
-  ).toBe(true)
+  const panel = screen.getByRole('region', { name: 'Latest saved version' })
+  await within(panel).findByText('Other client · Eastern Time')
+  expect(panel.classList.contains('availability-conflict')).toBe(true)
   expect(input('Name').value).toBe('My draft')
   expect(input('Date').value).toBe('2030-12-31')
   await user.click(screen.getByRole('button', { name: 'Apply my draft to this version' }))
