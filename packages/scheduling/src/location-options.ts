@@ -1,11 +1,13 @@
 import { isDeepStrictEqual } from 'node:util'
 import { DomainError } from './errors.ts'
+import { LOCATION_KINDS } from './location-kinds.ts'
 import { cleanText } from './text.ts'
 
 /** The original host-selected settings, also used for a resolved booking location. */
 export type EventTypeLocation =
   | { kind: 'google_meet'; autoCreate?: true }
   | { kind: 'zoom'; autoCreate?: true }
+  | { kind: 'microsoft_teams' }
   | { kind: 'phone'; number: string }
   | { kind: 'in_person'; address: string }
   | { kind: 'link'; url: string }
@@ -29,7 +31,6 @@ export const LOCATION_OPTION_LIMITS = {
 
 const OPTION_ID = /^[a-zA-Z0-9_-]+$/
 const PHONE_NUMBER = /^\+[1-9][0-9]{6,14}$/
-const kinds = ['google_meet', 'zoom', 'phone', 'in_person', 'link'] as const
 
 function invalid(message: string): never {
   throw new DomainError('invalid', 'invalid_locations', message)
@@ -57,7 +58,7 @@ export function validateLocationOptions(value: unknown): LocationOption[] | null
     if (id === '__proto__') return invalid('A location option id must not be __proto__')
     if (ids.has(id)) return invalid('Location option ids must be distinct')
     ids.add(id)
-    if (!kinds.includes(kind as (typeof kinds)[number]))
+    if (!LOCATION_KINDS.includes(kind as (typeof LOCATION_KINDS)[number]))
       return invalid('Choose a supported location kind')
     if (usedKinds.has(kind as string)) return invalid('Location option kinds must be distinct')
     usedKinds.add(kind as string)
@@ -95,6 +96,9 @@ export function validateLocationOptions(value: unknown): LocationOption[] | null
           kind,
           ...(item.autoCreate === true ? { autoCreate: true as const } : {}),
         }
+      case 'microsoft_teams':
+        only([])
+        return { ...metadata, kind }
       case 'phone': {
         only(['number', 'askInvitee'])
         if (item.askInvitee !== undefined) {

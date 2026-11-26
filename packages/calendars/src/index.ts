@@ -84,7 +84,6 @@ export interface CalendarDeps {
     | undefined
   google?: { client: GoogleCalendarClient; encryptionKey: string } | undefined
   microsoft?: { client: MicrosoftCalendarClient; encryptionKey: string } | undefined
-  microsoftTeamsForTest?: ((eventTypeId: string) => boolean) | undefined
   now?: () => number
   enqueueSync?: ((calendarId: string, transaction: Db) => Promise<unknown>) | undefined
   enqueueWritebackRecovery?:
