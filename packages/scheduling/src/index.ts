@@ -490,7 +490,11 @@ export {
   TeamAdminBookingSchema,
   toTeamAdminBooking,
 } from './team-admin-booking.ts'
-export { BULK_BOOKING_PREVIEW_CODES, teamBookingBulkPreview } from './team-booking-bulk-preview.ts'
+export {
+  BULK_BOOKING_PREVIEW_CODES,
+  cancelTeamBookingBulkItem,
+  teamBookingBulkPreview,
+} from './team-booking-bulk-preview.ts'
 export {
   cancelTeamAdminBooking,
   getTeamAdminBooking,

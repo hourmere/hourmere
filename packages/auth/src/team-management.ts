@@ -1,7 +1,7 @@
 import type { Db } from '@hourmere/db'
 import { scimManagedMember, scimSuspended } from '@hourmere/db/scim-suspension'
 import { sql } from 'kysely'
-import type { Principal } from './caller.ts'
+import type { CallerOrganization, CallerUser, Principal } from './caller.ts'
 import { isMember } from './organizations.ts'
 import { ssoRecoveryOwner } from './sso-recovery-membership.ts'
 
@@ -39,6 +39,11 @@ type TeamSession = Pick<Extract<Principal, { kind: 'session' }>, 'sessionId'> & 
   user: { id: string }
 }
 
+type TeamAccessPrincipal = Pick<Principal, 'scimResourcesEnabled'> & {
+  user: Pick<CallerUser, 'id'> & Partial<CallerUser>
+  organization: Pick<CallerOrganization, 'id'> & Partial<CallerOrganization>
+} & ({ kind: 'session'; sessionId: string } | { kind: 'api_key' | 'oauth' })
+
 /** First lock in every team write, including target-bound invitation acceptance. */
 export async function teamSessionUser(db: Db, principal: TeamSession, lock: boolean) {
   if (!uuid(principal.user.id) || !uuid(principal.sessionId)) throw denied()
@@ -73,7 +78,7 @@ export async function teamSession(db: Db, principal: TeamSession, lock: boolean 
 /** Current database facts only: principal organization metadata and client roles are not authority. */
 export async function checkTeamManagementAccess(
   db: Db,
-  principal: Principal,
+  principal: TeamAccessPrincipal,
   teamId: string,
   lock: boolean | 'key share' = false,
   context?: {

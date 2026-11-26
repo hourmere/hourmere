@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type pg from 'pg'
 import { describe, expect, it } from 'vitest'
 import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
+import { MIGRATION_COVERAGE_TIMEOUT } from './testing/migration-replay.ts'
 
 async function assertReceiptProtections(pool: pg.Pool) {
   const organizationId = randomUUID()
@@ -135,18 +136,22 @@ async function assertReceiptProtections(pool: pg.Pool) {
 describe.skipIf(!process.env.DATABASE_URL)(
   'team booking bulk cancellation preview constraints',
   () => {
-    it('detects a missing constraint for each independently droppable object', async () => {
-      const report = await checkConstraintCoverage({
-        serverUrl: process.env.DATABASE_URL as string,
-        migration: '0196_team_booking_bulk_cancellations.sql',
-        assertions: assertReceiptProtections,
-        concurrency: 2,
-        allowList: {
-          'constraint public.team_booking_bulk_cancellations.team_booking_bulk_cancellations_pkey':
-            'The item foreign key needs this target primary key, which PostgreSQL cannot drop in isolation.',
-        },
-      })
-      expect(report.problems).toEqual([])
-    }, 600_000)
+    it(
+      'detects a missing constraint for each independently droppable object',
+      async () => {
+        const report = await checkConstraintCoverage({
+          serverUrl: process.env.DATABASE_URL as string,
+          migration: '0196_team_booking_bulk_cancellations.sql',
+          assertions: assertReceiptProtections,
+          concurrency: 2,
+          allowList: {
+            'constraint public.team_booking_bulk_cancellations.team_booking_bulk_cancellations_pkey':
+              'The item foreign key needs this target primary key, which PostgreSQL cannot drop in isolation.',
+          },
+        })
+        expect(report.problems).toEqual([])
+      },
+      MIGRATION_COVERAGE_TIMEOUT,
+    )
   },
 )

@@ -2710,7 +2710,7 @@ which cancellation or opt-out cannot recall an already-dispatched SMS.
 The ordinary SMS delivery ledger and rolling budgets remain in force. Job payloads carry
 booking/rule identity and scheduling instants, never phone numbers or message bodies.
 
-## Team booking bulk cancellation previews
+## Team booking bulk cancellation receipts
 
 The preview receipt is keyed by a database-generated UUID in
 `team_booking_bulk_cancellations`. It stores the team, actor account, issuing session and
@@ -2721,8 +2721,20 @@ filters and session bearer are never written to the receipt.
 The primary key limits positions to one per ordinal, and the ordinal check and unique booking
 key enforce at most 25 distinct items. Deleting the team cascades to its receipts and items.
 Actor, session and booking IDs are retained when their corresponding rows are deleted.
-A preview writes these two tables in one transaction. It does not change bookings or enqueue
-jobs or notifications. Admission, execution and receipt cleanup are future release steps.
+A preview writes these two tables in one transaction. The issuing session can admit the
+unexpired receipt using its UUID. Admission freezes preview skips, marks eligible items
+pending and commits the queue wake and journal entry together. Confirmation replay and
+status are scoped to the same team and account, including after the actor signs in again.
+
+One active receipt per team and a database-wide budget of 100 bound admission. The
+rolling request ledger stores team and actor IDs, operation kind and database time.
+Each worker wake carries only the batch ID. An item has at most three attempts and
+can start within five minutes of admission. A committed claim has a short lease so an
+interrupted worker can be replaced. The booking update, ordinary cancellation effects
+and terminal item result share one transaction. Recovery requeues due batches and leaves
+live claims in place. Bounded cleanup removes completed results after seven days and
+unused receipts one day after expiry. Production admission and processing remain off
+pending browser and release acceptance.
 
 ## Audit events
 

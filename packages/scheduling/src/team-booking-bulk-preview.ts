@@ -1,6 +1,7 @@
-import { type Db, importedBookingIds } from '@hourmere/db'
-import { sql } from 'kysely'
-import { bookingPaymentBindings } from './bookings.ts'
+import { type Database, type Db, importedBookingIds } from '@hourmere/db'
+import { sql, type Transaction } from 'kysely'
+import { bookingPaymentBindings, cancelTeamBookingInTransaction } from './bookings.ts'
+import type { BookingNotifier } from './context.ts'
 
 export const BULK_BOOKING_PREVIEW_CODES = [
   'eligible',
@@ -14,7 +15,12 @@ export const BULK_BOOKING_PREVIEW_CODES = [
 type BulkBookingPreviewCode = (typeof BULK_BOOKING_PREVIEW_CODES)[number]
 
 /** Read bounded, already-proven IDs. Execution must repeat eligibility under its booking locks. */
-export async function teamBookingBulkPreview(db: Db, organizationId: string, bookingIds: string[]) {
+export async function teamBookingBulkPreview(
+  db: Db,
+  organizationId: string,
+  bookingIds: string[],
+  checkedAt = sql<Date>`clock_timestamp()`,
+) {
   const rows = await bookingPaymentBindings(db)
     .select(['booking.id', 'booking.status'])
     .select((eb) =>
@@ -28,7 +34,7 @@ export async function teamBookingBulkPreview(db: Db, organizationId: string, boo
         .as('paid'),
     )
     .select([
-      sql<boolean>`booking.start_at <= clock_timestamp()`.as('started'),
+      sql<boolean>`booking.start_at <= ${checkedAt}`.as('started'),
       sql<boolean>`EXISTS (
         SELECT 1 FROM unnest(booking.required_host_user_ids) AS host(user_id)
         WHERE NOT EXISTS (
@@ -58,4 +64,47 @@ export async function teamBookingBulkPreview(db: Db, organizationId: string, boo
     if (row.host_departed) return { bookingId, code: 'booking_host_departed' }
     return { bookingId, code: 'eligible' }
   })
+}
+
+type BulkSkip = Exclude<BulkBookingPreviewCode, 'eligible'>
+
+/** The worker already holds team authority and the item fence. Use the ordinary cancellation
+ * transaction's series, seat and booking locks before reusing preview's eligibility rules. */
+export async function cancelTeamBookingBulkItem(
+  trx: Transaction<Database>,
+  actor: { userId: string; organizationId: string },
+  bookingId: string,
+  options: {
+    batchId: string
+    sessionId: string
+    notify: BookingNotifier
+    deadline: Date
+  },
+): Promise<BulkSkip | 'cancelled' | 'processing_failed'> {
+  let outcome: BulkSkip | 'cancelled' | 'processing_failed' = 'booking_unavailable'
+  await cancelTeamBookingInTransaction(trx, actor, bookingId, Temporal.Now.instant, {
+    sessionId: options.sessionId,
+    notify: options.notify,
+    bulk: {
+      batchId: options.batchId,
+      async eligibleAt() {
+        const { now } = await trx
+          .selectNoFrom(sql<Date>`clock_timestamp()`.as('now'))
+          .executeTakeFirstOrThrow()
+        if (now >= options.deadline) {
+          outcome = 'processing_failed'
+          return
+        }
+        const [item] = await teamBookingBulkPreview(
+          trx,
+          actor.organizationId,
+          [bookingId],
+          sql`${now}::timestamptz`,
+        )
+        outcome = item?.code === 'eligible' ? 'cancelled' : (item?.code ?? 'booking_unavailable')
+        if (outcome === 'cancelled') return Temporal.Instant.fromEpochMilliseconds(now.getTime())
+      },
+    },
+  })
+  return outcome
 }

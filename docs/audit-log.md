@@ -87,11 +87,16 @@ allow-lists and value checks.
 | Slack destinations | `slack_destination.created`, `slack_destination.updated`, `slack_destination.paused`, `slack_destination.resumed`, `slack_destination.tested`, `slack_destination.deleted` |
 | OAuth | `oauth.client_registered`, `oauth.consent_granted`, `oauth.token_revoked` |
 | Account | `session.revoked`, `sign_in_method.added`, `sign_in_method.removed` |
-| Bookings | `booking.created`, `booking.rescheduled`, `booking.cancelled`, `booking.reschedule_requested`, `booking.attendee_no_show_changed` |
+| Bookings | `booking.created`, `booking.rescheduled`, `booking.cancelled`, `booking.reschedule_requested`, `booking.attendee_no_show_changed`, `booking.bulk_cancellation_admitted`, `booking.bulk_cancellation_completed` |
 | Event types | `event_type.created`, `event_type.updated`, `event_type.deleted`, `event_type.notifications_updated`, `event_type.waitlist_updated`, `event_type.round_robin_activated` |
 | Workflow definitions | `workflow.created`, `workflow.updated`, `workflow.enabled`, `workflow.disabled`, `workflow.deleted`, `workflow.previewed` |
 | Workflow execution | `workflow.run_scheduled`, `workflow.run_cancelled`, `workflow.run_skipped`, `workflow.email_attempted`, `workflow.email_sent`, `workflow.email_rejected`, `workflow.email_delivery_unknown`, `workflow.webhook_queued`, `workflow.webhook_completed`, `workflow.webhook_failed` |
 | Audit log | `audit_log.retention_updated` |
+
+Team booking bulk cancellation stays disabled pending release acceptance. Admission records
+`selectedCount` and identifies the submitting administrator and session. Completion records
+bounded `counts` by outcome and identifies the worker. The two entries and each ordinary
+`booking.cancelled` event committed by the batch share the batch UUID as `request_id`.
 
 `organization.ownership_transferred` and `api_key.rotated` are reserved action
 names, not currently emitted. Ownership transfer is blocked by the existing

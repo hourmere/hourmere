@@ -1637,19 +1637,35 @@ export interface SsoReplayCache {
 }
 
 export interface TeamBookingBulkCancellationItems {
+  attempt_count: Generated<number>;
   batch_id: string;
   booking_id: string;
+  claim_expires_at: Timestamp | null;
+  claim_token: string | null;
+  next_attempt_at: Timestamp | null;
   ordinal: number;
+  outcome: string | null;
   preview_outcome: string;
 }
 
 export interface TeamBookingBulkCancellations {
   actor_user_id: string;
+  admitted_at: Timestamp | null;
+  completed_at: Timestamp | null;
   created_at: Generated<Timestamp>;
   expires_at: Timestamp;
   id: Generated<string>;
   organization_id: string;
   session_id: string;
+  state: Generated<string>;
+}
+
+export interface TeamBookingBulkRequestLimits {
+  actor_user_id: string;
+  created_at: Generated<Timestamp>;
+  id: Generated<Int8>;
+  kind: string;
+  organization_id: string;
 }
 
 export interface WaitlistCandidates {
@@ -2039,6 +2055,7 @@ export interface DB {
   sso_replay_cache: SsoReplayCache;
   team_booking_bulk_cancellation_items: TeamBookingBulkCancellationItems;
   team_booking_bulk_cancellations: TeamBookingBulkCancellations;
+  team_booking_bulk_request_limits: TeamBookingBulkRequestLimits;
   waitlist_candidates: WaitlistCandidates;
   waitlist_capabilities: WaitlistCapabilities;
   waitlist_cohorts: WaitlistCohorts;

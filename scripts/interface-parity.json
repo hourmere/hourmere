@@ -89,6 +89,10 @@
     "exemption": "browser-session-only",
     "reason": "Preview binds the selected team booking page to its current owner/admin browser session."
   },
+  "confirmTeamBookingBulkCancellation": {
+    "exemption": "browser-session-only",
+    "reason": "Confirmation accepts a page-bound receipt from its issuing team owner/admin browser session and replay requires the same still-authorized account."
+  },
   "getPublicRoutingForm": { "mcp": "get_public_routing_form", "cli": "routing-forms public" },
   "getPublicTeamRoutingForm": { "mcp": "get_public_routing_form", "cli": "routing-forms public" },
   "routeLead": { "mcp": "route_lead", "cli": "routing-forms route" },

@@ -83,6 +83,8 @@ export const auditDetails = {
   'booking.created': [],
   'booking.rescheduled': [],
   'booking.cancelled': [],
+  'booking.bulk_cancellation_admitted': ['selectedCount'],
+  'booking.bulk_cancellation_completed': ['counts'],
   'booking.reschedule_requested': [],
   'booking.attendee_no_show_changed': ['attendeeId', 'noShow'],
   'event_type.created': [],
@@ -172,6 +174,50 @@ export function withAuditRequest<T>(requestId: string, fn: () => T): T {
   return requestContext.run(requestId, fn)
 }
 
+const bulkOutcomeCodes = [
+  'pending',
+  'cancelled',
+  'already_cancelled',
+  'booking_started',
+  'booking_not_supported',
+  'booking_unavailable',
+  'booking_host_departed',
+  'authorization_lost',
+  'processing_failed',
+] as const
+
+function bulkAuditDetails(action: AuditAction, details: Record<string, unknown>) {
+  const validCount = (value: unknown): value is number =>
+    typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 25
+  const refused = () => new Error('Audit detail values are not allow-listed for this action')
+  if (action === 'booking.bulk_cancellation_admitted') {
+    const selectedCount = details.selectedCount
+    if (!validCount(selectedCount) || selectedCount === 0) throw refused()
+    return { selectedCount }
+  }
+  if (action === 'booking.bulk_cancellation_completed') {
+    const counts = plainCopy(details.counts)
+    if (
+      !counts ||
+      typeof counts !== 'object' ||
+      Array.isArray(counts) ||
+      Object.keys(counts).length !== bulkOutcomeCodes.length
+    )
+      throw refused()
+    const entries = bulkOutcomeCodes.map(
+      (code) => [code, (counts as Record<string, unknown>)[code]] as const,
+    )
+    let total = 0
+    for (const [code, count] of entries) {
+      if (!validCount(count) || (code === 'pending' && count !== 0)) throw refused()
+      total += count
+    }
+    if (!validCount(total) || total === 0) throw refused()
+    return { counts: Object.fromEntries(entries) }
+  }
+  return details
+}
+
 /** One INSERT, using the caller's transaction. Never swallow audit failures. */
 export async function writeAuditEvent(trx: Db, event: AuditEvent): Promise<void> {
   if (!trx.isTransaction) throw new Error('Audit writes require a transaction')
@@ -180,7 +226,7 @@ export async function writeAuditEvent(trx: Db, event: AuditEvent): Promise<void>
   if (!allowed || Object.keys(details).some((key) => !allowed.includes(key))) {
     throw new Error('Audit details are not allow-listed for this action')
   }
-  await insertAuditEvent(trx, event, details)
+  await insertAuditEvent(trx, event, bulkAuditDetails(event.action, details))
 }
 
 async function insertAuditEvent(
