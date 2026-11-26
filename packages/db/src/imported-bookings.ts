@@ -5,19 +5,24 @@ import type { Db } from './index.ts'
  * Imported policy covers the entire connected reschedule chain. This also closes
  * stale root jobs and malformed legacy successors, without trusting a caller's ID.
  */
-export async function importedBookingIds(db: Db, ids: string[]): Promise<Set<string>> {
+export async function importedBookingIds(
+  db: Db,
+  ids: string[],
+  organizationId?: string,
+): Promise<Set<string>> {
   if (ids.length === 0) return new Set()
+  const scope = organizationId === undefined ? sql`true` : sql`organization_id = ${organizationId}`
   const result = await sql<{ id: string }>`
     WITH RECURSIVE connected(seed_id,booking_id) AS (
-      SELECT id,id FROM bookings WHERE id = ANY(${ids}::uuid[])
-        AND EXISTS (SELECT 1 FROM bookings WHERE source = 'import')
+      SELECT id,id FROM bookings WHERE id = ANY(${ids}::uuid[]) AND ${scope}
+        AND EXISTS (SELECT 1 FROM bookings WHERE source = 'import' AND ${scope})
       UNION
       SELECT c.seed_id,n.id FROM connected c
         JOIN bookings b ON b.id = c.booking_id
         JOIN LATERAL (
-          SELECT id FROM bookings WHERE id = b.rescheduled_from_id
+          SELECT id FROM bookings WHERE id = b.rescheduled_from_id AND ${scope}
           UNION
-          SELECT id FROM bookings WHERE rescheduled_from_id = b.id
+          SELECT id FROM bookings WHERE rescheduled_from_id = b.id AND ${scope}
         ) n ON true
     )
     SELECT DISTINCT c.seed_id AS id FROM connected c
