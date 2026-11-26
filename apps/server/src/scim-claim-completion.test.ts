@@ -1811,6 +1811,7 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
     const answer = await accept({ url }, cookie, claim.invitation_id as string)
     const after = await snapshot(organization.id)
     return {
+      scimClaims: options.scimClaims,
       enqueueScimInvitation,
       invitationId: claim.invitation_id,
       answer,
@@ -1851,6 +1852,7 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
       expect(production.enqueueScimInvitation).not.toHaveBeenCalled()
       expect(production.readmissionStatus).toBe(404)
     }
+    expect(production.scimClaims).not.toHaveProperty('link')
   }
 
   it.each([true, false])(
@@ -1876,7 +1878,7 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
   it('detects missing production claim completion in a source copy', async () => {
     await verifyProductionAcceptance(await serverCopy(), true)
     const mutant = await serverCopy([
-      '    scimClaims: config.SCIM_PROVISIONING_ENABLED ? scimClaimCompletion : scimClaimAdmissionOnly,\n    baseURL:',
+      '    scimClaims: config.SCIM_PROVISIONING_ENABLED ? productionScimClaims : scimClaimAdmissionOnly,\n    baseURL:',
       '    scimClaims: undefined,\n    baseURL:',
     ])
     await expect(verifyProductionAcceptance(mutant, true)).rejects.toMatchObject({

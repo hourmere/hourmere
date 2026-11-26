@@ -17,11 +17,11 @@ import { createDb, type Db } from '@hourmere/db'
 import { suspendScimMembership } from '@hourmere/db/scim-suspension'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import type { Mailer, MailMessage } from '@hourmere/mail'
-import type { SsoRequest, SsoResponse } from '@hourmere/outbound/sso'
+import { type SsoRequest, type SsoResponse, sendSsoRequest } from '@hourmere/outbound/sso'
 import { createFixtures } from '@hourmere/scheduling/testing'
 import { exportJWK, generateKeyPair, type JWTPayload, SignJWT } from 'jose'
 import { sql } from 'kysely'
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   prepareScimSuspension,
   suspendScimMember,
@@ -36,6 +36,7 @@ import {
   ssoFixture,
 } from '../../../packages/db/src/sso-storage-fixtures.ts'
 import { createApp } from './app.ts'
+import { loadConfig } from './config.ts'
 import { nativeTeamLeave } from './native-team-leave.ts'
 import { eventTypeRoutes } from './routes/event-types.ts'
 import { ssoRoutes } from './routes/sso.ts'
@@ -45,6 +46,7 @@ import { ssoDraftRoutes } from './routes/sso-drafts.ts'
 import { ssoIdentityRecoveryRoutes } from './routes/sso-link-recovery.ts'
 import { ssoPolicyRoutes } from './routes/sso-policy.ts'
 import { ssoRecoveryEnrollmentRoutes } from './routes/sso-recovery-enrollment.ts'
+import { productionAppOptions, productionAuthOptions } from './server.ts'
 import { sealSsoProviderConfiguration, ssoProviderConfigurationAad } from './sso-configuration.ts'
 import { ssoLinkRemovalEmailJob } from './sso-link-recovery.ts'
 import {
@@ -53,10 +55,16 @@ import {
   MAILBOX_PROOF_CONSUME_PATH,
   MAILBOX_PROOF_SEND_PATH,
   MailboxProofEmailPayload,
+  type MailboxProofQueue,
   mailboxProofRoutes,
 } from './sso-mailbox-proof.ts'
 import { oidcSignInRoutes } from './sso-oidc-sign-in.ts'
 import { samlSigningIdentity } from './sso-saml-fixtures.ts'
+
+vi.mock('@hourmere/outbound/sso', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@hourmere/outbound/sso')>()),
+  sendSsoRequest: vi.fn<typeof sendSsoRequest>(),
+}))
 
 const databaseUrl = process.env.DATABASE_URL
 const publicUrl = 'https://hourmere.example.test'
@@ -209,6 +217,12 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
   let app: ReturnType<typeof createApp>
   let mailboxJobs: MailboxProofEmailPayload[]
   let recoveryJobs: { name: string; payload: unknown }[]
+  const mailboxProofQueue: MailboxProofQueue = {
+    async enqueue(_name, payload) {
+      mailboxJobs.push(MailboxProofEmailPayload.parse(payload))
+      return 'job'
+    },
+  }
 
   beforeAll(async () => {
     owned = await createTestDatabase(databaseUrl as string, undefined, { tag: 'oidc_sign_in' })
@@ -242,6 +256,9 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
   afterAll(async () => {
     await authPool?.end()
     await owned?.drop()
+  })
+  afterEach(() => {
+    vi.mocked(sendSsoRequest).mockReset()
   })
 
   beforeEach(async () => {
@@ -339,12 +356,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       ssoMailboxProof: mailboxProofRoutes({
         db,
         capabilities,
-        queue: {
-          async enqueue(_name, payload) {
-            mailboxJobs.push(MailboxProofEmailPayload.parse(payload))
-            return 'job'
-          },
-        },
+        queue: mailboxProofQueue,
       }),
       ssoOidcSignIn: oidcSignInRoutes({
         db,
@@ -364,6 +376,64 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
         session: { secret, ...(expiresIn !== undefined && { expiresIn }) },
       }),
     })
+  }
+
+  function productionInstance() {
+    const config = loadConfig({
+      DATABASE_URL: owned.url,
+      BETTER_AUTH_SECRET: secret,
+      PUBLIC_URL: publicUrl,
+      SCIM_PROVISIONING_ENABLED: 'true',
+      SSO_OIDC_ENABLED: 'true',
+      SSO_ENCRYPTION_KEY: configurationKey.toString('base64'),
+      SIGNUP: 'open',
+    })
+    const unavailable = async (): Promise<never> => {
+      throw new Error('Unexpected collaborator in production OIDC flow')
+    }
+    const invitationMailLimits = { secret }
+    const authentication = createAuth(
+      productionAuthOptions({
+        config,
+        pool: authPool,
+        db,
+        mailer: { send: unavailable },
+        invitationDelivery: {
+          db,
+          queue: {
+            enqueue: unavailable,
+            retireExpiredInvitationEmailJobs: unavailable,
+            hasLiveInvitationEmailJob: unavailable,
+          },
+        },
+        invitationMailLimits,
+        jobs: { enqueue: unavailable },
+      }),
+    )
+    return createApp(
+      productionAppOptions({
+        config,
+        db,
+        auth: authentication,
+        resolveCaller: createCallerResolver({ auth: authentication, db }),
+        resolveMcpOAuth: unavailable,
+        checkDb: unavailable,
+        waitlist: { verify: unavailable, remove: unavailable },
+        invitationMailLimits,
+        webhookSettings: { enabled: false },
+        webhookQueue: { enqueue: unavailable },
+        notify: unavailable,
+        notifyAttendeeNoShow: unavailable,
+        googleCalendar: undefined,
+        microsoftCalendar: undefined,
+        zoomConference: undefined,
+        enqueueCalendarSync: unavailable,
+        enqueueCalendarWritebackRecovery: unavailable,
+        mailboxProofQueue,
+        scimMappingNotices: { enqueue: unavailable },
+        enqueueScimInvitation: unavailable,
+      }),
+    )
   }
 
   function configuration(
@@ -3572,6 +3642,46 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     return { invitationId: invitation.id, entryId: entry.id }
   }
 
+  it('completes the SCIM claim through production OIDC invitation acceptance', async () => {
+    vi.mocked(sendSsoRequest).mockImplementation(idp.send)
+    app = productionInstance()
+    const f = await provider()
+    const invitation = await issueInvitation(f.email, true)
+    const { pending } = await pendingAdmission(f, { email_verified: true })
+    await expectCompletionRefused(await acceptInvitation(pending, invitation.invitationId))
+    await proveMailbox(pending)
+
+    const accepted = await acceptInvitation(pending, invitation.invitationId)
+    expect(accepted.status).toBe(200)
+    const result = (await accepted.json()) as { member: { id: string; userId: string } }
+    expect(result).toMatchObject({
+      invitation: { id: invitation.invitationId, status: 'accepted' },
+      member: { id: expect.any(String), userId: expect.any(String), organizationId: fixture.team },
+    })
+    const claim = await db
+      .selectFrom('scim_user_claims as claim')
+      .innerJoin('scim_users as entry', 'entry.id', 'claim.scim_user_id')
+      .select([
+        'entry.id',
+        'entry.linked_user_id',
+        'entry.linked_member_id',
+        'claim.completed_at',
+        'claim.invalidated_at',
+      ])
+      .where('claim.invitation_id', '=', invitation.invitationId)
+      .executeTakeFirstOrThrow()
+    expect(claim).toEqual({
+      id: invitation.entryId,
+      linked_user_id: result.member.userId,
+      linked_member_id: result.member.id,
+      completed_at: expect.any(Date),
+      invalidated_at: null,
+    })
+    expect((await audit()).filter(({ action }) => action === 'scim_user.claimed')).toEqual([
+      expect.objectContaining({ target_id: claim.id, actor_id: result.member.userId }),
+    ])
+  })
+
   async function claimLinked(entryId: string | undefined) {
     if (!entryId) return null
     const entry = await db
@@ -4218,11 +4328,10 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
     expect(await effects()).toEqual(before)
   })
 
-  it.each(['live', 'expired', 'ambiguous', 'blocked', 'paused'] as const)(
-    'binds only a single eligible uninvited User claim through OIDC self-link (%s)',
+  it.each(['live', 'expired', 'ambiguous', 'blocked', 'paused', 'production'] as const)(
+    'gates uninvited SCIM claims during OIDC self-link (%s)',
     async (state) => {
       const f = await enrollment()
-      const pending = await prepareLink(f)
       const connection = await db
         .insertInto('scim_connections')
         .values({ organization_id: fixture.team })
@@ -4251,6 +4360,11 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
           })
           .execute()
       }
+      if (state === 'production') {
+        vi.mocked(sendSsoRequest).mockImplementation(idp.send)
+        app = productionInstance()
+      }
+      const pending = await prepareLink(f)
       if (state === 'blocked')
         await db
           .insertInto('scim_membership_blocks')
@@ -4262,7 +4376,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
           })
           .execute()
 
-      const oidcApp = instance({ scimClaims: state !== 'paused' })
+      const oidcApp = state === 'production' ? app : instance({ scimClaims: state !== 'paused' })
       const response = await complete(pending, {}, oidcApp)
       if (state === 'blocked') await expectCompletionRefused(response)
       else {
@@ -4278,6 +4392,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
           'entry.linked_user_id',
           'entry.linked_member_id',
           'claim.completed_at',
+          'claim.invalidated_at',
         ])
         .where('claim.connection_id', '=', connection.id)
         .execute()
@@ -4293,6 +4408,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
             linked_user_id: fixture.member,
             linked_member_id: fixture.memberMember,
             completed_at: expect.any(Date),
+            invalidated_at: null,
           },
         ])
         expect(activity).toEqual([
@@ -4309,8 +4425,23 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
             linked_user_id: null,
             linked_member_id: null,
             completed_at: null,
+            invalidated_at: null,
           })
         expect(activity).toEqual([])
+      }
+      if (state === 'production') {
+        const link = await db
+          .selectFrom('sso_identity_links')
+          .select(['organization_id', 'user_id', 'subject', 'proven_email'])
+          .where('provider_id', '=', f.providerId)
+          .executeTakeFirstOrThrow()
+        expect(link).toEqual({
+          organization_id: fixture.team,
+          user_id: fixture.member,
+          subject: f.claims.sub,
+          proven_email: f.email,
+        })
+        expect(events.filter(({ action }) => action.startsWith('scim_'))).toEqual([])
       }
     },
   )
