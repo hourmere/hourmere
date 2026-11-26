@@ -133,10 +133,8 @@ The privacy policy's effective and last-updated dates and the terms' effective d
 `LEGAL_PUBLICATION_DATE` in `apps/site/src/data/legal.ts`, currently `2026-10-22`.
 Keep that date on later deployments, including documentation and homepage changes; change it
 only when publishing revised legal text. A placeholder or invalid date stops the site build.
-Environment variables cannot override the source date. CI retains a fixture-date substitution
-for a placeholder source date; with the current committed date, that substitution makes no
-change. Its build steps restore the source with an exit trap and delete the generated site
-output. Never deploy fixture output or commit a fixture date.
+Environment variables cannot override the source date. CI builds the site using the committed
+date.
 
 ## Self-hosting
 

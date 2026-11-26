@@ -2,10 +2,13 @@ import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type pg from 'pg'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { migrationsDir, runMigrations } from './migrate.ts'
-import { createTestDatabase, type TestDatabase } from './testing.ts'
+import { MIGRATION_REPLAY_TIMEOUT, useMigrationReplay } from './testing/migration-replay.ts'
+import type { TestDatabase } from './testing.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
+
+vi.setConfig({ testTimeout: MIGRATION_REPLAY_TIMEOUT, hookTimeout: MIGRATION_REPLAY_TIMEOUT })
 
 const serverUrl = process.env.DATABASE_URL
 const migration = '0035_conference_token_operations.sql'
@@ -140,6 +143,8 @@ async function seed(pool: pg.Pool) {
 }
 
 describe.skipIf(!serverUrl)('conference token operation lease migration', () => {
+  const replay = useMigrationReplay(serverUrl as string, migration)
+
   it('preserves predecessor grants, matches fresh schema, reruns without writes and cascades owner deletion', async () => {
     const predecessor = await mkdtemp(join(tmpdir(), 'hourmere-token-lease-predecessor-'))
     let upgraded: TestDatabase | undefined
@@ -149,7 +154,7 @@ describe.skipIf(!serverUrl)('conference token operation lease migration', () => 
         initial = files.filter((file) => file < migration)
       expect(['0033', '0034']).toContain(initial.at(-1)?.slice(0, 4))
       for (const file of initial) await copyFile(join(migrationsDir, file), join(predecessor, file))
-      upgraded = await createTestDatabase(serverUrl as string, predecessor)
+      upgraded = await replay.predecessor.clone(predecessor)
       const pool = upgraded.pool
       expect(
         (await pool.query('SELECT name FROM schema_migrations ORDER BY name')).rows.at(-1),
@@ -195,7 +200,7 @@ describe.skipIf(!serverUrl)('conference token operation lease migration', () => 
         },
       ])
       const schema = await snapshotSchema(pool)
-      fresh = await createTestDatabase(serverUrl as string, predecessor)
+      fresh = await replay.predecessor.clone(predecessor)
       expect(await snapshotSchema(fresh.pool)).toEqual(schema)
       const ledger =
           'SELECT name,checksum,applied_at::text,xmin::text,ctid::text FROM schema_migrations ORDER BY name',

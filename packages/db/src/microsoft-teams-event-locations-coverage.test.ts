@@ -1,12 +1,16 @@
 import { randomUUID } from 'node:crypto'
-import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { copyFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type pg from 'pg'
 import { describe, expect, it } from 'vitest'
 import { migrationsDir, runMigrations } from './migrate.ts'
 import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
-import { createTestDatabase, type TestDatabase } from './testing.ts'
+import {
+  MIGRATION_COVERAGE_TIMEOUT,
+  MIGRATION_REPLAY_TIMEOUT,
+  useMigrationReplay,
+} from './testing/migration-replay.ts'
+import type { TestDatabase } from './testing.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -102,54 +106,59 @@ async function existingRows(pool: pg.Pool, ids: { event: string; booking: string
 }
 
 describe.skipIf(!serverUrl)('Microsoft Teams location migration', () => {
-  it('keeps the existing catalogued constraints and expands their accepted vocabulary', async () => {
-    const report = await checkConstraintCoverage({
-      serverUrl: serverUrl as string,
-      migration,
-      assertions: assertLocationVocabulary,
-    })
-    // Only a helper function body changes. The predecessor owns the constraints.
-    expect(report.problems).toEqual([])
-    expect(report.results).toEqual([])
-  })
+  const replay = useMigrationReplay(serverUrl as string, migration)
 
-  it('preserves predecessor data, matches a fresh install and reruns as a no-op', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'hourmere-teams-location-'))
-    let upgraded: TestDatabase | undefined
-    let fresh: TestDatabase | undefined
-    try {
-      for (const file of await readdir(migrationsDir)) {
-        if (file.endsWith('.sql') && file < migration)
-          await copyFile(join(migrationsDir, file), join(directory, file))
-      }
-      upgraded = await createTestDatabase(serverUrl as string, directory, { tag: 'teams_loc_up' })
-      const team = await createTeam(upgraded.pool)
-      const ids = await seedPredecessor(upgraded.pool, team)
-      const before = await existingRows(upgraded.pool, ids)
-      expect(before).toHaveLength(3)
-      await expect(insertType(upgraded.pool, team, locations)).rejects.toMatchObject(invalidOptions)
-
-      await copyFile(join(migrationsDir, migration), join(directory, migration))
-      await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([migration])
-      expect(await existingRows(upgraded.pool, ids)).toEqual(before)
-      await assertLocationVocabulary(upgraded.pool)
-
-      fresh = await createTestDatabase(serverUrl as string, directory, {
-        tag: 'teams_loc_new',
-        migrate: false,
+  it(
+    'keeps the existing catalogued constraints and expands their accepted vocabulary',
+    async () => {
+      const report = await checkConstraintCoverage({
+        serverUrl: serverUrl as string,
+        migration,
+        predecessorTemplate: replay.predecessor,
+        assertions: assertLocationVocabulary,
       })
-      expect((await runMigrations(fresh.pool, directory)).at(-1)).toBe(migration)
-      expect(await snapshotSchema(upgraded.pool)).toEqual(await snapshotSchema(fresh.pool))
-      await assertLocationVocabulary(fresh.pool)
-      await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([])
-      await expect(runMigrations(fresh.pool, directory)).resolves.toEqual([])
-      expect(await existingRows(upgraded.pool, ids)).toEqual(before)
-    } finally {
+      // Only a helper function body changes. The predecessor owns the constraints.
+      expect(report.problems).toEqual([])
+      expect(report.results).toEqual([])
+    },
+    MIGRATION_COVERAGE_TIMEOUT,
+  )
+
+  it(
+    'preserves predecessor data, matches a fresh install and reruns as a no-op',
+    async () => {
+      const { directory, predecessor } = replay
+      let upgraded: TestDatabase | undefined
+      let fresh: TestDatabase | undefined
       try {
-        await Promise.all([upgraded?.drop(), fresh?.drop()])
+        upgraded = await predecessor.clone(undefined, { migrate: false, tag: 'teams_loc_up' })
+        const team = await createTeam(upgraded.pool)
+        const ids = await seedPredecessor(upgraded.pool, team)
+        const before = await existingRows(upgraded.pool, ids)
+        expect(before).toHaveLength(3)
+        await expect(insertType(upgraded.pool, team, locations)).rejects.toMatchObject(
+          invalidOptions,
+        )
+
+        await copyFile(join(migrationsDir, migration), join(directory, migration))
+        await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([migration])
+        expect(await existingRows(upgraded.pool, ids)).toEqual(before)
+        await assertLocationVocabulary(upgraded.pool)
+
+        fresh = await predecessor.clone(undefined, {
+          tag: 'teams_loc_new',
+          migrate: false,
+        })
+        expect(await runMigrations(fresh.pool, directory)).toEqual([migration])
+        expect(await snapshotSchema(upgraded.pool)).toEqual(await snapshotSchema(fresh.pool))
+        await assertLocationVocabulary(fresh.pool)
+        await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([])
+        await expect(runMigrations(fresh.pool, directory)).resolves.toEqual([])
+        expect(await existingRows(upgraded.pool, ids)).toEqual(before)
       } finally {
-        await rm(directory, { recursive: true, force: true })
+        await Promise.all([upgraded?.drop(), fresh?.drop()])
       }
-    }
-  })
+    },
+    MIGRATION_REPLAY_TIMEOUT,
+  )
 })

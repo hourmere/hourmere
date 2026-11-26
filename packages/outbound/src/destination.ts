@@ -50,6 +50,19 @@ export function urlPort(url: URL): number {
   return Number(url.port || (url.protocol === 'http:' ? 80 : 443))
 }
 
+const NON_PUBLIC_SUFFIXES = [
+  'local',
+  'internal',
+  'localhost',
+  'home.arpa', // RFC 8375
+  'service.arpa', // RFC 9665
+  'alt', // RFC 9476
+  'test',
+  'example',
+  'invalid',
+  'onion',
+]
+
 /**
  * Public syntax: HTTPS on the default port to a dotted DNS name, never an IP literal, a
  * single label or a special-use suffix. Every DNS answer must still be public.
@@ -61,7 +74,7 @@ export function isPublicHttpsUrl(url: URL): boolean {
     isIP(urlHostname(url)) ||
     !url.hostname.includes('.') ||
     url.hostname.endsWith('.') ||
-    ['localhost', 'local', 'internal', 'test', 'invalid', 'example', 'onion'].some(
+    NON_PUBLIC_SUFFIXES.some(
       (suffix) => url.hostname === suffix || url.hostname.endsWith(`.${suffix}`),
     )
   )

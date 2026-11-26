@@ -1,5 +1,4 @@
-import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { copyFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type pg from 'pg'
 import { describe, expect, it } from 'vitest'
@@ -7,7 +6,12 @@ import { migrationsDir, runMigrations } from './migrate.ts'
 import { seeded } from './sso-identity-fixtures.ts'
 import { at, digest, insert, samlProviderValues, ssoFixture } from './sso-storage-fixtures.ts'
 import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
-import { createTestDatabase, type TestDatabase } from './testing.ts'
+import {
+  MIGRATION_COVERAGE_TIMEOUT,
+  MIGRATION_REPLAY_TIMEOUT,
+  useMigrationReplay,
+} from './testing/migration-replay.ts'
+import type { TestDatabase } from './testing.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -63,47 +67,49 @@ async function replayRows(pool: pg.Pool) {
 }
 
 describe.skipIf(!serverUrl)('SSO replay retention index', () => {
-  it('fails the retention index assertion when the index is dropped', async () => {
-    const report = await checkConstraintCoverage({
-      serverUrl: serverUrl as string,
-      migration,
-      assertions: assertRetentionIndex,
-    })
-    expect(report.problems).toEqual([])
-    expect(report.results.map(({ key, status }) => [key, status])).toEqual([
-      [`index public.sso_replay_cache.${index}`, 'covered'],
-    ])
-  })
+  const replay = useMigrationReplay(serverUrl as string, migration)
 
-  it('preserves live and expired cache rows, matches a fresh install and reruns as a no-op', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'hourmere-sso-replay-index-'))
-    let upgraded: TestDatabase | undefined
-    let fresh: TestDatabase | undefined
-    try {
-      for (const file of await readdir(migrationsDir)) {
-        if (file.endsWith('.sql') && file < migration) {
-          await copyFile(join(migrationsDir, file), join(directory, file))
-        }
-      }
-      upgraded = await createTestDatabase(serverUrl as string, directory, { tag: 'sso_replay_up' })
-      await seedReplayRows(upgraded.pool)
-      const before = await replayRows(upgraded.pool)
-      expect(before).toHaveLength(6)
-
-      await copyFile(join(migrationsDir, migration), join(directory, migration))
-      await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([migration])
-      fresh = await createTestDatabase(serverUrl as string, directory, { tag: 'sso_replay_new' })
-      expect(await snapshotSchema(upgraded.pool)).toEqual(await snapshotSchema(fresh.pool))
-      expect(await replayRows(upgraded.pool)).toEqual(before)
-      await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([])
-      await expect(runMigrations(fresh.pool, directory)).resolves.toEqual([])
-      expect(await replayRows(upgraded.pool)).toEqual(before)
-    } finally {
-      await Promise.all([
-        upgraded?.drop(),
-        fresh?.drop(),
-        rm(directory, { recursive: true, force: true }),
+  it(
+    'fails the retention index assertion when the index is dropped',
+    async () => {
+      const report = await checkConstraintCoverage({
+        serverUrl: serverUrl as string,
+        migration,
+        predecessorTemplate: replay.predecessor,
+        assertions: assertRetentionIndex,
+      })
+      expect(report.problems).toEqual([])
+      expect(report.results.map(({ key, status }) => [key, status])).toEqual([
+        [`index public.sso_replay_cache.${index}`, 'covered'],
       ])
-    }
-  })
+    },
+    MIGRATION_COVERAGE_TIMEOUT,
+  )
+
+  it(
+    'preserves live and expired cache rows, matches a fresh install and reruns as a no-op',
+    async () => {
+      const { directory, predecessor } = replay
+      let upgraded: TestDatabase | undefined
+      let fresh: TestDatabase | undefined
+      try {
+        upgraded = await predecessor.clone(undefined, { migrate: false, tag: 'sso_replay_up' })
+        await seedReplayRows(upgraded.pool)
+        const before = await replayRows(upgraded.pool)
+        expect(before).toHaveLength(6)
+
+        await copyFile(join(migrationsDir, migration), join(directory, migration))
+        await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([migration])
+        fresh = await predecessor.clone(directory, { tag: 'sso_replay_new' })
+        expect(await snapshotSchema(upgraded.pool)).toEqual(await snapshotSchema(fresh.pool))
+        expect(await replayRows(upgraded.pool)).toEqual(before)
+        await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([])
+        await expect(runMigrations(fresh.pool, directory)).resolves.toEqual([])
+        expect(await replayRows(upgraded.pool)).toEqual(before)
+      } finally {
+        await Promise.all([upgraded?.drop(), fresh?.drop()])
+      }
+    },
+    MIGRATION_REPLAY_TIMEOUT,
+  )
 })

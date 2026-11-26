@@ -30,7 +30,7 @@ export const SHORT_TEXT_LENGTH = 20
 // Code up to this length is never split, so it moves to the next line as a whole. Longer code,
 // and any URL, gets a wrap opportunity after each run of these separator characters.
 export const WHOLE_CODE_LENGTH = 24
-export const CODE_SEPARATORS = /(?<=\S)[/_.?&=]+(?=\S)/g
+export const CODE_SEPARATORS = /(?<=\S)[/_.?&=#]+(?=\S)/g
 
 const roles: Record<string, string> = {
   table: 'table',
