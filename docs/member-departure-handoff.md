@@ -173,8 +173,10 @@ A different proposal requires new consent.
 
 The internal dry run checks one proposed slot for the repaired event's sole host. It uses
 the original start and duration unless a different start or supported duration is supplied.
-It reports whether the exact slot is available, or `calendar_sync_unavailable` if conflict
-data cannot be trusted. Busy intervals, event mappings and provider identifiers stay private.
+It judges the exact start on the event type's current slot grid. An off-grid start is
+unavailable even when the replacement host is free. If conflict data cannot be trusted,
+it reports `calendar_sync_unavailable`. Busy intervals, event mappings and provider
+identifiers stay private.
 This read-only check reserves nothing and sends no invitations. Applying a handoff requires
 a fresh check under the write locks described above. The dry run has no transport entry point
 during staged implementation.
@@ -274,6 +276,13 @@ outgrows a day before scheduling it. Keep admission hard-off until the complete 
 verified. Migrations use a reserved number, generated types and constraint coverage. Use
 disposable PostgreSQL databases and fake provider/mail transports.
 
+The staged apply service has no transport or production offer store. It requires a locked,
+versioned offer and matching approvals for the booker and every distinct guest mailbox.
+It rechecks the approved terms and exact slot under the write locks, then uses the ordinary
+cancellation and creation intents for the two independent roots. A PostgreSQL test store
+exercises rollback and replay. Production offer and receipt storage, participant consent
+delivery, and handoff-specific mail and calendar-attachment handling are still pending.
+
 | Step | Deliverable and acceptance |
 | --- | --- |
 | 1. Storage | Add team-scoped offers, recipient consent and immutable handoff edges. Verify same-team references and uniqueness, upgrade preservation, deletion and retention, and the existing host-snapshot constraint. |
@@ -300,8 +309,12 @@ those bookings and leaves their ordinary booking flows in place.
 最多收到三次确认链接，重发后只有最新链接有效。首期仅支持单主持人的个人模式团队预约，
 不支持带路由快照的预约。管理员提交时，系统复核团队权限、实际主持人、工作时间、日历冲突和
 会议授权。通过后在同一事务内取消旧预约并创建新链，保留旧记录与原主持人快照。
-内部试算只判断接任者在指定时段能否预约，不占用时段、不发邀请。日历数据不可信时返回
+内部试算按活动类型当前的可预约时段网格检查指定开始时间。即使接任者有空，网格之外的开始
+时间也不可预约。试算不占用时段、不发邀请。日历数据不可信时返回
 `calendar_sync_unavailable`，不会公开私人忙碌区间或日历事件映射。正式应用需在锁内重新检查。
+当前单笔应用服务仅供内部测试。它在同一事务中保留旧链身份、重新核对授权和全部参与者同意、
+创建独立新链，并通过现有预约任务处理取消和创建。生产存储、同意投递、交接专用邮件与日历附件、
+操作入口和启用仍待后续阶段。
 旧会议的取消沿用原 ICS UID 与原日历组织者，新邀请使用新 UID。Google Meet 和 Zoom
 按各自预约链的固定组织者身份处理。Outlook 和 Teams 按旧链固定的写回状态清理，新 Teams
 会议要求实例启用 Microsoft 日历，并复核接任主持人的写入资格。任一条件不满足时返回
