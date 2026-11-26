@@ -11,18 +11,18 @@ export async function importedBookingIds(
   organizationId?: string,
 ): Promise<Set<string>> {
   if (ids.length === 0) return new Set()
-  const scope = organizationId === undefined ? sql`true` : sql`organization_id = ${organizationId}`
+  const scope = organizationId === undefined ? sql`` : sql` AND organization_id = ${organizationId}`
   const result = await sql<{ id: string }>`
     WITH RECURSIVE connected(seed_id,booking_id) AS (
-      SELECT id,id FROM bookings WHERE id = ANY(${ids}::uuid[]) AND ${scope}
-        AND EXISTS (SELECT 1 FROM bookings WHERE source = 'import' AND ${scope})
+      SELECT id,id FROM bookings WHERE id = ANY(${ids}::uuid[])${scope}
+        AND EXISTS (SELECT 1 FROM bookings WHERE source = 'import'${scope})
       UNION
       SELECT c.seed_id,n.id FROM connected c
         JOIN bookings b ON b.id = c.booking_id
         JOIN LATERAL (
-          SELECT id FROM bookings WHERE id = b.rescheduled_from_id AND ${scope}
+          SELECT id FROM bookings WHERE id = b.rescheduled_from_id${scope}
           UNION
-          SELECT id FROM bookings WHERE rescheduled_from_id = b.id AND ${scope}
+          SELECT id FROM bookings WHERE rescheduled_from_id = b.id${scope}
         ) n ON true
     )
     SELECT DISTINCT c.seed_id AS id FROM connected c
