@@ -26,6 +26,12 @@ export type MeetingLocation =
   | { kind: 'phone'; number: string }
   | { kind: 'address'; address: string }
   | { kind: 'custom'; text: string }
+  | TeamsMeetingLocation
+
+export type TeamsMeetingLocation = { kind: 'microsoft_teams' } & (
+  | { status: 'ready'; url: string }
+  | { status: 'join_url_pending' | 'teams_unavailable' | 'writeback_failed' }
+)
 
 export interface BookingEmailMeeting {
   eventName: string
@@ -52,6 +58,7 @@ export interface BookingEmailMeeting {
 export interface ManageLinks {
   reschedule: string
   cancel: string
+  details?: string | undefined
 }
 
 /** The invitee or a guest. Only the invitee gets manage links. */
@@ -223,13 +230,15 @@ function formatShortTime(
 
 // --- Locations ----------------------------------------------------------------------------
 
-/** Recipient-specific phone wording; collected numbers never enter guest payloads. */
+/** Guest payloads omit the invitee's collected phone number and automatic Teams links. */
 export function bookingLocationForRecipient(
   location: MeetingLocation | null,
   inviteePhone: boolean,
   role: 'host' | 'invitee' | 'guest',
   locale?: string | null,
 ): MeetingLocation | null {
+  if (location?.kind === 'microsoft_teams' && role === 'guest')
+    return { kind: 'custom', text: 'Microsoft Teams' }
   if (location?.kind !== 'phone') return location
   const language = interfaceLanguage(locale) ?? 'en'
   const key = inviteePhone
@@ -255,7 +264,23 @@ export function meetingLocationText(location: MeetingLocation): string {
       return multiLine(location.address)
     case 'custom':
       return multiLine(location.text)
+    case 'microsoft_teams':
+      return location.status === 'ready' ? singleLine(location.url) : 'Microsoft Teams'
   }
+}
+
+export function teamsMeetingNotice(
+  location: TeamsMeetingLocation,
+  locale: string | null | undefined,
+  cancelled: boolean,
+): string | undefined {
+  const language = interfaceLanguage(locale) ?? 'en'
+  if (location.status === 'join_url_pending')
+    return message(language, cancelled ? 'teams.linkPendingCancelled' : 'teams.linkPending')
+  if (location.status === 'teams_unavailable')
+    return message(language, cancelled ? 'teams.unavailableCancelled' : 'teams.unavailable')
+  if (location.status === 'writeback_failed')
+    return message(language, cancelled ? 'teams.writebackFailedCancelled' : 'teams.writebackFailed')
 }
 
 function locationForText(location: MeetingLocation, language: InterfaceLanguage): string {
@@ -650,13 +675,22 @@ export function bookingEmail(
       muted: true,
     })
   }
-  if (meeting.location) {
-    const location = meeting.location
-    // Join URLs belong to the action below the details, and never to a cancelled email.
+  const location = meeting.location
+  const teams = location?.kind === 'microsoft_teams' ? location : undefined
+  if (location) {
     const locationText =
       location.kind === 'link'
         ? singleLine(location.label ?? '') || t('Online meeting')
-        : locationForText(location, language)
+        : teams
+          ? [
+              'Microsoft Teams',
+              teams.status === 'ready' && kind === 'cancelled'
+                ? linkableUrl(teams.url)
+                : teamsMeetingNotice(teams, language, kind === 'cancelled'),
+            ]
+              .filter(Boolean)
+              .join('\n')
+          : locationForText(location, language)
     fields.push(field(t('Where'), locationText))
   } else if (kind !== 'conference_failed') {
     fields.push(
@@ -699,16 +733,23 @@ export function bookingEmail(
     kind !== 'cancelled' && kind !== 'conference_failed' && invitation
       ? { language, text: t(`calendar.email.${footerRole}`) }
       : undefined
-  const joinUrl = meeting.location?.kind === 'link' ? linkableUrl(meeting.location.url) : null
+  const joinLocation =
+    location?.kind === 'link'
+      ? location
+      : teams?.status === 'ready'
+        ? { kind: 'link' as const, label: 'Microsoft Teams', url: teams.url }
+        : undefined
+  const joinUrl = joinLocation && linkableUrl(joinLocation.url)
   const join =
-    joinUrl &&
-    meeting.location?.kind === 'link' &&
-    kind !== 'cancelled' &&
-    kind !== 'conference_failed'
-      ? { label: joinLabel(meeting.location, language), url: joinUrl }
+    joinLocation && joinUrl && kind !== 'cancelled' && kind !== 'conference_failed'
+      ? { label: joinLabel(joinLocation, language), url: joinUrl }
       : undefined
-  const bookingUrl =
-    isHost && options.bookingUrl ? (linkableUrl(options.bookingUrl) ?? undefined) : undefined
+  const bookingPage = isHost
+    ? options.bookingUrl
+    : teams?.status === 'join_url_pending'
+      ? manageLinks?.details
+      : undefined
+  const bookingUrl = bookingPage ? linkableUrl(bookingPage) : undefined
   // Cancellation and suppressed invitations can omit manage links; identity still
   // distinguishes the person who booked from the guests they added.
   const receivedWhy = isHost

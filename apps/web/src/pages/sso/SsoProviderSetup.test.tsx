@@ -8,6 +8,8 @@ import {
   json,
   later,
   ME,
+  PROFILE,
+  profile,
   type Routes,
   renderApp,
   signedInAs,
@@ -41,6 +43,15 @@ const provider: SsoProvider = {
 }
 const list = '/api/v1/team/sso/providers'
 const detail = `${list}/${provider.id}`
+const samlProvider: SsoProvider = {
+  ...provider,
+  id: '00000000-0000-7000-8000-000000000020',
+  protocol: 'saml',
+  displayName: 'SAML identity',
+  issuer: 'urn:example:saml:idp',
+  clientId: null,
+}
+const samlDetail = `${list}/${samlProvider.id}`
 const providerPage = (...data: SsoProvider[]) => json(200, { data, nextCursor: null })
 const base: Routes = {
   ...signedInAs({ ...ME, organization }),
@@ -57,6 +68,10 @@ const base: Routes = {
       ssoSamlEnabled: false,
       signIn: { email: true, google: false, microsoft: false },
     }),
+}
+const samlBase: Routes = {
+  ...base,
+  'GET /api/v1/instance': () => json(200, { ssoOidcEnabled: false, ssoSamlEnabled: true }),
 }
 
 describe('SSO provider setup', () => {
@@ -121,9 +136,8 @@ describe('SSO provider setup', () => {
     const confirmation = screen.getByRole('group', {
       name: 'Retire this provider? This action is permanent.',
     })
-    expect(document.activeElement).toBe(
-      within(confirmation).getByRole('button', { name: 'Cancel' }),
-    )
+    const cancel = within(confirmation).getByRole('button', { name: 'Cancel' })
+    await waitFor(() => expect(document.activeElement).toBe(cancel))
     await user.click(within(confirmation).getByRole('button', { name: 'Retire provider' }))
     await waitFor(() =>
       expect(screen.queryByRole('heading', { name: created.displayName })).toBeNull(),
@@ -293,4 +307,247 @@ describe('SSO provider setup', () => {
       expect(requests.to(`PATCH ${detail}`)).toHaveLength(1)
     },
   )
+})
+
+describe('SAML provider setup', () => {
+  it('hides all SAML provider controls and preserves the OIDC form when SAML is off', async () => {
+    const requests = fakeApi({
+      ...base,
+      [`GET ${list}`]: () => providerPage(provider, samlProvider),
+    })
+    const user = userEvent.setup()
+    renderApp(PATHS.sso)
+
+    const add = await screen.findByRole('button', { name: 'Add provider' })
+    expect(screen.queryByRole('button', { name: 'Add SAML provider' })).toBeNull()
+    expect(screen.queryByText(samlProvider.displayName)).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Download service provider metadata' })).toBeNull()
+    await user.click(add)
+    const form = within(screen.getByRole('form', { name: 'Add OIDC provider' }))
+    expect(form.getByLabelText('Client secret')).toBeTruthy()
+    expect(form.queryByText('Signing certificates')).toBeNull()
+    expect(requests.to(`POST ${list}`)).toHaveLength(0)
+  })
+
+  it('imports IdP metadata through a write and exposes only the safe summary and SP metadata link', async () => {
+    const metadata = '<EntityDescriptor>private-import-input</EntityDescriptor>'
+    const metadataUrl = 'https://identity.example.test/private-metadata-path'
+    const serverCertificate = 'private-returned-certificate'
+    const serverSecret = 'private-returned-secret'
+    const unexpectedFields = {
+      saml: { metadataDocument: metadata, metadataUrl, signingCertificates: [serverCertificate] },
+      oidc: { clientSecret: serverSecret },
+    }
+    let saved = false
+    const requests = fakeApi({
+      ...samlBase,
+      [`GET ${list}`]: () =>
+        saved ? providerPage({ ...samlProvider, ...unexpectedFields }) : providerPage(),
+      [`POST ${list}`]: () => {
+        saved = true
+        return json(201, { provider: { ...samlProvider, ...unexpectedFields } })
+      },
+    })
+    const user = userEvent.setup()
+    renderApp(PATHS.sso)
+    await user.click(await screen.findByRole('button', { name: 'Add SAML provider' }))
+    const form = within(screen.getByRole('form', { name: 'Add SAML provider' }))
+    const source = form.getByLabelText('SAML configuration source')
+    await user.type(form.getByLabelText('Display name'), samlProvider.displayName)
+    expect(form.getByLabelText('Identity provider entity ID')).toBeTruthy()
+    expect(form.getByLabelText('HTTP-Redirect sign-in URL')).toBeTruthy()
+    expect(form.getByText('Signed assertions are required.')).toBeTruthy()
+    await user.selectOptions(source, 'url')
+    const url = form.getByLabelText<HTMLInputElement>('Identity provider metadata URL')
+    expect(url.hasAttribute('data-private')).toBe(true)
+    await user.type(url, metadataUrl)
+    await user.selectOptions(source, 'xml')
+    await user.selectOptions(source, 'url')
+    expect(form.getByLabelText<HTMLInputElement>('Identity provider metadata URL').value).toBe('')
+    await user.selectOptions(source, 'xml')
+    const xml = form.getByLabelText<HTMLTextAreaElement>('Identity provider metadata XML')
+    expect(xml.hasAttribute('data-private')).toBe(true)
+    await user.click(xml)
+    await user.paste(metadata)
+    await user.click(form.getByRole('button', { name: 'Save changes' }))
+    expect(xml.value).toBe('')
+
+    const metadataLink = await screen.findByRole('link', {
+      name: 'Download service provider metadata',
+    })
+    expect(metadataLink.getAttribute('href')).toBe(
+      `/api/auth/sso/saml2/sp/metadata/${samlProvider.id}`,
+    )
+    expect(metadataLink.hasAttribute('download')).toBe(true)
+    const [posted] = requests.to(`POST ${list}`)
+    expect(posted?.headers.get('X-Expected-Organization-Id')).toBe(organization.id)
+    expect(posted?.body).toEqual({
+      displayName: samlProvider.displayName,
+      domainIds: [],
+      protocol: 'saml',
+      saml: { metadataDocument: metadata, wantAssertionsSigned: true },
+    })
+
+    await user.click(screen.getByRole('button', { name: `Edit ${samlProvider.displayName}` }))
+    const edit = within(screen.getByRole('form', { name: 'Edit provider' }))
+    expect(edit.getByLabelText<HTMLInputElement>('Identity provider entity ID').readOnly).toBe(true)
+    expect(edit.queryByLabelText(/Subject attribute/)).toBeNull()
+    expect(edit.getByLabelText<HTMLTextAreaElement>('Signing certificate 1').value).toBe('')
+    await user.selectOptions(edit.getByLabelText('SAML configuration source'), 'xml')
+    expect(edit.getByLabelText<HTMLTextAreaElement>('Identity provider metadata XML').value).toBe(
+      '',
+    )
+    await user.selectOptions(edit.getByLabelText('SAML configuration source'), 'url')
+    expect(edit.getByLabelText<HTMLInputElement>('Identity provider metadata URL').value).toBe('')
+    for (const value of [metadata, metadataUrl, serverCertificate, serverSecret]) {
+      expect(screen.queryByDisplayValue(value)).toBeNull()
+      expect(document.body.textContent).not.toContain(value)
+    }
+  })
+
+  it('submits overlapping signing certificates with the displayed revision and reloads after a conflict', async () => {
+    const oldCertificate = '-----BEGIN CERTIFICATE-----\nT0xE\n-----END CERTIFICATE-----'
+    const newCertificate = '-----BEGIN CERTIFICATE-----\nTkVX\n-----END CERTIFICATE-----'
+    const replacement = later()
+    let current = samlProvider
+    const requests = fakeApi({
+      ...samlBase,
+      [`GET ${list}`]: () => providerPage(current),
+      [`PATCH ${samlDetail}`]: () => {
+        if (current.revision === 3) {
+          current = { ...current, revision: 5 }
+          return replacement.response
+        }
+        current = { ...current, revision: current.revision + 1 }
+        return json(200, { provider: current })
+      },
+      [`POST ${samlDetail}/test`]: () =>
+        json(200, { url: 'https://identity.example.test/saml?RelayState=synthetic-attempt' }),
+    })
+    const user = userEvent.setup()
+    renderApp(PATHS.sso)
+    const edit = `Edit ${samlProvider.displayName}`
+    await user.click(await screen.findByRole('button', { name: edit }))
+    let form = within(screen.getByRole('form', { name: 'Edit provider' }))
+    await user.click(form.getByRole('button', { name: 'Add signing certificate' }))
+    const first = form.getByLabelText<HTMLTextAreaElement>('Signing certificate 1')
+    const second = form.getByLabelText<HTMLTextAreaElement>('Signing certificate 2')
+    for (const [field, certificate] of [
+      [first, oldCertificate],
+      [second, newCertificate],
+    ] as const) {
+      expect(field.hasAttribute('data-private')).toBe(true)
+      await user.click(field)
+      await user.paste(certificate)
+    }
+    await user.click(form.getByRole('button', { name: 'Save changes' }))
+    expect(first.value).toBe('')
+    expect(second.value).toBe('')
+    await replacement.answer(
+      json(409, { error: 'sso_configuration_changed', message: oldCertificate }),
+    )
+    await screen.findByText('These SSO settings changed. Reload before trying again.')
+    expect(document.body.textContent).not.toContain(oldCertificate)
+    expect(requests.to(`GET ${list}`)).toHaveLength(1)
+
+    await user.click(screen.getByRole('button', { name: 'Reload settings' }))
+    await user.click(await screen.findByRole('button', { name: edit }))
+    form = within(screen.getByRole('form', { name: 'Edit provider' }))
+    expect(form.getByLabelText<HTMLTextAreaElement>('Signing certificate 1').value).toBe('')
+    expect(form.queryByLabelText('Signing certificate 2')).toBeNull()
+    await user.click(form.getByRole('button', { name: 'Save changes' }))
+    await waitFor(() => expect(requests.to(`PATCH ${samlDetail}`)).toHaveLength(2))
+    expect(requests.to(`PATCH ${samlDetail}`).map(({ body }) => body)).toEqual([
+      {
+        expectedRevision: 3,
+        displayName: samlProvider.displayName,
+        saml: { signingCertificates: [oldCertificate, newCertificate] },
+      },
+      { expectedRevision: 5, displayName: samlProvider.displayName },
+    ])
+    await screen.findByText('Revision 6 · Disabled')
+    await user.click(
+      await screen.findByRole('button', { name: `Test provider ${samlProvider.displayName}` }),
+    )
+    const testLink = await screen.findByRole('link', { name: 'Continue to identity provider' })
+    expect(testLink.hasAttribute('data-private')).toBe(true)
+    expect(requests.to(`POST ${samlDetail}/test`)[0]?.body).toEqual({ expectedRevision: 6 })
+  })
+
+  it('replaces raw invalid-metadata diagnostics with a localized-safe error and clears the input', async () => {
+    const raw = '<EntityDescriptor>private-rejected-input</EntityDescriptor>'
+    const requests = fakeApi({
+      ...samlBase,
+      [`GET ${list}`]: () => providerPage(samlProvider),
+      [`PATCH ${samlDetail}`]: () => json(400, { error: 'invalid_request', message: raw }),
+    })
+    const user = userEvent.setup()
+    renderApp(PATHS.sso)
+    await user.click(
+      await screen.findByRole('button', { name: `Edit ${samlProvider.displayName}` }),
+    )
+    const form = within(screen.getByRole('form', { name: 'Edit provider' }))
+    await user.selectOptions(form.getByLabelText('SAML configuration source'), 'xml')
+    const xml = form.getByLabelText<HTMLTextAreaElement>('Identity provider metadata XML')
+    await user.click(xml)
+    await user.paste(raw)
+    await user.click(form.getByRole('button', { name: 'Save changes' }))
+
+    await screen.findByText(
+      'Check the SAML metadata, sign-in URL and signing certificates, then try again.',
+    )
+    expect(xml.value).toBe('')
+    expect(document.body.textContent).not.toContain(raw)
+    expect(requests.to(`PATCH ${samlDetail}`)[0]?.body).toEqual({
+      expectedRevision: samlProvider.revision,
+      displayName: samlProvider.displayName,
+      saml: { metadataDocument: raw },
+    })
+  })
+
+  it('keeps activation unavailable with neutral copy when domain verification is unknown', async () => {
+    const requests = fakeApi({
+      ...samlBase,
+      [`GET ${list}`]: () =>
+        providerPage({
+          ...samlProvider,
+          testStatus: 'passed',
+          domains: [{ ...domain, status: 'unknown' }],
+        }),
+    })
+    renderApp(PATHS.sso)
+    const activate = await screen.findByRole<HTMLButtonElement>('button', {
+      name: `Enable provider ${samlProvider.displayName}`,
+    })
+    expect(activate.disabled).toBe(true)
+    expect(screen.getByText(/Verification unknown/)).toBeTruthy()
+    expect(screen.queryByText(/Verify an associated domain before enabling/)).toBeNull()
+    expect(requests.to(`POST ${samlDetail}/activation`)).toHaveLength(0)
+  })
+
+  it('keeps activation unavailable with neutral copy when a test result is unknown', async () => {
+    fakeApi({ ...samlBase, [`GET ${list}`]: () => providerPage(samlProvider) })
+    renderApp(PATHS.sso)
+    await screen.findByText('Provider test status is unavailable.')
+    expect(screen.queryByText('No test result for the current revision.')).toBeNull()
+    expect(
+      screen.getByRole<HTMLButtonElement>('button', {
+        name: `Enable provider ${samlProvider.displayName}`,
+      }).disabled,
+    ).toBe(true)
+  })
+
+  it('renders the SAML source and editor controls in Simplified Chinese', async () => {
+    fakeApi({
+      ...samlBase,
+      ...profile({ ...PROFILE, locale: 'zh-CN' }),
+      [`GET ${list}`]: () => providerPage(),
+    })
+    const user = userEvent.setup()
+    renderApp(PATHS.sso)
+    await user.click(await screen.findByRole('button', { name: '添加 SAML 提供方' }))
+    const form = within(screen.getByRole('form', { name: '添加 SAML 提供方' }))
+    expect(form.getByLabelText('SAML 配置来源')).toBeTruthy()
+    expect(form.queryByLabelText('SAML configuration source')).toBeNull()
+  })
 })

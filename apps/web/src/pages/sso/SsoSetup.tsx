@@ -31,7 +31,7 @@ export function SsoSetupPage() {
   const { t } = useI18n()
   const me = useMe()
   const access = useTeamManagementAccess()
-  const { ssoOidcEnabled, ssoStored } = useOutletContext<AppShellContext>()
+  const { ssoOidcEnabled, ssoSamlEnabled, ssoStored } = useOutletContext<AppShellContext>()
   const showDomains = useMatch(PATHS.ssoDomainSettings) !== null
   const title = showDomains ? 'SSO domains' : 'Single sign-on'
   usePageTitle(title)
@@ -60,11 +60,9 @@ export function SsoSetupPage() {
             </p>
           )}
           <nav className="form-actions" aria-label={t('Single sign-on')}>
-            {(ssoOidcEnabled || ssoStored) && (
-              <NavLink to={PATHS.sso} end className="button">
-                {t('Identity providers')}
-              </NavLink>
-            )}
+            <NavLink to={PATHS.sso} end className="button">
+              {t('Identity providers')}
+            </NavLink>
             <NavLink to={PATHS.ssoDomainSettings} className="button">
               {t('SSO domains')}
             </NavLink>
@@ -74,7 +72,8 @@ export function SsoSetupPage() {
             organizationId={me.organization.id}
             owner={access.role === 'owner'}
             showDomains={showDomains}
-            addsTrust={ssoStored !== true}
+            oidcEnabled={ssoOidcEnabled === true}
+            samlEnabled={ssoSamlEnabled === true}
           />
         </>
       )}
@@ -105,13 +104,14 @@ function SsoInventory({
   organizationId,
   owner,
   showDomains,
-  addsTrust,
+  oidcEnabled,
+  samlEnabled,
 }: {
   organizationId: string
   owner: boolean
   showDomains: boolean
-  /** False while the operator setting is off: only trust-reducing controls are offered. */
-  addsTrust: boolean
+  oidcEnabled: boolean
+  samlEnabled: boolean
 }) {
   const { t } = useI18n()
   const me = useMe()
@@ -163,7 +163,7 @@ function SsoInventory({
 
   // Proof belongs to this team and settings pane. Keep the retry inputs in memory
   // only, and discard them when leaving the pane or restoring a page snapshot.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: showDomains changes the settings pane
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the pane, role and capabilities govern the request
   useLayoutEffect(() => {
     function reset() {
       activeWrite.current?.abort()
@@ -179,7 +179,7 @@ function SsoInventory({
       activeWrite.current?.abort()
       window.removeEventListener('pagehide', reset)
     }
-  }, [showDomains, owner])
+  }, [showDomains, owner, oidcEnabled, samlEnabled])
 
   useEffect(() => {
     if (!busy && !pending && proofOpener.current) {
@@ -277,9 +277,13 @@ function SsoInventory({
     ...provider,
     domains: provider.domains.flatMap(({ id }) => visibleDomains.get(id) ?? []),
   }))
+  const addsTrust = oidcEnabled || samlEnabled
   const ownedLinks = new Set(me.sso?.links.map(({ providerId }) => providerId))
   const stepUpProviders = providers.filter(
-    ({ id, enabled, protocol }) => enabled && protocol === 'oidc' && ownedLinks.has(id),
+    ({ id, enabled, protocol }) =>
+      enabled &&
+      ownedLinks.has(id) &&
+      ((protocol === 'oidc' && oidcEnabled) || (protocol === 'saml' && samlEnabled)),
   )
   const paneProps = {
     organizationId,
@@ -322,10 +326,12 @@ function SsoInventory({
               providers={providers}
               owner={owner}
               reload={reload}
-              addsTrust={addsTrust}
+              addsTrust={oidcEnabled}
+              samlEnabled={samlEnabled}
             />
             <SsoEnforcement
               addsTrust={addsTrust}
+              samlEnabled={samlEnabled}
               organizationId={organizationId}
               owner={owner}
               busy={paneProps.busy}

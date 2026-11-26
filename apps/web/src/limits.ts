@@ -6,6 +6,7 @@
 
 export const EVENT_TYPE = {
   maxAllowedDurations: 12,
+  maxLocationOptions: 5,
   titleMaxLength: 200,
   descriptionMaxLength: 5000,
   slugMaxLength: 64,

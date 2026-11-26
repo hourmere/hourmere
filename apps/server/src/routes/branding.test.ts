@@ -49,6 +49,22 @@ describe.skipIf(!process.env.DATABASE_URL)('branding REST', () => {
     principals.set(key, principal)
     return key
   }
+  it.each([
+    ['colour', { brandPrimaryColor: 'red' }],
+    ['logo reference', { brandLogo: 'abc' }],
+  ])('returns invalid_request for a malformed %s', async (_field, body) => {
+    const user = await createTestUser(db)
+    const response = await app.request('/api/v1/branding', {
+      method: 'PATCH',
+      headers: {
+        authorization: `Bearer ${token(user.principal)}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    })
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ error: 'invalid_request' })
+  })
   it('limits raw uploads and serves only normalized images with safe headers', async () => {
     const user = await createTestUser(db),
       key = token(user.principal),

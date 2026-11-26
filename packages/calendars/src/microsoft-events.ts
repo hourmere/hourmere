@@ -1,3 +1,4 @@
+import { teamsJoinUrl as validateTeamsJoinUrl } from '@hourmere/core/conference-url'
 import { isSingleLineText } from '@hourmere/scheduling/text'
 import { z } from 'zod'
 import { graphInstant, graphUtcTime, MicrosoftCalendarError } from './microsoft.ts'
@@ -23,23 +24,7 @@ const eventReference = z.object({
   onlineMeetingProvider: z.unknown().optional(),
   onlineMeeting: z.unknown().optional(),
 })
-export const teamsJoinUrl = z
-  .string()
-  .max(8192)
-  .refine((value) => {
-    if (!isSingleLineText(value) || /\s/u.test(value)) return false
-    const url = URL.parse(value)
-    // Microsoft documents both hosts for commercial Teams.
-    // https://learn.microsoft.com/en-us/powershell/module/microsoftteams/set-csteamsclientconfiguration#-useunifieddomain
-    return Boolean(
-      url &&
-        (url.origin === 'https://teams.microsoft.com' ||
-          url.origin === 'https://teams.cloud.microsoft') &&
-        url.href === value &&
-        !url.username &&
-        !url.password,
-    )
-  })
+export const teamsJoinUrl = z.string().refine((value) => Boolean(validateTeamsJoinUrl(value)))
 const teamsMeeting = z.object({
   isOnlineMeeting: z.literal(true),
   onlineMeetingProvider: z.literal(teamsProvider),
