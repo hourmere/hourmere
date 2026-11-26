@@ -94,7 +94,7 @@ async function verify(step: number) {
   expect(continueButton.hasAttribute('disabled')).toBe(true)
   await userEvent.click(within(proof).getByRole('button', { name: 'Send verification email' }))
   const input = await within(proof).findByLabelText('Email verification link')
-  expect(document.activeElement).toBe(input)
+  await waitFor(() => expect(document.activeElement).toBe(input))
   await userEvent.type(
     input,
     `${window.location.origin}${PATHS.mailboxProof}#attempt=${attemptId(step)}&token=${TOKEN}`,
