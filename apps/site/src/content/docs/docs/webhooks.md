@@ -117,7 +117,9 @@ Request events add `data.requestId`, keep `data.status` as `confirmed`, and omit
 Each replacement request has its own delivery identity. There are at most ten endpoints per organization.
 The URL is immutable: create a replacement endpoint to change the destination. By default,
 URLs require HTTPS on port 443, a fully qualified public DNS hostname, no user information
-or fragment, and at most 2048 characters. Private, loopback and special-purpose destinations
+or fragment, and at most 2048 characters. The public hostname policy excludes single labels
+and names under `.local`, `.internal`, `.localhost`, `.home.arpa`, `.service.arpa`, `.alt`,
+`.test`, `.example`, `.invalid` or `.onion`. Private, loopback and special-purpose destinations
 are refused unless the operator explicitly allows an eligible private destination below.
 Syntax and the current operator policy are checked when creating an endpoint and updating
 its subscription/active settings. An update containing only `isActive: false` (plus the ID

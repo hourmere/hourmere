@@ -3,6 +3,7 @@ import type pg from 'pg'
 import { describe, expect, it } from 'vitest'
 import { seedCheckoutHolds } from './payment-checkout-attempt-fixtures.ts'
 import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
+import { MIGRATION_COVERAGE_TIMEOUT } from './testing/migration-replay.ts'
 
 async function assertRefundProtections(pool: pg.Pool) {
   const [first, second] = await seedCheckoutHolds(pool)
@@ -152,12 +153,16 @@ async function assertRefundProtections(pool: pg.Pool) {
 }
 
 describe.skipIf(!process.env.DATABASE_URL)('payment refund obligation constraints', () => {
-  it('fails an assertion when any 0190 object is dropped', async () => {
-    const report = await checkConstraintCoverage({
-      serverUrl: process.env.DATABASE_URL as string,
-      migration: '0190_payment_refund_obligations.sql',
-      assertions: assertRefundProtections,
-    })
-    expect(report.problems).toEqual([])
-  }, 600_000)
+  it(
+    'fails an assertion when any 0190 object is dropped',
+    async () => {
+      const report = await checkConstraintCoverage({
+        serverUrl: process.env.DATABASE_URL as string,
+        migration: '0190_payment_refund_obligations.sql',
+        assertions: assertRefundProtections,
+      })
+      expect(report.problems).toEqual([])
+    },
+    MIGRATION_COVERAGE_TIMEOUT,
+  )
 })

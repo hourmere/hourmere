@@ -40,6 +40,8 @@ describe('guarded domain TXT lookup', () => {
     '_hourmere-sso.localhost',
     '_hourmere-sso.test.local',
     '_hourmere-sso.home.arpa',
+    '_hourmere-sso.idp.alt',
+    '_hourmere-sso.idp.service.arpa',
     '_hourmere-sso.127.0.0.1',
     '_hourmere-sso.999.999',
     '_hourmere-sso.*.example.com',

@@ -2,7 +2,7 @@ import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type pg from 'pg'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { migrationsDir, runMigrations } from './migrate.ts'
 import {
   insert,
@@ -10,8 +10,11 @@ import {
   oidcProviderValues,
   ssoFixture,
 } from './sso-storage-fixtures.ts'
-import { createTestDatabase, type TestDatabase } from './testing.ts'
+import { MIGRATION_REPLAY_TIMEOUT, useMigrationReplay } from './testing/migration-replay.ts'
+import type { TestDatabase } from './testing.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
+
+vi.setConfig({ testTimeout: MIGRATION_REPLAY_TIMEOUT, hookTimeout: MIGRATION_REPLAY_TIMEOUT })
 
 const migration = '0117_sso_domain_retirement.sql'
 async function snapshot(pool: pg.Pool) {
@@ -33,6 +36,8 @@ async function snapshot(pool: pg.Pool) {
 }
 
 describe.skipIf(!process.env.DATABASE_URL)('domain retirement upgrade', () => {
+  const replay = useMigrationReplay(process.env.DATABASE_URL as string, migration)
+
   it('preserves a populated predecessor, matches fresh install and reruns without changes', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'hourmere-domain-retirement-upgrade-'))
     let upgraded: TestDatabase | undefined
@@ -42,7 +47,7 @@ describe.skipIf(!process.env.DATABASE_URL)('domain retirement upgrade', () => {
         (f) => f.endsWith('.sql') && f < migration,
       ))
         await copyFile(join(migrationsDir, file), join(dir, file))
-      upgraded = await createTestDatabase(process.env.DATABASE_URL as string, dir)
+      upgraded = await replay.predecessor.clone(dir)
       const client = await upgraded.pool.connect()
       try {
         const f = await ssoFixture(client)
@@ -61,7 +66,7 @@ describe.skipIf(!process.env.DATABASE_URL)('domain retirement upgrade', () => {
       await copyFile(join(migrationsDir, migration), join(dir, migration))
       expect(await runMigrations(upgraded.pool, dir)).toEqual([migration])
       expect(await snapshot(upgraded.pool)).toEqual(before)
-      fresh = await createTestDatabase(process.env.DATABASE_URL as string, dir)
+      fresh = await replay.predecessor.clone(dir)
       const schema = await snapshotSchema(upgraded.pool)
       expect(schema).toEqual(await snapshotSchema(fresh.pool))
       expect((await upgraded.pool.query('SELECT * FROM sso_domain_retirements')).rows).toEqual([])
@@ -81,5 +86,5 @@ describe.skipIf(!process.env.DATABASE_URL)('domain retirement upgrade', () => {
       await upgraded?.drop()
       await rm(dir, { recursive: true, force: true })
     }
-  }, 120_000)
+  })
 })
