@@ -60,6 +60,28 @@ export function googleMeetUrl(value: unknown): string | undefined {
     ? value
     : undefined
 }
+
+/** Teams participant URLs returned by Microsoft's commercial calendar service. */
+export function teamsJoinUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.length > 8192 || !/^[\x21-\x7e]+$/u.test(value))
+    return undefined
+  try {
+    const url = new URL(value)
+    if (
+      url.href === value &&
+      (url.origin === 'https://teams.microsoft.com' ||
+        url.origin === 'https://teams.cloud.microsoft') &&
+      !url.username &&
+      !url.password &&
+      !url.hash &&
+      /^\/(?:l\/meetup-join\/[^/]+\/\d+|meet\/[^/]+)$/u.test(url.pathname)
+    )
+      return value
+  } catch {
+    return undefined
+  }
+}
+
 export function conferenceJoinUrl(
   provider: string,
   value: unknown,
@@ -75,6 +97,7 @@ export function conferenceJoinUrl(
 /** Presentation only: validating a participant link does not adopt a meeting identity. */
 export function displayConferenceUrl(provider: string, value: unknown): string | undefined {
   if (provider === 'google_meet') return googleMeetUrl(value)
+  if (provider === 'microsoft_teams') return teamsJoinUrl(value)
   if (provider !== 'zoom' || typeof value !== 'string') return undefined
   try {
     const id = zoomMeetingId(new URL(value).pathname.split('/').at(-1))

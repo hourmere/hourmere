@@ -26,6 +26,7 @@ import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { eligibleHostIds, hasValidHostShape } from './hosts.ts'
 import { isUuid } from './internal.ts'
+import { isMicrosoftTeamsDestination, microsoftTeamsLocation } from './microsoft-teams.ts'
 import {
   getSelfReadiness,
   getTeamMemberReadiness,
@@ -107,6 +108,8 @@ function sourceCopy(
     eligibleHostIds,
     hasValidHostShape,
     isUuid,
+    isMicrosoftTeamsDestination,
+    microsoftTeamsLocation,
     cleanText,
   }
   return new Function(

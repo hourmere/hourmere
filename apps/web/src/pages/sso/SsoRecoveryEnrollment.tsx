@@ -1,15 +1,17 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { useOutletContext } from 'react-router'
 import { api, unwrap } from '../../api/client.ts'
 import { isOrganizationContextChanged, RequestError } from '../../api/errors.ts'
+import type { AppShellContext } from '../../components/AppShell.tsx'
 import { useI18n } from '../../i18n/runtime.tsx'
 import type { MessageKey } from '../../i18n/translate.ts'
 import { useMe, useSession } from '../../session.tsx'
 import type { RecoveryNomination } from './recovery-nomination.ts'
 import { SsoFreshProof } from './SsoFreshProof.tsx'
 import {
-  oidcStepUpProviders,
   type SsoProofChallenge,
   SsoProofRequired,
+  ssoStepUpProviders,
   unwrapSsoWrite,
 } from './setup.ts'
 import './sso-setup.css'
@@ -117,6 +119,7 @@ export function SsoRecoveryNomination({
 }) {
   const { locale, t } = useI18n()
   const { organization, sso } = useMe()
+  const shell = useOutletContext<AppShellContext | null>()
   const { confirmReload } = useSession()
   const heading = useId()
   const headingRef = useRef<HTMLHeadingElement>(null)
@@ -124,7 +127,7 @@ export function SsoRecoveryNomination({
   const [expiresAt, setExpiresAt] = useState<string | null>(null)
   const { busy, failure, pending, start, cancelProof } = useEnrollmentWrite(false)
   const headers = { 'X-Expected-Organization-Id': organization.id }
-  const stepUpProviders = oidcStepUpProviders(sso)
+  const stepUpProviders = ssoStepUpProviders(sso, shell)
   const formattedExpiry =
     expiresAt && Number.isFinite(Date.parse(expiresAt))
       ? new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(

@@ -236,6 +236,13 @@ export function scheduleServerErrors(err: unknown): {
         fields: { timeZone: 'This is not a time zone the server knows. Choose one from the list.' },
         message: null,
       }
+    case 'too_many_overrides':
+      return {
+        fields: {},
+        message: msg(
+          'A schedule can have at most 10,000 date overrides, including past dates. Remove some overrides before saving.',
+        ),
+      }
     case 'invalid_weekly_hours': {
       // "weeklyHours.monday has overlapping intervals 09:00–12:00 and 11:00–13:00", …
       const day = /^weeklyHours\.(\w+)/.exec(detail)?.[1] as Weekday | undefined
@@ -280,6 +287,17 @@ export function summarize(
 function previousShort(short: string): string | undefined {
   const index = WEEKDAYS.findIndex((w) => w.short === short)
   return index > 0 ? WEEKDAYS[index - 1]?.short : undefined
+}
+
+/** A time-zone name in the interface language, with a fallback for unknown saved zones. */
+export function scheduleTimeZoneLabel(timeZone: string, locale: InterfaceLanguage): string {
+  const fallback = timeZone.replaceAll('_', ' ')
+  if (!isKnownTimeZone(timeZone)) return fallback
+  return (
+    new Intl.DateTimeFormat(locale, { timeZone, timeZoneName: 'longGeneric' })
+      .formatToParts()
+      .find((part) => part.type === 'timeZoneName')?.value ?? fallback
+  )
 }
 
 /** Today's date ("YYYY-MM-DD") in `timeZone`. */

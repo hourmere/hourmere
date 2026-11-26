@@ -224,19 +224,25 @@ describe('SSO setup in an enabled test instance', () => {
     },
   )
 
-  it.each([403, 503])(
-    'shows a neutral state when inventory loading ends with %s',
-    async (status) => {
+  it.each([
+    { status: 403, protocol: 'OIDC', flags: ENABLED },
+    { status: 503, protocol: 'OIDC', flags: ENABLED },
+    { status: 403, protocol: 'SAML', flags: { ssoOidcEnabled: false, ssoSamlEnabled: true } },
+    { status: 503, protocol: 'SAML', flags: { ssoOidcEnabled: false, ssoSamlEnabled: true } },
+  ])(
+    'shows a neutral state when $protocol inventory loading ends with $status',
+    async ({ status, flags }) => {
       const pending = later()
       fakeApi({
         ...signedInAs(TEAM),
-        'GET /api/v1/instance': () => json(200, ENABLED),
+        'GET /api/v1/instance': () => json(200, flags),
         [INVENTORY]: () => pending.response,
         [POLICY]: policy,
       })
       renderApp(PATHS.sso)
       await screen.findByRole('status', { name: 'Loading SSO settings…' })
       expect(screen.queryByText('No identity providers yet.')).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Add SAML provider' })).toBeNull()
       await pending.answer(
         json(status, { error: 'inventory_error', message: 'Synthetic internal error' }),
       )
@@ -248,6 +254,7 @@ describe('SSO setup in an enabled test instance', () => {
       expect(screen.queryByText('Synthetic internal error')).toBeNull()
       expect(screen.queryByText('No identity providers yet.')).toBeNull()
       expect(screen.queryByRole('button', { name: 'Add provider' })).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Add SAML provider' })).toBeNull()
     },
   )
 

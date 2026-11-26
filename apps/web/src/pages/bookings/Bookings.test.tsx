@@ -650,6 +650,14 @@ describe('a booking', () => {
     expect(values).toEqual(['Acme', 'Pro, Team', 'Yes', 'Old answer'])
   })
 
+  it('shows the Teams link on the host booking detail', async () => {
+    const url = 'https://teams.microsoft.com/l/meetup-join/fake-meeting/0'
+    bookingServer(booking({ location: { kind: 'microsoft_teams', status: 'ready', url } }))
+    renderApp(`/app/bookings/${BOOKING_ID}`)
+    const link = await screen.findByRole('link', { name: 'Join Microsoft Teams' })
+    expect(link.getAttribute('href')).toBe(url)
+  })
+
   it('shows the date at both ends when the invitee’s local meeting crosses midnight', async () => {
     bookingServer(booking({ start: '2030-03-05T04:45:00.000Z', end: '2030-03-05T05:15:00.000Z' }))
     renderApp(`/app/bookings/${BOOKING_ID}`)

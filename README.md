@@ -451,7 +451,8 @@ Optional [automatic Google Meet](https://hourmere.com/docs/automatic-google-meet
 ## Known limitations
 
 - [Microsoft Calendar](https://hourmere.com/docs/microsoft-calendar#known-limitations) supports
-  Outlook booking writeback. Event types cannot select automatic Microsoft Teams meetings yet.
+  Outlook booking writeback and automatic Teams meetings for single-host event types.
+  Real-tenant Teams acceptance is pending.
 - Organization OIDC single sign-on is off by default. The operator turns it on with
   `SSO_OIDC_ENABLED=true` (empty or unset follows the release default, which stays off
   until SSO ships; any other value prevents startup) and sets `SSO_ENCRYPTION_KEY`, an
