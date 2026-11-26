@@ -576,4 +576,8 @@ export const common = {
   // Booking location changes
   'The meeting location has changed. Please choose a time again.':
     '会议地点已变更。请重新选择时间。',
+
+  // Microsoft Teams host authorization
+  'The assigned host must configure Microsoft Teams in their own signed-in session.':
+    '指定的主持人须登录自己的账户来配置 Microsoft Teams。',
 } as const

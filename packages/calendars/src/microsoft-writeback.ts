@@ -955,9 +955,8 @@ async function writeDestination(
         return finish('calendar_unavailable')
       return finish('provider_unavailable', backoff, posted || possiblyCreated)
     }
-    // Keep the last acknowledged participant URL for asynchronous cancellation mail.
-    // Cancelled booking views and connection diagnostics never show it.
-    const joinUrl = includeTeams ? (event?.teamsJoinUrl ?? lease.teamsJoinUrl) : undefined
+    const joinUrl =
+      desired.active && includeTeams ? (event?.teamsJoinUrl ?? lease.teamsJoinUrl) : undefined
     return complete(
       {
         status: 'succeeded',

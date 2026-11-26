@@ -268,6 +268,7 @@ export interface BookingToolsDeps {
   automaticMeet?: boolean | undefined
   smsRemindersAvailable?: boolean | undefined
   automaticZoom?: boolean | undefined
+  microsoftCalendarEnabled?: boolean | undefined
   /**
    * Per-user limits for discovery, booking and both reschedule modes; defaults to the public
    * endpoints' per-address limits (PUBLIC_RATE_LIMITS). Replaced in tests.
@@ -296,6 +297,7 @@ export function bookingTools({
   automaticMeet,
   smsRemindersAvailable,
   automaticZoom,
+  microsoftCalendarEnabled,
   rateLimits = {},
 }: BookingToolsDeps): Tool[] {
   const publicContext = (caller: McpCaller): PublicContext => ({
@@ -307,6 +309,7 @@ export function bookingTools({
     automaticMeet,
     smsRemindersAvailable,
     automaticZoom,
+    microsoftCalendarEnabled,
     bookingMaxInviteeReschedules,
     ...(caller.scimResourcesEnabled && { scimResourcesEnabled: true }),
   })
@@ -321,6 +324,7 @@ export function bookingTools({
     automaticMeet,
     smsRemindersAvailable,
     automaticZoom,
+    microsoftCalendarEnabled,
   })
   const origin = (caller: McpCaller): BookingOrigin => ({
     source: 'mcp',
