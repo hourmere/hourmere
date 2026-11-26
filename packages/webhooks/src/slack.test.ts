@@ -19,6 +19,8 @@ import {
   createSlackDestination,
   deleteSlackDestination,
   listSlackDestinations,
+  SlackCreateInput,
+  SlackUpdateInput,
   testSlackDestination,
   updateSlackDestination,
 } from './slack.ts'
@@ -27,6 +29,16 @@ import { escapeSlackText, slackPayload, slackUrl } from './slack-format.ts'
 const url = 'https://hooks.slack.com/services/TTEST/BTEST/synthetic-secret'
 const settings = { enabled: true, encryptionKey: Buffer.alloc(32, 8).toString('base64') }
 const now = Temporal.Instant.from('2026-11-01T12:00Z')
+it('rejects duplicate Slack subscription events on create and update', () => {
+  const events = ['booking.created', 'booking.rescheduled', 'booking.created']
+  for (const result of [
+    SlackCreateInput.safeParse({ url, events }),
+    SlackUpdateInput.safeParse({ events }),
+  ]) {
+    expect(result.success).toBe(false)
+    expect(result.error?.issues).toEqual([expect.objectContaining({ path: ['events'] })])
+  }
+})
 it('accepts only documented incoming webhook hosts and exact credential paths', () => {
   expect(slackUrl(url)).toBe(url)
   expect(slackUrl(url.replace('slack.com', 'slack-gov.com'))).toBeUndefined()
