@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { inspect } from 'node:util'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createCalDavCredentialRecord, readCalDavCredentials } from './caldav-credentials.ts'
 import { redactCalDavField } from './caldav-redaction.ts'
 import { decryptCredential, encryptCredential } from './credentials.ts'
@@ -86,6 +86,23 @@ describe('CalDAV credential records', () => {
       username: '[REDACTED]',
       password: '[REDACTED]',
     })
+  })
+
+  it('shares redaction across separate instances of the module', async () => {
+    const credentials = redactCalDavField({ ...canonical }, 'password')
+    vi.resetModules()
+    const { redactCalDavField: redactAgain } = await import('./caldav-redaction.ts')
+    expect(redactAgain).not.toBe(redactCalDavField)
+    expect(redactAgain(credentials, 'password')).toBe(credentials)
+    expect(redactAgain(credentials, 'username')).toBe(credentials)
+    expect(redactCalDavField(credentials, 'username')).toBe(credentials)
+    expect(JSON.parse(JSON.stringify(credentials))).toEqual({
+      serverUrl: canonical.serverUrl,
+      username: '[REDACTED]',
+      password: '[REDACTED]',
+    })
+    expect(credentials.username).toBe(input.username)
+    expect(credentials.password).toBe(input.password)
   })
 
   it('keeps secrets out of inspection with custom rendering disabled', () => {

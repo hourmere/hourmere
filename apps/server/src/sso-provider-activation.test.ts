@@ -576,8 +576,7 @@ describe.skipIf(!databaseUrl)('SSO provider activation', () => {
     expect(await activationEvents()).toEqual([])
   })
 
-  it('preserves the last usable OIDC provider even with SAML enabled', async () => {
-    app = instance(bothOn)
+  it('counts a live SAML replacement only while its protocol is on', async () => {
     const provider = await draft({ enabled: true })
     const claim = await domain()
     await serve(provider.id, claim.id)
@@ -603,12 +602,12 @@ describe.skipIf(!databaseUrl)('SSO provider activation', () => {
     expect(await policy()).toEqual({ require_sso: true, trust_generation: 1, policy_revision: 1 })
     expect(await activationEvents()).toEqual([])
 
-    await serve(alternate.id, claim.id)
+    app = instance(bothOn)
     const proof = await stepUp(await write(path, deactivate), reliance)
     const disabled = await write(path, { ...deactivate, proofAttemptId: proof.id }, proof)
     expect(disabled.status).toBe(200)
     expect((await stored(provider.id)).enabled).toBe(false)
-    expect((await stored(alternate.id)).enabled).toBe(true)
+    expect((await stored(saml.id)).enabled).toBe(true)
     expect(await policy()).toEqual({ require_sso: true, trust_generation: 2, policy_revision: 1 })
     expect(await activationEvents()).toMatchObject([
       { action: 'sso_provider.disabled', target_id: provider.id },
@@ -671,7 +670,7 @@ describe.skipIf(!databaseUrl)('SSO provider activation', () => {
     expect(await policy()).toBeUndefined()
   })
 
-  it('refuses a SAML-only provider even when SAML is enabled', async () => {
+  it('allows a tested SAML-only provider to satisfy enforcement prerequisites while SAML is on', async () => {
     const provider = await db
       .insertInto('sso_providers')
       .values({ ...samlProviderValues(fixture.team), enabled: true })
@@ -681,10 +680,11 @@ describe.skipIf(!databaseUrl)('SSO provider activation', () => {
     await receipt(provider.id, 1, 'passed', true, 'saml')
     await db.insertInto('sso_recovery_owners').values(recoveryOwnerValues(fixture)).execute()
     await error(await setPolicy(enforce), 404, 'sso_disabled')
-    for (const capabilities of [bothOn, samlOnly]) {
-      await error(await setPolicy(enforce, { target: instance(capabilities) }), 404, 'sso_disabled')
-    }
     expect(await policy()).toBeUndefined()
+    app = instance(samlOnly)
+    const proof = await mailbox(await setPolicy(enforce), samlOnly)
+    expect((await setPolicy({ ...enforce, proofAttemptId: proof.id }, proof)).status).toBe(200)
+    expect(await policy()).toMatchObject({ require_sso: true })
   })
 
   it('locks the test result under the organization lock and checks it after waiting', async () => {
@@ -823,7 +823,7 @@ describe.skipIf(!databaseUrl)('SSO provider activation', () => {
     }
   })
 
-  it('points an enforced owner with only a SAML browser proof to recovery for trust reductions', async () => {
+  it('allows SAML step-up for trust reductions and protects the last usable SAML provider', async () => {
     const saml = await db
       .insertInto('sso_providers')
       .values({ ...samlProviderValues(fixture.team), enabled: true })
@@ -831,7 +831,7 @@ describe.skipIf(!databaseUrl)('SSO provider activation', () => {
       .executeTakeFirstOrThrow()
     const claim = await domain()
     await serve(saml.id, claim.id)
-    await seedOwnerProof(saml, claim)
+    const reliance = await seedOwnerProof(saml, claim)
     const oidc = await draft({ enabled: true })
     await serve(oidc.id, claim.id)
     await db
@@ -840,24 +840,15 @@ describe.skipIf(!databaseUrl)('SSO provider activation', () => {
       .execute()
     app = instance(samlOnly)
 
-    await error(await setPolicy({ ...enforce, requireSso: false }), 403, 'sso_required')
-    for (const { id } of [saml, oidc]) {
-      await error(await write(activationPath(id), deactivate), 403, 'sso_required')
-      await error(
-        await write(providerPath(id), { expectedRevision: 1 }, { method: 'DELETE' }),
-        403,
-        'sso_required',
-      )
-    }
+    await error(await write(activationPath(saml.id), deactivate), 409, 'sso_last_provider')
     await error(
-      await write(
-        `/api/v1/team/sso/domains/${claim.id}`,
-        { expectedGeneration: claim.generation },
-        { method: 'DELETE' },
-      ),
-      403,
-      'sso_required',
+      await write(providerPath(saml.id), { expectedRevision: 1 }, { method: 'DELETE' }),
+      409,
+      'sso_last_provider',
     )
+    const turnOff = { ...enforce, requireSso: false }
+    const proof = await stepUp(await setPolicy(turnOff), reliance)
+    expect((await setPolicy({ ...turnOff, proofAttemptId: proof.id }, proof)).status).toBe(200)
   })
 
   it('requires an accepted current recovery owner and refuses a demoted or re-promoted former owner', async () => {

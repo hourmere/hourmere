@@ -83,12 +83,19 @@ function key(settings: WebhookSettings) {
     )
   return settings.encryptionKey
 }
-async function authorize(trx: Db, ctx: WebhookServiceContext, deferFinal = false) {
+async function authorize(
+  trx: Db,
+  ctx: WebhookServiceContext,
+  deferFinal = false,
+  checkBudget?: () => void,
+) {
   await ctx.prepareOrganizationWrite?.(trx)
   // API keys, MCP OAuth and CLI have no session context check: refuse non-admins before
   // they take or wait for any organization or destination lock.
-  if (ctx.principal.kind !== 'session' || !ctx.authorizeOrganizationWrite)
-    await requireAdmin(trx, ctx)
+  const checkRole = ctx.principal.kind !== 'session' || !ctx.authorizeOrganizationWrite
+  if (checkRole) await requireAdmin(trx, ctx)
+  // A session without a preflight callback only has authority checked after the lock.
+  if (checkRole || ctx.prepareOrganizationWrite) checkBudget?.()
   // Only creation needs to serialize the organization-wide destination limit.
   await lockAuthorizationParents(trx, ctx, !deferFinal)
   if (!deferFinal) {
@@ -125,8 +132,8 @@ async function filter(trx: Db, ctx: ServiceContext, id: string | null | undefine
     .executeTakeFirst()
   if (!found) throw invalid()
 }
-async function locked(trx: Db, ctx: WebhookServiceContext, id: unknown) {
-  await authorize(trx, ctx, true)
+async function locked(trx: Db, ctx: WebhookServiceContext, id: unknown, checkBudget?: () => void) {
+  await authorize(trx, ctx, true, checkBudget)
   if (!z.uuid().safeParse(id).success) throw missing()
   const row = await trx
     .selectFrom('webhooks')
@@ -270,9 +277,9 @@ export async function deleteSlackDestination(ctx: WebhookServiceContext, id: unk
   })
 }
 /**
- * `admit` runs only after the caller passed the final owner/admin check for an existing
- * destination, so refused or missing-destination calls never use the test budget. It may
- * throw to refuse the attempt; nothing has been written at that point.
+ * `checkBudget` may refuse an already exhausted budget after preflight authorization,
+ * before the destination lock. `admit` counts only after final authorization for an
+ * existing destination and may still refuse if the budget was spent during the wait.
  */
 export async function testSlackDestination(
   ctx: WebhookServiceContext,
@@ -280,12 +287,13 @@ export async function testSlackDestination(
   id: unknown,
   queue?: WebhookQueue,
   admit?: () => void,
+  checkBudget?: () => void,
 ) {
   key(settings)
   if (!settings.enabled || !queue)
     throw new DomainError('conflict', 'slack_unavailable', 'Slack delivery is unavailable')
   return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
-    const row = await locked(trx, ctx, id)
+    const row = await locked(trx, ctx, id, checkBudget)
     const actor =
       ctx.principal.kind === 'session'
         ? { userId: ctx.principal.user.id, sessionId: ctx.principal.sessionId }

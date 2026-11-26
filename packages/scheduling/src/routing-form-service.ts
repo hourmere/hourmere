@@ -29,6 +29,7 @@ import {
   cleanRoutingText,
   evaluateRoutingForm,
   FALLBACK_RULE_ID,
+  isRoutingUuid,
   ROUTING_FORM_LIMITS,
   type RoutingAnswers,
   type RoutingFormConfig,
@@ -733,7 +734,7 @@ async function formHealth(
   const events = await loadRoutingTargetEvents(
     db,
     targets.flatMap((target) =>
-      target.kind === 'event' && target.eventTypeId !== null ? [target.eventTypeId] : [],
+      target.kind === 'event' && isRoutingUuid(target.eventTypeId) ? [target.eventTypeId] : [],
     ),
   )
   const byVersion = new Map<string, { health: RoutingFormHealth; unreadable: boolean }>()
@@ -765,7 +766,7 @@ async function formHealth(
 
   function targetHealth(target: StoredTarget): Omit<RoutingRuleHealth, 'ruleId'> {
     if (target.kind === 'message') return { eventTypeId: null, health: 'ok', reason: null }
-    if (target.kind === 'event' && target.eventTypeId !== null && isUuid(target.eventTypeId)) {
+    if (target.kind === 'event' && isRoutingUuid(target.eventTypeId)) {
       const reason = routingTargetProblem(organizationId, events.get(target.eventTypeId))
       return reason === undefined
         ? { eventTypeId: target.eventTypeId, health: 'ok', reason: null }

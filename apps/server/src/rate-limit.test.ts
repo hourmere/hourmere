@@ -23,6 +23,23 @@ describe('createRateLimiter', () => {
     expect(limiter.hit('a')).toBeUndefined()
   })
 
+  it('peeks without counting or opening a window and ignores expired windows', () => {
+    let t = 0
+    const limiter = createRateLimiter({ limit: 2, windowSeconds: 60 }, { now: () => t })
+    expect(limiter.peek('a')).toBeUndefined()
+    t = 1_000
+    expect(limiter.hit('a')).toBeUndefined()
+    expect(limiter.peek('a')).toBeUndefined()
+    expect(limiter.hit('a')).toBeUndefined()
+    expect(limiter.peek('a')).toBe(60)
+    t = 60_001
+    expect(limiter.peek('a')).toBe(1)
+    t = 61_000
+    expect(limiter.peek('a')).toBeUndefined()
+    expect(limiter.hit('a')).toBeUndefined()
+    expect(limiter.peek('a')).toBeUndefined()
+  })
+
   it('drops the oldest keys when too many are tracked', () => {
     let t = 0
     const limiter = createRateLimiter(

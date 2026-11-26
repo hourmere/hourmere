@@ -567,7 +567,6 @@ export const admin = {
   'Include the default duration in the allowed durations.':
     'Include the default duration in the allowed durations.',
   'Added {0}.': 'Added {0}.',
-  'Removed {0}. Default duration: {1}.': 'Removed {0}. Default duration: {1}.',
   Scope: 'Scope',
   'Bookings (read/write)': 'Bookings (read/write)',
   'Read only': 'Read only',
@@ -3273,4 +3272,7 @@ export const admin = {
   // Availability editor
   'A schedule can have at most 10,000 date overrides, including past dates. Remove some overrides before saving.':
     'A schedule can have at most 10,000 date overrides, including past dates. Remove some overrides before saving.',
+
+  // Additional durations
+  'Removed {0}. Selected length: {1}.': 'Removed {0}. Selected length: {1}.',
 } as const
