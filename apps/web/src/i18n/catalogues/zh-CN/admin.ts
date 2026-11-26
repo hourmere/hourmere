@@ -3119,6 +3119,39 @@ export const admin = {
   '{value} reschedule deadline': '须提前{value}改期',
   '{value} cancellation deadline': '须提前{value}取消',
   'Default timing rules': '默认预约时间规则',
+  // SAML provider setup and enforcement
+  'Add SAML provider': '添加 SAML 提供方',
+  'Identity provider entity ID': '身份提供方实体 ID',
+  'SAML configuration source': 'SAML 配置来源',
+  'Enter configuration manually': '手动填写配置',
+  'Paste identity provider metadata': '粘贴身份提供方元数据',
+  'Import metadata from a URL': '从网址导入元数据',
+  'Identity provider metadata XML': '身份提供方元数据 XML',
+  'Identity provider metadata URL': '身份提供方元数据网址',
+  'HTTP-Redirect sign-in URL': 'HTTP-Redirect 登录网址',
+  'Subject attribute': '主体属性',
+  'Leave blank to use the persistent NameID.': '留空时使用持久 NameID。',
+  'Signing certificates': '签名证书',
+  'Signing certificate {number}': '签名证书{number}',
+  'Add signing certificate': '添加签名证书',
+  'Leave blank to keep saved settings. Import metadata again to replace its settings.':
+    '留空可保留已保存的设置。重新导入元数据可更新相应设置。',
+  'To test a rotation, use a disabled draft. Submit the full set with both old and new certificates, test the new revision, then remove the old certificate after the identity provider switches.':
+    '请在已停用的草稿上测试证书轮换。提交包含新旧证书的完整列表，测试新版本，等身份提供方切换后再移除旧证书。',
+  'Supply signing certificates if the metadata contains none.':
+    '若元数据未包含签名证书，请单独填写。',
+  'Signed assertions are required.': '必须使用已签名的断言。',
+  'Download service provider metadata': '下载服务提供方元数据',
+  'Check the SAML metadata, sign-in URL and signing certificates, then try again.':
+    '请检查 SAML 元数据、登录网址和签名证书，然后重试。',
+  'Enable another usable provider before disabling this provider.':
+    '请先启用另一个可用的提供方，再停用此提供方。',
+  'A team owner must pass a test of the current version of an enabled identity provider.':
+    '团队所有者必须对已启用的身份提供方的当前版本完成测试。',
+  'An enabled identity provider with a verified domain is required.':
+    '需要一个已启用且关联了已验证域名的身份提供方。',
+  'Before requiring SSO, have an owner test the identity provider draft, then enable that revision with a verified domain. A current owner must also accept recovery enrollment.':
+    '强制单点登录前，请让团队所有者测试身份提供方草稿，并在关联已验证的域名后启用该版本。还须有一位现任所有者接受恢复登记。',
 
   // Additional durations
   'Removed {0}. Selected length: {1}.': '已移除{0}。当前选中的时长为{1}。',
