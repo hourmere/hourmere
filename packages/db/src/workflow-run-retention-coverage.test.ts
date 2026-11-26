@@ -1,12 +1,16 @@
 import { randomUUID } from 'node:crypto'
-import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { copyFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type pg from 'pg'
 import { describe, expect, it } from 'vitest'
 import { migrationsDir, runMigrations } from './migrate.ts'
 import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
-import { createTestDatabase, type TestDatabase } from './testing.ts'
+import {
+  MIGRATION_COVERAGE_TIMEOUT,
+  MIGRATION_REPLAY_TIMEOUT,
+  useMigrationReplay,
+} from './testing/migration-replay.ts'
+import type { TestDatabase } from './testing.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 import { executionFixture, executionTables } from './workflow-storage-execution-protections.ts'
 import { refused } from './workflow-storage-protections.ts'
@@ -158,63 +162,64 @@ async function executionRecords(pool: pg.Pool) {
 }
 
 describe.skipIf(!serverUrl)('workflow run retention migration', () => {
-  it('fails a protection assertion if the updated guard or either retention index is dropped', async () => {
-    const report = await checkConstraintCoverage({
-      serverUrl: serverUrl as string,
-      migration,
-      assertions: assertRetentionProtections,
-    })
-    expect(report.problems).toEqual([])
-    expect(report.results.map(({ key, status }) => [key, status])).toEqual([
-      [`index public.webhook_deliveries.${webhookIndex}`, 'covered'],
-      [`index public.workflow_runs.${runIndex}`, 'covered'],
-      ['trigger public.workflow_runs.workflow_runs_guard', 'covered'],
-    ])
-  }, 600_000)
+  const replay = useMigrationReplay(serverUrl as string, migration)
 
-  it('preserves existing execution rows, matches a fresh install, and reruns as a no-op', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'hourmere-workflow-retention-'))
-    let upgraded: TestDatabase | undefined
-    let fresh: TestDatabase | undefined
-    try {
-      for (const file of await readdir(migrationsDir)) {
-        if (file.endsWith('.sql') && file < migration)
-          await copyFile(join(migrationsDir, file), join(directory, file))
-      }
-      upgraded = await createTestDatabase(serverUrl as string, directory, {
-        tag: 'wf_retention_up',
+  it(
+    'fails a protection assertion if the updated guard or either retention index is dropped',
+    async () => {
+      const report = await checkConstraintCoverage({
+        serverUrl: serverUrl as string,
+        migration,
+        predecessorTemplate: replay.predecessor,
+        assertions: assertRetentionProtections,
       })
-      const pool = upgraded.pool
-      const fixture = await executionFixture(pool)
-      await fixture.capture()
-      const old = await fixture.capture()
-      await retireRun(pool, old.run)
-      await pool.query(
-        `INSERT INTO workflow_run_history (run_id, organization_id, workflow_id, revision,
+      expect(report.problems).toEqual([])
+      expect(report.results.map(({ key, status }) => [key, status])).toEqual([
+        [`index public.webhook_deliveries.${webhookIndex}`, 'covered'],
+        [`index public.workflow_runs.${runIndex}`, 'covered'],
+        ['trigger public.workflow_runs.workflow_runs_guard', 'covered'],
+      ])
+    },
+    MIGRATION_COVERAGE_TIMEOUT,
+  )
+
+  it(
+    'preserves existing execution rows, matches a fresh install, and reruns as a no-op',
+    async () => {
+      const { directory, predecessor } = replay
+      let upgraded: TestDatabase | undefined
+      let fresh: TestDatabase | undefined
+      try {
+        upgraded = await predecessor.clone(undefined, { migrate: false, tag: 'wf_retention_up' })
+        const pool = upgraded.pool
+        const fixture = await executionFixture(pool)
+        await fixture.capture()
+        const old = await fixture.capture()
+        await retireRun(pool, old.run)
+        await pool.query(
+          `INSERT INTO workflow_run_history (run_id, organization_id, workflow_id, revision,
            trigger, due_at, finished_at, outcome)
          SELECT id, organization_id, $2, 1, 'before_start', due_at, finished_at, 'retired'
          FROM workflow_runs WHERE id = $1`,
-        [old.run, old.workflow],
-      )
-      await refused(pool, retained, (db) => db.query(deleteRun, [old.run]))
-      const before = await executionRecords(pool)
+          [old.run, old.workflow],
+        )
+        await refused(pool, retained, (db) => db.query(deleteRun, [old.run]))
+        const before = await executionRecords(pool)
 
-      await copyFile(join(migrationsDir, migration), join(directory, migration))
-      await expect(runMigrations(pool, directory)).resolves.toEqual([migration])
-      await expect(runMigrations(pool, directory)).resolves.toEqual([])
-      expect(await executionRecords(pool)).toEqual(before)
+        await copyFile(join(migrationsDir, migration), join(directory, migration))
+        await expect(runMigrations(pool, directory)).resolves.toEqual([migration])
+        await expect(runMigrations(pool, directory)).resolves.toEqual([])
+        expect(await executionRecords(pool)).toEqual(before)
 
-      fresh = await createTestDatabase(serverUrl as string, directory, { tag: 'wf_retention_new' })
-      expect(await snapshotSchema(pool)).toEqual(await snapshotSchema(fresh.pool))
-      await expect(runMigrations(fresh.pool, directory)).resolves.toEqual([])
-      await expect(pool.query(deleteRun, [old.run])).resolves.toMatchObject({ rowCount: 1 })
-      await expect(fixture.one('workflow_recipient_claims', old.claim)).resolves.toBeUndefined()
-    } finally {
-      await Promise.all([
-        upgraded?.drop(),
-        fresh?.drop(),
-        rm(directory, { recursive: true, force: true }),
-      ])
-    }
-  }, 120_000)
+        fresh = await predecessor.clone(directory, { tag: 'wf_retention_new' })
+        expect(await snapshotSchema(pool)).toEqual(await snapshotSchema(fresh.pool))
+        await expect(runMigrations(fresh.pool, directory)).resolves.toEqual([])
+        await expect(pool.query(deleteRun, [old.run])).resolves.toMatchObject({ rowCount: 1 })
+        await expect(fixture.one('workflow_recipient_claims', old.claim)).resolves.toBeUndefined()
+      } finally {
+        await Promise.all([upgraded?.drop(), fresh?.drop()])
+      }
+    },
+    MIGRATION_REPLAY_TIMEOUT,
+  )
 })

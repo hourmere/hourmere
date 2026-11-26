@@ -62,6 +62,7 @@ export function useMemberReadiness(
               defaultSchedule: member.health.defaultSchedule,
               selectedCalendars: member.health.selectedCalendars,
               conferenceAccounts: member.health.conferenceAccounts,
+              ...(member.health.microsoftTeams && { microsoftTeams: member.health.microsoftTeams }),
             })
             if (Array.isArray(member.managedMembership?.blockers)) {
               managedMemberships.set(member.memberId, member.managedMembership)

@@ -42,6 +42,7 @@ import {
   user,
   userInsert,
 } from './scim-identity-protections.ts'
+import { MIGRATION_REPLAY_TIMEOUT } from './testing/migration-replay.ts'
 import { createTestDatabase, type TestDatabase } from './testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -105,10 +106,10 @@ describe.skipIf(!serverUrl)('SCIM identity storage', () => {
     } finally {
       await rm(directory, { recursive: true, force: true })
     }
-  }, 30_000)
+  }, MIGRATION_REPLAY_TIMEOUT)
   afterAll(async () => {
     await database?.drop()
-  })
+  }, MIGRATION_REPLAY_TIMEOUT)
 
   async function transaction(sql: string, work: (client: pg.PoolClient) => Promise<void>) {
     const client = await database.pool.connect()

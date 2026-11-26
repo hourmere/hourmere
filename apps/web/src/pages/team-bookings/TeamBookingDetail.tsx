@@ -18,7 +18,7 @@ import { MissingRecord } from '../NotFound.tsx'
 import { BookingDetail } from './TeamBookings.tsx'
 
 type Detail =
-  | { kind: 'booking'; booking: Schemas['TeamAdminBooking']; timeZone: string }
+  | { kind: 'booking'; booking: Schemas['TeamAdminBookingDetail']; timeZone: string }
   | { kind: 'missing' }
   | { kind: 'conflict'; error: unknown }
 
@@ -125,6 +125,7 @@ export function TeamBookingDetailPage({
           <BookingDetail
             embedded={embedded}
             booking={rowBooking ?? state.data.booking}
+            teamsLocation={state.data.booking.location?.kind === 'microsoft_teams'}
             timeZone={state.data.timeZone}
             expectedOrganizationId={expectedOrganizationId}
             conflict={listConflict ?? conflict}

@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Principal } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
+import { MIGRATION_REPLAY_TIMEOUT } from '@hourmere/db/migration-replay'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import type { MailMessage } from '@hourmere/mail'
 import { sendBookingNotification } from '@hourmere/notifications'
@@ -403,7 +404,7 @@ describe.skipIf(!serverUrl)('team cancellation removed-host security audit', () 
   })
 })
 
-describe.skipIf(!serverUrl)('team launch historical booking and invitation audit', () => {
+describe.skipIf(!serverUrl)('historical team launch', { timeout: MIGRATION_REPLAY_TIMEOUT }, () => {
   it('cancels an actual pre-host-snapshot booking and preserves legacy invitations without sending them', async () => {
     const predecessor = await mkdtemp(join(tmpdir(), 'hourmere-team-launch-old-'))
     let owned: TestDatabase | undefined
@@ -553,5 +554,5 @@ describe.skipIf(!serverUrl)('team launch historical booking and invitation audit
         await rm(predecessor, { recursive: true, force: true })
       }
     }
-  }, 30_000)
+  })
 })

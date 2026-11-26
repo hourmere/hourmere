@@ -9,6 +9,7 @@ import {
 import type { PublicContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { requireGroupSlotConferenceUsable } from './group-conferences.ts'
+import { microsoftTeamsLocation, requireMicrosoftTeamsHost } from './microsoft-teams.ts'
 import { createNotificationSnapshot, type NotificationSnapshot } from './notification-settings.ts'
 import { expirePaymentHolds } from './payment-expiry.ts'
 
@@ -96,17 +97,6 @@ export async function admitGroupSlot(
   )
     throw groupUnavailable()
   const hostId = q.event.hostUserIds[0] as string
-  const host = await db
-    .selectFrom('event_type_hosts as h')
-    .leftJoin('profiles as p', 'p.user_id', 'h.user_id')
-    .select([
-      'h.schedule_id',
-      'h.destination_calendar_id',
-      'p.destination_calendar_id as profile_calendar_id',
-    ])
-    .where('h.event_type_id', '=', config.id)
-    .where('h.user_id', '=', hostId)
-    .executeTakeFirstOrThrow()
   const options = config.locations as unknown as
     | { id: string; isDefault?: boolean; kind: string }[]
     | null
@@ -191,6 +181,26 @@ export async function admitGroupSlot(
   }
   const duration = q.end.since(q.start).total({ unit: 'minutes' })
   selectBookableLocationOption(q.event, q.locationOptionId)
+  if (microsoftTeamsLocation(option)) {
+    await requireMicrosoftTeamsHost(
+      db,
+      q.event.schedulingType,
+      q.event.hostUserIds,
+      config.id,
+      true,
+    )
+  }
+  const host = await db
+    .selectFrom('event_type_hosts as h')
+    .leftJoin('profiles as p', 'p.user_id', 'h.user_id')
+    .select([
+      'h.schedule_id',
+      'h.destination_calendar_id',
+      'p.destination_calendar_id as profile_calendar_id',
+    ])
+    .where('h.event_type_id', '=', config.id)
+    .where('h.user_id', '=', hostId)
+    .executeTakeFirstOrThrow()
   const source = q.sourceSlotId
     ? await db
         .selectFrom('group_slots')

@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { copyFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type pg from 'pg'
 import { describe, expect, it } from 'vitest'
@@ -15,7 +14,12 @@ import {
 } from './audit-event-details-protections.ts'
 import { migrationsDir, runMigrations } from './migrate.ts'
 import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
-import { createTestDatabase, type TestDatabase } from './testing.ts'
+import {
+  MIGRATION_COVERAGE_TIMEOUT,
+  MIGRATION_REPLAY_TIMEOUT,
+  useMigrationReplay,
+} from './testing/migration-replay.ts'
+import type { TestDatabase } from './testing.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -171,60 +175,60 @@ async function snapshotRows(pool: pg.Pool) {
 }
 
 describe.skipIf(!serverUrl)('workflow webhook subscription migration', () => {
-  it('fails protection assertions when either replacement check is dropped', async () => {
-    const report = await checkConstraintCoverage({
-      serverUrl: serverUrl as string,
-      migration,
-      assertions: assertSubscriptionAndAuditChecks,
-    })
-    expect(report.problems).toEqual([])
-    expect(report.results.map(({ key, status }) => [key, status])).toEqual([
-      ['constraint public.audit_events.audit_events_details_check', 'covered'],
-      ['constraint public.webhooks.webhooks_events_check', 'covered'],
-    ])
-  }, 600_000)
+  const replay = useMigrationReplay(serverUrl as string, migration)
 
-  it('preserves existing rows, matches a fresh install and reruns as a no-op', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'hourmere-workflow-webhooks-'))
-    let upgraded: TestDatabase | undefined
-    let fresh: TestDatabase | undefined
-    try {
-      for (const file of await readdir(migrationsDir)) {
-        if (file.endsWith('.sql') && file < migration) {
-          await copyFile(join(migrationsDir, file), join(directory, file))
-        }
-      }
-      upgraded = await createTestDatabase(serverUrl as string, directory, {
-        tag: 'workflow_hook_up',
+  it(
+    'fails protection assertions when either replacement check is dropped',
+    async () => {
+      const report = await checkConstraintCoverage({
+        serverUrl: serverUrl as string,
+        migration,
+        predecessorTemplate: replay.predecessor,
+        assertions: assertSubscriptionAndAuditChecks,
       })
-      await seedPredecessor(upgraded.pool)
-      const before = await snapshotRows(upgraded.pool)
-      expect(before.webhooks).toHaveLength(3)
-      expect(before.audit).toHaveLength(4)
-
-      await copyFile(join(migrationsDir, migration), join(directory, migration))
-      await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([migration])
-      expect(await snapshotRows(upgraded.pool)).toEqual(before)
-
-      fresh = await createTestDatabase(serverUrl as string, directory, { tag: 'workflow_new' })
-      expect(await snapshotSchema(fresh.pool)).toEqual(await snapshotSchema(upgraded.pool))
-      const ledger = (await upgraded.pool.query('SELECT * FROM schema_migrations ORDER BY name'))
-        .rows
-      expect(await runMigrations(upgraded.pool, directory)).toEqual([])
-      expect(await runMigrations(fresh.pool, directory)).toEqual([])
-      expect(await snapshotRows(upgraded.pool)).toEqual(before)
-      expect(
-        (await upgraded.pool.query('SELECT * FROM schema_migrations ORDER BY name')).rows,
-      ).toEqual(ledger)
-
-      await assertSubscriptionAndAuditChecks(upgraded.pool)
-      await assertSubscriptionAndAuditChecks(fresh.pool)
-    } finally {
-      await Promise.all([
-        upgraded?.drop(),
-        fresh?.drop(),
-        rm(directory, { recursive: true, force: true }),
+      expect(report.problems).toEqual([])
+      expect(report.results.map(({ key, status }) => [key, status])).toEqual([
+        ['constraint public.audit_events.audit_events_details_check', 'covered'],
+        ['constraint public.webhooks.webhooks_events_check', 'covered'],
       ])
-    }
-  }, 120_000)
+    },
+    MIGRATION_COVERAGE_TIMEOUT,
+  )
+
+  it(
+    'preserves existing rows, matches a fresh install and reruns as a no-op',
+    async () => {
+      const { directory, predecessor } = replay
+      let upgraded: TestDatabase | undefined
+      let fresh: TestDatabase | undefined
+      try {
+        upgraded = await predecessor.clone(undefined, { migrate: false, tag: 'workflow_hook_up' })
+        await seedPredecessor(upgraded.pool)
+        const before = await snapshotRows(upgraded.pool)
+        expect(before.webhooks).toHaveLength(3)
+        expect(before.audit).toHaveLength(4)
+
+        await copyFile(join(migrationsDir, migration), join(directory, migration))
+        await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([migration])
+        expect(await snapshotRows(upgraded.pool)).toEqual(before)
+
+        fresh = await predecessor.clone(directory, { tag: 'workflow_new' })
+        expect(await snapshotSchema(fresh.pool)).toEqual(await snapshotSchema(upgraded.pool))
+        const ledger = (await upgraded.pool.query('SELECT * FROM schema_migrations ORDER BY name'))
+          .rows
+        expect(await runMigrations(upgraded.pool, directory)).toEqual([])
+        expect(await runMigrations(fresh.pool, directory)).toEqual([])
+        expect(await snapshotRows(upgraded.pool)).toEqual(before)
+        expect(
+          (await upgraded.pool.query('SELECT * FROM schema_migrations ORDER BY name')).rows,
+        ).toEqual(ledger)
+
+        await assertSubscriptionAndAuditChecks(upgraded.pool)
+        await assertSubscriptionAndAuditChecks(fresh.pool)
+      } finally {
+        await Promise.all([upgraded?.drop(), fresh?.drop()])
+      }
+    },
+    MIGRATION_REPLAY_TIMEOUT,
+  )
 })

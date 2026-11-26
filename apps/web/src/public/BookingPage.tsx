@@ -688,7 +688,7 @@ function BookingFlow({
 
   return (
     <PublicLayout wide branding={event.branding}>
-      <div className="booking-layout">
+      <div className="booking-layout booking-page">
         <BookingEventInfo
           event={event}
           durationMinutes={durationMinutes}
@@ -849,6 +849,7 @@ function BookingFlow({
                 />
               }
               timeZone={timeZone}
+              showTimeZoneIcon
               onTimeZoneChange={(zone) => {
                 rememberVisitorTimeZone(zone)
                 setTimeZone(zone)
@@ -991,7 +992,14 @@ function Confirmation({
                 locale={locale}
               />,
             ],
-            ['Where', <LocationDetails key="where" location={booking.location} />],
+            [
+              'Where',
+              <LocationDetails
+                key="where"
+                location={booking.location}
+                cancelled={booking.status === 'cancelled'}
+              />,
+            ],
           ]}
         />
         <ConferenceNotice

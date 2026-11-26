@@ -3,11 +3,14 @@ import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type pg from 'pg'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { migrationsDir, runMigrations } from './migrate.ts'
 import { seedCheckoutHolds } from './payment-checkout-attempt-fixtures.ts'
-import { createTestDatabase, type TestDatabase } from './testing.ts'
+import { MIGRATION_REPLAY_TIMEOUT, useMigrationReplay } from './testing/migration-replay.ts'
+import type { TestDatabase } from './testing.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
+
+vi.setConfig({ testTimeout: MIGRATION_REPLAY_TIMEOUT, hookTimeout: MIGRATION_REPLAY_TIMEOUT })
 
 const migration = '0190_payment_refund_obligations.sql'
 
@@ -35,9 +38,10 @@ async function existingData(pool: pg.Pool) {
 }
 
 describe.skipIf(!process.env.DATABASE_URL)('payment refund obligation migration', () => {
+  const replay = useMigrationReplay(process.env.DATABASE_URL as string, migration)
+
   it('keeps predecessor records and backfills only bound late payments', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'hourmere-refunds-upgrade-'))
-    const serverUrl = process.env.DATABASE_URL as string
     let upgraded: TestDatabase | undefined
     let fresh: TestDatabase | undefined
     try {
@@ -45,7 +49,7 @@ describe.skipIf(!process.env.DATABASE_URL)('payment refund obligation migration'
         if (file.endsWith('.sql') && file < migration)
           await copyFile(join(migrationsDir, file), join(directory, file))
       }
-      upgraded = await createTestDatabase(serverUrl, directory)
+      upgraded = await replay.predecessor.clone(directory)
       const [bound, unbound] = await seedCheckoutHolds(upgraded.pool)
       await upgraded.pool.query(
         `UPDATE bookings SET status = 'cancelled', cancelled_at = clock_timestamp(),
@@ -93,7 +97,7 @@ describe.skipIf(!process.env.DATABASE_URL)('payment refund obligation migration'
         rows: [{ current_booking_id: null }, { current_booking_id: null }],
       })
 
-      fresh = await createTestDatabase(serverUrl, directory)
+      fresh = await replay.predecessor.clone(directory)
       const schema = await snapshotSchema(fresh.pool)
       expect(await snapshotSchema(upgraded.pool)).toEqual(schema)
       await expect(
@@ -117,5 +121,5 @@ describe.skipIf(!process.env.DATABASE_URL)('payment refund obligation migration'
         await rm(directory, { recursive: true, force: true })
       }
     }
-  }, 120_000)
+  })
 })

@@ -124,8 +124,8 @@ retries, retention, deletion and out-of-order delivery.
 The integration is separate from the Hourmere server and is excluded from its Docker
 image. The repository uses Node.js 26; Zapier's runtime uses Node.js 22. Keep your normal
 Hourmere installation on Node.js 26 and use Node.js 22 for this package's Zapier commands.
-The package pins `zapier-platform-core` and `zapier-platform-cli` to **19.2.1**, released
-on October 14, 2026. The package README contains the offline checks.
+The package pins `zapier-platform-core` and `zapier-platform-cli` to **19.3.0**, released
+on October 30, 2026. The package README contains the offline checks.
 
 Install this package separately with `npm ci --ignore-scripts` in `tools/zapier-hourmere`;
 its committed package lock pins the deployed dependency tree. Root workspace installs
