@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { copyFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type pg from 'pg'
 import { describe, expect, it } from 'vitest'
@@ -12,7 +11,12 @@ import {
   routingFixture,
 } from './routing-storage-fixtures.ts'
 import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
-import { createTestDatabase, type TestDatabase } from './testing.ts'
+import {
+  MIGRATION_COVERAGE_TIMEOUT,
+  MIGRATION_REPLAY_TIMEOUT,
+  useMigrationReplay,
+} from './testing/migration-replay.ts'
+import type { TestDatabase } from './testing.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -90,64 +94,71 @@ async function bookingData(pool: pg.Pool) {
 }
 
 describe.skipIf(!serverUrl)('booking routing snapshot marker guard', () => {
-  it('fails an assertion when either catalogued trigger is dropped', async () => {
-    const report = await checkConstraintCoverage({
-      serverUrl: serverUrl as string,
-      migration,
-      assertions: assertSnapshotMarker,
-    })
-    expect(report.problems).toEqual([])
-    expect(report.results.filter((result) => result.status === 'covered')).toHaveLength(2)
-  })
+  const replay = useMigrationReplay(serverUrl as string, migration)
 
-  it('repairs both predecessor marker errors, preserves booking data and matches a fresh install', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'hourmere-routing-marker-guard-'))
-    let upgraded: TestDatabase | undefined
-    let fresh: TestDatabase | undefined
-    try {
-      for (const file of await readdir(migrationsDir)) {
-        if (file.endsWith('.sql') && file < migration)
-          await copyFile(join(migrationsDir, file), join(directory, file))
+  it(
+    'fails an assertion when either catalogued trigger is dropped',
+    async () => {
+      const report = await checkConstraintCoverage({
+        serverUrl: serverUrl as string,
+        migration,
+        predecessorTemplate: replay.predecessor,
+        assertions: assertSnapshotMarker,
+      })
+      expect(report.problems).toEqual([])
+      expect(report.results.filter((result) => result.status === 'covered')).toHaveLength(2)
+    },
+    MIGRATION_COVERAGE_TIMEOUT,
+  )
+
+  it(
+    'repairs both predecessor marker errors, preserves booking data and matches a fresh install',
+    async () => {
+      const { directory, predecessor } = replay
+      const upgraded = await predecessor.clone(undefined, { migrate: false, tag: 'marker_guard' })
+      let fresh: TestDatabase | undefined
+      try {
+        const { pool } = upgraded
+        const f = await routingFixture(pool)
+        const questionId = randomUUID()
+        await insertRow(pool, 'booking_routing', {
+          ...bookingRoutingValues(f),
+          questions: JSON.stringify([
+            { type: 'short_text', id: questionId, label: 'Case details' },
+          ]),
+          answers: JSON.stringify({ [questionId]: 'Original information from the invitee' }),
+          replay_fingerprint: Buffer.alloc(32, 0xab),
+        })
+        await insertRow(pool, 'routing_receipts', {
+          ...receiptValues(f),
+          consumed_booking_id: f.booking,
+          answers_ciphertext: null,
+        })
+        await setMarker(pool, f.booking, false)
+        await setMarker(pool, f.otherBooking, true)
+        const before = await bookingData(pool)
+
+        await copyFile(join(migrationsDir, migration), join(directory, migration))
+        expect(await runMigrations(pool, directory)).toEqual([migration])
+        await expect(marker(pool, f.booking)).resolves.toBe(true)
+        await expect(marker(pool, f.otherBooking)).resolves.toBe(false)
+        expect(await bookingData(pool)).toEqual(before)
+
+        fresh = await predecessor.clone(directory, { tag: 'marker_fresh' })
+        expect(await snapshotSchema(pool)).toEqual(await snapshotSchema(fresh.pool))
+        expect(await runMigrations(pool, directory)).toEqual([])
+        expect(await runMigrations(fresh.pool, directory)).toEqual([])
+        expect(await bookingData(pool)).toEqual(before)
+
+        await expect(
+          pool.query('DELETE FROM booking_routing WHERE booking_id = $1', [f.booking]),
+        ).resolves.toMatchObject({ rowCount: 1 })
+        await expect(marker(pool, f.booking)).resolves.toBe(false)
+      } finally {
+        await fresh?.drop()
+        await upgraded.drop()
       }
-      upgraded = await createTestDatabase(serverUrl as string, directory, { tag: 'marker_guard' })
-      const { pool } = upgraded
-      const f = await routingFixture(pool)
-      const questionId = randomUUID()
-      await insertRow(pool, 'booking_routing', {
-        ...bookingRoutingValues(f),
-        questions: JSON.stringify([{ type: 'short_text', id: questionId, label: 'Case details' }]),
-        answers: JSON.stringify({ [questionId]: 'Original information from the invitee' }),
-        replay_fingerprint: Buffer.alloc(32, 0xab),
-      })
-      await insertRow(pool, 'routing_receipts', {
-        ...receiptValues(f),
-        consumed_booking_id: f.booking,
-        answers_ciphertext: null,
-      })
-      await setMarker(pool, f.booking, false)
-      await setMarker(pool, f.otherBooking, true)
-      const before = await bookingData(pool)
-
-      await copyFile(join(migrationsDir, migration), join(directory, migration))
-      expect(await runMigrations(pool, directory)).toEqual([migration])
-      await expect(marker(pool, f.booking)).resolves.toBe(true)
-      await expect(marker(pool, f.otherBooking)).resolves.toBe(false)
-      expect(await bookingData(pool)).toEqual(before)
-
-      fresh = await createTestDatabase(serverUrl as string, directory, { tag: 'marker_fresh' })
-      expect(await snapshotSchema(pool)).toEqual(await snapshotSchema(fresh.pool))
-      expect(await runMigrations(pool, directory)).toEqual([])
-      expect(await runMigrations(fresh.pool, directory)).toEqual([])
-      expect(await bookingData(pool)).toEqual(before)
-
-      await expect(
-        pool.query('DELETE FROM booking_routing WHERE booking_id = $1', [f.booking]),
-      ).resolves.toMatchObject({ rowCount: 1 })
-      await expect(marker(pool, f.booking)).resolves.toBe(false)
-    } finally {
-      await fresh?.drop()
-      await upgraded?.drop()
-      await rm(directory, { recursive: true, force: true })
-    }
-  })
+    },
+    MIGRATION_REPLAY_TIMEOUT,
+  )
 })
