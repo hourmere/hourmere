@@ -1,10 +1,10 @@
 name: UI checks
 
 on:
-  # Not required checks, but they run on every pull request that could change an audited page.
-  # The audits drive the real server with real migrations, so everything runs by default and a
-  # new directory runs too. Skipped only when every changed file is one of these:
+  # Jobs require the ui-checks label on pull requests. The audits drive the real server with
+  # real migrations, so new directories match the path filter, which excludes only these paths:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - "**"
       # Developer docs and root prose; the site renders its own apps/site/src/content.
@@ -54,6 +54,7 @@ concurrency:
 
 jobs:
   e2e-layout:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ui-checks')
     runs-on: ubuntu-latest
     timeout-minutes: 35
     strategy:
@@ -103,6 +104,7 @@ jobs:
           if-no-files-found: warn
 
   e2e-a11y-shard:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ui-checks')
     runs-on: ubuntu-latest
     timeout-minutes: 35
     strategy:
@@ -153,7 +155,9 @@ jobs:
 
   e2e-a11y:
     needs: e2e-a11y-shard
-    if: always()
+    if: >-
+      always() && (github.event_name != 'pull_request' ||
+      contains(github.event.pull_request.labels.*.name, 'ui-checks'))
     runs-on: ubuntu-latest
     timeout-minutes: 2
     env:
@@ -163,6 +167,7 @@ jobs:
         run: test "$SHARD_RESULT" = success
 
   e2e-cross-engine:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ui-checks')
     # The browser cache key does not include the OS release, and Playwright's WebKit build
     # links against the release it was installed on (libicu74 on 24.04). Pin the image so
     # ubuntu-latest moving to a new release cannot restore an incompatible cached browser.
@@ -223,6 +228,7 @@ jobs:
           if-no-files-found: warn
 
   visual-baseline-status:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ui-checks')
     runs-on: ubuntu-latest
     continue-on-error: true
     outputs:
@@ -242,7 +248,10 @@ jobs:
 
   e2e-visual:
     needs: visual-baseline-status
-    if: needs.visual-baseline-status.outputs.present == 'true'
+    if: >-
+      (github.event_name != 'pull_request' ||
+      contains(github.event.pull_request.labels.*.name, 'ui-checks')) &&
+      needs.visual-baseline-status.outputs.present == 'true'
     runs-on: ubuntu-latest
     continue-on-error: true
     timeout-minutes: 15

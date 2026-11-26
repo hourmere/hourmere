@@ -310,15 +310,18 @@ The reusable [CI workflow](.github/workflows/ci.yml) runs the first three alongs
 jobs, and the [DCO workflow](.github/workflows/dco.yml) runs `sign-off`. Six `e2e-shard` jobs run the
 complete functional browser suite in parallel; the `e2e` aggregator succeeds only
 when every shard succeeds, including on merge-queue runs. Each shard builds its own
-web and disposable site fixture and retains the browser-artifact privacy check. The separate
-[UI checks workflow](.github/workflows/ui-checks.yml) runs on pull requests, pushes to main
-and manual dispatches. Layout shards fail on every layout finding, scan error, browser
-failure or missing report; axe fails on serious/critical violations and scan/execution
+web and disposable site fixture and retains the browser-artifact privacy check. The optional
+[UI checks workflow](.github/workflows/ui-checks.yml) runs on pushes to `main` and manual
+dispatches. To request the audits on a pull request, add the `ui-checks` label. Adding the
+label or pushing new commits while it is present runs the audits when the changed files match
+the workflow's path filter. GitHub skips all UI check jobs on pull requests without the label.
+Layout shards fail on every layout finding, scan error, browser failure or missing report;
+axe fails on serious/critical violations and scan/execution
 errors or missing reports. Cross-engine test failures fail the job. The layout/axe run steps
 return browser failures immediately; their summaries still run and gate UI findings after
 exceptions apply. Sanitized-report uploads remain advisory. Visual-baseline detection, visual
 comparison and baseline generation remain advisory with `continue-on-error: true`. The workflow
-is not called by CI or the release workflow and does not run on release tags.
+is not called by CI or the release workflow and does not run in the merge queue or on release tags.
 
 Layout covers 16 CSS viewport sizes, light/dark, English and Simplified Chinese, plus
 British English on booking. Layout and axe include the booking calendar, form, confirmation,
@@ -339,9 +342,11 @@ runs even on cache hits because a browser cache does not preserve runner apt pac
 Playwright installs system packages only when its dry-run check finds packages missing.
 
 可复用 CI 保留原有必需检查名称。功能浏览器测试分为四片并行运行，
-`e2e` 汇总任务仅在所有分片成功时通过，合并队列也执行这些任务。独立的 **UI checks** 工作流在拉取请求、主分支推送和手动触发时运行，
+`e2e` 汇总任务仅在所有分片成功时通过，合并队列也执行这些任务。可选的 **UI checks** 工作流在推送到 `main` 或手动触发时运行。
+如需对拉取请求执行检测，请添加 `ui-checks` 标签。添加标签或保留标签并推送新提交时，变更文件须匹配工作流的路径筛选规则。
+未加标签的拉取请求会跳过所有 UI 检测任务。
 布局、axe 严重/致命问题和跨引擎测试回归会使任务失败；视觉检测仍为建议项。
-CI 和发布工作流都不调用它，发布标签不会运行这些检测。
+CI 和发布工作流都不调用它，合并队列和发布标签也不会运行这些检测。
 布局检测覆盖 16 种 CSS 视口、明暗主题、中英文，预约页另测英式英语；axe 记录通过、待人工确认、
 中等和轻微项数，并报告严重和致命问题；漏扫也会导致失败。
 axe 每个浏览器会话最多扫描 32 个状态，CI 并行执行四个分片。所有分片通过后，`e2e-a11y` 才通过。
