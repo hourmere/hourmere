@@ -3264,6 +3264,39 @@ export const admin = {
   '{value} reschedule deadline': '{value} reschedule deadline',
   '{value} cancellation deadline': '{value} cancellation deadline',
   'Default timing rules': 'Default timing rules',
+  // SAML provider setup and enforcement
+  'Add SAML provider': 'Add SAML provider',
+  'Identity provider entity ID': 'Identity provider entity ID',
+  'SAML configuration source': 'SAML configuration source',
+  'Enter configuration manually': 'Enter configuration manually',
+  'Paste identity provider metadata': 'Paste identity provider metadata',
+  'Import metadata from a URL': 'Import metadata from a URL',
+  'Identity provider metadata XML': 'Identity provider metadata XML',
+  'Identity provider metadata URL': 'Identity provider metadata URL',
+  'HTTP-Redirect sign-in URL': 'HTTP-Redirect sign-in URL',
+  'Subject attribute': 'Subject attribute',
+  'Leave blank to use the persistent NameID.': 'Leave blank to use the persistent NameID.',
+  'Signing certificates': 'Signing certificates',
+  'Signing certificate {number}': 'Signing certificate {number}',
+  'Add signing certificate': 'Add signing certificate',
+  'Leave blank to keep saved settings. Import metadata again to replace its settings.':
+    'Leave blank to keep saved settings. Import metadata again to replace its settings.',
+  'To test a rotation, use a disabled draft. Submit the full set with both old and new certificates, test the new revision, then remove the old certificate after the identity provider switches.':
+    'To test a rotation, use a disabled draft. Submit the full set with both old and new certificates, test the new revision, then remove the old certificate after the identity provider switches.',
+  'Supply signing certificates if the metadata contains none.':
+    'Supply signing certificates if the metadata contains none.',
+  'Signed assertions are required.': 'Signed assertions are required.',
+  'Download service provider metadata': 'Download service provider metadata',
+  'Check the SAML metadata, sign-in URL and signing certificates, then try again.':
+    'Check the SAML metadata, sign-in URL and signing certificates, then try again.',
+  'Enable another usable provider before disabling this provider.':
+    'Enable another usable provider before disabling this provider.',
+  'A team owner must pass a test of the current version of an enabled identity provider.':
+    'A team owner must pass a test of the current version of an enabled identity provider.',
+  'An enabled identity provider with a verified domain is required.':
+    'An enabled identity provider with a verified domain is required.',
+  'Before requiring SSO, have an owner test the identity provider draft, then enable that revision with a verified domain. A current owner must also accept recovery enrollment.':
+    'Before requiring SSO, have an owner test the identity provider draft, then enable that revision with a verified domain. A current owner must also accept recovery enrollment.',
 
   // Additional durations
   'Removed {0}. Selected length: {1}.': 'Removed {0}. Selected length: {1}.',

@@ -310,15 +310,18 @@ The reusable [CI workflow](.github/workflows/ci.yml) runs the first three alongs
 jobs, and the [DCO workflow](.github/workflows/dco.yml) runs `sign-off`. Six `e2e-shard` jobs run the
 complete functional browser suite in parallel; the `e2e` aggregator succeeds only
 when every shard succeeds, including on merge-queue runs. Each shard builds its own
-web and disposable site fixture and retains the browser-artifact privacy check. The separate
-[UI checks workflow](.github/workflows/ui-checks.yml) runs on pull requests, pushes to main
-and manual dispatches. Layout shards fail on every layout finding, scan error, browser
-failure or missing report; axe fails on serious/critical violations and scan/execution
+web and disposable site fixture and retains the browser-artifact privacy check. The optional
+[UI checks workflow](.github/workflows/ui-checks.yml) runs on pushes to `main` and manual
+dispatches. To request the audits on a pull request, add the `ui-checks` label. Adding the
+label or pushing new commits while it is present runs the audits when the changed files match
+the workflow's path filter. GitHub skips all UI check jobs on pull requests without the label.
+Layout shards fail on every layout finding, scan error, browser failure or missing report;
+axe fails on serious/critical violations and scan/execution
 errors or missing reports. Cross-engine test failures fail the job. The layout/axe run steps
 return browser failures immediately; their summaries still run and gate UI findings after
 exceptions apply. Sanitized-report uploads remain advisory. Visual-baseline detection, visual
 comparison and baseline generation remain advisory with `continue-on-error: true`. The workflow
-is not called by CI or the release workflow and does not run on release tags.
+is not called by CI or the release workflow and does not run in the merge queue or on release tags.
 
 Layout covers 16 CSS viewport sizes, light/dark, English and Simplified Chinese, plus
 British English on booking. Layout and axe include the booking calendar, form, confirmation,
@@ -334,6 +337,8 @@ states in both themes and languages.
 A CI-only canary with known violations verifies the in-browser scan pipeline. Cross-engine
 smoke covers booking, sign-in and the embed popup in desktop WebKit, iPhone WebKit and
 Firefox. These measurements use synthetic data and the disposable-database fixture.
+Axe splits registry states into batches of up to 32 per browser session and runs the
+batches in four parallel CI shards. The `e2e-a11y` job passes only when all shards pass.
 Every audit page pins the browser clock to the fixture's `AUDIT_NOW` before navigation,
 including form submissions that create rows read by later pages. After content readiness,
 audits await `document.fonts.ready` and 100 ms of stable DOM and geometry across paints;
@@ -343,11 +348,14 @@ runs even on cache hits because a browser cache does not preserve runner apt pac
 Playwright installs system packages only when its dry-run check finds packages missing.
 
 可复用 CI 保留原有必需检查名称。功能浏览器测试分为四片并行运行，
-`e2e` 汇总任务仅在所有分片成功时通过，合并队列也执行这些任务。独立的 **UI checks** 工作流在拉取请求、主分支推送和手动触发时运行，
+`e2e` 汇总任务仅在所有分片成功时通过，合并队列也执行这些任务。可选的 **UI checks** 工作流在推送到 `main` 或手动触发时运行。
+如需对拉取请求执行检测，请添加 `ui-checks` 标签。添加标签或保留标签并推送新提交时，变更文件须匹配工作流的路径筛选规则。
+未加标签的拉取请求会跳过所有 UI 检测任务。
 布局、axe 严重/致命问题和跨引擎测试回归会使任务失败；视觉检测仍为建议项。
-CI 和发布工作流都不调用它，发布标签不会运行这些检测。
+CI 和发布工作流都不调用它，合并队列和发布标签也不会运行这些检测。
 布局检测覆盖 16 种 CSS 视口、明暗主题、中英文，预约页另测英式英语；axe 记录通过、待人工确认、
 中等和轻微项数，并报告严重和致命问题；漏扫也会导致失败。
+axe 每个浏览器会话最多扫描 32 个状态，CI 并行执行四个分片。所有分片通过后，`e2e-a11y` 才通过。
 检测涵盖预约表单、确认页、时区面板、嵌入页、团队预约和 OAuth 授权页。
 账号菜单和集成导航分别检测展开状态，以覆盖展开后的控件、对比度和页面宽度。
 跨引擎冒烟覆盖 WebKit 桌面版、iPhone 预设和 Firefox 的预约、登录及嵌入弹窗。
@@ -368,9 +376,9 @@ export HOURMERE_E2E_BOOTSTRAP_URL=postgres://hourmere:hourmere@localhost:5432/ho
 ) # repeat 2/4, 3/4, 4/4 in new directories / 其余分片各用新目录
 (
   export HOURMERE_UI_REPORT_DIR="$(mktemp -d)"
-  node tools/e2e/run-audit.ts a11y
-  node tools/e2e/reports-summary.ts --suite=a11y
-)
+  node tools/e2e/run-audit.ts a11y --shard=1/4
+  node tools/e2e/reports-summary.ts --suite=a11y --shard=1/4
+) # repeat 2/4, 3/4, 4/4 in new directories / 其余分片各用新目录
 npx playwright install --with-deps webkit firefox
 (
   export HOURMERE_UI_REPORT_DIR="$(mktemp -d)"
@@ -381,7 +389,7 @@ npx playwright install --with-deps webkit firefox
 
 Reports go to ignored `temp/ui-audit-reports/` (override `HOURMERE_UI_REPORT_DIR`). Each
 **UI checks** job appends per-page finding counts and execution status to its GitHub Actions
-summary. Download the `ui-layout-*`, `ui-a11y`, `ui-cross-engine` and `ui-visual` artifacts
+summary. Download the `ui-layout-*`, `ui-a11y-*`, `ui-cross-engine` and `ui-visual` artifacts
 from that workflow run for sanitized JSON/Markdown; artifacts are retained for seven days.
 The `ui-visual` artifact contains browser execution metadata only. Local masked expected,
 actual and diff PNGs from failed screenshot comparisons are in `temp/ui-visual-results/`;
@@ -435,7 +443,7 @@ with exact `suite` (`layout` or `a11y`), `page`, `viewport: {width, height}`, `l
 finding `category`, an axe `rule` when applicable, a nonempty `reason` and ISO `expires` date.
 Unknown keys are rejected, including extra keys inside `viewport`; DOM selectors cannot
 narrow an exception. Expired, invalid and stale entries fail; a stale entry no longer matches a finding in its
-selected state. Each layout shard checks the exceptions for its own selected states, and
+selected state. Each measurement shard checks the exceptions for its own selected states, and
 selectors absent from the full matrix fail in every shard. Scan errors, lost reports and
 browser failures cannot be excepted. Legacy scan-time `a11y-exemptions.json` suppressions
 are rejected by the gate; use this shared file so every accepted finding remains visible.

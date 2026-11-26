@@ -31,7 +31,7 @@ import {
 } from './sso/recovery-nomination.ts'
 import { SsoMemberSettings } from './sso/SsoMemberSettings.tsx'
 import { SsoRecoveryAcceptance } from './sso/SsoRecoveryEnrollment.tsx'
-import { oidcStepUpProviders } from './sso/setup.ts'
+import { ssoStepUpProviders } from './sso/setup.ts'
 import { TeamMembers } from './TeamMembers.tsx'
 
 export function SettingsPage() {
@@ -233,15 +233,18 @@ export function SettingsPage() {
           key={`${organizationId}:${location.key}`}
           organizationId={organizationId}
           role={role.status === 'ready' ? role.data : null}
-          stepUpProviders={oidcStepUpProviders(me.sso)}
+          stepUpProviders={ssoStepUpProviders(me.sso, shell)}
         />
       )}
       {!personal &&
         me.principal.kind === 'session' &&
         (shell?.ssoOidcEnabled === true ||
           shell?.ssoSamlEnabled === true ||
-          (shell?.ssoStored === true && Boolean(me.sso?.links.length))) && (
+          (shell?.ssoStored === true &&
+            me.sso?.links.some(({ protocol }) => protocol !== 'saml'))) && (
           <SsoMemberSettings
+            key={String(shell?.ssoSamlEnabled === true)}
+            samlEnabled={shell?.ssoSamlEnabled === true}
             callbackAttemptId={isLinkCallback ? undefined : linkCallback}
             onDismissCallback={dismissLinkCallback}
           />
@@ -250,7 +253,7 @@ export function SettingsPage() {
         <section className="panel" aria-labelledby="sso-settings-heading">
           <h2 id="sso-settings-heading">{t('Single sign-on')}</h2>
           <div className="form-actions">
-            {shell?.showSsoSettings && (shell.ssoOidcEnabled || shell.ssoStored) && (
+            {shell?.showSsoSettings && (
               <Link className="button" to={PATHS.sso}>
                 {t('Identity providers')}
               </Link>
