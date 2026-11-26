@@ -93,10 +93,15 @@ allow-lists and value checks.
 | Workflow execution | `workflow.run_scheduled`, `workflow.run_cancelled`, `workflow.run_skipped`, `workflow.email_attempted`, `workflow.email_sent`, `workflow.email_rejected`, `workflow.email_delivery_unknown`, `workflow.webhook_queued`, `workflow.webhook_completed`, `workflow.webhook_failed` |
 | Audit log | `audit_log.retention_updated` |
 
-`organization.ownership_transferred` and `api_key.rotated` are reserved action
-names, not currently emitted. Ownership transfer is blocked by the existing
-role policy. Key rotation uses replacement-key creation followed by revocation,
-recorded as `api_key.created` and `api_key.revoked`.
+`organization.ownership_transfer_offered` requires exactly `targetMembershipId`,
+the recipient's stored membership ID (a lowercase UUID). It is available to
+existing readers of that team's journal. `organization.ownership_transfer_revoked`,
+`organization.ownership_transfer_expired`, `organization.ownership_transfer_invalidated`
+and `organization.ownership_transferred` require empty details. These actions are
+reserved for the [planned ownership transfer](team-ownership-transfer.md).
+
+`api_key.rotated` is also reserved. Key rotation uses replacement-key creation
+followed by revocation, recorded as `api_key.created` and `api_key.revoked`.
 
 Session revocation and sign-out belong to the user's personal organization. Bulk
 revocation records each affected session in the same transaction, including more

@@ -1138,6 +1138,26 @@ export interface OrganizationOperations {
   target_user_id: string | null;
 }
 
+export interface OrganizationOwnershipTransferBudgets {
+  operation: string;
+  organization_id: string;
+  request_count: number;
+  window_start: Timestamp;
+}
+
+export interface OrganizationOwnershipTransfers {
+  created_at: Timestamp;
+  expires_at: Timestamp;
+  id: Generated<string>;
+  initiator_membership_id: string;
+  initiator_user_id: string;
+  organization_id: string;
+  state: Generated<string>;
+  target_membership_id: string;
+  target_user_id: string;
+  terminal_at: Timestamp | null;
+}
+
 export interface PaymentCheckoutAttempts {
   account_id: string;
   amount_minor: number;
@@ -1977,6 +1997,8 @@ export interface DB {
   organization_brand_logos: OrganizationBrandLogos;
   organization_branding: OrganizationBranding;
   organization_operations: OrganizationOperations;
+  organization_ownership_transfer_budgets: OrganizationOwnershipTransferBudgets;
+  organization_ownership_transfers: OrganizationOwnershipTransfers;
   payment_checkout_attempts: PaymentCheckoutAttempts;
   payment_refund_obligations: PaymentRefundObligations;
   payment_stripe_events: PaymentStripeEvents;
