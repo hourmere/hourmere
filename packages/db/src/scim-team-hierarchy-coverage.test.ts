@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type pg from 'pg'
 import { describe, expect, it } from 'vitest'
 import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
+import { MIGRATION_COVERAGE_TIMEOUT } from './testing/migration-replay.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const mappingTable = 'scim_team_mappings'
@@ -487,29 +488,33 @@ async function assertConsents(pool: pg.Pool, f: Teams) {
 }
 
 describe.skipIf(!serverUrl)('SCIM team hierarchy constraint coverage', () => {
-  it('fails a protection assertion when a new constraint, index or trigger is dropped', async () => {
-    const allowList: Record<string, string> = {
-      'constraint public.scim_team_mappings.scim_team_mappings_pkey':
-        'Endpoint role foreign keys require this target primary key, which cannot be dropped in isolation.',
-      'constraint public.scim_team_mappings.scim_team_mappings_live_child_scope':
-        'Managed memberships reference this target key, which restates the primary key and cannot be dropped in isolation.',
-      'constraint public.scim_team_mapping_intents.scim_team_mapping_intents_pkey':
-        'Consent foreign keys require this target primary key, which cannot be dropped in isolation.',
-    }
-    const report = await checkConstraintCoverage({
-      serverUrl: serverUrl as string,
-      migration: '0181_scim_team_hierarchy.sql',
-      assertions: async (pool) => {
-        const teams = await seed(pool)
-        await assertTopology(pool, teams)
-        await assertInternalRows(pool, teams)
-        await assertConsents(pool, teams)
-      },
-      allowList,
-    })
-    expect(report.problems).toEqual([])
-    expect(report.results.filter((result) => result.status === 'covered')).toHaveLength(
-      report.objects.length - Object.keys(allowList).length,
-    )
-  }, 600_000)
+  it(
+    'fails a protection assertion when a new constraint, index or trigger is dropped',
+    async () => {
+      const allowList: Record<string, string> = {
+        'constraint public.scim_team_mappings.scim_team_mappings_pkey':
+          'Endpoint role foreign keys require this target primary key, which cannot be dropped in isolation.',
+        'constraint public.scim_team_mappings.scim_team_mappings_live_child_scope':
+          'Managed memberships reference this target key, which restates the primary key and cannot be dropped in isolation.',
+        'constraint public.scim_team_mapping_intents.scim_team_mapping_intents_pkey':
+          'Consent foreign keys require this target primary key, which cannot be dropped in isolation.',
+      }
+      const report = await checkConstraintCoverage({
+        serverUrl: serverUrl as string,
+        migration: '0181_scim_team_hierarchy.sql',
+        assertions: async (pool) => {
+          const teams = await seed(pool)
+          await assertTopology(pool, teams)
+          await assertInternalRows(pool, teams)
+          await assertConsents(pool, teams)
+        },
+        allowList,
+      })
+      expect(report.problems).toEqual([])
+      expect(report.results.filter((result) => result.status === 'covered')).toHaveLength(
+        report.objects.length - Object.keys(allowList).length,
+      )
+    },
+    MIGRATION_COVERAGE_TIMEOUT,
+  )
 })

@@ -2,6 +2,7 @@ import type pg from 'pg'
 import { describe, expect, it } from 'vitest'
 import { seedCheckoutHolds } from './payment-checkout-attempt-fixtures.ts'
 import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
+import { MIGRATION_COVERAGE_TIMEOUT } from './testing/migration-replay.ts'
 
 async function assertEventPaymentProtection(pool: pg.Pool) {
   const [hold] = await seedCheckoutHolds(pool)
@@ -42,12 +43,16 @@ async function assertEventPaymentProtection(pool: pg.Pool) {
 }
 
 describe.skipIf(!process.env.DATABASE_URL)('event type payment migration protection', () => {
-  it('fails an assertion when any 0191 object is dropped', async () => {
-    const report = await checkConstraintCoverage({
-      serverUrl: process.env.DATABASE_URL as string,
-      migration: '0191_event_type_payment.sql',
-      assertions: assertEventPaymentProtection,
-    })
-    expect(report.problems).toEqual([])
-  }, 600_000)
+  it(
+    'fails an assertion when any 0191 object is dropped',
+    async () => {
+      const report = await checkConstraintCoverage({
+        serverUrl: process.env.DATABASE_URL as string,
+        migration: '0191_event_type_payment.sql',
+        assertions: assertEventPaymentProtection,
+      })
+      expect(report.problems).toEqual([])
+    },
+    MIGRATION_COVERAGE_TIMEOUT,
+  )
 })

@@ -33,9 +33,8 @@ The RFC Editor pages list later updates to these RFCs; this first implementation
 explicitly targets the bounded RFC 7643/7644 subset below, not every newer extension.
 
 SCIM controls membership lifecycle. SSO controls authentication proof. An instance can
-use SCIM with verified mailbox and invitation acceptance alone. SCIM can also use the
-existing OIDC linking proof and shares admission tombstones with SSO. See the
-[SSO design](sso.md) for linking and admission.
+use SCIM with verified mailbox proof and invitation acceptance alone. The two features
+share admission tombstones. See the [SSO design](sso.md) for linking and admission.
 
 ## Protocol surface
 
@@ -196,9 +195,9 @@ replace that invitation: an expired claim is then never completed, while its sti
 invitation admits the person as an ordinary acceptance, the administrator's resend being the
 consent, and the entry stays unlinked. An account that
 another live entry of the connection already links is admitted the same way, without a second
-link. Claims without an invitation expire after 48 hours without renewal. They require the
-retirement re-admission proof below or the OIDC linking proof in deployments with OIDC
-enabled.
+link. Claims without an invitation expire after 48 hours without renewal. The explicit
+retirement re-admission procedure below can complete eligible returning-member claims.
+Other claims without an invitation stay pending until they expire.
 
 User profile replacement requires `userName` and replaces the mapped profile, including
 `userName`, `externalId` and the work address, on a live User in the token's connection.
@@ -304,19 +303,21 @@ account; SCIM `active` describes desired lifecycle state, not proof of login eli
 Default admission is **invitation/claim**, not direct creation of a login-capable auth
 account. POST creates the provisioning entry and a bounded, deduplicated invitation
 intent, using the existing mail queue and admission policy. It does not set
-`emailVerified=true`, create a sign-in session, or bypass restricted signup. The recipient
-must independently prove the mailbox or authenticate through an explicitly bound,
-accepted SSO linking flow. Only then create the account/personal organization if needed
-and atomically attach ordinary member access. Existing same-email personal accounts
-receive the same claim flow and require their own current account proof. No email-only
-link, password reset, personal-profile overwrite or new social-account link is allowed.
-Responses do not disclose whether a personal account exists.
+`emailVerified=true`, create a sign-in session, or bypass restricted signup. New
+enrollment claims complete only through invitation acceptance with Hourmere mailbox
+proof. Ordinary SSO self-linking leaves pending claims and directory attachments
+unchanged, including when SCIM and OIDC are both enabled. This remains the release
+boundary until the **Claim completion through SSO linking** work ships. See the
+[ordered implementation plan](#ordered-implementation-plan).
 
-Direct membership is allowed only for an account already explicitly bound to this
-connection through the accepted linking flow; active=true still checks current admission
-and suspension state. Replaying provisioning does not resend invitations indefinitely.
-SCIM is never a signup-domain authority. Implement enrollment and claim on the existing
-invitation/SSO interfaces, not an undocumented credential bypass.
+Existing same-email personal accounts receive the same claim flow and require their own
+current account proof. No email-only link, password reset, personal-profile overwrite
+or new social-account link is allowed. Responses do not disclose whether a personal
+account exists.
+
+Direct membership requires an account already explicitly bound to the connection.
+`active=true` still checks current admission and suspension state. Replaying provisioning
+does not resend invitations indefinitely. SCIM is never a signup-domain authority.
 
 ### Deactivation, deletion and manual control
 
@@ -528,8 +529,9 @@ source) against the bounded wait and its retry.
   expire after 48 hours. The `INVITATION_*` limits can be raised.
 - User creation records an existing member's address, or one that another pending
   invitation or another entry's claim already holds, as an entry with a pending claim and no
-  invitation, and sends nothing. These claims expire after 48 hours and require either the
-  retained-member re-admission confirmation or the OIDC linking proof.
+  invitation, and sends nothing. These claims expire after 48 hours. The dedicated
+  retained-member re-admission confirmation serves eligible returning members. Claim
+  completion through SSO linking is unavailable in production.
 - A claim also lasts 48 hours when it has an invitation. An administrator who resends or
   replaces that invitation gives it a new lifetime but not the claim: once the claim has
   expired, accepting the invitation admits the person as an ordinary member and leaves the
