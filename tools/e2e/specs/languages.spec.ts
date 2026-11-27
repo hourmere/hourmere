@@ -1,4 +1,5 @@
 import type { Locator, Page } from '@playwright/test'
+import { selectAdminLanguage } from '../account-menu.ts'
 import { revealEventSetting } from '../event-settings.ts'
 import { expect, fillInvitee, pickSlot, test } from '../fixtures.ts'
 import { selectPublicLanguage } from '../public-language.ts'
@@ -53,9 +54,6 @@ const text = {
   },
 } as const
 const other = (language: Language): Language => (language === 'en' ? 'zh-CN' : 'en')
-async function language(scope: Page | Locator, value: Language) {
-  await scope.getByRole('combobox', { name: /^(Interface language|界面语言)$/ }).selectOption(value)
-}
 async function initialLanguage(page: Page, value: Language) {
   await page.addInitScript((selected) => localStorage.setItem('hourmere-language', selected), value)
 }
@@ -426,7 +424,7 @@ for (const selected of ['en', 'zh-CN'] as const) {
     await page.getByRole('button', { name: text[selected].addDuration, exact: true }).click()
     await expect(page.locator('#duration-to-add-error')).toContainText(text[selected].numberError)
     const original = await title.elementHandle()
-    await language(page, other(selected))
+    await selectAdminLanguage(page, other(selected))
     await expect(page.locator('#duration-to-add-error')).toContainText(
       text[other(selected)].numberError,
     )
@@ -486,7 +484,7 @@ for (const selected of ['en', 'zh-CN'] as const) {
       })
       .click()
     await expect.poll(() => new URL(page.url()).pathname).toBe('/app/event-types')
-    await language(page, selected)
+    await selectAdminLanguage(page, selected)
     const savedEventLink = page.getByRole('link', {
       name: selected === 'en' ? 'Edit Settings' : '编辑 Settings',
       exact: true,
@@ -661,13 +659,13 @@ for (const selected of ['en', 'zh-CN'] as const) {
     ).toBe(true)
     const today = Temporal.Now.plainDateISO('UTC').toString()
     await page.getByLabel(/^(Start date|开始日期)$/).fill(today)
-    await language(page, other(selected))
+    await selectAdminLanguage(page, other(selected))
     await expect(page.getByLabel(/^(Start date|开始日期)$/)).toHaveValue(today)
     await page.getByLabel(/^(End date|结束日期)$/).fill(today)
     await page.getByRole('button', { name: /^(Update report|更新统计)$/ }).click()
     await expect(page.getByRole('rowheader', { name: today, exact: true })).toHaveCount(1)
     await expect(page.locator('dl.metric-cards dd').first()).toHaveText('1')
-    await language(page, selected)
+    await selectAdminLanguage(page, selected)
     await expect(
       page.getByRole('heading', { name: /^(Booking activity|预约统计)$/, level: 1 }),
     ).toBeVisible()
@@ -686,7 +684,7 @@ for (const selected of ['en', 'zh-CN'] as const) {
       ),
     ).toBeVisible()
     await expect(page.getByRole('table')).toHaveCount(0)
-    await language(page, other(selected))
+    await selectAdminLanguage(page, other(selected))
     await expect(
       page.getByText(
         /Your current team role does not permit this report|你当前的团队角色无权查看此统计/,
@@ -715,11 +713,11 @@ test('zh-CN collective host drafts, validation and public booking preserve every
   await page.getByLabel('排期方式', { exact: true }).selectOption('collective')
   await page.getByRole('button', { name: '创建活动类型', exact: true }).click()
   await expect(page.getByText('请选择两至八位必选主持人。').first()).toBeVisible()
-  await language(page, 'en')
+  await selectAdminLanguage(page, 'en')
   await expect(page.getByText('Choose two to eight required hosts.').first()).toBeVisible()
   await expect(page.getByLabel('Title', { exact: true })).toHaveValue('Chinese panel interview')
   await page.getByLabel('Second Required Host', { exact: true }).check()
-  await language(page, 'zh-CN')
+  await selectAdminLanguage(page, 'zh-CN')
   await expect(page.getByLabel('Second Required Host', { exact: true })).toBeChecked()
   await page.getByRole('button', { name: '创建活动类型', exact: true }).click()
   await expect(

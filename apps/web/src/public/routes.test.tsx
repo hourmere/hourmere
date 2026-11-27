@@ -6,7 +6,6 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { RouterProvider } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createAppRouter } from '../App.tsx'
-import { NAV_ITEMS } from '../components/AppShell.tsx'
 import {
   fakeApi,
   json,
@@ -18,8 +17,25 @@ import {
 } from '../test/fake-api.tsx'
 import { EVENT, eventRoutes, slotsAnswer } from '../test/public-fixtures.ts'
 
+const appPages = [
+  ['/app/event-types', 'Event types'],
+  ['/app/availability', 'Availability'],
+  ['/app/bookings', 'Bookings'],
+  ['/app/meeting-polls', 'Meeting polls'],
+  ['/app/workflows', 'Workflows'],
+  ['/app/team/bookings', 'Team bookings'],
+  ['/app/analytics', 'Booking activity'],
+  ['/app/conferences', 'Conference accounts'],
+  ['/app/calendars', 'Calendars'],
+  ['/app/api-keys', 'API keys'],
+  ['/app/connected-apps', 'Connected apps'],
+  ['/app/audit-log', 'Audit log'],
+  ['/app/settings', 'Settings'],
+  ['/app/routing-forms', 'Routing forms'],
+] as const
+
 describe('routing between the app and the public pages', () => {
-  it.each(NAV_ITEMS)('keeps the app page $to', async ({ to: path, label }) => {
+  it.each(appPages)('keeps the app page %s', async (path, label) => {
     fakeApi({
       ...signedIn,
       ...organizations(),
@@ -53,6 +69,10 @@ describe('routing between the app and the public pages', () => {
       ...(path === '/app/workflows' && {
         'GET /api/v1/instance': () => json(200, { workflowsEnabled: true }),
         'GET /api/v1/workflows': () => json(200, { data: [], nextCursor: null }),
+      }),
+      ...(path === '/app/routing-forms' && {
+        'GET /api/v1/instance': () => json(200, { routingFormsEnabled: true }),
+        'GET /api/v1/routing-forms': () => json(200, { data: [], nextAfter: null }),
       }),
     })
     renderApp(path)
@@ -88,7 +108,7 @@ describe('routing between the app and the public pages', () => {
 
   it('reserves every top-level path of the app, so no handle can shadow one', () => {
     const topLevel = [
-      ...NAV_ITEMS.map((item) => item.to),
+      ...appPages.map(([path]) => path),
       '/sign-in',
       '/booking',
       '/app',

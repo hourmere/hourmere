@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Booking } from '../../api/resources.ts'
 import { chooseLanguage } from '../../i18n/store.ts'
+import { selectAdminLanguage } from '../../test/account-menu.ts'
 import { browserLocale } from '../../test/browser-locale.ts'
 import {
   fakeApi,
@@ -583,7 +584,7 @@ describe('a booking', () => {
     const when = await screen.findByRole('region', { name: 'When' })
     const booked = within(when).getByText('Booked').nextElementSibling
     expect(booked?.textContent?.endsWith(`, through ${en}`)).toBe(true)
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Interface language' }), 'zh-CN')
+    await selectAdminLanguage(user, 'zh-CN')
     expect(within(when).getByText('已预约').nextElementSibling).toBe(booked)
     expect(booked?.textContent?.endsWith(zh)).toBe(true)
   })

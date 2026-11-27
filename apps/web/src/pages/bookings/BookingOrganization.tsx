@@ -12,6 +12,8 @@ import { type Me, useMe, useSession } from '../../session.tsx'
 import { MissingRecord } from '../NotFound.tsx'
 import { TeamBookingDetailPage } from '../team-bookings/TeamBookingDetail.tsx'
 
+type Destination = { organizationId: string; access: 'host' | 'team_admin' }
+
 /** Resolve access before issuing any session-wide space switch. */
 export function BookingOrganization({
   id,
@@ -29,9 +31,9 @@ export function BookingOrganization({
   const { accept, beginContextSwitch, refresh } = useSession()
   usePageTitle('Booking')
 
-  const load = useCallback(
-    async (signal: AbortSignal): Promise<Me | 'team_admin' | 'missing'> => {
-      let resolved: { organizationId: string; access: 'host' | 'team_admin' }
+  const resolve = useCallback(
+    async (signal: AbortSignal): Promise<Destination | 'team_admin' | 'missing'> => {
+      let resolved: Destination
       try {
         resolved = await unwrap(
           api.GET('/api/v1/bookings/{id}/organization', {
@@ -49,11 +51,32 @@ export function BookingOrganization({
         if (access === 'team_admin') rememberSpace(organizationId, access)
         return access === 'team_admin' ? 'team_admin' : 'missing'
       }
-      const personal = organizationId === personalOrganizationId
-      if (signal.aborted) throw signal.reason
       // Preserve the authorized destination for a refresh after a committed switch
       // whose response is lost. This history hint grants no server-side access.
       rememberSpace(organizationId, access)
+      return resolved
+    },
+    [id, currentOrganizationId, rememberSpace],
+  )
+  const [resolution, reload] = useLoad(resolve)
+  const destination = resolution.status === 'ready' ? resolution.data : null
+  const saved = location.state?.bookingSpace
+  // Commit the history hint before a session refresh can remount the page in the
+  // destination space. Router navigation and session updates use separate transitions.
+  const confirmedDestination =
+    destination &&
+    typeof destination === 'object' &&
+    saved?.userId === userId &&
+    saved?.id === id &&
+    saved?.organizationId === destination.organizationId &&
+    saved?.access === destination.access
+      ? destination
+      : null
+  const switchSpace = useCallback(
+    async (signal: AbortSignal): Promise<Me | 'missing' | null> => {
+      if (!confirmedDestination) return null
+      const { organizationId } = confirmedDestination
+      const personal = organizationId === personalOrganizationId
       const release = beginContextSwitch()
       let confirmed = false
       try {
@@ -84,40 +107,37 @@ export function BookingOrganization({
       }
     },
     [
-      id,
+      confirmedDestination,
       currentOrganizationId,
       personalOrganizationId,
       userId,
       beginContextSwitch,
       refresh,
-      rememberSpace,
     ],
   )
-  const [state, reload] = useLoad(load)
+  const [handoff] = useLoad(switchSpace)
 
   useEffect(() => {
-    // Commit the consumed history entry before accept remounts the organization tree.
-    const saved = location.state?.bookingSpace
     if (
-      state.status === 'ready' &&
-      typeof state.data === 'object' &&
-      saved?.userId === userId &&
-      saved?.id === id &&
-      saved?.organizationId === state.data.organization.id
+      handoff.status === 'ready' &&
+      handoff.data &&
+      handoff.data !== 'missing' &&
+      handoff.data.organization.id === confirmedDestination?.organizationId
     )
-      accept(state.data)
-  }, [state, accept, location.state, userId, id])
+      accept(handoff.data)
+  }, [handoff, confirmedDestination, accept])
 
-  if (state.status === 'ready' && state.data === 'team_admin')
-    return <TeamBookingDetailPage id={id} />
+  if (destination === 'team_admin') return <TeamBookingDetailPage id={id} />
 
-  if (state.status === 'error') {
+  const error =
+    resolution.status === 'error' ? resolution : handoff.status === 'error' ? handoff : null
+  if (error) {
     return (
       <>
         <PageHeader title={t('Booking')} />
         <div className="alert alert-error" role="alert">
           <p>
-            {t('Could not load the booking.')} {ui(state.message)}
+            {t('Could not load the booking.')} {ui(error.message)}
           </p>
           <button type="button" className="button button-small" onClick={reload}>
             {t('Try again')}
@@ -126,7 +146,7 @@ export function BookingOrganization({
       </>
     )
   }
-  if (state.status === 'ready' && state.data === 'missing') {
+  if (destination === 'missing' || (handoff.status === 'ready' && handoff.data === 'missing')) {
     return (
       <MissingRecord
         title={t('Booking not found')}

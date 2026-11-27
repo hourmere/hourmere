@@ -9,9 +9,10 @@ Current team owners and admins manage forms in their team space.
 
 ## Availability and the operator setting
 
-Routing forms are off by default. Set `ROUTING_FORMS_ENABLED=true` in the server
-environment and restart the server to enable routing. An unset or empty value defaults
-to `false`. The setting accepts `true` or `false`. Other values fail startup.
+Routing forms are on by default. An unset or empty `ROUTING_FORMS_ENABLED` uses
+that default, including when upgrading with an empty value from an earlier
+`.env.example`. Set `ROUTING_FORMS_ENABLED=false` and restart the server to turn
+routing off. The setting accepts `true` or `false`. Other values fail startup.
 For Docker Compose, set it in your deployment environment or deployment `.env` file
 and run `./scripts/compose-up.sh -d --wait` to apply the new configuration.
 See the [configuration reference](/docs/configuration#server-and-database).
@@ -23,7 +24,7 @@ steps below when it is `true`.
 
 ### Resolve a legacy handle collision
 
-When the setting is `true`, a stored personal handle of `route` in any case keeps
+With routing enabled by default or by explicit `true`, a stored personal handle of `route` in any case keeps
 routing off and triggers a startup warning. Existing booking pages under that
 handle keep working until the owner renames it. Team slugs live under `/team/` and can
 keep the name `route`.
@@ -106,8 +107,10 @@ preview and publish. **Health unknown** means the app could not check the target
 The invitee submits the form and sees either a message or a booking page. If the
 questions change during the visit, the page reloads the form and asks the invitee to
 review their answers. On the booking page, pick a time, review the editable details and
-confirm. Editing the prefilled details leaves the routing answers and selected event as
-they were. To change routing answers, start again from the form.
+confirm. If the server rejects a booking answer, the page reloads the booking questions
+and highlights the answer to check when it can identify the question. Editing the
+prefilled details leaves the routing answers and selected event as they were. To change
+routing answers, start again from the form.
 
 Treat the continuation link like a password. Its token lasts 30 minutes from submission.
 Reading booking details or checking slots leaves the expiry unchanged and reserves no time.
