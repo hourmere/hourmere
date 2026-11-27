@@ -3172,6 +3172,8 @@ export const admin = {
   'A schedule can have at most 10,000 date overrides, including past dates. Remove some overrides before saving.':
     '每个日程最多可有 10,000 个特定日期安排（包括过去的日期）。请先移除一些安排再保存。',
 
+  // SCIM invitation attribution
+  'SCIM connection': 'SCIM 连接',
   // Additional durations
   'Removed {0}. Selected length: {1}.': '已移除{0}。当前选中的时长为{1}。',
 
@@ -3231,6 +3233,39 @@ export const admin = {
   'Refreshing webhook endpoints…': '正在刷新 Webhook 端点…',
   'Saving webhook settings…': '正在保存 Webhook 设置…',
   'Refresh webhook endpoints': '刷新 Webhook 端点',
+
+  // Webhook delivery history
+  'Delivery history': '投递历史',
+  'Refresh history': '刷新投递历史',
+  'Loading deliveries…': '正在加载投递记录…',
+  'Loading older deliveries…': '正在加载更早的投递记录…',
+  'Load older deliveries': '加载更早的投递记录',
+  'No deliveries retained in the last 30 days.': '最近 30 天没有保留的投递记录。',
+  '{count} deliveries shown.': '已显示{count}条投递记录。',
+  'Could not load webhook deliveries.': '无法加载 Webhook 投递记录。',
+  'Could not load older deliveries.': '无法加载更早的投递记录。',
+  'This delivery history page is no longer available. Refresh history to start again.':
+    '此页投递记录已无法访问。请刷新投递历史，从第一页重新加载。',
+  'webhook.delivery.pending': '待投递',
+  Delivered: '已投递',
+  Failed: '投递失败',
+  'Unknown status': '未知状态',
+  Attempts: '尝试次数',
+  'HTTP status': 'HTTP 状态码',
+  'Created at': '创建时间',
+  'Last attempted at': '最近尝试时间',
+  'Delivered at': '投递成功时间',
+  'Delivery ID': '投递 ID',
+  'Event ID': '事件 ID',
+  'Last error': '最近错误',
+  'Transport error': '传输错误',
+  'HTTP error': 'HTTP 响应错误',
+  'Webhook disabled': 'Webhook 已停用',
+  'Delivery expired': '投递已过期',
+  'Signing secret unavailable': '签名密钥不可用',
+  'Delivery interrupted': '投递中断',
+  'Delivery job unavailable': '投递任务不可用',
+  'Unknown delivery error': '未知投递错误',
 
   // Team details
   'Team details': '团队资料',

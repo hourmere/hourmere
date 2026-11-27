@@ -893,6 +893,7 @@ export interface InvitationDeliveries {
   lease_id: string | null;
   lease_until: Timestamp | null;
   resend_request_id: string | null;
+  scim_issued: Generated<boolean>;
   smtp_accepted_at: Timestamp | null;
   state: string;
   updated_at: Generated<Timestamp>;
@@ -902,7 +903,7 @@ export interface InvitationEmailRequests {
   organization_id: string;
   recipient_hash: Buffer;
   requested_at: Timestamp;
-  user_id: string;
+  user_id: string | null;
 }
 
 export interface McpOauthClientActivity {

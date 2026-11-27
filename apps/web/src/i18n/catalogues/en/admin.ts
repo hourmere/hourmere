@@ -3321,6 +3321,8 @@ export const admin = {
   'A schedule can have at most 10,000 date overrides, including past dates. Remove some overrides before saving.':
     'A schedule can have at most 10,000 date overrides, including past dates. Remove some overrides before saving.',
 
+  // SCIM invitation attribution
+  'SCIM connection': 'SCIM connection',
   // Additional durations
   'Removed {0}. Selected length: {1}.': 'Removed {0}. Selected length: {1}.',
 
@@ -3383,6 +3385,39 @@ export const admin = {
   'Refreshing webhook endpoints…': 'Refreshing webhook endpoints…',
   'Saving webhook settings…': 'Saving webhook settings…',
   'Refresh webhook endpoints': 'Refresh webhook endpoints',
+
+  // Webhook delivery history
+  'Delivery history': 'Delivery history',
+  'Refresh history': 'Refresh history',
+  'Loading deliveries…': 'Loading deliveries…',
+  'Loading older deliveries…': 'Loading older deliveries…',
+  'Load older deliveries': 'Load older deliveries',
+  'No deliveries retained in the last 30 days.': 'No deliveries retained in the last 30 days.',
+  '{count} deliveries shown.': '{count} deliveries shown.',
+  'Could not load webhook deliveries.': 'Could not load webhook deliveries.',
+  'Could not load older deliveries.': 'Could not load older deliveries.',
+  'This delivery history page is no longer available. Refresh history to start again.':
+    'This delivery history page is no longer available. Refresh history to start again.',
+  'webhook.delivery.pending': 'Pending',
+  Delivered: 'Delivered',
+  Failed: 'Failed',
+  'Unknown status': 'Unknown status',
+  Attempts: 'Attempts',
+  'HTTP status': 'HTTP status',
+  'Created at': 'Created at',
+  'Last attempted at': 'Last attempted at',
+  'Delivered at': 'Delivered at',
+  'Delivery ID': 'Delivery ID',
+  'Event ID': 'Event ID',
+  'Last error': 'Last error',
+  'Transport error': 'Transport error',
+  'HTTP error': 'HTTP error',
+  'Webhook disabled': 'Webhook disabled',
+  'Delivery expired': 'Delivery expired',
+  'Signing secret unavailable': 'Signing secret unavailable',
+  'Delivery interrupted': 'Delivery interrupted',
+  'Delivery job unavailable': 'Delivery job unavailable',
+  'Unknown delivery error': 'Unknown delivery error',
 
   // Team details
   'Team details': 'Team details',

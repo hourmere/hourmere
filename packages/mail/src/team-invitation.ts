@@ -6,21 +6,26 @@ import type { MailMessage } from './index.ts'
 import { emailButton, emailLayout, emailLinkStyle, emailWrapStyle } from './layout.ts'
 import { emailText, escapeHtml, singleLine, subjectLine } from './text.ts'
 
-export interface TeamInvitationEmailOptions {
+export type TeamInvitationEmailOptions = {
   /** The exact invited address; never substitute an alias or the inviter's address. */
   to: string
   /** Trusted instance configuration (PUBLIC_URL), never a request URL or callback. */
   publicUrl: string
   invitationId: string
   teamName: string
-  /** Display name only; an empty name uses a generic localized label, never an email. */
-  inviterName: string
   /** Better Auth returns Date objects directly and ISO timestamps over HTTP. */
   expiresAt: Date | string
-  /** Explicit inviter choice, then instance default, then English. No URL negotiation. */
+  /** Explicit language, then instance default, then English. No URL negotiation. */
   language?: unknown
   defaultLanguage?: unknown
-}
+} & (
+  | {
+      scimIssued?: false
+      /** Display name only; an empty name uses a generic localized label. */
+      inviterName: string
+    }
+  | { scimIssued: true; inviterName?: never }
+)
 
 function acceptUrl(publicUrl: string, invitationId: string): string {
   let origin: string
@@ -79,6 +84,7 @@ export function teamInvitationEmail({
   publicUrl,
   invitationId,
   teamName,
+  scimIssued,
   inviterName,
   expiresAt,
   language: chosenLanguage,
@@ -89,12 +95,16 @@ export function teamInvitationEmail({
   const expiry = expiryText(expiresAt, language)
   if (!to || safeText(to) !== to) throw new Error('Invalid invitation recipient')
   const team = safeText(teamName) || mailMessage(language, 'teamInvitation.defaultTeam')
-  const inviter = safeText(inviterName) || mailMessage(language, 'teamInvitation.defaultInviter')
   const t = (key: Parameters<typeof mailMessage>[1]) =>
-    mailMessage(language, key, { team, inviter, email: to, expiry })
+    mailMessage(language, key, { team, email: to, expiry })
   const words = {
     subject: t('teamInvitation.subject'),
-    introduction: t('teamInvitation.introduction'),
+    introduction: scimIssued
+      ? t('teamInvitation.scimIntroduction')
+      : mailMessage(language, 'teamInvitation.introduction', {
+          team,
+          inviter: safeText(inviterName) || t('teamInvitation.defaultInviter'),
+        }),
     identity: t('teamInvitation.identity'),
     acceptance: t('teamInvitation.acceptance'),
     expiry: t('teamInvitation.expiry'),
