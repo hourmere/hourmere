@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { App } from '../App.tsx'
 import type { OrganizationMember } from '../api/auth.ts'
 import { PATHS } from '../paths.ts'
+import { selectAdminLanguage } from '../test/account-menu.ts'
 import {
   emptyTeamLists,
   fakeApi,
@@ -106,7 +107,7 @@ describe('team context in account settings', () => {
       expect(name.closest('dd.user-content')).not.toBeNull()
       expect(name.textContent).toBe(TEAM_ME.organization.name)
       expect(within(account).getByText('Your role')).toBeDefined()
-      await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+      await selectAdminLanguage(user, 'zh-CN')
       expect(within(account).getByText(zh)).toBeDefined()
       expect(within(account).getByText('你的角色')).toBeDefined()
       expect(
@@ -189,7 +190,7 @@ describe('team context in account settings', () => {
     expect(within(account).getByRole('alert').textContent).toBe('Could not load your team role.')
     expect(within(account).getByText('Owner')).toBeDefined()
     expect(within(account).getByText(TEAM_ME.organization.name)).toBeDefined()
-    await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    await selectAdminLanguage(user, 'zh-CN')
     expect(within(account).getByText('所有者')).toBeDefined()
     expect(within(account).getByText('上次确认的角色')).toBeDefined()
     expect(within(account).getByRole('button', { name: '重试' })).toBeDefined()

@@ -1,7 +1,8 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import styles from '../styles.css?raw'
+import { selectAdminLanguage } from '../test/account-menu.ts'
 import {
   fakeApi,
   json,
@@ -64,7 +65,7 @@ describe('Slack settings', () => {
       ),
     ).toBeTruthy()
     expect(screen.queryByText('Slack notifications are paused.')).toBeNull()
-    await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    await selectAdminLanguage(user, 'zh-CN')
     expect(
       await screen.findByText(
         'Slack 拒绝了此 Webhook 地址，通知已暂停。请先更换地址，再启用通知。',
@@ -85,7 +86,7 @@ describe('Slack settings', () => {
     const user = await open()
     await screen.findByText(destination.url)
     for (const language of ['en', 'zh-CN']) {
-      await user.selectOptions(screen.getByLabelText('Interface language'), language)
+      await selectAdminLanguage(user, language)
       const panel = document.getElementById('integrations-heading')?.closest('section')
       const buttons = panel?.querySelectorAll('button') ?? []
       expect(buttons.length).toBeGreaterThanOrEqual(4)
@@ -316,8 +317,8 @@ describe('Slack settings', () => {
     expect(
       screen.getByRole<HTMLButtonElement>('button', { name: 'Send test message' }).disabled,
     ).toBe(true)
-    await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
-    expect(screen.getByRole('heading', { name: '集成' })).toBeDefined()
+    await selectAdminLanguage(user, 'zh-CN')
+    expect(within(screen.getByRole('main')).getByRole('heading', { name: '集成' })).toBeDefined()
     expect(screen.getByText('Slack 通知已暂停。')).toBeDefined()
     expect(screen.getByLabelText('新的 Slack Webhook 地址')).toBeDefined()
     expect(screen.getByLabelText('按活动类型筛选')).toBeDefined()

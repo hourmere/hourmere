@@ -6,6 +6,7 @@ import type { ListedOrganizationMember } from '../api/auth.ts'
 import type { Schemas } from '../api/client.ts'
 import { InterfaceScope } from '../i18n/runtime.tsx'
 import { PATHS } from '../paths.ts'
+import { selectAdminLanguage } from '../test/account-menu.ts'
 import {
   fakeApi,
   json,
@@ -189,7 +190,7 @@ describe('team role management in settings', () => {
     ).toBe(false)
     expect(memberRow(owner.user.name).queryByText(managed)).toBeNull()
 
-    await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    await selectAdminLanguage(user, 'zh-CN')
     expect(blocked.getByText('由身份提供方管理')).toBeDefined()
     expect(blocked.getByText('身份提供方已暂停此成员资格。')).toBeDefined()
     expect(blocked.getByText('团队管理员已暂停此成员资格。')).toBeDefined()
@@ -586,7 +587,7 @@ describe('team role management in settings', () => {
       })
       renderApp(PATHS.settings)
       await screen.findByRole('button', { name: 'Make admin: Team member' })
-      await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+      await selectAdminLanguage(user, 'zh-CN')
       await user.click(await screen.findByRole('button', { name: /设为管理员.*Team member/ }))
       const review = within(screen.getByRole('region', { name: '更改团队角色' }))
       expect(review.getByText('Team member', { selector: 'bdi' }).parentElement?.textContent).toBe(

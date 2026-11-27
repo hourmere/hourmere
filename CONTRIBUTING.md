@@ -350,6 +350,12 @@ British English on booking. Layout and axe include the booking calendar, form, c
 time-zone panel, embedded and team booking, and OAuth consent states. Axe checks WCAG
 2.0/2.1/2.2 A/AA tags, records passes/incomplete and moderate/minor counts and reports
 serious/critical violations.
+The admin account menu and integration navigation each have their own audit state. This
+checks the controls, contrast and document width of the open panels as well as the closed
+shell. The integrations state uses the existing API keys URL to show the current link in
+the desktop group and the open narrow-screen disclosure. Keyboard scans begin on the
+open disclosure's trigger so Tab reaches its controls. Masked visual cases use the same
+states in both themes and languages.
 A CI-only canary with known violations verifies the in-browser scan pipeline. Cross-engine
 smoke covers booking, sign-in and the embed popup in desktop WebKit, iPhone WebKit and
 Firefox. These measurements use synthetic data and the disposable-database fixture.
@@ -373,6 +379,7 @@ CI 和发布工作流都不调用它，合并队列和发布标签也不会运�
 中等和轻微项数，并报告严重和致命问题；漏扫也会导致失败。
 axe 每个浏览器会话最多扫描 32 个状态，CI 并行执行四个分片。所有分片通过后，`e2e-a11y` 才通过。
 检测涵盖预约表单、确认页、时区面板、嵌入页、团队预约和 OAuth 授权页。
+账号菜单和集成导航分别检测展开状态，以覆盖展开后的控件、对比度和页面宽度。
 跨引擎冒烟覆盖 WebKit 桌面版、iPhone 预设和 Firefox 的预约、登录及嵌入弹窗。
 
 Build the web app as above, then run from the repository root. In Codex, **every command

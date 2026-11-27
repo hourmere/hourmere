@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import type { EventType } from '../../api/resources.ts'
 import { chooseLanguage } from '../../i18n/store.ts'
+import { openAccountMenu } from '../../test/account-menu.ts'
 import {
   emptyAccount,
   fakeApi,
@@ -1230,6 +1231,7 @@ describe('the unsaved-changes guard', () => {
     })
     await openExisting()
     await user.type(field('Title'), '!')
+    await openAccountMenu(user)
     await user.click(screen.getByRole('button', { name: 'Sign out' }))
     expect(confirm).toHaveBeenCalledWith(LEAVE_WITH_UNSAVED_CHANGES)
     expect(api.to('POST /api/auth/sign-out')).toHaveLength(0)
@@ -1374,6 +1376,7 @@ describe('answers that arrive after leaving or editing on', () => {
     })
     await openExisting()
     await user.type(field('Title'), ' (new)')
+    await openAccountMenu(user)
     await user.click(screen.getByRole('button', { name: 'Sign out' }))
     expect((await screen.findByRole('alert')).textContent).toMatch(/Could not sign out/)
     expect(confirm).toHaveBeenCalledTimes(1)

@@ -5,8 +5,10 @@ description: Choose a registered interface language, with English fallback and l
 
 Public booking, cancellation and rescheduling pages, embedded widgets and notification
 emails are available in English, Simplified Chinese, German, French, Spanish and Brazilian Portuguese. The account
-and sign-in interfaces remain available in English and Simplified Chinese. The language control is
-available on sign-in, account and standalone public booking pages.
+and sign-in interfaces remain available in English and Simplified Chinese. In the signed-in
+app, open the **Account menu** and choose **Interface language**. The account button is at
+the bottom of the sidebar on wide screens and below the navigation tabs on narrow screens.
+The language control is also available on sign-in and standalone public booking pages.
 
 On standalone public pages and the email sign-in confirmation page, open the globe button
 beside the current language to choose another language. The current choice has a check mark.
