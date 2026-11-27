@@ -1,4 +1,8 @@
 import { createRoute, z } from '@hono/zod-openapi'
+import {
+  PAYMENT_PROVIDER_AVAILABILITIES,
+  type PaymentProviderAvailability,
+} from '@hourmere/core/payment'
 import { workflowsEnabled as areWorkflowsEnabled, type WorkflowSettings } from '@hourmere/workflows'
 import { createMiddleware } from 'hono/factory'
 import type { CallerEnv } from '../caller.ts'
@@ -30,6 +34,12 @@ const Instance = z
       description: "This instance operator's terms; absent when not configured",
     }),
     smsRemindersAvailable: z.boolean().optional(),
+    eventTypePaymentAvailability: z
+      .string()
+      .optional()
+      .openapi({
+        description: `Whether hosts can enable Stripe Checkout in event settings. Known values: ${PAYMENT_PROVIDER_AVAILABILITIES.join(', ')}. Absent on older instances. Treat unknown values as unavailable.`,
+      }),
     automaticGoogleMeet: z.boolean().optional(),
     automaticZoom: z.boolean().optional(),
     scimProvisioningEnabled: z.boolean().optional().openapi({
@@ -88,6 +98,7 @@ export function instanceRoutes({
   publicUrl,
   socialProviders,
   smsRemindersAvailable = false,
+  eventTypePaymentAvailability,
   automaticMeet = false,
   automaticZoom = false,
   followUpHostNotesEnabled = true,
@@ -104,6 +115,7 @@ export function instanceRoutes({
 }: {
   /** The normalized PUBLIC_URL, independent of request or forwarded host headers. */
   smsRemindersAvailable?: boolean | undefined
+  eventTypePaymentAvailability?: PaymentProviderAvailability | undefined
   publicUrl: string
   /** The configured sign-in providers (config.socialProviders); only their presence counts. */
   socialProviders: { google?: unknown; microsoft?: unknown }
@@ -128,6 +140,7 @@ export function instanceRoutes({
     ...(privacyPolicyUrl && { privacyPolicyUrl }),
     ...(termsUrl && { termsUrl }),
     smsRemindersAvailable,
+    eventTypePaymentAvailability,
     automaticGoogleMeet: automaticMeet,
     automaticZoom,
     followUpHostNotesEnabled,

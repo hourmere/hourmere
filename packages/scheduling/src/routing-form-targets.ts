@@ -185,6 +185,7 @@ export async function loadRoutingTargetEvents(
       'e.booking_mode',
       'e.scheduling_type',
       'e.questions',
+      'e.payment',
     ])
     .where('e.id', 'in', ids)
     .execute()
@@ -200,9 +201,7 @@ export async function loadRoutingTargetEvents(
         deleted: row.deleted_at !== null,
         bookingMode: row.booking_mode,
         schedulingType: row.scheduling_type,
-        // Event types have no price setting yet (docs/payments.md). A later price setting
-        // must project its requirement here, so routing refuses paid events at once.
-        payment: 'none',
+        payment: row.payment === null ? 'none' : 'required',
         questions: parseQuestions(row.questions),
       },
     ]),

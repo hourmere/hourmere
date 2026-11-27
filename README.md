@@ -458,9 +458,14 @@ Optional [automatic Google Meet](https://hourmere.com/docs/automatic-google-meet
 
 ## Known limitations
 
+- Paid bookings are off by default. Self-hosters can enable Stripe test-mode Checkout on
+  eligible personal events. Live checkout is pending rollout acceptance and payment-reference
+  cleanup. [Paid bookings](https://hourmere.com/docs/payments).
+
 - [Microsoft Calendar](https://hourmere.com/docs/microsoft-calendar#known-limitations) supports
   Outlook booking writeback and automatic Teams meetings for single-host event types.
   Real-tenant Teams acceptance is pending.
+
 - Organization single sign-on is off by default for both OIDC and SAML. Turn on either
   protocol with `SSO_OIDC_ENABLED=true` or `SSO_SAML_ENABLED=true`. Empty or unset
   follows the release default, `false` keeps the protocol off, and other values prevent

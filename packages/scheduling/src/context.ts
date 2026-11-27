@@ -1,4 +1,5 @@
 import type { Principal } from '@hourmere/auth'
+import type { PaymentProviderAvailability } from '@hourmere/core/payment'
 import type { Db } from '@hourmere/db'
 import type { RecurringBookingAdmissionDeps } from './recurring-admission.ts'
 import type { SuccessRedirectPolicy } from './success-redirect.ts'
@@ -52,6 +53,7 @@ export interface ServiceContext extends RecurringBookingAdmissionDeps {
   requestId?: string | undefined
   /** Explicit operator SMS capability; defaults off. */
   smsRemindersAvailable?: boolean | undefined
+  paidBookingAvailability?: PaymentProviderAvailability | undefined
   /** Host-written follow-up body text; enabled unless the operator explicitly disables it. */
   followUpHostNotesEnabled?: boolean | undefined
   /** In-process SCIM resource capability. Defaults off. */
@@ -79,6 +81,7 @@ export interface ServiceContext extends RecurringBookingAdmissionDeps {
 
 /** For unauthenticated flows such as public booking pages and invitee links. */
 export interface PublicContext {
+  paidCheckoutAvailable?: boolean | undefined
   /** Immutable team IDs the operator has opted into the public homepage catalog. */
   teamPublicHomeOrganizationIds?: readonly string[] | undefined
   smsRemindersAvailable?: boolean | undefined

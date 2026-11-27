@@ -42,6 +42,7 @@ describe('before route chunks are available', () => {
     '/app/mailbox-proof',
     '/app/mailbox-proof/',
     '/book/pAtH_0123456789abcdefghijklmnopqrstuvwxyzAB',
+    '/booking/payment',
     '/poll',
     '/poll/voter',
     '/poll/recover',

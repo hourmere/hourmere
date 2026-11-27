@@ -65,6 +65,7 @@ const classes = {
     'GET /api/v1/public/-/routing/teams/{teamSlug}/{slug}',
     'GET /api/v1/public/{handle}/{slug}',
     'GET /api/v1/public/{handle}/{slug}/slots',
+    'POST /api/v1/public/checkout/status',
     'GET /api/v1/public/teams/{handle}/{slug}',
     'GET /api/v1/public/teams/{handle}',
     'GET /api/v1/public/teams/{handle}/{slug}/slots',
@@ -105,6 +106,8 @@ const classes = {
     'POST /api/v1/bookings/manage/cancel',
     'POST /api/v1/bookings/manage/reschedule',
     'POST /api/v1/public/{handle}/{slug}/bookings',
+    'POST /api/v1/public/{handle}/{slug}/checkout',
+    'POST /api/v1/public/checkout/cancel',
     'POST /api/v1/public/teams/{handle}/{slug}/bookings',
     'POST /api/v1/public/{handle}/{slug}/waitlist',
     'POST /api/v1/public/{handle}/{slug}/waitlist/resend',
@@ -726,6 +729,19 @@ describe.skipIf(!process.env.DATABASE_URL)(
             .executeTakeFirstOrThrow()
           payload = { versionId: form.published_version_id, answers: {} }
         }
+      } else if (template === '/api/v1/public/{handle}/{slug}/checkout') {
+        path = path.replace('{handle}', 'rest-scoped-host').replace('{slug}', 'intro')
+        headers['idempotency-key'] = randomUUID()
+        payload = {
+          start,
+          invitee: { name: 'Matrix invitee', email: 'matrix@example.test', timeZone: 'UTC' },
+          expectedAmountMinor: 5000,
+          expectedCurrency: 'usd',
+        }
+        expectedStatus = 409
+      } else if (template.startsWith('/api/v1/public/checkout/')) {
+        payload = { token: 'unavailable' }
+        expectedStatus = 404
       } else if (
         template.startsWith('/api/v1/public/') &&
         !template.startsWith('/api/v1/public/meeting-polls/')
@@ -1057,14 +1073,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 191-operation contract and all 573 scope combinations', () => {
+    it('covers the exact 194-operation contract and all 582 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(191)
-      expect(new Set(ids).size).toBe(191)
+      expect(ids).toHaveLength(194)
+      expect(new Set(ids).size).toBe(194)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(573)
+      expect(cases).toHaveLength(582)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
@@ -1132,6 +1148,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
             expect(await response.json()).toMatchObject({ error })
           } else if (operation === 'POST /api/v1/meeting-polls') {
             expect(await response.json()).toEqual({ error: 'event_type_not_found' })
+          } else if (operation === 'POST /api/v1/public/{handle}/{slug}/checkout') {
+            expect(await response.json()).toMatchObject({ error: 'paid_bookings_disabled' })
+          } else if (operation.startsWith('POST /api/v1/public/checkout/')) {
+            expect(await response.json()).toMatchObject({ error: 'payment_checkout_not_found' })
           } else if (operation.includes('/meeting-polls/') && response.status === 404) {
             expect(await response.json()).toMatchObject({ error: 'poll_not_found' })
           } else if (response.status !== 204) {

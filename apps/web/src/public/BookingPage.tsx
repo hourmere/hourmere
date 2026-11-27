@@ -1,6 +1,6 @@
 import { interfaceLanguage } from '@hourmere/core/language'
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
-import { Link, Navigate, useLocation, useParams } from 'react-router'
+import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-router'
 import { ConferenceNotice } from '../components/ConferenceNotice.tsx'
 import { EmailDeliveryHint } from '../components/EmailDeliveryHint.tsx'
 import { UserContentList, UserContentMessage } from '../components/UserContent.tsx'
@@ -26,6 +26,7 @@ import {
   randomKey,
   type Slot,
   type SlotLoader,
+  startPublicCheckout,
 } from './api.ts'
 import {
   BookingPerson,
@@ -43,6 +44,7 @@ import {
   bookingHostTimeZone,
 } from './BookingPageParts.tsx'
 import { monthOf } from './calendar.ts'
+import { CHECKOUT_RETURN_PATH, rememberCheckout } from './checkout-return.ts'
 import {
   embedParentRedirectAllowed,
   notifyEmbedBooked,
@@ -238,7 +240,8 @@ function BookingPageContent({
       : { status: 'loading' as const }
   const reload = () => setRetry((value) => value + 1)
   const embedded = useEmbedded()
-  const allowEmbedParent = state.status === 'ready' && state.data.allowEmbedParentRedirect === true
+  const allowEmbedParent =
+    state.status === 'ready' && !state.data.payment && state.data.allowEmbedParentRedirect === true
   const loaded = state.status !== 'loading'
   useEffect(() => {
     if (embedded && loaded) notifyEmbedReady(allowEmbedParent)
@@ -320,12 +323,17 @@ function BookingFlow({
   const { t, ui, locale: displayLocale, explicit, formatLocale } = useI18n()
 
   const embedded = useEmbedded()
+  const navigate = useNavigate()
   const browserFormatLocale = useMemo(preferredLocale, [])
   const locale = formatLocale ?? browserFormatLocale
   const [timeZone, setTimeZone] = useState(() => visitorTimeZone(detectTimeZone()))
   const [now, setNow] = useState(currentTime)
   const [event, setEvent] = useState(initialEvent)
   const [durationMinutes, setDurationMinutes] = useState(event.durationMinutes)
+  const payment = 'payment' in event ? event.payment : undefined
+  const price = payment?.prices.find((entry) => entry.durationMinutes === durationMinutes)
+  const paymentAvailable = 'paymentAvailable' in event && event.paymentAvailable === true
+  const bookingPath = `/${encodeURIComponent(handle)}/${encodeURIComponent(slug)}`
   const [durationRefresh, setDurationRefresh] = useState<
     { status: 'loading' } | { status: 'error'; message: UiText } | null
   >(null)
@@ -585,16 +593,18 @@ function BookingFlow({
 
   async function submit() {
     if (!slot || inFlight.current || directPending || directError) return
+    if (payment && (!price || !paymentAvailable || embedded || oneTimeToken || team)) return
     const guests = guestsFor(values.guests)
     const body: CreateBooking = {
       ...(embedded && { source: 'embed' as const }),
       start: slot.start,
       ...(requestedLocationOptionId && { locationOptionId: requestedLocationOptionId }),
-      ...(chosenLocation?.askInvitee && {
+      ...((chosenLocation?.askInvitee ||
+        (payment && event.smsRemindersEnabled && values.smsConsent)) && {
         inviteePhone: values.inviteePhone?.replace(/[ ().-]/g, ''),
         smsConsent: values.smsConsent ?? false,
       }),
-      ...(waitlist && { waitlistToken: waitlist.token }),
+      ...(waitlist && !payment && { waitlistToken: waitlist.token }),
       ...((hasDurationChoices || directFlow) && { durationMinutes }),
       invitee: {
         name: values.name.trim(),
@@ -622,6 +632,37 @@ function BookingFlow({
     setFormError(null)
     setServerErrors({})
     try {
+      if (payment && price) {
+        const {
+          start,
+          durationMinutes,
+          locationOptionId,
+          invitee,
+          responses,
+          inviteePhone,
+          smsConsent,
+        } = attempt.current.body
+        const { checkoutUrl, statusToken } = await startPublicCheckout(
+          handle,
+          slug,
+          {
+            start,
+            durationMinutes,
+            locationOptionId,
+            invitee,
+            responses,
+            inviteePhone,
+            smsConsent,
+            expectedAmountMinor: price.amountMinor,
+            expectedCurrency: payment.currency,
+          },
+          attempt.current.key,
+        )
+        rememberCheckout({ token: statusToken, bookingPath })
+        if (checkoutUrl) window.location.assign(checkoutUrl)
+        else navigate(CHECKOUT_RETURN_PATH)
+        return
+      }
       const { result, replayed } = oneTimeToken
         ? await createOneTimeLinkBooking(oneTimeToken, attempt.current.body, attempt.current.key)
         : await createBooking(handle, slug, attempt.current.body, attempt.current.key, team)
@@ -658,6 +699,15 @@ function BookingFlow({
             : 'The meeting location has changed. Please choose a time again.',
         )
         await refreshDurations()
+      } else if (code === 'payment_price_changed' || code === 'payment_required') {
+        setNotice('The price has changed. Review the updated price and choose a time again.')
+        await refreshDurations()
+      } else if (code === 'paid_bookings_disabled') {
+        setFormError('Online payment is temporarily unavailable. Please contact the host.')
+      } else if (payment && code?.startsWith('payment_checkout_')) {
+        setFormError(
+          'We couldn’t open Stripe Checkout. Try again to continue this payment attempt.',
+        )
       } else if (code === 'invalid_duration') {
         setNotice(
           directFlow
@@ -721,7 +771,15 @@ function BookingFlow({
               )}
             </p>
           )}
-          {directPending || directError ? (
+          {payment && embedded ? (
+            <a className="button" href={bookingPath} target="_blank" rel="noopener noreferrer">
+              {t('Open booking page to pay')}
+            </a>
+          ) : payment && !paymentAvailable ? (
+            <PublicStatus>
+              {t('Online payment is temporarily unavailable. Please contact the host.')}
+            </PublicStatus>
+          ) : directPending || directError ? (
             <section className="details-step" aria-label={t('Pick a time')}>
               <PublicStatus>
                 {t(
@@ -767,13 +825,22 @@ function BookingFlow({
               {directState.status === 'selected' && (
                 <p role="status">
                   {t(
-                    'The suggested time is selected. Review the details and confirm your booking.',
+                    payment
+                      ? 'The suggested time is selected. Review the details before continuing to payment.'
+                      : 'The suggested time is selected. Review the details and confirm your booking.',
                   )}
                 </p>
               )}
               {(prefill?.name || prefill?.email) && (
                 <p className="hint">
                   {t('These details were filled in for convenience. You can change them.')}
+                </p>
+              )}
+              {payment && (
+                <p className="hint">
+                  {t(
+                    'You’ll pay securely on Stripe. Your booking is confirmed only after Hourmere receives the payment. If you cancel the booking, a full refund is requested.',
+                  )}
                 </p>
               )}
               <BookingForm
@@ -797,6 +864,7 @@ function BookingFlow({
                 serverErrors={serverErrors}
                 formError={formError}
                 submitting={submitting}
+                paid={Boolean(payment)}
                 onSubmit={submit}
               />
             </BookingDetailsStep>

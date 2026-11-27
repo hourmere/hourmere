@@ -140,6 +140,7 @@ export async function createOneTimeBookingLink(
         )
       }
     }
+    if (event.payment) throw new DomainError('conflict', 'payment_flow_unsupported')
     if (expiresAt !== null) {
       const { future } = await trx
         .selectNoFrom(sql<boolean>`${expiresAt}::timestamptz > clock_timestamp()`.as('future'))
@@ -506,7 +507,7 @@ async function authorizedEvent(db: Db, ctx: ServiceContext, eventTypeId: string)
   if (!membership) throw insufficientRole()
   const event = await db
     .selectFrom('event_types')
-    .select(['id', 'organization_id', 'owner_user_id', 'is_active', 'deleted_at'])
+    .select(['id', 'organization_id', 'owner_user_id', 'is_active', 'deleted_at', 'payment'])
     .where('id', '=', eventTypeId)
     .where('organization_id', '=', ctx.principal.organization.id)
     .forShare()

@@ -74,10 +74,12 @@ const annotations = {
 export function catalogTools({
   db,
   smsRemindersAvailable,
+  paidBookingAvailability,
   followUpHostNotesEnabled,
 }: {
   db: Db
   smsRemindersAvailable?: boolean | undefined
+  paidBookingAvailability?: ServiceContext['paidBookingAvailability']
   followUpHostNotesEnabled?: boolean | undefined
 }): Tool[] {
   const context = (principal: McpCaller): ServiceContext => ({
@@ -86,6 +88,7 @@ export function catalogTools({
     ...(principal.scimResourcesEnabled && { scimResourcesEnabled: true }),
     now: () => Temporal.Now.instant(),
     smsRemindersAvailable,
+    paidBookingAvailability,
     followUpHostNotesEnabled,
   })
   return [

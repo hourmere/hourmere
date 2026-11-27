@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { isPaidEventSupported } from '@hourmere/core/payment'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import * as react from 'react'
@@ -14,6 +15,7 @@ import { eventType } from '../../test/fixtures.ts'
 import { isMultiLineText, isSingleLineText, singleLineProblem } from '../../text.ts'
 import * as formFunctions from './event-type-form.ts'
 import * as notificationFunctions from './notifications-form.ts'
+import * as paymentFunctions from './payment-form.ts'
 import type * as editorFunctions from './SuccessRedirectEditor.tsx'
 
 const form = readFileSync('apps/web/src/pages/event-types/event-type-form.ts', 'utf8')
@@ -59,6 +61,8 @@ const buildForm = (source: string) =>
     '{draftFromEventType, toInput, toPatchInput, emptyDraft, serverErrors}',
     {
       ...notificationFunctions,
+      ...paymentFunctions,
+      isPaidEventSupported,
       RequestError,
       parseWhole,
       wholeNumberProblem,

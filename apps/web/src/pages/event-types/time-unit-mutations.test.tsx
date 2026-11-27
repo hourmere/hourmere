@@ -138,7 +138,7 @@ it('detects removing the pristine submit guard before a real PATCH call', async 
       setFormError: noop,
       setStatus: noop,
       validateDraft: () => ({}),
-      draft: {},
+      draft: { payment: { enabled: false } },
       baseline: {},
       me: { organization: { personal: true } },
       setErrors: noop,

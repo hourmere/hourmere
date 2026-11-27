@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 
 export type PaymentMode = 'test' | 'live'
+export const PAYMENT_HOLD_MINUTES = 30
 
 /** The Stripe deadline includes rounding and creation grace. Capacity uses the DB deadline. */
 export function checkoutSessionExpiry(expiresAt: string): number {
@@ -27,6 +28,8 @@ export interface CheckoutOperation {
   expiresAt: string
   idempotencyKey: string
   startedAt: string
+  /** Browser Checkout uses a fixed first-party return, without any booking capabilities. */
+  publicReturn?: true
 }
 
 export interface CheckoutSession {

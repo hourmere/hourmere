@@ -6,6 +6,7 @@ import {
   cancelHostBooking,
   cancelManagedBooking,
   getHostBooking,
+  getHostBookingDetail,
   newManageToken,
   requestReschedule,
   rescheduleHostBooking,
@@ -148,6 +149,9 @@ describe.skipIf(!serverUrl)('confirmed paid booking lifecycle', () => {
       ...hostCtx,
       principal: { ...hostCtx.principal, user: stranger.principal.user },
     }
+    await expect(getHostBookingDetail(unauthorizedHost, id)).rejects.toMatchObject({
+      code: 'booking_not_found',
+    })
     await expect(cancelHostBooking(unauthorizedHost, id)).rejects.toMatchObject({
       code: 'booking_not_found',
     })
@@ -267,6 +271,15 @@ describe.skipIf(!serverUrl)('confirmed paid booking lifecycle', () => {
       id: second.booking.id,
       eventType: { durationMinutes: 30 },
     })
+    const paid = { status: 'paid', ...price, refundStatus: null }
+    const dashboard = `https://dashboard.stripe.com/${original.account_id}/test/payments/${expectedRefund.payment_reference}`
+    expect((await getManagedBookingDetails(publicCtx, token)).payment).toEqual(paid)
+    for (const bookingId of [id, first.booking.id, second.booking.id]) {
+      expect((await getHostBookingDetail(hostCtx, bookingId)).payment).toEqual({
+        ...paid,
+        stripeDashboardUrl: dashboard,
+      })
+    }
     expect((await getManagedBookingDetails(publicCtx, token)).eventType).not.toHaveProperty(
       'allowedDurationsMinutes',
     )
@@ -289,6 +302,10 @@ describe.skipIf(!serverUrl)('confirmed paid booking lifecycle', () => {
       status: 'cancelled',
     })
     expect(await refunds()).toEqual([expectedRefund])
+    expect((await getManagedBookingDetails(publicCtx, token)).payment).toEqual({
+      ...paid,
+      refundStatus: 'requested',
+    })
     expect(create).toHaveBeenCalledOnce()
     await expect(
       db

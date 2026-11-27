@@ -6,6 +6,7 @@
     ".": "./src/index.ts",
     "./meeting-poll-delivery": "./src/meeting-poll-delivery.ts",
     "./booking-chain": "./src/booking-chain.ts",
+    "./booking-payment-details": "./src/booking-payment-details.ts",
     "./errors": "./src/errors.ts",
     "./text": "./src/text.ts",
     "./conferences": "./src/conferences.ts",

@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
+import { isPaidEventSupported } from '@hourmere/core/payment'
 import { expect, it } from 'vitest'
 import { RequestError } from '../../api/errors.ts'
 import * as forms from '../../components/forms.tsx'
@@ -9,6 +10,7 @@ import { eventType } from '../../test/fixtures.ts'
 import * as text from '../../text.ts'
 import type * as Form from './event-type-form.ts'
 import * as notifications from './notifications-form.ts'
+import * as paymentFunctions from './payment-form.ts'
 
 type Copy = Pick<
   typeof Form,
@@ -28,7 +30,16 @@ function sourceCopy(change?: readonly [string, string]): Copy {
   source = stripTypeScriptTypes(source)
     .replace(/^import[\s\S]*?from '[^']+'\n/gm, '')
     .replace(/\bexport /g, '')
-  const bindings = { ...forms, ...translate, ...limits, ...text, ...notifications, RequestError }
+  const bindings = {
+    ...forms,
+    ...translate,
+    ...limits,
+    ...text,
+    ...notifications,
+    ...paymentFunctions,
+    isPaidEventSupported,
+    RequestError,
+  }
   return new Function(
     ...Object.keys(bindings),
     `${source}; return { emptyDraft, validateDraft, toPatchInput, toInput, serverErrors, draftFromEventType }`,

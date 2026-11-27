@@ -273,7 +273,18 @@ const BookingRouting = z
   })
   .openapi('BookingRouting')
 
+const BookingPayment = z.object({
+  status: z.string().openapi({ description: 'Currently paid. Clients must accept new values.' }),
+  amountMinor: z.number().int().positive(),
+  currency: z.string(),
+  refundStatus: z.string().nullable().openapi({
+    description:
+      'None (null), requested, pending, succeeded or failed. Clients must accept new values.',
+  }),
+})
+
 export const HostBooking = Booking.extend({
+  payment: BookingPayment.extend({ stripeDashboardUrl: z.url().optional() }).optional(),
   routing: BookingRouting.optional().openapi({
     description: 'The original stored routing provenance and question and answer snapshots.',
   }),
@@ -281,6 +292,7 @@ export const HostBooking = Booking.extend({
 
 export const ManagedBooking = Booking.extend({
   branding: PublicBranding.optional(),
+  payment: BookingPayment.optional(),
   eventType: z
     .object({
       title: z.string(),
