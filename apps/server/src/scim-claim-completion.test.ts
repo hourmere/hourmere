@@ -1151,7 +1151,49 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
       'Claims without an invitation expire after 48 hours without renewal',
       "No address is marked verified, and neither the account's profile, address or sign-in methods nor the entry's provisioned profile or timestamps change.",
       '| Claim completion through invitation acceptance | User creation and claim intent | Existing invitation acceptance; no new operation/tool/command | Resource test flag only |',
-      '| Claim completion through SSO linking | Claim completion through invitation acceptance; SSO design PR #247 and accepted linking implementation | SSO linking completion; no new operation/tool/command | Resource test flag only |',
+    ])
+      expect(says(sentence), sentence).toBe(true)
+  })
+
+  it('orders the SSO claim steps and keeps the explicit flow hard-off until release', () => {
+    const plan = design.split('## Ordered implementation plan')[1]?.split('\n## ')[0] ?? ''
+    const steps = [
+      'Claim purpose and migration',
+      'SCIM-to-SSO provider binding',
+      'Explicit OIDC claim attachment',
+      'OIDC claim conflict and replay acceptance',
+      'Invitation-free claim renewal',
+      'Directory claim browser controls',
+      'OIDC directory claim release',
+      'SAML directory claim release',
+    ]
+    let previous = -1
+    for (const step of steps) {
+      const index = plan.indexOf(`| ${step} |`)
+      expect(index, step).toBeGreaterThan(previous)
+      previous = index
+      const [row = ''] = plan.slice(index).split('\n', 1)
+      const flag = row.split(' | ')[3]
+      if (step === 'OIDC directory claim release')
+        expect(flag).toContain('requires SCIM on, OIDC on and explicit owner binding')
+      else if (step === 'SAML directory claim release')
+        expect(flag).toContain('requires SCIM on, SAML on and explicit owner binding')
+      else expect(flag, step).toMatch(/^Explicit SSO claim flow hard-off/)
+    }
+  })
+
+  it('documents the explicit SSO claim eligibility, side effects and switch rules', () => {
+    for (const sentence of [
+      'Implicit SCIM claim completion through ordinary OIDC self-link must be hard-off in production before any deployment.',
+      'Owner, admin and legacy compound roles are ineligible for directory attachment through this flow.',
+      'The member can omit `scimUserId` when the proven mailbox identifies exactly one eligible claim in the bound connection.',
+      'Require the ID only to disambiguate the intended entry.',
+      'The supplied ID never breaks a tie.',
+      'Neither occupied-address creation nor renewal queues mail or spends invitation budget.',
+      'Attachment creates no child membership and writes no child journal entry.',
+      'That write records `scim_membership.added` in the child journal in the same transaction as the roster addition.',
+      'Turning SCIM off refuses claim start, renewal and completion without doing an ordinary self-link, while ordinary SSO continues under its own policy.',
+      'Turning the bound SSO protocol off refuses claim start, renewal and completion with `404 sso_disabled`, even if SCIM and the other protocol are on.',
     ])
       expect(says(sentence), sentence).toBe(true)
   })
@@ -1811,6 +1853,7 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
     const answer = await accept({ url }, cookie, claim.invitation_id as string)
     const after = await snapshot(organization.id)
     return {
+      scimClaims: options.scimClaims,
       enqueueScimInvitation,
       invitationId: claim.invitation_id,
       answer,
@@ -1851,6 +1894,7 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
       expect(production.enqueueScimInvitation).not.toHaveBeenCalled()
       expect(production.readmissionStatus).toBe(404)
     }
+    expect(production.scimClaims).not.toHaveProperty('link')
   }
 
   it.each([true, false])(
@@ -1876,7 +1920,7 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
   it('detects missing production claim completion in a source copy', async () => {
     await verifyProductionAcceptance(await serverCopy(), true)
     const mutant = await serverCopy([
-      '    scimClaims: config.SCIM_PROVISIONING_ENABLED ? scimClaimCompletion : scimClaimAdmissionOnly,\n    baseURL:',
+      '    scimClaims: config.SCIM_PROVISIONING_ENABLED ? productionScimClaims : scimClaimAdmissionOnly,\n    baseURL:',
       '    scimClaims: undefined,\n    baseURL:',
     ])
     await expect(verifyProductionAcceptance(mutant, true)).rejects.toMatchObject({

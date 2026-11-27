@@ -533,6 +533,29 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
     }
   })
 
+  it.each([
+    ['reschedule', 'reschedule_booking'],
+    ['cancel', 'cancel_booking'],
+  ])('documents the managed %s request conflict in REST and MCP', async (action, name) => {
+    const response = await app.request('/api/v1/openapi.json')
+    expect(response.status).toBe(200)
+    const { paths } = (await response.json()) as {
+      paths: Record<string, { post: { responses: Record<string, { description: string }> } }>
+    }
+    const conflict = paths[`/api/v1/bookings/manage/${action}`]?.post.responses['409']
+    expect(conflict?.description).toMatch(/\breschedule_request_changed\b/)
+
+    const client = await connect(agent.key)
+    try {
+      const { tools } = await client.listTools()
+      expect(tools.find((tool) => tool.name === name)?.description).toContain(
+        'reschedule_request_changed (REST 409)',
+      )
+    } finally {
+      await client.close()
+    }
+  })
+
   it('discovers and books a collective team with exact-case teamSlug and an unambiguous namespace', async () => {
     const teamSlug = `Collective-${randomUUID().slice(0, 8)}`
     const org = await f.organization(teamSlug)

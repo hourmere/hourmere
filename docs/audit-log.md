@@ -315,15 +315,16 @@ Security failures (`sso_authentication.failed`, `sso_authentication.replay_rejec
 `sso_jit.refused` and `sso_link.conflicted`) have no business transaction, so
 `writeSsoSecurityFailure` writes each in a short transaction of its own, with the provider as
 target, once the request's own transaction has settled, never inside it; the request's
-rollback does not remove it, and the change writer refuses these actions. The actor is
+rollback does not remove it, and the change writer refuses these actions. The failure writer
+checks that the provider still exists and belongs to the team in the transaction that writes
+the audit event. The actor is
 anonymous, an external user or the signed-in user, with no credential or that user's session.
 Their details are redacted: a reason that is not on the list, such as a provider error, is
 recorded as `unclassified`, and a revision or correlation ID that is not a valid value is left
 out. At most 20 failures are recorded per provider and source (the failure action) in any 3,600
 seconds ([Audit limits](sso.md#audit-limits)); later failures in that window are dropped, so
-failed attempts cannot flood the journal. The tradeoff is that junk failures can fill a window
-and hide later failures of the same source until it slides; the writer reports each drop to
-its caller. When later steps emit them, SSO sign-ins and these bounded failures are the
+failed attempts cannot flood the journal. Each process reports a count of dropped failures
+by source in its logs without recording individual attempts. SSO sign-ins and these bounded failures are the
 exception to the access-log exclusion under [Not recorded](#not-recorded).
 
 ## Privacy, append-only behavior, and exclusions

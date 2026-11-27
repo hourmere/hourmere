@@ -12,6 +12,12 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Added
 
+- Booking workflows are enabled by default for unset or empty `WORKFLOWS_ENABLED`, including
+  on upgrades. Set `WORKFLOWS_ENABLED=false` across web and worker to pause capture and
+  delivery admissions. A slow workflow webhook receiver can no longer delay a booking's
+  cancellation or reschedule. See the
+  [workflow operating guide](https://github.com/hourmere/hourmere/blob/main/docs/workflows.md#operating-guide).
+
 - SCIM 2.0 provisioning for team Users and explicitly mapped child-team Groups,
   available on every instance without a paid plan. Discovery, directory membership
   lifecycle, team credential revocation and child-team audit records ship together.
@@ -161,6 +167,9 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Security
 
+- OIDC account self-linking leaves pending SCIM claims and directory attachments unchanged.
+  New SCIM enrollment claims complete only through invitation acceptance with Hourmere
+  mailbox proof until explicit SCIM claim completion through SSO linking ships.
 - Public booking and sign-in email abuse is bounded by a chain-wide invitee reschedule cap
   (default 5), separate rolling recipient limits for booking and sign-in mail (each 5/hour
   and 20/day), and one instance-wide mail cap (100/hour with a 20% reserve shared by host
