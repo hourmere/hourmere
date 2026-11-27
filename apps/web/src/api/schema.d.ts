@@ -3114,7 +3114,7 @@ export interface paths {
         };
         /**
          * Read a public personal routing form
-         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Reads the current published version and its ordered questions for an enabled form. Anonymous access is allowed. A supplied bearer must be a valid read, bookings or full API key.
+         * @description Routing forms are on by default. Set ROUTING_FORMS_ENABLED=false to turn them off. This operation returns routing_forms_disabled while routing forms are off. Reads the current published version and its ordered questions for an enabled form. Anonymous access is allowed. A supplied bearer must be a valid read, bookings or full API key.
          */
         get: operations["getPublicRoutingForm"];
         put?: never;
@@ -3136,7 +3136,7 @@ export interface paths {
         put?: never;
         /**
          * Submit answers to a public personal routing form
-         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Routes answers for the specified published version and returns a message or an expiring continuation with its private URL. Fetch the current public form again after routing_form_changed. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key.
+         * @description Routing forms are on by default. Set ROUTING_FORMS_ENABLED=false to turn them off. This operation returns routing_forms_disabled while routing forms are off. Routes answers for the specified published version and returns a message or an expiring continuation with its private URL. Fetch the current public form again after routing_form_changed. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key.
          */
         post: operations["routeLead"];
         delete?: never;
@@ -3154,7 +3154,7 @@ export interface paths {
         };
         /**
          * Read a public team routing form
-         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Reads the current published version and its ordered questions for an enabled form. Anonymous access is allowed. A supplied bearer must be a valid read, bookings or full API key.
+         * @description Routing forms are on by default. Set ROUTING_FORMS_ENABLED=false to turn them off. This operation returns routing_forms_disabled while routing forms are off. Reads the current published version and its ordered questions for an enabled form. Anonymous access is allowed. A supplied bearer must be a valid read, bookings or full API key.
          */
         get: operations["getPublicTeamRoutingForm"];
         put?: never;
@@ -3176,7 +3176,7 @@ export interface paths {
         put?: never;
         /**
          * Submit answers to a public team routing form
-         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Routes answers for the specified published version and returns a message or an expiring continuation with its private URL. Fetch the current public form again after routing_form_changed. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key.
+         * @description Routing forms are on by default. Set ROUTING_FORMS_ENABLED=false to turn them off. This operation returns routing_forms_disabled while routing forms are off. Routes answers for the specified published version and returns a message or an expiring continuation with its private URL. Fetch the current public form again after routing_form_changed. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key.
          */
         post: operations["routeTeamLead"];
         delete?: never;
@@ -3632,6 +3632,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/public/teams/{handle}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A team’s public booking directory
+         * @description The saved public name, exact-case slug and listed event summaries of an opted-in team. An enabled team with no eligible events returns an empty list. Hidden events remain accessible only through their existing direct or private links.
+         */
+        get: operations["getPublicTeam"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/public/teams/{handle}/{slug}": {
         parameters: {
             query?: never;
@@ -3966,7 +3986,7 @@ export interface paths {
         put?: never;
         /**
          * Book a slot through a routing continuation
-         * @description Books the event selected by the private route capability. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key. New routed bookings require ROUTING_FORMS_ENABLED=true (off by default). An exact committed replay with the same capability, Idempotency-Key and booking authority still succeeds after expiry or disablement.
+         * @description Books the event selected by the private route capability. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key. New routed bookings require routing forms to be enabled, which is the default. An exact committed replay with the same capability, Idempotency-Key and booking authority still succeeds after expiry or disablement.
          */
         post: operations["createRoutedBooking"];
         delete?: never;
@@ -3986,7 +4006,7 @@ export interface paths {
         put?: never;
         /**
          * Resolve a routing continuation
-         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Reads the selected event's current booking fields and editable prefill. The capability expires 30 minutes after issuance. Reads do not consume or renew it. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key.
+         * @description Routing forms are on by default. Set ROUTING_FORMS_ENABLED=false to turn them off. This operation returns routing_forms_disabled while routing forms are off. Reads the selected event's current booking fields and editable prefill. The capability expires 30 minutes after issuance. Reads do not consume or renew it. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key.
          */
         post: operations["resolveRoutingContinuation"];
         delete?: never;
@@ -4006,7 +4026,7 @@ export interface paths {
         put?: never;
         /**
          * Find slots for the selected event
-         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Offers ordinary availability in the given instant range for the event selected by the capability. Availability may change. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key.
+         * @description Routing forms are on by default. Set ROUTING_FORMS_ENABLED=false to turn them off. This operation returns routing_forms_disabled while routing forms are off. Offers ordinary availability in the given instant range for the event selected by the capability. Availability may change. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key.
          */
         post: operations["findRoutedSlots"];
         delete?: never;
@@ -4024,13 +4044,13 @@ export interface paths {
         };
         /**
          * List routing forms
-         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
+         * @description Routing forms are on by default. Set ROUTING_FORMS_ENABLED=false to turn them off. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
          */
         get: operations["listRoutingForms"];
         put?: never;
         /**
          * Create a routing form
-         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
+         * @description Routing forms are on by default. Set ROUTING_FORMS_ENABLED=false to turn them off. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
          */
         post: operations["createRoutingForm"];
         delete?: never;
@@ -4048,21 +4068,21 @@ export interface paths {
         };
         /**
          * Get a routing form
-         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
+         * @description Routing forms are on by default. Set ROUTING_FORMS_ENABLED=false to turn them off. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
          */
         get: operations["getRoutingForm"];
         put?: never;
         post?: never;
         /**
          * Archive a routing form
-         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
+         * @description Routing forms are on by default. Set ROUTING_FORMS_ENABLED=false to turn them off. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
          */
         delete: operations["archiveRoutingForm"];
         options?: never;
         head?: never;
         /**
          * Update a routing form
-         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
+         * @description Routing forms are on by default. Set ROUTING_FORMS_ENABLED=false to turn them off. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
          */
         patch: operations["updateRoutingForm"];
         trace?: never;
@@ -4078,7 +4098,7 @@ export interface paths {
         put?: never;
         /**
          * Preview a routing form draft
-         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins can preview the current draft in their active organization. API keys require full scope. Supply answers keyed by question UUID. Returns the draft revision, rule and condition matches, and any target eligibility failures. Preview is read-only, with no stored answers, route capabilities or notifications. Session requests require a same-origin Origin/Referer.
+         * @description Routing forms are on by default. Set ROUTING_FORMS_ENABLED=false to turn them off. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins can preview the current draft in their active organization. API keys require full scope. Supply answers keyed by question UUID. Returns the draft revision, rule and condition matches, and any target eligibility failures. Preview is read-only, with no stored answers, route capabilities or notifications. Session requests require a same-origin Origin/Referer.
          */
         post: operations["previewRoutingForm"];
         delete?: never;
@@ -4098,7 +4118,7 @@ export interface paths {
         put?: never;
         /**
          * Publish a routing form
-         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins can publish forms in their active organization. API keys require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Supply the last-read expectedRevision. Publication leaves enabled unchanged and revalidates all targets and mappings. Unsupported targets, including group and payment-required events, and invalid mappings return invalid_routing_target. Reuse the optional requestId UUID with identical input to return the original version and the current form. Changed input with the same key returns idempotency_key_reused.
+         * @description Routing forms are on by default. Set ROUTING_FORMS_ENABLED=false to turn them off. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins can publish forms in their active organization. API keys require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Supply the last-read expectedRevision. Publication leaves enabled unchanged and revalidates all targets and mappings. Unsupported targets, including group and payment-required events, and invalid mappings return invalid_routing_target. Reuse the optional requestId UUID with identical input to return the original version and the current form. Changed input with the same key returns idempotency_key_reused.
          */
         post: operations["publishRoutingForm"];
         delete?: never;
@@ -4540,6 +4560,8 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
+                    /** @description Request page-scoped selection proof when bulk cancellation is enabled */
+                    bulkSelection?: "true" | "false";
                     cursor?: string;
                     /** @description Only bookings ending after (exclusive) */
                     endAfter?: string;
@@ -4559,7 +4581,7 @@ export interface paths {
                     to?: string;
                 };
                 header?: {
-                    /** @description Optional team where the page opened; a still-authorized expected team with a different current space receives 409 reload guidance, otherwise 403 */
+                    /** @description Team where the page opened. Required when requesting a page proof; otherwise optional. A still-authorized expected team with a different current space receives 409 reload guidance, otherwise 403 */
                     "x-expected-organization-id"?: string;
                 };
                 path?: never;
@@ -4724,6 +4746,26 @@ export interface paths {
          * @description Requires a current verified team owner/admin browser session and a same-origin Origin or Referer. X-Expected-Organization-Id must match the team where the action started and the current session team. A caller who still owns or administers the expected team receives 409 organization_context_changed after switching to any other space, including personal or a member-only team; inaccessible expected teams retain the uniform 403. Cancels only a booking in that team before its start, queues the normal cancellation notifications, and preserves its saved hosts and conference organizer. Success returns {cancelled:true}; a retry after a committed cancellation returns 409 booking_already_cancelled without sending notifications again. Missing, inaccessible and already-started targets share team_management_access_denied. API keys and MCP OAuth tokens have no team-management access, including alongside a session cookie. This grants no host reschedule or private conference retry authority.
          */
         post: operations["cancelTeamBooking"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/team/bookings/bulk-cancellations/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview cancellation of bookings selected from one team booking page
+         * @description Unavailable until bulk cancellation is released. A current verified team owner/admin browser session and same-origin Origin or Referer are required. Preview records the ordered selection and eligibility without cancelling bookings or queuing notifications.
+         */
+        post: operations["previewTeamBookingBulkCancellation"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5760,13 +5802,13 @@ export interface paths {
         };
         /**
          * List the booking workflows of the owner the caller acts as
-         * @description The operator can enable booking workflows with WORKFLOWS_ENABLED=true. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full or read API-key scope. Name the owner explicitly: ownerKind=personal with your user ID in your personal organization, or ownerKind=team with the team ID while acting in that team as a current owner or admin. Any other owner, existing or not, gets the same 403 insufficient_role. Deleted workflows are not listed. Oldest first, by time-ordered ID; pass nextCursor as cursor with the same owner for the next page.
+         * @description Booking workflows are enabled by default. The operator can pause them with WORKFLOWS_ENABLED=false. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full or read API-key scope. Name the owner explicitly: ownerKind=personal with your user ID in your personal organization, or ownerKind=team with the team ID while acting in that team as a current owner or admin. Any other owner, existing or not, gets the same 403 insufficient_role. Deleted workflows are not listed. Oldest first, by time-ordered ID; pass nextCursor as cursor with the same owner for the next page.
          */
         get: operations["listWorkflows"];
         put?: never;
         /**
          * Create a booking workflow
-         * @description The operator can enable booking workflows with WORKFLOWS_ENABLED=true. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full API-key scope. Name your personal owner or a team you currently own or administer in the active organization. Retain idempotencyKey for retries: the same normalized request returns the stored definition, while changed input conflicts. IDs are server-generated; caller-supplied IDs and unknown fields are rejected. Webhook actions require an active endpoint in the acting organization subscribed to workflow.executed. Creation does not send mail.
+         * @description Booking workflows are enabled by default. The operator can pause them with WORKFLOWS_ENABLED=false. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full API-key scope. Name your personal owner or a team you currently own or administer in the active organization. Retain idempotencyKey for retries: the same normalized request returns the stored definition, while changed input conflicts. IDs are server-generated; caller-supplied IDs and unknown fields are rejected. Webhook actions require an active endpoint in the acting organization subscribed to workflow.executed. Creation does not send mail.
          */
         post: operations["createWorkflow"];
         delete?: never;
@@ -5784,21 +5826,21 @@ export interface paths {
         };
         /**
          * Read one booking workflow
-         * @description The operator can enable booking workflows with WORKFLOWS_ENABLED=true. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full or read API-key scope. Returns a workflow of the owner the caller acts as in its current organization: its own personal workflow, or a team workflow while it is a current owner or admin of that team. A missing, deleted or malformed ID, another owner's workflow and a workflow of another organization all get the same 404 workflow_not_found.
+         * @description Booking workflows are enabled by default. The operator can pause them with WORKFLOWS_ENABLED=false. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full or read API-key scope. Returns a workflow of the owner the caller acts as in its current organization: its own personal workflow, or a team workflow while it is a current owner or admin of that team. A missing, deleted or malformed ID, another owner's workflow and a workflow of another organization all get the same 404 workflow_not_found.
          */
         get: operations["getWorkflow"];
         put?: never;
         post?: never;
         /**
          * Delete a booking workflow
-         * @description The operator can enable booking workflows with WORKFLOWS_ENABLED=true. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full API-key scope and expectedRevision. Tombstones the definition and retires its pending runs. Repeated authorized deletion is safe. Missing, foreign and mismatched owner contexts return workflow_not_found. Revisions and creation keys remain with the tombstone; existing minimal history follows retention.
+         * @description Booking workflows are enabled by default. The operator can pause them with WORKFLOWS_ENABLED=false. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full API-key scope and expectedRevision. Tombstones the definition and retires its pending runs. Repeated authorized deletion is safe. Missing, foreign and mismatched owner contexts return workflow_not_found. Revisions and creation keys remain with the tombstone; existing minimal history follows retention.
          */
         delete: operations["deleteWorkflow"];
         options?: never;
         head?: never;
         /**
          * Edit, enable or disable a booking workflow
-         * @description The operator can enable booking workflows with WORKFLOWS_ENABLED=true. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full API-key scope. Supply expectedRevision and the fields to change. Content edits append an immutable revision; changing only enabled preserves the revision. A stale revision conflicts. Missing, foreign and mismatched owner contexts return workflow_not_found. Disabling or enabling changes no existing booking enrollment or execution. Webhook actions require an active endpoint in the acting organization subscribed to workflow.executed.
+         * @description Booking workflows are enabled by default. The operator can pause them with WORKFLOWS_ENABLED=false. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full API-key scope. Supply expectedRevision and the fields to change. Content edits append an immutable revision; changing only enabled preserves the revision. A stale revision conflicts. Missing, foreign and mismatched owner contexts return workflow_not_found. Disabling or enabling changes no existing booking enrollment or execution. Webhook actions require an active endpoint in the acting organization subscribed to workflow.executed.
          */
         patch: operations["updateWorkflow"];
         trace?: never;
@@ -5812,7 +5854,7 @@ export interface paths {
         };
         /**
          * List finished runs of a booking workflow
-         * @description The operator can enable booking workflows with WORKFLOWS_ENABLED=true. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full or read API-key scope and personal ownership or current team owner/admin access in the active organization. Returns metadata and aggregate outcomes only, newest first. Pass nextCursor as cursor with the same workflow for the next page. Missing, deleted, malformed and inaccessible workflow IDs return workflow_not_found.
+         * @description Booking workflows are enabled by default. The operator can pause them with WORKFLOWS_ENABLED=false. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full or read API-key scope and personal ownership or current team owner/admin access in the active organization. Returns metadata and aggregate outcomes only, newest first. Pass nextCursor as cursor with the same workflow for the next page. Missing, deleted, malformed and inaccessible workflow IDs return workflow_not_found.
          */
         get: operations["listWorkflowRuns"];
         put?: never;
@@ -5834,7 +5876,7 @@ export interface paths {
         put?: never;
         /**
          * Preview a booking workflow with synthetic data
-         * @description The operator can enable booking workflows with WORKFLOWS_ENABLED=true. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full API-key scope and current personal ownership or team owner/admin access in the active organization. Supply owner, the candidate definition fields and optional synthetic example values. Returns the match outcome, rendered email text and escaped HTML, and static estimates. Preview uses synthetic booking data and makes no deliveries.
+         * @description Booking workflows are enabled by default. The operator can pause them with WORKFLOWS_ENABLED=false. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full API-key scope and current personal ownership or team owner/admin access in the active organization. Supply owner, the candidate definition fields and optional synthetic example values. Returns the match outcome, rendered email text and escaped HTML, and static estimates. Preview uses synthetic booking data and makes no deliveries.
          */
         post: operations["previewWorkflow"];
         delete?: never;
@@ -5975,9 +6017,9 @@ export interface components {
             /** @description Stable dotted action, e.g. membership.role_changed. New actions may appear; ignore unknown ones. */
             action: string;
             actor: {
-                /** @description Stored user, API key, OAuth client or SCIM token ID, or a system service name; null for anonymous and external actors */
+                /** @description Stored user, API key, OAuth client, SCIM token or SCIM connection ID, or a system service name; null for anonymous and external actors */
                 id: string | null;
-                /** @description Who acted: user, api_key, oauth_client, system, scim_token, anonymous, external_api_key, external_oauth_client, external_user. New types may appear. */
+                /** @description Who acted: user, api_key, oauth_client, system, scim_token, scim_connection, anonymous, external_api_key, external_oauth_client, external_user. New types may appear. */
                 type: string;
             };
             credential: {
@@ -6288,6 +6330,18 @@ export interface components {
             /** @description Readable button text, currently #FFFFFF or #000000 */
             buttonTextColor: string | null;
             buttonTextContrast: number | null;
+        };
+        BulkCancellationPreview: {
+            /** Format: uuid */
+            confirmationId: string;
+            /** Format: date-time */
+            expiresAt: string;
+            items: {
+                /** Format: uuid */
+                bookingId: string;
+                /** @enum {string} */
+                code: "eligible" | "already_cancelled" | "booking_started" | "booking_not_supported" | "booking_unavailable" | "booking_host_departed";
+            }[];
         };
         CalendarConnection: {
             accountEmail: string | null;
@@ -6642,7 +6696,7 @@ export interface components {
             /** @description Machine-readable code, e.g. unauthorized */
             error: string;
             errorAlias?: components["schemas"]["ErrorAlias"];
-            /** @description Optional stable validation field name. Known values: successRedirect, successRedirect.url, successRedirect.parameters, successRedirect.includeInviteePersonalData, successRedirect.allowEmbedParent. New values may appear within /api/v1; ignore unknown values. */
+            /** @description Optional stable validation field name. Known values: successRedirect, successRedirect.url, successRedirect.parameters, successRedirect.includeInviteePersonalData, successRedirect.allowEmbedParent, and responses.<questionId> for a rejected routed booking answer. New values may appear within /api/v1; ignore unknown values. */
             field?: string;
             /** @description Human-readable detail */
             message?: string;
@@ -7420,7 +7474,7 @@ export interface components {
              * @description The public origin of this instance, configured by its operator
              */
             publicUrl: string;
-            /** @description Effective state of routing forms. ROUTING_FORMS_ENABLED defaults to false. A legacy route handle keeps routing forms off. Absent when unknown. */
+            /** @description Effective state of routing forms. ROUTING_FORMS_ENABLED defaults to true. A legacy personal route handle keeps routing forms off. Absent when unknown. */
             routingFormsEnabled?: boolean;
             /** @description Whether the operator enabled SCIM provisioning and owner token creation and rotation */
             scimProvisioningEnabled?: boolean;
@@ -7445,7 +7499,7 @@ export interface components {
              * @description This instance operator's terms; absent when not configured
              */
             termsUrl?: string;
-            /** @description Whether booking workflows are enabled; false until they are, and absent (treat as false) on older servers */
+            /** @description Effective WORKFLOWS_ENABLED setting (true by default). Treat an absent field on older servers as false. */
             workflowsEnabled?: boolean;
         };
         IssuedScimProvisioningToken: {
@@ -7511,6 +7565,11 @@ export interface components {
                 answer: string;
                 label: string;
             }[];
+            /**
+             * @description Present when the manage link still resolves to a cancelled booking that was moved to a new time.
+             * @enum {boolean}
+             */
+            wasRescheduled?: true;
         };
         /** @description The enrollment view for a session without the required team proof keeps the active organization ID and omits its metadata by returning empty name and slug strings. */
         Me: {
@@ -8268,6 +8327,23 @@ export interface components {
             title: string;
             /** Format: uuid */
             versionId: string;
+        };
+        PublicTeam: {
+            eventTypes: {
+                description: string | null;
+                durationMinutes: number;
+                location: {
+                    /** @enum {string} */
+                    kind: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
+                } | null;
+                /** @description The booking page is /team/{handle}/{slug} */
+                slug: string;
+                title: string;
+            }[];
+            team: {
+                name: string;
+                slug: string;
+            };
         };
         PublishRoutingForm: {
             expectedRevision: number;
@@ -9225,6 +9301,10 @@ export interface components {
             };
         };
         TeamAdminBookingPage: {
+            /** Format: date-time */
+            bulkPageExpiresAt?: string;
+            /** @description Proof for the exact page, available only when bulk selection is enabled and opted in */
+            bulkPageToken?: string;
             data: components["schemas"]["TeamAdminBooking"][];
             nextCursor: string | null;
         };
@@ -9839,7 +9919,7 @@ export interface operations {
                 /** @description Only events by this actor ID (requires actorType) */
                 actorId?: string;
                 /** @description Only events by this actor type */
-                actorType?: "user" | "api_key" | "oauth_client" | "system" | "scim_token" | "anonymous" | "external_api_key" | "external_oauth_client" | "external_user";
+                actorType?: "user" | "api_key" | "oauth_client" | "system" | "scim_token" | "scim_connection" | "anonymous" | "external_api_key" | "external_oauth_client" | "external_user";
                 /** @description nextCursor from the previous page with the same filters */
                 cursor?: string;
                 /** @description Earliest time, inclusive: RFC 3339 instant with an offset */
@@ -10795,7 +10875,7 @@ export interface operations {
                 /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
                 from: string;
                 hostUserId?: string;
-                /** @description Append routing provenance and saved answers to personal exports only. Requires routing forms to be enabled (ROUTING_FORMS_ENABLED=true, off by default). False is equivalent to omitting the option. */
+                /** @description Append routing provenance and saved answers to personal exports only. Requires routing forms to be enabled, which is the default. False is equivalent to omitting the option. */
                 includeRoutingAnswers?: "true" | "false";
                 /** @description Order by start time and id: asc (default) or desc. Keep unchanged between pages. */
                 order?: "asc" | "desc";
@@ -12594,7 +12674,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
+            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin; microsoft_teams_host_session_required: adding a Microsoft Teams location, changing its host, reactivating or duplicating it requires the assigned host’s signed-in session. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -12889,7 +12969,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
+            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin; microsoft_teams_host_session_required: adding a Microsoft Teams location, changing its host, reactivating or duplicating it requires the assigned host’s signed-in session. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -13054,7 +13134,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
+            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin; microsoft_teams_host_session_required: adding a Microsoft Teams location, changing its host, reactivating or duplicating it requires the assigned host’s signed-in session. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -16980,6 +17060,65 @@ export interface operations {
             };
         };
     };
+    getPublicTeam: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Exact-case organization slug (1–64 ASCII letters/digits/inner hyphens) */
+                handle: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The public team and its listed events */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicTeam"];
+                };
+            };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such public team page (`team_not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     createPublicTeamBooking: {
         parameters: {
             query?: never;
@@ -19468,6 +19607,81 @@ export interface operations {
             };
             /** @description The API key's rate limit is used up */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    previewTeamBookingBulkCancellation: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required: the organization where the selection started */
+                "x-expected-organization-id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    bookingIds: string[];
+                    pageToken: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Preview with an expiring server-generated confirmation ID */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkCancellationPreview"];
+                };
+            };
+            /** @description invalid_request: select 1 to 25 distinct booking IDs */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied: requires a current team owner/admin session without Authorization; forbidden: cookie writes require same-origin Origin or Referer sso_required: This team requires a current SSO proof. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Bulk cancellation is unavailable */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed: reload the page before trying this team write again; bulk_selection_changed: reload the booking page and select again */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Request body is too large */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };

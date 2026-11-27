@@ -268,13 +268,11 @@ describe.skipIf(!serverUrl)('Team slug reservations migration', () => {
   it(
     'reports case collisions, recovers with the documented SQL, matches a fresh install and reruns as a no-op',
     async () => {
-      const { directory } = replay
-      const upgraded = await replay.predecessor.clone(undefined, {
-        migrate: false,
-        tag: 'team_slug_up',
-      })
+      const { directory, predecessor } = replay
+      let upgraded: TestDatabase | undefined
       let fresh: TestDatabase | undefined
       try {
+        upgraded = await predecessor.clone(undefined, { migrate: false, tag: 'team_slug_up' })
         const { pool } = upgraded
         const teamId = randomUUID()
         const conflictId = randomUUID()
@@ -332,13 +330,13 @@ describe.skipIf(!serverUrl)('Team slug reservations migration', () => {
           rows: [],
         })
 
-        fresh = await createTestDatabase(serverUrl, directory, { tag: 'team_slug_fresh' })
+        fresh = await predecessor.clone(directory, { tag: 'team_slug_fresh' })
         expect(await snapshotSchema(pool)).toEqual(await snapshotSchema(fresh.pool))
         await expect(runMigrations(pool, directory)).resolves.toEqual([])
         await expect(runMigrations(fresh.pool, directory)).resolves.toEqual([])
         expect(await predecessorRows(pool, teamId)).toEqual(before)
       } finally {
-        await Promise.all([upgraded.drop(), fresh?.drop()])
+        await Promise.all([upgraded?.drop(), fresh?.drop()])
       }
     },
     MIGRATION_REPLAY_TIMEOUT,

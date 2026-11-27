@@ -20,6 +20,7 @@ import * as teamManagement from '../team-management.ts'
 import { catalogTools } from './catalog.ts'
 import { mcpEndpoint } from './endpoint.ts'
 import { eventTypeTools } from './event-types.ts'
+import { publicTeamTool } from './public-team.ts'
 import { defineTool, type McpCaller, runTool, type Tool } from './tools.ts'
 
 type Factory = typeof eventTypeTools
@@ -82,6 +83,7 @@ function productSourceCopy(change?: Change): Factory {
   }
   const bindings = {
     eventTypeTools,
+    publicTeamTool,
     whoamiTool: { name: 'whoami' },
     bookingTools: () => [],
     catalogTools: () => [],

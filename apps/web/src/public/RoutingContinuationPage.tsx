@@ -220,7 +220,7 @@ function ContinuationBooking({
   usePageTitle(literal(event.title))
 
   const refresh = useCallback(
-    async (code: StaleConfiguration, signal: AbortSignal) => {
+    async (code: StaleConfiguration, signal: AbortSignal, bookingError?: PublicRequestError) => {
       let updated: RoutingContinuation
       try {
         updated = await resolveRoutingContinuation(routeToken, signal)
@@ -233,6 +233,15 @@ function ContinuationBooking({
       if (signal.aborted) return
       attempt.current = null
       setDraft((draft) => refreshDraft(draft, updated.eventType, code))
+      if (code === 'invalid_responses' && bookingError) {
+        const { fields } = bookingErrors(bookingError, updated.eventType.questions)
+        if (Object.keys(fields).length > 0) {
+          setServerErrors(fields)
+          setFormError('Check the highlighted fields.')
+          setNotice(null)
+          return
+        }
+      }
       setNotice(refreshNotice[code])
     },
     [routeToken],
@@ -259,6 +268,8 @@ function ContinuationBooking({
   function changeTime(message: UiText | null = null) {
     setDraft((draft) => ({ ...draft, slot: null }))
     setNotice(message)
+    setFormError(null)
+    setServerErrors({})
     setNow(currentTime())
   }
 
@@ -335,7 +346,11 @@ function ContinuationBooking({
         setGone(true)
       } else if (staleConfiguration(code)) {
         try {
-          await refresh(code, active.signal)
+          await refresh(
+            code,
+            active.signal,
+            error instanceof PublicRequestError ? error : undefined,
+          )
         } catch (refreshError) {
           if (!active.signal.aborted) setFormError(failureMessage(refreshError))
         }
@@ -387,17 +402,27 @@ function ContinuationBooking({
     <PublicLayout wide>
       <div className="booking-layout">
         <aside className="event-info" aria-label={t('About this event')}>
-          <h1 className="event-title">{event.title}</h1>
+          <h1 className="event-title" dir="auto">
+            {event.title}
+          </h1>
           {event.host && (
             <div className="host-identity">
               <HostAvatar name={event.host.name} image={event.host.image} />
-              <p className="event-host">{event.host.name}</p>
+              <p className="event-host">
+                <bdi>{event.host.name}</bdi>
+              </p>
             </div>
           )}
           <ul className="event-facts">
             <li>{formatDuration(durationMinutes, language)}</li>
             {chosenLocation ? (
-              <li>{chosenLocation.label ?? ui(locationLabel(chosenLocation.kind))}</li>
+              <li>
+                {chosenLocation.label != null ? (
+                  <bdi>{chosenLocation.label}</bdi>
+                ) : (
+                  ui(locationLabel(chosenLocation.kind))
+                )}
+              </li>
             ) : event.location ? (
               <li>{ui(locationLabel(event.location.kind))}</li>
             ) : null}
@@ -463,8 +488,6 @@ function ContinuationBooking({
                   attempt.current = null
                 setDraft((draft) => ({ ...draft, slot: next }))
                 setNotice(null)
-                setFormError(null)
-                setServerErrors({})
               }}
               version={revision}
               focusTitle
@@ -490,7 +513,13 @@ function ContinuationBooking({
                                 })
                               }
                             />
-                            <span>{option.label ?? ui(locationLabel(option.kind))}</span>
+                            <span>
+                              {option.label != null ? (
+                                <bdi>{option.label}</bdi>
+                              ) : (
+                                ui(locationLabel(option.kind))
+                              )}
+                            </span>
                           </label>
                         ))}
                       </div>
@@ -565,7 +594,7 @@ function ContinuationConfirmation({
         </FocusHeading>
         <DetailList
           items={[
-            ['What', booking.title],
+            ['What', <bdi key="event">{booking.title}</bdi>],
             [
               'When',
               <When
@@ -581,7 +610,7 @@ function ContinuationConfirmation({
               <LocationDetails key="where" location={booking.location} cancelled={cancelled} />,
             ],
             ...(booking.assignedHost
-              ? [['Host', booking.assignedHost.name] as [string, string]]
+              ? [['Host', <bdi key="host">{booking.assignedHost.name}</bdi>] as const]
               : []),
           ]}
         />

@@ -116,8 +116,15 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
   })
 
   /** A Berlin-scheduled host in New York with one event type, booked by Ada from Tokyo. */
+  const mixedOptions = ['الخطة (Pro)', '中文', 'עברית (Team)']
+
   async function booked(
-    options: { guests?: boolean; now?: Temporal.Instant; start?: Temporal.Instant } = {},
+    options: {
+      guests?: boolean
+      now?: Temporal.Instant
+      start?: Temporal.Instant
+      mixedAnswers?: boolean
+    } = {},
   ) {
     const host = await f.host({ name: 'Grace Hopper', timeZone: 'America/New_York' })
     await f.schedule(host.userId)
@@ -129,6 +136,17 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
       location: { kind: 'link', url: 'https://meet.example.com/abc' },
       questions: [
         { id: 'topic', label: 'What should we talk about?', type: 'long_text', required: false },
+        ...(options.mixedAnswers
+          ? [
+              {
+                id: 'plans',
+                label: 'Plans',
+                type: 'multi_select',
+                required: false,
+                options: mixedOptions,
+              },
+            ]
+          : []),
       ],
     })
     const result = await createPublicBooking(
@@ -139,7 +157,10 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
         start: options.start ?? instant(START),
         invitee: { name: 'Ada Lovelace', email: 'ada@example.com', timeZone: 'Asia/Tokyo' },
         guests: options.guests ? [{ name: 'Charles Babbage', email: 'charles@example.com' }] : [],
-        responses: { topic: 'Engines,\nanalytical ones.' },
+        responses: {
+          topic: 'Engines,\nanalytical ones.',
+          ...(options.mixedAnswers && { plans: mixedOptions }),
+        },
       },
     )
     const hostEmail = (
@@ -243,7 +264,7 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
     const moved = await rescheduleManagedBooking(ctx, apiToken, {
       start: instant('2026-11-03T13:00:00Z'),
     })
-    const assertReady = (method: 'REQUEST' | 'CANCEL', sequence: number) => {
+    const assertLocation = (method: 'REQUEST' | 'CANCEL', sequence: number) => {
       expect(sent.map((message) => message.to)).toEqual([
         hostEmail,
         'ada@example.com',
@@ -252,20 +273,18 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
       for (const message of sent) {
         expect(message.sensitive).toBe(true)
         expect(message.text).toContain('Microsoft Teams')
-        if (message.to === 'charles@example.com') {
+        const calendar = invitation(message)
+        expect(calendar).toMatchObject({ method, uid: `${bookingId}@hourmere`, sequence })
+        if (method === 'CANCEL' || message.to === 'charles@example.com') {
           expect(message.text).not.toContain(url)
           expect(message.html).not.toContain(url)
-          const calendar = invitation(message)
           expect(calendar?.location).toBe('Microsoft Teams')
           expect(calendar?.description ?? '').not.toContain(url)
           continue
         }
         expect(message.text).toContain(url)
         expect(message.html).toContain(url)
-        expect(invitation(message)).toMatchObject({
-          method,
-          uid: `${bookingId}@hourmere`,
-          sequence,
+        expect(calendar).toMatchObject({
           location: url,
           description: expect.stringContaining(url),
         })
@@ -273,15 +292,50 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
       sent.length = 0
     }
     await sendBookingNotification(config, moved.booking.id, 'rescheduled')
-    assertReady('REQUEST', 1)
+    assertLocation('REQUEST', 1)
     await sendBookingNotification(config, moved.booking.id, 'rescheduled')
     expect(sent).toHaveLength(0)
 
     await cancelManagedBooking(ctx, moved.manageToken as string, {})
     await sendBookingNotification(config, moved.booking.id, 'cancelled')
-    assertReady('CANCEL', 2)
+    assertLocation('CANCEL', 2)
     await sendBookingNotification(config, moved.booking.id, 'cancelled')
     expect(sent).toHaveLength(0)
+  })
+
+  it('ignores a ready Teams writeback target whose owner is not a booking host', async () => {
+    const { bookingId, apiToken, hostId } = await booked()
+    const { userId: otherId } = await f.host()
+    await db
+      .updateTable('bookings')
+      .set({ location: JSON.stringify({ kind: 'microsoft_teams' }) })
+      .where('id', '=', bookingId)
+      .execute()
+    const target = async (userId: string, url: string) => {
+      const { calendarId } = await f.calendarBusy(userId, [], { checkConflicts: false, now: NOW })
+      await db
+        .insertInto('booking_calendar_targets')
+        .values({
+          root_booking_id: bookingId,
+          user_id: userId,
+          calendar_id: calendarId,
+          microsoft_writeback: JSON.stringify({
+            status: 'succeeded',
+            teamsStatus: 'ready',
+            teamsJoinUrl: url,
+            attempts: 1,
+          }),
+        })
+        .execute()
+    }
+    await target(otherId, 'https://teams.microsoft.com/l/meetup-join/stale-target/0')
+    const stale = await getManagedBooking(ctx, apiToken)
+    expect(stale.location).toEqual({ kind: 'microsoft_teams', status: 'join_url_pending' })
+
+    const url = 'https://teams.microsoft.com/l/meetup-join/current-host/0'
+    await target(hostId, url)
+    const current = await getManagedBooking(ctx, apiToken)
+    expect(current.location).toEqual({ kind: 'microsoft_teams', status: 'ready', url })
   })
 
   it.each([
@@ -582,7 +636,7 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
   })
 
   it('confirms to the host, the invitee and guests, each in their own time zone', async () => {
-    const { bookingId, hostEmail } = await booked({ guests: true })
+    const { bookingId, hostEmail } = await booked({ guests: true, mixedAnswers: true })
     const { mailer, sent } = testMailer()
     await sendBookingNotification(deps(mailer), bookingId, 'confirmed')
 
@@ -605,6 +659,10 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
     expect(toHost?.text).toContain('Invitee: Ada Lovelace <ada@example.com>')
     expect(toHost?.text).toContain('Guests: Charles Babbage <charles@example.com>')
     expect(toHost?.text).toContain('What should we talk about?\n  Engines,\n  analytical ones.')
+    expect(toHost?.text).toContain(`Plans\n  ${mixedOptions.join(', ')}`)
+    expect(toHost?.html).toContain(mixedOptions.map((option) => `<bdi>${option}</bdi>`).join(', '))
+    expect(toInvitee?.html).not.toContain(mixedOptions[0])
+    expect(toGuest?.html).not.toContain(mixedOptions[0])
     expect(toHost?.text).not.toContain('token=')
 
     for (const m of sent) {

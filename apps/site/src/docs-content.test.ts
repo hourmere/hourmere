@@ -318,6 +318,20 @@ describe('launch documentation disclosures', () => {
   })
 })
 
+describe('PWA installation documentation', () => {
+  it('distinguishes the proposed Web Push pilot from current availability', () => {
+    const assessment = read(`${siteDocs}/install-app.md`).split('\n## Web Push assessment\n')[1]
+    const limitations = read(`${siteDocs}/index.md`).split('\n## Known limitations\n')[1]
+
+    expect(prose(assessment ?? '')).toContain(
+      'Hourmere does not send Web Push notifications or request notification permission.',
+    )
+    expect(limitations).toContain(
+      'Hourmere does not send Web Push notifications. The [Web Push assessment](/docs/install-app#web-push-assessment)',
+    )
+  })
+})
+
 describe('Google self-hosting guidance', () => {
   const paths = [
     `${siteDocs}/google-calendar.md`,
@@ -651,15 +665,15 @@ describe('complete public documentation', () => {
     }
   })
 
-  it('publishes the routing guides with instructions for enabling routing', () => {
+  it('publishes the routing guides with the default and opt-out instructions', () => {
     const routingPages = pages.filter(({ path }) => isRoutingName(path))
     expect(routingPages.map(({ path }) => path)).toEqual(
       expect.arrayContaining(['routing-forms.md', 'routing-forms-api.md']),
     )
     for (const { path, source, draft } of routingPages) {
       expect(draft, path).toBe(false)
-      expect(source, path).toContain('Routing forms are off by default.')
-      expect(normalize(source), path).toMatch(/`ROUTING_FORMS_ENABLED=true`.*?restart the server/)
+      expect(source, path).toContain('Routing forms are on by default.')
+      expect(normalize(source), path).toMatch(/`ROUTING_FORMS_ENABLED=false`.*?restart the server/)
     }
   })
 

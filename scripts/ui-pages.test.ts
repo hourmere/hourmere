@@ -274,6 +274,15 @@ it('covers every requested real page and limits en-GB to the booking page', () =
     'scim-mapping-approval',
     'scim-mapping-denial',
     'scim-mapping-applied',
+    'webhooks-list',
+    'webhooks-create',
+    'webhooks-edit',
+    'webhooks-rotate-confirm',
+    'webhooks-delete-confirm',
+    'webhooks-secret',
+    'webhook-delivery-history',
+    'webhook-delivery-history-empty',
+    'webhook-delivery-history-invalid-cursor',
     'host',
     'booking',
     'booking-form',
@@ -287,6 +296,7 @@ it('covers every requested real page and limits en-GB to the booking page', () =
     'sign-in',
     'oauth-consent',
     'event-types',
+    'admin-account-menu',
     'event-type-editor',
     'event-type-editor-expanded',
     'availability-editor',
@@ -300,6 +310,7 @@ it('covers every requested real page and limits en-GB to the booking page', () =
     'calendars',
     'conferences',
     'api-keys',
+    'admin-integrations',
     'connected-apps',
     'settings',
     'not-found',
@@ -399,6 +410,7 @@ it('masks private DOM values and links, including values absent from HTML attrib
 
 const dataSource = readFileSync('tools/e2e/audit-data.ts', 'utf8')
 const pagesSource = readFileSync('tools/e2e/audit-pages.ts', 'utf8')
+const accountMenuUrl = pathToFileURL(resolve('tools/e2e/account-menu.ts')).href
 const routingAuditUrl = pathToFileURL(resolve('tools/e2e/routing-form-audit.ts')).href
 const routingManagerAuditUrl = pathToFileURL(
   resolve('tools/e2e/routing-form-manager-audit.ts'),
@@ -414,6 +426,7 @@ const ssoDelegationAuditUrl = pathToFileURL(resolve('tools/e2e/sso-delegation-au
 const ssoMemberAuditUrl = pathToFileURL(resolve('tools/e2e/sso-member-audit.ts')).href
 const ssoRecoveryAuditUrl = pathToFileURL(resolve('tools/e2e/sso-recovery-audit.ts')).href
 const scimMappingAuditUrl = pathToFileURL(resolve('tools/e2e/scim-mapping-audit.ts')).href
+const webhookAuditUrl = pathToFileURL(resolve('tools/e2e/webhook-audit.ts')).href
 const visualSource = readFileSync('tools/e2e/specs/visual.spec.ts', 'utf8')
 const fixtureSource = readFileSync('tools/e2e/fixtures.ts', 'utf8')
 const shellSource = readFileSync('apps/web/src/components/AppShell.tsx', 'utf8')
@@ -482,6 +495,7 @@ function sourceCopyResult(
   writeFileSync(
     join(directory, 'audit-pages.ts'),
     pages
+      .replace("'./account-menu.ts'", JSON.stringify(accountMenuUrl))
       .replace("'./routing-form-audit.ts'", JSON.stringify(routingAuditUrl))
       .replace("'./routing-form-manager-audit.ts'", JSON.stringify(routingManagerAuditUrl))
       .replace("'./host-meeting-poll-audit.ts'", JSON.stringify(hostPollAuditUrl))
@@ -492,7 +506,8 @@ function sourceCopyResult(
       .replace("'./sso-delegation-audit.ts'", JSON.stringify(ssoDelegationAuditUrl))
       .replace("'./sso-member-audit.ts'", JSON.stringify(ssoMemberAuditUrl))
       .replace("'./sso-recovery-audit.ts'", JSON.stringify(ssoRecoveryAuditUrl))
-      .replace("'./scim-mapping-audit.ts'", JSON.stringify(scimMappingAuditUrl)),
+      .replace("'./scim-mapping-audit.ts'", JSON.stringify(scimMappingAuditUrl))
+      .replace("'./webhook-audit.ts'", JSON.stringify(webhookAuditUrl)),
   )
   writeFileSync(join(directory, 'visual.spec.ts'), visual)
   writeFileSync(join(directory, 'fixtures.ts'), fixture)
@@ -783,6 +798,8 @@ const expected={
   'oauth-consent':{path:'/oauth/consent',public:false,wait:'Synthetic audit connector'},
   'manage-reschedule':{path:'/booking',public:true,wait:'.reschedule-summary .event-title'},
   'event-type-editor-expanded':{path:'/app/event-types/synthetic-event',public:false,wait:'h1'},
+  'admin-account-menu':{path:'/app/event-types',public:false,wait:'combobox:/^(Interface language|界面语言)$/'},
+  'admin-integrations':{path:'/app/api-keys',public:false,wait:'.sidenav a[href="/app/api-keys"][aria-current="page"]'},
   'bookings-routing-export':{path:'/app/bookings',public:false,wait:'Include routing form answers'},
   'team-bookings':{path:'/app/team/bookings',public:false,space:'team',wait:'.team-bookings-list'},
   'team-booking-detail':{path:'/app/bookings/synthetic-team-booking',public:false,space:'team',wait:'.team-booking-detail'},
@@ -795,6 +812,7 @@ for(const [id,state] of Object.entries(expected)) {
   globalThis.document={querySelectorAll:()=>groups}
   const locator=(selector)=>({
     waitFor:async()=>calls.push(['wait',selector]),
+    isVisible:async()=>true,
     first:()=>locator(selector),
     locator:(child)=>locator(selector+' '+child),
     filter:({hasText}={})=>locator(hasText?selector+' '+hasText:selector),
@@ -825,7 +843,7 @@ for(const [id,state] of Object.entries(expected)) {
   if(id==='manage-reschedule')assert.ok(calls.some(call=>call[0]==='wait'&&call[1]==='.reschedule-summary'),'Missing current booking summary readiness')
   assert.equal(signedIn,!state.public,'Wrong authentication state: '+id)
   assert.equal(space,state.space,'Wrong organization space: '+id)
-  assert.ok(calls.some(call=>call[0]==='wait'&&call[1].includes(state.wait)),'Missing content verification: '+id)
+  assert.ok(calls.some(call=>call[0]==='wait'&&String(call[1]).includes(state.wait)),'Missing content verification: '+id)
   if(id.startsWith('routing-manager-rules')||id.startsWith('routing-manager-publication'))
     assert.equal(new URLSearchParams(query).get('organizationId'),'synthetic-team-org','Editor must be pinned to the team space')
   if(state.preview) {
@@ -848,6 +866,10 @@ for(const [id,state] of Object.entries(expected)) {
   }
   if(id==='team-booking-detail')
     assert.ok(calls.some(call=>call[0]==='press'&&call[1]==='.team-bookings-list button'&&call[2]==='Enter'),'Team booking detail must open with the keyboard')
+  if(id==='admin-account-menu'||id==='admin-integrations') {
+    const disclosure=id==='admin-account-menu'?'Account menu':'Integrations'
+    assert.ok(calls.some(call=>call[0]==='press'&&call[1].includes(disclosure)&&call[2]==='Enter'),'Admin disclosure must open with the keyboard: '+id)
+  }
   if(id==='embedded-booking') {
     assert.equal(new URLSearchParams(query).get('parentOrigin'),app.parentUrl,'Embed must use the owned allowed parent')
     assert.match(new URLSearchParams(query).get('embedId') ?? '',/^[a-zA-Z0-9_-]{16,64}$/,'Embed must provide a valid correlation ID')
@@ -1037,7 +1059,9 @@ describe('source-copy coverage mutations', () => {
 })
 
 function assertIntentionalScrollers(shell: string, keys: string) {
-  expect(shell).toMatch(/<nav\s+className="sidenav"[^>]*>\s*<ul data-layout-scroll="horizontal">/)
+  expect(shell).toMatch(
+    /<nav\s+className="sidenav"[^>]*>\s*<div\s+className="sidenav-primary"[^>]*>\s*<ul\b[^>]*\bdata-layout-scroll="horizontal"/,
+  )
   const examples = keys.match(/<pre\b[^>]*>/g) ?? []
   expect(examples.length).toBeGreaterThanOrEqual(2)
   for (const example of examples) expect(example).toMatch(/\bdata-layout-scroll="horizontal"/)

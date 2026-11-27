@@ -10,10 +10,10 @@ import * as errors from '../api/errors.ts'
 import * as conferenceNotice from '../components/ConferenceNotice.tsx'
 import * as emailHint from '../components/EmailDeliveryHint.tsx'
 import * as zonePicker from '../components/TimeZonePicker.tsx'
+import * as userContent from '../components/UserContent.tsx'
 import * as format from '../format.ts'
 import * as hooks from '../hooks.ts'
 import * as duration from '../i18n/duration.ts'
-import * as formatting from '../i18n/formatting.ts'
 import * as runtime from '../i18n/runtime.tsx'
 import * as translate from '../i18n/translate.ts'
 import { compileSourceCopy } from '../test/compile-source-copy.ts'
@@ -80,10 +80,10 @@ function pageCopy(text = source): typeof OneTimeBookingPage {
       '../components/ConferenceNotice.tsx': conferenceNotice,
       '../components/EmailDeliveryHint.tsx': emailHint,
       '../components/TimeZonePicker.tsx': zonePicker,
+      '../components/UserContent.tsx': userContent,
       '../format.ts': format,
       '../hooks.ts': hooks,
       '../i18n/duration.ts': duration,
-      '../i18n/formatting.ts': formatting,
       '../i18n/runtime.tsx': runtime,
       '../i18n/translate.ts': translate,
       './AddToCalendar.tsx': calendar,
@@ -378,10 +378,6 @@ describe('one-time public protection source-copy controls', () => {
       expect(error instanceof Error).toBe(true)
       expect(error instanceof Error && error.message.includes(TOKEN)).toBe(false)
     }
-    const before = apiSource.slice(
-      apiSource.indexOf('    const safeError ='),
-      apiSource.indexOf('    throw new PublicRequestError'),
-    )
-    await killed(assertion, before, '    const safeError = error\n', apiSource)
+    await killed(assertion, 'privateResponse ? privateErrorBody(error) : error', 'error', apiSource)
   })
 })

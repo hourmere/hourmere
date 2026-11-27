@@ -3,6 +3,9 @@ import userEvent from '@testing-library/user-event'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import type { EventType } from '../../api/resources.ts'
 import { chooseLanguage } from '../../i18n/store.ts'
+import { BookingsPage, EventTypesPage, SettingsPage } from '../../lazy-pages.tsx'
+import { openAccountMenu } from '../../test/account-menu.ts'
+import { resolveEventTypeEditor } from '../../test/event-type-editor.ts'
 import {
   emptyAccount,
   fakeApi,
@@ -23,17 +26,12 @@ import {
   SCHEDULE_ID,
   schedule,
 } from '../../test/fixtures.ts'
+import { resolveLazy } from '../../test/resolve-lazy.ts'
 import { LEAVE_WITH_UNSAVED_CHANGES } from '../../unsaved-changes.tsx'
 
-// Warm the exercised lazy modules before UI assertions: this suite tests editor behavior,
-// not cold module transformation time on a shared test runner.
 beforeAll(async () => {
-  await Promise.all([
-    import('./EventTypeEditor.tsx'),
-    import('./EventTypes.tsx'),
-    import('../bookings/Bookings.tsx'),
-    import('../Settings.tsx'),
-  ])
+  await resolveEventTypeEditor()
+  await resolveLazy(EventTypesPage, BookingsPage, SettingsPage)
 })
 
 const location = () => screen.getByTestId('location').textContent
@@ -753,6 +751,8 @@ describe('editing an event type', () => {
     const api = eventTypeServer([saved])
     await openExisting()
     expect(field('Title').value).toBe('Intro call')
+    expect(field('Title').dir).toBe('auto')
+    expect(field(/Description/).dir).toBe('auto')
     expect(field(/Weekly limit/).value).toBe('5')
     expect(field(/Monthly limit/).value).toBe('10')
     expect(field('Address').value).toBe('Unter den Linden 1')
@@ -763,7 +763,11 @@ describe('editing an event type', () => {
     expect(screen.getByLabelText<HTMLSelectElement>('Schedule').value).toBe(SCHEDULE_ID)
 
     await user.clear(field('Title'))
-    await user.type(field('Title'), 'First call')
+    const title = 'مراجعة (QA)'
+    const description = 'مرحبًا!\n\nBring questions.'
+    await user.type(field('Title'), title)
+    await user.clear(field(/Description/))
+    await user.type(field(/Description/), description.replaceAll('\n', '{Enter}'))
     // Editing the title of a saved event type leaves its link alone.
     expect(field('Booking link').value).toBe('intro-call')
     expect(screen.getByText('Unsaved changes')).toBeDefined()
@@ -771,13 +775,14 @@ describe('editing an event type', () => {
     await user.click(screen.getByRole('button', { name: 'Save changes' }))
 
     expect(await screen.findByText('Saved.')).toBeDefined()
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Edit “First call”')
+    const heading = screen.getByRole('heading', { level: 1, name: `Edit “${title}”` })
+    expect(heading.querySelector('bdi')?.textContent).toBe(title)
     expect(api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`).map((c) => c.body)).toEqual([
       {
         smsRemindersEnabled: false,
-        title: 'First call',
+        title,
         slug: 'intro-call',
-        description: 'A first call.',
+        description,
         slotStepMinutes: null,
         // Saved questions keep their ids, so earlier answers stay attached.
         questions: [
@@ -1223,6 +1228,7 @@ describe('the unsaved-changes guard', () => {
     })
     await openExisting()
     await user.type(field('Title'), '!')
+    await openAccountMenu(user)
     await user.click(screen.getByRole('button', { name: 'Sign out' }))
     expect(confirm).toHaveBeenCalledWith(LEAVE_WITH_UNSAVED_CHANGES)
     expect(api.to('POST /api/auth/sign-out')).toHaveLength(0)
@@ -1367,6 +1373,7 @@ describe('answers that arrive after leaving or editing on', () => {
     })
     await openExisting()
     await user.type(field('Title'), ' (new)')
+    await openAccountMenu(user)
     await user.click(screen.getByRole('button', { name: 'Sign out' }))
     expect((await screen.findByRole('alert')).textContent).toMatch(/Could not sign out/)
     expect(confirm).toHaveBeenCalledTimes(1)

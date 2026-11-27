@@ -131,9 +131,8 @@ function managedProjection(change?: Change): typeof getManagedBookingDetails {
   )
   return new Function(
     'getPublicBranding',
-    'resolvedBookingHosts',
-    'getManagedBooking',
-    'managedLinkRescheduleRequest',
+    'prepareManagedBookingRead',
+    'managedLinkRescheduleRequestState',
     'changeDeadline',
     'cutoffsOf',
     'effectiveRescheduleCutoff',
@@ -141,14 +140,13 @@ function managedProjection(change?: Change): typeof getManagedBookingDetails {
     `${copy}; return getManagedBookingDetails`,
   )(
     async () => undefined,
-    () => ({ as: () => 'booking_hosts' }),
-    async () => ({
+    async () => async () => ({
       id: 'synthetic-booking',
       eventTypeId: 'synthetic-event',
       start: '2030-01-01T10:00:00Z',
     }),
     // A token from no reschedule request email.
-    async () => undefined,
+    () => undefined,
     changeDeadline,
     cutoffsOf,
     effectiveRescheduleCutoff,
@@ -183,11 +181,9 @@ function verifyPublic(project: ReturnType<typeof publicProjection>) {
 
 async function verifyManaged(project: typeof getManagedBookingDetails) {
   const query = {
-    select: () => query,
-    innerJoin: () => query,
     leftJoin: () => query,
+    select: () => query,
     where: () => query,
-    orderBy: () => query,
     executeTakeFirst: async () => ({
       title: 'Call',
       duration_minutes: 30,
@@ -196,10 +192,18 @@ async function verifyManaged(project: typeof getManagedBookingDetails) {
     executeTakeFirstOrThrow: async () => ({
       reschedule_cutoff_minutes: null,
       cancel_cutoff_minutes: null,
+      payment_hold_expires_at: null,
+      current_booking_id: null,
+      hosts: [{ name: 'Ada', handle: 'ada' }],
+      link_request: null,
     }),
-    execute: async () => [{ name: 'Ada', handle: 'ada' }],
   }
-  const db = { selectFrom: () => query } as unknown as Db
+  const transaction = {
+    setIsolationLevel: () => transaction,
+    setAccessMode: () => transaction,
+    execute: (read: (trx: Db) => Promise<unknown>) => read(db),
+  }
+  const db = { selectFrom: () => query, transaction: () => transaction } as unknown as Db
   expect(await project({ db, now: () => Temporal.Now.instant() }, 'synthetic-token')).toMatchObject(
     {
       eventType: { durationMinutes: 30, allowedDurationsMinutes: [5, 30, 60] },

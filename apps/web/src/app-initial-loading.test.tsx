@@ -3,53 +3,14 @@ import { MemoryRouter } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import { App } from './App.tsx'
 
-vi.mock('./lazy-pages.tsx', () => {
+vi.mock(import('./lazy-pages.tsx'), async (importOriginal) => {
   const pending = new Promise(() => {})
   const Pending = () => {
     throw pending
   }
-  const names = [
-    'AcceptInvitationPage',
-    'AnalyticsPage',
-    'ApiKeysPage',
-    'AppShell',
-    'AuditLogPage',
-    'AvailabilityPage',
-    'BookingDetailPage',
-    'BookingPage',
-    'BookingsPage',
-    'CalendarsPage',
-    'ConferencesPage',
-    'ConnectedAppsPage',
-    'CreateTeamPage',
-    'EditRoutingFormPage',
-    'EmbeddedBookingPage',
-    'EmbeddedTeamBookingPage',
-    'EventTypeEditorPage',
-    'EventTypesPage',
-    'HostMeetingPollRoute',
-    'HostPage',
-    'MailboxProofPage',
-    'ManageBookingPage',
-    'McpAuthorizePage',
-    'MeetingPollCreatePage',
-    'MeetingPollPage',
-    'MeetingPollsPage',
-    'NewRoutingFormPage',
-    'OneTimeBookingPage',
-    'RequireRoutingForms',
-    'RequireSession',
-    'RoutingFormPage',
-    'RoutingFormsPage',
-    'ScheduleEditorPage',
-    'SessionLayout',
-    'SettingsPage',
-    'SignInPage',
-    'TeamBookingPage',
-    'TeamBookingsPage',
-    'TroubleshootPage',
-  ]
-  return Object.fromEntries(names.map((name) => [name, Pending]))
+  // Importing the registry defines the lazy components without loading their page chunks.
+  const pages = await importOriginal()
+  return Object.fromEntries(Object.keys(pages).map((name) => [name, Pending]))
 })
 
 describe('before route chunks are available', () => {
@@ -77,6 +38,7 @@ describe('before route chunks are available', () => {
 
   it.each([
     '/ada',
+    '/team/Alpha',
     '/app/mailbox-proof',
     '/app/mailbox-proof/',
     '/book/pAtH_0123456789abcdefghijklmnopqrstuvwxyzAB',

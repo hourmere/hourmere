@@ -22,9 +22,16 @@ import {
 } from './team-sso.ts'
 import { nativeSsoRequired } from './team-sso-native.ts'
 
+export interface InvitationEmailBudgetRequest {
+  /** A SCIM generation spends the organization's provisioning budget. */
+  userId: string | null
+  organizationId: string
+  email: string
+}
+
 export type ReserveInvitationEmail = (
   trx: Db,
-  input: { userId: string; organizationId: string; email: string },
+  input: InvitationEmailBudgetRequest,
   now: Date,
 ) => Promise<boolean>
 
@@ -281,14 +288,15 @@ export function invitationRefusalCode(error: unknown): string | undefined {
 }
 
 /** Who issues an invitation inside admitInvitation. */
-export interface InvitationIssuer {
-  /** The inviter a new invitation records and the administrator authorizing its generation. */
+export type InvitationIssuer = {
+  /** The member recorded in Better Auth and used for the delivery authorization checks. */
   userId: string
-  /** Attribution of the membership.invited event a new invitation records. */
-  audit: Pick<AuditEvent, 'actor' | 'credential'>
   /** Throws once the issuer's own authority has lapsed at this database time (lock waits). */
   current?: ((now: Date) => void) | undefined
-}
+} & (
+  | { audit: Pick<AuditEvent, 'actor' | 'credential'>; scimConnectionId?: never }
+  | { audit?: never; scimConnectionId: string }
+)
 
 /** A validated creation, or a resend of an explicit invitation and generation. */
 export interface InvitationAdmission {
@@ -316,6 +324,7 @@ export async function admitInvitation(
   options: { reserve?: ReserveInvitationEmail | undefined } = {},
 ) {
   const { organizationId, email, resend, requestId } = input
+  const scimIssued = actor.scimConnectionId !== undefined
   const eligibilityDenial = (
     invitation: Parameters<typeof invitationEligibilityDenial>[0],
     now: Date,
@@ -435,10 +444,8 @@ export async function admitInvitation(
       .forUpdate()
       .execute()
   }
-  if (
-    options.reserve &&
-    !(await options.reserve(trx, { userId: actor.userId, organizationId, email }, now))
-  )
+  const budget = { userId: scimIssued ? null : actor.userId, organizationId, email }
+  if (options.reserve && !(await options.reserve(trx, budget, now)))
     throw new APIError('TOO_MANY_REQUESTS', {
       code: 'INVITATION_RATE_LIMITED',
       message: 'Invitation requests are temporarily limited. Try again later.',
@@ -518,7 +525,10 @@ export async function admitInvitation(
       .executeTakeFirstOrThrow()
     await writeAuditEvent(trx, {
       organizationId,
-      ...actor.audit,
+      ...(actor.audit ?? {
+        actor: { type: 'scim_connection', id: actor.scimConnectionId },
+        credential: { type: 'none' },
+      }),
       action: 'membership.invited',
       targetType: 'invitation',
       targetId: invitation.id,
@@ -537,6 +547,7 @@ export async function admitInvitation(
   }
   const values = {
     authorized_by_user_id: actor.userId,
+    scim_issued: scimIssued,
     generation: (delivery?.generation ?? (resend && !replacingExpired ? 1 : 0)) + 1,
     state: 'queued',
     attempts: 0,

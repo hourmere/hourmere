@@ -272,7 +272,8 @@ an invalid-input error when enforcing the same schema validation as the transpor
 
 An optional `field` string identifies a stable validation field name. Known values are
 `successRedirect`, `successRedirect.url`, `successRedirect.parameters`,
-`successRedirect.includeInviteePersonalData` and `successRedirect.allowEmbedParent`.
+`successRedirect.includeInviteePersonalData`, `successRedirect.allowEmbedParent` and
+`responses.<questionId>` for a rejected routed booking answer.
 New values may appear within `/api/v1`; clients must ignore unknown values and fall back
 to the error code and optional message. The published schema is an open string, not a
 closed enum. The field may be absent, including when talking to older servers.
@@ -619,6 +620,9 @@ the same context protection; the existing host booking-ID routes still require t
 to be a host.
 
 ### Team roles
+
+Custom roles are unavailable. The [proposed custom roles design](https://github.com/hourmere/hourmere/blob/main/docs/custom-roles.md)
+covers the planned catalogue and compatibility with existing credentials.
 
 Team invitations default to `member`; owners and admins may invite only that role,
 including when resending. Historical invitations with an elevated or custom stored role
@@ -1343,7 +1347,12 @@ Existing bookings stay reachable through their manage links, which do not involv
 Event-type `location` and `locations` accept the additive kind `microsoft_teams`.
 Use `{"kind":"microsoft_teams"}` for `location` and add an `id` for each option in
 `locations`. Only a single assigned host with an active Microsoft writeback destination
-can use it. The same configuration and existing permissions apply in REST, MCP and CLI.
+can use it. Enabling it, changing the assigned host, reactivating it, or duplicating the
+event type requires the assigned host's signed-in session and existing edit permission.
+REST returns `403 microsoft_teams_host_session_required` if that session is missing.
+MCP and CLI return the same error code. With Microsoft Calendar disabled on the instance,
+Teams slot and booking requests return `409 location_unavailable` in REST and the same
+domain error in MCP and CLI.
 
 Public event metadata exposes the kind and normal option metadata. Authorized booking
 responses may add `location.status` and `location.url` for Teams. Known statuses are

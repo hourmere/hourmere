@@ -50,9 +50,12 @@ export const routingFormPath = (id: string, organizationId: string) =>
 export const publicPageUrl = (handle: string, slug: string) =>
   `${window.location.origin}/${encodeURIComponent(handle)}/${encodeURIComponent(slug)}`
 
-/** A single-host team event in a separate namespace from personal handles. */
+/** A team directory and its booking pages use the exact-case team slug. */
+export const publicTeamHomePath = (teamSlug: string) => `/team/${encodeURIComponent(teamSlug)}`
+export const publicTeamEventPath = (teamSlug: string, slug: string) =>
+  `${publicTeamHomePath(teamSlug)}/${encodeURIComponent(slug)}`
 export const publicTeamPageUrl = (teamSlug: string, slug: string) =>
-  `${window.location.origin}/team/${encodeURIComponent(teamSlug)}/${encodeURIComponent(slug)}`
+  `${window.location.origin}${publicTeamEventPath(teamSlug, slug)}`
 
 export const TEAM_LINK_SLUG_HINT =
   'Choose a non-reserved team slug of 1–64 ASCII letters, digits or hyphens. Start and end with a letter or digit. New slugs are saved in lowercase.'

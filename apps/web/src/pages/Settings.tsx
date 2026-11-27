@@ -34,6 +34,7 @@ import { SsoRecoveryAcceptance } from './sso/SsoRecoveryEnrollment.tsx'
 import { ssoStepUpProviders } from './sso/setup.ts'
 import { TeamDetailsSettings } from './TeamDetailsSettings.tsx'
 import { TeamMembers } from './TeamMembers.tsx'
+import { WebhookIntegration } from './webhooks/WebhookIntegration.tsx'
 
 export function SettingsPage() {
   const { t, ui } = useI18n()
@@ -194,12 +195,14 @@ export function SettingsPage() {
         <DisplayNameForm name={me.user.name} />
         <dl className="details">
           <dt>{t('Email')}</dt>
-          <dd className="user-content">
+          <dd className="user-content" dir="ltr">
             <BreakableText>{me.user.email}</BreakableText>
           </dd>
           <dt>{t('Organization')}</dt>
           <dd className="user-content">
-            <BreakableText>{me.organization.name}</BreakableText>
+            <bdi>
+              <BreakableText>{me.organization.name}</BreakableText>
+            </bdi>
             {me.organization.personal && <span className="muted">{t(' (personal)')}</span>}
           </dd>
           {!personal && <TeamRole role={role} reload={reloadRole} createdMember={createdMember} />}
@@ -228,7 +231,13 @@ export function SettingsPage() {
               : null
         }
       />
-      <SlackIntegrations key={`slack-${organizationId}`} organizationId={organizationId} />
+      <section className="panel slack-integrations" aria-labelledby="integrations-heading">
+        <h2 id="integrations-heading">{t('Integrations')}</h2>
+        <div className="stack">
+          <SlackIntegrations key={organizationId} organizationId={organizationId} />
+          <WebhookIntegration key={`${userId}:${organizationId}:${location.key}`} />
+        </div>
+      </section>
       {!personal && me.principal.kind === 'session' && (
         <ProvisioningTokens
           organizationId={organizationId}
@@ -423,6 +432,7 @@ function DisplayNameForm({ name }: { name: string }) {
             <input
               {...props}
               value={draft}
+              dir="auto"
               autoComplete="name"
               maxLength={ACCOUNT.nameMaxLength}
               onChange={(e) => {
@@ -659,7 +669,7 @@ function ProfileForm({ profile, me }: { profile: Profile | null; me: Me }) {
           label={t('Notification language')}
           error={errors.locale}
           hint={t(
-            'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. The admin interface also uses this language until you choose an interface language in the top bar. After that, the two languages are independent.',
+            'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. The admin interface also uses this language until you choose an interface language in the account menu. After that, the two languages are independent.',
           )}
         >
           {(props) => (

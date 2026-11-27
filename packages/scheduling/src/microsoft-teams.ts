@@ -67,13 +67,22 @@ export async function hasMicrosoftTeamsDestination(
   return isMicrosoftTeamsDestination(destination)
 }
 
+const locationUnavailable = () =>
+  new DomainError('conflict', 'location_unavailable', 'The chosen location is unavailable.')
+
+export function requireMicrosoftTeamsEnabled(enabled: boolean | undefined) {
+  if (!enabled) throw locationUnavailable()
+}
+
 export async function requireMicrosoftTeamsHost(
   db: Db,
   mode: string,
   hosts: readonly string[],
   eventTypeId: string,
+  enabled: boolean | undefined,
   lock = false,
 ) {
+  requireMicrosoftTeamsEnabled(enabled)
   const [host] = hosts
   if (
     mode !== 'individual' ||
@@ -81,5 +90,5 @@ export async function requireMicrosoftTeamsHost(
     hosts.length !== 1 ||
     !(await hasMicrosoftTeamsDestination(db, host, eventTypeId, lock))
   )
-    throw new DomainError('conflict', 'location_unavailable', 'The chosen location is unavailable.')
+    throw locationUnavailable()
 }

@@ -6,7 +6,7 @@ import { ConfirmAction } from '../../components/ConfirmAction.tsx'
 import { OrganizationContextConflict } from '../../components/OrganizationContextConflict.tsx'
 import { useLoad } from '../../hooks.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
-import { answerText } from './booking-format.ts'
+import { BookingAnswer } from './BookingUserContent.tsx'
 
 /** Private host/team-manager panel. Never mounted on invitee or public pages. */
 export function GroupOccurrenceAttendees({
@@ -22,7 +22,7 @@ export function GroupOccurrenceAttendees({
   disabled?: boolean
   onCancelled?: () => void
 }) {
-  const { t, locale } = useI18n()
+  const { t } = useI18n()
   const heading = useId()
   const [conflict, setConflict] = useState<unknown>(null)
   const [status, setStatus] = useState<'active' | 'cancelled' | 'all'>('active')
@@ -112,10 +112,10 @@ export function GroupOccurrenceAttendees({
           <ul className="plain-list stack">
             {state.data.attendees.map((person) => (
               <li key={person.bookingId} className="user-content">
-                <h3>
+                <h3 dir="auto">
                   <BreakableText>{person.name}</BreakableText>
                 </h3>
-                <p>
+                <p dir="ltr">
                   <BreakableText>{person.email}</BreakableText>
                 </p>
                 <p>
@@ -123,16 +123,17 @@ export function GroupOccurrenceAttendees({
                   {person.noShowMarkedAt && <> · {t('No-show')}</>}
                 </p>
                 <dl className="details details-stacked">
-                  {Object.entries(person.responses).map(([question, answer]) => (
-                    <div key={question} className="detail-pair">
-                      <dt>{questions.find((item) => item.id === question)?.label ?? question}</dt>
-                      <dd className="multiline">
-                        {typeof answer === 'boolean'
-                          ? t(answer ? 'Yes' : 'No')
-                          : answerText(answer, locale)}
-                      </dd>
-                    </div>
-                  ))}
+                  {Object.entries(person.responses).map(([question, answer]) => {
+                    const label = questions.find((item) => item.id === question)?.label
+                    return (
+                      <div key={question} className="detail-pair">
+                        <dt dir={label === undefined ? undefined : 'auto'}>{label ?? question}</dt>
+                        <dd className="multiline">
+                          <BookingAnswer value={answer} />
+                        </dd>
+                      </div>
+                    )
+                  })}
                 </dl>
                 {Object.keys(person.responses).length === 0 && (
                   <p className="muted">{t('No answers to extra questions.')}</p>

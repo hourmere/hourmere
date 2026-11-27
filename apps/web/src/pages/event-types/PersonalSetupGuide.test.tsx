@@ -577,7 +577,7 @@ describe('personal booking page setup', () => {
 
   it('keeps the loaded guide and list after an offline refresh and retries inline', async () => {
     let online = true
-    account({
+    const api = account({
       schedules: [],
       routes: {
         'GET /api/v1/schedules': () => {
@@ -592,22 +592,25 @@ describe('personal booking page setup', () => {
     const guide = await openGuide()
     await userEvent.click(within(guide).getByRole('button', { name: USE_DEFAULT }))
     const confirmationError = await within(guide).findByRole('alert')
+    const retry = within(confirmationError).getByRole('button', { name: 'Refresh setup status' })
     online = false
-    await userEvent.click(
-      within(confirmationError).getByRole('button', { name: 'Refresh setup status' }),
-    )
+    await userEvent.click(retry)
     const failure = await screen.findByText(/Could not refresh setup status\./)
     expect(screen.getByRole('region', { name: GUIDE })).toBe(guide)
     expect(screen.getByRole('rowheader', { name: 'Intro call' })).toBeDefined()
     expect(screen.queryByText(/Could not load your event types\./)).toBeNull()
-    const refreshError = failure.closest('[role="alert"]') as HTMLElement
+    expect(confirmationError.textContent).toContain('Could not confirm your default availability.')
+    expect(failure.closest('[role="alert"]')).toBe(confirmationError)
+    expect(screen.getAllByRole('button', { name: 'Refresh setup status' })).toEqual([retry])
+    expect(document.activeElement).toBe(retry)
     online = true
-    await userEvent.click(
-      within(refreshError).getByRole('button', { name: 'Refresh setup status' }),
-    )
+    await userEvent.click(retry)
     await waitFor(() => expect(screen.queryByText(/Could not refresh setup status\./)).toBeNull())
     expect(screen.getByRole('region', { name: GUIDE })).toBe(guide)
     expect(screen.getByRole('rowheader', { name: 'Intro call' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Refresh setup status' })).toBe(retry)
+    expect(document.activeElement).toBe(retry)
+    expect(api.to('POST /api/v1/schedules/default')).toHaveLength(1)
   })
 
   it('lets the host skip the optional calendar step while keeping the required missing step visible', async () => {

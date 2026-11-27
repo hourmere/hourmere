@@ -7,12 +7,14 @@ export function openTimeSnippetTools({
   db,
   automaticMeet,
   automaticZoom,
+  microsoftCalendarEnabled,
   publicUrl = 'http://localhost',
   slotSnippetsEnabled = false,
 }: {
   db: Db
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
+  microsoftCalendarEnabled?: boolean | undefined
   publicUrl?: string | undefined
   slotSnippetsEnabled?: boolean | undefined
 }): Tool[] {
@@ -36,6 +38,7 @@ export function openTimeSnippetTools({
             db,
             automaticMeet,
             automaticZoom,
+            microsoftCalendarEnabled,
             principal: call.caller,
             ...(call.caller.scimResourcesEnabled && { scimResourcesEnabled: true }),
             now: () => Temporal.Now.instant(),

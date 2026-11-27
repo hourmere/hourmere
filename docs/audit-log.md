@@ -22,7 +22,8 @@ Indexes cover organization plus time, actor, or action, with ID tie breakers.
 
 Actors form a database-checked closed set: `user`, `api_key`, `oauth_client`,
 `system` (job/service name as ID), `scim_token` (a SCIM provisioning token's ID, always with
-credential `none`, because the token is the credential), `external_api_key`,
+credential `none`, because the token is the credential), `scim_connection` (a team's SCIM
+connection ID with credential `none`), `external_api_key`,
 `external_oauth_client`, `external_user` and `anonymous` (the last four without IDs). Credentials are
 `session` (optional session ID), `api_key` (ID and actual scope), `oauth` (client
 and grant IDs), or `none`. Legacy internal calls without an authenticated
@@ -190,11 +191,12 @@ SCIM User creation (`POST /Users`) records
 `scim_user.created` on the new resource ID, attributed to the provisioning token that made the
 request (actor `scim_token`, credential `none`), with empty details: no `userName`, address,
 name or other attribute value is recorded. The invitation it issues records
-`membership.invited` with the same attribution; a create whose claim records no invitation
-(a member's address, or one another pending invitation holds) records only
-`scim_user.created`. Both are written in the transaction that
-creates the entry, its claim and the invitation, so a create that fails or is refused records
-nothing.
+`membership.invited` with actor `scim_connection`, the SCIM connection ID and credential
+`none`. Cancellation of such an invitation when SCIM retires its claim records
+`membership.invitation_cancelled` with the same connection attribution. A create whose claim
+records no invitation (a member's address, or one another pending invitation holds) records
+only `scim_user.created`. Creation writes its events in the transaction that creates the entry,
+its claim and the invitation, so a create that fails or is refused records nothing.
 
 While SCIM provisioning is enabled, accepting the invitation of a pending SCIM User claim
 completes the claim and records `scim_user.claimed` on the resource ID, beside the usual

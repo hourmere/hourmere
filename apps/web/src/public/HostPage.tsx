@@ -1,6 +1,7 @@
 import { brandPalette } from '@hourmere/core/brand-contrast'
 import { type CSSProperties, useCallback } from 'react'
 import { Link, Navigate, useParams } from 'react-router'
+import { UserContentLines } from '../components/UserContent.tsx'
 import { usePageTitle } from '../hooks.ts'
 import { formatDuration } from '../i18n/duration.ts'
 import { useI18n } from '../i18n/runtime.tsx'
@@ -60,7 +61,7 @@ function HostPageContent({ handle }: { handle: string }) {
     <PublicLayout branding={branding}>
       <header className="host-header">
         <HostAvatar name={host.name} image={host.image} />
-        <h1>{host.name}</h1>
+        <h1 dir="auto">{host.name}</h1>
         {eventTypes.length > 0 && (
           <p className="muted">{t('Pick an event to see available times.')}</p>
         )}
@@ -86,16 +87,20 @@ function HostPageContent({ handle }: { handle: string }) {
                 >
                   {et.branding && <BrandLogo branding={et.branding} />}
                   {et.organizationName && (
-                    <span className="event-card-meta">{et.organizationName}</span>
+                    <span className="event-card-meta" dir="auto">
+                      {et.organizationName}
+                    </span>
                   )}
-                  <span className="event-card-title">{et.title}</span>
+                  <span className="event-card-title" dir="auto">
+                    {et.title}
+                  </span>
                   <span className="event-card-meta">
                     {formatDuration(et.durationMinutes, displayLocale)}
                     {et.location && ` · ${ui(locationLabel(et.location.kind))}`}
                   </span>
                   {et.description && (
                     <span className="event-card-description">
-                      {collapseBlankLines(et.description)}
+                      <UserContentLines text={collapseBlankLines(et.description)} />
                     </span>
                   )}
                 </Link>
@@ -106,7 +111,7 @@ function HostPageContent({ handle }: { handle: string }) {
       ) : (
         <div className="empty">
           <p>
-            {host.name} {t('has no events you can book right now.')}
+            <bdi>{host.name}</bdi> {t('has no events you can book right now.')}
           </p>
         </div>
       )}

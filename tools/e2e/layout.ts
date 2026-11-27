@@ -252,8 +252,11 @@ export function resetKeyboardNavigation() {
   window.scrollTo(0, 0)
 }
 
-export async function measureKeyboard(page: Page): Promise<AuditFinding[]> {
-  await page.evaluate(resetKeyboardNavigation)
+export async function measureKeyboard(
+  page: Page,
+  { fromCurrentFocus = false }: { fromCurrentFocus?: boolean } = {},
+): Promise<AuditFinding[]> {
+  if (!fromCurrentFocus) await page.evaluate(resetKeyboardNavigation)
   const findings: AuditFinding[] = [],
     visited = new Set<number>()
   let unfocused = 0
