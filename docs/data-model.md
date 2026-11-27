@@ -171,8 +171,8 @@ Public Checkout remains disabled.
 ## Custom role storage
 
 Migration `0197_custom_role_storage.sql` creates storage for [team custom roles](custom-roles.md).
-The instance master switch and team opt-ins start off. New teams without a policy row
-are off. The master and team epochs form the policy version for custom authority.
+The instance master switch and team opt-ins start off. New teams receive a disabled policy at commit. A missing policy confers no
+custom authority. The master and team epochs form the policy version for custom authority.
 Changing the master epoch leaves the team opt-in intact and invalidates the old version
 for every opted-in team. Fixed-role traffic continues through the existing predicates.
 
@@ -195,9 +195,18 @@ and OAuth grants remain intact. Credential ceiling rows start empty because the
 current role cannot prove a credential's original ceiling. SCIM token associations
 record their separate directory protocol version.
 
-Normal application traffic does not resolve or manage custom roles during this
-storage-only step. To downgrade, use the supported database backup and restore
-procedure. After a future activation, follow the credential revocation and reissue
+Migration `0200_custom_role_membership_lifecycle.sql` fills missing team and member
+rows and refreshes stale role tokens without rewriting native memberships. New
+teams receive a disabled policy after personal-space creation has marked its organization.
+Native membership inserts and role updates maintain the authorization snapshot.
+A role change out of fixed Member clears the assignment in the same transaction, even
+with both switches off. The existing assignment trigger increments its generation.
+The journal records the automatic clearance with the system actor. The native role
+change or transfer records the acting user in its own event.
+
+The product routes and resolver stay hard-off for custom access. An absent policy or
+authorization inherits the existing fixed-role path. To downgrade, use the supported
+database backup and restore procedure. After a future activation, follow the credential revocation and reissue
 steps in the [disable and recover design](custom-roles.md#storage-migration-and-credential-versions)
 before returning traffic to the restored database.
 

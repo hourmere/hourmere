@@ -135,6 +135,8 @@ export async function runWithFreshProof<T>(
   deps: FreshProofDeps,
   request: FreshProofRequest,
   callbacks: {
+    /** The session context fence must be acquired before user and organization locks. */
+    beforeLocks?: (trx: Db) => Promise<void>
     authorize: (trx: Db) => Promise<void>
     /** The operation can revoke the acting session's team proof in this transaction. */
     changesAuthority?: boolean
@@ -191,6 +193,7 @@ export async function runWithFreshProof<T>(
   let preparedGrantId: string | undefined
   const run = (prepared: boolean): Promise<FreshProofResult<T> | typeof prepare> =>
     teamWriteTransaction(deps.db.transaction(), async (trx) => {
+      await callbacks.beforeLocks?.(trx)
       // Follow the shared team-write lock order: person, organization, then session/attempt.
       await sql`SELECT id FROM auth."user"
       WHERE id IN (${request.userId}::uuid, ${request.affectedUserId ?? request.userId}::uuid)

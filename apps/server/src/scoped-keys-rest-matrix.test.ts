@@ -39,6 +39,15 @@ import { createApp } from './app.ts'
 import { productRoutes } from './server.ts'
 
 const scopes = ['full', 'read', 'bookings'] as const
+const customRoleOperations = [
+  'GET /api/v1/teams/{teamId}/permissions',
+  'GET /api/v1/teams/{teamId}/roles',
+  'POST /api/v1/teams/{teamId}/roles',
+  'GET /api/v1/teams/{teamId}/roles/{roleId}',
+  'PATCH /api/v1/teams/{teamId}/roles/{roleId}',
+  'DELETE /api/v1/teams/{teamId}/roles/{roleId}',
+  'PUT /api/v1/teams/{teamId}/members/{memberId}/custom-role',
+] as const
 // Do not derive expectations from the production registry being tested.
 const classes = {
   booking_read: [
@@ -242,6 +251,7 @@ const classes = {
     'POST /api/v1/teams/{teamId}/leave',
     'GET /api/v1/teams/{teamId}/member-readiness',
     'GET /api/v1/teams/{teamId}/readiness',
+    ...customRoleOperations,
   ],
   diagnostic_read: ['GET /api/v1/event-types/{id}/availability-troubleshooting'],
   public_metadata: [
@@ -518,6 +528,19 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
       if (template === '/api/v1/bookings/export.csv') path += `?from=${start}&to=${end}`
       if (kind === 'session_only') {
+        if (customRoleOperations.some((route) => route === operation)) {
+          return {
+            method,
+            path: path
+              .replace('{teamId}', teamId)
+              .replace('{roleId}', randomUUID())
+              .replace('{memberId}', randomUUID()),
+            payload,
+            headers,
+            expectedStatus: 404,
+            nativeError: 'custom_roles_disabled',
+          }
+        }
         if (template === '/api/v1/team/sso/policy') {
           headers.origin = publicUrl
           headers['X-Expected-Organization-Id'] = teamId
@@ -1076,14 +1099,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 196-operation contract and all 588 scope combinations', () => {
+    it('covers the exact 203-operation contract and all 609 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(196)
-      expect(new Set(ids).size).toBe(196)
+      expect(ids).toHaveLength(203)
+      expect(new Set(ids).size).toBe(203)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(588)
+      expect(cases).toHaveLength(609)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {

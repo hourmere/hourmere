@@ -212,9 +212,15 @@ export async function assertPersonalSpaceExclusion(pool: pg.Pool) {
   })
 
   const teamRoleId = await seedRole(pool, teamId)
-  await expect(insert(pool, 'team_member_authorizations', personalMember)).resolves.toMatchObject({
-    rowCount: 1,
-  })
+  await expect(
+    pool.query(
+      `INSERT INTO team_member_authorizations (organization_id, member_id, user_id)
+       SELECT $1, $2, $3 WHERE NOT EXISTS (
+         SELECT FROM team_member_authorizations WHERE member_id = $2
+       )`,
+      [personalMember.organization_id, personalMember.member_id, personalMember.user_id],
+    ),
+  ).resolves.toBeDefined()
   await expect(
     insert(pool, 'custom_role_assignments', {
       ...personalMember,

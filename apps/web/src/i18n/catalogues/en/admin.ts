@@ -3536,4 +3536,11 @@ export const admin = {
   // Paid booking management
   'Changes are unavailable for this paid booking. Contact your instance operator about cancellation or refunds.':
     'Changes are unavailable for this paid booking. Contact your instance operator about cancellation or refunds.',
+
+  // Custom team roles
+  'Custom roles are unavailable.': 'Custom roles are unavailable.',
+  'The role or assignment changed. Reload before saving.':
+    'The role or assignment changed. Reload before saving.',
+  'Clear this role’s assignments before archiving it.':
+    'Clear this role’s assignments before archiving it.',
 } as const

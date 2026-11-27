@@ -1,4 +1,20 @@
 {
+  "createCustomTeamRole": {
+    "exemption": "browser-session-only",
+    "reason": "Custom role management requires a verified fixed Owner's browser session and fresh proof."
+  },
+  "publishCustomTeamRole": {
+    "exemption": "browser-session-only",
+    "reason": "Custom role management requires a verified fixed Owner's browser session and fresh proof."
+  },
+  "archiveCustomTeamRole": {
+    "exemption": "browser-session-only",
+    "reason": "Custom role management requires a verified fixed Owner's browser session and fresh proof."
+  },
+  "assignCustomTeamRole": {
+    "exemption": "browser-session-only",
+    "reason": "Custom role management requires a verified fixed Owner's browser session and fresh proof."
+  },
   "createSsoDomainChallenge": {
     "exemption": "browser-session-only",
     "reason": "Claiming domain authority requires interactive administrator proof."
