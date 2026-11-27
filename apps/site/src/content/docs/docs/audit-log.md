@@ -114,6 +114,11 @@ data: choose the shortest period your obligations allow.
 - The operator cannot limit which retention an owner chooses, and there is no legal hold
   beyond **Keep forever**.
 - Deletion runs on the worker; an installation without a worker process never deletes.
+- [SSO](/docs/sso) security failures are capped at 20 per provider and action in a rolling
+  hour. Dropped failures leave no entry in the team's audit log. In releases with the
+  drop report, each process logs `sso.security_failures_dropped` with counts by action
+  60 seconds after the first drop in each batch. The warning omits provider and team IDs.
+  Pending counts are lost if the process exits before the warning is emitted.
 
 Purge deletion is limited to 50 batches of 1,000 rows per hourly run. Discovery still visits
 all organizations, and later organizations may wait across runs while earlier ones remain

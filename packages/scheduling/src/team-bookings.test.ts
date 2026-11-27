@@ -14,6 +14,7 @@ import {
   createPublicTeamBooking,
   listHostBookings,
   rescheduleHostBooking,
+  unavailablePaidManagementIds,
 } from './bookings.ts'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
@@ -72,6 +73,7 @@ function sourceCopy(replacement?: Replacement, pageReplacement?: Replacement): L
     'toTeamAdminBooking',
     'findPublicEventType',
     'findPublicTeamEventType',
+    'unavailablePaidManagementIds',
     `${compile('packages/scheduling/src/team-bookings.ts', replacement)}; return listTeamAdminBookings`,
   )(
     sql,
@@ -84,6 +86,7 @@ function sourceCopy(replacement?: Replacement, pageReplacement?: Replacement): L
     toTeamAdminBooking,
     findPublicEventType,
     findPublicTeamEventType,
+    unavailablePaidManagementIds,
   ) as List
   return guardCopy(list)
 }
@@ -137,10 +140,11 @@ describe.skipIf(!serverUrl)('team admin booking list', () => {
     })
     return { owner, admin, member, host, team, ownerCtx, adminCtx, memberCtx, eventId }
   }
-  it('keeps confirmed paid bookings readable without no-show management in lists and details', async () => {
+  it('keeps unbound paid bookings readable without cancellation or no-show management', async () => {
     const f = await setup()
     const id = await booking(f, '2026-10-31T09:00Z')
     expect((await getTeamAdminBooking(f.adminCtx, id)).canManageNoShow).toBe(true)
+    expect((await getTeamAdminBooking(f.adminCtx, id)).paidManagementUnavailable).toBeUndefined()
     await db
       .updateTable('bookings')
       .set({
@@ -163,6 +167,11 @@ describe.skipIf(!serverUrl)('team admin booking list', () => {
     }
     await verify(listTeamAdminBookings)
     expect((await getTeamAdminBooking(f.adminCtx, id)).canManageNoShow).toBe(false)
+    expect((await getTeamAdminBooking(f.adminCtx, id)).paidManagementUnavailable).toBe(true)
+    expect(
+      (await listTeamAdminBookings(f.adminCtx)).data.find((item) => item.id === id)
+        ?.paidManagementUnavailable,
+    ).toBe(true)
     await expect(verify(sourceCopy(['!paidIds.has(booking.id) &&', '']))).rejects.toMatchObject({
       name: 'AssertionError',
     })

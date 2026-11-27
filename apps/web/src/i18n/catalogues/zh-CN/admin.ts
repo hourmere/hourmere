@@ -3314,4 +3314,8 @@ export const admin = {
   // SAML recovery
   'If you are replacing signing certificates, enter the full set your identity provider uses.':
     '如需更换签名证书，请填写身份提供方使用的全部证书。',
+
+  // Paid booking management
+  'Changes are unavailable for this paid booking. Contact your instance operator about cancellation or refunds.':
+    '此付费预约暂无法变更。如需取消或退款，请联系实例管理员。',
 } as const

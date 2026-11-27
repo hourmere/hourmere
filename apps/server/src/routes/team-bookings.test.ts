@@ -39,7 +39,10 @@ import {
   bookingPageQuery,
   encodeBookingCursor,
 } from '../../../../packages/scheduling/src/booking-page.ts'
-import { cancelTeamBookingInTransaction } from '../../../../packages/scheduling/src/bookings.ts'
+import {
+  cancelTeamBookingInTransaction,
+  unavailablePaidManagementIds,
+} from '../../../../packages/scheduling/src/bookings.ts'
 import { resolvedBookingHosts } from '../../../../packages/scheduling/src/hosts.ts'
 import { isUuid } from '../../../../packages/scheduling/src/internal.ts'
 import { toTeamAdminBooking } from '../../../../packages/scheduling/src/team-admin-booking.ts'
@@ -822,6 +825,7 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
       'hosts',
       'id',
       'isRescheduled',
+      'paidManagementUnavailable',
       'start',
       'status',
     ])
@@ -919,6 +923,7 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
       bookingPageQuery,
       encodeBookingCursor,
       cancelTeamBookingInTransaction,
+      unavailablePaidManagementIds,
       importedBookingIds,
       DomainError,
       isUuid,

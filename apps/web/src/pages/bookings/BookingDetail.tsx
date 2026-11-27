@@ -295,6 +295,7 @@ function BookingView({
   const coHosts = booking.coHosts?.map(({ name }) => name.trim()) ?? []
   const location = describeLocation(booking.location)
   const readOnly = isReadOnlyBooking(booking)
+  const paidManagementUnavailable = booking.paidManagementUnavailable === true
   const cancelled = booking.status === 'cancelled'
   const rescheduled = cancelled && Boolean(booking.rescheduledToId)
   const started = new Date(booking.start).getTime() <= Date.now()
@@ -434,7 +435,15 @@ function BookingView({
         </dl>
       </section>
 
-      {!readOnly && !cancelled && !started && (
+      {!readOnly && !cancelled && !started && paidManagementUnavailable && (
+        <p className="hint">
+          {t(
+            'Changes are unavailable for this paid booking. Contact your instance operator about cancellation or refunds.',
+          )}
+        </p>
+      )}
+
+      {!readOnly && !cancelled && !started && !paidManagementUnavailable && (
         <RescheduleBooking
           booking={booking}
           timeZone={timeZone}
@@ -448,6 +457,7 @@ function BookingView({
       {!readOnly &&
         booking.status === 'confirmed' &&
         !started &&
+        !paidManagementUnavailable &&
         (booking.isGroupSeat ? (
           <p className="hint">{t('Group-seat bookings do not support reschedule requests.')}</p>
         ) : (
@@ -458,7 +468,7 @@ function BookingView({
           />
         ))}
 
-      {!readOnly && !cancelled && !started && (
+      {!readOnly && !cancelled && !started && !paidManagementUnavailable && (
         <CancelBooking
           booking={booking}
           expectedOrganizationId={expectedOrganizationId}
