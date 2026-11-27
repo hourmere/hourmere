@@ -78,6 +78,34 @@ const previous = () => screen.getByRole<HTMLButtonElement>('button', { name: 'Pr
 
 // The real router and network boundary exercise the lasting list, not a mocked panel.
 describe('booking list detail navigation', () => {
+  it.each([true, undefined] as const)(
+    'respects the server paid management restriction (%s) in the host panel',
+    async (paidManagementUnavailable) => {
+      server({
+        [`GET /api/v1/bookings/${first.id}`]: () =>
+          json(200, {
+            ...first,
+            start: '2999-01-01T09:00:00Z',
+            end: '2999-01-01T09:30:00Z',
+            paidManagementUnavailable,
+            payment: { status: 'paid', amountMinor: 1200, currency: 'usd', refundStatus: null },
+          }),
+      })
+      open()
+      await userEvent.setup().click(await screen.findByRole('link', { name: 'First appointment' }))
+      await screen.findByRole('heading', { name: 'First appointment' })
+      const panel = within(screen.getByRole('dialog', { name: /First appointment/ }))
+      for (const name of ['Cancel booking…', 'Reschedule', 'Request reschedule']) {
+        expect(panel.queryByRole('button', { name }) !== null, name).toBe(
+          !paidManagementUnavailable,
+        )
+      }
+      expect(
+        panel.queryByText(/contact your instance operator about cancellation or refunds/i) !== null,
+      ).toBe(Boolean(paidManagementUnavailable))
+    },
+  )
+
   it.each([
     '',
     '?tab=past',

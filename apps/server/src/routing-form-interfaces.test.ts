@@ -493,6 +493,48 @@ describe.skipIf(!process.env.DATABASE_URL)('routing configuration interfaces', (
   const effectiveSetting = (configured: string) =>
     resolveRoutingFormsEnabled({ db, routingFormsEnabled: parseRoutingFormsEnabled(configured) })
 
+  it('identifies a rejected routed booking answer without echoing private input on any interface', async () => {
+    const eventTypeId = await createFixtures(db).eventType(
+      owner.principal.organization.id,
+      owner.id,
+      { questions: [{ id: 'reference', label: 'Reference', type: 'short_text', required: true }] },
+    )
+    const receipt = await bookingReceipt(eventTypeId)
+    const key = await credential(outsider, 'bookings')
+    const application = app(await effectiveSetting('true'))
+    const input = {
+      routeToken: receipt.routeToken,
+      start: bookingStart('10:00'),
+      invitee: { name: 'Fixture invitee', email: 'routing@example.test', timeZone: 'UTC' },
+    }
+    for (const { responses, field } of [
+      { responses: { reference: true }, field: 'responses.reference' },
+      { responses: { [receipt.routeToken]: 'Private answer' } },
+    ]) {
+      const body = { ...input, responses }
+      const expected = { error: 'invalid_responses', ...(field && { field }) }
+      const rest = await application.request(routedBookingPath, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+        body: JSON.stringify(body),
+      })
+      expect(rest.status).toBe(400)
+      expect(await rest.json()).toEqual(expected)
+      const mcp = await rpc(application, key, 'tools/call', {
+        name: 'create_booking',
+        arguments: body,
+      })
+      expect(mcp.isError).toBe(true)
+      expect(JSON.parse(mcp.content[0].text)).toEqual(expected)
+      expect(
+        await callCli(application, key, 'book', { ...body, idempotencyKey: randomUUID() }),
+      ).toEqual({
+        ok: false,
+        body: { ...expected, outcomeMayBeUnknown: true },
+      })
+    }
+  })
+
   it('books a hidden target and authorizes only exact routed replay after expiry and disablement', async () => {
     const fixtures = createFixtures(db)
     const slug = 'hidden-routed-booking-event'

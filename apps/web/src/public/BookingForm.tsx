@@ -1,5 +1,6 @@
 import { type FormEvent, useId, useRef, useState } from 'react'
 import { ErrorSummary } from '../components/forms.tsx'
+import { UserContentMessage } from '../components/UserContent.tsx'
 import { useI18n } from '../i18n/runtime.tsx'
 import { literal, msg, type UiText } from '../i18n/translate.ts'
 import { locationLabel } from './BookingDetails.tsx'
@@ -55,6 +56,7 @@ interface BookingFormProps {
   onSubmit?: () => void
   /** Visible explanation when a preview has disabled submission. */
   submissionDisabledBy?: string
+  paid?: boolean
 }
 
 /** Client-side checks, by field id; empty when the form may be sent. */
@@ -110,8 +112,9 @@ export function BookingForm({
   submitting = false,
   onSubmit,
   submissionDisabledBy,
+  paid = false,
 }: BookingFormProps) {
-  const { t, ui, locale } = useI18n()
+  const { t, ui, uiText, locale } = useI18n()
 
   const locations = locationOptions ?? []
   const chosen = selectedLocation(locations, values.locationOptionId)
@@ -163,12 +166,12 @@ export function BookingForm({
   const summaryErrors: FieldErrors = {}
   for (const id of new Set([...Object.keys(labels), ...Object.keys(errors)])) {
     const error = errors[id]
-    if (!error) continue
-    const label = labels[id]
-    if (!label) {
-      summaryErrors[fieldId(id)] = error
-      continue
-    }
+    if (error) summaryErrors[fieldId(id)] = error
+  }
+
+  function renderSummaryError(id: string, error: UiText) {
+    const label = labels[id.slice(prefix.length)]
+    if (!label) return uiText(error)
     // Punctuated labels take no colon; only Chinese full-width punctuation drops the gap.
     const text = ui(label)
     const template =
@@ -177,10 +180,15 @@ export function BookingForm({
         : /[?？:：。]\s*$/u.test(text)
           ? '{0} {1}'
           : '{0}: {1}'
-    summaryErrors[fieldId(id)] = msg(template, {
-      '0': text,
-      '1': ui(error),
-    })
+    return typeof label === 'object' && 'literal' in label ? (
+      <UserContentMessage
+        message={template}
+        values={{ '0': text }}
+        otherValues={{ '1': ui(error) }}
+      />
+    ) : (
+      uiText(msg(template, { '0': text, '1': ui(error) }))
+    )
   }
 
   const describedBy = (field: string, hint?: string) =>
@@ -209,6 +217,7 @@ export function BookingForm({
         id={fieldId(field)}
         data-field={field}
         type={options.type ?? 'text'}
+        dir={options.type === undefined ? 'auto' : undefined}
         autoComplete={privateDetails ? 'off' : options.autoComplete}
         value={value}
         aria-invalid={errors[field] ? true : undefined}
@@ -234,7 +243,12 @@ export function BookingForm({
       noValidate
       onSubmit={submit}
     >
-      <ErrorSummary errors={summaryErrors} message={formError} attempt={attempt} />
+      <ErrorSummary
+        errors={summaryErrors}
+        message={formError}
+        attempt={attempt}
+        renderError={renderSummaryError}
+      />
       {locations.length > 1 && (
         <fieldset
           className="field choices"
@@ -252,7 +266,9 @@ export function BookingForm({
                 checked={chosen?.id === option.id}
                 onChange={() => update({ locationOptionId: option.id, inviteePhone: '' })}
               />
-              <span>{option.label ?? ui(locationLabel(option.kind))}</span>
+              <span dir={option.label == null ? undefined : 'auto'}>
+                {option.label ?? ui(locationLabel(option.kind))}
+              </span>
             </label>
           ))}
           {errorText('locationOptionId')}
@@ -379,7 +395,9 @@ export function BookingForm({
           aria-describedby={submissionDisabledBy}
           disabled={!onSubmit || submitting}
         >
-          {submitting ? t('Booking…') : t('Confirm booking')}
+          {paid
+            ? t(submitting ? 'Starting Checkout…' : 'Continue to payment')
+            : t(submitting ? 'Booking…' : 'Confirm booking')}
         </button>
       </BookingFormActions>
     </form>
@@ -419,7 +437,7 @@ function QuestionField({
   ) : null
   const label = (
     <>
-      {q.label}
+      <bdi>{q.label}</bdi>
       {!q.required && <span className="optional">{t(' (optional)')}</span>}
     </>
   )
@@ -434,6 +452,7 @@ function QuestionField({
             id={id}
             data-field={field}
             type={q.type === 'phone' ? 'tel' : 'text'}
+            dir={q.type === 'short_text' ? 'auto' : undefined}
             autoComplete={!privateDetails && q.type === 'phone' ? 'tel' : 'off'}
             value={typeof value === 'string' ? value : ''}
             aria-required={q.required}
@@ -450,6 +469,7 @@ function QuestionField({
           <textarea
             id={id}
             data-field={field}
+            dir="auto"
             rows={4}
             value={typeof value === 'string' ? value : ''}
             aria-required={q.required}
@@ -473,7 +493,7 @@ function QuestionField({
           >
             <option value="">{q.required ? t('Choose…') : t('No answer')}</option>
             {(q.options ?? []).map((option) => (
-              <option key={option} value={option}>
+              <option key={option} value={option} dir="auto">
                 {option}
               </option>
             ))}
@@ -498,7 +518,7 @@ function QuestionField({
                   )
                 }
               />
-              <span>{option}</span>
+              <span dir="auto">{option}</span>
             </label>
           ))}
           {errorText}

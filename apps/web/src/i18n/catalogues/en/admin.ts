@@ -1021,8 +1021,6 @@ export const admin = {
     'Choose a name and public address for your team.',
   'Use a name your teammates will recognize, up to 200 characters.':
     'Use a name your teammates will recognize, up to 200 characters.',
-  'Team addresses preserve letter case and are separate from personal handles.':
-    'Team addresses preserve letter case and are separate from personal handles.',
   'Team booking URL preview': 'Team booking URL preview',
   'Each team event gets its own address at the end of this URL. Creating a team does not publish a booking page.':
     'Each team event gets its own address at the end of this URL. Creating a team does not publish a booking page.',
@@ -1062,8 +1060,6 @@ export const admin = {
     'Review meeting details and manage this booking.',
   'Notification language': 'Notification language',
   'Choose a supported notification language.': 'Choose a supported notification language.',
-  'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. The admin interface also uses this language until you choose an interface language in the top bar. After that, the two languages are independent.':
-    'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. The admin interface also uses this language until you choose an interface language in the top bar. After that, the two languages are independent.',
   'Connect a calendar account to get started.': 'Connect a calendar account to get started.',
   'This Google calendar uses {calendarZone}; your availability uses {scheduleZone}. Bookings land at the same moment; Google Calendar usually shows them in {calendarZone} time.':
     'This Google calendar uses {calendarZone}; your availability uses {scheduleZone}. Bookings land at the same moment; Google Calendar usually shows them in {calendarZone} time.',
@@ -1331,8 +1327,6 @@ export const admin = {
   'Choose a date.': 'Choose a date.',
   'Choose a handle to get booking links. Check the suggestions below and save.':
     'Choose a handle to get booking links. Check the suggestions below and save.',
-  'Choose a non-reserved team slug of 1–64 letters, numbers or hyphens, starting and ending with a letter or number.':
-    'Choose a non-reserved team slug of 1–64 letters, numbers or hyphens, starting and ending with a letter or number.',
   'Choose a time zone from the list, e.g. Europe/Berlin.':
     'Choose a time zone from the list, e.g. Europe/Berlin.',
   'Choose a time zone.': 'Choose a time zone.',
@@ -3325,10 +3319,161 @@ export const admin = {
   'A schedule can have at most 10,000 date overrides, including past dates. Remove some overrides before saving.':
     'A schedule can have at most 10,000 date overrides, including past dates. Remove some overrides before saving.',
 
+  // SCIM invitation attribution
+  'SCIM connection': 'SCIM connection',
   // Additional durations
   'Removed {0}. Selected length: {1}.': 'Removed {0}. Selected length: {1}.',
+
+  // Admin navigation and account menu
+  'Account menu': 'Account menu',
+  'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. The admin interface also uses this language until you choose an interface language in the account menu. After that, the two languages are independent.':
+    'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. The admin interface also uses this language until you choose an interface language in the account menu. After that, the two languages are independent.',
+
+  // Signed webhook administration
+  'Checking webhook access…': 'Checking webhook access…',
+  'No webhook endpoints yet.': 'No webhook endpoints yet.',
+  'Add webhook': 'Add webhook',
+  'Create webhook': 'Create webhook',
+  'Edit webhook': 'Edit webhook',
+  'Destination origin': 'Destination origin',
+  'Destination URL': 'Destination URL',
+  'Endpoint ID': 'Endpoint ID',
+  'Webhook events': 'Webhook events',
+  'Choose at least one event.': 'Choose at least one event.',
+  'Booking reschedule requested': 'Booking reschedule requested',
+  'Booking reschedule request expired': 'Booking reschedule request expired',
+  'Attendee no-show changed': 'Attendee no-show changed',
+  'Workflow executed': 'Workflow executed',
+  'Unknown event': 'Unknown event',
+  Paused: 'Paused',
+  'Pause webhook': 'Pause webhook',
+  'Resume webhook': 'Resume webhook',
+  'A delivery in progress may finish after you pause this endpoint.':
+    'A delivery in progress may finish after you pause this endpoint.',
+  'Skipped deliveries stay skipped after resuming.':
+    'Skipped deliveries stay skipped after resuming.',
+  'Save subscriptions': 'Save subscriptions',
+  'Subscription editing is unavailable for this endpoint.':
+    'Subscription editing is unavailable for this endpoint.',
+  'Rotate signing secret…': 'Rotate signing secret…',
+  'Rotate signing secret': 'Rotate signing secret',
+  'Delete webhook…': 'Delete webhook…',
+  'Delete webhook': 'Delete webhook',
+  'Prepare your receiver to install the new signing secret immediately. All subsequent attempts, including retries, use the new secret.':
+    'Prepare your receiver to install the new signing secret immediately. All subsequent attempts, including retries, use the new secret.',
+  'Deleting this endpoint permanently removes its retained deliveries. Workflows that reference this ID must be updated separately.':
+    'Deleting this endpoint permanently removes its retained deliveries. Workflows that reference this ID must be updated separately.',
+  'Signing secret': 'Signing secret',
+  'Save this signing secret in your receiver’s secret store. You can see it only here.':
+    'Save this signing secret in your receiver’s secret store. You can see it only here.',
+  'Copy signing secret': 'Copy signing secret',
+  'Webhook endpoint created.': 'Webhook endpoint created.',
+  'Webhook endpoint updated.': 'Webhook endpoint updated.',
+  'Webhook endpoint deleted.': 'Webhook endpoint deleted.',
+  'Webhook signing secret rotated.': 'Webhook signing secret rotated.',
+  'This webhook endpoint is no longer available.': 'This webhook endpoint is no longer available.',
+  'Workflow events are unavailable on this instance.':
+    'Workflow events are unavailable on this instance.',
+  'Creating webhooks and rotating signing secrets are unavailable on this instance.':
+    'Creating webhooks and rotating signing secrets are unavailable on this instance.',
+  'This space can have up to ten webhook endpoints, including paused endpoints.':
+    'This space can have up to ten webhook endpoints, including paused endpoints.',
+  'Check the webhook settings and try again.': 'Check the webhook settings and try again.',
+  'The webhook change could not be confirmed. Refresh the list before taking another action.':
+    'The webhook change could not be confirmed. Refresh the list before taking another action.',
+  'Creation could not be confirmed. Refresh the list and confirm the endpoint ID before rotating its secret.':
+    'Creation could not be confirmed. Refresh the list and confirm the endpoint ID before rotating its secret.',
+  'Rotation could not be confirmed. The previous secret may already have been replaced. Refresh the list before taking another action.':
+    'Rotation could not be confirmed. The previous secret may already have been replaced. Refresh the list before taking another action.',
+  'Refreshing webhook endpoints…': 'Refreshing webhook endpoints…',
+  'Saving webhook settings…': 'Saving webhook settings…',
+  'Refresh webhook endpoints': 'Refresh webhook endpoints',
+
+  // Paid booking details
+  'Open payment in Stripe': 'Open payment in Stripe',
+
+  // Paid booking settings
+  Payments: 'Payments',
+  'Charge for bookings': 'Charge for bookings',
+  'Payment required': 'Payment required',
+  'Free booking': 'Free booking',
+  Currency: 'Currency',
+  'Price for {duration}': 'Price for {duration}',
+  'Set a price for every duration. Invitees pay through Stripe Checkout.':
+    'Set a price for every duration. Invitees pay through Stripe Checkout.',
+  'Ask your instance operator to configure Stripe for paid bookings.':
+    'Ask your instance operator to configure Stripe for paid bookings.',
+  'This instance could not verify its Stripe configuration. Contact your instance operator.':
+    'This instance could not verify its Stripe configuration. Contact your instance operator.',
+  'Paid bookings are turned off on this instance.':
+    'Paid bookings are turned off on this instance.',
+  'Paid bookings are currently available in Stripe test mode only.':
+    'Paid bookings are currently available in Stripe test mode only.',
+  'Paid booking settings are unavailable on this instance.':
+    'Paid booking settings are unavailable on this instance.',
+  'Paid bookings are available for personal, one-on-one events without additional guests, a waitlist, routing or recurring bookings. Use an in-person location, a saved meeting link or no location.':
+    'Paid bookings are available for personal, one-on-one events without additional guests, a waitlist, routing or recurring bookings. Use an in-person location, a saved meeting link or no location.',
+  'Enter a price for this duration.': 'Enter a price for this duration.',
+  'Enter a whole amount.': 'Enter a whole amount.',
+  'Enter an amount with up to two decimal places.':
+    'Enter an amount with up to two decimal places.',
+  'Enter an amount from {min} to {max} {currency}.':
+    'Enter an amount from {min} to {max} {currency}.',
+  'Check the price for every duration and try again.':
+    'Check the price for every duration and try again.',
+
+  // Webhook delivery history
+  'Delivery history': 'Delivery history',
+  'Refresh history': 'Refresh history',
+  'Loading deliveries…': 'Loading deliveries…',
+  'Loading older deliveries…': 'Loading older deliveries…',
+  'Load older deliveries': 'Load older deliveries',
+  'No deliveries retained in the last 30 days.': 'No deliveries retained in the last 30 days.',
+  '{count} deliveries shown.': '{count} deliveries shown.',
+  'Could not load webhook deliveries.': 'Could not load webhook deliveries.',
+  'Could not load older deliveries.': 'Could not load older deliveries.',
+  'This delivery history page is no longer available. Refresh history to start again.':
+    'This delivery history page is no longer available. Refresh history to start again.',
+  'webhook.delivery.pending': 'Pending',
+  Delivered: 'Delivered',
+  Failed: 'Failed',
+  'Unknown status': 'Unknown status',
+  Attempts: 'Attempts',
+  'HTTP status': 'HTTP status',
+  'Created at': 'Created at',
+  'Last attempted at': 'Last attempted at',
+  'Delivered at': 'Delivered at',
+  'Delivery ID': 'Delivery ID',
+  'Event ID': 'Event ID',
+  'Last error': 'Last error',
+  'Transport error': 'Transport error',
+  'HTTP error': 'HTTP error',
+  'Webhook disabled': 'Webhook disabled',
+  'Delivery expired': 'Delivery expired',
+  'Signing secret unavailable': 'Signing secret unavailable',
+  'Delivery interrupted': 'Delivery interrupted',
+  'Delivery job unavailable': 'Delivery job unavailable',
+  'Unknown delivery error': 'Unknown delivery error',
+
+  // Team details
+  'Team details': 'Team details',
+  'Save team details': 'Save team details',
+  'Team details saved.': 'Team details saved.',
+  'Reload team details': 'Reload team details',
+  'Team details changed since you opened this page. Reload team details before saving again.':
+    'Team details changed since you opened this page. Reload team details before saving again.',
+  'Old booking links, embeds, routing links and booking links in sent waitlist emails will stop working. Replace shared links and embeds after saving. For 90 days, only this team can reclaim the old address.':
+    'Old booking links, embeds, routing links and booking links in sent waitlist emails will stop working. Replace shared links and embeds after saving. For 90 days, only this team can reclaim the old address.',
+  'Choose a non-reserved team slug of 1–64 ASCII letters, digits or hyphens. Start and end with a letter or digit. New slugs are saved in lowercase.':
+    'Choose a non-reserved team slug of 1–64 ASCII letters, digits or hyphens. Start and end with a letter or digit. New slugs are saved in lowercase.',
+  'Team addresses are separate from personal handles.':
+    'Team addresses are separate from personal handles.',
 
   // SAML recovery
   'If you are replacing signing certificates, enter the full set your identity provider uses.':
     'If you are replacing signing certificates, enter the full set your identity provider uses.',
+
+  // Paid booking management
+  'Changes are unavailable for this paid booking. Contact your instance operator about cancellation or refunds.':
+    'Changes are unavailable for this paid booking. Contact your instance operator about cancellation or refunds.',
 } as const

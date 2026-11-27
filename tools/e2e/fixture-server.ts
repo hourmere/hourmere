@@ -13,6 +13,7 @@ export async function startFixtureServer(
   listener: OwnedListener,
   env: NodeJS.ProcessEnv,
   start: typeof startServer = startServer,
+  options: Parameters<typeof startServer>[1] = {},
 ): Promise<RunningServer> {
   const scope = Symbol('fixture server startup')
   const captured: ReturnType<typeof trackOwned>[] = []
@@ -26,7 +27,10 @@ export async function startFixtureServer(
   listening.subscribe(subscribers)
   try {
     running = await startupScope.run(scope, () =>
-      start({ ...env, PORT: '0', PUBLIC_URL: listener.url }, { recurringBookingsEnabled: true }),
+      start(
+        { ...env, PORT: '0', PUBLIC_URL: listener.url },
+        { ...options, recurringBookingsEnabled: true },
+      ),
     )
   } catch (error) {
     await Promise.allSettled(captured.map((owned) => owned.close()))

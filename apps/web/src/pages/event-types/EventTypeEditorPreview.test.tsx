@@ -1,25 +1,35 @@
 import { readFileSync } from 'node:fs'
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { expect, it, onTestFinished, vi } from 'vitest'
+import { beforeAll, expect, it, onTestFinished, vi } from 'vitest'
 import { chooseLanguage } from '../../i18n/store.ts'
+import { resolveEventTypeEditor } from '../../test/event-type-editor.ts'
 import { fakeApi, json, ME, profile, renderApp, signedIn } from '../../test/fake-api.tsx'
 import { EVENT_TYPE_ID, eventType, schedule } from '../../test/fixtures.ts'
+
+beforeAll(resolveEventTypeEditor)
+
+const wideQuery = '(min-width: 1280px)'
 
 function viewport(width: number) {
   let currentWidth = width
   const listeners = new Set<() => void>()
   vi.stubGlobal('matchMedia', (query: string) => ({
     get matches() {
-      const minimumWidth = /min-width: (\d+)px/.exec(query)?.[1]
-      return minimumWidth !== undefined && currentWidth >= Number(minimumWidth)
+      return query === wideQuery && currentWidth >= 1280
     },
-    addEventListener: (_type: string, listener: () => void) => listeners.add(listener),
-    removeEventListener: (_type: string, listener: () => void) => listeners.delete(listener),
+    addEventListener(type: string, listener: () => void) {
+      if (query === wideQuery && type === 'change') listeners.add(listener)
+    },
+    removeEventListener(type: string, listener: () => void) {
+      if (query === wideQuery && type === 'change') listeners.delete(listener)
+    },
   }))
-  return (nextWidth: number) => {
-    currentWidth = nextWidth
-    act(() => {
+  return async (nextWidth: number) => {
+    // The wide pane can render before the editor's effect subscribes to changes.
+    await waitFor(() => expect(listeners.size).toBeGreaterThan(0))
+    await act(async () => {
+      currentWidth = nextWidth
       for (const listener of listeners) listener()
     })
   }
@@ -56,7 +66,7 @@ it('updates the booking page as the host edits without fetching or persisting th
   const user = userEvent.setup()
   const view = renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
   const title = await screen.findByRole('textbox', { name: 'Title' })
-  const pane = within(screen.getByRole('complementary', { name: 'Booking page preview' }))
+  const pane = within(await screen.findByRole('complementary', { name: 'Booking page preview' }))
   await waitFor(() => {
     const branded = view.container.querySelector<HTMLElement>('.public-branded')
     expect(branded?.style.getPropertyValue('--brand-light-accent')).toBeTruthy()
@@ -132,32 +142,28 @@ it('places the preview beside the settings at 1280px and in a modal at 1279px', 
   setup()
   const user = userEvent.setup()
   const view = renderApp('/app/event-types/new')
-  await screen.findByRole('textbox', { name: 'Title' })
-  const pane = screen.getByRole('complementary', { name: 'Booking page preview' })
+  const pane = await screen.findByRole('complementary', { name: 'Booking page preview' })
   expect(pane.previousElementSibling?.classList.contains('event-type-editor-settings')).toBe(true)
   expect(pane.closest('main')?.className).toBe('main-content-wide')
   expect(screen.queryByRole('button', { name: 'Preview booking page' })).toBeNull()
 
-  resize(1279)
+  await resize(1279)
+  const trigger = await screen.findByRole('button', { name: 'Preview booking page' })
   expect(screen.queryByRole('complementary', { name: 'Booking page preview' })).toBeNull()
   expect(screen.queryByRole('dialog', { name: 'Booking page preview' })).toBeNull()
   expect(view.container.querySelector('.booking-layout')).toBeNull()
-  const trigger = screen.getByRole('button', { name: 'Preview booking page' })
   expect(trigger.getAttribute('aria-haspopup')).toBe('dialog')
   trigger.focus()
   await user.keyboard('{Enter}')
-  const dialog = screen.getByRole('dialog', { name: 'Booking page preview' })
+  const dialog = await screen.findByRole('dialog', { name: 'Booking page preview' })
   expect(dialog.getAttribute('aria-modal')).toBe('true')
   expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Close' }))
   fireEvent(dialog, new Event('cancel', { cancelable: true }))
   expect(screen.queryByRole('dialog', { name: 'Booking page preview' })).toBeNull()
   expect(document.activeElement).toBe(trigger)
   await user.keyboard(' ')
-  await user.click(
-    within(screen.getByRole('dialog', { name: 'Booking page preview' })).getByRole('button', {
-      name: 'Close',
-    }),
-  )
+  const reopenedDialog = await screen.findByRole('dialog', { name: 'Booking page preview' })
+  await user.click(within(reopenedDialog).getByRole('button', { name: 'Close' }))
   expect(document.activeElement).toBe(trigger)
 })
 
@@ -170,7 +176,7 @@ it('applies the two-column grid only at the wide breakpoint and makes the modal 
   const layout = '.event-type-editor-layout'
   const wide = rules.find(
     (rule): rule is CSSMediaRule =>
-      rule instanceof CSSMediaRule && rule.conditionText === '(min-width: 1280px)',
+      rule instanceof CSSMediaRule && rule.conditionText === wideQuery,
   )
   const grid = [...(wide?.cssRules ?? [])].find(
     (rule): rule is CSSStyleRule => rule instanceof CSSStyleRule && rule.selectorText === layout,

@@ -20,6 +20,7 @@ import { withAuditRequest } from '@hourmere/db/audit'
 import {
   DomainError,
   type DomainErrorKind,
+  InvalidBookingAnswerError,
   MeetingPollKeyMismatchError,
   MeetingPollRateLimitError,
   ONE_TIME_LINK_ALREADY_CREATED_MESSAGE,
@@ -573,7 +574,11 @@ export function createApp({
       // The lower-level error a service wrapped is for us, not the client.
       if (err.cause !== undefined) logError(c, `${err.code} caused by `, err.cause)
       const errorAlias = errorAliasFor(err.code)
-      const field = successRedirectErrorField(err.code, err.detail)
+      const privateRouting = isPublicRoutingFormPath(c.req.path)
+      const field =
+        privateRouting && err instanceof InvalidBookingAnswerError
+          ? err.field
+          : successRedirectErrorField(err.code, err.detail)
       const body = {
         error: err.code,
         ...(field && !isOneTimeLinkPath(c.req.path) && { field }),
@@ -590,7 +595,7 @@ export function createApp({
       }
       if (
         isWaitlistAdmissionPath(c.req.path) ||
-        isPublicRoutingFormPath(c.req.path) ||
+        privateRouting ||
         isSlackDestinationPath(c.req.path) ||
         isMeetingPollPath(c.req.path)
       )

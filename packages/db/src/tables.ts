@@ -719,6 +719,7 @@ export interface EventTypes {
   notifications: Generated<Json>;
   organization_id: string;
   owner_user_id: string | null;
+  payment: Json | null;
   position: Generated<number>;
   questions: Generated<Json>;
   recurrence: Json | null;
@@ -893,6 +894,7 @@ export interface InvitationDeliveries {
   lease_id: string | null;
   lease_until: Timestamp | null;
   resend_request_id: string | null;
+  scim_issued: Generated<boolean>;
   smtp_accepted_at: Timestamp | null;
   state: string;
   updated_at: Generated<Timestamp>;
@@ -902,7 +904,7 @@ export interface InvitationEmailRequests {
   organization_id: string;
   recipient_hash: Buffer;
   requested_at: Timestamp;
-  user_id: string;
+  user_id: string | null;
 }
 
 export interface McpOauthClientActivity {
@@ -1136,6 +1138,26 @@ export interface OrganizationOperations {
   previous_role: string | null;
   source: string;
   target_user_id: string | null;
+}
+
+export interface OrganizationOwnershipTransferBudgets {
+  operation: string;
+  organization_id: string;
+  request_count: number;
+  window_start: Timestamp;
+}
+
+export interface OrganizationOwnershipTransfers {
+  created_at: Timestamp;
+  expires_at: Timestamp;
+  id: Generated<string>;
+  initiator_membership_id: string;
+  initiator_user_id: string;
+  organization_id: string;
+  state: Generated<string>;
+  target_membership_id: string;
+  target_user_id: string;
+  terminal_at: Timestamp | null;
 }
 
 export interface PaymentCheckoutAttempts {
@@ -1636,6 +1658,28 @@ export interface SsoReplayCache {
   retain_until: Timestamp;
 }
 
+export interface TeamBookingBulkCancellationItems {
+  batch_id: string;
+  booking_id: string;
+  ordinal: number;
+  preview_outcome: string;
+}
+
+export interface TeamBookingBulkCancellations {
+  actor_user_id: string;
+  created_at: Generated<Timestamp>;
+  expires_at: Timestamp;
+  id: Generated<string>;
+  organization_id: string;
+  session_id: string;
+}
+
+export interface TeamSlugReservations {
+  expires_at: Timestamp;
+  organization_id: string | null;
+  slug: string;
+}
+
 export interface WaitlistCandidates {
   accepted_at: Timestamp | null;
   attempts: Generated<number>;
@@ -1977,6 +2021,8 @@ export interface DB {
   organization_brand_logos: OrganizationBrandLogos;
   organization_branding: OrganizationBranding;
   organization_operations: OrganizationOperations;
+  organization_ownership_transfer_budgets: OrganizationOwnershipTransferBudgets;
+  organization_ownership_transfers: OrganizationOwnershipTransfers;
   payment_checkout_attempts: PaymentCheckoutAttempts;
   payment_refund_obligations: PaymentRefundObligations;
   payment_stripe_events: PaymentStripeEvents;
@@ -2021,6 +2067,9 @@ export interface DB {
   sso_recovery_nominations: SsoRecoveryNominations;
   sso_recovery_owners: SsoRecoveryOwners;
   sso_replay_cache: SsoReplayCache;
+  team_booking_bulk_cancellation_items: TeamBookingBulkCancellationItems;
+  team_booking_bulk_cancellations: TeamBookingBulkCancellations;
+  team_slug_reservations: TeamSlugReservations;
   waitlist_candidates: WaitlistCandidates;
   waitlist_capabilities: WaitlistCapabilities;
   waitlist_cohorts: WaitlistCohorts;

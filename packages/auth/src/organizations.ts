@@ -1,9 +1,10 @@
 import { randomBytes } from 'node:crypto'
-import { isReservedName } from '@hourmere/core'
+import { isPublicTeamSlug, isReservedName } from '@hourmere/core'
 import type { Db } from '@hourmere/db'
 import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { APIError } from 'better-auth/api'
 import type { OrganizationOptions } from 'better-auth/plugins/organization'
+import { sql } from 'kysely'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -109,18 +110,22 @@ export async function ensurePersonalOrganization(db: Db, userId: string): Promis
     const now = new Date()
     let organizationId: string | undefined
     for (const slug of slugCandidates(slugify(name))) {
-      // ON CONFLICT instead of catching the error: a failed statement would abort the
-      // whole transaction.
-      const row = await trx
-        .insertInto('auth.organization')
-        .values({ name, slug, createdAt: now })
-        .onConflict((oc) => oc.column('slug').doNothing())
-        .returning('id')
-        .executeTakeFirst()
-      if (row) {
+      // Rolling a failed claim back to its savepoint also releases the slug lock.
+      // Subsequent candidates must not carry locks into a concurrent team rename.
+      await sql`SAVEPOINT personal_organization_slug`.execute(trx)
+      try {
+        const row = await trx
+          .insertInto('auth.organization')
+          .values({ name, slug, createdAt: now })
+          .returning('id')
+          .executeTakeFirstOrThrow()
         organizationId = row.id
-        break
+      } catch (error) {
+        if (!organizationSlugConflict(error)) throw error
+        await sql`ROLLBACK TO SAVEPOINT personal_organization_slug`.execute(trx)
       }
+      await sql`RELEASE SAVEPOINT personal_organization_slug`.execute(trx)
+      if (organizationId) break
     }
     if (!organizationId) throw new Error('cannot create a personal organization: no free slug')
 
@@ -150,6 +155,53 @@ export async function personalOwner(db: Db, organizationId: string): Promise<str
 const refuse = (message: string) =>
   new APIError('FORBIDDEN', { code: 'PERSONAL_ORGANIZATION', message })
 
+const invalidSlug = () =>
+  new APIError('BAD_REQUEST', {
+    code: 'ORGANIZATION_SLUG_INVALID',
+    message:
+      'Choose an address of 1–64 letters, digits, or hyphens, starting and ending with a letter or digit.',
+  })
+
+function normalizeSlug(slug: string) {
+  if (isReservedName(slug))
+    throw new APIError('BAD_REQUEST', {
+      code: 'ORGANIZATION_SLUG_RESERVED',
+      message: 'This organization slug is reserved. Choose another one.',
+    })
+  if (!isPublicTeamSlug(slug)) throw invalidSlug()
+  return slug.toLowerCase()
+}
+
+/** Better Auth queries for an exact match before the hooks. PostgreSQL cannot accept NUL. */
+export function blockNullSlug(slug: unknown) {
+  if (typeof slug === 'string' && slug.includes('\0')) throw invalidSlug()
+}
+
+function organizationSlugConflict(error: unknown) {
+  return (
+    error instanceof Error &&
+    'code' in error &&
+    error.code === '23505' &&
+    'constraint' in error &&
+    (error.constraint === 'organization_slug_key' ||
+      error.constraint === 'organization_slug_lower_uidx' ||
+      error.constraint === 'team_slug_reserved')
+  )
+}
+
+/** A folded live claim or a held address may become unavailable after the native lookup. */
+export function mapOrganizationSlugConflict(error: unknown): never {
+  if (organizationSlugConflict(error)) throw organizationSlugTaken()
+  throw error
+}
+
+export function organizationSlugTaken() {
+  return new APIError('BAD_REQUEST', {
+    message: 'Organization slug already taken',
+    code: 'ORGANIZATION_SLUG_ALREADY_TAKEN',
+  })
+}
+
 /**
  * Better Auth organization hooks that protect the public URL namespace and keep each personal
  * organization under its user's control. Without them a user could invite someone as owner
@@ -164,13 +216,6 @@ export function organizationGuards(
   // Hooks that run inside a native auth transaction (invitation acceptance) read through
   // its connection rather than wait for an application connection while holding it.
   const reader = () => transaction() ?? db
-  const checkSlug = (slug: string | undefined) => {
-    if (slug !== undefined && isReservedName(slug))
-      throw new APIError('BAD_REQUEST', {
-        code: 'ORGANIZATION_SLUG_RESERVED',
-        message: 'This organization slug is reserved. Choose another one.',
-      })
-  }
   const isPersonal = async (organizationId: string) =>
     (await personalOwner(reader(), organizationId)) !== undefined
   const noOneElse = async ({ organization }: { organization: { id: string } }) => {
@@ -179,9 +224,16 @@ export function organizationGuards(
     }
   }
   return {
-    beforeCreateOrganization: async ({ organization }) => checkSlug(organization.slug),
+    beforeCreateOrganization: async ({ organization }) => {
+      // Better Auth passes the persistence data here. Returning a patch would bring
+      // creation-only request fields such as keepCurrentActiveOrganization back into it.
+      if (organization.slug !== undefined) organization.slug = normalizeSlug(organization.slug)
+    },
     // A display-name-only edit must still work for an existing legacy reserved slug.
-    beforeUpdateOrganization: async ({ organization }) => checkSlug(organization.slug),
+    beforeUpdateOrganization: async ({ organization }) => {
+      if (organization.slug !== undefined)
+        return { data: { slug: normalizeSlug(organization.slug) } }
+    },
     // It lives as long as its user: deleting the user deletes it.
     beforeDeleteOrganization: async ({ organization }) => {
       if (await isPersonal(organization.id)) {

@@ -59,7 +59,8 @@ included, also on days when clocks change. Results are newest first, 50 per page
 
 All three answer the same way. Filters: `from` (inclusive) and `to` (exclusive) as RFC 3339
 instants with an offset, `actorType` (`user`, `api_key`, `oauth_client`, `system`,
-`scim_token`, `anonymous`, `external_api_key`, `external_oauth_client`, `external_user`),
+`scim_token`, `scim_connection`, `anonymous`, `external_api_key`, `external_oauth_client`,
+`external_user`),
 `actorId` (with `actorType`), an exact `action`, `limit` (1–100, default 50) and `cursor`.
 Pass `nextCursor` back with the same filters for the next page; pages never repeat an event
 when new ones are written meanwhile. Times in responses are UTC with microseconds.

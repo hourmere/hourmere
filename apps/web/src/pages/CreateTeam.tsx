@@ -219,6 +219,7 @@ export function CreateTeamPage() {
     setContextError(null)
     setAttempt((value) => value + 1)
     if (Object.keys(problems).length) return
+    submitted.slug = submitted.slug.toLowerCase()
     lock.current = true
     setBusy(true)
     setFocusSlug(false)
@@ -242,22 +243,28 @@ export function CreateTeamPage() {
       }
     } catch (err) {
       if (!mounted.current) return
+      const addressTaken =
+        err instanceof RequestError &&
+        (err.code === 'ORGANIZATION_ALREADY_EXISTS' ||
+          err.code === 'ORGANIZATION_SLUG_ALREADY_TAKEN')
       if (
         err instanceof RequestError &&
         (err.code === 'ORGANIZATION_SLUG_RESERVED' ||
-          (err.code === 'ORGANIZATION_ALREADY_EXISTS' && retrySlug === null))
+          err.code === 'ORGANIZATION_SLUG_INVALID' ||
+          (addressTaken && retrySlug === null))
       ) {
-        setErrors({ teamSlug: errorMessage(err) })
+        setRetrySlug(null)
+        setErrors({
+          teamSlug:
+            err.code === 'ORGANIZATION_SLUG_INVALID' ? TEAM_LINK_SLUG_HINT : errorMessage(err),
+        })
         setFocusSlug(true)
         setAttempt((value) => value + 1)
       } else {
         // Even a successful no-match read can precede a delayed original commit. Reusing
         // this exact address lets server uniqueness protect the explicit retry too.
         setRetrySlug(submitted.slug)
-        const pending = {
-          ...submitted,
-          addressTaken: err instanceof RequestError && err.code === 'ORGANIZATION_ALREADY_EXISTS',
-        }
+        const pending = { ...submitted, addressTaken }
         setUncertain(pending)
         setMessage('Creation could not be confirmed. Checking your teams before retrying…')
         try {
@@ -355,8 +362,7 @@ export function CreateTeamPage() {
             error={errors.teamSlug}
             hint={
               <>
-                {t(TEAM_LINK_SLUG_HINT)}{' '}
-                {t('Team addresses preserve letter case and are separate from personal handles.')}
+                {t(TEAM_LINK_SLUG_HINT)} {t('Team addresses are separate from personal handles.')}
                 {retrySlug && (
                   <>
                     {' '}
@@ -387,7 +393,7 @@ export function CreateTeamPage() {
           <p className="hint">{t('Team booking URL preview')}</p>
           <p className="mono preview user-content">
             <BreakableText>
-              {publicTeamPageUrl(draft.slug.trim() || 'your-team', 'event-link')}
+              {publicTeamPageUrl(draft.slug.trim().toLowerCase() || 'your-team', 'event-link')}
             </BreakableText>
           </p>
           <p className="hint">

@@ -147,7 +147,9 @@ describe('workflow email locale fallback', () => {
       })
       expect(rendered.text).toContain('Your booking for Planning & Design is confirmed.')
       expect(rendered.text).toContain('20 nov 2026, 10:00')
-      expect(rendered.html).toContain('Your booking for Planning &amp; Design is confirmed.')
+      expect(rendered.html).toContain(
+        'Your booking for <bdi>Planning &amp; Design</bdi> is confirmed.',
+      )
     } finally {
       spanish['workflow.created.body'] = body
     }

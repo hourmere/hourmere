@@ -39,7 +39,10 @@ import {
   bookingPageQuery,
   encodeBookingCursor,
 } from '../../../../packages/scheduling/src/booking-page.ts'
-import { cancelTeamBookingInTransaction } from '../../../../packages/scheduling/src/bookings.ts'
+import {
+  cancelTeamBookingInTransaction,
+  unavailablePaidManagementIds,
+} from '../../../../packages/scheduling/src/bookings.ts'
 import { resolvedBookingHosts } from '../../../../packages/scheduling/src/hosts.ts'
 import { isUuid } from '../../../../packages/scheduling/src/internal.ts'
 import { toTeamAdminBooking } from '../../../../packages/scheduling/src/team-admin-booking.ts'
@@ -803,7 +806,13 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
     expect(schema).toBeDefined()
     const envelope = resolve(document, schema as Record<string, unknown>)
     expect(responseAndRequestStrictness(document, [path]).closedResponses).toEqual([])
-    expect(Object.keys(envelope.properties as object).sort()).toEqual(['data', 'nextCursor'])
+    expect(Object.keys(envelope.properties as object).sort()).toEqual([
+      'bulkPageExpiresAt',
+      'bulkPageToken',
+      'data',
+      'nextCursor',
+    ])
+    expect(envelope.required).toEqual(['data', 'nextCursor'])
     const data = (envelope.properties as Record<string, { items: Record<string, unknown> }>).data
     const item = resolve(document, data?.items as Record<string, unknown>)
     expect(Object.keys(item.properties as object).sort()).toEqual([
@@ -816,6 +825,7 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
       'hosts',
       'id',
       'isRescheduled',
+      'paidManagementUnavailable',
       'start',
       'status',
     ])
@@ -913,6 +923,7 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
       bookingPageQuery,
       encodeBookingCursor,
       cancelTeamBookingInTransaction,
+      unavailablePaidManagementIds,
       importedBookingIds,
       DomainError,
       isUuid,

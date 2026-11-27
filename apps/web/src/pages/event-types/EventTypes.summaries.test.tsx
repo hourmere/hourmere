@@ -1,9 +1,12 @@
 import { fireEvent, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { expect, it } from 'vitest'
+import { beforeAll, expect, it } from 'vitest'
 import { chooseLanguage } from '../../i18n/store.ts'
+import { resolveEventTypeEditor } from '../../test/event-type-editor.ts'
 import { fakeApi, json, ME, profile, renderApp, signedInAs } from '../../test/fake-api.tsx'
 import { schedule } from '../../test/fixtures.ts'
+
+beforeAll(resolveEventTypeEditor)
 
 function disclosure(label: string) {
   return screen.getByText(label, { selector: 'summary' })
@@ -22,7 +25,7 @@ it('updates every personal settings summary and leaves the values visible when g
   })
   const user = userEvent.setup()
   renderApp('/app/event-types/new')
-  await screen.findByRole('heading', { name: 'New event type', level: 1 }, { timeout: 5000 })
+  await screen.findByRole('heading', { name: 'New event type', level: 1 })
 
   const basics = within(screen.getByRole('region', { name: 'Basics' }))
   expect(basics.getByText('30 min · No location')).toBeDefined()

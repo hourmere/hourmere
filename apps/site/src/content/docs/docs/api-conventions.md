@@ -96,6 +96,23 @@ including stale receipts; no new manage link or ICS can be issued. The local imp
 is documented in the [repository operator guide](https://github.com/hourmere/hourmere/blob/main/docs/calcom-import.md);
 it adds no network import endpoint.
 
+### Paid booking additions
+
+Authenticated event-type settings add optional write field `payment`, containing one
+lower-case `currency` and a `prices` array of `{durationMinutes, amountMinor}`, or `null`
+to clear prices. Omission keeps saved prices on update. The response adds `payment` and
+`paymentAvailability`. Public instance discovery exposes `eventTypePaymentAvailability`.
+Clients must tolerate absent fields from older servers and display unknown availability
+values neutrally. MCP and CLI accept the same payment settings. Existing ownership, team
+and key-scope rules apply. Valid pricing requires an eligible personal event and verified
+Stripe test-mode configuration with the operator switch on.
+
+Public Checkout starts with a random idempotency key and the invitee's displayed price.
+Status and release use the private capability from checkout creation. Payment and refund
+states can gain new values. Booking details read by a host or by invitee manage token add
+optional `payment`, with the original amount, currency and refund state. Only a host read
+includes the Stripe Dashboard link. [Paid bookings](/docs/payments).
+
 ### Booking source compatibility
 
 `Booking.source` adds `"import"` to the response values `"web"`, `"embed"`, `"api"`
@@ -272,7 +289,8 @@ an invalid-input error when enforcing the same schema validation as the transpor
 
 An optional `field` string identifies a stable validation field name. Known values are
 `successRedirect`, `successRedirect.url`, `successRedirect.parameters`,
-`successRedirect.includeInviteePersonalData` and `successRedirect.allowEmbedParent`.
+`successRedirect.includeInviteePersonalData`, `successRedirect.allowEmbedParent` and
+`responses.<questionId>` for a rejected routed booking answer.
 New values may appear within `/api/v1`; clients must ignore unknown values and fall back
 to the error code and optional message. The published schema is an open string, not a
 closed enum. The field may be absent, including when talking to older servers.
@@ -585,6 +603,22 @@ and prevents a switch into a team from retargeting an unsaved personal draft.
 Organization writes and context transitions in the same browser session are ordered across
 server processes, so a switch cannot overtake an already checked organization write.
 
+**Team details.** The settings form sends the exact name and slug it opened with, encoded
+with `encodeURIComponent`, as `X-Expected-Team-Name` and `X-Expected-Team-Slug`.
+`POST /api/auth/organization/update` compares both under the organization write lock.
+A failed comparison returns HTTP 409 `TEAM_SETTINGS_CHANGED`, with guidance to reload
+the details. Send both headers together. Omitting both preserves the existing protocol
+for callers that supply only the expected organization. Creating or changing an address
+requires 1–64 ASCII letters, digits or inner hyphens, starting and ending with a letter
+or digit. Invalid addresses return HTTP 400 `ORGANIZATION_SLUG_INVALID` and reserved
+names return HTTP 400 `ORGANIZATION_SLUG_RESERVED`. New and edited slugs are saved in lowercase.
+An update to an address claimed or held by another team returns HTTP 400
+`ORGANIZATION_SLUG_ALREADY_TAKEN`, including concurrent claims. The previous address is
+held for the same team to reclaim for 90 days. Public links move to the new address
+immediately. Old links, including booking links in sent waitlist emails, do not redirect.
+Team settings use the browser-session organization endpoint. MCP and CLI credentials
+cannot change team details.
+
 Session webhook writes require the same header, including personal-organization writes,
 and recheck the live session context inside the locked mutation transaction. Missing or
 malformed write expectations retain the event-type 409 reload response. Supplied read
@@ -632,6 +666,9 @@ the same context protection; the existing host booking-ID routes still require t
 to be a host.
 
 ### Team roles
+
+Custom roles are unavailable. The [proposed custom roles design](https://github.com/hourmere/hourmere/blob/main/docs/custom-roles.md)
+covers the planned catalogue and compatibility with existing credentials.
 
 Team invitations default to `member`; owners and admins may invite only that role,
 including when resending. Historical invitations with an elevated or custom stored role
@@ -1356,7 +1393,12 @@ Existing bookings stay reachable through their manage links, which do not involv
 Event-type `location` and `locations` accept the additive kind `microsoft_teams`.
 Use `{"kind":"microsoft_teams"}` for `location` and add an `id` for each option in
 `locations`. Only a single assigned host with an active Microsoft writeback destination
-can use it. The same configuration and existing permissions apply in REST, MCP and CLI.
+can use it. Enabling it, changing the assigned host, reactivating it, or duplicating the
+event type requires the assigned host's signed-in session and existing edit permission.
+REST returns `403 microsoft_teams_host_session_required` if that session is missing.
+MCP and CLI return the same error code. With Microsoft Calendar disabled on the instance,
+Teams slot and booking requests return `409 location_unavailable` in REST and the same
+domain error in MCP and CLI.
 
 Public event metadata exposes the kind and normal option metadata. Authorized booking
 responses may add `location.status` and `location.url` for Teams. Known statuses are
@@ -1422,9 +1464,9 @@ after a lost response before deciding to move the successor.
 Individual, collective and explicitly activated round-robin team event types have a public page at `/team/{teamSlug}/{slug}`. The matching
 API is `GET /api/v1/public/teams/{handle}/{slug}`, with `/slots` and `POST /bookings` suffixes
 as on personal pages; `handle` here is the organization slug in its exact stored case.
-Organization slug uniqueness is case-sensitive, so these routes preserve case and never
-choose a different team by lowercasing it. Event type slugs remain lowercase. Team slugs
-are 1–64 ASCII letters/digits/inner hyphens and may not be reserved names.
+Organization slug uniqueness is case-insensitive. New and edited team slugs are lowercase,
+and links to legacy slugs still use the stored case. Event type slugs remain lowercase.
+Team slugs are 1–64 ASCII letters, digits or inner hyphens and may not be reserved names.
 
 The event response includes `team: { name, slug }` in addition to its host and the usual
 public fields. Personal organizations and personal event types cannot be reached through

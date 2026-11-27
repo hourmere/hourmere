@@ -1,6 +1,7 @@
 import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it } from 'vitest'
+import { selectAdminLanguage } from '../test/account-menu.ts'
 import { fakeApi, PROFILE, profile, renderApp, signedIn } from '../test/fake-api.tsx'
 
 it('follows the account notification language until a top-bar interface language is chosen', async () => {
@@ -15,7 +16,7 @@ it('follows the account notification language until a top-bar interface language
   expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('设置')
   expect(localStorage.getItem('hourmere-language')).toBeNull()
 
-  await user.selectOptions(screen.getByRole('combobox', { name: '界面语言' }), 'en')
+  await selectAdminLanguage(user, 'en')
   expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Settings')
   expect(
     screen.getByRole<HTMLSelectElement>('combobox', { name: 'Notification language' }).value,

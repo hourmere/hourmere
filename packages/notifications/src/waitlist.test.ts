@@ -81,12 +81,15 @@ describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
     await owned?.drop()
   })
 
-  async function setup(locale = 'en', at = NOW) {
+  async function setup(locale = 'en', at = NOW, teamSlug?: string) {
     const host = await f.host({ timeZone: 'Europe/Berlin' })
     const scheduleId = await f.schedule(host.userId, { timeZone: 'Europe/Berlin', weeklyHours: {} })
-    const eventTypeId = await f.eventType(host.organizationId, host.userId, {
+    const organizationId = teamSlug ? await f.organization(teamSlug) : host.organizationId
+    if (teamSlug) await f.member(host.userId, organizationId)
+    const eventTypeId = await f.eventType(organizationId, teamSlug ? null : host.userId, {
       slug: 'intro',
       minimumNoticeMinutes: 0,
+      ...(teamSlug && { hosts: [{ userId: host.userId }] }),
     })
     await db
       .updateTable('event_types')
@@ -116,7 +119,8 @@ describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
     }
     const join = async (email = `${randomUUID()}@example.test`) => {
       await scheduling.joinWaitlist(deps, {
-        handle: host.handle,
+        handle: teamSlug ?? host.handle,
+        team: teamSlug !== undefined,
         slug: 'intro',
         email,
         consent: true,
@@ -159,6 +163,7 @@ describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
     }
     return {
       ...host,
+      organizationId,
       eventTypeId,
       scheduleId,
       deps,
@@ -235,6 +240,118 @@ describe.skipIf(!serverUrl)('waitlist durable mail delivery', () => {
       expect(s.logs.join('\n')).not.toMatch(/[a-f\d-]{36}\.[A-Za-z0-9_-]{43}/)
     },
   )
+
+  it('uses the current team address when a queued notification is sent after a rename', async () => {
+    const s = await setup('en', NOW, 'Legacy-Notice-Team')
+    const entry = await s.activate()
+    const [candidate] = await s.open()
+    expect(candidate).toBeDefined()
+    await db
+      .updateTable('auth.organization')
+      .set({ slug: 'renamed-notice-team' })
+      .where('id', '=', s.organizationId)
+      .execute()
+    await deliverWaitlistEmail(s.deps, { kind: 'notification', id: candidate?.id as string })
+    expect(s.messages).toHaveLength(1)
+    const links = s.messages[0]?.text.match(/https:\/\/\S+/g) ?? []
+    const paths = links.map((link) => new URL(link).pathname)
+    expect(paths).toContain('/team/renamed-notice-team/intro')
+    expect(
+      paths.filter((path) =>
+        path.startsWith(`/team/renamed-notice-team/intro/waitlist/${entry.id}.`),
+      ),
+    ).toHaveLength(3)
+    expect(paths.every((path) => !path.startsWith('/team/Legacy-Notice-Team/'))).toBe(true)
+  })
+
+  it('retires sent booking links while preserving team waitlist confirmation and removal links', async () => {
+    const s = await setup('en', NOW, 'Sent-Notice-Team')
+    await s.activate()
+    const pending = await s.join()
+    await deliverWaitlistEmail(s.deps, { kind: 'verification', id: pending.outboxId })
+    const [candidate] = await s.open()
+    if (!candidate) throw new Error('Expected a queued team notification')
+    await deliverWaitlistEmail(s.deps, { kind: 'notification', id: candidate.id })
+    expect(s.messages).toHaveLength(2)
+    const [verification, notice] = s.messages.map((message) =>
+      (message.text.match(/https:\/\/\S+/g) ?? []).map((link) => new URL(link)),
+    )
+    const booking = notice?.find(({ pathname }) => pathname === '/team/Sent-Notice-Team/intro')
+    const removal = notice?.find(({ pathname }) => pathname === '/booking/waitlist/remove')
+    const confirmation = verification?.find(
+      ({ pathname }) => pathname === '/booking/waitlist/verify',
+    )
+    if (!booking || !removal || !confirmation) throw new Error('Expected sent waitlist links')
+
+    const suggestions = (notice ?? []).filter(({ pathname }) =>
+      pathname.startsWith(`${booking.pathname}/waitlist/`),
+    )
+    expect(suggestions).toHaveLength(3)
+    const sentPaths = [booking, ...suggestions].map(({ pathname }) => pathname)
+    const load = (path: string) => {
+      const [, , handle = '', slug = ''] = path.split('/')
+      return scheduling.getPublicTeamEventType({ db, now: () => NOW }, { handle, slug })
+    }
+    for (const path of sentPaths) {
+      await expect(load(path)).resolves.toMatchObject({ team: { slug: 'Sent-Notice-Team' } })
+    }
+    const newAddress = 'sent-notice-replacement'
+    await db
+      .updateTable('auth.organization')
+      .set({ slug: newAddress })
+      .where('id', '=', s.organizationId)
+      .execute()
+    for (const path of sentPaths) {
+      await expect(load(path)).rejects.toMatchObject({ code: 'event_type_not_found' })
+    }
+    await expect(load(`/team/${newAddress}/intro`)).resolves.toMatchObject({
+      team: { slug: newAddress },
+    })
+
+    const verificationToken = new URLSearchParams(confirmation.hash.slice(1)).get('token') ?? ''
+    await expect(scheduling.verifyWaitlist(s.deps, { token: verificationToken })).resolves.toEqual({
+      verified: true,
+    })
+    await expect(
+      scheduling.removeWaitlist(s.deps, { token: removal.hash.slice(1) }),
+    ).resolves.toEqual({ removed: true })
+  })
+
+  it('passes a historical team slug as one encoded segment to the notification renderer', async () => {
+    const teamSlug = 'legacy-notice-path'
+    const s = await setup('en', NOW, teamSlug)
+    await s.activate()
+    const [candidate] = await s.open()
+    const event = await scheduling.resolveWaitlistEventById(db, s.eventTypeId)
+    if (!candidate || !event?.team) throw new Error('Expected a queued team notification')
+
+    // Current public lookup and rendering reject malformed historical slugs. Supply a
+    // legacy event at the lookup boundary and check the path handed to the renderer.
+    const legacySlug = 'Legacy Team%20'
+    const listSlots = scheduling.listPublicTeamSlots
+    const renderNotice = mail.waitlistNotificationEmail
+    const resolve = vi.spyOn(scheduling, 'resolveWaitlistEventById').mockResolvedValue({
+      ...event,
+      team: { ...event.team, slug: legacySlug },
+    })
+    const availability = vi
+      .spyOn(scheduling, 'listPublicTeamSlots')
+      .mockImplementation((ctx, input) => listSlots(ctx, { ...input, handle: teamSlug }))
+    const render = vi
+      .spyOn(mail, 'waitlistNotificationEmail')
+      .mockImplementation((options) =>
+        renderNotice({ ...options, bookingPath: `/team/${teamSlug}/intro` }),
+      )
+    try {
+      await deliverWaitlistEmail(s.deps, { kind: 'notification', id: candidate.id })
+      expect(s.messages).toHaveLength(1)
+      expect(render.mock.calls[0]?.[0].bookingPath).toBe('/team/Legacy%20Team%2520/intro')
+    } finally {
+      render.mockRestore()
+      availability.mockRestore()
+      resolve.mockRestore()
+    }
+  })
 
   async function verificationTimeZoneScenario(send: Sender) {
     const s = await setup('de')

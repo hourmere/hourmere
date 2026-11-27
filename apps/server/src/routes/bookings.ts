@@ -209,6 +209,10 @@ export const Booking = z
       description:
         'Authenticated reads only: whether this caller can change attendee no-show markers now.',
     }),
+    paidManagementUnavailable: z.literal(true).optional().openapi({
+      description:
+        'Authenticated host reads only: the payment binding prevents cancellation, rescheduling and reschedule requests.',
+    }),
     attendees: z.array(Attendee).openapi({ description: 'The invitee first, then guests' }),
     coHosts: z
       .array(z.object({ name: z.string() }))
@@ -273,7 +277,18 @@ const BookingRouting = z
   })
   .openapi('BookingRouting')
 
+const BookingPayment = z.object({
+  status: z.string().openapi({ description: 'Currently paid. Clients must accept new values.' }),
+  amountMinor: z.number().int().positive(),
+  currency: z.string(),
+  refundStatus: z.string().nullable().openapi({
+    description:
+      'None (null), requested, pending, succeeded or failed. Clients must accept new values.',
+  }),
+})
+
 export const HostBooking = Booking.extend({
+  payment: BookingPayment.extend({ stripeDashboardUrl: z.url().optional() }).optional(),
   routing: BookingRouting.optional().openapi({
     description: 'The original stored routing provenance and question and answer snapshots.',
   }),
@@ -281,6 +296,7 @@ export const HostBooking = Booking.extend({
 
 export const ManagedBooking = Booking.extend({
   branding: PublicBranding.optional(),
+  payment: BookingPayment.optional(),
   eventType: z
     .object({
       title: z.string(),
@@ -315,6 +331,10 @@ export const ManagedBooking = Booking.extend({
       description:
         "Present only when the manage token came from a host's reschedule request email: the request that email was sent for and what became of it. Other manage tokens omit it.",
     }),
+  wasRescheduled: z.literal(true).optional().openapi({
+    description:
+      'Present when the manage link still resolves to a cancelled booking that was moved to a new time.',
+  }),
   changeDeadlines: z
     .object({
       rescheduleBy: z.iso.datetime().nullable(),
@@ -509,6 +529,7 @@ export interface BookingRoutesDeps {
   automaticMeet?: boolean | undefined
   smsRemindersAvailable?: boolean | undefined
   automaticZoom?: boolean | undefined
+  microsoftCalendarEnabled?: boolean | undefined
   now?: () => Temporal.Instant
   notifyAttendeeNoShow?: AttendeeNoShowNotifier | undefined
   /** Queues the booking emails in the transaction of each change; none are sent without it. */
@@ -535,6 +556,7 @@ export function bookingRoutes({
   automaticMeet,
   smsRemindersAvailable,
   automaticZoom,
+  microsoftCalendarEnabled,
   rateLimits = {},
   hostRateLimits = {},
 }: BookingRoutesDeps): RouteModule {
@@ -545,6 +567,7 @@ export function bookingRoutes({
     automaticMeet,
     smsRemindersAvailable,
     automaticZoom,
+    microsoftCalendarEnabled,
     bookingMaxInviteeReschedules,
   }
   const manageLimit = rateLimit(createRateLimiter(rateLimits.manage ?? PUBLIC_RATE_LIMITS.manage))
@@ -587,6 +610,7 @@ export function bookingRoutes({
       automaticMeet,
       smsRemindersAvailable,
       automaticZoom,
+      microsoftCalendarEnabled,
       bookingExportMaxConcurrent,
       routingFormsEnabled,
       authorizeOrganizationWrite: bookingWriteAccess(principal, expectedOrganizationId),
@@ -1169,7 +1193,7 @@ export function bookingRoutes({
               bom: z.enum(['true', 'false']).optional(),
               includeRoutingAnswers: z.enum(['true', 'false']).optional().openapi({
                 description:
-                  'Append routing provenance and saved answers to personal exports only. Requires routing forms to be enabled (ROUTING_FORMS_ENABLED=true, off by default). False is equivalent to omitting the option.',
+                  'Append routing provenance and saved answers to personal exports only. Requires routing forms to be enabled, which is the default. False is equivalent to omitting the option.',
               }),
             })
             .strict(),

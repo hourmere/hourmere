@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test'
+import { accountMenuButton, accountMenuPanel } from '../account-menu.ts'
 import {
   acceptFixtureInvitation,
   button,
@@ -193,6 +194,8 @@ test('a team member proves their Hourmere mailbox and explicitly links Keycloak'
   expect(await app.account(email)).toEqual({ ...before, linkedSubjects: [subject] })
   expect(app.tokenExchanges()).toEqual(['issued'])
 
+  // Finishing the linking callback returns focus to the settings heading.
+  await expect(page.getByRole('heading', { name: 'Your team sign-in', exact: true })).toBeFocused()
   await signOut(page, app)
   await context.clearCookies()
   await page.goto(signInUrl(app))
@@ -278,7 +281,9 @@ test.describe('JIT team admission', () => {
       await proveMailbox(page, app, email)
       expect(await app.account(email)).toEqual(noAccount)
       await button(page, 'Continue').click()
-      await expect(button(page, 'Sign out')).toBeVisible()
+      await accountMenuButton(page).click()
+      await expect(accountMenuPanel(page).getByRole('button', { name: 'Sign out' })).toBeVisible()
+      await accountMenuButton(page).click()
       const admitted = await app.account(email)
       expect(admitted).toMatchObject({
         teamRole: 'member',

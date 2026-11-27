@@ -65,7 +65,9 @@ const classes = {
     'GET /api/v1/public/-/routing/teams/{teamSlug}/{slug}',
     'GET /api/v1/public/{handle}/{slug}',
     'GET /api/v1/public/{handle}/{slug}/slots',
+    'POST /api/v1/public/checkout/status',
     'GET /api/v1/public/teams/{handle}/{slug}',
+    'GET /api/v1/public/teams/{handle}',
     'GET /api/v1/public/teams/{handle}/{slug}/slots',
   ],
   booking_write: [
@@ -104,6 +106,8 @@ const classes = {
     'POST /api/v1/bookings/manage/cancel',
     'POST /api/v1/bookings/manage/reschedule',
     'POST /api/v1/public/{handle}/{slug}/bookings',
+    'POST /api/v1/public/{handle}/{slug}/checkout',
+    'POST /api/v1/public/checkout/cancel',
     'POST /api/v1/public/teams/{handle}/{slug}/bookings',
     'POST /api/v1/public/{handle}/{slug}/waitlist',
     'POST /api/v1/public/{handle}/{slug}/waitlist/resend',
@@ -225,6 +229,7 @@ const classes = {
     'GET /api/v1/team/bookings',
     'GET /api/v1/team/bookings/{id}',
     'POST /api/v1/team/bookings/{id}/cancel',
+    'POST /api/v1/team/bookings/bulk-cancellations/preview',
     'GET /api/v1/team/invitations',
     'GET /api/v1/team/invitations/{invitationId}',
     'POST /api/v1/team/invitations/{invitationId}/cancel',
@@ -418,6 +423,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
         routes: productRoutes({
           db,
           slotSnippetsEnabled: true,
+          teamPublicHomeOrganizationIds: [teamId],
           routingFormsEnabled: true,
           routingSecret: secret,
           scimProvisioningEnabled: true,
@@ -531,8 +537,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
           .replaceAll('{memberUserId}', owner.user.id)
           .replaceAll('{teamId}', teamId)
           .replaceAll('{organizationId}', teamId)
-        const error =
-          template === '/api/v1/bookings/{id}/organization'
+        const bulkPreviewOff = template === '/api/v1/team/bookings/bulk-cancellations/preview'
+        const error = bulkPreviewOff
+          ? 'not_found'
+          : template === '/api/v1/bookings/{id}/organization'
             ? 'booking_not_found'
             : template === '/api/v1/readiness/self'
               ? 'readiness_access_denied'
@@ -548,7 +556,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
           path,
           payload,
           headers,
-          expectedStatus: error === 'booking_not_found' ? 404 : 403,
+          expectedStatus: bulkPreviewOff || error === 'booking_not_found' ? 404 : 403,
           nativeError: error,
           cleanupEvent,
           cleanupSchedule,
@@ -721,6 +729,19 @@ describe.skipIf(!process.env.DATABASE_URL)(
             .executeTakeFirstOrThrow()
           payload = { versionId: form.published_version_id, answers: {} }
         }
+      } else if (template === '/api/v1/public/{handle}/{slug}/checkout') {
+        path = path.replace('{handle}', 'rest-scoped-host').replace('{slug}', 'intro')
+        headers['idempotency-key'] = randomUUID()
+        payload = {
+          start,
+          invitee: { name: 'Matrix invitee', email: 'matrix@example.test', timeZone: 'UTC' },
+          expectedAmountMinor: 5000,
+          expectedCurrency: 'usd',
+        }
+        expectedStatus = 409
+      } else if (template.startsWith('/api/v1/public/checkout/')) {
+        payload = { token: 'unavailable' }
+        expectedStatus = 404
       } else if (
         template.startsWith('/api/v1/public/') &&
         !template.startsWith('/api/v1/public/meeting-polls/')
@@ -1052,14 +1073,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 189-operation contract and all 567 scope combinations', () => {
+    it('covers the exact 194-operation contract and all 582 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(189)
-      expect(new Set(ids).size).toBe(189)
+      expect(ids).toHaveLength(194)
+      expect(new Set(ids).size).toBe(194)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(567)
+      expect(cases).toHaveLength(582)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
@@ -1127,6 +1148,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
             expect(await response.json()).toMatchObject({ error })
           } else if (operation === 'POST /api/v1/meeting-polls') {
             expect(await response.json()).toEqual({ error: 'event_type_not_found' })
+          } else if (operation === 'POST /api/v1/public/{handle}/{slug}/checkout') {
+            expect(await response.json()).toMatchObject({ error: 'paid_bookings_disabled' })
+          } else if (operation.startsWith('POST /api/v1/public/checkout/')) {
+            expect(await response.json()).toMatchObject({ error: 'payment_checkout_not_found' })
           } else if (operation.includes('/meeting-polls/') && response.status === 404) {
             expect(await response.json()).toMatchObject({ error: 'poll_not_found' })
           } else if (response.status !== 204) {

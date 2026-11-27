@@ -131,6 +131,10 @@ Zoom。两者都有时优先 Meet，都没有时不设地点。此默认值只�
 
 ## Manage the list
 
+If the personal setup guide cannot confirm your default hours, use **Refresh setup status**
+to read your saved setup. If the refresh also fails, the page keeps the last loaded guide
+and list. Use the same refresh action when your connection returns.
+
 Each event row has an enable/disable switch. Disabled rows are visually muted and retain
 a readable status. Disabling stops new bookings; it does not cancel existing bookings.
 If saving fails, the switch returns to its previous state and reports the error.
@@ -141,9 +145,16 @@ bookings through that link, but does not cancel existing bookings or erase their
 Embed opens the existing sharing controls and follows the event's current readiness rules.
 The controls support keyboard navigation and screen readers.
 
-中文：列表开关可直接启停事件；停用不取消已有预约，保存失败会还原开关并显示错误。
+An enabled [team home catalogue](/docs/team-public-home) can list this team's saved, active
+event types. The event's saved visibility controls whether it can appear there.
+
+中文：如果个人设置引导无法确认默认每周时间段，点“刷新设置状态”查看已保存的设置。
+如果刷新也失败，页面会保留上次加载的引导和列表。连接恢复后，点同一个按钮再次刷新。
+
+列表开关可直接启停事件；停用不取消已有预约，保存失败会还原开关并显示错误。
 更多菜单提供复制、嵌入和删除；删除必须先确认，也可取消。删除停止此链接的新预约，但不取消
 已有预约或删除其历史。
+团队公开首页目录启用后，已保存且启用的团队活动是否可以列出，取决于该活动已保存的可见性设置。
 
 ## Duplicate an event type
 

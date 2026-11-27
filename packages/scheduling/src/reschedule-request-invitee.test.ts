@@ -178,7 +178,40 @@ describe.skipIf(!serverUrl)('reschedule request links for invitees', () => {
       const cancelled = await getManagedBookingDetails(s.pub, link)
       expect(cancelled.status).toBe('cancelled')
       expect(cancelled.rescheduleRequest).toEqual({ id, state: 'cancelled' })
+      expect(cancelled).not.toHaveProperty('wasRescheduled')
     }
+  })
+
+  it('identifies the moved predecessor when a stale booking API token reloads', async () => {
+    const s = await setup()
+    const id = await s.request()
+    const token = required(s.created.manageToken)
+    const link = await emailToken(s.created.booking.id, id)
+    expect(await getManagedBookingDetails(s.pub, token)).toMatchObject({
+      pendingReschedule: { id },
+    })
+
+    const moved = await rescheduleManagedBooking(s.pub, link, {
+      start: instant('2026-11-02T10:00:00Z'),
+      rescheduleRequestId: id,
+    })
+    await expect(
+      rescheduleManagedBooking(s.pub, token, {
+        start: instant('2026-11-02T11:00:00Z'),
+        rescheduleRequestId: id,
+      }),
+    ).rejects.toMatchObject({ code: 'reschedule_request_changed' })
+
+    const reloaded = await getManagedBookingDetails(s.pub, token)
+    expect(reloaded).toMatchObject({
+      id: s.created.booking.id,
+      status: 'cancelled',
+      wasRescheduled: true,
+    })
+    expect(reloaded).not.toHaveProperty('rescheduleRequest')
+    expect(reloaded).not.toHaveProperty('rescheduledToId')
+    expect(reloaded).not.toHaveProperty('manageToken')
+    expect(moved.booking.status).toBe('confirmed')
   })
 
   it('reports a move made after the request closed instead of the older state', async () => {
@@ -229,6 +262,31 @@ describe.skipIf(!serverUrl)('reschedule request links for invitees', () => {
     const details = await getManagedBookingDetails(advancing, link)
     expect(details.pendingReschedule?.id).toBe(id)
     expect(details.rescheduleRequest).toEqual({ id, state: 'pending' })
+  })
+
+  it('reads the booking and its request link from one snapshot across a replacement', async () => {
+    const s = await setup()
+    const id = await s.request()
+    const link = await emailToken(s.created.booking.id, id)
+    let replacementId: string | undefined
+    const observed = db.withPlugin({
+      transformQuery: ({ node }) => node,
+      async transformResult({ result }) {
+        // Commit the replacement after booking hydration reads the pending request, but
+        // before the link lookup can read the state of the request named in the email.
+        if (!replacementId && result.rows.some((row) => row.id === id && row.state === 'pending')) {
+          replacementId = await s.request()
+        }
+        return result
+      },
+    })
+    const details = await getManagedBookingDetails({ ...s.pub, db: observed }, link)
+    expect(replacementId).toEqual(expect.any(String))
+    expect(details.pendingReschedule?.id).toBe(id)
+    expect(details.rescheduleRequest).toEqual({ id, state: 'pending' })
+    const fresh = await getManagedBookingDetails(s.pub, link)
+    expect(fresh.pendingReschedule?.id).toBe(replacementId)
+    expect(fresh.rescheduleRequest).toEqual({ id, state: 'replaced' })
   })
 
   it('frees the original time, its host block and its reminders when the invitee picks', async () => {

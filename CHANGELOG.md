@@ -12,6 +12,18 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Added
 
+- Routing forms ask invitees questions and offer a booking or show a message based on
+  their answers. Hosts can manage forms, inspect saved answers and include them in
+  personal booking exports. Routing is on by default for unset or empty
+  `ROUTING_FORMS_ENABLED`. Explicit `false` or a legacy personal `route` handle
+  keeps routing off. See the [routing forms guide](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/routing-forms.md).
+
+- Booking workflows are enabled by default for unset or empty `WORKFLOWS_ENABLED`, including
+  on upgrades. Set `WORKFLOWS_ENABLED=false` across web and worker to pause capture and
+  delivery admissions. A slow workflow webhook receiver can no longer delay a booking's
+  cancellation or reschedule. See the
+  [workflow operating guide](https://github.com/hourmere/hourmere/blob/main/docs/workflows.md#operating-guide).
+
 - Organization single sign-on through OIDC and SAML 2.0 is available on every
   instance, including self-hosted installations. Both protocols are on by default, including
   on upgrades with empty or unset settings. Teams configure a provider and enable enforcement
@@ -238,6 +250,11 @@ schema downgrade is not automatic. Direct source deployments require Node.js 26.
 Hourmere requires PostgreSQL 18+ because migrations use `uuidv7()`; the provided Compose
 stack includes PostgreSQL 18.
 
+- **Resolve case-insensitive team address collisions before migration 0194.** The
+  migration stops if existing addresses differ only in case and reports the conflicting
+  organization IDs. Check the database before upgrading and rename enough teams to make
+  every address unique. The renamed teams' published links change. See the
+  [team address preflight and recovery steps](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/self-hosting.md#resolve-team-address-collisions-migration-0194).
 - **SSO audit actions (migration 0085) upgrade in place.** The migration follows 0080: it
   replaces the audit details check with 0080's rules, unchanged, plus allow-lists for the SSO
   audit actions, which no version records yet. It is safe to apply while the previous version

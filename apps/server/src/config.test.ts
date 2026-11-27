@@ -11,18 +11,56 @@ const base = {
 }
 
 describe('loadConfig', () => {
-  it.each(['all', 'web', 'worker'])('parses workflow opt-in strictly in the %s role', (role) => {
-    const env = { ...base, HOURMERE_ROLE: role }
-    for (const value of [undefined, '', 'false']) {
-      expect(loadConfig({ ...env, WORKFLOWS_ENABLED: value }).WORKFLOWS_ENABLED).toBe(false)
+  it('requires explicit organization IDs to publish team directories', () => {
+    const id = '4ef4e257-e71a-4430-a73f-a1985dac9cca'
+    expect(loadConfig(base).TEAM_PUBLIC_HOME_ORGANIZATION_IDS).toEqual([])
+    for (const value of ['', '  ', ', ,']) {
+      expect(
+        loadConfig({ ...base, TEAM_PUBLIC_HOME_ORGANIZATION_IDS: value })
+          .TEAM_PUBLIC_HOME_ORGANIZATION_IDS,
+      ).toEqual([])
     }
-    expect(loadConfig({ ...env, WORKFLOWS_ENABLED: 'true' }).WORKFLOWS_ENABLED).toBe(true)
-    for (const value of ['yes', '0', '1', 'TRUE', ' ', ' true', 'false\n']) {
-      expect(() => loadConfig({ ...env, WORKFLOWS_ENABLED: value })).toThrow(
-        'WORKFLOWS_ENABLED must be true, false or empty',
+    expect(
+      loadConfig({
+        ...base,
+        TEAM_PUBLIC_HOME_ORGANIZATION_IDS: `, ${id.toUpperCase()} , , ${id} ,`,
+      }).TEAM_PUBLIC_HOME_ORGANIZATION_IDS,
+    ).toEqual([id])
+    expect(
+      loadConfig({
+        ...base,
+        TEAM_PUBLIC_HOME_ORGANIZATION_IDS: `${Array(256).fill(id).join(',')},`,
+      }).TEAM_PUBLIC_HOME_ORGANIZATION_IDS,
+    ).toEqual([id])
+    for (const invalid of ['*', 'team-slug', `${id}, ,garbage,`, Array(257).fill(id).join(',')]) {
+      expect(() => loadConfig({ ...base, TEAM_PUBLIC_HOME_ORGANIZATION_IDS: invalid })).toThrow(
+        /TEAM_PUBLIC_HOME_ORGANIZATION_IDS/,
       )
     }
   })
+
+  it.each(['all', 'web', 'worker'])(
+    'enables workflows by default and parses the switch strictly in the %s role',
+    (role) => {
+      const env = { ...base, HOURMERE_ROLE: role }
+      for (const value of [undefined, '', 'true']) {
+        expect(loadConfig({ ...env, WORKFLOWS_ENABLED: value })).toMatchObject({
+          WORKFLOWS_ENABLED: true,
+          FOLLOW_UP_HOST_NOTES_ENABLED: true,
+        })
+      }
+      expect(loadConfig({ ...env, WORKFLOWS_ENABLED: 'false' }).WORKFLOWS_ENABLED).toBe(false)
+      expect(loadConfig({ ...env, FOLLOW_UP_HOST_NOTES_ENABLED: 'false' })).toMatchObject({
+        WORKFLOWS_ENABLED: true,
+        FOLLOW_UP_HOST_NOTES_ENABLED: false,
+      })
+      for (const value of ['yes', '0', '1', 'TRUE', ' ', ' true', 'false\n']) {
+        expect(() => loadConfig({ ...env, WORKFLOWS_ENABLED: value })).toThrow(
+          'WORKFLOWS_ENABLED must be true, false or empty',
+        )
+      }
+    },
+  )
 
   function verifyExportLimit(load: typeof loadConfig) {
     for (const HOURMERE_ROLE of ['all', 'web', 'worker']) {

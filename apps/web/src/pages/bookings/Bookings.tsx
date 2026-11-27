@@ -19,6 +19,7 @@ import { useMe } from '../../session.tsx'
 import { BookingDetailPage } from './BookingDetail.tsx'
 import { BookingExport } from './BookingExport.tsx'
 import { BookingPanel, useBookingPanel } from './BookingPanel.tsx'
+import { BookingTitle } from './BookingUserContent.tsx'
 import { bookingTitle, hostZone } from './booking-format.ts'
 import { type NoShowChange, NoShowRowControls, withNoShowChange } from './NoShowAttendees.tsx'
 
@@ -506,18 +507,18 @@ function BookingList({
                           panel.open(b.id, event.currentTarget)
                         }}
                       >
-                        {ui(bookingTitle(b))}
+                        <BookingTitle booking={b} />
                       </Link>
                     </th>
                     <td data-label={t('Invitee')} className="user-content">
                       <div className="table-value">
                         {invitee ? (
                           <>
-                            {invitee.name}
+                            <bdi>{invitee.name}</bdi>
                             <br />
-                            <span className="muted">
+                            <bdi dir="ltr" className="muted">
                               <BreakableText>{invitee.email}</BreakableText>
-                            </span>
+                            </bdi>
                             {guests > 0 && (
                               <span className="muted">
                                 {' '}

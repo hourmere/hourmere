@@ -47,7 +47,8 @@ const attachment = icsAttachment({
 
 describe('default reminder output before follow-up templates', () => {
   // Captured from the unchanged renderer before adding follow-up content. The digest
-  // covers all subject, text, HTML and calendar bytes for all three recipient roles.
+  // covers subject, text, HTML and calendar bytes for all three roles. Direction
+  // markup is the only allowed difference from that baseline.
   it.each(registeredLocales)('preserves every $code reminder byte', ({ code }) => {
     const messages = [undefined, attachment].flatMap((calendar) =>
       recipients.map((recipient) =>
@@ -59,6 +60,10 @@ describe('default reminder output before follow-up templates', () => {
         ),
       ),
     )
-    expect(createHash('sha256').update(JSON.stringify(messages)).digest('hex')).toMatchSnapshot()
+    const canonical = messages.map((message) => ({
+      ...message,
+      html: message.html?.replace(/<\/?bdi(?: dir="ltr")?>/g, ''),
+    }))
+    expect(createHash('sha256').update(JSON.stringify(canonical)).digest('hex')).toMatchSnapshot()
   })
 })

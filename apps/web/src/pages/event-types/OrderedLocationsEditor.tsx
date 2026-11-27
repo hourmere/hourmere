@@ -105,6 +105,7 @@ export function OrderedLocationsEditor({
               {(props) => (
                 <input
                   {...props}
+                  dir="auto"
                   value={option.label ?? ''}
                   maxLength={100}
                   onChange={(event) => {
@@ -161,6 +162,7 @@ export function OrderedLocationsEditor({
                 {(props) => (
                   <input
                     {...props}
+                    dir="auto"
                     value={option.address}
                     onChange={(event) =>
                       update(option.id, { ...option, address: event.target.value })
@@ -198,7 +200,7 @@ export function OrderedLocationsEditor({
               />
               {t('Default location')}
             </label>
-            <div className="row">
+            <div className="location-option-actions">
               <button
                 id={`${id}-move-up`}
                 className="button button-small"

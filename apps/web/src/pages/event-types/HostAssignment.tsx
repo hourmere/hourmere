@@ -183,7 +183,7 @@ export function HostAssignment({
                   )
                 }}
               />
-              {member.name.trim() || t('Unnamed team member')}
+              <bdi>{member.name.trim() || t('Unnamed team member')}</bdi>
             </label>
             {canManage && draft.hostUserIds.includes(member.id) && (
               <>
@@ -245,7 +245,7 @@ export function HostAssignment({
             {members
               .filter((m) => draft.hostUserIds.includes(m.id))
               .map((m) => (
-                <option key={m.id} value={m.id}>
+                <option key={m.id} value={m.id} dir={m.name.trim() ? 'auto' : undefined}>
                   {m.name.trim() || t('Unnamed team member')}
                 </option>
               ))}

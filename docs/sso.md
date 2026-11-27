@@ -1908,11 +1908,15 @@ claim. Both [enforcement recovery](#operator-recovery-runbook) and
 [domain retirement](#retire-an-expired-claim-for-another-team) run from the server container in
 every setting state.
 
-For releases with the SSO failure-audit drop report, each process accumulates dropped failures
-by action for 60 seconds starting with the first drop in a batch. The
-`sso.security_failures_dropped` warning contains counts without provider, team or request IDs.
+Each process counts SSO security failures dropped by the audit rate limit. It counts by action
+for 60 seconds starting with the first drop in a batch. The `sso.security_failures_dropped`
+warning contains counts without provider, team or request IDs.
 Pending counts are held in memory and lost if the process exits before it emits the warning.
 Dropped failures leave no entry in the affected team's audit log.
+
+每个进程从首条 SSO 安全失败记录被限流丢弃起，按动作累计 60 秒。随后输出的
+`sso.security_failures_dropped` 警告只包含计数，不含提供方、团队或请求 ID。计数保存在内存中，
+进程在输出警告前退出时会丢失计数。被丢弃的记录不会写入受影响团队的审计日志。
 
 Known compatibility limitations:
 - Keycloak SAML response-only signing is insufficient: enable **Sign assertions**

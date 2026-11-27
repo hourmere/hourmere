@@ -19,9 +19,9 @@ exports[`recurring booking mail content > renders all 12 occurrences in the canc
 <p style="margin: 0 0 24px; color: #1f4fd8; font-size: 20px; font-weight: 700;">Hourmere</p>
 <p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">5 occurrences in this series were cancelled.</p>
 <table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
-<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">What</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Studio hours</td></tr>
-<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Host</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Mira</td></tr>
-<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Reason</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">The studio is closed for maintenance.</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">What</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;"><bdi>Studio hours</bdi></td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Host</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;"><bdi>Mira</bdi></td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Reason</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;"><bdi>The studio is closed for maintenance.</bdi></td></tr>
 </table>
 <p style="margin: 24px 0 8px; font-weight: 600;">Cancelled dates</p>
 <ul style="margin: 0; padding-left: 24px;">
@@ -105,10 +105,10 @@ exports[`recurring booking mail content > renders all 12 occurrences in the conf
 <table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;">
 <tr><td style="padding: 24px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; overflow-wrap: anywhere; word-break: break-word;">
 <p style="margin: 0 0 24px; color: #1f4fd8; font-size: 20px; font-weight: 700;">Hourmere</p>
-<p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">Your series of meetings with Mira is booked.</p>
+<p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">Your series of meetings with <bdi>Mira</bdi> is booked.</p>
 <table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
-<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">What</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Studio hours</td></tr>
-<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Host</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Mira</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">What</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;"><bdi>Studio hours</bdi></td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Host</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;"><bdi>Mira</bdi></td></tr>
 </table>
 <p style="margin: 24px 0 8px; font-weight: 600;">Occurrences</p>
 <ul style="margin: 0; padding-left: 24px;">
@@ -189,8 +189,8 @@ exports[`recurring booking mail content > renders all 12 occurrences in the link
 <p style="margin: 0 0 24px; color: #1f4fd8; font-size: 20px; font-weight: 700;">Hourmere</p>
 <p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">The meeting link status changed for 12 occurrences.</p>
 <table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
-<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">What</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Studio hours</td></tr>
-<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Invitee</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Ada</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">What</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;"><bdi>Studio hours</bdi></td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Invitee</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;"><bdi>Ada</bdi></td></tr>
 </table>
 <p style="margin: 24px 0 8px; font-weight: 600;">Occurrences</p>
 <ul style="margin: 0; padding-left: 24px;">
