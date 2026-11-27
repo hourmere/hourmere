@@ -284,6 +284,10 @@ Team booking bulk cancellation preview returns 404 until the feature is released
 | `GET /api/v1/team/bookings/{id}` | Browser session only | — |
 | `POST /api/v1/team/bookings/{id}/cancel` | Browser session only | — |
 | `GET /api/v1/team/bookings/{id}/handoff-preview` | Browser session only | — |
+| `POST /api/v1/team/bookings/{id}/handoff-offers` | Browser session only | — |
+| `GET /api/v1/team/bookings/{id}/handoff-offers/{offerId}` | Browser session only | — |
+| `POST /api/v1/team/bookings/{id}/handoff-offers/{offerId}/withdraw` | Browser session only | — |
+| `POST /api/v1/team/bookings/{id}/handoff-offers/{offerId}/resend` | Browser session only | — |
 | `POST /api/v1/team/bookings/{id}/handoff-offers/{offerId}/apply` | Browser session only | — |
 | `POST /api/v1/team/bookings/bulk-cancellations/preview` | Browser session only | — |
 | `GET /api/v1/team/invitations` | Browser session only | — |

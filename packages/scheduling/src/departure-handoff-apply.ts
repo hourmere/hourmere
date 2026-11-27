@@ -1,20 +1,7 @@
 import { createHash } from 'node:crypto'
-import {
-  checkTeamManagementAccess,
-  lockSharedTeamSsoProof,
-  ssoHardOff,
-  TeamManagementError,
-  type TeamSsoCapabilities,
-  teamSession,
-  withScimResources,
-} from '@hourmere/auth'
-import type { Database, Db } from '@hourmere/db'
+import { ssoHardOff, type TeamSsoCapabilities } from '@hourmere/auth'
+import type { Database } from '@hourmere/db'
 import { auditActor } from '@hourmere/db/audit'
-import {
-  checkTeamWriteDeadline,
-  recordTeamWriteOrganizationLock,
-  teamWriteTransaction,
-} from '@hourmere/db/team-write'
 import type { Transaction } from 'kysely'
 import { selectDurationMinutes } from './availability.ts'
 import {
@@ -29,6 +16,13 @@ import {
 import { cutoffsOf } from './change-deadlines.ts'
 import { prepareBookingConference, unresolvedLocation } from './conferences.ts'
 import type { BookingNotifier, ServiceContext } from './context.ts'
+import {
+  type DepartureHandoffSourceInput,
+  type DepartureHandoffWriteContext,
+  handoffOfferChanged as offerChanged,
+  handoffOfferNotFound as offerNotFound,
+  withDepartureHandoffWrite,
+} from './departure-handoff-access.ts'
 import { getDepartureHandoffEligibility } from './departure-handoff-eligibility.ts'
 import { getDepartureHandoffLocation } from './departure-handoff-location.ts'
 import { DomainError } from './errors.ts'
@@ -92,33 +86,13 @@ interface TermsInput {
   locationOptionId?: string
 }
 
-interface ApplyInput {
-  teamId: string
-  expectedOrganizationId: string
-  bookingId: string
+interface ApplyInput extends DepartureHandoffSourceInput {
   offerId: string
   version: number
 }
 
-interface ApplyContext extends ServiceContext {
+interface ApplyContext extends DepartureHandoffWriteContext {
   notify: BookingNotifier
-  /** Only the session advisory lock. Team row locks belong to the apply transaction. */
-  lockOrganizationContext?: (trx: Db) => Promise<void>
-}
-
-const bookingNotFound = () => new DomainError('not_found', 'booking_not_found', 'No such booking')
-const offerNotFound = () => new DomainError('not_found', 'handoff_offer_not_found')
-const offerChanged = () => new DomainError('conflict', 'handoff_offer_changed')
-const ssoRequired = (): never => {
-  throw new DomainError('forbidden', 'sso_required')
-}
-
-function rethrowTeamManagementError(error: unknown): never {
-  if (!(error instanceof TeamManagementError)) throw error
-  throw new DomainError(
-    error.code === 'organization_context_changed' ? 'conflict' : 'forbidden',
-    error.code,
-  )
 }
 
 function before(left: Temporal.Instant, right: Temporal.Instant): boolean {
@@ -141,7 +115,7 @@ function assertOfferLive(
 }
 
 export function departureHandoffDeadline(
-  offer: DepartureHandoffOffer,
+  offer: Pick<DepartureHandoffOffer, 'issuedAt' | 'expiresAt'>,
   sourceStart: Temporal.Instant,
   targetStart: Temporal.Instant,
 ): Temporal.Instant {
@@ -174,7 +148,7 @@ export function departureHandoffApprovedRecipientIds(
   return [...new Set(recipientKeys.flatMap((key) => approved.get(key) ?? []))]
 }
 
-async function readTerms(
+export async function readDepartureHandoffTerms(
   ctx: ServiceContext,
   organizationId: string,
   input: TermsInput,
@@ -278,7 +252,7 @@ export async function getDepartureHandoffTerms(
   input: TermsInput,
 ): Promise<{ termsDigest: string; recipientKeys: string[] }> {
   const eligible = await getDepartureHandoffEligibility(ctx, organizationId, input)
-  const { termsDigest, recipientKeys } = await readTerms(
+  const { termsDigest, recipientKeys } = await readDepartureHandoffTerms(
     ctx,
     organizationId,
     input,
@@ -296,46 +270,15 @@ export async function applyDepartureHandoff(
   store: DepartureHandoffApplyStore,
   ssoCapabilities: TeamSsoCapabilities = ssoHardOff,
 ): Promise<{ sourceBookingId: string; replacementBookingId: string }> {
-  if (ctx.principal.kind !== 'session')
-    throw new DomainError('forbidden', 'team_management_access_denied')
-  const capabilities = withScimResources(
+  return withDepartureHandoffWrite(
+    ctx,
+    input,
     ssoCapabilities,
-    ctx.scimResourcesEnabled || ctx.principal.scimResourcesEnabled,
-  )
-  const principal = capabilities.scimResourcesEnabled
-    ? { ...ctx.principal, scimResourcesEnabled: true as const }
-    : ctx.principal
-
-  return teamWriteTransaction(
-    ctx.db.transaction().setIsolationLevel('read committed'),
-    async (trx) => {
-      await ctx.lockOrganizationContext?.(trx)
-      const actor = await checkTeamManagementAccess(trx, principal, input.teamId, 'share', {
-        expectedOrganizationId: input.expectedOrganizationId,
-        allowPersonal: false,
-      }).catch(rethrowTeamManagementError)
-      recordTeamWriteOrganizationLock(trx, actor.organizationId)
-      const deadline = await lockSharedTeamSsoProof(
-        trx,
-        capabilities,
-        { userId: principal.user.id, sessionId: principal.sessionId },
-        actor.organizationId,
-        ssoRequired,
-      )
-
-      if (!isUuid(input.bookingId)) throw bookingNotFound()
-      const source = await trx
-        .selectFrom('bookings')
-        .select('id')
-        .where('id', '=', input.bookingId)
-        .where('organization_id', '=', actor.organizationId)
-        .forUpdate()
-        .executeTakeFirst()
-      if (!source) throw bookingNotFound()
+    async (writeContext, source, actor) => {
+      const { db: trx, principal } = writeContext
       if (!isUuid(input.offerId)) throw offerNotFound()
       const key = {
-        organizationId: actor.organizationId,
-        sourceBookingId: source.id,
+        ...source,
         offerId: input.offerId.toLowerCase(),
         version: input.version,
       }
@@ -343,31 +286,26 @@ export async function applyDepartureHandoff(
       if (!offer) throw offerNotFound()
       if (offer === 'version_mismatch' || offer.version !== input.version) throw offerChanged()
       if (offer.committed) {
-        await checkTeamWriteDeadline(trx, deadline, ssoRequired)
-        await teamSession(trx, principal, false).catch(rethrowTeamManagementError)
         return {
-          sourceBookingId: source.id,
+          sourceBookingId: source.sourceBookingId,
           replacementBookingId: offer.committed.replacementBookingId,
         }
       }
       if (offer.state !== 'live') throw offerChanged()
 
-      const writeContext = {
-        ...ctx,
-        db: trx,
-        principal,
-        scimResourcesEnabled: capabilities.scimResourcesEnabled,
+      const eligibilityInput = {
+        bookingId: source.sourceBookingId,
+        departingUserId: offer.departingUserId,
       }
-      const eligibilityInput = { bookingId: source.id, departingUserId: offer.departingUserId }
       const preliminary = await getDepartureHandoffEligibility(
         writeContext,
-        actor.organizationId,
+        source.organizationId,
         eligibilityInput,
       )
       await lockHosts(trx, [offer.departingUserId.toLowerCase(), preliminary.candidateUserId])
       const eligible = await getDepartureHandoffEligibility(
         writeContext,
-        actor.organizationId,
+        source.organizationId,
         eligibilityInput,
         ctx.now(),
         true,
@@ -376,10 +314,10 @@ export async function applyDepartureHandoff(
       if (candidateUserId !== preliminary.candidateUserId || event.id !== preliminary.event.id)
         throw offerChanged()
 
-      const terms = await readTerms(
+      const terms = await readDepartureHandoffTerms(
         writeContext,
-        actor.organizationId,
-        { bookingId: source.id, ...offer },
+        source.organizationId,
+        { bookingId: source.sourceBookingId, ...offer },
         eligible,
         true,
       )
@@ -395,12 +333,18 @@ export async function applyDepartureHandoff(
         .select(['notifications', 'reschedule_cutoff_minutes', 'cancel_cutoff_minutes'])
         .where('id', '=', event.id)
         .executeTakeFirstOrThrow()
-      await cancelTeamBookingInTransaction(trx, actor, source.id, () => now, {
-        notify: ctx.notify,
-        sessionId: principal.sessionId,
-        seriesOccurrenceId: null,
-        meetingPollLinked: false,
-      })
+      await cancelTeamBookingInTransaction(
+        trx,
+        { ...actor, organizationId: source.organizationId },
+        source.sourceBookingId,
+        () => now,
+        {
+          notify: ctx.notify,
+          sessionId: actor.sessionId,
+          seriesOccurrenceId: null,
+          meetingPollLinked: false,
+        },
+      )
       await requireOfferedSlot(trx, {
         eventTypeId: event.id,
         hostUserId: candidateUserId,
@@ -408,10 +352,10 @@ export async function applyDepartureHandoff(
         end: terms.end,
         now,
         durationMinutes: terms.duration,
-        excludeBookingId: source.id,
+        excludeBookingId: source.sourceBookingId,
       })
       const { id } = await insertBooking(trx, {
-        organizationId: actor.organizationId,
+        organizationId: source.organizationId,
         eventTypeId: event.id,
         start: terms.start,
         end: terms.end,
@@ -427,7 +371,7 @@ export async function applyDepartureHandoff(
         notificationSnapshot: createNotificationSnapshot(policy.notifications),
         changeCutoffs: cutoffsOf(policy),
       })
-      await auditBooking(trx, actor.organizationId, id, 'booking.created', {
+      await auditBooking(trx, source.organizationId, id, 'booking.created', {
         source: 'web',
         apiKeyId: null,
         audit: auditActor(principal),
@@ -451,9 +395,7 @@ export async function applyDepartureHandoff(
         replacementBookingId: id,
       })
       assertOfferLive(offer, eligible.source.start, terms.start, ctx.now())
-      await checkTeamWriteDeadline(trx, deadline, ssoRequired)
-      await teamSession(trx, principal, false).catch(rethrowTeamManagementError)
-      return { sourceBookingId: source.id, replacementBookingId: id }
+      return { sourceBookingId: source.sourceBookingId, replacementBookingId: id }
     },
   )
 }

@@ -184,5 +184,9 @@
   "series.repair": "Para volver a intentar generar el enlace de reunión, abra la reserva afectada en Hourmere.",
   "teams.linkPending": "El enlace de Teams aparecerá en los detalles de la reserva en cuanto esté disponible.",
   "teams.unavailable": "Microsoft Teams no está disponible. Esta reserva usará el evento del calendario de Outlook.",
-  "teams.writebackFailed": "El enlace de Teams no está disponible. La cita sigue programada."
+  "teams.writebackFailed": "El enlace de Teams no está disponible. La cita sigue programada.",
+  "departureHandoff.subject": "Revise el cambio propuesto para su reserva",
+  "departureHandoff.introduction": "Un administrador del equipo ha propuesto sustituir su reserva. La persona que hizo la reserva y todos los invitados deben dar su consentimiento para que el equipo pueda sustituirla. Si caduca la propuesta, la reserva actual sigue confirmada.",
+  "departureHandoff.privacy": "Mantenga este enlace en privado. Cualquiera que lo tenga puede responder en su nombre. Solo funciona el enlace más reciente.",
+  "departureHandoff.review": "Revisar la propuesta"
 }

@@ -184,5 +184,9 @@
   "series.repair": "Pour relancer la création du lien de réunion, ouvrez la réservation concernée dans Hourmere.",
   "teams.linkPending": "Le lien Teams s’affichera dans les détails de la réservation dès qu’il sera disponible.",
   "teams.unavailable": "Microsoft Teams est indisponible. Cette réservation utilise l’événement du calendrier Outlook.",
-  "teams.writebackFailed": "Le lien Teams est indisponible. La réservation est maintenue."
+  "teams.writebackFailed": "Le lien Teams est indisponible. La réservation est maintenue.",
+  "departureHandoff.subject": "Consultez la modification proposée pour votre réservation",
+  "departureHandoff.introduction": "Un administrateur de l’équipe propose de remplacer votre réservation. L’équipe ne pourra le faire qu’avec l’accord de la personne qui a réservé et de tous les invités. Si la proposition expire, la réservation actuelle reste confirmée.",
+  "departureHandoff.privacy": "Gardez ce lien privé. Toute personne qui le détient peut répondre en votre nom. Seul le lien le plus récent fonctionne.",
+  "departureHandoff.review": "Consulter la proposition"
 }

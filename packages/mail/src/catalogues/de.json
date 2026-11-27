@@ -184,5 +184,9 @@
   "series.repair": "Öffnen Sie die betroffene Buchung in Hourmere, um die Erstellung des Meetinglinks erneut zu versuchen.",
   "teams.linkPending": "Der Teams-Link erscheint in den Buchungsdetails, sobald er verfügbar ist.",
   "teams.unavailable": "Microsoft Teams ist nicht verfügbar. Für diese Buchung wird der Outlook-Kalendereintrag verwendet.",
-  "teams.writebackFailed": "Der Teams-Link ist nicht verfügbar. Der gebuchte Termin findet weiterhin statt."
+  "teams.writebackFailed": "Der Teams-Link ist nicht verfügbar. Der gebuchte Termin findet weiterhin statt.",
+  "departureHandoff.subject": "Vorgeschlagene Änderung Ihrer Buchung ansehen",
+  "departureHandoff.introduction": "Die Teamverwaltung hat einen Ersatz für Ihre Buchung vorgeschlagen. Erst wenn die buchende Person und alle Gäste zustimmen, kann das Team die Buchung ersetzen. Läuft der Vorschlag ab, bleibt die aktuelle Buchung bestätigt.",
+  "departureHandoff.privacy": "Behandeln Sie diesen Link vertraulich. Wer ihn hat, kann in Ihrem Namen antworten. Nur der neueste Link ist gültig.",
+  "departureHandoff.review": "Vorschlag ansehen"
 }

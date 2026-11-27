@@ -23,6 +23,7 @@ export function scimMappingEmail(
 
 export * from './booking.ts'
 export * from './branding.ts'
+export * from './departure-handoff.ts'
 export * from './ics.ts'
 export { emailLayout } from './layout.ts'
 export * from './team-invitation.ts'
