@@ -604,6 +604,9 @@ to be a host.
 
 ### Team roles
 
+Custom roles are unavailable. The [proposed custom roles design](https://github.com/hourmere/hourmere/blob/main/docs/custom-roles.md)
+covers the planned catalogue and compatibility with existing credentials.
+
 Team invitations default to `member`; owners and admins may invite only that role,
 including when resending. Historical invitations with an elevated or custom stored role
 cannot be resent or accepted. Revoke them and issue a new member invitation instead.
