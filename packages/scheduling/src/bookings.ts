@@ -3202,12 +3202,12 @@ export async function cancelTeamBookingInTransaction(
     if (options.bulk) return
     throw bookingNotFound()
   }
-  const checkedAt = options.bulk ? await options.bulk.eligibleAt() : now()
-  if (!checkedAt) return
+  const cancellationTime = options.bulk ? await options.bulk.eligibleAt() : now()
+  if (!cancellationTime) return
   await cancelLocked(
     trx,
     row,
-    checkedAt,
+    cancellationTime,
     normalizeReason(options.reason),
     options.notify,
     {
