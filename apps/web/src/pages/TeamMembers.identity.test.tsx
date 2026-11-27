@@ -12,7 +12,7 @@ import { TeamMembers } from './TeamMembers.tsx'
 const TEAM_ID = '00000000-0000-7000-8000-000000000010'
 const SELF_ID = '00000000-0000-7000-8000-000000000001'
 const PEER_ID = '00000000-0000-7000-8000-000000000002'
-const NAME = 'Same display name'
+const NAME = 'نور (R&D)'
 const SELF_EMAIL = 'current.member@example.test'
 const PEER_EMAIL = `${'long-local-part'.repeat(12)}@team.example.test`
 const MEMBERS = 'GET /api/auth/organization/list-members'
@@ -35,7 +35,7 @@ const copy = {
     you: '你',
     makeAdmin: `设为管理员：${NAME}`,
     roleReview: '更改团队角色',
-    roleQuestion: `将 ${NAME} 从成员改为管理员？`,
+    roleQuestion: `将${NAME}从成员改为管理员？`,
     remove: `移除成员：${NAME}`,
     removeReview: '移除团队成员',
     note: '配置检查不保证有可约时段。当前可约时间以预约页为准。',
@@ -125,7 +125,9 @@ describe.each(['en', 'zh-CN'] as const)('team member identities in %s', (locale)
         const name = within(row).getByText(NAME)
         const address = within(row).getByText(email)
         expectBreakableEmail(address, email)
+        expect(name.dir).toBe('auto')
         expect(address.tagName).toBe('DIV')
+        expect(address.dir).toBe('ltr')
         expect(address.previousElementSibling).toBe(name.parentElement)
       }
       expect(api.to(MEMBERS)).toHaveLength(1)
@@ -171,7 +173,8 @@ describe.each(['en', 'zh-CN'] as const)('team member identities in %s', (locale)
     render(contents('owner'))
     await user.click(await screen.findByRole('button', { name: copy[locale].makeAdmin }))
     const review = screen.getByRole('region', { name: copy[locale].roleReview })
-    expect(within(review).getByText(copy[locale].roleQuestion)).toBeDefined()
+    const name = within(review).getByText(NAME, { selector: 'bdi' })
+    expect(name.parentElement?.textContent).toBe(copy[locale].roleQuestion)
     expectBreakableEmail(within(review).getByText(PEER_EMAIL), PEER_EMAIL)
     expect(within(review).queryByText(SELF_EMAIL)).toBeNull()
     expect(api.to(ROLE)).toHaveLength(0)
@@ -186,7 +189,7 @@ describe.each(['en', 'zh-CN'] as const)('team member identities in %s', (locale)
       render(contents(role))
       await user.click(await screen.findByRole('button', { name: copy[locale].remove }))
       const review = screen.getByRole('region', { name: copy[locale].removeReview })
-      expect(within(review).getByText(NAME)).toBeDefined()
+      expect(within(review).getByText(NAME).getAttribute('dir')).toBe('auto')
       expectBreakableEmail(within(review).getByText(PEER_EMAIL), PEER_EMAIL)
       expect(within(review).queryByText(SELF_EMAIL)).toBeNull()
       expect(api.to(REMOVAL)).toHaveLength(0)

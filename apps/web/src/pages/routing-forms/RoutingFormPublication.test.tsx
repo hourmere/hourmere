@@ -154,7 +154,7 @@ describe('Routing form publication', () => {
     expect(screen.queryByRole('button', { name: reviewButton })).toBeNull()
     await user.click(screen.getByRole('button', { name: 'Save draft' }))
     const fallback = within(await screen.findByRole('region', { name: 'Fallback' }))
-    const message = 'Contact the support desk.'
+    const message = 'راسلنا (Contact the support desk.)'
     const field = fallback.getByRole('textbox', { name: 'Message to show' })
     await user.clear(field)
     await user.type(field, message)
@@ -167,7 +167,7 @@ describe('Routing form publication', () => {
     await user.type(previewPanel.getByRole('textbox', { name: /Company/ }), 'Example')
     await user.click(previewPanel.getByRole('button', { name: 'Run preview' }))
     const result = within(await previewPanel.findByTestId('routing-preview-result'))
-    expect(result.getByText(message)).toBeTruthy()
+    expect(result.getByText(message).tagName).toBe('BDI')
     expect(api.to(preview)[0]?.body).toEqual({
       answers: { [form.questions[0]?.id ?? '']: 'Example' },
     })
@@ -175,7 +175,7 @@ describe('Routing form publication', () => {
     await review(user)
     const confirmation = within(screen.getByRole('group', { name: reviewButton }))
     expect(confirmation.getByText('Saved fallback')).toBeTruthy()
-    expect(confirmation.getByText(message)).toBeTruthy()
+    expect(confirmation.getByText(message).tagName).toBe('BDI')
     expect(screen.getByRole('button', { name: 'Cancel' })).toBe(document.activeElement)
     expect(api.to(publish)).toHaveLength(0)
     await user.keyboard('{Escape}')

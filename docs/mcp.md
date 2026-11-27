@@ -90,6 +90,7 @@ to pass a private continuation to the invitee.
 | `publish_routing_form` | — | `routing-forms publish` | `full` |
 | `preview_routing_form` | — | `routing-forms preview` | `full` |
 | `get_public_routing_form` | — | `routing-forms public` | `full, read, bookings` |
+| `get_public_team` | — | `team-home` | `full, read, bookings` |
 | `route_lead` | — | `routing-forms route` | `full, bookings` |
 | `resolve_routing_continuation` | — | `routing-forms resolve` | `full, bookings` |
 | `find_routed_slots` | — | `routing-forms slots` | `full, bookings` |

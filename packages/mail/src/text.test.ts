@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   emailText,
+  emailUserText,
   escapeHtml,
   formatChineseTemplate,
   linkableUrl,
@@ -8,6 +9,17 @@ import {
   singleLine,
   subjectLine,
 } from './text.ts'
+
+describe('emailUserText', () => {
+  it('isolates each line and escapes markup while keeping blank lines', () => {
+    expect(emailUserText('🗓 12 موعد <x>\n\nEnglish עברית', 'en')).toBe(
+      '<bdi>🗓 12 موعد &lt;x&gt;</bdi><br><br><bdi>English עברית</bdi>',
+    )
+    expect(emailUserText('ada+1@example.test', 'en', 'ltr')).toBe(
+      '<bdi dir="ltr">ada+1@example.test</bdi>',
+    )
+  })
+})
 
 describe('emailText', () => {
   it.each(['“', '”'])('widens only the Chinese %s glyph', (quote) => {

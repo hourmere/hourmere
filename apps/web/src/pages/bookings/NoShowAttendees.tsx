@@ -204,7 +204,9 @@ export function NoShowAttendees({
       <ul className="plain-list stack">
         {attendees.map((person) => (
           <li key={person.id ?? person.email}>
-            <BreakableText>{person.name || person.email}</BreakableText>{' '}
+            <bdi dir={person.name ? undefined : 'ltr'}>
+              <BreakableText>{person.name || person.email}</BreakableText>
+            </bdi>{' '}
             {person.noShowMarkedAt && <span className="badge">{t('No-show')}</span>}{' '}
             {canEdit && person.id && (
               <NoShowButton
@@ -267,7 +269,9 @@ export function NoShowRowControls({
           <li key={person.id ?? person.email}>
             {named && (
               <>
-                <BreakableText>{person.name || person.email}</BreakableText>{' '}
+                <bdi dir={person.name ? undefined : 'ltr'}>
+                  <BreakableText>{person.name || person.email}</BreakableText>
+                </bdi>{' '}
               </>
             )}
             {person.noShowMarkedAt && (

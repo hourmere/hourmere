@@ -15,6 +15,7 @@ const acceptLink = `${invitation.publicUrl}/app/join?invitationId=${invitation.i
 function visibleText(html: string): string {
   return html
     .replace(/<head>[\s\S]*?<\/head>/i, '')
+    .replace(/<\/?bdi\b[^>]*>/g, '')
     .replace(/<[^>]*>/g, ' ')
     .replaceAll('&lt;', '<')
     .replaceAll('&gt;', '>')

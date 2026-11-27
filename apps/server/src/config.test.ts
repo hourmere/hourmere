@@ -11,6 +11,24 @@ const base = {
 }
 
 describe('loadConfig', () => {
+  it('requires explicit organization IDs to publish team directories', () => {
+    const id = '4ef4e257-e71a-4430-a73f-a1985dac9cca'
+    expect(loadConfig(base).TEAM_PUBLIC_HOME_ORGANIZATION_IDS).toEqual([])
+    expect(
+      loadConfig({ ...base, TEAM_PUBLIC_HOME_ORGANIZATION_IDS: '' })
+        .TEAM_PUBLIC_HOME_ORGANIZATION_IDS,
+    ).toEqual([])
+    expect(
+      loadConfig({ ...base, TEAM_PUBLIC_HOME_ORGANIZATION_IDS: ` ${id.toUpperCase()}, ${id} ` })
+        .TEAM_PUBLIC_HOME_ORGANIZATION_IDS,
+    ).toEqual([id])
+    for (const invalid of ['*', 'team-slug', `${id},`, Array(257).fill(id).join(',')]) {
+      expect(() => loadConfig({ ...base, TEAM_PUBLIC_HOME_ORGANIZATION_IDS: invalid })).toThrow(
+        /TEAM_PUBLIC_HOME_ORGANIZATION_IDS/,
+      )
+    }
+  })
+
   it.each(['all', 'web', 'worker'])(
     'enables workflows by default and parses the switch strictly in the %s role',
     (role) => {
