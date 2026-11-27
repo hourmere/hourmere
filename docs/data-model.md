@@ -2714,6 +2714,20 @@ which cancellation or opt-out cannot recall an already-dispatched SMS.
 The ordinary SMS delivery ledger and rolling budgets remain in force. Job payloads carry
 booking/rule identity and scheduling instants, never phone numbers or message bodies.
 
+## Team booking bulk cancellation previews
+
+The preview receipt is keyed by a database-generated UUID in
+`team_booking_bulk_cancellations`. It stores the team, actor account, issuing session and
+expiry inherited from the page proof. Its lifetime is at most ten minutes. The page proof,
+filters and session bearer are never written to the receipt.
+
+`team_booking_bulk_cancellation_items` records the ordered booking UUIDs and preview codes.
+The primary key limits positions to one per ordinal, and the ordinal check and unique booking
+key enforce at most 25 distinct items. Deleting the team cascades to its receipts and items.
+Actor, session and booking IDs are retained when their corresponding rows are deleted.
+A preview writes these two tables in one transaction. It does not change bookings or enqueue
+jobs or notifications. Admission, execution and receipt cleanup are future release steps.
+
 ## Audit events
 
 `audit_events` is the append-only management journal available to every instance.

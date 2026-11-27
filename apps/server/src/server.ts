@@ -187,6 +187,7 @@ import { ssoDraftRoutes } from './routes/sso-drafts.ts'
 import { ssoIdentityRecoveryRoutes } from './routes/sso-link-recovery.ts'
 import { ssoPolicyRoutes } from './routes/sso-policy.ts'
 import { ssoRecoveryEnrollmentRoutes } from './routes/sso-recovery-enrollment.ts'
+import { teamBookingBulkPreviewRoutes } from './routes/team-booking-bulk-preview.ts'
 import { teamBookingRoutes } from './routes/team-bookings.ts'
 import { teamInvitationRoutes } from './routes/team-invitations.ts'
 import { webhookRoutes } from './routes/webhooks.ts'
@@ -533,6 +534,7 @@ export function productRoutes({
       bookingExportMaxConcurrent,
     }),
     teamBookingRoutes({ db, notify }),
+    teamBookingBulkPreviewRoutes({ db }),
     teamInvitationRoutes({ db, invitationMailLimits }),
     memberDepartureImpactRoutes({ db }),
     memberRemovalRoutes({

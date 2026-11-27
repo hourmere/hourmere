@@ -228,6 +228,7 @@ const classes = {
     'GET /api/v1/team/bookings',
     'GET /api/v1/team/bookings/{id}',
     'POST /api/v1/team/bookings/{id}/cancel',
+    'POST /api/v1/team/bookings/bulk-cancellations/preview',
     'GET /api/v1/team/invitations',
     'GET /api/v1/team/invitations/{invitationId}',
     'POST /api/v1/team/invitations/{invitationId}/cancel',
@@ -534,8 +535,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
           .replaceAll('{memberUserId}', owner.user.id)
           .replaceAll('{teamId}', teamId)
           .replaceAll('{organizationId}', teamId)
-        const error =
-          template === '/api/v1/bookings/{id}/organization'
+        const bulkPreviewOff = template === '/api/v1/team/bookings/bulk-cancellations/preview'
+        const error = bulkPreviewOff
+          ? 'not_found'
+          : template === '/api/v1/bookings/{id}/organization'
             ? 'booking_not_found'
             : template === '/api/v1/readiness/self'
               ? 'readiness_access_denied'
@@ -551,7 +554,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
           path,
           payload,
           headers,
-          expectedStatus: error === 'booking_not_found' ? 404 : 403,
+          expectedStatus: bulkPreviewOff || error === 'booking_not_found' ? 404 : 403,
           nativeError: error,
           cleanupEvent,
           cleanupSchedule,
@@ -1068,14 +1071,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 192-operation contract and all 576 scope combinations', () => {
+    it('covers the exact 193-operation contract and all 579 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(192)
-      expect(new Set(ids).size).toBe(192)
+      expect(ids).toHaveLength(193)
+      expect(new Set(ids).size).toBe(193)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(576)
+      expect(cases).toHaveLength(579)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
