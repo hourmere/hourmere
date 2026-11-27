@@ -18,6 +18,7 @@ import { createDb, createPool } from '../../packages/db/src/index.ts'
 import { createTestDatabase } from '../../packages/db/src/testing.ts'
 import { icsHasLocation, textHasUrl } from '../../packages/mail/src/booking-link-testing.ts'
 import type { MailMessage } from '../../packages/mail/src/index.ts'
+import { fakeSmtpServer } from '../../packages/mail/src/smtp-testing.ts'
 import {
   dispatchConferenceNotifications,
   sendBookingNotification,
@@ -46,6 +47,7 @@ import { startFixtureServer } from './fixture-server.ts'
 import { listenOwned, type OwnedListener } from './listeners.ts'
 import { type PollAuditState, seedPollAuditData } from './meeting-poll-audit-data.ts'
 import { type ScreenshotFixtureState, seedScreenshotData } from './screenshot-data.ts'
+import { teamBookingBulkFixture } from './team-booking-bulk-fixtures.ts'
 
 export interface FixtureApp {
   url: string
@@ -102,6 +104,7 @@ export interface FixtureApp {
   rows: () => Promise<{ source: string; status: string }[]>
   authorizeHost: (teamRole?: 'owner' | 'member') => Promise<void>
   authorizeTeamSession: () => Promise<{ teamId: string; personalId: string }>
+  teamBookingBulk: ReturnType<typeof teamBookingBulkFixture>
   eventTypeTitles: () => Promise<string[]>
   bookingState: () => Promise<{
     total: number
@@ -127,6 +130,8 @@ export const test = base.extend<{
   notificationEditor: boolean
   slotSnippets: boolean
   waitlistSmtp: boolean
+  teamBookingBulkEnabled: boolean
+  teamBookingBulkSmtp: OwnedListener | undefined
 }>({
   automaticMeet: [false, { option: true }],
   multiHostMeet: [false, { option: true }],
@@ -134,6 +139,15 @@ export const test = base.extend<{
   notificationEditor: [false, { option: true }],
   slotSnippets: [false, { option: true }],
   waitlistSmtp: [false, { option: true }],
+  teamBookingBulkEnabled: [false, { option: true }],
+  teamBookingBulkSmtp: async ({ teamBookingBulkEnabled }, use) => {
+    const smtp = teamBookingBulkEnabled ? await listenOwned(fakeSmtpServer().server) : undefined
+    try {
+      await use(smtp)
+    } finally {
+      await smtp?.close()
+    }
+  },
   suppressFailureDom: [
     async ({ context }, use, testInfo) => {
       // Depending on context runs this teardown before its artifact finalization.
@@ -157,6 +171,7 @@ export const test = base.extend<{
       notificationEditor,
       slotSnippets,
       waitlistSmtp,
+      teamBookingBulkSmtp,
     },
     use,
   ) => {
@@ -472,11 +487,16 @@ export const test = base.extend<{
         DATABASE_URL: owned.url,
         BETTER_AUTH_SECRET: authSecret,
         SIGNUP: 'closed',
-        HOURMERE_ROLE: 'web',
+        HOURMERE_ROLE: teamBookingBulkSmtp ? 'all' : 'web',
         // SMTP availability enables waitlist admission. This web-only fixture never
         // runs delivery workers; explicit waitlist delivery uses the in-memory sink.
         ...(waitlistSmtp && {
           SMTP_URL: 'smtp://127.0.0.1:1',
+          MAIL_FROM: 'Hourmere Fixture <fixture@hourmere.invalid>',
+        }),
+        ...(teamBookingBulkSmtp && {
+          TEAM_BOOKING_BULK_CANCELLATION_ENABLED: 'true',
+          SMTP_URL: `smtp://127.0.0.1:${teamBookingBulkSmtp.port}`,
           MAIL_FROM: 'Hourmere Fixture <fixture@hourmere.invalid>',
         }),
         EMBED_ALLOWED_ORIGINS: parentUrl,
@@ -524,6 +544,7 @@ export const test = base.extend<{
         url,
         parentUrl,
         personalPath: '/fixture-host/call',
+        teamBookingBulk: teamBookingBulkFixture(db, f, team, host.userId, secondHost.userId),
         auditPollState: async (state) => {
           // Poll backing events must not change the existing host/list audit states.
           const pollHost = await f.host()

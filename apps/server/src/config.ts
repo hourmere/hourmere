@@ -254,6 +254,11 @@ const schema = z
     PAID_BOOKINGS_ENABLED: optional(z.enum(['true', 'false'])).transform(
       (value) => value === 'true',
     ),
+    TEAM_BOOKING_BULK_CANCELLATION_ENABLED: optional(
+      z.enum(['true', 'false'], {
+        error: 'TEAM_BOOKING_BULK_CANCELLATION_ENABLED must be true, false or empty',
+      }),
+    ).transform((value) => value === 'true'),
     SLOT_SNIPPETS_ENABLED: optional(z.enum(['true', 'false'])).transform(
       (value) => value === 'true',
     ),

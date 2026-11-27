@@ -201,6 +201,35 @@ not grant host rescheduling or reschedule-request authority through REST, MCP or
 直接改期会创建替代预约；改期请求在受邀人回答前保留原时段。缺席标记是开始后的私人管理记录，
 不会发送邮件，也不会取消预约。导入记录仍需在原系统管理。
 
+### Cancel multiple team bookings
+
+On instances that [enable bulk cancellation](/docs/configuration#server-and-database),
+team owners and admins can open **Team bookings**, apply the desired filters and select up
+to 25 upcoming confirmed bookings from the current page. **Show more bookings** moves the
+selection to the newly loaded page, even though earlier rows stay visible. Refreshing the
+list, changing filters or sort order, or switching teams clears the selection.
+
+Review the team, time zone, selected count and each booking before confirming. The preview
+shows which bookings can be cancelled and explains each skip. Bookings with online
+payments and imported records are skipped. The confirmation button shows how many bookings
+are eligible. Cancellation is permanent, queues the usual notifications as applicable,
+and only proceeds for bookings that are still eligible when processed.
+
+An accepted batch continues when you close its progress view. Return to the same team in
+the current tab to view the result again. If the submission response is lost, check the
+batch status and use the offered retry to resend the same confirmation. When processing
+ends, the list refreshes and the result shows what happened to each selected booking. To
+retry any unsuccessful booking that is still eligible, select it again and review a new
+preview.
+
+中文：实例启用批量取消后，团队所有者和管理员可在**团队预约**中应用筛选条件，
+从当前页勾选最多 25 条尚未开始且已确认的预约。加载下一页、刷新列表、更改筛选条件或排序、
+切换团队都会清除选择。确认前请核对团队、时区、选择数量和每条预约的取消资格。涉及在线付款的预约和导入记录会跳过。
+取消无法撤销，系统会按原有规则将通知排入队列，并在处理每条预约时再次检查资格。
+批次受理后，关闭进度窗口不会停止处理。可在同一标签页返回原团队查看结果。
+若提交未收到响应，请先查看该批次状态，再按界面提示重试同一次确认。
+处理完成后列表会刷新，逐条结果会保留。若要重试仍符合条件的预约，请重新勾选并确认新的预览。
+
 ## Known limitations
 
 - [Microsoft Calendar](/docs/microsoft-calendar#known-limitations) supports Outlook booking

@@ -20,8 +20,9 @@ import {
 import { sql } from 'kysely'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from '../app.ts'
-import { productRoutes } from '../server.ts'
+import { startServer } from '../server.ts'
 import type { EnqueueBulkCancellation } from '../team-booking-bulk-admission.ts'
+import { TEAM_BOOKING_BULK_JOB, TEAM_BOOKING_BULK_RECOVERY_JOB } from '../team-booking-bulk-jobs.ts'
 import { issueBulkPageProof } from '../team-booking-bulk-proof.ts'
 import { EXPECTED_ORGANIZATION_HEADER } from '../team-management.ts'
 import { teamBookingBulkPreviewRoutes } from './team-booking-bulk-preview.ts'
@@ -126,6 +127,40 @@ describe.skipIf(!serverUrl)('team booking bulk selection, preview and admission'
       resolveCaller: caller,
       routes,
     })
+  }
+
+  async function withRunningServer(
+    flag: 'true' | undefined,
+    verify: (request: (path: string, init?: RequestInit) => Promise<Response>) => Promise<void>,
+  ) {
+    const logs = (['log', 'info', 'warn', 'error'] as const).map((method) =>
+      vi.spyOn(console, method).mockImplementation(() => {}),
+    )
+    try {
+      const server = await startServer({
+        DATABASE_URL: owned.url,
+        BETTER_AUTH_SECRET: secret,
+        HOURMERE_ROLE: 'all',
+        PORT: '0',
+        PUBLIC_URL: origin,
+        TEAM_BOOKING_BULK_CANCELLATION_ENABLED: flag,
+      })
+      try {
+        await verify((path, init) => fetch(`http://127.0.0.1:${server.port}${path}`, init))
+      } finally {
+        await server.close()
+      }
+    } finally {
+      for (const log of logs) log.mockRestore()
+    }
+  }
+
+  async function recoveryCrons() {
+    const { rows } = await owned.pool.query<{ cron: string }>(
+      'SELECT cron FROM pgboss.schedule WHERE name=$1',
+      [TEAM_BOOKING_BULK_RECOVERY_JOB],
+    )
+    return rows.map(({ cron }) => cron)
   }
 
   async function session(user: TestUser, organizationId: string): Promise<Session> {
@@ -707,31 +742,35 @@ describe.skipIf(!serverUrl)('team booking bulk selection, preview and admission'
     expect(await receiptCount()).toBe(before)
   })
 
-  it('keeps proof, preview, confirmation and status inaccessible in production', async () => {
-    const product = application(
-      productRoutes({ db, socialProviders: {}, invitationMailLimits: { secret } }),
-    )
-    const { manager, first } = data
-    const headers = headersFor(manager)
-    const ordinary = await enabled.request(listPath, { headers })
-    expect(ordinary.status).toBe(200)
-    expect(await ordinary.json()).not.toHaveProperty('bulkPageToken')
-    const listResponse = await product.request(`${listPath}?bulkSelection=true`, { headers })
-    expect(listResponse.status).toBe(200)
-    const listBody = (await listResponse.json()) as object
-    expect(Object.keys(listBody).sort()).toEqual(['data', 'nextCursor'])
-    const { bulkPageToken } = await page(manager)
-    const before = await receiptCount()
-    headers.set('content-type', 'application/json')
-    const previewResponse = await product.request(previewPath, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ pageToken: bulkPageToken, bookingIds: [first] }),
+  it('keeps production routes and recovery off by default', async () => {
+    await withRunningServer(undefined, async (request) => {
+      const { manager, first } = data
+      const headers = headersFor(manager)
+      const response = await request(`${listPath}?bulkSelection=true`, { headers })
+      expect(response.status).toBe(200)
+      const listBody = (await response.json()) as object
+      expect(Object.keys(listBody).sort()).toEqual(['data', 'nextCursor'])
+      const { bulkPageToken } = await page(manager)
+      const before = await receiptCount()
+      await expectError(
+        await request(previewPath, {
+          method: 'POST',
+          headers: headersFor(manager, { 'content-type': 'application/json' }),
+          body: JSON.stringify({ pageToken: bulkPageToken, bookingIds: [first] }),
+        }),
+        404,
+        'not_found',
+      )
+      const path = `${bulkPath}/${randomUUID()}`
+      await expectError(
+        await request(`${path}/confirm`, { method: 'POST', headers }),
+        404,
+        'not_found',
+      )
+      await expectError(await request(path, { headers }), 404, 'not_found')
+      expect(await receiptCount()).toBe(before)
+      expect(await recoveryCrons()).toEqual([])
     })
-    expect(previewResponse.status).toBe(404)
-    await expectError(await confirmation(manager, randomUUID(), { app: product }), 404, 'not_found')
-    await expectError(await status(manager, randomUUID(), product), 404, 'not_found')
-    expect(await receiptCount()).toBe(before)
   })
 
   it('serializes parallel confirmation across web apps and replays the same batch after sign-in', async () => {
@@ -1084,5 +1123,44 @@ describe.skipIf(!serverUrl)('team booking bulk selection, preview and admission'
     await db.deleteFrom('auth.organization').where('id', '=', removed).execute()
     expect((await confirmation(actor, id)).status).toBe(202)
     await completeTestBatch(id)
+  })
+
+  it('wires production page proof, admission, status and recovery when explicitly enabled', async () => {
+    await withRunningServer('true', async (request) => {
+      const { otherManager, foreign } = data
+      const headers = headersFor(otherManager)
+      const ordinary = await request(listPath, { headers })
+      expect(ordinary.status).toBe(200)
+      expect(await ordinary.json()).not.toHaveProperty('bulkPageToken')
+      const proof = await request(`${listPath}?bulkSelection=true`, { headers })
+      expect(proof.status).toBe(200)
+      const { bulkPageToken } = (await proof.json()) as BulkPage
+      expect(bulkPageToken).toEqual(expect.any(String))
+
+      const preview = await request(previewPath, {
+        method: 'POST',
+        headers: headersFor(otherManager, { 'content-type': 'application/json' }),
+        body: JSON.stringify({ pageToken: bulkPageToken, bookingIds: [foreign] }),
+      })
+      expect(preview.status).toBe(200)
+      const { confirmationId } = (await preview.json()) as { confirmationId: string }
+      const path = `${bulkPath}/${confirmationId}`
+      const confirmed = await request(`${path}/confirm`, { method: 'POST', headers })
+      expect(confirmed.status).toBe(202)
+      expect(await confirmed.json()).toEqual({ id: confirmationId, state: 'queued' })
+
+      const status = await request(path, { headers })
+      expect(status.status).toBe(200)
+      expect(await status.json()).toMatchObject({
+        id: confirmationId,
+        items: [{ bookingId: foreign }],
+      })
+      const { rows } = await owned.pool.query<{ data: unknown }>(
+        'SELECT data FROM pgboss.job WHERE name=$1 AND singleton_key=$2',
+        [TEAM_BOOKING_BULK_JOB, confirmationId],
+      )
+      expect(rows).toEqual([{ data: { batchId: confirmationId } }])
+      expect(await recoveryCrons()).toEqual(['* * * * *'])
+    })
   })
 })

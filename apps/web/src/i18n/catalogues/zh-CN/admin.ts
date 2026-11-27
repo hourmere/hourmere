@@ -3178,4 +3178,59 @@ export const admin = {
 
   // Additional durations
   'Removed {0}. Selected length: {1}.': '已移除{0}。当前选中的时长为{1}。',
+  // Team booking bulk cancellation
+  'Select bookings to cancel': '选择要取消的预约',
+  'Select this page': '选择本页',
+  'Exit selection': '退出选择',
+  'Select booking: {event}, {time}': '选择预约：{event}，{time}',
+  '{count} selected on this page (maximum {limit}).': '本页已选择{count}条预约（最多{limit}条）。',
+  'Review cancellation': '查看取消预览',
+  'Refresh bookings': '刷新预约',
+  'Review bulk cancellation': '确认批量取消',
+  'Bulk cancellation status': '批量取消状态',
+  'View bulk cancellation': '查看批量取消',
+  'Retry submission': '重试提交',
+  'Cancel {count} booking': '取消{count}条预约',
+  'Cancel {count} bookings': '取消{count}条预约',
+  '{count} selected. {eligible} eligible to cancel.':
+    '已选择{count}条预约，其中{eligible}条可取消。',
+  'Cancellation is irreversible. Existing cancellation notifications will be queued as applicable. Some bookings may become ineligible before they are processed.':
+    '取消后无法撤销。系统将按现有规则把适用的取消通知排入队列。部分预约在处理前可能不再符合取消条件。',
+  'Selection expired or changed. Refresh the bookings and select again.':
+    '选择已过期或发生变化。请刷新预约列表后重新选择。',
+  'The confirmation expired. Select bookings again to start a new cancellation.':
+    '确认已过期。请重新选择预约，发起新的取消操作。',
+  'This batch is no longer available. Refresh the bookings before starting again.':
+    '该批次已不可用。请先刷新预约列表再重新开始。',
+  'Checking whether your cancellation was accepted…': '正在检查取消请求是否已受理…',
+  'Your cancellation has not been confirmed yet. You can safely retry this submission.':
+    '取消请求尚未确认。可以安全地重试提交。',
+  'Bulk cancellation queued': '批量取消已排队',
+  'Bulk cancellation in progress': '批量取消处理中',
+  'Bulk cancellation completed': '批量取消已完成',
+  '{cancelled} cancelled, {pending} pending, {other} skipped or failed.':
+    '已取消{cancelled}条，待处理{pending}条，已跳过或处理失败{other}条。',
+  'Closing this view does not stop an accepted cancellation.':
+    '关闭此窗口不会停止已受理的取消操作。',
+  'To try an unsuccessful booking again, refresh the list and select it if it is still eligible.':
+    '若要重试未成功取消的预约，请刷新列表并重新选择仍符合条件的预约。',
+  'Eligible to cancel': '可以取消',
+  'Awaiting processing': '等待处理',
+  'Already cancelled': '此前已取消',
+  'Booking already started': '预约已经开始',
+  'Unsupported booking (including paid or imported bookings)':
+    '不支持批量取消的预约（包括涉及付款的预约或导入记录）',
+  'Booking unavailable': '预约不可用',
+  'A required host left the team': '一位必需的主持人已离开团队',
+  'Team authority was lost': '团队管理权限已失效',
+  'Could not process the booking': '无法处理这条预约',
+  'No bookings on this page can be selected.': '本页没有可选择的预约。',
+  'The team has reached its bulk cancellation limit. Try again shortly.':
+    '团队已达到批量取消上限。请稍后重试。',
+  'Try again in {seconds} seconds.': '请在{seconds}秒后重试。',
+  'Filters applied': '已应用的筛选条件',
+  'Submission could not be confirmed. This page will keep checking its status.':
+    '无法确认提交是否成功。此页面会继续检查状态。',
+  'No selected bookings are eligible for cancellation. Review a fresh selection.':
+    '所选预约均不符合取消条件。请重新选择并查看。',
 } as const

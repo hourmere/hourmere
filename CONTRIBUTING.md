@@ -283,14 +283,15 @@ The bootstrap PostgreSQL account must be able to create and drop databases. Ever
 creates and migrates its own disposable database, runs the real web server on a random
 unused port, and closes its servers and drops the database in teardown. The bootstrap
 connection is used only for database creation/deletion. There is no `DATABASE_URL` or `.env`
-fallback. The fixture uses synthetic identities, closed signup and the web-only role, so
-queued notifications are never delivered. Browser requests outside the two owned local
-origins are blocked. No real mailbox, calendar credentials or external API is required.
+fallback. The fixture uses synthetic identities and closed signup. Most tests use the
+web-only role. Bulk cancellation tests run the worker with an owned fake SMTP listener.
+The browser is restricted to the two owned local web origins.
 
 `tools/e2e/specs/*.spec.ts` covers public personal/team booking, private-link rescheduling
 and cancellation, a stale-form booking conflict, cross-origin popup/privacy behavior and
 the account sign-in gate. Each scenario runs at desktop and mobile viewport sizes. These
-are genuine SPA/HTTP/PostgreSQL flows, without API response mocks. CI runs the suite in a
+are genuine SPA/HTTP/PostgreSQL flows. The bulk recovery test intercepts a confirmation
+response and one status read to simulate a lost reply during admission. CI runs the suite in a
 matrix with a PostgreSQL service and the runner's installed Chrome for each shard. The
 required `e2e` job checks that each shard succeeds and selects about one sixth of the full
 Playwright suite. The shard counts must add up to the full suite size. Only numeric counts
