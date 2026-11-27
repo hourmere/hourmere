@@ -6,7 +6,7 @@ self-hosted instances, have the same feature without a license or subscription.
 
 `SCIM_PROVISIONING_ENABLED` defaults to on. An unset or empty value follows the default,
 including when an upgrade reuses an earlier `.env.example` with an empty value.
-`true` enables provisioning. `false`, `0` and `off` disable it, and an invalid value
+`true`, `1` and `on` enable provisioning. `false`, `0` and `off` disable it, and an invalid value
 stops startup. Owners can create and rotate provisioning tokens while enabled. Owners
 and admins can list and revoke them in either state.
 
@@ -697,16 +697,29 @@ starts a new generation under their own invitation budget and name.
 For SCIM, the recipient limit counts all invitation requests for that address within the
 organization, using `MAIL_RECIPIENT_MAX_PER_HOUR` and `MAIL_RECIPIENT_MAX_PER_DAY`
 (5 and 20 by default). Scoping the normal cap to the organization lets a team provision
-an address that another team has invited. A separate instance-wide ceiling of four times
-each configured recipient limit (20 per hour and 80 per day by default) counts invitations
-from all teams and both sources to limit aggregate abuse. App invitations count app
-requests from all teams and SCIM requests from their own team against the recipient cap.
+an address that another team has invited. `INVITATION_GLOBAL_RECIPIENT_MULTIPLIER`
+sets the instance-wide ceiling as a multiple of each configured recipient limit. It
+counts invitations from all teams and both sources. The multiplier is a whole number
+from 1 to 2,147,483,647 and defaults to 4 (20 per hour and 80 per day with the default
+recipient limits). App invitations count app requests from all teams and SCIM requests
+from their own team against the recipient cap.
 Both sources share the 100 pending-invitation cap per team and the instance-wide SMTP
 attempt budget.
 
 A SCIM create that would queue invitation email returns 429 with `Retry-After: 3600`
 when admission is limited. Honor the retry interval and stagger a larger initial sync.
 Pending capacity returns as invitations are accepted, canceled or expire after 48 hours.
+If a pending invitation expires during both the initial create attempt and its one internal
+retry, the server rolls back the request and returns SCIM 503 with `Retry-After: 1`.
+
+### Upgrade maintenance window
+
+Migration `0192_scim_invitation_attribution.sql` adds validated `CHECK` constraints on
+`public.audit_events`. PostgreSQL scans the existing audit rows while holding an
+`ACCESS EXCLUSIVE` lock that blocks reads and writes to the table until the migration
+transaction commits. For a large audit table, schedule a low-traffic maintenance window,
+stop existing app and worker processes before running migrations, and allow time for
+the scans before restarting them.
 
 ## Known limitations
 
@@ -887,9 +900,8 @@ The source User's lifecycle follows its managed memberships on mappings with dir
 authority. `active:false` keeps the child memberships and suspends them, and revokes the
 child credentials. The suspension is stored on the membership's provenance row
 (`scim_team_managed_memberships.suspended_at`). Persisted suspensions continue to
-deny access when provisioning is switched off. The web process, background workers
-and offline operator recovery use the same configured SCIM setting for operations that
-require directory authority.
+deny access when provisioning is switched off. The web process and background workers
+use the configured SCIM setting for operations that require directory authority.
 
 A successful reactivation lifts the suspension. A parent-local blocker or missing
 parent membership refuses reactivation with 403 `mutability` and rolls back the entire
@@ -1259,8 +1271,9 @@ the normal write scope and live delegation for an enforced team.
 ### Offline mapping recovery runbook
 
 Confirm the instance, mapping UUID and both team UUIDs. Run the command in the
-Hourmere app container. It requires SCIM provisioning to be enabled and the application
-and job schemas to be current. It uses the existing queue without running migrations.
+Hourmere app container. Both commands work with SCIM provisioning on or off, including
+during rollback. They require current application and job schemas and use the existing
+queue without running migrations.
 
 ```sh
 docker compose exec app node apps/server/src/scim-team-mapping-recovery-cli.ts suspend MAPPING_UUID PARENT_UUID CHILD_UUID
@@ -1285,7 +1298,7 @@ docker compose exec app node apps/server/src/scim-team-mapping-recovery-cli.ts d
 请求。解除关联时，从已有映射准备请求。双方所有者在各自团队内核对并验证同一份请求，
 然后由任一批准人提交。即使同一人拥有两个团队，也要分别批准。批准过期后，须重新准备请求。
 
-需要离线恢复时，先核对实例和三个 UUID，再用上述 `suspend` 命令暂停目录管理。现有
+关闭 SCIM 后仍可执行离线恢复。先核对实例和三个 UUID，再用上述 `suspend` 命令暂停目录管理。现有
 成员关系和暂停状态会保留。若要解除映射，请运行 `detach`。如存在受保护的角色、主持安排或
 尚未结束的预约，请由子团队的授权管理员先通过常规管理流程处理，再重试。成功后，双方团队
 都会在审计日志中看到系统操作，后台任务会向当前所有者的已验证邮箱发送通知。
@@ -1311,6 +1324,8 @@ Pause the IdP's scheduled provisioning before changing its assignments. Set
 Probe ServiceProviderConfig, ResourceTypes, Schemas, Users and Groups to confirm uniform
 404, including with a previously valid bearer. Check that the organization can still list or revoke tokens and
 that a previously suspended member cannot regain access, including in mapped child teams.
+Use the [offline mapping recovery runbook](#offline-mapping-recovery-runbook) to suspend
+or detach a mapping while provisioning is off.
 
 Turning off the switch preserves Users, Groups, mappings, memberships and audit history.
 Stored suspensions and mailbox admission blockers keep applying. Deleted sessions, API

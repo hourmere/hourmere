@@ -18,10 +18,10 @@ const optional = <T extends z.ZodType>(schema: T) =>
   z.preprocess((v) => (v === '' ? undefined : v), schema.optional())
 
 export const scimProvisioningEnabled = optional(
-  z.enum(['true', 'false', '0', 'off'], {
-    error: 'SCIM_PROVISIONING_ENABLED must be true, false, 0, off or empty',
+  z.enum(['true', '1', 'on', 'false', '0', 'off'], {
+    error: 'SCIM_PROVISIONING_ENABLED must be true, 1, on, false, 0, off or empty',
   }),
-).transform((value) => value === undefined || value === 'true')
+).transform((value) => value === undefined || value === 'true' || value === '1' || value === 'on')
 
 const emailLimit = (name: string, fallback: number, minimum: number) => {
   const error = `${name} must be a whole number from ${minimum} to 2147483647`
@@ -308,6 +308,11 @@ const schema = z
     INVITATION_INVITER_MAX_PER_DAY: emailLimit('INVITATION_INVITER_MAX_PER_DAY', 100, 1),
     INVITATION_TEAM_MAX_PER_HOUR: emailLimit('INVITATION_TEAM_MAX_PER_HOUR', 50, 1),
     INVITATION_TEAM_MAX_PER_DAY: emailLimit('INVITATION_TEAM_MAX_PER_DAY', 200, 1),
+    INVITATION_GLOBAL_RECIPIENT_MULTIPLIER: emailLimit(
+      'INVITATION_GLOBAL_RECIPIENT_MULTIPLIER',
+      4,
+      1,
+    ),
     MAIL_MAX_PER_HOUR: emailLimit('MAIL_MAX_PER_HOUR', 100, 0),
     WORKFLOWS_ENABLED: optional(
       z.enum(['true', 'false'], { error: 'WORKFLOWS_ENABLED must be true, false or empty' }),

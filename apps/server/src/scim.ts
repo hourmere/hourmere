@@ -48,7 +48,7 @@ export interface ScimResourceRequest {
 export type ScimBody = { ok: true; value: unknown } | { ok: false; reply: ScimReply }
 
 export interface ScimReply {
-  status: 200 | 201 | 204 | 400 | 401 | 403 | 404 | 409 | 412 | 413 | 429 | 501
+  status: 200 | 201 | 204 | 400 | 401 | 403 | 404 | 409 | 412 | 413 | 429 | 501 | 503
   body: unknown
   /** Additional response headers such as Location or Retry-After. */
   headers?: Record<string, string> | undefined
@@ -154,6 +154,7 @@ export function mountScim(
   }
   const respond = (c: Context, status: 401 | 404 | 429 | 500, detail: string) =>
     send(c, status, scimError(status, detail))
+  const notFound = (c: Context) => respond(c, 404, 'Resource not found.')
   const rateLimited = (c: Context, retry: number) => {
     c.header('Retry-After', String(retry))
     return respond(c, 429, 'Too many requests.')
@@ -162,11 +163,11 @@ export function mountScim(
   app.all('/scim/*', async (c) => {
     c.header('Cache-Control', 'no-store')
     c.header('Referrer-Policy', 'no-referrer')
-    if (!options?.enabled) return respond(c, 404, 'SCIM provisioning is disabled.')
+    if (!options?.enabled) return notFound(c)
     const retry = limit.hit(rateLimitKey(c.var.clientIp))
     if (retry !== undefined) return rateLimited(c, retry)
     const organizationId = /^\/scim\/v2\/([a-f0-9-]{36})(?:\/|$)/i.exec(c.req.path)?.[1]
-    if (!organizationId) return respond(c, 404, 'SCIM resources are not available yet.')
+    if (!organizationId) return notFound(c)
     try {
       const principal = await authenticateScimToken(options.db, {
         path: c.req.path,
@@ -199,7 +200,7 @@ export function mountScim(
         if (reply.status === 204) return c.body(null, 204)
         return send(c, reply.status, reply.body)
       }
-      return respond(c, 404, 'SCIM resources are not available yet.')
+      return notFound(c)
     } catch {
       // Never pass credentials, paths or driver diagnostics to a logger.
       return respond(c, 500, 'SCIM request could not be processed.')

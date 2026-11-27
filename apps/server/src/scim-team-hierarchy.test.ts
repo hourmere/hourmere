@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
 import { randomBytes, randomUUID } from 'node:crypto'
+import { readFile, unlink, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import {
@@ -306,7 +307,7 @@ describe.skipIf(!databaseUrl)('SCIM team hierarchy transactions', () => {
     }
   })
 
-  it('suspends and detaches offline with exact scope, guarded departure, and transactional notices', async () => {
+  it('suspends and detaches offline while provisioning is off, retaining scope and departure guards', async () => {
     const parent = await team()
     const child = await team()
     const input = link(parent, child)
@@ -347,10 +348,7 @@ describe.skipIf(!databaseUrl)('SCIM team hierarchy transactions', () => {
       })
 
       await expect(
-        recoverScimTeamMapping(db, jobs, false, { ...target, action: 'detach' }),
-      ).rejects.toMatchObject({ code: 'scim_resources_disabled' })
-      await expect(
-        recoverScimTeamMapping(db, jobs, true, {
+        recoverScimTeamMapping(db, jobs, {
           ...target,
           childOrganizationId: randomUUID(),
           action: 'suspend',
@@ -361,34 +359,70 @@ describe.skipIf(!databaseUrl)('SCIM team hierarchy transactions', () => {
         enqueue: async (...args) => (++enqueued === 1 ? jobs.enqueue(...args) : null),
       }
       await expect(
-        recoverScimTeamMapping(db, failQueue, true, { ...target, action: 'suspend' }),
+        recoverScimTeamMapping(db, failQueue, { ...target, action: 'suspend' }),
       ).rejects.toThrow('could not be queued')
       expect((await mapping(mappingId)).suspended_at).toBeNull()
-      const suspendOffline = (setting: string) =>
-        execute(process.execPath, [recoveryCommand, 'suspend', mappingId, parent.id, child.id], {
+      const recoverOffline = (action: string, command = recoveryCommand, setting = 'off') =>
+        execute(process.execPath, [command, action, mappingId, parent.id, child.id], {
           env: {
             DATABASE_URL: owned.url,
             HOURMERE_SERVER_CONTAINER: '1',
             SCIM_PROVISIONING_ENABLED: setting,
           },
         })
-      await expect(suspendOffline('off')).rejects.toMatchObject({
+      await expect(recoverOffline('resume')).rejects.toMatchObject({
         code: 1,
-        stderr: expect.stringContaining('SCIM provisioning is disabled'),
+        stderr: expect.stringContaining('Pass <suspend|detach>'),
       })
+      await expect(recoverOffline('suspend', recoveryCommand, 'invalid')).rejects.toMatchObject({
+        code: 1,
+        stderr: expect.stringContaining('SCIM_PROVISIONING_ENABLED'),
+      })
+      const assertSuspendsOffline = (attempt: ReturnType<typeof recoverOffline>) =>
+        expect(attempt).resolves.toMatchObject({
+          stdout: 'Mapping suspended. Owner notices queued.\n',
+        })
+      const source = await readFile(recoveryCommand, 'utf8')
+      const call = '    process.exitCode = await runScimTeamMappingRecovery(url, target.data)'
+      expect(source).toContain(call)
+      const mutant = fileURLToPath(new URL(`./.scim-recovery-${randomUUID()}.ts`, import.meta.url))
+      await writeFile(
+        mutant,
+        source.replace(
+          call,
+          `    if (!scim.data) {
+      console.error('SCIM provisioning is disabled')
+      process.exitCode = 1
+    } else {
+  ${call}
+    }`,
+        ),
+        { flag: 'wx' },
+      )
+      try {
+        const attempt = recoverOffline('suspend', mutant)
+        await expect(attempt).rejects.toMatchObject({
+          code: 1,
+          stderr: 'SCIM provisioning is disabled\n',
+        })
+        await expect(assertSuspendsOffline(attempt)).rejects.toMatchObject({
+          name: 'AssertionError',
+        })
+      } finally {
+        await unlink(mutant)
+      }
       expect((await mapping(mappingId)).suspended_at).toBeNull()
-      await expect(suspendOffline('')).resolves.toMatchObject({
-        stdout: expect.stringContaining('Mapping suspended. Owner notices queued.'),
-      })
+      await assertSuspendsOffline(recoverOffline('suspend'))
       await expect(
-        recoverScimTeamMapping(db, jobs, true, { ...target, action: 'suspend' }),
+        recoverScimTeamMapping(db, jobs, { ...target, action: 'suspend' }),
       ).resolves.toBe('unchanged')
       await expect(listScimTeamMappings(deps(), child.owner.principal)).resolves.toMatchObject({
         mappings: [{ state: 'suspended' }],
       })
-      await expect(
-        recoverScimTeamMapping(db, jobs, true, { ...target, action: 'detach' }),
-      ).rejects.toMatchObject({ code: 'scim_mapping_roster_requires_departure' })
+      await expect(recoverOffline('detach')).rejects.toMatchObject({
+        code: 1,
+        stderr: expect.stringContaining('Detachment is blocked'),
+      })
       expect(
         await db
           .selectFrom('auth.member')
@@ -402,12 +436,12 @@ describe.skipIf(!databaseUrl)('SCIM team hierarchy transactions', () => {
         .set({ deleted_at: new Date(), is_active: false })
         .where('id', '=', eventId)
         .execute()
-      await expect(
-        recoverScimTeamMapping(db, jobs, true, { ...target, action: 'detach' }),
-      ).resolves.toBe('detached')
-      await expect(
-        recoverScimTeamMapping(db, jobs, true, { ...target, action: 'detach' }),
-      ).resolves.toBe('unchanged')
+      await expect(recoverOffline('detach')).resolves.toMatchObject({
+        stdout: 'Mapping detached. Owner notices queued.\n',
+      })
+      await expect(recoverScimTeamMapping(db, jobs, { ...target, action: 'detach' })).resolves.toBe(
+        'unchanged',
+      )
       expect(
         await db
           .selectFrom('auth.member')

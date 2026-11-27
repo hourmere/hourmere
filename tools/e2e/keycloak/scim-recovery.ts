@@ -227,7 +227,7 @@ export async function acceptMappingRecovery(scenario: ScimScenario) {
   const local = { userId: childOwnerId, role: 'owner' }
   expect(await roster()).toEqual([managed, local])
   const recover = (action: 'suspend' | 'detach', childOrganizationId = childId) =>
-    recoverScimTeamMapping(db, noticeQueue, true, {
+    recoverScimTeamMapping(db, noticeQueue, {
       action,
       mappingId,
       parentOrganizationId: organizationId,

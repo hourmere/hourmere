@@ -36,7 +36,7 @@ const errorBody = (status: number, detail: string) => ({
   status: String(status),
   detail,
 })
-const unavailable = errorBody(404, 'SCIM resources are not available yet.')
+const unavailable = errorBody(404, 'Resource not found.')
 
 function sourceCopyUrl(file: string, ...mutations: [string, string][]) {
   const location = new URL(file, import.meta.url)
@@ -1095,12 +1095,8 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User reads over HTTP', () => {
       }))
     // Flag absent, and the flag present with SCIM_PROVISIONING_ENABLED off.
     expect(await answers(harness(undefined))).toEqual(off(unavailable))
-    expect(await answers(harness(flagged(scimUsers), false))).toEqual(
-      off(errorBody(404, 'SCIM provisioning is disabled.')),
-    )
-    expect(await productionAnswers(resources, false)).toEqual(
-      off(errorBody(404, 'SCIM provisioning is disabled.')),
-    )
+    expect(await answers(harness(flagged(scimUsers), false))).toEqual(off(unavailable))
+    expect(await productionAnswers(resources, false)).toEqual(off(unavailable))
     const registered = await productionAnswers(resources, true)
     expect(registered.map(({ resource, status }) => ({ resource, status }))).toEqual(
       resources.map((resource, index) => ({ resource, status: index === 3 ? 404 : 200 })),

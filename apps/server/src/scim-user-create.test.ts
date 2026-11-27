@@ -10,6 +10,7 @@ import type { MailMessage } from '@hourmere/mail'
 import {
   deliverInvitationEmail,
   type InvitationMailLimits,
+  lockNotificationEmailBudget,
   reserveInvitationEmailBudget,
 } from '@hourmere/notifications'
 import { type KyselyPlugin, sql } from 'kysely'
@@ -41,7 +42,7 @@ const errorBody = (status: number, detail: string, scimType?: string) => ({
   ...(scimType === undefined ? {} : { scimType }),
   detail,
 })
-const unavailable = errorBody(404, 'SCIM resources are not available yet.')
+const unavailable = errorBody(404, 'Resource not found.')
 const identifierTaken = errorBody(
   409,
   'A User of this connection already has this userName or externalId.',
@@ -493,6 +494,29 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
       await new Promise((resolve) => setTimeout(resolve, 20))
     }
     return false
+  }
+
+  async function blockedBackend(blockerPid: number, request: Promise<unknown>, label: string) {
+    let settled = false
+    const markSettled = () => {
+      settled = true
+    }
+    void request.then(markSettled, markSettled)
+    const backendPid = await vi.waitFor(
+      async () => {
+        const { rows } = await owned.pool.query<{ pid: number }>(
+          `SELECT pid FROM pg_stat_activity
+            WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))`,
+          [blockerPid],
+        )
+        const pid = rows[0]?.pid
+        if (pid !== undefined || settled) return pid ?? 0
+        throw new Error('The request has not reached its PostgreSQL lock.')
+      },
+      { timeout: 1500, interval: 10 },
+    )
+    expect(backendPid, label).toBeGreaterThan(0)
+    return backendPid
   }
 
   async function verifyCreation(create: Create) {
@@ -1181,6 +1205,67 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
     expect(
       requests.filter((request) => request.user_id === organization.people.owner),
     ).toHaveLength(2)
+  }
+
+  async function verifyOrganizationBudgetRace(reserve: typeof reserveInvitationEmailBudget) {
+    const organization = await team()
+    const options = deps({
+      reserve: (trx, input, now) =>
+        reserve(trx, input, { ...roomy, scimInvitationMaxPerHour: 1 }, now),
+    })
+    const provision = (secret: string, mailbox: string) =>
+      client(scimUserCreation, organization, options, secret).post(
+        user(`budget-race-${unique()}`, work(mailbox)),
+      )
+    const firstAddress = `budget-first-${unique()}@example.com`
+    const queued = enqueued.length
+    const requests: ReturnType<typeof provision>[] = []
+    try {
+      const pending = await db.transaction().execute(async (holder) => {
+        await lockNotificationEmailBudget(holder)
+        const { pid: holderPid } = await holder
+          .selectNoFrom(sql<number>`pg_backend_pid()`.as('pid'))
+          .executeTakeFirstOrThrow()
+        const first = provision(organization.secrets.first, firstAddress)
+        requests.push(first)
+        const firstPid = await blockedBackend(holderPid, first, 'shared invitation budget lock')
+        const second = provision(
+          organization.secrets.second,
+          `budget-second-${unique()}@example.com`,
+        )
+        requests.push(second)
+        // The second token uses another database backend. It waits behind the first
+        // request's organization lock while that request waits for the budget lock.
+        const secondPid = await blockedBackend(firstPid, second, 'organization lock')
+        expect(secondPid).not.toBe(firstPid)
+        return [first, second] as const
+      })
+      const [accepted, refused] = await Promise.all(pending)
+      expect(accepted.status).toBe(201)
+      expect(refused).toMatchObject({ status: 429, body: limited, retryAfter: '3600' })
+      const {
+        requests: charges,
+        entries,
+        invitations,
+        claims,
+        deliveries,
+      } = await written(organization.id)
+      expect(charges).toEqual([expect.objectContaining({ user_id: null })])
+      expect(entries.map(({ id }) => id)).toEqual([accepted.body?.id])
+      expect(invitations).toEqual([
+        expect.objectContaining({ email: firstAddress, status: 'pending' }),
+      ])
+      const invitationId = invitations[0]?.id
+      expect(claims).toEqual([
+        expect.objectContaining({ invitation_id: invitationId, scim_user_id: accepted.body?.id }),
+      ])
+      expect(deliveries).toEqual([
+        expect.objectContaining({ invitation_id: invitationId, scim_issued: true }),
+      ])
+      expect(enqueued.slice(queued)).toEqual([{ invitationId, generation: 1 }])
+    } finally {
+      await Promise.allSettled(requests)
+    }
   }
 
   async function verifyAppRecipientBudget(reserve: typeof reserveInvitationEmailBudget) {
@@ -1902,6 +1987,86 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
     expect(requests.length, 'invitation budget charges').toBe(variant === 'budget' ? 1 : 2)
   }
 
+  async function verifyRepeatedExpiry(create: Create) {
+    const organization = await team()
+    const { post } = client(create, organization)
+    const address = `repeated-expiry-${unique()}@example.com`
+    const addInvitation = async (status: 'pending' | 'canceled') => {
+      const { id } = await db
+        .insertInto('auth.invitation')
+        .values({
+          organizationId: organization.id,
+          inviterId: organization.people.owner,
+          email: address,
+          role: 'member',
+          status,
+          expiresAt: sql<Date>`clock_timestamp() + interval '1 hour'`,
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      await db
+        .insertInto('invitation_deliveries')
+        .values({ invitation_id: id, state: 'queued' })
+        .execute()
+      return id
+    }
+    const first = await addInvitation('pending')
+    const second = await addInvitation('canceled')
+    const expireSoon = async (id: string) => {
+      const { expiresAt } = await db
+        .updateTable('auth.invitation')
+        .set({
+          status: 'pending',
+          expiresAt: sql<Date>`date_trunc('milliseconds', clock_timestamp()) + interval '1.5 seconds'`,
+        })
+        .where('id', '=', id)
+        .returning('expiresAt')
+        .executeTakeFirstOrThrow()
+      return expiresAt
+    }
+    const queued = enqueued.length
+    const holder = await owned.pool.connect()
+    const holdDelivery = (id: string) =>
+      holder.query('SELECT 1 FROM invitation_deliveries WHERE invitation_id = $1 FOR UPDATE', [id])
+    const sleepUntilExpiry = (expiry: Date) =>
+      holder.query('SELECT pg_sleep_until($1::timestamptz)', [expiry])
+    let answer: ReturnType<typeof post> | undefined
+    try {
+      await holder.query('BEGIN')
+      await holdDelivery(second)
+      await holder.query('SAVEPOINT first_delivery')
+      await holdDelivery(first)
+      const { rows } = await holder.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+      const holderPid = rows[0]?.pid as number
+      const firstExpiry = await expireSoon(first)
+      answer = post(user(`repeated-expiry-${unique()}`, work(address)))
+      await blockedBackend(holderPid, answer, 'first delivery lock')
+      await sleepUntilExpiry(firstExpiry)
+      // Stage a second pending candidate for the retry, independently of the create.
+      const secondExpiry = await expireSoon(second)
+      await holder.query('ROLLBACK TO SAVEPOINT first_delivery')
+      await blockedBackend(holderPid, answer, 'second delivery lock')
+      await sleepUntilExpiry(secondExpiry)
+      const before = await written(organization.id)
+      await holder.query('COMMIT')
+      const received = await answer
+      expect(received.status, 'repeated expiry SCIM response status').toBe(503)
+      expect(received.body).toEqual(
+        errorBody(503, 'User provisioning is temporarily unavailable. Retry shortly.'),
+      )
+      expect(received.retryAfter).toBe('1')
+      expect(await written(organization.id)).toEqual(before)
+      expect(enqueued).toHaveLength(queued)
+    } finally {
+      try {
+        await holder.query('ROLLBACK')
+      } finally {
+        holder.release()
+        if (answer) await Promise.allSettled([answer])
+      }
+    }
+  }
+
   const verifiers = {
     expiry: (create: Create) => verifyExpiryRace(create, 'delivery'),
     creation: verifyCreation,
@@ -2008,6 +2173,20 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
       expected: 1,
     })
   }, 60_000)
+  it('returns a retryable SCIM 503 and rolls back when the second invitation expires too', () =>
+    verifyRepeatedExpiry(scimUserCreation))
+  it('detects a source copy that returns an internal error after the second expiry', async () => {
+    const copy = await sourceCopy<typeof import('./scim-user-create.ts')>('./scim-user-create.ts', [
+      "    if (code === 'INVITATION_INELIGIBLE')\n",
+      '    if (false)\n',
+    ])
+    await expect(verifyRepeatedExpiry(copy.scimUserCreation)).rejects.toMatchObject({
+      name: 'AssertionError',
+      message: expect.stringContaining('repeated expiry SCIM response status'),
+      actual: 500,
+      expected: 503,
+    })
+  })
   it('lets the earliest owner with a verified address invite', () =>
     verifyInviter(scimUserCreation))
   it('still answers 201 when the queue is down after commit', () =>
@@ -2015,6 +2194,23 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
   it('applies the invitation admission limits', () => verifyLimits(scimUserCreation))
   it('keeps the owner’s in-app invitation budget after SCIM provisioning', () =>
     verifyOwnerBudget(scimUserCreation))
+  it('issues exactly one invitation when two SCIM requests race for the last organization slot', () =>
+    verifyOrganizationBudgetRace(reserveInvitationEmailBudget))
+  it('detects a source copy that skips the shared invitation budget lock', async () => {
+    const copy = await sourceCopy<{
+      reserveInvitationEmailBudget: typeof reserveInvitationEmailBudget
+    }>('../../../packages/notifications/src/invitation-mail-limits.ts', [
+      '  await lockNotificationEmailBudget(db)\n',
+      '',
+    ])
+    await expect(
+      verifyOrganizationBudgetRace(copy.reserveInvitationEmailBudget),
+    ).rejects.toMatchObject({
+      name: 'AssertionError',
+      message: expect.stringContaining('shared invitation budget lock'),
+      actual: 0,
+    })
+  })
   it('counts same-tenant recipient requests and enforces a separate global ceiling', () =>
     verifyRecipientBudget())
   it('counts five SCIM invitations against the in-app recipient cap only in their own team', () =>
@@ -2284,11 +2480,11 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
     expect(await answer(harness(undefined))).toMatchObject({ status: 404, body: unavailable })
     expect(await answer(harness(flagged(scimUserCreation, deps()), false))).toMatchObject({
       status: 404,
-      body: errorBody(404, 'SCIM provisioning is disabled.'),
+      body: unavailable,
     })
     expect(await productionAnswers(organization, false)).toMatchObject({
       status: 404,
-      body: errorBody(404, 'SCIM provisioning is disabled.'),
+      body: unavailable,
     })
     expect(await written(organization.id)).toEqual(state)
     expect((await productionAnswers(organization, true)).status).toBe(201)
