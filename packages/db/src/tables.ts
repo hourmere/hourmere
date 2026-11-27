@@ -893,6 +893,7 @@ export interface InvitationDeliveries {
   lease_id: string | null;
   lease_until: Timestamp | null;
   resend_request_id: string | null;
+  scim_issued: Generated<boolean>;
   smtp_accepted_at: Timestamp | null;
   state: string;
   updated_at: Generated<Timestamp>;
@@ -902,7 +903,7 @@ export interface InvitationEmailRequests {
   organization_id: string;
   recipient_hash: Buffer;
   requested_at: Timestamp;
-  user_id: string;
+  user_id: string | null;
 }
 
 export interface McpOauthClientActivity {
@@ -1636,6 +1637,22 @@ export interface SsoReplayCache {
   retain_until: Timestamp;
 }
 
+export interface TeamBookingBulkCancellationItems {
+  batch_id: string;
+  booking_id: string;
+  ordinal: number;
+  preview_outcome: string;
+}
+
+export interface TeamBookingBulkCancellations {
+  actor_user_id: string;
+  created_at: Generated<Timestamp>;
+  expires_at: Timestamp;
+  id: Generated<string>;
+  organization_id: string;
+  session_id: string;
+}
+
 export interface WaitlistCandidates {
   accepted_at: Timestamp | null;
   attempts: Generated<number>;
@@ -2021,6 +2038,8 @@ export interface DB {
   sso_recovery_nominations: SsoRecoveryNominations;
   sso_recovery_owners: SsoRecoveryOwners;
   sso_replay_cache: SsoReplayCache;
+  team_booking_bulk_cancellation_items: TeamBookingBulkCancellationItems;
+  team_booking_bulk_cancellations: TeamBookingBulkCancellations;
   waitlist_candidates: WaitlistCandidates;
   waitlist_capabilities: WaitlistCapabilities;
   waitlist_cohorts: WaitlistCohorts;

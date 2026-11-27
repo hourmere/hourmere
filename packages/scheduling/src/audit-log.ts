@@ -25,6 +25,7 @@ export const AUDIT_ACTOR_TYPES = [
   'oauth_client',
   'system',
   'scim_token',
+  'scim_connection',
   'anonymous',
   'external_api_key',
   'external_oauth_client',

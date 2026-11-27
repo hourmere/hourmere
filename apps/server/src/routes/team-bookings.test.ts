@@ -803,7 +803,13 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
     expect(schema).toBeDefined()
     const envelope = resolve(document, schema as Record<string, unknown>)
     expect(responseAndRequestStrictness(document, [path]).closedResponses).toEqual([])
-    expect(Object.keys(envelope.properties as object).sort()).toEqual(['data', 'nextCursor'])
+    expect(Object.keys(envelope.properties as object).sort()).toEqual([
+      'bulkPageExpiresAt',
+      'bulkPageToken',
+      'data',
+      'nextCursor',
+    ])
+    expect(envelope.required).toEqual(['data', 'nextCursor'])
     const data = (envelope.properties as Record<string, { items: Record<string, unknown> }>).data
     const item = resolve(document, data?.items as Record<string, unknown>)
     expect(Object.keys(item.properties as object).sort()).toEqual([

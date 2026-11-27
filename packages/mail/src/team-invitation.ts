@@ -6,21 +6,26 @@ import type { MailMessage } from './index.ts'
 import { emailButton, emailLayout, emailLinkStyle, emailWrapStyle } from './layout.ts'
 import { emailUserText, emailUserValue, escapeHtml, singleLine, subjectLine } from './text.ts'
 
-export interface TeamInvitationEmailOptions {
+export type TeamInvitationEmailOptions = {
   /** The exact invited address; never substitute an alias or the inviter's address. */
   to: string
   /** Trusted instance configuration (PUBLIC_URL), never a request URL or callback. */
   publicUrl: string
   invitationId: string
   teamName: string
-  /** Display name only; an empty name uses a generic localized label, never an email. */
-  inviterName: string
   /** Better Auth returns Date objects directly and ISO timestamps over HTTP. */
   expiresAt: Date | string
-  /** Explicit inviter choice, then instance default, then English. No URL negotiation. */
+  /** Explicit language, then instance default, then English. No URL negotiation. */
   language?: unknown
   defaultLanguage?: unknown
-}
+} & (
+  | {
+      scimIssued?: false
+      /** Display name only; an empty name uses a generic localized label. */
+      inviterName: string
+    }
+  | { scimIssued: true; inviterName?: never }
+)
 
 function acceptUrl(publicUrl: string, invitationId: string): string {
   let origin: string
@@ -79,6 +84,7 @@ export function teamInvitationEmail({
   publicUrl,
   invitationId,
   teamName,
+  scimIssued,
   inviterName,
   expiresAt,
   language: chosenLanguage,
@@ -89,7 +95,7 @@ export function teamInvitationEmail({
   const expiry = expiryText(expiresAt, language)
   if (!to || safeText(to) !== to) throw new Error('Invalid invitation recipient')
   const team = safeText(teamName)
-  const inviter = safeText(inviterName)
+  const inviter = scimIssued ? undefined : safeText(inviterName)
   const values = {
     team: team
       ? emailUserValue(team, language)
@@ -104,7 +110,7 @@ export function teamInvitationEmail({
   // The shared header limit counts UTF-16 units and can split an astral character.
   const subject = subjectLine(t('teamInvitation.subject').text).toWellFormed()
   const facts = [
-    t('teamInvitation.introduction'),
+    t(scimIssued ? 'teamInvitation.scimIntroduction' : 'teamInvitation.introduction'),
     t('teamInvitation.identity'),
     t('teamInvitation.acceptance'),
     t('teamInvitation.expiry'),

@@ -303,7 +303,7 @@ export async function assertAudit(
   }: {
     organizationId: string
     targetId: string
-    actorType: 'scim_token' | 'system' | 'user'
+    actorType: 'scim_token' | 'scim_connection' | 'system' | 'user'
     actorId: string
     credentialType?: 'none' | 'session'
     credentialId?: string | null

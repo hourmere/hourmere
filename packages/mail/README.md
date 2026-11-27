@@ -48,7 +48,8 @@ This example renders a message only; it does not send one.
 | `publicUrl: string` | The instance's own configured canonical HTTP(S) origin, supplied by trusted server configuration; an optional trailing `/` is accepted. Never take it from a request, invitation field or callback parameter. |
 | `invitationId: string` | Invitation UUID; the only variable accepted in the join URL. |
 | `teamName: string` | User-controlled team display name. |
-| `inviterName: string` | User-controlled inviter display name; pass the name, without an email-address fallback. |
+| `inviterName: string` | For app invitations, pass the inviter's display name, without an email-address fallback. |
+| `scimIssued: true` | For SCIM-issued delivery, render the identity provider on behalf of the team. Omit `inviterName`. Language selection uses the same fallback chain. |
 | `expiresAt: Date \| string` | The invitation expiry instant: Better Auth's direct API returns `Date` objects; HTTP JSON uses ISO timestamps with a time-zone offset. Both bodies show the same localized date and time at minute precision, explicitly labeled UTC because the invitee's time zone is unknown. |
 | `language?: unknown` | An explicit language chosen by the inviter. |
 | `defaultLanguage?: unknown` | An optional instance language supplied by the caller; no new environment setting is added. |
