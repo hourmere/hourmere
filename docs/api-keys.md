@@ -117,7 +117,7 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 
 Routing operations return `routing_forms_disabled` until an operator enables routing.
 
-Team booking bulk cancellation preview returns 404 until the feature is released.
+Team booking bulk cancellation preview, confirmation and status return 404 until release.
 
 <!-- api-key-scope-table:start -->
 
