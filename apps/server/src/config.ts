@@ -98,7 +98,11 @@ const schema = z
       DEFAULT_CONNECTION_TIMEOUT_MS,
     ),
     TEAM_PUBLIC_HOME_ORGANIZATION_IDS: optional(z.string()).transform((value, ctx) => {
-      const ids = value === undefined ? [] : value.split(',').map((id) => id.trim())
+      const ids =
+        value
+          ?.split(',')
+          .map((id) => id.trim())
+          .filter(Boolean) ?? []
       const uuid = z.uuid()
       if (ids.length > 256 || ids.some((id) => !uuid.safeParse(id).success)) {
         ctx.addIssue({

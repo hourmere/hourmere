@@ -255,6 +255,7 @@ export function FocusHeading({
   className,
   describedBy,
   dir,
+  preserveFocus = false,
 }: {
   children: ReactNode
   level?: 1 | 2 | 3
@@ -262,11 +263,13 @@ export function FocusHeading({
   className?: string
   describedBy?: string
   dir?: 'auto' | undefined
+  preserveFocus?: boolean
 }) {
   const ref = useRef<HTMLHeadingElement>(null)
   useEffect(() => {
+    if (preserveFocus && document.activeElement !== document.body) return
     ref.current?.focus()
-  }, [])
+  }, [preserveFocus])
   const Tag = level === 1 ? 'h1' : level === 2 ? 'h2' : 'h3'
   return (
     <Tag
