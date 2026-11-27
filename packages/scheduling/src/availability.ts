@@ -852,7 +852,7 @@ export function selectBookableLocationOption(
  * can host it; Meet narrows that pool to hosts with a Meet-capable destination.
  */
 export async function requireLocationAvailability(
-  ctx: Pick<PublicContext, 'db' | 'automaticMeet' | 'automaticZoom'>,
+  ctx: Pick<PublicContext, 'db' | 'automaticMeet' | 'automaticZoom' | 'microsoftCalendarEnabled'>,
   et: PublicEventTypeRecord,
   optionId?: string,
 ): Promise<string[]> {
