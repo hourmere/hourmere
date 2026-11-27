@@ -177,6 +177,23 @@ describe.skipIf(!process.env.DATABASE_URL)('payment foundation transport boundar
   it('refuses cancellation and rescheduling of unbound paid bookings', async () => {
     await protectedMutation()
   })
+  it('projects the unavailable capability for a confirmed unbound hold in host reads', async () => {
+    const { ctx, id } = await fixture()
+    await confirmPaymentHold(ctx, id, `pi_${id.replaceAll('-', '')}`)
+    await expect(bookings.getHostBookingDetail(ctx, id)).resolves.toMatchObject({
+      id,
+      status: 'confirmed',
+      paidManagementUnavailable: true,
+    })
+    expect((await bookings.listHostBookings(ctx)).data).toMatchObject([
+      { id, paidManagementUnavailable: true },
+    ])
+    await expect(
+      bookings.requestReschedule(ctx, id, { idempotencyKey: crypto.randomUUID() }),
+    ).rejects.toMatchObject({
+      code: 'paid_booking_management_unavailable',
+    })
+  })
   it('detects removal of the unbound paid-management guard', async () => {
     await expectKilled(
       await copy('if (paid?.payment_hold_expires_at || paid?.attempt_id)', 'if (false)'),

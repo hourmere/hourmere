@@ -6248,6 +6248,11 @@ export interface components {
              * @enum {string}
              */
             managementPolicy?: "local_only_read_only";
+            /**
+             * @description Authenticated host reads only: the payment binding prevents cancellation, rescheduling and reschedule requests.
+             * @enum {boolean}
+             */
+            paidManagementUnavailable?: true;
             /** @description An outstanding host request to choose another time. The original booking stays confirmed and blocks its slot; expiry keeps the original time. */
             pendingReschedule?: {
                 /**
@@ -9493,6 +9498,11 @@ export interface components {
             id: string;
             /** @description Additive, read-only: whether this cancelled booking was replaced by a rescheduled booking; status and status filters remain unchanged */
             isRescheduled: boolean;
+            /**
+             * @description The payment binding prevents cancellation of this confirmed booking
+             * @enum {boolean}
+             */
+            paidManagementUnavailable?: true;
             /** Format: date-time */
             start: string;
             /** @enum {string} */
