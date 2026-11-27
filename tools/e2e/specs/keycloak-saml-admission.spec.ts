@@ -22,7 +22,7 @@ import {
 } from '../keycloak/browser.ts'
 import { expect, type KeycloakFixture, test } from '../keycloak/fixture.ts'
 
-test.use({ protocol: 'saml', oidcEnabled: false })
+test.use({ protocol: 'saml' })
 
 async function beginAdmission(page: Page, app: KeycloakFixture, username: string) {
   await page.goto(samlSignInUrl(app))
@@ -77,9 +77,7 @@ async function admittedUser(app: KeycloakFixture, email: string, subject: string
   return account.userId
 }
 
-test.describe('with the SAML setting on', () => {
-  test.use({ samlEnabled: true })
-
+test.describe('with the default SAML setting', () => {
   test.beforeEach(async ({ keycloak: app }) => {
     await samlClient(app).setSignAssertions(true)
   })
@@ -181,19 +179,21 @@ test.describe('with the SAML setting on', () => {
   })
 })
 
-test('with the SAML setting off the seeded fixture offers no admission entry', async ({
-  page,
-  keycloak: app,
-}) => {
-  await page.goto(`${app.url}${mailboxProofPath}#attempt=${app.providerId}&saml=1`)
-  await expect(page.getByRole('status')).toHaveText('Identity verification is unavailable.')
-  await expect(button(page, mailboxSendLabel)).toHaveCount(0)
-  await expect(button(page, 'Continue')).toHaveCount(0)
-  const complete = await page.request.post(`${app.url}${SAML_COMPLETE_PATH}`, {
-    headers: { origin: app.url },
-    form: { attemptId: app.providerId },
-  })
-  expect(complete.status()).toBe(404)
-  expect((await complete.json()).error === 'sso_disabled').toBe(true)
-  await expectSignedOut(page, app)
-})
+const testWithSamlOff = test.extend({ oidcEnabled: false, samlEnabled: false })
+
+testWithSamlOff(
+  'with the SAML setting off the seeded fixture offers no admission entry',
+  async ({ page, keycloak: app }) => {
+    await page.goto(`${app.url}${mailboxProofPath}#attempt=${app.providerId}&saml=1`)
+    await expect(page.getByRole('status')).toHaveText('Identity verification is unavailable.')
+    await expect(button(page, mailboxSendLabel)).toHaveCount(0)
+    await expect(button(page, 'Continue')).toHaveCount(0)
+    const complete = await page.request.post(`${app.url}${SAML_COMPLETE_PATH}`, {
+      headers: { origin: app.url },
+      form: { attemptId: app.providerId },
+    })
+    expect(complete.status()).toBe(404)
+    expect((await complete.json()).error === 'sso_disabled').toBe(true)
+    await expectSignedOut(page, app)
+  },
+)

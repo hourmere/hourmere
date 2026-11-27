@@ -40,7 +40,6 @@ function environment(url: string, value?: string): NodeJS.ProcessEnv {
     HOURMERE_ROLE: 'web',
     SIGNUP: 'closed',
     PORT: '0',
-    SCIM_PROVISIONING_ENABLED: 'false',
     ...(value !== undefined && { ROUTING_FORMS_ENABLED: value }),
   }
 }
@@ -204,7 +203,7 @@ describe.skipIf(!databaseUrl)('routing enablement in the running server', () => 
         [
           '/api/v1/instance',
           200,
-          '{"publicUrl":"http://localhost","hostedSignupUrl":"https://hourmere.com","smsRemindersAvailable":false,"eventTypePaymentAvailability":"stripe_not_configured","automaticGoogleMeet":false,"automaticZoom":false,"followUpHostNotesEnabled":true,"embedEnabled":false,"slotSnippetsEnabled":false,"ssoOidcEnabled":false,"ssoSamlEnabled":false,"routingFormsEnabled":false,"workflowsEnabled":true,"scimProvisioningEnabled":false,"signIn":{"email":true,"google":false,"microsoft":false}}',
+          '{"publicUrl":"http://localhost","hostedSignupUrl":"https://hourmere.com","smsRemindersAvailable":false,"eventTypePaymentAvailability":"stripe_not_configured","automaticGoogleMeet":false,"automaticZoom":false,"followUpHostNotesEnabled":true,"embedEnabled":false,"slotSnippetsEnabled":false,"ssoOidcEnabled":true,"ssoSamlEnabled":true,"routingFormsEnabled":false,"workflowsEnabled":true,"scimProvisioningEnabled":true,"signIn":{"email":true,"google":false,"microsoft":false},"scimResourcesEnabled":true}',
         ],
         ['/route', 404, '404 Not Found'],
         ['/route/routing-host/intake', 404, '404 Not Found'],
@@ -262,7 +261,15 @@ describe.skipIf(!databaseUrl)('routing enablement in the running server', () => 
       if (source !== 'unset') expect(setting).toBe('')
       await withServer(setting, async (origin) => {
         const instance = await fetch(`${origin}/api/v1/instance`)
-        expect(await instance.json()).toHaveProperty('routingFormsEnabled', true)
+        expect(await instance.json()).toMatchObject({
+          routingFormsEnabled: true,
+          workflowsEnabled: true,
+          ssoOidcEnabled: true,
+          ssoSamlEnabled: true,
+          scimProvisioningEnabled: true,
+          scimResourcesEnabled: true,
+          eventTypePaymentAvailability: 'stripe_not_configured',
+        })
         const listed = catalogue(await listedTools(origin)).tools.filter(({ name }) =>
           routingTools.has(name),
         )

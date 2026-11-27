@@ -49,6 +49,7 @@ import {
   ssoRecoveryEnrollmentEmailJob,
 } from './sso-recovery-enrollment.ts'
 import { UseSsoRecoveryInput } from './sso-recovery-use.ts'
+import { configuredSsoCapabilities } from './sso-setting-fixtures.ts'
 
 const databaseUrl = process.env.DATABASE_URL
 const publicUrl = 'https://recovery-enrollment.example.test'
@@ -111,12 +112,10 @@ describe.skipIf(!databaseUrl)('SSO recovery', () => {
     enabled: boolean | 'setting-off' = true,
     resolveCaller: CallerResolver = createCallerResolver({ auth, db }),
   ) {
-    // 'setting-off' is what the running server passes while SSO_OIDC_ENABLED is off.
-    const capabilities = {
-      ssoOidcEnabled: enabled === true,
-      ssoSamlEnabled: false,
-      ssoOperatorSetting: enabled === 'setting-off',
-    }
+    const capabilities =
+      enabled === 'setting-off'
+        ? configuredSsoCapabilities('false', 'false')
+        : { ssoOidcEnabled: enabled, ssoSamlEnabled: false }
     const notices: Notice[] = []
     const proofJobs: MailboxProofEmailPayload[] = []
     const state = { now: undefined as string | undefined, failQueue: false }

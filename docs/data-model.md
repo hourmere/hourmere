@@ -135,6 +135,15 @@ the mapped profile and timestamp in the existing row. If the normalized work add
 changes, the same transaction sets the unfinished claim's `invalidated_at` and keeps its
 mailbox and invitation reference.
 
+With either SSO protocol enabled, a member removal writes a team-local admission block
+in `scim_membership_blocks` for the removed member's normalized account email, even if
+that team has never configured an identity provider. Distinct verified emails on active
+SSO links in that team each get their own block. The records identify a local removal
+(`source = 'local'`, `kind = 'removal'`). Active blocks prevent automatic readmission
+through SSO or SCIM, including after the team adopts either feature. The mailbox records
+have no expiration and are kept until that team is deleted, even after the account is
+deleted or the block is cleared.
+
 Migration `0181_scim_team_hierarchy.sql` adds storage for the
 [SCIM Groups-to-teams hierarchy](scim.md#groups-to-teams-hierarchy-authorization).
 Each live `scim_team_mappings` row is both a hierarchy edge and a reservation for
@@ -1171,9 +1180,8 @@ Browser-only policy writes share the organization write lock. Enabling enforceme
 the latest general and owner test receipts for the current provider revision after taking the
 organization lock. An eligible OIDC provider must have passing results from both receipts and a
 verified domain, and the team must have an accepted current recovery owner. The policy and its audit
-event commit together.
-OIDC and SAML stay hard-off. A test restricts table references to
-the storage layer and each explicitly named data owner.
+event commit together. A test restricts table references to the storage layer and each
+explicitly named data owner.
 
 All six belong to a team: a personal organization's rows are refused, and deleting the
 organization deletes them. Policies, providers and domain claims are deleted only with
@@ -1248,8 +1256,8 @@ step): `sso_identity_links`, `sso_attempts`, `sso_mailbox_tokens`, `sso_replay_c
 `sso_browser_proofs` and `sso_delegation_bindings`. The Mailbox proof step's module
 (`apps/server/src/sso-mailbox-proof.ts`) uses them: its endpoints and delivery job write
 attempts' mailbox proofs and their tokens, and its cleanup job deletes consumed and expired
-attempts, at most 1000 a minute, with their tokens. Its endpoints answer `404 sso_disabled`
-while OIDC and SAML stay hard-off, so nothing writes attempts in production yet. The test
+attempts, at most 1000 a minute, with their tokens. Mailbox proof remains available
+for recovery and supported trust-reducing operations when both protocols are off. The test
 that keeps production modules from naming the configuration tables covers these too, and
 lets that module name only attempts, tokens and providers. The shared fresh-proof gate
 (`apps/server/src/sso-fresh-proof.ts`) creates and consumes operation-bound attempts and
@@ -1593,7 +1601,6 @@ or renamed, and the test fails until the check accepts exactly those kinds.
 | Weeks 5–8 | Better Auth teams (sub-groups for round-robin pools) |
 | With Google/Microsoft sign-in | Already configured: Better Auth encrypts sign-in OAuth tokens (`encryptOAuthTokens`) |
 | After launch | Better Auth `two-factor` |
-| Planned, all instances | Organization SSO (OIDC/SAML): [evaluation and design](sso.md); audit integration |
 
 Background jobs (notification emails, reminders, calendar synchronization and webhook
 delivery/retries) use pg-boss (`@hourmere/jobs`), which keeps its queue in its own `pgboss` schema and

@@ -108,12 +108,13 @@ const challenge: Challenge = {
   expiresAt: '2030-01-08T10:00:00.000Z',
 }
 
-/** Supply synthetic responses through the browser client while the fixture server stays hard-off. */
+/** Supply synthetic responses through the browser client for individual audit states. */
 async function mockSsoSetupAudit(page: Page, app: FixtureApp, state: SsoSetupAuditPageId) {
   const { teamOrganizationId } = await app.auditState()
   const stepUp = state === 'sso-proof-step-up'
   const recoveryRequired = state === 'sso-enforcement-recovery-required'
   const retirement = state.startsWith('sso-identity-retire')
+  const identityUnavailable = state === 'sso-identity-unavailable'
   const instance: Schemas['Instance'] = {
     hostedSignupUrl: 'https://hourmere.com',
     publicUrl: app.url,
@@ -204,6 +205,11 @@ async function mockSsoSetupAudit(page: Page, app: FixtureApp, state: SsoSetupAud
     if (!response.ok()) return route.fulfill({ response })
     const caller = (await response.json()) as Schemas['Me']
     if (caller.organization.id !== teamOrganizationId) return contextChanged(route)
+    if (identityUnavailable) {
+      // A default-on server returns a real summary. This state models an absent summary.
+      const { sso: _sso, ...withoutSummary } = caller
+      return route.fulfill({ response, json: withoutSummary })
+    }
     const { id, displayName, revision } = enabledProvider
     return route.fulfill({
       response,
@@ -245,7 +251,7 @@ async function mockSsoSetupAudit(page: Page, app: FixtureApp, state: SsoSetupAud
     [`${app.url}/api/auth/sign-in/sso`, signIn],
     [`${app.url}/api/auth/sso/mailbox-proof/send`, sendProof],
   ]
-  if (stepUp || retirement) mocks.push([`${app.url}/api/v1/me`, me])
+  if (stepUp || retirement || identityUnavailable) mocks.push([`${app.url}/api/v1/me`, me])
   if (state === 'sso-identity-retire-forbidden' || state === 'sso-enforcement-admission') {
     mocks.push([
       `${app.url}/api/auth/organization/get-active-member`,

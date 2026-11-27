@@ -268,11 +268,11 @@ const guardedSsoWebNames: ReadonlySet<string> = new Set([
 const unavailable = async (): Promise<never> => {
   throw new Error('Route registration must not call the provider or the database')
 }
-// Both protocol settings are off here (unset, empty and false are tested below).
+// Explicitly disable both protocols to exercise the operator's opt-out.
 const productionEnv = {
   DATABASE_URL: 'postgres://catalogue@127.0.0.1:9/catalogue',
-  SSO_OIDC_ENABLED: '',
-  SSO_SAML_ENABLED: '',
+  SSO_OIDC_ENABLED: 'false',
+  SSO_SAML_ENABLED: 'false',
   SSO_ENCRYPTION_KEY: randomBytes(32).toString('base64'),
   SSO_PRIVATE_TARGETS: 'idp.internal:8443',
   BETTER_AUTH_SECRET: 'catalogue-test-only-secret-at-least-32-characters',
@@ -699,92 +699,75 @@ describe('SSO setting-off excludes only SSO from the published catalogues', () =
     rejects(() => expectNoSsoRoutes([...workerPaths(), MAILBOX_PROOF_SEND_PATH]))
   })
 
-  it.each([
-    ['unset', undefined],
-    ['empty', ''],
-    ['false', 'false'],
-  ])(
-    'answers 404 sso_disabled on sign-in endpoints as production assembles the app with both settings %s',
-    async (_state, setting) => {
-      const db = createDb(createPool('postgres://catalogue@127.0.0.1:9/catalogue'))
-      const previous = { oidc: process.env.SSO_OIDC_ENABLED, saml: process.env.SSO_SAML_ENABLED }
-      // The process environment is not what the app reads: only the configuration is.
-      process.env.SSO_OIDC_ENABLED = 'true'
-      process.env.SSO_SAML_ENABLED = 'true'
-      try {
-        const config = loadConfig({
-          ...productionEnv,
-          SSO_OIDC_ENABLED: setting,
-          SSO_SAML_ENABLED: setting,
-        })
-        // The queue, the caller resolver and the database all refuse: an effect would be a 500.
-        const app = createApp(productionOptions(db, config))
-        const instance = await app.request('/api/v1/instance')
-        expect(await instance.json()).toMatchObject({
-          ssoOidcEnabled: false,
-          ssoSamlEnabled: false,
-        })
-        for (const path of RETAINED_SSO_AUTH_PATHS)
-          for (const [method, headers, status, error] of [
-            ['GET', {}, 405, 'method_not_allowed'],
-            ['POST', {}, 403, 'forbidden'],
-            ['POST', { origin: 'https://attacker.example', cookie: 'a=b' }, 403, 'forbidden'],
-            [
-              'POST',
-              { origin: 'http://localhost', authorization: 'Bearer hm_x' },
-              403,
-              'forbidden',
-            ],
-            ['POST', { origin: 'http://localhost' }, 400, 'invalid_request'],
-          ] as const) {
-            const response = await app.request(path, {
-              method,
-              headers,
-              ...(method === 'GET' ? {} : { body: JSON.stringify({ attemptId: 'not-an-id' }) }),
-            })
-            expect(response.status, `${method} ${path}`).toBe(status)
-            expect(await response.json()).toEqual({ error })
-          }
-        for (const path of GUARDED_SSO_AUTH_PATHS.filter(
-          (path) => !RETAINED_SSO_AUTH_PATHS.includes(path),
-        ))
-          for (const method of ['POST', 'GET', 'PUT'])
-            for (const headers of [
-              {},
-              { origin: 'http://localhost', 'content-type': 'application/json' },
-              { origin: 'https://attacker.example', authorization: 'Bearer hm_x', cookie: 'a=b' },
-            ])
-              for (const id of ['0190f2c4-0000-7000-8000-000000000001', 'not-an-id']) {
-                const resolvedPath = path.replace(':providerId', id)
-                const requestPath =
-                  path === OIDC_CALLBACK_PATH
-                    ? `${resolvedPath}?state=synthetic&code=synthetic`
-                    : resolvedPath
-                const body =
-                  path === OIDC_SIGN_IN_PATH
-                    ? { providerId: id, intent: 'sign_in' }
-                    : path === OIDC_COMPLETE_PATH
-                      ? { attemptId: id }
-                      : { attemptId: id, token: 'synthetic' }
-                const response = await app.request(requestPath, {
-                  method,
-                  headers,
-                  ...(method === 'GET' ? {} : { body: JSON.stringify(body) }),
-                })
-                expect(response.status, `${method} ${path}`).toBe(404)
-                expect(await response.json()).toEqual({ error: 'sso_disabled' })
-              }
-      } finally {
-        for (const [name, value] of [
-          ['SSO_OIDC_ENABLED', previous.oidc],
-          ['SSO_SAML_ENABLED', previous.saml],
-        ] as const)
-          if (value === undefined) delete process.env[name]
-          else process.env[name] = value
-        await db.destroy()
-      }
-    },
-  )
+  it('answers 404 sso_disabled on production sign-in endpoints with both settings false', async () => {
+    const db = createDb(createPool('postgres://catalogue@127.0.0.1:9/catalogue'))
+    const previous = { oidc: process.env.SSO_OIDC_ENABLED, saml: process.env.SSO_SAML_ENABLED }
+    // The process environment is not what the app reads: only the configuration is.
+    process.env.SSO_OIDC_ENABLED = 'true'
+    process.env.SSO_SAML_ENABLED = 'true'
+    try {
+      // The queue, the caller resolver and the database all refuse: an effect would be a 500.
+      const app = createApp(productionOptions(db))
+      const instance = await app.request('/api/v1/instance')
+      expect(await instance.json()).toMatchObject({
+        ssoOidcEnabled: false,
+        ssoSamlEnabled: false,
+      })
+      for (const path of RETAINED_SSO_AUTH_PATHS)
+        for (const [method, headers, status, error] of [
+          ['GET', {}, 405, 'method_not_allowed'],
+          ['POST', {}, 403, 'forbidden'],
+          ['POST', { origin: 'https://attacker.example', cookie: 'a=b' }, 403, 'forbidden'],
+          ['POST', { origin: 'http://localhost', authorization: 'Bearer hm_x' }, 403, 'forbidden'],
+          ['POST', { origin: 'http://localhost' }, 400, 'invalid_request'],
+        ] as const) {
+          const response = await app.request(path, {
+            method,
+            headers,
+            ...(method === 'GET' ? {} : { body: JSON.stringify({ attemptId: 'not-an-id' }) }),
+          })
+          expect(response.status, `${method} ${path}`).toBe(status)
+          expect(await response.json()).toEqual({ error })
+        }
+      for (const path of GUARDED_SSO_AUTH_PATHS.filter(
+        (path) => !RETAINED_SSO_AUTH_PATHS.includes(path),
+      ))
+        for (const method of ['POST', 'GET', 'PUT'])
+          for (const headers of [
+            {},
+            { origin: 'http://localhost', 'content-type': 'application/json' },
+            { origin: 'https://attacker.example', authorization: 'Bearer hm_x', cookie: 'a=b' },
+          ])
+            for (const id of ['0190f2c4-0000-7000-8000-000000000001', 'not-an-id']) {
+              const resolvedPath = path.replace(':providerId', id)
+              const requestPath =
+                path === OIDC_CALLBACK_PATH
+                  ? `${resolvedPath}?state=synthetic&code=synthetic`
+                  : resolvedPath
+              const body =
+                path === OIDC_SIGN_IN_PATH
+                  ? { providerId: id, intent: 'sign_in' }
+                  : path === OIDC_COMPLETE_PATH
+                    ? { attemptId: id }
+                    : { attemptId: id, token: 'synthetic' }
+              const response = await app.request(requestPath, {
+                method,
+                headers,
+                ...(method === 'GET' ? {} : { body: JSON.stringify(body) }),
+              })
+              expect(response.status, `${method} ${path}`).toBe(404)
+              expect(await response.json()).toEqual({ error: 'sso_disabled' })
+            }
+    } finally {
+      for (const [name, value] of [
+        ['SSO_OIDC_ENABLED', previous.oidc],
+        ['SSO_SAML_ENABLED', previous.saml],
+      ] as const)
+        if (value === undefined) delete process.env[name]
+        else process.env[name] = value
+      await db.destroy()
+    }
+  })
 
   it('answers disabled for each trust-adding SSO write before caller, input or database access', async () => {
     const db = createDb(createPool('postgres://catalogue@127.0.0.1:9/catalogue'))
