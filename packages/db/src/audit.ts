@@ -31,7 +31,7 @@ export const auditDetails = {
   'membership.left': [],
   'membership.role_changed': ['oldRole', 'newRole'],
   'organization.ownership_transferred': [],
-  'organization.updated': [],
+  'organization.updated': ['oldSlug', 'newSlug', 'nameChanged'],
   'organization.created': [],
   'organization.branding_updated': ['logo', 'primaryColor'],
   'membership.invitation_cancelled': [],

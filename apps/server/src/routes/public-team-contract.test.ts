@@ -230,11 +230,6 @@ describe.skipIf(!serverUrl)('public team event contract', () => {
       .set({ slug: 'Personal-Space' })
       .where('id', '=', personal.organizationId)
       .execute()
-    await db
-      .updateTable('auth.organization')
-      .set({ slug: s.teamSlug.toLowerCase() })
-      .where('id', '=', other.team.id)
-      .execute()
     await updateEventType(s.ctx, s.event.id, { isHidden: true })
 
     const app = appWith([s.team.id, personal.organizationId])
@@ -248,6 +243,7 @@ describe.skipIf(!serverUrl)('public team event contract', () => {
     for (const response of [
       await disabled.request(s.catalogPath),
       await app.request(s.catalogPath.toLowerCase()),
+      await app.request(other.catalogPath),
       await app.request('/api/v1/public/teams/unknown-team'),
       await app.request('/api/v1/public/teams/Personal-Space'),
       await app.request('/api/v1/public/teams/invalid_slug'),

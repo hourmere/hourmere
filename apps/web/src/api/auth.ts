@@ -3,7 +3,7 @@
 // the shapes used here are written out by hand. Errors are `{ "message", "code" }`.
 import { safeNextPath, signInPath } from '../next-path.ts'
 import { api, notifyUnauthorized, type Schemas, unwrap } from './client.ts'
-import { errorFromResponse } from './errors.ts'
+import { errorFromResponse, RequestError } from './errors.ts'
 
 async function authRequest<T>(
   path: string,
@@ -285,6 +285,31 @@ export async function createOrganization(
   })
   const me = await unwrap(api.GET('/api/v1/me', { signal }))
   return { organization, me }
+}
+
+export type TeamDetails = Pick<Organization, 'name' | 'slug'>
+
+export async function updateTeamDetails(
+  organizationId: string,
+  expected: TeamDetails,
+  data: Partial<TeamDetails>,
+): Promise<TeamDetails> {
+  const updated = await authRequest<Pick<Organization, 'id' | 'name' | 'slug'> | null>(
+    '/organization/update',
+    {
+      body: { organizationId, data },
+      headers: {
+        'X-Expected-Organization-Id': organizationId,
+        'X-Expected-Team-Name': encodeURIComponent(expected.name),
+        'X-Expected-Team-Slug': encodeURIComponent(expected.slug),
+      },
+    },
+  )
+  const { name, slug } = { ...expected, ...data }
+  if (updated?.id !== organizationId || updated.name !== name || updated.slug !== slug) {
+    throw new RequestError(502, 'TEAM_SETTINGS_UNCONFIRMED', 'The team details were not confirmed.')
+  }
+  return { name, slug }
 }
 
 export interface SetActiveOrganizationInput {

@@ -1653,6 +1653,12 @@ export interface TeamBookingBulkCancellations {
   session_id: string;
 }
 
+export interface TeamSlugReservations {
+  expires_at: Timestamp;
+  organization_id: string | null;
+  slug: string;
+}
+
 export interface WaitlistCandidates {
   accepted_at: Timestamp | null;
   attempts: Generated<number>;
@@ -2040,6 +2046,7 @@ export interface DB {
   sso_replay_cache: SsoReplayCache;
   team_booking_bulk_cancellation_items: TeamBookingBulkCancellationItems;
   team_booking_bulk_cancellations: TeamBookingBulkCancellations;
+  team_slug_reservations: TeamSlugReservations;
   waitlist_candidates: WaitlistCandidates;
   waitlist_capabilities: WaitlistCapabilities;
   waitlist_cohorts: WaitlistCohorts;

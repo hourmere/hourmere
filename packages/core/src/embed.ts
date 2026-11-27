@@ -33,20 +33,25 @@ const SLUG = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/i
 /** Only public booking paths, never account, OAuth, API or invitee management pages. */
 export function publicBookingPath(pathname: string): string | undefined {
   const parts = pathname.replace(/\/$/, '').split('/').slice(1)
+  const [first, second, third] = parts
   if (
     parts.length === 3 &&
-    parts[0] === 'team' &&
-    isPublicTeamSlug(parts[1] ?? '') &&
-    SLUG.test(parts[2] ?? '')
+    first === 'team' &&
+    second &&
+    third &&
+    isPublicTeamSlug(second) &&
+    SLUG.test(third)
   )
-    return `/team/${parts[1]}/${parts[2]?.toLowerCase()}`
+    return `/team/${encodeURIComponent(second)}/${encodeURIComponent(third.toLowerCase())}`
   if (
     parts.length === 2 &&
-    HANDLE.test(parts[0] ?? '') &&
-    !isReservedName(parts[0] ?? '') &&
-    SLUG.test(parts[1] ?? '')
+    first &&
+    second &&
+    HANDLE.test(first) &&
+    !isReservedName(first) &&
+    SLUG.test(second)
   )
-    return `/${parts[0]?.toLowerCase()}/${parts[1]?.toLowerCase()}`
+    return `/${encodeURIComponent(first.toLowerCase())}/${encodeURIComponent(second.toLowerCase())}`
   return undefined
 }
 export const EMBED_ID = /^[a-zA-Z0-9_-]{16,64}$/
