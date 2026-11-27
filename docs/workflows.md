@@ -1,17 +1,17 @@
 # Booking workflows
 
 Booking workflows attach one conditional email or signed webhook action to a booking
-change or a timer. The app's list, lifecycle actions, editor, preview and run history are
-implemented, and the REST, MCP and CLI operations are published. **Workflows are
-available and off by default.** Set `WORKFLOWS_ENABLED=true` to opt in. When off,
-`GET /api/v1/instance` reports `workflowsEnabled: false`, the app hides the workflow
+change or a timer. Manage definitions and read run history in the app or through REST,
+MCP and CLI. **Workflows are enabled by default.** Set `WORKFLOWS_ENABLED=false` to pause
+them. When off, `GET /api/v1/instance` reports `workflowsEnabled: false`, the app hides the workflow
 pages, and authorized callers can use the direct recovery operations described below.
 
 ## Operating guide
 
 - Set the same `WORKFLOWS_ENABLED` value for all web processes, workers and schedulers.
-  Recreate them together after changing the setting. Leave the setting empty to use the
-  server default. Use the [configuration reference](../apps/site/src/content/docs/docs/configuration.md#email-and-registration)
+  Recreate them together after changing the setting. Unset and empty values enable
+  workflows, including on upgrades with an existing `WORKFLOWS_ENABLED=` assignment.
+  Use the [configuration reference](../apps/site/src/content/docs/docs/configuration.md#email-and-registration)
   for the two workflow mail caps.
 - In the app, [open Workflows in the current space](#manage-existing-workflows-in-the-app),
   [create or preview a definition](#create-edit-and-preview-workflows-in-the-app), and
@@ -29,13 +29,26 @@ pages, and authorized callers can use the direct recovery operations described b
   `1.2 × MAIL_MAX_PER_HOUR` at a positive cap. Hourmere Cloud keeps host-written text
   off and uses the [built-in templates](#email-and-webhook-actions) in every public locale.
 
-中文：工作流列表、启用与禁用、删除、编辑、预览和执行历史已实现，REST、MCP 与 CLI
-接口也已发布。工作流默认关闭，自托管无需付费即可启用。设置 `WORKFLOWS_ENABLED=true` 后，
-统一重建 Web、worker 和调度进程。关闭时，应用隐藏相关页面，有权限的调用者仍可直接使用
-恢复操作。
+中文：工作流支持网页、REST、MCP 和 CLI。未设置或留空 `WORKFLOWS_ENABLED` 时默认启用，
+自托管无需付费。紧急关停时，在所有 Web、worker 和调度进程中设置 `WORKFLOWS_ENABLED=false`，
+并一起重建这些进程。确认 `GET /api/v1/instance` 返回 `workflowsEnabled: false`。
+关闭时应用隐藏相关页面，有权限的调用者仍可直接使用恢复操作。
 改期请求及其到期不会改变现有执行计划。实际改期会用原有版本重新计算定时任务，
 并终止延期的创建通知。工作流邮件与核心邮件共用额度。全局上限大于零时，SMTP 容量按
 `1.2 × MAIL_MAX_PER_HOUR` 估算。Cloud 保持关闭主持人自定义文案，使用内置模板。
+
+### Pause and resume after an upgrade
+
+1. Set `WORKFLOWS_ENABLED=false` in the environment of every web process, worker and
+   scheduler. For Compose, set it in the deployment's `.env` and use the same Compose
+   overlays as the running deployment. Recreate all affected processes together.
+2. Verify that `GET /api/v1/instance` reports `workflowsEnabled: false` and that each worker
+   has the same setting. Use authorized direct REST, MCP or CLI calls to inspect history,
+   disable individual workflows or delete them. A send admitted before the stop can finish.
+   Core reminders and follow-ups continue.
+3. To resume, remove the override or set it to `true`, then recreate the same processes and
+   verify `workflowsEnabled: true`. Runs skipped as `instance_disabled` stay terminal.
+   Future runs remain eligible within their original delivery windows.
 
 ## Evidence and existing foundations
 
@@ -201,10 +214,11 @@ Disabling one definition is lazy, like the operator switch below: it changes no 
 row and stops new capture for that definition. A pending run that the dispatcher claims
 while its definition is disabled ends permanently as `workflow_disabled`. Re-enabling never
 revives terminal or skipped work; runs not yet claimed stay eligible, so a brief toggle loses
-only the runs claimed during it. The editor states this when disabling. Deletion is
-eager: the deleting transaction locks the organization, tombstones the definition and then
-retires every pending run of that definition. Imported bookings and their reschedule chains
-are excluded, matching existing import silence.
+only the runs claimed during it. The editor states this when disabling. Deletion is eager:
+the deleting transaction locks the organization, tombstones the definition and then retires
+every pending run of that definition. Retirement is a separate statement under READ
+COMMITTED so it sees runs committed while deletion waited for the definition. Imported
+bookings and their reschedule chains are excluded, matching existing import silence.
 
 | Condition | Rationale and comparison |
 | --- | --- |
@@ -270,7 +284,7 @@ the next complete built-in in the mail locale fallback chain, ending in English.
 不支持的语言使用英文内置模板；如果支持的语言缺少主题或正文，则两者一起回退到邮件语言
 回退链中下一个完整的内置模板，最终回退到英文。自托管默认允许使用收件人语言的自定义
 文本，未提供时采用内置模板。Hourmere Cloud 将主持人文本开关设为 false，始终使用内置
-模板。自托管与 Cloud 的工作流功能均仍处于硬关闭状态。
+模板。
 
 Templates are plain text with a typed allowlist of variables and use the notification
 mail catalogues for the public locales in `packages/core/src/locales.ts`. Administrator
@@ -408,9 +422,10 @@ n8n and Make guides that they do not offer the workflow kind.
 
 Internal webhook tests that subscribe an endpoint to every kind would add
 `workflow.executed` and get `404 workflows_disabled` while workflows are off:
-`packages/webhooks/src/delivery.test.ts`, `packages/webhooks/src/no-show.test.ts` and
-`packages/webhooks/src/audit-event-details-migration.test.ts`. Step 13d makes them subscribe
-to the booking kinds only, or use the enabled context.
+`packages/webhooks/src/delivery.test.ts` and `packages/webhooks/src/no-show.test.ts`.
+Step 13d makes them subscribe to the booking kinds only, or use the enabled context.
+`packages/webhooks/src/audit-event-details-migration.test.ts` uses the 0080-era webhook and
+Slack catalogues for both journal writes and detail-check assertions on the historical schema.
 
 Webhook audit events record the subscribed list, and since migration 0080 the audit
 journal's details check admits only the current webhook kinds. Step 13d's migration
@@ -476,19 +491,22 @@ After-end can run late within that bound only after the saved end. A delayed lif
 message is also limited by the same bound and current applicability. Budget exhaustion
 skips permanently as `budget_suppressed`, without retry storms or catch-up later. Existing
 reminders retain their current expiry/retry behavior; the new bound is for workflows only.
-For webhook deliveries it bounds the first network attempt only; a delivery first attempted
-in time retains the existing roughly seven-hour retry schedule, even beyond due + 60 minutes.
-Each retry still checks cancellation, disablement, authority and endpoint policy.
+For webhooks the worker checks the deadline again before the first network attempt. A
+delivery with a durable, timely first-admission marker retains the roughly seven-hour
+retry schedule, even beyond due + 60 minutes. If the worker crashes after admission, the
+next worker treats the attempt as potentially sent. Each retry checks cancellation,
+disablement, authority and endpoint policy.
 
-The shared webhook worker checks the booking, workflow and subscribed endpoint on every attempt.
-It records admission to the first guarded transport attempt durably before calling the transport.
-If the worker stops between admission and recording the result, the next attempt uses the same
-delivery ID. Pending deliveries use the existing bounded repair job. Turning workflows off
-stops workflow sends.
+The shared webhook worker checks the booking and workflow on every attempt and commits
+the first admission time before calling the guarded transport. The lifecycle locks are
+released at that commit. Cancellation, reschedule or disable can complete while a request
+is in flight. Endpoint and delivery locks still serialize transport with endpoint changes
+and competing sends. If the worker stops before recording the result, the next eligible
+attempt uses the same delivery ID. Pending deliveries use the existing bounded repair job.
 
-中文：共享 webhook worker 每次尝试前都会检查预约、工作流和已订阅的端点。首次尝试通过检查后，
-worker 先持久化准入时间，再调用受保护的传输层。如果在记录结果之前中断，重试沿用同一个投递 ID。
-待处理投递沿用现有的有界修复任务。关闭工作流会停止工作流投递。
+中文：共享 webhook worker 每次尝试前检查预约和工作流。首次准入时间提交后释放预约和工作流相关的锁，
+再调用受保护的传输层。接收端请求尚未返回时，取消、改期或停用仍可完成。端点和投递锁继续协调传输与端点变更，
+并防止并行发送。如果在记录结果之前中断，下一次符合条件的尝试沿用同一个投递 ID。待处理投递沿用现有的有界修复任务。
 
 Use durable definition revisions, booking associations, occurrences, per-action executions
 and per-recipient intents with database uniqueness; pg-boss jobs carry only opaque row IDs.
@@ -496,8 +514,10 @@ Reconciliation recreates missing wakes without recreating intents. Lock in the e
 identity/organization/lifecycle order: after its identity locks, every workflow writer takes
 the organization lock first, before the mail-budget lock and before any definition or run
 row, and writers that touch both definitions and runs lock the definition before its runs
-(see [workflow execution storage](data-model.md#workflow-execution-storage)). Use claim
-tokens and fencing, and recheck authority, workflow enabled state, booking anchors/status,
+(see [workflow execution storage](data-model.md#workflow-execution-storage)). A due scan
+can find runs across organizations. The dispatcher claims one run per transaction, starting
+with that run's organization before locking its definition and run. Use claim tokens and
+fencing, and recheck authority, workflow enabled state, booking anchors/status,
 recipient eligibility and deadline after waiting. Cancellation/disable serializes with the
 marker transaction and checks any already committed dispatch marker (irreversible unless positively
 known not sent) to determine which operation won. For email,
@@ -506,8 +526,14 @@ the marker and SMTP; an email whose marker commits first may still start or fini
 after cancellation/disable returns. This narrow race cannot recall an already-authorized
 dispatch. No workflow-held booking, workflow or budget row lock spans SMTP. Check expiry and live
 authority immediately before the marker, after all waits. Test both transaction orders,
-including a pause between marker commit and the SMTP call. Webhook delivery retains its
-existing endpoint/delivery locking and adds workflow checks without promising SMTP semantics.
+including a pause between marker commit and the SMTP call. Webhook admission also commits
+before transport. Webhook retries retain the delivery ID, and endpoint and delivery locks
+still serialize the send.
+
+To test lock order inside a workflow writer, take the competitor's first lock, run the
+whole workflow writer as one step, then request the competitor's second lock. In production
+integration tests for mail admission, use the invitation creation path in
+`packages/auth/src/invitations.ts` so its team lock is part of the race.
 
 For email, a database transaction cannot atomically commit SMTP acceptance. Choose
 **at-most-once potentially accepted SMTP attempt**: commit the recipient's reservation and
@@ -883,7 +909,7 @@ continues to use the existing endpoint limits and route rate limits. See
 
 The web app reads the optional `workflowsEnabled` field from public
 `GET /api/v1/instance` and shows workflow navigation and routes only when it is true.
-The response reflects `WORKFLOWS_ENABLED`, which defaults to false. Clients treat an absent
+The response reflects `WORKFLOWS_ENABLED`, which defaults to true. Clients treat an absent
 field as false.
 The editor uses `followUpHostNotesEnabled` from the same response to decide whether to
 show custom subject and body fields.
@@ -1055,32 +1081,30 @@ Step 19a first implemented the operator-off state behind the still-false constan
 an internal injected setting. With creation, editing, disable and delete, both execution
 paths, history and audit binding in place, step 19b sets `WORKFLOWS_IMPLEMENTED = true` and
 reads the operator setting from `loadConfig` for all processes. `WORKFLOWS_ENABLED` accepts
-the exact strings `true` and `false`. Unset and empty values use the server default, false.
+the exact strings `true` and `false`. Unset and empty values use the server default, true.
 Any other value fails startup. Operator-off refuses creation, preview, enabling and all
 other edits (including renames) with `404 workflows_disabled`. Definition and history reads,
 disable-only updates and deletion remain available for recovery. MCP discovery while off
 omits workflow tools. `GET /api/v1/instance` reports the effective setting as `workflowsEnabled`.
 
 While off, booking changes make no workflow queries and capture no runs. Workflow email
-and webhook sends stop. A fresh default install starts no workflow wake loop or retention job.
+and webhook admissions stop. A fresh install with an explicit stop starts no workflow
+wake loop or retention job.
 A paused worker that starts with unfinished runs or interrupted email attempts installs the
 workflow jobs for recovery, including retention. Pending runs
 become terminally skipped as `instance_disabled` only when they are claimed while off; future
 runs are not eagerly swept. Runs that were not claimed while off remain eligible within their
 delivery windows after re-enabling. Disabling one definition is lazy in the same way, with
-`workflow_disabled`. Existing reminders continue. Step 19b rewrites the docs index
-known-limitation line to say workflows are available but off by default. Final acceptance
-(step 20) changes the default to true and updates that line again. Explicit false stays
-supported; an environment copied from step 19b, or a Compose install with the empty
-forward, picks up the flip. Cloud and self-hosting have an identical workflow feature set
-without paid gating. Hourmere Cloud runs the independent host-text switch off, as described
-above.
+`workflow_disabled`. Existing reminders continue. An environment copied from the opt-in
+release, or a Compose install with the empty forward, uses the enabled default. Cloud and
+self-hosting have an identical workflow feature set without paid gating. Hourmere Cloud
+runs the independent host-text switch off, as described above.
 
 中文：`GET /api/v1/instance` 的 `workflowsEnabled` 反映运营开关。`WORKFLOWS_ENABLED`
-只接受 `true`、`false` 和空值，未设置或留空时默认关闭，其他值会导致启动失败。
+只接受 `true`、`false` 和空值，未设置或留空时默认启用，其他值会导致启动失败。
 关停时可读取定义和历史、仅停用或删除工作流，创建、预览、启用及其他编辑均会被拒绝。
 MCP 工具不会出现在发现列表中。关闭时，预约变更不会查询工作流数据或创建执行任务，
-工作流邮件和 webhook 均停止发送。默认关闭的全新实例不会启动工作流调度或清理任务。
+工作流邮件和 webhook 停止准入。显式关闭的全新实例不会启动工作流调度或清理任务。
 如果暂停的实例启动时还有未结束的执行或中断的邮件尝试，后台会安装恢复和清理任务。
 清理按结束时间处理超过 30 天的历史及已结束的执行，每次各最多 100 条。删除执行时会一并删除收件人声明，
 中断的邮件尝试和待处理的 webhook 投递结束后才会清理其执行。预约登记和审计事件按各自的规则保留。
@@ -1142,7 +1166,7 @@ prose, OpenAPI/client, CLI help and enabled-inventory parity, as defined in Roll
 | 13a. Webhook discovery and creation parity | 4 | Existing `GET /api/v1/webhooks` (`listWebhooks`) / `list_webhooks` / `webhooks list`; existing `POST /api/v1/webhooks` (`createWebhook`) / `create_webhook` / `webhooks create`. Update webhook/MCP/CLI guides now, including the "Webhook management is REST-only" sentence in `apps/site/src/content/docs/docs/webhooks.md`, `apps/site/src/content/docs/docs/n8n.md` and `tools/n8n-nodes-hourmere/README.md`. | Hard-off for workflow event kind | Full/read discovery, full-only create; current owner/admin checks; one-time secret returned only on creation; CLI JSON/help and parity mapping; existing event kinds unchanged. |
 | 13b. Webhook edit and retirement parity | 13a | Existing `PATCH /api/v1/webhooks/{id}` (`updateWebhook`) / `update_webhook` / `webhooks update`; existing `DELETE /api/v1/webhooks/{id}` (`deleteWebhook`) / `delete_webhook` / `webhooks delete`. Update webhook/MCP/CLI guides now. | Hard-off for workflow event kind | Pause after URL policy removal; immutable URL and permission tests; deletion race; parity gaps removed without changing unrelated gaps. |
 | 13c. Webhook rotation and history parity | 13b | Existing `POST /api/v1/webhooks/{id}/rotate-secret` (`rotateWebhookSecret`) / `rotate_webhook_secret` / `webhooks rotate-secret`; existing `GET /api/v1/webhooks/{id}/deliveries` (`listWebhookDeliveries`) / `list_webhook_deliveries` / `webhooks deliveries`. Update webhook/MCP/CLI guides now. | Hard-off for workflow event kind | Rotation exposes secret once with no CLI logging; current authorization and secret rotation races; safe paginated metadata; full/read read scope and full-only rotation. |
-| 13d. Webhook subscription kind and migration | 6, 13c | Existing createWebhook/updateWebhook accept workflow.executed: append it to WEBHOOK_EVENTS (6 to 7 kinds; eventsOf keeps .max(WEBHOOK_EVENTS.length); no maxItems added); workflows_disabled check with event validation; new migration replaces the 0070 webhooks.events CHECK with cardinality BETWEEN 1 AND 7 over the extended set; regenerate OpenAPI and client. Update the integration tests that bind to WEBHOOK_EVENTS, `tools/n8n-nodes-hourmere/contract.test.ts` and `scripts/make-template-validation.test.ts`, to exclude workflow.executed explicitly at every binding site, including the n8n OpenAPI enum comparison; the n8n EVENTS, Make tables and Zapier app stay unchanged. Internal webhook tests that subscribe to every kind, `packages/webhooks/src/delivery.test.ts`, `packages/webhooks/src/no-show.test.ts` and `packages/webhooks/src/audit-event-details-migration.test.ts`, subscribe to the booking kinds only or use the enabled context. The same migration, numbered above 0080, recreates audit_events_details_check so its webhook branch admits the new kind. Enable webhook-action validation in workflow create/update internal tests. | Hard-off for workflow event kind | Adding the new kind returns 404 workflows_disabled while off, ahead of 409 webhooks_disabled; keeping or removing an existing subscription works; other kinds work; populated predecessor with request- and attendance-kind subscriptions preserved, fresh install, no-op rerun and DB types; an endpoint subscribed to all current kinds can add the workflow kind; the n8n and Make tests still fail for a booking kind that their integration lacks; additive OpenAPI diff; missing/inactive/cross-owner subscription rejected; the docs/workflows.md baseline and its doc test are updated to the new constant and CHECK. |
+| 13d. Webhook subscription kind and migration | 6, 13c | Existing createWebhook/updateWebhook accept workflow.executed: append it to WEBHOOK_EVENTS (6 to 7 kinds; eventsOf keeps .max(WEBHOOK_EVENTS.length); no maxItems added); workflows_disabled check with event validation; new migration replaces the 0070 webhooks.events CHECK with cardinality BETWEEN 1 AND 7 over the extended set; regenerate OpenAPI and client. Update the integration tests that bind to WEBHOOK_EVENTS, `tools/n8n-nodes-hourmere/contract.test.ts` and `scripts/make-template-validation.test.ts`, to exclude workflow.executed explicitly at every binding site, including the n8n OpenAPI enum comparison; the n8n EVENTS, Make tables and Zapier app stay unchanged. Internal webhook tests that subscribe to every kind, `packages/webhooks/src/delivery.test.ts` and `packages/webhooks/src/no-show.test.ts`, subscribe to the booking kinds only or use the enabled context. The same migration, numbered above 0080, recreates audit_events_details_check so its webhook branch admits the new kind. Enable webhook-action validation in workflow create/update internal tests. | Hard-off for workflow event kind | Adding the new kind returns 404 workflows_disabled while off, ahead of 409 webhooks_disabled; keeping or removing an existing subscription works; other kinds work; populated predecessor with request- and attendance-kind subscriptions preserved, fresh install, no-op rerun and DB types; an endpoint subscribed to all current kinds can add the workflow kind; the n8n and Make tests still fail for a booking kind that their integration lacks; additive OpenAPI diff; missing/inactive/cross-owner subscription rejected; the docs/workflows.md baseline and its doc test are updated to the new constant and CHECK. |
 | 13e. Webhook subscription interfaces and guides | 13d | Existing listWebhooks/listWebhookDeliveries responses and the create_webhook/update_webhook and webhooks create/update interfaces carry the new kind; update MCP/CLI help, webhook/MCP/CLI guides and the payload field list; extend the existing open-enum compatibility note to the workflow kind; state in the Zapier, n8n and Make guides that they do not offer it. | Hard-off for workflow event kind | MCP and CLI return the same 404 workflows_disabled for the new kind; list Webhook.events and delivery eventType documented as open enums; required bookingId remains UUID; guides name every kind and the disabled state. |
 | 14a. Webhook outbox extension | 9, 13e | None. Signed workflow delivery payload; new migration adds nullable webhook_deliveries.workflow_run_id, re-keys the 0064 NULLS NOT DISTINCT uniqueness with it, and replaces the 0070 event_type CHECK, extending it from 6 to 7 kinds without changing booking, request or attendance deliveries; move the existing ON CONFLICT target in delivery.ts to the new key. | Hard-off | Populated predecessor with booking-origin, request-origin and attendance rows preserved unchanged, fresh install and no-op rerun; the existing capture's conflict target moves to the five-column key, booking/request duplicate capture still coalesces and each attendance change still gets its own delivery; the docs/workflows.md baseline and its doc test are updated; two workflow runs targeting one endpoint retain distinct identities; duplicate capture coalesces; transactional rollback; signatures verified with fake receiver; payload contains no new booking personal fields and no requestId. |
 | 14b. Webhook delivery fences | 14a | None. Reuse guarded transport and bounded delivery repair; add workflow cancellation/disable and expiration checks. | Hard-off | DNS rebinding, redirects, forbidden/private targets and policy removal refused; endpoint pause/rotation race; first attempt expires at due+60min but timely-started delivery retries beyond that bound with same ID and receiver dedupe; no real outbound calls. |

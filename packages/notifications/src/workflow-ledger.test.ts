@@ -9,9 +9,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createDb, type Db, runMigrations } from '@hourmere/db'
+import { MIGRATION_REPLAY_TIMEOUT } from '@hourmere/db/migration-replay'
 import { createTestDatabaseTemplate, type TestDatabase } from '@hourmere/db/testing'
 import type pg from 'pg'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   invitationRecipientHash,
   notificationEmailBudget,
@@ -28,6 +29,8 @@ const SECRET = 'synthetic-workflow-ledger-secret'
 const EMAIL = 'ada@example.test'
 const HOUR = 3_600_000
 const unlimited = 1_000_000
+
+vi.setConfig({ testTimeout: MIGRATION_REPLAY_TIMEOUT })
 
 /**
  * The counts the core queries see, read through the unchanged budget functions: the smallest cap
@@ -214,5 +217,5 @@ describe.skipIf(!serverUrl)('the shared mail ledger across the workflow executio
       for (const directory of [predecessors, ...directories])
         await rm(directory, { recursive: true, force: true })
     }
-  }, 120_000)
+  })
 })

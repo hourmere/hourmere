@@ -51,24 +51,7 @@ jobs:
         run: npm run db:migrate && npm run db:types -- --verify
       - name: Generated API types match the server's OpenAPI document
         run: npm run api:types && git diff --exit-code -- apps/web/src/api/schema.d.ts
-      - name: Build with a disposable legal publication fixture
-        run: |
-          legal_source=apps/site/src/data/legal.ts
-          legal_original=$(mktemp)
-          cp "$legal_source" "$legal_original"
-          restore_legal_source() {
-            cp "$legal_original" "$legal_source"
-            rm -f "$legal_original"
-            rm -rf apps/site/dist
-          }
-          trap restore_legal_source EXIT
-          node --input-type=module <<'NODE'
-          import { readFileSync, writeFileSync } from 'node:fs'
-          const path = 'apps/site/src/data/legal.ts'
-          const source = readFileSync(path, 'utf8')
-          writeFileSync(path, source.replace("'SET_ON_PUBLICATION_DAY'", "'2000-01-01'"))
-          NODE
-          npm run build
+      - run: npm run build
       - name: Inspect and smoke test the standalone npm CLI tarball
         run: npm run cli:pack-smoke
       - name: Validate the draft MCP Registry metadata against the official schema
@@ -256,6 +239,13 @@ jobs:
   e2e-shard:
     runs-on: ubuntu-latest
     timeout-minutes: 12
+    outputs:
+      shard_1: ${{ steps.browser.outputs.shard_1 }}
+      shard_2: ${{ steps.browser.outputs.shard_2 }}
+      shard_3: ${{ steps.browser.outputs.shard_3 }}
+      shard_4: ${{ steps.browser.outputs.shard_4 }}
+      shard_5: ${{ steps.browser.outputs.shard_5 }}
+      shard_6: ${{ steps.browser.outputs.shard_6 }}
     strategy:
       fail-fast: false
       matrix:
@@ -284,23 +274,11 @@ jobs:
         run: google-chrome --version
       - run: npm ci --ignore-scripts --audit=false --fund=false
       - run: npm run build --workspace @hourmere/web
-      - name: Build a disposable site fixture and run browser regressions
+      - name: Build the static site and run browser regressions
+        id: browser
+        env:
+          HOURMERE_E2E_SHARD: ${{ matrix.shard }}
         run: |
-          legal_source=apps/site/src/data/legal.ts
-          legal_original=$(mktemp)
-          cp "$legal_source" "$legal_original"
-          restore_legal_source() {
-            cp "$legal_original" "$legal_source"
-            rm -f "$legal_original"
-            rm -rf apps/site/dist
-          }
-          trap restore_legal_source EXIT
-          node --input-type=module <<'NODE'
-          import { readFileSync, writeFileSync } from 'node:fs'
-          const path = 'apps/site/src/data/legal.ts'
-          const source = readFileSync(path, 'utf8')
-          writeFileSync(path, source.replace("'SET_ON_PUBLICATION_DAY'", "'2000-01-01'"))
-          NODE
           npm run build --workspace @hourmere/site
           npm run test --workspace @hourmere/e2e -- --shard=${{ matrix.shard }}/6
       - run: npm run test:e2e:privacy
@@ -314,6 +292,32 @@ jobs:
     timeout-minutes: 2
     env:
       SHARD_RESULT: ${{ needs.e2e-shard.result }}
+      SHARD_COUNTS: ${{ toJSON(needs.e2e-shard.outputs) }}
+      SHARD_COUNT: "6"
     steps:
-      - name: Require every browser shard to succeed
-        run: test "$SHARD_RESULT" = success
+      - name: Require successful and complete browser shards
+        run: |
+          test "$SHARD_RESULT" = success
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+
+          const counts = JSON.parse(process.env.SHARD_COUNTS);
+          const shardCount = Number(process.env.SHARD_COUNT);
+          assert.ok(Number.isSafeInteger(shardCount) && shardCount > 1, 'Invalid browser shard count');
+          let total;
+          let selected = 0;
+          for (let shard = 1; shard <= shardCount; shard++) {
+            const match = /^([1-9]\d*):([1-9]\d*)$/.exec(counts[`shard_${shard}`]);
+            assert.ok(match, `Missing or invalid test count for shard ${shard}`);
+            const [, shardSelected, shardTotal] = match.map(Number);
+            total ??= shardTotal;
+            assert.equal(shardTotal, total, `Shard ${shard} discovered a different full suite size`);
+            const expected = total / shardCount;
+            const tolerance = Math.max(2, Math.ceil(expected / 10));
+            assert.ok(Math.abs(shardSelected - expected) <= tolerance,
+              `Shard ${shard} selected ${shardSelected}/${total} tests, expected about ${expected.toFixed(1)}`);
+            selected += shardSelected;
+          }
+          assert.equal(selected, total, 'The shard counts must add up to the full suite size');
+          console.log(`Selected ${selected} tests across ${shardCount} shards`);
+          NODE

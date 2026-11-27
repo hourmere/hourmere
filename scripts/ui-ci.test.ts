@@ -26,6 +26,7 @@ interface Job {
   if?: string
   'continue-on-error'?: boolean
   env?: Record<string, string>
+  outputs?: Record<string, string>
   services?: { postgres: { options: string } }
   strategy?: { 'fail-fast'?: boolean; matrix?: { shard?: number[] } }
   steps: Step[]
@@ -81,7 +82,9 @@ function selectedSpecs(
 // Include indented declarations inside describe blocks. Modified declarations (skip,
 // only, fixme) deliberately do not satisfy the required smoke-path names.
 function testNames(source: string) {
-  return [...source.matchAll(/^\s*test\(\s*(['"`])([^'"`]+)\1/gm)].map((match) => match[2])
+  return [...source.matchAll(/^\s*test\(\s*(['"`])((?:\\.|(?!\1)[^\\])*)\1/gm)].map(
+    (match) => match[2],
+  )
 }
 
 function declaredTests(file: string) {
@@ -131,11 +134,13 @@ describe('UI measurement CI contract', () => {
     }
   })
 
-  it('runs UI measurements only for pull requests, main pushes and manual baseline review', () => {
+  it('accepts PR label events and updates, main pushes and manual dispatches', () => {
     expect(Object.keys(workflow.on).sort()).toEqual(['pull_request', 'push', 'workflow_dispatch'])
     expect(workflow.on.push).toEqual({ branches: ['main'] })
-    // Pull requests run the UI checks by default; only listed paths can skip them.
-    expect(workflow.on.pull_request).toEqual({ paths: uiPullRequestPaths })
+    expect(workflow.on.pull_request).toEqual({
+      types: ['opened', 'synchronize', 'reopened', 'labeled'],
+      paths: uiPullRequestPaths,
+    })
     expect(workflow.on.workflow_dispatch).toEqual({
       inputs: {
         visual_baselines: {
@@ -152,18 +157,37 @@ describe('UI measurement CI contract', () => {
       group: 'ui-checks-${{ github.ref }}',
       'cancel-in-progress': true,
     })
-    expect(Object.keys(workflow.jobs).sort()).toEqual([
-      'e2e-a11y',
-      'e2e-cross-engine',
-      'e2e-layout',
-      'e2e-visual',
-      'visual-baseline-status',
-      'visual-baselines',
-    ])
     expect(workflow.jobs['e2e-layout']?.strategy).toEqual({
       'fail-fast': false,
       matrix: { shard: [1, 2, 3, 4, 5, 6, 7, 8] },
     })
+  })
+
+  it('skips every job on unlabeled PRs while allowing labeled PRs and main pushes', () => {
+    const gate =
+      "github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ui-checks')"
+    expect(
+      Object.fromEntries(Object.entries(workflow.jobs).map(([id, job]) => [id, job.if])),
+    ).toEqual({
+      'e2e-layout': gate,
+      'e2e-a11y-shard': gate,
+      'e2e-a11y': `always() && (${gate})`,
+      'e2e-cross-engine': gate,
+      'visual-baseline-status': gate,
+      'e2e-visual': `(${gate}) && needs.visual-baseline-status.outputs.present == 'true'`,
+      'visual-baselines': "github.event_name == 'workflow_dispatch' && inputs.visual_baselines",
+    })
+  })
+
+  it('keeps the axe time limit and makes e2e-a11y depend on every shard', () => {
+    const shard = workflow.jobs['e2e-a11y-shard']
+    expect(shard?.['timeout-minutes']).toBe(35)
+    expect(shard?.strategy).toEqual({ 'fail-fast': false, matrix: { shard: [1, 2, 3, 4] } })
+    const aggregate = workflow.jobs['e2e-a11y']
+    expect(aggregate?.needs).toBe('e2e-a11y-shard')
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub Actions expression is literal.
+    expect(aggregate?.env?.SHARD_RESULT).toBe('${{ needs.e2e-a11y-shard.result }}')
+    expect(aggregate?.steps[0]?.run).toBe('test "$SHARD_RESULT" = success')
   })
 
   it('isolates UI jobs from reusable CI and releases', () => {
@@ -187,20 +211,26 @@ describe('UI measurement CI contract', () => {
     }
   })
 
+  it('builds committed sources in CI without substituting a legal publication date', () => {
+    expect(requiredWorkflow.jobs['check-static']?.steps).toContainEqual({ run: 'npm run build' })
+    expect(requiredSource).not.toContain('apps/site/src/data/legal.ts')
+    expect(requiredSource).not.toContain('SET_ON_PUBLICATION_DAY')
+  })
+
   // Canonical required job definitions after merging main. Changes need owner review.
   it.each([
     // The stable required job only aggregates check-static and check-tests and fails unless
     // both succeeded (a failed, cancelled or skipped part fails it).
     ['check', 'd18968eb8cf24725d3c282e48bf92a300db6dd99208ef74bd8bcdde56f063b1e'],
     // Lint, types, generated types, the build, the CLI tarball and MCP metadata.
-    ['check-static', '3bce9a980ab6c404fbf4ccc83607a7da40b8feb11e75b4918e8fe9c2057d5a0c'],
+    ['check-static', '265e5b65813f903f1e7a6c55cf0ee7d24d59ea26d4d0b042dd86cd7467ee24d5'],
     // The suite in seven shards. Also runs the isolated Caddy upgrade integration; PostgreSQL
     // limits stay unchanged. The deployment-test shell comes from the Actions cache when present.
     ['check-tests', '8b59583e0e92eb77d66a08cffe92d8fa0707033f2f7a390f4a63017876c68de8'],
     ['cli-compatibility', 'e6baff5e1cbf2e5b3339c961747ed5be373cc5d0b7874200d54b903f13a3e194'],
     // Shards preserve the fixture and privacy gates; the stable required job aggregates them.
-    ['e2e', '64426cc5d9fc305079bc1aa63370b1a9a6926173a169e82ee18053e7c2ef3618'],
-    ['e2e-shard', '5ec12675b7971bde3283f69176bcd88a818be470c7b3ca34b5811b44ad42def6'],
+    ['e2e', 'cb4f31c9aa29924d293ef531c8014df4987124efc79c905b186ca73c72298709'],
+    ['e2e-shard', 'a6b1fdd39bd8206fdb6678738a3f627bb524ac6e375a829d2ab97f8f80935033'],
     ['docker', '2594f351267b97c37981b7889ae22495076c653543f5cd8ee11825ac4ed63d9a'],
   ])('preserves required job %s and its behavior', (id, digest) => {
     expect(requiredWorkflow.jobs[id ?? '']).toBeDefined()
@@ -215,15 +245,17 @@ describe('UI measurement CI contract', () => {
     expect(workflow.jobs[id]?.services?.postgres.options ?? '').not.toContain('max_connections')
   })
 
-  it.each(['e2e-layout', 'e2e-a11y', 'e2e-cross-engine'])(
+  it.each([
+    ['e2e-layout', 'layout', 8],
+    ['e2e-a11y-shard', 'a11y', 4],
+    ['e2e-cross-engine', 'cross-engine', undefined],
+  ] as const)(
     'makes %s fail on the terminal gate while preserving reports on failure',
-    (id) => {
+    (id, suite, shardCount) => {
       const job = workflow.jobs[id]
       expect(job?.['continue-on-error']).toBeUndefined()
-      const suite = id.slice('e2e-'.length)
       const summary = job?.steps.find((step) => step.name === 'Summarize measurements')
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub Actions expression is literal.
-      const shard = suite === 'layout' ? ' --shard=${{ matrix.shard }}/8' : ''
+      const shard = shardCount ? ` --shard=\${{ matrix.shard }}/${shardCount}` : ''
       expect(summary?.run).toBe(`node tools/e2e/reports-summary.ts --suite=${suite}${shard}`)
       expect(summary?.if).toBe('always()')
       const browser = job?.steps.find((step) => step.run?.includes('node tools/e2e/run-audit.ts'))
@@ -248,7 +280,7 @@ describe('UI measurement CI contract', () => {
     },
   )
 
-  it.each(['e2e-layout', 'e2e-a11y', 'e2e-cross-engine', 'e2e-visual'])(
+  it.each(['e2e-layout', 'e2e-a11y-shard', 'e2e-cross-engine', 'e2e-visual'])(
     'publishes only sanitized reports after %s even on failures',
     (id) => {
       const steps = workflow.jobs[id]?.steps ?? []
@@ -261,15 +293,9 @@ describe('UI measurement CI contract', () => {
     },
   )
 
-  it('skips visual comparison until reviewed baselines exist; generation is dispatch-only', () => {
+  it('uses the baseline status for comparison and uploads masked baselines for review', () => {
     expect(workflow.jobs['e2e-visual']?.needs).toBe('visual-baseline-status')
-    expect(workflow.jobs['e2e-visual']?.if).toBe(
-      "needs.visual-baseline-status.outputs.present == 'true'",
-    )
     const generation = workflow.jobs['visual-baselines']
-    expect(generation?.if).toBe(
-      "github.event_name == 'workflow_dispatch' && inputs.visual_baselines",
-    )
     expect(generation?.steps.some((step) => step.run?.includes('--update-snapshots'))).toBe(true)
     expect(generation?.steps.some((step) => step.run === 'npm run test:e2e:privacy')).toBe(true)
     expect(
@@ -352,12 +378,20 @@ describe('report-only browser command', () => {
       testNames(`
       test.describe('nested', () => {
         test('nested path', async () => {})
-        test("double-quoted path", async () => {})
+        test("host's path", async () => {})
+        test('choose "Phone"', async () => {})
+        test(\`host's "Phone"\`, async () => {})
         test.skip('skipped path', async () => {})
         test.only('focused path', async () => {})
       })
     `),
-    ).toEqual(['nested path', 'double-quoted path'])
+    ).toEqual(['nested path', "host's path", 'choose "Phone"', `host's "Phone"`])
+  })
+
+  it('keeps escaped matching quotes inside a smoke name', () => {
+    expect(testNames(String.raw`test('host\'s path', async () => {})`)).toEqual([
+      String.raw`host\'s path`,
+    ])
   })
 
   it('resolves native WebKit and Firefox projects without inheriting the Chrome channel', async () => {
@@ -468,15 +502,23 @@ describe('required browser shards', () => {
     expect(job?.['continue-on-error']).toBeUndefined()
     expect(job?.['timeout-minutes']).toBe(12)
     expect(job?.strategy).toEqual({ 'fail-fast': false, matrix: { shard: [1, 2, 3, 4, 5, 6] } })
+    expect(functionalConfig.fullyParallel).toBe(true)
     expect(job?.services?.postgres.options).not.toContain('max_connections')
-    const browser = job?.steps.find(
-      (step) => step.name === 'Build a disposable site fixture and run browser regressions',
-    )
+    const browser = job?.steps.find((step) => step.id === 'browser')
     expect(browser?.if).toBeUndefined()
     expect(browser?.['continue-on-error']).toBeUndefined()
-    expect(browser?.run).toContain('npm run build --workspace @hourmere/site')
-    expect(browser?.run).toContain('trap restore_legal_source EXIT')
-    expect(browser?.run?.split('\n').filter((line) => line.includes('npm run test'))).toEqual([
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub Actions expression is literal.
+    expect(browser?.env?.HOURMERE_E2E_SHARD).toBe('${{ matrix.shard }}')
+    expect(job?.outputs).toEqual(
+      Object.fromEntries(
+        [1, 2, 3, 4, 5, 6].map((shard) => [
+          `shard_${shard}`,
+          `\${{ steps.browser.outputs.shard_${shard} }}`,
+        ]),
+      ),
+    )
+    expect(browser?.run?.trimEnd().split('\n')).toEqual([
+      'npm run build --workspace @hourmere/site',
       // biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub Actions expression is literal.
       'npm run test --workspace @hourmere/e2e -- --shard=${{ matrix.shard }}/6',
     ])
@@ -499,22 +541,64 @@ describe('required browser shards', () => {
     expect({ ...job?.env, ...job?.steps[0]?.env }).toEqual({
       // biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub Actions expression is literal.
       SHARD_RESULT: '${{ needs.e2e-shard.result }}',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub Actions expression is literal.
+      SHARD_COUNTS: '${{ toJSON(needs.e2e-shard.outputs) }}',
+      SHARD_COUNT: String(requiredWorkflow.jobs['e2e-shard']?.strategy?.matrix?.shard?.length),
     })
   })
 
+  const balancedCounts = {
+    shard_1: '101:600',
+    shard_2: '99:600',
+    shard_3: '100:600',
+    shard_4: '100:600',
+    shard_5: '100:600',
+    shard_6: '100:600',
+  }
+
+  function runShardSummary(result: string, counts: Record<string, string>) {
+    const script = requiredWorkflow.jobs.e2e?.steps[0]?.run
+    expect(script).toBeTypeOf('string')
+    const execution = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', script ?? 'exit 99'], {
+      encoding: 'utf8',
+      env: {
+        PATH: process.env.PATH,
+        SHARD_RESULT: result,
+        SHARD_COUNTS: JSON.stringify(counts),
+        SHARD_COUNT: requiredWorkflow.jobs.e2e?.env?.SHARD_COUNT,
+      },
+    })
+    expect(execution.error).toBeUndefined()
+    return execution
+  }
+
   it.each(['success', 'failure', 'cancelled', 'skipped', ''])(
-    'accepts the aggregated shard result only when successful (%s)',
+    'accepts balanced shard counts only when the jobs succeeded (%s)',
     (result) => {
-      const script = requiredWorkflow.jobs.e2e?.steps[0]?.run
-      expect(script).toBeTypeOf('string')
-      const execution = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', script ?? 'exit 99'], {
-        encoding: 'utf8',
-        env: { PATH: process.env.PATH, SHARD_RESULT: result },
-      })
-      expect(execution.error).toBeUndefined()
+      const execution = runShardSummary(result, balancedCounts)
       expect(execution.status, execution.stderr).toBe(result === 'success' ? 0 : 1)
     },
   )
+
+  it.each([
+    ['unsharded execution', { shard_3: '600:600' }, 'Shard 3 selected 600/600 tests'],
+    [
+      'uneven coverage',
+      { shard_1: '140:600', shard_2: '60:600' },
+      'Shard 1 selected 140/600 tests',
+    ],
+    ['missing output', { shard_3: '' }, 'Missing or invalid test count for shard 3'],
+    [
+      'inconsistent total',
+      { shard_3: '100:601' },
+      'Shard 3 discovered a different full suite size',
+    ],
+    ['incomplete coverage', { shard_3: '99:600' }, 'must add up to the full suite size'],
+  ] as const)('rejects %s even when every job succeeded', (_name, counts, diagnostic) => {
+    const execution = runShardSummary('success', { ...balancedCounts, ...counts })
+    expect(execution.status, execution.stderr).toBe(1)
+    expect(execution.stderr).toContain(diagnostic)
+  })
 
   it('uses the same unfiltered Playwright command locally and in CI, adding only sharding', () => {
     const rootPackage = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
@@ -547,7 +631,7 @@ describe('required browser shards', () => {
   })
 })
 
-/** The reviewed pull-request filter: run by default, skip only these, re-include the workflow. */
+/** Paths eligible for labeled PR audits, including the audit workflow itself. */
 const uiPullRequestPaths = [
   '**',
   '!docs/**',
@@ -593,8 +677,8 @@ function filterGlob(pattern: string): RegExp {
   return new RegExp(`^${source}$`)
 }
 
-/** Whether a pull request changing `files` triggers the workflow: the last matching pattern wins. */
-function triggers(paths: string[], files: string[]): boolean {
+/** Whether any changed file passes the path filter, with the last matching pattern winning. */
+function matchesPaths(paths: string[], files: string[]): boolean {
   return files.some((file) => {
     let included = false
     for (const pattern of paths) {
@@ -632,9 +716,9 @@ describe('UI checks pull-request filter', () => {
     'tsconfig.base.json',
     'packages/new-package/src/index.ts',
     'new-directory/file.ts',
-  ])('runs for a pull request that changes %s', (file) => {
-    expect(triggers(paths, [file])).toBe(true)
-    expect(triggers(paths, ['docs/sso.md', file])).toBe(true)
+  ])('includes a pull request that changes %s', (file) => {
+    expect(matchesPaths(paths, [file])).toBe(true)
+    expect(matchesPaths(paths, ['docs/sso.md', file])).toBe(true)
   })
 
   it.each([
@@ -658,15 +742,15 @@ describe('UI checks pull-request filter', () => {
     'Caddyfile',
     'server.json',
     'vitest.config.ts',
-  ])('skips a pull request that changes only %s', (file) => {
-    expect(triggers(paths, [file])).toBe(false)
+  ])('excludes a pull request that changes only %s', (file) => {
+    expect(matchesPaths(paths, [file])).toBe(false)
   })
 
   it('skips nothing that the audited server, web app or fixtures import', () => {
     const imported = readFileSync(join(root, 'tools/e2e/fixture-server.ts'), 'utf8')
     expect(imported).toContain('apps/server')
     for (const file of ['apps/server/src/server.ts', 'apps/server/src/app.ts']) {
-      expect(triggers(paths, [file]), file).toBe(true)
+      expect(matchesPaths(paths, [file]), file).toBe(true)
     }
   })
 })

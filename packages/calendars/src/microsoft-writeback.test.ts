@@ -5,7 +5,9 @@ import {
   cancelManagedBooking,
   createPublicBooking,
   createPublicTeamBooking,
+  getHostBooking,
   getManagedBooking,
+  getPublicEventType,
   type PublicContext,
   rescheduleManagedBooking,
 } from '@hourmere/scheduling'
@@ -26,6 +28,7 @@ import { createMicrosoftCalendarClient } from './microsoft.ts'
 import {
   type CalendarWritePayload,
   readMicrosoftWritebackSummary,
+  recordMicrosoftBookingDestinations,
   writeMicrosoftCalendar,
 } from './microsoft-writeback.ts'
 import { TEST_CALENDAR_KEY } from './testing.ts'
@@ -263,7 +266,6 @@ describe.skipIf(!process.env.DATABASE_URL)(
     let connectionId: string
     let selected: string
     let eventTypeId: string
-    let microsoftTeamsForTest: CalendarDeps['microsoftTeamsForTest']
     let queued: CalendarWritePayload[]
 
     beforeAll(async () => {
@@ -324,7 +326,6 @@ describe.skipIf(!process.env.DATABASE_URL)(
       await f.schedule(host.userId, { timeZone: 'UTC' })
       now = NOW.epochMilliseconds
       queued = []
-      microsoftTeamsForTest = undefined
       provider = graph(() => now)
       deps = {
         db,
@@ -351,11 +352,12 @@ describe.skipIf(!process.env.DATABASE_URL)(
             return null
           },
         },
-        { google: false, now: () => now, microsoftTeamsForTest },
+        { google: false, now: () => now },
       )
       return {
         db,
         now: () => Temporal.Instant.fromEpochMilliseconds(now),
+        microsoftCalendarEnabled: true,
         notify: async (trx, event) => {
           if (!('requestId' in event)) await notify(trx, event)
         },
@@ -374,6 +376,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
 
     async function book(person = invitee, idempotencyKey?: string) {
       return (await create(person, idempotencyKey)).booking.id
+    }
+
+    function chooseTeams() {
+      return db
+        .updateTable('event_types')
+        .set({ location: JSON.stringify({ kind: 'microsoft_teams' }) })
+        .where('id', '=', eventTypeId)
+        .execute()
     }
 
     function setGroupType() {
@@ -483,7 +493,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
     it.each([false, true])(
       'updates the pinned copy across DST and deletes it on cancellation (Teams: %s)',
       async (teams) => {
-        if (teams) microsoftTeamsForTest = (id) => id === eventTypeId
+        if (teams) await chooseTeams()
         // The same Los Angeles wall time becomes an hour earlier in UTC after the DST change.
         await db
           .updateTable('schedules')
@@ -494,7 +504,6 @@ describe.skipIf(!process.env.DATABASE_URL)(
         const afterDst = beforeDst.add({ days: 3 })
         const created = await create(invitee, undefined, beforeDst.toInstant())
         const bookingId = created.booking.id
-        microsoftTeamsForTest = undefined
         await work({ bookingId })
         expect(provider.posts()[0]?.body).toMatchObject({
           start: { dateTime: '2030-03-08T17:00:00.000', timeZone: 'UTC' },
@@ -512,7 +521,20 @@ describe.skipIf(!process.env.DATABASE_URL)(
           expect(JSON.stringify(body)).not.toContain(invitee.email)
           expect(await state(bookingId)).toMatchObject({ teamsStatus: 'ready', teamsJoinUrl })
           const managed = await getManagedBooking(context(), requireToken(created.manageToken))
-          expect(JSON.stringify(managed)).not.toContain(teamsJoinUrl)
+          expect(managed.location).toEqual({
+            kind: 'microsoft_teams',
+            status: 'ready',
+            url: teamsJoinUrl,
+          })
+          expect(
+            (await getHostBooking({ ...context(), principal: await hostSession() }, bookingId))
+              .location,
+          ).toEqual(managed.location)
+          expect(
+            JSON.stringify(
+              await getPublicEventType(context(), { handle: host.handle, slug: 'outlook-booking' }),
+            ),
+          ).not.toContain(teamsJoinUrl)
           expect(
             JSON.stringify([...(await readMicrosoftWritebackSummary(db, [selected], now))]),
           ).not.toContain(teamsJoinUrl)
@@ -562,8 +584,15 @@ describe.skipIf(!process.env.DATABASE_URL)(
           { calendar_id: selected, external_event_id: eventId, etag: updatedEtag },
         ])
         expect(await busy()).toEqual([{ start: new Date(afterDst.epochMilliseconds) }])
-        if (teams)
+        if (teams) {
           expect(await state(bookingId)).toMatchObject({ teamsStatus: 'ready', teamsJoinUrl })
+          expect(
+            (await getManagedBooking(context(), requireToken(moved.manageToken))).location,
+          ).toEqual({ kind: 'microsoft_teams', status: 'ready', url: teamsJoinUrl })
+          expect(
+            (await getManagedBooking(context(), requireToken(created.manageToken))).location,
+          ).toEqual({ kind: 'microsoft_teams' })
+        }
         expect(
           await db
             .selectFrom('calendar_microsoft_changes')
@@ -596,6 +625,11 @@ describe.skipIf(!process.env.DATABASE_URL)(
         const cancelled = await state(bookingId)
         expect(cancelled).toMatchObject({ status: 'succeeded' })
         expect(cancelled).not.toHaveProperty('teamsJoinUrl')
+        if (teams) {
+          expect(
+            (await getManagedBooking(context(), requireToken(moved.manageToken))).location,
+          ).toEqual({ kind: 'microsoft_teams' })
+        }
       },
     )
 
@@ -635,34 +669,41 @@ describe.skipIf(!process.env.DATABASE_URL)(
       },
     )
 
-    it('reconciles at most three Teams write rounds before yielding to the queued revision', async () => {
-      microsoftTeamsForTest = (id) => id === eventTypeId
-      const created = await create()
-      const bookingId = created.booking.id
-      provider.controls.afterCreate = async () => {
-        const moved = await rescheduleManagedBooking(context(), requireToken(created.manageToken), {
-          start: NEXT,
-        })
-        provider.controls.afterPatch = async () => {
-          await cancelManagedBooking(context(), requireToken(moved.manageToken))
+    it.each([false, true])(
+      'reconciles at most two writes before yielding to the queued revision (Teams: %s)',
+      async (teams) => {
+        if (teams) await chooseTeams()
+        const created = await create()
+        const bookingId = created.booking.id
+        provider.controls.afterCreate = async () => {
+          const moved = await rescheduleManagedBooking(
+            context(),
+            requireToken(created.manageToken),
+            {
+              start: NEXT,
+            },
+          )
+          provider.controls.afterPatch = async () => {
+            await cancelManagedBooking(context(), requireToken(moved.manageToken))
+            return undefined
+          }
           return undefined
         }
-        return undefined
-      }
 
-      await work({ bookingId })
+        await work({ bookingId })
 
-      expect(provider.capabilityReads).toEqual(['outlook-selected'])
-      expect(provider.posts()).toHaveLength(1)
-      expect(patches()).toHaveLength(1)
-      expect(deletes()).toHaveLength(0)
-      expect(await state(bookingId)).toMatchObject({ status: 'pending' })
-      expect(queued).toEqual([{ bookingId }, { bookingId }, { bookingId }])
+        expect(provider.capabilityReads).toEqual(teams ? ['outlook-selected'] : [])
+        expect(provider.posts()).toHaveLength(1)
+        expect(patches()).toHaveLength(1)
+        expect(deletes()).toHaveLength(0)
+        expect(await state(bookingId)).toMatchObject({ status: 'pending' })
+        expect(queued).toEqual([{ bookingId }, { bookingId }, { bookingId }])
 
-      await work({ bookingId })
-      expect(deletes()).toHaveLength(1)
-      expect(await state(bookingId)).toMatchObject({ status: 'succeeded' })
-    })
+        await work({ bookingId })
+        expect(deletes()).toHaveLength(1)
+        expect(await state(bookingId)).toMatchObject({ status: 'succeeded' })
+      },
+    )
 
     it.each([
       { teams: false, lostResponse: false },
@@ -672,7 +713,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
     ])(
       'moves a copy rescheduled before the in-flight create finishes (Teams: $teams, lost response: $lostResponse)',
       async ({ teams, lostResponse }) => {
-        if (teams) microsoftTeamsForTest = (id) => id === eventTypeId
+        if (teams) await chooseTeams()
         const created = await create()
         const bookingId = created.booking.id
         const sent = Promise.withResolvers<void>()
@@ -958,7 +999,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
     it.each([false, true])(
       'keeps the POST payload stable through ambiguous create replay and successive moves (Teams: %s)',
       async (teams) => {
-        if (teams) microsoftTeamsForTest = (id) => id === eventTypeId
+        if (teams) await chooseTeams()
         const created = await create()
         const bookingId = created.booking.id
         provider.controls.beforeCreate = () => graphError(503, 'ServiceUnavailable')
@@ -1202,7 +1243,6 @@ describe.skipIf(!process.env.DATABASE_URL)(
     })
 
     it('ignores even a persisted destination owned by someone outside the booking', async () => {
-      microsoftTeamsForTest = (id) => id === eventTypeId
       const other = await f.host()
       const foreign = await calendar(await connect(other.userId), 'foreign-calendar')
       await select(foreign)
@@ -1215,7 +1255,6 @@ describe.skipIf(!process.env.DATABASE_URL)(
     })
 
     it('updates one private group copy until the last seat is cancelled', async () => {
-      microsoftTeamsForTest = (id) => id === eventTypeId
       await setGroupType()
       const first = await create()
       const groupSlotId = await slotFor(first.booking.id)
@@ -1268,6 +1307,90 @@ describe.skipIf(!process.env.DATABASE_URL)(
           .execute(),
       ).toEqual([])
       expect(provider.posts()).toHaveLength(1)
+    })
+
+    it('keeps a single group Teams meeting without rewriting its Outlook body', async () => {
+      await setGroupType()
+      await chooseTeams()
+      const first = await create()
+      const groupSlotId = await slotFor(first.booking.id)
+      await work({ groupSlotId })
+      const second = await create({ ...invitee, email: 'second@example.test' })
+      await work({ groupSlotId })
+
+      const ready = { kind: 'microsoft_teams', status: 'ready', url: teamsJoinUrl }
+      expect(second.booking.location).toEqual(ready)
+      expect(
+        (await getManagedBooking(context(), requireToken(first.manageToken))).location,
+      ).toEqual(ready)
+      expect(provider.posts()).toHaveLength(1)
+      expect(provider.posts()[0]?.body).toMatchObject({ isOnlineMeeting: true })
+      expect(provider.posts()[0]?.body).not.toHaveProperty('body')
+      expect(patches()).toHaveLength(0)
+
+      await cancelManagedBooking(context(), requireToken(first.manageToken))
+      await work({ groupSlotId })
+      expect(deletes()).toHaveLength(0)
+      expect(
+        (await getManagedBooking(context(), requireToken(second.manageToken))).location,
+      ).toEqual(ready)
+      await cancelManagedBooking(context(), requireToken(second.manageToken))
+      await work({ groupSlotId })
+      expect(deletes()).toHaveLength(1)
+      const slot = await db
+        .selectFrom('group_slots')
+        .select('microsoft_writeback')
+        .where('id', '=', groupSlotId)
+        .executeTakeFirstOrThrow()
+      expect(slot.microsoft_writeback).toMatchObject({ status: 'succeeded' })
+      expect(slot.microsoft_writeback).not.toHaveProperty('teamsJoinUrl')
+    })
+
+    it('keeps the Teams URL behind host and invitee authorization', async () => {
+      await chooseTeams()
+      const key = 'teams-confirmation-replay'
+      const created = await create(invitee, key)
+      const bookingId = created.booking.id
+      expect(created.booking.location).toEqual({
+        kind: 'microsoft_teams',
+        status: 'join_url_pending',
+      })
+      await work({ bookingId })
+      expect((await create(invitee, key)).booking.location).toEqual({ kind: 'microsoft_teams' })
+
+      const another = await create({ ...invitee, email: 'other@example.test' }, undefined, NEXT)
+      expect(
+        JSON.stringify(await getManagedBooking(context(), requireToken(another.manageToken))),
+      ).not.toContain(teamsJoinUrl)
+      const principal = await hostSession()
+      const other = await f.host()
+      await expect(
+        getHostBooking(
+          {
+            ...context(),
+            principal: {
+              ...principal,
+              organization: { ...principal.organization, id: other.organizationId },
+            },
+          },
+          bookingId,
+        ),
+      ).rejects.toMatchObject({ code: 'booking_not_found' })
+      await expect(
+        getHostBooking(
+          {
+            ...context(),
+            principal: {
+              ...principal,
+              user: { ...principal.user, id: other.userId },
+            },
+          },
+          bookingId,
+        ),
+      ).rejects.toMatchObject({ code: 'booking_not_found' })
+      expect(
+        (await getManagedBooking(context(), requireToken(created.manageToken))).location,
+      ).toEqual({ kind: 'microsoft_teams', status: 'ready', url: teamsJoinUrl })
     })
 
     it('preserves an Outlook edit to a group copy’s seat count', async () => {
@@ -1384,7 +1507,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
     it.each([false, true])(
       'defers a throttled POST until Retry-After and uses the same transactionId (Teams: %s)',
       async (teams) => {
-        if (teams) microsoftTeamsForTest = (id) => id === eventTypeId
+        if (teams) await chooseTeams()
         const bookingId = await book()
         provider.controls.beforeCreate = () =>
           graphError(429, 'TooManyRequests', { 'Retry-After': '120' })
@@ -1422,7 +1545,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       // https://learn.microsoft.com/en-us/graph/api/resources/calendar?view=graph-rest-1.0#properties
       { mailbox: 'personal Outlook', allowed: ['skypeForConsumer'] },
     ])('keeps the booking and tracks Teams unavailability for $mailbox', async ({ allowed }) => {
-      microsoftTeamsForTest = (id) => id === eventTypeId
+      await chooseTeams()
       provider.controls.allowedOnlineMeetingProviders = allowed
       const created = await create()
       const bookingId = created.booking.id
@@ -1439,6 +1562,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
       })
       expect(await state(bookingId)).not.toHaveProperty('teamsJoinUrl')
       expect(await mappings(bookingId)).toMatchObject([{ external_event_id: eventId }])
+      expect(
+        (await getManagedBooking(context(), requireToken(created.manageToken))).location,
+      ).toEqual({ kind: 'microsoft_teams', status: 'teams_unavailable' })
 
       const moved = await rescheduleManagedBooking(context(), requireToken(created.manageToken), {
         start: NEXT,
@@ -1449,7 +1575,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       expect(provider.capabilityReads).toEqual(['outlook-selected'])
       await cancelManagedBooking(context(), requireToken(moved.manageToken))
       await work({ bookingId })
-      expect(await state(bookingId)).not.toHaveProperty('teamsStatus')
+      expect(await state(bookingId)).toMatchObject({ teamsStatus: 'teams_unavailable' })
       expect(provider.events.size).toBe(0)
     })
 
@@ -1475,7 +1601,6 @@ describe.skipIf(!process.env.DATABASE_URL)(
         .set({ scheduling_type: 'collective' })
         .where('id', '=', collective)
         .execute()
-      microsoftTeamsForTest = (id) => id === collective
 
       const created = await createPublicTeamBooking(context(), {
         handle: teamHandle,
@@ -1484,6 +1609,17 @@ describe.skipIf(!process.env.DATABASE_URL)(
         invitee,
       })
       const bookingId = created.booking.id
+      // Exercise the worker's host-count check even if an invalid booking bypassed configuration.
+      await db
+        .deleteFrom('booking_calendar_targets')
+        .where('root_booking_id', '=', bookingId)
+        .execute()
+      await db
+        .updateTable('bookings')
+        .set({ location: JSON.stringify({ kind: 'microsoft_teams' }) })
+        .where('id', '=', bookingId)
+        .execute()
+      await recordMicrosoftBookingDestinations(db, bookingId, now)
       await work({ bookingId })
 
       const targets = await db
@@ -1507,7 +1643,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
     })
 
     it('retries a confirmed Teams event without a join URL and can recover the same event', async () => {
-      microsoftTeamsForTest = (id) => id === eventTypeId
+      await chooseTeams()
       provider.controls.omitTeamsJoinUrl = true
       const bookingId = await book()
 
@@ -1553,7 +1689,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
     })
 
     it('does not mark a possible create before the Teams capability check finishes', async () => {
-      microsoftTeamsForTest = (id) => id === eventTypeId
+      await chooseTeams()
       const created = await create()
       const bookingId = created.booking.id
       const probing = Promise.withResolvers<void>()
@@ -1577,7 +1713,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
     })
 
     it('records a Graph 403 during Teams capability discovery as a permission failure', async () => {
-      microsoftTeamsForTest = (id) => id === eventTypeId
+      await chooseTeams()
       provider.controls.beforeCapabilities = () => graphError(403, 'ErrorAccessDenied')
       const bookingId = await book()
       await work({ bookingId })
@@ -1683,7 +1819,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
     })
 
     it('replays an ambiguous Teams create through the booking marker and records the join URL', async () => {
-      microsoftTeamsForTest = (id) => id === eventTypeId
+      await chooseTeams()
       const bookingId = await book()
       provider.controls.afterCreate = async () => graphError(503, 'ServiceUnavailable')
       await work({ bookingId })

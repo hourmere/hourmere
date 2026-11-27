@@ -204,7 +204,7 @@ not grant host rescheduling or reschedule-request authority through REST, MCP or
 ## Known limitations
 
 - [Microsoft Calendar](/docs/microsoft-calendar#known-limitations) supports Outlook booking
-  writeback. Event types cannot select automatic Microsoft Teams meetings yet.
+  writeback and Teams meetings for single-host event types. Real-tenant Teams acceptance is pending.
 - Event-type timing units are a web display preference and are not persisted. Notice and
   buffers require whole minutes; booking windows require whole calendar days, even when
   shown in hours or minutes. REST, MCP and CLI retain their existing units.
@@ -213,6 +213,8 @@ not grant host rescheduling or reschedule-request authority through REST, MCP or
 - Prebuilt image installs have no runtime switch to disable app installation or the
   offline shell. Changing `VITE_PWA_ENABLED` requires rebuilding from source and replacing
   the deployed image; see [conversion steps](/docs/self-hosting#turn-off-app-installation).
+- Hourmere does not send Web Push notifications. The [Web Push assessment](/docs/install-app#web-push-assessment)
+  covers browser support, self-hosting dependencies and the proposed opt-in pilot.
 - Organization single sign-on is off by default. Operators can enable OIDC and SAML
   independently with `SSO_OIDC_ENABLED=true` and `SSO_SAML_ENABLED=true` on any instance
   without a paid-plan requirement. See the [single sign-on guide](/docs/sso). The
@@ -224,9 +226,9 @@ not grant host rescheduling or reschedule-request authority through REST, MCP or
   installation requires verification by n8n. Downstream effects need durable idempotency.
 - [Zapier](/docs/zapier) is not yet published in the Zapier directory. The source app
   can be deployed privately with your own Zapier account.
-- Booking workflows are available and off by default. Self-hosted operators can opt in
-  without a paid plan. Existing reminders, follow-ups and signed booking webhooks continue
-  to work. See the [configuration reference](/docs/configuration#email-and-registration)
+- Booking workflows are enabled by default, including on self-hosted instances.
+  Operators can pause them with `WORKFLOWS_ENABLED=false`. Existing reminders, follow-ups
+  and signed booking webhooks continue to work. See the [configuration reference](/docs/configuration#email-and-registration)
   and [workflow operating guide](https://github.com/hourmere/hourmere/blob/main/docs/workflows.md#operating-guide).
 - [Cal.com imports](/docs/calcom-import#known-limitations) create inactive drafts and read-only
   local busy records. Same-owner incremental completion is unavailable; group-slot overlaps

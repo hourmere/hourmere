@@ -173,5 +173,8 @@
   "series.cancelled.member": "Annulée",
   "series.manage": "Gérer la série",
   "series.view": "Voir la série",
-  "series.repair": "Pour relancer la création du lien de réunion, ouvrez la réservation concernée dans Hourmere."
+  "series.repair": "Pour relancer la création du lien de réunion, ouvrez la réservation concernée dans Hourmere.",
+  "teams.linkPending": "Le lien Teams s’affichera dans les détails de la réservation dès qu’il sera disponible.",
+  "teams.unavailable": "Microsoft Teams est indisponible. Cette réservation utilise l’événement du calendrier Outlook.",
+  "teams.writebackFailed": "Le lien Teams est indisponible. La réservation est maintenue."
 }

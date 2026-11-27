@@ -1,8 +1,8 @@
 // The workflow lock order (docs/data-model.md, "Workflow execution storage") as the SQL that
 // the later steps' writers issue: every workflow writer locks the owner organization first
 // (after any identity lock the existing order puts before it), before the shared mail-budget
-// lock and before any definition or run row, and a writer that
-// touches both definitions and runs locks the definition before its runs. Storage test support
+// lock and before any definition or run row. A writer that touches both definitions and runs
+// locks the definition before its runs. Storage test support
 // only: no production module imports it, and it holds no step's logic (which runs a deletion or
 // a reschedule retires, what capture enrolls, budgets or authority). The lock-order test races
 // each reversed order into a deadlock and each documented order to completion, and later steps
@@ -150,18 +150,24 @@ export interface Interleaving {
 }
 
 /**
- * Runs two transactions through `steps` on two connections. Each step starts once the previous
- * step of the schedule has finished or waits for a lock; a side runs its own steps in order, so
- * a step behind a waiting one of its side queues. An error ends its side's transaction (its
- * later steps are skipped); after the schedule each side that is still open commits. A
- * deadlock therefore ends one side with `40P01` and lets the other commit.
+ * Runs two READ COMMITTED transactions through `steps` on two connections. Each step
+ * starts once the previous step has finished or waits for a lock. A side runs its own
+ * steps in order, so a step behind a waiting one of its side queues. An error ends its
+ * side's transaction and skips its later steps. Each side still open after the schedule
+ * commits. A deadlock ends one side with `40P01` and lets the other commit.
+ *
+ * To check a writer's lock order, take the competitor's first lock, run the entire writer
+ * as one step, then request the competitor's second lock. Use `withBorrowedConnection`
+ * from `./testing.ts` for Kysely statements that take an open transaction. Race a writer
+ * that opens its own transaction outside this harness so it can own its connection and
+ * commit.
  */
 export async function interleave(pool: pg.Pool, steps: readonly Step[]): Promise<Interleaving> {
   const open = async () => {
     const client = await pool.connect()
     const pid = (await client.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]
       ?.pid as number
-    await client.query('BEGIN')
+    await client.query('BEGIN ISOLATION LEVEL READ COMMITTED')
     return { client, pid, chain: Promise.resolve(), ended: undefined as string | undefined }
   }
   const first = await open()

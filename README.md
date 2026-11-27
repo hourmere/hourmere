@@ -43,7 +43,7 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 | `packages/webhooks` | Signed organization booking webhooks and encrypted Slack destinations, transactional delivery and bounded retries. See [webhooks](https://hourmere.com/docs/webhooks). |
 | `packages/outbound` | Shared outbound destination policy: special-use address checks, operator private targets, URL syntax, DNS answer validation and pinned connections with TLS hostname verification. Webhooks send through it; CalDAV reuses its address and private-target policy. The hard-off SSO paths use the profile for domain-proof TXT queries and OIDC discovery and signing keys. |
 | `packages/notifications` | Durable booking and sign-in email delivery, retries and the encrypted credential outbox. See [notifications](https://hourmere.com/docs/notifications). |
-| `packages/workflows` | Booking workflow definitions and execution. The operator can enable workflows with `WORKFLOWS_ENABLED=true`. See the [operating guide](docs/workflows.md#operating-guide). |
+| `packages/workflows` | Booking workflow definitions and execution. Workflows are enabled by default. The operator can pause them with `WORKFLOWS_ENABLED=false`. See the [operating guide](docs/workflows.md#operating-guide). |
 | `tools/api-types` | Generates the web app's API types from the server's OpenAPI document (`npm run api:types`). |
 | `tools/cli` | API-key command-line client using the existing MCP tools (`npm run --silent cli -- --help`). See [CLI](https://hourmere.com/docs/cli). |
 | `tools/n8n-nodes-hourmere` | Self-hosted n8n community node with its own npm lockfile and install, outside the root workspaces; installed separately and excluded from the Docker image. See [n8n](https://hourmere.com/docs/n8n). |
@@ -84,6 +84,9 @@ npm run dev --workspace @hourmere/web
 
 Signed-in pages live under `/app` (`/app/event-types`, `/app/availability`, `/app/bookings`, `/app/api-keys`, `/app/settings`); `/sign-in` stays at the top level, and the rest of the root is for public booking pages (`/{handle}/{slug}` for personal types and
 `/team/{teamSlug}/{slug}` for individual, collective and activated round-robin team types). After signing in, people only return to pages under `/app`.
+
+See the [public booking week-view design evaluation](docs/booking-week-view.md)
+for a proposed alternate layout and its implementation estimate.
 
 Public meeting-poll pages live at `/poll` and `/poll/voter`, with private credentials
 in URL fragments and POST bodies. They support verification, voting and read-only closed
@@ -133,10 +136,8 @@ The privacy policy's effective and last-updated dates and the terms' effective d
 `LEGAL_PUBLICATION_DATE` in `apps/site/src/data/legal.ts`, currently `2026-10-22`.
 Keep that date on later deployments, including documentation and homepage changes; change it
 only when publishing revised legal text. A placeholder or invalid date stops the site build.
-Environment variables cannot override the source date. CI retains a fixture-date substitution
-for a placeholder source date; with the current committed date, that substitution makes no
-change. Its build steps restore the source with an exit trap and delete the generated site
-output. Never deploy fixture output or commit a fixture date.
+Environment variables cannot override the source date. CI builds the site using the committed
+date.
 
 ## Self-hosting
 
@@ -370,6 +371,8 @@ The expired-row replacement action cannot reuse these invitations.
 Owners can promote members to admins or return admins to member access after reviewing
 the permission change. Only owners manage admins; owner roles cannot be changed, and
 ownership transfer is not available yet. A team must always retain at least one owner.
+See the [proposed custom roles design](docs/custom-roles.md) for the permission catalogue
+and compatibility plan.
 
 Member rows show shared configuration and cached calendar health checks, without
 promising available times. Owners and admins see only coarse states for other members,
@@ -448,7 +451,8 @@ Optional [automatic Google Meet](https://hourmere.com/docs/automatic-google-meet
 ## Known limitations
 
 - [Microsoft Calendar](https://hourmere.com/docs/microsoft-calendar#known-limitations) supports
-  Outlook booking writeback. Event types cannot select automatic Microsoft Teams meetings yet.
+  Outlook booking writeback and automatic Teams meetings for single-host event types.
+  Real-tenant Teams acceptance is pending.
 - Organization single sign-on is off by default for both OIDC and SAML. Turn on either
   protocol with `SSO_OIDC_ENABLED=true` or `SSO_SAML_ENABLED=true`. Empty or unset
   follows the release default, `false` keeps the protocol off, and other values prevent

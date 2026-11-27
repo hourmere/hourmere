@@ -173,5 +173,8 @@
   "series.cancelled.member": "已取消",
   "series.manage": "管理系列预约",
   "series.view": "查看系列预约",
-  "series.repair": "如需重试生成会议链接，请在 Hourmere 中打开对应的预约。"
+  "series.repair": "如需重试生成会议链接，请在 Hourmere 中打开对应的预约。",
+  "teams.linkPending": "Teams 链接准备好后会显示在预约详情中。",
+  "teams.unavailable": "Microsoft Teams 当前不可用。此预约将使用 Outlook 日历事件。",
+  "teams.writebackFailed": "Teams 链接不可用，预约仍按原定时间进行。"
 }

@@ -595,7 +595,23 @@ export const common = {
     'Para continuar, vuelva a la pestaña donde solicitó la verificación.',
   'Copy the link from your email and paste it into the tab where you requested verification.':
     'Copie el enlace del correo y péguelo en la pestaña donde solicitó la verificación.',
+  // Microsoft Teams meeting locations
+  'Microsoft Teams': 'Microsoft Teams',
+  'Join Microsoft Teams': 'Unirse a la reunión de Microsoft Teams',
+  'The Teams link isn’t ready yet.': 'El enlace de Teams aún no está listo.',
+  'The booking is still scheduled without a Teams link.':
+    'La reserva sigue confirmada, sin enlace de Teams.',
   // Booking page preview
   'These are sample times. Booking is disabled in the preview.':
     'Estos horarios son de ejemplo. No se pueden hacer reservas en la vista previa.',
+  // Rescheduled booking links
+  'This booking was moved to a new time. The new booking has its own link.':
+    'Esta reserva se cambió a otro horario. La nueva reserva tiene su propio enlace.',
+  // Booking location changes
+  'The meeting location has changed. Please choose a time again.':
+    'El lugar de la reunión ha cambiado. Vuelva a elegir un horario.',
+
+  // Microsoft Teams host authorization
+  'The assigned host must configure Microsoft Teams in their own signed-in session.':
+    'El anfitrión asignado debe configurar Microsoft Teams desde una sesión de su propia cuenta.',
 } as const

@@ -9,10 +9,10 @@ import { createRequire, stripTypeScriptTypes } from 'node:module'
 import { join, relative } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { Principal } from '@hourmere/auth'
-import { createDb, type Db, runMigrations } from '@hourmere/db'
-import { createTestDatabaseTemplate, type TestDatabaseTemplate } from '@hourmere/db/testing'
+import { createDb, type Db } from '@hourmere/db'
+import { createTestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import * as Key from './meeting-poll-key.ts'
 import * as Voters from './meeting-poll-voters.ts'
 import * as Polls from './meeting-polls.ts'
@@ -127,11 +127,9 @@ const ALWAYS = {
   },
 }
 
-let template: TestDatabaseTemplate | undefined
-
 /** One scenario on its own migrated database, which is dropped afterwards. */
 async function scenario<T>(run: (db: Db) => Promise<T>): Promise<T> {
-  const owned = await (template as TestDatabaseTemplate).clone(undefined, { tag: 'poll_key' })
+  const owned = await createTestDatabase(serverUrl as string, undefined, { tag: 'poll_key' })
   try {
     return await run(createDb(owned.pool))
   } finally {
@@ -463,9 +461,8 @@ async function verifySwitchedSecret({ K, V }: Modules) {
 }
 
 /**
- * The startup check that the transport step will call. Without keyed data a different secret
- * is recorded; with any keyed data (a voter row or a removal tombstone) it is refused and
- * nothing changes.
+ * Startup records a different secret while no keyed data exists. A voter row or mailbox
+ * counter, including one without a removal tombstone, makes startup refuse and write nothing.
  */
 async function verifyStartupCheck({ K, V }: Modules) {
   await scenario(async (db) => {
@@ -497,6 +494,17 @@ async function verifyStartupCheck({ K, V }: Modules) {
       })
       .execute()
     await refused('a removal tombstone only')
+    // A mailbox can retain its mail budget after its voter row is gone.
+    await db
+      .updateTable('meeting_poll_mailbox_counters')
+      .set({
+        removed_at: null,
+        recovery_count: 1,
+        last_recovery_at: sql<string>`clock_timestamp()`,
+      })
+      .where('poll_id', '=', p.pollId)
+      .execute()
+    await refused('a mail recovery count only')
     // No keyed data is left (the poll stays): the other secret is recorded again.
     await db.deleteFrom('meeting_poll_mailbox_counters').execute()
     await succeeds(() => start(K, db, A))
@@ -890,19 +898,6 @@ describe('meeting poll key fence wiring', () => {
 })
 
 describe.skipIf(!serverUrl)('meeting poll key fence', { timeout: 60_000 }, () => {
-  beforeAll(async () => {
-    template = await createTestDatabaseTemplate(
-      serverUrl as string,
-      async (pool) => {
-        await runMigrations(pool)
-      },
-      { tag: 'poll_key' },
-    )
-  }, 120_000)
-  afterAll(async () => {
-    await template?.drop()
-  })
-
   const real: Modules = { K: Key, V: Voters }
 
   it('records a keyed fingerprint once on first use, never the secret', () => verifyFirstUse(real))
@@ -1069,6 +1064,18 @@ describe.skipIf(!serverUrl)('meeting poll key fence', { timeout: 60_000 }, () =>
       'the fence ignores removal tombstones',
       verifyStartupCheck,
       { key: [['\n      OR EXISTS (SELECT FROM meeting_poll_mailbox_counters)', '']] },
+    ],
+    [
+      'the fence counts only mailbox removal tombstones',
+      verifyStartupCheck,
+      {
+        key: [
+          [
+            'OR EXISTS (SELECT FROM meeting_poll_mailbox_counters)',
+            'OR EXISTS (SELECT FROM meeting_poll_mailbox_counters WHERE removed_at IS NOT NULL)',
+          ],
+        ],
+      },
     ],
     [
       'the fingerprint ignores letter case',

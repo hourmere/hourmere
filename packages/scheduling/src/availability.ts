@@ -45,6 +45,7 @@ import {
   publicLocationOptions,
   selectLocationOption,
 } from './location-options.ts'
+import { microsoftTeamsLocation, requireMicrosoftTeamsHost } from './microsoft-teams.ts'
 import { type OneTimeBookingLinkPrefill, resolveOneTimeBookingLink } from './one-time-links.ts'
 import { parseQuestions, type Question } from './questions.ts'
 import { eligibleRoundRobinHosts } from './round-robin.ts'
@@ -857,6 +858,15 @@ async function requireLocationAvailability(
 ): Promise<string[]> {
   const chosenOption = selectBookableLocationOption(et, optionId)
   return withLocationAvailability(et.locations, optionId, async () => {
+    if (microsoftTeamsLocation(chosenOption)) {
+      await requireMicrosoftTeamsHost(
+        ctx.db,
+        et.schedulingType,
+        et.hostUserIds,
+        et.id,
+        ctx.microsoftCalendarEnabled,
+      )
+    }
     if (automaticZoom(chosenOption)) {
       if (et.schedulingType !== 'individual' || et.hostUserIds.length !== 1)
         throw new DomainError('conflict', 'automatic_zoom_host_policy')
@@ -973,7 +983,11 @@ async function groupEventSlots(
     try {
       await requireGroupSlotConferenceUsable(ctx, ctx.db, slot)
     } catch (error) {
-      if (error instanceof DomainError && error.code === 'slot_unavailable') continue
+      if (
+        error instanceof DomainError &&
+        (error.code === 'slot_unavailable' || error.code === 'location_unavailable')
+      )
+        continue
       throw error
     }
     offered.push({

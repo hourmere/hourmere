@@ -144,7 +144,7 @@ uses one of Hourmere's ten webhook endpoints per organization. Supported events 
 - `booking.reschedule_request_expired`
 - `booking.attendee_no_show_changed` (**Attendee No-Show Changed**)
 
-The n8n trigger does not offer `workflow.executed`. Workflows are hard-off.
+The n8n trigger does not offer `workflow.executed`.
 
 Every delivery must have a valid HMAC-SHA256 signature over the exact raw body and a
 signed timestamp within five minutes of n8n's clock. Unsigned, tampered and stale requests

@@ -586,7 +586,23 @@ export const common = {
     'Return to the tab where you requested verification to continue.',
   'Copy the link from your email and paste it into the tab where you requested verification.':
     'Copy the link from your email and paste it into the tab where you requested verification.',
+  // Microsoft Teams meeting locations
+  'Microsoft Teams': 'Microsoft Teams',
+  'Join Microsoft Teams': 'Join Microsoft Teams',
+  'The Teams link isn’t ready yet.': 'The Teams link isn’t ready yet.',
+  'The booking is still scheduled without a Teams link.':
+    'The booking is still scheduled without a Teams link.',
   // Booking page preview
   'These are sample times. Booking is disabled in the preview.':
     'These are sample times. Booking is disabled in the preview.',
+  // Rescheduled booking links
+  'This booking was moved to a new time. The new booking has its own link.':
+    'This booking was moved to a new time. The new booking has its own link.',
+  // Booking location changes
+  'The meeting location has changed. Please choose a time again.':
+    'The meeting location has changed. Please choose a time again.',
+
+  // Microsoft Teams host authorization
+  'The assigned host must configure Microsoft Teams in their own signed-in session.':
+    'The assigned host must configure Microsoft Teams in their own signed-in session.',
 } as const

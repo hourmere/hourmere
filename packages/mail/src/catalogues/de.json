@@ -173,5 +173,8 @@
   "series.cancelled.member": "Storniert",
   "series.manage": "Terminserie verwalten",
   "series.view": "Terminserie ansehen",
-  "series.repair": "Öffnen Sie die betroffene Buchung in Hourmere, um die Erstellung des Meetinglinks erneut zu versuchen."
+  "series.repair": "Öffnen Sie die betroffene Buchung in Hourmere, um die Erstellung des Meetinglinks erneut zu versuchen.",
+  "teams.linkPending": "Der Teams-Link erscheint in den Buchungsdetails, sobald er verfügbar ist.",
+  "teams.unavailable": "Microsoft Teams ist nicht verfügbar. Für diese Buchung wird der Outlook-Kalendereintrag verwendet.",
+  "teams.writebackFailed": "Der Teams-Link ist nicht verfügbar. Der gebuchte Termin findet weiterhin statt."
 }

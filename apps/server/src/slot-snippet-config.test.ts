@@ -20,11 +20,11 @@ const base = {
   BETTER_AUTH_SECRET: 'synthetic-slot-config-secret-at-least-32-characters',
 }
 
-async function sourceCopy<T>(file: string, mutation?: [string, string]): Promise<T> {
+async function sourceCopy<T>(file: string, mutation?: [string | RegExp, string]): Promise<T> {
   const location = new URL(file, import.meta.url)
   let source = readFileSync(location, 'utf8')
   if (mutation) {
-    expect(source.includes(mutation[0])).toBe(true)
+    expect(source).toMatch(mutation[0])
     source = source.replace(...mutation)
   }
   const javascript = stripTypeScriptTypes(source).replace(
@@ -228,22 +228,15 @@ describe.skipIf(!process.env.DATABASE_URL)('production snippet route and tool fl
     const control = await sourceCopy<typeof server>('./server.ts')
     const nativeApp = await sourceCopy<typeof import('./app.ts')>('./app.ts')
     await verifyProduction(control, nativeApp.createApp)
+    const routeFlag = /(openTimeSnippetRoutes\(\{\s*db,\s*publicUrl,\s*)slotSnippetsEnabled,/
+    const toolFlag = /(openTimeSnippetTools\(\{\s*db,\s*publicUrl,\s*)slotSnippetsEnabled,/
     for (const replacement of [
-      [
-        'openTimeSnippetRoutes({ db, publicUrl, slotSnippetsEnabled,',
-        'openTimeSnippetRoutes({ db, publicUrl, slotSnippetsEnabled: true,',
-      ],
-      [
-        'openTimeSnippetRoutes({ db, publicUrl, slotSnippetsEnabled,',
-        'openTimeSnippetRoutes({ db, publicUrl, slotSnippetsEnabled: false,',
-      ],
+      [routeFlag, '$1slotSnippetsEnabled: true,'],
+      [routeFlag, '$1slotSnippetsEnabled: false,'],
       ['...(slotSnippetsEnabled\n', '...(true\n'],
       ['...(slotSnippetsEnabled\n', '...(false\n'],
-      [
-        'openTimeSnippetTools({ db, publicUrl, slotSnippetsEnabled,',
-        'openTimeSnippetTools({ db, publicUrl, slotSnippetsEnabled: false,',
-      ],
-    ] as [string, string][]) {
+      [toolFlag, '$1slotSnippetsEnabled: false,'],
+    ] satisfies [string | RegExp, string][]) {
       const mutant = await sourceCopy<typeof server>('./server.ts', replacement)
       await expect(verifyProduction(mutant, nativeApp.createApp)).rejects.toMatchObject({
         name: 'AssertionError',

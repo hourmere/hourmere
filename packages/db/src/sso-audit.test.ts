@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { setTimeout } from 'node:timers/promises'
 import pg from 'pg'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
   type AuditEvent,
   auditDetails,
@@ -25,6 +25,7 @@ import {
   ssoAuditDetails,
 } from './sso-audit.ts'
 import { ssoAuditTestId, ssoSensitiveValues } from './sso-audit-protections.ts'
+import { oidcProviderValues, samlProviderValues } from './sso-storage-fixtures.ts'
 import { createTestDatabase, type TestDatabase } from './testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -219,6 +220,7 @@ describe('SSO audit catalogue', () => {
     expect(SSO_AUDIT_LIMITS).toEqual({
       ssoSecurityFailureEvents: 20,
       ssoSecurityFailureWindow: 3600,
+      ssoSecurityFailureDropReportWindow: 60,
     })
   })
 })
@@ -252,6 +254,27 @@ describe.skipIf(!serverUrl)('SSO audit writers', () => {
     }) as unknown as SsoAuditEvent<A>
   const write = <A extends SsoChangeAction>(value: SsoAuditEvent<A>) =>
     db.transaction().execute((trx) => writeSsoAuditEvent(trx, value))
+  const organizationValues = (id: string) => ({
+    id,
+    name: 'sso',
+    slug: id,
+    createdAt: new Date(),
+  })
+  const createOrganization = async () => {
+    const id = randomUUID()
+    await db.insertInto('auth.organization').values(organizationValues(id)).execute()
+    return id
+  }
+  const createProvider = async (organizationId: string, method: SsoSecurityFailure['method']) => {
+    const values =
+      method === 'oidc' ? oidcProviderValues(organizationId) : samlProviderValues(organizationId)
+    const provider = await db
+      .insertInto('sso_providers')
+      .values(values)
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    return provider.id
+  }
   const rawInsert = (action: string, details: unknown) =>
     owned.pool.query(
       `INSERT INTO audit_events (actor_type, actor_id, credential_type, action, target_type, target_id, details)
@@ -366,8 +389,8 @@ describe.skipIf(!serverUrl)('SSO audit writers', () => {
   }, 120_000)
 
   it('never records a secret, token, assertion, raw subject or mailbox capability', async () => {
-    const organizationId = randomUUID()
-    const providerId = ssoAuditTestId()
+    const organizationId = await createOrganization()
+    const providerId = await createProvider(organizationId, 'oidc')
     // As a key's value or as an extra key, through the change writer: refused before SQL.
     for (const value of sensitive) {
       for (const action of changeActions) {
@@ -579,6 +602,39 @@ describe.skipIf(!serverUrl)('SSO audit writers', () => {
     expect(await rowsFor(outside)).toEqual([])
   })
 
+  it.each(['scim_token', 'oauth_client'] as const)(
+    'keeps email addresses and IdP subjects out of %s actor IDs',
+    async (type) => {
+      const organizationId = randomUUID()
+      const change = {
+        ...event('sso_member.scim_suspended', {}, organizationId),
+        credential: { type: 'none' as const },
+      }
+      for (const id of [ssoSensitiveValues.mailbox, ssoSensitiveValues.subjectText]) {
+        await expect(write({ ...change, actor: { type, id } })).rejects.toThrow(
+          'SSO audit targets and actors are stored IDs',
+        )
+      }
+      expect(await rowsFor(organizationId)).toEqual([])
+      await write({ ...change, actor: { type, id: ssoAuditTestId() } })
+      expect(await rowsFor(organizationId)).toMatchObject([{ actor_type: type }])
+    },
+  )
+
+  it.each(['session', 'api_key'] as const)(
+    'refuses a bearer token as a %s credential ID',
+    async (type) => {
+      const organizationId = randomUUID()
+      const change = event('sso_domain.verified', {}, organizationId)
+      await expect(
+        write({ ...change, credential: { type, id: ssoSensitiveValues.token } }),
+      ).rejects.toThrow('SSO audit credential IDs are stored IDs')
+      expect(await rowsFor(organizationId)).toEqual([])
+      await write({ ...change, credential: { type, id: randomUUID() } })
+      expect(await rowsFor(organizationId)).toMatchObject([{ credential_type: type }])
+    },
+  )
+
   it('keeps each writer to its own actions', async () => {
     const organizationId = randomUUID()
     const providerId = ssoAuditTestId()
@@ -666,10 +722,66 @@ describe.skipIf(!serverUrl)('SSO audit writers', () => {
     expect(await rowsFor(organizationId)).toEqual([])
   })
 
+  it('refuses the outer database handle inside a one-connection transaction callback', async () => {
+    const organizationId = await createOrganization()
+    const failure: SsoSecurityFailure = {
+      organizationId,
+      actor: { type: 'anonymous' },
+      credential: { type: 'none' },
+      action: 'sso_link.conflicted',
+      method: 'oidc',
+      providerId: await createProvider(organizationId, 'oidc'),
+    }
+    const pool = new pg.Pool({
+      connectionString: owned.url,
+      max: 1,
+      connectionTimeoutMillis: 1_000,
+    })
+    const tightDb = createDb(pool)
+    try {
+      await expect(
+        tightDb
+          .transaction()
+          .setIsolationLevel('read committed')
+          .execute(() => writeSsoSecurityFailure(tightDb, failure)),
+      ).rejects.toThrow('SSO security failures are written in a transaction of their own')
+      expect(await rowsFor(organizationId)).toEqual([])
+      await expect(writeSsoSecurityFailure(tightDb, failure)).resolves.toBe(true)
+    } finally {
+      await tightDb.destroy()
+    }
+  })
+
+  it('records a failure only for an existing provider in the same team and protocol', async () => {
+    const organizationId = await createOrganization()
+    const otherTeam = await createOrganization()
+    const providerId = await createProvider(organizationId, 'oidc')
+    const failure: SsoSecurityFailure = {
+      organizationId,
+      actor: { type: 'anonymous' },
+      credential: { type: 'none' },
+      action: 'sso_link.conflicted',
+      method: 'oidc',
+      providerId,
+    }
+    await expect(
+      writeSsoSecurityFailure(db, { ...failure, providerId: ssoAuditTestId() }),
+    ).resolves.toBe(false)
+    await expect(
+      writeSsoSecurityFailure(db, { ...failure, organizationId: otherTeam }),
+    ).resolves.toBe(false)
+    await expect(writeSsoSecurityFailure(db, { ...failure, method: 'saml' })).resolves.toBe(false)
+    expect(await rowsFor(organizationId)).toEqual([])
+    expect(await rowsFor(otherTeam)).toEqual([])
+    await expect(writeSsoSecurityFailure(db, failure)).resolves.toBe(true)
+    expect(await rowsFor(organizationId)).toMatchObject([{ target_id: providerId }])
+  })
+
   it('writes a redacted failure in its own transaction', async () => {
-    const organizationId = randomUUID()
-    const providerId = ssoAuditTestId()
+    const organizationId = await createOrganization()
+    const providerId = await createProvider(organizationId, 'oidc')
     const correlationId = ssoAuditTestId()
+    const rolledBackChange = randomUUID()
     const base = {
       organizationId,
       actor: { type: 'user' as const, id: randomUUID() },
@@ -683,12 +795,7 @@ describe.skipIf(!serverUrl)('SSO audit writers', () => {
         db.transaction().execute(async (trx) => {
           await trx
             .insertInto('auth.organization')
-            .values({
-              id: organizationId,
-              name: 'sso',
-              slug: organizationId,
-              createdAt: new Date(),
-            })
+            .values(organizationValues(rolledBackChange))
             .execute()
           throw new Error('nonce mismatch')
         }),
@@ -707,7 +814,7 @@ describe.skipIf(!serverUrl)('SSO audit writers', () => {
       await db
         .selectFrom('auth.organization')
         .select('id')
-        .where('id', '=', organizationId)
+        .where('id', '=', rolledBackChange)
         .execute(),
     ).toEqual([])
     for (const failure of [
@@ -750,8 +857,9 @@ describe.skipIf(!serverUrl)('SSO audit writers', () => {
   })
 
   it('bounds failure events per provider and source under a burst', async () => {
-    const organizationId = randomUUID()
-    const providers = [ssoAuditTestId(), ssoAuditTestId()]
+    const organizationId = await createOrganization()
+    const firstProvider = await createProvider(organizationId, 'saml')
+    const secondProvider = await createProvider(organizationId, 'saml')
     const limit = SSO_AUDIT_LIMITS.ssoSecurityFailureEvents
     const failure = (providerId: string, action: SsoSecurityFailure['action']) => ({
       organizationId,
@@ -763,23 +871,43 @@ describe.skipIf(!serverUrl)('SSO audit writers', () => {
       reason: 'signature_invalid',
     })
     const scopes = [
-      failure(providers[0] as string, 'sso_authentication.failed'),
-      failure(providers[0] as string, 'sso_authentication.replay_rejected'),
-      failure(providers[1] as string, 'sso_authentication.failed'),
+      failure(firstProvider, 'sso_authentication.failed'),
+      failure(firstProvider, 'sso_authentication.replay_rejected'),
+      failure(secondProvider, 'sso_authentication.failed'),
     ]
     // Three times the bound per scope, all at once, interleaved across scopes; every other call
     // spells the team's ID in upper case, which is still the same team.
-    const results = await Promise.all(
-      Array.from({ length: limit * 3 }, () => scopes).flatMap((group, index) =>
-        group.map((value) =>
-          writeSsoSecurityFailure(
-            db,
-            index % 2 ? { ...value, organizationId: organizationId.toUpperCase() } : value,
+    const report = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.useFakeTimers({ toFake: ['setTimeout'] })
+    try {
+      const results = await Promise.all(
+        Array.from({ length: limit * 3 }, () => scopes).flatMap((group, index) =>
+          group.map((value) =>
+            writeSsoSecurityFailure(
+              db,
+              index % 2 ? { ...value, organizationId: organizationId.toUpperCase() } : value,
+            ),
           ),
         ),
-      ),
-    )
-    expect(results.filter(Boolean)).toHaveLength(limit * scopes.length)
+      )
+      expect(results.filter(Boolean)).toHaveLength(limit * scopes.length)
+      const interval = SSO_AUDIT_LIMITS.ssoSecurityFailureDropReportWindow * 1000
+      vi.advanceTimersByTime(interval - 1)
+      expect(report).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(1)
+      expect(report).toHaveBeenCalledTimes(1)
+      const message = report.mock.calls[0]?.[0]
+      expect(JSON.parse(message)).toEqual({
+        event: 'sso.security_failures_dropped',
+        counts: {
+          'sso_authentication.failed': 4 * limit,
+          'sso_authentication.replay_rejected': 2 * limit,
+        },
+      })
+    } finally {
+      vi.useRealTimers()
+      report.mockRestore()
+    }
     const counts = (
       await owned.pool.query<{ target_id: string; action: string; n: number }>(
         `SELECT target_id, action, count(*)::int AS n FROM audit_events
@@ -793,11 +921,12 @@ describe.skipIf(!serverUrl)('SSO audit writers', () => {
         .sort((a, b) => `${a.target_id}${a.action}`.localeCompare(`${b.target_id}${b.action}`)),
     )
     // Another team's provider has its own bound.
+    const otherTeam = await createOrganization()
     await expect(
       writeSsoSecurityFailure(db, {
-        ...scopes[0],
-        organizationId: randomUUID(),
-      } as SsoSecurityFailure),
+        ...failure(await createProvider(otherTeam, 'saml'), 'sso_authentication.failed'),
+        organizationId: otherTeam,
+      }),
     ).resolves.toBe(true)
     expect(owned.pool.totalCount).toBeLessThanOrEqual(10)
   }, 60_000)
@@ -811,14 +940,14 @@ describe.skipIf(!serverUrl)('SSO audit writers', () => {
     })
     try {
       for (const handle of [db, createDb(repeatable)]) {
-        const organizationId = randomUUID()
+        const organizationId = await createOrganization()
         const failure: SsoSecurityFailure = {
           organizationId,
           actor: { type: 'anonymous' },
           credential: { type: 'none' },
           action: 'sso_link.conflicted',
           method: 'oidc',
-          providerId: ssoAuditTestId(),
+          providerId: await createProvider(organizationId, 'oidc'),
         }
         const limit = SSO_AUDIT_LIMITS.ssoSecurityFailureEvents
         for (let index = 1; index < limit; index++)
@@ -880,13 +1009,14 @@ describe.skipIf(!serverUrl)('SSO audit writers', () => {
   })
 
   it('drops a failure past the bound without waiting for the lock', async () => {
+    const organizationId = await createOrganization()
     const failure: SsoSecurityFailure = {
-      organizationId: randomUUID(),
+      organizationId,
       actor: { type: 'anonymous' },
       credential: { type: 'none' },
       action: 'sso_jit.refused',
       method: 'saml',
-      providerId: ssoAuditTestId(),
+      providerId: await createProvider(organizationId, 'saml'),
       reason: 'jit_disabled',
     }
     for (let index = 0; index < SSO_AUDIT_LIMITS.ssoSecurityFailureEvents; index++)
@@ -914,14 +1044,14 @@ describe.skipIf(!serverUrl)('SSO audit writers', () => {
   })
 
   it('lets the window slide', async () => {
-    const organizationId = randomUUID()
+    const organizationId = await createOrganization()
     const failure: SsoSecurityFailure = {
       organizationId,
       actor: { type: 'anonymous' },
       credential: { type: 'none' },
       action: 'sso_authentication.replay_rejected',
       method: 'saml',
-      providerId: ssoAuditTestId(),
+      providerId: await createProvider(organizationId, 'saml'),
     }
     const { ssoSecurityFailureEvents: limit, ssoSecurityFailureWindow: window } = SSO_AUDIT_LIMITS
     for (let index = 0; index < limit; index++)

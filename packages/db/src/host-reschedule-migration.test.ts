@@ -3,25 +3,14 @@ import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type pg from 'pg'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { migrationsDir, runMigrations } from './migrate.ts'
-import { createTestDatabase } from './testing.ts'
+import { MIGRATION_REPLAY_TIMEOUT, useMigrationReplay } from './testing/migration-replay.ts'
+
+vi.setConfig({ testTimeout: MIGRATION_REPLAY_TIMEOUT, hookTimeout: MIGRATION_REPLAY_TIMEOUT })
 
 const serverUrl = process.env.DATABASE_URL
 const migration = '0029_host_reschedule_tokens.sql'
-
-/** The bootstrap connection only creates and drops this test's disposable database. */
-async function withDatabase(check: (pool: pg.Pool) => Promise<void>) {
-  const owned = await createTestDatabase(serverUrl as string, undefined, {
-    migrate: false,
-    tag: 'host_tokens',
-  })
-  try {
-    await check(owned.pool)
-  } finally {
-    await owned.drop()
-  }
-}
 
 const nullable = async (pool: pg.Pool) =>
   (
@@ -48,6 +37,18 @@ const snapshot = async (pool: pg.Pool) =>
   ).rows[0]?.digest
 
 describe.skipIf(!serverUrl)('host reschedule token migration', () => {
+  // Leave 0028 unapplied so the populated case can check the last applied file.
+  const replay = useMigrationReplay(serverUrl as string, '0028_webhook_interrupted_deliveries.sql')
+
+  async function withDatabase(check: (pool: pg.Pool) => Promise<void>) {
+    const owned = await replay.predecessor.clone(undefined, { migrate: false, tag: 'host_tokens' })
+    try {
+      await check(owned.pool)
+    } finally {
+      await owned.drop()
+    }
+  }
+
   it('preserves predecessor bookings, attendees and email links, and remains unique', async () => {
     const predecessor = await mkdtemp(join(tmpdir(), 'hourmere-host-tokens-predecessor-'))
     try {

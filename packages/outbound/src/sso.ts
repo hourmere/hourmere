@@ -124,18 +124,12 @@ export function ssoUrl(
 }
 
 /**
- * Public DNS syntax for the URL's host, whatever its scheme and port: the shared
- * `isPublicHttpsUrl` check on the bare host (a dotted name, never an IP literal, a single
- * label, or a `.localhost`, `.local`, `.internal`, `.test`, `.invalid`, `.example` or
- * `.onion` name), and never a name under `home.arpa`, which that check does not list.
+ * Public DNS syntax for the host of an HTTP(S) URL, using the shared check on the bare
+ * host without the port. The caller separately enforces the scheme and port policy.
  */
 export function ssoPublicName(url: URL): boolean {
-  const hostname = urlHostname(url)
-  return (
-    isPublicHttpsUrl(new URL(`https://${url.hostname}/`)) &&
-    hostname !== 'home.arpa' &&
-    !hostname.endsWith('.home.arpa')
-  )
+  if (!url.hostname || (url.protocol !== 'http:' && url.protocol !== 'https:')) return false
+  return isPublicHttpsUrl(new URL(`https://${url.hostname}/`))
 }
 
 /**

@@ -47,6 +47,7 @@ import {
   locationOptionsFromLegacy,
   validateLocationOptions,
 } from './location-options.ts'
+import { hasMicrosoftTeamsDestination, microsoftTeamsLocation } from './microsoft-teams.ts'
 import {
   type NotificationSettings,
   parseNotifications,
@@ -733,7 +734,7 @@ async function createEventTypeWrite(
         hostIds,
         organizer,
         undefined,
-        zoomConnection,
+        { zoomConnectionId: zoomConnection },
       )
 
       const { id } = await trx
@@ -873,6 +874,14 @@ export async function updateEventType(
             true,
             ctx.scimResourcesEnabled === true,
           )
+          const reauthorizingHost =
+            schedulingType !== row.scheduling_type ||
+            [...configuredHosts].sort().join() !==
+              existing
+                .map((h) => h.user_id)
+                .sort()
+                .join() ||
+            (input.isActive === true && !row.is_active)
           await validateConference(
             trx,
             ctx,
@@ -881,16 +890,16 @@ export async function updateEventType(
             configuredHosts,
             organizer === undefined ? row.conference_organizer_user_id : organizer,
             row.id,
-            zoomConnection === undefined ? row.zoom_connection_id : zoomConnection,
-            !fieldsOf(row).locations?.some(automaticZoom) ||
-              schedulingType !== row.scheduling_type ||
-              [...configuredHosts].sort().join() !==
-                existing
-                  .map((h) => h.user_id)
-                  .sort()
-                  .join() ||
-              (zoomConnection !== undefined && zoomConnection !== row.zoom_connection_id) ||
-              (input.isActive === true && !row.is_active),
+            {
+              zoomConnectionId:
+                zoomConnection === undefined ? row.zoom_connection_id : zoomConnection,
+              authorizeZoom:
+                !fieldsOf(row).locations?.some(automaticZoom) ||
+                reauthorizingHost ||
+                (zoomConnection !== undefined && zoomConnection !== row.zoom_connection_id),
+              authorizeTeams:
+                reauthorizingHost || !fieldsOf(row).locations?.some(microsoftTeamsLocation),
+            },
           )
         }
         await trx
@@ -1337,6 +1346,9 @@ function validLocation(value: unknown): LocationSettings | null {
       if (value.autoCreate !== undefined && value.autoCreate !== true)
         return fail('autoCreate must be true when specified')
       return value.autoCreate === true ? { kind, autoCreate: true } : { kind }
+    case 'microsoft_teams':
+      expect([])
+      return { kind }
     case 'phone': {
       expect(['number', 'askInvitee'])
       if (value.askInvitee !== undefined)
@@ -1598,6 +1610,20 @@ function validZoomConnection(value: unknown): string | null | undefined {
     throw new DomainError('invalid', 'invalid_zoom_connection', 'Choose your own Zoom connection.')
   return (value as string).toLowerCase()
 }
+
+async function hasLiveEventTypeSession(db: Db, ctx: ServiceContext): Promise<boolean> {
+  if (ctx.principal.kind !== 'session') return false
+  const session = await db
+    .selectFrom('auth.session')
+    .select('id')
+    .where('id', '=', ctx.principal.sessionId)
+    .where('userId', '=', ctx.principal.user.id)
+    .where('expiresAt', '>', new Date(ctx.now().epochMilliseconds))
+    .forShare()
+    .executeTakeFirst()
+  return session !== undefined
+}
+
 // REST and MCP create/update share this validation; the CLI delegates to MCP.
 // Cal.com imports only static locations (or null), never automatic providers. Older
 // writes rejected multi-host automatic Meet before organizers were introduced, and
@@ -1612,8 +1638,15 @@ async function validateConference(
   hosts: string[],
   selected: string | null,
   eventTypeId?: string,
-  zoomConnectionId?: string | null,
-  authorizeZoom = true,
+  {
+    zoomConnectionId,
+    authorizeZoom = true,
+    authorizeTeams = true,
+  }: {
+    zoomConnectionId?: string | null
+    authorizeZoom?: boolean
+    authorizeTeams?: boolean
+  } = {},
 ) {
   if (selected !== null && (mode !== 'collective' || !hosts.includes(selected)))
     throw new DomainError(
@@ -1621,6 +1654,33 @@ async function validateConference(
       'invalid_conference_organizer',
       'Choose an organizer from the required hosts.',
     )
+  if (locations?.some(microsoftTeamsLocation)) {
+    const [host] = hosts
+    if (mode !== 'individual' || !host || hosts.length !== 1)
+      throw new DomainError(
+        'invalid',
+        'microsoft_teams_host_policy',
+        'Microsoft Teams requires individual scheduling with one host.',
+      )
+    if (
+      authorizeTeams &&
+      (host !== ctx.principal.user.id || !(await hasLiveEventTypeSession(db, ctx)))
+    )
+      throw new DomainError(
+        'forbidden',
+        'microsoft_teams_host_session_required',
+        'The assigned host must configure Microsoft Teams in their own signed-in session.',
+      )
+    if (
+      !ctx.microsoftCalendarEnabled ||
+      !(await hasMicrosoftTeamsDestination(db, host, eventTypeId))
+    )
+      throw new DomainError(
+        'conflict',
+        'microsoft_teams_calendar_unavailable',
+        'The host needs a connected Microsoft calendar selected for booking writeback.',
+      )
+  }
   if (locations?.some(automaticZoom)) {
     if (mode !== 'individual' || hosts.length !== 1)
       throw new DomainError(
@@ -1635,22 +1695,12 @@ async function validateConference(
           'zoom_host_session_required',
           'Only the host can choose their Zoom connection.',
         )
-      if (ctx.principal.kind === 'session') {
-        const session = await db
-          .selectFrom('auth.session')
-          .select('id')
-          .where('id', '=', ctx.principal.sessionId)
-          .where('userId', '=', ctx.principal.user.id)
-          .where('expiresAt', '>', new Date(ctx.now().epochMilliseconds))
-          .forShare()
-          .executeTakeFirst()
-        if (!session)
-          throw new DomainError(
-            'forbidden',
-            'zoom_host_session_required',
-            'Sign in again before choosing a private Zoom connection.',
-          )
-      }
+      if (ctx.principal.kind === 'session' && !(await hasLiveEventTypeSession(db, ctx)))
+        throw new DomainError(
+          'forbidden',
+          'zoom_host_session_required',
+          'Sign in again before choosing a private Zoom connection.',
+        )
       if (ctx.principal.kind === 'api_key')
         await requireActiveApiKey(db, ctx.principal, () => ctx.now().epochMilliseconds)
       await requireZoomConnection(db, hosts[0] as string, zoomConnectionId, ctx.automaticZoom)

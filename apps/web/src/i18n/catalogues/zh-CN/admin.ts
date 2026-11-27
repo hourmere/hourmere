@@ -188,8 +188,6 @@ export const admin = {
     '请选择有效的 PNG、JPEG 或 WebP 图片，大小不超过 512 KiB，宽高均不超过 2048 像素。不支持 SVG 和动图。',
   'Edit branding': '编辑品牌设置',
   'Primary colour': '主色',
-  'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against the white page background is reported separately.':
-    '系统会自动选择黑色或白色按钮文字，确保对比度至少为 4.5:1。与白色页面背景的对比度会单独显示。',
   'Brand logo': '品牌标志',
   'A logo is saved for this space.': '此空间已保存标志。',
   'Remove logo': '移除标志',
@@ -557,7 +555,6 @@ export const admin = {
   'Offer each duration only once.': '每种时长只能提供一次。',
   'Include the default duration in the allowed durations.': '请在可选时长中包含默认时长。',
   'Added {0}.': '已添加{0}。',
-  'Removed {0}. Default duration: {1}.': '已移除{0}。默认时长：{1}。',
   Scope: '权限范围',
   'Bookings (read/write)': '预约读写',
   'Read only': '只读',
@@ -3074,6 +3071,23 @@ export const admin = {
     'Microsoft 报告预约副本存在冲突。请在 Outlook 中检查日历。',
   'Hourmere will retry syncing a booking copy.': 'Hourmere 将重试同步预约副本。',
   'A booking copy has a pending change.': '有一个预约副本的变更尚待处理。',
+  // Microsoft Teams meeting locations
+  'Microsoft Teams requires individual scheduling with one host.':
+    'Microsoft Teams 仅支持由一位主持人负责的独立排期。',
+  'Could not verify Microsoft Teams availability for the host.':
+    '暂时无法确认主持人能否使用 Microsoft Teams。',
+  'Checking Microsoft Teams availability…': '正在检查 Microsoft Teams 是否可用…',
+  'Microsoft Calendar is unavailable on this instance.': '此实例无法使用 Microsoft 日历。',
+  'Connect a Microsoft 365 work or school calendar and select it for booking write-back.':
+    '请连接 Microsoft 365 工作或学校账户的日历，并选作预约写入目标。',
+  'Reconnect Microsoft Calendar and allow calendar event writes to use Teams.':
+    '请重新连接 Microsoft 日历并授予日历活动写入权限，以使用 Teams。',
+  'The host needs a Microsoft 365 work or school calendar selected for booking write-back.':
+    '主持人需将 Microsoft 365 工作或学校账户的日历选作预约写入目标。',
+  'Microsoft Teams creates a meeting link for each booking on the host’s Microsoft 365 work or school calendar.':
+    'Microsoft Teams 会在主持人的 Microsoft 365 工作或学校日历中为每次预约创建会议链接。',
+  'Remove a location option before adding another.': '请移除一个地点选项后再添加。',
+  'Open host booking details': '打开主持人预约详情',
   // SCIM provisioning
   'SCIM provisioning is disabled on this instance.': '此实例已禁用 SCIM 预配。',
   // Event type editor summaries and booking page preview
@@ -3153,6 +3167,75 @@ export const admin = {
     '需要一个已启用且关联了已验证域名的身份提供方。',
   'Before requiring SSO, have an owner test the identity provider draft, then enable that revision with a verified domain. A current owner must also accept recovery enrollment.':
     '强制单点登录前，请让团队所有者测试身份提供方草稿，并在关联已验证的域名后启用该版本。还须有一位现任所有者接受恢复登记。',
+
+  // Branding.
+  'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against white (#FFFFFF) is reported separately.':
+    '系统会自动选择黑色或白色按钮文字，确保对比度至少为 4.5:1。与白色（#FFFFFF）的对比度会单独显示。',
+
+  // Availability editor
+  'A schedule can have at most 10,000 date overrides, including past dates. Remove some overrides before saving.':
+    '每个日程最多可有 10,000 个特定日期安排（包括过去的日期）。请先移除一些安排再保存。',
+
+  // Additional durations
+  'Removed {0}. Selected length: {1}.': '已移除{0}。当前选中的时长为{1}。',
+
+  // Signed webhook administration
+  'Checking webhook access…': '正在检查 Webhook 管理权限…',
+  'No webhook endpoints yet.': '尚未添加 Webhook 端点。',
+  'Add webhook': '添加 Webhook',
+  'Create webhook': '创建 Webhook',
+  'Edit webhook': '编辑 Webhook',
+  'Destination origin': '目标源站',
+  'Destination URL': '目标网址',
+  'Endpoint ID': '端点 ID',
+  'Webhook events': 'Webhook 事件',
+  'Choose at least one event.': '请至少选择一种事件。',
+  'Booking reschedule requested': '已请求预约改期',
+  'Booking reschedule request expired': '预约改期请求已过期',
+  'Attendee no-show changed': '参会者的未到场标记已变更',
+  'Workflow executed': '工作流已执行',
+  'Unknown event': '未知事件',
+  Paused: '已暂停',
+  'Pause webhook': '暂停 Webhook',
+  'Resume webhook': '恢复 Webhook',
+  'A delivery in progress may finish after you pause this endpoint.':
+    '暂停此端点后，正在进行的投递仍可能完成。',
+  'Skipped deliveries stay skipped after resuming.': '恢复后，已跳过的投递将保持跳过状态。',
+  'Save subscriptions': '保存订阅',
+  'Subscription editing is unavailable for this endpoint.': '当前无法编辑此端点的事件订阅。',
+  'Rotate signing secret…': '轮换签名密钥…',
+  'Rotate signing secret': '轮换签名密钥',
+  'Delete webhook…': '删除 Webhook…',
+  'Delete webhook': '删除 Webhook',
+  'Prepare your receiver to install the new signing secret immediately. All subsequent attempts, including retries, use the new secret.':
+    '请准备在接收端立即更换签名密钥。后续所有投递都将使用新密钥，包括重试。',
+  'Deleting this endpoint permanently removes its retained deliveries. Workflows that reference this ID must be updated separately.':
+    '删除此端点后，保留的投递记录也将永久删除。请另行更新引用此端点 ID 的工作流。',
+  'Signing secret': '签名密钥',
+  'Save this signing secret in your receiver’s secret store. You can see it only here.':
+    '请将签名密钥保存到接收端的密钥存储中。仅此处可查看该密钥。',
+  'Copy signing secret': '复制签名密钥',
+  'Webhook endpoint created.': '已创建 Webhook 端点。',
+  'Webhook endpoint updated.': '已更新 Webhook 端点。',
+  'Webhook endpoint deleted.': '已删除 Webhook 端点。',
+  'Webhook signing secret rotated.': '已轮换 Webhook 签名密钥。',
+  'This webhook endpoint is no longer available.': '此 Webhook 端点已不可用。',
+  'Workflow events are unavailable on this instance.': '此实例当前无法使用工作流事件。',
+  'Creating webhooks and rotating signing secrets are unavailable on this instance.':
+    '此实例当前无法创建 Webhook 或轮换签名密钥。',
+  'This space can have up to ten webhook endpoints, including paused endpoints.':
+    '此空间最多可有 10 个 Webhook 端点，包含已暂停的端点。',
+  'Check the webhook settings and try again.': '请检查 Webhook 设置后重试。',
+  'The webhook change could not be confirmed. Refresh the list before taking another action.':
+    '无法确认 Webhook 是否已更改。请先刷新列表，再进行下一项操作。',
+  'Creation could not be confirmed. Refresh the list and confirm the endpoint ID before rotating its secret.':
+    '无法确认端点是否已创建。如需轮换签名密钥，请先刷新列表并确认端点 ID。',
+  'Rotation could not be confirmed. The previous secret may already have been replaced. Refresh the list before taking another action.':
+    '无法确认密钥是否已轮换。旧密钥可能已被替换。请先刷新列表，再进行下一项操作。',
+  'Refreshing webhook endpoints…': '正在刷新 Webhook 端点…',
+  'Saving webhook settings…': '正在保存 Webhook 设置…',
+  'Refresh webhook endpoints': '刷新 Webhook 端点',
+
   // SAML recovery
   'If you are replacing signing certificates, enter the full set your identity provider uses.':
     '如需更换签名证书，请填写身份提供方使用的全部证书。',

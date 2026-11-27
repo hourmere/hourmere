@@ -191,8 +191,8 @@ describe.skipIf(!serverUrl)('chosen booking location', () => {
   it.each([
     [
       'resolved choice persistence',
-      'location: groupSlot ? groupSlot.location : choice.location,',
-      'location: current.location,',
+      '    location,\n    locationOption:',
+      '    location: current.location,\n    locationOption:',
     ],
     [
       'explicit option selection',
