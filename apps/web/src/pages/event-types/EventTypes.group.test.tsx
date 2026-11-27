@@ -1,8 +1,9 @@
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { RequestError } from '../../api/errors.ts'
 import { chooseLanguage } from '../../i18n/store.ts'
+import { resolveEventTypeEditor } from '../../test/event-type-editor.ts'
 import { fakeApi, json, ME, profile, renderApp, signedInAs } from '../../test/fake-api.tsx'
 import { EVENT_TYPE_ID, eventType, schedule } from '../../test/fixtures.ts'
 import {
@@ -13,6 +14,8 @@ import {
   toPatchInput,
   validateDraft,
 } from './event-type-form.ts'
+
+beforeAll(resolveEventTypeEditor)
 
 describe('group event editor', () => {
   it.each(['en', 'zh-CN'] as const)('creates a group event in %s', async (language) => {

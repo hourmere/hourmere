@@ -3,7 +3,9 @@ import userEvent from '@testing-library/user-event'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import type { EventType } from '../../api/resources.ts'
 import { chooseLanguage } from '../../i18n/store.ts'
+import { BookingsPage, EventTypesPage, SettingsPage } from '../../lazy-pages.tsx'
 import { openAccountMenu } from '../../test/account-menu.ts'
+import { resolveEventTypeEditor } from '../../test/event-type-editor.ts'
 import {
   emptyAccount,
   fakeApi,
@@ -24,17 +26,12 @@ import {
   SCHEDULE_ID,
   schedule,
 } from '../../test/fixtures.ts'
+import { resolveLazy } from '../../test/resolve-lazy.ts'
 import { LEAVE_WITH_UNSAVED_CHANGES } from '../../unsaved-changes.tsx'
 
-// Warm the exercised lazy modules before UI assertions: this suite tests editor behavior,
-// not cold module transformation time on a shared test runner.
 beforeAll(async () => {
-  await Promise.all([
-    import('./EventTypeEditor.tsx'),
-    import('./EventTypes.tsx'),
-    import('../bookings/Bookings.tsx'),
-    import('../Settings.tsx'),
-  ])
+  await resolveEventTypeEditor()
+  await resolveLazy(EventTypesPage, BookingsPage, SettingsPage)
 })
 
 const location = () => screen.getByTestId('location').textContent

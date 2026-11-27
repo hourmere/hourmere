@@ -3,8 +3,9 @@ import * as embedSnippets from '@hourmere/core/embed-snippet'
 import { embedSnippet } from '@hourmere/core/embed-snippet'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { chooseLanguage } from '../../i18n/store.ts'
+import { resolveEventTypeEditor } from '../../test/event-type-editor.ts'
 import {
   fakeApi,
   json,
@@ -287,6 +288,8 @@ describe('saved event embed dialog', () => {
 })
 
 describe('event page entry points', () => {
+  beforeAll(resolveEventTypeEditor)
+
   it('closes the menu on Tab and Shift+Tab and continues through neighboring controls', async () => {
     render(
       <>
