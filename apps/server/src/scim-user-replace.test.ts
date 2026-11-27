@@ -756,7 +756,7 @@ describe.skipIf(!databaseUrl)('SCIM User profile replacement and PATCH', () => {
         await send(organization, `Users/${id}`, 'PUT', profile('would-change'), {}, application),
         404,
       )
-      expect(unavailable.detail).toBe('SCIM provisioning is disabled.')
+      expect(unavailable.detail).toBe('Resource not found.')
       expect(
         await expectError(
           await send(

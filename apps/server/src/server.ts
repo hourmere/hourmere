@@ -107,6 +107,7 @@ import {
   scanWaitlists,
   verifyWaitlist,
 } from '@hourmere/scheduling'
+import { departureHandoffStore } from '@hourmere/scheduling/departure-handoff-store'
 import {
   captureWorkflowWebhook,
   type WebhookQueue,
@@ -241,6 +242,8 @@ export function productionSsoCapabilities(
 
 // Production completes SCIM claims through invitation acceptance only.
 const productionScimClaims = { invitation: scimClaimCompletion.invitation }
+// Admission stays hard-off until participants can approve offers in production.
+const productionDepartureHandoffsEnabled = false
 
 /**
  * The /api/v1 route groups, each created with what it needs. The OpenAPI document (and with
@@ -332,7 +335,7 @@ export function productRoutes({
   /** In-process test injection only; no operator setting exists during hard-off. */
   routingFormsEnabled?: boolean
   routingBookingReceiptNow?: () => Temporal.Instant
-  /** In-process injection for staged acceptance. The running server supplies no store. */
+  /** Staged acceptance can inject a store and a clock. Production admission stays hard-off. */
   departureHandoffs?: DepartureHandoffs
   successRedirectAllowIpHosts?: boolean
   successRedirectPolicy?: ServiceContext['successRedirectPolicy']
@@ -957,6 +960,9 @@ export function productionAppOptions({
       enqueueCalendarWritebackRecovery,
       routingFormsEnabled,
       routingSecret: config.BETTER_AUTH_SECRET,
+      departureHandoffs: productionDepartureHandoffsEnabled
+        ? { store: departureHandoffStore }
+        : undefined,
       workflowRunCursorSecret: config.BETTER_AUTH_SECRET,
       workflowsEnabled,
     }),
@@ -1307,6 +1313,7 @@ async function start(
     invitationInviterMaxPerDay: config.INVITATION_INVITER_MAX_PER_DAY,
     invitationTeamMaxPerHour: config.INVITATION_TEAM_MAX_PER_HOUR,
     invitationTeamMaxPerDay: config.INVITATION_TEAM_MAX_PER_DAY,
+    invitationGlobalRecipientMultiplier: config.INVITATION_GLOBAL_RECIPIENT_MULTIPLIER,
   }
   const waitlistDeps = {
     db,

@@ -20,8 +20,8 @@ import {
 import { applyDepartureHandoff } from '../../scheduling/src/departure-handoff-apply.ts'
 import {
   createHandoffTestFixture,
-  createHandoffTestStorage,
   HANDOFF_NOW,
+  handoffTestRecords,
   handoffTestSession,
 } from '../../scheduling/src/departure-handoff-apply-test-fixture.ts'
 import { conferenceEncryptionKey } from './credentials.ts'
@@ -116,7 +116,7 @@ describe.skipIf(!databaseUrl)('departure handoff Zoom lifecycle (real Postgres)'
       await notifyConference(trx, event)
       await notifyEmail(trx, event, instant)
     }
-    const storage = await createHandoffTestStorage(db)
+    const storage = handoffTestRecords(db)
     let oldConnectionId: string | undefined
     let newConnectionId: string | undefined
     const fixture = await createHandoffTestFixture(db, {

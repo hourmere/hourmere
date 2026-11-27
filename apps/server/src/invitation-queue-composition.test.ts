@@ -7,6 +7,7 @@ import {
   INVITATION_EMAIL_JOB,
   INVITATION_EMAIL_REPAIR_JOB,
   invitationEmailRepairJob,
+  reserveInvitationEmailBudget,
 } from '@hourmere/notifications'
 import { describe, expect, it, vi } from 'vitest'
 import { type RunningServer, startServer } from './server.ts'
@@ -16,6 +17,7 @@ vi.mock('@hourmere/notifications', async (importOriginal) => {
   return {
     ...actual,
     createInvitationEmailRepairer: vi.fn(actual.createInvitationEmailRepairer),
+    reserveInvitationEmailBudget: vi.fn(actual.reserveInvitationEmailBudget),
   }
 })
 
@@ -71,6 +73,7 @@ describe.skipIf(!serverUrl)('invitation queue production composition', () => {
         PUBLIC_URL: publicUrl,
         SMTP_URL: 'smtp://synthetic.invalid',
         MAIL_FROM: 'sender@example.test',
+        INVITATION_GLOBAL_RECIPIENT_MULTIPLIER: '2',
       }
       running = await startServer({ ...config, HOURMERE_ROLE: 'web' })
       const response = await fetch(
@@ -87,6 +90,12 @@ describe.skipIf(!serverUrl)('invitation queue production composition', () => {
         },
       )
       expect(response.status).toBe(200)
+      expect(
+        vi
+          .mocked(reserveInvitationEmailBudget)
+          .mock.calls.map(([, , limits]) => limits.invitationGlobalRecipientMultiplier),
+        'the configured global recipient multiplier reaches the production invitation budget',
+      ).toEqual([2])
       const invitation = (await response.json()) as { id: string }
       const queued = await owned.pool.query<{ data: unknown; singleton_key: string }>(
         'SELECT data, singleton_key FROM pgboss.job WHERE name = $1',

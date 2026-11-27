@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { setTimeout } from 'node:timers/promises'
+import type { InvitationEmailBudgetRequest } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
@@ -43,7 +44,11 @@ describe.skipIf(!serverUrl)('invitation admission budgets (real PostgreSQL)', ()
     await db.deleteFrom('invitation_email_requests').execute()
     await db.deleteFrom('notification_email_sends').execute()
   })
-  const reserve = (limits: InvitationMailLimits = {}, identity = actor, at = NOW) =>
+  const reserve = (
+    limits: InvitationMailLimits = {},
+    identity: InvitationEmailBudgetRequest = actor,
+    at = NOW,
+  ) =>
     db
       .transaction()
       .execute((trx) =>
@@ -280,6 +285,23 @@ ${anchor}`,
     expect(await reserve()).toBe(false)
     expect(await counts()).toEqual({ requests: 20, mail: 0 })
   })
+
+  it.each([
+    ['hourly', { mailRecipientMaxPerHour: 1 }, NOW],
+    ['daily', { mailRecipientMaxPerDay: 1 }, new Date(NOW.getTime() - 7_200_000)],
+  ] as const)(
+    'uses the configured instance-wide %s multiplier across teams and sources',
+    async (_, limits, at) => {
+      const globalLimits = { ...limits, invitationGlobalRecipientMultiplier: 2 }
+      const scim = { ...actor, userId: null, organizationId: randomUUID() }
+      expect(await reserve(globalLimits, actor, at)).toBe(true)
+      expect(await reserve(globalLimits, scim, at)).toBe(true)
+      const next = { ...scim, organizationId: randomUUID() }
+      expect(await reserve(globalLimits, next)).toBe(false)
+      expect(await counts()).toEqual({ requests: 2, mail: 0 })
+      expect(await reserve(limits, next)).toBe(true)
+    },
+  )
 
   it('leaves shared guest-mail capacity untouched even when the instance is at its cap', async () => {
     await mailHistory(99, null)

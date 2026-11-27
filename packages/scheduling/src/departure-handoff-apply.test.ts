@@ -14,10 +14,10 @@ import type { BookingNotifier } from './context.ts'
 import { applyDepartureHandoff } from './departure-handoff-apply.ts'
 import {
   createHandoffTestFixture,
-  createHandoffTestStorage,
   HANDOFF_END,
   HANDOFF_NOW,
   HANDOFF_START,
+  handoffTestRecords,
   handoffTestSession,
 } from './departure-handoff-apply-test-fixture.ts'
 import { createFixtures } from './testing.ts'
@@ -32,13 +32,13 @@ type Fixture = Awaited<ReturnType<typeof createHandoffTestFixture>>
 describe.skipIf(!serverUrl)('internal departure handoff apply', () => {
   let owned: TestDatabase
   let db: Db
-  let storage: Awaited<ReturnType<typeof createHandoffTestStorage>>
+  let storage: Awaited<ReturnType<typeof handoffTestRecords>>
 
   beforeAll(async () => {
     owned = await createTestDatabase(serverUrl as string, undefined, { tag: 'handoff_apply' })
     owned.pool.options.max = 6
     db = createDb(owned.pool)
-    storage = await createHandoffTestStorage(db)
+    storage = handoffTestRecords(db)
     await sql`CREATE TABLE test_handoff_lifecycle (
       booking_id uuid NOT NULL REFERENCES bookings,
       event_type text NOT NULL,
@@ -62,6 +62,17 @@ describe.skipIf(!serverUrl)('internal departure handoff apply', () => {
 
   async function approve(f: Fixture) {
     return storage.offer(f.ctx, f.input, { departingUserId: f.departing.id })
+  }
+
+  async function closeOffer(f: Fixture) {
+    await db
+      .updateTable('departure_handoff_offers')
+      .set({ state: 'closed' })
+      .where('organization_id', '=', f.team.id)
+      .where('source_booking_id', '=', f.booking.id)
+      .where('id', '=', f.input.offerId)
+      .where('version', '=', f.input.version)
+      .execute()
   }
 
   const apply = (f: Fixture) => applyDepartureHandoff(f.ctx, f.input, storage.store)
@@ -182,6 +193,15 @@ describe.skipIf(!serverUrl)('internal departure handoff apply', () => {
         replacementBookingId: replacementId,
       },
     ])
+    expect(
+      await storage.store.readLatest(db, {
+        organizationId: f.team.id,
+        sourceBookingId: f.booking.id,
+      }),
+    ).toMatchObject({
+      state: 'closed',
+      committed: { replacementBookingId: replacementId },
+    })
     expect(await intents(f)).toEqual([
       { booking_id: f.booking.id, event_type: 'cancelled' },
       { booking_id: replacementId, event_type: 'created' },
@@ -272,19 +292,79 @@ describe.skipIf(!serverUrl)('internal departure handoff apply', () => {
   it('refuses approval from the previous offer version even when the terms are unchanged', async () => {
     const f = await setup()
     const original = await bookings(f)
-    await approve(f)
+    const first = await approve(f)
+    await closeOffer(f)
 
     const revised = { ...f, input: { ...f.input, version: f.input.version + 1 } }
-    await sql`UPDATE test_handoff_offers
-      SET offer = jsonb_set(offer, '{version}', to_jsonb(${revised.input.version}::int))
-      WHERE organization_id = ${f.team.id} AND source_id = ${f.booking.id}
-        AND offer_id = ${f.input.offerId}`.execute(db)
+    const next = await storage.offer(
+      revised.ctx,
+      revised.input,
+      { departingUserId: f.departing.id },
+      (offer) => ({ ...offer, approvals: [] }),
+    )
+    expect(next.offer.termsDigest).toBe(first.offer.termsDigest)
+    expect(
+      await storage.store.readLatest(db, {
+        organizationId: f.team.id,
+        sourceBookingId: f.booking.id,
+      }),
+    ).toMatchObject({ id: f.input.offerId, version: revised.input.version, approvals: [] })
 
+    await expect(apply(f)).rejects.toMatchObject(changed)
     await expect(apply(revised)).rejects.toMatchObject({
       kind: 'conflict',
       code: 'handoff_consent_required',
     })
     await expectUnchanged(f, original)
+  })
+
+  it('scopes offer lookups to the team and source even if an offer ID is known', async () => {
+    const f = await setup()
+    await approve(f)
+    const wrongTeam = {
+      organizationId: randomUUID(),
+      sourceBookingId: f.booking.id,
+      offerId: f.input.offerId,
+      version: f.input.version,
+    }
+    const wrongSource = {
+      ...wrongTeam,
+      organizationId: f.team.id,
+      sourceBookingId: randomUUID(),
+    }
+    for (const key of [wrongTeam, wrongSource]) {
+      await expect(storage.store.readLatest(db, key)).resolves.toBeUndefined()
+      await expect(
+        db.transaction().execute((trx) => storage.store.lockOffer(trx, key)),
+      ).resolves.toBeUndefined()
+    }
+  })
+
+  it('reads offer terms, decision times and deadlines at stored microsecond precision', async () => {
+    const f = await setup()
+    const start = HANDOFF_START.add({ microseconds: 123 }).toString()
+    const issuedAt = HANDOFF_NOW.subtract({ hours: 1, microseconds: 456 }).toString()
+    const expiresAt = HANDOFF_START.subtract({ microseconds: 789 }).toString()
+    const approvedAt = HANDOFF_NOW.subtract({ minutes: 30, microseconds: 123 }).toString()
+    await storage.offer(f.ctx, f.input, { departingUserId: f.departing.id, start }, (offer) => ({
+      ...offer,
+      issuedAt,
+      expiresAt,
+      approvals: offer.approvals.map((approval) => ({ ...approval, approvedAt })),
+    }))
+    const key = {
+      organizationId: f.team.id,
+      sourceBookingId: f.booking.id,
+      offerId: f.input.offerId,
+      version: f.input.version,
+    }
+    const saved = await db.transaction().execute((trx) => storage.store.lockOffer(trx, key))
+    expect(saved).toMatchObject({
+      start,
+      issuedAt,
+      expiresAt,
+      approvals: [{ approvedAt }, { approvedAt }],
+    })
   })
 
   it('refuses expired offers and changes to terms since approval', async () => {
@@ -294,6 +374,7 @@ describe.skipIf(!serverUrl)('internal departure handoff apply', () => {
       expiresAt: HANDOFF_NOW.toString(),
     }))
     await expect(apply(f)).rejects.toMatchObject(changed)
+    await closeOffer(f)
     const newOffer = { ...f, input: { ...f.input, offerId: randomUUID(), version: 2 } }
     await approve(newOffer)
     await db

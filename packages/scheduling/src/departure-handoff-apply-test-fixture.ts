@@ -3,11 +3,8 @@ import type { Db } from '@hourmere/db'
 import { sql } from 'kysely'
 import { createPublicTeamBooking } from './bookings.ts'
 import type { PublicContext, ServiceContext } from './context.ts'
-import {
-  type DepartureHandoffApplyStore,
-  type DepartureHandoffOffer,
-  getDepartureHandoffTerms,
-} from './departure-handoff-apply.ts'
+import { type DepartureHandoffOffer, getDepartureHandoffTerms } from './departure-handoff-apply.ts'
+import { departureHandoffStore } from './departure-handoff-store.ts'
 import { createFixtures, createTestTeam, createTestUser, type TestUser } from './testing.ts'
 
 export const HANDOFF_NOW = Temporal.Instant.from('2026-11-01T16:00:00Z')
@@ -115,77 +112,8 @@ export async function createHandoffTestFixture(
   return { ...event, team, owner, ctx, input, booking, manageToken }
 }
 
-/** A transaction-bound stand-in for the future offer, consent and receipt tables. */
-export async function createHandoffTestStorage(db: Db) {
-  await sql`CREATE TABLE test_handoff_offers (
-    organization_id uuid NOT NULL,
-    source_id uuid NOT NULL,
-    offer_id uuid NOT NULL,
-    offer jsonb NOT NULL,
-    PRIMARY KEY (organization_id, source_id, offer_id),
-    FOREIGN KEY (source_id, organization_id) REFERENCES bookings (id, organization_id)
-  )`.execute(db)
-  await sql`CREATE TABLE test_handoff_receipts (
-    organization_id uuid NOT NULL,
-    source_id uuid NOT NULL PRIMARY KEY,
-    offer_id uuid NOT NULL,
-    replacement_id uuid NOT NULL UNIQUE,
-    evidence jsonb NOT NULL,
-    CHECK (replacement_id <> source_id),
-    FOREIGN KEY (organization_id, source_id, offer_id) REFERENCES test_handoff_offers,
-    FOREIGN KEY (replacement_id, organization_id) REFERENCES bookings (id, organization_id)
-  )`.execute(db)
-
-  const applyStore: DepartureHandoffApplyStore = {
-    async lockOffer(trx, key) {
-      const {
-        rows: [row],
-      } = await sql<{
-        offer: DepartureHandoffOffer
-        replacement_id: string | null
-      }>`SELECT offer, replacement_id FROM test_handoff_offers AS offers
-        LEFT JOIN test_handoff_receipts USING (organization_id, source_id, offer_id)
-        WHERE organization_id = ${key.organizationId} AND source_id = ${key.sourceBookingId}
-          AND offer_id = ${key.offerId}
-        FOR UPDATE OF offers`.execute(trx)
-      return (
-        row && {
-          ...row.offer,
-          ...(row.replacement_id && { committed: { replacementBookingId: row.replacement_id } }),
-        }
-      )
-    },
-    async commitHandoff(trx, key, evidence) {
-      await sql`INSERT INTO test_handoff_receipts
-        (organization_id, source_id, offer_id, replacement_id, evidence)
-        VALUES (${key.organizationId}, ${key.sourceBookingId}, ${key.offerId},
-          ${evidence.replacementBookingId}, ${JSON.stringify(evidence)}::jsonb)`.execute(trx)
-    },
-  }
-
-  const store = {
-    ...applyStore,
-    async readLatest(db: Db, key: { organizationId: string; sourceBookingId: string }) {
-      const {
-        rows: [row],
-      } = await sql<{
-        id: string
-        offer: DepartureHandoffOffer
-        replacement_id: string | null
-      }>`SELECT offer_id AS id, offer, replacement_id FROM test_handoff_offers
-        LEFT JOIN test_handoff_receipts USING (organization_id, source_id, offer_id)
-        WHERE organization_id = ${key.organizationId} AND source_id = ${key.sourceBookingId}
-        ORDER BY (offer->>'version')::integer DESC, offer_id DESC LIMIT 1`.execute(db)
-      return (
-        row && {
-          ...row.offer,
-          id: row.id,
-          ...(row.replacement_id && { committed: { replacementBookingId: row.replacement_id } }),
-        }
-      )
-    },
-  }
-
+/** Seeds synthetic approved and pending recipients in the migrated tables. */
+export function handoffTestRecords(db: Db) {
   async function offer(
     ctx: ServiceContext,
     input: ApplyInput,
@@ -224,19 +152,70 @@ export async function createHandoffTestStorage(db: Db) {
         approvedAt: now.subtract({ minutes: 30 }).toString(),
       })),
     })
-    await sql`INSERT INTO test_handoff_offers (organization_id, source_id, offer_id, offer)
-      VALUES (${input.teamId}, ${input.bookingId}, ${input.offerId}, ${JSON.stringify(saved)}::jsonb)
-    `.execute(db)
+    await db.transaction().execute(async (trx) => {
+      await trx
+        .insertInto('departure_handoff_offers')
+        .values({
+          organization_id: input.teamId,
+          source_booking_id: input.bookingId,
+          id: input.offerId,
+          version: saved.version,
+          state: saved.state,
+          issued_at: saved.issuedAt,
+          expires_at: saved.expiresAt,
+          departing_user_id: saved.departingUserId,
+          proposer_user_id: ctx.principal.user.id,
+          target_start_at: saved.start,
+          duration_minutes: saved.durationMinutes,
+          location_option_id: saved.locationOptionId ?? null,
+          terms_digest: saved.termsDigest,
+        })
+        .execute()
+
+      const approved = new Map(saved.approvals.map((approval) => [approval.recipientKey, approval]))
+      await trx
+        .insertInto('departure_handoff_recipients')
+        .values(
+          recipientKeys.map((recipientKey) => {
+            const approval = approved.get(recipientKey)
+            return {
+              organization_id: input.teamId,
+              source_booking_id: input.bookingId,
+              offer_id: input.offerId,
+              offer_version: input.version,
+              id: approval?.recipientId ?? randomUUID(),
+              recipient_key: recipientKey,
+              decision: approval ? 'approved' : null,
+              decided_at: approval?.approvedAt ?? null,
+            }
+          }),
+        )
+        .execute()
+    })
     return { recipientKeys, offer: saved }
   }
 
   async function receipts(input: ApplyInput) {
-    const { rows } = await sql<{
-      evidence: Parameters<DepartureHandoffApplyStore['commitHandoff']>[2]
-    }>`
-      SELECT evidence FROM test_handoff_receipts WHERE source_id = ${input.bookingId}`.execute(db)
-    return rows.map((row) => row.evidence)
+    const rows = await db
+      .selectFrom('departure_booking_handoffs')
+      .select([
+        'offer_version',
+        'applying_user_id',
+        'applied_at',
+        'recipient_ids',
+        'replacement_booking_id',
+      ])
+      .where('organization_id', '=', input.teamId)
+      .where('source_booking_id', '=', input.bookingId)
+      .execute()
+    return rows.map((row) => ({
+      version: row.offer_version,
+      applyingUserId: row.applying_user_id,
+      appliedAt: Temporal.Instant.fromEpochMilliseconds(row.applied_at.getTime()).toString(),
+      recipientIds: row.recipient_ids,
+      replacementBookingId: row.replacement_booking_id,
+    }))
   }
 
-  return { store, offer, receipts }
+  return { store: departureHandoffStore, offer, receipts }
 }
