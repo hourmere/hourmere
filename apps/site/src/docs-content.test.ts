@@ -665,15 +665,15 @@ describe('complete public documentation', () => {
     }
   })
 
-  it('publishes the routing guides with instructions for enabling routing', () => {
+  it('publishes the routing guides with the default and opt-out instructions', () => {
     const routingPages = pages.filter(({ path }) => isRoutingName(path))
     expect(routingPages.map(({ path }) => path)).toEqual(
       expect.arrayContaining(['routing-forms.md', 'routing-forms-api.md']),
     )
     for (const { path, source, draft } of routingPages) {
       expect(draft, path).toBe(false)
-      expect(source, path).toContain('Routing forms are off by default.')
-      expect(normalize(source), path).toMatch(/`ROUTING_FORMS_ENABLED=true`.*?restart the server/)
+      expect(source, path).toContain('Routing forms are on by default.')
+      expect(normalize(source), path).toMatch(/`ROUTING_FORMS_ENABLED=false`.*?restart the server/)
     }
   })
 

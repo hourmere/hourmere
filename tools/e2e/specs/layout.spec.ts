@@ -394,7 +394,12 @@ for (const viewport of layoutViewports) {
               phase = 'layout'
               report.findings.push(...(await page.evaluate(measureLayout, viewport)))
               phase = 'keyboard'
-              report.findings.push(...(await measureKeyboard(page)))
+              // Leave focus on the open disclosure's trigger so Tab reaches its controls.
+              // The corresponding closed pages still scan from the skip link.
+              const fromCurrentFocus =
+                state.id === 'admin-account-menu' ||
+                (state.id === 'admin-integrations' && viewport.width < 960)
+              report.findings.push(...(await measureKeyboard(page, { fromCurrentFocus })))
             } catch {
               report.findings.push({ code: 'scan-error', phase })
             }

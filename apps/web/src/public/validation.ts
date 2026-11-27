@@ -236,7 +236,9 @@ export function bookingErrors(
             : 'Each guest needs a name on one line, at most 200 characters.'
       return { fields, form: null }
     case 'invalid_responses': {
-      const id = /^Question "([^"]+)"/.exec(message)?.[1]
+      const id = err.field?.startsWith('responses.')
+        ? err.field.slice('responses.'.length)
+        : /^Question "([^"]+)"/.exec(message)?.[1]
       const name = id === undefined ? undefined : label(id)
       if (id !== undefined && name !== undefined) {
         fields[questionField(id)] = 'Check this answer.'
