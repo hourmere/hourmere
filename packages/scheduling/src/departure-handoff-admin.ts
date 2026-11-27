@@ -22,6 +22,7 @@ export { applyDepartureHandoff } from './departure-handoff-apply.ts'
 
 /** The admin read and apply use the same versioned offer and committed edge. */
 export interface DepartureHandoffAdminStore extends DepartureHandoffApplyStore {
+  /** Use the caller's authorized repeatable-read preview snapshot. */
   readLatest(
     db: Db,
     key: { organizationId: string; sourceBookingId: string },

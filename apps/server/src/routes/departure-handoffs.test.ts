@@ -8,12 +8,13 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { fakeMicrosoft, TEST_CALENDAR_KEY } from '../../../../packages/calendars/src/testing.ts'
 import {
   createHandoffTestFixture,
-  createHandoffTestStorage,
   HANDOFF_NOW,
+  handoffTestRecords,
   handoffTestSession,
 } from '../../../../packages/scheduling/src/departure-handoff-apply-test-fixture.ts'
 import { createApp } from '../app.ts'
-import { productRoutes } from '../server.ts'
+import { loadConfig } from '../config.ts'
+import { productionAppOptions, productRoutes } from '../server.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const origin = 'http://localhost:4394'
@@ -25,7 +26,7 @@ describe.skipIf(!serverUrl)('departure handoff browser routes', () => {
   let db: Db
   let pool: ReturnType<typeof createAuthPool>
   let auth: ReturnType<typeof createAuth>
-  let storage: Awaited<ReturnType<typeof createHandoffTestStorage>>
+  let storage: Awaited<ReturnType<typeof handoffTestRecords>>
 
   beforeAll(async () => {
     owned = await createTestDatabase(serverUrl as string, undefined, { tag: 'handoff_admin' })
@@ -39,7 +40,7 @@ describe.skipIf(!serverUrl)('departure handoff browser routes', () => {
       signup,
       mailer: { send: async () => {} },
     })
-    storage = await createHandoffTestStorage(db)
+    storage = handoffTestRecords(db)
   })
 
   afterAll(async () => {
@@ -158,6 +159,56 @@ describe.skipIf(!serverUrl)('departure handoff browser routes', () => {
       await expectUnchanged(f)
     },
   )
+
+  it('keeps production admission off with a saved offer and a booking notifier', async () => {
+    const f = await fixture()
+    const unexpected = async (): Promise<never> => {
+      throw new Error('Production handoff should not dispatch work')
+    }
+    const config = loadConfig({
+      DATABASE_URL: owned.url,
+      PUBLIC_URL: origin,
+      BETTER_AUTH_SECRET: secret,
+    })
+    const app = createApp(
+      productionAppOptions({
+        config,
+        db,
+        auth,
+        resolveCaller: createCallerResolver({ auth, db }),
+        resolveMcpOAuth: unexpected,
+        checkDb: async () => {},
+        waitlist: { verify: unexpected, remove: unexpected },
+        invitationMailLimits: { secret },
+        webhookSettings: { enabled: false },
+        webhookQueue: { enqueue: unexpected },
+        notify: unexpected,
+        notifyAttendeeNoShow: unexpected,
+        googleCalendar: undefined,
+        microsoftCalendar: undefined,
+        zoomConference: undefined,
+        enqueueCalendarSync: unexpected,
+        enqueueCalendarWritebackRecovery: unexpected,
+        mailboxProofQueue: { enqueue: unexpected },
+        scimMappingNotices: { enqueue: unexpected },
+        enqueueScimInvitation: unexpected,
+      }),
+    )
+    const detail = await app.request(f.base, { headers: f.headers })
+    expect(detail.status).toBe(200)
+    expect(await detail.json()).not.toHaveProperty('departureHandoffEnabled')
+    await expectError(
+      await app.request(preview(f.base), { headers: f.headers }),
+      404,
+      'handoffs_disabled',
+    )
+    await expectError(
+      await app.request(apply(f.base, f.input.offerId), post(f.headers)),
+      404,
+      'handoffs_disabled',
+    )
+    await expectUnchanged(f)
+  })
 
   it('returns only a safe slot and approval count and refuses a crafted approval or missing guest', async () => {
     const f = await fixture('pending')
