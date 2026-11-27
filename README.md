@@ -371,6 +371,8 @@ The expired-row replacement action cannot reuse these invitations.
 Owners can promote members to admins or return admins to member access after reviewing
 the permission change. Only owners manage admins; owner roles cannot be changed, and
 ownership transfer is not available yet. A team must always retain at least one owner.
+See the [proposed custom roles design](docs/custom-roles.md) for the permission catalogue
+and compatibility plan.
 
 Member rows show shared configuration and cached calendar health checks, without
 promising available times. Owners and admins see only coarse states for other members,

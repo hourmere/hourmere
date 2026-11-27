@@ -54,6 +54,14 @@ and canonical SP URLs to check that changed RelayState, a damaged signature and 
 response are refused. SAML is enabled only by an in-process test injection. The same seeded
 provider offers no SAML sign-in option without it.
 
+The SAML linking and admission cases enable assertion signing on that same fixture.
+An existing member verifies their Hourmere mailbox and explicitly consents to linking
+before the link can be used for sign-in. Unlinked subjects see the same browser outcome
+whether or not an Hourmere account already exists for the asserted email. The cases cover
+explicit invitation acceptance with closed signup, JIT admission with open signup, and
+JIT refusal with closed signup. Without the test injection, the SAML link and admission
+entries are hidden and their requests are refused.
+
 The enforcement cases compare a mailbox session and a Keycloak session for the same
 owner. Binding a CLI and MCP lease requires a second Keycloak login with
 `prompt=login` and `max_age=0`. An unbound or revoked key cannot read the team's
