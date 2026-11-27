@@ -5,6 +5,7 @@ import { createServer as createHttpServer, type Server } from 'node:http'
 import { createServer as createTcpServer } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { test as base, expect, type FrameLocator, type Locator, type Page } from '@playwright/test'
+import { sql } from 'kysely'
 import { type RunningServer, startServer } from '../../apps/server/src/server.ts'
 import { createAuth, createAuthPool } from '../../packages/auth/src/index.ts'
 import { writeBookingCalendar } from '../../packages/calendars/src/booking-events.ts'
@@ -62,6 +63,7 @@ export interface FixtureApp {
     privateValues: readonly string[]
     rename: (slug: string) => Promise<void>
     reusePreviousSlug: () => Promise<void>
+    expirePreviousSlugReservation: () => Promise<void>
     enforceSso: () => Promise<void>
   } | null
   setEmbedSnippet: (snippet: string) => void
@@ -574,9 +576,18 @@ export const test = base.extend<{
           reusePreviousSlug: async () => {
             await db
               .updateTable('auth.organization')
-              .set({ slug: TEAM_DIRECTORY_SLUG })
+              .set({ slug: TEAM_DIRECTORY_SLUG.toLowerCase() })
               .where('id', '=', disabledDirectory)
               .execute()
+          },
+          expirePreviousSlugReservation: async () => {
+            await db
+              .updateTable('team_slug_reservations')
+              .set({ expires_at: sql<Date>`clock_timestamp() - interval '1 second'` })
+              .where('slug', '=', TEAM_DIRECTORY_SLUG.toLowerCase())
+              .where('organization_id', '=', directory)
+              .returning('slug')
+              .executeTakeFirstOrThrow()
           },
           enforceSso: async () => {
             await db

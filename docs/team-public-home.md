@@ -10,8 +10,10 @@ The operator sets `TEAM_PUBLIC_HOME_ORGANIZATION_IDS` and restarts the server. I
 256 comma-separated organization UUIDs. The parser trims whitespace, ignores empty entries
 including a trailing comma, and normalizes case. An empty list keeps every team home off.
 Invalid nonempty entries stop startup. Using the immutable organization ID keeps a renamed
-team's opt-in with that team and prevents an old slug's new owner from inheriting the opt-in.
-Public lookups use the current slug and exclude personal organizations.
+team's opt-in with that team. Public lookups use the current slug and exclude personal
+organizations. The former address stops resolving immediately and is reserved for the same team
+to reclaim for 90 days. If another team claims it after the reservation expires, that team's
+catalogue still needs its own opt-in.
 
 An enabled directory remains public when the team enforces SSO for member access. To take the
 directory offline, remove the team's UUID from the list and restart the server.
@@ -60,7 +62,9 @@ uses the existing `mcp:tools` grant.
 组织 UUID，最多 256 个，以逗号分隔，变更后重启服务。忽略空项和末尾逗号，非空项必须是有效的 UUID。
 团队强制成员使用单点登录后，已启用的目录仍可公开访问。关闭目录需从列表移除团队 UUID 并重启服务。
 公开查询使用当前团队地址标识（slug）的原始大小写。个人空间、未启用团队和未知地址统一返回
-`team_not_found`。已启用团队没有可展示活动时，仍返回团队名称、地址标识和空数组。仅收录已保存、
+`team_not_found`。改名后旧地址立即失效，并为原团队保留 90 天，期间原团队可取回。保留期结束后，
+若其他团队取得该地址，仍需为该团队单独启用目录。已启用团队没有可展示活动时，仍返回团队名称、
+地址标识和空数组。仅收录已保存、
 已启用、列出且未删除的团队活动。活动还须满足普通的团队主持人资格及轮询启用要求。目录只提供活动标题、
 地址标识、说明、默认时长及地点类型等公开字段，不枚举隐藏活动、一次性链接、主持人或预约信息。
 创建一次性链接时，活动保留原来的可见性设置。如需从目录中移除常规预约地址，请隐藏该活动。

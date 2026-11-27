@@ -241,7 +241,7 @@ test('publication follows a renamed SSO-enforced team and cannot transfer to a r
   await page.goto(app.url + homePath)
   await expect(main.getByRole('heading', { level: 1, name: AUDIT_TEAM_NAME })).toBeVisible()
 
-  const newSlug = 'RenamedDirectory'
+  const newSlug = 'renamed-directory'
   const newPath = `/team/${newSlug}`
   const newApi = `/api/v1/public/teams/${newSlug}`
   await app.teamDirectory.rename(newSlug)
@@ -260,16 +260,25 @@ test('publication follows a renamed SSO-enforced team and cannot transfer to a r
     main.getByRole('heading', { name: 'This booking page doesn’t exist', exact: true }),
   ).toBeVisible()
 
+  await expect(app.teamDirectory.reusePreviousSlug()).rejects.toMatchObject({
+    code: '23505',
+    constraint: 'team_slug_reserved',
+  })
+  await app.teamDirectory.expirePreviousSlugReservation()
   await app.teamDirectory.reusePreviousSlug()
-  const reused = await visitWithResponse(page, app.url, homePath, apiPath)
+  // A new claim stores the lowercase address, even when the former slug used mixed case.
+  const reusedSlug = TEAM_DIRECTORY_SLUG.toLowerCase()
+  const reusedPath = `/team/${reusedSlug}`
+  const reusedApi = `/api/v1/public/teams/${reusedSlug}`
+  const reused = await visitWithResponse(page, app.url, reusedPath, reusedApi)
   expect(reused.status()).toBe(404)
   expect(await reused.json()).toEqual(unavailableTeam)
   await expect(main).toHaveText('This team page is unavailable.')
   const reusedDirect = await visitWithResponse(
     page,
     app.url,
-    `${homePath}/direct-event`,
-    `${apiPath}/direct-event`,
+    `${reusedPath}/direct-event`,
+    `${reusedApi}/direct-event`,
   )
   expect(reusedDirect.status()).toBe(200)
   await expect(

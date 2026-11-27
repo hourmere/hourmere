@@ -23,6 +23,7 @@ import {
   createTestUser,
   testContext,
 } from '@hourmere/scheduling/testing'
+import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createApp } from '../app.ts'
 import { oneTimeBookingRoutes } from './one-time-bookings.ts'
@@ -110,7 +111,11 @@ describe.skipIf(!serverUrl)('public team event contract', () => {
       ],
     })
 
-  async function setup(schedulingType: SchedulingType, activate = true) {
+  async function setup(
+    schedulingType: SchedulingType,
+    activate = true,
+    teamSlug = `Research-Team-${randomUUID().slice(0, 8)}`,
+  ) {
     const owner = await createTestUser(db, 'Ada Lovelace')
     const users =
       schedulingType === 'individual' ? [owner] : [owner, await createTestUser(db, 'Grace Hopper')]
@@ -119,7 +124,6 @@ describe.skipIf(!serverUrl)('public team event contract', () => {
       users.map((user, index) => ({ user, role: index === 0 ? 'owner' : 'member' })),
       'Research team',
     )
-    const teamSlug = `Research-Team-${randomUUID().slice(0, 8)}`
     await db
       .updateTable('auth.organization')
       .set({ slug: teamSlug })
@@ -317,9 +321,11 @@ describe.skipIf(!serverUrl)('public team event contract', () => {
     expect(await direct.json()).toMatchObject({ slug: target.slug, title: target.title })
   })
 
-  it('moves publication with the organization when its former slug is reassigned', async () => {
-    const s = await setup('individual')
+  it('keeps publication with the renamed team when its reserved slug expires and is reused', async () => {
+    const s = await setup('individual', true, `research-team-${randomUUID().slice(0, 8)}`)
     const replacement = await setup('individual')
+    const replacementTitle = 'Replacement team introduction'
+    await updateEventType(replacement.ctx, replacement.event.id, { title: replacementTitle })
     const newSlug = `${s.teamSlug}-renamed`
     const app = appWith([s.team.id])
     expect((await app.request(s.catalogPath)).status).toBe(200)
@@ -329,11 +335,26 @@ describe.skipIf(!serverUrl)('public team event contract', () => {
       .set({ slug: newSlug })
       .where('id', '=', s.team.id)
       .execute()
+    const claimFormerSlug = () =>
+      db
+        .updateTable('auth.organization')
+        .set({ slug: s.teamSlug })
+        .where('id', '=', replacement.team.id)
+        .returning('slug')
+        .executeTakeFirstOrThrow()
+    await expect(claimFormerSlug()).rejects.toMatchObject({
+      code: '23505',
+      constraint: 'team_slug_reserved',
+    })
+    expect((await app.request(s.catalogPath)).status).toBe(404)
+
     await db
-      .updateTable('auth.organization')
-      .set({ slug: s.teamSlug })
-      .where('id', '=', replacement.team.id)
+      .updateTable('team_slug_reservations')
+      .set({ expires_at: sql<Date>`clock_timestamp() - interval '1 second'` })
+      .where('slug', '=', s.teamSlug)
+      .where('organization_id', '=', s.team.id)
       .execute()
+    await expect(claimFormerSlug()).resolves.toEqual({ slug: s.teamSlug })
 
     const old = await app.request(s.catalogPath)
     expect(old.status).toBe(404)
@@ -341,6 +362,9 @@ describe.skipIf(!serverUrl)('public team event contract', () => {
       error: 'team_not_found',
       message: 'No such team booking page',
     })
+    const replacementDirect = await app.request(s.path)
+    expect(replacementDirect.status).toBe(200)
+    expect(await replacementDirect.json()).toMatchObject({ title: replacementTitle })
     const renamed = await app.request(`/api/v1/public/teams/${newSlug}`)
     expect(renamed.status).toBe(200)
     expect(await renamed.json()).toMatchObject({
