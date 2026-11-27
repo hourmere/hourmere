@@ -754,7 +754,7 @@ function BookingList({
   /** Keeps the list, a later refresh's fallback and the open details showing the same mark. */
   function applyNoShow(bookingId: string, change: NoShowChange, announce: boolean) {
     const latest = loadedSnapshot.current ?? shown
-    const patched: LoadedBookingPages = {
+    const patched = {
       ...latest,
       data: latest.data.map((booking) =>
         booking.id === bookingId ? withNoShowChange(booking, change) : booking,
