@@ -158,6 +158,9 @@ describe.skipIf(!databaseUrl)('custom role browser REST', () => {
       request('POST', '/roles', initialRole, 'owner', { origin: 'https://other.example' }),
     ).resolves.toEqual(denied)
     await expect(request('GET', '/roles', undefined, 'member')).resolves.toEqual(denied)
+    await expect(
+      request('POST', '/roles', { ...initialRole, permissionIds: ['members.assign_role'] }),
+    ).resolves.toMatchObject({ status: 400, body: { error: 'invalid_request' } })
 
     await expect(
       request('GET', '/permissions', undefined, 'admin, unexpected'),

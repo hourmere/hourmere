@@ -33,11 +33,16 @@ const roleParams = teamParams.extend({ roleId: z.uuid() })
 const memberParams = teamParams.extend({ memberId: z.uuid() })
 const revision = z.number().int().min(1).max(2_147_483_647)
 const epoch = z.number().int().min(0).max(2_147_483_647)
+const phaseOne: ReadonlySet<string> = new Set(customRoleCatalogueV1.phaseOne)
+const permissionId = z
+  .string()
+  .refine((id) => phaseOne.has(id))
+  .openapi({
+    description: 'An explicit operation ID grantable in the first custom-role catalogue.',
+  })
 const definition = z.strictObject({
   name: z.string().trim().min(1).max(100),
-  permissionIds: z
-    .array(z.enum(customRoleCatalogueV1.phaseOne))
-    .max(customRoleCatalogueV1.phaseOne.length),
+  permissionIds: z.array(permissionId).max(customRoleCatalogueV1.phaseOne.length),
 })
 const publication = definition.extend({ expectedRevision: revision })
 const archive = z.strictObject({ expectedRevision: revision })

@@ -26,6 +26,7 @@ import { insert, sealed } from '../../../packages/db/src/sso-storage-fixtures.ts
 import { createApp } from './app.ts'
 import type { RouteModule } from './openapi.ts'
 import { openApiRouteInventory } from './openapi-document.ts'
+import { customRoleRoutes } from './routes/custom-roles.ts'
 import { teamBookingBulkPreviewRoutes } from './routes/team-booking-bulk-preview.ts'
 import { productRoutes } from './server.ts'
 import { databaseClock } from './sso-mailbox-proof.ts'
@@ -273,6 +274,17 @@ describe.skipIf(!serverUrl)('SSO proof on team writes', () => {
     const bulk = instance({
       routes: [teamBookingBulkPreviewRoutes({ db, bulkSelectionSecret: secret })],
     })
+    const customRoles = instance({
+      routes: [
+        customRoleRoutes({ db, publicUrl, capabilities: enabledCapabilities, enabled: true }),
+      ],
+    })
+    const customRoleWrites = new Set([
+      'POST /api/v1/teams/:teamId/roles',
+      'PATCH /api/v1/teams/:teamId/roles/:roleId',
+      'DELETE /api/v1/teams/:teamId/roles/:roleId',
+      'PUT /api/v1/teams/:teamId/members/:memberId/custom-role',
+    ])
     const { teamWriteRoutes } = await openApiRouteInventory()
     for (const operation of teamWriteRoutes) {
       const [method, pattern] = operation.split(' ') as [string, string]
@@ -282,7 +294,9 @@ describe.skipIf(!serverUrl)('SSO proof on team writes', () => {
         if (key === 'domainId') return String(fixture.domain.id)
         return eventId
       })
-      const target = path === '/api/v1/team/bookings/bulk-cancellations/preview' ? bulk : app
+      let target = app
+      if (path === '/api/v1/team/bookings/bulk-cancellations/preview') target = bulk
+      if (customRoleWrites.has(operation)) target = customRoles
       await expectRefused(await send(target, method, path, {}), operation)
     }
     expect(await currentTitle()).toBe('Before writing')

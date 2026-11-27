@@ -19,6 +19,7 @@ const dependentMigrations = [
   '0183_scim_groups.sql',
   '0184_scim_group_members.sql',
   '0197_custom_role_storage.sql',
+  '0200_custom_role_membership_lifecycle.sql',
 ]
 
 async function records(pool: pg.Pool, tables?: { schema: string; name: string }[]) {

@@ -40,6 +40,7 @@ describe.skipIf(!serverUrl)('SCIM identity constraint coverage', () => {
           '0183_scim_groups.sql',
           '0184_scim_group_members.sql',
           '0197_custom_role_storage.sql',
+          '0200_custom_role_membership_lifecycle.sql',
         ]
         for (const file of await readdir(migrationsDir)) {
           if (file.endsWith('.sql') && !later.includes(file)) {

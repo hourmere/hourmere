@@ -22669,7 +22669,7 @@ export interface operations {
             content: {
                 "application/json": {
                     name: string;
-                    permissionIds: ("analytics.read" | "branding.read" | "branding.update" | "branding.upload_logo" | "event_notifications.update" | "event_types.activate_round_robin" | "event_types.assign_hosts" | "event_types.create" | "event_types.delete" | "event_types.duplicate" | "event_types.list_host_candidates" | "event_types.update" | "readiness.read_team" | "routing_forms.preview" | "routing_forms.read" | "workflows.preview" | "workflows.read" | "workflows.read_runs")[];
+                    permissionIds: string[];
                     /** Format: uuid */
                     proofAttemptId?: string;
                 };
@@ -22879,7 +22879,7 @@ export interface operations {
                 "application/json": {
                     expectedRevision: number;
                     name: string;
-                    permissionIds: ("analytics.read" | "branding.read" | "branding.update" | "branding.upload_logo" | "event_notifications.update" | "event_types.activate_round_robin" | "event_types.assign_hosts" | "event_types.create" | "event_types.delete" | "event_types.duplicate" | "event_types.list_host_candidates" | "event_types.update" | "readiness.read_team" | "routing_forms.preview" | "routing_forms.read" | "workflows.preview" | "workflows.read" | "workflows.read_runs")[];
+                    permissionIds: string[];
                     /** Format: uuid */
                     proofAttemptId?: string;
                 };
