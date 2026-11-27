@@ -61,7 +61,12 @@ const voterRevisionInput = z.strictObject({
 
 type HostToolDeps = Pick<
   MeetingPollHostContext,
-  'db' | 'notify' | 'automaticMeet' | 'automaticZoom' | 'smsRemindersAvailable'
+  | 'db'
+  | 'notify'
+  | 'automaticMeet'
+  | 'automaticZoom'
+  | 'microsoftCalendarEnabled'
+  | 'smsRemindersAvailable'
 > & { meetingPollSecret?: string | undefined; publicUrl: string }
 
 export function meetingPollHostTools({

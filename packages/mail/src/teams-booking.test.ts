@@ -1,13 +1,8 @@
 import { localeRegistry } from '@hourmere/core/locales'
 import { describe, expect, it } from 'vitest'
-import {
-  type BookingEmailMeeting,
-  bookingEmail,
-  meetingLocationText,
-  type TeamsMeetingLocation,
-} from './booking.ts'
+import { type BookingEmailMeeting, bookingEmail, type TeamsMeetingLocation } from './booking.ts'
 import { mailCatalogues } from './catalogue.ts'
-import { calendarTeamsDescription, escapeIcsText, icsAttachment } from './ics.ts'
+import { calendarMeetingLocation, escapeIcsText, icsAttachment } from './ics.ts'
 import { escapeHtml } from './text.ts'
 
 const url =
@@ -21,9 +16,9 @@ const rows = [
   { kind: 'microsoft_teams', status: 'writeback_failed' },
 ] as const satisfies readonly TeamsMeetingLocation[]
 const noticeKeys = {
-  join_url_pending: ['teams.linkPending', 'teams.linkPendingCancelled'],
-  teams_unavailable: ['teams.unavailable', 'teams.unavailableCancelled'],
-  writeback_failed: ['teams.writebackFailed', 'teams.writebackFailedCancelled'],
+  join_url_pending: 'teams.linkPending',
+  teams_unavailable: 'teams.unavailable',
+  writeback_failed: 'teams.writebackFailed',
 } as const
 
 describe.each(Object.keys(localeRegistry))('Teams booking messages in %s', (locale) => {
@@ -48,8 +43,7 @@ describe.each(Object.keys(localeRegistry))('Teams booking messages in %s', (loca
         start,
         end,
         summary: meeting.eventName,
-        description: calendarTeamsDescription(location, method, locale),
-        location: meetingLocationText(location),
+        ...calendarMeetingLocation(location, method, locale),
         organizer: { name: meeting.hostName, email: 'grace@example.test' },
         attendees: [{ name: meeting.inviteeName, email: meeting.inviteeEmail }],
       })
@@ -65,19 +59,28 @@ describe.each(Object.keys(localeRegistry))('Teams booking messages in %s', (loca
       const content = email.attachments?.[0]?.content.replaceAll('\r\n ', '')
       expect(content).toContain(`METHOD:${method}`)
       const catalogue = mailCatalogues[locale]
-      if (location.status === 'ready') {
+      if (method === 'CANCEL') {
+        expect(email.text).not.toContain(url)
+        expect(email.html).not.toContain(escapeHtml(url))
+        expect(content).toContain('LOCATION:Microsoft Teams')
+        expect(content).not.toContain(url)
+        expect(content).not.toContain('DESCRIPTION:')
+        if (location.status !== 'ready') {
+          const notice = catalogue?.[noticeKeys[location.status]] ?? ''
+          expect(email.text).not.toContain(notice)
+          expect(email.html).not.toContain(escapeHtml(notice))
+        }
+      } else if (location.status === 'ready') {
         expect(email.text).toContain(url)
         expect(email.html).toContain(escapeHtml(url))
         expect(content).toContain(`LOCATION:${url}`)
         expect(content).toMatch(/DESCRIPTION:[^\r\n]+https:\/\/teams\.microsoft\.com/)
-        const detail = method === 'REQUEST' ? catalogue?.['Join Teams meeting'] : 'Microsoft Teams'
+        const detail = catalogue?.['Join Teams meeting']
         expect(detail).toBeTruthy()
         expect(content).toContain(`DESCRIPTION:${detail}`)
-        if (method === 'REQUEST') expect(email.text).toContain(detail)
-        else expect(email.html).not.toContain(`href="${escapeHtml(url)}"`)
+        expect(email.text).toContain(detail)
       } else {
-        const [scheduled, cancelled] = noticeKeys[location.status]
-        const notice = catalogue?.[kind === 'cancelled' ? cancelled : scheduled]
+        const notice = catalogue?.[noticeKeys[location.status]]
         expect(notice).toBeTruthy()
         if (locale !== 'en') expect(notice).not.toMatch(/The Teams link|This booking/)
         expect(email.text).toContain(notice)
@@ -87,7 +90,7 @@ describe.each(Object.keys(localeRegistry))('Teams booking messages in %s', (loca
         expect(JSON.stringify(email)).not.toContain('https://teams.')
         if (location.status === 'writeback_failed') {
           expect(JSON.stringify(email)).not.toContain('Outlook')
-          expect(email.text).not.toContain(catalogue?.[noticeKeys.join_url_pending[0]] ?? '')
+          expect(email.text).not.toContain(catalogue?.[noticeKeys.join_url_pending] ?? '')
         }
       }
     })

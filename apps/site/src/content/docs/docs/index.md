@@ -226,9 +226,9 @@ not grant host rescheduling or reschedule-request authority through REST, MCP or
   installation requires verification by n8n. Downstream effects need durable idempotency.
 - [Zapier](/docs/zapier) is not yet published in the Zapier directory. The source app
   can be deployed privately with your own Zapier account.
-- Booking workflows are available and off by default. Self-hosted operators can opt in
-  without a paid plan. Existing reminders, follow-ups and signed booking webhooks continue
-  to work. See the [configuration reference](/docs/configuration#email-and-registration)
+- Booking workflows are enabled by default, including on self-hosted instances.
+  Operators can pause them with `WORKFLOWS_ENABLED=false`. Existing reminders, follow-ups
+  and signed booking webhooks continue to work. See the [configuration reference](/docs/configuration#email-and-registration)
   and [workflow operating guide](https://github.com/hourmere/hourmere/blob/main/docs/workflows.md#operating-guide).
 - [Cal.com imports](/docs/calcom-import#known-limitations) create inactive drafts and read-only
   local busy records. Same-owner incremental completion is unavailable; group-slot overlaps
