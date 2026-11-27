@@ -220,20 +220,20 @@ import { createStripeClient } from './stripe-client.ts'
 import type { InvitationSummaryMailLimits } from './team-invitations.ts'
 import { createWorkerHealthApp } from './worker-health.ts'
 
-// SAML stays hard-off until its rollout completes: no setting is read for it, and only
-// in-process tests inject it into productRoutes.
-const ssoSamlEnabled = false
-
 /**
- * The SSO capabilities of the running server. OIDC follows the operator setting
- * SSO_OIDC_ENABLED; while it is off, stored SSO state stays readable, recoverable and
- * reducible (Setting-off behaviour in docs/sso.md).
+ * The SSO capabilities of the running server follow the operator settings.
+ * While off, stored SSO state stays readable, recoverable and reducible
+ * (Setting-off behaviour in docs/sso.md).
  */
 export function productionSsoCapabilities(
-  config: Pick<Config, 'SSO_OIDC_ENABLED' | 'SCIM_PROVISIONING_ENABLED'>,
+  config: Pick<Config, 'SSO_OIDC_ENABLED' | 'SSO_SAML_ENABLED' | 'SCIM_PROVISIONING_ENABLED'>,
 ): SsoCapabilities {
   return withScimResources(
-    { ssoOidcEnabled: config.SSO_OIDC_ENABLED, ssoSamlEnabled, ssoOperatorSetting: true },
+    {
+      ssoOidcEnabled: config.SSO_OIDC_ENABLED,
+      ssoSamlEnabled: config.SSO_SAML_ENABLED,
+      ssoOperatorSetting: true,
+    },
     config.SCIM_PROVISIONING_ENABLED,
   )
 }
@@ -324,7 +324,7 @@ export function productRoutes({
   ssoRecoveryEnrollmentQueue?: SsoRecoveryEnrollmentQueue | undefined
   /** SSO_OIDC_ENABLED as the running server passes it; tests inject it directly. */
   ssoOidcEnabled?: boolean
-  /** In-process test injection only; no operator setting exists during hard-off. */
+  /** SSO_SAML_ENABLED as the running server passes it; tests inject it directly. */
   ssoSamlEnabled?: boolean
   /** Passed by the running server: a protocol that is off keeps its Setting-off behaviour. */
   ssoOperatorSetting?: boolean | undefined

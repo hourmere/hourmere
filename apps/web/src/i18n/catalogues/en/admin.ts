@@ -3469,6 +3469,10 @@ export const admin = {
   'Team addresses are separate from personal handles.':
     'Team addresses are separate from personal handles.',
 
+  // SAML recovery
+  'If you are replacing signing certificates, enter the full set your identity provider uses.':
+    'If you are replacing signing certificates, enter the full set your identity provider uses.',
+
   // Booking handoff
   'Booking handoff': 'Booking handoff',
   'Handoff status': 'Handoff status',

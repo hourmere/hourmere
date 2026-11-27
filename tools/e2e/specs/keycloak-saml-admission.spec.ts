@@ -77,7 +77,7 @@ async function admittedUser(app: KeycloakFixture, email: string, subject: string
   return account.userId
 }
 
-test.describe('with SAML injected into the fixture', () => {
+test.describe('with the SAML setting on', () => {
   test.use({ samlEnabled: true })
 
   test.beforeEach(async ({ keycloak: app }) => {
@@ -181,7 +181,7 @@ test.describe('with SAML injected into the fixture', () => {
   })
 })
 
-test('without injection the seeded SAML fixture offers no admission entry', async ({
+test('with the SAML setting off the seeded fixture offers no admission entry', async ({
   page,
   keycloak: app,
 }) => {

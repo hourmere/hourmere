@@ -51,15 +51,15 @@ entity ID and ACS URL. Keycloak 26.8.2 starts with **Sign documents** enabled an
 **Sign assertions**, Keycloak returns the issued RelayState and the browser completes
 sign-in for the linked persona. A second Hourmere process shares the disposable database
 and canonical SP URLs to check that changed RelayState, a damaged signature and a replayed
-response are refused. SAML is enabled only by an in-process test injection. The same seeded
-provider offers no SAML sign-in option without it.
+response are refused. The fixture enables SAML through `SSO_SAML_ENABLED=true`. The same seeded
+provider offers no SAML sign-in option with the setting off.
 
 The SAML linking and admission cases enable assertion signing on that same fixture.
 An existing member verifies their Hourmere mailbox and explicitly consents to linking
 before the link can be used for sign-in. Unlinked subjects see the same browser outcome
 whether or not an Hourmere account already exists for the asserted email. The cases cover
 explicit invitation acceptance with closed signup, JIT admission with open signup, and
-JIT refusal with closed signup. Without the test injection, the SAML link and admission
+JIT refusal with closed signup. With the SAML setting off, the link and admission
 entries are hidden and their requests are refused.
 
 The OIDC enforcement cases compare a mailbox session and a Keycloak session for the same
@@ -76,7 +76,7 @@ realm. It verifies a new signing key and a fresh JWKS fetch after the verifier c
 The outage case checks existing proof, new sign-in refusal and the ordinary mailbox boundary.
 
 The SAML enforcement cases require `ForceAuthn="true"` and a fresh Keycloak login to
-bind a CLI and MCP lease. Without the SAML test injection, the seeded team still
+bind a CLI and MCP lease. With the SAML setting off, the seeded team still
 requires SSO and the sign-in page offers no SAML entry. SAML break-glass repair uses
 the browser's mailbox verification and the existing same-origin provider endpoints.
 Each edit, test and activation spends a separate recovery grant, and recovery leaves

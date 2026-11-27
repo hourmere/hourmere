@@ -257,8 +257,7 @@ export function SettingsPage() {
         me.principal.kind === 'session' &&
         (shell?.ssoOidcEnabled === true ||
           shell?.ssoSamlEnabled === true ||
-          (shell?.ssoStored === true &&
-            me.sso?.links.some(({ protocol }) => protocol !== 'saml'))) && (
+          (shell?.ssoStored === true && Boolean(me.sso?.links.length))) && (
           <SsoMemberSettings
             key={String(shell?.ssoSamlEnabled === true)}
             samlEnabled={shell?.ssoSamlEnabled === true}

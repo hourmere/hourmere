@@ -8,11 +8,14 @@ import {
   activateRoundRobin,
   createEventType,
   createOneTimeBookingLink,
+  createRoutingForm,
   deleteEventType,
   getPublicTeamEventType,
   type PublicEventType,
   publicLocationOptions,
+  publishRoutingForm,
   updateEventType,
+  updateRoutingForm,
 } from '@hourmere/scheduling'
 import {
   createFixtures,
@@ -20,8 +23,10 @@ import {
   createTestUser,
   testContext,
 } from '@hourmere/scheduling/testing'
+import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createApp } from '../app.ts'
+import { oneTimeBookingRoutes } from './one-time-bookings.ts'
 import { publicRoutes } from './public.ts'
 
 type SchedulingType = 'individual' | 'collective' | 'round_robin'
@@ -85,7 +90,10 @@ describe.skipIf(!serverUrl)('public team event contract', () => {
     await owned?.drop()
   })
 
-  const appWith = (teamPublicHomeOrganizationIds?: readonly string[]) =>
+  const appWith = (
+    teamPublicHomeOrganizationIds?: readonly string[],
+    routingFormsEnabled = false,
+  ) =>
     createApp({
       publicUrl: 'http://localhost:3000',
       checkDb: async () => {},
@@ -95,13 +103,19 @@ describe.skipIf(!serverUrl)('public team event contract', () => {
         publicRoutes({
           db,
           now,
+          routingFormsEnabled,
           teamPublicHomeOrganizationIds,
           rateLimits: { page: plenty, slots: plenty, book: plenty },
         }),
+        oneTimeBookingRoutes({ db, now }),
       ],
     })
 
-  async function setup(schedulingType: SchedulingType, activate = true) {
+  async function setup(
+    schedulingType: SchedulingType,
+    activate = true,
+    teamSlug = `Research-Team-${randomUUID().slice(0, 8)}`,
+  ) {
     const owner = await createTestUser(db, 'Ada Lovelace')
     const users =
       schedulingType === 'individual' ? [owner] : [owner, await createTestUser(db, 'Grace Hopper')]
@@ -110,7 +124,6 @@ describe.skipIf(!serverUrl)('public team event contract', () => {
       users.map((user, index) => ({ user, role: index === 0 ? 'owner' : 'member' })),
       'Research team',
     )
-    const teamSlug = `Research-Team-${randomUUID().slice(0, 8)}`
     await db
       .updateTable('auth.organization')
       .set({ slug: teamSlug })
@@ -180,11 +193,21 @@ describe.skipIf(!serverUrl)('public team event contract', () => {
     })
     await updateEventType(other.ctx, other.event.id, { title: 'Other team introduction' })
 
+    const privateValues = [
+      privateLink.token,
+      privateLink.id,
+      'private-guest@example.com',
+      s.team.id,
+      s.event.id,
+      ...s.users.flatMap((user) => [user.id, user.email]),
+      ...s.members.map((member) => member.id),
+    ]
     const app = appWith([s.team.id, other.team.id])
     const response = await app.request(s.catalogPath)
     expect(response.status).toBe(200)
     expect(response.headers.get('cache-control')).toBe('no-store')
     const body = await response.text()
+    for (const value of privateValues) expect(body.includes(value)).toBe(false)
     expect(JSON.parse(body)).toEqual({
       team: { name: 'Research team', slug: s.teamSlug },
       eventTypes: [
@@ -204,13 +227,36 @@ describe.skipIf(!serverUrl)('public team event contract', () => {
         },
       ],
     })
-    expect(body.includes(privateLink.token)).toBe(false)
     // Listing and link access remain separate; the directory does not change direct URLs.
     expect((await app.request(`${s.catalogPath}/${hidden.slug}`)).status).toBe(200)
+    const guessedToken = 'x'.repeat(43)
+    for (const slug of ['inactive', 'deleted', 'unknown-event', guessedToken]) {
+      for (const suffix of ['', `/slots?${range}`]) {
+        const unavailable = await app.request(`${s.catalogPath}/${slug}${suffix}`)
+        expect(unavailable.status).toBe(404)
+        expect(await unavailable.json()).toEqual({
+          error: 'event_type_not_found',
+          message: 'No such event type',
+        })
+      }
+    }
+    const guessedLink = await app.request(`/api/v1/book/${guessedToken}`)
+    expect(guessedLink.status).toBe(404)
+    expect(await guessedLink.json()).toEqual({ error: 'one_time_link_not_found' })
+    const oneTimePage = await app.request(`/api/v1/book/${privateLink.token}`)
+    expect(oneTimePage.status).toBe(200)
+    const oneTimeBody = await oneTimePage.text()
+    expect(oneTimeBody.includes(privateLink.token)).toBe(false)
+    expect(JSON.parse(oneTimeBody)).toMatchObject({
+      eventType: { title: hidden.title },
+      prefill: { name: 'Private guest', email: 'private-guest@example.com' },
+    })
 
     await updateEventType(s.ctx, s.event.id, { isHidden: true })
     const refreshed = await app.request(s.catalogPath)
-    expect(await refreshed.json()).toHaveProperty('eventTypes', [
+    const refreshedBody = await refreshed.text()
+    for (const value of privateValues) expect(refreshedBody.includes(value)).toBe(false)
+    expect(JSON.parse(refreshedBody)).toHaveProperty('eventTypes', [
       {
         slug: 'first',
         title: 'First saved event',
@@ -219,6 +265,115 @@ describe.skipIf(!serverUrl)('public team event contract', () => {
         location: null,
       },
     ])
+  })
+
+  it('omits a hidden target of a published routing form and preserves its direct link', async () => {
+    const s = await setup('individual')
+    const target = await createEventType(s.ctx, {
+      slug: 'private-routing-target',
+      title: 'Private routing target',
+      durationMinutes: 30,
+      hosts: [{ userId: s.ctx.principal.user.id }],
+      isHidden: true,
+    })
+    const { organization, user } = s.ctx.principal
+    const session = testContext(
+      db,
+      { kind: 'session', sessionId: randomUUID(), organization, user },
+      now,
+    )
+    const form = await createRoutingForm(session, {
+      slug: 'find-your-event',
+      title: 'Find your event',
+      fallback: { kind: 'event', eventTypeId: target.id, mappings: [] },
+    })
+    const { form: published } = await publishRoutingForm(session, form.id, {
+      expectedRevision: form.draftRevision,
+    })
+    await updateRoutingForm(session, form.id, {
+      expectedRevision: published.draftRevision,
+      enabled: true,
+    })
+
+    const app = appWith([s.team.id], true)
+    const catalogue = await app.request(s.catalogPath)
+    expect(catalogue.status).toBe(200)
+    expect(await catalogue.json()).toHaveProperty('eventTypes', [
+      {
+        slug: s.event.slug,
+        title: s.event.title,
+        description: s.event.description,
+        durationMinutes: s.event.durationMinutes,
+        location: { kind: 'phone' },
+      },
+    ])
+    const publicForm = await app.request(
+      `/api/v1/public/-/routing/teams/${s.teamSlug}/${form.slug}`,
+    )
+    expect(publicForm.status).toBe(200)
+    expect(await publicForm.json()).toEqual({
+      versionId: published.publishedVersionId,
+      title: form.title,
+      questions: [],
+    })
+    const direct = await app.request(`${s.catalogPath}/${target.slug}`)
+    expect(direct.status).toBe(200)
+    expect(await direct.json()).toMatchObject({ slug: target.slug, title: target.title })
+  })
+
+  it('keeps publication with the renamed team when its reserved slug expires and is reused', async () => {
+    const s = await setup('individual', true, `research-team-${randomUUID().slice(0, 8)}`)
+    const replacement = await setup('individual')
+    const replacementTitle = 'Replacement team introduction'
+    await updateEventType(replacement.ctx, replacement.event.id, { title: replacementTitle })
+    const newSlug = `${s.teamSlug}-renamed`
+    const app = appWith([s.team.id])
+    expect((await app.request(s.catalogPath)).status).toBe(200)
+
+    await db
+      .updateTable('auth.organization')
+      .set({ slug: newSlug })
+      .where('id', '=', s.team.id)
+      .execute()
+    const claimFormerSlug = () =>
+      db
+        .updateTable('auth.organization')
+        .set({ slug: s.teamSlug })
+        .where('id', '=', replacement.team.id)
+        .returning('slug')
+        .executeTakeFirstOrThrow()
+    await expect(claimFormerSlug()).rejects.toMatchObject({
+      code: '23505',
+      constraint: 'team_slug_reserved',
+    })
+    expect((await app.request(s.catalogPath)).status).toBe(404)
+
+    await db
+      .updateTable('team_slug_reservations')
+      .set({ expires_at: sql<Date>`clock_timestamp() - interval '1 second'` })
+      .where('slug', '=', s.teamSlug)
+      .where('organization_id', '=', s.team.id)
+      .execute()
+    await expect(claimFormerSlug()).resolves.toEqual({ slug: s.teamSlug })
+
+    const old = await app.request(s.catalogPath)
+    expect(old.status).toBe(404)
+    expect(await old.json()).toEqual({
+      error: 'team_not_found',
+      message: 'No such team booking page',
+    })
+    const replacementDirect = await app.request(s.path)
+    expect(replacementDirect.status).toBe(200)
+    expect(await replacementDirect.json()).toMatchObject({ title: replacementTitle })
+    const renamed = await app.request(`/api/v1/public/teams/${newSlug}`)
+    expect(renamed.status).toBe(200)
+    expect(await renamed.json()).toMatchObject({
+      team: { name: 'Research team', slug: newSlug },
+      eventTypes: [{ slug: s.event.slug }],
+    })
+    const direct = await app.request(`/api/v1/public/teams/${newSlug}/${s.event.slug}`)
+    expect(direct.status).toBe(200)
+    expect(await direct.json()).toMatchObject({ team: { slug: newSlug }, slug: s.event.slug })
   })
 
   it('serves an enabled empty team and answers unavailable pages without team identity', async () => {

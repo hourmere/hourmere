@@ -148,7 +148,7 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
         tags: ['SSO'],
         summary: 'Create a disabled SSO provider draft',
         description:
-          'Verified team owner/admin browser session with fresh proof. An enrolled owner can spend one recovery grant on an enforced team. Provider credentials and raw metadata are write-only. Returns 404 sso_disabled when the requested protocol is off. SAML is unavailable.',
+          'Verified team owner/admin browser session with fresh proof. An enrolled owner can spend one recovery grant on an enforced team. Provider credentials and raw metadata are write-only. Returns 404 sso_disabled when the requested protocol is off.',
         security: [{ session: [] }],
         middleware: [...middleware] as const,
         request: {
@@ -319,7 +319,7 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
         tags: ['SSO'],
         summary: 'Update an SSO provider draft',
         description:
-          'Verified team owner/admin browser session with fresh proof and expected revision. An enrolled owner can spend one recovery grant on an enforced team. Omitted secrets are preserved. Provider credentials and raw metadata are write-only. Returns 404 sso_disabled when the requested protocol is off. SAML is unavailable.',
+          'Verified team owner/admin browser session with fresh proof and expected revision. An enrolled owner can spend one recovery grant on an enforced team. Omitted secrets are preserved. Provider credentials and raw metadata are write-only. Returns 404 sso_disabled when the requested protocol is off.',
         security: [{ session: [] }],
         middleware: [...middleware] as const,
         request: {
@@ -356,7 +356,7 @@ export function ssoDraftRoutes(deps: SsoDraftDeps & OidcProviderTestDeps): Route
         tags: ['SSO'],
         summary: 'Retire an SSO provider',
         description:
-          'Verified team owner/admin browser session with fresh proof and expected revision. An enforced team must keep a usable provider. An authorized repeat retirement is idempotent. Stays available while SSO_OIDC_ENABLED is off.',
+          'Verified team owner/admin browser session with fresh proof and expected revision. An enforced team must keep a usable provider. An authorized repeat retirement is idempotent. Stays available while the provider’s protocol setting is off.',
         security: [{ session: [] }],
         middleware: [...deleteMiddleware] as const,
         request: {
