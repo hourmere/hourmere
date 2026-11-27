@@ -3325,6 +3325,8 @@ export const admin = {
   'A schedule can have at most 10,000 date overrides, including past dates. Remove some overrides before saving.':
     'A schedule can have at most 10,000 date overrides, including past dates. Remove some overrides before saving.',
 
+  // SCIM invitation attribution
+  'SCIM connection': 'SCIM connection',
   // Additional durations
   'Removed {0}. Selected length: {1}.': 'Removed {0}. Selected length: {1}.',
 

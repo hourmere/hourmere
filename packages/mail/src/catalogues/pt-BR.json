@@ -81,6 +81,7 @@
   "teamInvitation.defaultInviter": "Um membro da equipe",
   "teamInvitation.subject": "Convite para participar de {team}",
   "teamInvitation.introduction": "{inviter} convidou você para participar da equipe “{team}” no Hourmere.",
+  "teamInvitation.scimIntroduction": "Seu provedor de identidade enviou este convite em nome da equipe “{team}” no Hourmere.",
   "teamInvitation.identity": "Entre com {email}, o endereço de e-mail que recebeu o convite, e confirme esse endereço. Depois, aceite o convite na página. Aliases de e-mail não podem substituir esse endereço.",
   "teamInvitation.acceptance": "Entrar na conta não faz você participar da equipe; você precisa aceitar o convite explicitamente na página.",
   "teamInvitation.expiry": "Este convite expira em {expiry}.",
