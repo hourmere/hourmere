@@ -601,6 +601,11 @@ export const common = {
   // Booking location changes
   'The meeting location has changed. Please choose a time again.':
     'The meeting location has changed. Please choose a time again.',
+
+  // Microsoft Teams host authorization
+  'The assigned host must configure Microsoft Teams in their own signed-in session.':
+    'The assigned host must configure Microsoft Teams in their own signed-in session.',
+
   // Paid booking details
   'bookingPayment.label': 'Payment',
   'bookingPayment.paid': 'Paid {amount}',

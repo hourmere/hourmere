@@ -618,6 +618,7 @@ const notFound =
 const invalid =
   'invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, microsoft_teams_host_policy, invalid_schedule_id (scheduleId is not one of the host’s schedules), invalid_payment_price, or payment_flow_unsupported'
 const forbidden = `insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; ${CROSS_ORIGIN_WRITE}`
+const teamsSessionForbidden = `${forbidden}; microsoft_teams_host_session_required: adding a Microsoft Teams location, changing its host, reactivating or duplicating it requires the assigned host’s signed-in session`
 const slugTaken = 'slug_taken: another event type on the same page has this slug'
 const paymentSettingsUnavailable =
   'payment_settings_unavailable: the instance does not currently accept new Checkout payments'
@@ -875,7 +876,7 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
           201: { description: 'The new event type', content: json(EventType) },
           ...errorResponses({
             400: invalid,
-            403: forbidden,
+            403: teamsSessionForbidden,
             409: `${slugTaken}; ${microsoftTeamsUnavailable}; ${paymentSettingsUnavailable}; ${ORGANIZATION_CONTEXT_CHANGED}`,
           }),
         },
@@ -911,7 +912,7 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
           201: { description: 'The copied event type', content: json(EventType) },
           ...errorResponses({
             400: invalid,
-            403: forbidden,
+            403: teamsSessionForbidden,
             404: notFound,
             409: `${slugTaken}; ${microsoftTeamsUnavailable}; ${paymentSettingsUnavailable}; ${ORGANIZATION_CONTEXT_CHANGED}`,
           }),
@@ -967,7 +968,7 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
           200: { description: 'The changed event type', content: json(EventType) },
           ...errorResponses({
             400: invalid,
-            403: forbidden,
+            403: teamsSessionForbidden,
             404: notFound,
             409: `${slugTaken}; ${locationOptionsConflict}; ${microsoftTeamsUnavailable}; ${paymentSettingsUnavailable}; ${ORGANIZATION_CONTEXT_CHANGED}`,
           }),

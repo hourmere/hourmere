@@ -38,7 +38,7 @@ const operations = [
   command: command as string,
 }))
 
-/** The operations shipped while workflows are off; every other one is still absent. */
+/** The published workflow operations. Every other planned operation is absent. */
 const SHIPPED = [
   'listWorkflows',
   'createWorkflow',
@@ -50,10 +50,6 @@ const SHIPPED = [
 ]
 const shipped = operations.filter(({ operationId }) => SHIPPED.includes(operationId))
 const absent = operations.filter(({ operationId }) => !SHIPPED.includes(operationId))
-const defaultOperatorValues = [
-  { label: 'unset', value: undefined },
-  { label: 'the empty Compose value', value: '' },
-]
 
 /** A Hono path such as `/api/v1/workflows/:id`, from an OpenAPI path. */
 const honoPath = (path: string) => path.replace(/\{(\w+)\}/g, ':$1')
@@ -383,7 +379,7 @@ const toolError = (message: Awaited<ReturnType<typeof mcp>>) => {
   return JSON.parse(message.result?.content?.[0]?.text ?? '{}')
 }
 
-describe('booking workflows are off and expose the shipped operations', () => {
+describe('booking workflow operator setting and published operations', () => {
   it('reads every documented workflow operation from the design', () => {
     expect(operations.map(({ operationId }) => operationId)).toEqual([
       'listWorkflows',
@@ -422,7 +418,7 @@ describe('booking workflows are off and expose the shipped operations', () => {
     for (const { method, path, operationId } of shipped) {
       const operation = paths[path]?.[method.toLowerCase()] as Record<string, unknown>
       expect(operation?.operationId, operationId).toBe(operationId)
-      expect(String(operation?.description)).toContain('WORKFLOWS_ENABLED=true')
+      expect(String(operation?.description)).toContain('WORKFLOWS_ENABLED=false')
       expect(String(operation?.description)).toContain('404 workflows_disabled')
     }
     for (const { method, path, operationId } of absent) {
@@ -450,133 +446,145 @@ describe('booking workflows are off and expose the shipped operations', () => {
     expect(instance?.properties).toHaveProperty(['workflowsEnabled', 'type'], 'boolean')
   })
 
-  it.each(defaultOperatorValues)(
-    'honors operator-off on REST and MCP with $label',
-    async ({ value }) => {
+  it.each([undefined, ''])(
+    'advertises workflows by default for WORKFLOWS_ENABLED=%j',
+    async (value) => {
       const databaseUrl = 'postgres://workflows-off@127.0.0.1:9/workflows-off'
-      const pool = createPool(databaseUrl)
-      const connect = vi.spyOn(pool, 'connect')
-      const db = createDb(pool)
+      const db = createDb(createPool(databaseUrl))
       try {
         const app = productionApp(db, databaseUrl, value)
-        const routes = app.routes.map(({ path }) => path)
-        for (const control of ['/api/v1/bookings/:id', '/api/v1/instance', '/mcp', '/assets/*'])
-          expect(routes, control).toContain(control)
-        const workflowRoutes = [
-          ...new Set(
-            app.routes
-              .filter(({ path }) => workflowSegment.test(path))
-              .map(({ method, path }) => `${method} ${path}`),
-          ),
-        ].sort()
-        expect(workflowRoutes).toEqual(
-          shipped.map(({ method, path }) => `${method} ${honoPath(path)}`).sort(),
-        )
-        for (const route of workflowRoutes)
-          expect(
-            app.routes.some(
-              ({ method, path, handler }) =>
-                `${method} ${path}` === route && handler === workflowsGuard,
-            ),
-            route,
-          ).toBe(true)
-
         const instance = await app.request('/api/v1/instance')
         expect(instance.status).toBe(200)
-        expect(await instance.json()).toHaveProperty('workflowsEnabled', false)
-
-        const names = prepareTools(productTools({ db, slotSnippetsEnabled: true })).map(
-          ({ tool }) => tool.name,
-        )
-        expect(names).toContain('create_booking')
-        for (const { tool } of absent) expect(names).not.toContain(tool)
-        expect(names.filter((name) => /workflow/i.test(name)).sort()).toEqual(
+        expect(await instance.json()).toHaveProperty('workflowsEnabled', true)
+        const listed = (await mcp(app, 'full', 'tools/list')).result?.tools?.map(({ name }) => name)
+        expect(listed?.filter((name) => /workflow/i.test(name)).sort()).toEqual(
           shipped.map(({ tool }) => tool).sort(),
         )
-        for (const scope of ['full', 'read'] as const) {
-          const listed = (await mcp(app, scope, 'tools/list')).result?.tools?.map(
-            ({ name }) => name,
-          )
-          expect(listed).toContain('whoami')
-          expect(listed?.filter((name) => /workflow/i.test(name))).toEqual([])
-        }
-
-        // Refused mutations stop before validation. Recovery operations reach validation or
-        // opaque ID checks, without any DB access for these malformed requests.
-        const outcomes: Record<string, [number, string, Record<string, unknown>]> = {
-          createWorkflow: [404, 'workflows_disabled', {}],
-          previewWorkflow: [404, 'workflows_disabled', {}],
-          updateWorkflow: [
-            404,
-            'workflows_disabled',
-            { id: 'invalid', expectedRevision: 1, enabled: true },
-          ],
-          deleteWorkflow: [404, 'workflow_not_found', { id: 'invalid', expectedRevision: 1 }],
-          getWorkflow: [404, 'workflow_not_found', { id: 'invalid' }],
-          listWorkflowRuns: [404, 'workflow_not_found', { id: 'invalid' }],
-          listWorkflows: [400, 'invalid_request', {}],
-        }
-        for (const { method, path, operationId, tool } of shipped) {
-          const [status, error, args] = outcomes[operationId] ?? []
-          if (!args) throw new Error(`Missing operator-off expectation for ${operationId}`)
-          const { id: _id, ...body } = args
-          const url = path.replace('{id}', 'invalid')
-          const request = (scope?: keyof typeof keys) =>
-            app.request(url, {
-              method,
-              headers: {
-                ...(scope && { authorization: bearer(scope) }),
-                ...(method !== 'GET' && { 'content-type': 'application/json' }),
-              },
-              ...(method !== 'GET' && { body: JSON.stringify(body) }),
-            })
-          for (const scope of ['full', 'read', 'bookings'] as const) {
-            const refusedScope = scope === 'bookings' || (method !== 'GET' && scope === 'read')
-            const expectedError = refusedScope ? 'insufficient_scope' : error
-            const response = await request(scope)
-            expect(response.status, `${scope} ${method} ${url}`).toBe(refusedScope ? 403 : status)
-            expect(await response.json()).toMatchObject({ error: expectedError })
-            expect(
-              toolError(await mcp(app, scope, 'tools/call', { name: tool, arguments: args })),
-            ).toMatchObject({ error: expectedError })
-          }
-          expect((await request()).status, url).toBe(401)
-        }
-        expect(connect).not.toHaveBeenCalled()
       } finally {
         await db.destroy()
       }
     },
   )
 
-  it.each(defaultOperatorValues)(
-    'does not query the booking transaction with $label',
-    async ({ value }) => {
-      const config = workflowConfig('postgres://workflows-off@127.0.0.1:9/workflows-off', value)
-      const trx = new Proxy({} as Db, {
-        get: () => {
-          throw new Error('operator-off capture touched the transaction')
-        },
-      })
-      const now = Temporal.Instant.from('2030-01-01T12:00Z')
-      for (const type of [
-        'created',
-        'rescheduled',
-        'cancelled',
-        'reschedule_requested',
-        'reschedule_request_expired',
-      ] as const)
-        await expect(
-          workflows.captureWorkflowBooking(
-            trx,
-            { type, requestId: randomUUID(), bookingId: randomUUID(), start: now },
-            now,
-            config.BETTER_AUTH_SECRET,
-            { workflowsEnabled: config.WORKFLOWS_ENABLED },
+  it('honors explicit operator-off on REST and MCP', async () => {
+    const databaseUrl = 'postgres://workflows-off@127.0.0.1:9/workflows-off'
+    const pool = createPool(databaseUrl)
+    const connect = vi.spyOn(pool, 'connect')
+    const db = createDb(pool)
+    try {
+      const app = productionApp(db, databaseUrl, 'false')
+      const routes = app.routes.map(({ path }) => path)
+      for (const control of ['/api/v1/bookings/:id', '/api/v1/instance', '/mcp', '/assets/*'])
+        expect(routes, control).toContain(control)
+      const workflowRoutes = [
+        ...new Set(
+          app.routes
+            .filter(({ path }) => workflowSegment.test(path))
+            .map(({ method, path }) => `${method} ${path}`),
+        ),
+      ].sort()
+      expect(workflowRoutes).toEqual(
+        shipped.map(({ method, path }) => `${method} ${honoPath(path)}`).sort(),
+      )
+      for (const route of workflowRoutes)
+        expect(
+          app.routes.some(
+            ({ method, path, handler }) =>
+              `${method} ${path}` === route && handler === workflowsGuard,
           ),
-        ).resolves.toBeUndefined()
-    },
-  )
+          route,
+        ).toBe(true)
+
+      const instance = await app.request('/api/v1/instance')
+      expect(instance.status).toBe(200)
+      expect(await instance.json()).toHaveProperty('workflowsEnabled', false)
+
+      const names = prepareTools(productTools({ db, slotSnippetsEnabled: true })).map(
+        ({ tool }) => tool.name,
+      )
+      expect(names).toContain('create_booking')
+      for (const { tool } of absent) expect(names).not.toContain(tool)
+      expect(names.filter((name) => /workflow/i.test(name)).sort()).toEqual(
+        shipped.map(({ tool }) => tool).sort(),
+      )
+      for (const scope of ['full', 'read'] as const) {
+        const listed = (await mcp(app, scope, 'tools/list')).result?.tools?.map(({ name }) => name)
+        expect(listed).toContain('whoami')
+        expect(listed?.filter((name) => /workflow/i.test(name))).toEqual([])
+      }
+
+      // Refused mutations stop before validation. Recovery operations reach validation or
+      // opaque ID checks, without any DB access for these malformed requests.
+      const outcomes: Record<string, [number, string, Record<string, unknown>]> = {
+        createWorkflow: [404, 'workflows_disabled', {}],
+        previewWorkflow: [404, 'workflows_disabled', {}],
+        updateWorkflow: [
+          404,
+          'workflows_disabled',
+          { id: 'invalid', expectedRevision: 1, enabled: true },
+        ],
+        deleteWorkflow: [404, 'workflow_not_found', { id: 'invalid', expectedRevision: 1 }],
+        getWorkflow: [404, 'workflow_not_found', { id: 'invalid' }],
+        listWorkflowRuns: [404, 'workflow_not_found', { id: 'invalid' }],
+        listWorkflows: [400, 'invalid_request', {}],
+      }
+      for (const { method, path, operationId, tool } of shipped) {
+        const [status, error, args] = outcomes[operationId] ?? []
+        if (!args) throw new Error(`Missing operator-off expectation for ${operationId}`)
+        const { id: _id, ...body } = args
+        const url = path.replace('{id}', 'invalid')
+        const request = (scope?: keyof typeof keys) =>
+          app.request(url, {
+            method,
+            headers: {
+              ...(scope && { authorization: bearer(scope) }),
+              ...(method !== 'GET' && { 'content-type': 'application/json' }),
+            },
+            ...(method !== 'GET' && { body: JSON.stringify(body) }),
+          })
+        for (const scope of ['full', 'read', 'bookings'] as const) {
+          const refusedScope = scope === 'bookings' || (method !== 'GET' && scope === 'read')
+          const expectedError = refusedScope ? 'insufficient_scope' : error
+          const response = await request(scope)
+          expect(response.status, `${scope} ${method} ${url}`).toBe(refusedScope ? 403 : status)
+          expect(await response.json()).toMatchObject({ error: expectedError })
+          expect(
+            toolError(await mcp(app, scope, 'tools/call', { name: tool, arguments: args })),
+          ).toMatchObject({ error: expectedError })
+        }
+        expect((await request()).status, url).toBe(401)
+      }
+      expect(connect).not.toHaveBeenCalled()
+    } finally {
+      await db.destroy()
+    }
+  })
+
+  it('does not query the booking transaction when explicitly off', async () => {
+    const config = workflowConfig('postgres://workflows-off@127.0.0.1:9/workflows-off', 'false')
+    const trx = new Proxy({} as Db, {
+      get: () => {
+        throw new Error('operator-off capture touched the transaction')
+      },
+    })
+    const now = Temporal.Instant.from('2030-01-01T12:00Z')
+    for (const type of [
+      'created',
+      'rescheduled',
+      'cancelled',
+      'reschedule_requested',
+      'reschedule_request_expired',
+    ] as const)
+      await expect(
+        workflows.captureWorkflowBooking(
+          trx,
+          { type, requestId: randomUUID(), bookingId: randomUUID(), start: now },
+          now,
+          config.BETTER_AUTH_SECRET,
+          { workflowsEnabled: config.WORKFLOWS_ENABLED },
+        ),
+      ).resolves.toBeUndefined()
+  })
 
   it('registers only the shipped workflow CLI commands and app paths', () => {
     const commands = [

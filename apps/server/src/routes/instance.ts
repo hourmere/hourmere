@@ -66,7 +66,7 @@ const Instance = z
     }),
     workflowsEnabled: z.boolean().optional().openapi({
       description:
-        'Whether booking workflows are enabled; false until they are, and absent (treat as false) on older servers',
+        'Effective WORKFLOWS_ENABLED setting (true by default). Treat an absent field on older servers as false.',
     }),
     embedEnabled: z.boolean().optional().openapi({
       description: 'Whether embedding is enabled; absent when unknown',

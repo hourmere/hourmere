@@ -280,15 +280,11 @@ export function meetingLocationText(location: MeetingLocation): string {
 export function teamsMeetingNotice(
   location: TeamsMeetingLocation,
   locale: string | null | undefined,
-  cancelled: boolean,
 ): string | undefined {
   const language = interfaceLanguage(locale) ?? 'en'
-  if (location.status === 'join_url_pending')
-    return message(language, cancelled ? 'teams.linkPendingCancelled' : 'teams.linkPending')
-  if (location.status === 'teams_unavailable')
-    return message(language, cancelled ? 'teams.unavailableCancelled' : 'teams.unavailable')
-  if (location.status === 'writeback_failed')
-    return message(language, cancelled ? 'teams.writebackFailedCancelled' : 'teams.writebackFailed')
+  if (location.status === 'join_url_pending') return message(language, 'teams.linkPending')
+  if (location.status === 'teams_unavailable') return message(language, 'teams.unavailable')
+  if (location.status === 'writeback_failed') return message(language, 'teams.writebackFailed')
 }
 
 function locationForText(location: MeetingLocation, language: InterfaceLanguage): string {
@@ -701,9 +697,7 @@ export function bookingEmail(
         : teams
           ? [
               'Microsoft Teams',
-              teams.status === 'ready' && kind === 'cancelled'
-                ? linkableUrl(teams.url)
-                : teamsMeetingNotice(teams, language, kind === 'cancelled'),
+              kind !== 'cancelled' ? teamsMeetingNotice(teams, language) : undefined,
             ]
               .filter(Boolean)
               .join('\n')

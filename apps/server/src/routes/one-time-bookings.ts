@@ -49,6 +49,7 @@ export function oneTimeBookingRoutes({
   automaticMeet,
   smsRemindersAvailable,
   automaticZoom,
+  microsoftCalendarEnabled,
   successRedirectPolicy,
   rateLimits = {},
 }: PublicRoutesDeps): RouteModule {
@@ -59,6 +60,7 @@ export function oneTimeBookingRoutes({
     automaticMeet,
     smsRemindersAvailable,
     automaticZoom,
+    microsoftCalendarEnabled,
     successRedirectPolicy,
   }
   const limit = (group: 'page' | 'slots' | 'book') =>

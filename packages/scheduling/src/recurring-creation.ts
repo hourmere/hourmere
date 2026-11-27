@@ -287,6 +287,7 @@ async function createBookingSeries(
         requestId: ctx.requestId,
         automaticMeet: ctx.automaticMeet,
         automaticZoom: ctx.automaticZoom,
+        microsoftCalendarEnabled: ctx.microsoftCalendarEnabled,
         notify: (async (trx, event, now) => {
           await options.notifyMemberConference?.(trx, event, now)
           await options.notifyMemberEmail?.(trx, event, now)

@@ -265,6 +265,8 @@ function EventTypeForm({
     teamsIssue = 'Microsoft Teams requires individual scheduling with one host.'
   } else if (me.organization.personal) {
     teamsIssue = microsoftTeamsCalendarIssue
+  } else if (draft.hostUserIds[0] !== me.user.id) {
+    teamsIssue = 'The assigned host must configure Microsoft Teams in their own signed-in session.'
   } else if (!canAssignHosts) {
     teamsIssue = 'Could not verify Microsoft Teams availability for the host.'
   } else if (teamsHostStatus === 'unavailable') {

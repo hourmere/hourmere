@@ -373,6 +373,7 @@ export interface PublicRoutesDeps {
   automaticMeet?: boolean | undefined
   smsRemindersAvailable?: boolean | undefined
   automaticZoom?: boolean | undefined
+  microsoftCalendarEnabled?: boolean | undefined
   now?: () => Temporal.Instant
   paidBookingsEnabled?: boolean | undefined
   paymentProvider?: PaymentProvider | undefined
@@ -398,6 +399,7 @@ export function publicRoutes({
   automaticMeet,
   smsRemindersAvailable,
   automaticZoom,
+  microsoftCalendarEnabled,
   successRedirectPolicy,
   waitlistSecret,
   smtpConfigured,
@@ -417,6 +419,7 @@ export function publicRoutes({
     automaticMeet,
     smsRemindersAvailable,
     automaticZoom,
+    microsoftCalendarEnabled,
     successRedirectPolicy,
     waitlistSecret,
     smtpConfigured,

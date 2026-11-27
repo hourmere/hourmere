@@ -10,7 +10,7 @@ import { EventType, EventTypeInput, EventTypeUpdate } from '../routes/event-type
 import { defineTool, type McpCaller, type Tool } from './tools.ts'
 
 const teamsLocationDescription =
-  ' Set location.kind or a locations entry kind to microsoft_teams for individual scheduling with one host and that host’s Microsoft calendar selected for writeback.'
+  ' A microsoft_teams location requires one individual host with a Microsoft calendar selected for writeback. Adding Teams, reactivating an event with Teams or changing its host requires the assigned host’s browser session and returns microsoft_teams_host_session_required on this tool.'
 
 /** Account configuration writes, with the same strict input and services as REST. */
 export function eventTypeTools({
@@ -50,7 +50,7 @@ export function eventTypeTools({
       name: 'duplicate_event_type',
       title: 'Duplicate an event type',
       description:
-        'Copies event settings in the current organization with a new unique booking slug, as POST /api/v1/event-types/{id}/duplicate does. Requires full API-key scope and the same ownership or team owner/admin permission as creation. Bookings, history, statistics, one-time links and round-robin activation are not copied. Not idempotent: inspect the event list after an uncertain response before retrying.',
+        'Copies event settings in the current organization with a new unique booking slug, as POST /api/v1/event-types/{id}/duplicate does. Requires full API-key scope and the same ownership or team owner/admin permission as creation. Bookings, history, statistics, one-time links and round-robin activation are not copied. Not idempotent: inspect the event list after an uncertain response before retrying. Duplicating an event with a microsoft_teams location requires the assigned host’s browser session and returns microsoft_teams_host_session_required on this tool.',
       input: z.strictObject({ id: z.uuid() }),
       output: EventType,
       annotations: {

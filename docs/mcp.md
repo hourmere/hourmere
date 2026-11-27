@@ -188,7 +188,7 @@ can still be inspected and removed.
 配置、开启强制、委托绑定）返回 `404 sso_disabled`；上述两个读取操作、恢复操作和降低信任的
 操作对团队所有者和管理员保持可用，已保存的配置仍可查看和移除。
 
-The operator can enable booking workflows with `WORKFLOWS_ENABLED=true`. While off,
+Booking workflows are enabled by default. When the operator sets `WORKFLOWS_ENABLED=false`,
 `tools/list` omits workflow tools. Direct calls can still read workflows and run
 history, disable a workflow, or delete it with the required scope and role. Creation,
 preview, enabling and other edits return `isError: true` with `workflows_disabled`
@@ -250,9 +250,9 @@ API key. IDs that are missing or belong to another organization return `webhook_
 
 `create_webhook` and `update_webhook` accept `booking.created`, `booking.rescheduled`,
 `booking.cancelled`, `booking.reschedule_requested`, `booking.reschedule_request_expired`,
-`booking.attendee_no_show_changed` and `workflow.executed` in `events`. Adding
-`workflow.executed` requires `WORKFLOWS_ENABLED=true`. While workflows are off, adding it
-returns `workflows_disabled` (REST 404). On create, it takes precedence over
+`booking.attendee_no_show_changed` and `workflow.executed` in `events`. With
+`WORKFLOWS_ENABLED=false`, adding `workflow.executed` returns `workflows_disabled`
+(REST 404). On create, it takes precedence over
 `webhooks_disabled` (REST 409).
 
 `rotate_webhook_secret` takes `{ id }` and requires a `full` API key. Each successful
@@ -446,7 +446,10 @@ Configure an ordered `locations` list through the event-type create/update opera
 and choose `locationOptionId` for slot availability and booking. An invitee-phone option additionally requires
 `inviteePhone`, normalized to E.164 after removing common phone separators.
 CLI `slots` and `book` accept `locationOptionId` in their JSON input files.
-Use `kind: "microsoft_teams"` for a single-host event with a Microsoft writeback destination.
+For a single-host event with a Microsoft writeback destination, the host enables
+`kind: "microsoft_teams"` in their own signed-in session. MCP and CLI can book configured
+Teams events. Configuration changes that require a host session return
+`microsoft_teams_host_session_required` through both clients.
 Rescheduling keeps the original choice. See [meeting location choices](https://hourmere.com/docs/location-choices)
 for configuration examples, public discovery, compatibility and conference rules.
 
