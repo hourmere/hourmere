@@ -7,6 +7,7 @@ import {
   assertSeriesScope,
 } from './recurring-series-protections.ts'
 import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
+import { MIGRATION_COVERAGE_TIMEOUT } from './testing/migration-replay.ts'
 import { createTestDatabase, type TestDatabase } from './testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -45,16 +46,20 @@ describe.skipIf(!serverUrl)('recurring series protections', () => {
 })
 
 describe.skipIf(!serverUrl)('recurring series constraint coverage', () => {
-  it('fails a protection assertion when any independently protective object is dropped', async () => {
-    const report = await checkConstraintCoverage({
-      serverUrl: serverUrl as string,
-      migration,
-      assertions: assertRecurringSeriesProtections,
-      allowList,
-    })
-    expect(report.problems).toEqual([])
-    expect(report.results.filter((result) => result.status === 'covered')).toHaveLength(
-      report.objects.length - Object.keys(allowList).length,
-    )
-  }, 600_000)
+  it(
+    'fails a protection assertion when any independently protective object is dropped',
+    async () => {
+      const report = await checkConstraintCoverage({
+        serverUrl: serverUrl as string,
+        migration,
+        assertions: assertRecurringSeriesProtections,
+        allowList,
+      })
+      expect(report.problems).toEqual([])
+      expect(report.results.filter((result) => result.status === 'covered')).toHaveLength(
+        report.objects.length - Object.keys(allowList).length,
+      )
+    },
+    MIGRATION_COVERAGE_TIMEOUT,
+  )
 })

@@ -3,11 +3,18 @@ import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createDb, runMigrations } from '@hourmere/db'
-import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { MIGRATION_REPLAY_TIMEOUT } from '@hourmere/db/migration-replay'
+import {
+  createTestDatabaseTemplate,
+  type TestDatabase,
+  type TestDatabaseTemplate,
+} from '@hourmere/db/testing'
 import { createFixtures, createTestUser } from '@hourmere/scheduling/testing'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { snapshotSchema } from '../../db/src/upgrade-schema-snapshot.ts'
 import { encryptWebhookSecret } from './crypto.ts'
+
+vi.setConfig({ testTimeout: MIGRATION_REPLAY_TIMEOUT })
 
 it.skipIf(!process.env.DATABASE_URL)(
   '0068 preserves predecessor endpoints and delivery history, matches a fresh install and reruns as a no-op',
@@ -15,18 +22,22 @@ it.skipIf(!process.env.DATABASE_URL)(
     const dir = await mkdtemp(join(tmpdir(), 'hourmere-slack-predecessor-'))
     let owned: TestDatabase | undefined
     let fresh: TestDatabase | undefined
+    let template: TestDatabaseTemplate | undefined
     const migration = '0068_slack_destinations.sql'
     try {
-      owned = await createTestDatabase(process.env.DATABASE_URL as string, undefined, {
-        migrate: false,
-        tag: 'slack_upgrade',
-      })
       const source = new URL('../../db/migrations/', import.meta.url)
       const predecessors = (await readdir(source))
         .filter((file) => file.endsWith('.sql') && file < migration)
         .sort()
       for (const file of predecessors) await copyFile(new URL(file, source), join(dir, file))
-      expect(await runMigrations(owned.pool, dir)).toEqual(predecessors)
+      template = await createTestDatabaseTemplate(
+        process.env.DATABASE_URL as string,
+        async (pool) => {
+          expect(await runMigrations(pool, dir)).toEqual(predecessors)
+        },
+        { tag: 'slack_prev' },
+      )
+      owned = await template.clone(undefined, { migrate: false, tag: 'slack_upgrade' })
       const db = createDb(owned.pool)
       const user = await createTestUser(db)
       const id = randomUUID()
@@ -81,21 +92,17 @@ it.skipIf(!process.env.DATABASE_URL)(
       expect(await runMigrations(owned.pool, dir)).toEqual([])
       // A fresh install from the same files (only the predecessors plus 0068) must produce
       // exactly the upgraded auth and public schemas: columns, constraints, indexes, triggers.
-      fresh = await createTestDatabase(process.env.DATABASE_URL as string, dir, {
-        tag: 'slack_fresh',
-      })
+      fresh = await template.clone(dir, { tag: 'slack_fresh' })
       expect(await snapshotSchema(owned.pool)).toEqual(await snapshotSchema(fresh.pool))
       expect(await runMigrations(fresh.pool, dir)).toEqual([])
       expect(await runMigrations(owned.pool, dir)).toEqual([])
     } finally {
       try {
-        await fresh?.drop()
-        await owned?.drop()
+        await Promise.all([fresh?.drop(), owned?.drop()])
       } finally {
+        await template?.drop()
         await rm(dir, { recursive: true, force: true })
       }
     }
   },
-  // Two throwaway databases and two catalog snapshots; keep clear of the 5 s default.
-  60_000,
 )

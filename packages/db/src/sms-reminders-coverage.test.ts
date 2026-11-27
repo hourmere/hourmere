@@ -2,6 +2,7 @@ import type pg from 'pg'
 import { describe, expect, it } from 'vitest'
 import { attempts } from './meeting-poll-protections.ts'
 import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
+import { MIGRATION_COVERAGE_TIMEOUT } from './testing/migration-replay.ts'
 
 const setup = `INSERT INTO auth.organization (id,name,slug,"createdAt") VALUES ('10000000-0000-4000-8000-000000000001','SMS','sms-test',now());
 INSERT INTO event_types (id,organization_id,slug,title,duration_minutes) VALUES ('10000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000001','sms','SMS',30);
@@ -33,12 +34,16 @@ export async function assertSmsReminderProtections(pool: pg.Pool) {
   expect(errors.map((e) => e?.code)).toEqual(expected)
 }
 describe.skipIf(!process.env.DATABASE_URL)('SMS reminder constraint coverage', () => {
-  it('covers every new constraint', async () => {
-    const report = await checkConstraintCoverage({
-      serverUrl: process.env.DATABASE_URL as string,
-      migration: '0100_sms_reminders.sql',
-      assertions: assertSmsReminderProtections,
-    })
-    expect(report.problems).toEqual([])
-  }, 600000)
+  it(
+    'covers every new constraint',
+    async () => {
+      const report = await checkConstraintCoverage({
+        serverUrl: process.env.DATABASE_URL as string,
+        migration: '0100_sms_reminders.sql',
+        assertions: assertSmsReminderProtections,
+      })
+      expect(report.problems).toEqual([])
+    },
+    MIGRATION_COVERAGE_TIMEOUT,
+  )
 })

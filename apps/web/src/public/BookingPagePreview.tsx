@@ -156,6 +156,7 @@ function PreviewBookingFlow({ event, logoSrc }: BookingPagePreviewProps) {
               load={load}
               durationMinutes={duration}
               timeZone={timeZone}
+              showTimeZoneIcon
               onTimeZoneChange={setTimeZone}
               locale={locale}
               now={now}

@@ -1,6 +1,6 @@
 {
   "realm": "hourmere-fixture",
-  "displayName": "Hourmere OIDC fixture",
+  "displayName": "Hourmere SSO fixture",
   "enabled": true,
   "registrationAllowed": false,
   "loginWithEmailAllowed": false,
@@ -20,6 +20,34 @@
       "attributes": {
         "pkce.code.challenge.method": "S256"
       }
+    },
+    {
+      "clientId": "hourmere-fixture-saml",
+      "protocol": "saml",
+      "enabled": true,
+      "attributes": {
+        "saml.client.signature": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "fixture-subject",
+          "protocol": "saml",
+          "protocolMapper": "saml-user-property-mapper",
+          "config": {
+            "user.attribute": "id",
+            "attribute.name": "hourmereSubject"
+          }
+        },
+        {
+          "name": "fixture-email",
+          "protocol": "saml",
+          "protocolMapper": "saml-user-property-mapper",
+          "config": {
+            "user.attribute": "email",
+            "attribute.name": "email"
+          }
+        }
+      ]
     }
   ],
   "users": [
