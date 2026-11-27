@@ -1057,14 +1057,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 190-operation contract and all 570 scope combinations', () => {
+    it('covers the exact 191-operation contract and all 573 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(190)
-      expect(new Set(ids).size).toBe(190)
+      expect(ids).toHaveLength(191)
+      expect(new Set(ids).size).toBe(191)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(570)
+      expect(cases).toHaveLength(573)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
