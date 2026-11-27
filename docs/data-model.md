@@ -59,9 +59,10 @@ result before creating the event so job replays keep the same payload and `trans
 `ready` stores `teamsJoinUrl` in the private writeback record. `join_url_pending` records a
 confirmed event without a valid Teams link. The event mapping is saved so bounded retries can
 read the same event by ID. `teams_unavailable` records a calendar without Teams support, with
-an ordinary Outlook event still written. The last known link stays in the private writeback
-record for cancellation email delivery. Cancelled booking views and calendar connection
-summaries exclude it. Public event-type metadata exposes only the location option kind and label.
+an ordinary Outlook event still written. Successful cancellation writeback clears the stored
+join URL. Cancelled booking views, cancellation emails and calendar attachments, and calendar
+connection summaries exclude the link. Public event-type metadata exposes only the location
+option kind and label.
 The booking and notification views project `writeback_failed` when the writeback has failed
 and has no validated join URL.
 See [Microsoft Calendar](https://hourmere.com/docs/microsoft-calendar).
@@ -2438,6 +2439,12 @@ new token; a cancellation replay returns the cancelled booking and preserves the
 reason even when the retry supplies a different reason. A replaced or expired request,
 a different picked time or the opposite action fails with `reschedule_request_changed`. Keep the
 existing private email link when replay returns `manageToken: null`.
+
+After the managed read identifies the booking, it hydrates the booking lifecycle, pending
+request and linked request state in one read-only, repeatable-read transaction. Only a
+request email's token includes that email's `rescheduleRequest`. A link that resolves to a
+cancelled predecessor with a successor in the same organization returns
+`wasRescheduled: true` without the successor's ID or token.
 
 Notes follow follow-up host-note write sanitization: CRLF becomes LF, bidi embedding/isolate
 controls are removed, other controls (including tabs) are rejected, and the result must be

@@ -74,6 +74,7 @@ export function routingFormConfigurationTools({
   publicUrl = 'http://localhost:3000',
   automaticMeet,
   automaticZoom,
+  microsoftCalendarEnabled,
   smsRemindersAvailable,
 }: {
   db: Db
@@ -82,6 +83,7 @@ export function routingFormConfigurationTools({
   publicUrl?: string | undefined
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
+  microsoftCalendarEnabled?: boolean | undefined
   smsRemindersAvailable?: boolean | undefined
 }): Tool[] {
   const now = () => Temporal.Now.instant()
@@ -98,6 +100,7 @@ export function routingFormConfigurationTools({
     routingSecret,
     automaticMeet,
     automaticZoom,
+    microsoftCalendarEnabled,
     smsRemindersAvailable,
   }
   const privateContinuation = {

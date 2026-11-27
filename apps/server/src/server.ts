@@ -234,6 +234,9 @@ export function productionSsoCapabilities(
   )
 }
 
+// Production completes SCIM claims through invitation acceptance only.
+const productionScimClaims = { invitation: scimClaimCompletion.invitation }
+
 /**
  * The /api/v1 route groups, each created with what it needs. The OpenAPI document (and with
  * it the web app's types, `npm run api:types`) is made from this same list. Route groups hold
@@ -348,6 +351,7 @@ export function productRoutes({
   enqueueCalendarWritebackRecovery?: CalendarDeps['enqueueWritebackRecovery']
 } & RecurringBookingAdmissionDeps &
   WorkflowSettings): RouteModule[] {
+  const microsoftCalendarEnabled = microsoftCalendar !== undefined
   const ssoCapabilities = withScimResources(
     { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled, ssoOperatorSetting },
     scimResourcesEnabled,
@@ -441,7 +445,7 @@ export function productRoutes({
       smsRemindersAvailable,
       automaticMeet,
       automaticZoom,
-      microsoftCalendarEnabled: microsoftCalendar !== undefined,
+      microsoftCalendarEnabled,
       successRedirectPolicy,
       recurringBookingsEnabled,
     }),
@@ -453,6 +457,7 @@ export function productRoutes({
       notify,
       automaticMeet,
       automaticZoom,
+      microsoftCalendarEnabled,
       smsRemindersAvailable,
     }),
     publicRoutes({
@@ -468,6 +473,7 @@ export function productRoutes({
       notify,
       automaticMeet,
       automaticZoom,
+      microsoftCalendarEnabled,
       successRedirectPolicy,
     }),
     routingContinuationRoutes({
@@ -477,6 +483,7 @@ export function productRoutes({
       routingSecret,
       automaticMeet,
       automaticZoom,
+      microsoftCalendarEnabled,
       smsRemindersAvailable,
     }),
     oneTimeBookingRoutes({
@@ -485,12 +492,25 @@ export function productRoutes({
       notify,
       automaticMeet,
       automaticZoom,
+      microsoftCalendarEnabled,
       successRedirectPolicy,
     }),
     oneTimeLinkRoutes({ db, publicUrl }),
-    openTimeSnippetRoutes({ db, publicUrl, slotSnippetsEnabled, automaticMeet, automaticZoom }),
+    openTimeSnippetRoutes({
+      db,
+      publicUrl,
+      slotSnippetsEnabled,
+      automaticMeet,
+      automaticZoom,
+      microsoftCalendarEnabled,
+    }),
     routingFormRoutes({ db, routingFormsEnabled: routingEnabled }),
-    availabilityTroubleshootingRoutes({ db, automaticMeet, automaticZoom }),
+    availabilityTroubleshootingRoutes({
+      db,
+      automaticMeet,
+      automaticZoom,
+      microsoftCalendarEnabled,
+    }),
     bookingRoutes({
       db,
       routingFormsEnabled: routingEnabled,
@@ -499,6 +519,7 @@ export function productRoutes({
       notifyAttendeeNoShow,
       automaticMeet,
       automaticZoom,
+      microsoftCalendarEnabled,
       bookingMaxInviteeReschedules,
       bookingExportMaxConcurrent,
     }),
@@ -518,7 +539,7 @@ export function productRoutes({
       db,
       automaticMeet,
       automaticZoom,
-      microsoftCalendarEnabled: microsoftCalendar !== undefined,
+      microsoftCalendarEnabled,
     }),
     // Recovery operations stay available when the operator pauses workflows.
     workflowRoutes({
@@ -592,6 +613,7 @@ export function productTools({
   caldavCalendar?: CalendarDeps['caldav']
   zoomConference?: ConferenceDeps['zoom']
 } & WorkflowSettings): Tool[] {
+  const microsoftCalendarEnabled = microsoftCalendar !== undefined
   return [
     whoamiTool,
     publicTeamTool({
@@ -608,6 +630,7 @@ export function productTools({
       notifyAttendeeNoShow,
       automaticMeet,
       automaticZoom,
+      microsoftCalendarEnabled,
       bookingMaxInviteeReschedules,
       routingFormsEnabled: routingEnabled,
       routingSecret,
@@ -620,7 +643,7 @@ export function productTools({
       db,
       automaticMeet,
       automaticZoom,
-      microsoftCalendarEnabled: microsoftCalendar !== undefined,
+      microsoftCalendarEnabled,
       smsRemindersAvailable,
       followUpHostNotesEnabled,
       successRedirectPolicy,
@@ -629,9 +652,21 @@ export function productTools({
     ...slackDestinationTools({ db, ...webhooks, queue: webhookQueue }),
     ...webhookTools({ db, ...webhooks, workflowsEnabled }),
     ...(slotSnippetsEnabled
-      ? openTimeSnippetTools({ db, publicUrl, slotSnippetsEnabled, automaticMeet, automaticZoom })
+      ? openTimeSnippetTools({
+          db,
+          publicUrl,
+          slotSnippetsEnabled,
+          automaticMeet,
+          automaticZoom,
+          microsoftCalendarEnabled,
+        })
       : []),
-    ...availabilityTroubleshootingTools({ db, automaticMeet, automaticZoom }),
+    ...availabilityTroubleshootingTools({
+      db,
+      automaticMeet,
+      automaticZoom,
+      microsoftCalendarEnabled,
+    }),
     ...integrationTools({
       calendar: { db, google: googleCalendar, caldav: caldavCalendar },
       conference: { db, zoom: zoomConference },
@@ -644,6 +679,7 @@ export function productTools({
       notify,
       automaticMeet,
       automaticZoom,
+      microsoftCalendarEnabled,
       smsRemindersAvailable,
     }),
     ...waitlistTools({ db, secret: waitlistSecret, publicUrl, smtpConfigured }),
@@ -662,6 +698,7 @@ export function productTools({
       publicUrl,
       automaticMeet,
       automaticZoom,
+      microsoftCalendarEnabled,
       smsRemindersAvailable,
     }),
   ]
@@ -801,7 +838,7 @@ export function productionAppOptions({
       configurationKey: ssoConfigurationKey,
       privateTargets: ssoPrivateTargets,
       signup: config.signup,
-      scimClaims: config.SCIM_PROVISIONING_ENABLED ? scimClaimCompletion : scimClaimAdmissionOnly,
+      scimClaims: config.SCIM_PROVISIONING_ENABLED ? productionScimClaims : scimClaimAdmissionOnly,
       session: { secret: config.BETTER_AUTH_SECRET },
       readSession: readSsoSession,
     }),
@@ -941,7 +978,7 @@ export function productionAuthOptions({
     recordAdmissionRemoval,
     ssoCapabilities: sso,
     scimResourcesEnabled: config.SCIM_PROVISIONING_ENABLED,
-    scimClaims: config.SCIM_PROVISIONING_ENABLED ? scimClaimCompletion : scimClaimAdmissionOnly,
+    scimClaims: config.SCIM_PROVISIONING_ENABLED ? productionScimClaims : scimClaimAdmissionOnly,
     baseURL: config.PUBLIC_URL,
     secret: config.BETTER_AUTH_SECRET,
     mailer,
@@ -1208,6 +1245,7 @@ async function start(
     publicUrl: config.PUBLIC_URL,
     automaticMeet: config.GOOGLE_MEET_ENABLED,
     automaticZoom: config.ZOOM_MEETINGS_ENABLED,
+    microsoftCalendarEnabled: microsoftCalendar !== undefined,
   }
   const runWaitlistEmail = createWaitlistEmailWorker({
     ...notificationDeps,

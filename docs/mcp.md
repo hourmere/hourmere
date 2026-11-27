@@ -438,7 +438,10 @@ Configure an ordered `locations` list through the event-type create/update opera
 and choose `locationOptionId` for slot availability and booking. An invitee-phone option additionally requires
 `inviteePhone`, normalized to E.164 after removing common phone separators.
 CLI `slots` and `book` accept `locationOptionId` in their JSON input files.
-Use `kind: "microsoft_teams"` for a single-host event with a Microsoft writeback destination.
+For a single-host event with a Microsoft writeback destination, the host enables
+`kind: "microsoft_teams"` in their own signed-in session. MCP and CLI can book configured
+Teams events. Configuration changes that require a host session return
+`microsoft_teams_host_session_required` through both clients.
 Rescheduling keeps the original choice. See [meeting location choices](https://hourmere.com/docs/location-choices)
 for configuration examples, public discovery, compatibility and conference rules.
 

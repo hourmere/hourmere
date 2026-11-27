@@ -557,7 +557,7 @@ const a11yReportPipeline = (replacement?: [string, string]) => {
   // The spec turns any scan error into a scan-error finding. Record the engine errors it
   // catches there, so a broken copy is not read as a lost field.
   const scanError = '} catch {\n              report.findings.push('
-  expect(source.includes(scanError), 'scan error anchor').toBe(true)
+  expect(source.split(scanError), 'scan error anchor').toHaveLength(2)
   source = stripTypeScriptTypes(
     source
       .replace(

@@ -968,7 +968,13 @@ async function requireLocationAvailability(
   const chosenOption = selectBookableLocationOption(et, optionId)
   return withLocationAvailability(et.locations, optionId, async () => {
     if (microsoftTeamsLocation(chosenOption)) {
-      await requireMicrosoftTeamsHost(ctx.db, et.schedulingType, et.hostUserIds, et.id)
+      await requireMicrosoftTeamsHost(
+        ctx.db,
+        et.schedulingType,
+        et.hostUserIds,
+        et.id,
+        ctx.microsoftCalendarEnabled,
+      )
     }
     if (automaticZoom(chosenOption)) {
       if (et.schedulingType !== 'individual' || et.hostUserIds.length !== 1)
@@ -1086,7 +1092,11 @@ async function groupEventSlots(
     try {
       await requireGroupSlotConferenceUsable(ctx, ctx.db, slot)
     } catch (error) {
-      if (error instanceof DomainError && error.code === 'slot_unavailable') continue
+      if (
+        error instanceof DomainError &&
+        (error.code === 'slot_unavailable' || error.code === 'location_unavailable')
+      )
+        continue
       throw error
     }
     offered.push({
