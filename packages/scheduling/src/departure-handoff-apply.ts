@@ -129,19 +129,27 @@ function assertOfferLive(
   now: Temporal.Instant,
 ) {
   const issued = Temporal.Instant.from(offer.issuedAt)
-  const expires = Temporal.Instant.from(offer.expiresAt)
   if (
     offer.state !== 'live' ||
     before(now, issued) ||
-    !before(now, expires) ||
-    !before(now, issued.add({ hours: 48 })) ||
-    !before(now, sourceStart) ||
-    !before(now, targetStart)
+    !before(now, departureHandoffDeadline(offer, sourceStart, targetStart))
   )
     throw offerChanged()
 }
 
-function assertApproved(
+export function departureHandoffDeadline(
+  offer: DepartureHandoffOffer,
+  sourceStart: Temporal.Instant,
+  targetStart: Temporal.Instant,
+): Temporal.Instant {
+  const issueLimit = Temporal.Instant.from(offer.issuedAt).add({ hours: 48 })
+  return [sourceStart, targetStart, issueLimit].reduce(
+    (deadline, limit) => (before(limit, deadline) ? limit : deadline),
+    Temporal.Instant.from(offer.expiresAt),
+  )
+}
+
+export function departureHandoffApprovedRecipientIds(
   offer: DepartureHandoffOffer,
   recipientKeys: readonly string[],
   now: Temporal.Instant,
@@ -160,11 +168,7 @@ function assertApproved(
       })
       .map((approval) => [approval.recipientKey, approval.recipientId.toLowerCase()]),
   )
-  const recipientIds = recipientKeys.flatMap((key) => approved.get(key) ?? [])
-  if (new Set(recipientIds).size !== recipientKeys.length) {
-    throw new DomainError('conflict', 'handoff_consent_required')
-  }
-  return recipientIds
+  return [...new Set(recipientKeys.flatMap((key) => approved.get(key) ?? []))]
 }
 
 async function readTerms(
@@ -172,6 +176,7 @@ async function readTerms(
   organizationId: string,
   input: TermsInput,
   eligible: Awaited<ReturnType<typeof getDepartureHandoffEligibility>>,
+  lockMicrosoftDestination: boolean,
 ) {
   const { source, event, candidateUserId } = eligible
   const { db } = ctx
@@ -217,6 +222,7 @@ async function readTerms(
       locationOptionId,
       inviteePhone: source.savedInviteePhone,
     },
+    lockMicrosoftDestination,
   )
   const responses = validateResponses(event.questions, original.responses)
   const title = `${event.title} with ${booker.name}`
@@ -269,12 +275,18 @@ export async function getDepartureHandoffTerms(
   input: TermsInput,
 ): Promise<{ termsDigest: string; recipientKeys: string[] }> {
   const eligible = await getDepartureHandoffEligibility(ctx, organizationId, input)
-  const { termsDigest, recipientKeys } = await readTerms(ctx, organizationId, input, eligible)
+  const { termsDigest, recipientKeys } = await readTerms(
+    ctx,
+    organizationId,
+    input,
+    eligible,
+    false,
+  )
   return { termsDigest, recipientKeys }
 }
 
-/** Internal single-booking apply. Admission stays hard-off while there is no production
- * store or transport. The notifier adds the ordinary outbox work on this transaction. */
+/** Single-booking apply with an injected offer store. The notifier adds the ordinary
+ * outbox work on this transaction. */
 export async function applyDepartureHandoff(
   ctx: ApplyContext,
   input: ApplyInput,
@@ -370,11 +382,14 @@ export async function applyDepartureHandoff(
         actor.organizationId,
         { bookingId: source.id, ...offer },
         eligible,
+        true,
       )
       const now = ctx.now()
       assertOfferLive(offer, eligible.source.start, terms.start, now)
       if (terms.termsDigest !== offer.termsDigest) throw offerChanged()
-      const recipientIds = assertApproved(offer, terms.recipientKeys, now)
+      const recipientIds = departureHandoffApprovedRecipientIds(offer, terms.recipientKeys, now)
+      if (recipientIds.length !== terms.recipientKeys.length)
+        throw new DomainError('conflict', 'handoff_consent_required')
 
       const policy = await trx
         .selectFrom('event_types')

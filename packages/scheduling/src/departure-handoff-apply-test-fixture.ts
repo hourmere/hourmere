@@ -47,6 +47,9 @@ type FixtureEvent = {
 export async function createHandoffTestFixture(
   db: Db,
   options: {
+    candidate?: TestUser
+    now?: () => Temporal.Instant
+    start?: Temporal.Instant
     sourceContext?: Partial<PublicContext>
     applyContext?: Partial<ServiceContext>
     configureSource?: (event: FixtureEvent) => Promise<void>
@@ -55,7 +58,7 @@ export async function createHandoffTestFixture(
 ) {
   const owner = await createTestUser(db, 'Team owner')
   const departing = await createTestUser(db, 'Departing host')
-  const candidate = await createTestUser(db, 'Replacement host')
+  const candidate = options.candidate ?? (await createTestUser(db, 'Replacement host'))
   const team = await createTestTeam(db, [
     { user: owner, role: 'owner' },
     { user: departing, role: 'member' },
@@ -63,7 +66,7 @@ export async function createHandoffTestFixture(
   ])
   const fixtures = createFixtures(db)
   await fixtures.schedule(departing.id, { timeZone: 'America/Los_Angeles' })
-  await fixtures.schedule(candidate.id, { timeZone: 'America/Los_Angeles' })
+  if (!options.candidate) await fixtures.schedule(candidate.id, { timeZone: 'America/Los_Angeles' })
   const slug = 'handoff'
   const eventTypeId = await fixtures.eventType(team.id, null, {
     slug,
@@ -73,14 +76,14 @@ export async function createHandoffTestFixture(
   })
   const event = { eventTypeId, departing, candidate }
   await options.configureSource?.(event)
-  const now = () => HANDOFF_NOW
+  const now = options.now ?? (() => HANDOFF_NOW)
   const organization = team.as(owner).organization
   const { booking, manageToken } = await createPublicTeamBooking(
     { ...options.sourceContext, db, now },
     {
       handle: organization.slug,
       slug,
-      start: HANDOFF_START,
+      start: options.start ?? HANDOFF_START,
       invitee: { name: 'Private Booker', email: 'booker@example.test', timeZone: 'UTC' },
       guests: [{ name: 'Private Guest', email: 'guest@example.test' }],
       responses: { notes: 'Approved answer' },
@@ -133,7 +136,7 @@ export async function createHandoffTestStorage(db: Db) {
     FOREIGN KEY (replacement_id, organization_id) REFERENCES bookings (id, organization_id)
   )`.execute(db)
 
-  const store: DepartureHandoffApplyStore = {
+  const applyStore: DepartureHandoffApplyStore = {
     async lockOffer(trx, key) {
       const {
         rows: [row],
@@ -160,6 +163,29 @@ export async function createHandoffTestStorage(db: Db) {
     },
   }
 
+  const store = {
+    ...applyStore,
+    async readLatest(db: Db, key: { organizationId: string; sourceBookingId: string }) {
+      const {
+        rows: [row],
+      } = await sql<{
+        id: string
+        offer: DepartureHandoffOffer
+        replacement_id: string | null
+      }>`SELECT offer_id AS id, offer, replacement_id FROM test_handoff_offers
+        LEFT JOIN test_handoff_receipts USING (organization_id, source_id, offer_id)
+        WHERE organization_id = ${key.organizationId} AND source_id = ${key.sourceBookingId}
+        ORDER BY (offer->>'version')::integer DESC, offer_id DESC LIMIT 1`.execute(db)
+      return (
+        row && {
+          ...row.offer,
+          id: row.id,
+          ...(row.replacement_id && { committed: { replacementBookingId: row.replacement_id } }),
+        }
+      )
+    },
+  }
+
   async function offer(
     ctx: ServiceContext,
     input: ApplyInput,
@@ -183,18 +209,19 @@ export async function createHandoffTestStorage(db: Db) {
       input.teamId,
       termsInput,
     )
+    const now = ctx.now()
     const saved = update({
       ...termsInput,
       version: input.version,
       state: 'live',
-      issuedAt: HANDOFF_NOW.subtract({ hours: 1 }).toString(),
+      issuedAt: now.subtract({ hours: 1 }).toString(),
       expiresAt: HANDOFF_START.toString(),
       termsDigest,
       approvals: recipientKeys.map((recipientKey) => ({
         recipientId: randomUUID(),
         recipientKey,
         version: input.version,
-        approvedAt: HANDOFF_NOW.subtract({ minutes: 30 }).toString(),
+        approvedAt: now.subtract({ minutes: 30 }).toString(),
       })),
     })
     await sql`INSERT INTO test_handoff_offers (organization_id, source_id, offer_id, offer)

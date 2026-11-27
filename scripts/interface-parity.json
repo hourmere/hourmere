@@ -152,6 +152,10 @@
     "exemption": "invitee-checkout",
     "reason": "Paid admission hands off to Stripe Checkout and returns to the original invitee browser tab."
   },
+  "applyDepartureHandoff": {
+    "exemption": "browser-session-only",
+    "reason": "A current team owner or admin must explicitly confirm the participant-approved booking replacement in a browser session."
+  },
   "cancelTeamBooking": {
     "exemption": "browser-session-only",
     "reason": "Team-wide owner/admin cancellation is browser-session-only; host cancellation does not grant this authority."

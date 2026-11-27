@@ -6,7 +6,15 @@ import {
   withNoShowChange,
 } from '../bookings/NoShowAttendees.tsx'
 import './team-bookings.css'
-import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from 'react'
+import {
+  type FormEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { api, type Schemas, unwrap } from '../../api/client.ts'
 import { errorMessage, isOrganizationContextChanged, RequestError } from '../../api/errors.ts'
@@ -926,6 +934,7 @@ export function BookingDetail({
   conflict,
   onConflict,
   onRevoked,
+  handoff,
   onNoShowChanged,
   onRefresh,
   onClose,
@@ -940,6 +949,7 @@ export function BookingDetail({
   conflict: unknown
   onConflict: (error: unknown) => void
   onRevoked: () => void
+  handoff?: ReactNode
   onNoShowChanged?: (change: NoShowChange) => void
   onRefresh: () => void
   onClose: () => void
@@ -1106,6 +1116,7 @@ export function BookingDetail({
           return true
         }}
       />
+      {handoff}
       <ManualRebooking booking={booking} expectedOrganizationId={expectedOrganizationId} />
     </section>
   )

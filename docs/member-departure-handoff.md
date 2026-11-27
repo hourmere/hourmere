@@ -132,8 +132,8 @@ follow-up host notes, no-show data and SMS consent on the source chain. Copy onl
 booking details and the approved attendee information from the source. Resolve notification
 settings and follow-up content afresh from current configuration.
 
-Use one read-committed write transaction with the organization lock taken directly in update
-mode through the shared team-management path. Follow the existing actor and organization
+Use one read-committed write transaction with the organization lock taken directly in share
+mode through the shared team-management path. Membership writes take the exclusive lock. Follow the existing actor and organization
 ordering, then lock the source booking before the offer and the sorted advisory host locks.
 Take host locks for the sorted union of the sole saved source host and the sole configured
 replacement host. Lock and reread current event and eligibility facts in the established
@@ -178,8 +178,8 @@ unavailable even when the replacement host is free. If conflict data cannot be t
 it reports `calendar_sync_unavailable`. Busy intervals, event mappings and provider
 identifiers stay private.
 This read-only check reserves nothing and sends no invitations. Applying a handoff requires
-a fresh check under the write locks described above. The dry run has no transport entry point
-during staged implementation.
+a fresh check under the write locks described above. The staged administrator preview uses
+this same evaluator.
 
 ## Provider and notification identities
 
@@ -276,12 +276,36 @@ outgrows a day before scheduling it. Keep admission hard-off until the complete 
 verified. Migrations use a reserved number, generated types and constraint coverage. Use
 disposable PostgreSQL databases and fake provider/mail transports.
 
-The staged apply service has no transport or production offer store. It requires a locked,
-versioned offer and matching approvals for the booker and every distinct guest mailbox.
-It rechecks the approved terms and exact slot under the write locks, then uses the ordinary
-cancellation and creation intents for the two independent roots. A PostgreSQL test store
-exercises rollback and replay. Production offer and receipt storage, participant consent
-delivery, and handoff-specific mail and calendar-attachment handling are still pending.
+### Staged administrator flow
+
+The production server keeps handoff admission off. The staged browser and REST acceptance
+flow uses a PostgreSQL test store with versioned offers and recorded decisions. An authorized
+owner or admin opens the source in Team bookings and selects **Preview handoff**. The preview
+shows the proposed host, time and location type. A slot judged unavailable on the current
+event grid, calendar uncertainty, a changed offer, any outstanding approval, or an expired
+offer prevents confirmation. An expired offer leaves the source intact. If a slot changed
+since the preview, refresh it before trying again. A different offer requires fresh consent.
+
+**Confirm handoff** rechecks the terms and exact slot under the write locks. It queues the
+ordinary cancellation and confirmation for two independent booking chains. If the result is
+uncertain, refresh to see the committed receipt before trying again. The receipt reports
+meeting readiness and old cleanup status when available. Pending or failed provider work
+leaves the booking changes committed. The corresponding provider account owner can follow
+the ordinary recovery process for that account. The administrator sees no join links,
+provider identifiers or credentials in the handoff results.
+
+The staged GET is `/api/v1/team/bookings/{id}/handoff-preview`. Apply uses
+`POST /api/v1/team/bookings/{id}/handoff-offers/{offerId}/apply` and the exact offer
+`version` in the JSON body. Both bind the current browser session to
+`X-Expected-Organization-Id`. A successful preview returns the safe slot, aggregate
+consent state and deadline, or the limited committed receipt. The production assembly
+leaves the detail capability absent and returns `handoffs_disabled` to authorized callers.
+
+Production offer and receipt storage, proposal and consent delivery, recipient decisions and
+transports, handoff-specific messages and calendar attachments, and rollout remain pending.
+Provider cleanup and creation reuse existing workers. Zoom lost-response recovery is
+exercised with a fake, and handoff-specific Google and Microsoft lifecycle acceptance remains
+open. Bounded automatic handoff is a separate follow-on.
 
 | Step | Deliverable and acceptance |
 | --- | --- |
@@ -312,9 +336,12 @@ those bookings and leaves their ordinary booking flows in place.
 内部试算按活动类型当前的可预约时段网格检查指定开始时间。即使接任者有空，网格之外的开始
 时间也不可预约。试算不占用时段、不发邀请。日历数据不可信时返回
 `calendar_sync_unavailable`，不会公开私人忙碌区间或日历事件映射。正式应用需在锁内重新检查。
-当前单笔应用服务仅供内部测试。它在同一事务中保留旧链身份、重新核对授权和全部参与者同意、
-创建独立新链，并通过现有预约任务处理取消和创建。生产存储、同意投递、交接专用邮件与日历附件、
-操作入口和启用仍待后续阶段。
+预发布验收使用 PostgreSQL 测试存储。团队所有者或管理员可在团队预约详情试算单笔交接，
+查看接任主持人、时段和地点类型。来宾尚未回复、同意已过期、日历状态未知或时段不可用时，
+界面禁止确认。确认时在锁内重新复核。提交结果不确定时，先刷新查看回执，再决定是否重试。
+提交后，外部会议仍可处于待创建或失败状态，由对应主持人使用原有恢复流程处理。
+生产功能保持关闭。生产存储、提议与同意投递、参与者页面和接口、交接专用邮件与日历附件及
+上线启用仍待后续阶段。
 旧会议的取消沿用原 ICS UID 与原日历组织者，新邀请使用新 UID。Google Meet 和 Zoom
 按各自预约链的固定组织者身份处理。Outlook 和 Teams 按旧链固定的写回状态清理，新 Teams
 会议要求实例启用 Microsoft 日历，并复核接任主持人的写入资格。任一条件不满足时返回

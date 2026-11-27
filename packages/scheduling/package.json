@@ -9,6 +9,7 @@
     "./booking-payment-details": "./src/booking-payment-details.ts",
     "./errors": "./src/errors.ts",
     "./text": "./src/text.ts",
+    "./departure-handoff-admin": "./src/departure-handoff-admin.ts",
     "./conferences": "./src/conferences.ts",
     "./notification-settings": "./src/notification-settings.ts",
     "./routing-form-config": "./src/routing-form-config.ts",

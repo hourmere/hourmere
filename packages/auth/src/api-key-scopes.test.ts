@@ -162,6 +162,8 @@ const restContract = {
     'GET /api/v1/team/bookings',
     'GET /api/v1/team/bookings/{id}',
     'POST /api/v1/team/bookings/{id}/cancel',
+    'GET /api/v1/team/bookings/{id}/handoff-preview',
+    'POST /api/v1/team/bookings/{id}/handoff-offers/{offerId}/apply',
     'POST /api/v1/team/bookings/bulk-cancellations/preview',
     'GET /api/v1/team/invitations',
     'GET /api/v1/team/invitations/{invitationId}',

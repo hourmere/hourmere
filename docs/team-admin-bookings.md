@@ -111,3 +111,8 @@ The same bounded range, streaming limits and file privacy guidance apply as docu
 The [bulk cancellation contract](team-booking-bulk-cancellation.md) describes a future
 release. The preview route returns 404 in production, and booking lists omit page proofs
 until the feature is enabled. Team administrators can still cancel individual bookings.
+
+
+The [departure handoff design](member-departure-handoff.md#staged-administrator-flow) describes
+the staged owner/admin preview and confirmation for one future booking. Production keeps the
+feature off until the production offer and consent flow is complete and verified.
