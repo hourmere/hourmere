@@ -79,6 +79,8 @@ export interface ServiceContext extends RecurringBookingAdmissionDeps {
 
 /** For unauthenticated flows such as public booking pages and invitee links. */
 export interface PublicContext {
+  /** Immutable team IDs the operator has opted into the public homepage catalog. */
+  teamPublicHomeOrganizationIds?: readonly string[] | undefined
   smsRemindersAvailable?: boolean | undefined
   /** In-process SCIM resource capability. Defaults off. */
   scimResourcesEnabled?: boolean | undefined
