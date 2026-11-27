@@ -851,8 +851,8 @@ export function selectBookableLocationOption(
  * Checks that the option a query would book is usable and returns the round-robin pool that
  * can host it; Meet narrows that pool to hosts with a Meet-capable destination.
  */
-async function requireLocationAvailability(
-  ctx: PublicContext,
+export async function requireLocationAvailability(
+  ctx: Pick<PublicContext, 'db' | 'automaticMeet' | 'automaticZoom' | 'microsoftCalendarEnabled'>,
   et: PublicEventTypeRecord,
   optionId?: string,
 ): Promise<string[]> {
