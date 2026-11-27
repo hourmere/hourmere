@@ -1,5 +1,6 @@
 import type { Locator, Page } from '@playwright/test'
 import { SAML_COMPLETE_PATH } from '../../../apps/server/src/sso-saml-state.ts'
+import { accountMenuButton, accountMenuPanel } from '../account-menu.ts'
 import { describeStrandedPage, expect, type KeycloakFixture } from './fixture.ts'
 
 export { describeStrandedPage }
@@ -144,7 +145,7 @@ export async function expectSession(
       `The browser did not return to Hourmere: ${await describeStrandedPage(page, app)}`,
     )
   }
-  await expect(button(page, 'Sign out')).toBeVisible()
+  await expect(accountMenuButton(page)).toBeVisible()
   const response = await readFixtureApi(page, `${app.url}/api/v1/me`)
   expect(response.status()).toBe(200)
   expect(await response.json()).toMatchObject({
@@ -159,7 +160,8 @@ export async function expectSignedOut(page: Page, app: KeycloakFixture) {
 }
 
 export async function signOut(page: Page, app: KeycloakFixture) {
-  await button(page, 'Sign out').click()
+  await accountMenuButton(page).click()
+  await accountMenuPanel(page).getByRole('button', { name: 'Sign out', exact: true }).click()
   await expect(button(page, emailLinkLabel)).toBeVisible()
   await expectSignedOut(page, app)
 }

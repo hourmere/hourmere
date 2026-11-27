@@ -64,6 +64,22 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [Voting in a meeting poll](/docs/meeting-poll-voting): verify your email, submit or
   withdraw a ballot, and understand who can see your choices.
 
+## Navigate the admin app
+
+Use the main navigation for event types, availability, bookings and booking activity.
+Find **Conference accounts**, **Calendars**, **API keys** and **Connected apps** under
+**Integrations**. On a phone or narrow tablet, scroll the main tabs sideways and open
+**Integrations** below them. You can still use existing bookmarks for each page.
+
+Open the **Account menu** from the initials button at the bottom of the sidebar to see
+your email, choose an interface language or sign out. On a narrow screen, the same
+button sits beside **Integrations** below the tabs. Use Tab to move through the menu
+and Escape to close it and return focus to the initials button.
+
+中文：主导航可打开活动类型、可用时间、预约和预约统计。会议账号、日历、API 密钥及已连接应用位于
+**集成**分组。窄屏上可横向滚动主导航，并在下方展开集成列表。打开侧栏底部的**账户菜单**可查看邮箱、
+切换界面语言或退出登录。窄屏上的账户按钮位于**集成**旁。按 Tab 可在菜单内移动，按 Escape 可关闭菜单并返回按钮。
+
 ## Create an event type
 
 Open **Event types**, then **New event type** in your Hourmere instance. Start with four

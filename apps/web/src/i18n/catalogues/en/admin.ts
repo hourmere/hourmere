@@ -1060,8 +1060,6 @@ export const admin = {
     'Review meeting details and manage this booking.',
   'Notification language': 'Notification language',
   'Choose a supported notification language.': 'Choose a supported notification language.',
-  'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. The admin interface also uses this language until you choose an interface language in the top bar. After that, the two languages are independent.':
-    'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. The admin interface also uses this language until you choose an interface language in the top bar. After that, the two languages are independent.',
   'Connect a calendar account to get started.': 'Connect a calendar account to get started.',
   'This Google calendar uses {calendarZone}; your availability uses {scheduleZone}. Bookings land at the same moment; Google Calendar usually shows them in {calendarZone} time.':
     'This Google calendar uses {calendarZone}; your availability uses {scheduleZone}. Bookings land at the same moment; Google Calendar usually shows them in {calendarZone} time.',
@@ -3325,6 +3323,11 @@ export const admin = {
   'SCIM connection': 'SCIM connection',
   // Additional durations
   'Removed {0}. Selected length: {1}.': 'Removed {0}. Selected length: {1}.',
+
+  // Admin navigation and account menu
+  'Account menu': 'Account menu',
+  'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. The admin interface also uses this language until you choose an interface language in the account menu. After that, the two languages are independent.':
+    'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. The admin interface also uses this language until you choose an interface language in the account menu. After that, the two languages are independent.',
 
   // Signed webhook administration
   'Checking webhook access…': 'Checking webhook access…',

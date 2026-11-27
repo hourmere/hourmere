@@ -2,6 +2,7 @@ import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { goTo } from '../browser.ts'
+import { selectAdminLanguage } from '../test/account-menu.ts'
 import { fakeApi, json, later, renderApp, signedIn } from '../test/fake-api.tsx'
 
 vi.mock('../browser.ts', () => ({ goTo: vi.fn() }))
@@ -55,11 +56,7 @@ describe('calendar profile and consent readiness together', () => {
       })
       renderApp('/app/calendars')
       await screen.findByRole('heading', { name: 'host@example.test' })
-      if (locale === 'zh-CN')
-        await user.selectOptions(
-          screen.getByRole('combobox', { name: 'Interface language' }),
-          locale,
-        )
+      if (locale === 'zh-CN') await selectAdminLanguage(user, locale)
       expect(screen.queryByRole('link', { name: createLabel })).not.toBeNull()
       const profileLink = screen.getByRole('link', { name: createLabel })
       const destination = screen.getByRole('button', { name: destinationLabel })

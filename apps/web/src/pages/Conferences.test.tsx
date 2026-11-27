@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Schemas } from '../api/client.ts'
 import { goTo } from '../browser.ts'
 import { admin } from '../i18n/admin.ts'
+import { selectAdminLanguage } from '../test/account-menu.ts'
 import { fakeApi, json, later, renderApp, signedIn } from '../test/fake-api.tsx'
 
 vi.mock('../browser.ts', () => ({ goTo: vi.fn() }))
@@ -47,8 +48,7 @@ describe('separate conference accounts page', () => {
       })
       renderApp('/app/conferences')
       await screen.findByText('No Zoom accounts connected.')
-      if (locale === 'zh-CN')
-        await user.selectOptions(screen.getByLabelText('Interface language'), locale)
+      if (locale === 'zh-CN') await selectAdminLanguage(user, locale)
       const identityText =
         locale === 'en'
           ? 'Connect Zoom requests only basic account identity.'
@@ -116,7 +116,7 @@ describe('separate conference accounts page', () => {
     expect(heading.closest('article')?.classList.contains('panel')).toBe(true)
     expect(heading.closest('article')?.classList.contains('card')).toBe(false)
     expect(screen.getByText('zoom@example.com').querySelectorAll('wbr')).toHaveLength(2)
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Interface language' }), 'zh-CN')
+    await selectAdminLanguage(user, 'zh-CN')
     expect(await screen.findByRole('heading', { name: '会议账号', level: 1 })).toBeDefined()
     expect(screen.getByRole('heading', { name: 'Settings', level: 2 })).toBe(heading)
     expect(screen.getByText('Zoom 账号已连接。').getAttribute('role')).toBe('status')
@@ -137,7 +137,7 @@ describe('separate conference accounts page', () => {
         .queryByText('Zoom account operations are busy. Try again shortly.')
         ?.getAttribute('role'),
     ).toBe('status')
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Interface language' }), 'zh-CN')
+    await selectAdminLanguage(user, 'zh-CN')
     expect(screen.queryByText('Zoom 账号操作繁忙。请稍后重试。')?.getAttribute('role')).toBe(
       'status',
     )
@@ -228,7 +228,7 @@ describe('separate conference accounts page', () => {
     expect(
       requests.to('POST /api/v1/conference-connections/zoom/authorize-meetings')[0]?.body,
     ).toEqual({})
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Interface language' }), 'zh-CN')
+    await selectAdminLanguage(user, 'zh-CN')
     expect(screen.getByRole('heading', { name: 'Settings', level: 2 })).toBe(heading)
     expect(screen.getByText('仅身份访问')).toBeDefined()
     expect(screen.getAllByRole('button', { name: '授权 Zoom 会议' })).toHaveLength(2)
@@ -285,7 +285,7 @@ describe('separate conference accounts page', () => {
     expect((await screen.findByRole('alert')).textContent).toContain(
       'This Zoom refresh could not be confirmed.',
     )
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Interface language' }), 'zh-CN')
+    await selectAdminLanguage(user, 'zh-CN')
     expect(screen.getByRole('alert').textContent).toContain('无法确认此次 Zoom 刷新结果')
     expect(await screen.findByText('正在刷新连接')).toBeDefined()
     expect(screen.getByRole('button', { name: '刷新 Zoom 账号' }).hasAttribute('disabled')).toBe(
@@ -327,10 +327,7 @@ describe('separate conference accounts page', () => {
       )
       expect(requests.to('GET /api/v1/conference-connections')).toHaveLength(3)
       expect(screen.queryByText('synthetic provider prose')).toBeNull()
-      await user.selectOptions(
-        screen.getByRole('combobox', { name: 'Interface language' }),
-        'zh-CN',
-      )
+      await selectAdminLanguage(user, 'zh-CN')
       expect(screen.getByRole('alert').textContent).toBe('Zoom 账号操作繁忙。请稍后重试。')
       expect(screen.getByText('正在刷新连接')).toBeDefined()
       expect(screen.getByRole('button', { name: '刷新 Zoom 账号' }).hasAttribute('disabled')).toBe(
@@ -373,7 +370,7 @@ describe('separate conference accounts page', () => {
     ).toEqual({})
     expect(requests.to('GET /api/v1/conference-connections')).toHaveLength(2)
     expect(screen.queryByText('synthetic provider prose')).toBeNull()
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Interface language' }), 'zh-CN')
+    await selectAdminLanguage(user, 'zh-CN')
     expect(screen.getByRole('alert').textContent).toBe('请先重新连接此 Zoom 账号，再刷新。')
     expect(screen.getByText('需要重新连接')).toBeDefined()
     expect(screen.getByRole('button', { name: '刷新 Zoom 账号' }).hasAttribute('disabled')).toBe(
