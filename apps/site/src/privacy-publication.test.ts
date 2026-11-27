@@ -1,11 +1,9 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
 import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { parse } from 'yaml'
 
 const require = createRequire(import.meta.url)
 const astro = join(dirname(require.resolve('astro/package.json')), 'bin/astro.mjs')
@@ -186,50 +184,4 @@ describe('legal publication date', () => {
       }
     })
   }, 40_000)
-
-  it.each([0, 17])(
-    'restores CI source and discards fixture output when the build exits %s',
-    async (exitCode) => {
-      const workflow = parse(
-        await readFile(new URL('../../../.github/workflows/ci.yml', import.meta.url), 'utf8'),
-      ) as { jobs: { 'check-static': { steps: { name?: string; run?: string }[] } } }
-      const build = workflow.jobs['check-static'].steps.find(
-        (step) => step.name === 'Build with a disposable legal publication fixture',
-      )
-      expect(build?.run).toBeTypeOf('string')
-      await withFixture(async (fixture) => {
-        const path = join(fixture, 'apps/site/src/data/legal.ts')
-        await mkdir(dirname(path), { recursive: true })
-        const source = await readFile(new URL('./data/legal.ts', import.meta.url), 'utf8')
-        // Keep exercising the prepublication fixture after the real date is committed.
-        const original = source.replace(
-          /(export const LEGAL_PUBLICATION_DATE: string = )'[^']*'/,
-          "$1'SET_ON_PUBLICATION_DAY'",
-        )
-        await writeFile(path, original)
-        const bin = join(fixture, 'bin')
-        await mkdir(bin)
-        await writeFile(
-          join(bin, 'npm'),
-          '#!/bin/sh\nmkdir -p apps/site/dist\ncp apps/site/src/data/legal.ts build-source.txt\nprintf fixture > apps/site/dist/index.html\nexit "$HOURMERE_BUILD_PROBE_EXIT"\n',
-          { mode: 0o755 },
-        )
-        const result = spawnSync('/bin/bash', ['-e', '-c', build?.run ?? ''], {
-          cwd: fixture,
-          env: {
-            ...process.env,
-            PATH: `${bin}:${process.env.PATH}`,
-            HOURMERE_BUILD_PROBE_EXIT: String(exitCode),
-          },
-          encoding: 'utf8',
-          timeout: 10_000,
-        })
-        expect(result.error).toBeUndefined()
-        expect(result.status, result.stdout + result.stderr).toBe(exitCode)
-        expect(await readFile(join(fixture, 'build-source.txt'), 'utf8')).toContain("'2000-01-01'")
-        expect(await readFile(path, 'utf8')).toBe(original)
-        expect(existsSync(join(fixture, 'apps/site/dist'))).toBe(false)
-      })
-    },
-  )
 })

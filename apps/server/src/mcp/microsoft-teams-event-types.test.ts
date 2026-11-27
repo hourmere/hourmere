@@ -7,12 +7,13 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { runCli } from '../../../../tools/cli/src/cli.ts'
 import { createApp } from '../app.ts'
 import { eventTypeRoutes } from '../routes/event-types.ts'
+import { EXPECTED_ORGANIZATION_HEADER } from '../team-management.ts'
 import { mcpEndpoint } from './endpoint.ts'
 import { eventTypeTools } from './event-types.ts'
 
 const apiKey = 'hm_synthetic'
 const publicUrl = 'http://localhost:4189'
-const location = { kind: 'microsoft_teams' }
+const location = { kind: 'microsoft_teams' } as const
 const teamsOption = { id: 'teams', ...location }
 const input = () => ({
   slug: `teams-${randomUUID()}`,
@@ -68,6 +69,21 @@ describe.skipIf(!process.env.DATABASE_URL)('Microsoft Teams event type configura
     return { calendarId, connectionId }
   }
 
+  async function session(principal: Principal, expiresAt = new Date(Date.now() + 3600_000)) {
+    const { id: sessionId } = await db
+      .insertInto('auth.session')
+      .values({
+        userId: principal.user.id,
+        token: randomUUID(),
+        expiresAt,
+        updatedAt: new Date(),
+        activeOrganizationId: principal.organization.id,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    return { ...principal, kind: 'session' as const, sessionId }
+  }
+
   function clients(principal: Principal) {
     const deps = { db, microsoftCalendarEnabled: true }
     const app = createApp({
@@ -78,7 +94,11 @@ describe.skipIf(!process.env.DATABASE_URL)('Microsoft Teams event type configura
       routes: [eventTypeRoutes(deps)],
       mcp: mcpEndpoint({ tools: eventTypeTools(deps) }),
     })
-    const headers = { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }
+    const headers = new Headers({ 'content-type': 'application/json' })
+    if (principal.kind === 'session') {
+      headers.set('origin', publicUrl)
+      headers.set(EXPECTED_ORGANIZATION_HEADER, principal.organization.id)
+    } else headers.set('authorization', `Bearer ${apiKey}`)
     return {
       async rest(changes: object, id?: string) {
         const response = await app.request(
@@ -90,7 +110,11 @@ describe.skipIf(!process.env.DATABASE_URL)('Microsoft Teams event type configura
       async mcp(changes: object, id?: string) {
         const response = await app.request('/mcp', {
           method: 'POST',
-          headers: { ...headers, accept: 'application/json, text/event-stream' },
+          headers: {
+            authorization: `Bearer ${apiKey}`,
+            'content-type': 'application/json',
+            accept: 'application/json, text/event-stream',
+          },
           body: JSON.stringify({
             jsonrpc: '2.0',
             id: 1,
@@ -153,17 +177,33 @@ describe.skipIf(!process.env.DATABASE_URL)('Microsoft Teams event type configura
   it('requires a selected writable Microsoft calendar and preserves both location inputs', async () => {
     const host = await createTestUser(db)
     const client = clients(host.principal)
+    const signedIn = clients(await session(host.principal))
     const changes = { ...input(), location }
-    await denied(client, changes, 409, 'microsoft_teams_calendar_unavailable')
+    const unavailable = { status: 409, body: { error: 'microsoft_teams_calendar_unavailable' } }
+    expect(await signedIn.rest(changes)).toMatchObject(unavailable)
     const { connectionId } = await destination(host.id, ['Calendars.Read'])
-    await denied(client, changes, 409, 'microsoft_teams_calendar_unavailable')
+    expect(await signedIn.rest(changes)).toMatchObject(unavailable)
     await db
       .updateTable('calendar_connections')
       .set({ scopes: ['Calendars.ReadWrite'] })
       .where('id', '=', connectionId)
       .execute()
 
-    const created = await client.rest(changes)
+    await denied(client, changes, 403, 'microsoft_teams_host_session_required')
+    const expired = await session(host.principal, new Date(0))
+    const { createEventType } = await import('@hourmere/scheduling')
+    await expect(
+      createEventType(
+        {
+          db,
+          principal: expired,
+          now: () => Temporal.Now.instant(),
+          microsoftCalendarEnabled: true,
+        },
+        changes,
+      ),
+    ).rejects.toMatchObject({ code: 'microsoft_teams_host_session_required' })
+    const created = await signedIn.rest(changes)
     expect(created).toMatchObject({ status: 201, body: { location } })
     const saved = { location, locations: [teamsOption] }
     expect(await client.mcp({ locations: [teamsOption] }, created.body.id)).toMatchObject({
@@ -201,6 +241,7 @@ describe.skipIf(!process.env.DATABASE_URL)('Microsoft Teams event type configura
     const hostCalendar = await destination(host.id, ['Calendars.ReadWrite'])
     const ownerPrincipal = team.as(owner)
     const ownerClient = clients(ownerPrincipal)
+    const ownerSession = clients(await session(ownerPrincipal))
     const ownerHosts = [{ userId: owner.id }]
     const hostOnly = [{ userId: host.id }]
     const changes = { ...input(), locations: [teamsOption] }
@@ -231,12 +272,10 @@ describe.skipIf(!process.env.DATABASE_URL)('Microsoft Teams event type configura
         destination_calendar_id: hostCalendar.calendarId,
       })
       .execute()
-    await denied(
-      ownerClient,
-      { ...changes, hosts: ownerHosts },
-      409,
-      'microsoft_teams_calendar_unavailable',
-    )
+    expect(await ownerSession.rest({ ...changes, hosts: ownerHosts })).toMatchObject({
+      status: 409,
+      body: { error: 'microsoft_teams_calendar_unavailable' },
+    })
     await denied(clients(team.as(host)), changes, 403, 'insufficient_role')
     if (ownerPrincipal.kind !== 'api_key') throw new Error('Expected test API key')
     for (const apiKeyScope of ['read', 'bookings'] as const) {
@@ -247,8 +286,31 @@ describe.skipIf(!process.env.DATABASE_URL)('Microsoft Teams event type configura
         'insufficient_scope',
       )
     }
-    const created = await ownerClient.cli({ ...changes, hosts: hostOnly })
-    expect(created).toMatchObject({ code: 0, body: { location, locations: [teamsOption] } })
+    const sessionRequired = 'microsoft_teams_host_session_required'
+    await denied(ownerClient, { ...changes, hosts: hostOnly }, 403, sessionRequired)
+    expect(await ownerSession.rest({ ...changes, hosts: hostOnly })).toMatchObject({
+      status: 403,
+      body: { error: sessionRequired },
+    })
+    const created = await ownerClient.rest({ ...input(), hosts: hostOnly })
+    expect(created.status).toBe(201)
+    await denied(ownerClient, { locations: [teamsOption] }, 403, sessionRequired, created.body.id)
+    expect(await ownerSession.rest({ locations: [teamsOption] }, created.body.id)).toMatchObject({
+      status: 403,
+      body: { error: sessionRequired },
+    })
+
+    await db
+      .updateTable('auth.member')
+      .set({ role: 'admin' })
+      .where('organizationId', '=', team.id)
+      .where('userId', '=', host.id)
+      .execute()
+    const hostSession = clients(await session(team.as(host)))
+    expect(await hostSession.rest({ locations: [teamsOption] }, created.body.id)).toMatchObject({
+      status: 200,
+      body: { location, locations: [teamsOption] },
+    })
     await denied(
       clients(outsider.principal),
       { locations: null },
@@ -259,6 +321,15 @@ describe.skipIf(!process.env.DATABASE_URL)('Microsoft Teams event type configura
     expect(await ownerClient.mcp({ title: 'Ready for Teams' }, created.body.id)).toMatchObject({
       isError: false,
       body: { location, title: 'Ready for Teams' },
+    })
+    expect(await ownerClient.rest({ isActive: false }, created.body.id)).toMatchObject({
+      status: 200,
+      body: { isActive: false },
+    })
+    await denied(ownerClient, { isActive: true }, 403, sessionRequired, created.body.id)
+    expect(await hostSession.rest({ isActive: true }, created.body.id)).toMatchObject({
+      status: 200,
+      body: { isActive: true },
     })
   })
 })

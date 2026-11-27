@@ -1,10 +1,11 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { chooseLanguage } from '../i18n/store.ts'
 import type { UiText } from '../i18n/translate.ts'
 import { BookingForm, type BookingFormValues, validateBookingForm } from './BookingForm.tsx'
+import { EmbeddedContext } from './embed-context.ts'
 import type { FieldErrors, Question } from './validation.ts'
 
 const valid: BookingFormValues = {
@@ -256,6 +257,126 @@ describe('public booking form polish', () => {
     rerender(<Form serverErrors={{ email: 'Enter an email address.' }} />)
     expect(screen.getByRole('heading').textContent).toBe('请检查表单')
     expect(screen.getByRole('link').textContent).toBe('邮箱：请输入邮箱地址。')
+  })
+})
+
+describe('phone booking actions', () => {
+  function phoneViewport() {
+    const media = Object.assign(new EventTarget(), { matches: true })
+    const viewport = Object.assign(new EventTarget(), { height: 640, offsetTop: 0, scale: 1 })
+    vi.stubGlobal('innerHeight', 640)
+    vi.stubGlobal('matchMedia', () => media)
+    vi.stubGlobal('visualViewport', viewport)
+    return { media, viewport }
+  }
+
+  it('docks a single native submit at the end of the form and leaves desktop and embeds in flow', async () => {
+    const { media } = phoneViewport()
+    const user = userEvent.setup()
+    const submit = vi.fn()
+    const form = (embedded: boolean) => (
+      <div className="public">
+        <EmbeddedContext value={embedded}>
+          <Form onSubmit={submit} />
+        </EmbeddedContext>
+      </div>
+    )
+    const { rerender } = render(form(false))
+    const confirm = screen.getByRole<HTMLButtonElement>('button', { name: 'Confirm booking' })
+    const bar = confirm.parentElement
+    expect(bar?.hasAttribute('data-docked')).toBe(true)
+    expect(confirm.form?.lastElementChild).toBe(bar)
+    expect(confirm.type).toBe('submit')
+    await user.tab()
+    expect(document.activeElement).toBe(screen.getByLabelText('Your name'))
+    await user.tab()
+    expect(document.activeElement).toBe(screen.getByLabelText('Email'))
+    await user.tab()
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Add a guest' }))
+    await user.tab()
+    expect(document.activeElement).toBe(confirm)
+    await user.keyboard('{Enter}')
+    expect(submit).toHaveBeenCalledOnce()
+
+    media.matches = false
+    media.dispatchEvent(new Event('change'))
+    expect(bar?.hasAttribute('data-docked')).toBe(false)
+    media.matches = true
+    media.dispatchEvent(new Event('change'))
+    expect(bar?.hasAttribute('data-docked')).toBe(true)
+    rerender(form(true))
+    expect(bar?.hasAttribute('data-docked')).toBe(false)
+    expect(screen.getByRole('button', { name: 'Confirm booking' })).toBe(confirm)
+  })
+
+  it('tracks the keyboard inset and scrolls the active field clear of the dock', () => {
+    const { viewport } = phoneViewport()
+    let frame: FrameRequestCallback = () => {}
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frame = callback
+      return 1
+    })
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const scrollBy = vi.spyOn(window, 'scrollBy').mockImplementation(() => {})
+    const root = document.documentElement
+    const dockHeight = 61
+    const rect = Element.prototype.getBoundingClientRect
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: Element,
+    ) {
+      if (this.classList.contains('booking-form-actions')) {
+        const inset = Number.parseFloat(root.style.getPropertyValue('--booking-viewport-inset'))
+        return { ...rect.call(this), height: dockHeight, top: 640 - inset - dockHeight }
+      }
+      return this.getAttribute('data-field') === 'email'
+        ? { ...rect.call(this), height: 44, bottom: 365 }
+        : rect.call(this)
+    })
+    const { unmount } = render(
+      <div className="public">
+        <Form />
+      </div>,
+    )
+    const confirm = screen.getByRole('button', { name: 'Confirm booking' })
+    const email = screen.getByLabelText('Email')
+    act(() => email.focus())
+    frame(0)
+    expect(scrollBy).not.toHaveBeenCalled()
+    expect(root.style.getPropertyValue('--booking-actions-height')).toBe('61px')
+
+    viewport.height = 361
+    viewport.dispatchEvent(new Event('resize'))
+    frame(0)
+    expect(root.style.getPropertyValue('--booking-viewport-inset')).toBe('279px')
+    expect(scrollBy).toHaveBeenCalledExactlyOnceWith({ top: 73, behavior: 'instant' })
+    expect(document.activeElement).toBe(email)
+
+    viewport.offsetTop = 42
+    viewport.dispatchEvent(new Event('scroll'))
+    expect(root.style.getPropertyValue('--booking-viewport-inset')).toBe('237px')
+    expect(scrollBy).toHaveBeenCalledTimes(1)
+
+    viewport.height = 220
+    viewport.dispatchEvent(new Event('resize'))
+    expect(confirm.parentElement?.hasAttribute('data-docked')).toBe(false)
+    viewport.height = 640
+    viewport.offsetTop = 0
+    viewport.dispatchEvent(new Event('resize'))
+    expect(confirm.parentElement?.hasAttribute('data-docked')).toBe(true)
+    expect(root.style.getPropertyValue('--booking-viewport-inset')).toBe('0px')
+
+    viewport.scale = 2
+    viewport.dispatchEvent(new Event('resize'))
+    expect(confirm.parentElement?.hasAttribute('data-docked')).toBe(false)
+    viewport.scale = 1
+    viewport.dispatchEvent(new Event('resize'))
+    expect(confirm.parentElement?.hasAttribute('data-docked')).toBe(true)
+
+    unmount()
+    expect(root.style.getPropertyValue('--booking-actions-height')).toBe('')
+    expect(root.style.getPropertyValue('--booking-viewport-inset')).toBe('')
+    viewport.dispatchEvent(new Event('resize'))
+    expect(root.style.getPropertyValue('--booking-actions-height')).toBe('')
   })
 })
 

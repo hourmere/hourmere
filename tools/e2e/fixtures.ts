@@ -849,6 +849,7 @@ export const test = base.extend<{
             title: AUDIT_TITLE,
             description: AUDIT_DESCRIPTION,
             minimumNoticeMinutes: 30,
+            location: { kind: 'in_person', address: 'Synthetic meeting room' },
           })
           // Opt in only for editor measurements; other audit pages keep their
           // existing notification data and operator settings.
@@ -881,6 +882,7 @@ export const test = base.extend<{
             title: AUDIT_TITLE,
             description: AUDIT_DESCRIPTION,
             minimumNoticeMinutes: 30,
+            location: { kind: 'in_person', address: 'Synthetic meeting room' },
             hosts: [{ userId: host.userId }],
           })
           const schedule = await db

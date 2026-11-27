@@ -315,6 +315,10 @@ export const ManagedBooking = Booking.extend({
       description:
         "Present only when the manage token came from a host's reschedule request email: the request that email was sent for and what became of it. Other manage tokens omit it.",
     }),
+  wasRescheduled: z.literal(true).optional().openapi({
+    description:
+      'Present when the manage link still resolves to a cancelled booking that was moved to a new time.',
+  }),
   changeDeadlines: z
     .object({
       rescheduleBy: z.iso.datetime().nullable(),
@@ -509,6 +513,7 @@ export interface BookingRoutesDeps {
   automaticMeet?: boolean | undefined
   smsRemindersAvailable?: boolean | undefined
   automaticZoom?: boolean | undefined
+  microsoftCalendarEnabled?: boolean | undefined
   now?: () => Temporal.Instant
   notifyAttendeeNoShow?: AttendeeNoShowNotifier | undefined
   /** Queues the booking emails in the transaction of each change; none are sent without it. */
@@ -535,6 +540,7 @@ export function bookingRoutes({
   automaticMeet,
   smsRemindersAvailable,
   automaticZoom,
+  microsoftCalendarEnabled,
   rateLimits = {},
   hostRateLimits = {},
 }: BookingRoutesDeps): RouteModule {
@@ -545,6 +551,7 @@ export function bookingRoutes({
     automaticMeet,
     smsRemindersAvailable,
     automaticZoom,
+    microsoftCalendarEnabled,
     bookingMaxInviteeReschedules,
   }
   const manageLimit = rateLimit(createRateLimiter(rateLimits.manage ?? PUBLIC_RATE_LIMITS.manage))
@@ -587,6 +594,7 @@ export function bookingRoutes({
       automaticMeet,
       smsRemindersAvailable,
       automaticZoom,
+      microsoftCalendarEnabled,
       bookingExportMaxConcurrent,
       routingFormsEnabled,
       authorizeOrganizationWrite: bookingWriteAccess(principal, expectedOrganizationId),

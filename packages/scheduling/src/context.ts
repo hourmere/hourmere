@@ -95,6 +95,8 @@ export interface PublicContext {
   /** Explicit instance capability; defaults off. */
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
+  /** Whether the instance has a configured Microsoft Calendar connection flow. */
+  microsoftCalendarEnabled?: boolean | undefined
   now: () => Temporal.Instant
   /** Told about booking changes in their transaction; nobody is told when absent. */
   notify?: BookingNotifier | undefined
