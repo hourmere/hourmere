@@ -34,6 +34,7 @@ import { SsoRecoveryAcceptance } from './sso/SsoRecoveryEnrollment.tsx'
 import { ssoStepUpProviders } from './sso/setup.ts'
 import { TeamDetailsSettings } from './TeamDetailsSettings.tsx'
 import { TeamMembers } from './TeamMembers.tsx'
+import { WebhookIntegration } from './webhooks/WebhookIntegration.tsx'
 
 export function SettingsPage() {
   const { t, ui } = useI18n()
@@ -228,7 +229,13 @@ export function SettingsPage() {
               : null
         }
       />
-      <SlackIntegrations key={`slack-${organizationId}`} organizationId={organizationId} />
+      <section className="panel slack-integrations" aria-labelledby="integrations-heading">
+        <h2 id="integrations-heading">{t('Integrations')}</h2>
+        <div className="stack">
+          <SlackIntegrations key={organizationId} organizationId={organizationId} />
+          <WebhookIntegration key={`${userId}:${organizationId}:${location.key}`} />
+        </div>
+      </section>
       {!personal && me.principal.kind === 'session' && (
         <ProvisioningTokens
           organizationId={organizationId}
