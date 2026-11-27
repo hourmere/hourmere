@@ -123,7 +123,7 @@ describe('workflow REST operations while off', () => {
           paths[path]?.[method]?.description,
           tools.find((tool) => tool.name === name)?.description,
         ]) {
-          expect(description, name).toContain('WORKFLOWS_ENABLED=true')
+          expect(description, name).toContain('WORKFLOWS_ENABLED=false')
           expect(description, name).toContain(
             'creation, preview, enabling and other edits return 404 workflows_disabled',
           )
