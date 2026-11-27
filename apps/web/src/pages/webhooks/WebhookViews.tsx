@@ -38,14 +38,20 @@ export interface WebhookDraft {
 
 export type WebhookConfirmation = 'rotate' | 'delete'
 
-function usePanelHeading() {
+export function usePanelHeading() {
   const heading = useRef<HTMLHeadingElement>(null)
   const id = useId()
   useLayoutEffect(() => heading.current?.focus(), [])
   return { id, ref: heading, tabIndex: -1 }
 }
 
-function EndpointIdentity({ endpoint, prefix }: { endpoint: WebhookEndpoint; prefix: string }) {
+export function EndpointIdentity({
+  endpoint,
+  prefix,
+}: {
+  endpoint: WebhookEndpoint
+  prefix: string
+}) {
   const { t } = useI18n()
   return (
     <>
@@ -63,20 +69,26 @@ function EndpointIdentity({ endpoint, prefix }: { endpoint: WebhookEndpoint; pre
 
 function EventLabels({ events }: { events: readonly string[] }) {
   const { t, locale } = useI18n()
-  const labels = new Set<MessageKey>(
-    events.map((event) => (isWebhookEvent(event) ? EVENT_LABELS[event] : 'Unknown event')),
-  )
+  const labels = new Set<MessageKey>(events.map(webhookEventLabel))
   return new Intl.ListFormat(locale).format(Array.from(labels, (label) => t(label)))
 }
+
+export function webhookEventLabel(event: string): MessageKey {
+  return isWebhookEvent(event) ? EVENT_LABELS[event] : 'Unknown event'
+}
+
+type OpenEndpoint = (id: string, opener: HTMLButtonElement) => void
 
 export function WebhookList({
   endpoints,
   onEdit,
+  onHistory,
   onCreate,
   busy,
 }: {
   endpoints: readonly WebhookEndpoint[]
-  onEdit: (id: string, opener: HTMLButtonElement) => void
+  onEdit: OpenEndpoint
+  onHistory: OpenEndpoint
   onCreate: (opener: HTMLButtonElement) => void
   busy: boolean
 }) {
@@ -87,7 +99,13 @@ export function WebhookList({
         // biome-ignore lint/a11y/noRedundantRoles: WebKit can omit unstyled lists from the accessibility tree.
         <ul className="webhook-endpoints" role="list">
           {endpoints.map((endpoint) => (
-            <WebhookListItem key={endpoint.id} endpoint={endpoint} onEdit={onEdit} busy={busy} />
+            <WebhookListItem
+              key={endpoint.id}
+              endpoint={endpoint}
+              onEdit={onEdit}
+              onHistory={onHistory}
+              busy={busy}
+            />
           ))}
         </ul>
       ) : (
@@ -110,10 +128,12 @@ export function WebhookList({
 function WebhookListItem({
   endpoint,
   onEdit,
+  onHistory,
   busy,
 }: {
   endpoint: WebhookEndpoint
-  onEdit: (id: string, opener: HTMLButtonElement) => void
+  onEdit: OpenEndpoint
+  onHistory: OpenEndpoint
   busy: boolean
 }) {
   const { t } = useI18n()
@@ -129,15 +149,26 @@ function WebhookListItem({
         <dt>{t('Status')}</dt>
         <dd>{t(endpoint.isActive ? 'Enabled' : 'Paused')}</dd>
       </dl>
-      <button
-        type="button"
-        className="button button-wrap"
-        disabled={busy}
-        aria-describedby={`${prefix}-origin ${prefix}-id`}
-        onClick={(event) => onEdit(endpoint.id, event.currentTarget)}
-      >
-        {t('Edit webhook')}
-      </button>
+      <div className="webhook-actions form-actions">
+        <button
+          type="button"
+          className="button button-wrap"
+          disabled={busy}
+          aria-describedby={`${prefix}-origin ${prefix}-id`}
+          onClick={(event) => onEdit(endpoint.id, event.currentTarget)}
+        >
+          {t('Edit webhook')}
+        </button>
+        <button
+          type="button"
+          className="button button-wrap"
+          disabled={busy}
+          aria-describedby={`${prefix}-origin ${prefix}-id`}
+          onClick={(event) => onHistory(endpoint.id, event.currentTarget)}
+        >
+          {t('Delivery history')}
+        </button>
+      </div>
     </li>
   )
 }

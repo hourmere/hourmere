@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { useLayoutEffect } from 'react'
 import { Link, MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
+import type { Schemas } from '../../api/client.ts'
 import { InterfaceScope } from '../../i18n/runtime.tsx'
 import { RequireSession, SessionProvider, useMe, useSession } from '../../session.tsx'
 import {
@@ -53,6 +54,34 @@ const CREATE_UNKNOWN =
   'Creation could not be confirmed. Refresh the list and confirm the endpoint ID before rotating its secret.'
 const ROTATE_UNKNOWN =
   'Rotation could not be confirmed. The previous secret may already have been replaced. Refresh the list before taking another action.'
+const DELIVERY_PATH = `${ENDPOINT_PATH}/deliveries`
+const DELIVERIES = `GET ${DELIVERY_PATH}`
+const HISTORY_EMPTY = 'No deliveries retained in the last 30 days.'
+const SECOND_ENDPOINT = { ...ENDPOINT, id: '00000000-0000-7000-8000-000000000071' }
+const delivery = {
+  id: '00000000-0000-7000-8000-000000000085',
+  eventId: '00000000-0000-7000-8000-000000000086',
+  bookingId: '00000000-0000-7000-8000-000000000087',
+  eventType: 'booking.created',
+  status: 'pending',
+  attempts: 2,
+  httpStatus: 503,
+  lastError: 'http_error',
+  createdAt: '2026-11-06T01:00:00Z',
+  lastAttemptAt: '2026-11-06T02:00:00Z',
+  deliveredAt: null,
+} satisfies Schemas['WebhookDelivery']
+const olderDelivery = {
+  ...delivery,
+  id: '00000000-0000-7000-8000-000000000084',
+  eventType: 'booking.rescheduled',
+  status: 'delivered',
+  httpStatus: 204,
+  lastError: null,
+  deliveredAt: '2026-11-06T02:00:01Z',
+} satisfies Schemas['WebhookDelivery']
+const deliveryPage = (data: unknown[], nextAfter: string | null = null) =>
+  json(200, { data, nextAfter })
 
 type User = ReturnType<typeof userEvent.setup>
 
@@ -157,6 +186,18 @@ function expectPrivateDataAbsent() {
 function setVisibility(visibility: 'hidden' | 'visible') {
   vi.spyOn(document, 'visibilityState', 'get').mockReturnValue(visibility)
   fireEvent(document, new Event('visibilitychange'))
+}
+
+const history = () => within(screen.getByRole('region', { name: 'Delivery history' }))
+
+async function openHistory(user: User, endpointId = ENDPOINT.id) {
+  const text = await screen.findByText(endpointId, { exact: true })
+  const item = text.closest<HTMLElement>('li')
+  if (!item) throw new Error('Endpoint should be in the webhook list')
+  const opener = within(item).getByRole('button', { name: 'Delivery history' })
+  await user.click(opener)
+  expect(document.activeElement).toBe(head('Delivery history'))
+  return opener
 }
 
 describe('webhook list and edits', () => {
@@ -782,4 +823,299 @@ describe('webhook session and organization boundaries', () => {
     expect(screen.queryByRole('button', { name: 'Copy signing secret' })).toBeNull()
     expectPrivateDataAbsent()
   })
+})
+
+describe('webhook delivery history', () => {
+  it('loads on demand and presents the persisted outcomes and safe attempt metadata', async () => {
+    const response = later()
+    const { api, user, record } = open({ [DELIVERIES]: () => response.response })
+    const failed = {
+      ...delivery,
+      id: '00000000-0000-7000-8000-000000000083',
+      eventType: 'booking.future-marker',
+      status: 'failed',
+      attempts: 13,
+      lastError: 'synthetic-unclassified-error-marker',
+    }
+    const skipped = {
+      ...delivery,
+      id: '00000000-0000-7000-8000-000000000082',
+      eventType: 'booking.cancelled',
+      status: 'skipped',
+      attempts: 0,
+      httpStatus: null,
+      lastError: 'disabled',
+      lastAttemptAt: null,
+    }
+    const markers = ['synthetic-payload-marker', 'synthetic-signature-marker', SYNTHETIC_SECRET]
+    await screen.findByText(ENDPOINT.id)
+    expect(api.to(DELIVERIES)).toHaveLength(0)
+    const opener = await openHistory(user)
+    expect(history().getByText('Loading deliveries…').closest('[role="status"]')).toBeTruthy()
+    expect(history().queryByText(HISTORY_EMPTY)).toBeNull()
+    await waitFor(() => expect(api.to(DELIVERIES)).toHaveLength(1))
+    const request = webhookRequests().find((call) => new URL(call.url).pathname === DELIVERY_PATH)
+    expect(request).toMatchObject({ method: 'GET', cache: 'no-store' })
+    expect(request?.headers.get('X-Expected-Organization-Id')).toBe(ME.organization.id)
+    expect(request?.url).toBe(location.origin + DELIVERY_PATH)
+    expect(api.to(DELIVERIES).map(({ path }) => path)).toEqual([DELIVERY_PATH])
+
+    await response.answer(
+      deliveryPage([
+        {
+          ...delivery,
+          payload: { marker: markers[0] },
+          headers: { 'X-Hourmere-Signature': markers[1] },
+          responseBody: markers[0],
+          secret: markers[2],
+        },
+        olderDelivery,
+        failed,
+        skipped,
+      ]),
+    )
+    for (const label of [
+      'Pending',
+      'Delivered',
+      'Failed',
+      'Skipped',
+      'Booking created',
+      'Booking rescheduled',
+      'Booking cancelled',
+      'HTTP error',
+      'Unknown delivery error',
+      'Unknown event',
+      '204',
+      '13',
+      '0',
+    ]) {
+      expect(history().getByText(label, { exact: true })).toBeTruthy()
+    }
+    // The most recent attempt failed with HTTP 503, but its server outcome is still pending.
+    const pending = history().getByText(delivery.id, { exact: true }).closest<HTMLElement>('li')
+    if (!pending) throw new Error('Delivery should be in the history list')
+    expect(within(pending).getByText('Pending')).toBeTruthy()
+    expect(within(pending).getByText('Attempts')).toBeTruthy()
+    expect(within(pending).getByText('2', { exact: true })).toBeTruthy()
+    expect(within(pending).getByText('HTTP status')).toBeTruthy()
+    expect(within(pending).getByText('503', { exact: true })).toBeTruthy()
+    expect(within(pending).getByText('—', { exact: true })).toBeTruthy()
+    for (const dateTime of [delivery.createdAt, delivery.lastAttemptAt]) {
+      const time = pending.querySelector(`time[datetime="${dateTime}"]`)
+      expect(time?.textContent).toBeTruthy()
+      expect(time?.textContent).not.toBe(dateTime)
+    }
+    const deliveredAt = screen
+      .getByRole('region', { name: 'Delivery history' })
+      .querySelector(`time[datetime="${olderDelivery.deliveredAt}"]`)
+    expect(deliveredAt?.textContent).toBeTruthy()
+
+    const contents = [
+      document.body.innerHTML,
+      JSON.stringify(record.mock.calls),
+      JSON.stringify(localStorage),
+      JSON.stringify(sessionStorage),
+    ]
+    for (const marker of [...markers, failed.eventType, failed.lastError, 'X-Hourmere-Signature']) {
+      expect(contents.some((value) => value.includes(marker))).toBe(false)
+    }
+    expectPrivateDataAbsent()
+    expect(history().queryByRole('button', { name: 'Load older deliveries' })).toBeNull()
+    await user.click(history().getByRole('button', { name: 'Close' }))
+    expect(document.activeElement).toBe(opener)
+  })
+
+  it('offers a fresh read on failure and announces empty only after a successful first page', async () => {
+    const retry = later()
+    let reads = 0
+    const { api, user } = open({
+      [DELIVERIES]: () => (++reads === 1 ? endpointError(503, 'unavailable') : retry.response),
+    })
+    await openHistory(user)
+    const error = await history().findByText('Could not load webhook deliveries.')
+    expect(error.closest('[role="alert"]')).toBeTruthy()
+    expect(history().queryByText(HISTORY_EMPTY)).toBeNull()
+    expectPrivateDataAbsent()
+    await user.click(history().getByRole('button', { name: 'Try again' }))
+    expect(document.activeElement).toBe(history().getByRole('button', { name: 'Refresh history' }))
+    expect(history().getByText('Loading deliveries…')).toBeTruthy()
+    await retry.answer(deliveryPage([]))
+    expect((await history().findByText(HISTORY_EMPTY)).closest('[role="status"]')).toBeTruthy()
+    expect(api.to(DELIVERIES).map(({ path }) => path)).toEqual([DELIVERY_PATH, DELIVERY_PATH])
+  })
+
+  it('keeps the current page on a failed append and retries that cursor before appending in order', async () => {
+    const next = later()
+    let olderReads = 0
+    const { api, user } = open({
+      [DELIVERIES]: ({ path }) => {
+        if (path === DELIVERY_PATH) return deliveryPage([delivery], delivery.id)
+        if (++olderReads === 1) return next.response
+        return deliveryPage([olderDelivery])
+      },
+    })
+    await openHistory(user)
+    await history().findByText(delivery.id)
+    await user.dblClick(history().getByRole('button', { name: 'Load older deliveries' }))
+    await waitFor(() => expect(api.to(DELIVERIES)).toHaveLength(2))
+    expect(history().getByText(delivery.id)).toBeTruthy()
+    expect(history().getByRole('status').textContent).toBe('Loading older deliveries…')
+    await next.answer(endpointError(503, 'unavailable'))
+    expect(
+      (await history().findByText('Could not load older deliveries.')).closest('[role="alert"]'),
+    ).toBeTruthy()
+    expect(history().getByText(delivery.id)).toBeTruthy()
+    await user.click(history().getByRole('button', { name: 'Try again' }))
+    const recent = history().getByText(delivery.id)
+    const older = await history().findByText(olderDelivery.id)
+    expect(recent.compareDocumentPosition(older) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(history().getByRole('status').textContent).toBe('2 deliveries shown.')
+    expect(document.activeElement).toBe(older.closest('li'))
+    expect(history().queryByRole('button', { name: 'Load older deliveries' })).toBeNull()
+    expect(api.to(DELIVERIES).map(({ path }) => path)).toEqual([
+      DELIVERY_PATH,
+      `${DELIVERY_PATH}?after=${delivery.id}`,
+      `${DELIVERY_PATH}?after=${delivery.id}`,
+    ])
+    expect(
+      api.to(DELIVERIES).map(({ headers }) => headers.get('X-Expected-Organization-Id')),
+    ).toEqual([ME.organization.id, ME.organization.id, ME.organization.id])
+  })
+
+  it('clears an invalid cursor and refreshes from the first page', async () => {
+    let firstPages = 0
+    const { api, user } = open({
+      [DELIVERIES]: ({ path }) => {
+        if (path !== DELIVERY_PATH) return endpointError(400, 'invalid_cursor')
+        return ++firstPages === 1 ? deliveryPage([delivery], delivery.id) : deliveryPage([])
+      },
+    })
+    await openHistory(user)
+    await user.click(await history().findByRole('button', { name: 'Load older deliveries' }))
+    const error = await history().findByText(
+      'This delivery history page is no longer available. Refresh history to start again.',
+    )
+    expect(error.closest('[role="alert"]')).toBeTruthy()
+    expect(history().queryByRole('button', { name: 'Load older deliveries' })).toBeNull()
+    expect(history().queryByRole('button', { name: 'Try again' })).toBeNull()
+    await user.click(history().getByRole('button', { name: 'Refresh history' }))
+    await history().findByText(HISTORY_EMPTY)
+    expect(history().queryByText(delivery.id)).toBeNull()
+    expect(api.to(DELIVERIES).map(({ path }) => path)).toEqual([
+      DELIVERY_PATH,
+      `${DELIVERY_PATH}?after=${delivery.id}`,
+      DELIVERY_PATH,
+    ])
+  })
+
+  it.each([
+    [401, 'unauthorized'],
+    [403, 'team_management_access_denied'],
+  ] as const)(
+    'ignores an obsolete %s and starts without its cursor on another endpoint',
+    async (status, code) => {
+      const pending = later()
+      const secondPath = `${BASE}/${SECOND_ENDPOINT.id}/deliveries`
+      const { api, onAccessDenied, user } = open({
+        [LIST]: () => json(200, [ENDPOINT, SECOND_ENDPOINT]),
+        [DELIVERIES]: ({ path }) =>
+          path === DELIVERY_PATH ? deliveryPage([delivery], delivery.id) : pending.response,
+        [`GET ${secondPath}`]: () => deliveryPage([]),
+      })
+      await openHistory(user)
+      await user.click(await history().findByRole('button', { name: 'Load older deliveries' }))
+      await waitFor(() => expect(api.to(DELIVERIES)).toHaveLength(2))
+      const oldRequest = webhookRequests().find((call) =>
+        new URL(call.url).searchParams.has('after'),
+      )
+      expect(oldRequest?.signal.aborted).toBe(false)
+      await user.click(history().getByRole('button', { name: 'Close' }))
+      await openHistory(user, SECOND_ENDPOINT.id)
+      await history().findByText(HISTORY_EMPTY)
+      expect(api.to(`GET ${secondPath}`).map(({ path }) => path)).toEqual([secondPath])
+      expect(oldRequest?.signal.aborted).toBe(true)
+      await pending.answer(endpointError(status, code))
+      expect(history().getByText(HISTORY_EMPTY)).toBeTruthy()
+      expect(screen.queryByText('Sign-in destination')).toBeNull()
+      expect(history().queryByText(delivery.id)).toBeNull()
+      expect(onAccessDenied).not.toHaveBeenCalled()
+    },
+  )
+
+  it.each([
+    [401, 'unauthorized', 'Sign-in destination'],
+    [403, 'team_management_access_denied', ACCESS],
+    [409, 'organization_context_changed', CONFLICT],
+  ] as const)('clears the endpoint and its loaded history on %s', async (status, code, message) => {
+    const { api, onAccessDenied, user } = open({
+      [DELIVERIES]: ({ path }) =>
+        path === DELIVERY_PATH
+          ? deliveryPage([delivery], delivery.id)
+          : endpointError(status, code),
+    })
+    await openHistory(user)
+    await history().findByText(delivery.id)
+    await user.click(history().getByRole('button', { name: 'Load older deliveries' }))
+    await screen.findByText(message)
+    expect(screen.queryByRole('region', { name: 'Delivery history' })).toBeNull()
+    expect(document.body.textContent?.includes(delivery.id)).toBe(false)
+    expect(endpointVisible()).toBe(false)
+    expect(api.to(LIST)).toHaveLength(1)
+    if (status === 403) expect(onAccessDenied).toHaveBeenCalledWith(code)
+    expectPrivateDataAbsent()
+  })
+
+  it('closes stale history and refreshes the endpoint list after a missing endpoint', async () => {
+    const pending = later()
+    let reads = 0
+    const { api, user } = open({
+      [LIST]: () => json(200, ++reads === 1 ? [ENDPOINT] : []),
+      [DELIVERIES]: () => pending.response,
+    })
+    await openHistory(user)
+    await pending.answer(endpointError(404, 'webhook_not_found'))
+    await screen.findByText(MISSING)
+    await screen.findByText(EMPTY)
+    expect(screen.queryByRole('region', { name: 'Delivery history' })).toBeNull()
+    expect(document.activeElement).toBe(head('Webhooks'))
+    expect(api.to(LIST)).toHaveLength(2)
+    expect(
+      api
+        .to(LIST)
+        .every(({ headers }) => headers.get('X-Expected-Organization-Id') === ME.organization.id),
+    ).toBe(true)
+  })
+
+  it.each(['space', 'account'] as const)(
+    'clears visible history and ignores an in-flight page after an observed %s change',
+    async (scope) => {
+      const pending = later()
+      const previous =
+        scope === 'account' ? { ...ME, organization: { ...ME.organization, personal: false } } : ME
+      let me = previous
+      const { api, user } = open({
+        [ME_ROUTE]: () => json(200, me),
+        [LIST]: () => json(200, me === previous ? [ENDPOINT] : []),
+        [DELIVERIES]: ({ path }) =>
+          path === DELIVERY_PATH ? deliveryPage([delivery], delivery.id) : pending.response,
+      })
+      await openHistory(user)
+      await user.click(await history().findByRole('button', { name: 'Load older deliveries' }))
+      await waitFor(() => expect(api.to(DELIVERIES)).toHaveLength(2))
+      const oldRequest = webhookRequests().find((call) =>
+        new URL(call.url).searchParams.has('after'),
+      )
+      me =
+        scope === 'space'
+          ? { ...previous, organization: { ...previous.organization, id: SECOND_SPACE } }
+          : { ...previous, user: { ...previous.user, id: SECOND_SPACE } }
+      await user.click(button('Refresh session'))
+      await screen.findByText(EMPTY)
+      expect(oldRequest?.signal.aborted).toBe(true)
+      expect(document.body.textContent?.includes(delivery.id)).toBe(false)
+      await pending.answer(deliveryPage([olderDelivery]))
+      expect(document.body.textContent?.includes(olderDelivery.id)).toBe(false)
+      expect(screen.queryByRole('region', { name: 'Delivery history' })).toBeNull()
+    },
+  )
 })
