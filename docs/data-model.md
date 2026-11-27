@@ -2827,7 +2827,9 @@ that digest in the same update. Withdrawal and supersession clear the affected v
 digests in their transaction.
 
 `departure_handoff_deliveries` links the durable intent to its transactional mail job ID.
-The job payload carries only the recipient ID. The worker commits the send claim, digest
+The job payload carries only the recipient ID. Delivery derives its authority from the
+committed, still-live proposal version created or resent by an authorized administrator.
+The worker commits the send claim, digest
 rotation and mailbox count before SMTP. Its pending outcome is `unknown` until the worker
 has a definitive result. A duplicate job cannot reclaim an intent. A resend uses a request
 key scoped to the version's recipient row.

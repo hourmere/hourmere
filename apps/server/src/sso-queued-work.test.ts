@@ -340,6 +340,8 @@ it('classifies every production worker by its source of authority', () => {
     'conferenceMirrorDispatchJob',
     'conferenceNotificationDispatchJob',
     'configuredSmsJobs',
+    // Delivery belongs to a committed proposal version and rechecks that it is still live.
+    'departureHandoffEmailJob',
     'groupHostMailJob',
     'rescheduleRequestExpiryJob',
     'scheduledBookingEmailJob',
@@ -355,6 +357,7 @@ it('classifies every production worker by its source of authority', () => {
     'calDavSyncJob',
     'calendarDispatchJob',
     'calendarSyncJob',
+    'departureHandoffCleanupJob',
     'invitationEmailRepairJob',
     'mailboxProofJobs',
     'mcpOAuthCleanupJob',
