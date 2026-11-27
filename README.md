@@ -280,10 +280,11 @@ Team owners and admins can configure [collective meetings](https://hourmere.com/
 with two to eight required hosts, or [round-robin pools](https://hourmere.com/docs/round-robin-scheduling)
 with one to eight hosts and explicit activation.
 
-Set `ROUTING_FORMS_ENABLED=true` in `.env` and recreate the server container with
-`./scripts/compose-up.sh -d --wait` to enable routing forms. Unset or empty uses the
-server default (`false`). See [routing forms](https://hourmere.com/docs/routing-forms)
-for setup and what to do if a legacy `route` handle keeps the feature off.
+Routing forms are on by default, including when `ROUTING_FORMS_ENABLED` is unset or
+empty. To turn them off, set `ROUTING_FORMS_ENABLED=false` in `.env` and recreate
+the server container with `./scripts/compose-up.sh -d --wait`. See
+[routing forms](https://hourmere.com/docs/routing-forms) for setup and what to do
+if a legacy personal `route` handle keeps routing off.
 
 Website widgets support inline and popup booking; see [embedding](https://hourmere.com/docs/embedding) for the
 explicit parent-origin allow list, integration snippets and privacy contract.
