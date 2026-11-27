@@ -490,8 +490,8 @@ describe.skipIf(!databaseUrl)('SCIM managed memberships in native Better Auth', 
 
       const trusted = await measured('add', () => f.trustedAdd())
       expect(trusted).toEqual(await f.admitted())
-      // Captured on main against the same fixture and request bodies.
-      expect(counts).toEqual({ profile: 3, role: 43, remove: 57, accept: 34, leave: 41, add: 13 })
+      // Role changes, removals and departures each check for a pending transfer once.
+      expect(counts).toEqual({ profile: 3, role: 44, remove: 58, accept: 34, leave: 42, add: 13 })
     } finally {
       queries.mockRestore()
     }

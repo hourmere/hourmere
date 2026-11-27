@@ -207,7 +207,7 @@ describe.skipIf(!databaseUrl)('SCIM-managed memberships on existing REST routes'
 
   it('preserves the ordinary team leave response and statement count', async () => {
     const f = await fixture()
-    expect(await counted(f.leave, 25)).toEqual({
+    expect(await counted(f.leave, 26)).toEqual({
       status: 200,
       body: { organizationId: f.personalId },
     })
@@ -215,7 +215,7 @@ describe.skipIf(!databaseUrl)('SCIM-managed memberships on existing REST routes'
 
   it('preserves the ordinary member removal response and statement count', async () => {
     const f = await fixture()
-    expect(await counted(f.remove, 36)).toEqual({
+    expect(await counted(f.remove, 37)).toEqual({
       status: 200,
       body: {
         operationId: expect.stringMatching(/^[\da-f-]{36}$/),
