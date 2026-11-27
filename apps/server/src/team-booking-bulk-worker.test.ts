@@ -201,10 +201,45 @@ describe.skipIf(!bootstrap)('team booking bulk cancellation worker', () => {
   const run = (batchId: string, notifier = notify) =>
     runTeamBookingBulkCancellation(db, batchId, { notify: notifier })
 
+  function pauseClaimedWorker(batchId: string, notifier = notify) {
+    const ready = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    let paused = false
+    const observed = db.withPlugin({
+      transformQuery: ({ node }) => node,
+      async transformResult({ result }) {
+        // The advisory slot is acquired after the claim commits and before any row locks.
+        if (!paused && result.rows[0]?.acquired === true) {
+          paused = true
+          ready.resolve()
+          await release.promise
+        }
+        return result
+      },
+    })
+    const worker = runTeamBookingBulkCancellation(observed, batchId, { notify: notifier })
+    return {
+      worker,
+      wait: () =>
+        Promise.race([
+          ready.promise,
+          worker.then(() => expect.fail('Worker exited before acquiring the item slot')),
+        ]),
+      release: release.resolve,
+    }
+  }
+
   const itemRows = (batchId: string) =>
     db
       .selectFrom('team_booking_bulk_cancellation_items')
-      .select(['booking_id', 'outcome', 'attempt_count', 'claim_token', 'next_attempt_at'])
+      .select([
+        'booking_id',
+        'outcome',
+        'attempt_count',
+        'claim_token',
+        'claim_expires_at',
+        'next_attempt_at',
+      ])
       .where('batch_id', '=', batchId)
       .orderBy('ordinal')
       .execute()
@@ -401,6 +436,33 @@ describe.skipIf(!bootstrap)('team booking bulk cancellation worker', () => {
     expect(await db.selectFrom('payment_refund_obligations').select('id').execute()).toEqual([])
   })
 
+  it('rechecks a link to a foreign imported booking after an eligible preview', async () => {
+    const f = await fixture()
+    const foreignTeam = await createTestTeam(db, [{ user: f.owner, role: 'owner' }])
+    const imported = await createFixtures(db).booking(
+      foreignTeam.id,
+      [],
+      '2030-11-04T08:00:00Z',
+      '2030-11-04T08:30:00Z',
+      { source: 'import' },
+    )
+    const { id } = await f.booking()
+    const batchId = await f.admit([id])
+    await db
+      .updateTable('bookings')
+      .set({ rescheduled_from_id: imported })
+      .where('id', '=', id)
+      .execute()
+
+    await run(batchId)
+
+    expect(await itemRows(batchId)).toMatchObject([{ outcome: 'booking_not_supported' }])
+    expect(await bookingState(id)).toEqual({ status: 'confirmed' })
+    expect(await bookingState(imported)).toEqual({ status: 'confirmed' })
+    expect(await queuedNotifications(id, imported)).toEqual([])
+    expect(await audit(f.team.id, 'booking.cancelled')).toEqual([])
+  })
+
   it('preserves terminal outcomes across recovery of an abandoned claim and redelivery', async () => {
     const f = await fixture()
     const first = await f.booking()
@@ -502,6 +564,96 @@ describe.skipIf(!bootstrap)('team booking bulk cancellation worker', () => {
       },
     ])
   })
+
+  it('leaves the item and its side effects untouched when a stale claimant resumes', async () => {
+    const f = await fixture()
+    const { id } = await f.booking()
+    const batchId = await f.admit([id])
+    const stale = pauseClaimedWorker(batchId)
+    let replacement: ReturnType<typeof pauseClaimedWorker> | undefined
+    try {
+      await stale.wait()
+      const [firstClaim] = await itemRows(batchId)
+      expect(firstClaim).toMatchObject({
+        outcome: 'pending',
+        attempt_count: 1,
+        claim_token: expect.any(String),
+      })
+      await db
+        .updateTable('team_booking_bulk_cancellation_items')
+        .set({ claim_expires_at: wallTime, next_attempt_at: wallTime })
+        .where('batch_id', '=', batchId)
+        .execute()
+
+      replacement = pauseClaimedWorker(batchId)
+      await replacement.wait()
+      const running = await batch(batchId)
+      const replacementItems = await itemRows(batchId)
+      const [secondClaim] = replacementItems
+      expect(secondClaim).toMatchObject({
+        outcome: 'pending',
+        attempt_count: 2,
+        claim_token: expect.any(String),
+      })
+      expect(secondClaim?.claim_token).not.toBe(firstClaim?.claim_token)
+
+      stale.release()
+      await stale.worker
+
+      expect(await bookingState(id)).toEqual({ status: 'confirmed' })
+      expect(await itemRows(batchId)).toEqual(replacementItems)
+      expect(await batch(batchId)).toEqual(running)
+      expect(await queuedNotifications(id)).toEqual([])
+      expect(await audit(f.team.id, 'booking.cancelled')).toEqual([])
+      expect(await audit(f.team.id, 'booking.bulk_cancellation_completed')).toEqual([])
+    } finally {
+      stale.release()
+      replacement?.release()
+      await Promise.allSettled([stale.worker, replacement?.worker])
+    }
+
+    await replacement?.worker
+    expect(await itemRows(batchId)).toMatchObject([{ outcome: 'cancelled', attempt_count: 2 }])
+    expect(await queuedNotifications(id)).toHaveLength(1)
+    expect(await audit(f.team.id, 'booking.cancelled')).toHaveLength(1)
+  })
+
+  it.each(['before the booking lock', 'before commit'] as const)(
+    'stops cancellation when the issuing session expires %s',
+    async (phase) => {
+      const f = await fixture()
+      const { id } = await f.booking()
+      const batchId = await f.admit([id])
+      const expireSession = (connection: Db) =>
+        connection
+          .updateTable('auth.session')
+          .set({ expiresAt: wallTime })
+          .where('id', '=', f.principal.sessionId)
+          .executeTakeFirstOrThrow()
+      let notificationAttempts = 0
+      const paused = pauseClaimedWorker(batchId, async (trx, event, instant) => {
+        notificationAttempts++
+        await notify(trx, event, instant)
+        // Advance expiry on the connection holding the session lock, after queuing the
+        // notification, so the commit check observes it without waiting on a real timer.
+        if (phase === 'before commit') await expireSession(trx)
+      })
+      try {
+        await paused.wait()
+        if (phase === 'before the booking lock') await expireSession(db)
+      } finally {
+        paused.release()
+        await paused.worker
+      }
+
+      expect(notificationAttempts).toBe(phase === 'before commit' ? 1 : 0)
+      expect(await itemRows(batchId)).toMatchObject([{ outcome: 'authorization_lost' }])
+      expect(await batch(batchId)).toMatchObject({ state: 'completed' })
+      expect(await bookingState(id)).toEqual({ status: 'confirmed' })
+      expect(await queuedNotifications(id)).toEqual([])
+      expect(await audit(f.team.id, 'booking.cancelled')).toEqual([])
+    },
+  )
 
   it('stops pending writes when the submitting session switches teams', async () => {
     const f = await fixture()
