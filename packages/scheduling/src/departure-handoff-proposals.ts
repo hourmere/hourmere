@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import { ssoHardOff, type TeamSsoCapabilities } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import { type InferResult, sql } from 'kysely'
@@ -11,18 +10,20 @@ import {
   handoffBookingNotFound,
   handoffOfferChanged,
   handoffOfferNotFound,
-  lockDepartureHandoffSource,
   withDepartureHandoffWrite,
 } from './departure-handoff-access.ts'
 import { departureHandoffDeadline, readDepartureHandoffTerms } from './departure-handoff-apply.ts'
+import {
+  DEPARTURE_HANDOFF_SEND_LIMIT,
+  departureHandoffRecipientHash,
+  lockDepartureHandoffSource,
+} from './departure-handoff-delivery.ts'
 import { getDepartureHandoffEligibility } from './departure-handoff-eligibility.ts'
 import { withDepartureHandoffRead } from './departure-handoff-preview.ts'
 import { DomainError } from './errors.ts'
 import { isUuid } from './internal.ts'
 import { cleanInviteeEmail } from './text.ts'
 
-export { lockDepartureHandoffSource } from './departure-handoff-access.ts'
-export const DEPARTURE_HANDOFF_SEND_LIMIT = 3
 const MAX_VERSION = 2_147_483_647
 const queueDeadline = sql<Date>`clock_timestamp() - interval '20 minutes'`
 
@@ -66,19 +67,6 @@ interface ProposalInput extends DepartureHandoffSourceInput {
 }
 
 export type EnqueueDepartureHandoffEmail = (db: Db, recipientId: string) => Promise<string>
-
-export function departureHandoffRecipientHash(sourceBookingId: string, recipientKey: string) {
-  return createHash('sha256')
-    .update(`hourmere:departure-handoff:mailbox:v1\0${sourceBookingId}\0${recipientKey}`)
-    .digest('hex')
-}
-
-/** Recipient IDs are immutable and each belongs to exactly one offer version. */
-export function departureHandoffTokenDigest(recipientId: string, token: string) {
-  return createHash('sha256')
-    .update(`hourmere:departure-handoff:consent:v1\0${recipientId}\0${token}`)
-    .digest('hex')
-}
 
 const exhausted = () => new DomainError('conflict', 'handoff_send_limit')
 const before = (left: Temporal.Instant, right: string | Temporal.Instant) =>

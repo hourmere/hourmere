@@ -13,7 +13,7 @@ import {
   departureHandoffRecipientHash,
   departureHandoffTokenDigest,
   lockDepartureHandoffSource,
-} from '@hourmere/scheduling/departure-handoff-proposals'
+} from '@hourmere/scheduling/departure-handoff-delivery'
 import { cleanInviteeEmail } from '@hourmere/scheduling/text'
 import { sql } from 'kysely'
 import { z } from 'zod'

@@ -8,10 +8,10 @@ import {
   deliverDepartureHandoffEmail,
   departureHandoffEmailJob,
 } from '@hourmere/notifications'
+import { departureHandoffTokenDigest } from '@hourmere/scheduling/departure-handoff-delivery'
 import {
   cleanupDepartureHandoffProposals,
   createDepartureHandoffProposal,
-  departureHandoffTokenDigest,
   readDepartureHandoffProposal,
   resendDepartureHandoffProposal,
   withdrawDepartureHandoffProposal,

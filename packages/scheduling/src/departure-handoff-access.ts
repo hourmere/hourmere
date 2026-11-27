@@ -12,10 +12,10 @@ import {
   recordTeamWriteOrganizationLock,
   teamWriteTransaction,
 } from '@hourmere/db/team-write'
-import { sql, type Transaction } from 'kysely'
+import type { Transaction } from 'kysely'
 import type { ServiceContext } from './context.ts'
+import { lockDepartureHandoffSource } from './departure-handoff-delivery.ts'
 import { DomainError } from './errors.ts'
-import { isUuid } from './internal.ts'
 
 export interface DepartureHandoffSourceInput {
   teamId: string
@@ -43,38 +43,6 @@ function rethrowTeamManagementError(error: unknown): never {
     error.code === 'organization_context_changed' ? 'conflict' : 'forbidden',
     error.code,
   )
-}
-
-/** Acquire the source lock after the organization lock and before any offer or recipient. */
-export async function lockDepartureHandoffSource(
-  db: Db,
-  organizationId: string,
-  bookingId: string,
-  skipLocked = false,
-) {
-  if (!isUuid(bookingId)) return undefined
-  const source = await db
-    .selectFrom('bookings')
-    .select(['id', 'status'])
-    .select(
-      sql<string | null>`to_char(start_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`.as(
-        'start',
-      ),
-    )
-    .where('id', '=', bookingId)
-    .where('organization_id', '=', organizationId)
-    .forUpdate()
-    .$if(skipLocked, (query) => query.skipLocked())
-    .executeTakeFirst()
-  if (!source) return undefined
-  // Use a fresh statement snapshot after any lock wait.
-  const successor = await db
-    .selectFrom('bookings')
-    .select('id')
-    .where('organization_id', '=', organizationId)
-    .where('rescheduled_from_id', '=', source.id)
-    .executeTakeFirst()
-  return { ...source, hasSuccessor: Boolean(successor) }
 }
 
 /** Keep proposal and apply on the same current team-management boundary. */
