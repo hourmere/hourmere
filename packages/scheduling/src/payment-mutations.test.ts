@@ -445,8 +445,8 @@ describe.skipIf(!process.env.DATABASE_URL)('payment source-copy protection mutat
     const mutant = await copy(
       './payments.ts',
       'createPaymentHold',
-      'payment_idempotency_key: key, idempotency_fingerprint: fingerprint',
-      "idempotency_key: 'payment:' + key, idempotency_fingerprint: fingerprint",
+      'payment_idempotency_key: key,',
+      "idempotency_key: 'payment:' + key,",
     )
     await expectKilled(mutant, (copy) =>
       keyIsolation(copy.createPaymentHold as typeof createPaymentHold),

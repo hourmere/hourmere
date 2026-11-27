@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import * as language from '@hourmere/core/language'
+import * as payment from '@hourmere/core/payment'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import * as react from 'react'
@@ -28,6 +29,7 @@ import * as formActions from './BookingFormActions.tsx'
 import type { BookingPage, OneTimeBookingPage } from './BookingPage.tsx'
 import * as bookingParts from './BookingPageParts.tsx'
 import * as calendarDates from './calendar.ts'
+import * as checkoutReturn from './checkout-return.ts'
 import * as description from './EventDescription.tsx'
 import * as embed from './embed-context.ts'
 import * as env from './env.ts'
@@ -88,6 +90,7 @@ function compile<T>(file: string, text: string, dependencies: Record<string, unk
 
 function partsCopy(text: string) {
   return compile<typeof bookingParts>('apps/web/src/public/BookingPageParts.tsx', text, {
+    '@hourmere/core/payment': payment,
     react,
     '../components/TimeZonePicker.tsx': zonePicker,
     '../components/UserContent.tsx': userContent,
@@ -123,6 +126,7 @@ function pageCopy(text = source, parts = bookingParts): Pages {
     './BookingForm.tsx': form,
     './BookingPageParts.tsx': parts,
     './calendar.ts': calendarDates,
+    './checkout-return.ts': checkoutReturn,
     './EventDescription.tsx': description,
     './embed-context.ts': embed,
     './env.ts': {

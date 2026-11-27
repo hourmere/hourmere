@@ -56,6 +56,7 @@ interface BookingFormProps {
   onSubmit?: () => void
   /** Visible explanation when a preview has disabled submission. */
   submissionDisabledBy?: string
+  paid?: boolean
 }
 
 /** Client-side checks, by field id; empty when the form may be sent. */
@@ -111,6 +112,7 @@ export function BookingForm({
   submitting = false,
   onSubmit,
   submissionDisabledBy,
+  paid = false,
 }: BookingFormProps) {
   const { t, ui, uiText, locale } = useI18n()
 
@@ -393,7 +395,9 @@ export function BookingForm({
           aria-describedby={submissionDisabledBy}
           disabled={!onSubmit || submitting}
         >
-          {submitting ? t('Booking…') : t('Confirm booking')}
+          {paid
+            ? t(submitting ? 'Starting Checkout…' : 'Continue to payment')
+            : t(submitting ? 'Booking…' : 'Confirm booking')}
         </button>
       </BookingFormActions>
     </form>

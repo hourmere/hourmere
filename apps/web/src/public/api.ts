@@ -19,6 +19,8 @@ export type RoutedBookingInput = Schemas['RoutedBookingInput']
 export type RoutedBookingResult = Schemas['RoutedBookingResult']
 export type OneTimeBookingPage = Schemas['OneTimeBookingPage']
 export type JoinWaitlist = Schemas['JoinWaitlist']
+export type PublicCheckoutStatus = Schemas['PublicCheckoutStatus']
+export type StartPublicCheckout = Schemas['StartPublicCheckout']
 
 /** A request the server refused; `retryAfter` (seconds) comes with 429. */
 export class PublicRequestError extends RequestError {
@@ -417,6 +419,53 @@ export async function createBooking(
         }),
   )
   return { result: data, replayed: status === 200 }
+}
+
+export async function startPublicCheckout(
+  handle: string,
+  slug: string,
+  body: StartPublicCheckout,
+  idempotencyKey: string,
+) {
+  const { data } = await call(
+    () =>
+      api.POST('/api/v1/public/{handle}/{slug}/checkout', {
+        ...privateRoutingRequest,
+        params: { path: { handle, slug }, header: { 'idempotency-key': idempotencyKey } },
+        body,
+      }),
+    undefined,
+    true,
+  )
+  return data
+}
+
+export async function getPublicCheckoutStatus(token: string, signal: AbortSignal) {
+  const { data } = await call(
+    () =>
+      api.POST('/api/v1/public/checkout/status', {
+        ...privateRoutingRequest,
+        body: { token },
+        signal,
+      }),
+    signal,
+    true,
+  )
+  return data
+}
+
+export async function cancelPublicCheckout(token: string, signal: AbortSignal) {
+  const { data } = await call(
+    () =>
+      api.POST('/api/v1/public/checkout/cancel', {
+        ...privateRoutingRequest,
+        body: { token },
+        signal,
+      }),
+    signal,
+    true,
+  )
+  return data
 }
 
 export async function joinWaitlist(

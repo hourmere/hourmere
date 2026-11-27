@@ -12,6 +12,7 @@ import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { ServiceContext } from './context.ts'
+import { updateEventType } from './event-types.ts'
 import type { Question } from './questions.ts'
 import * as Service from './routing-form-service.ts'
 import {
@@ -1210,8 +1211,7 @@ describe.skipIf(!serverUrl)('routing form configuration services', () => {
         title: 'Paid later',
         ...draft(event).input,
       })
-      // Event types have no price setting yet (docs/payments.md). A copy whose publication
-      // reads a synthetic payment requirement, as a later price setting would project it.
+      // Instrument this projection to assert the recheck uses the publishing transaction.
       const paid = await sourceCopy(
         [PUBLISH_TARGET_READ, PUBLISH_TARGET_READ.replace('loadRoutingTargetEvents(', 'paid(')],
         [
@@ -1240,8 +1240,42 @@ describe.skipIf(!serverUrl)('routing form configuration services', () => {
       }
       expect(seen).toEqual([true])
       expect(await versions(form.id)).toEqual([])
-      // The shipped publication reads no payment requirement and publishes.
+      // This event has no saved price, so ordinary publication succeeds.
       await Service.publishRoutingForm(space.ctx, form.id, { expectedRevision: 1 })
+    })
+
+    it('invalidates published routing targets when a price is saved and restores them when cleared', async () => {
+      const space = await personalSpace()
+      const event = await space.event({ durationMinutes: 30 })
+      const form = await Service.createRoutingForm(space.ctx, {
+        slug: slug(),
+        title: 'Route to a consultation',
+        ...draft(event).input,
+      })
+      const { version } = await Service.publishRoutingForm(space.ctx, form.id, {
+        expectedRevision: 1,
+      })
+      const health = () =>
+        db
+          .selectFrom('routing_target_dependencies')
+          .select('health_code')
+          .where('version_id', '=', version.id)
+          .executeTakeFirstOrThrow()
+      const eventCtx = { ...space.ctx, paidBookingAvailability: 'available' as const }
+      await updateEventType(eventCtx, event, {
+        payment: { currency: 'usd', prices: [{ durationMinutes: 30, amountMinor: 5000 }] },
+      })
+      await expect(health()).resolves.toEqual({ health_code: 'unavailable' })
+      const replacement = await Service.createRoutingForm(space.ctx, {
+        slug: slug(),
+        title: 'Route to a paid consultation',
+        ...draft(event).input,
+      })
+      await expect(
+        Service.publishRoutingForm(space.ctx, replacement.id, { expectedRevision: 1 }),
+      ).rejects.toMatchObject({ code: 'invalid_routing_target', reason: 'payment_required' })
+      await updateEventType(eventCtx, event, { payment: null })
+      await expect(health()).resolves.toEqual({ health_code: 'ok' })
     })
 
     it('publishes a team form to single-host, round-robin and collective team events', async () => {

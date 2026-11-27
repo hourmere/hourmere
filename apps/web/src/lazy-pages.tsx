@@ -173,6 +173,11 @@ export const ManageBookingPage = page(
   (m) => m.ManageBookingPage,
 )
 
+export const CheckoutReturnPage = page(
+  () => import('./public/CheckoutReturnPage.tsx'),
+  (m) => m.CheckoutReturnPage,
+)
+
 export const EmbeddedBookingPage = page(
   () => import('./public/Embed.tsx'),
   (m) => m.EmbeddedBookingPage,

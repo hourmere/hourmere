@@ -6,7 +6,7 @@ import { createServer as createTcpServer } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { test as base, expect, type FrameLocator, type Locator, type Page } from '@playwright/test'
 import { sql } from 'kysely'
-import { type RunningServer, startServer } from '../../apps/server/src/server.ts'
+import type { RunningServer } from '../../apps/server/src/server.ts'
 import { createAuth, createAuthPool } from '../../packages/auth/src/index.ts'
 import { writeBookingCalendar } from '../../packages/calendars/src/booking-events.ts'
 import { writeBookingConference } from '../../packages/calendars/src/conferences.ts'
@@ -53,6 +53,7 @@ import { startFixtureServer } from './fixture-server.ts'
 import { listenOwned, type OwnedListener } from './listeners.ts'
 import { type PollAuditState, seedPollAuditData } from './meeting-poll-audit-data.ts'
 import { type ScreenshotFixtureState, seedScreenshotData } from './screenshot-data.ts'
+import { stripeFixture } from './stripe-fixture.ts'
 import { seedWebhookDeliveryHistory } from './webhook-delivery-fixtures.ts'
 
 export interface FixtureApp {
@@ -66,6 +67,7 @@ export interface FixtureApp {
     expirePreviousSlugReservation: () => Promise<void>
     enforceSso: () => Promise<void>
   } | null
+  stripe?: ReturnType<typeof stripeFixture>
   setEmbedSnippet: (snippet: string) => void
   configureMixedDirection: (content: {
     title: string
@@ -126,7 +128,9 @@ export interface FixtureApp {
   hostCounts: () => Promise<number[]>
   rows: () => Promise<{ source: string; status: string }[]>
   authorizeHost: (teamRole?: 'owner' | 'member') => Promise<void>
-  authorizeTeamSession: () => Promise<{ teamId: string; personalId: string }>
+  authorizeTeamSession: (
+    actor?: 'owner' | 'member' | 'other-team',
+  ) => Promise<{ teamId: string; personalId: string; expire: () => Promise<void> }>
   eventTypeTitles: () => Promise<string[]>
   bookingState: () => Promise<{
     total: number
@@ -158,6 +162,7 @@ export const test = base.extend<{
   notificationEditor: boolean
   slotSnippets: boolean
   waitlistSmtp: boolean
+  paidStripe: boolean
   teamPublicHome: boolean
 }>({
   automaticMeet: [false, { option: true }],
@@ -166,6 +171,7 @@ export const test = base.extend<{
   notificationEditor: [false, { option: true }],
   slotSnippets: [false, { option: true }],
   waitlistSmtp: [false, { option: true }],
+  paidStripe: [false, { option: true }],
   teamPublicHome: [false, { option: true }],
   suppressFailureDom: [
     async ({ context }, use, testInfo) => {
@@ -190,6 +196,7 @@ export const test = base.extend<{
       notificationEditor,
       slotSnippets,
       waitlistSmtp,
+      paidStripe,
       teamPublicHome,
     },
     use,
@@ -210,6 +217,7 @@ export const test = base.extend<{
         f = createFixtures(db),
         host = await f.host({ handle: 'fixture-host', name: 'Fixture Host', timeZone: 'UTC' })
       await f.schedule(host.userId, { timeZone: 'UTC' })
+      const stripe = paidStripe ? stripeFixture(url, db) : undefined
       const provider = fakeGoogle(),
         sent: MailMessage[] = []
       let meetResponse: 'pending' | 'success' | 'failure' | 'lost' = 'pending'
@@ -345,12 +353,21 @@ export const test = base.extend<{
           minimumNoticeMinutes: 30,
         })
       }
-      await f.eventType(host.organizationId, host.userId, {
+      const personalEvent = await f.eventType(host.organizationId, host.userId, {
         title: 'Fixture call',
         slug: 'call',
         allowGuests: false,
         minimumNoticeMinutes: 30,
+        ...(stripe && { location: { kind: 'link', url: 'https://video.example.test/fixture' } }),
       })
+      if (stripe)
+        await db
+          .updateTable('event_types')
+          .set({
+            payment: { currency: 'usd', prices: [{ durationMinutes: 30, amountMinor: 4242 }] },
+          })
+          .where('id', '=', personalEvent)
+          .execute()
       const team = await f.organization('FixtureTeam')
       await f.member(host.userId, team, 'owner')
       await f.eventType(team, null, {
@@ -668,43 +685,41 @@ export const test = base.extend<{
           },
         })
       }
-      const fixtureEnv = {
-        DATABASE_URL: owned.url,
-        BETTER_AUTH_SECRET: authSecret,
-        SIGNUP: 'closed',
-        HOURMERE_ROLE: 'web',
-        // SMTP availability enables waitlist admission. This web-only fixture never
-        // runs delivery workers; explicit waitlist delivery uses the in-memory sink.
-        ...(waitlistSmtp && {
-          SMTP_URL: 'smtp://127.0.0.1:1',
-          MAIL_FROM: 'Hourmere Fixture <fixture@hourmere.invalid>',
-        }),
-        EMBED_ALLOWED_ORIGINS: parentUrl,
-        ...(uiAudit && { MCP_OAUTH_ENABLED: 'true' }),
-        ...(notificationEditor && { FOLLOW_UP_HOST_NOTES_ENABLED: 'true' }),
-        ...(slotSnippets && { SLOT_SNIPPETS_ENABLED: 'true' }),
-        ...(teamPublicHome && { TEAM_PUBLIC_HOME_ORGANIZATION_IDS: directoryIds.join(',') }),
-        ...(automaticMeet && {
-          GOOGLE_MEET_ENABLED: 'true',
-          GOOGLE_CALENDAR_CLIENT_ID: 'synthetic-client',
-          GOOGLE_CALENDAR_CLIENT_SECRET: 'synthetic-secret',
-          CALENDAR_ENCRYPTION_KEY: TEST_CALENDAR_KEY,
-        }),
-        WEB_DIST:
-          process.env.HOURMERE_E2E_WEB_DIST ??
-          fileURLToPath(new URL('../../apps/web/dist', import.meta.url)),
-      }
       app = await startFixtureServer(
         appListener,
-        fixtureEnv,
-        uiAudit
-          ? (env, options) =>
-              startServer(env, {
-                ...options,
-                // Repeated page mounts share one loopback bucket across all apps in a worker.
-                organizationListRateLimitMaxForTests: 20_000,
-              })
-          : undefined,
+        {
+          DATABASE_URL: owned.url,
+          BETTER_AUTH_SECRET: authSecret,
+          SIGNUP: 'closed',
+          HOURMERE_ROLE: 'web',
+          ...stripe?.env,
+          // SMTP availability enables waitlist admission. This web-only fixture never
+          // runs delivery workers; explicit waitlist delivery uses the in-memory sink.
+          ...(waitlistSmtp && {
+            SMTP_URL: 'smtp://127.0.0.1:1',
+            MAIL_FROM: 'Hourmere Fixture <fixture@hourmere.invalid>',
+          }),
+          EMBED_ALLOWED_ORIGINS: parentUrl,
+          ...(uiAudit && { MCP_OAUTH_ENABLED: 'true' }),
+          ...(notificationEditor && { FOLLOW_UP_HOST_NOTES_ENABLED: 'true' }),
+          ...(slotSnippets && { SLOT_SNIPPETS_ENABLED: 'true' }),
+          ...(teamPublicHome && { TEAM_PUBLIC_HOME_ORGANIZATION_IDS: directoryIds.join(',') }),
+          ...(automaticMeet && {
+            GOOGLE_MEET_ENABLED: 'true',
+            GOOGLE_CALENDAR_CLIENT_ID: 'synthetic-client',
+            GOOGLE_CALENDAR_CLIENT_SECRET: 'synthetic-secret',
+            CALENDAR_ENCRYPTION_KEY: TEST_CALENDAR_KEY,
+          }),
+          WEB_DIST:
+            process.env.HOURMERE_E2E_WEB_DIST ??
+            fileURLToPath(new URL('../../apps/web/dist', import.meta.url)),
+        },
+        undefined,
+        {
+          ...(stripe && { stripeTransport: stripe.transport }),
+          // Repeated page mounts share one loopback bucket across all apps in a worker.
+          ...(uiAudit && { organizationListRateLimitMaxForTests: 20_000 }),
+        },
       )
       let externalRequests = 0
       let authorization: string | undefined
@@ -747,6 +762,7 @@ export const test = base.extend<{
           })
           return key.key
         },
+        ...(stripe && { stripe }),
         configureMixedDirection: async ({ title, description, hostName, question }) => {
           await db
             .updateTable('auth.user')
@@ -1580,19 +1596,28 @@ export const test = base.extend<{
             ),
           )
         },
-        authorizeTeamSession: async () => {
+        authorizeTeamSession: async (actor = 'owner') => {
           authorization = undefined
+          const account =
+            actor === 'other-team'
+              ? await f.host({ name: 'Other team owner' })
+              : actor === 'member'
+                ? secondHost
+                : host
+          const teamId = actor === 'other-team' ? await f.organization('other-fixture-team') : team
+          if (actor === 'other-team') await f.member(account.userId, teamId, 'owner')
           const token = randomBytes(24).toString('base64url')
-          await db
+          const session = await db
             .insertInto('auth.session')
             .values({
-              userId: host.userId,
-              activeOrganizationId: team,
+              userId: account.userId,
+              activeOrganizationId: teamId,
               token,
               updatedAt: new Date(),
               expiresAt: new Date(Date.now() + 86_400_000),
             })
-            .execute()
+            .returning('id')
+            .executeTakeFirstOrThrow()
           await context.addCookies([
             {
               name: 'better-auth.session_token',
@@ -1604,7 +1629,17 @@ export const test = base.extend<{
               sameSite: 'Lax',
             },
           ])
-          return { teamId: team, personalId: host.organizationId }
+          return {
+            teamId,
+            personalId: account.organizationId,
+            expire: async () => {
+              await db
+                .updateTable('auth.session')
+                .set({ expiresAt: new Date(0) })
+                .where('id', '=', session.id)
+                .execute()
+            },
+          }
         },
         eventTypeTitles: async () =>
           (await db.selectFrom('event_types').select('title').orderBy('title').execute()).map(

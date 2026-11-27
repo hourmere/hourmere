@@ -32,6 +32,7 @@ import {
   type MeetingLocation,
 } from '@hourmere/mail'
 import type { BookingEvent } from '@hourmere/scheduling'
+import { readBookingPayment } from '@hourmere/scheduling/booking-payment-details'
 import { conferenceOrganizerAvailable } from '@hourmere/scheduling/conferences'
 import { readTeamsMeetingLocations } from '@hourmere/scheduling/teams-meeting-locations'
 import { sql } from 'kysely'
@@ -395,6 +396,7 @@ export interface NotificationData {
     ical_version: number
     ical_organizer_name: string | null
     ical_organizer_email: string | null
+    payment_confirmed_at: string | null
   }
   /** Hosts with a pinned provider calendar copy; do not email a second new invitation. */
   calendarCopyHosts: Set<string>
@@ -500,7 +502,8 @@ export function loadNotificationData(
           FROM bookings b JOIN chain c ON b.id = c.rescheduled_from_id
          WHERE c.depth < 1000
       )
-      SELECT c.id, c.depth, b.ical_version, b.ical_organizer_name, b.ical_organizer_email
+      SELECT c.id, c.depth, b.ical_version, b.ical_organizer_name, b.ical_organizer_email,
+        b.payment_confirmed_at
         FROM chain c JOIN bookings b ON b.id=c.id ORDER BY c.depth DESC LIMIT 1`.execute(conn)
     const root = chain.rows[0]
     if (!root) return undefined
@@ -896,6 +899,11 @@ async function deliverBookingNotification(
   const data = await loadNotificationData(deps.db, bookingId)
   if (!data || !stillApplies(kind, data, now)) return 'skipped'
   const { booking, hosts, attendees } = data
+  const payment =
+    data.root.payment_confirmed_at &&
+    (kind === 'confirmed' || kind === 'rescheduled' || kind === 'cancelled')
+      ? await readBookingPayment(deps.db, data.root.id, booking.organizationId)
+      : undefined
   const identity = data.conferenceIdentity
   const organizer = invitationOrganizer(data)
   if (
@@ -959,6 +967,7 @@ async function deliverBookingNotification(
     location: booking.location,
     previous: data.previous,
     cancelReason: booking.cancelReason,
+    payment: payment?.summary,
   }
   // Persist before any SMTP call, with a compare-and-set: concurrent jobs and a changed
   // MAIL_FROM must never give the same UID two calendar organizers. The short UPDATE ends

@@ -538,6 +538,9 @@ When adding or changing an operation covered by the guard:
    destination, and the registered reference-setting MCP tool. This does not exempt
    other writes or permit a new known gap; binary uploads travel through REST while
    MCP sets an already uploaded reference.
+   The three public Stripe handoff and return operations use the `invitee-checkout`
+   exemption. The guard checks their exact operation IDs, paths and optional API key
+   contract. Event pricing and confirmed booking management continue to use REST, MCP and CLI.
 4. Update or remove the entry when the operation or either interface name changes. Run
    `npm run api:types` and commit the regenerated API types after route changes.
 5. Run the guard locally:

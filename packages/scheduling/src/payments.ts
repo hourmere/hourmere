@@ -1,14 +1,17 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto'
+import { isPaidEventSupported } from '@hourmere/core/payment'
 import type { Db } from '@hourmere/db'
 import { type NotNull, sql } from 'kysely'
-import { findPublicEventType, selectDurationMinutes } from './availability.ts'
+import { findPublicEventType, selectDurationMinutes, toIso } from './availability.ts'
 import {
   type CreateBookingInput,
   canonicalJson,
   insertBooking,
   lockHosts,
+  prepareBookingAttendees,
   requireOfferedSlot,
   resolveBookingLocation,
+  sha256,
   validateInvitee,
 } from './bookings.ts'
 import { cutoffsOf } from './change-deadlines.ts'
@@ -22,6 +25,7 @@ import {
   type CheckoutOperation,
   type CheckoutSession,
   checkoutSessionExpiry,
+  PAYMENT_HOLD_MINUTES,
   type PaymentMode,
   type PaymentProvider,
 } from './payment-provider.ts'
@@ -31,16 +35,25 @@ import {
   type StripeRefundObservation,
 } from './payment-refunds.ts'
 import { validateResponses } from './questions.ts'
+import {
+  type BookingSuccessRedirect,
+  bookingSuccessRedirect,
+  validateSuccessRedirect,
+} from './success-redirect.ts'
 
-export const PAYMENT_HOLD_MINUTES = 30
+export { PAYMENT_HOLD_MINUTES }
 export interface PaymentContext extends PublicContext {
-  paidBookingsEnabled?: boolean
-  paymentProvider?: PaymentProvider
+  paidBookingsEnabled?: boolean | undefined
+  paymentProvider?: PaymentProvider | undefined
 }
 
 export interface PaymentPrice {
   amountMinor: number
   currency: string
+}
+
+interface PublicPaymentContext extends PaymentContext {
+  paymentStatusSecret?: string | undefined
 }
 
 const disabled = () =>
@@ -51,6 +64,7 @@ export async function createPaymentHold(
   ctx: PaymentContext,
   input: CreateBookingInput,
   trustedPrice?: PaymentPrice,
+  publicCheckoutSecret?: string,
 ): Promise<{
   id: string
   status: string
@@ -77,7 +91,9 @@ export async function createPaymentHold(
     throw new DomainError('invalid', 'invalid_idempotency_key')
   if (input.waitlistToken || input.guests?.length)
     throw new DomainError('invalid', 'payment_flow_unsupported')
-  const invitee = validateInvitee(input.invitee)
+  const invitee = publicCheckoutSecret
+    ? prepareBookingAttendees(input).invitee
+    : validateInvitee(input.invitee)
   const event = await findPublicEventType(ctx.db, input.handle, input.slug, {
     scimResourcesEnabled: ctx.scimResourcesEnabled,
   })
@@ -142,6 +158,7 @@ export async function createPaymentHold(
         'notifications',
         'reschedule_cutoff_minutes',
         'cancel_cutoff_minutes',
+        'recurrence',
       ])
       .where('id', '=', current.id)
       .executeTakeFirstOrThrow()
@@ -151,12 +168,52 @@ export async function createPaymentHold(
       model.booking_mode !== 'individual'
     )
       throw new DomainError('invalid', 'payment_flow_unsupported')
+    if (publicCheckoutSecret) {
+      if (!current.payment) throw new DomainError('conflict', 'payment_price_changed')
+      if (input.smsConsent && !(ctx.smsRemindersAvailable && current.smsRemindersEnabled))
+        throw new DomainError('invalid', 'payment_flow_unsupported')
+      const personal = await trx
+        .selectFrom('personal_organizations')
+        .select('organization_id')
+        .where('organization_id', '=', current.organizationId)
+        .where('user_id', '=', current.hostUserId)
+        .executeTakeFirst()
+      if (
+        !isPaidEventSupported({
+          personal: Boolean(personal),
+          schedulingType: current.schedulingType,
+          bookingMode: model.booking_mode,
+          hostCount: current.hostUserIds.length,
+          allowGuests: current.allowGuests,
+          waitlistEnabled: current.waitlistEnabled,
+          recurringEnabled: model.recurrence !== null,
+          locationKinds: (current.locations ?? []).map((location) => location.kind),
+        })
+      )
+        throw new DomainError('invalid', 'payment_flow_unsupported')
+    }
     // Gate the option this hold would store: the invitee's choice, or the default without one.
     const chosen = selectLocationOption(current.locations, input.locationOptionId)
     if (chosen?.kind === 'google_meet' || chosen?.kind === 'zoom' || chosen?.kind === 'phone')
       throw new DomainError('invalid', 'payment_flow_unsupported')
     const responses = validateResponses(current.questions, input.responses ?? {})
     const duration = selectDurationMinutes(current, input.durationMinutes)
+    let charge = price
+    if (publicCheckoutSecret) {
+      const amount = current.payment?.prices.find(
+        (entry) => entry.durationMinutes === duration,
+      )?.amountMinor
+      const currency = current.payment?.currency
+      if (
+        !price ||
+        !amount ||
+        !currency ||
+        price.currency !== currency ||
+        price.amountMinor !== amount
+      )
+        throw new DomainError('conflict', 'payment_price_changed')
+      charge = { amountMinor: amount, currency }
+    }
     const end = input.start.add({ minutes: duration })
     const now = Temporal.Instant.from((await checkoutClock(trx)).toISOString())
     const hasFullPaymentWindow =
@@ -192,14 +249,23 @@ export async function createPaymentHold(
       notificationSnapshot: createNotificationSnapshot(model.notifications),
       changeCutoffs: cutoffsOf(model),
       manageTokenHash: null,
+      successRedirect: publicCheckoutSecret
+        ? paymentSuccessRedirect(ctx, current, invitee, input.start, end)
+        : undefined,
       paymentHoldExpiresAt: expiresAt,
     })
     await trx
       .updateTable('bookings')
-      .set({ payment_idempotency_key: key, idempotency_fingerprint: fingerprint })
+      .set({
+        payment_idempotency_key: key,
+        idempotency_fingerprint: fingerprint,
+        ...(publicCheckoutSecret && {
+          manage_token_hash: sha256(checkoutManageToken(publicCheckoutSecret, id, key)),
+        }),
+      })
       .where('id', '=', id)
       .execute()
-    if (price && provider) {
+    if (charge && provider) {
       const attemptId = randomUUID()
       await trx
         .insertInto('payment_checkout_attempts')
@@ -208,28 +274,45 @@ export async function createPaymentHold(
           booking_id: id,
           account_id: provider.accountId,
           mode: provider.mode,
-          amount_minor: price.amountMinor,
-          currency: price.currency,
+          amount_minor: charge.amountMinor,
+          currency: charge.currency,
           idempotency_key: `hourmere_checkout_${attemptId}`,
         })
         .execute()
     }
     return { id, status: 'pending_payment', expiresAt }
   })
-  if (price && hold.status === 'pending_payment')
-    return { ...hold, checkout: await createPaymentCheckout(ctx, hold.id) }
+  if (price && hold.status === 'pending_payment') {
+    try {
+      return { ...hold, checkout: await createPaymentCheckout(ctx, hold.id) }
+    } catch (error) {
+      // The browser can poll the protected local outcome if the provider completed
+      // before an exact replay arrived. An ambiguous create can still be retried.
+      if (
+        publicCheckoutSecret &&
+        error instanceof DomainError &&
+        error.code === 'payment_hold_inactive'
+      )
+        return hold
+      throw error
+    }
+  }
   return hold
 }
 
 async function lockCheckoutHold(db: Db, id: string) {
   const hold = await db
     .selectFrom('bookings')
-    .select(['status', 'payment_hold_expires_at'])
+    .select(['status', 'payment_hold_expires_at', 'manage_token_hash'])
     .where('id', '=', id)
     .forUpdate()
     .executeTakeFirst()
   if (!hold?.payment_hold_expires_at) throw new DomainError('not_found', 'booking_not_found')
-  return { status: hold.status, deadline: hold.payment_hold_expires_at }
+  return {
+    status: hold.status,
+    deadline: hold.payment_hold_expires_at,
+    publicReturn: hold.manage_token_hash !== null,
+  }
 }
 
 async function checkoutClock(db: Db) {
@@ -271,6 +354,7 @@ export async function createPaymentCheckout(ctx: PaymentContext, id: string) {
       expiresAt: hold.deadline.toISOString(),
       idempotencyKey: attempt.idempotency_key,
       startedAt: (attempt.started_at ?? now).toISOString(),
+      ...(hold.publicReturn && { publicReturn: true as const }),
     }
     return { operation, shouldCreate: attempt.started_at === null, sessionId: attempt.session_id }
   })
@@ -308,6 +392,166 @@ export async function createPaymentCheckout(ctx: PaymentContext, id: string) {
   if (!active) throw new DomainError('conflict', 'payment_hold_inactive')
   if (!url) throw new DomainError('conflict', 'payment_checkout_unavailable')
   return { sessionId: observedId, url }
+}
+
+function paymentSuccessRedirect(
+  ctx: PublicContext,
+  event: NonNullable<Awaited<ReturnType<typeof findPublicEventType>>>,
+  invitee: ReturnType<typeof validateInvitee>,
+  start: Temporal.Instant,
+  end: Temporal.Instant,
+) {
+  try {
+    return bookingSuccessRedirect(
+      validateSuccessRedirect(event.successRedirect, ctx.successRedirectPolicy),
+      {
+        eventTypeSlug: event.slug,
+        start: toIso(start),
+        end: toIso(end),
+        timeZone: invitee.timeZone,
+        hostName: event.hostName,
+        inviteeName: invitee.name,
+        inviteeEmail: invitee.email,
+      },
+    )
+  } catch (error) {
+    if (!(error instanceof DomainError) || error.code !== 'invalid_success_redirect') throw error
+    return undefined
+  }
+}
+
+function checkoutDigest(secret: string, purpose: 'status' | 'manage', id: string, key: string) {
+  return createHmac('sha256', secret).update(`paid-checkout:${purpose}:${id}:${key}`).digest()
+}
+
+function checkoutManageToken(secret: string, id: string, key: string) {
+  return checkoutDigest(secret, 'manage', id, key).toString('base64url')
+}
+
+const publicCheckoutNotFound = () => new DomainError('not_found', 'payment_checkout_not_found')
+const PUBLIC_CHECKOUT_TOKEN = /^([a-f0-9-]{36})\.([A-Za-z0-9_-]{43})$/
+const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/
+
+/** The caller's quote is a precondition. The locked event determines the price. */
+export async function startPublicCheckout(
+  ctx: PublicPaymentContext,
+  input: CreateBookingInput,
+  quote: PaymentPrice,
+) {
+  const secret = ctx.paymentStatusSecret
+  if (!secret || !ctx.paymentProvider) throw disabled()
+  const key = input.idempotencyKey
+  if (!key || !UUID.test(key)) throw new DomainError('invalid', 'invalid_idempotency_key')
+  const scopedKey = `checkout:v1:${key}`
+  const hold = await createPaymentHold(ctx, { ...input, idempotencyKey: scopedKey }, quote, secret)
+  const attempt = await ctx.db
+    .selectFrom('payment_checkout_attempts')
+    .select('id')
+    .where('booking_id', '=', hold.id)
+    .executeTakeFirstOrThrow()
+  return {
+    statusToken: `${attempt.id}.${checkoutDigest(secret, 'status', attempt.id, scopedKey).toString('base64url')}`,
+    expiresAt: hold.expiresAt,
+    ...(hold.checkout && { checkoutUrl: hold.checkout.url }),
+  }
+}
+
+type CheckoutStatus = 'pending_payment' | 'expired' | 'cancelled' | 'paid'
+type CheckoutRefundStatus = 'requested' | 'pending' | 'succeeded' | 'failed'
+
+export interface PublicCheckoutStatus {
+  status: CheckoutStatus
+  refundStatus?: CheckoutRefundStatus
+  latePayment?: true
+  manageToken?: string
+  successRedirect?: BookingSuccessRedirect
+}
+
+async function publicCheckoutRow(ctx: PublicPaymentContext, token: string, lock: boolean) {
+  const secret = ctx.paymentStatusSecret
+  const [, id, hash] = PUBLIC_CHECKOUT_TOKEN.exec(token) ?? []
+  if (!secret || !id || !UUID.test(id) || !hash) throw publicCheckoutNotFound()
+  const query = ctx.db
+    .selectFrom('bookings as b')
+    .innerJoin('payment_checkout_attempts as attempt', 'attempt.booking_id', 'b.id')
+    .leftJoin('bookings as successor', 'successor.id', 'attempt.current_booking_id')
+    .leftJoin('payment_refund_obligations as refund', 'refund.attempt_id', 'attempt.id')
+    .select([
+      'b.id as id',
+      'b.payment_idempotency_key as key',
+      'b.payment_hold_expires_at as deadline',
+      'b.payment_confirmed_at as confirmedAt',
+      'b.payment_refund_required as latePayment',
+      'b.success_redirect as successRedirect',
+      'attempt.current_booking_id as currentBookingId',
+      'refund.state as refundStatus',
+    ])
+    .select(sql<string>`coalesce(successor.status, b.status)`.as('status'))
+    .select(
+      sql<Buffer | null>`case when successor.id is null then b.manage_token_hash else successor.manage_token_hash end`.as(
+        'manageTokenHash',
+      ),
+    )
+    .select(sql<boolean>`b.payment_hold_expires_at <= clock_timestamp()`.as('due'))
+    .where('attempt.id', '=', id)
+  const row = await (lock ? query.forUpdate('b') : query).executeTakeFirst()
+  if (
+    !row?.key ||
+    !row.deadline ||
+    !timingSafeEqual(checkoutDigest(secret, 'status', id, row.key), Buffer.from(hash, 'base64url'))
+  )
+    throw publicCheckoutNotFound()
+  return { secret, ...row, key: row.key, deadline: row.deadline }
+}
+
+/** Status reads only our database. A return URL or Stripe object ID confers no authority. */
+export async function getPublicCheckoutStatus(
+  ctx: PublicPaymentContext,
+  token: string,
+): Promise<PublicCheckoutStatus> {
+  const row = await publicCheckoutRow(ctx, token, false)
+  const status: CheckoutStatus =
+    row.status === 'confirmed'
+      ? 'paid'
+      : row.status === 'cancelled'
+        ? 'cancelled'
+        : row.status === 'expired' || row.due
+          ? 'expired'
+          : 'pending_payment'
+  const manageToken = row.confirmedAt && checkoutManageToken(row.secret, row.id, row.key)
+  return {
+    status,
+    ...(row.refundStatus && { refundStatus: row.refundStatus as CheckoutRefundStatus }),
+    ...(row.latePayment && { latePayment: true as const }),
+    ...(manageToken && row.manageTokenHash?.equals(sha256(manageToken)) && { manageToken }),
+    ...(status === 'paid' &&
+      !row.currentBookingId &&
+      row.successRedirect && {
+        successRedirect: row.successRedirect as unknown as BookingSuccessRedirect,
+      }),
+  }
+}
+
+/** Cancellation races the signed payment observation on the same booking lock. */
+export async function cancelPublicCheckout(
+  ctx: PublicPaymentContext,
+  token: string,
+): Promise<PublicCheckoutStatus> {
+  await ctx.db.transaction().execute(async (db) => {
+    const row = await publicCheckoutRow({ ...ctx, db }, token, true)
+    if (row.status !== 'pending_payment') return
+    const now = await checkoutClock(db)
+    const expired = row.deadline <= now
+    await db
+      .updateTable('bookings')
+      .set({
+        status: expired ? 'expired' : 'cancelled',
+        cancelled_at: expired ? null : now,
+      })
+      .where('id', '=', row.id)
+      .execute()
+  })
+  return getPublicCheckoutStatus(ctx, token)
 }
 
 async function lockPaymentHold(db: Db, id: string) {
