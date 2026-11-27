@@ -1,5 +1,7 @@
+import { formatPaymentAmount } from '@hourmere/core/payment'
 import { type ReactNode, useId } from 'react'
 import { TimeZoneName } from '../components/TimeZonePicker.tsx'
+import { UserContentList, UserContentMessage } from '../components/UserContent.tsx'
 import { isKnownTimeZone } from '../format.ts'
 import { formatDuration } from '../i18n/duration.ts'
 import { formatList } from '../i18n/formatting.ts'
@@ -35,34 +37,59 @@ export function BookingEventInfo({
   headingLevel?: 1 | 2
   children?: ReactNode
 }) {
-  const { t, ui, locale: displayLocale } = useI18n()
+  const { t, ui, locale: displayLocale, formatLocale } = useI18n()
   const hostTimeZone = bookingHostTimeZone(event)
   const location = chosenLocation ?? event.location
+  const payment = 'payment' in event ? event.payment : undefined
+  const price = payment?.prices.find((entry) => entry.durationMinutes === durationMinutes)
   const Heading = headingLevel === 1 ? 'h1' : 'h2'
+  const requiredHosts = event.hosts?.map(({ name, timeZone }) => ({
+    name,
+    detail: zoneName(timeZone),
+  }))
+  const requiredHostLabels = requiredHosts?.map((host) => t('{name} ({detail})', host))
   return (
     <aside className="event-info" aria-label={t('About this event')}>
-      <Heading className="event-title">{event.title || t('Booking')}</Heading>
+      <Heading className="event-title" dir={event.title ? 'auto' : undefined}>
+        {event.title || t('Booking')}
+      </Heading>
       <div className="host-identity">
         {!team && (
           <HostAvatar name={event.host.name} image={showHostImage ? event.host.image : undefined} />
         )}
-        <p className="event-host">{event.team?.name ?? event.host.name}</p>
+        <p className="event-host" dir="auto">
+          {event.team?.name ?? event.host.name}
+        </p>
       </div>
       {event.schedulingType === 'round_robin' && (
         <p className="event-description">
           {t('An available team member will be assigned when you book.')}
         </p>
       )}
-      {event.hosts && (
+      {requiredHosts && requiredHostLabels && (
         <p className="event-description">
-          {t('Required hosts: {hosts}', {
-            hosts: formatList(
-              event.hosts.map((host) =>
-                t('{name} ({detail})', { name: host.name, detail: zoneName(host.timeZone) }),
+          <UserContentMessage
+            message="Required hosts: {hosts}"
+            values={{ hosts: formatList(requiredHostLabels, displayLocale) }}
+            renderValues={{
+              hosts: (
+                <UserContentList
+                  values={requiredHostLabels}
+                  renderValue={(value, index) => {
+                    const host = requiredHosts[index]
+                    if (!host) return value
+                    return (
+                      <UserContentMessage
+                        message="{name} ({detail})"
+                        values={{ name: host.name }}
+                        otherValues={{ detail: host.detail }}
+                      />
+                    )
+                  }}
+                />
               ),
-              displayLocale,
-            ),
-          })}
+            }}
+          />
         </p>
       )}
       <ul className="event-facts">
@@ -70,10 +97,22 @@ export function BookingEventInfo({
           <BookingFactIcon name="clock" />
           <span>{formatDuration(durationMinutes, displayLocale)}</span>
         </li>
+        {payment && price && (
+          <li>
+            <span>
+              {t('Price: {amount}', {
+                amount: formatPaymentAmount(
+                  { amountMinor: price.amountMinor, currency: payment.currency },
+                  formatLocale,
+                ),
+              })}
+            </span>
+          </li>
+        )}
         {location && (
           <li>
             <BookingFactIcon name="pin" />
-            <span className="user-content">
+            <span className="user-content" dir={chosenLocation?.label == null ? undefined : 'auto'}>
               {chosenLocation?.label ?? ui(locationLabel(location.kind))}
             </span>
           </li>
@@ -219,7 +258,9 @@ export function BookingOptions({
                   checked={locationOptionId === option.id}
                   onChange={() => onLocationChange(option.id)}
                 />
-                <span>{option.label ?? ui(locationLabel(option.kind))}</span>
+                <span dir={option.label == null ? undefined : 'auto'}>
+                  {option.label ?? ui(locationLabel(option.kind))}
+                </span>
               </label>
             ))}
           </div>

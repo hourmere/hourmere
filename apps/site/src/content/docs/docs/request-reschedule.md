@@ -48,6 +48,8 @@ answered, the page says why instead of opening them:
 A confirmed future booking can still be moved or cancelled from the same page under the
 ordinary rules. A page that stayed open while the request changed gets the same
 explanation when its answer is refused, and then shows the booking as it is now.
+If you reopen the link saved when you booked and it still shows the old time, the page
+explains that the booking was moved and that the new booking has its own link.
 
 ## Notes and delivery
 
@@ -95,7 +97,9 @@ reason, even if the retry supplies a different reason. With the token from the
 request email, `GET /api/v1/bookings/manage` reports what happened in the optional
 `rescheduleRequest`: that request's `id` and its `state`, one of `pending`, `expired`,
 `replaced`, `rescheduled` (moved since the email, by the invitee or a host) or
-`cancelled`. Other manage tokens omit it. MCP and CLI have no invitee read of a manage
+`cancelled`. Other manage tokens omit it. When a manage link still opens a booking
+that was cancelled by a move, the same endpoint returns `wasRescheduled: true`.
+MCP and CLI have no invitee read of a manage
 token, so they see only the error code.
 
 Webhook subscriptions can opt into `booking.reschedule_requested` and

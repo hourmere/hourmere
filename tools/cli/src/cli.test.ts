@@ -860,6 +860,7 @@ describe('CLI transport and arguments', () => {
     ['whoami', 'whoami'],
     ['profile', 'get_profile'],
     ['catalog', 'list_event_types'],
+    ['team-home', 'get_public_team'],
     ['event', 'get_event_type'],
     ['create-event', 'create_event_type'],
     ['duplicate-event', 'duplicate_event_type'],
@@ -886,9 +887,11 @@ describe('CLI transport and arguments', () => {
       const input =
         command === 'book'
           ? { idempotencyKey: 'random-test-key' }
-          : command === 'duplicate-event'
-            ? { id: '019a0000-0000-7000-8000-000000000001' }
-            : { limit: 7 }
+          : command === 'team-home'
+            ? { handle: 'Public-Team' }
+            : command === 'duplicate-event'
+              ? { id: '019a0000-0000-7000-8000-000000000001' }
+              : { limit: 7 }
       const fetcher = vi.fn<typeof fetch>(async (url, init) => {
         expect(String(url)).toBe('https://hourmere.example/mcp')
         expect(init?.redirect).toBe('error')

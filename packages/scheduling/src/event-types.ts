@@ -5,6 +5,7 @@
 // pointing at the event type they were made with.
 import { requireActiveApiKey } from '@hourmere/auth'
 import { PHONE_NUMBER_PATTERN, validateEventTypeRules } from '@hourmere/core'
+import type { EventPayment, EventPaymentAvailability } from '@hourmere/core/payment'
 import type { Db, Json } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import { teamWriteTransaction } from '@hourmere/db/team-write'
@@ -27,6 +28,11 @@ import {
 } from './conferences.ts'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
+import {
+  assertPaidEventSupported,
+  paymentAvailability,
+  validateEventPayment,
+} from './event-type-payment.ts'
 import { assertHosts, lockOrganization } from './hosts.ts'
 import {
   engineValidation,
@@ -117,6 +123,8 @@ export interface EventType {
   smsRemindersAvailable?: boolean
   notifications: NotificationSettings
   waitlist: WaitlistSettings
+  payment: EventPayment | null
+  paymentAvailability: EventPaymentAvailability
   isActive: boolean
   /** Hidden from public listings; the direct link remains bookable. */
   isHidden: boolean
@@ -160,6 +168,7 @@ export interface EventTypeInput {
   questions?: QuestionInput[] | undefined
   notifications?: NotificationSettings | undefined
   waitlist?: WaitlistSettings | undefined
+  payment?: EventPayment | null | undefined
   isActive?: boolean | undefined
   isHidden?: boolean | undefined
   allowGuests?: boolean | undefined
@@ -296,12 +305,12 @@ export async function listEventTypes(ctx: ServiceContext): Promise<EventType[]> 
     .orderBy('e.position')
     .orderBy('e.id')
     .execute()
-  return rows.map((row) => toEventType(row, ctx.smsRemindersAvailable))
+  return rows.map((row) => toEventType(row, ctx))
 }
 
 export async function getEventType(ctx: ServiceContext, id: string): Promise<EventType> {
   const row = await visibleRow(ctx.db, ctx, id)
-  return toEventType(await loadEventType(ctx.db, row.id), ctx.smsRemindersAvailable)
+  return toEventType(await loadEventType(ctx.db, row.id), ctx)
 }
 
 /** The complete saved notification settings visible to the caller. */
@@ -383,12 +392,13 @@ async function writeWaitlistSettings(
   db: Db,
   row: Pick<
     EventTypeRow,
-    'id' | 'scheduling_type' | 'organization_id' | 'owner_user_id' | 'waitlist_enabled'
+    'id' | 'scheduling_type' | 'organization_id' | 'owner_user_id' | 'waitlist_enabled' | 'payment'
   >,
   settings: WaitlistSettings,
   scimResourcesEnabled: boolean,
 ) {
   if (settings.enabled) {
+    if (row.payment) throw new DomainError('invalid', 'payment_flow_unsupported')
     const hosts = await db
       .selectFrom('event_type_hosts')
       .select('user_id')
@@ -662,7 +672,7 @@ async function createEventTypeWrite(
       let input = originalInput
       if (sourceId !== undefined) {
         await visibleRow(trx, ctx, sourceId, { lock: true })
-        const source = toEventType(await loadEventType(trx, sourceId), ctx.smsRemindersAvailable)
+        const source = toEventType(await loadEventType(trx, sourceId), ctx)
         const slugs = new Set(
           (
             await trx
@@ -695,6 +705,7 @@ async function createEventTypeWrite(
           zoomConnectionId: source.zoomConnectionId,
           notifications: source.notifications,
           waitlist: source.waitlist,
+          payment: source.payment,
         }
       }
       if (!input) throw notFound()
@@ -713,6 +724,22 @@ async function createEventTypeWrite(
         personalOwnerId,
       )
       validateGroupConfiguration(fields, schedulingType)
+      const payment = validateEventPayment(input.payment ?? null, fields.allowedDurationsMinutes)
+      if (payment) {
+        assertPaidEventSupported(
+          {
+            personal: personalOwnerId !== null,
+            schedulingType,
+            bookingMode: fields.bookingMode,
+            hostCount: hostIds.length,
+            allowGuests: fields.allowGuests,
+            waitlistEnabled: waitlist?.enabled ?? false,
+            locationKinds: fields.locations?.map(({ kind }) => kind) ?? [],
+          },
+          ctx.paidBookingAvailability,
+          true,
+        )
+      }
       const scheduleId = validScheduleId(input.scheduleId) ?? null
       if (schedulingType !== 'individual' && scheduleId !== null) throw invalidScheduleId()
       await assertHosts(
@@ -734,13 +761,14 @@ async function createEventTypeWrite(
         hostIds,
         organizer,
         undefined,
-        zoomConnection,
+        { zoomConnectionId: zoomConnection },
       )
 
       const { id } = await trx
         .insertInto('event_types')
         .values({
           ...insertColumns(fields),
+          ...(payment !== null && { payment: jsonb(payment) }),
           ...(notifications === undefined ? {} : { notifications: jsonb(notifications) }),
           organization_id: ctx.principal.organization.id,
           owner_user_id: personalOwnerId,
@@ -768,7 +796,7 @@ async function createEventTypeWrite(
           ctx.scimResourcesEnabled === true,
         )
       await auditEventType(ctx, trx, id, 'event_type.created')
-      return toEventType(await loadEventType(trx, id), ctx.smsRemindersAvailable)
+      return toEventType(await loadEventType(trx, id), ctx)
     }),
   )
 }
@@ -831,6 +859,7 @@ export async function updateEventType(
       if (
         Object.keys(changes).length > 0 ||
         notificationsChanged ||
+        input.payment !== undefined ||
         scheduleId !== undefined ||
         changingHosts ||
         organizer !== undefined ||
@@ -852,6 +881,26 @@ export async function updateEventType(
           changes.locations !== undefined,
         )
         validateGroupConfiguration(fields, schedulingType)
+        const payment = validateEventPayment(
+          input.payment === undefined ? (row.payment ?? null) : input.payment,
+          fields.allowedDurationsMinutes,
+        )
+        if (payment) {
+          assertPaidEventSupported(
+            {
+              personal: ctx.principal.organization.personal && row.owner_user_id !== null,
+              schedulingType,
+              bookingMode: fields.bookingMode,
+              hostCount: hostIds?.length ?? existing.length,
+              allowGuests: fields.allowGuests,
+              waitlistEnabled: waitlist?.enabled ?? row.waitlist_enabled,
+              recurringEnabled: row.recurrence != null,
+              locationKinds: fields.locations?.map(({ kind }) => kind) ?? [],
+            },
+            ctx.paidBookingAvailability,
+            input.payment !== undefined,
+          )
+        }
         if (
           zoomConnection &&
           zoomConnection !== row.zoom_connection_id &&
@@ -874,6 +923,14 @@ export async function updateEventType(
             true,
             ctx.scimResourcesEnabled === true,
           )
+          const reauthorizingHost =
+            schedulingType !== row.scheduling_type ||
+            [...configuredHosts].sort().join() !==
+              existing
+                .map((h) => h.user_id)
+                .sort()
+                .join() ||
+            (input.isActive === true && !row.is_active)
           await validateConference(
             trx,
             ctx,
@@ -882,22 +939,25 @@ export async function updateEventType(
             configuredHosts,
             organizer === undefined ? row.conference_organizer_user_id : organizer,
             row.id,
-            zoomConnection === undefined ? row.zoom_connection_id : zoomConnection,
-            !fieldsOf(row).locations?.some(automaticZoom) ||
-              schedulingType !== row.scheduling_type ||
-              [...configuredHosts].sort().join() !==
-                existing
-                  .map((h) => h.user_id)
-                  .sort()
-                  .join() ||
-              (zoomConnection !== undefined && zoomConnection !== row.zoom_connection_id) ||
-              (input.isActive === true && !row.is_active),
+            {
+              zoomConnectionId:
+                zoomConnection === undefined ? row.zoom_connection_id : zoomConnection,
+              authorizeZoom:
+                !fieldsOf(row).locations?.some(automaticZoom) ||
+                reauthorizingHost ||
+                (zoomConnection !== undefined && zoomConnection !== row.zoom_connection_id),
+              authorizeTeams:
+                reauthorizingHost || !fieldsOf(row).locations?.some(microsoftTeamsLocation),
+            },
           )
         }
         await trx
           .updateTable('event_types')
           .set({
             ...columns(fields),
+            ...(input.payment !== undefined && {
+              payment: payment === null ? null : jsonb(payment),
+            }),
             ...(notifications === undefined ? {} : { notifications: jsonb(notifications) }),
             scheduling_type: schedulingType,
             ...(organizer !== undefined ? { conference_organizer_user_id: organizer } : {}),
@@ -965,7 +1025,7 @@ export async function updateEventType(
         new Date(ctx.now().epochMilliseconds),
       )
       await auditEventType(ctx, trx, row.id, 'event_type.updated')
-      return toEventType(await loadEventType(trx, row.id), ctx.smsRemindersAvailable)
+      return toEventType(await loadEventType(trx, row.id), ctx)
     }),
   )
 }
@@ -1487,13 +1547,28 @@ function columns(fields: Fields) {
   }
 }
 
-function toEventType(row: EventTypeRow, smsRemindersAvailable = false): EventType {
+function toEventType(row: EventTypeRow, ctx: ServiceContext): EventType {
+  const fields = fieldsOf(row)
   return {
     id: row.id,
     organizationId: row.organization_id,
     ownerUserId: row.owner_user_id,
-    ...fieldsOf(row),
-    smsRemindersAvailable,
+    ...fields,
+    payment: (row.payment ?? null) as unknown as EventPayment | null,
+    smsRemindersAvailable: ctx.smsRemindersAvailable ?? false,
+    paymentAvailability: paymentAvailability(
+      {
+        personal: ctx.principal.organization.personal && row.owner_user_id !== null,
+        schedulingType: row.scheduling_type,
+        bookingMode: row.booking_mode,
+        hostCount: row.hosts.length,
+        allowGuests: row.allow_guests,
+        waitlistEnabled: row.waitlist_enabled,
+        recurringEnabled: row.recurrence != null,
+        locationKinds: fields.locations?.map(({ kind }) => kind) ?? [],
+      },
+      ctx.paidBookingAvailability,
+    ),
     notifications: parseNotifications(row.notifications),
     waitlist: { enabled: row.waitlist_enabled },
     schedulingType: row.scheduling_type as SchedulingType,
@@ -1586,7 +1661,7 @@ export async function activateRoundRobin(ctx: ServiceContext, id: string): Promi
       .onConflict((conflict) => conflict.column('event_type_id').doUpdateSet({ enabled: true }))
       .execute()
     await auditEventType(ctx, trx, row.id, 'event_type.round_robin_activated')
-    return toEventType(await loadEventType(trx, row.id), ctx.smsRemindersAvailable)
+    return toEventType(await loadEventType(trx, row.id), ctx)
   })
 }
 
@@ -1602,6 +1677,20 @@ function validZoomConnection(value: unknown): string | null | undefined {
     throw new DomainError('invalid', 'invalid_zoom_connection', 'Choose your own Zoom connection.')
   return (value as string).toLowerCase()
 }
+
+async function hasLiveEventTypeSession(db: Db, ctx: ServiceContext): Promise<boolean> {
+  if (ctx.principal.kind !== 'session') return false
+  const session = await db
+    .selectFrom('auth.session')
+    .select('id')
+    .where('id', '=', ctx.principal.sessionId)
+    .where('userId', '=', ctx.principal.user.id)
+    .where('expiresAt', '>', new Date(ctx.now().epochMilliseconds))
+    .forShare()
+    .executeTakeFirst()
+  return session !== undefined
+}
+
 // REST and MCP create/update share this validation; the CLI delegates to MCP.
 // Cal.com imports only static locations (or null), never automatic providers. Older
 // writes rejected multi-host automatic Meet before organizers were introduced, and
@@ -1616,8 +1705,15 @@ async function validateConference(
   hosts: string[],
   selected: string | null,
   eventTypeId?: string,
-  zoomConnectionId?: string | null,
-  authorizeZoom = true,
+  {
+    zoomConnectionId,
+    authorizeZoom = true,
+    authorizeTeams = true,
+  }: {
+    zoomConnectionId?: string | null
+    authorizeZoom?: boolean
+    authorizeTeams?: boolean
+  } = {},
 ) {
   if (selected !== null && (mode !== 'collective' || !hosts.includes(selected)))
     throw new DomainError(
@@ -1632,6 +1728,15 @@ async function validateConference(
         'invalid',
         'microsoft_teams_host_policy',
         'Microsoft Teams requires individual scheduling with one host.',
+      )
+    if (
+      authorizeTeams &&
+      (host !== ctx.principal.user.id || !(await hasLiveEventTypeSession(db, ctx)))
+    )
+      throw new DomainError(
+        'forbidden',
+        'microsoft_teams_host_session_required',
+        'The assigned host must configure Microsoft Teams in their own signed-in session.',
       )
     if (
       !ctx.microsoftCalendarEnabled ||
@@ -1657,22 +1762,12 @@ async function validateConference(
           'zoom_host_session_required',
           'Only the host can choose their Zoom connection.',
         )
-      if (ctx.principal.kind === 'session') {
-        const session = await db
-          .selectFrom('auth.session')
-          .select('id')
-          .where('id', '=', ctx.principal.sessionId)
-          .where('userId', '=', ctx.principal.user.id)
-          .where('expiresAt', '>', new Date(ctx.now().epochMilliseconds))
-          .forShare()
-          .executeTakeFirst()
-        if (!session)
-          throw new DomainError(
-            'forbidden',
-            'zoom_host_session_required',
-            'Sign in again before choosing a private Zoom connection.',
-          )
-      }
+      if (ctx.principal.kind === 'session' && !(await hasLiveEventTypeSession(db, ctx)))
+        throw new DomainError(
+          'forbidden',
+          'zoom_host_session_required',
+          'Sign in again before choosing a private Zoom connection.',
+        )
       if (ctx.principal.kind === 'api_key')
         await requireActiveApiKey(db, ctx.principal, () => ctx.now().epochMilliseconds)
       await requireZoomConnection(db, hosts[0] as string, zoomConnectionId, ctx.automaticZoom)

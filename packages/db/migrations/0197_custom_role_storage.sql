@@ -284,6 +284,30 @@ ALTER TABLE custom_roles ADD CONSTRAINT custom_role_active_revision
   REFERENCES custom_role_revisions (organization_id, role_id, revision)
   DEFERRABLE INITIALLY DEFERRED;
 
+CREATE FUNCTION guard_custom_role_organization_kind() RETURNS trigger
+LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
+BEGIN
+  -- Serialize role creation with personal marking on the same organization. Write a
+  -- row version so a concurrent repeatable-read transaction cannot use a stale snapshot.
+  UPDATE auth.organization SET "createdAt" = "createdAt" WHERE id = NEW.organization_id;
+  IF TG_TABLE_NAME = 'custom_roles' THEN
+    IF EXISTS (SELECT FROM personal_organizations WHERE organization_id = NEW.organization_id) THEN
+      RAISE EXCEPTION 'custom roles belong to team organizations'
+        USING ERRCODE = 'check_violation', CONSTRAINT = 'custom_role_team_organization';
+    END IF;
+  ELSIF EXISTS (SELECT FROM custom_roles WHERE organization_id = NEW.organization_id) THEN
+    RAISE EXCEPTION 'an organization with custom roles cannot become personal'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'personal_organization_has_custom_roles';
+  END IF;
+  RETURN NEW;
+END
+$$;
+CREATE TRIGGER custom_role_team_guard BEFORE INSERT ON custom_roles
+  FOR EACH ROW EXECUTE FUNCTION guard_custom_role_organization_kind();
+CREATE TRIGGER personal_organization_custom_roles_guard
+  BEFORE INSERT OR UPDATE OF organization_id ON personal_organizations
+  FOR EACH ROW EXECUTE FUNCTION guard_custom_role_organization_kind();
+
 CREATE FUNCTION guard_custom_role_revision() RETURNS trigger
 LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
 BEGIN
@@ -485,6 +509,18 @@ ALTER TABLE audit_events DROP CONSTRAINT audit_events_details_check;
 ALTER TABLE audit_events ADD CONSTRAINT audit_events_details_check CHECK (
   jsonb_typeof(details) = 'object' AND
   CASE
+    -- Record changed public addresses and whether the name changed, without storing names.
+    WHEN action = 'organization.updated' THEN details - ARRAY['oldSlug','newSlug','nameChanged'] = '{}'::jsonb
+      AND (NOT details ? 'nameChanged' OR details->'nameChanged' = 'true'::jsonb)
+      AND (details ? 'oldSlug') = (details ? 'newSlug')
+      AND (NOT details ? 'newSlug' OR (
+        jsonb_typeof(details->'newSlug') = 'string'
+        AND (details->>'newSlug') COLLATE "C" ~ '^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$'
+        AND (details->'oldSlug' = 'null'::jsonb OR (
+          jsonb_typeof(details->'oldSlug') = 'string'
+          AND (details->>'oldSlug') COLLATE "C" ~ '^[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?$'
+        ))
+      ))
     WHEN action = 'membership.role_changed' THEN details - ARRAY['oldRole','newRole'] = '{}'::jsonb
     WHEN action IN ('api_key.created','api_key.rotated') THEN details - 'scope' = '{}'::jsonb
     -- Each catalogue name present adds one to the sum, so the sum equals the length only when

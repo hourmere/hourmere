@@ -5,7 +5,10 @@ import { checkTeamManagementMembership } from '../../auth/src/team-management.ts
 import { assertTeamOwnerRemains } from '../../auth/src/team-owner-continuity.ts'
 import { customRoleCatalogueV1 } from '../../core/src/custom-role-catalogue.ts'
 import { assertCustomRoleAuditProtections } from './custom-role-audit-protections.ts'
-import { assertCustomRoleStorageProtections } from './custom-role-storage-protections.ts'
+import {
+  assertCustomRoleStorageProtections,
+  assertPersonalSpaceExclusion,
+} from './custom-role-storage-protections.ts'
 import { createDb } from './index.ts'
 import { runMigrations } from './migrate.ts'
 import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
@@ -128,7 +131,13 @@ async function seedPredecessor(pool: pg.Pool) {
   await pool.query(
     `INSERT INTO audit_events
       (organization_id, action, actor_type, actor_id, credential_type, target_type, target_id, details)
-     VALUES ($1, 'membership.role_changed', 'user', $2, 'session', 'membership', $3, '{"oldRole":"member","newRole":"admin"}')`,
+     VALUES
+       ($1, 'membership.role_changed', 'user', $2, 'session', 'membership', $3,
+        '{"oldRole":"member","newRole":"admin"}'),
+       ($1, 'organization.updated', 'user', $2, 'session', 'organization', $1::uuid::text,
+        '{"oldSlug":"old-custom-role-team","newSlug":"custom-role-upgrade-team","nameChanged":true}'),
+       ($1, 'organization.ownership_transfer_offered', 'user', $2, 'session', 'organization', $1::uuid::text,
+        jsonb_build_object('targetMembershipId', $3::text))`,
     [teamId, owner, memberIds[1]],
   )
 }
@@ -316,6 +325,15 @@ describe.skipIf(!serverUrl)('custom role storage migration', () => {
     }
   })
 
+  it('excludes personal spaces from custom roles and assignments', async () => {
+    const db = await createTestDatabase(serverUrl, undefined, { tag: 'role_personal' })
+    try {
+      await assertPersonalSpaceExclusion(db.pool)
+    } finally {
+      await db.drop()
+    }
+  })
+
   it(
     'fails a protection assertion for each independently protective object removed',
     async () => {
@@ -335,6 +353,7 @@ describe.skipIf(!serverUrl)('custom role storage migration', () => {
         predecessorTemplate: replay.predecessor,
         assertions: async (pool) => {
           await assertCustomRoleStorageProtections(pool)
+          await assertPersonalSpaceExclusion(pool)
           await assertCustomRoleAuditProtections(pool)
         },
       })

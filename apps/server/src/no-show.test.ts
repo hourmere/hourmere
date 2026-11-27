@@ -150,7 +150,7 @@ describe.skipIf(!serverUrl)('attendee no-show interface parity', () => {
     )
     expect(new Set(events.map((event) => event.request_id)).size).toBe(2)
   })
-  it('returns stored attendee IDs for uppercase REST writes and replays, including webhook payloads', async () => {
+  it('returns stored attendee IDs for uppercase REST and MCP writes, REST replays and webhooks', async () => {
     const settings = { enabled: true, encryptionKey: Buffer.alloc(32, 9).toString('base64') }
     const { webhook } = await createWebhook(testContext(db, caller), settings, {
       url: 'https://hooks.example.com/attendance',
@@ -207,6 +207,32 @@ describe.skipIf(!serverUrl)('attendee no-show interface parity', () => {
     for (const delivery of deliveries)
       expect(JSON.parse(delivery.payload).data.attendeeId).toBe(canonicalId)
     expect(queue.enqueue).toHaveBeenCalledTimes(2)
+
+    const tool = bookingTools({ db, now }).find((tool) => tool.name === 'set_attendee_no_show')
+    if (!tool) throw new Error('Missing attendance tool: set_attendee_no_show')
+    const result = await runTool(
+      tool,
+      { bookingId, attendeeId: canonicalId.toUpperCase(), noShow: true },
+      {
+        caller: {
+          kind: 'oauth',
+          user: caller.user,
+          organization: caller.organization,
+          oauthConsentId: 'test',
+          clientId: 'test',
+          scopes: ['mcp:tools'],
+        },
+        rateLimit: () => {},
+      },
+      () => {
+        throw new Error('Unexpected MCP tool error')
+      },
+    )
+    expect(result.structuredContent).toEqual({
+      attendeeId: canonicalId,
+      noShowMarkedAt: new Date(now().epochMilliseconds).toISOString(),
+      noShowMarkedBy: caller.user.id,
+    })
   })
   it('exposes real group-seat attendee IDs and marks one seat without changing another', async () => {
     const fixture = await groupFixture(owned.pool)

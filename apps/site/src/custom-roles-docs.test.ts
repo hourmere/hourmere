@@ -137,12 +137,22 @@ describe('custom roles design facts', () => {
   })
 
   it('documents the paid booking boundary and preserves the existing refund effect', () => {
-    expect(read('docs/payments.md')).toContain('price settings and automatic Stripe Session expiry')
-    expect(read('packages/scheduling/src/bookings.ts')).toContain('ensurePaymentRefund(')
-    expect(row('Billing and booking payments')).toContain(
-      'The deployed paid-admission path remains off',
+    const paymentDocs = asProse(read('docs/payments.md'))
+    const billing = row('Billing and booking payments')
+    expect(paymentDocs).toContain(
+      'New paid admission defaults to off and live admission remains closed.',
     )
-    expect(row('Billing and booking payments')).toContain('No `billing.*` or `payments.*` grant')
+    expect(paymentDocs).toContain(
+      'Automatic Stripe Session expiry on local release remains later work.',
+    )
+    expect(read('packages/scheduling/src/bookings.ts')).toContain('ensurePaymentRefund(')
+    expect(billing).toContain(
+      'Price settings and Stripe Checkout are limited to eligible personal event types.',
+    )
+    expect(billing).toContain(
+      'Test-mode admission defaults to off and live admission remains closed.',
+    )
+    expect(billing).toContain('No `billing.*` or `payments.*` grant')
   })
 
   it('pins legacy credential ceilings through renewal and use', () => {

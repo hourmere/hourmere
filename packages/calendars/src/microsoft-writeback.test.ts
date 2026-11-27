@@ -9,7 +9,6 @@ import {
   getManagedBooking,
   getPublicEventType,
   type PublicContext,
-  readTeamsMeetingLocations,
   rescheduleManagedBooking,
 } from '@hourmere/scheduling'
 import { createFixtures } from '@hourmere/scheduling/testing'
@@ -358,6 +357,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       return {
         db,
         now: () => Temporal.Instant.fromEpochMilliseconds(now),
+        microsoftCalendarEnabled: true,
         notify: async (trx, event) => {
           if (!('requestId' in event)) await notify(trx, event)
         },
@@ -624,14 +624,12 @@ describe.skipIf(!process.env.DATABASE_URL)(
         expect(await busy()).toEqual([])
         const cancelled = await state(bookingId)
         expect(cancelled).toMatchObject({ status: 'succeeded' })
+        expect(cancelled).not.toHaveProperty('teamsJoinUrl')
         if (teams) {
           expect(
             (await getManagedBooking(context(), requireToken(moved.manageToken))).location,
           ).toEqual({ kind: 'microsoft_teams' })
-          expect(
-            (await readTeamsMeetingLocations(db, [moved.booking])).get(moved.booking.id),
-          ).toEqual({ kind: 'microsoft_teams', status: 'ready', url: teamsJoinUrl })
-        } else expect(cancelled).not.toHaveProperty('teamsJoinUrl')
+        }
       },
     )
 
@@ -1333,9 +1331,19 @@ describe.skipIf(!process.env.DATABASE_URL)(
       await cancelManagedBooking(context(), requireToken(first.manageToken))
       await work({ groupSlotId })
       expect(deletes()).toHaveLength(0)
+      expect(
+        (await getManagedBooking(context(), requireToken(second.manageToken))).location,
+      ).toEqual(ready)
       await cancelManagedBooking(context(), requireToken(second.manageToken))
       await work({ groupSlotId })
       expect(deletes()).toHaveLength(1)
+      const slot = await db
+        .selectFrom('group_slots')
+        .select('microsoft_writeback')
+        .where('id', '=', groupSlotId)
+        .executeTakeFirstOrThrow()
+      expect(slot.microsoft_writeback).toMatchObject({ status: 'succeeded' })
+      expect(slot.microsoft_writeback).not.toHaveProperty('teamsJoinUrl')
     })
 
     it('keeps the Teams URL behind host and invitee authorization', async () => {

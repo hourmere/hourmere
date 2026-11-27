@@ -170,30 +170,72 @@ async function assertMemberStorage(pool: pg.Pool, member: Member, foreignMember:
   })
 }
 
-async function seedRole(pool: pg.Pool, organization_id: string) {
+function insertRole(pool: pg.Pool, organizationId: string, id: string) {
+  return pool.query(
+    `WITH role AS (
+       INSERT INTO custom_roles (organization_id, id, active_revision)
+       VALUES ($1, $2, 1) RETURNING organization_id, id, active_revision
+     )
+     INSERT INTO custom_role_revisions (organization_id, role_id, revision, name, permission_ids)
+     SELECT organization_id, id, active_revision, 'Scheduling support', ARRAY['event_types.create']
+     FROM role`,
+    [organizationId, id],
+  )
+}
+
+async function seedRole(pool: pg.Pool, organizationId: string) {
   const id = randomUUID()
-  const client = await pool.connect()
-  try {
-    await expect(client.query('BEGIN')).resolves.toBeDefined()
-    await expect(
-      client.query(
-        'INSERT INTO custom_roles (organization_id, id, active_revision) VALUES ($1, $2, 1)',
-        [organization_id, id],
-      ),
-    ).resolves.toMatchObject({ rowCount: 1 })
-    await expect(
-      client.query(
-        `INSERT INTO custom_role_revisions (organization_id, role_id, revision, name, permission_ids)
-       VALUES ($1, $2, 1, 'Scheduling support', ARRAY['event_types.create'])`,
-        [organization_id, id],
-      ),
-    ).resolves.toMatchObject({ rowCount: 1 })
-    await expect(client.query('COMMIT')).resolves.toBeDefined()
-  } finally {
-    // A dropped-object failure can leave this transaction open.
-    client.release(true)
-  }
+  await expect(insertRole(pool, organizationId, id)).resolves.toMatchObject({ rowCount: 1 })
   return id
+}
+
+export async function assertPersonalSpaceExclusion(pool: pg.Pool) {
+  const teamId = randomUUID()
+  const personalId = randomUUID()
+  await expect(
+    pool.query(
+      `INSERT INTO auth.organization (id, name, slug, "createdAt")
+       SELECT id, 'Role scope fixture', id::text, now() FROM unnest($1::uuid[]) AS id`,
+      [[teamId, personalId]],
+    ),
+  ).resolves.toMatchObject({ rowCount: 2 })
+  const teamOwner = await seedMember(pool, teamId, 'owner')
+  const personalOwner = await seedMember(pool, personalId, 'owner')
+  const personalMember = await seedMember(pool, personalId, 'member')
+  const personalMarker = { organization_id: personalId, user_id: personalOwner.user_id }
+  await expect(insert(pool, 'personal_organizations', personalMarker)).resolves.toMatchObject({
+    rowCount: 1,
+  })
+  await expect(insertRole(pool, personalId, randomUUID())).rejects.toMatchObject({
+    code: '23514',
+    constraint: 'custom_role_team_organization',
+  })
+
+  const teamRoleId = await seedRole(pool, teamId)
+  await expect(insert(pool, 'team_member_authorizations', personalMember)).resolves.toMatchObject({
+    rowCount: 1,
+  })
+  await expect(
+    insert(pool, 'custom_role_assignments', {
+      ...personalMember,
+      role_id: teamRoleId,
+      assigned_by_user_id: personalOwner.user_id,
+    }),
+  ).rejects.toMatchObject({ code: '23503', constraint: 'custom_role_assignment_role' })
+
+  const cannotMarkPersonal = { code: '23514', constraint: 'personal_organization_has_custom_roles' }
+  await expect(
+    insert(pool, 'personal_organizations', {
+      organization_id: teamId,
+      user_id: teamOwner.user_id,
+    }),
+  ).rejects.toMatchObject(cannotMarkPersonal)
+  await expect(
+    pool.query('UPDATE personal_organizations SET organization_id = $1 WHERE user_id = $2', [
+      teamId,
+      personalOwner.user_id,
+    ]),
+  ).rejects.toMatchObject(cannotMarkPersonal)
 }
 
 async function assertRevisionStorage(

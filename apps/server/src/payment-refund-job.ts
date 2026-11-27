@@ -6,8 +6,8 @@ import type { StripeConfig } from './stripe-config.ts'
 import { createStripeRefundProvider } from './stripe-refunds.ts'
 
 /** Retained obligations drain independently of the new admission and receiver switch. */
-export function paymentRefundJob(db: Db, stripe?: StripeConfig) {
-  const provider = stripe ? createStripeRefundProvider(stripe) : undefined
+export function paymentRefundJob(db: Db, stripe?: StripeConfig, transport?: typeof fetch) {
+  const provider = stripe ? createStripeRefundProvider(stripe, transport) : undefined
   return defineJob({
     name: 'payment-refunds-v1',
     payload: z.strictObject({}),

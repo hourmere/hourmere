@@ -46,7 +46,7 @@ lists the exact requests exercised by the Keycloak fixture.
 
 - An active User with an eligible work address can receive an invitation. The
   person proves control of their verified mailbox and own account to claim the
-  membership. Existing signup policy and invitation limits apply. Claims expire
+  membership. Instance signup policy applies. Claims expire
   after 48 hours. Some existing accounts require OIDC linking or re-admission
   proof instead of an invitation.
 - Deactivation blocks managed team access and revokes the member's team
@@ -54,6 +54,11 @@ lists the exact requests exercised by the Keycloak fixture.
   resource. The person's account, personal space, other teams and booking
   history are preserved. Reactivation can restore team access after applicable
   blockers are cleared. Affected team credentials must be created again.
+- Deactivating an unlinked User pauses acceptance of its pending SCIM invitation.
+  Deleting the User cancels pending SCIM invitations for unfinished claims. Changing
+  or clearing the work address invalidates its pending claim and blocks acceptance
+  through its SCIM invitation. An administrator can independently issue or renew an
+  invitation under the team's usual rules.
 - Groups manage only the directory-sourced roster of one explicitly mapped child
   team. Nested groups and role mapping are unsupported. Group DELETE removes its
   managed roster and keeps the child team, manual members and booking history.
@@ -68,6 +73,26 @@ lists the exact requests exercised by the Keycloak fixture.
   removals, suspensions, reactivations and team credential revocations. It
   identifies the child membership and the SCIM system actor. The log omits
   directory attributes and parent credential identifiers.
+
+## Invitations and initial sync
+
+The invitation says it was sent by the identity provider on behalf of the team. The
+verified owner who backs the invitation determines its language through their profile
+preference. The audit log identifies the team's SCIM connection for invitation issuance
+and cancellation by provisioning.
+
+- Each team can queue 60 SCIM invitation emails per rolling hour and 240 per rolling
+  24 hours, shared across its provisioning tokens. App invitations and resends use
+  the team's existing app invitation limits and the administrator's own budget.
+- The SCIM recipient cap counts requests within the team. Its defaults are five per
+  hour and 20 per day for one address. App invitations count app requests across
+  teams and SCIM requests from their own team. An instance-wide ceiling across
+  all teams and both sources limits aggregate abuse. This ceiling is four times
+  the configured recipient limits, 20 per hour and 80 per day by default.
+- App and SCIM invitations share the team cap of 100 unexpired pending invitations
+  and the instance-wide SMTP attempt budget. Stagger a large initial sync and
+  honor the `Retry-After` header on 429. Pending capacity returns as invitations
+  are accepted, canceled or expire.
 
 ## Known limitations
 
@@ -132,6 +157,13 @@ SCIM 默认开启，自托管实例无需订阅。团队所有者在「设置 �
 并在身份提供商的 SCIM 2.0 连接器中使用团队专属地址
 `https://<hourmere-host>/scim/v2/<organization-id>`。请先用少量测试用户验证连接。
 同步群组前，父团队和子团队的所有者须分别批准对同一个群组 `externalId` 的映射。
+
+SCIM 邀请邮件以身份提供商代表团队的名义发出，语言沿用邀请所关联的已验证所有者的语言偏好。
+审计日志记录发出或取消邀请的 SCIM 连接。每个团队在滚动一小时内可安排 60 封 SCIM 邀请邮件，滚动 24 小时内可安排 240 封，
+团队所有预配令牌共用此额度。应用内邀请和重发使用独立的管理者额度。SCIM 邀请的收件人限额按团队计算，默认同一地址
+每小时 5 封、每天 20 封。应用内邀请的收件人限额统计所有团队的应用内邀请和本团队的 SCIM 邀请。为限制滥用，
+所有团队的邀请另有实例级收件人上限，为配置值的四倍，默认每小时 20 封、
+每天 80 封。初次同步人数较多时请分批进行，遇到 429 时遵循 `Retry-After`。
 
 目录停用成员时会暂停其受管团队访问，并撤销相关会话、API 密钥和 MCP OAuth 授权。
 如果子团队所有者已将该受管成员提升为管理员，父目录对该用户的停用或删除会整体返回 403，

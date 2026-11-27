@@ -85,7 +85,7 @@ const copy = {
 function visibleText(html: string): string {
   return html
     .replace(/<head>[\s\S]*?<\/head>/i, '')
-    .replace(/<\/?span\b[^>]*>/g, '')
+    .replace(/<\/?(?:span|bdi)\b[^>]*>/g, '')
     .replace(/<[^>]*>/g, ' ')
     .replaceAll('&lt;', '<')
     .replaceAll('&gt;', '>')
@@ -148,7 +148,9 @@ function verifyNormalization(render: Render = followUpEmail) {
     hostNote: 'First\r\nBcc: victim@example.test\rLast\u0000\u202e\tline\ud800',
   })
   expect(message.text).toContain('First\nBcc: victim@example.test\nLast\tline�')
-  expect(message.html).toContain('First<br>Bcc: victim@example.test<br>Last\tline�')
+  expect(message.html).toContain(
+    '<bdi>First</bdi><br><bdi>Bcc: victim@example.test</bdi><br><bdi>Last\tline�</bdi>',
+  )
   expect(message.subject).toBe(copy.en.subject)
   expect(message.to).toBe(meeting.inviteeEmail)
   expect(message.replyTo).toBeUndefined()
@@ -363,7 +365,7 @@ describe('follow-up email templates', () => {
   it.each<[string, Replacement, (render: Render) => void | Promise<void>]>([
     [
       'note HTML escaping',
-      [`\${htmlLines(c.hostNote.text, c.language)}`, `\${c.hostNote.text}`],
+      [`\${emailUserText(c.hostNote.text, c.language)}`, `\${c.hostNote.text}`],
       verifyEscaping,
     ],
     [
@@ -399,7 +401,7 @@ describe('follow-up email templates', () => {
       'private-answer omission',
       [
         'answers: [],\n    bookingUrl,',
-        "answers: recipient.role === 'host' ? recipient.answers : [],\n    bookingUrl,",
+        "answers: recipient.role === 'host' ? recipient.answers.map(({ question, answer }) => ({ question, answer: bookingAnswerContent(answer, language) })) : [],\n    bookingUrl,",
       ],
       verifyPrivacy,
     ],

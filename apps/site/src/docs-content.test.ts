@@ -318,6 +318,20 @@ describe('launch documentation disclosures', () => {
   })
 })
 
+describe('PWA installation documentation', () => {
+  it('distinguishes the proposed Web Push pilot from current availability', () => {
+    const assessment = read(`${siteDocs}/install-app.md`).split('\n## Web Push assessment\n')[1]
+    const limitations = read(`${siteDocs}/index.md`).split('\n## Known limitations\n')[1]
+
+    expect(prose(assessment ?? '')).toContain(
+      'Hourmere does not send Web Push notifications or request notification permission.',
+    )
+    expect(limitations).toContain(
+      'Hourmere does not send Web Push notifications. The [Web Push assessment](/docs/install-app#web-push-assessment)',
+    )
+  })
+})
+
 describe('Google self-hosting guidance', () => {
   const paths = [
     `${siteDocs}/google-calendar.md`,
@@ -585,6 +599,12 @@ describe('complete public documentation', () => {
         ?.split('\n## ')[0]
         ?.trimEnd()
       expect(groupPolicy).toBeDefined()
+      const ssoPolicy = source
+        .match(/^### Team single sign-on\n[\s\S]*?(?=\n#{1,3} )/m)?.[0]
+        ?.replace('](/docs/rest#', '](https://hourmere.com/docs/rest#')
+        .replace('](https://github.com/hourmere/hourmere/blob/main/docs/sso.md#', '](sso.md#')
+        .trimEnd()
+      expect(ssoPolicy).toBeDefined()
       expect(read(original)).toBe(
         [
           '[API conventions](https://hourmere.com/docs/api-conventions).',
@@ -616,6 +636,8 @@ describe('complete public documentation', () => {
           '| Request and supplied expectation | Previous response | Current response |',
           '|---|---|---|',
           ...webhookRows,
+          '',
+          ssoPolicy,
           '',
           groupPolicy,
           '',
@@ -651,15 +673,15 @@ describe('complete public documentation', () => {
     }
   })
 
-  it('publishes the routing guides with instructions for enabling routing', () => {
+  it('publishes the routing guides with the default and opt-out instructions', () => {
     const routingPages = pages.filter(({ path }) => isRoutingName(path))
     expect(routingPages.map(({ path }) => path)).toEqual(
       expect.arrayContaining(['routing-forms.md', 'routing-forms-api.md']),
     )
     for (const { path, source, draft } of routingPages) {
       expect(draft, path).toBe(false)
-      expect(source, path).toContain('Routing forms are off by default.')
-      expect(normalize(source), path).toMatch(/`ROUTING_FORMS_ENABLED=true`.*?restart the server/)
+      expect(source, path).toContain('Routing forms are on by default.')
+      expect(normalize(source), path).toMatch(/`ROUTING_FORMS_ENABLED=false`.*?restart the server/)
     }
   })
 
@@ -684,15 +706,14 @@ describe('complete public documentation', () => {
     expect(license).toBe('[AGPL-3.0](LICENSE)')
   })
 
-  it('documents the committed legal publication date and fixture build policy', () => {
+  it('documents the committed legal publication date and CI build policy', () => {
     const readme = normalize(read('README.md'))
     const legal = read('apps/site/src/data/legal.ts')
     const date = legal.match(/LEGAL_PUBLICATION_DATE[^=]*=\s*'([^']+)'/)?.[1]
     expect(date).toBe('2026-10-22')
     expect(readme).toContain('2026-10-22')
     expect(readme).toContain('change it only when publishing revised legal text')
-    expect(readme).toContain('CI retains a fixture-date substitution')
-    expect(readme).toContain('with the current committed date, that substitution makes no change')
+    expect(readme).toContain('CI builds the site using the committed date')
     expect(readme).toContain('A placeholder or invalid date stops the site build')
     expect(readme).not.toContain('SET_ON_PUBLICATION_DAY')
     expect(legal).toContain(

@@ -120,6 +120,7 @@ export function RequestReschedule({
           >
             {(props) => (
               <textarea
+                dir="auto"
                 {...props}
                 rows={3}
                 value={note}

@@ -516,20 +516,29 @@ describe('the booking page', () => {
       await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
       await user.type(screen.getByLabelText('Email'), 'grace@example.com')
       await selectPublicLanguage(user, 'zh-CN')
-      expect(
-        screen.getByText('必选主持人：王小明（Europe/Berlin）、李小红（Asia/Shanghai）'),
-      ).toBeDefined()
+      expect(screen.getByText(/^必选主持人：/).textContent).toBe(
+        '必选主持人：王小明（Europe/Berlin）、李小红（Asia/Shanghai）',
+      )
       await user.click(screen.getByRole('button', { name: '确认预约' }))
       await screen.findByRole('heading', { name: '预约成功' })
       expect(document.querySelector('.confirmation .lede')?.textContent).toBe(lede)
+      expect(
+        Array.from(
+          document.querySelectorAll('.confirmation .lede bdi'),
+          (value) => value.textContent,
+        ),
+      ).toEqual([host, title])
       // Only the Chinese double quotes get quote markup; apostrophes in Latin text do not.
       expect(
         [
           ...(document.querySelector('.confirmation .lede')?.querySelectorAll('.cjk-quote') ?? []),
         ].map((span) => span.textContent),
       ).toEqual(['“', '”'])
-      expect(screen.getByText('周小刚、赵小华')).toBeDefined()
-      expect(screen.getByText('Grace Hopper（grace@example.com）')).toBeDefined()
+      expect(screen.getByText('来宾', { selector: 'dt' }).nextElementSibling?.textContent).toBe(
+        '周小刚、赵小华',
+      )
+      const invitee = screen.getByText('grace@example.com', { selector: 'bdi[dir=ltr]' })
+      expect(invitee.parentElement?.textContent).toBe('Grace Hopper（grace@example.com）')
       const calendarUrl = new URL(
         screen.getByRole<HTMLAnchorElement>('link', { name: 'Google 日历' }).href,
       )
@@ -1853,7 +1862,9 @@ describe('the host page', () => {
         json(404, { error: 'host_not_found', message: 'No such booking page' }),
     })
     renderApp('/empty')
-    expect(await screen.findByText('Empty has no events you can book right now.')).toBeDefined()
+    expect((await screen.findByText('has no events you can book right now.')).textContent).toBe(
+      'Empty has no events you can book right now.',
+    )
     renderApp('/nobody')
     expect(await screen.findByRole('heading', { name: 'Page not found' })).toBeDefined()
   })
@@ -1881,7 +1892,9 @@ it.each(['', ' \t '])(
     await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
     await screen.findByRole('heading', { name: 'You’re booked' })
     expect(screen.getByText('Host (UTC)')).toBeDefined()
-    expect(screen.getByText('Your Intro call with Host is confirmed.')).toBeDefined()
+    expect(document.querySelector('.confirmation .lede')?.textContent).toBe(
+      'Your Intro call with Host is confirmed.',
+    )
     expect(screen.queryByText('Team pool')).toBeNull()
   },
 )
@@ -1911,12 +1924,9 @@ it.each([false, true])(
     await user.type(screen.getByLabelText('Email'), 'synthetic@example.com')
     await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
     await screen.findByRole('heading', { name: 'You’re booked' })
-    expect(
-      screen.getByText(
-        deleted ? 'Host no longer available' : 'Actual selected person (Asia/Shanghai)',
-        { selector: 'dd' },
-      ),
-    ).toBeDefined()
+    expect(screen.getByText('Host', { selector: 'dt' }).nextElementSibling?.textContent).toBe(
+      deleted ? 'Host no longer available' : 'Actual selected person (Asia/Shanghai)',
+    )
     expect(screen.queryByText('Team pool')).toBeNull()
   },
 )

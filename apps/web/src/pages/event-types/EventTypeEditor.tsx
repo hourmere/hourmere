@@ -16,6 +16,7 @@ import { ErrorSummary, Field, type FieldErrors, parseWhole } from '../../compone
 import { PageHeader } from '../../components/PageHeader.tsx'
 import { PageSkeleton } from '../../components/PageSkeleton.tsx'
 import { StickyFormActions } from '../../components/StickyFormActions.tsx'
+import { UserContentMessage } from '../../components/UserContent.tsx'
 import { flash, useFlash } from '../../flash.ts'
 import { useLoad, useMounted, usePageTitle } from '../../hooks.ts'
 import { formatMinutes } from '../../i18n/duration.ts'
@@ -52,6 +53,7 @@ import {
   LOCATION_KINDS,
   type LocationKind,
   orderedLocations,
+  paidDraftSupported,
   serverErrors,
   slugify,
   suggestedBookingSlug,
@@ -64,6 +66,8 @@ import { NotificationsEditor } from './NotificationsEditor.tsx'
 import { pruneNotificationErrors } from './notifications-form.ts'
 import { OneTimeLinks } from './OneTimeLinks.tsx'
 import { OrderedLocationsEditor } from './OrderedLocationsEditor.tsx'
+import { PaymentSettings } from './PaymentSettings.tsx'
+import { paymentInput, unsupportedPayment, validatePayment } from './payment-form.ts'
 import { QuestionsEditor } from './QuestionsEditor.tsx'
 import { ReadOnlyHosts } from './ReadOnlyHosts.tsx'
 import { SavedEventShare } from './SavedEventShare.tsx'
@@ -82,6 +86,24 @@ interface Loaded {
   microsoftTeamsCalendarIssue: MessageKey | undefined
   smsRemindersAvailable: boolean | undefined
   followUpHostNotesEnabled: boolean
+  paymentAvailability: Schemas['Instance']['eventTypePaymentAvailability']
+}
+
+function paymentAvailabilityReason(availability: Loaded['paymentAvailability']): MessageKey | null {
+  switch (availability) {
+    case 'available':
+      return null
+    case 'stripe_not_configured':
+      return 'Ask your instance operator to configure Stripe for paid bookings.'
+    case 'stripe_unverified':
+      return 'This instance could not verify its Stripe configuration. Contact your instance operator.'
+    case 'disabled':
+      return 'Paid bookings are turned off on this instance.'
+    case 'live_mode_unavailable':
+      return 'Paid bookings are currently available in Stripe test mode only.'
+    default:
+      return 'Paid booking settings are unavailable on this instance.'
+  }
 }
 
 /** Creates an event type (/app/event-types/new) or edits one (/app/event-types/:id). */
@@ -145,6 +167,7 @@ function EventTypeEditor({ id }: { id: string | undefined }) {
         microsoftTeamsCalendarIssue: teamsCalendarIssue(connections),
         smsRemindersAvailable: instance.smsRemindersAvailable,
         followUpHostNotesEnabled: instance.followUpHostNotesEnabled === true,
+        paymentAvailability: instance.eventTypePaymentAvailability,
       }
     },
     [id, organization.personal],
@@ -190,6 +213,7 @@ function EventTypeForm({
   microsoftTeamsCalendarIssue,
   smsRemindersAvailable,
   followUpHostNotesEnabled,
+  paymentAvailability,
 }: Loaded) {
   const { t, text, ui, uiText, locale: displayLocale } = useI18n()
   const noScheduleHint = t('You have no schedule yet, so no times are offered. {0}.').split('{0}')
@@ -223,6 +247,14 @@ function EventTypeForm({
         },
   )
   const [draft, setDraft] = useState(baseline)
+  const savedPaymentUnsupported =
+    saved?.paymentAvailability === 'unsupported_event' &&
+    paidDraftSupported(baseline, me.organization.personal)
+  const paymentSupported =
+    !savedPaymentUnsupported && paidDraftSupported(draft, me.organization.personal)
+  const paymentReason = paymentSupported
+    ? paymentAvailabilityReason(paymentAvailability)
+    : unsupportedPayment
   const [teamsHost, setTeamsHost] = useState<TeamsHostReadiness>()
   const teamsHostStatus =
     teamsHost && teamsHost.userId === draft.hostUserIds[0] ? teamsHost.status : 'checking'
@@ -234,6 +266,8 @@ function EventTypeForm({
     teamsIssue = 'Microsoft Teams requires individual scheduling with one host.'
   } else if (me.organization.personal) {
     teamsIssue = microsoftTeamsCalendarIssue
+  } else if (draft.hostUserIds[0] !== me.user.id) {
+    teamsIssue = 'The assigned host must configure Microsoft Teams in their own signed-in session.'
   } else if (!canAssignHosts) {
     teamsIssue = 'Could not verify Microsoft Teams availability for the host.'
   } else if (teamsHostStatus === 'unavailable') {
@@ -293,7 +327,6 @@ function EventTypeForm({
     [...draft.hostUserIds].sort().join() === [...baseline.hostUserIds].sort().join()
 
   const editing = saved !== null
-  const title = editing ? msg('Edit “{0}”', { '0': saved.title }) : 'New event type'
 
   function set<K extends keyof EventTypeDraft>(name: K, value: EventTypeDraft[K]) {
     invalidateReadiness()
@@ -354,6 +387,12 @@ function EventTypeForm({
       draft.hostUserIds.length !== 1
     )
       problems.hosts = 'Choose exactly one required host.'
+    if (draft.payment.enabled) {
+      if (!paymentSupported) problems.payment = unsupportedPayment
+      else if (!paymentReason)
+        Object.assign(problems, validatePayment(draft.payment, draft.allowedDurationsMinutes))
+      else if (toPatchInput(draft, baseline).payment !== undefined) problems.payment = paymentReason
+    }
     setErrors(problems)
     if (Object.keys(problems).length > 0) return
     // The fields are locked until the answer comes, so it cannot overwrite later edits.
@@ -637,6 +676,7 @@ function EventTypeForm({
                 {(props) => (
                   <input
                     {...props}
+                    dir="auto"
                     value={draft.title}
                     autoComplete="off"
                     onChange={(e) => {
@@ -831,6 +871,7 @@ function EventTypeForm({
                   <textarea
                     {...props}
                     rows={4}
+                    dir="auto"
                     value={draft.description}
                     onChange={(e) => set('description', e.target.value)}
                   />
@@ -967,6 +1008,25 @@ function EventTypeForm({
                 set('durationMinutes', defaultDuration)
               }}
               onDefaultChange={(value) => set('durationMinutes', value)}
+            />
+          </SettingsGroup>
+          <SettingsGroup
+            label="Payments"
+            summary={t(
+              draft.payment.enabled
+                ? 'Payment required'
+                : paymentReason
+                  ? 'Unavailable'
+                  : 'Free booking',
+            )}
+            initiallyOpen={draft.payment.enabled}
+          >
+            <PaymentSettings
+              payment={draft.payment}
+              durations={draft.allowedDurationsMinutes}
+              reason={paymentReason}
+              errors={errors}
+              onChange={(payment) => set('payment', payment)}
             />
           </SettingsGroup>
           {showHosts && (
@@ -1260,7 +1320,7 @@ function EventTypeForm({
                             : ''}
                         </option>
                         {schedules.map((s) => (
-                          <option key={s.id} value={s.id}>
+                          <option key={s.id} value={s.id} dir="auto">
                             {s.name}
                           </option>
                         ))}
@@ -1443,7 +1503,12 @@ function EventTypeForm({
           </p>
           <ConfirmAction
             label={t('Delete event type')}
-            prompt={t('Delete “{0}”? This cannot be undone.', { '0': saved.title })}
+            prompt={
+              <UserContentMessage
+                message="Delete “{0}”? This cannot be undone."
+                values={{ '0': saved.title }}
+              />
+            }
             confirmLabel={t('Delete event type')}
             busyLabel={t('Deleting…')}
             failure={t('Could not delete the event type.')}
@@ -1460,7 +1525,13 @@ function EventTypeForm({
         <Link to={PATHS.eventTypes}>{t('Event types')}</Link>
       </p>
       <PageHeader
-        title={uiText(title)}
+        title={
+          saved ? (
+            <UserContentMessage message="Edit “{0}”" values={{ '0': saved.title }} />
+          ) : (
+            t('New event type')
+          )
+        }
         lede={t('Set the booking details, questions and availability for this event type.')}
       />
       <EventTypeEditorLayout
@@ -1468,6 +1539,12 @@ function EventTypeForm({
         me={me}
         profile={profile}
         smsRemindersAvailable={smsRemindersAvailable}
+        payment={
+          !paymentReason &&
+          Object.keys(validatePayment(draft.payment, draft.allowedDurationsMinutes)).length === 0
+            ? paymentInput(draft.payment, draft.allowedDurationsMinutes)
+            : null
+        }
         canReadBranding={
           me.principal.kind === 'session' &&
           (me.organization.personal ||
@@ -1656,6 +1733,7 @@ function LocationFields({
             <input
               {...props}
               autoComplete="street-address"
+              dir="auto"
               value={draft.address}
               onChange={(e) => set('address', e.target.value)}
             />

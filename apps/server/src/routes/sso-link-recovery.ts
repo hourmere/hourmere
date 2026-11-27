@@ -63,7 +63,7 @@ export function ssoIdentityRecoveryRoutes(deps: SsoIdentityRecoveryDeps): RouteM
         tags: ['SSO'],
         summary: 'Retire the caller’s exact SSO identity link',
         description:
-          'Current team member browser session with independent mailbox proof and the link ID and generation from /me. Stays available while SSO_OIDC_ENABLED is off.',
+          'Current team member browser session with independent mailbox proof and the link ID and generation from /me. Stays available while the protocol setting is off.',
         security: [{ session: [] }],
         middleware: [...middleware] as const,
         request: {
@@ -97,7 +97,7 @@ export function ssoIdentityRecoveryRoutes(deps: SsoIdentityRecoveryDeps): RouteM
         tags: ['SSO'],
         summary: 'Retire another member’s exact SSO identity link',
         description:
-          'Team owner/admin browser session with fresh administration proof and the link generation from the provider inventory. Another owner must retire an owner’s link. Stays available while SSO_OIDC_ENABLED is off.',
+          'Team owner/admin browser session with fresh administration proof and the link generation from the provider inventory. Another owner must retire an owner’s link. Stays available while the protocol setting is off.',
         security: [{ session: [] }],
         middleware: [...middleware, removalProtocolGuard] as const,
         request: {

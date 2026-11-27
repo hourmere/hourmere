@@ -2,7 +2,12 @@ import { createHmac, randomBytes, randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { createRequire, stripTypeScriptTypes } from 'node:module'
 import { pathToFileURL } from 'node:url'
-import { createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
+import {
+  createAuth,
+  createAuthPool,
+  createCallerResolver,
+  type ReserveInvitationEmail,
+} from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
@@ -325,19 +330,14 @@ describe.skipIf(!serverUrl)('team invitation concurrency across distinct admin s
   async function verifySessionLapse(lock: 'delivery' | 'budget') {
     const [admin] = await admins()
     const email = `${randomUUID()}@outside.example`
-    const reserve = {
-      reserve: (
-        trx: Db,
-        input: { userId: string; organizationId: string; email: string },
-        now: Date,
-      ) => reserveInvitationEmailBudget(trx, input, { secret }, now),
-    }
+    const reserve: ReserveInvitationEmail = (trx, input, now) =>
+      reserveInvitationEmailBudget(trx, input, { secret }, now)
     const request = (sessionId: string) =>
       manageInvitation(
         db,
         { userId: admin.userId, sessionId, activeOrganizationId: admin.organizationId },
         { organizationId: admin.organizationId, email },
-        reserve,
+        { reserve },
       )
     // The administrator's own pending invitation, whose delivery row a retry locks.
     if (lock === 'delivery') await request(admin.sessionId)

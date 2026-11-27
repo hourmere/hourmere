@@ -13,7 +13,7 @@ export function normalizedHandle(value: string): string | undefined {
   return HANDLE.test(lower) ? lower : undefined
 }
 
-/** Team organization slugs preserve case, matching their case-sensitive unique constraint. */
+/** Public team URLs use the stored case, including for legacy team slugs. */
 export function teamSlug(value: string): string | undefined {
   return isPublicTeamSlug(value) ? value : undefined
 }

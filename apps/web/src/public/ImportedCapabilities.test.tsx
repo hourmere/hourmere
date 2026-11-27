@@ -9,11 +9,13 @@ import * as client from '../api/client.ts'
 import * as errors from '../api/errors.ts'
 import type { Booking } from '../api/resources.ts'
 import * as breakable from '../components/BreakableText.tsx'
+import * as bookingPayment from '../components/booking-payment.ts'
 import * as conference from '../components/ConferenceNotice.tsx'
 import * as copyButton from '../components/CopyButton.tsx'
 import * as forms from '../components/forms.tsx'
 import * as conflict from '../components/OrganizationContextConflict.tsx'
 import * as pageHeader from '../components/PageHeader.tsx'
+import * as userContent from '../components/UserContent.tsx'
 import * as flash from '../flash.ts'
 import * as format from '../format.ts'
 import * as hooks from '../hooks.ts'
@@ -22,6 +24,7 @@ import * as runtime from '../i18n/runtime.tsx'
 import * as translate from '../i18n/translate.ts'
 import * as limits from '../limits.ts'
 import * as bookingPanel from '../pages/bookings/BookingPanel.tsx'
+import * as bookingUserContent from '../pages/bookings/BookingUserContent.tsx'
 import * as bookingFormat from '../pages/bookings/booking-format.ts'
 import * as calendarCopy from '../pages/bookings/CalendarCopyNotice.tsx'
 import * as noShow from '../pages/bookings/NoShowAttendees.tsx'
@@ -64,6 +67,7 @@ function sourceCopy<T>(path: string, before: string, after: string): T {
     '../../i18n/formatting.ts': formatting,
     '../../i18n/translate.ts': translate,
     '../../paths.ts': paths,
+    '../../public/BookingDetails.tsx': publicDetails,
     '../../limits.ts': limits,
     '../../text.ts': text,
     '../../unsaved-changes.tsx': unsaved,
@@ -71,7 +75,10 @@ function sourceCopy<T>(path: string, before: string, after: string): T {
     '../../components/PageHeader.tsx': pageHeader,
     '../../components/forms.tsx': forms,
     '../../components/ConferenceNotice.tsx': conference,
+    '../../components/booking-payment.ts': bookingPayment,
+    '../../components/UserContent.tsx': userContent,
     './BookingPanel.tsx': bookingPanel,
+    './BookingUserContent.tsx': bookingUserContent,
     './CalendarCopyNotice.tsx': calendarCopy,
     './booking-format.ts': bookingFormat,
     './RescheduleBooking.tsx': reschedule,
@@ -86,6 +93,7 @@ function sourceCopy<T>(path: string, before: string, after: string): T {
     '../i18n/runtime.tsx': runtime,
     '../../i18n/runtime.tsx': runtime,
     '../components/CopyButton.tsx': copyButton,
+    '../components/booking-payment.ts': bookingPayment,
     './ics.ts': ics,
     '../format.ts': format,
     '../hooks.ts': hooks,
@@ -102,6 +110,7 @@ function sourceCopy<T>(path: string, before: string, after: string): T {
     './validation.ts': publicValidation,
     './visitor-time-zone.ts': visitorZone,
     '../components/ConferenceNotice.tsx': conference,
+    '../components/UserContent.tsx': userContent,
 
     '../../components/OrganizationContextConflict.tsx': conflict,
   }
@@ -208,7 +217,7 @@ describe('imported browser capabilities', () => {
     'detects removal of the imported %s UI guard',
     (component) => {
       const path = 'apps/web/src/pages/bookings/BookingDetail.tsx'
-      const before = `{!readOnly && !cancelled && !started && (\n        <${component}`
+      const componentGuard = `!cancelled && !started && !paidManagementUnavailable && (\n        <${component}`
       const copy = sourceCopy<{
         BookingView: react.ComponentType<{
           booking: Booking
@@ -217,7 +226,7 @@ describe('imported browser capabilities', () => {
           fromProfile: boolean
           expectedOrganizationId: string
         }>
-      }>(path, before, `{!cancelled && !started && (\n        <${component}`)
+      }>(path, `{!readOnly && ${componentGuard}`, `{${componentGuard}`)
       const View = copy.BookingView
       render(
         <router.MemoryRouter>

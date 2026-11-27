@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { BrowserRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from '../App.tsx'
+import { selectAdminLanguage } from '../test/account-menu.ts'
 import {
   fakeApi,
   instance,
@@ -34,6 +35,10 @@ beforeEach(() => window.history.replaceState(null, '', '/'))
 const setLanguage = async (user: ReturnType<typeof userEvent.setup>, language: 'en' | 'zh-CN') => {
   if (screen.queryByRole('button', { name: /^(Language:|语言：)/ })) {
     await selectPublicLanguage(user, language)
+    return
+  }
+  if (screen.queryByRole('button', { name: /^(Account menu|账户菜单)$/ })) {
+    await selectAdminLanguage(user, language)
     return
   }
   await user.selectOptions(

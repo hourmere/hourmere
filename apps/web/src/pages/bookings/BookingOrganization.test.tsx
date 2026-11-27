@@ -127,7 +127,8 @@ describe('host booking mail links', () => {
           .to(`GET /api/v1/team/bookings/${BOOKING_ID}`)[0]
           ?.headers.get('X-Expected-Organization-Id'),
       ).toBe(team.organization.id)
-      expect(api.to(`GET /api/v1/bookings/${BOOKING_ID}`)).toHaveLength(status === 200 ? 1 : 2)
+      // A committed switch with a lost response still opens the limited team view directly.
+      expect(api.to(`GET /api/v1/bookings/${BOOKING_ID}`)).toHaveLength(1)
       expect(screen.queryByRole('button', { name: 'Reschedule…' })).toBeNull()
       expect(screen.getByTestId('location').textContent).toBe(detail)
       await userEvent.click(screen.getByRole('button', { name: /^Switch space Meeting team/ }))

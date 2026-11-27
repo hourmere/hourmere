@@ -120,6 +120,16 @@ const PHONE = /^\+?[0-9][0-9 ().-]*$/
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
+/** The field names a stored booking question. It never contains the submitted answer. */
+export class InvalidBookingAnswerError extends DomainError {
+  readonly field: `responses.${string}`
+
+  constructor(questionId: string, problem: string) {
+    super('invalid', 'invalid_responses', `Question "${questionId}" ${problem}`)
+    this.field = `responses.${questionId}`
+  }
+}
+
 /**
  * Checks answers against the event type's questions and returns them normalized (text
  * trimmed, empty optional answers left out). Throws `invalid_responses` for an unknown
@@ -138,8 +148,8 @@ export function validateResponses(questions: readonly Question[], given: unknown
   const result: Responses = Object.create(null)
   for (const q of questions) {
     const value = Object.hasOwn(given, q.id) ? given[q.id] : undefined
-    const name = `Question "${q.id}"`
-    const missing = () => invalid(`${name} is required`)
+    const badAnswer = (problem: string) => new InvalidBookingAnswerError(q.id, problem)
+    const missing = () => badAnswer('is required')
     switch (q.type) {
       case 'short_text':
       case 'long_text':
@@ -148,19 +158,19 @@ export function validateResponses(questions: readonly Question[], given: unknown
           if (q.required) throw missing()
           break
         }
-        if (typeof value !== 'string') throw invalid(`${name} takes text`)
+        if (typeof value !== 'string') throw badAnswer('takes text')
         const text = value.trim()
         if (text === '') {
           if (q.required) throw missing()
           break
         }
         if (text.length > MAX_ANSWER_LENGTH[q.type]) {
-          throw invalid(`${name} takes at most ${MAX_ANSWER_LENGTH[q.type]} characters`)
+          throw badAnswer(`takes at most ${MAX_ANSWER_LENGTH[q.type]} characters`)
         }
         if (!(q.type === 'long_text' ? isMultiLineText(text) : isSingleLineText(text))) {
-          throw invalid(`${name} contains characters that are not allowed`)
+          throw badAnswer('contains characters that are not allowed')
         }
-        if (q.type === 'phone' && !PHONE.test(text)) throw invalid(`${name} takes a phone number`)
+        if (q.type === 'phone' && !PHONE.test(text)) throw badAnswer('takes a phone number')
         result[q.id] = text
         break
       }
@@ -170,7 +180,7 @@ export function validateResponses(questions: readonly Question[], given: unknown
           break
         }
         if (typeof value !== 'string' || !q.options?.includes(value)) {
-          throw invalid(`${name} takes one of its options`)
+          throw badAnswer('takes one of its options')
         }
         result[q.id] = value
         break
@@ -185,7 +195,7 @@ export function validateResponses(questions: readonly Question[], given: unknown
           !value.every((v) => typeof v === 'string' && q.options?.includes(v)) ||
           new Set(value).size !== value.length
         ) {
-          throw invalid(`${name} takes a list of distinct options`)
+          throw badAnswer('takes a list of distinct options')
         }
         result[q.id] = value as string[]
         break
@@ -195,7 +205,7 @@ export function validateResponses(questions: readonly Question[], given: unknown
           if (q.required) throw missing()
           break
         }
-        if (typeof value !== 'boolean') throw invalid(`${name} takes true or false`)
+        if (typeof value !== 'boolean') throw badAnswer('takes true or false')
         if (q.required && !value) throw missing()
         result[q.id] = value
         break

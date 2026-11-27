@@ -1,4 +1,5 @@
 import type { components } from '../../../apps/web/src/api/schema.d.ts'
+import { selectAdminLanguage } from '../account-menu.ts'
 import { expect, test } from '../fixtures.ts'
 
 for (const personal of [true, false]) {
@@ -30,7 +31,7 @@ for (const personal of [true, false]) {
       const width = testInfo.project.name === 'mobile' ? 320 : 1280
       await page.setViewportSize({ width, height: 1000 })
       await page.goto(`${app.url}/app/event-types`)
-      await page.getByRole('combobox', { name: 'Interface language' }).selectOption(language)
+      await selectAdminLanguage(page, language)
       await expect(page.locator('.event-checks')).not.toHaveCount(0)
       await expect(
         page.locator('.event-checks').filter({ hasText: /Checking configuration|正在检查配置/ }),

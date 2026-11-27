@@ -17,6 +17,11 @@ import {
   serviceContext,
 } from '../openapi.ts'
 import {
+  bulkPageBinding,
+  databaseWallTime,
+  issueBulkPageProof,
+} from '../team-booking-bulk-proof.ts'
+import {
   EXPECTED_ORGANIZATION_HEADER,
   ORGANIZATION_CONTEXT_CHANGED,
   teamManagementAccess,
@@ -40,6 +45,11 @@ const TeamAdminBookingPage = z
   .object({
     ...TeamAdminBookingListPageSchema.shape,
     data: z.array(TeamAdminBooking),
+    bulkPageToken: z.string().optional().openapi({
+      description:
+        'Proof for the exact page, available only when bulk selection is enabled and opted in',
+    }),
+    bulkPageExpiresAt: z.iso.datetime().optional(),
   })
   .openapi('TeamAdminBookingPage')
 const TeamBookingCancellation = z
@@ -48,7 +58,7 @@ const TeamBookingCancellation = z
 
 /** Team administration uses browser sessions and the shared current-team access check. */
 export function teamBookingRoutes(
-  deps: ServiceDeps & { notify?: BookingNotifier | undefined },
+  deps: ServiceDeps & { notify?: BookingNotifier | undefined; bulkSelectionSecret?: string },
 ): RouteModule {
   return ({ app, caller }) => {
     const access = teamManagementAccess(deps.db, caller)
@@ -66,10 +76,14 @@ export function teamBookingRoutes(
           headers: z.object({
             'x-expected-organization-id': z.string().optional().openapi({
               description:
-                'Optional team where the page opened; a still-authorized expected team with a different current space receives 409 reload guidance, otherwise 403',
+                'Team where the page opened. Required when requesting a page proof; otherwise optional. A still-authorized expected team with a different current space receives 409 reload guidance, otherwise 403',
             }),
           }),
-          query: ListBookingsQuery,
+          query: ListBookingsQuery.extend({
+            bulkSelection: z.enum(['true', 'false']).optional().openapi({
+              description: 'Request page-scoped selection proof when bulk cancellation is enabled',
+            }),
+          }),
         },
         responses: {
           200: { description: 'A page of team bookings', content: json(TeamAdminBookingPage) },
@@ -90,7 +104,8 @@ export function teamBookingRoutes(
       }),
       async (c) => {
         const q = c.req.valid('query')
-        const page = await listTeamAdminBookings(serviceContext(deps, c.var.principal), {
+        const principal = c.var.principal
+        const input = {
           order: q.order,
           from: q.from === undefined ? undefined : Temporal.Instant.from(q.from),
           to: q.to === undefined ? undefined : Temporal.Instant.from(q.to),
@@ -100,7 +115,28 @@ export function teamBookingRoutes(
           q: q.q,
           limit: q.limit,
           cursor: q.cursor,
-        })
+        }
+        const ctx = serviceContext(deps, principal)
+        const { bulkSelectionSecret } = deps
+        if (q.bulkSelection !== 'true' || !bulkSelectionSecret)
+          return c.json(await listTeamAdminBookings(ctx, input), 200)
+
+        const page = await access.read(
+          principal,
+          principal.organization.id,
+          async (db, actor) => {
+            const result = await listTeamAdminBookings(ctx, input)
+            const proof = issueBulkPageProof(
+              bulkSelectionSecret,
+              bulkPageBinding(principal, actor),
+              input,
+              result.data.map((booking) => booking.id),
+              await databaseWallTime(db),
+            )
+            return { ...result, ...proof }
+          },
+          { expectedOrganizationId: c.req.header(EXPECTED_ORGANIZATION_HEADER) ?? '' },
+        )
         return c.json(page, 200)
       },
     )

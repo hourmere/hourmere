@@ -7,6 +7,7 @@ import type { OrganizationMember } from '../api/auth.ts'
 import type { Schemas } from '../api/client.ts'
 import { InterfaceScope } from '../i18n/runtime.tsx'
 import { PATHS } from '../paths.ts'
+import { selectAdminLanguage } from '../test/account-menu.ts'
 import {
   fakeApi,
   json,
@@ -545,7 +546,7 @@ describe('joined team members and pending invitations in settings', () => {
     })
     renderApp(PATHS.settings)
     await screen.findByText('Accepted by the mail server')
-    await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    await selectAdminLanguage(user, 'zh-CN')
     const members = screen.getByRole('region', { name: '团队成员' })
     expect(within(members).getByText('2 位已加入的成员')).toBeDefined()
     expect(within(members).getByText('所有者')).toBeDefined()

@@ -56,7 +56,7 @@ describe('reschedule request emails', () => {
       "normalizeFollowUpHostNote(options.hostNote ?? '')",
       "options.hostNote ?? ''",
     ],
-    ['note HTML escaping', `\${htmlLines(c.hostNote.text, c.language)}`, `\${c.hostNote.text}`],
+    ['note HTML escaping', `\${emailUserText(c.hostNote.text, c.language)}`, `\${c.hostNote.text}`],
     ['expired note omission', 'hostNote: !expired && note ?', 'hostNote: note ?'],
     [
       'expired capability omission',

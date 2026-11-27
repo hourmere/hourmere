@@ -587,7 +587,7 @@ describe.skipIf(!databaseUrl)('SSO fresh proof', () => {
       )
     const production = readFileSync(new URL('./server.ts', import.meta.url), 'utf8')
     expect(production).toContain('ssoOidcEnabled: config.SSO_OIDC_ENABLED,')
-    expect(production).toContain('const ssoSamlEnabled = false')
+    expect(production).toContain('ssoSamlEnabled: config.SSO_SAML_ENABLED,')
   })
   it('expires mailbox proof at its exact fresh-administration deadline', () => expiryScenario(real))
   it('reads expiry after waiting for the row lock', () => lockedExpiryScenario(real))

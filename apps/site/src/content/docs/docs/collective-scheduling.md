@@ -40,10 +40,27 @@ Individual event types retain their existing host-specific schedule behavior.
 ## Public links, agents and availability
 
 Team links remain `/team/{teamSlug}/{slug}`, including inside inline and popup widgets.
-The public REST namespace is `/api/v1/public/teams/{teamSlug}/{slug}`. Team slugs keep their
-stored case. Public metadata includes all required hosts' names/time zones, without their
+The public REST namespace is `/api/v1/public/teams/{teamSlug}/{slug}`. New and edited team
+slugs are saved in lowercase. Existing links use the exact stored case. Public metadata
+includes all required hosts' names/time zones, without their
 user IDs, email addresses, hours or calendar details. Location details remain private until
 booking, as on personal pages.
+
+In your team space, owners and admins can edit the name and public address under
+**Settings → Team details**. Teams can share a display name. Changing the name alone keeps
+existing URLs. Changing the public address changes links that contain the team slug,
+including public event pages, embeds, team routing links and booking links in already-sent
+waitlist notification emails. Waitlist confirmation and removal links keep working.
+Existing bookings and their history stay in the team. Invitees can still use their
+existing booking management links.
+Replace the old links in shared messages and embeds.
+
+The old address does not redirect. For 90 days after a change, only the same team can
+reclaim it. A reclaimed address is saved in lowercase. Links using the original
+mixed-case spelling remain unavailable. If the team leaves an address unused after
+90 days, another team can claim it and matching links may open that team's pages.
+If another administrator saved changes while your form was open, reload team details,
+then review and reapply your edits.
 
 MCP `find_available_slots` / `create_booking`, and the corresponding CLI commands, accept
 exactly one of `handle` (personal) or `teamSlug` (team), plus the existing `slug` and booking

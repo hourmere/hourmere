@@ -68,7 +68,7 @@ export function ssoRecoveryEnrollmentRoutes(deps: SsoRecoveryEnrollmentDeps): Ro
         tags: ['SSO'],
         summary: 'Start SSO recovery for the specified team',
         description:
-          'Requires an enrolled owner’s browser session and fresh mailbox proof. Permits inspecting SSO configuration and one provider repair write or one write turning off enforcement. Stays available while SSO_OIDC_ENABLED is off.',
+          'Requires an enrolled owner’s browser session and fresh mailbox proof. Permits inspecting SSO configuration and one provider repair write or one write turning off enforcement. Stays available while both protocol settings are off.',
         security: [{ session: [] }],
         middleware: [...useMiddleware] as const,
         request: {
@@ -108,7 +108,7 @@ export function ssoRecoveryEnrollmentRoutes(deps: SsoRecoveryEnrollmentDeps): Ro
         tags: ['SSO'],
         summary: 'Nominate a current team owner for SSO recovery',
         description:
-          'Requires a team owner browser session and fresh administration proof. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.',
+          'Requires a team owner browser session and fresh administration proof. Returns 404 sso_disabled while both protocol settings are off.',
         security: [{ session: [] }],
         middleware: [...middleware] as const,
         request: { headers, body: { required: true, content: json(ConfigureSsoRecoveryInput) } },
@@ -146,7 +146,7 @@ export function ssoRecoveryEnrollmentRoutes(deps: SsoRecoveryEnrollmentDeps): Ro
         tags: ['SSO'],
         summary: 'Accept the caller’s SSO recovery nomination',
         description:
-          'Requires the nominated owner’s browser session and independent mailbox proof. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.',
+          'Requires the nominated owner’s browser session and independent mailbox proof. Returns 404 sso_disabled while both protocol settings are off.',
         security: [{ session: [] }],
         middleware: [...middleware] as const,
         request: {

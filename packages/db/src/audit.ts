@@ -30,8 +30,12 @@ export const auditDetails = {
   'membership.removed': [],
   'membership.left': [],
   'membership.role_changed': ['oldRole', 'newRole'],
+  'organization.ownership_transfer_offered': ['targetMembershipId'],
+  'organization.ownership_transfer_revoked': [],
+  'organization.ownership_transfer_expired': [],
+  'organization.ownership_transfer_invalidated': [],
   'organization.ownership_transferred': [],
-  'organization.updated': [],
+  'organization.updated': ['oldSlug', 'newSlug', 'nameChanged'],
   'organization.created': [],
   'organization.branding_updated': ['logo', 'primaryColor'],
   'membership.invitation_cancelled': [],
@@ -152,6 +156,8 @@ export interface AuditActor {
     | 'external_user'
     /** A SCIM provisioning token (its ID); the credential is then `none`. */
     | 'scim_token'
+    /** A SCIM provisioning connection (its ID); the credential is then `none`. */
+    | 'scim_connection'
   id?: string
 }
 export interface AuditCredential {
