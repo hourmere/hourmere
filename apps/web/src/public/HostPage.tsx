@@ -83,7 +83,7 @@ function HostPageContent({ handle }: { handle: string }) {
                 <Link
                   className="event-card event-card-own-brand"
                   style={style as CSSProperties}
-                  to={`/${handle}/${et.slug}`}
+                  to={`/${encodeURIComponent(handle)}/${encodeURIComponent(et.slug)}`}
                 >
                   {et.branding && <BrandLogo branding={et.branding} />}
                   {et.organizationName && (

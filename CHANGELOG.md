@@ -241,6 +241,11 @@ schema downgrade is not automatic. Direct source deployments require Node.js 26.
 Hourmere requires PostgreSQL 18+ because migrations use `uuidv7()`; the provided Compose
 stack includes PostgreSQL 18.
 
+- **Resolve case-insensitive team address collisions before migration 0194.** The
+  migration stops if existing addresses differ only in case and reports the conflicting
+  organization IDs. Check the database before upgrading and rename enough teams to make
+  every address unique. The renamed teams' published links change. See the
+  [team address preflight and recovery steps](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/self-hosting.md#resolve-team-address-collisions-migration-0194).
 - **SSO audit actions (migration 0085) upgrade in place.** The migration follows 0080: it
   replaces the audit details check with 0080's rules, unchanged, plus allow-lists for the SSO
   audit actions, which no version records yet. It is safe to apply while the previous version

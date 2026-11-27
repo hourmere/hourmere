@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { tryGetCurrentAuthEndpointContext } from '@better-auth/core/context'
+import { isPublicTeamSlugFormat } from '@hourmere/core'
 import type { Database, Db } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import { scimManagedMember, scimProvisioned, scimSuspended } from '@hourmere/db/scim-suspension'
@@ -13,7 +14,7 @@ import {
   MemberDepartureOwnerRequiredError,
 } from './member-departure.ts'
 import { recordTeamRoleChange } from './organization-operations.ts'
-import { isMember, isUuid } from './organizations.ts'
+import { blockNullSlug, isMember, isUuid, mapOrganizationSlugConflict } from './organizations.ts'
 import type { ScimClaimCompletion, ScimClaimFinish } from './scim-claims.ts'
 import {
   checkSsoAdmissionBlocks,
@@ -82,6 +83,28 @@ const managedResource = () =>
     code: SCIM_MANAGED_RESOURCE_CODE,
     message: SCIM_MANAGED_RESOURCE_MESSAGE,
   })
+
+const teamSettingsChanged = () =>
+  new APIError('CONFLICT', {
+    code: 'TEAM_SETTINGS_CHANGED',
+    message:
+      'Team details changed since you opened this page. Reload team details before saving again.',
+  })
+
+function expectedTeamDetails(headers: Headers) {
+  const name = headers.get('x-expected-team-name')
+  const slug = headers.get('x-expected-team-slug')
+  if (name === null && slug === null) return undefined
+  if (name === null || slug === null) throw teamSettingsChanged()
+  let decoded: { name: string; slug: string }
+  try {
+    decoded = { name: decodeURIComponent(name), slug: decodeURIComponent(slug) }
+  } catch {
+    throw teamSettingsChanged()
+  }
+  if (decoded.name.includes('\0') || decoded.slug.includes('\0')) throw teamSettingsChanged()
+  return decoded
+}
 
 /** After the organization lock, find a live account or proven mailbox admission decision. */
 function managedAdmissionBlock(
@@ -573,8 +596,12 @@ export function createTeamRolePolicy(
       )
         state.ctx = ctx
       if (!protectedPaths.has(ctx.path)) return
-      if (!(await getSessionFromCtx(ctx))) return
       const input = body(ctx)
+      if (ctx.path === createOrganization) blockNullSlug(input.slug)
+      if (ctx.path === updateOrganization && input.data && typeof input.data === 'object') {
+        blockNullSlug((input.data as Record<string, unknown>).slug)
+      }
+      if (!(await getSessionFromCtx(ctx))) return
       await asAuthError(async () => {
         // Self-removal keeps the safe leave policy, including member access and the
         // locked final-owner refusal. Other targets require administrative removal.
@@ -1001,6 +1028,7 @@ export function createTeamRolePolicy(
               )
             )
               throw teamRoleDenied()
+            const expected = ctx.request && expectedTeamDetails(ctx.request.headers)
             const patch = request.update as {
               name?: string
               slug?: string
@@ -1023,12 +1051,19 @@ export function createTeamRolePolicy(
                 .executeTakeFirst()
               if (managedName) throw managedResource()
             }
-            const updated = await trx
+            const previous = await trx
+              .selectFrom('auth.organization')
+              .select(['name', 'slug'])
+              .where('id', '=', facts.organizationId)
+              .executeTakeFirstOrThrow()
+            let update = trx
               .updateTable('auth.organization')
               .set(patch)
               .where('id', '=', facts.organizationId)
-              .returningAll()
-              .executeTakeFirstOrThrow()
+            if (expected)
+              update = update.where('name', '=', expected.name).where('slug', '=', expected.slug)
+            const updated = await update.returningAll().executeTakeFirst()
+            if (!updated) throw teamSettingsChanged()
             const actor = await principal(ctx)
             if (!actor) throw teamRoleDenied()
             await writeAuditEvent(trx, {
@@ -1037,10 +1072,17 @@ export function createTeamRolePolicy(
               action: 'organization.updated',
               targetType: 'organization',
               targetId: facts.organizationId,
+              details: {
+                ...(previous.name !== updated.name && { nameChanged: true }),
+                ...(previous.slug !== updated.slug && {
+                  oldSlug: isPublicTeamSlugFormat(previous.slug) ? previous.slug : null,
+                  newSlug: updated.slug,
+                }),
+              },
             })
             await requireProof(trx, ctx, facts.organizationId)
             return updated as never
-          })
+          }).catch(mapOrganizationSlugConflict)
         }
         if (ctx?.path === changeRole && request.model === 'member') {
           return write(async (trx) => {

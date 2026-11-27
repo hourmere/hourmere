@@ -1,8 +1,9 @@
 import type { Db } from '@hourmere/db'
 import type { BetterAuthPlugin } from 'better-auth'
 import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/api'
+import { sql } from 'kysely'
 import type { AuthMiddlewareContext } from './api-keys.ts'
-import { isMember, isUuid } from './organizations.ts'
+import { blockNullSlug, isMember, isUuid, organizationSlugTaken } from './organizations.ts'
 import { memoizeTeamSsoAccess, type TeamSsoCapabilities, type TeamSsoSession } from './team-sso.ts'
 
 export function nativeSsoRequired(): never {
@@ -48,6 +49,25 @@ function slugId(db: Db, slug: unknown) {
     .where('slug', '=', slug)
     .executeTakeFirst()
     .then((organization) => organization?.id)
+}
+
+async function slugAvailability(db: Db, slug: unknown) {
+  if (typeof slug !== 'string' || !slug) return undefined
+  blockNullSlug(slug)
+  const folded = sql<string>`lower(${slug} COLLATE pg_catalog.pg_unicode_fast)`
+  const organization = await db
+    .selectFrom('auth.organization')
+    .select('id')
+    .where(sql<string>`lower(slug COLLATE pg_catalog.pg_unicode_fast)`, '=', folded)
+    .executeTakeFirst()
+  if (organization) return organization.id
+  const hold = await db
+    .selectFrom('team_slug_reservations')
+    .select('slug')
+    .where('slug', '=', folded)
+    .where('expires_at', '>', sql<Date>`clock_timestamp()`)
+    .executeTakeFirst()
+  if (hold) throw organizationSlugTaken()
 }
 
 /** Both the HTTP router and the trusted auth.api methods dispatch through these hooks. */
@@ -99,7 +119,7 @@ export function nativeTeamSso(db: Db, capabilities: TeamSsoCapabilities) {
       const activeId = session?.session.activeOrganizationId
       let organizationId: string | undefined
       if (checkSlug) {
-        organizationId = await slugId(db, body?.slug)
+        organizationId = await slugAvailability(db, body?.slug)
       } else if (fromInvitation) {
         const invitationId = uuid(
           path === '/organization/get-invitation' ? ctx.query?.id : body?.invitationId,
@@ -158,8 +178,10 @@ export function nativeTeamSso(db: Db, capabilities: TeamSsoCapabilities) {
           deniedReads.add(ctx.context)
           return { deferred: true }
         }
-        return
+        if (!checkSlug) return
       }
+
+      if (checkSlug) throw organizationSlugTaken()
 
       // Run slug-selected reads against the exact row whose policy was checked.
       // Otherwise a slug reassigned between the guard and endpoint can select a new team.

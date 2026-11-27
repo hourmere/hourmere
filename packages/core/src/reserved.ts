@@ -112,7 +112,12 @@ export function isClaimReservedHandle(name: string): boolean {
   return CLAIM_RESERVED_HANDLES.has(name.toLowerCase())
 }
 
+/** Public team slug syntax, independent of the reserved names. */
+export function isPublicTeamSlugFormat(value: string): boolean {
+  return /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/i.test(value)
+}
+
 /** Exact-case organization slug eligible for the separate public team URL namespace. */
 export function isPublicTeamSlug(value: string): boolean {
-  return /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/i.test(value) && !isReservedName(value)
+  return isPublicTeamSlugFormat(value) && !isReservedName(value)
 }
