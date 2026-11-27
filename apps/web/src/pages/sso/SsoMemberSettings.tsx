@@ -213,7 +213,7 @@ export function SsoMemberSettings({
 
   const providers =
     sso?.providers.filter(({ protocol }) => samlEnabled || protocol !== 'saml') ?? []
-  const links = sso?.links.filter(({ protocol }) => samlEnabled || protocol !== 'saml') ?? []
+  const links = sso?.links ?? []
   const unlinked = providers.filter(({ id }) => !links.some(({ providerId }) => providerId === id))
   const actionsBlocked = busy || pending !== null || authorization !== null || hasCallback
 

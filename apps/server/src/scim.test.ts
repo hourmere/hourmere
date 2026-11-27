@@ -436,6 +436,7 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM credential HTTP boundaries', ()
     for (const enabled of [false, true]) {
       const ssoCapabilities = productionSsoCapabilities({
         SSO_OIDC_ENABLED: false,
+        SSO_SAML_ENABLED: false,
         SCIM_PROVISIONING_ENABLED: enabled,
       })
       const resolve = createCallerResolver({ auth, db, ssoCapabilities })

@@ -3310,4 +3310,8 @@ export const admin = {
   'Choose a non-reserved team slug of 1–64 ASCII letters, digits or hyphens. Start and end with a letter or digit. New slugs are saved in lowercase.':
     '请选择未被保留的团队标识，使用 1–64 个英文字母、数字或连字符，首尾须为字母或数字。新标识将以小写保存。',
   'Team addresses are separate from personal handles.': '团队地址与个人用户名互相独立。',
+
+  // SAML recovery
+  'If you are replacing signing certificates, enter the full set your identity provider uses.':
+    '如需更换签名证书，请填写身份提供方使用的全部证书。',
 } as const

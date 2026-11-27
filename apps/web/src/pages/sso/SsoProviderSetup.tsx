@@ -21,8 +21,8 @@ interface ProviderProps {
   reload: () => void
 }
 
-type ProviderProtocol = 'oidc' | 'saml'
-type ProviderEditor = { protocol: ProviderProtocol; provider: SsoProvider | null }
+export type ProviderProtocol = 'oidc' | 'saml'
+export type ProviderEditor = { protocol: ProviderProtocol; provider: SsoProvider | null }
 
 const endpointFields = [
   ['authorizationEndpoint', 'Authorization endpoint'],
@@ -47,7 +47,7 @@ export function SsoProviderSetup({
   const [editor, setEditor] = useState<ProviderEditor | null>(null)
   const opener = useRef<HTMLButtonElement>(null)
   const visibleProviders = providers.filter(
-    ({ protocol }) => protocol === 'oidc' || (protocol === 'saml' && samlEnabled),
+    ({ protocol }) => protocol === 'oidc' || protocol === 'saml',
   )
   const editing = (editor?.protocol === 'saml' ? samlEnabled : addsTrust) ? editor : null
 
@@ -98,7 +98,7 @@ export function SsoProviderSetup({
       )}
       {visibleProviders.map((provider) => {
         const protocol = provider.protocol === 'saml' ? 'saml' : 'oidc'
-        const canEdit = protocol === 'saml' || addsTrust
+        const canEdit = protocol === 'saml' ? samlEnabled : addsTrust
         return (
           <section
             key={provider.id}
@@ -123,17 +123,8 @@ export function SsoProviderSetup({
             />
             <fieldset className="form-fieldset" disabled={props.busy || editing !== null}>
               <div className="form-actions">
-                {protocol === 'saml' && (
-                  <a
-                    className="button button-small"
-                    href={'/api/auth/sso/saml2/sp/metadata/:providerId'.replace(
-                      ':providerId',
-                      encodeURIComponent(provider.id),
-                    )}
-                    download
-                  >
-                    {t('Download service provider metadata')}
-                  </a>
+                {protocol === 'saml' && canEdit && (
+                  <SamlMetadataDownload providerId={provider.id} />
                 )}
                 {canEdit && (
                   <button
@@ -184,6 +175,22 @@ export function SsoProviderSetup({
         )
       })}
     </section>
+  )
+}
+
+export function SamlMetadataDownload({ providerId }: { providerId: string }) {
+  const { t } = useI18n()
+  return (
+    <a
+      className="button button-small"
+      href={'/api/auth/sso/saml2/sp/metadata/:providerId'.replace(
+        ':providerId',
+        encodeURIComponent(providerId),
+      )}
+      download
+    >
+      {t('Download service provider metadata')}
+    </a>
   )
 }
 
@@ -252,7 +259,7 @@ function ProviderActivation({
           }),
         ),
       reload,
-      samlEnabled
+      samlEnabled || provider.protocol === 'saml'
         ? {
             ...activationErrors,
             sso_last_provider: 'Enable another usable provider before disabling this provider.',
@@ -351,10 +358,12 @@ export function ProviderForm({
   reload,
   provider,
   protocol = provider?.protocol === 'saml' ? 'saml' : 'oidc',
+  recovering = false,
   onClose,
 }: ProviderProps & {
   provider: SsoProvider | null
   protocol?: ProviderProtocol
+  recovering?: boolean
   onClose: () => void
 }) {
   const { t } = useI18n()
@@ -553,7 +562,7 @@ export function ProviderForm({
           )}
         </div>
         {protocol === 'saml' ? (
-          <SamlProviderFields formId={formId} provider={provider} />
+          <SamlProviderFields formId={formId} provider={provider} recovering={recovering} />
         ) : (
           <fieldset className="form-fieldset">
             <legend>{t('Endpoint overrides')}</legend>
@@ -601,9 +610,11 @@ export function ProviderForm({
 function SamlProviderFields({
   formId,
   provider,
+  recovering,
 }: {
   formId: string
   provider: SsoProvider | null
+  recovering: boolean
 }) {
   const { t } = useI18n()
   const [source, setSource] = useState('manual')
@@ -709,7 +720,9 @@ function SamlProviderFields({
         {provider && (
           <p className="hint">
             {t(
-              'To test a rotation, use a disabled draft. Submit the full set with both old and new certificates, test the new revision, then remove the old certificate after the identity provider switches.',
+              recovering
+                ? 'If you are replacing signing certificates, enter the full set your identity provider uses.'
+                : 'To test a rotation, use a disabled draft. Submit the full set with both old and new certificates, test the new revision, then remove the old certificate after the identity provider switches.',
             )}
           </p>
         )}

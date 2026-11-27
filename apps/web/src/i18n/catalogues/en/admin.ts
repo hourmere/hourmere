@@ -3468,4 +3468,8 @@ export const admin = {
     'Choose a non-reserved team slug of 1–64 ASCII letters, digits or hyphens. Start and end with a letter or digit. New slugs are saved in lowercase.',
   'Team addresses are separate from personal handles.':
     'Team addresses are separate from personal handles.',
+
+  // SAML recovery
+  'If you are replacing signing certificates, enter the full set your identity provider uses.':
+    'If you are replacing signing certificates, enter the full set your identity provider uses.',
 } as const

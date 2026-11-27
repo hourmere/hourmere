@@ -44,7 +44,7 @@ export function ssoPolicyRoutes(deps: SsoPolicyDeps): RouteModule {
         tags: ['SSO'],
         summary: 'Set the current team SSO policy',
         description:
-          'Requires a verified team owner or administrator browser session and fresh administration proof. An enrolled owner can spend recovery authority to turn off enforcement without enabling JIT. While SSO_OIDC_ENABLED is off, requiring SSO or JIT admission returns 404 sso_disabled; turning the requirement off stays available.',
+          'Requires a verified team owner or administrator browser session and fresh administration proof. An enrolled owner can spend recovery authority to turn off enforcement without enabling JIT. Starting enforcement requires a usable provider on an enabled protocol. Enabling JIT requires at least one protocol to be on. Turning the requirement off stays available.',
         security: [{ session: [] }],
         middleware: [guard, teamManagementSessionCaller(caller)] as const,
         request: {
