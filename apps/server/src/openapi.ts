@@ -27,7 +27,7 @@ export const ErrorBody = z
       .string()
       .optional()
       .openapi({
-        description: `Optional stable validation field name. Known values: ${SUCCESS_REDIRECT_ERROR_FIELDS.join(', ')}. New values may appear within /api/v1; ignore unknown values.`,
+        description: `Optional stable validation field name. Known values: ${SUCCESS_REDIRECT_ERROR_FIELDS.join(', ')}, and responses.<questionId> for a rejected routed booking answer. New values may appear within /api/v1; ignore unknown values.`,
       }),
     message: z.string().optional().openapi({ description: 'Human-readable detail' }),
   })

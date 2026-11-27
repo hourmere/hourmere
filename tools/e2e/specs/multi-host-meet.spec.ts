@@ -1,4 +1,5 @@
 import type { FrameLocator, Page } from '@playwright/test'
+import { selectAdminLanguage } from '../account-menu.ts'
 import { revealEventSetting } from '../event-settings.ts'
 import { expect, fillInvitee, pickSlot, test, waitUntilAtRest } from '../fixtures.ts'
 
@@ -45,10 +46,7 @@ for (const language of ['en', 'zh-CN'] as const) {
     await page
       .getByLabel('Meeting organizer', { exact: true })
       .selectOption({ label: 'Second Required Host' })
-    if (zh)
-      await page
-        .getByRole('combobox', { name: 'Interface language', exact: true })
-        .selectOption('zh-CN')
+    if (zh) await selectAdminLanguage(page, 'zh-CN')
     await expect(page.getByLabel(zh ? '标题' : 'Title', { exact: true })).toHaveValue(
       'Multi browser Meet',
     )

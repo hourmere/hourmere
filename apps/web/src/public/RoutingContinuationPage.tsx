@@ -220,7 +220,7 @@ function ContinuationBooking({
   usePageTitle(literal(event.title))
 
   const refresh = useCallback(
-    async (code: StaleConfiguration, signal: AbortSignal) => {
+    async (code: StaleConfiguration, signal: AbortSignal, bookingError?: PublicRequestError) => {
       let updated: RoutingContinuation
       try {
         updated = await resolveRoutingContinuation(routeToken, signal)
@@ -233,6 +233,15 @@ function ContinuationBooking({
       if (signal.aborted) return
       attempt.current = null
       setDraft((draft) => refreshDraft(draft, updated.eventType, code))
+      if (code === 'invalid_responses' && bookingError) {
+        const { fields } = bookingErrors(bookingError, updated.eventType.questions)
+        if (Object.keys(fields).length > 0) {
+          setServerErrors(fields)
+          setFormError('Check the highlighted fields.')
+          setNotice(null)
+          return
+        }
+      }
       setNotice(refreshNotice[code])
     },
     [routeToken],
@@ -259,6 +268,8 @@ function ContinuationBooking({
   function changeTime(message: UiText | null = null) {
     setDraft((draft) => ({ ...draft, slot: null }))
     setNotice(message)
+    setFormError(null)
+    setServerErrors({})
     setNow(currentTime())
   }
 
@@ -335,7 +346,11 @@ function ContinuationBooking({
         setGone(true)
       } else if (staleConfiguration(code)) {
         try {
-          await refresh(code, active.signal)
+          await refresh(
+            code,
+            active.signal,
+            error instanceof PublicRequestError ? error : undefined,
+          )
         } catch (refreshError) {
           if (!active.signal.aborted) setFormError(failureMessage(refreshError))
         }
@@ -463,8 +478,6 @@ function ContinuationBooking({
                   attempt.current = null
                 setDraft((draft) => ({ ...draft, slot: next }))
                 setNotice(null)
-                setFormError(null)
-                setServerErrors({})
               }}
               version={revision}
               focusTitle
