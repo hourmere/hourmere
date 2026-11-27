@@ -272,7 +272,8 @@ an invalid-input error when enforcing the same schema validation as the transpor
 
 An optional `field` string identifies a stable validation field name. Known values are
 `successRedirect`, `successRedirect.url`, `successRedirect.parameters`,
-`successRedirect.includeInviteePersonalData` and `successRedirect.allowEmbedParent`.
+`successRedirect.includeInviteePersonalData`, `successRedirect.allowEmbedParent` and
+`responses.<questionId>` for a rejected routed booking answer.
 New values may appear within `/api/v1`; clients must ignore unknown values and fall back
 to the error code and optional message. The published schema is an open string, not a
 closed enum. The field may be absent, including when talking to older servers.

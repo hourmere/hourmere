@@ -7,6 +7,7 @@ import { commonCatalogues } from '../i18n/common.ts'
 import { fakeApi, json } from '../test/fake-api.tsx'
 import { booking, NEW_TOKEN, slot, TOKEN } from '../test/public-fixtures.ts'
 import { selectPublicLanguage } from '../test/public-language.ts'
+import { createRoutedBooking } from './api.ts'
 import { RoutingContinuationPage } from './RoutingContinuationPage.tsx'
 
 vi.mock('./env.ts', async (original) => ({
@@ -241,6 +242,114 @@ describe('routing continuation', () => {
     expect(replay?.body).toEqual(first?.body)
   })
 
+  it.each(['submitted', 'newly required'] as const)(
+    'marks a rejected %s answer against the refreshed questions',
+    async (kind) => {
+      const user = userEvent.setup()
+      const added = kind === 'newly required'
+      const ticket = { id: 'ticket', label: 'Support ticket', type: 'short_text', required: true }
+      const question = added ? ticket : { id: 'reference', label: 'Project reference' }
+      const refreshed = added
+        ? {
+            ...projection,
+            eventType: {
+              ...projection.eventType,
+              locations: [{ id: 'office', kind: 'in_person', label: 'Office' }],
+              questions: [...projection.eventType.questions, ticket],
+            },
+          }
+        : projection
+      let rejected = false
+      const message = `Unexpected private content ${TOKEN}`
+      const api = fakeApi({
+        [resolveRoute]: () => json(200, rejected ? refreshed : projection),
+        [slotsRoute]: slotsResponse,
+        [bookingsRoute]: () => {
+          if (rejected) return json(201, result)
+          rejected = true
+          return json(400, {
+            error: 'invalid_responses',
+            field: `responses.${question.id}`,
+            message,
+          })
+        },
+      })
+      render(<RoutingContinuationPage routeToken={TOKEN} />)
+      await chooseTime(user)
+      await user.type(screen.getByRole('textbox', { name: 'Project reference' }), 'PRJ-42')
+      await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+      if (added) await chooseTime(user)
+
+      const alert = await screen.findByRole('alert')
+      expect(document.activeElement).toBe(alert)
+      const link = within(alert).getByRole('link', {
+        name: `${question.label}: Check this answer.`,
+      })
+      const field = screen.getByRole<HTMLInputElement>('textbox', {
+        name: question.label,
+        description: 'Check this answer.',
+      })
+      expect(field.getAttribute('aria-invalid')).toBe('true')
+      expect(field.value).toBe(added ? '' : 'PRJ-42')
+      expect(screen.queryByText(/This form has changed/)).toBeNull()
+      expect(document.body.textContent).not.toContain(message)
+      expect(api.to(resolveRoute)).toHaveLength(2)
+      await user.click(link)
+      expect(document.activeElement).toBe(field)
+      fireEvent.change(field, { target: { value: 'PRJ-43' } })
+      expect(field.getAttribute('aria-invalid')).toBeNull()
+      await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+
+      expect(await screen.findByRole('heading', { name: 'You’re booked' })).toBeDefined()
+      expect(api.to(bookingsRoute).at(-1)?.body).toMatchObject({
+        start,
+        responses: { topic: 'Original topic', [question.id]: 'PRJ-43' },
+      })
+    },
+  )
+
+  it('discards prose in the field of a private booking error', async () => {
+    const user = userEvent.setup()
+    const field = 'responses.Unexpected private detail'
+    const message = 'Unfiltered server error detail'
+    fakeApi({
+      [resolveRoute]: () => json(200, projection),
+      [slotsRoute]: slotsResponse,
+      [bookingsRoute]: () => json(400, { error: 'invalid_responses', field, message }),
+    })
+
+    await expect(
+      createRoutedBooking(
+        {
+          routeToken: TOKEN,
+          start,
+          durationMinutes: 30,
+          invitee: { name: 'Test invitee', email: 'invitee@example.invalid', timeZone: 'UTC' },
+          responses: { topic: 'Original topic', reference: 'PRJ-42' },
+        },
+        crypto.randomUUID(),
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({
+      name: 'PublicRequestError',
+      code: 'invalid_responses',
+      field: undefined,
+    })
+
+    render(<RoutingContinuationPage routeToken={TOKEN} />)
+    await chooseTime(user)
+    const reference = screen.getByRole('textbox', { name: 'Project reference' })
+    await user.type(reference, 'PRJ-42')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+
+    expect(
+      await screen.findByText('This form has changed. Review your answers before continuing.'),
+    ).toBeDefined()
+    expect(document.querySelector('[aria-invalid="true"]')).toBeNull()
+    expect(document.body.textContent).not.toContain(field)
+    expect(document.body.textContent).not.toContain(message)
+  })
+
   it('refreshes changed questions and keeps compatible answers and the chosen time', async () => {
     const user = userEvent.setup()
     let changed = false
@@ -291,7 +400,7 @@ describe('routing continuation', () => {
       [bookingsRoute]: () => {
         if (changed) return json(201, result)
         changed = true
-        return json(422, { error: 'invalid_responses', message: `Private value ${TOKEN}` })
+        return json(400, { error: 'invalid_responses', field: `responses.${TOKEN}` })
       },
     })
     render(<RoutingContinuationPage routeToken={TOKEN} />)

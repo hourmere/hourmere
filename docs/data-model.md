@@ -1086,6 +1086,9 @@ evidence and the consumed receipt on the original booking. The snapshot insert m
 booking and refuses payment holds. Ordinary bookings use the default marker and need no
 snapshot lookup.
 
+Migration 0193 repairs inconsistent markers and guards writes against the snapshot in
+the same organization. Removing a snapshot clears the marker if its booking survives.
+
 Migration 0083 adds `routing_form_operations`, the idempotency records of form creation and
 publication requests that carry a client `requestId`. A record holds the organization, the
 operation (`create` or `publish`), the acting credential by kind (`session`, `api_key` or
