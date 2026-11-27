@@ -171,6 +171,14 @@ facts are stale or unreadable, refuse with calendar availability unknown. If an 
 conflict arises or the eligible host, logistics or offered time changes, apply fails.
 A different proposal requires new consent.
 
+The internal dry run checks one proposed slot for the repaired event's sole host. It uses
+the original start and duration unless a different start or supported duration is supplied.
+It reports whether the exact slot is available, or `calendar_sync_unavailable` if conflict
+data cannot be trusted. Busy intervals, event mappings and provider identifiers stay private.
+This read-only check reserves nothing and sends no invitations. Applying a handoff requires
+a fresh check under the write locks described above. The dry run has no transport entry point
+during staged implementation.
+
 ## Provider and notification identities
 
 | Surface | Source chain | Replacement chain |
@@ -201,10 +209,12 @@ any remaining copy in Outlook. If disconnection removed the target, only manual 
 in Outlook is available. The replacement host's credentials cannot be used to reconcile
 the old event.
 
-For a new Teams booking, admission checks the new host's eligible owned Microsoft
-destination with `Calendars.ReadWrite`. After commit the worker checks Teams support on
-that exact calendar before writing. The old chain's private `teamsJoinUrl` is never copied
-to the replacement chain. Keep the last validated URL on the old root for eligible
+For a new Teams booking, admission requires Microsoft calendars to be enabled on the
+instance and the new host to have an eligible owned Microsoft destination with
+`Calendars.ReadWrite`. If either check fails, return `location_unavailable`. After commit
+the worker checks Teams support on that exact calendar before writing. The old chain's
+private `teamsJoinUrl` is never copied to the replacement chain. Keep the last validated
+URL on the old root for eligible
 cancellation mail recipients. Each email uses its own root's state and recipient policy.
 For `join_url_pending`, `teams_unavailable` and `writeback_failed`, the cancellation
 describes the old link's status and the confirmation describes the new link's status.
@@ -290,6 +300,9 @@ those bookings and leaves their ordinary booking flows in place.
 最多收到三次确认链接，重发后只有最新链接有效。首期仅支持单主持人的个人模式团队预约，
 不支持带路由快照的预约。管理员提交时，系统复核团队权限、实际主持人、工作时间、日历冲突和
 会议授权。通过后在同一事务内取消旧预约并创建新链，保留旧记录与原主持人快照。
+内部试算只判断接任者在指定时段能否预约，不占用时段、不发邀请。日历数据不可信时返回
+`calendar_sync_unavailable`，不会公开私人忙碌区间或日历事件映射。正式应用需在锁内重新检查。
 旧会议的取消沿用原 ICS UID 与原日历组织者，新邀请使用新 UID。Google Meet 和 Zoom
 按各自预约链的固定组织者身份处理。Outlook 和 Teams 按旧链固定的写回状态清理，新 Teams
-会议须复核新主持人的 Microsoft 日历资格，旧入会链接仅供旧链的取消邮件使用。
+会议要求实例启用 Microsoft 日历，并复核接任主持人的写入资格。任一条件不满足时返回
+`location_unavailable`。旧入会链接仅供旧链的取消邮件使用。
