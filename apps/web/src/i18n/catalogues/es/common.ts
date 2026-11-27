@@ -662,4 +662,10 @@ export const common = {
     'Se ha seleccionado el horario sugerido. Revisa los datos antes de ir al pago.',
   'You’ll pay securely on Stripe. Your booking is confirmed only after Hourmere receives the payment. If you cancel the booking, a full refund is requested.':
     'Pagarás de forma segura en Stripe. Hourmere no confirmará la cita hasta recibir el pago. Si cancelas la cita, se solicitará un reembolso completo.',
+
+  // Team public home
+  'This team has no public events right now.':
+    'Este equipo no tiene eventos públicos en este momento.',
+  'This team page is unavailable.': 'Esta página de equipo no está disponible.',
+  'Couldn’t load this team page.': 'No se pudo cargar esta página de equipo.',
 } as const

@@ -653,4 +653,9 @@ export const common = {
     'The suggested time is selected. Review the details before continuing to payment.',
   'You’ll pay securely on Stripe. Your booking is confirmed only after Hourmere receives the payment. If you cancel the booking, a full refund is requested.':
     'You’ll pay securely on Stripe. Your booking is confirmed only after Hourmere receives the payment. If you cancel the booking, a full refund is requested.',
+
+  // Team public home
+  'This team has no public events right now.': 'This team has no public events right now.',
+  'This team page is unavailable.': 'This team page is unavailable.',
+  'Couldn’t load this team page.': 'Couldn’t load this team page.',
 } as const

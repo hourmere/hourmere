@@ -1,8 +1,9 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import type { EventType } from '../../api/resources.ts'
 import { chooseLanguage } from '../../i18n/store.ts'
+import { resolveEventTypeEditor } from '../../test/event-type-editor.ts'
 import {
   fakeApi,
   json,
@@ -15,6 +16,8 @@ import {
 } from '../../test/fake-api.tsx'
 import { EVENT_TYPE_ID, eventType, SCHEDULE_ID, schedule } from '../../test/fixtures.ts'
 import { LEAVE_WITH_UNSAVED_CHANGES } from '../../unsaved-changes.tsx'
+
+beforeAll(resolveEventTypeEditor)
 
 const team = {
   ...ME,

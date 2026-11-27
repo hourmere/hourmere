@@ -627,4 +627,9 @@ export const common = {
     '已选中建议的时间。请核对详情后继续付款。',
   'You’ll pay securely on Stripe. Your booking is confirmed only after Hourmere receives the payment. If you cancel the booking, a full refund is requested.':
     '你将在 Stripe 安全付款。Hourmere 收到付款后才会确认预约。如果取消预约，系统会申请全额退款。',
+
+  // Team public home
+  'This team has no public events right now.': '此团队目前没有公开活动。',
+  'This team page is unavailable.': '此团队页面暂不可用。',
+  'Couldn’t load this team page.': '无法加载此团队页面。',
 } as const

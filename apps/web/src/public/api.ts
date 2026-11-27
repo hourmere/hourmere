@@ -233,6 +233,29 @@ export async function getHost(handle: string, signal: AbortSignal): Promise<Publ
   return data
 }
 
+export async function getTeamHome(
+  handle: string,
+  signal: AbortSignal,
+): Promise<Schemas['PublicTeam']> {
+  const { data } = await call(
+    () =>
+      api.GET('/api/v1/public/teams/{handle}', {
+        params: { path: { handle } },
+        credentials: 'omit',
+        cache: 'no-store',
+        signal,
+      }),
+    signal,
+  )
+  if (
+    data?.team?.slug !== handle ||
+    typeof data.team.name !== 'string' ||
+    !Array.isArray(data.eventTypes)
+  )
+    throw new NetworkError()
+  return data
+}
+
 export async function getEventType(
   handle: string,
   slug: string,

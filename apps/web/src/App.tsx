@@ -71,6 +71,7 @@ import {
   SsoSetupPage,
   TeamBookingPage,
   TeamBookingsPage,
+  TeamHomePage,
   TroubleshootPage,
   WorkflowEditorPage,
   WorkflowRunHistoryPage,
@@ -162,6 +163,7 @@ export const appRoutes = createRoutesFromElements(
       path="/:handle/:slug/waitlist/:waitlistToken/:suggestedStart/:previewExpiresAt"
       element={<BookingPage />}
     />
+    <Route path="/team/:teamSlug" element={<TeamHomePage />} />
     <Route path="/team/:teamSlug/:slug" element={<TeamBookingPage />} />
     <Route path="/:handle" element={<HostPage />} />
     <Route path="/:handle/:slug" element={<BookingPage />} />
