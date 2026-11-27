@@ -90,6 +90,7 @@ function invitation(message: MailMessage | undefined) {
     sequence: event?.getFirstPropertyValue('sequence'),
     summary: event?.getFirstPropertyValue('summary'),
     location: event?.getFirstPropertyValue('location'),
+    description: event?.getFirstPropertyValue('description'),
     organizerName: event?.getFirstProperty('organizer')?.getParameter('cn'),
   }
 }
@@ -173,6 +174,175 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
       .where('booking_id', '=', bookingId)
       .orderBy('recipient')
       .execute()
+
+  it('keeps pending and ready Teams notices private through reschedule and cancellation', async () => {
+    const { bookingId, apiToken, hostId, hostEmail } = await booked({ guests: true })
+    const url = 'https://teams.microsoft.com/l/meetup-join/synthetic-booking/0?context=abc'
+    await db
+      .updateTable('bookings')
+      .set({ location: JSON.stringify({ kind: 'microsoft_teams' }) })
+      .where('id', '=', bookingId)
+      .execute()
+    const { calendarId } = await f.calendarBusy(hostId, [], { checkConflicts: false, now: NOW })
+    await db
+      .insertInto('booking_calendar_targets')
+      .values({
+        root_booking_id: bookingId,
+        user_id: hostId,
+        calendar_id: calendarId,
+        microsoft_writeback: JSON.stringify({
+          status: 'retrying',
+          attempts: 1,
+          updatedAt: NOW.toString(),
+          teamsStatus: 'join_url_pending',
+        }),
+      })
+      .execute()
+
+    const { mailer, sent } = testMailer()
+    const config = deps(mailer)
+    await sendBookingNotification(config, bookingId, 'confirmed')
+    expect(sent.map((message) => message.to)).toEqual([
+      hostEmail,
+      'ada@example.com',
+      'charles@example.com',
+    ])
+    const pending = 'The Teams link will appear in the booking details when it’s ready.'
+    const bookerEmail = sent.find(to('ada@example.com'))
+    const token = tokenIn(bookerEmail)
+    expect(token).toBeTruthy()
+    expect(bookerEmail?.html).toContain(`href="${PUBLIC_URL}/booking#token=${token}"`)
+    expect(sent.find(to('charles@example.com'))?.html).not.toContain('/booking#token=')
+    for (const message of sent.filter((m) => m.to !== 'charles@example.com')) {
+      expect(message.text).toContain(pending)
+      expect(message.html).toContain(pending)
+      expect(invitation(message)).toMatchObject({
+        method: 'REQUEST',
+        uid: `${bookingId}@hourmere`,
+        sequence: 0,
+        location: 'Microsoft Teams',
+        description: expect.stringContaining(pending),
+      })
+    }
+    expect(JSON.stringify(sent)).not.toContain(url)
+    sent.length = 0
+
+    await db
+      .updateTable('booking_calendar_targets')
+      .set({
+        microsoft_writeback: JSON.stringify({
+          status: 'succeeded',
+          attempts: 2,
+          updatedAt: NOW.toString(),
+          teamsStatus: 'ready',
+          teamsJoinUrl: url,
+        }),
+      })
+      .where('root_booking_id', '=', bookingId)
+      .execute()
+    const moved = await rescheduleManagedBooking(ctx, apiToken, {
+      start: instant('2026-11-03T13:00:00Z'),
+    })
+    const assertLocation = (method: 'REQUEST' | 'CANCEL', sequence: number) => {
+      expect(sent.map((message) => message.to)).toEqual([
+        hostEmail,
+        'ada@example.com',
+        'charles@example.com',
+      ])
+      for (const message of sent) {
+        expect(message.sensitive).toBe(true)
+        expect(message.text).toContain('Microsoft Teams')
+        const calendar = invitation(message)
+        expect(calendar).toMatchObject({ method, uid: `${bookingId}@hourmere`, sequence })
+        if (method === 'CANCEL' || message.to === 'charles@example.com') {
+          expect(message.text).not.toContain(url)
+          expect(message.html).not.toContain(url)
+          expect(calendar?.location).toBe('Microsoft Teams')
+          expect(calendar?.description ?? '').not.toContain(url)
+          continue
+        }
+        expect(message.text).toContain(url)
+        expect(message.html).toContain(url)
+        expect(calendar).toMatchObject({
+          location: url,
+          description: expect.stringContaining(url),
+        })
+      }
+      sent.length = 0
+    }
+    await sendBookingNotification(config, moved.booking.id, 'rescheduled')
+    assertLocation('REQUEST', 1)
+    await sendBookingNotification(config, moved.booking.id, 'rescheduled')
+    expect(sent).toHaveLength(0)
+
+    await cancelManagedBooking(ctx, moved.manageToken as string, {})
+    await sendBookingNotification(config, moved.booking.id, 'cancelled')
+    assertLocation('CANCEL', 2)
+    await sendBookingNotification(config, moved.booking.id, 'cancelled')
+    expect(sent).toHaveLength(0)
+  })
+
+  it('ignores a ready Teams writeback target whose owner is not a booking host', async () => {
+    const { bookingId, apiToken, hostId } = await booked()
+    const { userId: otherId } = await f.host()
+    await db
+      .updateTable('bookings')
+      .set({ location: JSON.stringify({ kind: 'microsoft_teams' }) })
+      .where('id', '=', bookingId)
+      .execute()
+    const target = async (userId: string, url: string) => {
+      const { calendarId } = await f.calendarBusy(userId, [], { checkConflicts: false, now: NOW })
+      await db
+        .insertInto('booking_calendar_targets')
+        .values({
+          root_booking_id: bookingId,
+          user_id: userId,
+          calendar_id: calendarId,
+          microsoft_writeback: JSON.stringify({
+            status: 'succeeded',
+            teamsStatus: 'ready',
+            teamsJoinUrl: url,
+            attempts: 1,
+          }),
+        })
+        .execute()
+    }
+    await target(otherId, 'https://teams.microsoft.com/l/meetup-join/stale-target/0')
+    const stale = await getManagedBooking(ctx, apiToken)
+    expect(stale.location).toEqual({ kind: 'microsoft_teams', status: 'join_url_pending' })
+
+    const url = 'https://teams.microsoft.com/l/meetup-join/current-host/0'
+    await target(hostId, url)
+    const current = await getManagedBooking(ctx, apiToken)
+    expect(current.location).toEqual({ kind: 'microsoft_teams', status: 'ready', url })
+  })
+
+  it.each([
+    ['retrying', 'teams_unavailable', 'join_url_pending'],
+    ['succeeded', 'teams_unavailable', 'teams_unavailable'],
+    ['failed', 'teams_unavailable', 'writeback_failed'],
+    ['failed', 'join_url_pending', 'writeback_failed'],
+  ])('projects Teams writeback %s with %s as %s', async (status, teamsStatus, expected) => {
+    const { bookingId, apiToken, hostId } = await booked()
+    await db
+      .updateTable('bookings')
+      .set({ location: JSON.stringify({ kind: 'microsoft_teams' }) })
+      .where('id', '=', bookingId)
+      .execute()
+    const { calendarId } = await f.calendarBusy(hostId, [], { checkConflicts: false, now: NOW })
+    await db
+      .insertInto('booking_calendar_targets')
+      .values({
+        root_booking_id: bookingId,
+        user_id: hostId,
+        calendar_id: calendarId,
+        microsoft_writeback: JSON.stringify({ status, teamsStatus, attempts: 1 }),
+      })
+      .execute()
+
+    const booking = await getManagedBooking(ctx, apiToken)
+    expect(booking.location).toEqual({ kind: 'microsoft_teams', status: expected })
+  })
 
   it.each([
     {
@@ -1048,6 +1218,33 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
       }
     }
     const bookingId = '0199f0c4-7a2b-7000-8000-000000000001'
+
+    it('gives Teams confirmation a short writeback grace period for future starts', async () => {
+      const { bookingId } = await booked()
+      const queue = fakeQueue()
+      await db.transaction().execute(async (trx) => {
+        for (const seconds of [10, 21, 3600]) {
+          await enqueueBookingNotifications(
+            queue,
+            trx,
+            { type: 'created', bookingId, teamsMeeting: true, start: NOW.add({ seconds }) },
+            NOW,
+          )
+        }
+        await enqueueBookingNotifications(
+          queue,
+          trx,
+          { type: 'created', bookingId, start: NOW.add({ hours: 1 }) },
+          NOW,
+        )
+      })
+      expect(queue.queued).toEqual([
+        { kind: 'confirmed', startAfter: undefined },
+        { kind: 'confirmed', startAfter: undefined },
+        { kind: 'confirmed', startAfter: NOW.add({ seconds: 20 }) },
+        { kind: 'confirmed', startAfter: undefined },
+      ])
+    })
 
     it('skips a reminder less than a day away, or due within an hour of the booking', async () => {
       const queue = fakeQueue()

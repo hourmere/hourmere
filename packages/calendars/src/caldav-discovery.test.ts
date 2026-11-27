@@ -348,7 +348,7 @@ describe('CalDAV discovery mock server', () => {
     })
     expect(transport).toHaveBeenCalledTimes(3)
   })
-  it('uses the final request URI after redirects for relative properties', async () => {
+  it('uses the final request URI after redirects for relative properties and collections', async () => {
     const transport = vi
       .fn<CalDavTransport>()
       .mockResolvedValueOnce({ status: 302, body: '', location: '/redirected/bootstrap' })
@@ -367,16 +367,26 @@ describe('CalDAV discovery mock server', () => {
           '<c:calendar-home-set><d:href>../calendars/x/</d:href></c:calendar-home-set>',
         ),
       })
-      .mockResolvedValueOnce({ status: 207, body: calendar })
+      .mockResolvedValueOnce({ status: 308, body: '', location: 'inventory/' })
+      .mockResolvedValueOnce({
+        status: 207,
+        body: calendar.replace('/calendars/host/work/', 'work/'),
+      })
     const result = await createCalDavDiscovery(transport).discover(credentials)
     expect(result.principalUrl).toBe('https://dav.example.com/redirected/x/')
     expect(result.calendarHomeUrl).toBe('https://dav.example.com/another/principals/calendars/x/')
-    expect(transport.mock.calls.map(([request]) => new URL(request.url).pathname)).toEqual([
-      '/.well-known/caldav',
-      '/redirected/bootstrap',
-      '/redirected/x/',
-      '/another/principals/host/',
-      '/another/principals/calendars/x/',
+    expect(result.calendars.map(({ url }) => url)).toEqual([
+      'https://dav.example.com/another/principals/calendars/x/inventory/work/',
+    ])
+    expect(
+      transport.mock.calls.map(([request]) => [request.depth, new URL(request.url).pathname]),
+    ).toEqual([
+      ['0', '/.well-known/caldav'],
+      ['0', '/redirected/bootstrap'],
+      ['0', '/redirected/x/'],
+      ['0', '/another/principals/host/'],
+      ['1', '/another/principals/calendars/x/'],
+      ['1', '/another/principals/calendars/x/inventory/'],
     ])
   })
   it('selects a trailing-slash match among multiple responses', async () => {
@@ -535,6 +545,30 @@ describe('CalDAV discovery mock server', () => {
         createCalDavDiscovery(transport).discover({ ...credentials, serverUrl }),
       ).rejects.toMatchObject({ code: 'destination_refused' })
       expect(transport).not.toHaveBeenCalled()
+    },
+  )
+  it.each(['work/?view=events', 'work/?', 'work/#details', 'work/#'])(
+    'refuses query or fragment in discovery href %s',
+    async (href) => {
+      const withPrincipalHref = mock([
+        entry.replace('/principals/host/', href),
+        principal,
+        calendar,
+      ])
+      await expect(
+        createCalDavDiscovery(withPrincipalHref).discover(credentials),
+      ).rejects.toMatchObject({ code: 'destination_refused' })
+      expect(withPrincipalHref).toHaveBeenCalledTimes(1)
+
+      const withCollectionHref = mock([
+        entry,
+        principal,
+        calendar.replace('/calendars/host/work/', href),
+      ])
+      await expect(
+        createCalDavDiscovery(withCollectionHref).discover(credentials),
+      ).rejects.toMatchObject({ code: 'destination_refused' })
+      expect(withCollectionHref).toHaveBeenCalledTimes(3)
     },
   )
   it('rejects raw href controls and immutable origin configuration changes', async () => {

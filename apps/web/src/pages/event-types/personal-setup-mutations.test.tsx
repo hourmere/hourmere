@@ -1,10 +1,9 @@
 import { readFileSync } from 'node:fs'
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
-import type { ComponentType } from 'react'
+import type { ComponentProps, ComponentType } from 'react'
 import * as react from 'react'
 import { Link, MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { EventType, Schedule } from '../../api/resources.ts'
 import { CopyButton } from '../../components/CopyButton.tsx'
 import { useLoad, useMounted } from '../../hooks.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
@@ -13,6 +12,7 @@ import { compileSourceCopy } from '../../test/compile-source-copy.ts'
 import { ME, PROFILE } from '../../test/fake-api.tsx'
 import { eventType, schedule } from '../../test/fixtures.ts'
 import { validDefault } from '../availability/valid-default.ts'
+import { PersonalSetupGuide } from './PersonalSetupGuide.tsx'
 
 const source = readFileSync('apps/web/src/pages/event-types/PersonalSetupGuide.tsx', 'utf8')
 const guideSource = source.slice(source.indexOf('/** Derived'))
@@ -60,13 +60,7 @@ function clearPreferences() {
 }
 afterEach(clearPreferences)
 
-type GuideProps = {
-  me: typeof ME
-  profile: typeof PROFILE
-  schedules: Schedule[]
-  eventTypes: EventType[]
-  reload: () => void
-}
+type GuideProps = ComponentProps<typeof PersonalSetupGuide>
 function guide(code: string) {
   return copy<ComponentType<GuideProps>>(code, 'PersonalSetupGuide', {
     ...react,
@@ -75,18 +69,20 @@ function guide(code: string) {
     CopyButton,
     useI18n,
     useMounted,
-    validDefault,
   })
 }
 function showGuide(Guide: ComponentType<GuideProps>, events = [eventType()], me = ME) {
+  const schedules = [schedule()]
   return render(
     <MemoryRouter>
       <Guide
         me={me}
         profile={PROFILE}
-        schedules={[schedule()]}
+        schedules={schedules}
         eventTypes={events}
+        availabilityDone={schedules.some(validDefault)}
         reload={() => {}}
+        refreshFailure={null}
       />
     </MemoryRouter>,
   )
@@ -181,11 +177,6 @@ async function assertRetainedRefresh(code: string) {
 }
 
 const Empty = () => null
-const ReloadGuide = ({ reload }: { reload: () => void }) => (
-  <button type="button" onClick={reload}>
-    Refresh guide
-  </button>
-)
 const ReadinessVersion = ({ readinessVersion }: { readinessVersion: number }) => (
   <output aria-label="Readiness refresh">{readinessVersion}</output>
 )
@@ -196,7 +187,7 @@ function assertGuideReload(code: string) {
     ...paths,
     Link,
     validDefault,
-    useI18n: () => ({ t: (text: string) => text, uiText: (text: string) => text }),
+    useI18n,
     useMe: () => ME,
     usePageTitle: () => {},
     useFlash: () => '',
@@ -204,12 +195,12 @@ function assertGuideReload(code: string) {
     useEventTypesLoad: () => [
       { status: 'ready', data: { eventTypes: [eventType()], profile: PROFILE, schedules: [] } },
       () => {},
-      null,
+      'Offline',
     ],
     PageHeader: Empty,
     EmptyState: Empty,
     PageSkeleton: Empty,
-    PersonalSetupGuide: ReloadGuide,
+    PersonalSetupGuide,
     EventTypeTable: ReadinessVersion,
   })
   const view = render(
@@ -218,7 +209,10 @@ function assertGuideReload(code: string) {
     </MemoryRouter>,
   )
   try {
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh guide' }))
+    const setup = screen.getByRole('region', { name: 'Set up your booking page' })
+    const refresh = screen.getByRole('button', { name: 'Refresh setup status' })
+    expect(within(setup).getByRole('alert').contains(refresh)).toBe(true)
+    fireEvent.click(refresh)
     expect(screen.getByLabelText('Readiness refresh').textContent).toBe('1')
   } finally {
     view.unmount()

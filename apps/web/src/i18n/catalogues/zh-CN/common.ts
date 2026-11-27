@@ -562,7 +562,22 @@ export const common = {
     '请返回发起验证的标签页继续操作。',
   'Copy the link from your email and paste it into the tab where you requested verification.':
     '请从邮件中复制验证链接，并粘贴到发起验证的标签页。',
+  // Microsoft Teams meeting locations
+  'Microsoft Teams': 'Microsoft Teams',
+  'Join Microsoft Teams': '加入 Microsoft Teams 会议',
+  'The Teams link isn’t ready yet.': 'Teams 会议链接尚未就绪。',
+  'The booking is still scheduled without a Teams link.': '预约仍然有效，但没有 Teams 会议链接。',
   // Booking page preview
   'These are sample times. Booking is disabled in the preview.':
     '这些时间仅供示例。预览中无法提交预约。',
+  // Rescheduled booking links
+  'This booking was moved to a new time. The new booking has its own link.':
+    '此预约已改期。新预约有自己的链接。',
+  // Booking location changes
+  'The meeting location has changed. Please choose a time again.':
+    '会议地点已变更。请重新选择时间。',
+
+  // Microsoft Teams host authorization
+  'The assigned host must configure Microsoft Teams in their own signed-in session.':
+    '指定的主持人须登录自己的账户来配置 Microsoft Teams。',
 } as const

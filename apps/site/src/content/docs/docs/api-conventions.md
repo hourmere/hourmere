@@ -1322,6 +1322,25 @@ uses. Its owner keeps the profile, and must pick a new handle the next time they
 Existing bookings stay reachable through their manage links, which do not involve the handle.
 
 
+### Microsoft Teams locations
+
+Event-type `location` and `locations` accept the additive kind `microsoft_teams`.
+Use `{"kind":"microsoft_teams"}` for `location` and add an `id` for each option in
+`locations`. Only a single assigned host with an active Microsoft writeback destination
+can use it. Enabling it, changing the assigned host, reactivating it, or duplicating the
+event type requires the assigned host's signed-in session and existing edit permission.
+REST returns `403 microsoft_teams_host_session_required` if that session is missing.
+MCP and CLI return the same error code. With Microsoft Calendar disabled on the instance,
+Teams slot and booking requests return `409 location_unavailable` in REST and the same
+domain error in MCP and CLI.
+
+Public event metadata exposes the kind and normal option metadata. Authorized booking
+responses may add `location.status` and `location.url` for Teams. Known statuses are
+`join_url_pending`, `ready`, `teams_unavailable` and `writeback_failed`. Clients must tolerate additional
+statuses and the absence of either field. A Teams join URL requires host access or the
+invitee’s booking capability. A team-administration detail may expose the kind alone.
+See [Microsoft Teams setup and availability](/docs/microsoft-calendar#add-microsoft-teams-to-an-event-type).
+
 ### Legacy event location updates
 
 Protected event-type `location` remains a read/write compatibility projection of the

@@ -63,6 +63,7 @@ const eventTypeResponse = (eventType: ServiceEventType) => eventType
 const locationKinds = {
   googleMeet: { kind: z.literal('google_meet'), autoCreate: z.literal(true).optional() },
   zoom: { kind: z.literal('zoom'), autoCreate: z.literal(true).optional() },
+  microsoftTeams: { kind: z.literal('microsoft_teams') },
   phone: {
     kind: z.literal('phone'),
     number: z.string().openapi({
@@ -86,7 +87,7 @@ const locationKinds = {
 }
 const locationDoc = {
   description:
-    'Where the meeting happens, by kind; Meet and Zoom links are generated per booking. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location. Configure invitee phone collection through locations. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client.',
+    'Where the meeting happens, by kind. Microsoft Teams uses microsoft_teams with no other settings, requires individual scheduling with one host, and uses that host’s selected writable Microsoft calendar. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location. Configure invitee phone collection through locations. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client.',
 }
 // Not named components: zod-to-openapi would add the null of `.nullable()` to the
 // component itself, and flattens a union with null.
@@ -101,6 +102,7 @@ const Location = z
     }),
     z.object(locationKinds.inPerson),
     z.object(locationKinds.link),
+    z.object(locationKinds.microsoftTeams),
   ])
   .nullable()
   .openapi(locationDoc)
@@ -121,6 +123,7 @@ const LocationInput = z
       ),
     z.strictObject(locationKinds.inPerson),
     z.strictObject(locationKinds.link),
+    z.strictObject(locationKinds.microsoftTeams),
   ])
   .nullable()
   .openapi(locationDoc)
@@ -144,9 +147,10 @@ const locationOptionVariants = [
   },
   { ...locationKinds.inPerson, ...optionMetadata },
   { ...locationKinds.link, ...optionMetadata },
+  { ...locationKinds.microsoftTeams, ...optionMetadata },
 ] as const
 const locationsDescription =
-  'Ordered list of 1–5 options with distinct ids and kinds, and at most one default. Omitted on update preserves options; null clears. Cannot be supplied together with location. Phone requires either number or askInvitee: true; the latter collects an invitee phone number at booking.'
+  'Ordered list of 1–5 options with distinct ids and kinds, and at most one default. Omitted on update preserves options; null clears. Cannot be supplied together with location. Phone requires either number or askInvitee: true; the latter collects an invitee phone number at booking. microsoft_teams requires individual scheduling with one host and a writable Microsoft calendar selected for booking events.'
 const LocationsInput = z
   .array(
     z.discriminatedUnion('kind', [
@@ -161,6 +165,7 @@ const LocationsInput = z
         ),
       z.strictObject(locationOptionVariants[3]),
       z.strictObject(locationOptionVariants[4]),
+      z.strictObject(locationOptionVariants[5]),
     ]),
   )
   .nullable()
@@ -173,6 +178,7 @@ export const Locations = z
       z.object(locationOptionVariants[2]),
       z.object(locationOptionVariants[3]),
       z.object(locationOptionVariants[4]),
+      z.object(locationOptionVariants[5]),
     ]),
   )
   .nullable()
@@ -568,11 +574,14 @@ export const EVENT_TYPE_BODY_LIMIT = 2 * 1024 * 1024
 const notFound =
   'event_type_not_found: no such event type in the organization, or one the caller cannot see'
 const invalid =
-  'invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules)'
+  'invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, microsoft_teams_host_policy, or invalid_schedule_id (scheduleId is not one of the host’s schedules)'
 const forbidden = `insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; ${CROSS_ORIGIN_WRITE}`
+const teamsSessionForbidden = `${forbidden}; microsoft_teams_host_session_required: adding a Microsoft Teams location, changing its host, reactivating or duplicating it requires the assigned host’s signed-in session`
 const slugTaken = 'slug_taken: another event type on the same page has this slug'
 const locationOptionsConflict =
   'location_options_conflict: changing legacy location would replace multiple or labelled options; use locations through an option-aware client'
+const microsoftTeamsUnavailable =
+  'microsoft_teams_calendar_unavailable: the host needs a connected Microsoft calendar selected for booking writeback'
 
 export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
   const writeContext = (principal: Principal, expectedOrganizationId?: string) => ({
@@ -823,8 +832,8 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
           201: { description: 'The new event type', content: json(EventType) },
           ...errorResponses({
             400: invalid,
-            403: forbidden,
-            409: `${slugTaken}; ${ORGANIZATION_CONTEXT_CHANGED}`,
+            403: teamsSessionForbidden,
+            409: `${slugTaken}; ${microsoftTeamsUnavailable}; ${ORGANIZATION_CONTEXT_CHANGED}`,
           }),
         },
       }),
@@ -859,9 +868,9 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
           201: { description: 'The copied event type', content: json(EventType) },
           ...errorResponses({
             400: invalid,
-            403: forbidden,
+            403: teamsSessionForbidden,
             404: notFound,
-            409: `${slugTaken}; ${ORGANIZATION_CONTEXT_CHANGED}`,
+            409: `${slugTaken}; ${microsoftTeamsUnavailable}; ${ORGANIZATION_CONTEXT_CHANGED}`,
           }),
         },
       }),
@@ -915,9 +924,9 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
           200: { description: 'The changed event type', content: json(EventType) },
           ...errorResponses({
             400: invalid,
-            403: forbidden,
+            403: teamsSessionForbidden,
             404: notFound,
-            409: `${slugTaken}; ${locationOptionsConflict}; ${ORGANIZATION_CONTEXT_CHANGED}`,
+            409: `${slugTaken}; ${locationOptionsConflict}; ${microsoftTeamsUnavailable}; ${ORGANIZATION_CONTEXT_CHANGED}`,
           }),
         },
       }),

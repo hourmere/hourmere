@@ -173,5 +173,8 @@
   "series.cancelled.member": "Cancelada",
   "series.manage": "Gestionar la serie",
   "series.view": "Ver la serie",
-  "series.repair": "Para volver a intentar generar el enlace de reunión, abra la reserva afectada en Hourmere."
+  "series.repair": "Para volver a intentar generar el enlace de reunión, abra la reserva afectada en Hourmere.",
+  "teams.linkPending": "El enlace de Teams aparecerá en los detalles de la reserva en cuanto esté disponible.",
+  "teams.unavailable": "Microsoft Teams no está disponible. Esta reserva usará el evento del calendario de Outlook.",
+  "teams.writebackFailed": "El enlace de Teams no está disponible. La cita sigue programada."
 }

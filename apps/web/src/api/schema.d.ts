@@ -4517,7 +4517,7 @@ export interface paths {
         put?: never;
         /**
          * Queue one sample notification through the delivery outbox
-         * @description At most five authorized attempts per organization per minute, shared with MCP on this server; refused (403) and unknown-destination (404) calls are not counted. Returns 409 slack_test_pending while a sample is pending.
+         * @description At most five authorized attempts per organization per minute, shared with MCP on this server. An exhausted budget returns 429 after authorization, before the destination lookup. Refused (403) and unknown-destination (404) calls are not counted. Returns 409 slack_test_pending while a sample is pending.
          */
         post: operations["testSlackDestination"];
         delete?: never;
@@ -4643,7 +4643,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["TeamAdminBooking"];
+                        "application/json": components["schemas"]["TeamAdminBookingDetail"];
                     };
                 };
                 /** @description Invalid parameters (invalid_request) */
@@ -5760,13 +5760,13 @@ export interface paths {
         };
         /**
          * List the booking workflows of the owner the caller acts as
-         * @description The operator can enable booking workflows with WORKFLOWS_ENABLED=true. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full or read API-key scope. Name the owner explicitly: ownerKind=personal with your user ID in your personal organization, or ownerKind=team with the team ID while acting in that team as a current owner or admin. Any other owner, existing or not, gets the same 403 insufficient_role. Deleted workflows are not listed. Oldest first, by time-ordered ID; pass nextCursor as cursor with the same owner for the next page.
+         * @description Booking workflows are enabled by default. The operator can pause them with WORKFLOWS_ENABLED=false. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full or read API-key scope. Name the owner explicitly: ownerKind=personal with your user ID in your personal organization, or ownerKind=team with the team ID while acting in that team as a current owner or admin. Any other owner, existing or not, gets the same 403 insufficient_role. Deleted workflows are not listed. Oldest first, by time-ordered ID; pass nextCursor as cursor with the same owner for the next page.
          */
         get: operations["listWorkflows"];
         put?: never;
         /**
          * Create a booking workflow
-         * @description The operator can enable booking workflows with WORKFLOWS_ENABLED=true. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full API-key scope. Name your personal owner or a team you currently own or administer in the active organization. Retain idempotencyKey for retries: the same normalized request returns the stored definition, while changed input conflicts. IDs are server-generated; caller-supplied IDs and unknown fields are rejected. Webhook actions require an active endpoint in the acting organization subscribed to workflow.executed. Creation does not send mail.
+         * @description Booking workflows are enabled by default. The operator can pause them with WORKFLOWS_ENABLED=false. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full API-key scope. Name your personal owner or a team you currently own or administer in the active organization. Retain idempotencyKey for retries: the same normalized request returns the stored definition, while changed input conflicts. IDs are server-generated; caller-supplied IDs and unknown fields are rejected. Webhook actions require an active endpoint in the acting organization subscribed to workflow.executed. Creation does not send mail.
          */
         post: operations["createWorkflow"];
         delete?: never;
@@ -5784,21 +5784,21 @@ export interface paths {
         };
         /**
          * Read one booking workflow
-         * @description The operator can enable booking workflows with WORKFLOWS_ENABLED=true. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full or read API-key scope. Returns a workflow of the owner the caller acts as in its current organization: its own personal workflow, or a team workflow while it is a current owner or admin of that team. A missing, deleted or malformed ID, another owner's workflow and a workflow of another organization all get the same 404 workflow_not_found.
+         * @description Booking workflows are enabled by default. The operator can pause them with WORKFLOWS_ENABLED=false. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full or read API-key scope. Returns a workflow of the owner the caller acts as in its current organization: its own personal workflow, or a team workflow while it is a current owner or admin of that team. A missing, deleted or malformed ID, another owner's workflow and a workflow of another organization all get the same 404 workflow_not_found.
          */
         get: operations["getWorkflow"];
         put?: never;
         post?: never;
         /**
          * Delete a booking workflow
-         * @description The operator can enable booking workflows with WORKFLOWS_ENABLED=true. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full API-key scope and expectedRevision. Tombstones the definition and retires its pending runs. Repeated authorized deletion is safe. Missing, foreign and mismatched owner contexts return workflow_not_found. Revisions and creation keys remain with the tombstone; existing minimal history follows retention.
+         * @description Booking workflows are enabled by default. The operator can pause them with WORKFLOWS_ENABLED=false. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full API-key scope and expectedRevision. Tombstones the definition and retires its pending runs. Repeated authorized deletion is safe. Missing, foreign and mismatched owner contexts return workflow_not_found. Revisions and creation keys remain with the tombstone; existing minimal history follows retention.
          */
         delete: operations["deleteWorkflow"];
         options?: never;
         head?: never;
         /**
          * Edit, enable or disable a booking workflow
-         * @description The operator can enable booking workflows with WORKFLOWS_ENABLED=true. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full API-key scope. Supply expectedRevision and the fields to change. Content edits append an immutable revision; changing only enabled preserves the revision. A stale revision conflicts. Missing, foreign and mismatched owner contexts return workflow_not_found. Disabling or enabling changes no existing booking enrollment or execution. Webhook actions require an active endpoint in the acting organization subscribed to workflow.executed.
+         * @description Booking workflows are enabled by default. The operator can pause them with WORKFLOWS_ENABLED=false. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full API-key scope. Supply expectedRevision and the fields to change. Content edits append an immutable revision; changing only enabled preserves the revision. A stale revision conflicts. Missing, foreign and mismatched owner contexts return workflow_not_found. Disabling or enabling changes no existing booking enrollment or execution. Webhook actions require an active endpoint in the acting organization subscribed to workflow.executed.
          */
         patch: operations["updateWorkflow"];
         trace?: never;
@@ -5812,7 +5812,7 @@ export interface paths {
         };
         /**
          * List finished runs of a booking workflow
-         * @description The operator can enable booking workflows with WORKFLOWS_ENABLED=true. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full or read API-key scope and personal ownership or current team owner/admin access in the active organization. Returns metadata and aggregate outcomes only, newest first. Pass nextCursor as cursor with the same workflow for the next page. Missing, deleted, malformed and inaccessible workflow IDs return workflow_not_found.
+         * @description Booking workflows are enabled by default. The operator can pause them with WORKFLOWS_ENABLED=false. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full or read API-key scope and personal ownership or current team owner/admin access in the active organization. Returns metadata and aggregate outcomes only, newest first. Pass nextCursor as cursor with the same workflow for the next page. Missing, deleted, malformed and inaccessible workflow IDs return workflow_not_found.
          */
         get: operations["listWorkflowRuns"];
         put?: never;
@@ -5834,7 +5834,7 @@ export interface paths {
         put?: never;
         /**
          * Preview a booking workflow with synthetic data
-         * @description The operator can enable booking workflows with WORKFLOWS_ENABLED=true. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full API-key scope and current personal ownership or team owner/admin access in the active organization. Supply owner, the candidate definition fields and optional synthetic example values. Returns the match outcome, rendered email text and escaped HTML, and static estimates. Preview uses synthetic booking data and makes no deliveries.
+         * @description Booking workflows are enabled by default. The operator can pause them with WORKFLOWS_ENABLED=false. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full API-key scope and current personal ownership or team owner/admin access in the active organization. Supply owner, the candidate definition fields and optional synthetic example values. Returns the match outcome, rendered email text and escaped HTML, and static estimates. Preview uses synthetic booking data and makes no deliveries.
          */
         post: operations["previewWorkflow"];
         delete?: never;
@@ -6225,10 +6225,14 @@ export interface components {
                 noShowMarkedBy: string | null;
             }[];
         };
-        /** @description Where the meeting happens. Details depend on the kind: `number` (phone), `address` (in_person), `url` (link) */
+        /** @description Where the meeting happens. Details depend on the kind: `number` (phone), `address` (in_person), `url` (link or a ready online meeting). A Teams join URL requires host access or the invitee’s booking capability. */
         BookingLocation: ({
             /** @enum {string} */
-            kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+            kind: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
+            /** @description Microsoft Teams meeting state when available: join_url_pending, ready, teams_unavailable or writeback_failed. Clients must tolerate additional values. */
+            status?: unknown;
+            /** @description A ready Teams booking includes a validated HTTPS participant URL. */
+            url?: unknown;
         } & {
             [key: string]: unknown;
         }) | null;
@@ -6565,7 +6569,7 @@ export interface components {
                 /** @enum {string} */
                 operator: "equals";
                 /** @enum {string} */
-                value: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+                value: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
             } | {
                 /** @enum {string} */
                 field: "guest_count";
@@ -6687,7 +6691,7 @@ export interface components {
             isActive: boolean;
             /** @description Hidden from public listings; anyone with the direct link can still book it. This is not access control. */
             isHidden: boolean;
-            /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location. Configure invitee phone collection through locations. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client. */
+            /** @description Where the meeting happens, by kind. Microsoft Teams uses microsoft_teams with no other settings, requires individual scheduling with one host, and uses that host’s selected writable Microsoft calendar. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location. Configure invitee phone collection through locations. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client. */
             location: {
                 /** @enum {boolean} */
                 autoCreate?: true;
@@ -6720,8 +6724,11 @@ export interface components {
                  * @description An http or https URL, stored as parsed (normalized)
                  */
                 url: string;
+            } | {
+                /** @enum {string} */
+                kind: "microsoft_teams";
             } | null;
-            /** @description Ordered list of 1–5 options with distinct ids and kinds, and at most one default. Omitted on update preserves options; null clears. Cannot be supplied together with location. Phone requires either number or askInvitee: true; the latter collects an invitee phone number at booking. */
+            /** @description Ordered list of 1–5 options with distinct ids and kinds, and at most one default. Omitted on update preserves options; null clears. Cannot be supplied together with location. Phone requires either number or askInvitee: true; the latter collects an invitee phone number at booking. microsoft_teams requires individual scheduling with one host and a writable Microsoft calendar selected for booking events. */
             locations: ({
                 /** @enum {boolean} */
                 autoCreate?: true;
@@ -6779,6 +6786,14 @@ export interface components {
                  * @description An http or https URL, stored as parsed (normalized)
                  */
                 url: string;
+            } | {
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "microsoft_teams";
+                label?: string;
             })[] | null;
             /** @description Bookings per host's day; null = no limit */
             maxBookingsPerDay: number | null;
@@ -6884,7 +6899,7 @@ export interface components {
              * @default false
              */
             isHidden: boolean;
-            /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location. Configure invitee phone collection through locations. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client. */
+            /** @description Where the meeting happens, by kind. Microsoft Teams uses microsoft_teams with no other settings, requires individual scheduling with one host, and uses that host’s selected writable Microsoft calendar. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location. Configure invitee phone collection through locations. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client. */
             location?: {
                 /** @enum {boolean} */
                 autoCreate?: true;
@@ -6917,8 +6932,11 @@ export interface components {
                  * @description An http or https URL, stored as parsed (normalized)
                  */
                 url: string;
+            } | {
+                /** @enum {string} */
+                kind: "microsoft_teams";
             } | null;
-            /** @description Ordered list of 1–5 options with distinct ids and kinds, and at most one default. Omitted on update preserves options; null clears. Cannot be supplied together with location. Phone requires either number or askInvitee: true; the latter collects an invitee phone number at booking. */
+            /** @description Ordered list of 1–5 options with distinct ids and kinds, and at most one default. Omitted on update preserves options; null clears. Cannot be supplied together with location. Phone requires either number or askInvitee: true; the latter collects an invitee phone number at booking. microsoft_teams requires individual scheduling with one host and a writable Microsoft calendar selected for booking events. */
             locations?: ({
                 /** @enum {boolean} */
                 autoCreate?: true;
@@ -6976,6 +6994,14 @@ export interface components {
                  * @description An http or https URL, stored as parsed (normalized)
                  */
                 url: string;
+            } | {
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "microsoft_teams";
+                label?: string;
             })[] | null;
             /** @description Bookings per host's day; null = no limit */
             maxBookingsPerDay?: number | null;
@@ -7132,7 +7158,7 @@ export interface components {
             isActive?: boolean;
             /** @description Hidden from public listings; anyone with the direct link can still book it. This is not access control. */
             isHidden?: boolean;
-            /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location. Configure invitee phone collection through locations. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client. */
+            /** @description Where the meeting happens, by kind. Microsoft Teams uses microsoft_teams with no other settings, requires individual scheduling with one host, and uses that host’s selected writable Microsoft calendar. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location. Configure invitee phone collection through locations. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client. */
             location?: {
                 /** @enum {boolean} */
                 autoCreate?: true;
@@ -7165,8 +7191,11 @@ export interface components {
                  * @description An http or https URL, stored as parsed (normalized)
                  */
                 url: string;
+            } | {
+                /** @enum {string} */
+                kind: "microsoft_teams";
             } | null;
-            /** @description Ordered list of 1–5 options with distinct ids and kinds, and at most one default. Omitted on update preserves options; null clears. Cannot be supplied together with location. Phone requires either number or askInvitee: true; the latter collects an invitee phone number at booking. */
+            /** @description Ordered list of 1–5 options with distinct ids and kinds, and at most one default. Omitted on update preserves options; null clears. Cannot be supplied together with location. Phone requires either number or askInvitee: true; the latter collects an invitee phone number at booking. microsoft_teams requires individual scheduling with one host and a writable Microsoft calendar selected for booking events. */
             locations?: ({
                 /** @enum {boolean} */
                 autoCreate?: true;
@@ -7224,6 +7253,14 @@ export interface components {
                  * @description An http or https URL, stored as parsed (normalized)
                  */
                 url: string;
+            } | {
+                /** @description Stable option id: 1–64 letters, digits, underscores or hyphens; __proto__ is reserved. */
+                id: string;
+                /** @enum {boolean} */
+                isDefault?: true;
+                /** @enum {string} */
+                kind: "microsoft_teams";
+                label?: string;
             })[] | null;
             /** @description Bookings per host's day; null = no limit */
             maxBookingsPerDay?: number | null;
@@ -7408,7 +7445,7 @@ export interface components {
              * @description This instance operator's terms; absent when not configured
              */
             termsUrl?: string;
-            /** @description Whether booking workflows are enabled; false until they are, and absent (treat as false) on older servers */
+            /** @description Effective WORKFLOWS_ENABLED setting (true by default). Treat an absent field on older servers as false. */
             workflowsEnabled?: boolean;
         };
         IssuedScimProvisioningToken: {
@@ -7474,6 +7511,11 @@ export interface components {
                 answer: string;
                 label: string;
             }[];
+            /**
+             * @description Present when the manage link still resolves to a cancelled booking that was moved to a new time.
+             * @enum {boolean}
+             */
+            wasRescheduled?: true;
         };
         /** @description The enrollment view for a session without the required team proof keeps the active organization ID and omits its metadata by returning empty name and slug strings. */
         Me: {
@@ -7799,6 +7841,11 @@ export interface components {
                     conferenceAccounts: "connected" | "attention_required" | "not_connected" | "check_failed";
                     /** @enum {string} */
                     defaultSchedule: "satisfied" | "not_applicable" | "configuration_blocker" | "dependency_unavailable" | "not_checked" | "check_failed";
+                    /**
+                     * @description Cached eligibility of the member’s selected Microsoft writeback destination.
+                     * @enum {string}
+                     */
+                    microsoftTeams?: "ready" | "unavailable" | "check_failed";
                     /** @enum {string} */
                     selectedCalendars: "satisfied" | "not_applicable" | "configuration_blocker" | "dependency_unavailable" | "not_checked" | "check_failed";
                 };
@@ -7974,7 +8021,7 @@ export interface components {
             /** @description Only the kind; details such as a phone number come with the booking */
             location: {
                 /** @enum {string} */
-                kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+                kind: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
             } | null;
             /** @description Ordered location choices; private host details are disclosed only after booking. */
             locations: {
@@ -7984,7 +8031,7 @@ export interface components {
                 /** @enum {boolean} */
                 isDefault?: true;
                 /** @enum {string} */
-                kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+                kind: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
                 label?: string;
             }[] | null;
             /** @description Booking-form fields beyond name and email */
@@ -8100,7 +8147,7 @@ export interface components {
             /** @description Only the kind; details such as a phone number come with the booking */
             location: {
                 /** @enum {string} */
-                kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+                kind: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
             } | null;
             /** @description Ordered location choices; private host details are disclosed only after booking. */
             locations: {
@@ -8110,7 +8157,7 @@ export interface components {
                 /** @enum {boolean} */
                 isDefault?: true;
                 /** @enum {string} */
-                kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+                kind: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
                 label?: string;
             }[] | null;
             /** @description Booking-form fields beyond name and email */
@@ -8140,7 +8187,7 @@ export interface components {
                 durationMinutes: number;
                 location: {
                     /** @enum {string} */
-                    kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+                    kind: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
                 } | null;
                 /** @description Owning team space name; omitted for personal event types */
                 organizationName?: string;
@@ -8189,7 +8236,7 @@ export interface components {
                 /** @enum {boolean} */
                 isDefault?: true;
                 /** @enum {string} */
-                kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+                kind: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
                 label?: string;
             }[] | null;
             ownBallot: components["schemas"]["MeetingPollOwnBallot"];
@@ -8404,7 +8451,7 @@ export interface components {
                 /** @description Only the kind; details such as a phone number come with the booking */
                 location: {
                     /** @enum {string} */
-                    kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+                    kind: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
                 } | null;
                 /** @description Ordered location choices; private host details are disclosed only after booking. */
                 locations: {
@@ -8414,7 +8461,7 @@ export interface components {
                     /** @enum {boolean} */
                     isDefault?: true;
                     /** @enum {string} */
-                    kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+                    kind: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
                     label?: string;
                 }[] | null;
                 /** @description Booking-form fields beyond name and email */
@@ -9176,6 +9223,12 @@ export interface components {
             /** @enum {string} */
             status: "confirmed" | "cancelled";
         };
+        TeamAdminBookingDetail: components["schemas"]["TeamAdminBooking"] & {
+            location?: {
+                /** @enum {string} */
+                kind: "microsoft_teams";
+            };
+        };
         TeamAdminBookingPage: {
             data: components["schemas"]["TeamAdminBooking"][];
             nextCursor: string | null;
@@ -9428,7 +9481,7 @@ export interface components {
                 /** @enum {string} */
                 operator: "equals";
                 /** @enum {string} */
-                value: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+                value: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
             } | {
                 /** @enum {string} */
                 field: "guest_count";
@@ -9674,7 +9727,7 @@ export interface components {
             /** @enum {string} */
             operator: "equals";
             /** @enum {string} */
-            value: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+            value: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
         } | {
             /** @enum {string} */
             field: "guest_count";
@@ -12528,7 +12581,7 @@ export interface operations {
                     "application/json": components["schemas"]["EventType"];
                 };
             };
-            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
+            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, microsoft_teams_host_policy, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12546,7 +12599,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
+            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin; microsoft_teams_host_session_required: adding a Microsoft Teams location, changing its host, reactivating or duplicating it requires the assigned host’s signed-in session. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -12555,7 +12608,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description slug_taken: another event type on the same page has this slug; organization_context_changed: reload the page before trying this team write again */
+            /** @description slug_taken: another event type on the same page has this slug; microsoft_teams_calendar_unavailable: the host needs a connected Microsoft calendar selected for booking writeback; organization_context_changed: reload the page before trying this team write again */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -12823,7 +12876,7 @@ export interface operations {
                     "application/json": components["schemas"]["EventType"];
                 };
             };
-            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
+            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, microsoft_teams_host_policy, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12841,7 +12894,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
+            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin; microsoft_teams_host_session_required: adding a Microsoft Teams location, changing its host, reactivating or duplicating it requires the assigned host’s signed-in session. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -12859,7 +12912,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description slug_taken: another event type on the same page has this slug; location_options_conflict: changing legacy location would replace multiple or labelled options; use locations through an option-aware client; organization_context_changed: reload the page before trying this team write again */
+            /** @description slug_taken: another event type on the same page has this slug; location_options_conflict: changing legacy location would replace multiple or labelled options; use locations through an option-aware client; microsoft_teams_calendar_unavailable: the host needs a connected Microsoft calendar selected for booking writeback; organization_context_changed: reload the page before trying this team write again */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -12988,7 +13041,7 @@ export interface operations {
                     "application/json": components["schemas"]["EventType"];
                 };
             };
-            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
+            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, microsoft_teams_host_policy, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13006,7 +13059,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
+            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin; microsoft_teams_host_session_required: adding a Microsoft Teams location, changing its host, reactivating or duplicating it requires the assigned host’s signed-in session. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -13024,7 +13077,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description slug_taken: another event type on the same page has this slug; organization_context_changed: reload the page before trying this team write again */
+            /** @description slug_taken: another event type on the same page has this slug; microsoft_teams_calendar_unavailable: the host needs a connected Microsoft calendar selected for booking writeback; organization_context_changed: reload the page before trying this team write again */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -13156,7 +13209,7 @@ export interface operations {
                     "application/json": components["schemas"]["EventType"];
                 };
             };
-            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
+            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, microsoft_teams_host_policy, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -22399,7 +22452,7 @@ export interface operations {
                         /** @enum {string} */
                         operator: "equals";
                         /** @enum {string} */
-                        value: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+                        value: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
                     } | {
                         /** @enum {string} */
                         field: "guest_count";
@@ -22422,7 +22475,7 @@ export interface operations {
                         guestCount?: number;
                         locale?: string;
                         /** @enum {string|null} */
-                        locationKind?: "google_meet" | "zoom" | "phone" | "in_person" | "link" | null;
+                        locationKind?: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams" | null;
                         publicPath?: string;
                         recipientName?: string;
                         /** @enum {string} */

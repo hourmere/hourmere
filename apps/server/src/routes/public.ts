@@ -298,6 +298,7 @@ export interface PublicRoutesDeps {
   automaticMeet?: boolean | undefined
   smsRemindersAvailable?: boolean | undefined
   automaticZoom?: boolean | undefined
+  microsoftCalendarEnabled?: boolean | undefined
   now?: () => Temporal.Instant
   routingFormsEnabled?: boolean
   /** BETTER_AUTH_SECRET. Fixtures may omit it while routing forms are off. */
@@ -320,6 +321,7 @@ export function publicRoutes({
   automaticMeet,
   smsRemindersAvailable,
   automaticZoom,
+  microsoftCalendarEnabled,
   successRedirectPolicy,
   waitlistSecret,
   smtpConfigured,
@@ -336,6 +338,7 @@ export function publicRoutes({
     automaticMeet,
     smsRemindersAvailable,
     automaticZoom,
+    microsoftCalendarEnabled,
     successRedirectPolicy,
     waitlistSecret,
     smtpConfigured,

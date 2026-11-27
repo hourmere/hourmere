@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto'
-import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { copyFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import type pg from 'pg'
 import { describe, expect, it } from 'vitest'
@@ -8,7 +7,12 @@ import { insertRecord } from './group-seats-fixtures.ts'
 import { migrationsDir, runMigrations } from './migrate.ts'
 import { createSeries, createTenant } from './recurring-series-protections.ts'
 import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
-import { createTestDatabase, type TestDatabase } from './testing.ts'
+import {
+  MIGRATION_COVERAGE_TIMEOUT,
+  MIGRATION_REPLAY_TIMEOUT,
+  useMigrationReplay,
+} from './testing/migration-replay.ts'
+import type { TestDatabase } from './testing.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -123,65 +127,70 @@ const ledger = (pool: pg.Pool) =>
   pool.query('SELECT name, checksum, applied_at, xmin::text FROM schema_migrations ORDER BY name')
 
 describe.skipIf(!serverUrl)('series calendar attachment receipts', () => {
-  it('preserves predecessor receipts, matches a fresh install and reruns as a no-op', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'hourmere-series-calendar-receipts-'))
-    let upgraded: TestDatabase | undefined
-    let fresh: TestDatabase | undefined
-    try {
-      const predecessors = (await readdir(migrationsDir))
-        .filter((file) => file.endsWith('.sql') && file < migration)
-        .sort()
-      await Promise.all(
-        predecessors.map((file) => copyFile(join(migrationsDir, file), join(directory, file))),
-      )
-      upgraded = await createTestDatabase(serverUrl as string, directory, { tag: 'ics_upgrade' })
-      const pool = upgraded.pool
-      await seedReceipts(pool)
-      const before = await receiptSnapshot(pool)
-      expect(before.booking).toHaveLength(2)
-      expect(before.series).toHaveLength(2)
-      const beforeLedger = (await ledger(pool)).rows
+  const replay = useMigrationReplay(serverUrl as string, migration)
 
-      await copyFile(join(migrationsDir, migration), join(directory, migration))
-      expect(await runMigrations(pool, directory)).toEqual([migration])
-      expect(await receiptSnapshot(pool)).toEqual(before)
-      expect(
-        (await pool.query('SELECT DISTINCT calendar_attached FROM booking_notifications')).rows,
-      ).toEqual([{ calendar_attached: null }])
-      expect(
-        (await pool.query('SELECT DISTINCT calendar_ordinals FROM booking_series_notifications'))
-          .rows,
-      ).toEqual([{ calendar_ordinals: null }])
-      const appliedLedger = (await ledger(pool)).rows
-      expect(appliedLedger.slice(0, -1)).toEqual(beforeLedger)
-
-      fresh = await createTestDatabase(serverUrl as string, directory, { migrate: false })
-      expect(await runMigrations(fresh.pool, directory)).toEqual([...predecessors, migration])
-      const schema = await snapshotSchema(pool)
-      expect(await snapshotSchema(fresh.pool)).toEqual(schema)
-      const freshLedger = (await ledger(fresh.pool)).rows
-
-      expect(await runMigrations(pool, directory)).toEqual([])
-      expect(await runMigrations(fresh.pool, directory)).toEqual([])
-      expect((await ledger(pool)).rows).toEqual(appliedLedger)
-      expect((await ledger(fresh.pool)).rows).toEqual(freshLedger)
-      expect(await receiptSnapshot(pool)).toEqual(before)
-    } finally {
+  it(
+    'preserves predecessor receipts, matches a fresh install and reruns as a no-op',
+    async () => {
+      const { directory, predecessor } = replay
+      let upgraded: TestDatabase | undefined
+      let fresh: TestDatabase | undefined
       try {
-        await Promise.all([fresh?.drop(), upgraded?.drop()])
-      } finally {
-        await rm(directory, { recursive: true, force: true })
-      }
-    }
-  }, 120_000)
+        const predecessors = (await readdir(migrationsDir))
+          .filter((file) => file.endsWith('.sql') && file < migration)
+          .sort()
+        upgraded = await predecessor.clone(undefined, { migrate: false, tag: 'ics_upgrade' })
+        const pool = upgraded.pool
+        await seedReceipts(pool)
+        const before = await receiptSnapshot(pool)
+        expect(before.booking).toHaveLength(2)
+        expect(before.series).toHaveLength(2)
+        const beforeLedger = (await ledger(pool)).rows
 
-  it('fails a protection assertion when either calendar receipt constraint is dropped', async () => {
-    const report = await checkConstraintCoverage({
-      serverUrl: serverUrl as string,
-      migration,
-      assertions: assertCalendarReceiptProtections,
-    })
-    expect(report.problems).toEqual([])
-    expect(report.results.filter(({ status }) => status === 'covered')).toHaveLength(2)
-  }, 600_000)
+        await copyFile(join(migrationsDir, migration), join(directory, migration))
+        expect(await runMigrations(pool, directory)).toEqual([migration])
+        expect(await receiptSnapshot(pool)).toEqual(before)
+        expect(
+          (await pool.query('SELECT DISTINCT calendar_attached FROM booking_notifications')).rows,
+        ).toEqual([{ calendar_attached: null }])
+        expect(
+          (await pool.query('SELECT DISTINCT calendar_ordinals FROM booking_series_notifications'))
+            .rows,
+        ).toEqual([{ calendar_ordinals: null }])
+        const appliedLedger = (await ledger(pool)).rows
+        expect(appliedLedger.slice(0, -1)).toEqual(beforeLedger)
+
+        fresh = await predecessor.clone(undefined, { migrate: false })
+        expect(await runMigrations(fresh.pool, directory)).toEqual([migration])
+        const schema = await snapshotSchema(pool)
+        expect(await snapshotSchema(fresh.pool)).toEqual(schema)
+        const freshLedger = (await ledger(fresh.pool)).rows
+        expect(freshLedger.map(({ name }) => name)).toEqual([...predecessors, migration])
+
+        expect(await runMigrations(pool, directory)).toEqual([])
+        expect(await runMigrations(fresh.pool, directory)).toEqual([])
+        expect((await ledger(pool)).rows).toEqual(appliedLedger)
+        expect((await ledger(fresh.pool)).rows).toEqual(freshLedger)
+        expect(await receiptSnapshot(pool)).toEqual(before)
+      } finally {
+        await Promise.all([fresh?.drop(), upgraded?.drop()])
+      }
+    },
+    MIGRATION_REPLAY_TIMEOUT,
+  )
+
+  it(
+    'fails a protection assertion when either calendar receipt constraint is dropped',
+    async () => {
+      const report = await checkConstraintCoverage({
+        serverUrl: serverUrl as string,
+        migration,
+        predecessorTemplate: replay.predecessor,
+        assertions: assertCalendarReceiptProtections,
+      })
+      expect(report.problems).toEqual([])
+      expect(report.results.filter(({ status }) => status === 'covered')).toHaveLength(2)
+    },
+    MIGRATION_COVERAGE_TIMEOUT,
+  )
 })
