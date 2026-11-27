@@ -420,9 +420,13 @@ export function PollRoster({
             return (
               <li key={voter.voterId} className="poll-roster-entry">
                 <div data-private>
-                  <strong id={nameId}>{voter.name}</strong>
+                  <strong id={nameId} dir="auto">
+                    {voter.name}
+                  </strong>
                   <div className="meeting-poll-cell-detail">
-                    <BreakableText>{voter.email}</BreakableText>
+                    <bdi dir="ltr">
+                      <BreakableText>{voter.email}</BreakableText>
+                    </bdi>
                   </div>
                   <span className="badge">{t(VOTER_STATUS[voter.status] ?? 'Unknown')}</span>
                 </div>

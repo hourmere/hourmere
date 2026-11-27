@@ -328,18 +328,23 @@ export function answersOf(
   questions: Json | null,
   responses: Json,
   language: InterfaceLanguage,
-): { question: string; answer: string }[] {
+): { question: string; answer: string | string[] }[] {
   const given = isRecord(responses) ? responses : {}
-  const answers: { question: string; answer: string }[] = []
+  const answers: { question: string; answer: string | string[] }[] = []
   const seen = new Set<string>()
+  const answerValue = (value: unknown) => {
+    const text = bookingAnswerText(value, language)
+    // Retain the option boundaries for HTML while using the existing plain-text separator.
+    return text && Array.isArray(value) ? value.filter((item) => typeof item === 'string') : text
+  }
   for (const q of Array.isArray(questions) ? questions : []) {
     if (!isRecord(q) || typeof q.id !== 'string' || !Object.hasOwn(given, q.id)) continue
     seen.add(q.id)
-    const answer = bookingAnswerText(given[q.id], language)
+    const answer = answerValue(given[q.id])
     if (answer) answers.push({ question: typeof q.label === 'string' ? q.label : q.id, answer })
   }
   for (const [id, value] of Object.entries(given)) {
-    const answer = seen.has(id) ? undefined : bookingAnswerText(value, language)
+    const answer = seen.has(id) ? undefined : answerValue(value)
     if (answer) answers.push({ question: id, answer })
   }
   return answers

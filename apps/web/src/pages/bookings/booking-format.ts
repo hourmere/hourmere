@@ -2,16 +2,17 @@ import { displayConferenceUrl } from '@hourmere/core/conference-url'
 // How bookings read: their location and answers, and the host's time zone they are shown in.
 import type { Booking, Profile } from '../../api/resources.ts'
 import { browserTimeZone } from '../../format.ts'
-import { formatList } from '../../i18n/formatting.ts'
-import { literal, msg, type UiText } from '../../i18n/translate.ts'
+import { literal, type UiLiteral } from '../../i18n/translate.ts'
 
 /** Localize only a verified generated title; retain custom and historical titles verbatim. */
-export function bookingTitle(booking: Booking): UiText {
+export function bookingTitle(
+  booking: Booking,
+): UiLiteral | { key: '{event} with {host}'; values: { event: string; host: string } } {
   const invitee = booking.attendees.find((attendee) => attendee.isBooker)
   const event = booking.eventTypeTitle
   if (!invitee || !event || booking.title !== `${event} with ${invitee.name}`)
     return literal(booking.title)
-  return msg('{event} with {host}', { event, host: invitee.name })
+  return { key: '{event} with {host}', values: { event, host: invitee.name } }
 }
 
 /** Mutation responses omit host-read metadata; keep it only for the same booking. */
@@ -84,15 +85,4 @@ export const SOURCE_LABELS: Record<Booking['source'], string> = {
   api: 'an agent or script (API)',
   mcp: 'an AI agent (MCP)',
   import: 'the original scheduling system',
-}
-
-/** An answer as text: options joined, checkboxes as Yes or No. */
-export function answerText(
-  value: string | string[] | boolean | undefined,
-  locale = 'en',
-): string | null {
-  if (value === undefined) return null
-  if (typeof value === 'boolean') return value ? 'Yes' : 'No'
-  if (Array.isArray(value)) return value.length ? formatList(value, locale) : null
-  return value.trim() ? value : null
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { translateMessage } from '../../i18n/translate.ts'
 import { booking } from '../../test/fixtures.ts'
-import { answerText, bookingTitle, bookingUpdate, describeLocation } from './booking-format.ts'
+import { bookingTitle, bookingUpdate, describeLocation } from './booking-format.ts'
 
 describe('booking title metadata on updates', () => {
   const current = booking({ eventTypeTitle: '初次通话' })
@@ -79,17 +79,4 @@ describe('booking location links', () => {
       expect(describeLocation({ kind: 'link', url })?.href).toBe(url)
     },
   )
-})
-
-describe('booking answer text', () => {
-  it.each([
-    ['zh-CN', 'Pro、Team'],
-    ['en', 'Pro, Team'],
-  ])('formats selected options in %s', (locale, expected) => {
-    expect(answerText(['Pro', 'Team'], locale)).toBe(expected)
-    expect(answerText([], locale)).toBeNull()
-    expect(answerText(undefined, locale)).toBeNull()
-    expect(answerText('Settings', locale)).toBe('Settings')
-    expect(answerText(true, locale)).toBe('Yes')
-  })
 })

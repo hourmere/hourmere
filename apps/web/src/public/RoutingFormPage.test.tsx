@@ -101,22 +101,42 @@ describe('the public routing form', () => {
 
   it('sends answers only in the POST body and displays outcome text literally', async () => {
     const user = userEvent.setup()
+    const privateAnswer = '✨ 42 ليلى (Layla)'
+    const questionLabel = 'שם (Company)'
+    const optionLabel = 'مبيعات (Sales)'
+    const outcome = `${message.message}\n\nشكرا (Thanks)`
     const api = fakeApi({
       ...enabled,
-      [`GET ${endpoint}`]: () => json(200, form),
-      [`POST ${endpoint}/route`]: () => json(200, message),
+      [`GET ${endpoint}`]: () =>
+        json(200, {
+          ...form,
+          title: 'مرحبا (Routing)',
+          questions: [
+            { ...form.questions[0], label: questionLabel },
+            form.questions[1],
+            { ...form.questions[2], options: [{ id: chosen, label: optionLabel }] },
+          ],
+        }),
+      [`POST ${endpoint}/route`]: () => json(200, { ...message, message: outcome }),
     })
     const storage = vi.spyOn(Storage.prototype, 'setItem')
     const logs = (['log', 'warn', 'error'] as const).map((level) => vi.spyOn(console, level))
     const url = window.location.href
     renderApp(path)
-    const privateAnswer = 'Acme private request'
-    await user.type(await screen.findByLabelText('Company'), ` ${privateAnswer} `)
+    expect(
+      (await screen.findByRole('heading', { name: 'مرحبا (Routing)' })).getAttribute('dir'),
+    ).toBe('auto')
+    const company = screen.getByRole('textbox', { name: questionLabel })
+    expect(company.getAttribute('dir')).toBe('auto')
+    expect(screen.getByText(questionLabel).tagName).toBe('BDI')
+    await user.type(company, ` ${privateAnswer} `)
     await user.type(screen.getByLabelText('Work email'), 'invitee@example.invalid')
-    await user.selectOptions(screen.getByLabelText('Department'), 'Sales')
+    expect(screen.getByRole('option', { name: optionLabel }).getAttribute('dir')).toBe('auto')
+    await user.selectOptions(screen.getByLabelText('Department'), chosen)
     await user.click(screen.getByRole('button', { name: 'Continue' }))
     expect(await screen.findByRole('heading', { name: 'Thank you' })).toBe(document.activeElement)
-    expect(screen.getByText(message.message)).toBeDefined()
+    expect(screen.getByText(message.message).tagName).toBe('BDI')
+    expect(screen.getByText('شكرا (Thanks)').parentElement?.textContent).toBe(outcome)
     expect(screen.queryByText('We will be in touch.', { exact: true })).toBeNull()
     expect(api.to(`POST ${endpoint}/route`)).toMatchObject([
       {
