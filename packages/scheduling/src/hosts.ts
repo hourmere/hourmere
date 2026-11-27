@@ -1,6 +1,7 @@
 import type { Db } from '@hourmere/db'
 import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { recordTeamWriteOrganizationLock } from '@hourmere/db/team-write'
+import type { Expression } from 'kysely'
 import { DomainError } from './errors.ts'
 
 const invalidHosts = () =>
@@ -61,17 +62,25 @@ export async function readEligibleHostIds(
     .orderBy('id')
   if (lock) users = users.forShare()
   const verified = await users.execute()
-  let members = db
-    .selectFrom('auth.member')
+  let members = currentTeamHostMembership(db, organizationId, scimResourcesEnabled)
     .select(['userId', 'organizationId'])
-    .where('organizationId', '=', organizationId)
     .where('userId', 'in', ids)
-    .where((eb) =>
-      eb.not(scimSuspended(eb.ref('organizationId'), eb.ref('userId'), scimResourcesEnabled)),
-    )
     .orderBy('userId')
   if (lock) members = members.forShare()
   return eligibleHostIds(organizationId, ids, verified, await members.execute())
+}
+
+export function currentTeamHostMembership(
+  db: Db,
+  organizationId: string | Expression<string>,
+  scimResourcesEnabled = false,
+) {
+  return db
+    .selectFrom('auth.member')
+    .where('organizationId', '=', organizationId)
+    .where((eb) =>
+      eb.not(scimSuspended(eb.ref('organizationId'), eb.ref('userId'), scimResourcesEnabled)),
+    )
 }
 
 /** Hold current membership and verification until a host assignment or booking commits. */

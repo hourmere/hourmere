@@ -16,6 +16,7 @@ import {
   RoleManagementNotice,
   TeamMemberRoleButton,
 } from '../components/team-members/TeamMemberRole.tsx'
+import { UserContentMessage } from '../components/UserContent.tsx'
 import { useI18n } from '../i18n/runtime.tsx'
 import type { MessageKey, UiText } from '../i18n/translate.ts'
 import { PATHS } from '../paths.ts'
@@ -254,7 +255,7 @@ export function TeamMembers({
                 return (
                   <li key={member.id}>
                     <div>
-                      <span className="user-content">
+                      <span className="user-content" dir="auto">
                         <BreakableText>
                           {member.user.name.trim() || t('Unnamed team member')}
                         </BreakableText>
@@ -285,7 +286,7 @@ export function TeamMembers({
                       )}
                     </div>
                     {canManage && member.user.email && (
-                      <div className="hint user-content">
+                      <div className="hint user-content" dir="ltr">
                         <BreakableText>{member.user.email}</BreakableText>
                       </div>
                     )}
@@ -343,9 +344,10 @@ export function TeamMembers({
                               setNomineeId(member.userId)
                             }}
                           >
-                            {t('Nominate {name} for SSO recovery', {
-                              name: member.user.name.trim() || t('Unnamed team member'),
-                            })}
+                            <UserContentMessage
+                              message="Nominate {name} for SSO recovery"
+                              values={{ name: member.user.name.trim() || t('Unnamed team member') }}
+                            />
                           </button>
                         </div>
                       )}

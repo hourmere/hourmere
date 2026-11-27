@@ -24,7 +24,7 @@ function overflowing() {
   vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(60)
 }
 
-const paragraphs = ['', 'First paragraph', '  \t', '', 'Second paragraph', 'Third line', '']
+const paragraphs = ['', '🙂 42 مرحبا (Booking)', '  \t', '', 'Second paragraph', 'שלום 42', '']
 
 it('expands and collapses a measured long description with an accessible control', async () => {
   clampAt('3')
@@ -54,19 +54,24 @@ it.each(['\n', '\r\n', '\r'])(
     render(<EventDescription>{original}</EventDescription>)
     const toggle = await screen.findByRole('button', { name: 'Show more' })
     const text = document.getElementById(toggle.getAttribute('aria-controls') ?? '')
-    expect(text?.textContent).toBe('First paragraph\nSecond paragraph\nThird line')
+    expect(text?.textContent).toBe('🙂 42 مرحبا (Booking)\nSecond paragraph\nשלום 42')
+    expect(Array.from(text?.querySelectorAll('bdi') ?? [], (line) => line.textContent)).toEqual([
+      '🙂 42 مرحبا (Booking)',
+      'Second paragraph',
+      'שלום 42',
+    ])
     await user.click(toggle)
     expect(text?.textContent).toBe(original)
     await user.click(toggle)
-    expect(text?.textContent).toBe('First paragraph\nSecond paragraph\nThird line')
+    expect(text?.textContent).toBe('🙂 42 مرحبا (Booking)\nSecond paragraph\nשלום 42')
   },
 )
 
 it('keeps the blank lines where the page container no longer clamps descriptions', () => {
   clampAt('none')
   const original = paragraphs.join('\n')
-  render(<EventDescription>{original}</EventDescription>)
-  expect(screen.getByText(original, { normalizer: (value) => value }).textContent).toBe(original)
+  const { container } = render(<EventDescription>{original}</EventDescription>)
+  expect(container.querySelector('.event-description')?.textContent).toBe(original)
   expect(screen.queryByRole('button')).toBeNull()
 })
 

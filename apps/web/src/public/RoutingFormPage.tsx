@@ -2,6 +2,7 @@ import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from 
 import { useParams } from 'react-router'
 import type { Schemas } from '../api/client.ts'
 import { goTo } from '../browser.ts'
+import { UserContentLines } from '../components/UserContent.tsx'
 import { useMounted, usePageTitle } from '../hooks.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import { literal, msg, type UiText } from '../i18n/translate.ts'
@@ -89,7 +90,9 @@ function RoutingQuestion({
   return (
     <div className="field">
       <div className="routing-form-label">
-        <label htmlFor={id}>{question.label}</label>
+        <label htmlFor={id}>
+          <bdi>{question.label}</bdi>
+        </label>
         {!question.required && (
           <span className="optional" id={`${id}-optional`}>
             {t('Optional')}
@@ -100,7 +103,7 @@ function RoutingQuestion({
         <select {...control} onChange={(event) => onChange(event.currentTarget.value)}>
           <option value="">{t('Select an option')}</option>
           {question.options.map((option) => (
-            <option key={option.id} value={option.id}>
+            <option key={option.id} value={option.id} dir="auto">
               {option.label}
             </option>
           ))}
@@ -109,6 +112,7 @@ function RoutingQuestion({
         <input
           {...control}
           type={question.type === 'email' ? 'email' : 'text'}
+          dir={question.type === 'email' ? 'ltr' : 'auto'}
           maxLength={LIMITS.short_text}
           spellCheck={false}
           onChange={(event) => onChange(event.currentTarget.value)}
@@ -245,7 +249,9 @@ export function RoutingFormPage() {
         {state.status === 'message' && (
           <>
             <FocusHeading>{t(titles.message)}</FocusHeading>
-            <p className="routing-form-copy">{state.message}</p>
+            <p className="routing-form-copy">
+              <UserContentLines text={state.message} />
+            </p>
           </>
         )}
         {state.status === 'form' && (
@@ -254,11 +260,14 @@ export function RoutingFormPage() {
               key={state.form.versionId}
               id={headingId}
               describedBy={state.changed ? changedNoticeId : undefined}
+              dir="auto"
             >
               {state.form.title}
             </FocusHeading>
             {state.form.description && (
-              <p className="routing-form-copy">{state.form.description}</p>
+              <p className="routing-form-copy">
+                <UserContentLines text={state.form.description} />
+              </p>
             )}
             {state.changed && (
               <p className="alert alert-info" id={changedNoticeId} role="status">

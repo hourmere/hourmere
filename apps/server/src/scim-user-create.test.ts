@@ -647,10 +647,11 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
       .select('name')
       .where('id', '=', organization.people.owner)
       .executeTakeFirstOrThrow()
-    const attribution = `Su proveedor de identidad le ha enviado esta invitación en nombre del equipo «${organization.name}» en Hourmere.`
+    const attribution = (team: string) =>
+      `Su proveedor de identidad le ha enviado esta invitación en nombre del equipo «${team}» en Hourmere.`
     expect(messages).toHaveLength(1)
-    expect(messages[0]?.text).toContain(attribution)
-    expect(messages[0]?.html).toContain(attribution)
+    expect(messages[0]?.text).toContain(attribution(organization.name))
+    expect(messages[0]?.html).toContain(attribution(`<bdi>${organization.name}</bdi>`))
     expect(messages[0]?.text).not.toContain(owner.name)
     expect(messages[0]?.html).not.toContain(owner.name)
     // The User event identifies the credential. Invitation issuance names the connection.

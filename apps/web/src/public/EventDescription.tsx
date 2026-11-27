@@ -1,4 +1,5 @@
 import { useId, useLayoutEffect, useRef, useState } from 'react'
+import { UserContentLines } from '../components/UserContent.tsx'
 import { useI18n } from '../i18n/runtime.tsx'
 import { collapseBlankLines } from './description.ts'
 
@@ -10,8 +11,8 @@ export function EventDescription({ children }: { children: string }) {
   const [expanded, setExpanded] = useState(false)
   const [overflows, setOverflows] = useState(false)
   const [clamped, setClamped] = useState(false)
-  // Before paint, including the second commit after collapsing blank lines.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: clamped changes the committed paragraph text that is measured
+  // Before paint, including after a description change or collapsing blank lines.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the effect measures the committed description
   useLayoutEffect(() => {
     const element = text.current
     if (!element) return
@@ -30,7 +31,7 @@ export function EventDescription({ children }: { children: string }) {
       observer?.disconnect()
       window.removeEventListener('resize', measure)
     }
-  }, [expanded, clamped])
+  }, [children, expanded, clamped])
   return (
     <div className="event-description-disclosure">
       <p
@@ -39,7 +40,7 @@ export function EventDescription({ children }: { children: string }) {
         className={`event-description${expanded ? '' : ' event-description-collapsed'}`}
       >
         {/* Blank lines are the host's paragraph breaks: drop them only while clamped. */}
-        {clamped && !expanded ? collapseBlankLines(children) : children}
+        <UserContentLines text={clamped && !expanded ? collapseBlankLines(children) : children} />
       </p>
       {overflows && (
         <button

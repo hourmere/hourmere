@@ -309,7 +309,9 @@ function EventTypeTable({
               return (
                 <tr key={e.id} className={!isActive ? 'event-type-inactive' : undefined}>
                   <th scope="row" data-label={t('Title')} className="user-content">
-                    <Link to={eventTypePath(e.id)}>{e.title}</Link>
+                    <Link to={eventTypePath(e.id)}>
+                      <bdi>{e.title}</bdi>
+                    </Link>
                   </th>
                   <td data-label={t('Duration')} className="fit nowrap">
                     <div className="table-value">

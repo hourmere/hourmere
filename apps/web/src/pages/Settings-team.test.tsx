@@ -103,14 +103,16 @@ describe('team context in account settings', () => {
       renderApp(PATHS.settings)
       const account = await screen.findByRole('region', { name: 'Account' })
       expect(await within(account).findByText(en)).toBeDefined()
-      const name = within(account).getByText(TEAM_ME.organization.name)
-      expect(name.classList.contains('user-content')).toBe(true)
+      const name = within(account).getByText(TEAM_ME.organization.name, { selector: 'bdi' })
+      expect(name.closest('dd.user-content')).not.toBeNull()
       expect(name.textContent).toBe(TEAM_ME.organization.name)
       expect(within(account).getByText('Your role')).toBeDefined()
       await selectAdminLanguage(user, 'zh-CN')
       expect(within(account).getByText(zh)).toBeDefined()
       expect(within(account).getByText('你的角色')).toBeDefined()
-      expect(within(account).getByText(TEAM_ME.organization.name)).toBeDefined()
+      expect(
+        within(account).getByText(TEAM_ME.organization.name, { selector: 'bdi' }),
+      ).toBeDefined()
       expect(within(account).getByRole('link', { name: '创建团队' })).toBeDefined()
     },
   )

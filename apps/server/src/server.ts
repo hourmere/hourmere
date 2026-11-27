@@ -141,6 +141,7 @@ import { meetingPollTools } from './mcp/meeting-polls.ts'
 import { mcpOAuthCleanupJob, mcpOAuthRoutes } from './mcp/oauth.ts'
 import { oneTimeLinkTools } from './mcp/one-time-links.ts'
 import { openTimeSnippetTools } from './mcp/open-time-snippets.ts'
+import { publicTeamTool } from './mcp/public-team.ts'
 import { routingFormConfigurationTools } from './mcp/routing-forms.ts'
 import { scimMappingAdministration } from './mcp/scim-team-mappings.ts'
 import { slackDestinationTools } from './mcp/slack-destinations.ts'
@@ -267,6 +268,7 @@ export function productRoutes({
   scimProvisioningEnabled = false,
   scimResourcesEnabled,
   slotSnippetsEnabled = false,
+  teamPublicHomeOrganizationIds,
   ssoConfigurationKey,
   ssoPrivateTargets,
   ssoLinkRemovalQueue,
@@ -304,6 +306,7 @@ export function productRoutes({
   scimProvisioningEnabled?: boolean
   scimResourcesEnabled?: boolean | undefined
   slotSnippetsEnabled?: boolean
+  teamPublicHomeOrganizationIds?: readonly string[] | undefined
   /** Operator-managed key for encrypted provider configuration; does not enable SSO. */
   ssoConfigurationKey?: Buffer | undefined
   ssoPrivateTargets?: OidcProviderTestDeps['privateTargets']
@@ -460,6 +463,7 @@ export function productRoutes({
     }),
     publicRoutes({
       db,
+      teamPublicHomeOrganizationIds,
       routingFormsEnabled: routingEnabled,
       routingSecret,
       receiptNow: routingBookingReceiptNow,
@@ -561,6 +565,7 @@ export function productTools({
   smtpConfigured,
   publicUrl,
   slotSnippetsEnabled = false,
+  teamPublicHomeOrganizationIds,
   // Hard-off unless the running server passes its configured capabilities.
   ssoCapabilities: sso = { ssoOidcEnabled: false, ssoSamlEnabled: false },
   routingFormsEnabled: routingEnabled = false,
@@ -591,6 +596,7 @@ export function productTools({
   routingBookingReceiptNow?: (() => Temporal.Instant) | undefined
   smtpConfigured?: boolean | undefined
   slotSnippetsEnabled?: boolean | undefined
+  teamPublicHomeOrganizationIds?: readonly string[] | undefined
   /** Hard-off unless the running server passes its configured capabilities. */
   ssoCapabilities?: SsoCapabilities | undefined
   routingFormsEnabled?: boolean | undefined
@@ -612,6 +618,11 @@ export function productTools({
   const microsoftCalendarEnabled = microsoftCalendar !== undefined
   return [
     whoamiTool,
+    publicTeamTool({
+      db,
+      teamPublicHomeOrganizationIds,
+      scimResourcesEnabled: sso.scimResourcesEnabled,
+    }),
     ...bookingTools({
       db,
       waitlistSecret,
@@ -864,6 +875,7 @@ export function productionAppOptions({
       recurringBookingsEnabled,
       embedAllowedOrigins: config.EMBED_ALLOWED_ORIGINS,
       slotSnippetsEnabled: config.SLOT_SNIPPETS_ENABLED,
+      teamPublicHomeOrganizationIds: config.TEAM_PUBLIC_HOME_ORGANIZATION_IDS,
       successRedirectPolicy,
       bookingMaxInviteeReschedules: config.BOOKING_MAX_INVITEE_RESCHEDULES,
       bookingExportMaxConcurrent: config.BOOKING_EXPORT_MAX_CONCURRENT,
@@ -923,6 +935,7 @@ export function productionAppOptions({
         routingSecret: config.BETTER_AUTH_SECRET,
         workflowRunCursorSecret: config.BETTER_AUTH_SECRET,
         workflowsEnabled,
+        teamPublicHomeOrganizationIds: config.TEAM_PUBLIC_HOME_ORGANIZATION_IDS,
         ssoCapabilities: sso,
       }),
     }),

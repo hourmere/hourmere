@@ -236,6 +236,7 @@ export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.fr
   rest('POST', '/api/v1/public/{handle}/{slug}/bookings', 'booking_write', 'optional_key'),
   rest('GET', '/api/v1/public/{handle}/{slug}/slots', 'booking_read', 'optional_key'),
   rest('GET', '/api/v1/public/teams/{handle}/{slug}', 'booking_read', 'optional_key'),
+  rest('GET', '/api/v1/public/teams/{handle}', 'booking_read', 'optional_key'),
   rest('POST', '/api/v1/public/teams/{handle}/{slug}/bookings', 'booking_write', 'optional_key'),
   rest('GET', '/api/v1/public/teams/{handle}/{slug}/slots', 'booking_read', 'optional_key'),
   rest('POST', '/api/v1/public/{handle}/{slug}/waitlist', 'booking_write', 'optional_key'),
@@ -395,6 +396,7 @@ export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.free
     'GET /api/v1/public/-/routing/{handle}/{slug}',
     'GET /api/v1/public/-/routing/teams/{teamSlug}/{slug}',
   ]),
+  mcp('get_public_team', 'booking_read', ['GET /api/v1/public/teams/{handle}']),
   mcp('route_lead', 'booking_write', [
     'POST /api/v1/public/-/routing/{handle}/{slug}/route',
     'POST /api/v1/public/-/routing/teams/{teamSlug}/{slug}/route',
@@ -601,6 +603,7 @@ export const API_KEY_CLI_OPERATIONS: readonly ApiKeyCliOperation[] = Object.free
   cli('branding set', 'set_branding'),
   cli('profile', 'get_profile'),
   cli('catalog', 'list_event_types'),
+  cli('team-home', 'get_public_team'),
   cli('event', 'get_event_type'),
   cli('duplicate-event', 'duplicate_event_type'),
   cli('create-event', 'create_event_type'),
