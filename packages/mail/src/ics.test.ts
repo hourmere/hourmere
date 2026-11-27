@@ -140,6 +140,23 @@ describe('buildIcs', () => {
     expect(event.getFirstPropertyValue('description')).toBe(description)
   })
 
+  it('preserves mixed-direction calendar and contact values as literal text', () => {
+    const title = '🗓 12 موعد; English, 中文'
+    const host = 'נועה (Noa)'
+    const description = 'موعد <fixture@example.test>\n\nNext: 中文'
+    const { event } = parse(
+      buildIcs({
+        ...base,
+        summary: title,
+        description,
+        organizer: { ...base.organizer, name: host },
+      }),
+    )
+    expect(event.getFirstPropertyValue('summary')).toBe(title)
+    expect(event.getFirstPropertyValue('description')).toBe(description)
+    expect(event.getFirstProperty('organizer')?.getParameter('cn')).toBe(host)
+  })
+
   it('quotes names in parameters, replacing what a quoted value cannot hold', () => {
     const ics = buildIcs({
       ...base,

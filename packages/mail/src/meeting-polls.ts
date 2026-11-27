@@ -3,11 +3,18 @@ import {
   type InterfaceLanguage,
   interfaceLanguage,
 } from '@hourmere/core/language'
-import { mailMessage } from './catalogue.ts'
+import { mailContent, mailMessage } from './catalogue.ts'
 import { formatMailDateTime } from './date-time.ts'
 import type { MailMessage } from './index.ts'
 import { emailLayout, emailLinkStyle } from './layout.ts'
-import { emailText, escapeHtml, singleLine, subjectLine } from './text.ts'
+import {
+  emailText,
+  emailUserText,
+  emailUserValue,
+  escapeHtml,
+  singleLine,
+  subjectLine,
+} from './text.ts'
 
 interface MeetingPollEmailOptions {
   to: string
@@ -75,7 +82,7 @@ function pollMail(
   to: string,
   language: InterfaceLanguage,
   subjectText: string,
-  parts: { text: string; url?: string }[],
+  parts: { text: string; html?: string; url?: string }[],
 ): MailMessage {
   if (!to || singleLine(to) !== to) throw new Error('Invalid meeting poll recipient')
   const subject = subjectLine(subjectText).toWellFormed()
@@ -90,7 +97,7 @@ function pollMail(
       parts
         .map(
           (p) =>
-            `<p>${emailText(p.text, language)}${p.url ? `<br><a href="${escapeHtml(p.url)}" style="${emailLinkStyle}" rel="noreferrer">${emailText(p.url, language)}</a>` : ''}</p>`,
+            `<p>${p.html ?? emailText(p.text, language)}${p.url ? `<br><a href="${escapeHtml(p.url)}" style="${emailLinkStyle}" rel="noreferrer">${emailUserText(p.url, language, 'ltr')}</a>` : ''}</p>`,
         )
         .join('\n'),
     ),
@@ -116,7 +123,10 @@ function votingLinkMail(
   const t = (key: Parameters<typeof mailMessage>[1]) => mailMessage(language, key, values)
   const parts = [
     {
-      text: t(`poll.${kind}.body`),
+      ...mailContent(language, `poll.${kind}.body`, {
+        ...values,
+        poll: emailUserValue(values.poll, language),
+      }),
       url: `${origin}/poll/voter#${options.token}`,
     },
     { text: t('poll.expiry') },
@@ -154,7 +164,10 @@ export function meetingPollDeadlineEmail(options: MeetingPollDeadlineEmailOption
   }
   const t = (key: Parameters<typeof mailMessage>[1]) => mailMessage(language, key, values)
   return pollMail(options.to, language, t('poll.deadline.subject'), [
-    { text: t('poll.deadline.body') },
+    mailContent(language, 'poll.deadline.body', {
+      ...values,
+      poll: emailUserValue(values.poll, language),
+    }),
     { text: t('poll.deadline.responses') },
     {
       text: t('poll.deadline.results'),

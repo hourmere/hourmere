@@ -1,9 +1,16 @@
 // Render only. The delivery worker owns eligibility, capabilities and mail accounting.
 import { formattingLocale, interfaceLanguage } from '@hourmere/core/language'
-import { mailMessage } from './catalogue.ts'
+import { mailContent, mailMessage } from './catalogue.ts'
 import type { MailMessage } from './index.ts'
 import { emailLayout, emailLinkStyle } from './layout.ts'
-import { emailText, escapeHtml, singleLine, subjectLine } from './text.ts'
+import {
+  emailText,
+  emailUserText,
+  emailUserValue,
+  escapeHtml,
+  singleLine,
+  subjectLine,
+} from './text.ts'
 
 interface WaitlistEmailOptions {
   to: string
@@ -65,7 +72,7 @@ function instant(value: Date | string): Temporal.Instant {
 
 type Language = NonNullable<ReturnType<typeof interfaceLanguage>>
 type MessageKey = Parameters<typeof mailMessage>[1]
-type Part = { text: string; url?: string }
+type Part = { text: string; html?: string; url?: string }
 
 function context(options: WaitlistEmailOptions) {
   const language =
@@ -73,13 +80,22 @@ function context(options: WaitlistEmailOptions) {
   const publicOrigin = origin(options.publicUrl)
   const to = options.to
   if (!to || singleLine(to.toWellFormed()) !== to) throw new Error('Invalid waitlist recipient')
-  const event =
-    singleLine(options.eventTitle.toWellFormed()) || mailMessage(language, 'waitlist.event')
+  const event = singleLine(options.eventTitle.toWellFormed())
+  const title = event || mailMessage(language, 'waitlist.event')
   const removeUrl = `${publicOrigin}/booking/waitlist/remove#${capability(options.removalToken)}`
   const expiry = instant(options.expiresAt)
   const t = (key: MessageKey, values: Record<string, string> = {}) =>
-    mailMessage(language, key, { event, ...values })
-  return { language, publicOrigin, to, removeUrl, expiry, t }
+    mailMessage(language, key, { event: title, ...values })
+  return {
+    language,
+    publicOrigin,
+    to,
+    removeUrl,
+    expiry,
+    t,
+    introduction: (key: 'waitlist.verify.introduction' | 'waitlist.notice.introduction') =>
+      mailContent(language, key, { event: event ? emailUserValue(event, language) : title }),
+  }
 }
 
 function render(to: string, language: Language, title: string, parts: Part[]): MailMessage {
@@ -95,7 +111,7 @@ function render(to: string, language: Language, title: string, parts: Part[]): M
       parts
         .map(
           (part) =>
-            `<p>${emailText(part.text, language)}${part.url ? `<br><a href="${escapeHtml(part.url)}" style="${emailLinkStyle}" rel="noreferrer">${emailText(part.url, language)}</a>` : ''}</p>`,
+            `<p>${part.html ?? emailText(part.text, language)}${part.url ? `<br><a href="${escapeHtml(part.url)}" style="${emailLinkStyle}" rel="noreferrer">${emailUserText(part.url, language, 'ltr')}</a>` : ''}</p>`,
         )
         .join('\n'),
     ),
@@ -104,10 +120,10 @@ function render(to: string, language: Language, title: string, parts: Part[]): M
 
 /** Opening the link only previews confirmation; activation requires an explicit POST. */
 export function waitlistVerificationEmail(options: WaitlistVerificationEmailOptions): MailMessage {
-  const { language, publicOrigin, to, removeUrl, expiry, t } = context(options)
+  const { language, publicOrigin, to, removeUrl, expiry, t, introduction } = context(options)
   const verifyUrl = `${publicOrigin}/booking/waitlist/verify#token=${capability(options.token)}&management=${capability(options.removalToken)}`
   return render(to, language, t('waitlist.verify.subject'), [
-    { text: t('waitlist.verify.introduction') },
+    introduction('waitlist.verify.introduction'),
     { text: t('waitlist.verify.action'), url: verifyUrl },
     {
       text: t('waitlist.verify.expiry', {
@@ -140,7 +156,7 @@ function displayTime(value: Temporal.Instant, timeZone: string, language: Langua
 
 /** Suggested times are ordinary booking links; no capability grants a hold or priority. */
 export function waitlistNotificationEmail(options: WaitlistNotificationEmailOptions): MailMessage {
-  const { language, publicOrigin, to, removeUrl, expiry, t } = context(options)
+  const { language, publicOrigin, to, removeUrl, expiry, t, introduction } = context(options)
   if (!/^\/(?:[A-Za-z0-9-]+\/|team\/[A-Za-z0-9-]+\/)[a-z0-9-]+$/.test(options.bookingPath)) {
     throw new Error('Invalid waitlist booking path')
   }
@@ -172,7 +188,7 @@ export function waitlistNotificationEmail(options: WaitlistNotificationEmailOpti
     }
   })
   return render(to, language, t('waitlist.notice.subject'), [
-    { text: t('waitlist.notice.introduction') },
+    introduction('waitlist.notice.introduction'),
     { text: t('waitlist.broadcast') },
     ...suggestions,
     {

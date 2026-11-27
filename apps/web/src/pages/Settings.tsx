@@ -193,12 +193,14 @@ export function SettingsPage() {
         <DisplayNameForm name={me.user.name} />
         <dl className="details">
           <dt>{t('Email')}</dt>
-          <dd className="user-content">
+          <dd className="user-content" dir="ltr">
             <BreakableText>{me.user.email}</BreakableText>
           </dd>
           <dt>{t('Organization')}</dt>
           <dd className="user-content">
-            <BreakableText>{me.organization.name}</BreakableText>
+            <bdi>
+              <BreakableText>{me.organization.name}</BreakableText>
+            </bdi>
             {me.organization.personal && <span className="muted">{t(' (personal)')}</span>}
           </dd>
           {!personal && <TeamRole role={role} reload={reloadRole} createdMember={createdMember} />}
@@ -422,6 +424,7 @@ function DisplayNameForm({ name }: { name: string }) {
             <input
               {...props}
               value={draft}
+              dir="auto"
               autoComplete="name"
               maxLength={ACCOUNT.nameMaxLength}
               onChange={(e) => {

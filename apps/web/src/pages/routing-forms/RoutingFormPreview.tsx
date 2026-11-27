@@ -8,6 +8,7 @@ import type { Schemas } from '../../api/client.ts'
 import { isOrganizationContextChanged, RequestError } from '../../api/errors.ts'
 import { ErrorSummary, Field, type FieldErrors } from '../../components/forms.tsx'
 import { OrganizationContextConflict } from '../../components/OrganizationContextConflict.tsx'
+import { UserContentLines } from '../../components/UserContent.tsx'
 import { useI18n } from '../../i18n/runtime.tsx'
 import { previewRoutingForm, type RoutingForm } from './routing-form-api.ts'
 
@@ -176,7 +177,7 @@ function PreviewFields({
                     >
                       <option value="">{t('Select an option')}</option>
                       {question.options.map((option) => (
-                        <option key={option.id} value={option.id}>
+                        <option key={option.id} value={option.id} dir="auto">
                           {option.label}
                         </option>
                       ))}
@@ -186,6 +187,7 @@ function PreviewFields({
                       {...control}
                       autoComplete="off"
                       inputMode={question.type === 'email' ? 'email' : undefined}
+                      dir={question.type === 'email' ? 'ltr' : 'auto'}
                       maxLength={ROUTING_FORM_LIMITS.textAnswerLength}
                       required={question.required}
                       value={value}
@@ -267,7 +269,9 @@ function PreviewResult({
         )}
       </div>
       {result.target?.kind === 'message' && (
-        <p className="user-content routing-preview-message">{result.target.message}</p>
+        <p className="user-content routing-preview-message">
+          <UserContentLines text={result.target.message} />
+        </p>
       )}
       {result.target?.kind === 'event' && (
         <p>{title ? <bdi className="user-content">{title}</bdi> : t('Book an event')}</p>
