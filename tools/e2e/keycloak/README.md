@@ -12,7 +12,7 @@ cache.
 ```sh
 npm run build --workspace @hourmere/web
 HOURMERE_E2E_BOOTSTRAP_URL=postgres://hourmere:hourmere@localhost:5432/hourmere \
-  npm run test --workspace @hourmere/e2e -- keycloak-oidc --project=desktop
+  npm run test --workspace @hourmere/e2e -- keycloak-oidc keycloak-saml --project=desktop
 ```
 
 The PostgreSQL bootstrap connection creates and drops a disposable Hourmere database.
@@ -44,6 +44,23 @@ acceptance through the existing invitation endpoint after mailbox verification. 
 admission requires instance signup eligibility and is refused with closed signup. With
 OIDC off, the sign-in and member-link controls are hidden and the link and admission
 requests are refused.
+
+The SAML sign-in cases add a SAML client to the same realm and register the exact SP
+entity ID and ACS URL. Keycloak 26.8.2 starts with **Sign documents** enabled and
+**Sign assertions** disabled. Hourmere refuses that response. After the fixture enables
+**Sign assertions**, Keycloak returns the issued RelayState and the browser completes
+sign-in for the linked persona. A second Hourmere process shares the disposable database
+and canonical SP URLs to check that changed RelayState, a damaged signature and a replayed
+response are refused. SAML is enabled only by an in-process test injection. The same seeded
+provider offers no SAML sign-in option without it.
+
+The SAML linking and admission cases enable assertion signing on that same fixture.
+An existing member verifies their Hourmere mailbox and explicitly consents to linking
+before the link can be used for sign-in. Unlinked subjects see the same browser outcome
+whether or not an Hourmere account already exists for the asserted email. The cases cover
+explicit invitation acceptance with closed signup, JIT admission with open signup, and
+JIT refusal with closed signup. Without the test injection, the SAML link and admission
+entries are hidden and their requests are refused.
 
 The enforcement cases compare a mailbox session and a Keycloak session for the same
 owner. Binding a CLI and MCP lease requires a second Keycloak login with

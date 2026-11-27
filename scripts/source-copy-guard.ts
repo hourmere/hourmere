@@ -30,6 +30,8 @@ interface Family {
   wrappers: WeakMap<object, object>
   /** Each wrapper, mapped to what it wraps. */
   originals: WeakMap<object, object>
+  /** Test callbacks wrapped on their way into the copy. */
+  callbacks: WeakMap<Callable, Callable>
 }
 const families = new WeakMap<object, Family>()
 /** Each mutated copy from `mutatedPair`, mapped to its unmutated twin. */
@@ -104,6 +106,51 @@ const carriesCode = (value: object, seen = new Set<object>()): boolean => {
   })
 }
 
+/** Copy only plain argument containers that lead to a wrapper, preserving cycles and aliases. */
+function unwrapArguments(args: unknown[], unwrap: (value: unknown) => unknown): unknown[] {
+  const containers = new Map<object, PropertyDescriptorMap>()
+  const parents = new Map<object, Set<object>>()
+  const changed = new Set<object>()
+  const visit = (value: unknown, parent?: object) => {
+    if (!Object.is(unwrap(value), value)) {
+      if (parent) changed.add(parent)
+      return
+    }
+    if (!isPlain(value) || wrappers.has(value)) return
+    if (parent) {
+      const links = parents.get(value) ?? new Set<object>()
+      links.add(parent)
+      parents.set(value, links)
+    }
+    if (containers.has(value)) return
+    const descriptors = Object.getOwnPropertyDescriptors(value)
+    containers.set(value, descriptors)
+    for (const key of Reflect.ownKeys(descriptors)) {
+      const descriptor = Reflect.get(descriptors, key) as PropertyDescriptor
+      if ('value' in descriptor) visit(descriptor.value, value)
+    }
+  }
+  for (const arg of args) visit(arg)
+  // Set iteration includes parents added during the walk, including through a cycle.
+  for (const value of changed) {
+    for (const parent of parents.get(value) ?? []) changed.add(parent)
+  }
+  const replacements = new Map<object, object>()
+  for (const value of changed)
+    replacements.set(value, Array.isArray(value) ? [] : Object.create(Object.getPrototypeOf(value)))
+  const replace = (value: unknown) => replacements.get(value as object) ?? unwrap(value)
+  for (const [value, replacement] of replacements) {
+    const descriptors = containers.get(value) as PropertyDescriptorMap
+    for (const key of Reflect.ownKeys(descriptors)) {
+      const descriptor = Reflect.get(descriptors, key) as PropertyDescriptor
+      if ('value' in descriptor) descriptor.value = replace(descriptor.value)
+    }
+    Object.defineProperties(replacement, descriptors)
+    if (!Object.isExtensible(value)) Object.preventExtensions(replacement)
+  }
+  return args.map(replace)
+}
+
 export interface GuardOptions {
   /** A guarded copy this one belongs to, such as a second copy a scenario builds: they share faults. */
   partOf?: object
@@ -125,19 +172,30 @@ export interface GuardOptions {
  *   getter or setter that raises an engine error is recorded. A frozen result cannot change, so
  *   it is returned as a frozen copy whose functions and accessors are guarded. A read-only,
  *   non-configurable function member of a result that is not frozen cannot be guarded: reading it
- *   raises a harness TypeError, recorded like any other fault;
+ *   raises a harness TypeError, recorded like any other fault. This can also happen if the
+ *   copy freezes a result after returning it. A getter deliberately throwing an engine error
+ *   is recorded as a harness fault too, just like a throwing method;
  * - class instances (including Response, Date and Map) and data are returned as they are, since a
- *   proxy would break private fields and brand checks: their methods are not guarded.
+ *   proxy can break private fields and brand checks. Writable arrays read off a proxied object
+ *   are also proxied so writes through array methods unwrap what they store.
  *
- * A wrapper that comes back into its own copy (as `this`, a direct argument or a value assigned
- * through a proxy) is unwrapped, so the copy sees its own object. A wrapper from another copy is
- * passed as it is, so it keeps recording that copy's faults; a returned wrapper is never wrapped
- * again.
+ * A wrapper that comes back into its own copy is unwrapped. This includes promises, `this`,
+ * values assigned through a proxy, and own data properties of plain arguments. Plain
+ * containers that need unwrapping are copied per call, preserving cycles and shared
+ * references within a call. Their identity can differ across calls, and writes to a copied
+ * container do not update the test's original container. A stable wrapper unwraps the
+ * synchronous results of a direct test callback. It compares unequal to the same callback
+ * supplied to the copy outside this wrapper. A returned promise or thenable keeps the same
+ * wrapper. A wrapper from another copy passes through and keeps recording that copy's faults.
+ *
+ * Guarding does not reach promise-valued members, objects with custom prototypes, objects
+ * the copy hands to test callbacks, methods added to previously unguarded objects, or reads
+ * of raw property descriptors.
  */
 export function guardCopy<T extends object>(copy: T, { partOf }: GuardOptions = {}): T {
   const family: Family | undefined =
     partOf === undefined
-      ? { faults: [], wrappers: new WeakMap(), originals: new WeakMap() }
+      ? { faults: [], wrappers: new WeakMap(), originals: new WeakMap(), callbacks: new WeakMap() }
       : families.get(partOf)
   if (!family) throw new Error('guardCopy needs `partOf` to be a copy wrapped by guardCopy')
   const record = (error: unknown): never => {
@@ -152,16 +210,41 @@ export function guardCopy<T extends object>(copy: T, { partOf }: GuardOptions = 
     wrappers.add(wrapper)
     return wrapper
   }
+  const adaptCallback = (value: unknown) => {
+    if (
+      typeof value !== 'function' ||
+      wrappers.has(value) ||
+      family.wrappers.has(value) ||
+      isClass(value as Callable)
+    )
+      return value
+    const callback = value as Callable
+    const known = family.callbacks.get(callback)
+    if (known) return known
+    const adapted = new Proxy(callback, {
+      apply(target, receiver, args) {
+        return unwrapArguments([Reflect.apply(target, receiver, args)], unwrap)[0]
+      },
+    })
+    family.callbacks.set(callback, adapted)
+    family.wrappers.set(adapted, callback)
+    return adapted
+  }
+  const guardPromise = (promise: object) =>
+    wrappers.has(promise)
+      ? promise
+      : (family.wrappers.get(promise) ??
+        remember(promise, Promise.resolve(promise).then(guardValue, record)))
   const guardFunction = (run: Callable) => {
     const guarded = remember(run, function guarded(this: unknown, ...args: unknown[]) {
       let result: unknown
       try {
-        result = Reflect.apply(run, unwrap(this), args.map(unwrap))
+        result = Reflect.apply(run, unwrap(this), unwrapArguments(args, unwrap).map(adaptCallback))
       } catch (error) {
         return record(error)
       }
       return typeof (result as PromiseLike<unknown> | undefined)?.then === 'function'
-        ? Promise.resolve(result).then(guardValue, record)
+        ? guardPromise(result as object)
         : guardValue(result)
     })
     for (const [name, member] of Object.entries(run))
@@ -201,8 +284,9 @@ export function guardCopy<T extends object>(copy: T, { partOf }: GuardOptions = 
           } catch (error) {
             return record(error)
           }
-          const guarded = guardValue(value)
-          if (guarded !== value && own.configurable === false && own.writable === false)
+          const readOnly = own.configurable === false && own.writable === false
+          const guarded = guardValue(value, !readOnly)
+          if (guarded !== value && readOnly)
             return record(
               new TypeError(
                 `guardCopy cannot guard ${String(key)}, a read-only member of a result that is not frozen`,
@@ -219,14 +303,17 @@ export function guardCopy<T extends object>(copy: T, { partOf }: GuardOptions = 
         },
       }),
     )
-  const guardValue = (value: unknown): unknown => {
+  const guardValue = (value: unknown, guardArray = false): unknown => {
     if (wrappers.has(value as object)) return value
     const known = family.wrappers.get(value as object)
     if (known) return known
     if (typeof value === 'function')
       return isClass(value as Callable) ? value : guardFunction(value as Callable)
-    if (!isPlain(value) || !carriesCode(value)) return value
-    return Object.isFrozen(value) ? guardFrozen(value) : guardResult(value)
+    if (!isPlain(value)) return value
+    const frozen = Object.isFrozen(value)
+    if ((guardArray && !frozen && Array.isArray(value)) || carriesCode(value))
+      return frozen ? guardFrozen(value) : guardResult(value)
+    return value
   }
   if (typeof copy === 'function' && isClass(copy as Callable))
     throw new Error('guardCopy needs a function or an object')

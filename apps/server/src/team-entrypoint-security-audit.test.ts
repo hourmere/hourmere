@@ -1071,7 +1071,7 @@ describe.skipIf(!serverUrl)('native team management security audit', () => {
     // The hook answers any other error with its own 500 and drops it. Let an engine error
     // through to the guarded handler, so a broken copy is not read as a refused write.
     const fallback = '    if (error instanceof APIError) throw error\n'
-    expect(source.includes(fallback), 'cancellation fallback anchor').toBe(true)
+    expect(source.split(fallback), 'cancellation fallback anchor').toHaveLength(2)
     source = source.replace(
       fallback,
       `${fallback}    if ([ReferenceError, SyntaxError, TypeError].some((type) => error instanceof type)) throw error\n`,

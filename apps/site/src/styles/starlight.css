@@ -45,7 +45,7 @@ h1#_top {
 }
 
 .sl-markdown-content td code {
-  /* Code wraps only at the <wbr> points, never inside a word. */
+  /* The table grid can scroll, so code only needs its normal wrap opportunities. */
   overflow-wrap: normal;
 }
 
@@ -84,7 +84,13 @@ h1#_top {
   }
 
   .sl-markdown-content thead {
-    display: none;
+    /* Card labels are visible, while assistive technology still gets the table headings. */
+    position: absolute;
+    display: block;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
   }
 
   .sl-markdown-content tbody,
@@ -107,6 +113,16 @@ h1#_top {
     min-width: 0;
     padding: 0;
     border: 0;
+  }
+
+  .sl-markdown-content td[data-cell="short"] {
+    white-space: normal;
+    overflow-wrap: break-word;
+  }
+
+  .sl-markdown-content td code {
+    /* Use explicit URL breaks first, then wrap any segment wider than a card. */
+    overflow-wrap: break-word;
   }
 
   .sl-markdown-content td + td {

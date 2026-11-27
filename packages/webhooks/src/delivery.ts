@@ -365,18 +365,75 @@ export async function deliverWorkflowWebhook(
   jobAttempt = 1,
   audit?: WorkflowAuditPort,
 ) {
+  const retry = await deps.db.connection().execute(async (connection) => {
+    // A lease can expire between marker commit and send. Serialize both transactions
+    // on one connection so another worker cannot reuse this fresh marker as a retry.
+    const key = sql`hashtextextended(${`hourmere.workflow-webhook-delivery:${deliveryId.toLowerCase()}`}, 0)`
+    let acquired: boolean | undefined
+    async function release() {
+      // A canceled acquisition may have taken the lock before losing its result.
+      if (acquired === false) return
+      try {
+        await sql`SELECT pg_advisory_unlock(${key})`.execute(connection)
+      } catch (error) {
+        // If the unlock itself was canceled, retire this session so the pool
+        // cannot reuse it while the session lock is held.
+        await sql`SELECT pg_terminate_backend(pg_backend_pid())`.execute(connection).catch(() => {})
+        throw error
+      }
+    }
+    let retry = true
+    try {
+      const lock = await sql<{
+        acquired: boolean
+      }>`SELECT pg_try_advisory_lock(${key}) AS acquired`.execute(connection)
+      acquired = lock.rows[0]?.acquired
+      if (acquired)
+        retry = await sendWorkflowWebhook(
+          { ...deps, db: connection },
+          deliveryId,
+          signal,
+          jobAttempt,
+          audit,
+        )
+    } catch (error) {
+      await release().catch(() => {})
+      throw error
+    }
+    await release()
+    return retry
+  })
+  throwIfWebhookRetry(retry, signal)
+}
+
+async function sendWorkflowWebhook(
+  deps: WebhookDeps,
+  deliveryId: string,
+  signal: AbortSignal,
+  jobAttempt: number,
+  audit?: WorkflowAuditPort,
+) {
   const identity = await deps.db
     .selectFrom('webhook_deliveries')
     .select(['workflow_run_id', 'organization_id', 'booking_id', 'webhook_id'])
     .where('id', '=', deliveryId)
     .where('status', '=', 'pending')
     .executeTakeFirst()
-  if (!identity?.workflow_run_id) return
+  if (!identity?.workflow_run_id) return false
   // Keep workflow schema initialization out of ordinary webhook delivery.
   const { lockWorkflowWebhookRun, workflowAuditPort } = await import('@hourmere/workflows')
   const runId = identity.workflow_run_id
   const now = deps.now ?? (() => Temporal.Now.instant())
-  const retry = await deps.db.transaction().execute(async (trx) => {
+  const lockEndpoint = (trx: Db) =>
+    trx
+      .selectFrom('webhooks')
+      .selectAll()
+      .where('id', '=', identity.webhook_id)
+      .forShare()
+      .executeTakeFirst()
+  const lockDelivery = (trx: Db) =>
+    trx.selectFrom('webhook_deliveries').selectAll().where('id', '=', deliveryId).forUpdate()
+  const admitted = await deps.db.transaction().execute(async (trx) => {
     // Match capture and lifecycle lock order. The endpoint and delivery lock order
     // remains the same as for booking webhooks.
     const locked = await lockWorkflowWebhookRun(trx, {
@@ -386,97 +443,90 @@ export async function deliverWorkflowWebhook(
       webhookId: identity.webhook_id,
     })
     const run = locked?.eligibility
-    const endpoint = await trx
-      .selectFrom('webhooks')
-      .selectAll()
-      .where('id', '=', identity.webhook_id)
-      .forShare()
-      .executeTakeFirst()
+    const endpoint = await lockEndpoint(trx)
     if (!endpoint) return false
-    const delivery = await trx
-      .selectFrom('webhook_deliveries')
-      .select(['status', 'event_type', 'last_attempt_at', 'created_at'])
-      .where('id', '=', deliveryId)
-      .executeTakeFirst()
+    const delivery = await lockDelivery(trx).executeTakeFirst()
     if (delivery?.status !== 'pending') return false
-    const eligible =
-      run &&
-      deps.enabled &&
-      endpoint.is_active &&
-      endpoint.destination_kind === 'webhook' &&
-      endpoint.events.includes(delivery.event_type) &&
-      (endpoint.event_type_id === null || endpoint.event_type_id === run.eventTypeId)
-    const credentials = eligible ? webhookCredentials(deps, endpoint) : undefined
-    let markedHere = false
-    if (
-      eligible &&
-      credentials?.error === null &&
-      delivery.last_attempt_at === null &&
-      !signal.aborted &&
-      webhookUrl(endpoint.url, deps.privateTargets)
-    ) {
-      // The run serializes senders. Keep its and the endpoint's locks while a short
-      // separate transaction records admission to the first guarded transport attempt.
-      // A process lost after the receiver accepts can then retry this same delivery ID.
-      markedHere = await deps.db.transaction().execute(async (marker) => {
-        const current = await marker
-          .selectFrom('webhook_deliveries')
-          .select(['status', 'last_attempt_at'])
-          .where('id', '=', deliveryId)
-          .forUpdate()
-          .executeTakeFirst()
-        const started = now()
-        if (
-          current?.status !== 'pending' ||
-          current.last_attempt_at !== null ||
-          signal.aborted ||
-          started.epochMilliseconds >= run.expiresAt ||
-          delivery.created_at.getTime() < started.subtract({ hours: 24 * 30 }).epochMilliseconds
-        )
-          return false
-        await marker
-          .updateTable('webhook_deliveries')
-          .set({ last_attempt_at: new Date(started.epochMilliseconds) })
-          .where('id', '=', deliveryId)
-          .execute()
-        return true
-      })
-    }
-    let current = await trx
-      .selectFrom('webhook_deliveries')
-      .selectAll()
-      .where('id', '=', deliveryId)
-      .forUpdate()
-      .executeTakeFirst()
-    if (current?.status !== 'pending') return false
     const attemptAt = now()
-    async function recordOutcome(outcome: 'delivered' | 'failed', reason?: 'expired') {
-      if (!locked) return
-      await (audit ?? workflowAuditPort).record(trx, {
-        ...locked.auditIdentity,
-        event: outcome === 'delivered' ? 'workflow.webhook_completed' : 'workflow.webhook_failed',
-        occurredAt: attemptAt,
-        actor: { kind: 'background', job: 'dispatch' },
-        ...(reason && { reason }),
-      })
-    }
-    if (!eligible) {
-      await skipWebhookDelivery(trx, deliveryId, 'disabled')
-      await recordOutcome('failed')
-      return false
-    }
-    const firstAttempt = markedHere || current.last_attempt_at === null
-    if (
-      (firstAttempt && attemptAt.epochMilliseconds >= run.expiresAt) ||
-      delivery.created_at.getTime() < attemptAt.subtract({ hours: 24 * 30 }).epochMilliseconds
+    const auditIdentity = locked?.auditIdentity
+    async function recordOutcome(
+      connection: Db,
+      occurredAt: Temporal.Instant,
+      outcome: 'pending' | 'delivered' | 'failed',
+      reason?: 'expired',
     ) {
-      await skipWebhookDelivery(trx, deliveryId, 'expired', markedHere)
-      await recordOutcome('failed', 'expired')
+      if (auditIdentity && outcome !== 'pending')
+        await (audit ?? workflowAuditPort).record(connection, {
+          ...auditIdentity,
+          event: outcome === 'delivered' ? 'workflow.webhook_completed' : 'workflow.webhook_failed',
+          occurredAt,
+          actor: { kind: 'background', job: 'dispatch' },
+          ...(reason && { reason }),
+        })
+    }
+    if (!run || !deps.enabled || !workflowWebhookSubscribed(endpoint, delivery, run.eventTypeId)) {
+      await skipWebhookDelivery(trx, deliveryId, 'disabled')
+      await recordOutcome(trx, attemptAt, 'failed')
       return false
     }
-    // This worker knows it has not yet entered the transport. A marker left by
-    // a previous worker is ambiguous and must still allow a retry.
-    if (markedHere && signal.aborted) current = { ...current, last_attempt_at: null }
+    const firstAttempt = delivery.last_attempt_at === null
+    if (workflowWebhookExpired(delivery, attemptAt, firstAttempt, run.expiresAt)) {
+      await skipWebhookDelivery(trx, deliveryId, 'expired')
+      await recordOutcome(trx, attemptAt, 'failed', 'expired')
+      return false
+    }
+    const credentials = workflowWebhookCredentials(deps, endpoint)
+    if (credentials.error || signal.aborted) {
+      const { retry, outcome } = await attemptWebhook(
+        trx,
+        deps,
+        endpoint,
+        delivery,
+        signal,
+        attemptAt,
+        jobAttempt,
+        credentials,
+      )
+      await recordOutcome(trx, attemptAt, outcome)
+      return retry
+    }
+    // The marker commits with the lifecycle checks, before the transport. If
+    // acknowledgement rolls back, a later job may retry the same delivery ID.
+    if (firstAttempt)
+      await trx
+        .updateTable('webhook_deliveries')
+        .set({ last_attempt_at: new Date(attemptAt.epochMilliseconds) })
+        .where('id', '=', deliveryId)
+        .execute()
+    return { run, firstAttempt, recordOutcome }
+  })
+  if (typeof admitted === 'boolean') return admitted
+
+  return deps.db.transaction().execute(async (trx) => {
+    // Keep the endpoint/delivery sender locks for pause, rotation and acknowledgement.
+    // The workflow lifecycle locks were released when the marker committed.
+    const endpoint = await lockEndpoint(trx)
+    if (!endpoint) return false
+    const delivery = await lockDelivery(trx).executeTakeFirst()
+    if (delivery?.status !== 'pending') return false
+    const { run, firstAttempt, recordOutcome } = admitted
+    const attemptAt = now()
+    if (!workflowWebhookSubscribed(endpoint, delivery, run.eventTypeId)) {
+      await skipWebhookDelivery(trx, deliveryId, 'disabled', firstAttempt)
+      await recordOutcome(trx, attemptAt, 'failed')
+      return false
+    }
+    if (workflowWebhookExpired(delivery, attemptAt, firstAttempt, run.expiresAt)) {
+      await skipWebhookDelivery(trx, deliveryId, 'expired', firstAttempt)
+      await recordOutcome(trx, attemptAt, 'failed', 'expired')
+      return false
+    }
+    const credentials = workflowWebhookCredentials(deps, endpoint)
+    // Only this worker's fresh marker can be cleared for a known unstarted attempt.
+    const current =
+      firstAttempt && (signal.aborted || credentials.error)
+        ? { ...delivery, last_attempt_at: null }
+        : delivery
     const { retry, outcome } = await attemptWebhook(
       trx,
       deps,
@@ -487,10 +537,34 @@ export async function deliverWorkflowWebhook(
       jobAttempt,
       credentials,
     )
-    if (outcome !== 'pending') await recordOutcome(outcome)
+    await recordOutcome(trx, attemptAt, outcome)
     return retry
   })
-  throwIfWebhookRetry(retry, signal)
+}
+
+function workflowWebhookSubscribed(
+  endpoint: Selectable<Webhooks>,
+  delivery: Selectable<WebhookDeliveries>,
+  eventTypeId: string,
+) {
+  return (
+    endpoint.is_active &&
+    endpoint.destination_kind === 'webhook' &&
+    endpoint.events.includes(delivery.event_type) &&
+    (endpoint.event_type_id === null || endpoint.event_type_id === eventTypeId)
+  )
+}
+
+function workflowWebhookExpired(
+  delivery: Selectable<WebhookDeliveries>,
+  now: Temporal.Instant,
+  firstAttempt: boolean,
+  expiresAt: number,
+) {
+  return (
+    (firstAttempt && now.epochMilliseconds >= expiresAt) ||
+    delivery.created_at.getTime() < now.subtract({ hours: 24 * 30 }).epochMilliseconds
+  )
 }
 
 const guardedWorkflowWebhook = workflowExecution(
@@ -616,7 +690,14 @@ export async function deliverWebhook(
   throwIfWebhookRetry(retry, signal)
 }
 
-function webhookCredentials(deps: WebhookDeps, endpoint: Selectable<Webhooks>) {
+interface WebhookCredentials {
+  destination: string
+  isSlack: boolean
+  secret: string
+  error: 'secret_unavailable' | 'transport_error' | null
+}
+
+function webhookCredentials(deps: WebhookDeps, endpoint: Selectable<Webhooks>): WebhookCredentials {
   let error: 'secret_unavailable' | null = null
   let secret: string
   let destination = endpoint.url
@@ -643,6 +724,13 @@ function webhookCredentials(deps: WebhookDeps, endpoint: Selectable<Webhooks>) {
     secret = ''
   }
   return { destination, isSlack, secret, error }
+}
+
+function workflowWebhookCredentials(deps: WebhookDeps, endpoint: Selectable<Webhooks>) {
+  const credentials = webhookCredentials(deps, endpoint)
+  if (!credentials.error && !webhookUrl(endpoint.url, deps.privateTargets))
+    credentials.error = 'transport_error'
+  return credentials
 }
 
 async function attemptWebhook(

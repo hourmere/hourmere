@@ -115,21 +115,23 @@ endpoint or one outside the credential's organization. See
 `isActive: false` 暂停。删除会一并清除保留的投递记录，CLI 需加 `--yes` 确认；
 不存在或属于其他组织的端点均返回 `webhook_not_found`。
 没有单独的端点详情或测试投递操作。请从列表查找端点 ID，并通过触发已订阅事件的预约验证接收端。
-工作流默认关闭。关闭时创建或更新端点并新增 `workflow.executed` 订阅会返回
-`404 workflows_disabled`，创建时优先于 `409 webhooks_disabled`。
+工作流默认开启。设置 `WORKFLOWS_ENABLED=false` 后，创建或更新端点并新增
+`workflow.executed` 订阅会返回 `404 workflows_disabled`，创建时优先于 `409 webhooks_disabled`。
 
 `events` must be a nonempty, duplicate-free subset of `booking.created`,
 `booking.rescheduled`, `booking.cancelled`, `booking.reschedule_requested`,
 `booking.reschedule_request_expired`, `booking.attendee_no_show_changed` and `workflow.executed`.
-Adding `workflow.executed` requires `WORKFLOWS_ENABLED=true`. While workflows are off,
-adding it on creation or update returns `404 workflows_disabled`. On create, that takes
-precedence over `409 webhooks_disabled`. An existing subscription can be kept or removed.
+Workflows are enabled by default. With `WORKFLOWS_ENABLED=false`, adding
+`workflow.executed` on creation or update returns `404 workflows_disabled`. On create,
+that takes precedence over `409 webhooks_disabled`. An existing subscription can be kept or removed.
 
 Request events add `data.requestId`, keep `data.status` as `confirmed`, and omit notes and management links.
 Each replacement request has its own delivery identity. There are at most ten endpoints per organization.
 The URL is immutable: create a replacement endpoint to change the destination. By default,
 URLs require HTTPS on port 443, a fully qualified public DNS hostname, no user information
-or fragment, and at most 2048 characters. Private, loopback and special-purpose destinations
+or fragment, and at most 2048 characters. The public hostname policy excludes single labels
+and names under `.local`, `.internal`, `.localhost`, `.home.arpa`, `.service.arpa`, `.alt`,
+`.test`, `.example`, `.invalid` or `.onion`. Private, loopback and special-purpose destinations
 are refused unless the operator explicitly allows an eligible private destination below.
 Syntax and the current operator policy are checked when creating an endpoint and updating
 its subscription/active settings. An update containing only `isActive: false` (plus the ID
