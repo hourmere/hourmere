@@ -407,3 +407,23 @@ for (const viewport of layoutViewports) {
     }
   }
 }
+
+test('organization list supports an audit burst and still requires a session', async ({
+  page,
+  app,
+}) => {
+  const url = `${app.url}/api/auth/organization/list`
+  const status = async () => {
+    const response = await page.request.get(url)
+    const code = response.status()
+    await response.dispose()
+    return code
+  }
+  expect(await status()).toBe(401)
+  await app.auditSignIn(true)
+  // A full page-preparation run can exceed the normal 100-request budget from one IP.
+  for (let batch = 0; batch < 11; batch++) {
+    const statuses = await Promise.all(Array.from({ length: 10 }, status))
+    expect(statuses).toEqual(Array<number>(10).fill(200))
+  }
+})

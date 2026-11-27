@@ -512,7 +512,11 @@ export const test = base.extend<{
             fileURLToPath(new URL('../../apps/web/dist', import.meta.url)),
         },
         undefined,
-        stripe ? { stripeTransport: stripe.transport } : {},
+        {
+          ...(stripe && { stripeTransport: stripe.transport }),
+          // Repeated page mounts share one loopback bucket across all apps in a worker.
+          ...(uiAudit && { organizationListRateLimitMaxForTests: 20_000 }),
+        },
       )
       let externalRequests = 0
       let authorization: string | undefined

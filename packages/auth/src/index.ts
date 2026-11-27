@@ -274,6 +274,8 @@ export interface AuthConfig {
    */
   /** Optional MCP OAuth authorization server, separate from social/calendar providers. */
   mcpOAuth?: boolean | undefined
+  /** UI audit startup may supply a larger request budget for the organization list only. */
+  organizationListRateLimitMaxForTests?: number | undefined
   /** Injected only by isolated client-metadata tests; runtime uses the pinned DNS transport. */
   mcpMetadataFetcher?: Parameters<typeof mcpOAuthPlugins>[2]
   /**
@@ -312,6 +314,7 @@ export function createAuth({
   socialProviders = {},
   socialProviderOptions = {},
   mcpOAuth = false,
+  organizationListRateLimitMaxForTests,
   mcpMetadataFetcher,
   leaveTeamMember,
   scimClaims,
@@ -349,7 +352,19 @@ export function createAuth({
     secret,
     session: { expiresIn: AUTH_SESSION_LIFETIME_SECONDS },
     // The OAuth attack surface is the same for every NODE_ENV.
-    ...(mcpOAuth ? { rateLimit: { enabled: true } } : {}),
+    ...(mcpOAuth && {
+      rateLimit: {
+        enabled: true,
+        ...(organizationListRateLimitMaxForTests !== undefined && {
+          customRules: {
+            '/organization/list': (_request, rule) => ({
+              ...rule,
+              max: organizationListRateLimitMaxForTests,
+            }),
+          },
+        }),
+      },
+    }),
     advanced: {
       database: { generateId: 'uuid' },
       useSecureCookies: new URL(baseURL).protocol === 'https:',

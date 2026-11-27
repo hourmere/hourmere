@@ -1037,7 +1037,9 @@ export interface RunningServer {
   close(): Promise<void>
 }
 
-interface StartServerOptions extends RecurringBookingAdmissionDeps {
+interface StartServerOptions
+  extends RecurringBookingAdmissionDeps,
+    Pick<AuthConfig, 'organizationListRateLimitMaxForTests'> {
   /** In-process transport injection for isolated test-mode acceptance. */
   stripeTransport?: typeof fetch | undefined
 }
@@ -1580,8 +1582,8 @@ async function start(
       // Core notification intents precede workflow capture in the booking's transaction.
       await captureWorkflowBooking(trx, event, now, config.BETTER_AUTH_SECRET, { workflowsEnabled })
     }
-    const auth = createAuth(
-      productionAuthOptions({
+    const auth = createAuth({
+      ...productionAuthOptions({
         config,
         pool: authPool,
         db,
@@ -1590,7 +1592,8 @@ async function start(
         invitationMailLimits,
         jobs,
       }),
-    )
+      organizationListRateLimitMaxForTests: options.organizationListRateLimitMaxForTests,
+    })
     // db is closed below.
     fetch = createApp(
       productionAppOptions({
