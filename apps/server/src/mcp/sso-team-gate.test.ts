@@ -39,6 +39,7 @@ const ungated: Record<string, string> = {
   'mcp:withdraw_meeting_poll_vote': 'capability link: public poll vote withdrawal',
   'mcp:opt_out_meeting_poll_reminder': 'capability link: public poll reminder opt-out',
   'mcp:get_public_routing_form': 'public: published routing form',
+  'mcp:get_public_team': 'public: opted-in team directory',
   'mcp:route_lead': 'public: published routing form submission',
   'mcp:resolve_routing_continuation': 'capability link: capability token, no team session',
   'mcp:find_routed_slots': 'capability link: capability token, no team session',

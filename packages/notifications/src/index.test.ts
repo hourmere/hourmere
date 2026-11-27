@@ -116,8 +116,15 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
   })
 
   /** A Berlin-scheduled host in New York with one event type, booked by Ada from Tokyo. */
+  const mixedOptions = ['الخطة (Pro)', '中文', 'עברית (Team)']
+
   async function booked(
-    options: { guests?: boolean; now?: Temporal.Instant; start?: Temporal.Instant } = {},
+    options: {
+      guests?: boolean
+      now?: Temporal.Instant
+      start?: Temporal.Instant
+      mixedAnswers?: boolean
+    } = {},
   ) {
     const host = await f.host({ name: 'Grace Hopper', timeZone: 'America/New_York' })
     await f.schedule(host.userId)
@@ -129,6 +136,17 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
       location: { kind: 'link', url: 'https://meet.example.com/abc' },
       questions: [
         { id: 'topic', label: 'What should we talk about?', type: 'long_text', required: false },
+        ...(options.mixedAnswers
+          ? [
+              {
+                id: 'plans',
+                label: 'Plans',
+                type: 'multi_select',
+                required: false,
+                options: mixedOptions,
+              },
+            ]
+          : []),
       ],
     })
     const result = await createPublicBooking(
@@ -139,7 +157,10 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
         start: options.start ?? instant(START),
         invitee: { name: 'Ada Lovelace', email: 'ada@example.com', timeZone: 'Asia/Tokyo' },
         guests: options.guests ? [{ name: 'Charles Babbage', email: 'charles@example.com' }] : [],
-        responses: { topic: 'Engines,\nanalytical ones.' },
+        responses: {
+          topic: 'Engines,\nanalytical ones.',
+          ...(options.mixedAnswers && { plans: mixedOptions }),
+        },
       },
     )
     const hostEmail = (
@@ -615,7 +636,7 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
   })
 
   it('confirms to the host, the invitee and guests, each in their own time zone', async () => {
-    const { bookingId, hostEmail } = await booked({ guests: true })
+    const { bookingId, hostEmail } = await booked({ guests: true, mixedAnswers: true })
     const { mailer, sent } = testMailer()
     await sendBookingNotification(deps(mailer), bookingId, 'confirmed')
 
@@ -638,6 +659,10 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
     expect(toHost?.text).toContain('Invitee: Ada Lovelace <ada@example.com>')
     expect(toHost?.text).toContain('Guests: Charles Babbage <charles@example.com>')
     expect(toHost?.text).toContain('What should we talk about?\n  Engines,\n  analytical ones.')
+    expect(toHost?.text).toContain(`Plans\n  ${mixedOptions.join(', ')}`)
+    expect(toHost?.html).toContain(mixedOptions.map((option) => `<bdi>${option}</bdi>`).join(', '))
+    expect(toInvitee?.html).not.toContain(mixedOptions[0])
+    expect(toGuest?.html).not.toContain(mixedOptions[0])
     expect(toHost?.text).not.toContain('token=')
 
     for (const m of sent) {

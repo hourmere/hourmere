@@ -262,7 +262,10 @@ describe('Spanish mail catalogue', () => {
     expect(message.html).toContain('<html lang="es">')
     expect(message.text).toContain('Equipo {inviter} & <diseño>')
     expect(message.html).toContain('Equipo {inviter} &amp; &lt;diseño&gt;')
-    for (const content of [message.text, message.html ?? '']) {
+    for (const content of [
+      message.text,
+      message.html?.replace(/<\/?bdi(?: dir="ltr")?>/g, '') ?? '',
+    ]) {
       expect(content).toContain(
         'Inicie sesión con ada@example.test, la dirección de correo electrónico que recibió la invitación, y verifíquela',
       )

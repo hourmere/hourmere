@@ -7,6 +7,7 @@ import { createFixtures, type Fixtures } from '@hourmere/scheduling/testing'
 import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createApp } from '../app.ts'
+import { publicRoutes } from '../routes/public.ts'
 import { productTools } from '../server.ts'
 import { mcpEndpoint } from './endpoint.ts'
 
@@ -94,7 +95,8 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP persisted scope matrix', () => {
       authHandler: auth.handler,
       resolveCaller: createCallerResolver({ auth, db }),
       publicUrl,
-      mcp: mcpEndpoint({ tools: productTools({ db }) }),
+      routes: [publicRoutes({ db, teamPublicHomeOrganizationIds: [team] })],
+      mcp: mcpEndpoint({ tools: productTools({ db, teamPublicHomeOrganizationIds: [team] }) }),
     })
   })
   afterAll(async () => {
@@ -128,6 +130,23 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP persisted scope matrix', () => {
     expect(result.isError).toBe(true)
     return JSON.parse(result.content[0]?.text ?? '')
   }
+
+  it('returns the same public team directory and neutral missing result as REST', async () => {
+    const handle = 'mcp-scoped-team'
+    const res = await app.request(`/api/v1/public/teams/${handle}`)
+    expect(res.status).toBe(200)
+    const directory = await res.json()
+    expect(directory).toMatchObject({ team: { slug: handle }, eventTypes: [{ slug: 'intro' }] })
+    for (const scope of scopes) {
+      const key = keys.get(`${scope}:personal`) as Key
+      expect(success(await call(key, 'get_public_team', { handle }))).toEqual(directory)
+      const missing = await app.request('/api/v1/public/teams/mcp-scoped-host')
+      expect(missing.status).toBe(404)
+      expect(failure(await call(key, 'get_public_team', { handle: 'mcp-scoped-host' }))).toEqual(
+        await missing.json(),
+      )
+    }
+  })
 
   it.each(scopes)('%s keeps personal/team reads and credential attribution', async (scope) => {
     for (const [space, organizationId, event] of [
