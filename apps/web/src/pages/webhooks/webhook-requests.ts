@@ -1,5 +1,6 @@
 import { api, type Schemas } from '../../api/client.ts'
 import { RequestError } from '../../api/errors.ts'
+import type { MessageKey } from '../../i18n/translate.ts'
 import type { WebhookDraft, WebhookEndpoint, WebhookEvent } from './WebhookViews.tsx'
 
 export type WebhookAction =
@@ -71,6 +72,74 @@ function secretFrom(result: { secret: string }): string {
 export async function readWebhooks(organizationId: string, signal: AbortSignal) {
   const rows = await dataFrom(api.GET('/api/v1/webhooks', options(organizationId, signal)), 200)
   return rows.map((row) => endpointFrom(row, organizationId))
+}
+
+const DELIVERY_ERRORS = {
+  transport_error: 'Transport error',
+  http_error: 'HTTP error',
+  disabled: 'Webhook disabled',
+  expired: 'Delivery expired',
+  secret_unavailable: 'Signing secret unavailable',
+  interrupted: 'Delivery interrupted',
+  job_missing: 'Delivery job unavailable',
+} as const satisfies Record<string, MessageKey>
+
+function deliveryErrorLabel(code: string | null): MessageKey | null {
+  if (code === null) return null
+  return Object.hasOwn(DELIVERY_ERRORS, code)
+    ? DELIVERY_ERRORS[code as keyof typeof DELIVERY_ERRORS]
+    : 'Unknown delivery error'
+}
+
+function deliveryFrom({
+  id,
+  eventId,
+  eventType,
+  bookingId,
+  status,
+  attempts,
+  httpStatus,
+  lastError,
+  createdAt,
+  lastAttemptAt,
+  deliveredAt,
+}: Schemas['WebhookDelivery']) {
+  return {
+    id,
+    eventId,
+    eventType,
+    bookingId,
+    status,
+    attempts,
+    httpStatus,
+    lastErrorLabel: deliveryErrorLabel(lastError),
+    createdAt,
+    lastAttemptAt,
+    deliveredAt,
+  }
+}
+
+export type WebhookDelivery = ReturnType<typeof deliveryFrom>
+
+export async function readWebhookDeliveries(
+  organizationId: string,
+  id: string,
+  after: string | null,
+  signal: AbortSignal,
+) {
+  const request = options(organizationId, signal)
+  const page = await dataFrom(
+    api.GET('/api/v1/webhooks/{id}/deliveries', {
+      ...request,
+      params: {
+        ...request.params,
+        path: { id },
+        query: after === null ? undefined : { after },
+      },
+    }),
+    200,
+  )
+  return { rows: page.data.map(deliveryFrom), nextAfter: page.nextAfter }
 }
 
 export async function changeWebhook(
