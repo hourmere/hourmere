@@ -989,7 +989,7 @@ describe.skipIf(!databaseUrl)('SCIM Group resources', () => {
   it.each([false, true])(
     'enforces the production switch for Group and discovery routes (%s)',
     async (enabled) => {
-      const detail = 'SCIM provisioning is disabled.'
+      const detail = 'Resource not found.'
       const parent = await team('Production assembly parent')
       const child = await team('Production assembly child')
       const token = await issue(parent.id)

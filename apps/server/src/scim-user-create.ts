@@ -221,6 +221,17 @@ async function create(
     const code = invitationRefusalCode(error)
     if (code === 'INVITATION_RATE_LIMITED' || code === 'INVITATION_PENDING_LIMIT')
       return invitationsLimited().reply
+    // The first expiry is retried inside the transaction. A second expiry rolls the
+    // entire create back and tells the identity provider when it can try again.
+    if (code === 'INVITATION_INELIGIBLE')
+      return refuse(
+        503,
+        'User provisioning is temporarily unavailable. Retry shortly.',
+        undefined,
+        {
+          'Retry-After': '1',
+        },
+      ).reply
     // Anything else rolls everything back as a server error the provider retries.
     throw error
   }

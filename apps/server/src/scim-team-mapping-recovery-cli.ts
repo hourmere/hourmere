@@ -10,12 +10,7 @@ import { recoverScimTeamMapping, ScimMappingRecovery } from './scim-team-mapping
 export async function runScimTeamMappingRecovery(
   url: string,
   target: z.infer<typeof ScimMappingRecovery>,
-  resourcesEnabled: boolean,
 ) {
-  if (!resourcesEnabled) {
-    console.error('SCIM provisioning is disabled. Enable it before running mapping recovery.')
-    return 1
-  }
   const db = createDb(createPool(url))
   const jobs = createJobs({
     connectionString: url,
@@ -27,7 +22,7 @@ export async function runScimTeamMappingRecovery(
   let exitCode = 0
   try {
     await jobs.start()
-    const result = await recoverScimTeamMapping(db, jobs, resourcesEnabled, target)
+    const result = await recoverScimTeamMapping(db, jobs, target)
     console.log(
       result === 'unchanged' ? 'No changes made.' : `Mapping ${result}. Owner notices queued.`,
     )
@@ -73,6 +68,6 @@ if (import.meta.main) {
     console.error(scim.error.issues[0]?.message)
     process.exitCode = 1
   } else {
-    process.exitCode = await runScimTeamMappingRecovery(url, target.data, scim.data)
+    process.exitCode = await runScimTeamMappingRecovery(url, target.data)
   }
 }

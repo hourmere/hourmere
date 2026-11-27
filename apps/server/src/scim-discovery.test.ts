@@ -926,7 +926,7 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM discovery over HTTP', () => {
     for (const resource of discovery) {
       const response = await scim(application, organizationId, resource, bearer(issued.secret))
       expect(response.status).toBe(404)
-      expect(await response.json()).toEqual(scimError(404, 'SCIM provisioning is disabled.'))
+      expect(await response.json()).toEqual(scimError(404, 'Resource not found.'))
     }
   })
 
@@ -992,7 +992,7 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM discovery over HTTP', () => {
     resources.map((resource) => ({
       resource,
       status: 404,
-      body: scimError(404, 'SCIM provisioning is disabled.'),
+      body: scimError(404, 'Resource not found.'),
     }))
 
   it('runs the query parser only with the production switch enabled', async () => {
