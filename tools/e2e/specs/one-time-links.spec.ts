@@ -179,6 +179,9 @@ for (const locale of ['en', 'zh-CN'] as const) {
       const pages = await Promise.all(invitees.map((invitee) => invitee.newPage()))
       for (const invitee of pages) {
         await openPrivateLink(invitee, url)
+        await expect(
+          invitee.locator('.event-facts svg[aria-hidden="true"][focusable="false"]'),
+        ).toHaveCount(2)
         await pickSlot(invitee, invitee)
         await fillInvitee(invitee)
       }

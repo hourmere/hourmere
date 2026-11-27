@@ -3,12 +3,15 @@ import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type pg from 'pg'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { insertRecord } from './group-seats-fixtures.ts'
 import { migrationsDir, runMigrations } from './migrate.ts'
 import { createSeries, createTenant } from './recurring-series-protections.ts'
+import { MIGRATION_REPLAY_TIMEOUT } from './testing/migration-replay.ts'
 import { createTestDatabase, type TestDatabase } from './testing.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
+
+vi.setConfig({ testTimeout: MIGRATION_REPLAY_TIMEOUT, hookTimeout: MIGRATION_REPLAY_TIMEOUT })
 
 const serverUrl = process.env.DATABASE_URL
 const migration = '0127_recurring_series_delivery.sql'
@@ -87,7 +90,9 @@ describe.skipIf(!serverUrl)('recurring series delivery migration', () => {
       await Promise.all(
         predecessors.map((file) => copyFile(join(migrationsDir, file), join(directory, file))),
       )
-      upgraded = await createTestDatabase(serverUrl as string, directory, { tag: 'series_upgrade' })
+      upgraded = await createTestDatabase(serverUrl as string, directory, {
+        tag: 'series_upgrade',
+      })
       const pool = upgraded.pool
       expect((await ledger(pool)).rows.at(-1)?.name).toBe('0126_recurring_series.sql')
       await seedPredecessor(pool)
@@ -126,5 +131,5 @@ describe.skipIf(!serverUrl)('recurring series delivery migration', () => {
         await rm(directory, { recursive: true, force: true })
       }
     }
-  }, 120_000)
+  })
 })

@@ -85,6 +85,9 @@ npm run dev --workspace @hourmere/web
 Signed-in pages live under `/app` (`/app/event-types`, `/app/availability`, `/app/bookings`, `/app/api-keys`, `/app/settings`); `/sign-in` stays at the top level, and the rest of the root is for public booking pages (`/{handle}/{slug}` for personal types and
 `/team/{teamSlug}/{slug}` for individual, collective and activated round-robin team types). After signing in, people only return to pages under `/app`.
 
+See the [public booking week-view design evaluation](docs/booking-week-view.md)
+for a proposed alternate layout and its implementation estimate.
+
 Public meeting-poll pages live at `/poll` and `/poll/voter`, with private credentials
 in URL fragments and POST bodies. They support verification, voting and read-only closed
 ballots without login. Personal event owners and current team owners or admins can
@@ -133,10 +136,8 @@ The privacy policy's effective and last-updated dates and the terms' effective d
 `LEGAL_PUBLICATION_DATE` in `apps/site/src/data/legal.ts`, currently `2026-10-22`.
 Keep that date on later deployments, including documentation and homepage changes; change it
 only when publishing revised legal text. A placeholder or invalid date stops the site build.
-Environment variables cannot override the source date. CI retains a fixture-date substitution
-for a placeholder source date; with the current committed date, that substitution makes no
-change. Its build steps restore the source with an exit trap and delete the generated site
-output. Never deploy fixture output or commit a fixture date.
+Environment variables cannot override the source date. CI builds the site using the committed
+date.
 
 ## Self-hosting
 
