@@ -33,9 +33,8 @@ export type ScimClaimFinish = (
 ) => Promise<void>
 
 /**
- * The admission decision for a proof: refused (a live admission blocker), or admitted, with a
- * finish step when the claim can be completed. An admission without a finish is the ordinary
- * invitation acceptance; the entry stays unlinked.
+ * The admission decision for a proof: refused, or admitted with a finish step when the
+ * claim can be completed. An admission without a finish leaves the entry unlinked.
  */
 export type ScimClaimDecision = { refused: true } | { refused: false; finish?: ScimClaimFinish }
 
@@ -70,6 +69,38 @@ function alreadyLinked(trx: Db, connectionId: string, userId: string) {
     .where('linked_user_id', '=', userId)
     .where('retired_at', 'is', null)
     .executeTakeFirst()
+}
+
+/** Under the organization and invitation locks, look for independent administrator consent. */
+async function administratorAuthorizedInvitation(trx: Db, proof: ScimInvitationProof) {
+  const invitation = await trx
+    .selectFrom('auth.invitation as invitation')
+    .leftJoin('invitation_deliveries as delivery', 'delivery.invitation_id', 'invitation.id')
+    .select(['delivery.resend_request_id', 'delivery.scim_issued'])
+    .select((eb) =>
+      eb
+        .selectFrom('audit_events as event')
+        .select('event.actor_type')
+        .whereRef('event.organization_id', '=', 'invitation.organizationId')
+        .whereRef('event.occurred_at', '>=', 'invitation.createdAt')
+        .where('event.action', '=', 'membership.invited')
+        .where('event.target_type', '=', 'invitation')
+        .where('event.target_id', '=', sql<string>`${eb.ref('invitation.id')}::text`)
+        .orderBy('event.occurred_at', 'desc')
+        .limit(1)
+        .as('issuer'),
+    )
+    .where('invitation.organizationId', '=', proof.organizationId)
+    .where('invitation.id', '=', proof.invitationId)
+    .executeTakeFirstOrThrow()
+  // A native renewal carries independent authority. For original invitations, the audit
+  // takes precedence because SCIM can add a missing delivery to an app invitation. A legacy
+  // app delivery can predate issuance auditing.
+  return (
+    invitation.resend_request_id !== null ||
+    invitation.issuer === 'user' ||
+    (invitation.issuer === null && invitation.scim_issued === false)
+  )
 }
 
 export const scimClaimCompletion: ScimClaimCompletion = {
@@ -107,20 +138,20 @@ export const scimClaimCompletion: ScimClaimCompletion = {
       .forUpdate()
       .executeTakeFirst()
     if (entry?.retired_at === null && !entry.active) return { refused: true }
-    // An expired claim is not completed even when an administrator resent its invitation:
-    // the person is admitted by that invitation alone and the entry stays unlinked.
+    // A directory invitation cannot admit a person on the strength of an invalid claim.
+    // Independent invitation authority can still admit them without linking the entry.
     if (
       !entry ||
       entry.retired_at !== null ||
-      entry.linked_user_id !== null ||
       claim.completed_at !== null ||
       claim.invalidated_at !== null ||
       !claim.current ||
       claim.work_email !== proof.mailbox
     )
-      return admitted
+      return (await administratorAuthorizedInvitation(trx, proof)) ? admitted : { refused: true }
     // One live entry per account in a connection: an account another live entry already
     // links is admitted by its invitation, and this entry stays unlinked.
+    if (entry.linked_user_id !== null) return admitted
     const linked = await alreadyLinked(trx, claim.connection_id, proof.userId)
     if (linked) return admitted
     return { refused: false, finish: finishScimClaim(proof, entry.id, claim.id) }

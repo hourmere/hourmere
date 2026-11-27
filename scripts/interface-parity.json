@@ -140,6 +140,18 @@
     "mcp": "cancel_booking",
     "cli": "cancel"
   },
+  "cancelPublicCheckout": {
+    "exemption": "invitee-checkout",
+    "reason": "The Stripe return page releases only the unpaid hold identified by its per-attempt capability."
+  },
+  "getPublicCheckoutStatus": {
+    "exemption": "invitee-checkout",
+    "reason": "The Stripe return page sends its private attempt capability in a POST body instead of a URL."
+  },
+  "startPublicCheckout": {
+    "exemption": "invitee-checkout",
+    "reason": "Paid admission hands off to Stripe Checkout and returns to the original invitee browser tab."
+  },
   "cancelTeamBooking": {
     "exemption": "browser-session-only",
     "reason": "Team-wide owner/admin cancellation is browser-session-only; host cancellation does not grant this authority."

@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { createRoute, z } from '@hono/zod-openapi'
 import * as calendars from '@hourmere/calendars'
+import { PAYMENT_CURRENCIES } from '@hourmere/core/payment'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import * as scheduling from '@hourmere/scheduling'
@@ -41,6 +42,7 @@ function routeCopy<T>(file: 'public' | 'bookings', returned: string, change?: Ch
     source.replace(/^import[\s\S]*?from '[^']+'\n/gm, '').replace(/^export \{[^\n]+\}\n/gm, ''),
   ).replace(/\bexport /g, '')
   const bindings = {
+    PAYMENT_CURRENCIES,
     publicBookingAuditOrigin,
     publicRoutingFormRoutes,
     PublicBranding,

@@ -10,6 +10,7 @@ import {
   selectDurationMinutes,
   toIso,
 } from './availability.ts'
+import { type BookingPaymentSummary, readBookingPayment } from './booking-payment-details.ts'
 import {
   assertBookingLocallyManaged,
   assertInviteeRescheduleAllowed,
@@ -38,6 +39,7 @@ import { readManagedRoutingAnswers } from './routing-booking.ts'
 /** The booking behind a manage token, with what the invitee needs to recognize it. */
 export interface ManagedBooking extends Booking {
   branding?: PublicBranding
+  payment?: BookingPaymentSummary
   /** The current event type, with the purchased duration for paid bookings. */
   eventType: { title: string; durationMinutes: number; allowedDurationsMinutes?: number[] } | null
   /** The people the invitee meets: each host's name (their handle if they have no name). */
@@ -135,6 +137,10 @@ async function readManagedBookingDetails(
       : undefined
   const start = Temporal.Instant.from(booking.start)
   const paid = details.payment_hold_expires_at || details.current_booking_id
+  const payment =
+    paid || booking.rescheduledFromId
+      ? await readBookingPayment(ctx.db, booking.id, details.organization_id)
+      : undefined
   const durationOptions =
     !paid && eventType && eventType.allowed_durations_minutes.length > 1
       ? {
@@ -148,6 +154,7 @@ async function readManagedBookingDetails(
   return {
     ...booking,
     ...(branding && { branding }),
+    ...(payment && { payment: payment.summary }),
     eventType: eventType
       ? {
           title: eventType.title,

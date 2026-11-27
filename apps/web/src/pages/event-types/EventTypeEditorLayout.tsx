@@ -1,3 +1,4 @@
+import type { EventPayment } from '@hourmere/core/payment'
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react'
 import { api, type Schemas, unwrap } from '../../api/client.ts'
 import { loadBrandLogo, type Profile } from '../../api/resources.ts'
@@ -42,6 +43,7 @@ function previewEvent(
   profile: Profile | null,
   smsRemindersAvailable: boolean | undefined,
   branding: Schemas['PublicEventType']['branding'],
+  payment: EventPayment | null,
 ): Schemas['PublicEventType'] {
   const duration = parseWhole(draft.durationMinutes)
   const { min, max } = RULES.durationMinutes
@@ -93,6 +95,7 @@ function previewEvent(
       team: { name: me.organization.name, slug: me.organization.slug },
     }),
     ...(branding && { branding }),
+    ...(payment && { payment }),
   }
 }
 
@@ -103,6 +106,7 @@ export function EventTypeEditorLayout({
   profile,
   smsRemindersAvailable,
   canReadBranding,
+  payment,
 }: {
   children: ReactNode
   draft: EventTypeDraft
@@ -110,6 +114,7 @@ export function EventTypeEditorLayout({
   profile: Profile | null
   smsRemindersAvailable: boolean | undefined
   canReadBranding: boolean
+  payment: EventPayment | null
 }) {
   const { t } = useI18n()
   const title = t('Booking page preview')
@@ -132,7 +137,7 @@ export function EventTypeEditorLayout({
 
   const preview = (wide || open) && (
     <BookingPagePreview
-      event={previewEvent(draft, me, profile, smsRemindersAvailable, brand?.branding)}
+      event={previewEvent(draft, me, profile, smsRemindersAvailable, brand?.branding, payment)}
       {...(brand?.logoSrc && { logoSrc: brand.logoSrc })}
     />
   )

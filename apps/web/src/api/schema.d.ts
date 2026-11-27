@@ -3360,6 +3360,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/public/{handle}/{slug}/checkout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reserve a paid time and start Stripe Checkout
+         * @description Paid personal events only. Matching replays keep the original hold and Session. Stripe-hosted Checkout collects payment.
+         */
+        post: operations["startPublicCheckout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/public/{handle}/{slug}/slots": {
         parameters: {
             query?: never;
@@ -3507,6 +3527,46 @@ export interface paths {
         get: operations["getPublicBrandLogo"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/checkout/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Release an unpaid reservation
+         * @description Use the private status capability from checkout creation. Checking a Stripe return changes no booking.
+         */
+        post: operations["cancelPublicCheckout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/checkout/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check a private paid booking attempt
+         * @description Use the private status capability from checkout creation. Checking a Stripe return changes no booking.
+         */
+        post: operations["getPublicCheckoutStatus"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5233,7 +5293,7 @@ export interface paths {
         post?: never;
         /**
          * Revoke the caller’s exact SSO delegation
-         * @description Requires a current team browser session. Stays available while SSO_OIDC_ENABLED is off.
+         * @description Requires a current team browser session. Stays available while the protocol settings are off.
          */
         delete: operations["revokeSsoDelegation"];
         options?: never;
@@ -5252,7 +5312,7 @@ export interface paths {
         put?: never;
         /**
          * Create or rotate a DNS domain challenge
-         * @description Verified team owner/admin browser session with fresh proof only. The TXT challenge is returned once; only its digest is stored. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.
+         * @description Verified team owner/admin browser session with fresh proof only. The TXT challenge is returned once; only its digest is stored. Returns 404 sso_disabled while both protocol settings are off.
          */
         post: operations["createSsoDomainChallenge"];
         delete?: never;
@@ -5273,7 +5333,7 @@ export interface paths {
         post?: never;
         /**
          * Retire a domain claim
-         * @description Verified team owner/admin browser session with fresh proof and expected generation. Stays available while SSO_OIDC_ENABLED is off.
+         * @description Verified team owner/admin browser session with fresh proof and expected generation. Stays available while both protocol settings are off.
          */
         delete: operations["deleteSsoDomain"];
         options?: never;
@@ -5292,7 +5352,7 @@ export interface paths {
         put?: never;
         /**
          * Verify an exact domain through trusted DNS
-         * @description Verified team owner/admin browser session with fresh proof and expected generation. DNS errors return unknown status. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.
+         * @description Verified team owner/admin browser session with fresh proof and expected generation. DNS errors return unknown status. Returns 404 sso_disabled while both protocol settings are off.
          */
         post: operations["verifySsoDomain"];
         delete?: never;
@@ -5310,12 +5370,12 @@ export interface paths {
         };
         /**
          * Read the current team SSO policy
-         * @description Owner/admin only; read/full API key or authorized MCP OAuth. An unconfigured team has invitation-only admission and no SSO requirement. OIDC SSO is off unless the operator sets SSO_OIDC_ENABLED=true; while off, this read still answers for stored configuration.
+         * @description Owner/admin only; read/full API key or authorized MCP OAuth. An unconfigured team has invitation-only admission and no SSO requirement. This read remains available while both SSO protocol settings are off.
          */
         get: operations["getSsoPolicy"];
         /**
          * Set the current team SSO policy
-         * @description Requires a verified team owner or administrator browser session and fresh administration proof. An enrolled owner can spend recovery authority to turn off enforcement without enabling JIT. While SSO_OIDC_ENABLED is off, requiring SSO or JIT admission returns 404 sso_disabled; turning the requirement off stays available.
+         * @description Requires a verified team owner or administrator browser session and fresh administration proof. An enrolled owner can spend recovery authority to turn off enforcement without enabling JIT. Starting enforcement requires a usable provider on an enabled protocol. Enabling JIT requires at least one protocol to be on. Turning the requirement off stays available.
          */
         put: operations["setSsoPolicy"];
         post?: never;
@@ -5334,13 +5394,13 @@ export interface paths {
         };
         /**
          * List safe SSO provider drafts for the current team
-         * @description Owner/admin only; read/full API key or authorized MCP OAuth. OIDC SSO is off unless the operator sets SSO_OIDC_ENABLED=true; while off, this read still answers for stored configuration. Follow nextCursor for all providers. Opaque links and generations are only returned to browser sessions. Configuration, secrets, raw metadata and identity claims are never returned. Objects and status strings may gain values.
+         * @description Owner/admin only; read/full API key or authorized MCP OAuth. This read remains available while both SSO protocol settings are off. Follow nextCursor for all providers. Opaque links and generations are only returned to browser sessions. Configuration, secrets, raw metadata and identity claims are never returned. Objects and status strings may gain values.
          */
         get: operations["listSsoProviders"];
         put?: never;
         /**
          * Create a disabled SSO provider draft
-         * @description Verified team owner/admin browser session with fresh proof. An enrolled owner can spend one recovery grant on an enforced team. Provider credentials and raw metadata are write-only. Returns 404 sso_disabled when the requested protocol is off. SAML is unavailable.
+         * @description Verified team owner/admin browser session with fresh proof. An enrolled owner can spend one recovery grant on an enforced team. Provider credentials and raw metadata are write-only. Returns 404 sso_disabled when the requested protocol is off.
          */
         post: operations["createSsoProvider"];
         delete?: never;
@@ -5361,14 +5421,14 @@ export interface paths {
         post?: never;
         /**
          * Retire an SSO provider
-         * @description Verified team owner/admin browser session with fresh proof and expected revision. An enforced team must keep a usable provider. An authorized repeat retirement is idempotent. Stays available while SSO_OIDC_ENABLED is off.
+         * @description Verified team owner/admin browser session with fresh proof and expected revision. An enforced team must keep a usable provider. An authorized repeat retirement is idempotent. Stays available while the provider’s protocol setting is off.
          */
         delete: operations["deleteSsoProvider"];
         options?: never;
         head?: never;
         /**
          * Update an SSO provider draft
-         * @description Verified team owner/admin browser session with fresh proof and expected revision. An enrolled owner can spend one recovery grant on an enforced team. Omitted secrets are preserved. Provider credentials and raw metadata are write-only. Returns 404 sso_disabled when the requested protocol is off. SAML is unavailable.
+         * @description Verified team owner/admin browser session with fresh proof and expected revision. An enrolled owner can spend one recovery grant on an enforced team. Omitted secrets are preserved. Provider credentials and raw metadata are write-only. Returns 404 sso_disabled when the requested protocol is off.
          */
         patch: operations["updateSsoProvider"];
         trace?: never;
@@ -5409,7 +5469,7 @@ export interface paths {
         post: operations["linkSsoAccount"];
         /**
          * Retire the caller’s exact SSO identity link
-         * @description Current team member browser session with independent mailbox proof and the link ID and generation from /me. Stays available while SSO_OIDC_ENABLED is off.
+         * @description Current team member browser session with independent mailbox proof and the link ID and generation from /me. Stays available while the protocol setting is off.
          */
         delete: operations["unlinkSsoAccount"];
         options?: never;
@@ -5429,7 +5489,7 @@ export interface paths {
         post?: never;
         /**
          * Retire another member’s exact SSO identity link
-         * @description Team owner/admin browser session with fresh administration proof and the link generation from the provider inventory. Another owner must retire an owner’s link. Stays available while SSO_OIDC_ENABLED is off.
+         * @description Team owner/admin browser session with fresh administration proof and the link generation from the provider inventory. Another owner must retire an owner’s link. Stays available while the protocol setting is off.
          */
         delete: operations["removeSsoIdentityLink"];
         options?: never;
@@ -5468,7 +5528,7 @@ export interface paths {
         put?: never;
         /**
          * Nominate a current team owner for SSO recovery
-         * @description Requires a team owner browser session and fresh administration proof. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.
+         * @description Requires a team owner browser session and fresh administration proof. Returns 404 sso_disabled while both protocol settings are off.
          */
         post: operations["configureSsoRecovery"];
         delete?: never;
@@ -5488,7 +5548,7 @@ export interface paths {
         put?: never;
         /**
          * Accept the caller’s SSO recovery nomination
-         * @description Requires the nominated owner’s browser session and independent mailbox proof. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.
+         * @description Requires the nominated owner’s browser session and independent mailbox proof. Returns 404 sso_disabled while both protocol settings are off.
          */
         post: operations["acceptSsoRecoveryEnrollment"];
         delete?: never;
@@ -5508,7 +5568,7 @@ export interface paths {
         put?: never;
         /**
          * Start SSO recovery for the specified team
-         * @description Requires an enrolled owner’s browser session and fresh mailbox proof. Permits inspecting SSO configuration and one provider repair write or one write turning off enforcement. Stays available while SSO_OIDC_ENABLED is off.
+         * @description Requires an enrolled owner’s browser session and fresh mailbox proof. Permits inspecting SSO configuration and one provider repair write or one write turning off enforcement. Stays available while both protocol settings are off.
          */
         post: operations["useSsoRecovery"];
         delete?: never;
@@ -6865,6 +6925,19 @@ export interface components {
              * @description The user whose personal page lists it; null for a team event type
              */
             ownerUserId: string | null;
+            /** @description Stripe Checkout price for every offered duration. Available for personal, individual events with one host and without recurrence, guests, waitlist, phone or automatic conferences. Omission preserves the saved price on update; null makes future bookings free. */
+            payment?: {
+                /** @enum {string} */
+                currency: "usd" | "eur" | "gbp" | "cad" | "aud" | "jpy";
+                prices: {
+                    /** @description Amount in currency minor units. The minimum is 30 for GBP, 50 for other supported currencies. JPY has zero decimal places. */
+                    amountMinor: number;
+                    /** @description The corresponding offered duration in whole minutes */
+                    durationMinutes: number;
+                }[];
+            } | null;
+            /** @description Known values: available, disabled, stripe_not_configured, stripe_unverified, live_mode_unavailable, unsupported_event. Treat unknown values as unavailable. */
+            paymentAvailability?: string;
             /** @description Order on the page, ascending */
             position: number;
             questions: components["schemas"]["Question"][];
@@ -7069,6 +7142,17 @@ export interface components {
              */
             minimumNoticeMinutes: number;
             notifications?: components["schemas"]["EventTypeNotificationsInput"];
+            /** @description Stripe Checkout price for every offered duration. Available for personal, individual events with one host and without recurrence, guests, waitlist, phone or automatic conferences. Omission preserves the saved price on update; null makes future bookings free. */
+            payment?: {
+                /** @enum {string} */
+                currency: "usd" | "eur" | "gbp" | "cad" | "aud" | "jpy";
+                prices: {
+                    /** @description Amount in currency minor units. The minimum is 30 for GBP, 50 for other supported currencies. JPY has zero decimal places. */
+                    amountMinor: number;
+                    /** @description The corresponding offered duration in whole minutes */
+                    durationMinutes: number;
+                }[];
+            } | null;
             /**
              * @description Order on the page, ascending
              * @default 0
@@ -7325,6 +7409,17 @@ export interface components {
             /** @description How far ahead a meeting must be booked, in whole minutes */
             minimumNoticeMinutes?: number;
             notifications?: components["schemas"]["EventTypeNotificationsInput"];
+            /** @description Stripe Checkout price for every offered duration. Available for personal, individual events with one host and without recurrence, guests, waitlist, phone or automatic conferences. Omission preserves the saved price on update; null makes future bookings free. */
+            payment?: {
+                /** @enum {string} */
+                currency: "usd" | "eur" | "gbp" | "cad" | "aud" | "jpy";
+                prices: {
+                    /** @description Amount in currency minor units. The minimum is 30 for GBP, 50 for other supported currencies. JPY has zero decimal places. */
+                    amountMinor: number;
+                    /** @description The corresponding offered duration in whole minutes */
+                    durationMinutes: number;
+                }[];
+            } | null;
             /** @description Order on the page, ascending */
             position?: number;
             /** @description Extra booking-form fields */
@@ -7450,6 +7545,16 @@ export interface components {
             status: "ok" | "degraded";
         };
         HostBooking: components["schemas"]["Booking"] & {
+            payment?: {
+                amountMinor: number;
+                currency: string;
+                /** @description None (null), requested, pending, succeeded or failed. Clients must accept new values. */
+                refundStatus: string | null;
+                /** @description Currently paid. Clients must accept new values. */
+                status: string;
+                /** Format: uri */
+                stripeDashboardUrl?: string;
+            };
             routing?: components["schemas"]["BookingRouting"];
         };
         Instance: {
@@ -7457,6 +7562,8 @@ export interface components {
             automaticZoom?: boolean;
             /** @description Whether embedding is enabled; absent when unknown */
             embedEnabled?: boolean;
+            /** @description Whether hosts can enable Stripe Checkout in event settings. Known values: available, disabled, stripe_not_configured, stripe_unverified, live_mode_unavailable. Absent on older instances. Treat unknown values as unavailable. */
+            eventTypePaymentAvailability?: string;
             /** @description Whether hosts may add plain-text notes to follow-up emails */
             followUpHostNotesEnabled?: boolean;
             /**
@@ -7492,7 +7599,7 @@ export interface components {
             smsRemindersAvailable?: boolean;
             /** @description The effective SSO_OIDC_ENABLED operator setting (off by default); absent when unknown */
             ssoOidcEnabled?: boolean;
-            /** @description Whether SAML SSO is enabled: always false for now; absent when unknown */
+            /** @description The effective SSO_SAML_ENABLED operator setting (off by default); absent when unknown */
             ssoSamlEnabled?: boolean;
             /**
              * Format: uri
@@ -7550,6 +7657,14 @@ export interface components {
             hosts: {
                 name: string;
             }[];
+            payment?: {
+                amountMinor: number;
+                currency: string;
+                /** @description None (null), requested, pending, succeeded or failed. Clients must accept new values. */
+                refundStatus: string | null;
+                /** @description Currently paid. Clients must accept new values. */
+                status: string;
+            };
             /** @description Present only when the manage token came from a host's reschedule request email: the request that email was sent for and what became of it. Other manage tokens omit it. */
             rescheduleRequest?: {
                 /** Format: uuid */
@@ -8088,6 +8203,18 @@ export interface components {
                 kind: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
                 label?: string;
             }[] | null;
+            /** @description Price in minor units for each offered meeting length, when payment is required. */
+            payment?: {
+                /** @enum {string} */
+                currency: "usd" | "eur" | "gbp" | "cad" | "aud" | "jpy";
+                prices: {
+                    amountMinor: number;
+                    /** @description Selected meeting length in whole minutes, from the event type's allowedDurationsMinutes. Omitted uses the default for a new booking, or preserves the original booking length when rescheduling. */
+                    durationMinutes: number;
+                }[];
+            };
+            /** @description Whether a paid event can currently start Checkout. Only present for priced events. */
+            paymentAvailable?: boolean;
             /** @description Booking-form fields beyond name and email */
             questions: components["schemas"]["Question"][];
             /** @enum {string} */
@@ -8176,6 +8303,41 @@ export interface components {
             name: string;
             primaryColor: string | null;
         };
+        PublicCheckoutStarted: {
+            /**
+             * Format: uri
+             * @description Hosted Stripe Checkout. Omitted when the hold cannot start or resume an open Session.
+             */
+            checkoutUrl?: string;
+            /**
+             * Format: date-time
+             * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
+             * @example 2026-11-02T09:00:00.000Z
+             */
+            expiresAt: string;
+            /** @description Private capability for local status and cancellation. Keep out of URLs. */
+            statusToken: string;
+        };
+        PublicCheckoutStatus: {
+            /** @enum {boolean} */
+            latePayment?: true;
+            /** @description Only issued for a payment that confirmed a booking. */
+            manageToken?: string;
+            /** @description Known values: requested, pending, succeeded, failed. Omitted before a refund exists. */
+            refundStatus?: string;
+            /** @description Known values: pending_payment, expired, cancelled, paid. */
+            status: string;
+            /** @description Present only after successful creation of a booking with saved redirect settings. Show the normal confirmation and an explicit Continue link; do not automatically navigate. */
+            successRedirect?: {
+                /** @description Explicit event-type opt-in for a user-activated continuation in the embedding parent. Otherwise embedded pages open a new tab with noopener noreferrer. */
+                allowEmbedParent: boolean;
+                /**
+                 * Format: uri
+                 * @description Saved booking-time continuation URL, with only explicitly selected parameters. Never taken from request parameters. The same idempotent creation replay returns the same URL.
+                 */
+                url: string;
+            };
+        };
         PublicEventType: {
             /** @description Allowed meeting lengths kept in ascending order. Present when invitees have a choice; omitted means only durationMinutes is offered. */
             allowedDurationsMinutes?: number[];
@@ -8214,6 +8376,18 @@ export interface components {
                 kind: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
                 label?: string;
             }[] | null;
+            /** @description Price in minor units for each offered meeting length, when payment is required. */
+            payment?: {
+                /** @enum {string} */
+                currency: "usd" | "eur" | "gbp" | "cad" | "aud" | "jpy";
+                prices: {
+                    amountMinor: number;
+                    /** @description Selected meeting length in whole minutes, from the event type's allowedDurationsMinutes. Omitted uses the default for a new booking, or preserves the original booking length when rescheduling. */
+                    durationMinutes: number;
+                }[];
+            };
+            /** @description Whether a paid event can currently start Checkout. Only present for priced events. */
+            paymentAvailable?: boolean;
             /** @description Booking-form fields beyond name and email */
             questions: components["schemas"]["Question"][];
             /** @enum {string} */
@@ -9248,6 +9422,36 @@ export interface components {
                 validationStatus: string;
             }[];
             nextCursor: string | null;
+        };
+        StartPublicCheckout: {
+            /** @description Selected meeting length in whole minutes, from the event type's allowedDurationsMinutes. Omitted uses the default for a new booking, or preserves the original booking length when rescheduling. */
+            durationMinutes?: number;
+            /** @description Displayed price in minor units. A stale quote is rejected; the saved price controls the charge. */
+            expectedAmountMinor: number;
+            /** @enum {string} */
+            expectedCurrency: "usd" | "eur" | "gbp" | "cad" | "aud" | "jpy";
+            invitee: {
+                /** Format: email */
+                email: string;
+                /** @description BCP 47 language tag. Registered interface and notification languages: en, zh-CN, de, fr, es, pt-BR. Regional tags are matched to a registered language; unsupported languages and missing translations fall back to English. Locale does not change the meeting time zone. */
+                locale?: string;
+                name: string;
+                /** @description IANA time zone */
+                timeZone: string;
+            };
+            /** @description Required for an askInvitee phone option: + and 7–15 total digits including the country code, first digit nonzero. Spaces, parentheses, dots and hyphens are removed before E.164 validation. */
+            inviteePhone?: string;
+            /** @description An id from the public event locations. Omission selects the default or first option. */
+            locationOptionId?: string;
+            responses?: components["schemas"]["Responses"];
+            /** @description Explicit invitee consent to SMS booking reminders. Requires inviteePhone. */
+            smsConsent?: boolean;
+            /**
+             * Format: date-time
+             * @description The start of an offered slot
+             * @example 2026-11-02T09:00:00.000Z
+             */
+            start: string;
         };
         TeamAdminBooking: {
             attendees: {
@@ -12656,7 +12860,7 @@ export interface operations {
                     "application/json": components["schemas"]["EventType"];
                 };
             };
-            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, microsoft_teams_host_policy, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
+            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, microsoft_teams_host_policy, invalid_schedule_id (scheduleId is not one of the host’s schedules), invalid_payment_price, or payment_flow_unsupported */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12683,7 +12887,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description slug_taken: another event type on the same page has this slug; microsoft_teams_calendar_unavailable: the host needs a connected Microsoft calendar selected for booking writeback; organization_context_changed: reload the page before trying this team write again */
+            /** @description slug_taken: another event type on the same page has this slug; microsoft_teams_calendar_unavailable: the host needs a connected Microsoft calendar selected for booking writeback; payment_settings_unavailable: the instance does not currently accept new Checkout payments; organization_context_changed: reload the page before trying this team write again */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -12951,7 +13155,7 @@ export interface operations {
                     "application/json": components["schemas"]["EventType"];
                 };
             };
-            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, microsoft_teams_host_policy, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
+            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, microsoft_teams_host_policy, invalid_schedule_id (scheduleId is not one of the host’s schedules), invalid_payment_price, or payment_flow_unsupported */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12987,7 +13191,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description slug_taken: another event type on the same page has this slug; location_options_conflict: changing legacy location would replace multiple or labelled options; use locations through an option-aware client; microsoft_teams_calendar_unavailable: the host needs a connected Microsoft calendar selected for booking writeback; organization_context_changed: reload the page before trying this team write again */
+            /** @description slug_taken: another event type on the same page has this slug; location_options_conflict: changing legacy location would replace multiple or labelled options; use locations through an option-aware client; microsoft_teams_calendar_unavailable: the host needs a connected Microsoft calendar selected for booking writeback; payment_settings_unavailable: the instance does not currently accept new Checkout payments; organization_context_changed: reload the page before trying this team write again */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -13116,7 +13320,7 @@ export interface operations {
                     "application/json": components["schemas"]["EventType"];
                 };
             };
-            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, microsoft_teams_host_policy, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
+            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, microsoft_teams_host_policy, invalid_schedule_id (scheduleId is not one of the host’s schedules), invalid_payment_price, or payment_flow_unsupported */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13152,7 +13356,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description slug_taken: another event type on the same page has this slug; microsoft_teams_calendar_unavailable: the host needs a connected Microsoft calendar selected for booking writeback; organization_context_changed: reload the page before trying this team write again */
+            /** @description slug_taken: another event type on the same page has this slug; microsoft_teams_calendar_unavailable: the host needs a connected Microsoft calendar selected for booking writeback; payment_settings_unavailable: the instance does not currently accept new Checkout payments; organization_context_changed: reload the page before trying this team write again */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -13284,7 +13488,7 @@ export interface operations {
                     "application/json": components["schemas"]["EventType"];
                 };
             };
-            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, microsoft_teams_host_policy, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
+            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, microsoft_teams_host_policy, invalid_schedule_id (scheduleId is not one of the host’s schedules), invalid_payment_price, or payment_flow_unsupported */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13425,7 +13629,7 @@ export interface operations {
                     "application/json": components["schemas"]["WaitlistSettings"];
                 };
             };
-            /** @description invalid_request, waitlist_unsupported */
+            /** @description invalid_request, waitlist_unsupported, payment_flow_unsupported */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -16204,8 +16408,101 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The chosen location is unavailable (`location_unavailable`), the time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), the Idempotency-Key was used for a different request (`idempotency_key_reused`), or the round-robin host pool or activation changed while the request waited (`booking_changed`; fetch current availability before retrying) */
+            /** @description The event requires checkout (`payment_required`), the chosen location is unavailable (`location_unavailable`), the time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), the Idempotency-Key was used for a different request (`idempotency_key_reused`), or the round-robin host pool or activation changed while the request waited (`booking_changed`; fetch current availability before retrying) */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    startPublicCheckout: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Random UUID kept for identical retries. */
+                "idempotency-key": string;
+            };
+            path: {
+                handle: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartPublicCheckout"];
+            };
+        };
+        responses: {
+            /** @description Private paid checkout attempt */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicCheckoutStarted"];
+                };
+            };
+            /** @description Invalid booking request or unsupported payment flow */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such public event type (`event_type_not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Paid checkout is unavailable, the quote changed, or the slot cannot be reserved */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description payload_too_large (maximum 2,097,152 bytes) */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -16409,6 +16706,148 @@ export interface operations {
             };
             /** @description brand_logo_not_found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    cancelPublicCheckout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    token: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Current local outcome */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicCheckoutStatus"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description payment_checkout_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getPublicCheckoutStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    token: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Current local outcome */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicCheckoutStatus"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description payment_checkout_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -17193,7 +17632,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The chosen location is unavailable (`location_unavailable`), the time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), the Idempotency-Key was used for a different request (`idempotency_key_reused`), or the round-robin host pool or activation changed while the request waited (`booking_changed`; fetch current availability before retrying) */
+            /** @description The event requires checkout (`payment_required`), the chosen location is unavailable (`location_unavailable`), the time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), the Idempotency-Key was used for a different request (`idempotency_key_reused`), or the round-robin host pool or activation changed while the request waited (`booking_changed`; fetch current availability before retrying) */
             409: {
                 headers: {
                     [name: string]: unknown;

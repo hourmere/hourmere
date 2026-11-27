@@ -14,7 +14,9 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { parseEnv } from 'node:util'
 import { afterAll, describe, expect, it } from 'vitest'
+import { loadConfig } from '../apps/server/src/config.ts'
 
 // Mutation probes use a source copy without changing the worktree implementation.
 const source = readFileSync(
@@ -99,7 +101,7 @@ describe('first-run deployment setup', { timeout: 20_000 }, () => {
     expect(text.includes("AUTO_MIGRATE='true'\n")).toBe(true)
     // Copied verbatim from the template: empty, so this install follows the release default.
     expect(/^SSO_OIDC_ENABLED=$/m.test(text)).toBe(true)
-    expect(/^SSO_SAML_ENABLED/m.test(text)).toBe(false)
+    expect(/^SSO_SAML_ENABLED=$/m.test(text)).toBe(true)
     expect(
       text.includes("SMTP_URL='smtps://synthetic:$literal\\'pass@smtp.example.test:465'\n"),
     ).toBe(true)
@@ -111,6 +113,22 @@ describe('first-run deployment setup', { timeout: 20_000 }, () => {
     expect(text.includes('TERMS_URL=\n')).toBe(true)
     expect(text.match(/^BETTER_AUTH_SECRET=/gm)?.length).toBe(1)
     expect(setup.noStaging()).toBe(true)
+  })
+
+  it('keeps an install from a template without the SAML setting off after upgrade', () => {
+    const setup = fixture()
+    const template = join(setup.directory, '.env.example')
+    writeFileSync(template, readFileSync(example, 'utf8').replace(/^SSO_SAML_ENABLED=.*\n/m, ''))
+    expect(setup.run(plainInput).status).toBe(0)
+    const before = setup.text()
+    copyFileSync(example, template)
+    expect(setup.run(plainInput).status).toBe(1)
+    expect(setup.text() === before).toBe(true)
+    const existing = parseEnv(before)
+    expect(existing.SSO_SAML_ENABLED).toBeUndefined()
+    const env = { ...existing, DATABASE_URL: 'postgres://synthetic@localhost:9/legacy-install' }
+    expect(loadConfig(env).SSO_SAML_ENABLED).toBe(false)
+    expect(loadConfig({ ...env, SSO_SAML_ENABLED: '' }).SSO_SAML_ENABLED).toBe(false)
   })
 
   it('persists an explicitly selected Compose project for subsequent commands', () => {

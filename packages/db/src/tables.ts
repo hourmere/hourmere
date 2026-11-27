@@ -719,6 +719,7 @@ export interface EventTypes {
   notifications: Generated<Json>;
   organization_id: string;
   owner_user_id: string | null;
+  payment: Json | null;
   position: Generated<number>;
   questions: Generated<Json>;
   recurrence: Json | null;

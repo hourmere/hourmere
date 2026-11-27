@@ -10,6 +10,8 @@ import {
   json,
   later,
   ME,
+  PROFILE,
+  profile,
   type Routes,
   renderApp,
   signedInAs,
@@ -66,6 +68,21 @@ const PROVIDER = {
   domains: [{ id: DOMAIN, generation: 2, name: 'example.test', status: 'verified' }],
   createdAt: '2026-10-01T09:00:00.000Z',
 } satisfies Schemas['SsoProviderPage']['data'][number]
+const METADATA = '<EntityDescriptor>new-idp-metadata</EntityDescriptor>'
+const CERTIFICATES = ['old-test-pin', 'new-test-pin'] as const
+const SAVED_SAML = {
+  metadataDocument: '<EntityDescriptor>saved-idp-metadata</EntityDescriptor>',
+  metadataUrl: 'https://identity.example.test/private-metadata',
+  signingCertificates: ['saved-test-pin'],
+}
+const SAML_PROVIDER = {
+  ...PROVIDER,
+  protocol: 'saml',
+  displayName: 'SAML IdP',
+  clientId: null,
+  issuer: 'urn:example:idp',
+  saml: SAVED_SAML,
+}
 const UNAVAILABLE = 'SSO recovery is unavailable in this team.'
 const START = 'Start recovery'
 const AGAIN = 'Verify again to continue recovery'
@@ -73,6 +90,7 @@ const TOKEN = 'T'.repeat(43)
 const attemptId = (step: number) => `00000000-0000-7000-8000-00000000005${step}`
 
 const enabledInstance = () => json(200, { ssoOidcEnabled: true, ssoSamlEnabled: false })
+const samlInstance = () => json(200, { ssoOidcEnabled: false, ssoSamlEnabled: true })
 
 const enabled: Routes = {
   ...signedInAs(TEAM),
@@ -86,29 +104,40 @@ const personalRecovery: Routes = {
   'GET /api/v1/instance': enabledInstance,
 }
 
-async function verify(step: number) {
+async function verify(step: number, locale: 'en' | 'zh-CN' = 'en') {
+  const user = userEvent.setup()
+  const zh = locale === 'zh-CN'
   const proof = await screen.findByRole('region', {
-    name: 'Confirm your identity before changing SSO settings.',
+    name: zh
+      ? '请先验证身份，再更改单点登录设置。'
+      : 'Confirm your identity before changing SSO settings.',
   })
-  const continueButton = within(proof).getByRole('button', { name: 'Continue' })
+  const continueButton = within(proof).getByRole('button', { name: zh ? '继续' : 'Continue' })
   expect(continueButton.hasAttribute('disabled')).toBe(true)
-  await userEvent.click(within(proof).getByRole('button', { name: 'Send verification email' }))
-  const input = await within(proof).findByLabelText('Email verification link')
+  await user.click(
+    within(proof).getByRole('button', { name: zh ? '发送验证邮件' : 'Send verification email' }),
+  )
+  const input = await within(proof).findByLabelText(zh ? '邮箱验证链接' : 'Email verification link')
   await waitFor(() => expect(document.activeElement).toBe(input))
-  await userEvent.type(
-    input,
+  await user.paste(
     `${window.location.origin}${PATHS.mailboxProof}#attempt=${attemptId(step)}&token=${TOKEN}`,
   )
-  await userEvent.click(within(proof).getByRole('button', { name: 'Verify email link' }))
-  await within(proof).findByText('Email verification complete.')
-  await userEvent.click(continueButton)
+  await user.click(
+    within(proof).getByRole('button', { name: zh ? '验证邮箱链接' : 'Verify email link' }),
+  )
+  await within(proof).findByText(zh ? '邮箱验证已完成。' : 'Email verification complete.')
+  await user.click(continueButton)
 }
 
-function useFixture(overrides: Routes = {}, requireGrantForPolicy = false) {
+function useFixture(
+  overrides: Routes = {},
+  requireGrantForPolicy = false,
+  seed: Schemas['SsoProviderPage']['data'][number] = PROVIDER,
+) {
   let ceremonies = 0
   let latestAttempt = ''
   let grant = false
-  let provider: Schemas['SsoProviderPage']['data'][number] = { ...PROVIDER }
+  let provider = { ...seed }
   const api = fakeApi({
     ...enabled,
     [POLICY]: () =>
@@ -143,9 +172,11 @@ function useFixture(overrides: Routes = {}, requireGrantForPolicy = false) {
     [UPDATE]: ({ body }) => {
       expect(grant).toBe(true)
       expect(body).toEqual({
-        displayName: PROVIDER.displayName,
+        displayName: seed.displayName,
         expectedRevision: 4,
-        oidc: { clientSecret: 'new test secret' },
+        ...(seed.protocol === 'saml'
+          ? { saml: { metadataDocument: METADATA, signingCertificates: CERTIFICATES } }
+          : { oidc: { clientSecret: 'new test secret' } }),
       })
       provider = { ...provider, revision: 5, testStatus: 'unknown' }
       grant = false
@@ -406,71 +437,211 @@ describe('SSO recovery with the capability present', () => {
     expect(api.to(SEND)).toHaveLength(0)
   })
 
-  it('takes one new mailbox ceremony per update, test and reactivation from personal space', async () => {
-    const api = useFixture(personalRecovery, true)
-    renderApp(PATHS.ssoRecovery)
-    const start = await screen.findByRole('button', { name: START })
-    expect(api.to(USE)).toHaveLength(0)
-    expect(api.to(PROVIDERS)).toHaveLength(0)
-    await userEvent.click(start)
-    await verify(1)
+  it.each([PROVIDER, SAML_PROVIDER])(
+    'takes a mailbox ceremony per $protocol repair write from personal space',
+    async (provider) => {
+      const saml = provider.protocol === 'saml'
+      const api = useFixture(
+        { ...personalRecovery, ...(saml && { 'GET /api/v1/instance': samlInstance }) },
+        true,
+        provider,
+      )
+      const user = userEvent.setup()
+      const testButton = `Test provider ${provider.displayName}`
+      const enableButton = `Enable provider ${provider.displayName}`
+      renderApp(PATHS.ssoRecovery)
+      const start = await screen.findByRole('button', { name: START })
+      expect(api.to(USE)).toHaveLength(0)
+      expect(api.to(PROVIDERS)).toHaveLength(0)
+      await userEvent.click(start)
+      await verify(1)
 
-    const edit = await screen.findByRole('button', { name: 'Edit Example IdP' })
-    expect(screen.queryByRole('button', { name: /retire|disable|require sso$/i })).toBeNull()
-    expect(
-      screen.getByRole('button', { name: 'Enable provider Example IdP' }).hasAttribute('disabled'),
-    ).toBe(true)
-    await userEvent.click(edit)
-    await userEvent.click(screen.getByRole('button', { name: 'Replace client secret' }))
-    await userEvent.type(screen.getByLabelText('New client secret'), 'new test secret')
-    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
-    await screen.findByText('Provider saved. Verify again to test the current revision.')
-    expect(screen.queryByRole('button', { name: 'Test provider Example IdP' })).toBeNull()
+      const edit = await screen.findByRole('button', { name: `Edit ${provider.displayName}` })
+      expect(screen.queryByRole('button', { name: /retire|disable|require sso$/i })).toBeNull()
+      expect(screen.getByRole('button', { name: enableButton }).hasAttribute('disabled')).toBe(true)
+      await user.click(edit)
+      const form = within(screen.getByRole('form', { name: 'Edit provider' }))
+      const writeOnlyFields: HTMLTextAreaElement[] = []
+      if (saml) {
+        expect(screen.queryByRole('button', { name: 'Add provider' })).toBeNull()
+        expect(screen.getByRole('button', { name: 'Add SAML provider' })).toBeDefined()
+        expect(
+          screen
+            .getByRole('link', { name: 'Download service provider metadata' })
+            .getAttribute('href'),
+        ).toBe(`/api/auth/sso/saml2/sp/metadata/${ID}`)
+        expect(form.queryByLabelText('Client secret')).toBeNull()
+        const source = form.getByLabelText('SAML configuration source')
+        await user.selectOptions(source, 'url')
+        const url = form.getByLabelText<HTMLInputElement>('Identity provider metadata URL')
+        expect(url.value).toBe('')
+        expect(url.hasAttribute('data-private')).toBe(true)
+        await user.selectOptions(source, 'xml')
+        await user.click(form.getByRole('button', { name: 'Add signing certificate' }))
+        for (const [label, input] of [
+          ['Identity provider metadata XML', METADATA],
+          ['Signing certificate 1', CERTIFICATES[0]],
+          ['Signing certificate 2', CERTIFICATES[1]],
+        ] as const) {
+          const field = form.getByLabelText<HTMLTextAreaElement>(label)
+          expect(field.value).toBe('')
+          expect(field.hasAttribute('data-private')).toBe(true)
+          writeOnlyFields.push(field)
+          await user.click(field)
+          await user.paste(input)
+        }
+      } else {
+        await user.click(form.getByRole('button', { name: 'Replace client secret' }))
+        await user.type(form.getByLabelText('New client secret'), 'new test secret')
+      }
+      await user.click(form.getByRole('button', { name: 'Save changes' }))
+      expect(writeOnlyFields.every(({ value }) => value === '')).toBe(true)
+      await screen.findByText('Provider saved. Verify again to test the current revision.')
+      expect(screen.queryByRole('button', { name: testButton })).toBeNull()
 
-    await userEvent.click(screen.getByRole('button', { name: AGAIN }))
-    await verify(2)
-    expect(
-      (await screen.findByRole('button', { name: 'Enable provider Example IdP' })).hasAttribute(
-        'disabled',
-      ),
-    ).toBe(true)
-    await userEvent.click(screen.getByRole('button', { name: 'Test provider Example IdP' }))
-    const handoff = await screen.findByRole('link', {
-      name: 'Continue to identity provider (opens in a new tab)',
-    })
-    expect(handoff.getAttribute('href')).toBe(PROVIDER_URL)
-    expect(handoff.getAttribute('target')).toBe('_blank')
-    expect(screen.queryByRole('button', { name: 'Enable provider Example IdP' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Check provider test result' })).toBeNull()
-
-    await userEvent.click(screen.getByRole('button', { name: AGAIN }))
-    await verify(3)
-    const refresh = await screen.findByRole('button', { name: 'Check provider test result' })
-    const enable = screen.getByRole('button', { name: 'Enable provider Example IdP' })
-    expect(enable.hasAttribute('disabled')).toBe(true)
-    api.finishProviderTest()
-    await userEvent.click(refresh)
-    await waitFor(() => expect(enable.hasAttribute('disabled')).toBe(false))
-    expect(enable.hasAttribute('disabled')).toBe(false)
-    await userEvent.click(enable)
-    await screen.findByText('The current provider revision is enabled.')
-    expect(api.to(SEND)).toHaveLength(3)
-    expect(api.to(CONSUME)).toHaveLength(3)
-    expect(api.to(USE).map(({ body }) => body)).toEqual(
-      [1, 2, 3].flatMap((step) => [
-        { expectedRevision: POLICY_DATA.policyRevision },
-        { expectedRevision: POLICY_DATA.policyRevision, proofAttemptId: attemptId(step) },
-      ]),
-    )
-    for (const operation of [UPDATE, TEST, ACTIVATE, USE, POLICY, PROVIDERS, SEND, CONSUME]) {
+      await userEvent.click(screen.getByRole('button', { name: AGAIN }))
+      await verify(2)
       expect(
-        api
-          .to(operation)
-          .every(
-            ({ headers }) => headers.get('x-expected-organization-id') === TEAM.organization.id,
-          ),
+        (await screen.findByRole('button', { name: enableButton })).hasAttribute('disabled'),
       ).toBe(true)
-    }
+      if (saml) {
+        for (const privateValue of [
+          SAVED_SAML.metadataDocument,
+          SAVED_SAML.metadataUrl,
+          ...SAVED_SAML.signingCertificates,
+          METADATA,
+          ...CERTIFICATES,
+        ]) {
+          expect(screen.queryByDisplayValue(privateValue)).toBeNull()
+          expect(document.body.textContent).not.toContain(privateValue)
+        }
+      }
+      await userEvent.click(screen.getByRole('button', { name: testButton }))
+      const handoff = await screen.findByRole('link', {
+        name: 'Continue to identity provider (opens in a new tab)',
+      })
+      expect(handoff.getAttribute('href')).toBe(PROVIDER_URL)
+      expect(handoff.getAttribute('target')).toBe('_blank')
+      expect(screen.queryByRole('button', { name: enableButton })).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Check provider test result' })).toBeNull()
+
+      await userEvent.click(screen.getByRole('button', { name: AGAIN }))
+      await verify(3)
+      const refresh = await screen.findByRole('button', { name: 'Check provider test result' })
+      const enable = screen.getByRole('button', { name: enableButton })
+      expect(enable.hasAttribute('disabled')).toBe(true)
+      api.finishProviderTest()
+      await userEvent.click(refresh)
+      await waitFor(() => expect(enable.hasAttribute('disabled')).toBe(false))
+      expect(enable.hasAttribute('disabled')).toBe(false)
+      await userEvent.click(enable)
+      await screen.findByText('The current provider revision is enabled.')
+      expect(api.to(SEND)).toHaveLength(3)
+      expect(api.to(CONSUME)).toHaveLength(3)
+      expect(api.to(USE).map(({ body }) => body)).toEqual(
+        [1, 2, 3].flatMap((step) => [
+          { expectedRevision: POLICY_DATA.policyRevision },
+          { expectedRevision: POLICY_DATA.policyRevision, proofAttemptId: attemptId(step) },
+        ]),
+      )
+      for (const operation of [UPDATE, TEST, ACTIVATE, USE, POLICY, PROVIDERS, SEND, CONSUME]) {
+        expect(
+          api
+            .to(operation)
+            .every(
+              ({ headers }) => headers.get('x-expected-organization-id') === TEAM.organization.id,
+            ),
+        ).toBe(true)
+      }
+    },
+  )
+
+  it.each([false, true])(
+    'retains SAML recovery when SAML is off (OIDC %s)',
+    async (oidcEnabled) => {
+      const api = useFixture(
+        {
+          ...personalRecovery,
+          'GET /api/v1/instance': () =>
+            json(200, { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: false }),
+        },
+        true,
+        SAML_PROVIDER,
+      )
+      renderApp(PATHS.ssoRecovery)
+      await userEvent.click(await screen.findByRole('button', { name: START }))
+      await verify(1)
+      const provider = within(
+        await screen.findByRole('region', { name: SAML_PROVIDER.displayName }),
+      )
+      expect(provider.queryByRole('button')).toBeNull()
+      expect(provider.queryByRole('link')).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Add SAML provider' })).toBeNull()
+      expect(Boolean(screen.queryByRole('button', { name: 'Add provider' }))).toBe(oidcEnabled)
+      await userEvent.click(screen.getByRole('button', { name: 'Stop requiring SSO' }))
+      const confirmation = within(
+        screen.getByRole('group', { name: 'Stop requiring single sign-on for this team?' }),
+      )
+      await userEvent.click(confirmation.getByRole('button', { name: 'Stop requiring SSO' }))
+      await screen.findByText('Single sign-on is now optional for this team.')
+      expect(api.to(TURN_OFF)).toHaveLength(1)
+      expect(api.to(UPDATE)).toHaveLength(0)
+      expect(api.to(TEST)).toHaveLength(0)
+      expect(api.to(ACTIVATE)).toHaveLength(0)
+    },
+  )
+
+  it('clears private SAML inputs after a revision conflict and reloads the editor after new proof', async () => {
+    let revision = SAML_PROVIDER.revision
+    const response = later()
+    const api = useFixture(
+      {
+        ...personalRecovery,
+        ...profile({ ...PROFILE, locale: 'zh-CN' }),
+        'GET /api/v1/instance': samlInstance,
+        [PROVIDERS]: () => json(200, { data: [{ ...SAML_PROVIDER, revision }], nextCursor: null }),
+        [UPDATE]: () => response.response,
+      },
+      true,
+      SAML_PROVIDER,
+    )
+    const user = userEvent.setup()
+    renderApp(PATHS.ssoRecovery)
+    await user.click(await screen.findByRole('button', { name: '开始恢复' }))
+    await verify(1, 'zh-CN')
+    const editLabel = `编辑“${SAML_PROVIDER.displayName}”`
+    await user.click(await screen.findByRole('button', { name: editLabel }))
+    const editor = within(screen.getByRole('form', { name: '编辑提供方' }))
+    expect(editor.getByText('如需更换签名证书，请填写身份提供方使用的全部证书。')).toBeDefined()
+    await user.selectOptions(editor.getByLabelText('SAML 配置来源'), 'url')
+    const url = editor.getByLabelText<HTMLInputElement>('身份提供方元数据网址')
+    const privateUrl = 'https://identity.example.test/new-private-metadata'
+    await user.click(url)
+    await user.paste(privateUrl)
+    await user.click(editor.getByRole('button', { name: '保存更改' }))
+    expect(url.value).toBe('')
+    expect(api.to(UPDATE).map(({ body }) => body)).toEqual([
+      {
+        displayName: SAML_PROVIDER.displayName,
+        expectedRevision: revision,
+        saml: { metadataUrl: privateUrl },
+      },
+    ])
+
+    revision += 1
+    await response.answer(json(409, { error: 'sso_configuration_changed', message: privateUrl }))
+    await screen.findByText('无法完成此恢复操作。请重新验证后再试。')
+    expect(document.body.textContent).not.toContain(privateUrl)
+    expect(screen.queryByRole('button', { name: editLabel })).toBeNull()
+    await user.click(screen.getByRole('button', { name: '重新验证并继续恢复' }))
+    await verify(2, 'zh-CN')
+    await user.click(await screen.findByRole('button', { name: editLabel }))
+    expect(screen.getByText(/^版本 5\b/)).toBeDefined()
+    const reopened = within(screen.getByRole('form', { name: '编辑提供方' }))
+    await user.selectOptions(reopened.getByLabelText('SAML 配置来源'), 'url')
+    expect(reopened.getByLabelText<HTMLInputElement>('身份提供方元数据网址').value).toBe('')
+    expect(api.to(PROVIDERS)).toHaveLength(2)
+    expect(api.to(UPDATE)).toHaveLength(1)
   })
 
   it('can stop requiring SSO while preserving the existing admission policy', async () => {

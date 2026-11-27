@@ -26,7 +26,7 @@ export function ssoReadTools(deps: SsoReadDeps): Tool[] {
       name: 'list_sso_providers',
       title: 'List SSO providers',
       description:
-        'Lists safe provider summaries for the current team, for owners/admins with read/full API key scope or mcp:tools OAuth. Pass nextCursor as cursor for the next page. Never returns configuration, secrets, raw metadata or identities. OIDC SSO is off unless the operator sets SSO_OIDC_ENABLED=true; while off, this read still answers for stored configuration.',
+        'Lists safe provider summaries for the current team, for owners/admins with read/full API key scope or mcp:tools OAuth. Pass nextCursor as cursor for the next page. Never returns configuration, secrets, raw metadata or identities. This read remains available while both SSO protocol settings are off.',
       input: z.strictObject({
         cursor: z.string().optional(),
         limit: z.number().int().min(1).max(100).optional(),
@@ -39,7 +39,7 @@ export function ssoReadTools(deps: SsoReadDeps): Tool[] {
       name: GET_SSO_POLICY,
       title: 'Get SSO policy',
       description:
-        'Reads the current team SSO policy for owners/admins with read/full API key scope or mcp:tools OAuth. Never returns configuration, secrets, raw metadata or identities. OIDC SSO is off unless the operator sets SSO_OIDC_ENABLED=true; while off, this read still answers for stored configuration.',
+        'Reads the current team SSO policy for owners/admins with read/full API key scope or mcp:tools OAuth. Never returns configuration, secrets, raw metadata or identities. This read remains available while both SSO protocol settings are off.',
       input: z.strictObject({}),
       output: SsoPolicy,
       run: (_args, call) => getSsoPolicy(deps, call.caller, call.teamRead?.policy),

@@ -90,7 +90,7 @@ import {
   signInEmailJobs,
   waitlistEmailJob,
 } from '@hourmere/notifications'
-import type { ServiceContext } from '@hourmere/scheduling'
+import type { PaymentProvider, ServiceContext } from '@hourmere/scheduling'
 import {
   type AttendeeNoShowNotifier,
   type BookingNotifier,
@@ -214,23 +214,25 @@ import {
   ssoRecoveryEnrollmentEmailJob,
 } from './sso-recovery-enrollment.ts'
 import { samlSignInRoutes } from './sso-saml-sign-in.ts'
+import { createStripePaymentProvider } from './stripe-checkout.ts'
+import { createStripeClient } from './stripe-client.ts'
 import type { InvitationSummaryMailLimits } from './team-invitations.ts'
 import { createWorkerHealthApp } from './worker-health.ts'
 
-// SAML stays hard-off until its rollout completes: no setting is read for it, and only
-// in-process tests inject it into productRoutes.
-const ssoSamlEnabled = false
-
 /**
- * The SSO capabilities of the running server. OIDC follows the operator setting
- * SSO_OIDC_ENABLED; while it is off, stored SSO state stays readable, recoverable and
- * reducible (Setting-off behaviour in docs/sso.md).
+ * The SSO capabilities of the running server follow the operator settings.
+ * While off, stored SSO state stays readable, recoverable and reducible
+ * (Setting-off behaviour in docs/sso.md).
  */
 export function productionSsoCapabilities(
-  config: Pick<Config, 'SSO_OIDC_ENABLED' | 'SCIM_PROVISIONING_ENABLED'>,
+  config: Pick<Config, 'SSO_OIDC_ENABLED' | 'SSO_SAML_ENABLED' | 'SCIM_PROVISIONING_ENABLED'>,
 ): SsoCapabilities {
   return withScimResources(
-    { ssoOidcEnabled: config.SSO_OIDC_ENABLED, ssoSamlEnabled, ssoOperatorSetting: true },
+    {
+      ssoOidcEnabled: config.SSO_OIDC_ENABLED,
+      ssoSamlEnabled: config.SSO_SAML_ENABLED,
+      ssoOperatorSetting: true,
+    },
     config.SCIM_PROVISIONING_ENABLED,
   )
 }
@@ -293,9 +295,15 @@ export function productRoutes({
   workflowsEnabled,
   smtpConfigured,
   recurringBookingsEnabled,
+  paidBookingAvailability,
+  paymentProvider,
+  paymentStatusSecret,
   auditLogRetentionDays = null,
 }: {
   db: Db
+  paidBookingAvailability?: ServiceContext['paidBookingAvailability']
+  paymentProvider?: PaymentProvider | undefined
+  paymentStatusSecret?: string | undefined
   /** AUDIT_LOG_RETENTION_DAYS: days, or null (the default) to keep events forever. */
   auditLogRetentionDays?: number | null
   automaticMeet?: boolean
@@ -314,7 +322,7 @@ export function productRoutes({
   ssoRecoveryEnrollmentQueue?: SsoRecoveryEnrollmentQueue | undefined
   /** SSO_OIDC_ENABLED as the running server passes it; tests inject it directly. */
   ssoOidcEnabled?: boolean
-  /** In-process test injection only; no operator setting exists during hard-off. */
+  /** SSO_SAML_ENABLED as the running server passes it; tests inject it directly. */
   ssoSamlEnabled?: boolean
   /** Passed by the running server: a protocol that is off keeps its Setting-off behaviour. */
   ssoOperatorSetting?: boolean | undefined
@@ -370,6 +378,7 @@ export function productRoutes({
       scimProvisioningEnabled,
       automaticMeet,
       smsRemindersAvailable,
+      eventTypePaymentAvailability: paidBookingAvailability,
       automaticZoom,
       followUpHostNotesEnabled,
       slotSnippetsEnabled,
@@ -444,6 +453,7 @@ export function productRoutes({
       db,
       followUpHostNotesEnabled,
       smsRemindersAvailable,
+      paidBookingAvailability,
       automaticMeet,
       automaticZoom,
       microsoftCalendarEnabled,
@@ -476,6 +486,9 @@ export function productRoutes({
       automaticZoom,
       microsoftCalendarEnabled,
       successRedirectPolicy,
+      paymentProvider,
+      paymentStatusSecret,
+      paidBookingsEnabled: paidBookingAvailability === 'available',
     }),
     routingContinuationRoutes({
       db,
@@ -573,6 +586,7 @@ export function productTools({
   workflowRunCursorSecret,
   workflowsEnabled,
   smsRemindersAvailable = false,
+  paidBookingAvailability,
   successRedirectPolicy,
   notify,
   notifyAttendeeNoShow,
@@ -602,6 +616,7 @@ export function productTools({
   routingFormsEnabled?: boolean | undefined
   publicUrl?: string | undefined
   smsRemindersAvailable?: boolean | undefined
+  paidBookingAvailability?: ServiceContext['paidBookingAvailability']
   followUpHostNotesEnabled?: boolean | undefined
   workflowRunCursorSecret?: string | undefined
   successRedirectPolicy?: ServiceContext['successRedirectPolicy']
@@ -625,6 +640,7 @@ export function productTools({
     }),
     ...bookingTools({
       db,
+      paidCheckoutAvailable: paidBookingAvailability === 'available',
       waitlistSecret,
       smtpConfigured,
       smsRemindersAvailable,
@@ -638,7 +654,12 @@ export function productTools({
       routingSecret,
       receiptNow: routingBookingReceiptNow,
     }),
-    ...catalogTools({ db, followUpHostNotesEnabled, smsRemindersAvailable }),
+    ...catalogTools({
+      db,
+      followUpHostNotesEnabled,
+      smsRemindersAvailable,
+      paidBookingAvailability,
+    }),
     ...brandingTools({ db }),
     ...auditLogTools({ db, auditLogRetentionDays }),
     ...eventTypeTools({
@@ -647,6 +668,7 @@ export function productTools({
       automaticZoom,
       microsoftCalendarEnabled,
       smsRemindersAvailable,
+      paidBookingAvailability,
       followUpHostNotesEnabled,
       successRedirectPolicy,
     }),
@@ -711,6 +733,8 @@ export interface ProductionAppDeps extends RecurringBookingAdmissionDeps {
   enqueueScimInvitation: ReturnType<typeof createInvitationEmailDispatcher>
   config: Config
   db: Db
+  stripeTransport?: typeof fetch | undefined
+  stripeAccountVerified?: boolean | undefined
   /** Effective state after the startup namespace check. */
   routingFormsEnabled?: boolean
   /** Better Auth session reads are used by the provider-test callback. */
@@ -749,6 +773,8 @@ export interface ProductionAppDeps extends RecurringBookingAdmissionDeps {
 export function productionAppOptions({
   config,
   db,
+  stripeTransport,
+  stripeAccountVerified = false,
   routingFormsEnabled = false,
   auth,
   resolveCaller,
@@ -774,6 +800,19 @@ export function productionAppOptions({
   recurringBookingsEnabled,
 }: ProductionAppDeps): AppDeps {
   const workflowsEnabled = config.WORKFLOWS_ENABLED
+  const paidBookingAvailability = !config.stripe
+    ? 'stripe_not_configured'
+    : !config.PAID_BOOKINGS_ENABLED
+      ? 'disabled'
+      : config.stripe.mode === 'live'
+        ? 'live_mode_unavailable'
+        : stripeAccountVerified
+          ? 'available'
+          : 'stripe_unverified'
+  const paymentProvider =
+    paidBookingAvailability === 'available' && config.stripe
+      ? createStripePaymentProvider(config.stripe, config.PUBLIC_URL, stripeTransport)
+      : undefined
   // All configuration transports and public booking routes share the instance policy.
   const successRedirectPolicy = {
     publicUrl: config.PUBLIC_URL,
@@ -865,6 +904,9 @@ export function productionAppOptions({
       db,
       invitationMailLimits,
       waitlistSecret: config.BETTER_AUTH_SECRET,
+      paymentStatusSecret: config.BETTER_AUTH_SECRET,
+      paidBookingAvailability,
+      paymentProvider,
       meetingPollSecret: config.BETTER_AUTH_SECRET,
       smtpConfigured: Boolean(config.SMTP_URL && config.MAIL_FROM),
       socialProviders: config.socialProviders,
@@ -917,6 +959,7 @@ export function productionAppOptions({
         publicUrl: config.PUBLIC_URL,
         followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,
         successRedirectPolicy,
+        paidBookingAvailability,
         smsRemindersAvailable: config.SMS_PROVIDER === 'twilio',
         smtpConfigured: Boolean(config.SMTP_URL && config.MAIL_FROM),
         notify,
@@ -1007,13 +1050,17 @@ export interface RunningServer {
   close(): Promise<void>
 }
 
-type ServerTestOptions = RecurringBookingAdmissionDeps &
-  Pick<AuthConfig, 'organizationListRateLimitMaxForTests'>
+interface StartServerOptions
+  extends RecurringBookingAdmissionDeps,
+    Pick<AuthConfig, 'organizationListRateLimitMaxForTests'> {
+  /** In-process transport injection for isolated test-mode acceptance. */
+  stripeTransport?: typeof fetch | undefined
+}
 
 /** Starts Hourmere from environment variables (see .env.example) and optional test dependencies. */
 export async function startServer(
   env: NodeJS.ProcessEnv = process.env,
-  options: ServerTestOptions = {},
+  options: StartServerOptions = {},
 ): Promise<RunningServer> {
   // First, before anything can log: one line per console call, control characters escaped.
   const restoreConsole = installOneLineConsole()
@@ -1027,7 +1074,7 @@ export async function startServer(
 
 async function start(
   env: NodeJS.ProcessEnv,
-  options: ServerTestOptions,
+  options: StartServerOptions,
   restoreConsole: () => void,
 ): Promise<RunningServer> {
   const config = loadConfig(env)
@@ -1321,7 +1368,7 @@ async function start(
       }),
       ...configuredSmsJobs(config, db),
       paymentHoldsExpiryJob(() => expirePaymentHolds({ db })),
-      paymentRefundJob(db, config.stripe),
+      paymentRefundJob(db, config.stripe, options.stripeTransport),
       ...(config.MCP_OAUTH_ENABLED ? [mcpOAuthCleanupJob(db)] : []),
       ...signInEmailJobs({
         db,
@@ -1522,6 +1569,16 @@ async function start(
   if (!authPool) {
     fetch = createWorkerHealthApp({ checkDb, checkJobs: () => jobs.check() }).fetch
   } else {
+    const stripe = config.stripe
+    const stripeAccountVerified =
+      config.PAID_BOOKINGS_ENABLED && stripe?.mode === 'test'
+        ? await createStripeClient(stripe, options.stripeTransport)
+            .accounts.retrieveCurrent()
+            .then(
+              ({ id }) => id === stripe.accountId,
+              () => false,
+            )
+        : false
     // Booking changes over REST and MCP queue their emails in their own transactions.
     const emailNotifier = bookingNotifier(jobs)
     const calendarNotifier = calendarBookingNotifier(jobs, { google: Boolean(googleCalendar) })
@@ -1554,6 +1611,8 @@ async function start(
     fetch = createApp(
       productionAppOptions({
         config,
+        stripeTransport: options.stripeTransport,
+        stripeAccountVerified,
         routingFormsEnabled,
         recurringBookingsEnabled: recurringBookingAdmissionEnabled(options),
         db,

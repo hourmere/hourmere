@@ -14,7 +14,12 @@ import { PATHS } from '../../paths.ts'
 import { useMe, useSession } from '../../session.tsx'
 import { useTeamManagementAccess } from '../../team-management.tsx'
 import { SsoFreshProof } from './SsoFreshProof.tsx'
-import { ProviderForm } from './SsoProviderSetup.tsx'
+import {
+  type ProviderEditor,
+  ProviderForm,
+  type ProviderProtocol,
+  SamlMetadataDownload,
+} from './SsoProviderSetup.tsx'
 import './sso-setup.css'
 import {
   loadSsoProviders,
@@ -34,7 +39,8 @@ const changed = 'These SSO settings changed. Reload before trying again.'
 export function SsoRecoveryPage() {
   const { t } = useI18n()
   const me = useMe()
-  const { ssoOidcEnabled } = useOutletContext<AppShellContext>()
+  const { ssoOidcEnabled, ssoSamlEnabled } = useOutletContext<AppShellContext>()
+  const protocols = { oidc: ssoOidcEnabled === true, saml: ssoSamlEnabled === true }
   const access = useTeamManagementAccess()
   const team = !me.organization.personal && me.principal.kind === 'session'
   const recoveryTeams = me.principal.kind === 'session' ? (me.ssoRecoveryTeams ?? []) : []
@@ -98,7 +104,7 @@ export function SsoRecoveryPage() {
           key={`${me.user.id}:${selected.id}:recovery`}
           organizationId={selected.id}
           discoveredRevision={selected.policyRevision}
-          oidcEnabled={ssoOidcEnabled === true}
+          protocols={protocols}
         />
       ) : activeTeam && access.status === 'loading' ? (
         <PageSkeleton label={loading} />
@@ -108,7 +114,7 @@ export function SsoRecoveryPage() {
         <RecoveryFlow
           key={`${me.user.id}:${me.organization.id}`}
           organizationId={me.organization.id}
-          oidcEnabled={ssoOidcEnabled === true}
+          protocols={protocols}
         />
       ) : (
         <RecoveryNotice message={unavailable} />
@@ -179,15 +185,21 @@ function revisionReadiness(revision: number): Readiness {
 }
 
 type Inventory = { policy: Policy; providers: SsoProvider[]; expiresAt: number }
-type ProviderTest = { url: string; providerId: string; revision: number }
+type ProviderTest = {
+  url: string
+  providerId: string
+  revision: number
+  protocol: ProviderProtocol
+}
+type RepairProtocols = Record<ProviderProtocol, boolean>
 
 function RecoveryFlow({
   organizationId,
-  oidcEnabled,
+  protocols,
   discoveredRevision,
 }: {
   organizationId: string
-  oidcEnabled: boolean
+  protocols: RepairProtocols
   discoveredRevision?: number
 }) {
   const { locale, t } = useI18n()
@@ -302,7 +314,7 @@ function RecoveryFlow({
   async function loadInventory(signal: AbortSignal, expiresAt: number) {
     const [policy, providers] = await Promise.all([
       loadPolicy(organizationId, signal),
-      oidcEnabled ? loadSsoProviders(organizationId, signal) : [],
+      loadSsoProviders(organizationId, signal),
     ])
     signal.throwIfAborted()
     const current = recoveryReadiness(policy)
@@ -445,7 +457,7 @@ function RecoveryFlow({
           {t(notice)}
         </p>
       )}
-      {providerTest && !proof && (
+      {providerTest && protocols[providerTest.protocol] && !proof && (
         <section className="panel stack sso-enforcement" aria-label={t('Test provider')}>
           <div className="form-actions">
             <a
@@ -496,7 +508,7 @@ function RecoveryFlow({
         <RecoveryRepair
           organizationId={organizationId}
           inventory={inventory}
-          oidcEnabled={oidcEnabled}
+          protocols={protocols}
           busy={busy}
           heading={repairHeading}
           spend={spend}
@@ -521,7 +533,7 @@ const activationErrors = {
 function RecoveryRepair({
   organizationId,
   inventory,
-  oidcEnabled,
+  protocols,
   busy,
   heading,
   spend,
@@ -532,7 +544,7 @@ function RecoveryRepair({
 }: {
   organizationId: string
   inventory: Inventory
-  oidcEnabled: boolean
+  protocols: RepairProtocols
   busy: boolean
   heading: RefObject<HTMLHeadingElement | null>
   spend: SsoMutation
@@ -543,9 +555,12 @@ function RecoveryRepair({
 }) {
   const { t, locale } = useI18n()
   const id = useId()
-  const [editing, setEditing] = useState<'new' | SsoProvider | null>(null)
+  const [editor, setEditor] = useState<ProviderEditor | null>(null)
+  const editing = editor && protocols[editor.protocol] ? editor : null
   const editorOpener = useRef<HTMLButtonElement>(null)
-  const providers = inventory.providers.filter(({ protocol }) => protocol === 'oidc')
+  const providers = inventory.providers.filter(
+    ({ protocol }) => protocol === 'oidc' || protocol === 'saml',
+  )
   const domains = new Map<string, SsoProvider['domains'][number]>()
   for (const provider of providers) {
     for (const domain of provider.domains) {
@@ -580,25 +595,36 @@ function RecoveryRepair({
       <h2 id={id} ref={heading} tabIndex={-1}>
         {t('Repair identity providers')}
       </h2>
-      {oidcEnabled && (
+      {(protocols.oidc || protocols.saml) && (
         <>
           <p>
             {t(
               'Save the repair, test the current revision and enable it. Verify by email again before each subsequent change.',
             )}
           </p>
-          <div>
-            <button
-              type="button"
-              className="button"
-              disabled={busy || editing !== null}
-              onClick={(event) => {
-                editorOpener.current = event.currentTarget
-                setEditing('new')
-              }}
-            >
-              {t('Add provider')}
-            </button>
+          <div className="form-actions">
+            {(
+              [
+                ['oidc', 'Add provider'],
+                ['saml', 'Add SAML provider'],
+              ] as const
+            ).map(
+              ([protocol, label]) =>
+                protocols[protocol] && (
+                  <button
+                    key={protocol}
+                    type="button"
+                    className="button"
+                    disabled={busy || editing !== null}
+                    onClick={(event) => {
+                      editorOpener.current = event.currentTarget
+                      setEditor({ protocol, provider: null })
+                    }}
+                  >
+                    {t(label)}
+                  </button>
+                ),
+            )}
           </div>
           {editing && (
             <ProviderForm
@@ -607,118 +633,124 @@ function RecoveryRepair({
               busy={busy}
               mutate={spend}
               reload={onSave}
-              provider={editing === 'new' ? null : editing}
-              onClose={() => setEditing(null)}
+              {...editing}
+              recovering
+              onClose={() => setEditor(null)}
             />
           )}
-          {providers.length === 0 && <p className="empty">{t('No identity providers yet.')}</p>}
-          {providers.map((provider) => {
-            const params = { path: { providerId: provider.id }, header }
-            const revision = provider.revision
-            const canEnable =
-              provider.testStatus === 'passed' &&
-              provider.domains.some(({ status }) => status === 'verified')
-            const domainCheckUnknown = provider.domains.some(
-              ({ status }) => !['pending', 'verified', 'failed', 'expired'].includes(status),
-            )
-            const statusId = `${id}-status-${provider.id}`
-            return (
-              <section className="panel" key={provider.id} aria-labelledby={`${id}-${provider.id}`}>
-                <h3 id={`${id}-${provider.id}`} className="user-content">
-                  {provider.displayName}
-                </h3>
-                <p className="user-content">{provider.issuer}</p>
-                <p>
-                  {t('Revision {revision}', { revision })} ·{' '}
-                  {t(provider.enabled ? 'Enabled' : 'Disabled')}
-                </p>
-                <p id={statusId}>
-                  {t(
-                    provider.testStatus === 'passed'
-                      ? 'Current revision passed its test.'
-                      : provider.testStatus === 'failed'
-                        ? 'Current revision failed its test.'
-                        : provider.testStatus === 'not_tested'
-                          ? 'No test result for the current revision.'
-                          : 'Provider test status is unavailable.',
-                  )}
-                  {provider.testStatus === 'passed' && !canEnable && (
-                    <>
-                      {locale === 'zh-CN' ? '' : ' '}
-                      {t(
-                        domainCheckUnknown
-                          ? 'Verification unknown'
-                          : activationErrors.sso_domain_unverified,
-                      )}
-                    </>
-                  )}
-                </p>
-                <fieldset className="form-fieldset" disabled={busy || editing !== null}>
-                  <div className="form-actions">
-                    <button
-                      type="button"
-                      className="button button-small"
-                      aria-label={t('Edit {name}', { name: provider.displayName })}
-                      onClick={(event) => {
-                        editorOpener.current = event.currentTarget
-                        setEditing(provider)
-                      }}
-                    >
-                      {t('Edit')}
-                    </button>
-                    <button
-                      type="button"
-                      className="button button-small"
-                      aria-label={t('Test provider {name}', { name: provider.displayName })}
-                      onClick={() =>
-                        void spend(async (signal) => {
-                          const { url } = await unwrap(
-                            api.POST('/api/v1/team/sso/providers/{providerId}/test', {
-                              params,
-                              body: { expectedRevision: revision },
-                              signal,
-                            }),
-                          )
-                          return {
-                            url: ssoAuthorizationUrl(url),
-                            providerId: provider.id,
-                            revision,
-                          }
-                        }, onTest)
-                      }
-                    >
-                      {t('Test provider')}
-                    </button>
-                    <button
-                      type="button"
-                      className="button button-small"
-                      aria-label={t('Enable provider {name}', { name: provider.displayName })}
-                      aria-describedby={statusId}
-                      disabled={!canEnable}
-                      onClick={() =>
-                        void spend(
-                          (signal) =>
-                            unwrap(
-                              api.POST('/api/v1/team/sso/providers/{providerId}/activation', {
-                                params,
-                                body: { expectedRevision: revision, enabled: true },
-                                signal,
-                              }),
-                            ),
-                          onActivation,
-                          activationErrors,
-                        )
-                      }
-                    >
-                      {t('Enable provider')}
-                    </button>
-                  </div>
-                </fieldset>
-              </section>
-            )
-          })}
         </>
       )}
+      {providers.length === 0 && <p className="empty">{t('No identity providers yet.')}</p>}
+      {providers.map((provider) => {
+        const protocol = provider.protocol === 'saml' ? 'saml' : 'oidc'
+        const params = { path: { providerId: provider.id }, header }
+        const revision = provider.revision
+        const canEnable =
+          provider.testStatus === 'passed' &&
+          provider.domains.some(({ status }) => status === 'verified')
+        const domainCheckUnknown = provider.domains.some(
+          ({ status }) => !['pending', 'verified', 'failed', 'expired'].includes(status),
+        )
+        const statusId = `${id}-status-${provider.id}`
+        return (
+          <section className="panel" key={provider.id} aria-labelledby={`${id}-${provider.id}`}>
+            <h3 id={`${id}-${provider.id}`} className="user-content">
+              {provider.displayName}
+            </h3>
+            <p className="user-content">{provider.issuer}</p>
+            <p>
+              {t('Revision {revision}', { revision })} ·{' '}
+              {t(provider.enabled ? 'Enabled' : 'Disabled')}
+            </p>
+            <p id={statusId}>
+              {t(
+                provider.testStatus === 'passed'
+                  ? 'Current revision passed its test.'
+                  : provider.testStatus === 'failed'
+                    ? 'Current revision failed its test.'
+                    : provider.testStatus === 'not_tested'
+                      ? 'No test result for the current revision.'
+                      : 'Provider test status is unavailable.',
+              )}
+              {provider.testStatus === 'passed' && !canEnable && (
+                <>
+                  {locale === 'zh-CN' ? '' : ' '}
+                  {t(
+                    domainCheckUnknown
+                      ? 'Verification unknown'
+                      : activationErrors.sso_domain_unverified,
+                  )}
+                </>
+              )}
+            </p>
+            {protocols[protocol] && (
+              <fieldset className="form-fieldset" disabled={busy || editing !== null}>
+                <div className="form-actions">
+                  {protocol === 'saml' && <SamlMetadataDownload providerId={provider.id} />}
+                  <button
+                    type="button"
+                    className="button button-small"
+                    aria-label={t('Edit {name}', { name: provider.displayName })}
+                    onClick={(event) => {
+                      editorOpener.current = event.currentTarget
+                      setEditor({ protocol, provider })
+                    }}
+                  >
+                    {t('Edit')}
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-small"
+                    aria-label={t('Test provider {name}', { name: provider.displayName })}
+                    onClick={() =>
+                      void spend<ProviderTest>(async (signal) => {
+                        const { url } = await unwrap(
+                          api.POST('/api/v1/team/sso/providers/{providerId}/test', {
+                            params,
+                            body: { expectedRevision: revision },
+                            signal,
+                          }),
+                        )
+                        return {
+                          url: ssoAuthorizationUrl(url),
+                          providerId: provider.id,
+                          revision,
+                          protocol,
+                        }
+                      }, onTest)
+                    }
+                  >
+                    {t('Test provider')}
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-small"
+                    aria-label={t('Enable provider {name}', { name: provider.displayName })}
+                    aria-describedby={statusId}
+                    disabled={!canEnable}
+                    onClick={() =>
+                      void spend(
+                        (signal) =>
+                          unwrap(
+                            api.POST('/api/v1/team/sso/providers/{providerId}/activation', {
+                              params,
+                              body: { expectedRevision: revision, enabled: true },
+                              signal,
+                            }),
+                          ),
+                        onActivation,
+                        activationErrors,
+                      )
+                    }
+                  >
+                    {t('Enable provider')}
+                  </button>
+                </div>
+              </fieldset>
+            )}
+          </section>
+        )
+      })}
       {(admission === 'invitation_only' || admission === 'jit') && (
         <fieldset className="form-fieldset" disabled={busy || editing !== null}>
           <ConfirmAction

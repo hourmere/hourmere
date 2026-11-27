@@ -126,7 +126,9 @@ names the invitation it issued or reused. That reference is null when the addres
 already belongs to a member or another pending invitation holds it. The new resource
 starts without an account or membership link. While provisioning is enabled, accepting
 the attached invitation sets both links and the claim's `completed_at`, subject to
-the live account and mailbox blockers. Re-admission confirmation can complete a claim
+the entry and claim lifecycle and the live account and mailbox blockers. A retired entry
+or invalid claim refuses admission through an invitation still authorized by SCIM.
+Re-admission confirmation can complete a claim
 without an invitation for a retained ordinary member and clear that account's matching
 retired SCIM suspension in the same organization transaction. User replacement updates
 the mapped profile and timestamp in the existing row. If the normalized work address
@@ -1879,6 +1881,11 @@ The phases within that organization boundary are:
   order, then share-locks their member rows in sorted user-ID order. Round-robin bookings
   next lock their assignment state. A changed host set is refused; do not append newly
   discovered advisory locks out of order.
+- Internal departure handoff takes the actor's user share lock, the organization share lock,
+  and the actor's member and session share locks before checking SSO proof. It locks the
+  source booking and then the offer before taking the source and candidate host advisory locks
+  in sorted user-ID order. The organization share lock fences membership changes while allowing
+  other team booking writers to take their organization locks.
 - Routing form creation takes the organization share lock, then the transaction advisory
   lock `hashtextextended('hourmere.routing-form-quota:' || organizationId, 0)` before
   inserting the form. It never upgrades or writes the organization row. Any transaction
@@ -2488,7 +2495,7 @@ An immutable 30-minute deadline bounds the hold. Expiry releases host occupancy 
 confirmation after the deadline records refund intent without reviving the booking.
 The transition guard prevents changing retained deadlines/references or resurrecting terminal
 holds. Group seats and imported bookings cannot carry payment holds. See the
-[paid-booking design](payments.md) for the internal-only rollout boundary, refund
+[paid-booking design](payments.md) for the test-mode rollout boundary, refund
 ledger, retention and operator responsibilities. Stop old app and worker processes before
 migration and restart all roles together.
 
@@ -2520,6 +2527,11 @@ the leased operation and its provider refund ID. Booking changes atomically upda
 attempt's current booking association while keeping the original PaymentIntent reference
 on the root. The receiver retains the receipt, account, mode and provider IDs of a signed
 paid Session with a binding mismatch for operator reconciliation.
+
+Migration `0191_event_type_payment.sql` adds optional `event_types.payment` configuration
+with one currency and one integer minor-unit price per offered duration. Existing event
+types stay free. Service writes normalize the duration order and preserve it in the price
+list. The setting affects future holds only. Checkout attempts keep their own price snapshot.
 
 ## Private attendee no-show markers
 

@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { isPaidEventSupported } from '@hourmere/core/payment'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import * as react from 'react'
@@ -18,6 +19,7 @@ import { eventType } from '../../test/fixtures.ts'
 import { isMultiLineText, isSingleLineText, singleLineProblem } from '../../text.ts'
 import type * as eventFunctions from './event-type-form.ts'
 import * as notificationFunctions from './notifications-form.ts'
+import * as paymentFunctions from './payment-form.ts'
 import type { WaitlistEditor } from './WaitlistEditor.tsx'
 
 const form = readFileSync('apps/web/src/pages/event-types/event-type-form.ts', 'utf8')
@@ -61,6 +63,8 @@ const buildForm = (source: string) =>
       isSingleLineText,
       singleLineProblem,
       ...notificationFunctions,
+      ...paymentFunctions,
+      isPaidEventSupported,
     },
   )
 function detects(before: string, after: string, assertion: (source: string) => void) {

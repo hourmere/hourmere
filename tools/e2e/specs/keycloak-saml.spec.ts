@@ -122,7 +122,7 @@ function tamperSignature(response: string) {
   return Buffer.from(tampered).toString('base64')
 }
 
-test.describe('with SAML injected into the fixture', () => {
+test.describe('with the SAML setting on', () => {
   test.use({ samlEnabled: true })
 
   test('Keycloak document-only signing is refused while signed assertions allow SAML completion', async ({
@@ -196,7 +196,7 @@ test.describe('with SAML injected into the fixture', () => {
   })
 })
 
-test('without injection the same fixture offers no SAML sign-in', async ({
+test('with the SAML setting off the same fixture offers no SAML sign-in', async ({
   page,
   keycloak: app,
 }) => {

@@ -27,15 +27,13 @@ export interface DepartureHandoffEligibilityInput {
   departingUserId: string
 }
 
-/**
- * Internal facts for an authorized team preview. Read through the caller's snapshot.
- * Eligibility is advisory until a future writer rechecks it under the handoff locks.
- */
+/** Internal facts for a preview or an apply that already holds the source and host locks. */
 export async function getDepartureHandoffEligibility(
   ctx: ServiceContext,
   organizationId: string,
   input: DepartureHandoffEligibilityInput,
   now = ctx.now(),
+  lockEvent = false,
 ) {
   const { db } = ctx
   if (!isUuid(organizationId) || !isUuid(input.bookingId)) throw bookingNotFound()
@@ -130,6 +128,7 @@ export async function getDepartureHandoffEligibility(
   // Event types have no price setting yet (docs/payments.md). A future price setting
   // also belongs in this target admission check.
   const event = await findOneTimeEventType(db, source.event_type_id, {
+    lock: lockEvent,
     scimResourcesEnabled: ctx.scimResourcesEnabled,
   })
   if (

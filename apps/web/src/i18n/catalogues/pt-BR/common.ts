@@ -614,6 +614,54 @@ export const common = {
   'The assigned host must configure Microsoft Teams in their own signed-in session.':
     'O anfitrião designado precisa entrar na própria conta para configurar o Microsoft Teams.',
 
+  // Paid booking details
+  'bookingPayment.label': 'Pagamento',
+  'bookingPayment.paid': '{amount} pagos',
+  'bookingPayment.refund': 'Reembolso',
+  'bookingPayment.requested': 'Reembolso solicitado',
+  'bookingPayment.pending': 'Reembolso pendente',
+  'bookingPayment.succeeded': 'Reembolso emitido',
+  'bookingPayment.failed': 'Falha no reembolso',
+  'bookingPayment.none': 'Sem reembolso',
+  'bookingPayment.unknown': 'Status indisponível',
+  // Paid booking checkout
+  'Price: {amount}': 'Preço: {amount}',
+  'Starting Checkout…': 'Abrindo a página de pagamento…',
+  'Continue to payment': 'Continuar para o pagamento',
+  'Payment status': 'Status do pagamento',
+  'Waiting for payment confirmation': 'Aguardando a confirmação do pagamento',
+  'Reservation expired': 'A reserva expirou',
+  'Reservation cancelled': 'Reserva cancelada',
+  'A full refund has been requested.': 'Foi solicitado um reembolso integral.',
+  'Stripe is processing the refund.': 'A Stripe está processando o reembolso.',
+  'Stripe has sent your refund. Your bank may take time to post it.':
+    'A Stripe enviou o reembolso. Seu banco pode levar algum tempo para creditá-lo.',
+  'The refund could not be completed. Contact the host for help.':
+    'Não foi possível concluir o reembolso. Entre em contato com quem organiza a reunião.',
+  'We couldn’t find this payment attempt': 'Não encontramos esta tentativa de pagamento',
+  'Return to the tab where you started payment. If your booking was confirmed, use the link in your confirmation email.':
+    'Volte à aba em que você iniciou o pagamento. Se seu agendamento foi confirmado, use o link no e-mail de confirmação.',
+  'We couldn’t check the payment. Try again before starting another booking.':
+    'Não foi possível verificar o pagamento. Tente novamente antes de iniciar outro agendamento.',
+  'Your time is reserved for up to 30 minutes. Hourmere will confirm the booking after it receives the payment.':
+    'Seu horário fica reservado por até 30 minutos. O Hourmere confirma o agendamento quando recebe o pagamento.',
+  'Release unpaid reservation': 'Liberar a reserva não paga',
+  'Payment arrived after the reservation ended. Your booking was not confirmed.':
+    'O pagamento chegou após o fim da reserva. Seu agendamento não foi confirmado.',
+  'Manage booking': 'Gerenciar agendamento',
+  'Choose another time': 'Escolher outro horário',
+  'The price has changed. Review the updated price and choose a time again.':
+    'O preço mudou. Confira o valor atualizado e escolha um horário novamente.',
+  'Online payment is temporarily unavailable. Please contact the host.':
+    'O pagamento on-line está temporariamente indisponível. Entre em contato com quem organiza a reunião.',
+  'We couldn’t open Stripe Checkout. Try again to continue this payment attempt.':
+    'Não foi possível abrir o Stripe Checkout. Tente novamente para continuar este pagamento.',
+  'Open booking page to pay': 'Abrir a página de agendamento para pagar',
+  'The suggested time is selected. Review the details before continuing to payment.':
+    'O horário sugerido foi selecionado. Confira os dados antes de continuar para o pagamento.',
+  'You’ll pay securely on Stripe. Your booking is confirmed only after Hourmere receives the payment. If you cancel the booking, a full refund is requested.':
+    'Você pagará com segurança na Stripe. O Hourmere confirma o agendamento após receber o pagamento. Se você cancelar o agendamento, será solicitado um reembolso integral.',
+
   // Team public home
   'This team has no public events right now.': 'Esta equipe não tem eventos públicos no momento.',
   'This team page is unavailable.': 'Esta página da equipe está indisponível.',

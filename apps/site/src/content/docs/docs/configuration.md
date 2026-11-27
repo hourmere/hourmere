@@ -60,9 +60,10 @@ includes PostgreSQL 18.
 | `WEBHOOKS_ENABLED` | `false` | Capture and deliver organization booking events for outbound HTTPS webhooks and Slack. No backfill; set identically on web and worker. See [booking webhooks](/docs/webhooks). |
 | `WEBHOOK_ENCRYPTION_KEY` | Unset | Independent 32-byte base64 key required when webhooks are enabled or to configure [Slack notifications](/docs/slack). Encrypts signing secrets and Slack URLs; keep stable and backed up. Slack capture and delivery also require `WEBHOOKS_ENABLED=true`. |
 | `WEBHOOK_PRIVATE_TARGETS` | Unset | Self-hosting only: up to 32 comma-separated exact `hostname:port`, `IPv4[/CIDR]:port[-port]` or `[IPv6[/CIDR]]:port[-port]` entries permitting private HTTP(S) webhook destinations. Empty preserves public HTTPS-only delivery. Set identically on web and worker. |
-| `SSO_OIDC_ENABLED` | `false` | Turn on [organization OIDC single sign-on](/docs/sso). Unset or empty uses the release default, which is off until SSO ships; only `true` and `false` are accepted as nonempty values and anything else prevents startup. Set identically on web and worker. Turning it off never lifts a team's stored SSO requirement; see [what off means](/docs/sso#what-off-means). SAML has no setting yet. |
+| `SSO_OIDC_ENABLED` | `false` | Turn on [organization OIDC single sign-on](/docs/sso). Unset or empty uses the release default, currently off. A nonempty value must be `true` or `false` for startup to succeed. Set identically on web and worker. Turning it off preserves the team's stored SSO requirement. See [what off means](/docs/sso#what-off-means). |
+| `SSO_SAML_ENABLED` | `false` | Turn on [organization SAML single sign-on](/docs/sso). Unset or empty uses the release default, currently off. A nonempty value must be `true` or `false` for startup to succeed. Set identically on web and worker. Turning it off preserves the team's stored SSO requirement. See [what off means](/docs/sso#what-off-means). |
 | `SSO_ENCRYPTION_KEY` | Unset | Independent canonical 32-byte base64 key that seals identity provider configuration; required before a team can save a provider. Keep stable and back up privately; losing it makes saved configuration unreadable. Does not enable SSO by itself. |
-| `SSO_PRIVATE_TARGETS` | Unset | Used by organization OIDC sign-in when `SSO_OIDC_ENABLED` is on; validated at startup in every state. Self-hosting only: up to 32 comma-separated exact `hostname:port`, `IPv4:port` or `[IPv6]:port` entries, one port each, for identity providers on a private network, or public ones on a port other than 443 listed by their public DNS name. HTTPS stays required. Separate from `WEBHOOK_PRIVATE_TARGETS`; see [private identity providers](#private-identity-providers). |
+| `SSO_PRIVATE_TARGETS` | Unset | Used by server-side requests to providers for an enabled SSO protocol. Validated at startup in every state. Self-hosting only: up to 32 comma-separated exact `hostname:port`, `IPv4:port` or `[IPv6]:port` entries, one port each, for identity providers on a private network, or public ones on a port other than 443 listed by their public DNS name. HTTPS stays required. Separate from `WEBHOOK_PRIVATE_TARGETS`. See [private identity providers](#private-identity-providers). |
 | `SCIM_PROVISIONING_ENABLED` | `true` (also unset or empty) | Enable Users, Groups and discovery for team organizations, plus owner-only provisioning token creation and rotation. Set `false`, `0` or `off` to disable. An invalid value stops startup. Owners and admins can list and revoke tokens while disabled. See [SCIM provisioning](/docs/scim). |
 | `MCP_OAUTH_ENABLED` | `false` | Enable MCP OAuth connectors alongside API keys. Requires HTTPS except on loopback; explicit organization approval and revocation at `/app/connected-apps`. No calendar/provider client credentials needed. Set identically on web and worker. |
 | `HOURMERE_ROLE` | `all` | `all`: API and workers; `web`: API/queues only; `worker`: jobs and health endpoint only. The separate-worker Compose overlay fixes the app to `web` and the worker to `worker`, independently of this `.env` setting. |
@@ -142,9 +143,9 @@ for configuration and delivery behavior.
 
 ### Private identity providers
 
-`SSO_PRIVATE_TARGETS` serves organization OIDC sign-in, which is off unless the operator
-sets `SSO_OIDC_ENABLED=true`. The server validates the value at startup in every state and
-routes nothing through it while OIDC is off. It is empty by default. **Hourmere Cloud leaves it empty.** It is a separate operator setting and
+`SSO_PRIVATE_TARGETS` serves outbound OIDC requests and SAML metadata imports by URL for
+enabled protocols. The server validates it at startup even when both protocols are off.
+It is empty by default. **Hourmere Cloud leaves it empty.** It is a separate operator setting and
 never reuses `WEBHOOK_PRIVATE_TARGETS`; no team setting can add to it. It lists the identity
 providers that the default rules cannot reach: those on a private network, and public ones
 served on a port other than 443.
@@ -527,8 +528,8 @@ for public apps; its private/development apps do not trigger those notifications
 ## Paid-booking foundation
 
 `PAID_BOOKINGS_ENABLED` defaults to `false`. Set it to `true` with a complete Stripe
-configuration to receive signed events at `POST /api/webhooks/stripe` in an isolated test
-instance. Paid hold admission and public Checkout remain disabled. Existing holds expire
+test-mode configuration to accept paid bookings through Stripe Checkout and receive signed
+events at `POST /api/webhooks/stripe` in an isolated instance. Live checkout stays disabled. Holds expire
 regardless of this setting. Retained refunds for a configured Stripe account and mode
 also continue to run. Compose forwards the optional Stripe settings unset by default.
 When using a `_FILE` setting, supply the path inside the container and mount the secret file

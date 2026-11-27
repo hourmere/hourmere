@@ -40,7 +40,7 @@ function requestsFreshAuthentication(authorization: URL) {
   }
 }
 
-test.describe('with SAML injected into the fixture', () => {
+test.describe('with the SAML setting on', () => {
   test.use({ samlEnabled: true })
 
   test('refuses a mailbox session at the team boundary and admits the same owner through SAML', async ({
@@ -92,7 +92,7 @@ test.describe('with SAML injected into the fixture', () => {
   })
 })
 
-test('without SAML injection the seeded team still enforces SSO and offers no SAML sign-in', async ({
+test('with the SAML setting off the seeded team still enforces SSO and offers no SAML sign-in', async ({
   page,
   keycloak: app,
 }) => {

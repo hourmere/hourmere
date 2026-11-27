@@ -1092,8 +1092,8 @@ describe.skipIf(!databaseUrl)('SSO mailbox proof', () => {
     await expectProductionAvailable(control)
     // Without the operator setting marker the composition would be hard-off again.
     const mutant = await sourceCopy<typeof server>('./server.ts', [
-      'ssoOperatorSetting: true }',
-      'ssoOperatorSetting: false }',
+      'ssoOperatorSetting: true,',
+      'ssoOperatorSetting: false,',
     ])
     await expect(expectProductionAvailable(mutant)).rejects.toMatchObject({
       name: 'AssertionError',
@@ -1240,9 +1240,9 @@ async function expectProductionAvailable(module: typeof server) {
       DATABASE_URL: 'postgres://mailbox-proof@127.0.0.1:9/production',
       BETTER_AUTH_SECRET: SECRET,
       PUBLIC_URL: PUBLIC_URL,
-      // Unset, empty and false are the same setting-off state; SAML is not a setting.
+      // Unset, empty and false are the same setting-off state for both protocols.
       SSO_OIDC_ENABLED: '',
-      SSO_SAML_ENABLED: 'true',
+      SSO_SAML_ENABLED: '',
       SCIM_PROVISIONING_ENABLED: 'false',
     })
     const app = nativeCreateApp(

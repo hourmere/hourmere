@@ -2,7 +2,7 @@ import { z } from '@hono/zod-openapi'
 import type { Principal } from '@hourmere/auth'
 import { parse } from 'hono/utils/cookie'
 import { sql } from 'kysely'
-import { ssoRetained } from './sso.ts'
+import { samlLinkRecoveryAvailable, ssoRetained } from './sso.ts'
 import { bindingCookieName, browserBindingDigest } from './sso-mailbox-proof.ts'
 import { LINK_SSO_ACCOUNT, OIDC_COMPLETE_LINK } from './sso-oidc-link.ts'
 import { samlCompleteLinkOperation, samlLinkOperation } from './sso-saml-state.ts'
@@ -132,7 +132,7 @@ export async function readSsoMe(
         JOIN sso_providers p ON p.id = l.provider_id AND p.organization_id = l.organization_id
         WHERE l.user_id = c.user_id AND l.organization_id = c.organization_id
           AND l.retired_at IS NULL AND p.retired_at IS NULL
-          AND (p.protocol = 'oidc' OR (p.protocol = 'saml' AND ${capabilities.ssoSamlEnabled}::boolean))
+          AND (p.protocol = 'oidc' OR (p.protocol = 'saml' AND ${samlLinkRecoveryAvailable(capabilities)}::boolean))
         ORDER BY l.id
       )) AS links,
       to_json(ARRAY(

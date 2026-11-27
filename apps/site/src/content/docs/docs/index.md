@@ -231,9 +231,9 @@ not grant host rescheduling or reschedule-request authority through REST, MCP or
   the deployed image; see [conversion steps](/docs/self-hosting#turn-off-app-installation).
 - Hourmere does not send Web Push notifications. The [Web Push assessment](/docs/install-app#web-push-assessment)
   covers browser support, self-hosting dependencies and the proposed opt-in pilot.
-- Organization [OIDC single sign-on](/docs/sso) is off by default: the operator turns it
-  on with `SSO_OIDC_ENABLED=true`, on every instance and without a paid-plan requirement.
-  SAML is being built and is not available yet. The
+- Organization single sign-on is off by default. Operators can enable OIDC and SAML
+  independently with `SSO_OIDC_ENABLED=true` and `SSO_SAML_ENABLED=true` on any instance
+  without a paid-plan requirement. See the [single sign-on guide](/docs/sso). The
   [SSO design](https://github.com/hourmere/hourmere/blob/main/docs/sso.md) covers
   self-hosting, linking, enforcement and the remaining implementation sequence.
 - [Make](/docs/make) recipes require manual assembly; no import-verified blueprint or native
@@ -277,9 +277,8 @@ not grant host rescheduling or reschedule-request authority through REST, MCP or
   includes internal busy-time sync and conditional booking writes, with no production
   worker registration or UI/API/MCP/CLI access. Real-account acceptance
   is still pending; see the [operator note](/docs/self-hosting#caldav-foundation).
-- [Paid bookings](/docs/payments) have internal holds, Stripe Checkout Session creation,
-  automatic refunds and read-only operator reconciliation. Public checkout and payment
-  settings remain future work.
+- Paid bookings support Stripe Checkout, automatic refunds and read-only reconciliation
+  in Stripe test mode after operator opt-in. [Paid bookings](/docs/payments).
 - [Requests to choose another time](/docs/request-reschedule) retain the original booking
   until it is moved or cancelled. Expiry keeps it confirmed; imported and group-seat
   bookings do not support requests.

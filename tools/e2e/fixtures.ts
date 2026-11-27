@@ -1,11 +1,12 @@
 // Initialize schema extensions before service fixtures construct shared Zod schemas.
 import '@hono/zod-openapi'
-import { createHash, createHmac, randomBytes } from 'node:crypto'
+import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto'
 import { createServer as createHttpServer, type Server } from 'node:http'
 import { createServer as createTcpServer } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { test as base, expect, type FrameLocator, type Locator, type Page } from '@playwright/test'
-import { type RunningServer, startServer } from '../../apps/server/src/server.ts'
+import { sql } from 'kysely'
+import type { RunningServer } from '../../apps/server/src/server.ts'
 import { createAuth, createAuthPool } from '../../packages/auth/src/index.ts'
 import { writeBookingCalendar } from '../../packages/calendars/src/booking-events.ts'
 import { writeBookingConference } from '../../packages/calendars/src/conferences.ts'
@@ -24,8 +25,14 @@ import {
 } from '../../packages/notifications/src/index.ts'
 import { deliverMeetingPollEmail } from '../../packages/notifications/src/meeting-polls.ts'
 import { deliverWaitlistEmail } from '../../packages/notifications/src/waitlist.ts'
+import { createOneTimeBookingLink } from '../../packages/scheduling/src/one-time-links.ts'
+import {
+  createRoutingForm,
+  publishRoutingForm,
+  updateRoutingForm,
+} from '../../packages/scheduling/src/routing-form-service.ts'
 import { validateSuccessRedirect } from '../../packages/scheduling/src/success-redirect.ts'
-import { createFixtures } from '../../packages/scheduling/src/testing.ts'
+import { createFixtures, testContext } from '../../packages/scheduling/src/testing.ts'
 import { scanWaitlists } from '../../packages/scheduling/src/waitlist-discovery.ts'
 import {
   AUDIT_BOOKING_END,
@@ -46,12 +53,21 @@ import { startFixtureServer } from './fixture-server.ts'
 import { listenOwned, type OwnedListener } from './listeners.ts'
 import { type PollAuditState, seedPollAuditData } from './meeting-poll-audit-data.ts'
 import { type ScreenshotFixtureState, seedScreenshotData } from './screenshot-data.ts'
+import { stripeFixture } from './stripe-fixture.ts'
 import { seedWebhookDeliveryHistory } from './webhook-delivery-fixtures.ts'
 
 export interface FixtureApp {
   url: string
   parentUrl: string
   personalPath: string
+  teamDirectory: {
+    privateValues: readonly string[]
+    rename: (slug: string) => Promise<void>
+    reusePreviousSlug: () => Promise<void>
+    expirePreviousSlugReservation: () => Promise<void>
+    enforceSso: () => Promise<void>
+  } | null
+  stripe?: ReturnType<typeof stripeFixture>
   setEmbedSnippet: (snippet: string) => void
   configureMixedDirection: (content: {
     title: string
@@ -112,7 +128,9 @@ export interface FixtureApp {
   hostCounts: () => Promise<number[]>
   rows: () => Promise<{ source: string; status: string }[]>
   authorizeHost: (teamRole?: 'owner' | 'member') => Promise<void>
-  authorizeTeamSession: () => Promise<{ teamId: string; personalId: string }>
+  authorizeTeamSession: (
+    actor?: 'owner' | 'member' | 'other-team',
+  ) => Promise<{ teamId: string; personalId: string; expire: () => Promise<void> }>
   eventTypeTitles: () => Promise<string[]>
   bookingState: () => Promise<{
     total: number
@@ -122,6 +140,7 @@ export interface FixtureApp {
     fingerprints: number
     originalFingerprintPreserved: boolean
   }>
+  createReadApiKey: () => Promise<string>
 }
 export interface FixtureOptions {
   uiAudit: boolean
@@ -143,6 +162,7 @@ export const test = base.extend<{
   notificationEditor: boolean
   slotSnippets: boolean
   waitlistSmtp: boolean
+  paidStripe: boolean
   teamPublicHome: boolean
 }>({
   automaticMeet: [false, { option: true }],
@@ -151,6 +171,7 @@ export const test = base.extend<{
   notificationEditor: [false, { option: true }],
   slotSnippets: [false, { option: true }],
   waitlistSmtp: [false, { option: true }],
+  paidStripe: [false, { option: true }],
   teamPublicHome: [false, { option: true }],
   suppressFailureDom: [
     async ({ context }, use, testInfo) => {
@@ -175,6 +196,7 @@ export const test = base.extend<{
       notificationEditor,
       slotSnippets,
       waitlistSmtp,
+      paidStripe,
       teamPublicHome,
     },
     use,
@@ -195,6 +217,7 @@ export const test = base.extend<{
         f = createFixtures(db),
         host = await f.host({ handle: 'fixture-host', name: 'Fixture Host', timeZone: 'UTC' })
       await f.schedule(host.userId, { timeZone: 'UTC' })
+      const stripe = paidStripe ? stripeFixture(url, db) : undefined
       const provider = fakeGoogle(),
         sent: MailMessage[] = []
       let meetResponse: 'pending' | 'success' | 'failure' | 'lost' = 'pending'
@@ -330,12 +353,21 @@ export const test = base.extend<{
           minimumNoticeMinutes: 30,
         })
       }
-      await f.eventType(host.organizationId, host.userId, {
+      const personalEvent = await f.eventType(host.organizationId, host.userId, {
         title: 'Fixture call',
         slug: 'call',
         allowGuests: false,
         minimumNoticeMinutes: 30,
+        ...(stripe && { location: { kind: 'link', url: 'https://video.example.test/fixture' } }),
       })
+      if (stripe)
+        await db
+          .updateTable('event_types')
+          .set({
+            payment: { currency: 'usd', prices: [{ durationMinutes: 30, amountMinor: 4242 }] },
+          })
+          .where('id', '=', personalEvent)
+          .execute()
       const team = await f.organization('FixtureTeam')
       await f.member(host.userId, team, 'owner')
       await f.eventType(team, null, {
@@ -439,6 +471,7 @@ export const test = base.extend<{
         .values({ event_type_id: roundId, enabled: true })
         .execute()
       const directoryIds: string[] = []
+      let teamDirectory: FixtureApp['teamDirectory'] = null
       if (teamPublicHome) {
         const directory = await f.organization(TEAM_DIRECTORY_SLUG)
         const emptyDirectory = await f.organization(EMPTY_TEAM_DIRECTORY_SLUG)
@@ -450,22 +483,136 @@ export const test = base.extend<{
           .where('id', '=', directory)
           .execute()
         await f.member(host.userId, directory, 'owner')
-        await f.eventType(directory, null, {
+        const publicEvent = await f.eventType(directory, null, {
           slug: 'public-event',
           title: AUDIT_TITLE,
           description: AUDIT_DESCRIPTION,
           hosts: [{ userId: host.userId }],
         })
-        const unlisted = await f.eventType(directory, null, {
-          slug: 'unlisted-event',
-          title: 'Unlisted fixture event',
+        const roundRobin = await f.eventType(directory, null, {
+          slug: 'public-round-robin',
+          title: 'Public round-robin fixture event',
           hosts: [{ userId: host.userId }],
         })
         await db
           .updateTable('event_types')
-          .set({ is_hidden: true })
-          .where('id', '=', unlisted)
+          .set({ position: 1, scheduling_type: 'round_robin' })
+          .where('id', '=', roundRobin)
           .execute()
+        await db
+          .insertInto('round_robin_state')
+          .values({ event_type_id: roundRobin, enabled: true })
+          .execute()
+        const hiddenEvent = (slug: string, title: string) =>
+          f.eventType(directory, null, { slug, title, hosts: [{ userId: host.userId }] })
+        const [unlisted, linkEvent, routeTarget] = await Promise.all([
+          hiddenEvent('unlisted-event', 'Unlisted fixture event'),
+          hiddenEvent('one-time-event', 'One-time fixture event'),
+          hiddenEvent('route-target', 'Hidden routing fixture event'),
+        ])
+        await db
+          .updateTable('event_types')
+          .set({ is_hidden: true })
+          .where('id', 'in', [unlisted, linkEvent, routeTarget])
+          .execute()
+        const inactive = await f.eventType(directory, null, {
+          slug: 'inactive-event',
+          title: 'Inactive fixture event',
+          isActive: false,
+          hosts: [{ userId: host.userId }],
+        })
+        const deleted = await f.eventType(directory, null, {
+          slug: 'deleted-event',
+          title: 'Deleted fixture event',
+          deletedAt: new Date().toISOString(),
+          hosts: [{ userId: host.userId }],
+        })
+        const user = await db
+          .selectFrom('auth.user')
+          .select(['id', 'name', 'email'])
+          .where('id', '=', host.userId)
+          .executeTakeFirstOrThrow()
+        const membership = await db
+          .selectFrom('auth.member')
+          .select('id')
+          .where('organizationId', '=', directory)
+          .where('userId', '=', user.id)
+          .executeTakeFirstOrThrow()
+        const ctx = testContext(db, {
+          kind: 'session',
+          sessionId: randomUUID(),
+          organization: {
+            id: directory,
+            name: AUDIT_TEAM_NAME,
+            slug: TEAM_DIRECTORY_SLUG,
+            personal: false,
+          },
+          user,
+        })
+        const prefillEmail = 'team-one-time-prefill@hourmere.invalid'
+        const oneTime = await createOneTimeBookingLink(ctx, {
+          eventTypeId: linkEvent,
+          prefill: { email: prefillEmail },
+        })
+        const form = await createRoutingForm(ctx, {
+          slug: 'private-target-form',
+          title: 'Routing fixture form',
+          fallback: { kind: 'event', eventTypeId: routeTarget, mappings: [] },
+        })
+        const publication = await publishRoutingForm(ctx, form.id, { expectedRevision: 1 })
+        await updateRoutingForm(ctx, form.id, {
+          expectedRevision: publication.form.draftRevision,
+          enabled: true,
+        })
+        teamDirectory = {
+          privateValues: [
+            directory,
+            user.id,
+            user.email,
+            membership.id,
+            publicEvent,
+            roundRobin,
+            unlisted,
+            linkEvent,
+            routeTarget,
+            inactive,
+            deleted,
+            oneTime.id,
+            oneTime.token,
+            prefillEmail,
+            form.id,
+            publication.version.id,
+          ],
+          rename: async (slug) => {
+            await db
+              .updateTable('auth.organization')
+              .set({ slug })
+              .where('id', '=', directory)
+              .execute()
+          },
+          reusePreviousSlug: async () => {
+            await db
+              .updateTable('auth.organization')
+              .set({ slug: TEAM_DIRECTORY_SLUG.toLowerCase() })
+              .where('id', '=', disabledDirectory)
+              .execute()
+          },
+          expirePreviousSlugReservation: async () => {
+            await db
+              .updateTable('team_slug_reservations')
+              .set({ expires_at: sql<Date>`clock_timestamp() - interval '1 second'` })
+              .where('slug', '=', TEAM_DIRECTORY_SLUG.toLowerCase())
+              .where('organization_id', '=', directory)
+              .returning('slug')
+              .executeTakeFirstOrThrow()
+          },
+          enforceSso: async () => {
+            await db
+              .insertInto('sso_policies')
+              .values({ organization_id: directory, require_sso: true })
+              .execute()
+          },
+        }
         await f.member(host.userId, disabledDirectory, 'owner')
         await f.eventType(disabledDirectory, null, {
           slug: 'direct-event',
@@ -522,43 +669,57 @@ export const test = base.extend<{
       parentListener = await listenOwned(parent)
       const parentUrl = parentListener.url
       const authSecret = randomBytes(32).toString('base64')
-      const fixtureEnv = {
-        DATABASE_URL: owned.url,
-        BETTER_AUTH_SECRET: authSecret,
-        SIGNUP: 'closed',
-        HOURMERE_ROLE: 'web',
-        // SMTP availability enables waitlist admission. This web-only fixture never
-        // runs delivery workers; explicit waitlist delivery uses the in-memory sink.
-        ...(waitlistSmtp && {
-          SMTP_URL: 'smtp://127.0.0.1:1',
-          MAIL_FROM: 'Hourmere Fixture <fixture@hourmere.invalid>',
-        }),
-        EMBED_ALLOWED_ORIGINS: parentUrl,
-        ...(uiAudit && { MCP_OAUTH_ENABLED: 'true' }),
-        ...(notificationEditor && { FOLLOW_UP_HOST_NOTES_ENABLED: 'true' }),
-        ...(slotSnippets && { SLOT_SNIPPETS_ENABLED: 'true' }),
-        ...(teamPublicHome && { TEAM_PUBLIC_HOME_ORGANIZATION_IDS: directoryIds.join(',') }),
-        ...(automaticMeet && {
-          GOOGLE_MEET_ENABLED: 'true',
-          GOOGLE_CALENDAR_CLIENT_ID: 'synthetic-client',
-          GOOGLE_CALENDAR_CLIENT_SECRET: 'synthetic-secret',
-          CALENDAR_ENCRYPTION_KEY: TEST_CALENDAR_KEY,
-        }),
-        WEB_DIST:
-          process.env.HOURMERE_E2E_WEB_DIST ??
-          fileURLToPath(new URL('../../apps/web/dist', import.meta.url)),
+      const fixtureAuth = () => {
+        const signup = { mode: 'closed', allowedDomains: [] } as const
+        authPool ??= createAuthPool(owned.url, signup)
+        return createAuth({
+          pool: authPool,
+          db,
+          baseURL: url,
+          secret: authSecret,
+          signup,
+          mailer: {
+            send: async () => {
+              throw new Error('No mail delivery in browser fixtures')
+            },
+          },
+        })
       }
       app = await startFixtureServer(
         appListener,
-        fixtureEnv,
-        uiAudit
-          ? (env, options) =>
-              startServer(env, {
-                ...options,
-                // Repeated page mounts share one loopback bucket across all apps in a worker.
-                organizationListRateLimitMaxForTests: 20_000,
-              })
-          : undefined,
+        {
+          DATABASE_URL: owned.url,
+          BETTER_AUTH_SECRET: authSecret,
+          SIGNUP: 'closed',
+          HOURMERE_ROLE: 'web',
+          ...stripe?.env,
+          // SMTP availability enables waitlist admission. This web-only fixture never
+          // runs delivery workers; explicit waitlist delivery uses the in-memory sink.
+          ...(waitlistSmtp && {
+            SMTP_URL: 'smtp://127.0.0.1:1',
+            MAIL_FROM: 'Hourmere Fixture <fixture@hourmere.invalid>',
+          }),
+          EMBED_ALLOWED_ORIGINS: parentUrl,
+          ...(uiAudit && { MCP_OAUTH_ENABLED: 'true' }),
+          ...(notificationEditor && { FOLLOW_UP_HOST_NOTES_ENABLED: 'true' }),
+          ...(slotSnippets && { SLOT_SNIPPETS_ENABLED: 'true' }),
+          ...(teamPublicHome && { TEAM_PUBLIC_HOME_ORGANIZATION_IDS: directoryIds.join(',') }),
+          ...(automaticMeet && {
+            GOOGLE_MEET_ENABLED: 'true',
+            GOOGLE_CALENDAR_CLIENT_ID: 'synthetic-client',
+            GOOGLE_CALENDAR_CLIENT_SECRET: 'synthetic-secret',
+            CALENDAR_ENCRYPTION_KEY: TEST_CALENDAR_KEY,
+          }),
+          WEB_DIST:
+            process.env.HOURMERE_E2E_WEB_DIST ??
+            fileURLToPath(new URL('../../apps/web/dist', import.meta.url)),
+        },
+        undefined,
+        {
+          ...(stripe && { stripeTransport: stripe.transport }),
+          // Repeated page mounts share one loopback bucket across all apps in a worker.
+          ...(uiAudit && { organizationListRateLimitMaxForTests: 20_000 }),
+        },
       )
       let externalRequests = 0
       let authorization: string | undefined
@@ -591,6 +752,17 @@ export const test = base.extend<{
         url,
         parentUrl,
         personalPath: '/fixture-host/call',
+        teamDirectory,
+        createReadApiKey: async () => {
+          const key = await fixtureAuth().api.createApiKey({
+            body: {
+              userId: secondHost.userId,
+              metadata: { scope: 'read', organizationId: secondHost.organizationId },
+            },
+          })
+          return key.key
+        },
+        ...(stripe && { stripe }),
         configureMixedDirection: async ({ title, description, hostName, question }) => {
           await db
             .updateTable('auth.user')
@@ -1424,19 +1596,28 @@ export const test = base.extend<{
             ),
           )
         },
-        authorizeTeamSession: async () => {
+        authorizeTeamSession: async (actor = 'owner') => {
           authorization = undefined
+          const account =
+            actor === 'other-team'
+              ? await f.host({ name: 'Other team owner' })
+              : actor === 'member'
+                ? secondHost
+                : host
+          const teamId = actor === 'other-team' ? await f.organization('other-fixture-team') : team
+          if (actor === 'other-team') await f.member(account.userId, teamId, 'owner')
           const token = randomBytes(24).toString('base64url')
-          await db
+          const session = await db
             .insertInto('auth.session')
             .values({
-              userId: host.userId,
-              activeOrganizationId: team,
+              userId: account.userId,
+              activeOrganizationId: teamId,
               token,
               updatedAt: new Date(),
               expiresAt: new Date(Date.now() + 86_400_000),
             })
-            .execute()
+            .returning('id')
+            .executeTakeFirstOrThrow()
           await context.addCookies([
             {
               name: 'better-auth.session_token',
@@ -1448,15 +1629,23 @@ export const test = base.extend<{
               sameSite: 'Lax',
             },
           ])
-          return { teamId: team, personalId: host.organizationId }
+          return {
+            teamId,
+            personalId: account.organizationId,
+            expire: async () => {
+              await db
+                .updateTable('auth.session')
+                .set({ expiresAt: new Date(0) })
+                .where('id', '=', session.id)
+                .execute()
+            },
+          }
         },
         eventTypeTitles: async () =>
           (await db.selectFrom('event_types').select('title').orderBy('title').execute()).map(
             (row) => row.title,
           ),
         authorizeHost: async (teamRole) => {
-          const signup = { mode: 'closed', allowedDomains: [] } as const
-          authPool ??= createAuthPool(owned.url, signup)
           if (teamRole)
             await db
               .updateTable('auth.member')
@@ -1464,19 +1653,7 @@ export const test = base.extend<{
               .where('organizationId', '=', team)
               .where('userId', '=', host.userId)
               .execute()
-          const auth = createAuth({
-            pool: authPool,
-            db,
-            baseURL: url,
-            secret: authSecret,
-            signup,
-            mailer: {
-              send: async () => {
-                throw new Error('No mail delivery in browser fixtures')
-              },
-            },
-          })
-          const key = await auth.api.createApiKey({
+          const key = await fixtureAuth().api.createApiKey({
             body: {
               userId: host.userId,
               name: 'synthetic-browser-fixture',
