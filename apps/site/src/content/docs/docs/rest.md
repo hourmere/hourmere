@@ -128,12 +128,11 @@ voter requests and credential handling. For request and response schemas, use yo
 ## Instance capabilities
 
 `GET /api/v1/instance` includes additive `ssoOidcEnabled` and `ssoSamlEnabled`
-booleans with the instance's effective settings. Both protocols are off by default,
-including on self-hosted instances. The operator can enable either protocol with
-`SSO_OIDC_ENABLED=true` or `SSO_SAML_ENABLED=true`. An unset or empty value uses the
-release default, `false` explicitly turns the protocol off, and any other nonempty
-value fails startup. Older servers may omit these fields. Treat absence as unknown,
-keep the corresponding SSO entry points hidden and tolerate unknown response fields.
+booleans with the instance's effective settings. Both protocols are on by default,
+including on self-hosted instances. Each protocol is on with an unset or empty value
+or `true`. Set `SSO_OIDC_ENABLED=false` or `SSO_SAML_ENABLED=false` to turn it off.
+Any other value fails startup. Older servers may omit these fields. Treat absence as
+unknown, keep the corresponding SSO entry points hidden and tolerate unknown response fields.
 
 `GET /api/v1/instance` also reports whether routing forms are effectively enabled
 as `routingFormsEnabled`. Routing is on by default. A self-hosted operator can turn it
@@ -168,7 +167,7 @@ protocol get `404 sso_disabled`. SSO writes require a browser session, including
 recovery, and are documented in the [REST conventions](/docs/api-conventions#team-single-sign-on).
 See [single sign-on](/docs/sso#what-off-means) for the complete off behavior and recovery.
 
-中文：两种协议默认关闭，实例状态接口返回各自的实际启用状态。当前团队所有者或管理员可用
+中文：两种协议默认开启，实例状态接口返回各自的实际启用状态。当前团队所有者或管理员可用
 团队的 `read` 或 `full` 密钥读取提供方与策略，两种协议关闭时也可读取。团队已强制 SSO 时，
 密钥还需有效的委托，否则收到 `403 sso_required`，且不会跳转到登录页面。通过已关闭协议
 增加信任返回 `404 sso_disabled`。更改 SSO 配置与恢复仅接受浏览器会话。

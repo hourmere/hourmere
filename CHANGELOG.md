@@ -25,11 +25,13 @@ must approve publication through the [release workflow](https://github.com/hourm
   [workflow operating guide](https://github.com/hourmere/hourmere/blob/main/docs/workflows.md#operating-guide).
 
 - Organization single sign-on through OIDC and SAML 2.0 is available on every
-  instance, including self-hosted installations. Both protocols default to off. Enable them
-  separately with `SSO_OIDC_ENABLED=true` and `SSO_SAML_ENABLED=true`. Turning a protocol off
-  suspends its browser proofs and delegations while stored team enforcement continues. Enrolled
-  owners can recover through their Hourmere mailbox, and operators can turn off enforcement
-  without reaching the identity provider. See the [single sign-on guide](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/sso.md).
+  instance, including self-hosted installations. Both protocols are on by default, including
+  on upgrades with empty or unset settings. Teams configure a provider and enable enforcement
+  separately. Turn off either protocol with `SSO_OIDC_ENABLED=false` or `SSO_SAML_ENABLED=false`.
+  Turning a protocol off suspends its browser proofs and delegations while stored team
+  enforcement continues. Enrolled owners can recover through their Hourmere mailbox, and
+  operators can turn off enforcement without reaching the identity provider. See the
+  [single sign-on guide](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/sso.md).
 
 - SCIM 2.0 provisioning for team Users and explicitly mapped child-team Groups,
   available on every instance without a paid plan. Discovery, directory membership

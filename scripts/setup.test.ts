@@ -30,6 +30,8 @@ const sender = "Hourmere's scheduling <bookings@example.test>"
 const origin = 'https://meet.example.test'
 const proxyInput = `\n${origin}\n${smtp}\n${sender}\n`
 const plainInput = 'plain\n\n\nyes\n'
+const ssoSettings = ['SSO_OIDC_ENABLED', 'SSO_SAML_ENABLED'] as const
+const hasCompose = spawnSync('docker', ['compose', 'version'], { encoding: 'utf8' }).status === 0
 
 afterAll(() => {
   for (const directory of directories) rmSync(directory, { recursive: true, force: true })
@@ -77,6 +79,35 @@ function generatedSecret(contents: string, name: string): string {
   return new RegExp(`^${name}='([^']*)'$`, 'm').exec(contents)?.[1] ?? ''
 }
 
+function legacySsoInstall(method: 'setup' | 'copy', period: 'before settings' | 'setting window') {
+  const install = fixture()
+  const template = join(install.directory, '.env.example')
+  if (period === 'before settings') {
+    writeFileSync(
+      template,
+      readFileSync(example, 'utf8').replace(/^SSO_(OIDC|SAML)_ENABLED=.*\n/gm, ''),
+    )
+  }
+  if (method === 'setup') expect(install.run(plainInput).status).toBe(0)
+  else copyFileSync(template, install.envFile)
+  const beforeUpgrade = install.text()
+  const existing = parseEnv(beforeUpgrade)
+  for (const key of ssoSettings) {
+    expect(existing[key]).toBe(period === 'setting window' ? '' : undefined)
+  }
+  // The upgrade replaces the tracked template and setup refuses to overwrite the private file.
+  copyFileSync(example, template)
+  expect(install.run(plainInput).status).toBe(1)
+  expect(install.text() === beforeUpgrade).toBe(true)
+  return { ...install, existing, beforeUpgrade }
+}
+
+const legacySsoInstalls = [
+  ['setup', 'before settings'],
+  ['setup', 'setting window'],
+  ['copy', 'setting window'],
+] as const
+
 describe('first-run deployment setup', { timeout: 20_000 }, () => {
   it('generates independent strong secrets privately and selects the HTTPS Compose path', () => {
     const setup = fixture()
@@ -115,21 +146,84 @@ describe('first-run deployment setup', { timeout: 20_000 }, () => {
     expect(setup.noStaging()).toBe(true)
   })
 
-  it('keeps an install from a template without the SAML setting off after upgrade', () => {
-    const setup = fixture()
-    const template = join(setup.directory, '.env.example')
-    writeFileSync(template, readFileSync(example, 'utf8').replace(/^SSO_SAML_ENABLED=.*\n/m, ''))
-    expect(setup.run(plainInput).status).toBe(0)
-    const before = setup.text()
-    copyFileSync(example, template)
-    expect(setup.run(plainInput).status).toBe(1)
-    expect(setup.text() === before).toBe(true)
-    const existing = parseEnv(before)
-    expect(existing.SSO_SAML_ENABLED).toBeUndefined()
-    const env = { ...existing, DATABASE_URL: 'postgres://synthetic@localhost:9/legacy-install' }
-    expect(loadConfig(env).SSO_SAML_ENABLED).toBe(false)
-    expect(loadConfig({ ...env, SSO_SAML_ENABLED: '' }).SSO_SAML_ENABLED).toBe(false)
-  })
+  it.each(legacySsoInstalls)(
+    'enables both SSO protocols on direct startup from an unchanged %s .env from the %s',
+    (method, period) => {
+      const { existing } = legacySsoInstall(method, period)
+      // A direct deployment needs a database URL and the operator supplies the auth secret
+      // when starting with a copied template. Neither changes the existing SSO settings.
+      const config = loadConfig({
+        ...existing,
+        DATABASE_URL: 'postgres://synthetic@localhost:9/legacy-install',
+        BETTER_AUTH_SECRET:
+          existing.BETTER_AUTH_SECRET || 'synthetic-direct-auth-secret-at-least-32',
+      })
+      for (const key of ssoSettings) expect(config[key]).toBe(true)
+    },
+  )
+
+  it.skipIf(!hasCompose).each(legacySsoInstalls)(
+    'enables both SSO protocols through Compose from an unchanged %s .env from the %s',
+    (method, period) => {
+      const { directory, text, beforeUpgrade } = legacySsoInstall(method, period)
+      for (const file of ['docker-compose.yml', 'docker-compose.worker.yml']) {
+        copyFileSync(new URL(`../${file}`, import.meta.url), join(directory, file))
+      }
+      function composeEnvironment(overrides: NodeJS.ProcessEnv = {}) {
+        const result = spawnSync(
+          'docker',
+          [
+            'compose',
+            '--env-file',
+            '.env',
+            '-f',
+            'docker-compose.yml',
+            '-f',
+            'docker-compose.worker.yml',
+            'config',
+            '--format',
+            'json',
+          ],
+          {
+            cwd: directory,
+            encoding: 'utf8',
+            env: {
+              PATH: process.env.PATH,
+              HOME: process.env.HOME,
+              ...(method === 'copy' && {
+                BETTER_AUTH_SECRET: 'synthetic-compose-auth-secret-at-least-32',
+                POSTGRES_PASSWORD: 'synthetic-compose-password',
+              }),
+              ...overrides,
+            },
+          },
+        )
+        expect(result.status, 'Compose must render the app and worker environments').toBe(0)
+        const { services } = JSON.parse(result.stdout) as {
+          services: Record<'app' | 'worker', { environment: NodeJS.ProcessEnv }>
+        }
+        return [services.app.environment, services.worker.environment]
+      }
+
+      for (const env of composeEnvironment()) {
+        const config = loadConfig(env)
+        for (const key of ssoSettings) {
+          expect(env[key]).toBe('')
+          expect(config[key]).toBe(true)
+        }
+      }
+      for (const key of ssoSettings) {
+        for (const env of composeEnvironment({ [key]: 'false' })) {
+          const config = loadConfig(env)
+          for (const setting of ssoSettings) expect(config[setting]).toBe(setting !== key)
+        }
+        for (const env of composeEnvironment({ [key]: 'garbage' })) {
+          expect(() => loadConfig(env)).toThrow(`${key} must be true, false or empty`)
+        }
+      }
+      expect(text() === beforeUpgrade).toBe(true)
+    },
+  )
 
   it('persists an explicitly selected Compose project for subsequent commands', () => {
     const setup = fixture()
