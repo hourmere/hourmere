@@ -115,7 +115,7 @@ is listed explicitly. CLI `--help`, no arguments and `--version` are local and r
 New operations require explicit classification; `read` and `bookings` do not gain access
 because an endpoint uses GET or a tool advertises itself as read-only.
 
-Routing operations return `routing_forms_disabled` until an operator enables routing.
+Routing operations return `routing_forms_disabled` while routing is off.
 
 Team booking bulk cancellation preview, confirmation and status return 404 until release.
 
@@ -256,8 +256,12 @@ Team booking bulk cancellation preview, confirmation and status return 404 until
 | `POST /api/v1/routing-continuations/slots` | Public or manage token; check a supplied key | `full, bookings` |
 | `POST /api/v1/routing-continuations/bookings` | Public or manage token; check a supplied key | `full, bookings` |
 | `POST /api/v1/public/{handle}/{slug}/bookings` | Public or manage token; check a supplied key | `full, bookings` |
+| `POST /api/v1/public/{handle}/{slug}/checkout` | Public or manage token; check a supplied key | `full, bookings` |
+| `POST /api/v1/public/checkout/status` | Public or manage token; check a supplied key | `full, read, bookings` |
+| `POST /api/v1/public/checkout/cancel` | Public or manage token; check a supplied key | `full, bookings` |
 | `GET /api/v1/public/{handle}/{slug}/slots` | Public or manage token; check a supplied key | `full, read, bookings` |
 | `GET /api/v1/public/teams/{handle}/{slug}` | Public or manage token; check a supplied key | `full, read, bookings` |
+| `GET /api/v1/public/teams/{handle}` | Public or manage token; check a supplied key | `full, read, bookings` |
 | `POST /api/v1/public/teams/{handle}/{slug}/bookings` | Public or manage token; check a supplied key | `full, bookings` |
 | `GET /api/v1/public/teams/{handle}/{slug}/slots` | Public or manage token; check a supplied key | `full, read, bookings` |
 | `POST /api/v1/public/{handle}/{slug}/waitlist` | Public or manage token; check a supplied key | `full, bookings` |
@@ -279,6 +283,8 @@ Team booking bulk cancellation preview, confirmation and status return 404 until
 | `GET /api/v1/team/bookings` | Browser session only | — |
 | `GET /api/v1/team/bookings/{id}` | Browser session only | — |
 | `POST /api/v1/team/bookings/{id}/cancel` | Browser session only | — |
+| `GET /api/v1/team/bookings/{id}/handoff-preview` | Browser session only | — |
+| `POST /api/v1/team/bookings/{id}/handoff-offers/{offerId}/apply` | Browser session only | — |
 | `POST /api/v1/team/bookings/bulk-cancellations/preview` | Browser session only | — |
 | `POST /api/v1/team/bookings/bulk-cancellations/{id}/confirm` | Browser session only | — |
 | `GET /api/v1/team/bookings/bulk-cancellations/{id}` | Browser session only | — |
@@ -363,6 +369,7 @@ Team booking bulk cancellation preview, confirmation and status return 404 until
 | `publish_routing_form` | — | `routing-forms publish` | `full` |
 | `preview_routing_form` | — | `routing-forms preview` | `full` |
 | `get_public_routing_form` | — | `routing-forms public` | `full, read, bookings` |
+| `get_public_team` | — | `team-home` | `full, read, bookings` |
 | `route_lead` | — | `routing-forms route` | `full, bookings` |
 | `resolve_routing_continuation` | — | `routing-forms resolve` | `full, bookings` |
 | `find_routed_slots` | — | `routing-forms slots` | `full, bookings` |
@@ -460,18 +467,26 @@ These routes keep their own authentication; API key scopes do not authorize them
 
 <!-- api-key-scope-table:end -->
 
-OIDC single sign-on is off unless the operator sets `SSO_OIDC_ENABLED=true`; SAML is
-being built and no setting enables it. While OIDC is off, the SSO operations in these
-tables that add trust (sign-in, linking, provider and domain setup, enabling enforcement,
-delegation binding) return `404 sso_disabled`. The reads `list_sso_providers` and
-`get_sso_policy` (CLI `sso providers list` / `sso policy`), recovery and trust-reducing
-operations stay available to a team's owners and administrators, so stored configuration
-can still be inspected and removed.
+OIDC and SAML single sign-on are off by default. The operator enables them separately
+with `SSO_OIDC_ENABLED=true` and `SSO_SAML_ENABLED=true`. Requests that add trust through
+a disabled protocol return `404 sso_disabled`, including sign-in, linking, provider
+setup and delegation binding. Domain setup, just-in-time admission and recovery enrollment
+require at least one enabled protocol. A team needs a usable provider on an enabled
+protocol to start requiring SSO. The reads `list_sso_providers` and `get_sso_policy`
+(CLI `sso providers list` / `sso policy`) remain available to team owners and administrators.
+Stored enforcement still applies. Turning a protocol off suspends its existing proofs and
+delegations. Re-enabling it restores their use before the original deadline if they still
+meet the other validity checks. Machine reads without a usable delegation on an enforced
+team return `sso_required`. Enrolled owners can use browser recovery, and trust-reducing
+operations retain their usual authorization and proof requirements.
 
-除非运营者设置 `SSO_OIDC_ENABLED=true`，否则 OIDC 单点登录保持关闭；SAML 仍在开发中，
-没有可启用它的设置。OIDC 关闭时，表中增加信任的 SSO 操作（登录、关联、身份提供方和域名
-配置、开启强制、委托绑定）返回 `404 sso_disabled`；上述两个读取操作、恢复操作和降低信任的
-操作对团队所有者和管理员保持可用，已保存的配置仍可查看和移除。
+OIDC 和 SAML 单点登录默认关闭。运营者可分别设置 `SSO_OIDC_ENABLED=true` 和
+`SSO_SAML_ENABLED=true`。通过已关闭协议增加信任的请求（如登录、关联、配置身份提供方和绑定
+委托）返回 `404 sso_disabled`。设置域名、即时入组和恢复登记需要至少启用一种协议；开启强制单点
+登录需要该协议上有可用的身份提供方。上述两个读取操作对团队所有者和管理员保持可用。已保存的
+强制要求继续生效。关闭协议会暂停其证明和委托，在原到期时间前重新启用且证明或委托仍有效时
+可以恢复使用。通过机器客户端读取已强制 SSO 的团队时仍需有效委托，否则返回 `sso_required`。
+已登记的所有者可通过浏览器恢复，降低信任的操作仍需通过原有的权限和证明验证。
 
 Booking workflow operations (`GET /api/v1/workflows`, `GET /api/v1/workflows/{id}`,
 `list_workflows`, `get_workflow`, `workflows list` and `workflows get`) are listed before the

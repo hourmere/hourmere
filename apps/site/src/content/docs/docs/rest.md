@@ -128,15 +128,50 @@ voter requests and credential handling. For request and response schemas, use yo
 ## Instance capabilities
 
 `GET /api/v1/instance` includes additive `ssoOidcEnabled` and `ssoSamlEnabled`
-booleans. Both are currently `false`: organization SSO is unavailable, including on
-self-hosted instances, and no environment setting enables it yet. Older servers may
-omit these fields; clients should treat absence as unknown, keep SSO entry points hidden and
-tolerate unknown response fields. No SSO operations are exposed in this release.
+booleans with the instance's effective settings. Both protocols are off by default,
+including on self-hosted instances. The operator can enable either protocol with
+`SSO_OIDC_ENABLED=true` or `SSO_SAML_ENABLED=true`. An unset or empty value uses the
+release default, `false` explicitly turns the protocol off, and any other nonempty
+value fails startup. Older servers may omit these fields. Treat absence as unknown,
+keep the corresponding SSO entry points hidden and tolerate unknown response fields.
 
 `GET /api/v1/instance` also reports whether routing forms are effectively enabled
-as `routingFormsEnabled`. Routing is off by default. A self-hosted operator can set
-`ROUTING_FORMS_ENABLED=true` and restart the server. A legacy personal `route` handle
+as `routingFormsEnabled`. Routing is on by default. A self-hosted operator can turn it
+off by setting `ROUTING_FORMS_ENABLED=false` and restarting the server. A legacy personal `route` handle
 can still keep the effective state off.
+
+## Read team single sign-on configuration
+
+Use a `read` or `full` API key for a current owner or administrator of the team.
+The key's organization selects the team for both reads. With a browser session, the
+active organization selects it. On an enforced team use a session with live SSO
+proof or an API key with a usable SSO delegation. An enrolled owner can also read
+the configuration from the browser with a live recovery grant.
+
+```sh
+curl --fail-with-body "$HOURMERE_URL/api/v1/team/sso/providers?limit=10" \
+  -H "Authorization: Bearer $HOURMERE_API_KEY"
+curl --fail-with-body "$HOURMERE_URL/api/v1/team/sso/policy" \
+  -H "Authorization: Bearer $HOURMERE_API_KEY"
+```
+
+The providers response contains `data` and `nextCursor`. The default limit is 50 and
+the maximum is 100. Pass a non-null `nextCursor` as `cursor` for the same team.
+Results omit provider secrets, raw metadata and identity claims. The policy includes
+`requireSso`, `admission`, `policyRevision` and `trustGeneration`. Treat response
+objects and status strings as open to additions.
+
+Both reads remain available to authorized callers with both protocols off. Stored
+enforcement still applies. A key without a usable delegation for an enforced team gets
+`403 sso_required`, with no sign-in redirect. Requests that add trust through a disabled
+protocol get `404 sso_disabled`. SSO writes require a browser session, including for
+recovery, and are documented in the [REST conventions](/docs/api-conventions#team-single-sign-on).
+See [single sign-on](/docs/sso#what-off-means) for the complete off behavior and recovery.
+
+中文：两种协议默认关闭，实例状态接口返回各自的实际启用状态。当前团队所有者或管理员可用
+团队的 `read` 或 `full` 密钥读取提供方与策略，两种协议关闭时也可读取。团队已强制 SSO 时，
+密钥还需有效的委托，否则收到 `403 sso_required`，且不会跳转到登录页面。通过已关闭协议
+增加信任返回 `404 sso_disabled`。更改 SSO 配置与恢复仅接受浏览器会话。
 
 ## Use routing forms
 

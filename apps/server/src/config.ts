@@ -97,6 +97,22 @@ const schema = z
       'DATABASE_CONNECTION_TIMEOUT',
       DEFAULT_CONNECTION_TIMEOUT_MS,
     ),
+    TEAM_PUBLIC_HOME_ORGANIZATION_IDS: optional(z.string()).transform((value, ctx) => {
+      const ids =
+        value
+          ?.split(',')
+          .map((id) => id.trim())
+          .filter(Boolean) ?? []
+      const uuid = z.uuid()
+      if (ids.length > 256 || ids.some((id) => !uuid.safeParse(id).success)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'TEAM_PUBLIC_HOME_ORGANIZATION_IDS must be at most 256 comma-separated UUIDs',
+        })
+        return z.NEVER
+      }
+      return [...new Set(ids.map((id) => id.toLowerCase()))]
+    }),
     EMBED_ALLOWED_ORIGINS: optional(
       z
         .string()
@@ -170,8 +186,7 @@ const schema = z
         return z.NEVER
       }
     }),
-    // Reserved for SSO, which is not available yet: parsed and validated at startup, read by
-    // nothing else, so it routes nothing. Never the webhook allowlist, never team-editable.
+    // Operator-only SSO destinations. Independent of the webhook allowlist and team settings.
     SSO_PRIVATE_TARGETS: optional(z.string()).transform((value, ctx) => {
       try {
         return parseSsoPrivateTargets(value)
@@ -194,10 +209,12 @@ const schema = z
       ),
     ),
     SCIM_PROVISIONING_ENABLED: scimProvisioningEnabled,
-    // Organization OIDC sign-in. Empty or unset follows the release default, which is off
-    // until SSO ships. SSO_SAML_ENABLED is not a setting yet and is not read.
+    // Organization single sign-on. Empty or unset follows the release default, currently off.
     SSO_OIDC_ENABLED: optional(
       z.enum(['true', 'false'], { error: 'SSO_OIDC_ENABLED must be true, false or empty' }),
+    ).transform((value) => value === 'true'),
+    SSO_SAML_ENABLED: optional(
+      z.enum(['true', 'false'], { error: 'SSO_SAML_ENABLED must be true, false or empty' }),
     ).transform((value) => value === 'true'),
     MCP_OAUTH_ENABLED: optional(z.enum(['true', 'false'])).transform((v) => v === 'true'),
     PORT: z.preprocess(
@@ -294,7 +311,7 @@ const schema = z
     MAIL_MAX_PER_HOUR: emailLimit('MAIL_MAX_PER_HOUR', 100, 0),
     WORKFLOWS_ENABLED: optional(
       z.enum(['true', 'false'], { error: 'WORKFLOWS_ENABLED must be true, false or empty' }),
-    ).transform((value) => value === 'true'),
+    ).transform((value) => value !== 'false'),
     WORKFLOW_MAIL_MAX_PER_HOUR: emailLimit('WORKFLOW_MAIL_MAX_PER_HOUR', 20, 0),
     WORKFLOW_OWNER_MAIL_MAX_PER_HOUR: emailLimit('WORKFLOW_OWNER_MAIL_MAX_PER_HOUR', 5, 0),
     GOOGLE_CLIENT_ID: optional(z.string()),

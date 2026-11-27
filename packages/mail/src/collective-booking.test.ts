@@ -46,7 +46,11 @@ describe('collective booking mail', () => {
       const message = bookingEmail(kind, meeting, { ...attendee, locale })
       expect(message.subject).toContain(names)
       expect(message.text.split(names).length).toBeGreaterThanOrEqual(4)
-      expect(message.html).toContain(names)
+      expect(message.html).toContain(
+        names
+          .replace('Liam LA', '<bdi>Liam LA</bdi>')
+          .replace('Berta Berlin', '<bdi>Berta Berlin</bdi>'),
+      )
       expect(message.text).not.toContain('Co-hosts')
     }
     const followUp = followUpEmail(meeting, { ...attendee, locale })

@@ -24,8 +24,8 @@ export function notifyUnauthorized() {
 }
 
 const watchSession: Middleware = {
-  onResponse({ response }) {
-    if (response.status === 401) notifyUnauthorized()
+  onResponse({ request, response }) {
+    if (response.status === 401 && !request.signal.aborted) notifyUnauthorized()
   },
 }
 

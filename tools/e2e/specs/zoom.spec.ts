@@ -1,3 +1,4 @@
+import { selectAdminLanguage } from '../account-menu.ts'
 import { expect, test } from '../zoom-fixtures.ts'
 
 const labels = {
@@ -38,7 +39,7 @@ for (const language of ['en', 'zh-CN'] as const) {
     zoomApp,
   }) => {
     await page.goto(`${zoomApp.url}/app/conferences`)
-    await page.getByRole('combobox', { name: 'Interface language' }).selectOption(language)
+    await selectAdminLanguage(page, language)
     await expect(page.getByRole('heading', { name: text.title, level: 1 })).toBeVisible()
     await page.keyboard.press('Tab')
     await page.getByRole('button', { name: text.connect, exact: true }).click()
@@ -110,7 +111,7 @@ for (const language of ['en', 'zh-CN'] as const) {
     zoomApp,
   }) => {
     await page.goto(`${zoomApp.url}/app/conferences`)
-    await page.getByRole('combobox', { name: 'Interface language' }).selectOption(language)
+    await selectAdminLanguage(page, language)
     await page.getByRole('button', { name: text.connect, exact: true }).click()
     await expect(page.getByText(text.connected, { exact: true })).toBeVisible()
     zoomApp.setScopeFailure()
@@ -121,7 +122,7 @@ for (const language of ['en', 'zh-CN'] as const) {
     expect(await zoomApp.state()).toMatchObject({ connections: 1, active: 0, secrets: 0 })
     const alternative = language === 'en' ? 'zh-CN' : 'en',
       other = labels[alternative]
-    await page.locator('.language-picker select').selectOption(alternative)
+    await selectAdminLanguage(page, alternative)
     await expect(page.getByRole('alert')).toHaveText(other.permission)
     await expect(page.getByRole('heading', { name: 'Settings', level: 2 })).toBeVisible()
     zoomApp.restoreScope()
@@ -144,7 +145,7 @@ test.describe('Zoom disabled by default', () => {
       zoomApp,
     }) => {
       await page.goto(`${zoomApp.url}/app/conferences`)
-      await page.getByRole('combobox', { name: 'Interface language' }).selectOption(language)
+      await selectAdminLanguage(page, language)
       await expect(page.getByText(labels[language].disabled, { exact: true })).toBeVisible()
       await expect(
         page.getByRole('button', { name: labels[language].connect, exact: true }),
@@ -191,7 +192,7 @@ test.describe('Zoom explicit meeting authorization', () => {
         identity = language === 'en' ? 'Identity only' : '仅身份访问',
         permission = language === 'en' ? 'Meeting permissions' : '会议权限'
       await page.goto(`${zoomApp.url}/app/conferences`)
-      await page.getByRole('combobox', { name: 'Interface language' }).selectOption(language)
+      await selectAdminLanguage(page, language)
       await page.getByRole('button', { name: text.connect, exact: true }).click()
       await expect(page.getByText(text.connected, { exact: true })).toBeVisible()
       await expect(page.getByText(identity, { exact: true })).toBeVisible()

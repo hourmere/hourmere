@@ -365,6 +365,8 @@ describe.skipIf(!serverUrl)('event type service', () => {
         questions: [],
         notifications: DEFAULT_NOTIFICATIONS,
         waitlist: { enabled: false },
+        payment: null,
+        paymentAvailability: 'stripe_not_configured',
         isActive: true,
         isHidden: false,
         allowGuests: false,
@@ -593,6 +595,7 @@ describe.skipIf(!serverUrl)('event type service', () => {
         maxBookingsPerDay: null,
         location: null,
         locations: null,
+        paymentAvailability: 'stripe_not_configured',
         updatedAt: expect.any(String),
       })
       expect(await updateEventType(personal(user), created.id, {})).toEqual(updated)

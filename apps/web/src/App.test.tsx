@@ -127,10 +127,8 @@ describe('route loading language', () => {
       </MemoryRouter>,
     )
     expect(screen.getByRole('status').textContent).toBe('正在加载…')
-    expect(screen.getByLabelText<HTMLSelectElement>('界面语言').value).toBe('zh-CN')
-    expect(
-      [...screen.getByLabelText<HTMLSelectElement>('界面语言').options].map(({ value }) => value),
-    ).toEqual(['en', 'zh-CN'])
+    expect(document.documentElement.lang).toBe('zh-CN')
+    expect(screen.queryByRole('combobox', { name: '界面语言' })).toBeNull()
     expect(localStorage.getItem('hourmere-language')).toBe('de')
   })
 

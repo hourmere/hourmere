@@ -113,7 +113,7 @@ function MeetingPollListPage({
                 <div className="card-main">
                   <h2 className="card-title">
                     <Link className="user-content" to={meetingPollPath(poll.id, organizationId)}>
-                      {poll.title}
+                      <bdi>{poll.title}</bdi>
                     </Link>
                   </h2>
                   <p>{t(POLL_STATUS[poll.status] ?? 'Unknown')}</p>

@@ -41,9 +41,9 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 | `packages/mail` | Outgoing email: SMTP, or the server log when SMTP is not configured; booking email templates and calendar invitations. |
 | `packages/jobs` | Background jobs on Postgres (pg-boss): typed job definitions, enqueueing inside a transaction, workers. |
 | `packages/webhooks` | Signed organization booking webhooks and encrypted Slack destinations, transactional delivery and bounded retries. See [webhooks](https://hourmere.com/docs/webhooks). |
-| `packages/outbound` | Shared outbound destination policy: special-use address checks, operator private targets, URL syntax, DNS answer validation and pinned connections with TLS hostname verification. Webhooks send through it; CalDAV reuses its address and private-target policy. The hard-off SSO paths use the profile for domain-proof TXT queries and OIDC discovery and signing keys. |
+| `packages/outbound` | Shared outbound destination policy: special-use address checks, operator private targets, URL syntax, DNS answer validation and pinned connections with TLS hostname verification. Webhooks and CalDAV use it. SSO uses its profile for domain-proof TXT queries, OIDC provider requests and SAML metadata URL imports. |
 | `packages/notifications` | Durable booking and sign-in email delivery, retries and the encrypted credential outbox. See [notifications](https://hourmere.com/docs/notifications). |
-| `packages/workflows` | Booking workflow definitions and execution. The operator can enable workflows with `WORKFLOWS_ENABLED=true`. See the [operating guide](docs/workflows.md#operating-guide). |
+| `packages/workflows` | Booking workflow definitions and execution. Workflows are enabled by default. The operator can pause them with `WORKFLOWS_ENABLED=false`. See the [operating guide](docs/workflows.md#operating-guide). |
 | `tools/api-types` | Generates the web app's API types from the server's OpenAPI document (`npm run api:types`). |
 | `tools/cli` | API-key command-line client using the existing MCP tools (`npm run --silent cli -- --help`). See [CLI](https://hourmere.com/docs/cli). |
 | `tools/n8n-nodes-hourmere` | Self-hosted n8n community node with its own npm lockfile and install, outside the root workspaces; installed separately and excluded from the Docker image. See [n8n](https://hourmere.com/docs/n8n). |
@@ -208,16 +208,23 @@ Give containers at least 35 seconds to stop.
 
 Before upgrading, take a full backup, including the host `Caddyfile` with any operator
 customizations, and record the current branch name or tag alongside
-the backup's saved commit. A checkout-only rollback with
+the backup's saved commit. Migration 0194 stops if existing team addresses collide when
+compared case-insensitively. Check for collisions before upgrading and change the affected
+addresses on the old version. The renamed teams' published links change. If startup
+already stopped at migration 0194, stop the app and any worker and follow the
+[team address preflight and recovery steps](https://hourmere.com/docs/self-hosting#resolve-team-address-collisions-migration-0194).
+
+A checkout-only rollback with
 `git checkout <previous branch or tag>` is safe if a guard, `docker compose pull` or
 `docker compose stop` fails before the new-version `docker compose up` command runs.
-Once that `up` is attempted, follow [Back up and restore](https://hourmere.com/docs/self-hosting#back-up-and-restore),
-even if it fails: a new app or worker may already have applied migrations; old code against
-the new schema is unsafe. In the supplied Compose files, `AUTO_MIGRATE=true` runs application
+If you need to roll back after attempting that `up`, follow
+[Back up and restore](https://hourmere.com/docs/self-hosting#back-up-and-restore) even if startup
+fails. A new app or worker may already have applied migrations; old code against the new
+schema is unsafe. In the supplied Compose files, `AUTO_MIGRATE=true` runs application
 and pg-boss migrations at process startup for every role (`all`, `web` and `worker`),
 not during `pull` or `stop`; there is no separate migrate service. A separately started
 new-version worker, `npm run db:migrate` or a custom migration job can migrate earlier;
-if any has started, use backup/restore even before this Compose `up`.
+if any has started, use backup/restore for rollback even before this Compose `up`.
 For a failed main-tracking pull, the backup's saved commit identifies
 the exact pre-upgrade revision: `git pull` advances `main`, so its branch name alone does
 not undo the update. If rollback leaves a pre-1.0 `main`-tracking checkout detached, run
@@ -273,10 +280,11 @@ Team owners and admins can configure [collective meetings](https://hourmere.com/
 with two to eight required hosts, or [round-robin pools](https://hourmere.com/docs/round-robin-scheduling)
 with one to eight hosts and explicit activation.
 
-Set `ROUTING_FORMS_ENABLED=true` in `.env` and recreate the server container with
-`./scripts/compose-up.sh -d --wait` to enable routing forms. Unset or empty uses the
-server default (`false`). See [routing forms](https://hourmere.com/docs/routing-forms)
-for setup and what to do if a legacy `route` handle keeps the feature off.
+Routing forms are on by default, including when `ROUTING_FORMS_ENABLED` is unset or
+empty. To turn them off, set `ROUTING_FORMS_ENABLED=false` in `.env` and recreate
+the server container with `./scripts/compose-up.sh -d --wait`. See
+[routing forms](https://hourmere.com/docs/routing-forms) for setup and what to do
+if a legacy personal `route` handle keeps routing off.
 
 Website widgets support inline and popup booking; see [embedding](https://hourmere.com/docs/embedding) for the
 explicit parent-origin allow list, integration snippets and privacy contract.
@@ -371,6 +379,8 @@ The expired-row replacement action cannot reuse these invitations.
 Owners can promote members to admins or return admins to member access after reviewing
 the permission change. Only owners manage admins; owner roles cannot be changed, and
 ownership transfer is not available yet. A team must always retain at least one owner.
+See the [proposed custom roles design](docs/custom-roles.md) for the permission catalogue
+and compatibility plan.
 
 Member rows show shared configuration and cached calendar health checks, without
 promising available times. Owners and admins see only coarse states for other members,
@@ -448,18 +458,23 @@ Optional [automatic Google Meet](https://hourmere.com/docs/automatic-google-meet
 
 ## Known limitations
 
+- Paid bookings are off by default. Self-hosters can enable Stripe test-mode Checkout on
+  eligible personal events. Live checkout is pending rollout acceptance and payment-reference
+  cleanup. [Paid bookings](https://hourmere.com/docs/payments).
+
 - [Microsoft Calendar](https://hourmere.com/docs/microsoft-calendar#known-limitations) supports
   Outlook booking writeback and automatic Teams meetings for single-host event types.
   Real-tenant Teams acceptance is pending.
-- Organization OIDC single sign-on is off by default. The operator turns it on with
-  `SSO_OIDC_ENABLED=true` (empty or unset follows the release default, which stays off
-  until SSO ships; any other value prevents startup) and sets `SSO_ENCRYPTION_KEY`, an
-  independent 32-byte base64 key that seals provider configuration; keep it stable and
-  backed up privately. Turning the setting off never lifts a team's stored SSO
-  requirement: sign-in, linking and new configuration stop, while recovery and
-  trust-reducing operations stay available. See the
-  [single sign-on guide](https://hourmere.com/docs/sso). SAML is being built and is not
-  available yet; no setting enables it.
+
+- Organization single sign-on is off by default for both OIDC and SAML. Turn on either
+  protocol with `SSO_OIDC_ENABLED=true` or `SSO_SAML_ENABLED=true`. Empty or unset
+  follows the release default, `false` keeps the protocol off, and other values prevent
+  startup. Set a stable, independent 32-byte base64 `SSO_ENCRYPTION_KEY` to seal provider
+  configuration and back it up privately. Turning a protocol off stops its sign-in, linking
+  and new configuration, and suspends its existing browser proofs and delegations. Stored
+  team requirements still apply. Recovery and trust-reducing operations keep their normal
+  authorization. See the [single sign-on guide](https://hourmere.com/docs/sso) and
+  [self-hosting recovery drill](https://hourmere.com/docs/self-hosting#sso-backup-and-recovery-drill).
 
 - Prebuilt image installs have no runtime PWA off switch. Setting `VITE_PWA_ENABLED=false`
   and restarting cannot change a compiled image. Disabling installation requires a source

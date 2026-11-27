@@ -30,8 +30,12 @@ export const auditDetails = {
   'membership.removed': [],
   'membership.left': [],
   'membership.role_changed': ['oldRole', 'newRole'],
+  'organization.ownership_transfer_offered': ['targetMembershipId'],
+  'organization.ownership_transfer_revoked': [],
+  'organization.ownership_transfer_expired': [],
+  'organization.ownership_transfer_invalidated': [],
   'organization.ownership_transferred': [],
-  'organization.updated': [],
+  'organization.updated': ['oldSlug', 'newSlug', 'nameChanged'],
   'organization.created': [],
   'organization.branding_updated': ['logo', 'primaryColor'],
   'membership.invitation_cancelled': [],
@@ -110,6 +114,36 @@ export const auditDetails = {
   'workflow.webhook_completed': ['revision', 'trigger'],
   'workflow.webhook_failed': ['revision', 'trigger', 'reason'],
   'audit_log.retention_updated': [],
+  'custom_role.created': ['roleId', 'newRevision', 'policyEpoch', 'masterEpoch', 'outcome'],
+  'custom_role.revised': [
+    'roleId',
+    'oldRevision',
+    'newRevision',
+    'policyEpoch',
+    'masterEpoch',
+    'outcome',
+  ],
+  'custom_role.archived': ['roleId', 'oldRevision', 'policyEpoch', 'masterEpoch', 'outcome'],
+  'membership.custom_role_assigned': [
+    'roleId',
+    'oldRoleId',
+    'oldRevision',
+    'newRevision',
+    'policyEpoch',
+    'masterEpoch',
+    'outcome',
+    'personalDataPermissionIds',
+  ],
+  'membership.custom_role_cleared': [
+    'roleId',
+    'oldRevision',
+    'policyEpoch',
+    'masterEpoch',
+    'outcome',
+    'personalDataPermissionIds',
+  ],
+  'team.custom_roles_enabled': ['oldPolicyEpoch', 'newPolicyEpoch', 'masterEpoch', 'outcome'],
+  'team.custom_roles_disabled': ['oldPolicyEpoch', 'newPolicyEpoch', 'masterEpoch', 'outcome'],
 } as const
 export type AuditAction = keyof typeof auditDetails
 export interface AuditActor {
@@ -124,6 +158,8 @@ export interface AuditActor {
     | 'external_user'
     /** A SCIM provisioning token (its ID); the credential is then `none`. */
     | 'scim_token'
+    /** A SCIM provisioning connection (its ID); the credential is then `none`. */
+    | 'scim_connection'
   id?: string
 }
 export interface AuditCredential {

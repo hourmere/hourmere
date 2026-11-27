@@ -15,6 +15,7 @@ const acceptLink = `${invitation.publicUrl}/app/join?invitationId=${invitation.i
 function visibleText(html: string): string {
   return html
     .replace(/<head>[\s\S]*?<\/head>/i, '')
+    .replace(/<\/?bdi\b[^>]*>/g, '')
     .replace(/<[^>]*>/g, ' ')
     .replaceAll('&lt;', '<')
     .replaceAll('&gt;', '>')
@@ -49,6 +50,25 @@ describe('teamInvitationEmail', () => {
       ).toMatchSnapshot()
     },
   )
+
+  it.each([
+    ['en', 'Your identity provider sent this invitation on behalf of the team'],
+    ['zh-CN', '你的身份提供商代表 Hourmere 上的团队'],
+    ['de', 'Ihr Identitätsanbieter hat Ihnen diese Einladung im Namen des Teams'],
+    ['fr', 'Votre fournisseur d’identité vous a envoyé cette invitation au nom de l’équipe'],
+    ['es', 'Su proveedor de identidad le ha enviado esta invitación en nombre del equipo'],
+    ['pt-BR', 'Seu provedor de identidade enviou este convite em nome da equipe'],
+  ])('attributes a SCIM invitation to the identity provider in %s', (defaultLanguage, intro) => {
+    const { inviterName, ...options } = invitation
+    const message = teamInvitationEmail({ ...options, defaultLanguage, scimIssued: true })
+    expect(message.html).toContain(`<html lang="${defaultLanguage}">`)
+    for (const body of [message.text, visibleText(message.html ?? '')]) {
+      expect(body).toContain(intro)
+      expect(body).toContain(invitation.teamName)
+      expect(body).not.toContain(inviterName)
+      expect(body).toContain(acceptLink)
+    }
+  })
 
   it.each([
     {

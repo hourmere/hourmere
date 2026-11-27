@@ -8,6 +8,7 @@ import {
   createAuthPool,
   createCallerResolver,
   ensurePersonalOrganization,
+  type ReserveInvitationEmail,
   type ScimClaimCompletion,
   type SignupPolicy,
   scimClaimCompletion,
@@ -670,13 +671,8 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
    */
   async function verifyExpiredClaim(served: Served) {
     const organization = await team()
-    const reserve = {
-      reserve: (
-        trx: Db,
-        input: { userId: string; organizationId: string; email: string },
-        now: Date,
-      ) => reserveInvitationEmailBudget(trx, input, roomy, now),
-    }
+    const reserve: ReserveInvitationEmail = (trx, input, now) =>
+      reserveInvitationEmailBudget(trx, input, roomy, now)
     const resend = async (invitationId: string, email: string) => {
       const { sessionId } = await signIn(organization.people.owner, organization.id)
       return manageInvitation(
@@ -690,7 +686,7 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
           expectedGeneration: 1,
           requestId: randomUUID(),
         },
-        reserve,
+        { reserve },
       )
     }
     const ageClaim = (id: string) =>
@@ -1050,10 +1046,14 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
    * while it waits is no longer the invitation's recipient, though Better Auth's own check saw
    * the old address before the wait.
    */
-  async function verifyAddressee(served: Served) {
+  async function verifyAddressee(served: Served, source: 'app' | 'scim') {
     const organization = await team()
     const mailbox = `moving-${unique()}@example.com`
-    const { claim } = await provision(served, organization, mailbox)
+    const invitationId =
+      source === 'scim'
+        ? (await provision(served, organization, mailbox)).claim.invitation_id
+        : (await appInvitation(organization, organization.people.owner, mailbox)).id
+    if (!invitationId) throw new Error('Expected an invitation')
     const pat = await person(mailbox)
     const { cookie } = await signIn(pat)
     const before = await snapshot(organization.id)
@@ -1064,7 +1064,7 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
       await contender.query('SELECT 1 FROM auth."user" WHERE id = $1 FOR UPDATE', [pat])
       const pid = (await contender.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]
         ?.pid as number
-      answer = accept(served, cookie, claim.invitation_id as string)
+      answer = accept(served, cookie, invitationId)
       await blockedBy(pid)
       await contender.query('UPDATE auth."user" SET email = $2 WHERE id = $1', [
         pat,
@@ -1138,7 +1138,8 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
     replay: verifyReplay,
     untouched: verifyUntouched,
     atomicity: verifyAtomicity,
-    addressee: verifyAddressee,
+    // An ordinary invitation isolates the native recheck from the SCIM claim's mailbox check.
+    addressee: (served: Served) => verifyAddressee(served, 'app'),
     lockOrder: verifyLockOrder,
   }
 
@@ -1155,7 +1156,49 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
       'Claims without an invitation expire after 48 hours without renewal',
       "No address is marked verified, and neither the account's profile, address or sign-in methods nor the entry's provisioned profile or timestamps change.",
       '| Claim completion through invitation acceptance | User creation and claim intent | Existing invitation acceptance; no new operation/tool/command | Resource test flag only |',
-      '| Claim completion through SSO linking | Claim completion through invitation acceptance; SSO design PR #247 and accepted linking implementation | SSO linking completion; no new operation/tool/command | Resource test flag only |',
+    ])
+      expect(says(sentence), sentence).toBe(true)
+  })
+
+  it('orders the SSO claim steps and keeps the explicit flow hard-off until release', () => {
+    const plan = design.split('## Ordered implementation plan')[1]?.split('\n## ')[0] ?? ''
+    const steps = [
+      'Claim purpose and migration',
+      'SCIM-to-SSO provider binding',
+      'Explicit OIDC claim attachment',
+      'OIDC claim conflict and replay acceptance',
+      'Invitation-free claim renewal',
+      'Directory claim browser controls',
+      'OIDC directory claim release',
+      'SAML directory claim release',
+    ]
+    let previous = -1
+    for (const step of steps) {
+      const index = plan.indexOf(`| ${step} |`)
+      expect(index, step).toBeGreaterThan(previous)
+      previous = index
+      const [row = ''] = plan.slice(index).split('\n', 1)
+      const flag = row.split(' | ')[3]
+      if (step === 'OIDC directory claim release')
+        expect(flag).toContain('requires SCIM on, OIDC on and explicit owner binding')
+      else if (step === 'SAML directory claim release')
+        expect(flag).toContain('requires SCIM on, SAML on and explicit owner binding')
+      else expect(flag, step).toMatch(/^Explicit SSO claim flow hard-off/)
+    }
+  })
+
+  it('documents the explicit SSO claim eligibility, side effects and switch rules', () => {
+    for (const sentence of [
+      'Implicit SCIM claim completion through ordinary OIDC self-link must be hard-off in production before any deployment.',
+      'Owner, admin and legacy compound roles are ineligible for directory attachment through this flow.',
+      'The member can omit `scimUserId` when the proven mailbox identifies exactly one eligible claim in the bound connection.',
+      'Require the ID only to disambiguate the intended entry.',
+      'The supplied ID never breaks a tie.',
+      'Neither occupied-address creation nor renewal queues mail or spends invitation budget.',
+      'Attachment creates no child membership and writes no child journal entry.',
+      'That write records `scim_membership.added` in the child journal in the same transaction as the roster addition.',
+      'Turning SCIM off refuses claim start, renewal and completion without doing an ordinary self-link, while ordinary SSO continues under its own policy.',
+      'Turning the bound SSO protocol off refuses claim start, renewal and completion with `404 sso_disabled`, even if SCIM and the other protocol are on.',
     ])
       expect(says(sentence), sentence).toBe(true)
   })
@@ -1374,6 +1417,34 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
         .executeTakeFirst(),
     ).toEqual({ linked_user_id: recipient })
   })
+  it('refuses an otherwise-pending SCIM invitation bound to a retired User', async () => {
+    const served = await instance()
+    const organization = await team()
+    const mailbox = `retired-pending-${unique()}@example.com`
+    const { id, claim } = await provision(served, organization, mailbox)
+    const invitationId = claim.invitation_id
+    if (!invitationId) throw new Error('Expected a SCIM-issued invitation')
+    const { cookie, sessionId } = await signIn(await person(mailbox))
+
+    // Current DELETE cancels the invitation and invalidates the claim. Leave both
+    // pending here to exercise the retired-entry check independently of those writes.
+    await db
+      .updateTable('scim_users')
+      .set({ active: false, retired_at: sql<Date>`clock_timestamp()` })
+      .where('id', '=', id)
+      .execute()
+    const before = await snapshot(organization.id)
+    expect(await accept(served, cookie, invitationId)).toEqual({ status: 403, body: denied })
+    expect(await snapshot(organization.id)).toEqual(before)
+    expect(
+      await db
+        .selectFrom('auth.session')
+        .select('activeOrganizationId')
+        .where('id', '=', sessionId)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ activeOrganizationId: null })
+  })
+
   it.each(['pending', 'invalidated'] as const)(
     'cancels the invitation of an unfinished %s claim and requires a fresh proof after retirement',
     async (state) => {
@@ -1439,8 +1510,8 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
       ])
       expect(retired.events).toContainEqual({
         action: 'membership.invitation_cancelled',
-        actor_type: 'scim_token',
-        actor_id: expect.any(String),
+        actor_type: 'scim_connection',
+        actor_id: first.claim.connection_id,
         credential_type: 'none',
         credential_id: null,
         target_type: 'invitation',
@@ -1488,7 +1559,7 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
       expect(claimed(afterProof.events).map((event) => event.target_id)).toEqual([fresh.id])
     },
   )
-  it.each(['issued', 'renewed'] as const)(
+  it.each(['issued', 'issued without delivery', 'issued before auditing', 'renewed'] as const)(
     'preserves an invitation %s by a local owner when its SCIM User retires',
     async (authority) => {
       const served = await instance()
@@ -1496,13 +1567,42 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
       const owner = organization.people.owner
       const address = `local-${unique()}@example.com`
       const recipient = await person(address)
-      const local =
-        authority === 'issued' ? await appInvitation(organization, owner, address) : undefined
+      let localId: string | undefined
+      if (authority === 'issued before auditing') {
+        const legacy = await db
+          .insertInto('auth.invitation')
+          .values({
+            organizationId: organization.id,
+            inviterId: owner,
+            email: address,
+            role: 'member',
+            status: 'pending',
+            expiresAt: sql<Date>`clock_timestamp() + interval '1 hour'`,
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+        localId = legacy.id
+        await db
+          .insertInto('invitation_deliveries')
+          .values({
+            invitation_id: localId,
+            state: 'failed',
+            last_error_code: 'legacy_delivery_unknown',
+          })
+          .execute()
+      } else if (authority !== 'renewed') {
+        localId = (await appInvitation(organization, owner, address)).id
+        if (authority === 'issued without delivery')
+          await db
+            .deleteFrom('invitation_deliveries')
+            .where('invitation_id', '=', localId)
+            .execute()
+      }
       const { id, claim } = await provision(served, organization, address)
       const invitationId = claim.invitation_id
       if (!invitationId) throw new Error('Expected the claim to bind the invitation')
-      if (authority === 'issued') {
-        expect(invitationId).toBe(local?.id)
+      if (localId) {
+        expect(invitationId).toBe(localId)
       } else {
         // Backdate the generation past the resend cooldown, then renew through the same
         // service as the dashboard. Its generation and expiry now belong to local authority.
@@ -1527,6 +1627,7 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
           .executeTakeFirstOrThrow()
       const before = await snapshot(organization.id)
       const delivered = await delivery()
+      if (authority === 'issued without delivery') expect(delivered.scim_issued).toBe(true)
       const response = await fetch(`${served.url}/scim/v2/${organization.id}/Users/${id}`, {
         method: 'DELETE',
         headers: { authorization: `Bearer ${organization.secret}` },
@@ -1562,9 +1663,9 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
     verifyUntouched(await instance()))
   it('commits the link, completion, membership and events together', async () =>
     verifyAtomicity(await instance()))
-  it(
-    'rechecks the addressee after waiting for the account lock',
-    async () => verifyAddressee(await instance()),
+  it.each(['app', 'scim'] as const)(
+    'rechecks the addressee of an %s invitation after waiting for the account lock',
+    async (source) => verifyAddressee(await instance(), source),
     30_000,
   )
   it(
@@ -1665,7 +1766,7 @@ describe.skipIf(!serverUrl)('SCIM claim completion through invitation acceptance
     const replayMutant = {
       completion: [
         ['      claim.completed_at !== null ||\n', ''],
-        ['      entry.linked_user_id !== null ||\n', ''],
+        ['    if (entry.linked_user_id !== null) return admitted\n', ''],
         ["      .where('linked_user_id', 'is', null)\n", ''],
         ["      .where('completed_at', 'is', null)\n", ''],
       ] as [string, string][],

@@ -18,6 +18,7 @@ const dependentMigrations = [
   '0181_scim_team_hierarchy.sql',
   '0183_scim_groups.sql',
   '0184_scim_group_members.sql',
+  '0197_custom_role_storage.sql',
 ]
 
 async function records(pool: pg.Pool, tables?: { schema: string; name: string }[]) {
@@ -48,7 +49,7 @@ async function predecessor() {
   let database: TestDatabase | undefined
   try {
     // Keep modeling the out-of-order upgrade from an instance with later independent
-    // migrations. The hierarchy and Group source references need keys created by 0073.
+    // migrations. The hierarchy, Group and custom-role references need keys created by 0073.
     for (const file of (await readdir(migrationsDir)).filter(
       (f) => f.endsWith('.sql') && f !== migration && !dependentMigrations.includes(f),
     )) {

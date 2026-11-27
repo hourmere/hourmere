@@ -1,13 +1,20 @@
 import type { Page } from '@playwright/test'
+import { accountMenuButton, accountMenuPanel } from '../account-menu.ts'
 import {
+  acceptFixtureInvitation,
   button,
   clickPrivate,
   describeStrandedPage,
   emailLinkLabel,
   expectSession,
   expectSignedOut,
+  genericOutcome,
   isAuthorization,
+  mailboxPromptText,
+  mailboxProofPath,
   mailboxSendLabel,
+  noAccount,
+  openMemberSettings,
   openPrivateLink,
   proveMailbox,
   returnPath,
@@ -16,16 +23,13 @@ import {
   signInWithEmail,
   signOut,
   ssoLabel,
+  startMemberLink,
   submitKeycloakLogin,
 } from '../keycloak/browser.ts'
 import { expect, type KeycloakFixture, test } from '../keycloak/fixture.ts'
 
 const callbackRoute = '/api/auth/sso/callback/'
-const mailboxProofPath = '/app/mailbox-proof'
 const completePath = '/api/auth/sso/oidc/complete'
-const invitationPath = '/api/auth/organization/accept-invitation'
-const genericOutcome =
-  'To continue, sign in with your usual method or use a current team invitation.'
 const personalSignInLabels = ['Continue with Google', 'Sign in with Microsoft']
 
 async function expectRefusal(page: Page, app: KeycloakFixture) {
@@ -129,23 +133,6 @@ test('Keycloak sign-in refuses a used authorization code with consumed or fresh 
   expect(app.tokenExchanges()).toEqual(['issued', 'invalid_code'])
 })
 
-async function openMemberSettings(page: Page, app: KeycloakFixture) {
-  await page.goto(`${app.url}/sign-in`)
-  await signInWithEmail(page, app, app.idp.linkable.email)
-  await expectSession(page, app, app.linkableUserId, true)
-  const space = page.getByRole('button', { name: /^Switch space/ })
-  await space.click()
-  await page.getByRole('menuitemradio', { name: app.teamName, exact: true }).click()
-  await expect(space).toContainText(app.teamName)
-  await page.goto(`${app.url}/app/settings`)
-  await expect(page.getByRole('heading', { name: 'Account', exact: true })).toBeVisible()
-  // Read the capabilities directly: the page's own response body is discarded on navigation.
-  const instance = await page.request.get(`${app.url}/api/v1/instance`)
-  expect(instance.status()).toBe(200)
-  const capabilities = await instance.json()
-  return capabilities
-}
-
 async function beginAdmission(page: Page, app: KeycloakFixture, username: string) {
   await page.goto(signInUrl(app))
   const [callback] = await Promise.all([
@@ -181,18 +168,6 @@ async function continueAdmission(page: Page, app: KeycloakFixture, status: numbe
   return completion
 }
 
-async function mailboxPromptText(page: Page) {
-  return ((await page.getByRole('main').textContent()) ?? '').replace(/\s+/g, ' ').trim()
-}
-
-const noAccount = {
-  userId: null,
-  teamRole: null,
-  linkedSubjects: [],
-  sessionCount: 0,
-  personalSpace: false,
-}
-
 test('a team member proves their Hourmere mailbox and explicitly links Keycloak', async ({
   page,
   context,
@@ -209,15 +184,8 @@ test('a team member proves their Hourmere mailbox and explicitly links Keycloak'
     personalSpace: true,
   })
 
-  await button(page, 'Link account (Fixture Keycloak)').click()
-  await button(page, 'Link account').click()
-  const authorize = page.getByRole('link', { name: 'Continue to identity provider', exact: true })
-  await expect(button(page, 'Continue')).toBeDisabled()
-  await expect(authorize).toHaveCount(0)
+  await startMemberLink(page, app, email)
   expect(app.tokenExchanges()).toEqual([])
-  await proveMailbox(page, app, email)
-  await button(page, 'Continue').click()
-  await clickPrivate(authorize)
   await submitKeycloakLogin(page, app, username)
   await expect(page.getByRole('heading', { name: 'Confirm your SSO link' })).toBeVisible()
   expect(await app.account(email)).toEqual(before)
@@ -226,6 +194,8 @@ test('a team member proves their Hourmere mailbox and explicitly links Keycloak'
   expect(await app.account(email)).toEqual({ ...before, linkedSubjects: [subject] })
   expect(app.tokenExchanges()).toEqual(['issued'])
 
+  // Finishing the linking callback returns focus to the settings heading.
+  await expect(page.getByRole('heading', { name: 'Your team sign-in', exact: true })).toBeFocused()
   await signOut(page, app)
   await context.clearCookies()
   await page.goto(signInUrl(app))
@@ -280,23 +250,7 @@ test('a proved Keycloak recipient explicitly accepts a pending invitation on clo
   expect(await app.invitationStatus()).toBe('pending')
   expect(await app.account(email)).toEqual(noAccount)
 
-  if (!attemptId) throw new Error('The fixture mailbox link had no admission attempt')
-  // Exercise the existing explicit acceptance endpoint in the browser that holds the proof.
-  const status = await page.evaluate(
-    async ({ invitationId, attemptId, path }) => {
-      const response = await fetch(path, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Hourmere-Sso-Attempt': attemptId,
-        },
-        body: JSON.stringify({ invitationId }),
-      })
-      return response.status
-    },
-    { invitationId: app.invitationId, attemptId, path: invitationPath },
-  )
-  expect(status).toBe(200)
+  expect(await acceptFixtureInvitation(page, app, attemptId)).toBe(200)
   expect(await app.invitationStatus()).toBe('accepted')
   const admitted = await app.account(email)
   expect(admitted).toMatchObject({
@@ -327,7 +281,9 @@ test.describe('JIT team admission', () => {
       await proveMailbox(page, app, email)
       expect(await app.account(email)).toEqual(noAccount)
       await button(page, 'Continue').click()
-      await expect(button(page, 'Sign out')).toBeVisible()
+      await accountMenuButton(page).click()
+      await expect(accountMenuPanel(page).getByRole('button', { name: 'Sign out' })).toBeVisible()
+      await accountMenuButton(page).click()
       const admitted = await app.account(email)
       expect(admitted).toMatchObject({
         teamRole: 'member',

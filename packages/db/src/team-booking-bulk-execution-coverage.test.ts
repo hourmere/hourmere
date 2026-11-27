@@ -3,7 +3,9 @@ import { copyFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type pg from 'pg'
 import { describe, expect, it } from 'vitest'
+import { assertCustomRoleAuditProtections } from './custom-role-audit-protections.ts'
 import { migrationsDir, runMigrations } from './migrate.ts'
+import { assertOwnershipTransferAuditProtections } from './ownership-transfer-audit-protections.ts'
 import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
 import {
   MIGRATION_COVERAGE_TIMEOUT,
@@ -348,11 +350,6 @@ describe.skipIf(!serverUrl)('team booking bulk execution migration', () => {
           seeded.organization_id,
         )
         const before = await predecessorData(upgraded.pool)
-        const check = await upgraded.pool.query<{ expression: string }>(
-          `SELECT pg_get_expr(conbin, conrelid) AS expression FROM pg_constraint
-         WHERE conrelid = 'audit_events'::regclass AND conname = 'audit_events_details_check'`,
-        )
-
         await copyFile(join(migrationsDir, migration), join(replay.directory, migration))
         await expect(runMigrations(upgraded.pool, replay.directory)).resolves.toEqual([migration])
         expect(await predecessorData(upgraded.pool)).toEqual(before)
@@ -370,13 +367,6 @@ describe.skipIf(!serverUrl)('team booking bulk execution migration', () => {
             [seeded.id],
           ),
         ).resolves.toMatchObject({ rows: [{ outcome: null, attempt_count: 0 }] })
-        const previous = await upgraded.pool.query<{ body: string }>(
-          `SELECT pg_get_functiondef('audit_event_pre_bulk_details_valid(audit_events)'::regprocedure) AS body`,
-        )
-        // PostgreSQL deparses the stored SQL body with different parentheses and whitespace.
-        expect(
-          previous.rows[0]?.body?.replaceAll('previous_event.', '').replace(/[\s()]/g, ''),
-        ).toContain(check.rows[0]?.expression?.replace(/[\s()]/g, ''))
         fresh = await createTestDatabase(serverUrl as string, undefined, {
           migrate: false,
           tag: 'bulk_run_fresh',
@@ -386,6 +376,24 @@ describe.skipIf(!serverUrl)('team booking bulk execution migration', () => {
         await expect(runMigrations(upgraded.pool, replay.directory)).resolves.toEqual([])
         await expect(runMigrations(fresh.pool, replay.directory)).resolves.toEqual([])
         expect(await predecessorData(upgraded.pool)).toEqual(before)
+        await expect(
+          appendAudit(
+            upgraded.pool,
+            'organization.updated',
+            { oldSlug: 'Migration-Team', newSlug: 'migration-team' },
+            seeded.organization_id,
+          ),
+        ).resolves.toMatchObject({ rowCount: 1 })
+        await expect(
+          appendAudit(
+            upgraded.pool,
+            'organization.updated',
+            { oldSlug: 'Migration-Team', newSlug: 'MIGRATION-TEAM' },
+            seeded.organization_id,
+          ),
+        ).rejects.toMatchObject({ code: '23514', constraint: 'audit_events_details_check' })
+        await assertOwnershipTransferAuditProtections(upgraded.pool)
+        await assertCustomRoleAuditProtections(upgraded.pool)
       } finally {
         await Promise.all([fresh?.drop(), upgraded.drop()])
       }

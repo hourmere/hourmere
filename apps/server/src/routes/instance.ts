@@ -1,4 +1,8 @@
 import { createRoute, z } from '@hono/zod-openapi'
+import {
+  PAYMENT_PROVIDER_AVAILABILITIES,
+  type PaymentProviderAvailability,
+} from '@hourmere/core/payment'
 import { workflowsEnabled as areWorkflowsEnabled, type WorkflowSettings } from '@hourmere/workflows'
 import { createMiddleware } from 'hono/factory'
 import type { CallerEnv } from '../caller.ts'
@@ -30,6 +34,12 @@ const Instance = z
       description: "This instance operator's terms; absent when not configured",
     }),
     smsRemindersAvailable: z.boolean().optional(),
+    eventTypePaymentAvailability: z
+      .string()
+      .optional()
+      .openapi({
+        description: `Whether hosts can enable Stripe Checkout in event settings. Known values: ${PAYMENT_PROVIDER_AVAILABILITIES.join(', ')}. Absent on older instances. Treat unknown values as unavailable.`,
+      }),
     automaticGoogleMeet: z.boolean().optional(),
     automaticZoom: z.boolean().optional(),
     scimProvisioningEnabled: z.boolean().optional().openapi({
@@ -45,18 +55,19 @@ const Instance = z
         'The effective SSO_OIDC_ENABLED operator setting (off by default); absent when unknown',
     }),
     ssoSamlEnabled: z.boolean().optional().openapi({
-      description: 'Whether SAML SSO is enabled: always false for now; absent when unknown',
+      description:
+        'The effective SSO_SAML_ENABLED operator setting (off by default); absent when unknown',
     }),
     routingFormsEnabled: z.boolean().optional().openapi({
       description:
-        'Effective state of routing forms. ROUTING_FORMS_ENABLED defaults to false. A legacy route handle keeps routing forms off. Absent when unknown.',
+        'Effective state of routing forms. ROUTING_FORMS_ENABLED defaults to true. A legacy personal route handle keeps routing forms off. Absent when unknown.',
     }),
     followUpHostNotesEnabled: z.boolean().optional().openapi({
       description: 'Whether hosts may add plain-text notes to follow-up emails',
     }),
     workflowsEnabled: z.boolean().optional().openapi({
       description:
-        'Whether booking workflows are enabled; false until they are, and absent (treat as false) on older servers',
+        'Effective WORKFLOWS_ENABLED setting (true by default). Treat an absent field on older servers as false.',
     }),
     embedEnabled: z.boolean().optional().openapi({
       description: 'Whether embedding is enabled; absent when unknown',
@@ -87,6 +98,7 @@ export function instanceRoutes({
   publicUrl,
   socialProviders,
   smsRemindersAvailable = false,
+  eventTypePaymentAvailability,
   automaticMeet = false,
   automaticZoom = false,
   followUpHostNotesEnabled = true,
@@ -103,6 +115,7 @@ export function instanceRoutes({
 }: {
   /** The normalized PUBLIC_URL, independent of request or forwarded host headers. */
   smsRemindersAvailable?: boolean | undefined
+  eventTypePaymentAvailability?: PaymentProviderAvailability | undefined
   publicUrl: string
   /** The configured sign-in providers (config.socialProviders); only their presence counts. */
   socialProviders: { google?: unknown; microsoft?: unknown }
@@ -127,6 +140,7 @@ export function instanceRoutes({
     ...(privacyPolicyUrl && { privacyPolicyUrl }),
     ...(termsUrl && { termsUrl }),
     smsRemindersAvailable,
+    eventTypePaymentAvailability,
     automaticGoogleMeet: automaticMeet,
     automaticZoom,
     followUpHostNotesEnabled,

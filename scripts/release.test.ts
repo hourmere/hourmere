@@ -103,6 +103,8 @@ describe('release preparation', () => {
       'notifications.md#conference-outbox-delivery-budget',
       'webhooks.md',
       'scim.md',
+      'routing-forms.md',
+      'sso.md',
     ]
     for (const guide of guides) {
       expect(notes).toContain(

@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
+import { UserContentLines } from '../../components/UserContent.tsx'
 import { useI18n } from '../../i18n/runtime.tsx'
 import type { MessageKey } from '../../i18n/translate.ts'
 import type { RoutingDraft, RoutingForm } from './routing-form-api.ts'
@@ -123,7 +124,9 @@ export function RoutingFormPublication({
             <>
               <h3>{t('Saved fallback')}</h3>
               {fallback.kind === 'message' ? (
-                <p className="user-content routing-preview-message">{fallback.message}</p>
+                <p className="user-content routing-preview-message">
+                  <UserContentLines text={fallback.message} />
+                </p>
               ) : (
                 <p>
                   {fallbackEvent ? (

@@ -128,7 +128,7 @@ describe.skipIf(!serverUrl)('Brazilian Portuguese booking notification language'
         expect(message?.text).toContain('terça-feira, 3 de novembro de 2026')
         expect(message?.text).toContain('10:00')
         expect(message?.html).toContain('<html lang="pt-BR">')
-        expect(message?.html).toContain('Sua reunião com Grace Hopper está agendada.')
+        expect(message?.html).toContain('Sua reunião com <bdi>Grace Hopper</bdi> está agendada.')
         expect(invitation(message as MailMessage)).toMatchObject({
           summary: 'Intro call com Grace Hopper',
           description: expect.stringContaining('Agendado com Grace Hopper pelo Hourmere.'),

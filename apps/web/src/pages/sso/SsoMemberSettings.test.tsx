@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { App } from '../../App.tsx'
 import type { Schemas } from '../../api/client.ts'
 import { PATHS } from '../../paths.ts'
+import { selectAdminLanguage } from '../../test/account-menu.ts'
 import {
   type Call,
   emptyTeamLists,
@@ -139,10 +140,8 @@ const mailRoutes: Routes = {
 
 type User = ReturnType<typeof userEvent.setup>
 
-async function openConsent(user: User, action: 'Link' | 'Unlink') {
-  await user.click(
-    await screen.findByRole('button', { name: `${action} account (${provider.displayName})` }),
-  )
+async function openConsent(user: User, action: 'Link' | 'Unlink', name = provider.displayName) {
+  await user.click(await screen.findByRole('button', { name: `${action} account (${name})` }))
   const group = within(screen.getByRole('group', { name: `${action} this sign-in method?` }))
   const cancel = group.getByRole('button', { name: 'Cancel' })
   await waitFor(() => expect(document.activeElement).toBe(cancel))
@@ -383,7 +382,8 @@ describe('Member SSO settings', () => {
     // Off, the server sends no summary for a team without stored SSO state.
     { viewer: { ...ME, organization: team }, enabled: false },
     {
-      viewer: { ...teamMe, sso: { ...empty, providers: [samlProvider], links: [samlLink] } },
+      // A hard-off protocol does not project a provider choice or stored SAML links.
+      viewer: { ...teamMe, sso: empty },
       enabled: false,
     },
     { viewer: { ...ME, sso: teamMe.sso }, enabled: true },
@@ -406,21 +406,45 @@ describe('Member SSO settings', () => {
     },
   )
 
-  it('hides SAML choices and links from a retained projection while OIDC remains enabled', async () => {
-    const oidc = { ...provider, id: anotherAttemptId, displayName: 'OIDC identity' }
-    const { requests } = showSettings({
-      viewer: {
+  it.each([false, true])(
+    'can unlink a saved SAML link while SAML is off (OIDC %s)',
+    async (enabled) => {
+      const oidc = { ...provider, id: anotherAttemptId, displayName: 'OIDC identity' }
+      let active = {
         ...teamMe,
-        sso: { ...empty, providers: [samlProvider, oidc], links: [samlLink] },
-      },
-    })
-    await screen.findByRole('button', { name: `Link account (${oidc.displayName})` })
-    expect(screen.queryByText(samlProvider.displayName)).toBeNull()
-    expect(screen.queryByText(samlLink.id)).toBeNull()
-    expect(screen.queryByRole('button', { name: /^Unlink account/ })).toBeNull()
-    expect(requests.to(startLink)).toEqual([])
-    expect(requests.to(unlink)).toEqual([])
-  })
+        sso: { ...empty, providers: enabled ? [oidc] : [], links: [samlLink] },
+      }
+      const { requests, user } = showSettings({
+        enabled,
+        viewer: active,
+        routes: {
+          ...mailRoutes,
+          'GET /api/v1/me': () => json(200, active),
+          [unlink]: ({ body }) => {
+            if (!(body as { proofAttemptId?: string }).proofAttemptId) return mailboxChallenge()
+            active = { ...active, sso: { ...active.sso, links: [] } }
+            return new Response(null, { status: 204 })
+          },
+        },
+      })
+      const consent = await openConsent(user, 'Unlink', `Identity provider (${samlProvider.id})`)
+      expect(screen.getByText(samlLink.id)).toBeDefined()
+      expect(
+        screen
+          .queryAllByRole('button', { name: /^Link account/ })
+          .map((button) => button.getAttribute('aria-label')),
+      ).toEqual(enabled ? [`Link account (${oidc.displayName})`] : [])
+      await user.click(consent.getByRole('button', { name: 'Unlink account' }))
+      await pasteMailboxLink(user, await openMailbox(user))
+      await screen.findByText('Email verification complete.')
+      await user.click(screen.getByRole('button', { name: 'Continue' }))
+      await waitFor(() => expect(screen.queryByText(samlLink.id)).toBeNull())
+
+      const target = { linkId: samlLink.id, expectedLinkGeneration: samlLink.generation }
+      expectTeamWrites(requests.to(unlink), [target, { ...target, proofAttemptId }])
+      expect(requests.to(startLink)).toHaveLength(0)
+    },
+  )
 
   it('uses only native completion consent for an enabled SAML link', async () => {
     const viewer = callbackViewer()
@@ -469,7 +493,7 @@ describe('Member SSO settings', () => {
     expect(settings.queryByText('Internal details')).toBeNull()
     expect(settings.queryByRole('button', { name: 'Send verification email' })).toBeNull()
     expectTeamWrites(requests.to(startLink), [{}])
-    await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    await selectAdminLanguage(user, 'zh-CN')
     expect(settings.getByRole('status').textContent).toBe('当前无法查看你的团队登录设置。')
   })
 

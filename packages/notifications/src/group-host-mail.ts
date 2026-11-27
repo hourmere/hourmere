@@ -10,6 +10,7 @@ import {
   icsAttachment,
   type MailMessage,
 } from '@hourmere/mail'
+import { emailUserText } from '@hourmere/mail/text'
 import type { NotificationSnapshot } from '@hourmere/scheduling/notification-settings'
 import { sql } from 'kysely'
 import { z } from 'zod'
@@ -163,7 +164,7 @@ export function groupHostMessage(row: Message, deps: NotificationDeps): MailMess
     html: emailLayout(
       zh ? 'zh-CN' : 'en',
       heading,
-      `<p>${escapeHtml(text).replaceAll('\n', '<br>')}</p>`,
+      `<p>${escapeHtml(heading)}<br>${emailUserText(row.title, zh ? 'zh-CN' : 'en')}<br>${escapeHtml(time)}<br>${escapeHtml(count)}</p>`,
     ),
     ...(row.kind === 'calendar' && {
       attachments: [

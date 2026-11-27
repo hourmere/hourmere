@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import * as language from '@hourmere/core/language'
+import * as payment from '@hourmere/core/payment'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import * as react from 'react'
@@ -9,6 +10,7 @@ import * as conferenceNotice from '../components/ConferenceNotice.tsx'
 import * as emailHint from '../components/EmailDeliveryHint.tsx'
 import * as formComponents from '../components/forms.tsx'
 import * as zonePicker from '../components/TimeZonePicker.tsx'
+import * as userContent from '../components/UserContent.tsx'
 import * as format from '../format.ts'
 import * as hooks from '../hooks.ts'
 import * as duration from '../i18n/duration.ts'
@@ -27,6 +29,7 @@ import * as formActions from './BookingFormActions.tsx'
 import type { BookingPage, OneTimeBookingPage } from './BookingPage.tsx'
 import * as bookingParts from './BookingPageParts.tsx'
 import * as calendarDates from './calendar.ts'
+import * as checkoutReturn from './checkout-return.ts'
 import * as description from './EventDescription.tsx'
 import * as embed from './embed-context.ts'
 import * as env from './env.ts'
@@ -87,8 +90,10 @@ function compile<T>(file: string, text: string, dependencies: Record<string, unk
 
 function partsCopy(text: string) {
   return compile<typeof bookingParts>('apps/web/src/public/BookingPageParts.tsx', text, {
+    '@hourmere/core/payment': payment,
     react,
     '../components/TimeZonePicker.tsx': zonePicker,
+    '../components/UserContent.tsx': userContent,
     '../format.ts': format,
     '../i18n/duration.ts': duration,
     '../i18n/formatting.ts': formatting,
@@ -109,10 +114,10 @@ function pageCopy(text = source, parts = bookingParts): Pages {
     '../components/ConferenceNotice.tsx': conferenceNotice,
     '../components/EmailDeliveryHint.tsx': emailHint,
     '../components/TimeZonePicker.tsx': zonePicker,
+    '../components/UserContent.tsx': userContent,
     '../format.ts': format,
     '../hooks.ts': hooks,
     '../i18n/duration.ts': duration,
-    '../i18n/formatting.ts': formatting,
     '../i18n/runtime.tsx': runtime,
     '../i18n/translate.ts': translate,
     './AddToCalendar.tsx': calendar,
@@ -121,6 +126,7 @@ function pageCopy(text = source, parts = bookingParts): Pages {
     './BookingForm.tsx': form,
     './BookingPageParts.tsx': parts,
     './calendar.ts': calendarDates,
+    './checkout-return.ts': checkoutReturn,
     './EventDescription.tsx': description,
     './embed-context.ts': embed,
     './env.ts': {
@@ -736,6 +742,7 @@ it('detects rejecting formatted international phone input in the public form', (
     const copied = compile<typeof form>('apps/web/src/public/BookingForm.tsx', text, {
       react,
       '../components/forms.tsx': formComponents,
+      '../components/UserContent.tsx': userContent,
       '../i18n/runtime.tsx': runtime,
       '../i18n/translate.ts': translate,
       './BookingDetails.tsx': details,

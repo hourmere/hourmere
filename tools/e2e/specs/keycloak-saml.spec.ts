@@ -6,11 +6,13 @@ import {
 import {
   button,
   clickPrivate,
+  completeSamlCeremony,
   emailLinkLabel,
   expectSession,
   expectSignedOut,
   returnPath,
-  signInUrl,
+  samlClient,
+  samlSignInUrl,
   ssoLabel,
   submitKeycloakLogin,
 } from '../keycloak/browser.ts'
@@ -19,17 +21,6 @@ import { expect, type KeycloakFixture, test } from '../keycloak/fixture.ts'
 const refusal = { status: 303, location: '/sign-in?error=unable_to_create_session' }
 
 test.use({ protocol: 'saml', oidcEnabled: false })
-
-function samlSignInUrl(app: KeycloakFixture) {
-  const url = new URL(signInUrl(app))
-  url.searchParams.set('saml', '1')
-  return url.href
-}
-
-function samlClient(app: KeycloakFixture) {
-  if (!app.idp.saml) throw new Error('The fixture has no SAML client')
-  return app.idp.saml
-}
 
 function callbackFields(request: Request) {
   const fields = new URLSearchParams(request.postData() ?? '')
@@ -108,14 +99,7 @@ async function expectPending(page: Page, app: KeycloakFixture, acs: Response) {
 }
 
 async function completeSignIn(page: Page, app: KeycloakFixture) {
-  const [completion] = await Promise.all([
-    page.waitForResponse(
-      (response) =>
-        response.request().method() === 'POST' &&
-        response.url() === `${app.url}${SAML_COMPLETE_PATH}`,
-    ),
-    clickPrivate(button(page, 'Continue')),
-  ])
+  const completion = await completeSamlCeremony(page, app)
   expect(completion.status()).toBe(303)
   expect((await completion.request().headerValue('origin')) === app.url).toBe(true)
   expect((await completion.headerValue('location')) === returnPath).toBe(true)
@@ -138,7 +122,7 @@ function tamperSignature(response: string) {
   return Buffer.from(tampered).toString('base64')
 }
 
-test.describe('with SAML injected into the fixture', () => {
+test.describe('with the SAML setting on', () => {
   test.use({ samlEnabled: true })
 
   test('Keycloak document-only signing is refused while signed assertions allow SAML completion', async ({
@@ -212,7 +196,7 @@ test.describe('with SAML injected into the fixture', () => {
   })
 })
 
-test('without injection the same fixture offers no SAML sign-in', async ({
+test('with the SAML setting off the same fixture offers no SAML sign-in', async ({
   page,
   keycloak: app,
 }) => {

@@ -95,6 +95,7 @@
   },
   "getPublicRoutingForm": { "mcp": "get_public_routing_form", "cli": "routing-forms public" },
   "getPublicTeamRoutingForm": { "mcp": "get_public_routing_form", "cli": "routing-forms public" },
+  "getPublicTeam": { "mcp": "get_public_team", "cli": "team-home" },
   "routeLead": { "mcp": "route_lead", "cli": "routing-forms route" },
   "routeTeamLead": { "mcp": "route_lead", "cli": "routing-forms route" },
   "resolveRoutingContinuation": {
@@ -142,6 +143,22 @@
   "cancelManagedBooking": {
     "mcp": "cancel_booking",
     "cli": "cancel"
+  },
+  "cancelPublicCheckout": {
+    "exemption": "invitee-checkout",
+    "reason": "The Stripe return page releases only the unpaid hold identified by its per-attempt capability."
+  },
+  "getPublicCheckoutStatus": {
+    "exemption": "invitee-checkout",
+    "reason": "The Stripe return page sends its private attempt capability in a POST body instead of a URL."
+  },
+  "startPublicCheckout": {
+    "exemption": "invitee-checkout",
+    "reason": "Paid admission hands off to Stripe Checkout and returns to the original invitee browser tab."
+  },
+  "applyDepartureHandoff": {
+    "exemption": "browser-session-only",
+    "reason": "A current team owner or admin must explicitly confirm the participant-approved booking replacement in a browser session."
   },
   "cancelTeamBooking": {
     "exemption": "browser-session-only",

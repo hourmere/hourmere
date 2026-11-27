@@ -75,7 +75,7 @@ export function ssoRoutes(deps: SsoReadDeps): RouteModule {
         tags: ['SSO'],
         summary: 'List safe SSO provider drafts for the current team',
         description:
-          'Owner/admin only; read/full API key or authorized MCP OAuth. OIDC SSO is off unless the operator sets SSO_OIDC_ENABLED=true; while off, this read still answers for stored configuration. Follow nextCursor for all providers. Opaque links and generations are only returned to browser sessions. Configuration, secrets, raw metadata and identity claims are never returned. Objects and status strings may gain values.',
+          'Owner/admin only; read/full API key or authorized MCP OAuth. This read remains available while both SSO protocol settings are off. Follow nextCursor for all providers. Opaque links and generations are only returned to browser sessions. Configuration, secrets, raw metadata and identity claims are never returned. Objects and status strings may gain values.',
         security: authenticated,
         middleware: [enabled, caller] as const,
         request: {
@@ -115,7 +115,7 @@ export function ssoRoutes(deps: SsoReadDeps): RouteModule {
         tags: ['SSO'],
         summary: 'Read the current team SSO policy',
         description:
-          'Owner/admin only; read/full API key or authorized MCP OAuth. An unconfigured team has invitation-only admission and no SSO requirement. OIDC SSO is off unless the operator sets SSO_OIDC_ENABLED=true; while off, this read still answers for stored configuration.',
+          'Owner/admin only; read/full API key or authorized MCP OAuth. An unconfigured team has invitation-only admission and no SSO requirement. This read remains available while both SSO protocol settings are off.',
         security: authenticated,
         middleware: [enabled, caller] as const,
         request: { headers: recoveryReadHeaders },

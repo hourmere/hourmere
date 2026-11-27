@@ -88,6 +88,7 @@ export default defineConfig({
           label: 'Scheduling',
           items: [
             { label: 'Event types', link: '/docs/event-types' },
+            { label: 'Team public home', link: '/docs/team-public-home' },
             { label: 'Availability', link: '/docs/availability' },
             { label: 'Round-robin scheduling', link: '/docs/round-robin-scheduling' },
             { label: 'Collective scheduling', link: '/docs/collective-scheduling' },
@@ -139,7 +140,7 @@ export default defineConfig({
             { label: 'REST quickstart', link: '/docs/rest' },
             { label: 'API keys', link: '/docs/api-keys' },
             { label: 'SCIM provisioning tokens', link: '/docs/scim' },
-            { label: 'Single sign-on (OIDC)', link: '/docs/sso' },
+            { label: 'Single sign-on', link: '/docs/sso' },
             { label: 'API conventions', link: '/docs/api-conventions' },
             { label: 'MCP quickstart', link: '/docs/mcp' },
             { label: 'CLI', link: '/docs/cli' },

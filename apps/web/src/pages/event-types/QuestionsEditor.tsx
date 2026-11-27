@@ -201,6 +201,7 @@ function QuestionCard({
           {(props) => (
             <input
               {...props}
+              dir="auto"
               value={q.label}
               onChange={(e) => onUpdate({ label: e.target.value })}
               autoComplete="off"
@@ -263,6 +264,7 @@ function QuestionCard({
                   <div className="option-row">
                     <input
                       id={id}
+                      dir="auto"
                       value={o.text}
                       aria-invalid={error ? true : undefined}
                       aria-describedby={error ? `${id}-error` : undefined}

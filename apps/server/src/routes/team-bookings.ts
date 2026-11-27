@@ -39,6 +39,7 @@ const TeamAdminBooking = z
   })
   .openapi('TeamAdminBooking')
 const TeamAdminBookingDetail = TeamAdminBooking.extend({
+  departureHandoffEnabled: z.literal(true).optional(),
   location: z.object({ kind: z.literal('microsoft_teams') }).optional(),
 }).openapi('TeamAdminBookingDetail')
 const TeamAdminBookingPage = z
@@ -58,7 +59,11 @@ const TeamBookingCancellation = z
 
 /** Team administration uses browser sessions and the shared current-team access check. */
 export function teamBookingRoutes(
-  deps: ServiceDeps & { notify?: BookingNotifier | undefined; bulkSelectionSecret?: string },
+  deps: ServiceDeps & {
+    notify?: BookingNotifier | undefined
+    bulkSelectionSecret?: string
+    departureHandoffEnabled?: boolean
+  },
 ): RouteModule {
   return ({ app, caller }) => {
     const access = teamManagementAccess(deps.db, caller)
@@ -166,11 +171,18 @@ export function teamBookingRoutes(
           }),
         },
       }),
-      async (c) =>
-        c.json(
-          await getTeamAdminBooking(serviceContext(deps, c.var.principal), c.req.valid('param').id),
+      async (c) => {
+        const booking = await getTeamAdminBooking(
+          serviceContext(deps, c.var.principal),
+          c.req.valid('param').id,
+        )
+        return c.json(
+          deps.departureHandoffEnabled
+            ? { ...booking, departureHandoffEnabled: true as const }
+            : booking,
           200,
-        ),
+        )
+      },
     )
     app.openapi(
       createRoute({

@@ -1,10 +1,13 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EventType } from '../../api/resources.ts'
 import { chooseLanguage } from '../../i18n/store.ts'
+import { resolveEventTypeEditor } from '../../test/event-type-editor.ts'
 import { fakeApi, json, ME, profile, renderApp, signedInAs } from '../../test/fake-api.tsx'
 import { eventType, schedule } from '../../test/fixtures.ts'
+
+beforeAll(resolveEventTypeEditor)
 
 const createdId = 'e0000000-0000-7000-8000-000000000010'
 const copyId = 'e0000000-0000-7000-8000-000000000011'

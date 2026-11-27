@@ -90,7 +90,7 @@ import {
   signInEmailJobs,
   waitlistEmailJob,
 } from '@hourmere/notifications'
-import type { ServiceContext } from '@hourmere/scheduling'
+import type { PaymentProvider, ServiceContext } from '@hourmere/scheduling'
 import {
   type AttendeeNoShowNotifier,
   type BookingNotifier,
@@ -141,6 +141,7 @@ import { meetingPollTools } from './mcp/meeting-polls.ts'
 import { mcpOAuthCleanupJob, mcpOAuthRoutes } from './mcp/oauth.ts'
 import { oneTimeLinkTools } from './mcp/one-time-links.ts'
 import { openTimeSnippetTools } from './mcp/open-time-snippets.ts'
+import { publicTeamTool } from './mcp/public-team.ts'
 import { routingFormConfigurationTools } from './mcp/routing-forms.ts'
 import { scimMappingAdministration } from './mcp/scim-team-mappings.ts'
 import { slackDestinationTools } from './mcp/slack-destinations.ts'
@@ -162,6 +163,7 @@ import { brandingRoutes } from './routes/branding.ts'
 import { caldavRoutes } from './routes/caldav.ts'
 import { calendarRoutes } from './routes/calendars.ts'
 import { conferenceRoutes } from './routes/conferences.ts'
+import { type DepartureHandoffs, departureHandoffRoutes } from './routes/departure-handoffs.ts'
 import { eventTypeRoutes } from './routes/event-types.ts'
 import { instanceRoutes } from './routes/instance.ts'
 import { meetingPollHostRoutes } from './routes/meeting-poll-host.ts'
@@ -213,6 +215,8 @@ import {
   ssoRecoveryEnrollmentEmailJob,
 } from './sso-recovery-enrollment.ts'
 import { samlSignInRoutes } from './sso-saml-sign-in.ts'
+import { createStripePaymentProvider } from './stripe-checkout.ts'
+import { createStripeClient } from './stripe-client.ts'
 import {
   TEAM_BOOKING_BULK_JOB,
   TEAM_BOOKING_BULK_RECOVERY_JOB,
@@ -222,20 +226,20 @@ import type { EnqueueBulkCancellation } from './team-booking-bulk-worker.ts'
 import type { InvitationSummaryMailLimits } from './team-invitations.ts'
 import { createWorkerHealthApp } from './worker-health.ts'
 
-// SAML stays hard-off until its rollout completes: no setting is read for it, and only
-// in-process tests inject it into productRoutes.
-const ssoSamlEnabled = false
-
 /**
- * The SSO capabilities of the running server. OIDC follows the operator setting
- * SSO_OIDC_ENABLED; while it is off, stored SSO state stays readable, recoverable and
- * reducible (Setting-off behaviour in docs/sso.md).
+ * The SSO capabilities of the running server follow the operator settings.
+ * While off, stored SSO state stays readable, recoverable and reducible
+ * (Setting-off behaviour in docs/sso.md).
  */
 export function productionSsoCapabilities(
-  config: Pick<Config, 'SSO_OIDC_ENABLED' | 'SCIM_PROVISIONING_ENABLED'>,
+  config: Pick<Config, 'SSO_OIDC_ENABLED' | 'SSO_SAML_ENABLED' | 'SCIM_PROVISIONING_ENABLED'>,
 ): SsoCapabilities {
   return withScimResources(
-    { ssoOidcEnabled: config.SSO_OIDC_ENABLED, ssoSamlEnabled, ssoOperatorSetting: true },
+    {
+      ssoOidcEnabled: config.SSO_OIDC_ENABLED,
+      ssoSamlEnabled: config.SSO_SAML_ENABLED,
+      ssoOperatorSetting: true,
+    },
     config.SCIM_PROVISIONING_ENABLED,
   )
 }
@@ -273,6 +277,7 @@ export function productRoutes({
   scimProvisioningEnabled = false,
   scimResourcesEnabled,
   slotSnippetsEnabled = false,
+  teamPublicHomeOrganizationIds,
   ssoConfigurationKey,
   ssoPrivateTargets,
   ssoLinkRemovalQueue,
@@ -293,13 +298,20 @@ export function productRoutes({
   meetingPollSecret,
   routingSecret,
   routingBookingReceiptNow,
+  departureHandoffs,
   workflowRunCursorSecret,
   workflowsEnabled,
   smtpConfigured,
   recurringBookingsEnabled,
+  paidBookingAvailability,
+  paymentProvider,
+  paymentStatusSecret,
   auditLogRetentionDays = null,
 }: {
   db: Db
+  paidBookingAvailability?: ServiceContext['paidBookingAvailability']
+  paymentProvider?: PaymentProvider | undefined
+  paymentStatusSecret?: string | undefined
   /** AUDIT_LOG_RETENTION_DAYS: days, or null (the default) to keep events forever. */
   auditLogRetentionDays?: number | null
   automaticMeet?: boolean
@@ -310,6 +322,7 @@ export function productRoutes({
   scimProvisioningEnabled?: boolean
   scimResourcesEnabled?: boolean | undefined
   slotSnippetsEnabled?: boolean
+  teamPublicHomeOrganizationIds?: readonly string[] | undefined
   /** Operator-managed key for encrypted provider configuration; does not enable SSO. */
   ssoConfigurationKey?: Buffer | undefined
   ssoPrivateTargets?: OidcProviderTestDeps['privateTargets']
@@ -317,13 +330,15 @@ export function productRoutes({
   ssoRecoveryEnrollmentQueue?: SsoRecoveryEnrollmentQueue | undefined
   /** SSO_OIDC_ENABLED as the running server passes it; tests inject it directly. */
   ssoOidcEnabled?: boolean
-  /** In-process test injection only; no operator setting exists during hard-off. */
+  /** SSO_SAML_ENABLED as the running server passes it; tests inject it directly. */
   ssoSamlEnabled?: boolean
   /** Passed by the running server: a protocol that is off keeps its Setting-off behaviour. */
   ssoOperatorSetting?: boolean | undefined
   /** In-process test injection only; no operator setting exists during hard-off. */
   routingFormsEnabled?: boolean
   routingBookingReceiptNow?: () => Temporal.Instant
+  /** In-process injection for staged acceptance. The running server supplies no store. */
+  departureHandoffs?: DepartureHandoffs
   successRedirectAllowIpHosts?: boolean
   successRedirectPolicy?: ServiceContext['successRedirectPolicy']
   bookingMaxInviteeReschedules?: number | undefined
@@ -355,6 +370,7 @@ export function productRoutes({
   enqueueCalendarWritebackRecovery?: CalendarDeps['enqueueWritebackRecovery']
 } & RecurringBookingAdmissionDeps &
   WorkflowSettings): RouteModule[] {
+  const microsoftCalendarEnabled = microsoftCalendar !== undefined
   const ssoCapabilities = withScimResources(
     { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled, ssoOperatorSetting },
     scimResourcesEnabled,
@@ -372,6 +388,7 @@ export function productRoutes({
       scimProvisioningEnabled,
       automaticMeet,
       smsRemindersAvailable,
+      eventTypePaymentAvailability: paidBookingAvailability,
       automaticZoom,
       followUpHostNotesEnabled,
       slotSnippetsEnabled,
@@ -446,9 +463,10 @@ export function productRoutes({
       db,
       followUpHostNotesEnabled,
       smsRemindersAvailable,
+      paidBookingAvailability,
       automaticMeet,
       automaticZoom,
-      microsoftCalendarEnabled: microsoftCalendar !== undefined,
+      microsoftCalendarEnabled,
       successRedirectPolicy,
       recurringBookingsEnabled,
     }),
@@ -460,10 +478,12 @@ export function productRoutes({
       notify,
       automaticMeet,
       automaticZoom,
+      microsoftCalendarEnabled,
       smsRemindersAvailable,
     }),
     publicRoutes({
       db,
+      teamPublicHomeOrganizationIds,
       routingFormsEnabled: routingEnabled,
       routingSecret,
       receiptNow: routingBookingReceiptNow,
@@ -474,7 +494,11 @@ export function productRoutes({
       notify,
       automaticMeet,
       automaticZoom,
+      microsoftCalendarEnabled,
       successRedirectPolicy,
+      paymentProvider,
+      paymentStatusSecret,
+      paidBookingsEnabled: paidBookingAvailability === 'available',
     }),
     routingContinuationRoutes({
       db,
@@ -483,6 +507,7 @@ export function productRoutes({
       routingSecret,
       automaticMeet,
       automaticZoom,
+      microsoftCalendarEnabled,
       smsRemindersAvailable,
     }),
     oneTimeBookingRoutes({
@@ -491,12 +516,25 @@ export function productRoutes({
       notify,
       automaticMeet,
       automaticZoom,
+      microsoftCalendarEnabled,
       successRedirectPolicy,
     }),
     oneTimeLinkRoutes({ db, publicUrl }),
-    openTimeSnippetRoutes({ db, publicUrl, slotSnippetsEnabled, automaticMeet, automaticZoom }),
+    openTimeSnippetRoutes({
+      db,
+      publicUrl,
+      slotSnippetsEnabled,
+      automaticMeet,
+      automaticZoom,
+      microsoftCalendarEnabled,
+    }),
     routingFormRoutes({ db, routingFormsEnabled: routingEnabled }),
-    availabilityTroubleshootingRoutes({ db, automaticMeet, automaticZoom }),
+    availabilityTroubleshootingRoutes({
+      db,
+      automaticMeet,
+      automaticZoom,
+      microsoftCalendarEnabled,
+    }),
     bookingRoutes({
       db,
       routingFormsEnabled: routingEnabled,
@@ -505,10 +543,24 @@ export function productRoutes({
       notifyAttendeeNoShow,
       automaticMeet,
       automaticZoom,
+      microsoftCalendarEnabled,
       bookingMaxInviteeReschedules,
       bookingExportMaxConcurrent,
     }),
-    teamBookingRoutes({ db, notify }),
+    teamBookingRoutes({
+      db,
+      notify,
+      departureHandoffEnabled: Boolean(departureHandoffs && notify),
+    }),
+    departureHandoffRoutes({
+      db,
+      notify,
+      handoffs: departureHandoffs,
+      capabilities: ssoCapabilities,
+      automaticMeet,
+      automaticZoom,
+      microsoftCalendarEnabled,
+    }),
     teamBookingBulkPreviewRoutes({ db, ssoCapabilities }),
     teamInvitationRoutes({ db, invitationMailLimits }),
     memberDepartureImpactRoutes({ db }),
@@ -525,7 +577,7 @@ export function productRoutes({
       db,
       automaticMeet,
       automaticZoom,
-      microsoftCalendarEnabled: microsoftCalendar !== undefined,
+      microsoftCalendarEnabled,
     }),
     // Recovery operations stay available when the operator pauses workflows.
     workflowRoutes({
@@ -549,6 +601,7 @@ export function productTools({
   smtpConfigured,
   publicUrl,
   slotSnippetsEnabled = false,
+  teamPublicHomeOrganizationIds,
   // Hard-off unless the running server passes its configured capabilities.
   ssoCapabilities: sso = { ssoOidcEnabled: false, ssoSamlEnabled: false },
   routingFormsEnabled: routingEnabled = false,
@@ -556,6 +609,7 @@ export function productTools({
   workflowRunCursorSecret,
   workflowsEnabled,
   smsRemindersAvailable = false,
+  paidBookingAvailability,
   successRedirectPolicy,
   notify,
   notifyAttendeeNoShow,
@@ -579,11 +633,13 @@ export function productTools({
   routingBookingReceiptNow?: (() => Temporal.Instant) | undefined
   smtpConfigured?: boolean | undefined
   slotSnippetsEnabled?: boolean | undefined
+  teamPublicHomeOrganizationIds?: readonly string[] | undefined
   /** Hard-off unless the running server passes its configured capabilities. */
   ssoCapabilities?: SsoCapabilities | undefined
   routingFormsEnabled?: boolean | undefined
   publicUrl?: string | undefined
   smsRemindersAvailable?: boolean | undefined
+  paidBookingAvailability?: ServiceContext['paidBookingAvailability']
   followUpHostNotesEnabled?: boolean | undefined
   workflowRunCursorSecret?: string | undefined
   successRedirectPolicy?: ServiceContext['successRedirectPolicy']
@@ -597,10 +653,17 @@ export function productTools({
   caldavCalendar?: CalendarDeps['caldav']
   zoomConference?: ConferenceDeps['zoom']
 } & WorkflowSettings): Tool[] {
+  const microsoftCalendarEnabled = microsoftCalendar !== undefined
   return [
     whoamiTool,
+    publicTeamTool({
+      db,
+      teamPublicHomeOrganizationIds,
+      scimResourcesEnabled: sso.scimResourcesEnabled,
+    }),
     ...bookingTools({
       db,
+      paidCheckoutAvailable: paidBookingAvailability === 'available',
       waitlistSecret,
       smtpConfigured,
       smsRemindersAvailable,
@@ -608,20 +671,27 @@ export function productTools({
       notifyAttendeeNoShow,
       automaticMeet,
       automaticZoom,
+      microsoftCalendarEnabled,
       bookingMaxInviteeReschedules,
       routingFormsEnabled: routingEnabled,
       routingSecret,
       receiptNow: routingBookingReceiptNow,
     }),
-    ...catalogTools({ db, followUpHostNotesEnabled, smsRemindersAvailable }),
+    ...catalogTools({
+      db,
+      followUpHostNotesEnabled,
+      smsRemindersAvailable,
+      paidBookingAvailability,
+    }),
     ...brandingTools({ db }),
     ...auditLogTools({ db, auditLogRetentionDays }),
     ...eventTypeTools({
       db,
       automaticMeet,
       automaticZoom,
-      microsoftCalendarEnabled: microsoftCalendar !== undefined,
+      microsoftCalendarEnabled,
       smsRemindersAvailable,
+      paidBookingAvailability,
       followUpHostNotesEnabled,
       successRedirectPolicy,
     }),
@@ -629,9 +699,21 @@ export function productTools({
     ...slackDestinationTools({ db, ...webhooks, queue: webhookQueue }),
     ...webhookTools({ db, ...webhooks, workflowsEnabled }),
     ...(slotSnippetsEnabled
-      ? openTimeSnippetTools({ db, publicUrl, slotSnippetsEnabled, automaticMeet, automaticZoom })
+      ? openTimeSnippetTools({
+          db,
+          publicUrl,
+          slotSnippetsEnabled,
+          automaticMeet,
+          automaticZoom,
+          microsoftCalendarEnabled,
+        })
       : []),
-    ...availabilityTroubleshootingTools({ db, automaticMeet, automaticZoom }),
+    ...availabilityTroubleshootingTools({
+      db,
+      automaticMeet,
+      automaticZoom,
+      microsoftCalendarEnabled,
+    }),
     ...integrationTools({
       calendar: { db, google: googleCalendar, caldav: caldavCalendar },
       conference: { db, zoom: zoomConference },
@@ -644,6 +726,7 @@ export function productTools({
       notify,
       automaticMeet,
       automaticZoom,
+      microsoftCalendarEnabled,
       smsRemindersAvailable,
     }),
     ...waitlistTools({ db, secret: waitlistSecret, publicUrl, smtpConfigured }),
@@ -662,6 +745,7 @@ export function productTools({
       publicUrl,
       automaticMeet,
       automaticZoom,
+      microsoftCalendarEnabled,
       smsRemindersAvailable,
     }),
   ]
@@ -672,6 +756,8 @@ export interface ProductionAppDeps extends RecurringBookingAdmissionDeps {
   enqueueScimInvitation: ReturnType<typeof createInvitationEmailDispatcher>
   config: Config
   db: Db
+  stripeTransport?: typeof fetch | undefined
+  stripeAccountVerified?: boolean | undefined
   /** Effective state after the startup namespace check. */
   routingFormsEnabled?: boolean
   /** Better Auth session reads are used by the provider-test callback. */
@@ -710,6 +796,8 @@ export interface ProductionAppDeps extends RecurringBookingAdmissionDeps {
 export function productionAppOptions({
   config,
   db,
+  stripeTransport,
+  stripeAccountVerified = false,
   routingFormsEnabled = false,
   auth,
   resolveCaller,
@@ -735,6 +823,19 @@ export function productionAppOptions({
   recurringBookingsEnabled,
 }: ProductionAppDeps): AppDeps {
   const workflowsEnabled = config.WORKFLOWS_ENABLED
+  const paidBookingAvailability = !config.stripe
+    ? 'stripe_not_configured'
+    : !config.PAID_BOOKINGS_ENABLED
+      ? 'disabled'
+      : config.stripe.mode === 'live'
+        ? 'live_mode_unavailable'
+        : stripeAccountVerified
+          ? 'available'
+          : 'stripe_unverified'
+  const paymentProvider =
+    paidBookingAvailability === 'available' && config.stripe
+      ? createStripePaymentProvider(config.stripe, config.PUBLIC_URL, stripeTransport)
+      : undefined
   // All configuration transports and public booking routes share the instance policy.
   const successRedirectPolicy = {
     publicUrl: config.PUBLIC_URL,
@@ -826,6 +927,9 @@ export function productionAppOptions({
       db,
       invitationMailLimits,
       waitlistSecret: config.BETTER_AUTH_SECRET,
+      paymentStatusSecret: config.BETTER_AUTH_SECRET,
+      paidBookingAvailability,
+      paymentProvider,
       meetingPollSecret: config.BETTER_AUTH_SECRET,
       smtpConfigured: Boolean(config.SMTP_URL && config.MAIL_FROM),
       socialProviders: config.socialProviders,
@@ -836,6 +940,7 @@ export function productionAppOptions({
       recurringBookingsEnabled,
       embedAllowedOrigins: config.EMBED_ALLOWED_ORIGINS,
       slotSnippetsEnabled: config.SLOT_SNIPPETS_ENABLED,
+      teamPublicHomeOrganizationIds: config.TEAM_PUBLIC_HOME_ORGANIZATION_IDS,
       successRedirectPolicy,
       bookingMaxInviteeReschedules: config.BOOKING_MAX_INVITEE_RESCHEDULES,
       bookingExportMaxConcurrent: config.BOOKING_EXPORT_MAX_CONCURRENT,
@@ -877,6 +982,7 @@ export function productionAppOptions({
         publicUrl: config.PUBLIC_URL,
         followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,
         successRedirectPolicy,
+        paidBookingAvailability,
         smsRemindersAvailable: config.SMS_PROVIDER === 'twilio',
         smtpConfigured: Boolean(config.SMTP_URL && config.MAIL_FROM),
         notify,
@@ -895,6 +1001,7 @@ export function productionAppOptions({
         routingSecret: config.BETTER_AUTH_SECRET,
         workflowRunCursorSecret: config.BETTER_AUTH_SECRET,
         workflowsEnabled,
+        teamPublicHomeOrganizationIds: config.TEAM_PUBLIC_HOME_ORGANIZATION_IDS,
         ssoCapabilities: sso,
       }),
     }),
@@ -966,10 +1073,17 @@ export interface RunningServer {
   close(): Promise<void>
 }
 
+interface StartServerOptions
+  extends RecurringBookingAdmissionDeps,
+    Pick<AuthConfig, 'organizationListRateLimitMaxForTests'> {
+  /** In-process transport injection for isolated test-mode acceptance. */
+  stripeTransport?: typeof fetch | undefined
+}
+
 /** Starts Hourmere from environment variables (see .env.example) and optional test dependencies. */
 export async function startServer(
   env: NodeJS.ProcessEnv = process.env,
-  options: RecurringBookingAdmissionDeps = {},
+  options: StartServerOptions = {},
 ): Promise<RunningServer> {
   // First, before anything can log: one line per console call, control characters escaped.
   const restoreConsole = installOneLineConsole()
@@ -983,7 +1097,7 @@ export async function startServer(
 
 async function start(
   env: NodeJS.ProcessEnv,
-  options: RecurringBookingAdmissionDeps,
+  options: StartServerOptions,
   restoreConsole: () => void,
 ): Promise<RunningServer> {
   const config = loadConfig(env)
@@ -1013,8 +1127,8 @@ async function start(
     }
     await db.transaction().execute((trx) => ensureWaitlistKey(trx, config.BETTER_AUTH_SECRET))
     await db.transaction().execute((trx) => ensureMeetingPollKey(trx, config.BETTER_AUTH_SECRET))
-    // A paused worker still skips due runs from an earlier opt-in. A fresh default
-    // install has no workflow schedule or worker, and web roles never consume wakes.
+    // An explicitly paused worker still skips previously captured runs as they come due.
+    // A paused install without work to recover needs no workflow jobs. Web roles never consume wakes.
     runWorkflowJobs = role !== 'web' && (await shouldRunWorkflowJobs(db, { workflowsEnabled }))
   } catch (error) {
     await db.destroy()
@@ -1206,6 +1320,7 @@ async function start(
     publicUrl: config.PUBLIC_URL,
     automaticMeet: config.GOOGLE_MEET_ENABLED,
     automaticZoom: config.ZOOM_MEETINGS_ENABLED,
+    microsoftCalendarEnabled: microsoftCalendar !== undefined,
   }
   const runWaitlistEmail = createWaitlistEmailWorker({
     ...notificationDeps,
@@ -1298,7 +1413,7 @@ async function start(
       }),
       ...configuredSmsJobs(config, db),
       paymentHoldsExpiryJob(() => expirePaymentHolds({ db })),
-      paymentRefundJob(db, config.stripe),
+      paymentRefundJob(db, config.stripe, options.stripeTransport),
       ...(config.MCP_OAUTH_ENABLED ? [mcpOAuthCleanupJob(db)] : []),
       ...signInEmailJobs({
         db,
@@ -1515,8 +1630,18 @@ async function start(
   if (!authPool) {
     fetch = createWorkerHealthApp({ checkDb, checkJobs: () => jobs.check() }).fetch
   } else {
-    const auth = createAuth(
-      productionAuthOptions({
+    const stripe = config.stripe
+    const stripeAccountVerified =
+      config.PAID_BOOKINGS_ENABLED && stripe?.mode === 'test'
+        ? await createStripeClient(stripe, options.stripeTransport)
+            .accounts.retrieveCurrent()
+            .then(
+              ({ id }) => id === stripe.accountId,
+              () => false,
+            )
+        : false
+    const auth = createAuth({
+      ...productionAuthOptions({
         config,
         pool: authPool,
         db,
@@ -1525,11 +1650,14 @@ async function start(
         invitationMailLimits,
         jobs,
       }),
-    )
+      organizationListRateLimitMaxForTests: options.organizationListRateLimitMaxForTests,
+    })
     // db is closed below.
     fetch = createApp(
       productionAppOptions({
         config,
+        stripeTransport: options.stripeTransport,
+        stripeAccountVerified,
         routingFormsEnabled,
         recurringBookingsEnabled: recurringBookingAdmissionEnabled(options),
         db,

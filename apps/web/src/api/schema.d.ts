@@ -3114,7 +3114,7 @@ export interface paths {
         };
         /**
          * Read a public personal routing form
-         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Reads the current published version and its ordered questions for an enabled form. Anonymous access is allowed. A supplied bearer must be a valid read, bookings or full API key.
+         * @description Routing forms are on by default. Set ROUTING_FORMS_ENABLED=false to turn them off. This operation returns routing_forms_disabled while routing forms are off. Reads the current published version and its ordered questions for an enabled form. Anonymous access is allowed. A supplied bearer must be a valid read, bookings or full API key.
          */
         get: operations["getPublicRoutingForm"];
         put?: never;
@@ -3136,7 +3136,7 @@ export interface paths {
         put?: never;
         /**
          * Submit answers to a public personal routing form
-         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Routes answers for the specified published version and returns a message or an expiring continuation with its private URL. Fetch the current public form again after routing_form_changed. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key.
+         * @description Routing forms are on by default. Set ROUTING_FORMS_ENABLED=false to turn them off. This operation returns routing_forms_disabled while routing forms are off. Routes answers for the specified published version and returns a message or an expiring continuation with its private URL. Fetch the current public form again after routing_form_changed. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key.
          */
         post: operations["routeLead"];
         delete?: never;
@@ -3154,7 +3154,7 @@ export interface paths {
         };
         /**
          * Read a public team routing form
-         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Reads the current published version and its ordered questions for an enabled form. Anonymous access is allowed. A supplied bearer must be a valid read, bookings or full API key.
+         * @description Routing forms are on by default. Set ROUTING_FORMS_ENABLED=false to turn them off. This operation returns routing_forms_disabled while routing forms are off. Reads the current published version and its ordered questions for an enabled form. Anonymous access is allowed. A supplied bearer must be a valid read, bookings or full API key.
          */
         get: operations["getPublicTeamRoutingForm"];
         put?: never;
@@ -3176,7 +3176,7 @@ export interface paths {
         put?: never;
         /**
          * Submit answers to a public team routing form
-         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Routes answers for the specified published version and returns a message or an expiring continuation with its private URL. Fetch the current public form again after routing_form_changed. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key.
+         * @description Routing forms are on by default. Set ROUTING_FORMS_ENABLED=false to turn them off. This operation returns routing_forms_disabled while routing forms are off. Routes answers for the specified published version and returns a message or an expiring continuation with its private URL. Fetch the current public form again after routing_form_changed. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key.
          */
         post: operations["routeTeamLead"];
         delete?: never;
@@ -3360,6 +3360,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/public/{handle}/{slug}/checkout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reserve a paid time and start Stripe Checkout
+         * @description Paid personal events only. Matching replays keep the original hold and Session. Stripe-hosted Checkout collects payment.
+         */
+        post: operations["startPublicCheckout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/public/{handle}/{slug}/slots": {
         parameters: {
             query?: never;
@@ -3513,6 +3533,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/public/checkout/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Release an unpaid reservation
+         * @description Use the private status capability from checkout creation. Checking a Stripe return changes no booking.
+         */
+        post: operations["cancelPublicCheckout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/checkout/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check a private paid booking attempt
+         * @description Use the private status capability from checkout creation. Checking a Stripe return changes no booking.
+         */
+        post: operations["getPublicCheckoutStatus"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/public/meeting-polls/enroll": {
         parameters: {
             query?: never;
@@ -3626,6 +3686,26 @@ export interface paths {
         put?: never;
         /** Withdraw your ballot and opt out of poll mail */
         post: operations["withdrawMeetingPollVote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/teams/{handle}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A team’s public booking directory
+         * @description The saved public name, exact-case slug and listed event summaries of an opted-in team. An enabled team with no eligible events returns an empty list. Hidden events remain accessible only through their existing direct or private links.
+         */
+        get: operations["getPublicTeam"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3966,7 +4046,7 @@ export interface paths {
         put?: never;
         /**
          * Book a slot through a routing continuation
-         * @description Books the event selected by the private route capability. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key. New routed bookings require ROUTING_FORMS_ENABLED=true (off by default). An exact committed replay with the same capability, Idempotency-Key and booking authority still succeeds after expiry or disablement.
+         * @description Books the event selected by the private route capability. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key. New routed bookings require routing forms to be enabled, which is the default. An exact committed replay with the same capability, Idempotency-Key and booking authority still succeeds after expiry or disablement.
          */
         post: operations["createRoutedBooking"];
         delete?: never;
@@ -3986,7 +4066,7 @@ export interface paths {
         put?: never;
         /**
          * Resolve a routing continuation
-         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Reads the selected event's current booking fields and editable prefill. The capability expires 30 minutes after issuance. Reads do not consume or renew it. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key.
+         * @description Routing forms are on by default. Set ROUTING_FORMS_ENABLED=false to turn them off. This operation returns routing_forms_disabled while routing forms are off. Reads the selected event's current booking fields and editable prefill. The capability expires 30 minutes after issuance. Reads do not consume or renew it. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key.
          */
         post: operations["resolveRoutingContinuation"];
         delete?: never;
@@ -4006,7 +4086,7 @@ export interface paths {
         put?: never;
         /**
          * Find slots for the selected event
-         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Offers ordinary availability in the given instant range for the event selected by the capability. Availability may change. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key.
+         * @description Routing forms are on by default. Set ROUTING_FORMS_ENABLED=false to turn them off. This operation returns routing_forms_disabled while routing forms are off. Offers ordinary availability in the given instant range for the event selected by the capability. Availability may change. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key.
          */
         post: operations["findRoutedSlots"];
         delete?: never;
@@ -4024,13 +4104,13 @@ export interface paths {
         };
         /**
          * List routing forms
-         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
+         * @description Routing forms are on by default. Set ROUTING_FORMS_ENABLED=false to turn them off. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
          */
         get: operations["listRoutingForms"];
         put?: never;
         /**
          * Create a routing form
-         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
+         * @description Routing forms are on by default. Set ROUTING_FORMS_ENABLED=false to turn them off. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
          */
         post: operations["createRoutingForm"];
         delete?: never;
@@ -4048,21 +4128,21 @@ export interface paths {
         };
         /**
          * Get a routing form
-         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
+         * @description Routing forms are on by default. Set ROUTING_FORMS_ENABLED=false to turn them off. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
          */
         get: operations["getRoutingForm"];
         put?: never;
         post?: never;
         /**
          * Archive a routing form
-         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
+         * @description Routing forms are on by default. Set ROUTING_FORMS_ENABLED=false to turn them off. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
          */
         delete: operations["archiveRoutingForm"];
         options?: never;
         head?: never;
         /**
          * Update a routing form
-         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
+         * @description Routing forms are on by default. Set ROUTING_FORMS_ENABLED=false to turn them off. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins manage forms in their active organization. Reads require read/full API-key scope; writes require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Create accepts an optional requestId UUID for safe retries; update/archive require the last-read expectedRevision.
          */
         patch: operations["updateRoutingForm"];
         trace?: never;
@@ -4078,7 +4158,7 @@ export interface paths {
         put?: never;
         /**
          * Preview a routing form draft
-         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins can preview the current draft in their active organization. API keys require full scope. Supply answers keyed by question UUID. Returns the draft revision, rule and condition matches, and any target eligibility failures. Preview is read-only, with no stored answers, route capabilities or notifications. Session requests require a same-origin Origin/Referer.
+         * @description Routing forms are on by default. Set ROUTING_FORMS_ENABLED=false to turn them off. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins can preview the current draft in their active organization. API keys require full scope. Supply answers keyed by question UUID. Returns the draft revision, rule and condition matches, and any target eligibility failures. Preview is read-only, with no stored answers, route capabilities or notifications. Session requests require a same-origin Origin/Referer.
          */
         post: operations["previewRoutingForm"];
         delete?: never;
@@ -4098,7 +4178,7 @@ export interface paths {
         put?: never;
         /**
          * Publish a routing form
-         * @description Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins can publish forms in their active organization. API keys require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Supply the last-read expectedRevision. Publication leaves enabled unchanged and revalidates all targets and mappings. Unsupported targets, including group and payment-required events, and invalid mappings return invalid_routing_target. Reuse the optional requestId UUID with identical input to return the original version and the current form. Changed input with the same key returns idempotency_key_reused.
+         * @description Routing forms are on by default. Set ROUTING_FORMS_ENABLED=false to turn them off. This operation returns routing_forms_disabled while routing forms are off. Personal owners and current team owners/admins can publish forms in their active organization. API keys require full scope. Session writes require X-Expected-Organization-Id and same-origin Origin/Referer checks. Supply the last-read expectedRevision. Publication leaves enabled unchanged and revalidates all targets and mappings. Unsupported targets, including group and payment-required events, and invalid mappings return invalid_routing_target. Reuse the optional requestId UUID with identical input to return the original version and the current form. Changed input with the same key returns idempotency_key_reused.
          */
         post: operations["publishRoutingForm"];
         delete?: never;
@@ -4732,6 +4812,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/team/bookings/{id}/handoff-offers/{offerId}/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Apply an explicitly approved booking handoff
+         * @description Requires a current owner/admin browser session and a same-origin write. Rechecks team authority, exact version, all recipient approvals, the currently offered slot and meeting eligibility in one transaction. Replays return the same limited receipt. Provider and mail work runs after commit.
+         */
+        post: operations["applyDepartureHandoff"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/team/bookings/{id}/handoff-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview one booking handoff and read its current consent or receipt
+         * @description Reads one exact slot on the event type’s current grid. Does not reserve time, send consent links, or change a booking. Returns limited consent counts or a safe committed status from the same team. Staged and disabled unless a handoff store and booking notifier are wired in.
+         */
+        get: operations["previewDepartureHandoff"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/team/bookings/bulk-cancellations/{id}": {
         parameters: {
             query?: never;
@@ -5253,7 +5373,7 @@ export interface paths {
         post?: never;
         /**
          * Revoke the caller’s exact SSO delegation
-         * @description Requires a current team browser session. Stays available while SSO_OIDC_ENABLED is off.
+         * @description Requires a current team browser session. Stays available while the protocol settings are off.
          */
         delete: operations["revokeSsoDelegation"];
         options?: never;
@@ -5272,7 +5392,7 @@ export interface paths {
         put?: never;
         /**
          * Create or rotate a DNS domain challenge
-         * @description Verified team owner/admin browser session with fresh proof only. The TXT challenge is returned once; only its digest is stored. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.
+         * @description Verified team owner/admin browser session with fresh proof only. The TXT challenge is returned once; only its digest is stored. Returns 404 sso_disabled while both protocol settings are off.
          */
         post: operations["createSsoDomainChallenge"];
         delete?: never;
@@ -5293,7 +5413,7 @@ export interface paths {
         post?: never;
         /**
          * Retire a domain claim
-         * @description Verified team owner/admin browser session with fresh proof and expected generation. Stays available while SSO_OIDC_ENABLED is off.
+         * @description Verified team owner/admin browser session with fresh proof and expected generation. Stays available while both protocol settings are off.
          */
         delete: operations["deleteSsoDomain"];
         options?: never;
@@ -5312,7 +5432,7 @@ export interface paths {
         put?: never;
         /**
          * Verify an exact domain through trusted DNS
-         * @description Verified team owner/admin browser session with fresh proof and expected generation. DNS errors return unknown status. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.
+         * @description Verified team owner/admin browser session with fresh proof and expected generation. DNS errors return unknown status. Returns 404 sso_disabled while both protocol settings are off.
          */
         post: operations["verifySsoDomain"];
         delete?: never;
@@ -5330,12 +5450,12 @@ export interface paths {
         };
         /**
          * Read the current team SSO policy
-         * @description Owner/admin only; read/full API key or authorized MCP OAuth. An unconfigured team has invitation-only admission and no SSO requirement. OIDC SSO is off unless the operator sets SSO_OIDC_ENABLED=true; while off, this read still answers for stored configuration.
+         * @description Owner/admin only; read/full API key or authorized MCP OAuth. An unconfigured team has invitation-only admission and no SSO requirement. This read remains available while both SSO protocol settings are off.
          */
         get: operations["getSsoPolicy"];
         /**
          * Set the current team SSO policy
-         * @description Requires a verified team owner or administrator browser session and fresh administration proof. An enrolled owner can spend recovery authority to turn off enforcement without enabling JIT. While SSO_OIDC_ENABLED is off, requiring SSO or JIT admission returns 404 sso_disabled; turning the requirement off stays available.
+         * @description Requires a verified team owner or administrator browser session and fresh administration proof. An enrolled owner can spend recovery authority to turn off enforcement without enabling JIT. Starting enforcement requires a usable provider on an enabled protocol. Enabling JIT requires at least one protocol to be on. Turning the requirement off stays available.
          */
         put: operations["setSsoPolicy"];
         post?: never;
@@ -5354,13 +5474,13 @@ export interface paths {
         };
         /**
          * List safe SSO provider drafts for the current team
-         * @description Owner/admin only; read/full API key or authorized MCP OAuth. OIDC SSO is off unless the operator sets SSO_OIDC_ENABLED=true; while off, this read still answers for stored configuration. Follow nextCursor for all providers. Opaque links and generations are only returned to browser sessions. Configuration, secrets, raw metadata and identity claims are never returned. Objects and status strings may gain values.
+         * @description Owner/admin only; read/full API key or authorized MCP OAuth. This read remains available while both SSO protocol settings are off. Follow nextCursor for all providers. Opaque links and generations are only returned to browser sessions. Configuration, secrets, raw metadata and identity claims are never returned. Objects and status strings may gain values.
          */
         get: operations["listSsoProviders"];
         put?: never;
         /**
          * Create a disabled SSO provider draft
-         * @description Verified team owner/admin browser session with fresh proof. An enrolled owner can spend one recovery grant on an enforced team. Provider credentials and raw metadata are write-only. Returns 404 sso_disabled when the requested protocol is off. SAML is unavailable.
+         * @description Verified team owner/admin browser session with fresh proof. An enrolled owner can spend one recovery grant on an enforced team. Provider credentials and raw metadata are write-only. Returns 404 sso_disabled when the requested protocol is off.
          */
         post: operations["createSsoProvider"];
         delete?: never;
@@ -5381,14 +5501,14 @@ export interface paths {
         post?: never;
         /**
          * Retire an SSO provider
-         * @description Verified team owner/admin browser session with fresh proof and expected revision. An enforced team must keep a usable provider. An authorized repeat retirement is idempotent. Stays available while SSO_OIDC_ENABLED is off.
+         * @description Verified team owner/admin browser session with fresh proof and expected revision. An enforced team must keep a usable provider. An authorized repeat retirement is idempotent. Stays available while the provider’s protocol setting is off.
          */
         delete: operations["deleteSsoProvider"];
         options?: never;
         head?: never;
         /**
          * Update an SSO provider draft
-         * @description Verified team owner/admin browser session with fresh proof and expected revision. An enrolled owner can spend one recovery grant on an enforced team. Omitted secrets are preserved. Provider credentials and raw metadata are write-only. Returns 404 sso_disabled when the requested protocol is off. SAML is unavailable.
+         * @description Verified team owner/admin browser session with fresh proof and expected revision. An enrolled owner can spend one recovery grant on an enforced team. Omitted secrets are preserved. Provider credentials and raw metadata are write-only. Returns 404 sso_disabled when the requested protocol is off.
          */
         patch: operations["updateSsoProvider"];
         trace?: never;
@@ -5429,7 +5549,7 @@ export interface paths {
         post: operations["linkSsoAccount"];
         /**
          * Retire the caller’s exact SSO identity link
-         * @description Current team member browser session with independent mailbox proof and the link ID and generation from /me. Stays available while SSO_OIDC_ENABLED is off.
+         * @description Current team member browser session with independent mailbox proof and the link ID and generation from /me. Stays available while the protocol setting is off.
          */
         delete: operations["unlinkSsoAccount"];
         options?: never;
@@ -5449,7 +5569,7 @@ export interface paths {
         post?: never;
         /**
          * Retire another member’s exact SSO identity link
-         * @description Team owner/admin browser session with fresh administration proof and the link generation from the provider inventory. Another owner must retire an owner’s link. Stays available while SSO_OIDC_ENABLED is off.
+         * @description Team owner/admin browser session with fresh administration proof and the link generation from the provider inventory. Another owner must retire an owner’s link. Stays available while the protocol setting is off.
          */
         delete: operations["removeSsoIdentityLink"];
         options?: never;
@@ -5488,7 +5608,7 @@ export interface paths {
         put?: never;
         /**
          * Nominate a current team owner for SSO recovery
-         * @description Requires a team owner browser session and fresh administration proof. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.
+         * @description Requires a team owner browser session and fresh administration proof. Returns 404 sso_disabled while both protocol settings are off.
          */
         post: operations["configureSsoRecovery"];
         delete?: never;
@@ -5508,7 +5628,7 @@ export interface paths {
         put?: never;
         /**
          * Accept the caller’s SSO recovery nomination
-         * @description Requires the nominated owner’s browser session and independent mailbox proof. Returns 404 sso_disabled while SSO_OIDC_ENABLED is off.
+         * @description Requires the nominated owner’s browser session and independent mailbox proof. Returns 404 sso_disabled while both protocol settings are off.
          */
         post: operations["acceptSsoRecoveryEnrollment"];
         delete?: never;
@@ -5528,7 +5648,7 @@ export interface paths {
         put?: never;
         /**
          * Start SSO recovery for the specified team
-         * @description Requires an enrolled owner’s browser session and fresh mailbox proof. Permits inspecting SSO configuration and one provider repair write or one write turning off enforcement. Stays available while SSO_OIDC_ENABLED is off.
+         * @description Requires an enrolled owner’s browser session and fresh mailbox proof. Permits inspecting SSO configuration and one provider repair write or one write turning off enforcement. Stays available while both protocol settings are off.
          */
         post: operations["useSsoRecovery"];
         delete?: never;
@@ -5822,13 +5942,13 @@ export interface paths {
         };
         /**
          * List the booking workflows of the owner the caller acts as
-         * @description The operator can enable booking workflows with WORKFLOWS_ENABLED=true. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full or read API-key scope. Name the owner explicitly: ownerKind=personal with your user ID in your personal organization, or ownerKind=team with the team ID while acting in that team as a current owner or admin. Any other owner, existing or not, gets the same 403 insufficient_role. Deleted workflows are not listed. Oldest first, by time-ordered ID; pass nextCursor as cursor with the same owner for the next page.
+         * @description Booking workflows are enabled by default. The operator can pause them with WORKFLOWS_ENABLED=false. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full or read API-key scope. Name the owner explicitly: ownerKind=personal with your user ID in your personal organization, or ownerKind=team with the team ID while acting in that team as a current owner or admin. Any other owner, existing or not, gets the same 403 insufficient_role. Deleted workflows are not listed. Oldest first, by time-ordered ID; pass nextCursor as cursor with the same owner for the next page.
          */
         get: operations["listWorkflows"];
         put?: never;
         /**
          * Create a booking workflow
-         * @description The operator can enable booking workflows with WORKFLOWS_ENABLED=true. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full API-key scope. Name your personal owner or a team you currently own or administer in the active organization. Retain idempotencyKey for retries: the same normalized request returns the stored definition, while changed input conflicts. IDs are server-generated; caller-supplied IDs and unknown fields are rejected. Webhook actions require an active endpoint in the acting organization subscribed to workflow.executed. Creation does not send mail.
+         * @description Booking workflows are enabled by default. The operator can pause them with WORKFLOWS_ENABLED=false. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full API-key scope. Name your personal owner or a team you currently own or administer in the active organization. Retain idempotencyKey for retries: the same normalized request returns the stored definition, while changed input conflicts. IDs are server-generated; caller-supplied IDs and unknown fields are rejected. Webhook actions require an active endpoint in the acting organization subscribed to workflow.executed. Creation does not send mail.
          */
         post: operations["createWorkflow"];
         delete?: never;
@@ -5846,21 +5966,21 @@ export interface paths {
         };
         /**
          * Read one booking workflow
-         * @description The operator can enable booking workflows with WORKFLOWS_ENABLED=true. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full or read API-key scope. Returns a workflow of the owner the caller acts as in its current organization: its own personal workflow, or a team workflow while it is a current owner or admin of that team. A missing, deleted or malformed ID, another owner's workflow and a workflow of another organization all get the same 404 workflow_not_found.
+         * @description Booking workflows are enabled by default. The operator can pause them with WORKFLOWS_ENABLED=false. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full or read API-key scope. Returns a workflow of the owner the caller acts as in its current organization: its own personal workflow, or a team workflow while it is a current owner or admin of that team. A missing, deleted or malformed ID, another owner's workflow and a workflow of another organization all get the same 404 workflow_not_found.
          */
         get: operations["getWorkflow"];
         put?: never;
         post?: never;
         /**
          * Delete a booking workflow
-         * @description The operator can enable booking workflows with WORKFLOWS_ENABLED=true. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full API-key scope and expectedRevision. Tombstones the definition and retires its pending runs. Repeated authorized deletion is safe. Missing, foreign and mismatched owner contexts return workflow_not_found. Revisions and creation keys remain with the tombstone; existing minimal history follows retention.
+         * @description Booking workflows are enabled by default. The operator can pause them with WORKFLOWS_ENABLED=false. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full API-key scope and expectedRevision. Tombstones the definition and retires its pending runs. Repeated authorized deletion is safe. Missing, foreign and mismatched owner contexts return workflow_not_found. Revisions and creation keys remain with the tombstone; existing minimal history follows retention.
          */
         delete: operations["deleteWorkflow"];
         options?: never;
         head?: never;
         /**
          * Edit, enable or disable a booking workflow
-         * @description The operator can enable booking workflows with WORKFLOWS_ENABLED=true. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full API-key scope. Supply expectedRevision and the fields to change. Content edits append an immutable revision; changing only enabled preserves the revision. A stale revision conflicts. Missing, foreign and mismatched owner contexts return workflow_not_found. Disabling or enabling changes no existing booking enrollment or execution. Webhook actions require an active endpoint in the acting organization subscribed to workflow.executed.
+         * @description Booking workflows are enabled by default. The operator can pause them with WORKFLOWS_ENABLED=false. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full API-key scope. Supply expectedRevision and the fields to change. Content edits append an immutable revision; changing only enabled preserves the revision. A stale revision conflicts. Missing, foreign and mismatched owner contexts return workflow_not_found. Disabling or enabling changes no existing booking enrollment or execution. Webhook actions require an active endpoint in the acting organization subscribed to workflow.executed.
          */
         patch: operations["updateWorkflow"];
         trace?: never;
@@ -5874,7 +5994,7 @@ export interface paths {
         };
         /**
          * List finished runs of a booking workflow
-         * @description The operator can enable booking workflows with WORKFLOWS_ENABLED=true. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full or read API-key scope and personal ownership or current team owner/admin access in the active organization. Returns metadata and aggregate outcomes only, newest first. Pass nextCursor as cursor with the same workflow for the next page. Missing, deleted, malformed and inaccessible workflow IDs return workflow_not_found.
+         * @description Booking workflows are enabled by default. The operator can pause them with WORKFLOWS_ENABLED=false. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full or read API-key scope and personal ownership or current team owner/admin access in the active organization. Returns metadata and aggregate outcomes only, newest first. Pass nextCursor as cursor with the same workflow for the next page. Missing, deleted, malformed and inaccessible workflow IDs return workflow_not_found.
          */
         get: operations["listWorkflowRuns"];
         put?: never;
@@ -5896,7 +6016,7 @@ export interface paths {
         put?: never;
         /**
          * Preview a booking workflow with synthetic data
-         * @description The operator can enable booking workflows with WORKFLOWS_ENABLED=true. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full API-key scope and current personal ownership or team owner/admin access in the active organization. Supply owner, the candidate definition fields and optional synthetic example values. Returns the match outcome, rendered email text and escaped HTML, and static estimates. Preview uses synthetic booking data and makes no deliveries.
+         * @description Booking workflows are enabled by default. The operator can pause them with WORKFLOWS_ENABLED=false. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full API-key scope and current personal ownership or team owner/admin access in the active organization. Supply owner, the candidate definition fields and optional synthetic example values. Returns the match outcome, rendered email text and escaped HTML, and static estimates. Preview uses synthetic booking data and makes no deliveries.
          */
         post: operations["previewWorkflow"];
         delete?: never;
@@ -6043,9 +6163,9 @@ export interface components {
             /** @description Stable dotted action, e.g. membership.role_changed. New actions may appear; ignore unknown ones. */
             action: string;
             actor: {
-                /** @description Stored user, API key, OAuth client or SCIM token ID, or a system service name; null for anonymous and external actors */
+                /** @description Stored user, API key, OAuth client, SCIM token or SCIM connection ID, or a system service name; null for anonymous and external actors */
                 id: string | null;
-                /** @description Who acted: user, api_key, oauth_client, system, scim_token, anonymous, external_api_key, external_oauth_client, external_user. New types may appear. */
+                /** @description Who acted: user, api_key, oauth_client, system, scim_token, scim_connection, anonymous, external_api_key, external_oauth_client, external_user. New types may appear. */
                 type: string;
             };
             credential: {
@@ -6214,6 +6334,11 @@ export interface components {
              * @enum {string}
              */
             managementPolicy?: "local_only_read_only";
+            /**
+             * @description Authenticated host reads only: the payment binding prevents cancellation, rescheduling and reschedule requests.
+             * @enum {boolean}
+             */
+            paidManagementUnavailable?: true;
             /** @description An outstanding host request to choose another time. The original booking stays confirmed and blocks its slot; expiry keeps the original time. */
             pendingReschedule?: {
                 /**
@@ -6728,6 +6853,49 @@ export interface components {
         DeleteWorkflowInput: {
             expectedRevision: number;
         };
+        DepartureHandoffPreview: {
+            /** @enum {string} */
+            issue?: "calendar_sync_unavailable" | "location_unavailable" | "handoff_offer_changed" | "handoff_source_ineligible" | "handoff_candidate_ineligible";
+            offer: {
+                /** Format: date-time */
+                expiresAt: string;
+                /** Format: uuid */
+                id: string;
+                outstandingApprovals?: number;
+                /** @enum {string} */
+                state: "unverified" | "pending" | "ready" | "expired" | "closed";
+                version: number;
+            } | null;
+            preview: {
+                /** @enum {string} */
+                availability: "available" | "unavailable";
+                candidateName: string;
+                /** Format: date-time */
+                end: string;
+                /** Format: date-time */
+                evaluatedAt: string;
+                /** @enum {string|null} */
+                locationKind: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams" | null;
+                /** Format: date-time */
+                start: string;
+            } | null;
+            receipt: {
+                /** @enum {string} */
+                conference: "pending" | "ready" | "failed" | "not_required" | "unknown";
+                /** @enum {string} */
+                oldConferenceCleanup?: "pending" | "complete" | "unresolved";
+                /** Format: uuid */
+                replacementBookingId: string;
+                /** Format: uuid */
+                sourceBookingId: string;
+            } | null;
+        };
+        DepartureHandoffReceipt: {
+            /** Format: uuid */
+            replacementBookingId: string;
+            /** Format: uuid */
+            sourceBookingId: string;
+        };
         DisplayName: {
             name: string;
         };
@@ -6748,7 +6916,7 @@ export interface components {
             /** @description Machine-readable code, e.g. unauthorized */
             error: string;
             errorAlias?: components["schemas"]["ErrorAlias"];
-            /** @description Optional stable validation field name. Known values: successRedirect, successRedirect.url, successRedirect.parameters, successRedirect.includeInviteePersonalData, successRedirect.allowEmbedParent. New values may appear within /api/v1; ignore unknown values. */
+            /** @description Optional stable validation field name. Known values: successRedirect, successRedirect.url, successRedirect.parameters, successRedirect.includeInviteePersonalData, successRedirect.allowEmbedParent, and responses.<questionId> for a rejected routed booking answer. New values may appear within /api/v1; ignore unknown values. */
             field?: string;
             /** @description Human-readable detail */
             message?: string;
@@ -6917,6 +7085,19 @@ export interface components {
              * @description The user whose personal page lists it; null for a team event type
              */
             ownerUserId: string | null;
+            /** @description Stripe Checkout price for every offered duration. Available for personal, individual events with one host and without recurrence, guests, waitlist, phone or automatic conferences. Omission preserves the saved price on update; null makes future bookings free. */
+            payment?: {
+                /** @enum {string} */
+                currency: "usd" | "eur" | "gbp" | "cad" | "aud" | "jpy";
+                prices: {
+                    /** @description Amount in currency minor units. The minimum is 30 for GBP, 50 for other supported currencies. JPY has zero decimal places. */
+                    amountMinor: number;
+                    /** @description The corresponding offered duration in whole minutes */
+                    durationMinutes: number;
+                }[];
+            } | null;
+            /** @description Known values: available, disabled, stripe_not_configured, stripe_unverified, live_mode_unavailable, unsupported_event. Treat unknown values as unavailable. */
+            paymentAvailability?: string;
             /** @description Order on the page, ascending */
             position: number;
             questions: components["schemas"]["Question"][];
@@ -7121,6 +7302,17 @@ export interface components {
              */
             minimumNoticeMinutes: number;
             notifications?: components["schemas"]["EventTypeNotificationsInput"];
+            /** @description Stripe Checkout price for every offered duration. Available for personal, individual events with one host and without recurrence, guests, waitlist, phone or automatic conferences. Omission preserves the saved price on update; null makes future bookings free. */
+            payment?: {
+                /** @enum {string} */
+                currency: "usd" | "eur" | "gbp" | "cad" | "aud" | "jpy";
+                prices: {
+                    /** @description Amount in currency minor units. The minimum is 30 for GBP, 50 for other supported currencies. JPY has zero decimal places. */
+                    amountMinor: number;
+                    /** @description The corresponding offered duration in whole minutes */
+                    durationMinutes: number;
+                }[];
+            } | null;
             /**
              * @description Order on the page, ascending
              * @default 0
@@ -7377,6 +7569,17 @@ export interface components {
             /** @description How far ahead a meeting must be booked, in whole minutes */
             minimumNoticeMinutes?: number;
             notifications?: components["schemas"]["EventTypeNotificationsInput"];
+            /** @description Stripe Checkout price for every offered duration. Available for personal, individual events with one host and without recurrence, guests, waitlist, phone or automatic conferences. Omission preserves the saved price on update; null makes future bookings free. */
+            payment?: {
+                /** @enum {string} */
+                currency: "usd" | "eur" | "gbp" | "cad" | "aud" | "jpy";
+                prices: {
+                    /** @description Amount in currency minor units. The minimum is 30 for GBP, 50 for other supported currencies. JPY has zero decimal places. */
+                    amountMinor: number;
+                    /** @description The corresponding offered duration in whole minutes */
+                    durationMinutes: number;
+                }[];
+            } | null;
             /** @description Order on the page, ascending */
             position?: number;
             /** @description Extra booking-form fields */
@@ -7502,6 +7705,16 @@ export interface components {
             status: "ok" | "degraded";
         };
         HostBooking: components["schemas"]["Booking"] & {
+            payment?: {
+                amountMinor: number;
+                currency: string;
+                /** @description None (null), requested, pending, succeeded or failed. Clients must accept new values. */
+                refundStatus: string | null;
+                /** @description Currently paid. Clients must accept new values. */
+                status: string;
+                /** Format: uri */
+                stripeDashboardUrl?: string;
+            };
             routing?: components["schemas"]["BookingRouting"];
         };
         Instance: {
@@ -7509,6 +7722,8 @@ export interface components {
             automaticZoom?: boolean;
             /** @description Whether embedding is enabled; absent when unknown */
             embedEnabled?: boolean;
+            /** @description Whether hosts can enable Stripe Checkout in event settings. Known values: available, disabled, stripe_not_configured, stripe_unverified, live_mode_unavailable. Absent on older instances. Treat unknown values as unavailable. */
+            eventTypePaymentAvailability?: string;
             /** @description Whether hosts may add plain-text notes to follow-up emails */
             followUpHostNotesEnabled?: boolean;
             /**
@@ -7526,7 +7741,7 @@ export interface components {
              * @description The public origin of this instance, configured by its operator
              */
             publicUrl: string;
-            /** @description Effective state of routing forms. ROUTING_FORMS_ENABLED defaults to false. A legacy route handle keeps routing forms off. Absent when unknown. */
+            /** @description Effective state of routing forms. ROUTING_FORMS_ENABLED defaults to true. A legacy personal route handle keeps routing forms off. Absent when unknown. */
             routingFormsEnabled?: boolean;
             /** @description Whether the operator enabled SCIM provisioning and owner token creation and rotation */
             scimProvisioningEnabled?: boolean;
@@ -7544,14 +7759,14 @@ export interface components {
             smsRemindersAvailable?: boolean;
             /** @description The effective SSO_OIDC_ENABLED operator setting (off by default); absent when unknown */
             ssoOidcEnabled?: boolean;
-            /** @description Whether SAML SSO is enabled: always false for now; absent when unknown */
+            /** @description The effective SSO_SAML_ENABLED operator setting (off by default); absent when unknown */
             ssoSamlEnabled?: boolean;
             /**
              * Format: uri
              * @description This instance operator's terms; absent when not configured
              */
             termsUrl?: string;
-            /** @description Whether booking workflows are enabled; false until they are, and absent (treat as false) on older servers */
+            /** @description Effective WORKFLOWS_ENABLED setting (true by default). Treat an absent field on older servers as false. */
             workflowsEnabled?: boolean;
         };
         IssuedScimProvisioningToken: {
@@ -7602,6 +7817,14 @@ export interface components {
             hosts: {
                 name: string;
             }[];
+            payment?: {
+                amountMinor: number;
+                currency: string;
+                /** @description None (null), requested, pending, succeeded or failed. Clients must accept new values. */
+                refundStatus: string | null;
+                /** @description Currently paid. Clients must accept new values. */
+                status: string;
+            };
             /** @description Present only when the manage token came from a host's reschedule request email: the request that email was sent for and what became of it. Other manage tokens omit it. */
             rescheduleRequest?: {
                 /** Format: uuid */
@@ -7617,6 +7840,11 @@ export interface components {
                 answer: string;
                 label: string;
             }[];
+            /**
+             * @description Present when the manage link still resolves to a cancelled booking that was moved to a new time.
+             * @enum {boolean}
+             */
+            wasRescheduled?: true;
         };
         /** @description The enrollment view for a session without the required team proof keeps the active organization ID and omits its metadata by returning empty name and slug strings. */
         Me: {
@@ -8135,6 +8363,18 @@ export interface components {
                 kind: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
                 label?: string;
             }[] | null;
+            /** @description Price in minor units for each offered meeting length, when payment is required. */
+            payment?: {
+                /** @enum {string} */
+                currency: "usd" | "eur" | "gbp" | "cad" | "aud" | "jpy";
+                prices: {
+                    amountMinor: number;
+                    /** @description Selected meeting length in whole minutes, from the event type's allowedDurationsMinutes. Omitted uses the default for a new booking, or preserves the original booking length when rescheduling. */
+                    durationMinutes: number;
+                }[];
+            };
+            /** @description Whether a paid event can currently start Checkout. Only present for priced events. */
+            paymentAvailable?: boolean;
             /** @description Booking-form fields beyond name and email */
             questions: components["schemas"]["Question"][];
             /** @enum {string} */
@@ -8223,6 +8463,41 @@ export interface components {
             name: string;
             primaryColor: string | null;
         };
+        PublicCheckoutStarted: {
+            /**
+             * Format: uri
+             * @description Hosted Stripe Checkout. Omitted when the hold cannot start or resume an open Session.
+             */
+            checkoutUrl?: string;
+            /**
+             * Format: date-time
+             * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
+             * @example 2026-11-02T09:00:00.000Z
+             */
+            expiresAt: string;
+            /** @description Private capability for local status and cancellation. Keep out of URLs. */
+            statusToken: string;
+        };
+        PublicCheckoutStatus: {
+            /** @enum {boolean} */
+            latePayment?: true;
+            /** @description Only issued for a payment that confirmed a booking. */
+            manageToken?: string;
+            /** @description Known values: requested, pending, succeeded, failed. Omitted before a refund exists. */
+            refundStatus?: string;
+            /** @description Known values: pending_payment, expired, cancelled, paid. */
+            status: string;
+            /** @description Present only after successful creation of a booking with saved redirect settings. Show the normal confirmation and an explicit Continue link; do not automatically navigate. */
+            successRedirect?: {
+                /** @description Explicit event-type opt-in for a user-activated continuation in the embedding parent. Otherwise embedded pages open a new tab with noopener noreferrer. */
+                allowEmbedParent: boolean;
+                /**
+                 * Format: uri
+                 * @description Saved booking-time continuation URL, with only explicitly selected parameters. Never taken from request parameters. The same idempotent creation replay returns the same URL.
+                 */
+                url: string;
+            };
+        };
         PublicEventType: {
             /** @description Allowed meeting lengths kept in ascending order. Present when invitees have a choice; omitted means only durationMinutes is offered. */
             allowedDurationsMinutes?: number[];
@@ -8261,6 +8536,18 @@ export interface components {
                 kind: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
                 label?: string;
             }[] | null;
+            /** @description Price in minor units for each offered meeting length, when payment is required. */
+            payment?: {
+                /** @enum {string} */
+                currency: "usd" | "eur" | "gbp" | "cad" | "aud" | "jpy";
+                prices: {
+                    amountMinor: number;
+                    /** @description Selected meeting length in whole minutes, from the event type's allowedDurationsMinutes. Omitted uses the default for a new booking, or preserves the original booking length when rescheduling. */
+                    durationMinutes: number;
+                }[];
+            };
+            /** @description Whether a paid event can currently start Checkout. Only present for priced events. */
+            paymentAvailable?: boolean;
             /** @description Booking-form fields beyond name and email */
             questions: components["schemas"]["Question"][];
             /** @enum {string} */
@@ -8374,6 +8661,23 @@ export interface components {
             title: string;
             /** Format: uuid */
             versionId: string;
+        };
+        PublicTeam: {
+            eventTypes: {
+                description: string | null;
+                durationMinutes: number;
+                location: {
+                    /** @enum {string} */
+                    kind: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
+                } | null;
+                /** @description The booking page is /team/{handle}/{slug} */
+                slug: string;
+                title: string;
+            }[];
+            team: {
+                name: string;
+                slug: string;
+            };
         };
         PublishRoutingForm: {
             expectedRevision: number;
@@ -9279,6 +9583,36 @@ export interface components {
             }[];
             nextCursor: string | null;
         };
+        StartPublicCheckout: {
+            /** @description Selected meeting length in whole minutes, from the event type's allowedDurationsMinutes. Omitted uses the default for a new booking, or preserves the original booking length when rescheduling. */
+            durationMinutes?: number;
+            /** @description Displayed price in minor units. A stale quote is rejected; the saved price controls the charge. */
+            expectedAmountMinor: number;
+            /** @enum {string} */
+            expectedCurrency: "usd" | "eur" | "gbp" | "cad" | "aud" | "jpy";
+            invitee: {
+                /** Format: email */
+                email: string;
+                /** @description BCP 47 language tag. Registered interface and notification languages: en, zh-CN, de, fr, es, pt-BR. Regional tags are matched to a registered language; unsupported languages and missing translations fall back to English. Locale does not change the meeting time zone. */
+                locale?: string;
+                name: string;
+                /** @description IANA time zone */
+                timeZone: string;
+            };
+            /** @description Required for an askInvitee phone option: + and 7–15 total digits including the country code, first digit nonzero. Spaces, parentheses, dots and hyphens are removed before E.164 validation. */
+            inviteePhone?: string;
+            /** @description An id from the public event locations. Omission selects the default or first option. */
+            locationOptionId?: string;
+            responses?: components["schemas"]["Responses"];
+            /** @description Explicit invitee consent to SMS booking reminders. Requires inviteePhone. */
+            smsConsent?: boolean;
+            /**
+             * Format: date-time
+             * @description The start of an offered slot
+             * @example 2026-11-02T09:00:00.000Z
+             */
+            start: string;
+        };
         TeamAdminBooking: {
             attendees: {
                 email: string;
@@ -9319,12 +9653,19 @@ export interface components {
             id: string;
             /** @description Additive, read-only: whether this cancelled booking was replaced by a rescheduled booking; status and status filters remain unchanged */
             isRescheduled: boolean;
+            /**
+             * @description The payment binding prevents cancellation of this confirmed booking
+             * @enum {boolean}
+             */
+            paidManagementUnavailable?: true;
             /** Format: date-time */
             start: string;
             /** @enum {string} */
             status: "confirmed" | "cancelled";
         };
         TeamAdminBookingDetail: components["schemas"]["TeamAdminBooking"] & {
+            /** @enum {boolean} */
+            departureHandoffEnabled?: true;
             location?: {
                 /** @enum {string} */
                 kind: "microsoft_teams";
@@ -9949,7 +10290,7 @@ export interface operations {
                 /** @description Only events by this actor ID (requires actorType) */
                 actorId?: string;
                 /** @description Only events by this actor type */
-                actorType?: "user" | "api_key" | "oauth_client" | "system" | "scim_token" | "anonymous" | "external_api_key" | "external_oauth_client" | "external_user";
+                actorType?: "user" | "api_key" | "oauth_client" | "system" | "scim_token" | "scim_connection" | "anonymous" | "external_api_key" | "external_oauth_client" | "external_user";
                 /** @description nextCursor from the previous page with the same filters */
                 cursor?: string;
                 /** @description Earliest time, inclusive: RFC 3339 instant with an offset */
@@ -10905,7 +11246,7 @@ export interface operations {
                 /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
                 from: string;
                 hostUserId?: string;
-                /** @description Append routing provenance and saved answers to personal exports only. Requires routing forms to be enabled (ROUTING_FORMS_ENABLED=true, off by default). False is equivalent to omitting the option. */
+                /** @description Append routing provenance and saved answers to personal exports only. Requires routing forms to be enabled, which is the default. False is equivalent to omitting the option. */
                 includeRoutingAnswers?: "true" | "false";
                 /** @description Order by start time and id: asc (default) or desc. Keep unchanged between pages. */
                 order?: "asc" | "desc";
@@ -12686,7 +13027,7 @@ export interface operations {
                     "application/json": components["schemas"]["EventType"];
                 };
             };
-            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, microsoft_teams_host_policy, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
+            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, microsoft_teams_host_policy, invalid_schedule_id (scheduleId is not one of the host’s schedules), invalid_payment_price, or payment_flow_unsupported */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12704,7 +13045,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
+            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin; microsoft_teams_host_session_required: adding a Microsoft Teams location, changing its host, reactivating or duplicating it requires the assigned host’s signed-in session. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -12713,7 +13054,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description slug_taken: another event type on the same page has this slug; microsoft_teams_calendar_unavailable: the host needs a connected Microsoft calendar selected for booking writeback; organization_context_changed: reload the page before trying this team write again */
+            /** @description slug_taken: another event type on the same page has this slug; microsoft_teams_calendar_unavailable: the host needs a connected Microsoft calendar selected for booking writeback; payment_settings_unavailable: the instance does not currently accept new Checkout payments; organization_context_changed: reload the page before trying this team write again */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -12981,7 +13322,7 @@ export interface operations {
                     "application/json": components["schemas"]["EventType"];
                 };
             };
-            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, microsoft_teams_host_policy, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
+            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, microsoft_teams_host_policy, invalid_schedule_id (scheduleId is not one of the host’s schedules), invalid_payment_price, or payment_flow_unsupported */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12999,7 +13340,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
+            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin; microsoft_teams_host_session_required: adding a Microsoft Teams location, changing its host, reactivating or duplicating it requires the assigned host’s signed-in session. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -13017,7 +13358,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description slug_taken: another event type on the same page has this slug; location_options_conflict: changing legacy location would replace multiple or labelled options; use locations through an option-aware client; microsoft_teams_calendar_unavailable: the host needs a connected Microsoft calendar selected for booking writeback; organization_context_changed: reload the page before trying this team write again */
+            /** @description slug_taken: another event type on the same page has this slug; location_options_conflict: changing legacy location would replace multiple or labelled options; use locations through an option-aware client; microsoft_teams_calendar_unavailable: the host needs a connected Microsoft calendar selected for booking writeback; payment_settings_unavailable: the instance does not currently accept new Checkout payments; organization_context_changed: reload the page before trying this team write again */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -13146,7 +13487,7 @@ export interface operations {
                     "application/json": components["schemas"]["EventType"];
                 };
             };
-            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, microsoft_teams_host_policy, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
+            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, microsoft_teams_host_policy, invalid_schedule_id (scheduleId is not one of the host’s schedules), invalid_payment_price, or payment_flow_unsupported */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13164,7 +13505,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
+            /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin; microsoft_teams_host_session_required: adding a Microsoft Teams location, changing its host, reactivating or duplicating it requires the assigned host’s signed-in session. insufficient_scope: This API key does not allow this operation. sso_required: This team requires a current SSO proof. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -13182,7 +13523,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description slug_taken: another event type on the same page has this slug; microsoft_teams_calendar_unavailable: the host needs a connected Microsoft calendar selected for booking writeback; organization_context_changed: reload the page before trying this team write again */
+            /** @description slug_taken: another event type on the same page has this slug; microsoft_teams_calendar_unavailable: the host needs a connected Microsoft calendar selected for booking writeback; payment_settings_unavailable: the instance does not currently accept new Checkout payments; organization_context_changed: reload the page before trying this team write again */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -13314,7 +13655,7 @@ export interface operations {
                     "application/json": components["schemas"]["EventType"];
                 };
             };
-            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, microsoft_teams_host_policy, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
+            /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, microsoft_teams_host_policy, invalid_schedule_id (scheduleId is not one of the host’s schedules), invalid_payment_price, or payment_flow_unsupported */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13455,7 +13796,7 @@ export interface operations {
                     "application/json": components["schemas"]["WaitlistSettings"];
                 };
             };
-            /** @description invalid_request, waitlist_unsupported */
+            /** @description invalid_request, waitlist_unsupported, payment_flow_unsupported */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -16234,8 +16575,101 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The chosen location is unavailable (`location_unavailable`), the time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), the Idempotency-Key was used for a different request (`idempotency_key_reused`), or the round-robin host pool or activation changed while the request waited (`booking_changed`; fetch current availability before retrying) */
+            /** @description The event requires checkout (`payment_required`), the chosen location is unavailable (`location_unavailable`), the time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), the Idempotency-Key was used for a different request (`idempotency_key_reused`), or the round-robin host pool or activation changed while the request waited (`booking_changed`; fetch current availability before retrying) */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    startPublicCheckout: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Random UUID kept for identical retries. */
+                "idempotency-key": string;
+            };
+            path: {
+                handle: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartPublicCheckout"];
+            };
+        };
+        responses: {
+            /** @description Private paid checkout attempt */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicCheckoutStarted"];
+                };
+            };
+            /** @description Invalid booking request or unsupported payment flow */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such public event type (`event_type_not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Paid checkout is unavailable, the quote changed, or the slot cannot be reserved */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description payload_too_large (maximum 2,097,152 bytes) */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -16439,6 +16873,148 @@ export interface operations {
             };
             /** @description brand_logo_not_found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    cancelPublicCheckout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    token: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Current local outcome */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicCheckoutStatus"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description payment_checkout_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getPublicCheckoutStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    token: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Current local outcome */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicCheckoutStatus"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description payment_checkout_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -17090,6 +17666,65 @@ export interface operations {
             };
         };
     };
+    getPublicTeam: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Exact-case organization slug (1–64 ASCII letters/digits/inner hyphens) */
+                handle: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The public team and its listed events */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicTeam"];
+                };
+            };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such public team page (`team_not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     createPublicTeamBooking: {
         parameters: {
             query?: never;
@@ -17164,7 +17799,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The chosen location is unavailable (`location_unavailable`), the time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), the Idempotency-Key was used for a different request (`idempotency_key_reused`), or the round-robin host pool or activation changed while the request waited (`booking_changed`; fetch current availability before retrying) */
+            /** @description The event requires checkout (`payment_required`), the chosen location is unavailable (`location_unavailable`), the time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), the Idempotency-Key was used for a different request (`idempotency_key_reused`), or the round-robin host pool or activation changed while the request waited (`booking_changed`; fetch current availability before retrying) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -19568,6 +20203,180 @@ export interface operations {
                 };
             };
             /** @description organization_context_changed: reload the page before trying this team write again; booking_already_cancelled: this team's booking is already cancelled */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    applyDepartureHandoff: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required team where the booking was opened. Reload if the active space changed. */
+                "x-expected-organization-id": string;
+            };
+            path: {
+                id: string;
+                offerId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    version: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Committed handoff receipt */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepartureHandoffReceipt"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Verified team owner/admin browser session required. Authorization headers are denied. sso_required: This team requires a current SSO proof. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Handoffs are disabled or the source or offer is unavailable in the current team. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed: reload the page before trying this team write again; the current booking, offer, consent or slot changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Required calendar availability is unknown */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    previewDepartureHandoff: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required team where the booking was opened. Reload if the active space changed. */
+                "x-expected-organization-id": string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current handoff preview or status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepartureHandoffPreview"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Verified team owner/admin browser session required. Authorization headers are denied. sso_required: This team requires a current SSO proof. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Handoffs are disabled or the source or offer is unavailable in the current team. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed: reload the page before trying this team write again; the current booking, offer, consent or slot changed */
             409: {
                 headers: {
                     [name: string]: unknown;

@@ -9,7 +9,7 @@ export interface SsoCapabilities {
   /** The effective provisioning capability, or absent if this service was built without it. */
   readonly scimResourcesEnabled?: boolean | undefined
   /**
-   * True once a protocol follows an operator setting, as the running server always passes it.
+   * True when protocols follow operator settings, as the running server always passes it.
    * A protocol that is off is then in Setting-off behaviour (docs/sso.md): reads, recovery,
    * trust-reducing operations and their mailbox proof stay available for stored state.
    * Absent, both protocols are hard-off, which only in-process tests assemble.
@@ -49,6 +49,11 @@ export function ssoRetained(capabilities: SsoCapabilities): boolean {
     capabilities.ssoSamlEnabled ||
     capabilities.ssoOperatorSetting === true
   )
+}
+
+/** Stored SAML identity links are available for recovery while its operator setting is off. */
+export function samlLinkRecoveryAvailable(capabilities: SsoCapabilities): boolean {
+  return capabilities.ssoSamlEnabled || capabilities.ssoOperatorSetting === true
 }
 
 /**

@@ -43,6 +43,7 @@ export {
   getOneTimeBookingPage,
   getPublicEventType,
   getPublicHost,
+  getPublicTeam,
   getPublicTeamEventType,
   LOCATION_KINDS,
   type Location,
@@ -57,6 +58,7 @@ export {
   type PublicEventType,
   type PublicEventTypeSummary,
   type PublicHost,
+  type PublicTeam,
   type SlotView,
 } from './availability.ts'
 export {
@@ -325,13 +327,17 @@ export {
 } from './payment-refunds.ts'
 export {
   cancelPaymentHold,
+  cancelPublicCheckout,
   confirmPaymentHold,
   createPaymentCheckout,
   createPaymentHold,
+  getPublicCheckoutStatus,
   PAYMENT_HOLD_MINUTES,
   type PaymentContext,
   type PaymentPrice,
+  type PublicCheckoutStatus,
   recordStripePaymentEvent,
+  startPublicCheckout,
 } from './payments.ts'
 export {
   findLegacyHandleCollisions,
@@ -347,6 +353,7 @@ export {
   updateDisplayName,
 } from './profile.ts'
 export {
+  InvalidBookingAnswerError,
   MAX_ANSWER_LENGTH,
   MAX_OPTION_LENGTH,
   MAX_OPTIONS,

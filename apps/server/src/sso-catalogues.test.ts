@@ -268,12 +268,11 @@ const guardedSsoWebNames: ReadonlySet<string> = new Set([
 const unavailable = async (): Promise<never> => {
   throw new Error('Route registration must not call the provider or the database')
 }
-// The OIDC setting is off here (unset, empty and false are tested to be the same below);
-// SSO_SAML_ENABLED is not a setting yet and must change nothing.
+// Both protocol settings are off here (unset, empty and false are tested below).
 const productionEnv = {
   DATABASE_URL: 'postgres://catalogue@127.0.0.1:9/catalogue',
   SSO_OIDC_ENABLED: '',
-  SSO_SAML_ENABLED: 'true',
+  SSO_SAML_ENABLED: '',
   SSO_ENCRYPTION_KEY: randomBytes(32).toString('base64'),
   SSO_PRIVATE_TARGETS: 'idp.internal:8443',
   BETTER_AUTH_SECRET: 'catalogue-test-only-secret-at-least-32-characters',
@@ -705,7 +704,7 @@ describe('SSO setting-off excludes only SSO from the published catalogues', () =
     ['empty', ''],
     ['false', 'false'],
   ])(
-    'answers 404 sso_disabled on sign-in endpoints as production assembles the app with OIDC %s',
+    'answers 404 sso_disabled on sign-in endpoints as production assembles the app with both settings %s',
     async (_state, setting) => {
       const db = createDb(createPool('postgres://catalogue@127.0.0.1:9/catalogue'))
       const previous = { oidc: process.env.SSO_OIDC_ENABLED, saml: process.env.SSO_SAML_ENABLED }
@@ -713,10 +712,11 @@ describe('SSO setting-off excludes only SSO from the published catalogues', () =
       process.env.SSO_OIDC_ENABLED = 'true'
       process.env.SSO_SAML_ENABLED = 'true'
       try {
-        const { SSO_OIDC_ENABLED: _omitted, ...env } = productionEnv
-        const config = loadConfig(
-          setting === undefined ? env : { ...env, SSO_OIDC_ENABLED: setting },
-        )
+        const config = loadConfig({
+          ...productionEnv,
+          SSO_OIDC_ENABLED: setting,
+          SSO_SAML_ENABLED: setting,
+        })
         // The queue, the caller resolver and the database all refuse: an effect would be a 500.
         const app = createApp(productionOptions(db, config))
         const instance = await app.request('/api/v1/instance')

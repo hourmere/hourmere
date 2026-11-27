@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Schemas } from './api/client.ts'
 import { chooseLanguage } from './i18n/store.ts'
 import { SessionProvider, useSession } from './session.tsx'
+import { openAccountMenu } from './test/account-menu.ts'
 import {
   emptyAccount,
   emptyTeamLists,
@@ -64,12 +65,12 @@ describe('the session gate', () => {
       'Bookings',
       'Meeting polls',
       'Booking activity',
+      'Audit log',
+      'Settings',
       'Conference accounts',
       'Calendars',
       'API keys',
       'Connected apps',
-      'Audit log',
-      'Settings',
     ])
     expect(
       within(nav)
@@ -81,17 +82,20 @@ describe('the session gate', () => {
       '/app/bookings',
       '/app/meeting-polls',
       '/app/analytics',
+      '/app/audit-log',
+      '/app/settings',
       '/app/conferences',
       '/app/calendars',
       '/app/api-keys',
       '/app/connected-apps',
-      '/app/audit-log',
-      '/app/settings',
     ])
     expect(screen.getByRole('link', { name: 'Event types' }).getAttribute('aria-current')).toBe(
       'page',
     )
-    expect(screen.getByText(ME.user.email)).toBeDefined()
+    await openAccountMenu(userEvent)
+    expect(
+      within(screen.getByRole('region', { name: 'Account menu' })).getByText(ME.user.email),
+    ).toBeDefined()
   })
 
   it('starts keyboard navigation at the skip link on the first page', async () => {
@@ -121,23 +125,27 @@ describe('the session gate', () => {
       toJSON: () => ({}),
     })
     const original = Element.prototype.getBoundingClientRect
+    const primary = '[data-layout-scroll="horizontal"]'
     vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
       this: Element,
     ) {
-      if (this.matches('nav ul')) return rect(100, 300)
-      if (this.matches('nav a[aria-current="page"]')) {
+      if (this.matches(primary)) return rect(100, 300)
+      if (this.matches(`${primary} a[aria-current="page"]`)) {
         const offset = this.closest('ul')?.scrollLeft ?? 0
         return rect(start - offset, end - offset)
       }
       return original.call(this)
     })
     vi.spyOn(Element.prototype, 'clientWidth', 'get').mockImplementation(function (this: Element) {
-      return this.matches('nav ul') ? 200 : 0
+      return this.matches(primary) ? 200 : 0
     })
     fakeApi({ ...signedIn, ...emptyAccount })
     renderApp('/app/event-types')
     await screen.findByRole('heading', { name: 'Event types', level: 1 })
-    const list = within(screen.getByRole('navigation', { name: 'Main' })).getByRole('list')
+    const list = screen
+      .getByRole('navigation', { name: 'Main' })
+      .querySelector<HTMLUListElement>(primary)
+    if (!list) throw new Error('The main navigation needs a horizontal list')
     // The heading can appear before AppShell's passive navigation effect runs.
     await waitFor(() => expect(list.scrollLeft).toBe(expected))
     expect(document.activeElement).toBe(document.body)
@@ -178,11 +186,41 @@ describe('the session gate', () => {
       'POST /api/auth/sign-out': () => json(200, { success: true }),
     })
     renderApp('/app/settings')
-    await userEvent.click(await screen.findByRole('button', { name: 'Sign out' }))
+    await openAccountMenu(userEvent)
+    await userEvent.click(screen.getByRole('button', { name: 'Sign out' }))
     expect(await screen.findByRole('heading', { name: 'Sign in to Hourmere' })).toBeDefined()
     expect(location()).toBe('/sign-in')
     expect(api.to('POST /api/auth/sign-out')).toHaveLength(1)
     expect(screen.queryByText(EXPIRED)).toBeNull()
+  })
+
+  it('announces a failed sign-out and lets the account retry it', async () => {
+    const user = userEvent.setup()
+    let attempts = 0
+    const api = fakeApi({
+      ...signedIn,
+      ...instance(),
+      ...profile(),
+      'POST /api/auth/sign-out': () =>
+        ++attempts === 1
+          ? json(500, { message: 'Database unavailable' })
+          : json(200, { success: true }),
+    })
+    renderApp('/app/settings')
+    await openAccountMenu(user)
+    await user.click(screen.getByRole('button', { name: 'Sign out' }))
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'Could not sign out. Something went wrong on our side. Try again in a moment.',
+    )
+    const trigger = screen.getByRole('button', { name: 'Account menu' })
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    expect(document.activeElement).toBe(trigger)
+    expect(location()).toBe('/app/settings')
+
+    await openAccountMenu(user)
+    await user.click(screen.getByRole('button', { name: 'Sign out' }))
+    expect(await screen.findByRole('heading', { name: 'Sign in to Hourmere' })).toBeDefined()
+    expect(api.to('POST /api/auth/sign-out')).toHaveLength(2)
   })
 
   it('returns to sign-in, remembering the page, when the session lapses', async () => {
@@ -290,6 +328,7 @@ describe('the session gate', () => {
     })
     await vi.waitFor(() => expect(api.to('GET /api/v1/me')).toHaveLength(2))
 
+    await openAccountMenu(userEvent)
     await userEvent.click(screen.getByRole('button', { name: 'Sign out' }))
     await screen.findByRole('heading', { name: 'Sign in to Hourmere' })
     await act(async () => {

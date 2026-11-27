@@ -684,6 +684,36 @@ export interface ConferenceTokenOperations {
   user_id: string;
 }
 
+export interface CustomRoleAssignments {
+  assigned_by_user_id: string;
+  member_id: string;
+  organization_id: string;
+  role_id: string;
+  user_id: string;
+}
+
+export interface CustomRoleMasterPolicy {
+  enabled: Generated<boolean>;
+  policy_epoch: Generated<number>;
+  singleton: Generated<boolean>;
+}
+
+export interface CustomRoleRevisions {
+  catalogue_version: Generated<number>;
+  name: string;
+  organization_id: string;
+  permission_ids: string[];
+  revision: number;
+  role_id: string;
+}
+
+export interface CustomRoles {
+  active_revision: number;
+  archived_at: Timestamp | null;
+  id: Generated<string>;
+  organization_id: string;
+}
+
 export interface EventTypeHosts {
   destination_calendar_id: string | null;
   event_type_id: string;
@@ -719,6 +749,7 @@ export interface EventTypes {
   notifications: Generated<Json>;
   organization_id: string;
   owner_user_id: string | null;
+  payment: Json | null;
   position: Generated<number>;
   questions: Generated<Json>;
   recurrence: Json | null;
@@ -893,6 +924,7 @@ export interface InvitationDeliveries {
   lease_id: string | null;
   lease_until: Timestamp | null;
   resend_request_id: string | null;
+  scim_issued: Generated<boolean>;
   smtp_accepted_at: Timestamp | null;
   state: string;
   updated_at: Generated<Timestamp>;
@@ -902,7 +934,7 @@ export interface InvitationEmailRequests {
   organization_id: string;
   recipient_hash: Buffer;
   requested_at: Timestamp;
-  user_id: string;
+  user_id: string | null;
 }
 
 export interface McpOauthClientActivity {
@@ -1136,6 +1168,26 @@ export interface OrganizationOperations {
   previous_role: string | null;
   source: string;
   target_user_id: string | null;
+}
+
+export interface OrganizationOwnershipTransferBudgets {
+  operation: string;
+  organization_id: string;
+  request_count: number;
+  window_start: Timestamp;
+}
+
+export interface OrganizationOwnershipTransfers {
+  created_at: Timestamp;
+  expires_at: Timestamp;
+  id: Generated<string>;
+  initiator_membership_id: string;
+  initiator_user_id: string;
+  organization_id: string;
+  state: Generated<string>;
+  target_membership_id: string;
+  target_user_id: string;
+  terminal_at: Timestamp | null;
 }
 
 export interface PaymentCheckoutAttempts {
@@ -1385,6 +1437,11 @@ export interface ScimTeamMappings {
 export interface ScimTokenConnections {
   connection_id: string;
   organization_id: string;
+  token_id: string;
+}
+
+export interface ScimTokenProtocolVersions {
+  protocol_version: Generated<number>;
   token_id: string;
 }
 
@@ -1666,6 +1723,44 @@ export interface TeamBookingBulkRequestLimits {
   id: Generated<Int8>;
   kind: string;
   organization_id: string;
+}
+
+export interface TeamCredentialAuthorizations {
+  api_key_id: string | null;
+  catalogue_version: Generated<number>;
+  credential_generation: Generated<number>;
+  id: Generated<string>;
+  master_epoch: number;
+  member_generation: number;
+  member_id: string;
+  oauth_grant_id: string | null;
+  organization_id: string;
+  permission_ids: string[];
+  policy_epoch: number;
+  session_id: string | null;
+  user_id: string;
+}
+
+export interface TeamCustomRolePolicies {
+  enabled: Generated<boolean>;
+  organization_id: string;
+  policy_epoch: Generated<number>;
+}
+
+export interface TeamMemberAuthorizations {
+  fixed_policy_version: Generated<number>;
+  fixed_role: string | null;
+  generation: Generated<number>;
+  legacy_role_tokens: string[] | null;
+  member_id: string;
+  organization_id: string;
+  user_id: string;
+}
+
+export interface TeamSlugReservations {
+  expires_at: Timestamp;
+  organization_id: string | null;
+  slug: string;
 }
 
 export interface WaitlistCandidates {
@@ -1978,6 +2073,10 @@ export interface DB {
   conference_connections: ConferenceConnections;
   conference_oauth_states: ConferenceOauthStates;
   conference_token_operations: ConferenceTokenOperations;
+  custom_role_assignments: CustomRoleAssignments;
+  custom_role_master_policy: CustomRoleMasterPolicy;
+  custom_role_revisions: CustomRoleRevisions;
+  custom_roles: CustomRoles;
   event_type_hosts: EventTypeHosts;
   event_types: EventTypes;
   group_booking_move_receipts: GroupBookingMoveReceipts;
@@ -2009,6 +2108,8 @@ export interface DB {
   organization_brand_logos: OrganizationBrandLogos;
   organization_branding: OrganizationBranding;
   organization_operations: OrganizationOperations;
+  organization_ownership_transfer_budgets: OrganizationOwnershipTransferBudgets;
+  organization_ownership_transfers: OrganizationOwnershipTransfers;
   payment_checkout_attempts: PaymentCheckoutAttempts;
   payment_refund_obligations: PaymentRefundObligations;
   payment_stripe_events: PaymentStripeEvents;
@@ -2033,6 +2134,7 @@ export interface DB {
   scim_team_mapping_intents: ScimTeamMappingIntents;
   scim_team_mappings: ScimTeamMappings;
   scim_token_connections: ScimTokenConnections;
+  scim_token_protocol_versions: ScimTokenProtocolVersions;
   scim_user_claims: ScimUserClaims;
   scim_users: ScimUsers;
   sign_in_emails: SignInEmails;
@@ -2056,6 +2158,10 @@ export interface DB {
   team_booking_bulk_cancellation_items: TeamBookingBulkCancellationItems;
   team_booking_bulk_cancellations: TeamBookingBulkCancellations;
   team_booking_bulk_request_limits: TeamBookingBulkRequestLimits;
+  team_credential_authorizations: TeamCredentialAuthorizations;
+  team_custom_role_policies: TeamCustomRolePolicies;
+  team_member_authorizations: TeamMemberAuthorizations;
+  team_slug_reservations: TeamSlugReservations;
   waitlist_candidates: WaitlistCandidates;
   waitlist_capabilities: WaitlistCapabilities;
   waitlist_cohorts: WaitlistCohorts;

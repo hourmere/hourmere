@@ -81,6 +81,7 @@
   "teamInvitation.defaultInviter": "团队成员",
   "teamInvitation.subject": "邀请你加入团队：{team}",
   "teamInvitation.introduction": "{inviter} 邀请你加入 Hourmere 上的团队「{team}」。",
+  "teamInvitation.scimIntroduction": "你的身份提供商代表 Hourmere 上的团队「{team}」向你发送了此邀请。",
   "teamInvitation.identity": "请使用受邀邮箱 {email} 登录并完成邮箱验证，然后在邀请页面接受邀请。邮箱别名不能代替此地址。",
   "teamInvitation.acceptance": "仅登录不会加入团队；你需要在页面上明确接受邀请。",
   "teamInvitation.expiry": "邀请有效期至：{expiry}。",
@@ -153,6 +154,13 @@
   "scimMapping.linked": "您的团队已批准 SCIM 映射 {mappingId}。目录配置该群组后，即可通过此映射管理子团队的名称以及由目录管理的成员。",
   "scimMapping.unlinked": "SCIM 映射 {mappingId} 已解除。目录无法再通过此映射管理团队。",
   "scimMapping.suspended": "通过 SCIM 映射 {mappingId} 进行的目录管理已暂停。现有成员关系和暂停状态保持不变。",
+  "bookingPayment.label": "付款",
+  "bookingPayment.paid": "已支付 {amount}",
+  "bookingPayment.refund": "退款",
+  "bookingPayment.requested": "已申请退款",
+  "bookingPayment.pending": "退款处理中",
+  "bookingPayment.succeeded": "退款已发出",
+  "bookingPayment.failed": "退款失败",
   "series.confirmed.subject": "系列预约已确认：{event}",
   "series.confirmed.booker": "你与{host}的系列会议已预约。",
   "series.confirmed.guest": "{invitee}邀请你参加与{host}的系列会议。",
@@ -175,9 +183,6 @@
   "series.view": "查看系列预约",
   "series.repair": "如需重试生成会议链接，请在 Hourmere 中打开对应的预约。",
   "teams.linkPending": "Teams 链接准备好后会显示在预约详情中。",
-  "teams.linkPendingCancelled": "取消预约时，Teams 链接尚未生成。",
   "teams.unavailable": "Microsoft Teams 当前不可用。此预约将使用 Outlook 日历事件。",
-  "teams.unavailableCancelled": "Microsoft Teams 当时不可用。此预约原定改用 Outlook 日历事件。",
-  "teams.writebackFailed": "Teams 链接不可用，预约仍按原定时间进行。",
-  "teams.writebackFailedCancelled": "取消此预约时，Teams 链接不可用。"
+  "teams.writebackFailed": "Teams 链接不可用，预约仍按原定时间进行。"
 }
