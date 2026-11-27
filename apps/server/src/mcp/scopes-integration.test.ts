@@ -6,6 +6,7 @@ import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createFixtures, type Fixtures } from '@hourmere/scheduling/testing'
 import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { runCli } from '../../../../tools/cli/src/cli.ts'
 import { createApp } from '../app.ts'
 import { publicRoutes } from '../routes/public.ts'
 import { productTools } from '../server.ts'
@@ -13,6 +14,7 @@ import { mcpEndpoint } from './endpoint.ts'
 
 const scopes = ['full', 'read', 'bookings'] as const
 const publicUrl = 'http://localhost:4185'
+const directoryHandle = 'mcp-public-directory'
 const denied = {
   error: 'insufficient_scope',
   message: 'This API key does not allow this operation.',
@@ -77,6 +79,16 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP persisted scope matrix', () => {
       slug: 'intro',
       hosts: [{ userId: host.userId }],
     })
+    const directoryTeam = await fixtures.organization(directoryHandle)
+    await fixtures.member(host.userId, directoryTeam, 'owner')
+    const directoryHosts = [{ userId: host.userId }]
+    await fixtures.eventType(directoryTeam, null, { slug: 'intro', hosts: directoryHosts })
+    const hidden = await fixtures.eventType(directoryTeam, null, {
+      slug: 'unlisted',
+      title: 'Unlisted event',
+      hosts: directoryHosts,
+    })
+    await db.updateTable('event_types').set({ is_hidden: true }).where('id', '=', hidden).execute()
     for (const scope of scopes) {
       for (const [space, organizationId] of [
         ['personal', host.organizationId],
@@ -95,8 +107,10 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP persisted scope matrix', () => {
       authHandler: auth.handler,
       resolveCaller: createCallerResolver({ auth, db }),
       publicUrl,
-      routes: [publicRoutes({ db, teamPublicHomeOrganizationIds: [team] })],
-      mcp: mcpEndpoint({ tools: productTools({ db, teamPublicHomeOrganizationIds: [team] }) }),
+      routes: [publicRoutes({ db, teamPublicHomeOrganizationIds: [directoryTeam] })],
+      mcp: mcpEndpoint({
+        tools: productTools({ db, teamPublicHomeOrganizationIds: [directoryTeam] }),
+      }),
     })
   })
   afterAll(async () => {
@@ -131,20 +145,73 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP persisted scope matrix', () => {
     return JSON.parse(result.content[0]?.text ?? '')
   }
 
-  it('returns the same public team directory and neutral missing result as REST', async () => {
-    const handle = 'mcp-scoped-team'
+  async function readDirectoryWithCli(key: Key, handle: string) {
+    let stdout = ''
+    let stderr = ''
+    const code = await runCli({
+      argv: ['team-home', '--input', '-'],
+      env: { HOURMERE_URL: publicUrl, HOURMERE_API_KEY: key.key },
+      stdin: (async function* () {
+        yield JSON.stringify({ handle })
+      })(),
+      stdout: (text) => {
+        stdout += text
+      },
+      stderr: (text) => {
+        stderr += text
+      },
+      fetch: async (input, init) => app.fetch(new Request(input, init)),
+    })
+    expect((stdout + stderr).includes(key.key)).toBe(false)
+    return { code, stdout, stderr }
+  }
+
+  it('keeps the exact public directory and neutral unavailable result across REST, MCP and CLI', async () => {
+    const handle = directoryHandle
+    const disabled = 'mcp-disabled-directory'
+    const unknown = 'mcp-unknown-directory'
+    await fixtures.organization(disabled)
+    const directory = {
+      team: { name: handle, slug: handle },
+      eventTypes: [
+        {
+          slug: 'intro',
+          title: 'Intro call',
+          description: null,
+          durationMinutes: 30,
+          location: null,
+        },
+      ],
+    }
     const res = await app.request(`/api/v1/public/teams/${handle}`)
     expect(res.status).toBe(200)
-    const directory = await res.json()
-    expect(directory).toMatchObject({ team: { slug: handle }, eventTypes: [{ slug: 'intro' }] })
+    expect(await res.json()).toEqual(directory)
+    const unavailable = { error: 'team_not_found', message: 'No such team booking page' }
+    const missing = [disabled, unknown, 'mcp-scoped-host']
+    for (const slug of missing) {
+      const response = await app.request(`/api/v1/public/teams/${slug}`)
+      expect(response.status).toBe(404)
+      expect(await response.json()).toEqual(unavailable)
+    }
     for (const scope of scopes) {
       const key = keys.get(`${scope}:personal`) as Key
-      expect(success(await call(key, 'get_public_team', { handle }))).toEqual(directory)
-      const missing = await app.request('/api/v1/public/teams/mcp-scoped-host')
-      expect(missing.status).toBe(404)
-      expect(failure(await call(key, 'get_public_team', { handle: 'mcp-scoped-host' }))).toEqual(
-        await missing.json(),
-      )
+      const result = await call(key, 'get_public_team', { handle })
+      expect(success(result)).toEqual(directory)
+      expect(result.content.map(({ text }) => JSON.parse(text))).toEqual([directory])
+      const cli = await readDirectoryWithCli(key, handle)
+      expect(cli.code).toBe(0)
+      expect(cli.stderr).toBe('')
+      expect(JSON.parse(cli.stdout)).toEqual(directory)
+      for (const slug of missing) {
+        expect(failure(await call(key, 'get_public_team', { handle: slug }))).toEqual(unavailable)
+        const missingCli = await readDirectoryWithCli(key, slug)
+        expect(missingCli.code).toBe(1)
+        expect(missingCli.stdout).toBe('')
+        expect(JSON.parse(missingCli.stderr)).toEqual({
+          error: unavailable.error,
+          outcomeMayBeUnknown: true,
+        })
+      }
     }
   })
 
