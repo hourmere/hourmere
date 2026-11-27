@@ -435,8 +435,8 @@ export const test = base.extend<
   {
     keycloak: KeycloakFixture
     protocol: 'oidc' | 'saml'
-    oidcEnabled: boolean
-    samlEnabled: boolean
+    oidcEnabled: boolean | undefined
+    samlEnabled: boolean | undefined
     admission: Admission
     signupMode: SignupPolicy['mode']
     enforced: boolean
@@ -448,8 +448,8 @@ export const test = base.extend<
   { getWorkerKeycloak: () => Promise<KeycloakContainer> }
 >({
   protocol: ['oidc', { option: true }],
-  oidcEnabled: [true, { option: true }],
-  samlEnabled: [false, { option: true }],
+  oidcEnabled: [undefined, { option: true }],
+  samlEnabled: [undefined, { option: true }],
   admission: ['invitation_only', { option: true }],
   signupMode: ['closed', { option: true }],
   enforced: [false, { option: true }],
@@ -556,12 +556,12 @@ export const test = base.extend<
           }),
         }
         const mail = new Map<string, string>()
-        // Parse both operator settings through the production configuration.
+        // Positive cases inherit the production defaults. Off cases explicitly opt out.
         const config = loadConfig({
           DATABASE_URL: owned.url,
           BETTER_AUTH_SECRET: secret,
-          SSO_OIDC_ENABLED: oidcEnabled ? 'true' : '',
-          SSO_SAML_ENABLED: samlEnabled ? 'true' : '',
+          ...(oidcEnabled !== undefined && { SSO_OIDC_ENABLED: String(oidcEnabled) }),
+          ...(samlEnabled !== undefined && { SSO_SAML_ENABLED: String(samlEnabled) }),
           SSO_ENCRYPTION_KEY: configurationKey.toString('base64'),
         })
         const capabilities = productionSsoCapabilities(config)
@@ -718,7 +718,8 @@ export const test = base.extend<
           signingKeyIds: () => [...signingKeyIds],
           jwksRequests: () => jwksRequests,
           postSamlToPeer: async (fields) => {
-            if (!samlSp || !samlEnabled) throw new Error('The Keycloak SAML fixture is disabled')
+            if (!samlSp || !capabilities.ssoSamlEnabled)
+              throw new Error('The Keycloak SAML fixture is disabled')
             samlPeer ??= startSamlPeer({
               databaseUrl: owned.url,
               publicUrl: url,

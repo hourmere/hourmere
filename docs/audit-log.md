@@ -268,6 +268,28 @@ details, bodies, answers, URLs and secrets.
 Workflow events use the space's existing audit permissions and retention. Workflows remain
 hard-off.
 
+## Reserved custom-role actions
+
+The [custom-role storage](custom-roles.md#storage-migration-and-credential-versions)
+migration reserves the following actions. Custom roles are hard-off and the application
+does not emit these events yet. The journal uses its existing team, actor, target and time
+columns. Each action requires `outcome: succeeded` and `masterEpoch` and omits the
+credential's session ID. A clearance can also record a trusted user, SCIM token or system
+actor when the membership lifecycle removes the assignment.
+
+| Action | Additional details |
+| --- | --- |
+| `custom_role.created` | `roleId`, `newRevision`, `policyEpoch` |
+| `custom_role.revised` | `roleId`, `oldRevision`, `newRevision`, `policyEpoch` |
+| `custom_role.archived` | `roleId`, `oldRevision`, `policyEpoch` |
+| `membership.custom_role_assigned` | `roleId`, `newRevision`, `policyEpoch`, plus `oldRoleId` and `oldRevision` if replacing an assignment |
+| `membership.custom_role_cleared` | `roleId`, `oldRevision`, `policyEpoch` |
+| `team.custom_roles_enabled`, `team.custom_roles_disabled` | `oldPolicyEpoch`, `newPolicyEpoch` |
+
+Assignment and clearance also record `personalDataPermissionIds` when the role includes
+such grants. The database accepts only a distinct list of the catalogue's personal-data
+permission IDs. Role labels, proof identifiers and member personal data are excluded.
+
 ## SSO actions
 
 The [organization SSO](sso.md) actions are defined, with their detail allow-lists in the

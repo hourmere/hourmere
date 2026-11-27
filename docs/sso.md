@@ -1,24 +1,16 @@
 # Organization SSO: evaluation and implementation design
 
-Status: being built and not available yet. The plugin evaluation was first run 2026-11-06 against the Better
-Auth 1.7.12 family and re-run 2026-11-09, in the Upgrade step, against the installed
-1.7.16 family that main pins since the November security upgrade. `@better-auth/sso`
-1.7.16 is a development dependency of the auth workspace: no shipped source imports or
-registers it, and the production image does not contain it. The first plan step that
-imports it from shipped code moves it to `dependencies`. Migration 0074 adds the
-configuration storage of the Configuration storage step (see
-[Data model](data-model.md#sso-configuration-storage)) and migration 0075 the identity
-storage of the Identity storage step (see
-[Data model](data-model.md#sso-identity-storage)). The Mailbox proof step added the first
-code that uses that storage: the two mailbox proof endpoints, which answer `404 sso_disabled`
-while both protocols are hard-off, the worker job that delivers their email and the bounded
-cleanup of attempts. The Fresh proof step adds the shared operation-bound retry gate,
-exercised only by a test operation; no production route calls it yet. Draft reads adds
-the redacted provider list and policy read across REST, MCP and CLI; both return
-`404 sso_disabled` before lookup in production, and their MCP tools are hidden while off.
-The OIDC sign-in and callback endpoints also return `404 sso_disabled` in production.
-SSO will be available to every instance, including self-hosted ones. There is no license,
-subscription or hosted-service requirement.
+Organization SSO is available on every instance, including self-hosted deployments.
+OIDC and SAML are on by default. Teams configure their identity providers and enable
+enforcement separately. See the [single sign-on guide](https://hourmere.com/docs/sso)
+for setup, member sign-in and recovery.
+
+The plugin evaluation was first run on 2026-11-06 against the Better Auth 1.7.12
+family and re-run on 2026-11-09, in the Upgrade step, against the installed 1.7.16
+family. The stock `@better-auth/sso` plugin is a development dependency and the
+production image does not register it. See the data model for
+[configuration storage](data-model.md#sso-configuration-storage) and
+[identity storage](data-model.md#sso-identity-storage).
 
 ## Decision and release conditions
 
@@ -35,7 +27,7 @@ A post-login hook cannot repair a session that should never have been issued.
 
 ### Method and exact versions
 
-packages/auth/package.json pins better-auth, `@better-auth/sso` and every other family package at exactly 1.7.16, and the root lockfile records the whole tree. The evaluation reads the installed JS, chiefly `packages/auth/node_modules/@better-auth/sso/dist/index.mjs`; line numbers below refer to that file unless another file is named. Lockfile versions of the plugin's dependencies: samlify 2.15.1, jose 6.2.12, @xmldom/xmldom 0.9.12 (0.8.15 nested under xml-crypto and @authenio/xml-encryption), fast-xml-parser 5.12.0, xml-crypto 6.4.0 and tldts 7.4.18; all are MIT-licensed. The plugin is a `devDependencies` entry with the exact 1.7.16 pin, so `npm prune --omit=dev` in the image build leaves the plugin and its SAML and XML stack out of the image. `npm audit` and `npm audit --omit=dev` report no vulnerabilities. The production tree kept its 174 packages until the SAML verifier step, which made xml-crypto 6.4.0 and @xmldom/xmldom 0.9.12 direct `dependencies` of apps/server at the versions already locked; that adds five packages to the image (those two, @xmldom/is-dom-node 1.0.1 and, nested under xml-crypto, @xmldom/xmldom 0.8.15 and xpath 0.0.33), and both audits still report none. The plugin and samlify stay development-only. The first plan step that imports the plugin from shipped code moves it to `dependencies` and re-runs the production audit.
+packages/auth/package.json pins better-auth, `@better-auth/sso` and every other family package at exactly 1.7.16, and the root lockfile records the whole tree. The evaluation reads the installed JS, chiefly `packages/auth/node_modules/@better-auth/sso/dist/index.mjs`; line numbers below refer to that file unless another file is named. Lockfile versions of the plugin's dependencies: samlify 2.15.1, jose 6.2.12, @xmldom/xmldom 0.9.12 (0.8.15 nested under xml-crypto and @authenio/xml-encryption), fast-xml-parser 5.12.0, xml-crypto 6.4.0 and tldts 7.4.18; all are MIT-licensed. The plugin remains a `devDependencies` entry with the exact 1.7.16 pin and is excluded from the image by `npm prune --omit=dev`. At the time of the evaluation, `npm audit` and `npm audit --omit=dev` reported no vulnerabilities. The production tree kept its 174 packages until the SAML verifier step, which made xml-crypto 6.4.0 and @xmldom/xmldom 0.9.12 direct `dependencies` of apps/server at the versions already locked. That added five packages to the image (those two, @xmldom/is-dom-node 1.0.1 and, nested under xml-crypto, @xmldom/xmldom 0.8.15 and xpath 0.0.33), and both audits still reported none at that step. apps/server also declares samlify 2.15.1 as a runtime dependency for generating outbound SAML authentication requests. The inbound SAML verifier uses xml-crypto and @xmldom/xmldom directly.
 
 Against 1.7.12, the 2026-11-06 baseline, the plugin's runtime JS differs only in bundler output: folded constants, added block braces and one local hoisted out of an object literal (the remote JWKS set is still created on every callback). The plugin's changelog has empty entries for 1.7.13 to 1.7.16, and core's `oauth2/verify-id-token.mjs` is byte-identical. Every row below was re-checked against the 1.7.16 source. The 1.7.12 baseline came from an owned spike install (`.sso-evaluation-spike`, deleted after inspection) that resolved jose 6.2.15; the lockfile now resolves 6.2.12, which has the same `iat` behaviour.
 
@@ -643,9 +635,9 @@ replacement and outage, unknown/duplicate key IDs and an algorithm/key-type mism
 Request only `openid email profile`, no offline access. Discard ID/access/refresh
 tokens after validation; never repurpose calendar or MCP OAuth credentials.
 
-The internal verifier is in place while both protocols stay hard-off. It accepts only
-signed RS256 ID tokens with a matching attempt nonce. It returns the exact issuer and
-subject and, when present, the signed `auth_time` used by step-up.
+The OIDC verifier accepts only signed RS256 ID tokens with a matching attempt nonce.
+It returns the exact issuer and subject and, when present, the signed `auth_time` used
+by step-up.
 Sign-in attempts use a fresh S256 challenge and an authenticated state envelope. The
 attempt row binds that state to the initiating browser, provider revision and team, and
 only one callback can take the verifier and nonce. The OIDC sign-in adapter uses these
@@ -984,15 +976,13 @@ A provider's successes and changes are outside the failure bound.
 
 ## Proposed REST, MCP and CLI contracts
 
-Status sentences in this section were written as each step landed. Both protocols now
-have independent settings and default to off. The historical hard-off checks for
-trust-adding operations still apply when their protocol is off. Reads, recovery and
-trust-reducing operations follow [Setting-off behaviour](#rollout-gating).
+Both protocols have independent settings and default to on. Disabled protocols refuse
+trust-adding operations. Reads, recovery and trust-reducing operations follow
+[Setting-off behaviour](#rollout-gating).
 
-All paths and names in this section are future contracts. Configuration uses only the
-web's generated `/api/v1` client. Register every write with `app.openapi()` and a unique
-operationId; regenerate `apps/web/src/api/schema.d.ts` in the implementation PR.
-Do not add entries to the frozen interface-parity known-gap list.
+Configuration uses the web's generated `/api/v1` client. Register every write with
+`app.openapi()` and a unique operationId, and regenerate `apps/web/src/api/schema.d.ts`
+when changing the contract. Do not add entries to the frozen interface-parity known-gap list.
 
 All trust-changing configuration writes are browser-session-only. Installing an IdP,
 changing domain authority or disabling enforcement changes who can authenticate;
@@ -1214,10 +1204,11 @@ recovering the value. Verify/delete take `{expectedGeneration, proofAttemptId?}`
 Domains are organization-owned and providers
 reference their IDs; the provider inventory includes safe domain status/generation.
 The three domain writes are browser-session-only. While no protocol is on, creating a
-challenge and verifying return `404 sso_disabled` and deleting a claim stays available; they have no MCP tools or CLI commands. With the internal
-test capability enabled, each requires a verified current team owner/admin, the exact
-Origin, expected organization header and operation-bound fresh administration proof. A new
-challenge lasts 24 hours and rotates the generation; the TXT value is returned only once.
+challenge and verifying return `404 sso_disabled` and deleting a claim stays available.
+These operations have no MCP tools or CLI commands. Each requires a verified current
+team owner/admin, the exact Origin, expected organization header and operation-bound
+fresh administration proof. A new challenge lasts 24 hours and rotates the generation;
+the TXT value is returned only once.
 Names are normalized to lowercase IDNA ASCII and one trailing DNS root dot is removed.
 Wildcards, IPs, special-use names, public suffixes (including private suffixes) and known
 public mailbox namespaces are refused; the mailbox restriction also covers subdomains.
@@ -1234,14 +1225,14 @@ move personal spaces or enable a provider. Scheduled rechecks and operator retir
 follow the [domain lifecycle runbook](#domain-lifecycle-operations) below.
 
 域名挑战、验证与退役只允许浏览器会话调用，没有 MCP 工具或 CLI 命令。
-OIDC 和 SAML 仍在代码中关闭，三个接口均返回 `404 sso_disabled`。内部测试开启后，
+OIDC 和 SAML 均关闭时，创建挑战和验证域名返回 `404 sso_disabled`，仍可删除声明。
 当前团队中已验证的所有者或管理员须提供同源请求、预期团队和操作绑定的新鲜管理证明。
 域名转换为小写 IDNA ASCII，并移除一个末尾根点；拒绝通配符、IP、特殊用途名称、
 公共后缀（含私有后缀）以及已知公共邮箱域名及其子域名。父域名与子域名须分别证明。
 挑战有效期为 24 小时；重新创建会轮换代次，TXT 值只返回一次。DNS 故障显示 `unknown`，
 不能视为所有权已验证。未验证挑战不占用域名；其他团队已验证或过期暂停的声明不会被抢占。
 退役保留声明 ID，域名验证不会创建账号、加入团队、移动个人空间或启用提供者。
-定期复查与运营者退役命令仍属于后续的域名生命周期工作。
+定期复查与运营者退役命令见下文的域名生命周期操作手册。
 
 The OIDC test takes `{expectedRevision, proofAttemptId?}` and applies to a disabled draft
 under ordinary fresh administration. On an enforced team a recovery owner can spend a
@@ -1619,7 +1610,7 @@ While `SSO_OIDC_ENABLED` is off, sign-in, callback and completion return
 已关联身份的 OIDC 登录沿用现有会话流程。发起登录时需校验 `Origin` 并将尝试绑定到浏览器；
 回调仅使用一次授权码和状态，并在创建会话前重新检查提供商版本、域名声明、身份关联、
 已证明的邮箱和当前团队成员资格。浏览器证明取适用期限中的最早时间，会话续期不延长证明。
-OIDC 在生产代码中保持关闭，登录发起、回调和完成端点均返回 `404 sso_disabled`。
+`SSO_OIDC_ENABLED` 关闭时，登录发起、回调和完成端点均返回 `404 sso_disabled`。
 
 OIDC step-up uses the same initiation and callback. Its state binds the authorization
 response to the pending write attempt, existing session and browser, provider revision,
@@ -1724,7 +1715,7 @@ identifies the team's provider. The sign-in page offers no email or domain looku
 for SSO. Continue using your existing sign-in method for your personal space. If
 you are already signed in, sign out before using the team's SSO link.
 
-With `SSO_SAML_ENABLED=true`, team owners and admins can add a SAML provider under
+When SAML is enabled, team owners and admins can add a SAML provider under
 **Settings → Single sign-on**.
 Enter the IdP's details manually, paste its metadata XML, or import that metadata from
 a URL. The form shows the provider revision and offers the service provider metadata
@@ -1754,9 +1745,9 @@ team's space and open **Settings**. Choose the provider under **Your team sign-i
 verify your Hourmere mailbox, and continue to the identity provider.
 When you return, confirm the link to finish. To unlink, use the same section in
 that team and independently verify your Hourmere mailbox again. An expired or
-cancelled request must be started again. OIDC is off unless the operator sets
-`SSO_OIDC_ENABLED=true`; while it is off the sign-in and link controls are hidden, and a
-member who already has a link can still unlink it.
+cancelled request must be started again. If the operator sets
+`SSO_OIDC_ENABLED=false`, the sign-in and link controls are hidden. A member who
+already has a link can still unlink it.
 
 #### 成员登录和账号设置
 
@@ -1764,7 +1755,7 @@ OIDC 可用时，打开团队提供的登录链接（`/sign-in?sso=<providerId>`
 **使用单点登录**。链接指定团队的身份提供方。登录页不会通过邮箱地址或域名查找单点登录
 提供方。个人空间仍可使用原有方式登录。如果你已经登录，请先退出，再使用团队的单点登录链接。
 
-设置 `SSO_SAML_ENABLED=true` 后，团队所有者和管理员可在
+SAML 启用时，团队所有者和管理员可在
 **设置 → 单点登录**中添加 SAML 提供方。可以手动填写身份提供方信息、粘贴元数据 XML，
 或从网址导入。表单显示提供方版本，并提供配置身份提供方所需的服务提供方元数据下载。
 已保存的身份提供方元数据和证书只写。请在已停用的草稿上测试证书轮换。提交包含新旧证书的
@@ -1785,8 +1776,8 @@ OIDC 可用时，打开团队提供的登录链接（`/sign-in?sso=<providerId>`
 如需关联已有账号，请用原有方式登录，切换到团队空间后打开**设置**。在**你的团队登录方式**
 下选择身份提供方，验证 Hourmere 邮箱后继续前往该提供方。返回时，确认关联以完成操作。
 解除关联也在同一团队的设置中进行，并需再次独立验证 Hourmere 邮箱。请求过期或取消后，
-请重新发起。除非运营者设置 `SSO_OIDC_ENABLED=true`，否则 OIDC 保持关闭：登录和关联选项会隐藏，
-已有关联的成员仍可解除关联。
+请重新发起。运营者设置 `SSO_OIDC_ENABLED=false` 时，登录和关联选项会隐藏，已有关联的成员
+仍可解除关联。
 
 Ownership (all auth-protocol exceptions, no MCP/CLI surface): OIDC sign-in owns
 initiation and callback for linked identities; OIDC completion owns
@@ -1801,7 +1792,7 @@ fixed sign-in error page, or the exact internal SAML completion route
 
 ## Provider and domain setup in team settings
 
-With `SSO_OIDC_ENABLED=true`, a current team owner or admin can open
+When OIDC is enabled, a current team owner or admin can open
 **Settings → Single sign-on** to create, edit or retire an OIDC provider and manage
 its associated domains. Issuer and client ID are fixed after creation. To change the
 client secret, select **Replace client secret** and enter a new value. Saving other
@@ -1815,7 +1806,7 @@ challenge rotates the value and resets verification. The domain list shows domai
 linked to providers plus those added during the current visit. Associate a new domain
 with a provider to find it on a later visit.
 
-设置 `SSO_OIDC_ENABLED=true` 后，当前团队的所有者或管理员可在
+OIDC 启用时，当前团队的所有者或管理员可在
 **设置 → 单点登录**中创建、编辑或停用提供方，并管理关联域名。创建后，签发者网址和客户端
 ID 固定。如需更换密钥，请选择**替换客户端密钥**并输入新值。保存其他更改时会保留现有密钥。
 如果配置版本已变更，请重新加载设置并核对当前配置，再提交更改。
@@ -1900,12 +1891,16 @@ SSO configuration keep the read, recovery and trust-reducing controls.
 
 Operators configure canonical HTTPS `PUBLIC_URL`, working SMTP for independent email
 proof/recovery, credential encryption keys, trusted proxy settings and optional private
-IdP destinations. Enable OIDC with `SSO_OIDC_ENABLED=true` or SAML with
-`SSO_SAML_ENABLED=true` on any instance. Both settings default to off. Unset and empty
-follow the default, `false` explicitly turns the protocol off, and other values fail
-startup. Configure the same settings on web and worker. Stored enforcement still applies
-when a protocol is off. The setup script and Compose pass through empty values. An older
-`.env` without `SSO_SAML_ENABLED` also leaves SAML off.
+IdP destinations. Each protocol is on with an unset or empty setting or `true`.
+Set `SSO_OIDC_ENABLED=false` or `SSO_SAML_ENABLED=false` to turn a protocol off.
+Other values fail startup. Configure the same settings on web and worker. Stored
+enforcement still applies when a protocol is off. Existing `.env` files created by
+`scripts/setup.sh` or copied from `.env.example` during the setting window can be used
+unchanged after upgrade. Direct startup treats empty or missing settings as on, and
+Compose passes through the empty values. An upgrade on an instance with no SSO
+configuration adds navigation and sign-in options. Teams configure providers and
+enable enforcement separately.
+
 The public operator and user guide is `apps/site/src/content/docs/docs/sso.md`.
 The [backup and recovery drill](https://hourmere.com/docs/self-hosting#sso-backup-and-recovery-drill)
 covers restoring configuration, disabling enforcement without the IdP and retiring an expired domain
@@ -2019,12 +2014,13 @@ that marker, `requireSsoRetained` (`apps/server/src/sso.ts`) keeps reads, recove
 trust-reducing operations and their mailbox proof available while every protocol is off,
 and `requireSsoEnabled` keeps refusing everything that adds trust. Without the marker,
 which only in-process tests assemble, both protocols are hard-off as before. The catalogue
-regression suite runs its production checks with the protocol settings unset, empty and
-`false`. The protocol endpoints and trust-adding writes still answer `404 sso_disabled` as
+regression suite tests the production off state with explicit `false`. The protocol
+endpoints and trust-adding writes still answer `404 sso_disabled` as
 specified for each endpoint. The mailbox proof pair, the two reads, recovery and
 trust-reducing writes keep their usual authorization. A dedicated policy test covers a
-team whose only enabled provider is SAML when only OIDC is on. The startup check uses
-the production entry point and checks `/instance` for the effective settings.
+team whose only enabled provider is SAML when only OIDC is on. Startup tests use the
+production entry point and check `/instance` for the effective state with unset and
+empty settings and with explicit `false`.
 
 The Hard-off guard catalogue regression checks reject SSO names in the Hono route
 inventory of the app built from `productionAppOptions` (`apps/server/src/server.ts`),
@@ -2120,8 +2116,8 @@ stays scheduled. Two other things work in every state: a stored `requireSso` pol
 enforcement onward (no product path can store one while hard-off), and the operator
 maintenance commands, which only remove trust, run.
 
-**Setting-off behaviour** (after the setting step: unset or empty before the default
-flip, or `false`). Operations that add trust through that protocol return
+**Setting-off behaviour.** After Acceptance and defaults, an explicit `false` turns
+a protocol off. Operations that add trust through that protocol return
 `404 sso_disabled`: sign-in initiation, callbacks, ACS, metadata and completion; provider
 create, update, test and `activateSsoProvider` with `enabled: true`; linking, step-up and
 delegation binding. `setSsoPolicy` with `requireSso: true` is refused with
@@ -2342,9 +2338,6 @@ behaviour keeps available stay available.
 
 ## Out of scope and remaining decisions
 
-No product implementation or migration lands with this design. The Upgrade step adds one
-development dependency, `@better-auth/sso` at the pinned family version, which no shipped
-source imports or registers.
 IdP group role mapping, service accounts, IdP-initiated SAML, SAML SLO, encrypted
 assertions, automatic domain transfers, wildcard domain claims, a separate
 recovery-owner withdrawal operation and global forced SSO are deferred.
@@ -2359,9 +2352,7 @@ policy is reachable only as an after-the-fact header check (see
 Pre-session hook and plugin paths). Better Auth is retained for local sessions, and the
 OIDC and SAML federation paths are replaced by maintained-library adapters; the OIDC
 verifier and SAML verifier steps record their negative tests before either protocol
-leaves hard-off. The audit journal of PR #246 is an
-external prerequisite of the Audit actions step. Confirm the conservative
-no-automatic-linking policy, invitation-only default, expiring delegated proof policy,
-mailbox fresh administration for teams without enforcement and the 72-hour recovery
-nomination with the project lead;
-these are proposed safe defaults, not existing customer behavior.
+left hard-off. The audit journal of PR #246 was a prerequisite of the Audit actions step.
+The release uses explicit account linking, invitation-only admission by default, expiring
+delegated proof, mailbox fresh administration for teams without enforcement and a 72-hour
+recovery nomination.

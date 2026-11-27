@@ -17,11 +17,9 @@ import {
 } from '../keycloak/browser.ts'
 import { expect, test } from '../keycloak/fixture.ts'
 
-test.use({ protocol: 'saml', oidcEnabled: false })
+test.use({ protocol: 'saml' })
 
-test.describe('with the SAML setting on', () => {
-  test.use({ samlEnabled: true })
-
+test.describe('with the default SAML setting', () => {
   test('a team member proves their Hourmere mailbox and consents to a Keycloak SAML link', async ({
     page,
     context,
@@ -30,7 +28,7 @@ test.describe('with the SAML setting on', () => {
     await samlClient(app).setSignAssertions(true)
     const { email, subject, username } = app.idp.linkable
     const capabilities = await openMemberSettings(page, app)
-    expect(capabilities).toMatchObject({ ssoOidcEnabled: false, ssoSamlEnabled: true })
+    expect(capabilities).toMatchObject({ ssoOidcEnabled: true, ssoSamlEnabled: true })
     const before = await app.account(email)
     expect(before).toMatchObject({
       userId: app.linkableUserId,
@@ -74,25 +72,29 @@ test.describe('with the SAML setting on', () => {
   })
 })
 
-test('with the SAML setting off the same seeded fixture offers no SAML link entry', async ({
-  page,
-  keycloak: app,
-}) => {
-  const capabilities = await openMemberSettings(page, app)
-  expect(capabilities).toMatchObject({ ssoOidcEnabled: false, ssoSamlEnabled: false })
-  await expect(page.getByRole('heading', { name: 'Your team sign-in' })).toHaveCount(0)
-  await expect(button(page, 'Link account (Fixture Keycloak)')).toHaveCount(0)
-  const link = await page.evaluate(
-    async ({ providerId, teamId }) => {
-      const response = await fetch(`/api/v1/team/sso/providers/${providerId}/link`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Expected-Organization-Id': teamId },
-        body: '{}',
-      })
-      return { status: response.status, disabled: (await response.json()).error === 'sso_disabled' }
-    },
-    { providerId: app.providerId, teamId: app.teamId },
-  )
-  expect(link).toEqual({ status: 404, disabled: true })
-  expect((await app.account(app.idp.linkable.email)).linkedSubjects).toEqual([])
+test.describe('with the SSO settings explicitly off', () => {
+  test.use({ oidcEnabled: false, samlEnabled: false })
+
+  test('the same seeded fixture offers no SAML link entry', async ({ page, keycloak: app }) => {
+    const capabilities = await openMemberSettings(page, app)
+    expect(capabilities).toMatchObject({ ssoOidcEnabled: false, ssoSamlEnabled: false })
+    await expect(page.getByRole('heading', { name: 'Your team sign-in' })).toHaveCount(0)
+    await expect(button(page, 'Link account (Fixture Keycloak)')).toHaveCount(0)
+    const link = await page.evaluate(
+      async ({ providerId, teamId }) => {
+        const response = await fetch(`/api/v1/team/sso/providers/${providerId}/link`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Expected-Organization-Id': teamId },
+          body: '{}',
+        })
+        return {
+          status: response.status,
+          disabled: (await response.json()).error === 'sso_disabled',
+        }
+      },
+      { providerId: app.providerId, teamId: app.teamId },
+    )
+    expect(link).toEqual({ status: 404, disabled: true })
+    expect((await app.account(app.idp.linkable.email)).linkedSubjects).toEqual([])
+  })
 })

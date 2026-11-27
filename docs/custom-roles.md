@@ -9,6 +9,10 @@ and keeps its existing identity and resource boundaries.
 
 ## Current gates and proposed catalogue
 
+The operation IDs, gate predicates and target and projection exceptions in this section
+record the v1 fixed-policy reference. Add a new catalogue version to change the
+reference used by saved revisions or credential ceilings.
+
 **Owner** and **Admin** mean the current fixed team roles. **Member** means an effective
 team member, including owners and admins. **Host** means an assigned host authorized by
 the existing booking relationship. **Custom** marks actions eligible for explicit grants.

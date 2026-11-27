@@ -107,6 +107,13 @@ const publicationDate = resolveLegalPublicationDate()
       Google or with Microsoft.
     </li>
     <li>
+      <strong>Team admission records:</strong> when a member is removed, Hourmere keeps one
+      admission record for their account email in that team. Distinct verified addresses on active
+      single sign-on links to the team have separate records. Active blocks prevent automatic
+      readmission through single sign-on or directory provisioning, including if the team sets up
+      either feature later. See <a href="#retention">section 10</a>.
+    </li>
+    <li>
       <strong>Email sign-in:</strong> when you sign in with an email link, we process your email
       address and a one-time sign-in token that expires after 5 minutes. Queued sign-in emails
       store the recipient and link encrypted. The queued copy is deleted after delivery, or when
@@ -687,6 +694,10 @@ const publicationDate = resolveLegalPublicationDate()
       <strong>Account, scheduling and booking information</strong> is kept while your account
       exists. Disconnecting a calendar removes its local connection data; cancelling a booking
       keeps its booking record and is not a deletion request.
+    </li>
+    <li>
+      <strong>Team admission records</strong> are kept until the team is deleted, even if the
+      account is deleted or the admission block is cleared.
     </li>
     <li>
       <strong>Calendar data</strong> is retained and deleted as described in section 4 (Google) and

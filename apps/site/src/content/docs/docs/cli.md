@@ -67,8 +67,8 @@ The provider list returns `data` and `nextCursor`. Pass a non-null `nextCursor` 
 and defaults to 50. The policy command uses an empty input object. Results omit
 provider secrets, raw metadata and identity claims.
 
-OIDC and SAML are off by default. The server operator controls them separately with
-`SSO_OIDC_ENABLED` and `SSO_SAML_ENABLED`. Both commands remain available with either
+OIDC and SAML are on by default. The server operator can turn either protocol off with
+`SSO_OIDC_ENABLED=false` or `SSO_SAML_ENABLED=false`. Both commands remain available with either
 or both protocol settings off. Stored enforcement still applies. If the team requires SSO,
 bind an SSO delegation to the key in the credential's team space under **API keys**,
 using fresh SSO verification. A missing, expired or suspended delegation causes the
@@ -77,7 +77,7 @@ Use the browser for all SSO setup and recovery.
 See [single sign-on](/docs/sso) for the instance settings and their effects.
 
 中文：当前团队所有者或管理员可用团队的 `read` 或 `full` 密钥读取提供方和策略。
-两种协议默认关闭，也可用这两个命令读取。已强制 SSO 的团队要求密钥具有有效委托，
+两种协议默认开启，关闭后仍可用这两个命令读取。已强制 SSO 的团队要求密钥具有有效委托，
 否则 CLI 会向标准错误输出 `sso_required` 并以状态码 **1** 退出。请在浏览器绑定委托、
 配置 SSO 或恢复访问。
 

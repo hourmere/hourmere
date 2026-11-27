@@ -15,6 +15,7 @@ import { resolveSamlProviderInput } from './sso-saml-configuration.ts'
 import { samlSigningIdentity } from './sso-saml-fixtures.ts'
 import { samlSignInRoutes } from './sso-saml-sign-in.ts'
 import { parseSamlXml, samlMaximumResponseBytes } from './sso-saml-verifier.ts'
+import { configuredSsoCapabilities } from './sso-setting-fixtures.ts'
 
 const publicUrl = 'https://hourmere.example.test'
 const entityId = 'urn:example:synthetic-idp'
@@ -307,12 +308,8 @@ describe.skipIf(!databaseUrl)('SAML SP metadata endpoint', () => {
     }
   })
 
-  it('answers sso_disabled before storage access for known and unknown providers while hard-off', async () => {
-    const app = instance(db, {
-      ssoOidcEnabled: true,
-      ssoSamlEnabled: false,
-      ssoOperatorSetting: true,
-    })
+  it('answers sso_disabled before storage access for known and unknown providers with SAML off', async () => {
+    const app = instance(db, configuredSsoCapabilities('true', 'false'))
     const select = vi.spyOn(db, 'selectFrom')
     try {
       for (const id of [draftId, oidcId, 'unknown']) {

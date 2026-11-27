@@ -12,7 +12,7 @@ cache.
 ```sh
 npm run build --workspace @hourmere/web
 HOURMERE_E2E_BOOTSTRAP_URL=postgres://hourmere:hourmere@localhost:5432/hourmere \
-  npm run test --workspace @hourmere/e2e -- keycloak-oidc keycloak-saml --project=desktop
+  npm run test --workspace @hourmere/e2e -- keycloak-oidc keycloak-saml sso-defaults --project=desktop
 ```
 
 The PostgreSQL bootstrap connection creates and drops a disposable Hourmere database.
@@ -30,11 +30,17 @@ the team SSO validator's public DNS syntax. The fixture seeds the verified domai
 PostgreSQL without a DNS query. Personal sign-in uses `example.test`, an in-memory mail
 sink and fake Google and Microsoft responses.
 
-The fixture starts Hourmere in process with OIDC enabled for the positive case. The
-off case uses the same seeded realm and default capability, which is also the production
-default. The browser spec checks that a changed state stops before the token exchange,
+The fixture starts Hourmere in process, parses the production configuration and leaves both
+protocol settings unset for the positive cases. Both protocols are enabled by default. The
+off cases use the same seeded realm and set both settings explicitly to `false`.
+The browser spec checks that a changed state stops before the token exchange,
 a changed nonce is refused after Keycloak issues a signed token, and a used code is
 refused with both consumed and fresh state.
+
+The defaults spec restarts the production server on the same origin and database with
+both settings unset. It verifies that an existing team with no SSO configuration keeps
+its session, event types and policy while gaining SSO navigation and provider-specific
+sign-in options.
 
 The linking and admission cases use Hourmere's own mailbox verification with an in-memory
 mail sink. They cover explicit self-link, the generic mailbox verification flow for
@@ -51,8 +57,8 @@ entity ID and ACS URL. Keycloak 26.8.2 starts with **Sign documents** enabled an
 **Sign assertions**, Keycloak returns the issued RelayState and the browser completes
 sign-in for the linked persona. A second Hourmere process shares the disposable database
 and canonical SP URLs to check that changed RelayState, a damaged signature and a replayed
-response are refused. The fixture enables SAML through `SSO_SAML_ENABLED=true`. The same seeded
-provider offers no SAML sign-in option with the setting off.
+response are refused. The same seeded provider offers no SAML sign-in option with the
+setting off.
 
 The SAML linking and admission cases enable assertion signing on that same fixture.
 An existing member verifies their Hourmere mailbox and explicitly consents to linking
@@ -65,7 +71,7 @@ entries are hidden and their requests are refused.
 The OIDC enforcement cases compare a mailbox session and a Keycloak session for the same
 owner. Binding a CLI and MCP lease requires a second Keycloak login with
 `prompt=login` and `max_age=0`. An unbound or revoked key cannot read the team's
-catalog. Without OIDC injection, the seeded enforcement policy still blocks ordinary
+catalog. With an explicit OIDC opt-out, the seeded enforcement policy still blocks ordinary
 team access and the sign-in page has no SSO option.
 
 The OIDC recovery cases spend a fresh mailbox ceremony on each provider repair write and

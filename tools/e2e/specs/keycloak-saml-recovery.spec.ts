@@ -18,8 +18,6 @@ import {
 
 test.use({
   protocol: 'saml',
-  oidcEnabled: false,
-  samlEnabled: true,
   enforced: true,
   brokenProvider: true,
 })

@@ -95,6 +95,9 @@ describe.skipIf(!serverUrl)('SSO team read compatibility', () => {
       PUBLIC_URL: publicUrl,
       BETTER_AUTH_SECRET: secret,
       MCP_OAUTH_ENABLED: 'true',
+      // Explicit opt-out preserves the legacy /me shape while stored enforcement still applies.
+      SSO_OIDC_ENABLED: 'false',
+      SSO_SAML_ENABLED: 'false',
     })
     authPool = createAuthPool(owned.url, config.signup)
     auth = createAuth({

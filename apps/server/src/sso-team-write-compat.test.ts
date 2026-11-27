@@ -321,12 +321,22 @@ describe.skipIf(!serverUrl)('team writes without an SSO policy', () => {
     })
     const removalQueries = [...statements]
     expect(roleQueries).toHaveLength(31)
-    expect(removalQueries).toHaveLength(37)
+    // Default-on SSO records a local block so a later IdP configuration cannot readmit this member.
+    expect(removalQueries).toHaveLength(40)
     for (const queries of [roleQueries, removalQueries]) {
       expect(
         queries.filter((query) => query.includes('organization_ownership_transfers')),
       ).toHaveLength(1)
     }
+    expect(
+      await db
+        .selectFrom('scim_membership_blocks')
+        .select(['source', 'kind'])
+        .where('organization_id', '=', team.id)
+        .where('identity_email', '=', member.email)
+        .where('cleared_at', 'is', null)
+        .execute(),
+    ).toEqual([{ source: 'local', kind: 'removal' }])
     expect(
       [...roleQueries, ...removalQueries].some((query) => query.includes('sso_attempts')),
     ).toBe(false)

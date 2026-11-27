@@ -209,13 +209,13 @@ const schema = z
       ),
     ),
     SCIM_PROVISIONING_ENABLED: scimProvisioningEnabled,
-    // Organization single sign-on. Empty or unset follows the release default, currently off.
+    // Organization single sign-on. Empty or unset leaves the protocol on.
     SSO_OIDC_ENABLED: optional(
       z.enum(['true', 'false'], { error: 'SSO_OIDC_ENABLED must be true, false or empty' }),
-    ).transform((value) => value === 'true'),
+    ).transform((value) => value !== 'false'),
     SSO_SAML_ENABLED: optional(
       z.enum(['true', 'false'], { error: 'SSO_SAML_ENABLED must be true, false or empty' }),
-    ).transform((value) => value === 'true'),
+    ).transform((value) => value !== 'false'),
     MCP_OAUTH_ENABLED: optional(z.enum(['true', 'false'])).transform((v) => v === 'true'),
     PORT: z.preprocess(
       (value) => (typeof value === 'string' && value.trim() === '' ? Number.NaN : value),

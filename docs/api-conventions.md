@@ -166,7 +166,7 @@ When a write returns `403 sso_reauthentication_required`, complete its returned
 `attemptId` as `proofAttemptId`. Use a fresh recovery verification for each
 recovery-authorized write.
 
-Both protocol settings default to off. The two reads remain available to authorized
+Both protocol settings default to on. The two reads remain available to authorized
 callers in every settings combination. Trust-adding requests through an off protocol
 return `404 sso_disabled` and stored team enforcement continues.
 See the [REST quickstart](https://hourmere.com/docs/rest#read-team-single-sign-on-configuration)
@@ -175,7 +175,7 @@ and [operation contracts](sso.md#proposed-rest-mcp-and-cli-contracts).
 中文：读取提供方与策略需要当前团队所有者或管理员权限。强制 SSO 的团队还要求浏览器证明，
 或密钥的有效委托。SSO 写入仅接受同源浏览器会话，须提供目标团队的
 `X-Expected-Organization-Id` 并省略 `Authorization`。如需新鲜证明，在同一浏览器完成后
-用原输入及 `proofAttemptId` 重试。两种协议默认关闭，已有强制策略继续生效。
+用原输入及 `proofAttemptId` 重试。两种协议默认开启，关闭协议时已有强制策略继续生效。
 
 ### Group booking fields and privacy
 
