@@ -4540,6 +4540,8 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
+                    /** @description Request page-scoped selection proof when bulk cancellation is enabled */
+                    bulkSelection?: "true" | "false";
                     cursor?: string;
                     /** @description Only bookings ending after (exclusive) */
                     endAfter?: string;
@@ -4559,7 +4561,7 @@ export interface paths {
                     to?: string;
                 };
                 header?: {
-                    /** @description Optional team where the page opened; a still-authorized expected team with a different current space receives 409 reload guidance, otherwise 403 */
+                    /** @description Team where the page opened. Required when requesting a page proof; otherwise optional. A still-authorized expected team with a different current space receives 409 reload guidance, otherwise 403 */
                     "x-expected-organization-id"?: string;
                 };
                 path?: never;
@@ -4724,6 +4726,26 @@ export interface paths {
          * @description Requires a current verified team owner/admin browser session and a same-origin Origin or Referer. X-Expected-Organization-Id must match the team where the action started and the current session team. A caller who still owns or administers the expected team receives 409 organization_context_changed after switching to any other space, including personal or a member-only team; inaccessible expected teams retain the uniform 403. Cancels only a booking in that team before its start, queues the normal cancellation notifications, and preserves its saved hosts and conference organizer. Success returns {cancelled:true}; a retry after a committed cancellation returns 409 booking_already_cancelled without sending notifications again. Missing, inaccessible and already-started targets share team_management_access_denied. API keys and MCP OAuth tokens have no team-management access, including alongside a session cookie. This grants no host reschedule or private conference retry authority.
          */
         post: operations["cancelTeamBooking"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/team/bookings/bulk-cancellations/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview cancellation of bookings selected from one team booking page
+         * @description Unavailable until bulk cancellation is released. A current verified team owner/admin browser session and same-origin Origin or Referer are required. Preview records the ordered selection and eligibility without cancelling bookings or queuing notifications.
+         */
+        post: operations["previewTeamBookingBulkCancellation"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5760,13 +5782,13 @@ export interface paths {
         };
         /**
          * List the booking workflows of the owner the caller acts as
-         * @description The operator can enable booking workflows with WORKFLOWS_ENABLED=true. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full or read API-key scope. Name the owner explicitly: ownerKind=personal with your user ID in your personal organization, or ownerKind=team with the team ID while acting in that team as a current owner or admin. Any other owner, existing or not, gets the same 403 insufficient_role. Deleted workflows are not listed. Oldest first, by time-ordered ID; pass nextCursor as cursor with the same owner for the next page.
+         * @description Booking workflows are enabled by default. The operator can pause them with WORKFLOWS_ENABLED=false. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full or read API-key scope. Name the owner explicitly: ownerKind=personal with your user ID in your personal organization, or ownerKind=team with the team ID while acting in that team as a current owner or admin. Any other owner, existing or not, gets the same 403 insufficient_role. Deleted workflows are not listed. Oldest first, by time-ordered ID; pass nextCursor as cursor with the same owner for the next page.
          */
         get: operations["listWorkflows"];
         put?: never;
         /**
          * Create a booking workflow
-         * @description The operator can enable booking workflows with WORKFLOWS_ENABLED=true. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full API-key scope. Name your personal owner or a team you currently own or administer in the active organization. Retain idempotencyKey for retries: the same normalized request returns the stored definition, while changed input conflicts. IDs are server-generated; caller-supplied IDs and unknown fields are rejected. Webhook actions require an active endpoint in the acting organization subscribed to workflow.executed. Creation does not send mail.
+         * @description Booking workflows are enabled by default. The operator can pause them with WORKFLOWS_ENABLED=false. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full API-key scope. Name your personal owner or a team you currently own or administer in the active organization. Retain idempotencyKey for retries: the same normalized request returns the stored definition, while changed input conflicts. IDs are server-generated; caller-supplied IDs and unknown fields are rejected. Webhook actions require an active endpoint in the acting organization subscribed to workflow.executed. Creation does not send mail.
          */
         post: operations["createWorkflow"];
         delete?: never;
@@ -5784,21 +5806,21 @@ export interface paths {
         };
         /**
          * Read one booking workflow
-         * @description The operator can enable booking workflows with WORKFLOWS_ENABLED=true. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full or read API-key scope. Returns a workflow of the owner the caller acts as in its current organization: its own personal workflow, or a team workflow while it is a current owner or admin of that team. A missing, deleted or malformed ID, another owner's workflow and a workflow of another organization all get the same 404 workflow_not_found.
+         * @description Booking workflows are enabled by default. The operator can pause them with WORKFLOWS_ENABLED=false. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full or read API-key scope. Returns a workflow of the owner the caller acts as in its current organization: its own personal workflow, or a team workflow while it is a current owner or admin of that team. A missing, deleted or malformed ID, another owner's workflow and a workflow of another organization all get the same 404 workflow_not_found.
          */
         get: operations["getWorkflow"];
         put?: never;
         post?: never;
         /**
          * Delete a booking workflow
-         * @description The operator can enable booking workflows with WORKFLOWS_ENABLED=true. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full API-key scope and expectedRevision. Tombstones the definition and retires its pending runs. Repeated authorized deletion is safe. Missing, foreign and mismatched owner contexts return workflow_not_found. Revisions and creation keys remain with the tombstone; existing minimal history follows retention.
+         * @description Booking workflows are enabled by default. The operator can pause them with WORKFLOWS_ENABLED=false. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full API-key scope and expectedRevision. Tombstones the definition and retires its pending runs. Repeated authorized deletion is safe. Missing, foreign and mismatched owner contexts return workflow_not_found. Revisions and creation keys remain with the tombstone; existing minimal history follows retention.
          */
         delete: operations["deleteWorkflow"];
         options?: never;
         head?: never;
         /**
          * Edit, enable or disable a booking workflow
-         * @description The operator can enable booking workflows with WORKFLOWS_ENABLED=true. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full API-key scope. Supply expectedRevision and the fields to change. Content edits append an immutable revision; changing only enabled preserves the revision. A stale revision conflicts. Missing, foreign and mismatched owner contexts return workflow_not_found. Disabling or enabling changes no existing booking enrollment or execution. Webhook actions require an active endpoint in the acting organization subscribed to workflow.executed.
+         * @description Booking workflows are enabled by default. The operator can pause them with WORKFLOWS_ENABLED=false. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full API-key scope. Supply expectedRevision and the fields to change. Content edits append an immutable revision; changing only enabled preserves the revision. A stale revision conflicts. Missing, foreign and mismatched owner contexts return workflow_not_found. Disabling or enabling changes no existing booking enrollment or execution. Webhook actions require an active endpoint in the acting organization subscribed to workflow.executed.
          */
         patch: operations["updateWorkflow"];
         trace?: never;
@@ -5812,7 +5834,7 @@ export interface paths {
         };
         /**
          * List finished runs of a booking workflow
-         * @description The operator can enable booking workflows with WORKFLOWS_ENABLED=true. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full or read API-key scope and personal ownership or current team owner/admin access in the active organization. Returns metadata and aggregate outcomes only, newest first. Pass nextCursor as cursor with the same workflow for the next page. Missing, deleted, malformed and inaccessible workflow IDs return workflow_not_found.
+         * @description Booking workflows are enabled by default. The operator can pause them with WORKFLOWS_ENABLED=false. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full or read API-key scope and personal ownership or current team owner/admin access in the active organization. Returns metadata and aggregate outcomes only, newest first. Pass nextCursor as cursor with the same workflow for the next page. Missing, deleted, malformed and inaccessible workflow IDs return workflow_not_found.
          */
         get: operations["listWorkflowRuns"];
         put?: never;
@@ -5834,7 +5856,7 @@ export interface paths {
         put?: never;
         /**
          * Preview a booking workflow with synthetic data
-         * @description The operator can enable booking workflows with WORKFLOWS_ENABLED=true. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full API-key scope and current personal ownership or team owner/admin access in the active organization. Supply owner, the candidate definition fields and optional synthetic example values. Returns the match outcome, rendered email text and escaped HTML, and static estimates. Preview uses synthetic booking data and makes no deliveries.
+         * @description Booking workflows are enabled by default. The operator can pause them with WORKFLOWS_ENABLED=false. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available. Requires full API-key scope and current personal ownership or team owner/admin access in the active organization. Supply owner, the candidate definition fields and optional synthetic example values. Returns the match outcome, rendered email text and escaped HTML, and static estimates. Preview uses synthetic booking data and makes no deliveries.
          */
         post: operations["previewWorkflow"];
         delete?: never;
@@ -6288,6 +6310,18 @@ export interface components {
             /** @description Readable button text, currently #FFFFFF or #000000 */
             buttonTextColor: string | null;
             buttonTextContrast: number | null;
+        };
+        BulkCancellationPreview: {
+            /** Format: uuid */
+            confirmationId: string;
+            /** Format: date-time */
+            expiresAt: string;
+            items: {
+                /** Format: uuid */
+                bookingId: string;
+                /** @enum {string} */
+                code: "eligible" | "already_cancelled" | "booking_started" | "booking_not_supported" | "booking_unavailable" | "booking_host_departed";
+            }[];
         };
         CalendarConnection: {
             accountEmail: string | null;
@@ -7445,7 +7479,7 @@ export interface components {
              * @description This instance operator's terms; absent when not configured
              */
             termsUrl?: string;
-            /** @description Whether booking workflows are enabled; false until they are, and absent (treat as false) on older servers */
+            /** @description Effective WORKFLOWS_ENABLED setting (true by default). Treat an absent field on older servers as false. */
             workflowsEnabled?: boolean;
         };
         IssuedScimProvisioningToken: {
@@ -9230,6 +9264,10 @@ export interface components {
             };
         };
         TeamAdminBookingPage: {
+            /** Format: date-time */
+            bulkPageExpiresAt?: string;
+            /** @description Proof for the exact page, available only when bulk selection is enabled and opted in */
+            bulkPageToken?: string;
             data: components["schemas"]["TeamAdminBooking"][];
             nextCursor: string | null;
         };
@@ -19473,6 +19511,81 @@ export interface operations {
             };
             /** @description The API key's rate limit is used up */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    previewTeamBookingBulkCancellation: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required: the organization where the selection started */
+                "x-expected-organization-id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    bookingIds: string[];
+                    pageToken: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Preview with an expiring server-generated confirmation ID */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkCancellationPreview"];
+                };
+            };
+            /** @description invalid_request: select 1 to 25 distinct booking IDs */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied: requires a current team owner/admin session without Authorization; forbidden: cookie writes require same-origin Origin or Referer sso_required: This team requires a current SSO proof. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Bulk cancellation is unavailable */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed: reload the page before trying this team write again; bulk_selection_changed: reload the booking page and select again */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Request body is too large */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };

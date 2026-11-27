@@ -1376,8 +1376,8 @@ run IDs and never recreates identities or intents. The internal email attempt se
 commits the reservation and shared ledger charge with the recipient marker, then calls
 SMTP outside the transaction. Only the matching marker token can schedule a known-not-sent
 retry. Retry admission restamps both rows under the same organization and mail-budget locks.
-Expired marker leases resolve to `delivery_unknown`. `WORKFLOWS_ENABLED` opts the instance
-into capture and delivery. The worker installs workflow repair and retention when enabled
+Expired marker leases resolve to `delivery_unknown`. `WORKFLOWS_ENABLED` defaults to true
+and controls capture and delivery. The worker installs workflow repair and retention when enabled
 or when startup finds unfinished work or an interrupted attempt to recover.
 
 - **Enrollments** record a booking's capture of one workflow revision at one lifecycle
@@ -1539,14 +1539,6 @@ kinds to `Principal['kind']` of `@hourmere/auth`: typecheck fails when a princip
 or renamed, and the test fails until the check accepts exactly those kinds.
 
 ## Planned additions (each a new migration)
-
-The [booking workflows design](workflows.md) specifies proposed triggers, conditions,
-email and webhook actions, durable execution records and workflow sub-caps within the shared mail budget.
-Only its definition, execution and creation key storage exist ([workflow definition
-storage](#workflow-definition-storage), [workflow execution storage](#workflow-execution-storage),
-[workflow creation key storage](#workflow-creation-key-storage)),
-with definition read, creation, update and deletion operations that answer `workflows_disabled` while hard-off;
-no worker or runtime enablement exists yet.
 
 | When | Change |
 |---|---|
@@ -2728,6 +2720,20 @@ which cancellation or opt-out cannot recall an already-dispatched SMS.
 
 The ordinary SMS delivery ledger and rolling budgets remain in force. Job payloads carry
 booking/rule identity and scheduling instants, never phone numbers or message bodies.
+
+## Team booking bulk cancellation previews
+
+The preview receipt is keyed by a database-generated UUID in
+`team_booking_bulk_cancellations`. It stores the team, actor account, issuing session and
+expiry inherited from the page proof. Its lifetime is at most ten minutes. The page proof,
+filters and session bearer are never written to the receipt.
+
+`team_booking_bulk_cancellation_items` records the ordered booking UUIDs and preview codes.
+The primary key limits positions to one per ordinal, and the ordinal check and unique booking
+key enforce at most 25 distinct items. Deleting the team cascades to its receipts and items.
+Actor, session and booking IDs are retained when their corresponding rows are deleted.
+A preview writes these two tables in one transaction. It does not change bookings or enqueue
+jobs or notifications. Admission, execution and receipt cleanup are future release steps.
 
 ## Audit events
 

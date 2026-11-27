@@ -1,4 +1,5 @@
 import type { Locator, Page } from '@playwright/test'
+import { SAML_COMPLETE_PATH } from '../../../apps/server/src/sso-saml-state.ts'
 import { describeStrandedPage, expect, type KeycloakFixture } from './fixture.ts'
 
 export { describeStrandedPage }
@@ -7,6 +8,17 @@ export const returnPath = '/app/event-types'
 export const ssoLabel = 'Sign in with single sign-on'
 export const emailLinkLabel = 'Email me a sign-in link'
 export const mailboxSendLabel = 'Send verification email'
+export const mailboxProofPath = '/app/mailbox-proof'
+const invitationPath = '/api/auth/organization/accept-invitation'
+export const genericOutcome =
+  'To continue, sign in with your usual method or use a current team invitation.'
+export const noAccount = {
+  userId: null,
+  teamRole: null,
+  linkedSubjects: [],
+  sessionCount: 0,
+  personalSpace: false,
+}
 
 export function button(page: Page, name: string) {
   return page.getByRole('button', { name, exact: true })
@@ -16,6 +28,29 @@ export function signInUrl(app: KeycloakFixture) {
   const url = new URL('/sign-in', app.url)
   url.search = new URLSearchParams({ sso: app.providerId, next: returnPath }).toString()
   return url.href
+}
+
+export function samlSignInUrl(app: KeycloakFixture) {
+  const url = new URL(signInUrl(app))
+  url.searchParams.set('saml', '1')
+  return url.href
+}
+
+export function samlClient(app: KeycloakFixture) {
+  if (!app.idp.saml) throw new Error('The fixture has no SAML client')
+  return app.idp.saml
+}
+
+export async function completeSamlCeremony(page: Page, app: KeycloakFixture, label = 'Continue') {
+  const [completion] = await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        response.url() === `${app.url}${SAML_COMPLETE_PATH}`,
+    ),
+    clickPrivate(button(page, label)),
+  ])
+  return completion
 }
 
 export function isAuthorization(url: URL, { idp }: KeycloakFixture) {
@@ -66,12 +101,29 @@ export async function signInAtKeycloak(
   await submitKeycloakLogin(page, app, username)
 }
 
+export async function signInThroughSaml(page: Page, app: KeycloakFixture) {
+  await page.goto(samlSignInUrl(app))
+  await signInAtKeycloak(page, app)
+  const completion = await completeSamlCeremony(page, app)
+  expect(completion.status()).toBe(303)
+  await expectSession(page, app, app.linkedUserId, false)
+}
+
 export async function signInWithEmail(page: Page, app: KeycloakFixture, email: string) {
   await page.getByRole('textbox', { name: 'Email', exact: true }).fill(email)
   await button(page, emailLinkLabel).click()
   await expect(page.getByRole('heading', { name: 'Check your email' })).toBeVisible()
   await openPrivateLink(page, await app.magicLink(email))
   await clickPrivate(button(page, 'Sign in to Hourmere'))
+}
+
+export async function readFixtureApi(page: Page, url: string) {
+  try {
+    return await page.request.get(url)
+  } catch {
+    // Playwright transport errors include the request headers.
+    throw new Error('The browser could not read the fixture API')
+  }
 }
 
 export async function expectSession(
@@ -93,7 +145,7 @@ export async function expectSession(
     )
   }
   await expect(button(page, 'Sign out')).toBeVisible()
-  const response = await page.request.get(`${app.url}/api/v1/me`)
+  const response = await readFixtureApi(page, `${app.url}/api/v1/me`)
   expect(response.status()).toBe(200)
   expect(await response.json()).toMatchObject({
     user: { id: userId },
@@ -103,7 +155,7 @@ export async function expectSession(
 }
 
 export async function expectSignedOut(page: Page, app: KeycloakFixture) {
-  expect((await page.request.get(`${app.url}/api/v1/me`)).status()).toBe(401)
+  expect((await readFixtureApi(page, `${app.url}/api/v1/me`)).status()).toBe(401)
 }
 
 export async function signOut(page: Page, app: KeycloakFixture) {
@@ -123,16 +175,79 @@ export async function proveMailbox(page: Page, app: KeycloakFixture, email: stri
   return new URLSearchParams(link.hash.slice(1)).get('attempt')
 }
 
+export async function switchToFixtureTeam(page: Page, app: KeycloakFixture) {
+  const space = page.getByRole('button', { name: /^Switch space/ })
+  await space.click()
+  await page.getByRole('menuitemradio', { name: app.teamName, exact: true }).click()
+  await expect(space).toContainText(app.teamName)
+}
+
+export async function openMemberSettings(page: Page, app: KeycloakFixture) {
+  await page.goto(`${app.url}/sign-in`)
+  await signInWithEmail(page, app, app.idp.linkable.email)
+  await expectSession(page, app, app.linkableUserId, true)
+  await switchToFixtureTeam(page, app)
+  await page.goto(`${app.url}/app/settings`)
+  await expect(page.getByRole('heading', { name: 'Account', exact: true })).toBeVisible()
+  const instance = await readFixtureApi(page, `${app.url}/api/v1/instance`)
+  expect(instance.status()).toBe(200)
+  return instance.json()
+}
+
+export async function startMemberLink(page: Page, app: KeycloakFixture, email: string) {
+  await button(page, 'Link account (Fixture Keycloak)').click()
+  await button(page, 'Link account').click()
+  const authorize = page.getByRole('link', { name: 'Continue to identity provider', exact: true })
+  await expect(button(page, 'Continue')).toBeDisabled()
+  await expect(authorize).toHaveCount(0)
+  await proveMailbox(page, app, email)
+  await button(page, 'Continue').click()
+  await clickPrivate(authorize)
+}
+
+export async function mailboxPromptText(page: Page) {
+  return ((await page.getByRole('main').textContent()) ?? '').replace(/\s+/g, ' ').trim()
+}
+
+export async function acceptFixtureInvitation(
+  page: Page,
+  app: KeycloakFixture,
+  attemptId: string | null,
+) {
+  if (!attemptId) throw new Error('The fixture mailbox link had no admission attempt')
+  // Submit explicit acceptance from the same browser that holds the mailbox proof.
+  return page.evaluate(
+    async ({ invitationId, attemptId, path }) => {
+      const response = await fetch(path, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Hourmere-Sso-Attempt': attemptId,
+        },
+        body: JSON.stringify({ invitationId }),
+      })
+      return response.status
+    },
+    { invitationId: app.invitationId, attemptId, path: invitationPath },
+  )
+}
+
 export async function expectMailboxCannotEnterTeam(page: Page, app: KeycloakFixture) {
   await signInWithEmail(page, app, app.idp.linked.email)
   await expectSession(page, app, app.linkedUserId, true)
-  const response = await page.request.post(`${app.url}/api/auth/organization/set-active`, {
-    headers: { origin: app.url },
-    data: { organizationId: app.teamId },
-    maxRedirects: 0,
-  })
+  const response = await page.request
+    .post(`${app.url}/api/auth/organization/set-active`, {
+      headers: { origin: app.url },
+      data: { organizationId: app.teamId },
+      maxRedirects: 0,
+    })
+    .catch(() => {
+      throw new Error('The browser could not request the fixture team')
+    })
   expect(response.status()).toBe(403)
-  expect(response.headers().location).toBeUndefined()
+  expect(response.headers().location === undefined, 'Team access denial must not redirect').toBe(
+    true,
+  )
   expect(await response.json()).toMatchObject({ code: 'SSO_REQUIRED', message: 'sso_required' })
   await expectSession(page, app, app.linkedUserId, true)
 }

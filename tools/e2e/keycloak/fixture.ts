@@ -189,7 +189,8 @@ async function seedSignIn(
   const configuration = saml
     ? {
         ssoEndpoint: saml.ssoEndpoint,
-        signingCertificates: saml.signingCertificates,
+        // The fixture's HTTPS certificate is a valid RSA certificate with an unrelated key.
+        signingCertificates: brokenProvider ? [idp.certificate] : saml.signingCertificates,
         subjectAttribute: saml.subjectAttribute,
       }
     : {
@@ -555,11 +556,12 @@ export const test = base.extend<
           }),
         }
         const mail = new Map<string, string>()
-        // Parse the OIDC operator setting like production. Only this fixture injects SAML.
+        // Parse the operator environment like production. The SAML variable has no effect.
         const config = loadConfig({
           DATABASE_URL: owned.url,
           BETTER_AUTH_SECRET: secret,
           SSO_OIDC_ENABLED: oidcEnabled ? 'true' : '',
+          SSO_SAML_ENABLED: protocol === 'saml' ? 'true' : undefined,
           SSO_ENCRYPTION_KEY: configurationKey.toString('base64'),
         })
         const production = productionSsoCapabilities(config)

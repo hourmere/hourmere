@@ -519,6 +519,172 @@ the serialized writer shapes against the migration and against each weakened loc
 and hold a conflicting lock on each table the migration locks (derived from the migration
 source) against the bounded wait and its retry.
 
+### Claim completion through SSO linking
+
+This design covers claims created without an invitation. Implicit SCIM claim completion
+through ordinary OIDC self-link must be hard-off in production before any deployment.
+The [implicit-claim hard-off change](https://github.com/hourmere/hourmere/pull/582) is
+the pre-deploy gate. Existing SCIM attachments, invitation-based completion and
+[retained-member re-admission](#deactivation-deletion-and-manual-control) keep their
+existing authority. SSO unlinking or provider retirement does not undo a completed SCIM
+attachment.
+
+**Connection binding.** A current owner explicitly selects one enabled SSO provider for
+the team's SCIM connection. Store the exact same-organization connection and provider
+IDs and advance the binding revision on each change, including clearing and restoring
+the same provider. Existing connections start unbound. Matching domain, email,
+`userName` or `externalId`, or having only one provider, confers no authority. Token
+rotation preserves the connection. Provider disablement, retirement or a failed or
+expired domain verification makes the binding unusable. Provider replacement needs
+a new owner decision. Recheck the selected provider and its verified domain with a
+positive latest recheck using the [SSO linking rules](sso.md#identity-linking-and-admission).
+
+**Own-account proof and consent.** The person signs in through an independent existing
+Hourmere method, opens the team's account settings and explicitly chooses to attach their
+membership to directory management while linking their sign-in. The `linkSsoAccount`
+request carries an explicit claim intent separate from the optional `scimUserId`.
+A request omitting both fields is ordinary self-link. A User ID without claim intent is
+refused. The claim intent requires a browser session in the expected active team, exact
+Origin, no `Authorization` header, a current membership whose role is exactly `member`,
+and fresh independent Hourmere mailbox proof bound to this operation. Owner, admin and
+legacy compound roles are ineligible for directory attachment through this flow.
+Explain before confirmation that the directory can suspend or retire the team
+membership. A new validated IdP result from this ceremony can reuse
+an existing live link only for the same provider, issuer, subject, account and proven
+mailbox. A different proven mailbox follows the existing SSO mailbox-change rules
+before starting a new claim ceremony.
+
+Use the existing OIDC callback or SAML ACS to stage the verified identity and the
+existing same-origin completion POST to confirm. The asserted address, independently
+proven address, verified address on the signed-in account and claim mailbox must all
+normalize to the same value. OIDC `email_verified`, a SAML email attribute and an SSO
+session from the selected provider cannot supply independent local proof. The ceremony
+binds the original browser, account, session, membership, exact claim and User IDs,
+organization, connection, binding revision, provider revision, `trustGeneration`,
+verified domain claim and generation, and the ID and generation of any existing link
+to be reused. Recheck those bindings when staging and confirming, including concurrent
+unlink or link retirement. Use the validated issuer/entity ID and immutable subject from
+the [SSO identity contract](sso.md#identity-linking-and-admission). An existing binding of
+that subject to another account, or a conflicting subject on the same account, follows
+existing SSO conflict and recovery rules. A same-email personal account must prove its
+own session. An unlinked SSO sign-in keeps its generic outcome before mailbox proof.
+For an eligible signed-in actor, use their verified account mailbox to snapshot the
+candidate at initiation, then require proof of that mailbox before using the match.
+The member can omit `scimUserId` when the proven mailbox identifies exactly one eligible
+claim in the bound connection. Require the ID only to disambiguate the intended entry.
+A supplied ID must match an otherwise eligible entry and cannot override the mailbox,
+binding or competing-claim checks. A missing or ambiguous candidate at initiation requires a new
+ceremony even if the eligible set changes during proof. Give the same mailbox challenge
+whether the claim is eligible, missing, expired, ambiguous or for another mailbox.
+Look up no other account. After proof, use the existing generic SSO completion refusal
+for an ineligible claim, without identifying an account, invitation or competing claim.
+The new flow adds no disclosure to SCIM responses. The claim branch creates no account,
+session, browser proof or membership.
+Ordinary invitation acceptance or separately configured SSO JIT can establish
+membership through their existing rules before the person starts the claim ceremony.
+In invitation-only mode a claim itself grants no admission.
+
+**Occupied address.** For the occupied addresses described under User creation, POST
+keeps its existing 201 response with an invitation-free claim. Resolve against present
+state at completion, including competing claims without invitations.
+
+| Address held by | Decision |
+|---|---|
+| A current member | Attach the caller's existing ordinary membership after both proofs if it is unblocked and the account has no other live User in this connection. Preserve the role and membership ID. |
+| Another administrator's invitation, or multiple invitations | Leave every invitation untouched. A nonmember first gains membership through ordinary admission. An independently valid invitation is accepted by its explicit ID under ordinary rules. The claim never chooses a winner among invitations. |
+| An invitation with an old role | The old role provides no claim authority. If the person is still a nonmember, an authorized administrator can cancel the stale invitation and issue a current `member` invitation through the normal flow. |
+| An invitation whose inviter left | The stale invitation provides no claim authority. A current authorized inviter can resolve it through the normal invitation flow. The departed inviter's authority is never inherited. |
+| Another pending claim | An invitation remains bound to its original claim. Refuse SSO completion while any other unexpired, unfinished claim for that mailbox in the same connection belongs to a live User, including an invitation-bound claim or a temporarily inactive User. The supplied ID never breaks a tie. Correct or retire the mistaken entry, or wait for its claim to expire. If the original claim already linked the account, the existing one-live-User constraint still prevents a second attachment. |
+
+**Expiry and renewal.** Keep the original 48-hour lifetime and use the database clock
+after lock waits. At `now >= expires_at` the claim is ineligible. Record a claim's
+original purpose at issuance to distinguish an ordinary invitation-free claim from
+invitation acceptance and retained-member re-admission. Deleting an invitation can
+null its foreign key and never changes its original purpose. Historical pending claims
+whose purpose cannot be proved stay in their existing invitation or re-admission flow
+where applicable and otherwise expire. An operator can retire and reprovision a still
+unlinked historical entry to start enrollment again, using a new resource ID and
+leaving any independent invitation under its normal rules.
+
+A current owner can deliberately issue a fresh successor to an expired, unfinished,
+uninvalidated invitation-free claim on the same active, unlinked User with the same
+work mailbox. Require a usable binding, instance address eligibility, no competing
+live claim or mailbox admission block, and fresh administration proof bound to the
+team, entry, previous claim and binding revision. Close the old claim and create a
+new claim ID in one transaction. The successor expires 48 hours from the database
+clock and requires a new linking ceremony. Repeat or concurrent requests cannot
+extend an unexpired successor or spend the same proof on a later claim. Resend,
+replay, reactivation, profile writes and switch changes never renew a claim. Neither
+occupied-address creation nor renewal queues mail or spends invitation budget. A
+member-requested mailbox proof uses existing SSO proof mail and its own limits.
+
+**Commit, blockers and replay.** Use the [team membership and host lock order](data-model.md#team-membership-and-host-lock-order)
+for the SSO actor and team. Hold the organization update lock through completion and
+take claim locks before the User lock. Under those locks reread the session, role,
+binding, provider and domain, both proofs and their deadlines, current mailbox, exact
+claim and User, competing claims, and existing links. Require the User to be active,
+unretired and unlinked and the claim to be unexpired, uncompleted and uninvalidated.
+Check live account and normalized-mailbox blocks in `scim_membership_blocks`, including
+mailbox tombstones after account deletion, and any applicable SSO subject block. This
+flow clears no block. Local reinstatement and SCIM reactivation or retained-member
+re-admission remain separate authority decisions.
+
+Spend the pending completion once, write or reuse the exact SSO identity link, attach
+the SCIM User to the proven account and existing membership, mark the claim complete,
+and write the audit records in one transaction. A conflict or failed commit leaves no
+partial attachment or newly created identity link. Expired, stale, replayed and
+wrong-browser attempts cannot attach an entry or fall back to a different claim or
+ordinary self-link. Invitation acceptance, expiry, renewal, profile change, removal,
+retirement and competing link attempts must be ordered by the same locks. A retired
+User ID stays terminal even when SCIM identifiers are reused on a new entry.
+
+**Child-team rosters.** Attachment creates no child membership and writes no child journal
+entry. An IdP's existing roster assignment becomes effective in Hourmere only when a
+subsequent authorized Group write successfully adds the now-linked User through the
+[Group membership rules](#existing-teams-and-group-writes). That write records
+`scim_membership.added` in the child journal in the same transaction as the roster addition.
+Child owners can see the child membership ID and the `system` actor named `scim` in the
+journal. Event details are empty.
+
+**Audit and interfaces.** `scim_user.claimed` targets the SCIM User and attributes the
+action to the claimant's browser session, with empty details. Record `sso_link.linked`
+only for a newly written SSO link, using the existing SSO event. Journal binding changes
+and renewal in their own transactions with the owner's session and the opaque connection
+or SCIM User target, respectively. Refusals create no SCIM lifecycle events. Existing
+SSO auditing retains its existing allowlisted correlation, redaction and limits. Keep
+mailbox values, IdP subjects, proofs, invitation IDs, bearer credentials and attempt
+material out of new audit details and logs.
+
+The member flow extends browser-session-only `linkSsoAccount` and the existing SSO
+auth-protocol completion surfaces. Owner configuration uses GET and PUT
+`/api/v1/organizations/{organizationId}/provisioning/sso-binding` for safe binding metadata
+and a revision-checked set or clear. Renewal uses POST
+`/api/v1/organizations/{organizationId}/provisioning/users/{scimUserId}/renew-claim`.
+Writes require the owner's session, exact Origin, expected organization and fresh
+administration proof. Declare session-only security and the parity exemption for
+identity-trust changes that require interactive proof. MCP, CLI, API-key and OAuth
+clients cannot act as the consenting browser or owner. `/scim/v2` gains no action,
+field, error or discovery capability. Use the generated client and English and
+Simplified Chinese controls when wiring the browser flow.
+
+**Switches and rollback.** The explicit claim flow is hard-off in production through
+the preparatory rows. Only its release row may wire it into production after acceptance.
+At release it needs `SCIM_PROVISIONING_ENABLED`, the selected protocol's effective SSO
+capability, and the owner's current binding. SAML stays hard-off until its own setting
+step. Turning SCIM off refuses claim start, renewal and completion without doing an
+ordinary self-link, while ordinary SSO continues under its own policy. Turning the
+bound SSO protocol off refuses claim start, renewal and completion with
+`404 sso_disabled`, even if SCIM and the other protocol are on. Those requests follow
+the SSO [setting-off rules](sso.md#rollout-gating) for operations that add trust.
+Native invitation completion and retained-member
+re-admission keep their existing SCIM gates. After release, an owner can clear the
+binding under the SSO trust-reducing rules and their normal proof requirements. An
+enforced team without step-up uses existing SSO recovery. Both rollback paths preserve
+completed links, memberships, enforcement and admission blocks. Claim and proof clocks
+run during downtime. After resumption, an unspent attempt can complete only before
+its original deadlines and after passing every current check. Neither switch restores
+an expired or consumed proof.
+
 ## Invitation delivery and limits
 
 SCIM invitation email admissions have a separate budget of 60 per organization in a rolling
@@ -1033,7 +1199,6 @@ editing `.env`.
 | User reads | Query parser | GET Users and Users/{id}; no MCP/CLI | Resource test flag only | Filtered/unfiltered pagination, inactive entries, scoped not-found, no personal-account enumeration |
 | User creation and claim intent | User reads; audit log PR #246 | POST Users; existing invitation issuance service; no MCP/CLI | Resource test flag only; no automatic admission | Duplicate/replay race, deduplicated notification, signup policy, pending claim, audit atomicity, no verified-email mutation |
 | Claim completion through invitation acceptance | User creation and claim intent | Existing invitation acceptance; no new operation/tool/command | Resource test flag only | Mailbox and own-account proof through acceptance, same-email account without disclosure, expired invitation, expired claim with a resent invitation, local/SCIM tombstones, claim replay, claims without an invitation untouched |
-| Claim completion through SSO linking | Claim completion through invitation acceptance; SSO design PR #247 and accepted linking implementation | SSO linking completion; no new operation/tool/command | Resource test flag only | Own-account proof through the accepted linking flow, claims without an invitation and their 48-hour expiry, same-email conflict, local/SCIM tombstones, claim replay |
 | User profile replacement | Claim completion through invitation acceptance | PUT Users/{id}; no MCP/CLI | Resource test flag only | Okta replacement fixtures, server-owned fields protected, no global profile/email takeover |
 | User PATCH normalization | User profile replacement | PATCH Users/{id} profile operations; active changes refused; no MCP/CLI | Resource test flag only | Ordered atomic patch, Entra forms, invalid-path rollback, bounded input, mutation assertions |
 | Suspension checks on authorization | User PATCH normalization; SSO design PR #247 and accepted linking implementation | Shared REST/MCP/native membership authorization; no new interface | Resource test flag only | Every credential/cached proof refuses suspended team, personal/other-team preservation, native selection and JIT cannot bypass |
@@ -1054,6 +1219,14 @@ editing `.env`.
 | [Local Keycloak harness](#local-keycloak-harness) | RFC and provider corpus | Pinned local image/plugin fixture and synthetic identities; no new interface | Resources hard-off | Document actual SCIM capability, deterministic startup/cleanup, no live third-party calls, reproducible protocol capture without secrets |
 | [Local lifecycle acceptance](#local-lifecycle-acceptance) | Local Keycloak harness; audit log PR #246; SSO design PR #247 and accepted linking implementation | Local fixture scenarios; no new interface | Resources hard-off | Create/rename/deactivate/reactivate/delete/groups, owner/admin refusal, credential rotation/revocation, recovery, rate limits and audit acceptance |
 | Release documentation and registration | Local lifecycle acceptance | Operator/provider docs and production resource registration; no new protocol operation | Enable only after all prior acceptance; same feature for self-hosters | Tested-provider matrix, limitations, rollback drill documented, any intermediate release hard-off proven; complete Users/Groups/conformance before registering handlers; default of `SCIM_PROVISIONING_ENABLED` changed to on, and an install whose `.env` was copied from an earlier `.env.example` (empty value) is on after upgrade without editing `.env` |
+| Claim purpose and migration | Release documentation and registration, Claim completion through invitation acceptance, User lifecycle: retirement and re-admission | Add a migration to persist original claim purpose and record it on issuance | Explicit SSO claim flow hard-off | Predecessor data preserved on upgrade, invitation deletion never converts purpose, unclassified claims stay excluded, invitation acceptance and retained-member re-admission still work |
+| SCIM-to-SSO provider binding | Claim purpose and migration, SSO Provider activation and Fresh proof | Same-team binding storage and owner-only GET/PUT binding, revision-checked set and clear | Explicit SSO claim flow hard-off | No automatic association on upgrade, cross-team and mixed-credential refusal, stale proof or revision refusal, rotation keeps connection, rebind and retirement invalidate old attempts |
+| Explicit OIDC claim attachment | SCIM-to-SSO provider binding, OIDC self-link and Keycloak OIDC linking | Extend `linkSsoAccount` and OIDC completion with the explicit intent, mailbox selection and atomic attachment (about one day) | Explicit SSO claim flow hard-off, fixture only | Unique mailbox match without an ID, wrong account/provider/connection/ID and protected roles refused, expiry, atomic link/claim/audit, existing link reuse, attachment alone writes no child roster or journal entry |
+| OIDC claim conflict and replay acceptance | Explicit OIDC claim attachment | Enforce competing-claim and tombstone checks and exercise the occupied-address and race cases (about one day) | Explicit SSO claim flow hard-off, fixture only | Five occupied-address cases, both live-account and deleted-account tombstones, supplied ID never decides a race, candidate changes and replay refused, later authorized Group addition writes its child roster and journal together |
+| Invitation-free claim renewal | OIDC claim conflict and replay acceptance | Owner POST renewal on the same entry, existing interactive administration proof | Explicit SSO claim flow hard-off, fixture only | Expired claim gets a new ID and 48-hour window, stale proof and concurrent retry fail, no mail, no budget spend, no change to invitations or blockers |
+| Directory claim browser controls | Invitation-free claim renewal, SSO Member UI | Connection selection, renewal and member consent in settings using the generated client | Explicit SSO claim flow hard-off, fixture only | Independent sign-in and explicit consent for the intended resource, en and zh-CN, generic refusals, no controls in production or for the wrong role/team |
+| OIDC directory claim release | Directory claim browser controls, Keycloak OIDC acceptance | Production wiring, public docs, provider fixture and rollback drill, no protocol changes | OIDC claim flow requires SCIM on, OIDC on and explicit owner binding, SAML claim flow hard-off | Full pilot with an existing account, no implicit attachments, independent SCIM-off and OIDC-off checks, current signup and invitation-only rules preserved, no SAML claim via fixture switch in production |
+| SAML directory claim release | OIDC directory claim release, SAML self-link, SAML UI, Keycloak SAML linking and acceptance, SAML setting | Reuse the claim transaction with the SAML ACS and completion POST, public docs and SAML fixture | SAML claim flow hard-off through this row's acceptance, then requires SCIM on, SAML on and explicit owner binding | Bound SAML subject, original browser confirmation and replay, cross-protocol and provider mismatch, same refusal and rollback checks as OIDC |
 
 Mapping administration is ordinary product configuration, not credential minting, so it
 ships MCP and CLI parity rather than borrowing the browser-only exemption. Additional
