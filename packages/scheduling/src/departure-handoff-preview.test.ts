@@ -179,6 +179,42 @@ describe.skipIf(!serverUrl)('internal departure handoff preview', () => {
     ])
   })
 
+  it('requires Microsoft calendars to be enabled when previewing a Teams location', async () => {
+    const { candidate, eventTypeId, input, ctx, fixtures } = await setup()
+    const { calendarId } = await fixtures.calendarBusy(candidate.id, [], { checkConflicts: false })
+    await db
+      .updateTable('calendar_connections')
+      .set({ scopes: ['Calendars.ReadWrite'] })
+      .where('user_id', '=', candidate.id)
+      .execute()
+    await db
+      .updateTable('calendars')
+      .set({ access_role: 'owner' })
+      .where('id', '=', calendarId)
+      .execute()
+    await db
+      .insertInto('profiles')
+      .values({
+        user_id: candidate.id,
+        handle: `teams-${candidate.id.slice(-24)}`,
+        time_zone: 'UTC',
+        destination_calendar_id: calendarId,
+      })
+      .execute()
+    await db
+      .updateTable('event_types')
+      .set({ locations: JSON.stringify([{ id: 'teams', kind: 'microsoft_teams' }]) })
+      .where('id', '=', eventTypeId)
+      .execute()
+
+    await expect(
+      previewDepartureHandoff({ ...ctx, microsoftCalendarEnabled: false }, input),
+    ).rejects.toMatchObject({ kind: 'conflict', code: 'location_unavailable' })
+    await expect(
+      previewDepartureHandoff({ ...ctx, microsoftCalendarEnabled: true }, input),
+    ).resolves.toMatchObject({ locationKind: 'microsoft_teams', availability: 'available' })
+  })
+
   it('ignores an exact mapped source copy and keeps an unrelated busy event at the same time', async () => {
     const { candidate, input, ctx, fixtures } = await setup()
     const { calendarId, externalEventIds } = await fixtures.calendarBusy(

@@ -164,17 +164,20 @@ describe.skipIf(!hasCompose)(
     )
 
     it.each([
-      { enabled: false, mailCap: 20, ownerCap: 5 },
-      { enabled: true, mailCap: 12, ownerCap: 3 },
+      { value: undefined, enabled: true, mailCap: 20, ownerCap: 5 },
+      { value: '', enabled: true, mailCap: 20, ownerCap: 5 },
+      { value: 'false', enabled: false, mailCap: 20, ownerCap: 5 },
+      { value: 'true', enabled: true, mailCap: 12, ownerCap: 3 },
     ])(
-      'loads the same workflow settings in every role when enabled=$enabled',
-      ({ enabled, mailCap, ownerCap }) => {
+      'loads the same workflow settings in every role with WORKFLOWS_ENABLED=$value',
+      ({ value, enabled, mailCap, ownerCap }) => {
         const forwarded = {
-          WORKFLOWS_ENABLED: enabled ? 'true' : '',
-          WORKFLOW_MAIL_MAX_PER_HOUR: enabled ? String(mailCap) : '',
-          WORKFLOW_OWNER_MAIL_MAX_PER_HOUR: enabled ? String(ownerCap) : '',
+          WORKFLOWS_ENABLED: value ?? '',
+          WORKFLOW_MAIL_MAX_PER_HOUR: value === 'true' ? String(mailCap) : '',
+          WORKFLOW_OWNER_MAIL_MAX_PER_HOUR: value === 'true' ? String(ownerCap) : '',
         }
-        const env: Record<string, string> = enabled ? forwarded : {}
+        // The empty assignment is what a copy of the opt-in release's .env.example has.
+        const env = value === undefined ? {} : forwarded
         const standalone = render([], env)
         const split = render(['image', 'proxy', 'worker'], { HOURMERE_VERSION: '1.2.3', ...env })
         expect(standalone.status).toBe(0)

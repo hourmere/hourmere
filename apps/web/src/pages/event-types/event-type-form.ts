@@ -921,6 +921,11 @@ export function serverErrors(
       )
     case 'microsoft_teams_host_policy':
       return field('location-kind', 'Microsoft Teams requires individual scheduling with one host.')
+    case 'microsoft_teams_host_session_required':
+      return field(
+        'location-kind',
+        'The assigned host must configure Microsoft Teams in their own signed-in session.',
+      )
     case 'microsoft_teams_calendar_unavailable':
       return field(
         'location-kind',

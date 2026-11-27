@@ -5,7 +5,7 @@ import { createServer as createHttpServer, type Server } from 'node:http'
 import { createServer as createTcpServer } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { test as base, expect, type FrameLocator, type Locator, type Page } from '@playwright/test'
-import type { RunningServer } from '../../apps/server/src/server.ts'
+import { type RunningServer, startServer } from '../../apps/server/src/server.ts'
 import { createAuth, createAuthPool } from '../../packages/auth/src/index.ts'
 import { writeBookingCalendar } from '../../packages/calendars/src/booking-events.ts'
 import { writeBookingConference } from '../../packages/calendars/src/conferences.ts'
@@ -46,6 +46,7 @@ import { startFixtureServer } from './fixture-server.ts'
 import { listenOwned, type OwnedListener } from './listeners.ts'
 import { type PollAuditState, seedPollAuditData } from './meeting-poll-audit-data.ts'
 import { type ScreenshotFixtureState, seedScreenshotData } from './screenshot-data.ts'
+import { seedWebhookDeliveryHistory } from './webhook-delivery-fixtures.ts'
 
 export interface FixtureApp {
   url: string
@@ -64,6 +65,10 @@ export interface FixtureApp {
   waitlistState: () => Promise<{ states: string[]; acceptedEmails: number; messages: number }>
   auditState: () => Promise<AuditFixtureState>
   auditPollState: (state: PollAuditState) => ReturnType<typeof seedPollAuditData>
+  seedWebhookHistory: (
+    fixture: AuditFixtureState,
+    space?: 'team',
+  ) => ReturnType<typeof seedWebhookDeliveryHistory>
   meetingPollVerificationLink: (email: string) => Promise<URL>
   screenshotState: () => Promise<ScreenshotFixtureState>
   auditSignIn: (signedIn: boolean, locale?: string, space?: 'team') => Promise<void>
@@ -468,7 +473,7 @@ export const test = base.extend<{
       parentListener = await listenOwned(parent)
       const parentUrl = parentListener.url
       const authSecret = randomBytes(32).toString('base64')
-      app = await startFixtureServer(appListener, {
+      const fixtureEnv = {
         DATABASE_URL: owned.url,
         BETTER_AUTH_SECRET: authSecret,
         SIGNUP: 'closed',
@@ -492,7 +497,19 @@ export const test = base.extend<{
         WEB_DIST:
           process.env.HOURMERE_E2E_WEB_DIST ??
           fileURLToPath(new URL('../../apps/web/dist', import.meta.url)),
-      })
+      }
+      app = await startFixtureServer(
+        appListener,
+        fixtureEnv,
+        uiAudit
+          ? (env, options) =>
+              startServer(env, {
+                ...options,
+                // Repeated page mounts share one loopback bucket across all apps in a worker.
+                organizationListRateLimitMaxForTests: 20_000,
+              })
+          : undefined,
+      )
       let externalRequests = 0
       let authorization: string | undefined
       await context.route('**/*', async (route) => {
@@ -524,6 +541,7 @@ export const test = base.extend<{
         url,
         parentUrl,
         personalPath: '/fixture-host/call',
+        seedWebhookHistory: (fixture, space) => seedWebhookDeliveryHistory(db, fixture, space),
         auditPollState: async (state) => {
           // Poll backing events must not change the existing host/list audit states.
           const pollHost = await f.host()

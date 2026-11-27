@@ -18,7 +18,6 @@ export async function getDepartureHandoffLocation(
 ): Promise<LocationKind | null> {
   const option = selectBookableLocationOption(event, locationOptionId)
   if (
-    (option?.kind === 'microsoft_teams' && ctx.microsoftCalendarEnabled !== true) ||
     option?.kind === 'link' ||
     (option?.kind === 'google_meet' && !automaticMeet(option)) ||
     (option?.kind === 'zoom' && !automaticZoom(option)) ||
