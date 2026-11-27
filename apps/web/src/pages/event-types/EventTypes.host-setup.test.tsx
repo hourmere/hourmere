@@ -1,9 +1,10 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { InterfaceScope } from '../../i18n/runtime.tsx'
 import { chooseLanguage } from '../../i18n/store.ts'
+import { resolveEventTypeEditor } from '../../test/event-type-editor.ts'
 import {
   fakeApi,
   json,
@@ -19,6 +20,8 @@ import { UnsavedChangesProvider } from '../../unsaved-changes.tsx'
 import { TeamMembers } from '../TeamMembers.tsx'
 import { emptyDraft } from './event-type-form.ts'
 import { ReadOnlyHosts } from './ReadOnlyHosts.tsx'
+
+beforeAll(resolveEventTypeEditor)
 
 const TEAM = { ...ME, organization: { ...ME.organization, personal: false } }
 const PEER_ID = '00000000-0000-7000-8000-000000000009'
