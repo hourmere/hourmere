@@ -318,6 +318,20 @@ describe('launch documentation disclosures', () => {
   })
 })
 
+describe('PWA installation documentation', () => {
+  it('distinguishes the proposed Web Push pilot from current availability', () => {
+    const assessment = read(`${siteDocs}/install-app.md`).split('\n## Web Push assessment\n')[1]
+    const limitations = read(`${siteDocs}/index.md`).split('\n## Known limitations\n')[1]
+
+    expect(prose(assessment ?? '')).toContain(
+      'Hourmere does not send Web Push notifications or request notification permission.',
+    )
+    expect(limitations).toContain(
+      'Hourmere does not send Web Push notifications. The [Web Push assessment](/docs/install-app#web-push-assessment)',
+    )
+  })
+})
+
 describe('Google self-hosting guidance', () => {
   const paths = [
     `${siteDocs}/google-calendar.md`,
