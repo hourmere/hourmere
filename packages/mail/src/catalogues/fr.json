@@ -81,6 +81,7 @@
   "teamInvitation.defaultInviter": "Un membre de l’équipe",
   "teamInvitation.subject": "Invitation à rejoindre {team}",
   "teamInvitation.introduction": "{inviter} vous a invité à rejoindre l’équipe « {team} » sur Hourmere.",
+  "teamInvitation.scimIntroduction": "Votre fournisseur d’identité vous a envoyé cette invitation au nom de l’équipe « {team} » sur Hourmere.",
   "teamInvitation.identity": "Connectez-vous avec l’adresse e-mail invitée {email} et vérifiez-la, puis acceptez l’invitation sur la page. Les alias de messagerie ne peuvent pas remplacer cette adresse.",
   "teamInvitation.acceptance": "La connexion seule ne vous fait pas rejoindre l’équipe ; vous devez accepter explicitement l’invitation sur la page.",
   "teamInvitation.expiry": "Cette invitation expire le {expiry}.",
