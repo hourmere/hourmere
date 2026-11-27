@@ -168,6 +168,39 @@ The [paid-booking design](payments.md) describes pending-payment holds, bounded 
 occupancy, the Stripe webhook receiver, leased refund obligations and operator reconciliation.
 Public Checkout remains disabled.
 
+## Custom role storage
+
+Migration `0197_custom_role_storage.sql` creates storage for [team custom roles](custom-roles.md).
+The instance master switch and team opt-ins start off. New teams without a policy row
+are off. The master and team epochs form the policy version for custom authority.
+Changing the master epoch leaves the team opt-in intact and invalidates the old version
+for every opted-in team. Fixed-role traffic continues through the existing predicates.
+
+Each role has an organization-scoped identity and a pointer to one immutable revision.
+The revision records a catalogue version and explicit permission IDs. The database
+rejects unknown versions, wildcards, fixed-only actions and duplicate IDs in role
+revisions. The v1 catalogue includes the deferred phase-two IDs. Rollout controls
+which permissions can be granted. An assignment binds a fixed Member incarnation
+to a role in the same team and records the assigning user. Assigning a role to
+oneself fails. Role definitions and assignments are restricted to team spaces, and
+an organization with role history cannot be marked as personal. Publishing a revision
+or changing an assignment advances the affected members' authorization generations in
+the same transaction.
+
+The migration snapshots exact, trimmed role tokens and sets the initial generation to
+one on existing memberships. A single recognized token maps to the corresponding
+fixed policy. Other token sets remain ambiguous for the future activation preflight.
+The snapshot conveys no authorization. Existing members, invitations, sessions, keys
+and OAuth grants remain intact. Credential ceiling rows start empty because the
+current role cannot prove a credential's original ceiling. SCIM token associations
+record their separate directory protocol version.
+
+Normal application traffic does not resolve or manage custom roles during this
+storage-only step. To downgrade, use the supported database backup and restore
+procedure. After a future activation, follow the credential revocation and reissue
+steps in the [disable and recover design](custom-roles.md#storage-migration-and-credential-versions)
+before returning traffic to the restored database.
+
 ## Principles
 
 - **Two schemas.** `auth` belongs to [Better Auth](https://www.better-auth.com) and keeps
