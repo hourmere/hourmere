@@ -456,6 +456,67 @@ describe.skipIf(!serverUrl)('internal departure handoff apply', () => {
     expect(await intents(f)).toHaveLength(2)
   })
 
+  it('serializes different sources competing for the same successor slot', async ({
+    signal,
+    onTestFinished,
+  }) => {
+    const first = await setup()
+    const second = await createHandoffTestFixture(db, {
+      candidate: first.candidate,
+      applyContext: { notify },
+    })
+    await approve(first)
+    await approve(second)
+    const original = await bookings(second)
+    const completed = Promise.withResolvers<void>()
+    onTestFinished(() => completed.promise)
+
+    let competing: ReturnType<typeof apply> | undefined
+    let competingFinished = false
+    let lockType: string | undefined
+    try {
+      await expect(
+        applyDepartureHandoff(
+          {
+            ...first.ctx,
+            async notify(trx, event, now) {
+              await notify(trx, event, now)
+              if (event.type !== 'cancelled') return
+              // The first apply is past host locking but has not occupied the slot yet.
+              // Use its own connection to wait for the competing apply's actual lock wait.
+              competing = apply(second)
+              const finished = () => {
+                competingFinished = true
+              }
+              void competing.then(finished, finished)
+              while (!competingFinished) {
+                signal.throwIfAborted()
+                const { rows } = await sql<{ locktype: string }>`
+                  SELECT locktype FROM pg_locks
+                  WHERE NOT granted AND pg_backend_pid() = ANY(pg_blocking_pids(pid))`.execute(trx)
+                if (rows[0]) {
+                  lockType = rows[0].locktype
+                  return
+                }
+                await setTimeout(10, undefined, { signal })
+              }
+            },
+          },
+          first.input,
+          storage.store,
+        ),
+      ).resolves.toMatchObject({ sourceBookingId: first.booking.id })
+      expect(competing).toBeDefined()
+      await expect(competing).rejects.toMatchObject({ kind: 'conflict', code: 'slot_unavailable' })
+      expect(lockType).toBe('advisory')
+      expect(await bookings(first)).toHaveLength(2)
+      await expectUnchanged(second, original)
+    } finally {
+      await competing?.catch(() => {})
+      completed.resolve()
+    }
+  })
+
   for (const action of ['cancel', 'reschedule'] as const) {
     it(`lets ordinary ${action} win when it holds the booking first`, async (testContext) => {
       const f = await setup()

@@ -34,16 +34,31 @@ export interface DepartureHandoffPreview {
   availability: 'available' | 'unavailable'
 }
 
-/**
- * Internal trial of one slot for the repaired event's sole host. The rollout has no
- * transport entry point. A later write must authorize and recheck under its own locks.
- * The only conflict information returned is whether this exact slot is offered.
- */
+/** Trial of one slot for the repaired event's sole host. A write must recheck under
+ * its own locks. The only conflict information returned is whether the slot is offered. */
 export function previewDepartureHandoff(
   ctx: ServiceContext,
   input: DepartureHandoffPreviewInput,
   ssoCapabilities: TeamSsoCapabilities = ssoHardOff,
 ): Promise<DepartureHandoffPreview> {
+  return withDepartureHandoffRead(
+    ctx,
+    input.teamId,
+    input.teamId,
+    ssoCapabilities,
+    (readContext, organizationId, now) =>
+      previewDepartureHandoffSlot(readContext, organizationId, input, now),
+  )
+}
+
+/** Authorize and read the preview and any offer evidence in one private snapshot. */
+export function withDepartureHandoffRead<T>(
+  ctx: ServiceContext,
+  teamId: string,
+  expectedOrganizationId: string,
+  ssoCapabilities: TeamSsoCapabilities,
+  read: (ctx: ServiceContext, organizationId: string, now: Temporal.Instant) => Promise<T>,
+): Promise<T> {
   return ctx.db
     .transaction()
     .setIsolationLevel('repeatable read')
@@ -60,8 +75,8 @@ export function previewDepartureHandoff(
       if (principal.kind !== 'session')
         throw new DomainError('forbidden', 'team_management_access_denied')
 
-      const actor = await checkTeamManagementAccess(db, principal, input.teamId, false, {
-        expectedOrganizationId: input.teamId,
+      const actor = await checkTeamManagementAccess(db, principal, teamId, false, {
+        expectedOrganizationId,
         allowPersonal: false,
       }).catch((error: unknown) => {
         if (!(error instanceof TeamManagementError)) throw error
@@ -80,48 +95,57 @@ export function previewDepartureHandoff(
       if (!sso.allowed) throw new DomainError('forbidden', 'sso_required')
 
       const now = ctx.now()
-      const readContext = { ...ctx, db, scimResourcesEnabled }
-      const { source, event, candidateUserId } = await getDepartureHandoffEligibility(
-        readContext,
-        actor.organizationId,
-        input,
-        now,
-      )
-      const locationKind = await getDepartureHandoffLocation(
-        readContext,
-        event,
-        input.locationOptionId ?? source.locationOptionId,
-        source.savedInviteePhone,
-      )
-      const durationMinutes = selectDurationMinutes(
-        event,
-        input.durationMinutes ?? source.end.since(source.start).total('minutes'),
-      )
-      const start = input.start ?? source.start
-      const end = start.add({ minutes: durationMinutes })
-      // This mapper omits only the source's local occupancy and exact provider-event
-      // mappings for its chain. It refuses stale conflict calendars without provider I/O.
-      const slots = await findSlots(db, {
-        eventTypeId: event.id,
-        hostUserId: candidateUserId,
-        rangeStart: start,
-        rangeEnd: end,
-        now,
-        durationMinutes,
-        excludeBookingId: source.id,
-      })
-
-      return {
-        bookingId: source.id,
-        eventTypeId: event.id,
-        candidateUserId,
-        evaluatedAt: now.toString(),
-        start: start.toString(),
-        end: end.toString(),
-        locationKind,
-        availability: slots.some((slot) => slot.start.equals(start) && slot.end.equals(end))
-          ? 'available'
-          : 'unavailable',
-      }
+      return read({ ...ctx, db, scimResourcesEnabled, now: () => now }, actor.organizationId, now)
     })
+}
+
+/** Needs a current authorized team and the caller's read-only snapshot. */
+export async function previewDepartureHandoffSlot(
+  ctx: ServiceContext,
+  organizationId: string,
+  input: Omit<DepartureHandoffPreviewInput, 'teamId'>,
+  now: Temporal.Instant,
+): Promise<DepartureHandoffPreview> {
+  const { source, event, candidateUserId } = await getDepartureHandoffEligibility(
+    ctx,
+    organizationId,
+    input,
+    now,
+  )
+  const locationKind = await getDepartureHandoffLocation(
+    ctx,
+    event,
+    input.locationOptionId ?? source.locationOptionId,
+    source.savedInviteePhone,
+  )
+  const durationMinutes = selectDurationMinutes(
+    event,
+    input.durationMinutes ?? source.end.since(source.start).total('minutes'),
+  )
+  const start = input.start ?? source.start
+  const end = start.add({ minutes: durationMinutes })
+  // This mapper omits only the source's local occupancy and exact provider-event
+  // mappings for its chain. It refuses stale conflict calendars without provider I/O.
+  const slots = await findSlots(ctx.db, {
+    eventTypeId: event.id,
+    hostUserId: candidateUserId,
+    rangeStart: start,
+    rangeEnd: end,
+    now,
+    durationMinutes,
+    excludeBookingId: source.id,
+  })
+
+  return {
+    bookingId: source.id,
+    eventTypeId: event.id,
+    candidateUserId,
+    evaluatedAt: now.toString(),
+    start: start.toString(),
+    end: end.toString(),
+    locationKind,
+    availability: slots.some((slot) => slot.start.equals(start) && slot.end.equals(end))
+      ? 'available'
+      : 'unavailable',
+  }
 }

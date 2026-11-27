@@ -125,8 +125,7 @@ export async function getDepartureHandoffEligibility(
   // A legacy successor may contain a local source value on an imported chain.
   if (await isImportedBooking(db, source.id)) throw ineligibleSource()
 
-  // Event types have no price setting yet (docs/payments.md). A future price setting
-  // also belongs in this target admission check.
+  // The payment constraint allows prices only on personal event types.
   const event = await findOneTimeEventType(db, source.event_type_id, {
     lock: lockEvent,
     scimResourcesEnabled: ctx.scimResourcesEnabled,

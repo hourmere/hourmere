@@ -4812,6 +4812,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/team/bookings/{id}/handoff-offers/{offerId}/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Apply an explicitly approved booking handoff
+         * @description Requires a current owner/admin browser session and a same-origin write. Rechecks team authority, exact version, all recipient approvals, the currently offered slot and meeting eligibility in one transaction. Replays return the same limited receipt. Provider and mail work runs after commit.
+         */
+        post: operations["applyDepartureHandoff"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/team/bookings/{id}/handoff-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview one booking handoff and read its current consent or receipt
+         * @description Reads one exact slot on the event type’s current grid. Does not reserve time, send consent links, or change a booking. Returns limited consent counts or a safe committed status from the same team. Staged and disabled unless a handoff store and booking notifier are wired in.
+         */
+        get: operations["previewDepartureHandoff"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/team/bookings/bulk-cancellations/preview": {
         parameters: {
             query?: never;
@@ -6740,6 +6780,49 @@ export interface components {
         };
         DeleteWorkflowInput: {
             expectedRevision: number;
+        };
+        DepartureHandoffPreview: {
+            /** @enum {string} */
+            issue?: "calendar_sync_unavailable" | "location_unavailable" | "handoff_offer_changed" | "handoff_source_ineligible" | "handoff_candidate_ineligible";
+            offer: {
+                /** Format: date-time */
+                expiresAt: string;
+                /** Format: uuid */
+                id: string;
+                outstandingApprovals?: number;
+                /** @enum {string} */
+                state: "unverified" | "pending" | "ready" | "expired" | "closed";
+                version: number;
+            } | null;
+            preview: {
+                /** @enum {string} */
+                availability: "available" | "unavailable";
+                candidateName: string;
+                /** Format: date-time */
+                end: string;
+                /** Format: date-time */
+                evaluatedAt: string;
+                /** @enum {string|null} */
+                locationKind: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams" | null;
+                /** Format: date-time */
+                start: string;
+            } | null;
+            receipt: {
+                /** @enum {string} */
+                conference: "pending" | "ready" | "failed" | "not_required" | "unknown";
+                /** @enum {string} */
+                oldConferenceCleanup?: "pending" | "complete" | "unresolved";
+                /** Format: uuid */
+                replacementBookingId: string;
+                /** Format: uuid */
+                sourceBookingId: string;
+            } | null;
+        };
+        DepartureHandoffReceipt: {
+            /** Format: uuid */
+            replacementBookingId: string;
+            /** Format: uuid */
+            sourceBookingId: string;
         };
         DisplayName: {
             name: string;
@@ -9509,6 +9592,8 @@ export interface components {
             status: "confirmed" | "cancelled";
         };
         TeamAdminBookingDetail: components["schemas"]["TeamAdminBooking"] & {
+            /** @enum {boolean} */
+            departureHandoffEnabled?: true;
             location?: {
                 /** @enum {string} */
                 kind: "microsoft_teams";
@@ -20046,6 +20131,180 @@ export interface operations {
                 };
             };
             /** @description organization_context_changed: reload the page before trying this team write again; booking_already_cancelled: this team's booking is already cancelled */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    applyDepartureHandoff: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required team where the booking was opened. Reload if the active space changed. */
+                "x-expected-organization-id": string;
+            };
+            path: {
+                id: string;
+                offerId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    version: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Committed handoff receipt */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepartureHandoffReceipt"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Verified team owner/admin browser session required. Authorization headers are denied. sso_required: This team requires a current SSO proof. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Handoffs are disabled or the source or offer is unavailable in the current team. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed: reload the page before trying this team write again; the current booking, offer, consent or slot changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Required calendar availability is unknown */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    previewDepartureHandoff: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required team where the booking was opened. Reload if the active space changed. */
+                "x-expected-organization-id": string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current handoff preview or status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepartureHandoffPreview"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Verified team owner/admin browser session required. Authorization headers are denied. sso_required: This team requires a current SSO proof. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Handoffs are disabled or the source or offer is unavailable in the current team. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed: reload the page before trying this team write again; the current booking, offer, consent or slot changed */
             409: {
                 headers: {
                     [name: string]: unknown;
