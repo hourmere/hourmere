@@ -1321,6 +1321,7 @@ async function start(
     invitationInviterMaxPerDay: config.INVITATION_INVITER_MAX_PER_DAY,
     invitationTeamMaxPerHour: config.INVITATION_TEAM_MAX_PER_HOUR,
     invitationTeamMaxPerDay: config.INVITATION_TEAM_MAX_PER_DAY,
+    invitationGlobalRecipientMultiplier: config.INVITATION_GLOBAL_RECIPIENT_MULTIPLIER,
   }
   const waitlistDeps = {
     db,
