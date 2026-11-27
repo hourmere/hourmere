@@ -101,6 +101,14 @@ export async function signInAtKeycloak(
   await submitKeycloakLogin(page, app, username)
 }
 
+export async function signInThroughSaml(page: Page, app: KeycloakFixture) {
+  await page.goto(samlSignInUrl(app))
+  await signInAtKeycloak(page, app)
+  const completion = await completeSamlCeremony(page, app)
+  expect(completion.status()).toBe(303)
+  await expectSession(page, app, app.linkedUserId, false)
+}
+
 export async function signInWithEmail(page: Page, app: KeycloakFixture, email: string) {
   await page.getByRole('textbox', { name: 'Email', exact: true }).fill(email)
   await button(page, emailLinkLabel).click()
@@ -109,7 +117,7 @@ export async function signInWithEmail(page: Page, app: KeycloakFixture, email: s
   await clickPrivate(button(page, 'Sign in to Hourmere'))
 }
 
-async function readFixtureApi(page: Page, url: string) {
+export async function readFixtureApi(page: Page, url: string) {
   try {
     return await page.request.get(url)
   } catch {
@@ -167,14 +175,18 @@ export async function proveMailbox(page: Page, app: KeycloakFixture, email: stri
   return new URLSearchParams(link.hash.slice(1)).get('attempt')
 }
 
-export async function openMemberSettings(page: Page, app: KeycloakFixture) {
-  await page.goto(`${app.url}/sign-in`)
-  await signInWithEmail(page, app, app.idp.linkable.email)
-  await expectSession(page, app, app.linkableUserId, true)
+export async function switchToFixtureTeam(page: Page, app: KeycloakFixture) {
   const space = page.getByRole('button', { name: /^Switch space/ })
   await space.click()
   await page.getByRole('menuitemradio', { name: app.teamName, exact: true }).click()
   await expect(space).toContainText(app.teamName)
+}
+
+export async function openMemberSettings(page: Page, app: KeycloakFixture) {
+  await page.goto(`${app.url}/sign-in`)
+  await signInWithEmail(page, app, app.idp.linkable.email)
+  await expectSession(page, app, app.linkableUserId, true)
+  await switchToFixtureTeam(page, app)
   await page.goto(`${app.url}/app/settings`)
   await expect(page.getByRole('heading', { name: 'Account', exact: true })).toBeVisible()
   const instance = await readFixtureApi(page, `${app.url}/api/v1/instance`)
@@ -223,13 +235,19 @@ export async function acceptFixtureInvitation(
 export async function expectMailboxCannotEnterTeam(page: Page, app: KeycloakFixture) {
   await signInWithEmail(page, app, app.idp.linked.email)
   await expectSession(page, app, app.linkedUserId, true)
-  const response = await page.request.post(`${app.url}/api/auth/organization/set-active`, {
-    headers: { origin: app.url },
-    data: { organizationId: app.teamId },
-    maxRedirects: 0,
-  })
+  const response = await page.request
+    .post(`${app.url}/api/auth/organization/set-active`, {
+      headers: { origin: app.url },
+      data: { organizationId: app.teamId },
+      maxRedirects: 0,
+    })
+    .catch(() => {
+      throw new Error('The browser could not request the fixture team')
+    })
   expect(response.status()).toBe(403)
-  expect(response.headers().location).toBeUndefined()
+  expect(response.headers().location === undefined, 'Team access denial must not redirect').toBe(
+    true,
+  )
   expect(await response.json()).toMatchObject({ code: 'SSO_REQUIRED', message: 'sso_required' })
   await expectSession(page, app, app.linkedUserId, true)
 }

@@ -24,7 +24,9 @@ import {
 } from '../../../packages/db/src/sso-identity-fixtures.ts'
 import { insert, sealed } from '../../../packages/db/src/sso-storage-fixtures.ts'
 import { createApp } from './app.ts'
+import type { RouteModule } from './openapi.ts'
 import { openApiRouteInventory } from './openapi-document.ts'
+import { teamBookingBulkPreviewRoutes } from './routes/team-booking-bulk-preview.ts'
 import { productRoutes } from './server.ts'
 import { databaseClock } from './sso-mailbox-proof.ts'
 import { teamReadAccess } from './sso-team-reads.ts'
@@ -124,27 +126,39 @@ describe.skipIf(!serverUrl)('SSO proof on team writes', () => {
     }
   }
 
-  function instance({ enabled = true, enforce = true, routeDb = db } = {}) {
+  function instance({
+    enabled = true,
+    enforce = true,
+    routeDb = db,
+    routes,
+  }: {
+    enabled?: boolean
+    enforce?: boolean
+    routeDb?: Db
+    routes?: RouteModule[]
+  } = {}) {
     const capabilities = { ssoOidcEnabled: enabled, ssoSamlEnabled: false }
     return createApp({
       checkDb: async () => {},
       authHandler: auth.handler,
       resolveCaller: createCallerResolver({ auth, db, ssoCapabilities: capabilities }),
       publicUrl,
-      routes: productRoutes({
-        db: routeDb,
-        publicUrl,
-        socialProviders: {},
-        invitationMailLimits: { secret },
-        meetingPollSecret: secret,
-        routingFormsEnabled: true,
-        routingSecret: secret,
-        workflowsEnabled: true,
-        scimProvisioningEnabled: true,
-        ssoOidcEnabled: enabled,
-        ssoConfigurationKey: Buffer.alloc(32),
-        webhooks: { enabled: true },
-      }),
+      routes:
+        routes ??
+        productRoutes({
+          db: routeDb,
+          publicUrl,
+          socialProviders: {},
+          invitationMailLimits: { secret },
+          meetingPollSecret: secret,
+          routingFormsEnabled: true,
+          routingSecret: secret,
+          workflowsEnabled: true,
+          scimProvisioningEnabled: true,
+          ssoOidcEnabled: enabled,
+          ssoConfigurationKey: Buffer.alloc(32),
+          webhooks: { enabled: true },
+        }),
       ...(enforce && {
         ssoTeamReads: { db, capabilities },
       }),
@@ -255,6 +269,10 @@ describe.skipIf(!serverUrl)('SSO proof on team writes', () => {
   it('checks every registered team write with operational features enabled', async () => {
     await requireSso()
     const app = instance()
+    // The preview route has no production opt-in until bulk cancellation ships.
+    const bulk = instance({
+      routes: [teamBookingBulkPreviewRoutes({ db, bulkSelectionSecret: secret })],
+    })
     const { teamWriteRoutes } = await openApiRouteInventory()
     for (const operation of teamWriteRoutes) {
       const [method, pattern] = operation.split(' ') as [string, string]
@@ -264,7 +282,8 @@ describe.skipIf(!serverUrl)('SSO proof on team writes', () => {
         if (key === 'domainId') return String(fixture.domain.id)
         return eventId
       })
-      await expectRefused(await send(app, method, path, {}), operation)
+      const target = path === '/api/v1/team/bookings/bulk-cancellations/preview' ? bulk : app
+      await expectRefused(await send(target, method, path, {}), operation)
     }
     expect(await currentTitle()).toBe('Before writing')
   })

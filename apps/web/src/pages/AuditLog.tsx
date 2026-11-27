@@ -22,6 +22,7 @@ type ActorType =
   | 'oauth_client'
   | 'system'
   | 'scim_token'
+  | 'scim_connection'
   | 'anonymous'
   | 'external_api_key'
   | 'external_oauth_client'
@@ -37,6 +38,7 @@ const ACTOR_TYPES: Record<ActorType, MessageKey> = {
   oauth_client: 'OAuth client',
   system: 'System',
   scim_token: 'SCIM token',
+  scim_connection: 'SCIM connection',
   anonymous: 'Anonymous',
   external_api_key: 'External API key',
   external_oauth_client: 'External OAuth client',

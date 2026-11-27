@@ -28,11 +28,23 @@ replaces the old secret immediately, including for retry attempts. Before deleti
 the endpoint ID and confirm that you can lose its retained delivery history. If a write
 cannot be confirmed, refresh the list and verify the endpoint ID before taking another action.
 
+Open **Delivery history** on an endpoint to inspect its records from the last 30 days,
+newest first. The history shows whether each delivery is pending, delivered, failed or
+skipped, along with attempt counts, timestamps, HTTP status and a safe error label when
+available. A pending delivery may already show a failed attempt. Use **Load older
+deliveries** to continue, or **Refresh history** to start again at the newest records
+when the page is unavailable. History contains delivery metadata only.
+
 中文：选择个人或团队空间，然后打开 **设置 → 集成 → Webhook**。列表显示目标站点、端点 ID、
 订阅事件及启用或暂停状态。每个空间最多有十个端点，包含暂停的端点。更换目标 URL 时，请先
 新建端点，再更新引用旧端点 ID 的工作流，最后删除旧端点。创建或轮换后，请立即将仅展示一次的
 签名密钥复制到接收端的密钥存储。轮换立即替换旧密钥，也适用于重试。删除会永久清除保留的投递
 记录。若无法确认操作结果，请刷新列表并核对端点 ID，再采取下一步操作。
+
+选择端点的 **投递历史**，按从新到旧的顺序查看最近 30 天的记录。记录显示待投递、已投递、
+投递失败或已跳过，以及尝试次数、时间、HTTP 状态码和可用的错误标签。待投递记录可能已有失败的
+尝试。选择 **加载更早的投递记录** 可以继续浏览。若当前页无法访问，请选择 **刷新投递历史**，
+从最新的记录重新开始。投递历史仅显示元数据。
 
 ## Enable and configure
 

@@ -1053,8 +1053,8 @@ describe.skipIf(!serverUrl)('team booking cancellation HTTP boundary', () => {
 
   it('detects replacing missing context with the current organization with a real assertion failure', async () => {
     const copy = routeCopy([
-      "c.req.header(EXPECTED_ORGANIZATION_HEADER) ?? ''",
-      'c.var.principal.organization.id',
+      "const expectedOrganizationId = c.req.header(EXPECTED_ORGANIZATION_HEADER) ?? ''",
+      'const expectedOrganizationId = c.var.principal.organization.id',
     ])
     await expect(verifyExpectedContext(copy)).rejects.toThrow(
       expect.objectContaining({ name: 'AssertionError' }),
