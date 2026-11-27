@@ -3264,7 +3264,7 @@ const sameUuid = (left: unknown, right: unknown) =>
   typeof right === 'string' &&
   left.toLowerCase() === right.toLowerCase()
 
-async function auditBooking(
+export async function auditBooking(
   trx: Db,
   organizationId: string,
   targetId: string,
