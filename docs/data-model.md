@@ -2759,6 +2759,27 @@ Actor, session and booking IDs are retained when their corresponding rows are de
 A preview writes these two tables in one transaction. It does not change bookings or enqueue
 jobs or notifications. Admission, execution and receipt cleanup are future release steps.
 
+## Departure booking handoff storage
+
+`departure_handoff_offers` stores one immutable row per source booking version. The
+source and team are linked by a composite foreign key. A source has at most one live
+version. Its saved terms may be closed, and different terms require a new version.
+`departure_handoff_recipients` stores one normalized mailbox per exact version and a
+pending, approved or declined decision. Each recipient has a globally unique record ID.
+
+`departure_booking_handoffs` is both the internal link and the immutable receipt. It
+uniquely binds a source to a distinct same-team replacement and records the exact offer
+version, applying actor, time and opaque approval IDs. Apply writes it and closes the
+offer in the transaction that cancels the source and creates the replacement. Booking
+chain traversal continues to use `rescheduled_from_id`.
+
+Team deletion cascades through its bookings. Deleting the source removes its offers,
+recipients and receipt. Deleting the replacement also removes the receipt. Team member
+removal preserves the proposal and receipt's historical actor IDs. A committed receipt
+retains the offer version it references and survives pruning of the recipient mailbox
+rows. Production admission stays disabled while proposal lifecycle, delivery and
+recipient decisions are built. See [the handoff design](member-departure-handoff.md).
+
 ## Audit events
 
 `audit_events` is the append-only management journal available to every instance.

@@ -684,6 +684,44 @@ export interface ConferenceTokenOperations {
   user_id: string;
 }
 
+export interface DepartureBookingHandoffs {
+  applied_at: Timestamp;
+  applying_user_id: string;
+  offer_id: string;
+  offer_version: number;
+  organization_id: string;
+  recipient_ids: string[];
+  replacement_booking_id: string;
+  source_booking_id: string;
+}
+
+export interface DepartureHandoffOffers {
+  departing_user_id: string;
+  duration_minutes: number;
+  expires_at: Timestamp;
+  id: Generated<string>;
+  issued_at: Timestamp;
+  location_option_id: string | null;
+  organization_id: string;
+  proposer_user_id: string;
+  source_booking_id: string;
+  state: Generated<string>;
+  target_start_at: Timestamp;
+  terms_digest: string;
+  version: number;
+}
+
+export interface DepartureHandoffRecipients {
+  decided_at: Timestamp | null;
+  decision: string | null;
+  id: Generated<string>;
+  offer_id: string;
+  offer_version: number;
+  organization_id: string;
+  recipient_key: string;
+  source_booking_id: string;
+}
+
 export interface EventTypeHosts {
   destination_calendar_id: string | null;
   event_type_id: string;
@@ -1990,6 +2028,9 @@ export interface DB {
   conference_connections: ConferenceConnections;
   conference_oauth_states: ConferenceOauthStates;
   conference_token_operations: ConferenceTokenOperations;
+  departure_booking_handoffs: DepartureBookingHandoffs;
+  departure_handoff_offers: DepartureHandoffOffers;
+  departure_handoff_recipients: DepartureHandoffRecipients;
   event_type_hosts: EventTypeHosts;
   event_types: EventTypes;
   group_booking_move_receipts: GroupBookingMoveReceipts;

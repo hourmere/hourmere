@@ -27,7 +27,7 @@ import { createPublicTeamBooking } from '../../packages/scheduling/src/bookings.
 import type { BookingNotifier } from '../../packages/scheduling/src/context.ts'
 import {
   createHandoffTestFixture,
-  createHandoffTestStorage,
+  handoffTestRecords,
   handoffTestSession,
 } from '../../packages/scheduling/src/departure-handoff-apply-test-fixture.ts'
 import { test as base, expect } from './fixtures.ts'
@@ -152,7 +152,7 @@ export const test = base.extend<{
           .where('id', '=', eventTypeId)
           .execute()
       }
-      const storage = await createHandoffTestStorage(db)
+      const storage = handoffTestRecords(db)
       const fixture = await createHandoffTestFixture(db, {
         now,
         start,

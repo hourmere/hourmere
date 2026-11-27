@@ -41,6 +41,7 @@ interface HandoffKey {
   organizationId: string
   sourceBookingId: string
   offerId: string
+  version: number
 }
 
 export interface DepartureHandoffOffer {
@@ -67,12 +68,14 @@ export interface DepartureHandoffOffer {
  * It must enforce unique source and replacement edges and persist the receipt and consent
  * references atomically. Mailbox keys identify decisions and stay in offer storage. */
 export interface DepartureHandoffApplyStore {
-  lockOffer(trx: Transaction<Database>, key: HandoffKey): Promise<DepartureHandoffOffer | undefined>
+  lockOffer(
+    trx: Transaction<Database>,
+    key: HandoffKey,
+  ): Promise<DepartureHandoffOffer | 'version_mismatch' | undefined>
   commitHandoff(
     trx: Transaction<Database>,
     key: HandoffKey,
     evidence: {
-      version: number
       applyingUserId: string
       appliedAt: string
       recipientIds: string[]
@@ -334,15 +337,11 @@ export async function applyDepartureHandoff(
         organizationId: actor.organizationId,
         sourceBookingId: source.id,
         offerId: input.offerId.toLowerCase(),
+        version: input.version,
       }
       const offer = await store.lockOffer(trx, key)
       if (!offer) throw offerNotFound()
-      if (
-        !Number.isSafeInteger(input.version) ||
-        input.version < 1 ||
-        offer.version !== input.version
-      )
-        throw offerChanged()
+      if (offer === 'version_mismatch' || offer.version !== input.version) throw offerChanged()
       if (offer.committed) {
         await checkTeamWriteDeadline(trx, deadline, ssoRequired)
         await teamSession(trx, principal, false).catch(rethrowTeamManagementError)
@@ -446,7 +445,6 @@ export async function applyDepartureHandoff(
         now,
       )
       await store.commitHandoff(trx, key, {
-        version: offer.version,
         applyingUserId: actor.userId,
         appliedAt: now.toString(),
         recipientIds,
