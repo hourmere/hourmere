@@ -1,6 +1,7 @@
 import { type Expression, sql, type Transaction } from 'kysely'
 import { writeAuditEvent } from './audit.ts'
 import type { Database } from './index.ts'
+import { retirePendingOwnershipTransfer } from './ownership-transfer.ts'
 
 interface ScimMembershipSuspension {
   organizationId: string
@@ -102,6 +103,8 @@ export async function revokeScimTeamCredentials(
   organizationId: string,
   userId: string,
 ) {
+  await retirePendingOwnershipTransfer(trx, { organizationId, userId })
+
   // Delete by indexed account ID in one batch. A simultaneous rolling refresh only
   // updates the existing row, so it either completes before deletion or finds no session.
   await trx

@@ -14,6 +14,7 @@ import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { fixedTeamRole } from '../../../packages/auth/src/team-role-policy.ts'
 import { createApp } from './app.ts'
+import { seedPendingOwnershipTransfer } from './ownership-transfer-fixtures.ts'
 import { productRoutes } from './server.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -177,6 +178,34 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
       .orderBy('id')
       .execute()
   }
+
+  it('invalidates a pending transfer only after an actual participant role change', async () => {
+    const f = await fixture()
+    const offer = await seedPendingOwnershipTransfer(db, f.teamId, f.actor.id, f.target.id)
+    const change = (role: 'member' | 'admin') =>
+      post(f, 'update-member-role', {
+        organizationId: f.teamId,
+        memberId: f.targetMemberId,
+        role,
+      })
+
+    expect((await post(f, 'delete', { organizationId: f.teamId })).status).toBe(403)
+    expect((await change('member')).status).toBe(200)
+    expect(await offer()).toEqual({ state: 'pending', terminal_at: null })
+    expect((await change('admin')).status).toBe(200)
+    const invalidated = await offer()
+    expect(invalidated).toEqual({ state: 'invalidated', terminal_at: expect.any(Date) })
+    expect((await change('member')).status).toBe(200)
+    expect(await offer()).toEqual(invalidated)
+    expect(
+      await db
+        .selectFrom('audit_events')
+        .select(['actor_type', 'credential_type', 'target_id', 'details'])
+        .where('organization_id', '=', f.teamId)
+        .where('action', '=', 'organization.ownership_transfer_invalidated')
+        .execute(),
+    ).toEqual([{ actor_type: 'system', credential_type: 'none', target_id: f.teamId, details: {} }])
+  })
 
   function roleOperation(f: Fixture, previousRole: string, newRole: string) {
     return {

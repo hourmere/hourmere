@@ -184,5 +184,9 @@
   "series.repair": "Para volver a intentar generar el enlace de reunión, abra la reserva afectada en Hourmere.",
   "teams.linkPending": "El enlace de Teams aparecerá en los detalles de la reserva en cuanto esté disponible.",
   "teams.unavailable": "Microsoft Teams no está disponible. Esta reserva usará el evento del calendario de Outlook.",
-  "teams.writebackFailed": "El enlace de Teams no está disponible. La cita sigue programada."
+  "teams.writebackFailed": "El enlace de Teams no está disponible. La cita sigue programada.",
+  "ownershipTransfer.offered.subject": "Propuesta de transferencia de propiedad del equipo",
+  "ownershipTransfer.offered.message": "Le han ofrecido la propiedad de {team}. Inicie sesión y seleccione el equipo para revisar la propuesta en su configuración.",
+  "ownershipTransfer.confirmed.subject": "Transferencia de propiedad del equipo completada",
+  "ownershipTransfer.confirmed.message": "Se ha completado la transferencia de propiedad de {team}. Inicie sesión y seleccione el equipo para ver los roles actuales en su configuración."
 }

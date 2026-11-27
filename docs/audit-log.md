@@ -103,8 +103,11 @@ change without retaining either name. Previous events can have empty details.
 the recipient's stored membership ID (a lowercase UUID). It is available to
 existing readers of that team's journal. `organization.ownership_transfer_revoked`,
 `organization.ownership_transfer_expired`, `organization.ownership_transfer_invalidated`
-and `organization.ownership_transferred` require empty details. These actions are
-reserved for the [planned ownership transfer](team-ownership-transfer.md).
+and `organization.ownership_transferred` require empty details. A confirmed transfer
+also records two `membership.role_changed` events, targeted by membership ID and correlated
+with the confirmation through the same request ID. Expiry and invalidation use a system
+actor. The [ownership transfer service](team-ownership-transfer.md) remains unavailable
+through product interfaces.
 
 `api_key.rotated` is also reserved. Key rotation uses replacement-key creation
 followed by revocation, recorded as `api_key.created` and `api_key.revoked`.

@@ -38,6 +38,7 @@ import {
 import { createApp } from './app.ts'
 import { loadConfig } from './config.ts'
 import { nativeTeamLeave } from './native-team-leave.ts'
+import { seedPendingOwnershipTransfer } from './ownership-transfer-fixtures.ts'
 import { eventTypeRoutes } from './routes/event-types.ts'
 import { ssoRoutes } from './routes/sso.ts'
 import { ssoDelegationRoutes } from './routes/sso-delegation.ts'
@@ -4519,6 +4520,12 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
 
   it('requires independent mailbox proof from the exact browser and session to unlink only the caller', async () => {
     const f = await linked()
+    const offer = await seedPendingOwnershipTransfer(
+      db,
+      fixture.team,
+      fixture.owner,
+      fixture.member,
+    )
     const other = await recoveryTarget(f, fixture.admin)
     const actor = await browserSession(fixture.member)
     const otherSession = await browserSession(fixture.member)
@@ -4573,6 +4580,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
         (await freshProofChallenge(await recoveryRequest(path, cookie, retry), cookie)).id,
       ).not.toBe(challenge.id)
     expect(await storedLink(f.link.id)).toEqual(f.link)
+    expect(await offer()).toEqual({ state: 'pending', terminal_at: null })
     expect(recoveryJobs).toEqual([])
     expect((await attemptRow(challenge)).consumed_at).toBeNull()
 
@@ -4586,6 +4594,7 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       retired_at: expect.any(Date),
     })
     expect(await storedLink(other.link.id)).toEqual(other.link)
+    expect(await offer()).toEqual({ state: 'invalidated', terminal_at: expect.any(Date) })
     expect((await attemptRow(challenge)).consumed_at).toBeInstanceOf(Date)
     expect(recoveryJobs).toEqual([
       {
@@ -4597,6 +4606,13 @@ describe.skipIf(!databaseUrl)('OIDC sign-in, provider tests, self-linking and ad
       },
     ])
     expect(await audit()).toEqual([
+      expect.objectContaining({
+        action: 'organization.ownership_transfer_invalidated',
+        actor_type: 'system',
+        credential_type: 'none',
+        target_id: fixture.team,
+        details: {},
+      }),
       expect.objectContaining({
         action: 'sso_link.unlinked',
         actor_id: fixture.member,

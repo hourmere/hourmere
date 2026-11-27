@@ -184,5 +184,9 @@
   "series.repair": "Para tentar gerar o link da reunião novamente, abra o agendamento correspondente no Hourmere.",
   "teams.linkPending": "O link do Teams aparecerá nos detalhes da reserva assim que estiver disponível.",
   "teams.unavailable": "O Microsoft Teams está indisponível. Esta reserva usará o evento do calendário do Outlook.",
-  "teams.writebackFailed": "O link do Teams está indisponível. A reunião continua agendada."
+  "teams.writebackFailed": "O link do Teams está indisponível. A reunião continua agendada.",
+  "ownershipTransfer.offered.subject": "Proposta de transferência de propriedade da equipe",
+  "ownershipTransfer.offered.message": "Você recebeu uma proposta para assumir a propriedade de {team}. Entre e selecione a equipe para consultar a proposta nas configurações.",
+  "ownershipTransfer.confirmed.subject": "Transferência de propriedade da equipe concluída",
+  "ownershipTransfer.confirmed.message": "A transferência de propriedade de {team} foi concluída. Entre e selecione a equipe para ver as funções atuais nas configurações."
 }

@@ -5,6 +5,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import { tryGetCurrentAuthEndpointContext } from '@better-auth/core/context'
 import { createDb, type Db, setRoutingTargetHealth } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
+import { retirePendingOwnershipTransfer } from '@hourmere/db/ownership-transfer'
 import { scimManagedMember, scimProvisioned, scimSuspended } from '@hourmere/db/scim-suspension'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { DomainError } from '@hourmere/scheduling/errors'
@@ -73,6 +74,7 @@ function sourceCopy(replacement?: Replacement): Remove {
   const bindings = {
     auditActor,
     writeAuditEvent,
+    retirePendingOwnershipTransfer,
     assertTeamOwnerRemains,
     checkTeamManagementAccess,
     isUuid,
@@ -113,6 +115,7 @@ function policySourceCopy(
   const bindings = {
     auditActor,
     writeAuditEvent,
+    retirePendingOwnershipTransfer,
     AsyncLocalStorage,
     assertTeamOwnerRemains,
     checkSsoAdmissionBlocks,

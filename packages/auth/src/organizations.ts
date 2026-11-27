@@ -1,10 +1,11 @@
 import { randomBytes } from 'node:crypto'
 import { isPublicTeamSlug, isReservedName } from '@hourmere/core'
-import type { Db } from '@hourmere/db'
+import type { Database, Db } from '@hourmere/db'
+import { retirePendingOwnershipTransfer } from '@hourmere/db/ownership-transfer'
 import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { APIError } from 'better-auth/api'
 import type { OrganizationOptions } from 'better-auth/plugins/organization'
-import { sql } from 'kysely'
+import { sql, type Transaction } from 'kysely'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -211,7 +212,7 @@ export function organizationSlugTaken() {
  */
 export function organizationGuards(
   db: Db,
-  transaction: () => Db | undefined = () => undefined,
+  transaction: () => Transaction<Database> | undefined = () => undefined,
 ): NonNullable<OrganizationOptions['organizationHooks']> {
   // Hooks that run inside a native auth transaction (invitation acceptance) read through
   // its connection rather than wait for an application connection while holding it.
@@ -239,6 +240,9 @@ export function organizationGuards(
       if (await isPersonal(organization.id)) {
         throw refuse('A personal organization cannot be deleted')
       }
+      // The native wrapper holds the organization write lock before reaching its hook.
+      const trx = transaction()
+      if (trx) await retirePendingOwnershipTransfer(trx, { organizationId: organization.id })
     },
     beforeCreateInvitation: noOneElse,
     beforeAcceptInvitation: noOneElse,

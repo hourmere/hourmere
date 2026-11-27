@@ -184,5 +184,9 @@
   "series.repair": "To retry a meeting link, open the affected booking in Hourmere.",
   "teams.linkPending": "The Teams link will appear in the booking details when it’s ready.",
   "teams.unavailable": "Microsoft Teams is unavailable. This booking falls back to the Outlook calendar event.",
-  "teams.writebackFailed": "The Teams link is unavailable. This booking is still scheduled."
+  "teams.writebackFailed": "The Teams link is unavailable. This booking is still scheduled.",
+  "ownershipTransfer.offered.subject": "Team ownership transfer offer",
+  "ownershipTransfer.offered.message": "You were offered ownership of {team}. Sign in and select the team to review the offer in its settings.",
+  "ownershipTransfer.confirmed.subject": "Team ownership transfer completed",
+  "ownershipTransfer.confirmed.message": "The ownership transfer for {team} was completed. Sign in and select the team to see its current roles in settings."
 }

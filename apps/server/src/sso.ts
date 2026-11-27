@@ -2,6 +2,12 @@ import { DomainError } from '@hourmere/scheduling'
 
 export const USE_SSO_RECOVERY = 'useSsoRecovery'
 export const SCIM_MAPPING_CONSENT = 'approveScimTeamMapping'
+export const CREATE_OWNERSHIP_TRANSFER = 'createOwnershipTransfer'
+export const CONFIRM_OWNERSHIP_TRANSFER = 'confirmOwnershipTransfer'
+
+export function isOwnershipTransferProofOperation(operation: string | null) {
+  return operation === CREATE_OWNERSHIP_TRANSFER || operation === CONFIRM_OWNERSHIP_TRANSFER
+}
 
 export interface SsoCapabilities {
   readonly ssoOidcEnabled: boolean

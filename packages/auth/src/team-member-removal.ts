@@ -1,5 +1,6 @@
 import { type Database, type Db, setRoutingTargetHealth } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
+import { retirePendingOwnershipTransfer } from '@hourmere/db/ownership-transfer'
 import { scimManagedMember } from '@hourmere/db/scim-suspension'
 import type { Transaction } from 'kysely'
 import type { Principal } from './caller.ts'
@@ -146,6 +147,10 @@ async function removeTeamMemberInTransaction(
       userId: member.userId,
     })
   }
+  await retirePendingOwnershipTransfer(trx, {
+    organizationId: actor.organizationId,
+    membershipId: member.id,
+  })
   await trx
     .deleteFrom('auth.member')
     .where('id', '=', member.id)
