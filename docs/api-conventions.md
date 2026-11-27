@@ -202,24 +202,3 @@ not whether older retained history exists beyond that bound.
 
 中文：名单翻页最多到偏移量 10000；`hasMore` 表示还有可请求的下一页，
 不保证该范围之外没有保留的历史记录。
-
-
-### Custom team roles
-
-The browser paths under `/api/v1/teams/{teamId}` return `404 custom_roles_disabled`
-while the feature is hard-off. The existing invitation, team role and booking
-permissions continue to apply.
-
-When enabled, `GET /permissions` lists supported team-level fixed decisions and
-current custom grants for the session. Individual actions still check objects and
-fields. Only a fixed Owner can manage definitions or assignments. Writes require
-same-origin browser requests, `X-Expected-Organization-Id` and fresh verification
-bound to the input and target. Role edits carry an expected revision, and member
-edits carry the expected authorization generation and role revision. Stale edits
-return `409 role_revision_conflict`. Role archival requires all assignments to be
-cleared first.
-
-中文：自定义角色尚未开放，相关接口统一返回 `404 custom_roles_disabled`。现有邀请、
-成员角色及预约权限继续适用。开放后，仅固定所有者可通过同源浏览器会话管理角色和分配，
-写入须提供预期团队和版本，并重新验证身份。保存时版本不一致会返回
-`409 role_revision_conflict`。
