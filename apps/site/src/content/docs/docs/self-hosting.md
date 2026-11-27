@@ -211,8 +211,12 @@ rules and, when configuration is introduced, keep web and worker policy consiste
 
 ## Private identity providers
 
-Organization sign-in is off by default. Set `SSO_OIDC_ENABLED=true` or
-`SSO_SAML_ENABLED=true` to enable that protocol. See [single sign-on](/docs/sso).
+Organization single sign-on is available on self-hosted instances and both protocols
+are off by default. Set `SSO_OIDC_ENABLED=true` or `SSO_SAML_ENABLED=true` to enable that
+protocol. Unset or empty uses the release default, `false` explicitly turns a protocol
+off, and other values prevent startup. Use identical settings for web and worker. Set
+`SSO_ENCRYPTION_KEY` before saving a provider, and configure working SMTP for mailbox
+verification and recovery. See [single sign-on](/docs/sso).
 `SSO_PRIVATE_TARGETS` lists identity
 providers on a private network or on a port other than 443, and is empty by default; leave
 it empty unless your identity provider needs it. It accepts only exact `host:port` entries
@@ -706,6 +710,115 @@ Keep the free `PROXY_SUBNET`, `PROXY_IP` and `PROXY_DYNAMIC_RANGE` selected befo
 database restore; overlapping ingress networks cannot coexist. Plain mode omits the proxy
 restoration. Verify health, expected data, sign-in and a booking before
 reopening traffic. Keep the old volumes and backup until recovery is accepted.
+
+## SSO backup and recovery drill
+
+Before requiring SSO, use the [backup and restore procedure](#back-up-and-restore) on a
+test deployment with synthetic teams and users. The full dump includes team policies,
+provider configuration sealed with `SSO_ENCRYPTION_KEY`, domain claims, identity links,
+recovery enrollment, proofs, delegations, audit events and queued owner notices.
+Retain the original `SSO_ENCRYPTION_KEY` and `BETTER_AUTH_SECRET`. Store the key material
+in a protected backup separate from the database dump, and keep the backed-up `PUBLIC_URL`,
+protocol settings and deployment revision. The operator command can lift enforcement if
+the encryption key is lost, but saved provider configuration requires the original key.
+
+Restore into a separate checkout, Compose project and fresh database volume. Before
+starting services, isolate traffic and egress, including SMTP, IdPs, webhooks and restored
+jobs. Route mail to a test inbox and use a DNS zone controlled by the drill. Use one test
+team that requires OIDC, one that requires SAML, and a separate expired domain claim for
+the retirement drill. Repeat the access recovery on both enforced teams.
+
+### Recover team access without the IdP
+
+1. Make the test IdPs unavailable. In the restored deployment set `SSO_OIDC_ENABLED=false`
+   and `SSO_SAML_ENABLED=false` on both web and worker, then recreate the services. Check
+   that `GET /api/v1/instance` reports `ssoOidcEnabled` and `ssoSamlEnabled` as `false`.
+   Confirm that personal sign-in still works and existing team enforcement still blocks
+   access without a valid SSO proof or delegation.
+2. With access to an enrolled owner's Hourmere mailbox, open **SSO recovery** from
+   personal settings. Select the team, verify the mailbox and choose **Stop requiring SSO**.
+   Confirm that ordinary team sign-in works again and that the previous admission mode
+   remains in effect. See the [provider repair procedure](/docs/sso#repair-a-provider-during-recovery)
+   for when the IdP can complete a new test.
+3. Restore the enforced test state to rehearse loss of all recovery-owner mailboxes.
+   The instance operator confirms the deployment and the team's organization UUID,
+   then runs this from its Compose checkout with a working job queue.
+
+   ```sh
+   docker compose exec app node apps/server/src/sso-operator-recovery-cli.ts TEAM_UUID
+   ```
+
+4. `SSO enforcement disabled. Owner notifications queued.` confirms the policy change,
+   the system audit event `sso_maintenance.enforcement_disabled` and the queue writes
+   committed together. The command advances the policy revision and trust generation,
+   invalidating existing SSO proofs and delegations. Admission, providers, domains,
+   memberships and recovery enrollment are preserved. Confirm team access by the usual
+   sign-in method. With `SMTP_URL`, `MAIL_FROM` and the worker running, verify delivery to
+   the current owners' verified mailboxes in the test inbox. A second invocation returns
+   `SSO enforcement is already off. No changes made.` with no duplicate audit or notice.
+   An unknown UUID or personal organization returns exit code 1. In an actual incident,
+   check worker logs for delivery failures and notify owners through your incident process
+   if retries are exhausted.
+
+### Retire an expired domain claim
+
+A verified claim stays exclusive after expiry, and the domain recheck worker runs even
+when both protocols are off. To rehearse releasing an expired test claim for a different
+team, confirm the requesting team's identity and use the old claim's ID and current
+generation. Run these server-container operations against the restored deployment.
+
+1. Generate a maintenance TXT challenge.
+
+   ```sh
+   docker compose exec app node apps/server/src/sso-domain-retirement-cli.ts challenge OLD_CLAIM_ID EXPECTED_GENERATION REQUESTING_TEAM_ID
+   ```
+
+   Give the returned name and one-time value privately to the requesting team's DNS
+   administrator. The administrator publishes the TXT record in the drill's DNS zone.
+   Keep the challenge response out of logs. If it expires or the value is lost, issue
+   another challenge.
+2. Once the record resolves from the server, retire the expired claim using the returned
+   challenge ID.
+
+   ```sh
+   docker compose exec app node apps/server/src/sso-domain-retirement-cli.ts retire CHALLENGE_ID
+   ```
+
+   Confirm the old claim is retired and the old team has a `sso_maintenance.domain_retired`
+   system audit event. The command checks the expired generation again while it holds the
+   domain lock. Retirement records both teams and stores durable notices for the old
+   team's owners in the database. It uses configured SMTP to deliver those notices.
+3. If the command reports that retirement committed but delivery did not complete, or
+   that owner notifications remain pending, check SMTP and retry delivery with the same ID.
+
+   ```sh
+   docker compose exec app node apps/server/src/sso-domain-retirement-cli.ts notify CHALLENGE_ID
+   ```
+
+   Verify notice delivery and remove the maintenance TXT record. The requesting team must
+   use the ordinary domain challenge and verification with a protocol on before it can
+   use the domain for SSO. Providers, identities, memberships, policies, proofs and
+   delegations never transfer between the two teams.
+
+Both maintenance commands are available in the server container with OIDC and SAML off.
+They are instance-operator procedures separate from the REST API, MCP and product CLI.
+
+### 中文说明
+
+强制单点登录前，请用测试部署备份和演练。保存完整数据库、原部署版本、`PUBLIC_URL`、协议设置、
+`SSO_ENCRYPTION_KEY` 和 `BETTER_AUTH_SECRET`。将密钥与数据库备份分开保护。在独立的 Compose
+项目及新数据库卷中恢复，启动前隔离身份提供方、邮件和其他外部服务。使用测试邮箱及自管 DNS。
+
+分别模拟 OIDC 和 SAML 身份提供方中断。关闭两种协议后，个人空间仍可登录，团队的强制要求
+仍生效。已登记的所有者可从个人设置进入**单点登录恢复**，验证邮箱后关闭团队的强制要求。
+所有恢复所有者均无法使用邮箱时，实例运维人员可用上述 `sso-operator-recovery-cli.ts` 命令
+关闭指定团队的强制要求，并确认旧证明和委托失效、系统审计已写入且当前所有者收到通知。
+重复执行不会再写入审计或发送通知。
+
+使用上述 `sso-domain-retirement-cli.ts` 的 `challenge` 和 `retire` 演练过期域名退役。
+在自管 DNS 中发布一次性 TXT 记录，确认过期声明退役和系统审计记录。若退役成功但通知未送达，
+用同一挑战 ID 执行 `notify`。移除演练 TXT 记录后，请求团队仍须在协议启用时完成普通域名验证。
+两项运维命令在两种协议均关闭时也可运行。
 
 ## Upgrade and roll back
 

@@ -1404,10 +1404,14 @@ verifies their Hourmere mailbox within 72 hours. Opening the link alone does not
 
 For an enforced team, **Settings → Single sign-on → SSO recovery** starts a mailbox
 verification. The resulting grant lets the owner inspect the providers and make one change.
-For an enabled SAML protocol, repair a provider by replacing signing certificates or
-importing updated IdP metadata. Saved certificates and metadata are write-only.
-Save the repair, verify again to test the saved revision, and complete the provider test in
-a new tab. Return to the recovery tab and verify again to enable the tested revision. The
+When SAML is enabled on the instance, choose **Edit** on the SAML provider. Under
+**SAML configuration source**, supply the replacement settings by pasting IdP metadata XML,
+importing it from an HTTPS URL, or entering the configuration manually. To replace signing
+certificates, enter the full set the IdP uses. Saved certificates and metadata are write-only,
+so the fields open blank. **Download service provider metadata** gives the IdP administrator
+the Hourmere entity ID and ACS URL.
+Select **Save changes**, verify again for **Test provider**, and complete the provider test in
+a new tab. Return to the recovery tab and verify again for **Enable provider**. The
 owner can also spend a grant to stop requiring SSO while keeping the team's admission mode.
 An enrolled owner can use the same Settings entry after an ordinary sign-in that lands
 in personal space. Choose a team if more than one is eligible and select **Start recovery**
@@ -1425,8 +1429,10 @@ accepted path and query. The fragment is lost.
 链接不会接受提名。
 
 在强制单点登录的团队中，可从**设置 → 单点登录 → 单点登录恢复**开始验证邮箱。验证后，
-所有者可查看身份提供方并进行一次更改。SAML 启用时，可提交替换证书或导入更新的身份提供方元数据。
-已保存的证书和元数据仅供写入。保存修复后，请重新验证邮箱，测试已保存的版本，
+所有者可查看身份提供方并进行一次更改。SAML 启用时，可在提供方的**编辑**中手动填写配置、
+粘贴元数据 XML 或从 HTTPS 网址导入。更换签名证书时，请填写提供方使用的全部证书。
+已保存的证书和元数据仅供写入，打开表单时相应字段为空。可通过**下载服务提供方元数据**
+获取 Hourmere 的实体 ID 和 ACS 网址。保存修复后，请重新验证邮箱，测试已保存的版本，
 并在新标签页完成测试。回到恢复页面，再次验证邮箱后启用通过测试的版本。所有者也可使用
 一次授权关闭强制单点登录，保留团队原有的入组方式。两种协议均关闭时，仍可查看配置并关闭
 强制单点登录。已接受提名的恢复所有者在普通登录进入个人空间后，仍可打开同一设置入口。
@@ -1440,8 +1446,10 @@ proofAttemptId?}`, verifies that the current team member owns the credential and
 that it belongs to the current team, and returns `201` with `{id, expiresAt}`.
 `revokeSsoDelegation` accepts an owned binding ID and returns `204` without a
 response body. A current team browser session can withdraw its own delegation
-without a live SSO browser proof or a fresh proof challenge. On an enforced team,
-if OIDC is off while another protocol is on, revocation returns `403 sso_required`.
+without a live SSO browser proof or a fresh proof challenge. On an enforced team
+with OIDC off, an owned SAML-bound delegation can still be revoked with `204`.
+An OIDC-bound delegation or a binding ID that does not resolve to the caller's team
+and account returns `403 sso_required` in that state.
 Both writes require the exact origin and `X-Expected-Organization-Id` for the current team.
 
 The owner's API-key list (`GET /api/auth/api-key/list`) and OAuth connection list
@@ -1899,6 +1907,21 @@ startup. Configure the same settings on web and worker. Stored enforcement still
 when a protocol is off. The setup script and Compose pass through empty values. An older
 `.env` without `SSO_SAML_ENABLED` also leaves SAML off.
 The public operator and user guide is `apps/site/src/content/docs/docs/sso.md`.
+The [backup and recovery drill](https://hourmere.com/docs/self-hosting#sso-backup-and-recovery-drill)
+covers restoring configuration, disabling enforcement without the IdP and retiring an expired domain
+claim. Both [enforcement recovery](#operator-recovery-runbook) and
+[domain retirement](#retire-an-expired-claim-for-another-team) run from the server container in
+every setting state.
+
+Each process counts SSO security failures dropped by the audit rate limit. It counts by action
+for 60 seconds starting with the first drop in a batch. The `sso.security_failures_dropped`
+warning contains counts without provider, team or request IDs.
+Pending counts are held in memory and lost if the process exits before it emits the warning.
+Dropped failures leave no entry in the affected team's audit log.
+
+每个进程从首条 SSO 安全失败记录被限流丢弃起，按动作累计 60 秒。随后输出的
+`sso.security_failures_dropped` 警告只包含计数，不含提供方、团队或请求 ID。计数保存在内存中，
+进程在输出警告前退出时会丢失计数。被丢弃的记录不会写入受影响团队的审计日志。
 
 Known compatibility limitations:
 - Keycloak SAML response-only signing is insufficient: enable **Sign assertions**
