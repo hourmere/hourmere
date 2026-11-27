@@ -4,10 +4,10 @@ import { findLegacyHandleCollisions } from '@hourmere/scheduling'
 export function parseRoutingFormsEnabled(value: string | undefined): boolean {
   switch (value) {
     case 'true':
-      return true
-    case 'false':
     case '':
     case undefined:
+      return true
+    case 'false':
       return false
     default:
       throw new Error('ROUTING_FORMS_ENABLED must be true or false')

@@ -9,6 +9,7 @@ import {
   getPublicBrandLogo,
   getPublicEventType,
   getPublicHost,
+  getPublicTeam,
   getPublicTeamEventType,
   joinWaitlist,
   listPublicSlots,
@@ -158,6 +159,21 @@ export const PublicHost = z
   })
   .openapi('PublicHost')
 
+export const PublicTeam = z
+  .object({
+    team: z.object({ name: z.string(), slug: z.string() }),
+    eventTypes: z.array(
+      z.object({
+        slug: z.string().openapi({ description: 'The booking page is /team/{handle}/{slug}' }),
+        title: z.string(),
+        description: z.string().nullable(),
+        durationMinutes: z.number().int(),
+        location: z.object({ kind: LocationKind }).nullable(),
+      }),
+    ),
+  })
+  .openapi('PublicTeam')
+
 export { Slot }
 
 const name = z.string().min(1).max(200)
@@ -271,6 +287,13 @@ const WaitlistAccepted = z.object({ accepted: z.literal(true) }).openapi('Waitli
 
 export const HostParams = z.object({ handle: z.string().openapi({ example: 'ada' }) })
 
+export const PublicTeamParams = z.object({
+  handle: z.string().openapi({
+    description: 'Exact-case organization slug (1–64 ASCII letters/digits/inner hyphens)',
+    example: 'cobaltmere',
+  }),
+})
+
 export const PageParams = z.object({
   handle: z.string().openapi({ example: 'ada' }),
   slug: z.string().openapi({ example: 'intro-call' }),
@@ -291,6 +314,7 @@ const eventTypeNotFound = error('No such public event type (`event_type_not_foun
 
 export interface PublicRoutesDeps {
   db: Db
+  teamPublicHomeOrganizationIds?: readonly string[] | undefined
   smtpConfigured?: boolean | undefined
   waitlistSecret?: string | undefined
   publicUrl?: string | undefined
@@ -298,6 +322,7 @@ export interface PublicRoutesDeps {
   automaticMeet?: boolean | undefined
   smsRemindersAvailable?: boolean | undefined
   automaticZoom?: boolean | undefined
+  microsoftCalendarEnabled?: boolean | undefined
   now?: () => Temporal.Instant
   routingFormsEnabled?: boolean
   /** BETTER_AUTH_SECRET. Fixtures may omit it while routing forms are off. */
@@ -315,11 +340,13 @@ export interface PublicRoutesDeps {
  */
 export function publicRoutes({
   db,
+  teamPublicHomeOrganizationIds,
   now = () => Temporal.Now.instant(),
   notify,
   automaticMeet,
   smsRemindersAvailable,
   automaticZoom,
+  microsoftCalendarEnabled,
   successRedirectPolicy,
   waitlistSecret,
   smtpConfigured,
@@ -331,11 +358,13 @@ export function publicRoutes({
 }: PublicRoutesDeps): RouteModule {
   const publicDeps: PublicContext = {
     db,
+    teamPublicHomeOrganizationIds,
     now,
     notify,
     automaticMeet,
     smsRemindersAvailable,
     automaticZoom,
+    microsoftCalendarEnabled,
     successRedirectPolicy,
     waitlistSecret,
     smtpConfigured,
@@ -367,7 +396,7 @@ export function publicRoutes({
         tags: ['Public'],
         summary: 'Book a slot through a routing continuation',
         description:
-          'Books the event selected by the private route capability. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key. New routed bookings require ROUTING_FORMS_ENABLED=true (off by default). An exact committed replay with the same capability, Idempotency-Key and booking authority still succeeds after expiry or disablement.',
+          'Books the event selected by the private route capability. Anonymous access is allowed. A supplied bearer must be a valid bookings or full API key. New routed bookings require routing forms to be enabled, which is the default. An exact committed replay with the same capability, Idempotency-Key and booking authority still succeeds after expiry or disablement.',
         security: routedSecurity,
         middleware: [bookLimit, routeBodyLimit(BOOKING_BODY_LIMIT)],
         request: {
@@ -452,6 +481,27 @@ export function publicRoutes({
       async (c) => c.json(await getPublicHost(ctx, c.req.valid('param')), 200),
     )
 
+    app.openapi(
+      createRoute({
+        method: 'get',
+        path: '/api/v1/public/teams/{handle}',
+        operationId: 'getPublicTeam',
+        tags: ['Public'],
+        summary: 'A team’s public booking directory',
+        description:
+          'The saved public name, exact-case slug and listed event summaries of an opted-in team. An enabled team with no eligible events returns an empty list. Hidden events remain accessible only through their existing direct or private links.',
+        security: routedSecurity,
+        middleware: pageLimit,
+        request: { params: PublicTeamParams },
+        responses: {
+          200: { description: 'The public team and its listed events', content: json(PublicTeam) },
+          404: error('No such public team page (`team_not_found`)'),
+          429: rateLimited,
+        },
+      }),
+      async (c) => c.json(await getPublicTeam(ctx, c.req.valid('param')), 200),
+    )
+
     // Team routes precede the personal wildcard routes, including an event named 'slots'.
     for (const target of [
       {
@@ -479,15 +529,7 @@ export function publicRoutes({
             : 'What the booking page at /{handle}/{slug} shows.',
           middleware: pageLimit,
           request: {
-            params: target.team
-              ? PageParams.extend({
-                  handle: z.string().openapi({
-                    description:
-                      'Exact-case organization slug (1–64 ASCII letters/digits/inner hyphens)',
-                    example: 'cobaltmere',
-                  }),
-                })
-              : PageParams,
+            params: target.team ? PageParams.extend(PublicTeamParams.shape) : PageParams,
           },
           responses: {
             200: { description: 'The event type', content: json(PublicEventType) },

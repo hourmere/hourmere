@@ -85,7 +85,13 @@ function renderFingerprint(locale: InterfaceLanguage) {
       calendarResponseDescription(role, locale),
     ),
   ]
-  return createHash('sha256').update(JSON.stringify(output)).digest('hex')
+  // Keep the original compatibility baseline for all bytes outside direction markup.
+  const canonical = output.map((value) =>
+    typeof value === 'string'
+      ? value
+      : { ...value, html: value.html?.replace(/<\/?bdi(?: dir="ltr")?>/g, '') },
+  )
+  return createHash('sha256').update(JSON.stringify(canonical)).digest('hex')
 }
 
 describe('existing language output before Brazilian Portuguese registration', () => {

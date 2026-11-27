@@ -9,10 +9,10 @@ import { createRequire, stripTypeScriptTypes } from 'node:module'
 import { join, relative } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { Principal } from '@hourmere/auth'
-import { createDb, type Db, runMigrations } from '@hourmere/db'
-import { createTestDatabaseTemplate, type TestDatabaseTemplate } from '@hourmere/db/testing'
+import { createDb, type Db } from '@hourmere/db'
+import { createTestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import * as Key from './meeting-poll-key.ts'
 import * as Voters from './meeting-poll-voters.ts'
 import * as Polls from './meeting-polls.ts'
@@ -127,11 +127,9 @@ const ALWAYS = {
   },
 }
 
-let template: TestDatabaseTemplate | undefined
-
 /** One scenario on its own migrated database, which is dropped afterwards. */
 async function scenario<T>(run: (db: Db) => Promise<T>): Promise<T> {
-  const owned = await (template as TestDatabaseTemplate).clone(undefined, { tag: 'poll_key' })
+  const owned = await createTestDatabase(serverUrl as string, undefined, { tag: 'poll_key' })
   try {
     return await run(createDb(owned.pool))
   } finally {
@@ -900,19 +898,6 @@ describe('meeting poll key fence wiring', () => {
 })
 
 describe.skipIf(!serverUrl)('meeting poll key fence', { timeout: 60_000 }, () => {
-  beforeAll(async () => {
-    template = await createTestDatabaseTemplate(
-      serverUrl as string,
-      async (pool) => {
-        await runMigrations(pool)
-      },
-      { tag: 'poll_key' },
-    )
-  }, 120_000)
-  afterAll(async () => {
-    await template?.drop()
-  })
-
   const real: Modules = { K: Key, V: Voters }
 
   it('records a keyed fingerprint once on first use, never the secret', () => verifyFirstUse(real))

@@ -981,8 +981,6 @@ export const admin = {
   'Choose a name and public address for your team.': '为团队选择名称和公开地址。',
   'Use a name your teammates will recognize, up to 200 characters.':
     '使用团队成员熟悉的名称，最多 200 个字符。',
-  'Team addresses preserve letter case and are separate from personal handles.':
-    '团队地址区分字母大小写，与个人用户名互相独立。',
   'Team booking URL preview': '团队预约网址预览',
   'Each team event gets its own address at the end of this URL. Creating a team does not publish a booking page.':
     '每个团队活动都会在此网址末尾使用独立的活动地址。创建团队不会发布预约页面。',
@@ -1020,8 +1018,6 @@ export const admin = {
   'Review meeting details and manage this booking.': '查看会议详情并管理此预约。',
   'Notification language': '通知语言',
   'Choose a supported notification language.': '请选择支持的通知语言。',
-  'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. The admin interface also uses this language until you choose an interface language in the top bar. After that, the two languages are independent.':
-    '你收到的通知邮件和日历邀请所用的语言。预约页面和受邀者邮件使用访客的语言。在顶栏选择界面语言之前，管理界面也使用此语言；选择后，两种语言互不影响。',
   'Connect a calendar account to get started.': '连接日历账号以开始使用。',
   'This Google calendar uses {calendarZone}; your availability uses {scheduleZone}. Bookings land at the same moment; Google Calendar usually shows them in {calendarZone} time.':
     '此 Google 日历使用{calendarZone}时区；你的可预约时段使用{scheduleZone}时区。预约对应同一时刻；Google 日历通常以{calendarZone}时间显示。',
@@ -1276,8 +1272,6 @@ export const admin = {
   'Choose a date.': '请选择日期。',
   'Choose a handle to get booking links. Check the suggestions below and save.':
     '请选择用户名以获得预约链接。请查看下方建议并保存。',
-  'Choose a non-reserved team slug of 1–64 letters, numbers or hyphens, starting and ending with a letter or number.':
-    '请选择未被保留的团队标识，使用 1–64 个字母、数字或连字符，首尾须为字母或数字。',
   'Choose a time zone from the list, e.g. Europe/Berlin.':
     '请从列表中选择时区，例如 Europe/Berlin。',
   'Choose a time zone.': '请选择时区。',
@@ -3176,6 +3170,116 @@ export const admin = {
   'A schedule can have at most 10,000 date overrides, including past dates. Remove some overrides before saving.':
     '每个日程最多可有 10,000 个特定日期安排（包括过去的日期）。请先移除一些安排再保存。',
 
+  // SCIM invitation attribution
+  'SCIM connection': 'SCIM 连接',
   // Additional durations
   'Removed {0}. Selected length: {1}.': '已移除{0}。当前选中的时长为{1}。',
+
+  // Admin navigation and account menu
+  'Account menu': '账户菜单',
+  'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. The admin interface also uses this language until you choose an interface language in the account menu. After that, the two languages are independent.':
+    '你收到的通知邮件和日历邀请所用的语言。预约页面和受邀者邮件使用访客的语言。在账户菜单中选择界面语言之前，管理界面也使用此语言；选择后，两种语言互不影响。',
+
+  // Signed webhook administration
+  'Checking webhook access…': '正在检查 Webhook 管理权限…',
+  'No webhook endpoints yet.': '尚未添加 Webhook 端点。',
+  'Add webhook': '添加 Webhook',
+  'Create webhook': '创建 Webhook',
+  'Edit webhook': '编辑 Webhook',
+  'Destination origin': '目标源站',
+  'Destination URL': '目标网址',
+  'Endpoint ID': '端点 ID',
+  'Webhook events': 'Webhook 事件',
+  'Choose at least one event.': '请至少选择一种事件。',
+  'Booking reschedule requested': '已请求预约改期',
+  'Booking reschedule request expired': '预约改期请求已过期',
+  'Attendee no-show changed': '参会者的未到场标记已变更',
+  'Workflow executed': '工作流已执行',
+  'Unknown event': '未知事件',
+  Paused: '已暂停',
+  'Pause webhook': '暂停 Webhook',
+  'Resume webhook': '恢复 Webhook',
+  'A delivery in progress may finish after you pause this endpoint.':
+    '暂停此端点后，正在进行的投递仍可能完成。',
+  'Skipped deliveries stay skipped after resuming.': '恢复后，已跳过的投递将保持跳过状态。',
+  'Save subscriptions': '保存订阅',
+  'Subscription editing is unavailable for this endpoint.': '当前无法编辑此端点的事件订阅。',
+  'Rotate signing secret…': '轮换签名密钥…',
+  'Rotate signing secret': '轮换签名密钥',
+  'Delete webhook…': '删除 Webhook…',
+  'Delete webhook': '删除 Webhook',
+  'Prepare your receiver to install the new signing secret immediately. All subsequent attempts, including retries, use the new secret.':
+    '请准备在接收端立即更换签名密钥。后续所有投递都将使用新密钥，包括重试。',
+  'Deleting this endpoint permanently removes its retained deliveries. Workflows that reference this ID must be updated separately.':
+    '删除此端点后，保留的投递记录也将永久删除。请另行更新引用此端点 ID 的工作流。',
+  'Signing secret': '签名密钥',
+  'Save this signing secret in your receiver’s secret store. You can see it only here.':
+    '请将签名密钥保存到接收端的密钥存储中。仅此处可查看该密钥。',
+  'Copy signing secret': '复制签名密钥',
+  'Webhook endpoint created.': '已创建 Webhook 端点。',
+  'Webhook endpoint updated.': '已更新 Webhook 端点。',
+  'Webhook endpoint deleted.': '已删除 Webhook 端点。',
+  'Webhook signing secret rotated.': '已轮换 Webhook 签名密钥。',
+  'This webhook endpoint is no longer available.': '此 Webhook 端点已不可用。',
+  'Workflow events are unavailable on this instance.': '此实例当前无法使用工作流事件。',
+  'Creating webhooks and rotating signing secrets are unavailable on this instance.':
+    '此实例当前无法创建 Webhook 或轮换签名密钥。',
+  'This space can have up to ten webhook endpoints, including paused endpoints.':
+    '此空间最多可有 10 个 Webhook 端点，包含已暂停的端点。',
+  'Check the webhook settings and try again.': '请检查 Webhook 设置后重试。',
+  'The webhook change could not be confirmed. Refresh the list before taking another action.':
+    '无法确认 Webhook 是否已更改。请先刷新列表，再进行下一项操作。',
+  'Creation could not be confirmed. Refresh the list and confirm the endpoint ID before rotating its secret.':
+    '无法确认端点是否已创建。如需轮换签名密钥，请先刷新列表并确认端点 ID。',
+  'Rotation could not be confirmed. The previous secret may already have been replaced. Refresh the list before taking another action.':
+    '无法确认密钥是否已轮换。旧密钥可能已被替换。请先刷新列表，再进行下一项操作。',
+  'Refreshing webhook endpoints…': '正在刷新 Webhook 端点…',
+  'Saving webhook settings…': '正在保存 Webhook 设置…',
+  'Refresh webhook endpoints': '刷新 Webhook 端点',
+
+  // Webhook delivery history
+  'Delivery history': '投递历史',
+  'Refresh history': '刷新投递历史',
+  'Loading deliveries…': '正在加载投递记录…',
+  'Loading older deliveries…': '正在加载更早的投递记录…',
+  'Load older deliveries': '加载更早的投递记录',
+  'No deliveries retained in the last 30 days.': '最近 30 天没有保留的投递记录。',
+  '{count} deliveries shown.': '已显示{count}条投递记录。',
+  'Could not load webhook deliveries.': '无法加载 Webhook 投递记录。',
+  'Could not load older deliveries.': '无法加载更早的投递记录。',
+  'This delivery history page is no longer available. Refresh history to start again.':
+    '此页投递记录已无法访问。请刷新投递历史，从第一页重新加载。',
+  'webhook.delivery.pending': '待投递',
+  Delivered: '已投递',
+  Failed: '投递失败',
+  'Unknown status': '未知状态',
+  Attempts: '尝试次数',
+  'HTTP status': 'HTTP 状态码',
+  'Created at': '创建时间',
+  'Last attempted at': '最近尝试时间',
+  'Delivered at': '投递成功时间',
+  'Delivery ID': '投递 ID',
+  'Event ID': '事件 ID',
+  'Last error': '最近错误',
+  'Transport error': '传输错误',
+  'HTTP error': 'HTTP 响应错误',
+  'Webhook disabled': 'Webhook 已停用',
+  'Delivery expired': '投递已过期',
+  'Signing secret unavailable': '签名密钥不可用',
+  'Delivery interrupted': '投递中断',
+  'Delivery job unavailable': '投递任务不可用',
+  'Unknown delivery error': '未知投递错误',
+
+  // Team details
+  'Team details': '团队资料',
+  'Save team details': '保存团队资料',
+  'Team details saved.': '团队资料已保存。',
+  'Reload team details': '重新加载团队资料',
+  'Team details changed since you opened this page. Reload team details before saving again.':
+    '打开此页面后，团队资料已更改。请重新加载团队资料后再保存。',
+  'Old booking links, embeds, routing links and booking links in sent waitlist emails will stop working. Replace shared links and embeds after saving. For 90 days, only this team can reclaim the old address.':
+    '原有的预约链接、嵌入内容、路由链接以及已发送候补邮件中的预约链接将无法使用。保存后请更新已分享的链接和嵌入内容。旧地址将在 90 天内仅供此团队重新启用。',
+  'Choose a non-reserved team slug of 1–64 ASCII letters, digits or hyphens. Start and end with a letter or digit. New slugs are saved in lowercase.':
+    '请选择未被保留的团队标识，使用 1–64 个英文字母、数字或连字符，首尾须为字母或数字。新标识将以小写保存。',
+  'Team addresses are separate from personal handles.': '团队地址与个人用户名互相独立。',
 } as const

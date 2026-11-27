@@ -1,11 +1,13 @@
 import { type ReactNode, useId } from 'react'
 import { TimeZoneName } from '../components/TimeZonePicker.tsx'
+import { UserContentList, UserContentMessage } from '../components/UserContent.tsx'
 import { isKnownTimeZone } from '../format.ts'
 import { formatDuration } from '../i18n/duration.ts'
 import { formatList } from '../i18n/formatting.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import type { OneTimeBookingPage, PublicEventType, Slot } from './api.ts'
 import { locationLabel } from './BookingDetails.tsx'
+import { BookingFactIcon } from './BookingFactIcon.tsx'
 import type { BookingLocationOption } from './BookingForm.tsx'
 import { EventDescription } from './EventDescription.tsx'
 import { FocusHeading, HostAvatar } from './PublicLayout.tsx'
@@ -36,42 +38,73 @@ export function BookingEventInfo({
 }) {
   const { t, ui, locale: displayLocale } = useI18n()
   const hostTimeZone = bookingHostTimeZone(event)
+  const location = chosenLocation ?? event.location
   const Heading = headingLevel === 1 ? 'h1' : 'h2'
+  const requiredHosts = event.hosts?.map(({ name, timeZone }) => ({
+    name,
+    detail: zoneName(timeZone),
+  }))
+  const requiredHostLabels = requiredHosts?.map((host) => t('{name} ({detail})', host))
   return (
     <aside className="event-info" aria-label={t('About this event')}>
-      <Heading className="event-title">{event.title || t('Booking')}</Heading>
+      <Heading className="event-title" dir={event.title ? 'auto' : undefined}>
+        {event.title || t('Booking')}
+      </Heading>
       <div className="host-identity">
         {!team && (
           <HostAvatar name={event.host.name} image={showHostImage ? event.host.image : undefined} />
         )}
-        <p className="event-host">{event.team?.name ?? event.host.name}</p>
+        <p className="event-host" dir="auto">
+          {event.team?.name ?? event.host.name}
+        </p>
       </div>
       {event.schedulingType === 'round_robin' && (
         <p className="event-description">
           {t('An available team member will be assigned when you book.')}
         </p>
       )}
-      {event.hosts && (
+      {requiredHosts && requiredHostLabels && (
         <p className="event-description">
-          {t('Required hosts: {hosts}', {
-            hosts: formatList(
-              event.hosts.map((host) =>
-                t('{name} ({detail})', { name: host.name, detail: zoneName(host.timeZone) }),
+          <UserContentMessage
+            message="Required hosts: {hosts}"
+            values={{ hosts: formatList(requiredHostLabels, displayLocale) }}
+            renderValues={{
+              hosts: (
+                <UserContentList
+                  values={requiredHostLabels}
+                  renderValue={(value, index) => {
+                    const host = requiredHosts[index]
+                    if (!host) return value
+                    return (
+                      <UserContentMessage
+                        message="{name} ({detail})"
+                        values={{ name: host.name }}
+                        otherValues={{ detail: host.detail }}
+                      />
+                    )
+                  }}
+                />
               ),
-              displayLocale,
-            ),
-          })}
+            }}
+          />
         </p>
       )}
       <ul className="event-facts">
-        <li>{formatDuration(durationMinutes, displayLocale)}</li>
-        {chosenLocation ? (
-          <li>{chosenLocation.label ?? ui(locationLabel(chosenLocation.kind))}</li>
-        ) : event.location ? (
-          <li>{ui(locationLabel(event.location.kind))}</li>
-        ) : null}
+        <li>
+          <BookingFactIcon name="clock" />
+          <span>{formatDuration(durationMinutes, displayLocale)}</span>
+        </li>
+        {location && (
+          <li>
+            <BookingFactIcon name="pin" />
+            <span className="user-content" dir={chosenLocation?.label == null ? undefined : 'auto'}>
+              {chosenLocation?.label ?? ui(locationLabel(location.kind))}
+            </span>
+          </li>
+        )}
         {hostTimeZone && (
           <li className="user-content">
+            <BookingFactIcon name="globe" />
             <TimeZoneName
               className="host-time-zone"
               name={zoneName(hostTimeZone)}
@@ -210,7 +243,9 @@ export function BookingOptions({
                   checked={locationOptionId === option.id}
                   onChange={() => onLocationChange(option.id)}
                 />
-                <span>{option.label ?? ui(locationLabel(option.kind))}</span>
+                <span dir={option.label == null ? undefined : 'auto'}>
+                  {option.label ?? ui(locationLabel(option.kind))}
+                </span>
               </label>
             ))}
           </div>

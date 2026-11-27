@@ -115,7 +115,9 @@ is listed explicitly. CLI `--help`, no arguments and `--version` are local and r
 New operations require explicit classification; `read` and `bookings` do not gain access
 because an endpoint uses GET or a tool advertises itself as read-only.
 
-Routing operations return `routing_forms_disabled` until an operator enables routing.
+Routing operations return `routing_forms_disabled` while routing is off.
+
+Team booking bulk cancellation preview returns 404 until the feature is released.
 
 <!-- api-key-scope-table:start -->
 
@@ -256,6 +258,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `POST /api/v1/public/{handle}/{slug}/bookings` | Public or manage token; check a supplied key | `full, bookings` |
 | `GET /api/v1/public/{handle}/{slug}/slots` | Public or manage token; check a supplied key | `full, read, bookings` |
 | `GET /api/v1/public/teams/{handle}/{slug}` | Public or manage token; check a supplied key | `full, read, bookings` |
+| `GET /api/v1/public/teams/{handle}` | Public or manage token; check a supplied key | `full, read, bookings` |
 | `POST /api/v1/public/teams/{handle}/{slug}/bookings` | Public or manage token; check a supplied key | `full, bookings` |
 | `GET /api/v1/public/teams/{handle}/{slug}/slots` | Public or manage token; check a supplied key | `full, read, bookings` |
 | `POST /api/v1/public/{handle}/{slug}/waitlist` | Public or manage token; check a supplied key | `full, bookings` |
@@ -277,6 +280,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `GET /api/v1/team/bookings` | Browser session only | — |
 | `GET /api/v1/team/bookings/{id}` | Browser session only | — |
 | `POST /api/v1/team/bookings/{id}/cancel` | Browser session only | — |
+| `POST /api/v1/team/bookings/bulk-cancellations/preview` | Browser session only | — |
 | `GET /api/v1/team/invitations` | Browser session only | — |
 | `GET /api/v1/team/invitations/{invitationId}` | Browser session only | — |
 | `POST /api/v1/team/invitations/{invitationId}/cancel` | Browser session only | — |
@@ -358,6 +362,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `publish_routing_form` | — | `routing-forms publish` | `full` |
 | `preview_routing_form` | — | `routing-forms preview` | `full` |
 | `get_public_routing_form` | — | `routing-forms public` | `full, read, bookings` |
+| `get_public_team` | — | `team-home` | `full, read, bookings` |
 | `route_lead` | — | `routing-forms route` | `full, bookings` |
 | `resolve_routing_continuation` | — | `routing-forms resolve` | `full, bookings` |
 | `find_routed_slots` | — | `routing-forms slots` | `full, bookings` |

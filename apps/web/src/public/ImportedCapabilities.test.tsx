@@ -14,6 +14,7 @@ import * as copyButton from '../components/CopyButton.tsx'
 import * as forms from '../components/forms.tsx'
 import * as conflict from '../components/OrganizationContextConflict.tsx'
 import * as pageHeader from '../components/PageHeader.tsx'
+import * as userContent from '../components/UserContent.tsx'
 import * as flash from '../flash.ts'
 import * as format from '../format.ts'
 import * as hooks from '../hooks.ts'
@@ -22,6 +23,7 @@ import * as runtime from '../i18n/runtime.tsx'
 import * as translate from '../i18n/translate.ts'
 import * as limits from '../limits.ts'
 import * as bookingPanel from '../pages/bookings/BookingPanel.tsx'
+import * as bookingUserContent from '../pages/bookings/BookingUserContent.tsx'
 import * as bookingFormat from '../pages/bookings/booking-format.ts'
 import * as calendarCopy from '../pages/bookings/CalendarCopyNotice.tsx'
 import * as noShow from '../pages/bookings/NoShowAttendees.tsx'
@@ -64,6 +66,7 @@ function sourceCopy<T>(path: string, before: string, after: string): T {
     '../../i18n/formatting.ts': formatting,
     '../../i18n/translate.ts': translate,
     '../../paths.ts': paths,
+    '../../public/BookingDetails.tsx': publicDetails,
     '../../limits.ts': limits,
     '../../text.ts': text,
     '../../unsaved-changes.tsx': unsaved,
@@ -71,7 +74,9 @@ function sourceCopy<T>(path: string, before: string, after: string): T {
     '../../components/PageHeader.tsx': pageHeader,
     '../../components/forms.tsx': forms,
     '../../components/ConferenceNotice.tsx': conference,
+    '../../components/UserContent.tsx': userContent,
     './BookingPanel.tsx': bookingPanel,
+    './BookingUserContent.tsx': bookingUserContent,
     './CalendarCopyNotice.tsx': calendarCopy,
     './booking-format.ts': bookingFormat,
     './RescheduleBooking.tsx': reschedule,
@@ -102,6 +107,7 @@ function sourceCopy<T>(path: string, before: string, after: string): T {
     './validation.ts': publicValidation,
     './visitor-time-zone.ts': visitorZone,
     '../components/ConferenceNotice.tsx': conference,
+    '../components/UserContent.tsx': userContent,
 
     '../../components/OrganizationContextConflict.tsx': conflict,
   }

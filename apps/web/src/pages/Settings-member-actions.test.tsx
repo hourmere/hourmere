@@ -1,12 +1,14 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import type { ListedOrganizationMember } from '../api/auth.ts'
 import type { Schemas } from '../api/client.ts'
 import { TeamMemberActions } from '../components/team-members/TeamMemberActions.tsx'
 import { InterfaceScope } from '../i18n/runtime.tsx'
+import { AppShell, RequireSession, SessionLayout, SettingsPage } from '../lazy-pages.tsx'
 import { bookingPath, eventTypePath, PATHS } from '../paths.ts'
+import { selectAdminLanguage } from '../test/account-menu.ts'
 import {
   fakeApi,
   json,
@@ -18,6 +20,9 @@ import {
   renderApp,
   signedInAs,
 } from '../test/fake-api.tsx'
+import { resolveLazy } from '../test/resolve-lazy.ts'
+
+beforeAll(() => resolveLazy(SessionLayout, RequireSession, AppShell, SettingsPage))
 
 const TEAM_ID = '00000000-0000-7000-8000-000000000010'
 const TEAM_ME: Schemas['Me'] = {
@@ -131,8 +136,15 @@ function teamServer(role = 'member', routes: Routes = {}) {
   })
 }
 
+async function findLeaveTrigger() {
+  const trigger = await screen.findByRole('button', { name: 'Leave team' })
+  // The review is keyed by role, which can still be loading when the trigger first appears.
+  await within(screen.getByRole('region', { name: 'Account' })).findByText(/^(Owner|Admin|Member)$/)
+  return trigger
+}
+
 async function openLeave(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(await screen.findByRole('button', { name: 'Leave team' }))
+  await user.click(await findLeaveTrigger())
   await screen.findByRole('heading', { name: 'Review leaving this team' })
 }
 
@@ -196,7 +208,7 @@ describe('team member leave actions', () => {
     expect(screen.queryByRole('button', { name: 'Leave this team' })).toBeNull()
     await preview.answer(json(200, impact()))
     await user.click(await screen.findByRole('button', { name: 'Leave this team' }))
-    expect(api.to(LEAVE_ROUTE)).toHaveLength(1)
+    await waitFor(() => expect(api.to(LEAVE_ROUTE)).toHaveLength(1))
     expect(screen.queryByText('You left the team. Reload to open your personal space.')).toBeNull()
     expect(screen.getByRole('button', { name: 'Cancel' }).hasAttribute('disabled')).toBe(true)
     await user.keyboard('{Escape}')
@@ -542,13 +554,19 @@ describe('team member removal actions', () => {
     },
   )
 
-  it.each(['owner', 'admin', 'member', 'custom-admin', 'OWNER'])(
+  it.each([
+    ['owner', 'Owner'],
+    ['admin', 'Admin'],
+    ['member', 'Member'],
+    ['custom-admin', 'custom-admin'],
+    ['OWNER', 'OWNER'],
+  ])(
     'offers removal only for exact permitted roles when the actor is %s',
-    async (role) => {
+    async (role, roleLabel) => {
       teamServer(role)
       renderApp(PATHS.settings)
       await screen.findByText('Team member', { selector: 'span' })
-      await screen.findByRole('button', { name: 'Leave team' })
+      await within(screen.getByRole('region', { name: 'Account' })).findByText(roleLabel)
       expect(screen.queryByRole('button', { name: 'Remove member: Other owner' })).toBeNull()
       expect(screen.queryByRole('button', { name: 'Remove member: Ada' })).toBeNull()
       expect(Boolean(screen.queryByRole('button', { name: 'Remove member: Team admin' }))).toBe(
@@ -567,6 +585,7 @@ describe('team member removal actions', () => {
     })
     renderApp(PATHS.settings)
     await screen.findByText('Team member', { selector: 'span' })
+    await screen.findByRole('link', { name: 'Manage team events' })
     expect(screen.queryByRole('button', { name: 'Remove member: Team member' })).toBeNull()
   })
 
@@ -653,7 +672,7 @@ describe('team member removal actions', () => {
     renderApp(PATHS.settings)
     await openRemoval(user)
     await user.click(await screen.findByRole('button', { name: 'Remove member' }))
-    expect(api.to(removalRoute(MEMBER_ID))).toHaveLength(1)
+    await waitFor(() => expect(api.to(removalRoute(MEMBER_ID))).toHaveLength(1))
     expectNoRemovalSuccess()
     expect(screen.getByRole('button', { name: 'Cancel' }).hasAttribute('disabled')).toBe(true)
     await user.keyboard('{Escape}')
@@ -854,14 +873,14 @@ describe('member action recovery and accessibility', () => {
     const user = userEvent.setup()
     teamServer()
     renderApp(PATHS.settings)
-    const trigger = await screen.findByRole('button', { name: 'Leave team' })
+    const trigger = await findLeaveTrigger()
     trigger.focus()
     await user.keyboard('{Enter}')
     const heading = await screen.findByRole('heading', { name: 'Review leaving this team' })
     await waitFor(() => expect(document.activeElement).toBe(heading))
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('heading', { name: 'Review leaving this team' })).toBeNull()
-    expect(document.activeElement).toBe(trigger)
+    await waitFor(() => expect(document.activeElement).toBe(trigger))
   })
 
   it.each(['Escape', 'Cancel'])(
@@ -1024,9 +1043,9 @@ describe('member action recovery and accessibility', () => {
         json(200, impact([eventType()], [booking(), booking(2, true)])),
     })
     renderApp(PATHS.settings)
-    await screen.findByRole('button', { name: 'Leave team' })
-    await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
-    await user.click(screen.getByRole('button', { name: '退出团队' }))
+    await findLeaveTrigger()
+    await selectAdminLanguage(user, 'zh-CN')
+    await user.click(await screen.findByRole('button', { name: '退出团队' }))
     await screen.findByText(eventType().title)
     expect(screen.queryByRole('heading', { name: 'Review leaving this team' })).toBeNull()
     expect(screen.getByRole('heading', { name: /退出/ })).toBeDefined()

@@ -1,14 +1,19 @@
 import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { groupFixture, insertSeat, insertSlot, transaction } from './group-seats-fixtures.ts'
 import { migrationsDir, runMigrations } from './migrate.ts'
-import { createTestDatabase, type TestDatabase } from './testing.ts'
+import { MIGRATION_REPLAY_TIMEOUT, useMigrationReplay } from './testing/migration-replay.ts'
+import type { TestDatabase } from './testing.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
+
+vi.setConfig({ testTimeout: MIGRATION_REPLAY_TIMEOUT, hookTimeout: MIGRATION_REPLAY_TIMEOUT })
 
 const serverUrl = process.env.DATABASE_URL
 describe.skipIf(!serverUrl)('slot resource upgrade', () => {
+  const replay = useMigrationReplay(serverUrl as string, '0061_group_slot_resources.sql')
+
   it('preserves populated predecessor seats, backfills immutable location and matches fresh/no-op schemas', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'hourmere-slot-resource-predecessor-'))
     let old: TestDatabase | undefined, fresh: TestDatabase | undefined
@@ -19,7 +24,7 @@ describe.skipIf(!serverUrl)('slot resource upgrade', () => {
       for (const name of migrations)
         if (name.endsWith('.sql') && name < '0061')
           await copyFile(join(migrationsDir, name), join(directory, name))
-      old = await createTestDatabase(serverUrl as string, directory)
+      old = await replay.predecessor.clone(directory)
       expect(
         (await old.pool.query('SELECT name FROM schema_migrations ORDER BY name DESC LIMIT 1'))
           .rows,
@@ -93,7 +98,7 @@ describe.skipIf(!serverUrl)('slot resource upgrade', () => {
       const after = await snapshotSchema(old.pool)
       expect(await runMigrations(old.pool, directory)).toEqual([])
       expect(await snapshotSchema(old.pool)).toEqual(after)
-      fresh = await createTestDatabase(serverUrl as string, directory)
+      fresh = await replay.predecessor.clone(directory)
       expect(await snapshotSchema(fresh.pool)).toEqual(after)
     } finally {
       await old?.drop()

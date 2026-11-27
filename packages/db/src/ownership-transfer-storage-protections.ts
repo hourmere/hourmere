@@ -6,11 +6,11 @@ const transferTable = 'organization_ownership_transfers'
 const budgetTable = 'organization_ownership_transfer_budgets'
 const day = 24 * 60 * 60 * 1000
 
-function insert(pool: pg.Pool, table: string, values: Record<string, unknown>) {
+function insert(pool: pg.Pool, table: string, values: Record<string, unknown>, returning = '*') {
   const columns = Object.keys(values)
   return pool.query(
     `INSERT INTO ${table} (${columns.join(', ')})
-     VALUES (${columns.map((_, index) => `$${index + 1}`).join(', ')}) RETURNING *`,
+     VALUES (${columns.map((_, index) => `$${index + 1}`).join(', ')}) RETURNING ${returning}`,
     Object.values(values),
   )
 }
@@ -127,24 +127,23 @@ export async function assertOwnershipTransferStorageProtections(pool: pg.Pool) {
     `SELECT (extract(epoch FROM clock_timestamp()) * 1000)::bigint AS now_ms`,
   )
   const now = Number(rows[0]?.now_ms)
-  const createdAt = new Date(now - 60_000)
-  const expiresAt = new Date(createdAt.getTime() + day)
+  const past = new Date(now - 60_000)
   const binding = {
     organization_id: organizationId,
     initiator_user_id: initiator,
     initiator_membership_id: initiatorMembership,
     target_user_id: recipient,
     target_membership_id: recipientMembership,
-    created_at: createdAt,
-    expires_at: expiresAt,
   }
-  const offer = (overrides: Record<string, unknown> = {}) =>
-    insert(pool, transferTable, { ...binding, ...overrides })
+  const offer = (overrides: Record<string, unknown> = {}, returning?: string) =>
+    insert(pool, transferTable, { ...binding, ...overrides }, returning)
   const transition = (offerId: string, state: string, terminalAt: Date | null) =>
     pool.query(
       `UPDATE organization_ownership_transfers SET state = $2, terminal_at = $3 WHERE id = $1`,
       [offerId, state, terminalAt],
     )
+  const deleteOffer = (offerId: string) =>
+    pool.query(`DELETE FROM organization_ownership_transfers WHERE id = $1`, [offerId])
 
   await needsColumns(pool, transferTable, { ...binding, state: 'pending' })
   await refuses(
@@ -157,20 +156,28 @@ export async function assertOwnershipTransferStorageProtections(pool: pg.Pool) {
     offer({ target_membership_id: initiatorMembership }),
     `${transferTable}_participants`,
   )
-  await refuses(offer({ expires_at: createdAt }), `${transferTable}_deadline`)
-  await refuses(
-    offer({ created_at: 'infinity', expires_at: 'infinity' }),
-    `${transferTable}_deadline`,
-  )
-  await refuses(offer({ terminal_at: createdAt }), `${transferTable}_terminal_time`)
-  await refuses(
-    offer({ state: 'confirmed', terminal_at: createdAt }),
-    `${transferTable}_transition`,
-  )
+  await refuses(offer({ terminal_at: past }), `${transferTable}_terminal_time`)
+  await refuses(offer({ state: 'confirmed', terminal_at: past }), `${transferTable}_transition`)
 
-  await expect(offer({ id })).resolves.toMatchObject({
-    rows: [{ ...binding, id, state: 'pending', terminal_at: null }],
+  await expect(
+    offer(
+      { id, created_at: new Date(now + day), expires_at: new Date(now + 2 * day) },
+      `*, created_at BETWEEN statement_timestamp() AND clock_timestamp() AS created_on_insert,
+         expires_at = created_at + interval '24 hours' AS exact_deadline`,
+    ),
+  ).resolves.toMatchObject({
+    rows: [
+      {
+        ...binding,
+        id,
+        state: 'pending',
+        terminal_at: null,
+        created_on_insert: true,
+        exact_deadline: true,
+      },
+    ],
   })
+  await refuses(deleteOffer(id), `${transferTable}_delete_guard`)
   await refuses(offer(), `${transferTable}_one_pending`, '23505')
   const other = {
     id: otherId,
@@ -179,10 +186,17 @@ export async function assertOwnershipTransferStorageProtections(pool: pg.Pool) {
     target_membership_id: otherRecipientMembership,
   }
   await expect(offer(other)).resolves.toMatchObject({ rowCount: 1 })
-  await refuses(transition(id, 'unknown', createdAt), `${transferTable}_state`)
+  await refuses(transition(id, 'unknown', past), `${transferTable}_state`)
   await refuses(transition(id, 'confirmed', null), `${transferTable}_terminal_time`)
-  await refuses(transition(id, 'confirmed', expiresAt), `${transferTable}_terminal_time`)
-  await refuses(transition(id, 'expired', createdAt), `${transferTable}_terminal_time`)
+  await refuses(
+    pool.query(
+      `UPDATE organization_ownership_transfers SET state = 'confirmed', terminal_at = expires_at
+       WHERE id = $1`,
+      [id],
+    ),
+    `${transferTable}_terminal_time`,
+  )
+  await refuses(transition(id, 'expired', past), `${transferTable}_terminal_time`)
   const immutableWrites = {
     id: randomUUID(),
     organization_id: otherOrganizationId,
@@ -224,22 +238,52 @@ export async function assertOwnershipTransferStorageProtections(pool: pg.Pool) {
     ]),
   )
   await refuses(transition(id, 'pending', null), `${transferTable}_transition`)
-  await refuses(transition(id, 'confirmed', createdAt), `${transferTable}_transition`)
-  await refuses(transition(id, 'revoked', createdAt), `${transferTable}_transition`)
+  await refuses(transition(id, 'confirmed', past), `${transferTable}_transition`)
+  await refuses(transition(id, 'revoked', past), `${transferTable}_transition`)
+  await refuses(deleteOffer(id), `${transferTable}_delete_guard`)
   await refuses(offer({ id }), `${transferTable}_pkey`, '23505')
 
   const expiredId = randomUUID()
-  const expiredAt = new Date(now - 60_000)
-  const historicalCreation = new Date(expiredAt.getTime() - day)
+  const historicalCreation = new Date(past.getTime() - day)
+  // Isolate the timestamp constraints from the insert trigger and seed an already expired offer.
   await expect(
-    offer({ id: expiredId, created_at: historicalCreation, expires_at: expiredAt }),
-  ).resolves.toMatchObject({ rowCount: 1 })
+    pool.query(`ALTER TABLE ${transferTable} DISABLE TRIGGER USER`),
+  ).resolves.toBeDefined()
+  try {
+    await needsColumns(
+      pool,
+      transferTable,
+      { ...binding, created_at: historicalCreation, expires_at: past },
+      ['created_at', 'expires_at'],
+    )
+    await refuses(
+      offer({ created_at: historicalCreation, expires_at: new Date(past.getTime() + 1000) }),
+      `${transferTable}_deadline`,
+    )
+    await refuses(
+      offer({ created_at: 'infinity', expires_at: 'infinity' }),
+      `${transferTable}_deadline`,
+    )
+    await expect(
+      offer({ id: expiredId, created_at: historicalCreation, expires_at: past }),
+    ).resolves.toMatchObject({ rowCount: 1 })
+  } finally {
+    await expect(
+      pool.query(`ALTER TABLE ${transferTable} ENABLE TRIGGER USER`),
+    ).resolves.toBeDefined()
+  }
   await refuses(offer(), `${transferTable}_one_pending`, '23505')
   for (const state of ['confirmed', 'revoked']) {
     await refuses(transition(expiredId, state, historicalCreation), `${transferTable}_expired`)
   }
-  await expect(transition(expiredId, 'expired', expiredAt)).resolves.toMatchObject({ rowCount: 1 })
-  await expect(transition(otherId, 'revoked', createdAt)).resolves.toMatchObject({ rowCount: 1 })
+  await expect(transition(expiredId, 'expired', past)).resolves.toMatchObject({ rowCount: 1 })
+  await expect(
+    pool.query(
+      `UPDATE organization_ownership_transfers SET state = 'revoked', terminal_at = clock_timestamp()
+       WHERE id = $1`,
+      [otherId],
+    ),
+  ).resolves.toMatchObject({ rowCount: 1 })
   await expect(offer()).resolves.toMatchObject({
     rows: [{ id: expect.any(String), state: 'pending', terminal_at: null }],
   })

@@ -1,5 +1,4 @@
-import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { copyFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { type CompiledQuery, Kysely, PostgresDialect } from 'kysely'
 import type pg from 'pg'
@@ -9,7 +8,12 @@ import { migrationsDir, runMigrations } from './migrate.ts'
 import { suspendScimMembership } from './scim-suspension.ts'
 import { prepareScimSuspension } from './scim-suspension-fixtures.ts'
 import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
-import { createTestDatabase, type TestDatabase } from './testing.ts'
+import {
+  MIGRATION_COVERAGE_TIMEOUT,
+  MIGRATION_REPLAY_TIMEOUT,
+  useMigrationReplay,
+} from './testing/migration-replay.ts'
+import type { TestDatabase } from './testing.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -133,46 +137,48 @@ async function assertRevocationIndex(pool: pg.Pool) {
 }
 
 describe.skipIf(!serverUrl)('SCIM API key revocation index', () => {
-  it('uses the index for both revocation predicates and fails the plan assertion when dropped', async () => {
-    const report = await checkConstraintCoverage({
-      serverUrl: serverUrl as string,
-      migration,
-      assertions: assertRevocationIndex,
-    })
-    expect(report.problems).toEqual([])
-    expect(report.results.map(({ key, status }) => [key, status])).toEqual([
-      [`index auth.apikey.${index}`, 'covered'],
-    ])
-  }, 600_000)
+  const replay = useMigrationReplay(serverUrl as string, migration)
 
-  it('preserves populated predecessor keys, matches a fresh install and reruns as a no-op', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'hourmere-scim-key-index-'))
-    let upgraded: TestDatabase | undefined
-    let fresh: TestDatabase | undefined
-    try {
-      for (const file of await readdir(migrationsDir)) {
-        if (file.endsWith('.sql') && file < migration) {
-          await copyFile(join(migrationsDir, file), join(directory, file))
-        }
-      }
-      upgraded = await createTestDatabase(serverUrl as string, directory, { tag: 'scim_key_up' })
-      await seed(upgraded.pool)
-      const before = await keyRows(upgraded.pool)
-      expect(before).toHaveLength(7)
-      await copyFile(join(migrationsDir, migration), join(directory, migration))
-      await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([migration])
-      fresh = await createTestDatabase(serverUrl as string, directory, { tag: 'scim_key_new' })
-      expect(await snapshotSchema(upgraded.pool)).toEqual(await snapshotSchema(fresh.pool))
-      expect(await keyRows(upgraded.pool)).toEqual(before)
-      await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([])
-      await expect(runMigrations(fresh.pool, directory)).resolves.toEqual([])
-      expect(await keyRows(upgraded.pool)).toEqual(before)
-    } finally {
-      await Promise.all([
-        upgraded?.drop(),
-        fresh?.drop(),
-        rm(directory, { recursive: true, force: true }),
+  it(
+    'uses the index for both revocation predicates and fails the plan assertion when dropped',
+    async () => {
+      const report = await checkConstraintCoverage({
+        serverUrl: serverUrl as string,
+        migration,
+        predecessorTemplate: replay.predecessor,
+        assertions: assertRevocationIndex,
+      })
+      expect(report.problems).toEqual([])
+      expect(report.results.map(({ key, status }) => [key, status])).toEqual([
+        [`index auth.apikey.${index}`, 'covered'],
       ])
-    }
-  }, 120_000)
+    },
+    MIGRATION_COVERAGE_TIMEOUT,
+  )
+
+  it(
+    'preserves populated predecessor keys, matches a fresh install and reruns as a no-op',
+    async () => {
+      const { directory, predecessor } = replay
+      let upgraded: TestDatabase | undefined
+      let fresh: TestDatabase | undefined
+      try {
+        upgraded = await predecessor.clone(undefined, { migrate: false, tag: 'scim_key_up' })
+        await seed(upgraded.pool)
+        const before = await keyRows(upgraded.pool)
+        expect(before).toHaveLength(7)
+        await copyFile(join(migrationsDir, migration), join(directory, migration))
+        await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([migration])
+        fresh = await predecessor.clone(directory, { tag: 'scim_key_new' })
+        expect(await snapshotSchema(upgraded.pool)).toEqual(await snapshotSchema(fresh.pool))
+        expect(await keyRows(upgraded.pool)).toEqual(before)
+        await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([])
+        await expect(runMigrations(fresh.pool, directory)).resolves.toEqual([])
+        expect(await keyRows(upgraded.pool)).toEqual(before)
+      } finally {
+        await Promise.all([upgraded?.drop(), fresh?.drop()])
+      }
+    },
+    MIGRATION_REPLAY_TIMEOUT,
+  )
 })

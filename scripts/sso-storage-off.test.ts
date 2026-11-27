@@ -160,6 +160,7 @@ const DATA_OWNERS: Readonly<Record<string, readonly string[]>> = {
     'sso_providers',
   ],
   'packages/db/src/scim-suspension.ts': ['sso_browser_proofs'],
+  'packages/db/src/audit.ts': ['sso_providers'],
 }
 // A table name as a whole identifier in any case (PostgreSQL folds unquoted identifiers),
 // its generated row type, or the storage test support. `sso_providers_guard` or

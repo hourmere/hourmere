@@ -14,7 +14,6 @@ export async function retireScimUserClaims(
     connectionId: string
     scimUserId: string
   },
-  actor: { type: 'scim_token'; id: string },
 ) {
   // A profile change can invalidate a claim while leaving its invitation usable.
   // Revoke SCIM's own invitation, preserving an administrator's issuance or renewal.
@@ -41,7 +40,12 @@ export async function retireScimUserClaims(
           .where('organization_id', '=', organizationId)
           .where('action', '=', 'membership.invited')
           .whereRef('occurred_at', '>=', 'auth.invitation.createdAt')
-          .where('actor_type', '=', 'scim_token')
+          .where((eb) =>
+            eb.or([
+              eb('actor_type', '=', 'scim_token'), // Invitations issued before connection attribution.
+              eb.and([eb('actor_type', '=', 'scim_connection'), eb('actor_id', '=', connectionId)]),
+            ]),
+          )
           .where('target_type', '=', 'invitation')
           .where('target_id', '=', sql<string>`${ref('auth.invitation.id')}::text`),
       ),
@@ -69,7 +73,7 @@ export async function retireScimUserClaims(
     for (const { id } of invitations) {
       await writeAuditEvent(trx, {
         organizationId,
-        actor,
+        actor: { type: 'scim_connection', id: connectionId },
         credential: { type: 'none' },
         action: 'membership.invitation_cancelled',
         targetType: 'invitation',

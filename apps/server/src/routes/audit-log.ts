@@ -54,7 +54,7 @@ export const AuditEvent = z
       }),
       id: z.string().nullable().openapi({
         description:
-          'Stored user, API key, OAuth client or SCIM token ID, or a system service name; null for anonymous and external actors',
+          'Stored user, API key, OAuth client, SCIM token or SCIM connection ID, or a system service name; null for anonymous and external actors',
       }),
     }),
     credential: z.object({

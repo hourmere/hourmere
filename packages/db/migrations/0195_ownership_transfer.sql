@@ -39,7 +39,18 @@ BEGIN
       RAISE EXCEPTION 'ownership transfer must start pending'
         USING ERRCODE = 'check_violation', CONSTRAINT = 'organization_ownership_transfers_transition';
     END IF;
+    NEW.created_at := clock_timestamp();
+    NEW.expires_at := NEW.created_at + interval '24 hours';
     RETURN NEW;
+  END IF;
+
+  IF TG_OP = 'DELETE' THEN
+    -- The parent row is already gone when its foreign key cascades the delete.
+    IF EXISTS (SELECT 1 FROM auth.organization WHERE id = OLD.organization_id) THEN
+      RAISE EXCEPTION 'ownership transfer can only be deleted with its organization'
+        USING ERRCODE = 'check_violation', CONSTRAINT = 'organization_ownership_transfers_delete_guard';
+    END IF;
+    RETURN OLD;
   END IF;
 
   IF ROW(NEW.id, NEW.organization_id, NEW.initiator_user_id, NEW.initiator_membership_id,
@@ -65,7 +76,7 @@ BEGIN
 END $$;
 
 CREATE TRIGGER organization_ownership_transfers_guard
-  BEFORE INSERT OR UPDATE ON organization_ownership_transfers
+  BEFORE INSERT OR UPDATE OR DELETE ON organization_ownership_transfers
   FOR EACH ROW EXECUTE FUNCTION guard_organization_ownership_transfer();
 
 -- One durable counter per team and operation. A new aligned window replaces the old count.
@@ -83,6 +94,18 @@ ALTER TABLE audit_events DROP CONSTRAINT audit_events_details_check;
 ALTER TABLE audit_events ADD CONSTRAINT audit_events_details_check CHECK (
   jsonb_typeof(details) = 'object' AND
   CASE
+    -- Record changed public addresses and whether the name changed, without storing names.
+    WHEN action = 'organization.updated' THEN details - ARRAY['oldSlug','newSlug','nameChanged'] = '{}'::jsonb
+      AND (NOT details ? 'nameChanged' OR details->'nameChanged' = 'true'::jsonb)
+      AND (details ? 'oldSlug') = (details ? 'newSlug')
+      AND (NOT details ? 'newSlug' OR (
+        jsonb_typeof(details->'newSlug') = 'string'
+        AND (details->>'newSlug') COLLATE "C" ~ '^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$'
+        AND (details->'oldSlug' = 'null'::jsonb OR (
+          jsonb_typeof(details->'oldSlug') = 'string'
+          AND (details->>'oldSlug') COLLATE "C" ~ '^[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?$'
+        ))
+      ))
     WHEN action = 'membership.role_changed' THEN details - ARRAY['oldRole','newRole'] = '{}'::jsonb
     WHEN action IN ('api_key.created','api_key.rotated') THEN details - 'scope' = '{}'::jsonb
     -- Each catalogue name present adds one to the sum, so the sum equals the length only when

@@ -49,14 +49,14 @@ const Instance = z
     }),
     routingFormsEnabled: z.boolean().optional().openapi({
       description:
-        'Effective state of routing forms. ROUTING_FORMS_ENABLED defaults to false. A legacy route handle keeps routing forms off. Absent when unknown.',
+        'Effective state of routing forms. ROUTING_FORMS_ENABLED defaults to true. A legacy personal route handle keeps routing forms off. Absent when unknown.',
     }),
     followUpHostNotesEnabled: z.boolean().optional().openapi({
       description: 'Whether hosts may add plain-text notes to follow-up emails',
     }),
     workflowsEnabled: z.boolean().optional().openapi({
       description:
-        'Whether booking workflows are enabled; false until they are, and absent (treat as false) on older servers',
+        'Effective WORKFLOWS_ENABLED setting (true by default). Treat an absent field on older servers as false.',
     }),
     embedEnabled: z.boolean().optional().openapi({
       description: 'Whether embedding is enabled; absent when unknown',

@@ -22,7 +22,7 @@ import { LEAVE_WITH_UNSAVED_CHANGES } from '../unsaved-changes.tsx'
 const team: CreatedOrganization = {
   id: '00000000-0000-7000-8000-000000000010',
   name: 'Research team',
-  slug: 'Research-Team',
+  slug: 'research-team',
   logo: null,
   createdAt: '2026-10-01T09:00:00.000Z',
   members: [
@@ -114,7 +114,7 @@ describe('creating a team', () => {
         content.startsWith(`${window.location.origin}/team/`),
       )
       expect(preview.textContent).toBe(`${window.location.origin}/team/your-team/event-link`)
-      const user = await fill(`  ${team.name}  `)
+      const user = await fill(`  ${team.name}  `, 'Research-Team')
       expect(nameInput().labels?.[0]?.textContent).toBe(locale === 'en' ? 'Team name' : '团队名称')
       expect(slugInput().labels?.[0]?.textContent).toBe(
         locale === 'en' ? 'Team public address' : '团队公开地址',
@@ -144,10 +144,10 @@ describe('creating a team', () => {
     },
   )
 
-  it('previews the exact-case team namespace as text without making a personal booking link', async () => {
+  it('previews the lowercase team namespace as text without making a personal booking link', async () => {
     server()
     renderApp('/app/teams/new')
-    await fill()
+    await fill(team.name, 'Research-Team')
     const preview = screen.getByText((content) =>
       content.startsWith(`${window.location.origin}/team/${team.slug}/`),
     )
@@ -166,7 +166,7 @@ describe('creating a team', () => {
     expect(within(screen.getByRole('main')).queryByText('Owner')).toBeNull()
   })
 
-  it.each(['', '-bad', 'bad-', 'two words', 'a/b', '你好', 'a'.repeat(65), 'Admin'])(
+  it.each(['', '-bad', 'bad-', 'two words', 'a/b', '你好', 'Kit', 'a'.repeat(65), 'Admin'])(
     'rejects invalid or reserved address %j before posting and focuses it',
     async (slug) => {
       const { api } = server()
@@ -195,23 +195,25 @@ describe('creating a team', () => {
     },
   )
 
-  it.each(['ORGANIZATION_ALREADY_EXISTS', 'ORGANIZATION_SLUG_RESERVED'])(
-    'puts the server address error %s on the address field and focuses it',
-    async (code) => {
-      const { api } = server({
-        'POST /api/auth/organization/create': () => json(400, { code }),
-      })
-      renderApp('/app/teams/new')
-      const user = await fill()
-      await user.click(submit())
-      const alert = await screen.findByRole('alert')
-      expect(within(alert).getByRole('link').getAttribute('href')).toBe('#teamSlug')
-      await waitFor(() => expect(document.activeElement).toBe(slugInput()))
-      expect(slugInput().value).toBe(team.slug)
-      expect(api.to('POST /api/auth/organization/create')).toHaveLength(1)
-      expect(leaving()).toBe(true)
-    },
-  )
+  it.each([
+    'ORGANIZATION_ALREADY_EXISTS',
+    'ORGANIZATION_SLUG_ALREADY_TAKEN',
+    'ORGANIZATION_SLUG_RESERVED',
+    'ORGANIZATION_SLUG_INVALID',
+  ])('puts the server address error %s on the address field and focuses it', async (code) => {
+    const { api } = server({
+      'POST /api/auth/organization/create': () => json(400, { code }),
+    })
+    renderApp('/app/teams/new')
+    const user = await fill()
+    await user.click(submit())
+    const alert = await screen.findByRole('alert')
+    expect(within(alert).getByRole('link').getAttribute('href')).toBe('#teamSlug')
+    await waitFor(() => expect(document.activeElement).toBe(slugInput()))
+    expect(slugInput().value).toBe(team.slug)
+    expect(api.to('POST /api/auth/organization/create')).toHaveLength(1)
+    expect(leaving()).toBe(true)
+  })
 
   it('locks both drafts through create and confirmation and rejects a double submit', async () => {
     const pending = later()
@@ -390,8 +392,8 @@ describe('reconciling an uncertain creation result', () => {
       await user.click(submit())
       await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/app/settings'))
       expect(api.to('POST /api/auth/organization/create').map((call) => call.body)).toEqual([
-        { name: team.name, slug: 'Taken-Team', keepCurrentActiveOrganization: true },
-        { name: team.name, slug: 'Taken-Team', keepCurrentActiveOrganization: true },
+        { name: team.name, slug: 'taken-team', keepCurrentActiveOrganization: true },
+        { name: team.name, slug: 'taken-team', keepCurrentActiveOrganization: true },
         { name: team.name, slug: team.slug, keepCurrentActiveOrganization: true },
       ])
     },
@@ -635,11 +637,10 @@ describe('reconciling an uncertain creation result', () => {
     expect(api.to('POST /api/auth/organization/create')).toHaveLength(1)
   })
 
-  it('uses exact-case addresses when deciding whether a team already exists', async () => {
+  it('does not mistake a legacy uppercase address for a newly created team', async () => {
     const { api } = server({
       'POST /api/auth/organization/create': () => json(500, { code: 'INTERNAL_SERVER_ERROR' }),
-      'GET /api/auth/organization/list': () =>
-        json(200, [{ ...team, slug: team.slug.toLowerCase() }]),
+      'GET /api/auth/organization/list': () => json(200, [{ ...team, slug: 'Research-Team' }]),
     })
     renderApp('/app/teams/new')
     const user = await fill()

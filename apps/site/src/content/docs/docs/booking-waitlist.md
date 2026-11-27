@@ -60,6 +60,10 @@ Following a suggestion opens the ordinary booking flow; all booking rules still 
 A retained notification timestamp records SMTP acceptance, not inbox delivery. The invitee
 can use the leave link to clear their contact details and stop future messages.
 
+If a team changes its public address, booking links in waitlist notifications that
+were already sent still point to the old address. They do not redirect to the new
+address. Confirmation and leave links use private tokens and keep working.
+
 ## Privacy and retention
 
 Leaving, host removal and disabling immediately clear contact details and revoke pending

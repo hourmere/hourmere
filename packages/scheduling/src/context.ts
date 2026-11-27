@@ -79,6 +79,8 @@ export interface ServiceContext extends RecurringBookingAdmissionDeps {
 
 /** For unauthenticated flows such as public booking pages and invitee links. */
 export interface PublicContext {
+  /** Immutable team IDs the operator has opted into the public homepage catalog. */
+  teamPublicHomeOrganizationIds?: readonly string[] | undefined
   smsRemindersAvailable?: boolean | undefined
   /** In-process SCIM resource capability. Defaults off. */
   scimResourcesEnabled?: boolean | undefined
@@ -95,6 +97,8 @@ export interface PublicContext {
   /** Explicit instance capability; defaults off. */
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
+  /** Whether the instance has a configured Microsoft Calendar connection flow. */
+  microsoftCalendarEnabled?: boolean | undefined
   now: () => Temporal.Instant
   /** Told about booking changes in their transaction; nobody is told when absent. */
   notify?: BookingNotifier | undefined

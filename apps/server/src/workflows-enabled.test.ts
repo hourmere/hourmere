@@ -941,7 +941,7 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
       expect(body).toMatchObject({
         synthetic: true,
         match: 'matched',
-        emails: [{ text: '<Hi>', html: '<p>&lt;Hi&gt;</p>' }],
+        emails: [{ text: '<Hi>', html: '<p><span dir="auto">&lt;Hi&gt;</span></p>' }],
       })
       const result = await previewTool(token, input)
       expect(result.isError).not.toBe(true)
@@ -1617,7 +1617,7 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
       }).WORKFLOWS_ENABLED,
     })
     const on = setting('true')
-    const off = setting('')
+    const off = setting('false')
     const context = { db, principal: user.principal, ...on }
     const definition = await createWorkflow(context, {
       owner: { kind: 'personal', id: user.id },

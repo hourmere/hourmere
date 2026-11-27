@@ -88,6 +88,7 @@ export default defineConfig({
           label: 'Scheduling',
           items: [
             { label: 'Event types', link: '/docs/event-types' },
+            { label: 'Team public home', link: '/docs/team-public-home' },
             { label: 'Availability', link: '/docs/availability' },
             { label: 'Round-robin scheduling', link: '/docs/round-robin-scheduling' },
             { label: 'Collective scheduling', link: '/docs/collective-scheduling' },
