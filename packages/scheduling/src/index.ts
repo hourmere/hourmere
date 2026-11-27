@@ -347,6 +347,7 @@ export {
   updateDisplayName,
 } from './profile.ts'
 export {
+  InvalidBookingAnswerError,
   MAX_ANSWER_LENGTH,
   MAX_OPTION_LENGTH,
   MAX_OPTIONS,

@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { App } from '../../App.tsx'
 import type { Schemas } from '../../api/client.ts'
 import { PATHS } from '../../paths.ts'
+import { selectAdminLanguage } from '../../test/account-menu.ts'
 import {
   type Call,
   emptyTeamLists,
@@ -492,7 +493,7 @@ describe('Member SSO settings', () => {
     expect(settings.queryByText('Internal details')).toBeNull()
     expect(settings.queryByRole('button', { name: 'Send verification email' })).toBeNull()
     expectTeamWrites(requests.to(startLink), [{}])
-    await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    await selectAdminLanguage(user, 'zh-CN')
     expect(settings.getByRole('status').textContent).toBe('当前无法查看你的团队登录设置。')
   })
 

@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test'
+import { selectAdminLanguage } from '../account-menu.ts'
 import { revealEventSetting } from '../event-settings.ts'
 import { expect, type FixtureApp, test } from '../fixtures.ts'
 
@@ -14,9 +15,7 @@ for (const locale of ['en', 'zh-CN'] as const) {
 
     async function hostEditor(page: Page, app: FixtureApp) {
       await page.goto(`${app.url}/app/event-types`)
-      await page
-        .getByRole('combobox', { name: /^(Interface language|界面语言)$/ })
-        .selectOption(locale)
+      await selectAdminLanguage(page, locale)
       await page
         .getByRole('link', { name: zh ? '编辑 Fixture call' : 'Edit Fixture call', exact: true })
         .click()

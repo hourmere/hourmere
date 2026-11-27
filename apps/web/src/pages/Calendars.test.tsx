@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Schemas } from '../api/client.ts'
 import { goTo } from '../browser.ts'
 import styles from '../styles.css?raw'
+import { selectAdminLanguage } from '../test/account-menu.ts'
 import { fakeApi, json, later, PROFILE, profile, renderApp, signedIn } from '../test/fake-api.tsx'
 import { schedule } from '../test/fixtures.ts'
 
@@ -654,8 +655,7 @@ describe('the calendars page', () => {
       })
       renderApp('/app/calendars')
       await screen.findByRole('heading', { name: 'calendar@example.com' })
-      if (locale === 'zh-CN')
-        await user.selectOptions(screen.getByLabelText('Interface language'), locale)
+      if (locale === 'zh-CN') await selectAdminLanguage(user, locale)
       const notice = document.querySelector('.calendar-list .alert-info')
       expect(notice?.textContent).toMatchSnapshot()
       expect(notice?.textContent).not.toContain('_')
@@ -797,8 +797,7 @@ describe('the calendars page', () => {
       fakeApi({ ...signedIn, ...profile(), ...list([], false, false) })
       renderApp('/app/calendars')
       await screen.findByText('No calendar accounts connected yet.')
-      if (locale === 'zh-CN')
-        await user.selectOptions(screen.getByLabelText('Interface language'), locale)
+      if (locale === 'zh-CN') await selectAdminLanguage(user, locale)
       const empty = document.querySelector('.empty') as HTMLElement
       expect(empty.textContent).toContain(
         locale === 'en' ? 'Basic booking works without one.' : '不连接日历也能使用基础预约。',
@@ -974,7 +973,7 @@ describe('the calendars page', () => {
     })
     renderApp('/app/calendars')
     await screen.findByRole('heading', { name: 'calendar@example.com' })
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Interface language' }), 'zh-CN')
+    await selectAdminLanguage(user, 'zh-CN')
     expect(screen.getByText('无法加载个人资料。请重试后再选择用于写入新预约的日历。')).toBeDefined()
     expect(screen.queryByRole('link', { name: '创建个人资料' })).toBeNull()
     expect(screen.getByRole('button', { name: '重试' })).toBeDefined()
@@ -990,11 +989,7 @@ describe('the calendars page', () => {
       fakeApi({ ...signedIn, ...list([]) })
       renderApp('/app/calendars?connection=session_required')
       await screen.findByText('No calendar accounts connected yet.')
-      if (locale === 'zh-CN')
-        await user.selectOptions(
-          screen.getByRole('combobox', { name: 'Interface language' }),
-          locale,
-        )
+      if (locale === 'zh-CN') await selectAdminLanguage(user, locale)
       expect(within(screen.getByRole('main')).getByRole('status').textContent).toBe(message)
     },
   )
@@ -1012,11 +1007,7 @@ describe('the calendars page', () => {
       })
       renderApp('/app/calendars')
       await screen.findByRole('heading', { name: 'calendar@example.com' })
-      if (language === 'zh-CN')
-        await user.selectOptions(
-          screen.getByRole('combobox', { name: 'Interface language' }),
-          language,
-        )
+      if (language === 'zh-CN') await selectAdminLanguage(user, language)
       const link = screen.getByRole('link', { name: createLabel })
       expect(link.getAttribute('href')).toBe('/app/settings#profile-heading')
       const destination = screen.getByRole('button', {
@@ -1090,11 +1081,7 @@ describe('the calendars page', () => {
       })
       renderApp('/app/calendars')
       await screen.findByRole('heading', { name: 'calendar@example.com' })
-      if (language === 'zh-CN')
-        await user.selectOptions(
-          screen.getByRole('combobox', { name: 'Interface language' }),
-          language,
-        )
+      if (language === 'zh-CN') await selectAdminLanguage(user, language)
       await user.click(
         screen.getByRole('button', {
           name: language === 'en' ? 'Write new bookings here' : '将新预约写入此日历',
@@ -1137,11 +1124,7 @@ describe('the calendars page', () => {
       try {
         renderApp('/app/calendars')
         await screen.findByRole('heading', { name: 'calendar@example.com' })
-        if (language === 'zh-CN')
-          await user.selectOptions(
-            screen.getByRole('combobox', { name: 'Interface language' }),
-            language,
-          )
+        if (language === 'zh-CN') await selectAdminLanguage(user, language)
         const group = screen.getByRole('group', {
           name: `${name}${language === 'en' ? ' (primary)' : '（主日历）'}`,
         })
@@ -1174,7 +1157,7 @@ describe('the calendars page', () => {
     })
     renderApp('/app/calendars?connection=connected&provider=microsoft')
     await screen.findByRole('heading', { name: 'calendar@example.com' })
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Interface language' }), 'zh-CN')
+    await selectAdminLanguage(user, 'zh-CN')
     expect(within(screen.getByRole('main')).getByRole('status').textContent).toBe(
       'Microsoft 日历已连接。日历列表已就绪。请查看下方账户状态，确认实际连接的账户。',
     )

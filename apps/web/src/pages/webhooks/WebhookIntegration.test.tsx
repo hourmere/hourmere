@@ -44,7 +44,10 @@ function membership(role: string) {
 
 const openSettings = async () => {
   renderApp('/app/settings')
-  return within(await screen.findByRole('region', { name: 'Integrations' }))
+  const integrations = await waitFor(() =>
+    within(screen.getByRole('main')).getByRole('region', { name: 'Integrations' }),
+  )
+  return within(integrations)
 }
 
 describe('Webhooks in Settings → Integrations', () => {

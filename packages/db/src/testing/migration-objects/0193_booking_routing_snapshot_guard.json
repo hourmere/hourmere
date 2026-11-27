@@ -1,0 +1,7 @@
+{
+  "migration": "0193_booking_routing_snapshot_guard.sql",
+  "objects": {
+    "trigger public.booking_routing.booking_routing_clear_snapshot": "CREATE TRIGGER booking_routing_clear_snapshot AFTER DELETE ON public.booking_routing FOR EACH ROW EXECUTE FUNCTION clear_booking_routing_snapshot() -- function SET search_path=public, pg_temp md5 2fb800d95bf1114290b6034626106099",
+    "trigger public.bookings.bookings_routing_snapshot_guard": "CREATE TRIGGER bookings_routing_snapshot_guard BEFORE INSERT OR UPDATE OF has_routing_snapshot, id, organization_id ON public.bookings FOR EACH ROW EXECUTE FUNCTION guard_booking_routing_snapshot() -- function SET search_path=public, pg_temp md5 660ce442a99da40271b513523b6ccc3e"
+  }
+}

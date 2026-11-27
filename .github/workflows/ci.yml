@@ -212,6 +212,10 @@ jobs:
             printf 'Unknown well-known route returned HTTP %s; expected 404\n' "$unknown_well_known_status" >&2
             exit 1
           }
+      - name: Smoke test the default routing setting
+        run: |
+          curl --fail --silent --show-error http://127.0.0.1:3000/api/v1/instance |
+            jq --exit-status '.routingFormsEnabled == true'
       - name: Smoke test the separate worker overlay
         timeout-minutes: 2
         run: |
