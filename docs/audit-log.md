@@ -74,6 +74,11 @@ recorded. New detail keys require deliberate schema and documentation review. Th
 [SSO actions](#sso-actions) and [workflow actions](#workflow-actions) have their own
 allow-lists and value checks.
 
+`organization.updated` records `oldSlug` and `newSlug` together when the address changes.
+`oldSlug` preserves the previous spelling for well-formed legacy slugs and is null for
+legacy addresses outside the allowed format. `nameChanged: true` records a display-name
+change without retaining either name. Previous events can have empty details.
+
 | Area | Actions |
 | --- | --- |
 | Membership | `membership.invited`, `membership.accepted`, `membership.invitation_rejected`, `membership.removed`, `membership.left`, `membership.role_changed`, `membership.invitation_cancelled` |

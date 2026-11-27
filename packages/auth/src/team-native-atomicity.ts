@@ -10,6 +10,7 @@ import type {
 import { sql, type Transaction } from 'kysely'
 import { withAuthAuditTransaction } from './audit.ts'
 import { scimMappingDetachRequired } from './organization-context.ts'
+import { mapOrganizationSlugConflict } from './organizations.ts'
 
 const AUTH_TRANSACTION = Symbol.for('hourmere.auth-transaction')
 
@@ -40,7 +41,9 @@ export function nativeTeamTransactions<O extends OrganizationOptions>(
   plugin.endpoints.createOrganization = Object.assign(
     (context: Parameters<typeof createOrganization>[0]) => {
       if (!context?.context) return createOrganization(context)
-      return runWithTransaction(context.context.adapter, () => createOrganization(context))
+      return runWithTransaction(context.context.adapter, () => createOrganization(context)).catch(
+        mapOrganizationSlugConflict,
+      )
     },
     createOrganization,
   ) as typeof createOrganization

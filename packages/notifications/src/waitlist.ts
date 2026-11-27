@@ -382,8 +382,8 @@ export async function deliverWaitlistEmail(
               ...common,
               token: management,
               bookingPath: prepared.event.team
-                ? `/team/${prepared.event.team.slug}/${prepared.event.slug}`
-                : `/${prepared.event.handle}/${prepared.event.slug}`,
+                ? `/team/${encodeURIComponent(prepared.event.team.slug)}/${encodeURIComponent(prepared.event.slug)}`
+                : `/${encodeURIComponent(prepared.event.handle)}/${encodeURIComponent(prepared.event.slug)}`,
               slots: row.slots as { start: string; end: string }[],
             })
       const timeout = AbortSignal.timeout(
