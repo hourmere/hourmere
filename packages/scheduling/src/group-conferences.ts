@@ -10,6 +10,7 @@ import {
 } from './conferences.ts'
 import type { PublicContext } from './context.ts'
 import { DomainError } from './errors.ts'
+import { microsoftTeamsLocation, requireMicrosoftTeamsEnabled } from './microsoft-teams.ts'
 import { cleanText } from './text.ts'
 
 type ConferenceFlags = Pick<PublicContext, 'automaticMeet' | 'automaticZoom'>
@@ -85,7 +86,7 @@ async function requirePinnedGroupConference(
  * against the host's current account, the way the first seat's preparation would.
  */
 export async function requireGroupSlotConferenceUsable(
-  ctx: ConferenceFlags,
+  ctx: ConferenceFlags & Pick<PublicContext, 'microsoftCalendarEnabled'>,
   trx: Db,
   slot: {
     id: string
@@ -95,6 +96,8 @@ export async function requireGroupSlotConferenceUsable(
     zoom_connection_id: string | null
   },
 ) {
+  if (microsoftTeamsLocation(slot.location))
+    requireMicrosoftTeamsEnabled(ctx.microsoftCalendarEnabled)
   if (!automaticConference(slot.location)) return
   const existing = await trx
     .selectFrom('group_slot_conferences')

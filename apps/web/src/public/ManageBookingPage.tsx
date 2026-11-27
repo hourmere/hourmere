@@ -149,9 +149,8 @@ async function followReschedule(
   signal?: AbortSignal,
 ): Promise<ManagedBooking> {
   if (booking.status !== 'cancelled' || booking.conference) return booking
-  // Token resolution can precede a reschedule while hydration sees its cancelled
-  // predecessor. Resolve the same capability once more, using its existing successor
-  // rules. The result is final, even when cancelled too; this must not become polling.
+  // A reschedule can commit between token resolution and hydration. Resolve the same
+  // capability once more in case it now follows a successor. That result is final.
   try {
     return await getManagedBooking(token, signal)
   } catch {
@@ -376,7 +375,7 @@ function ManageView({
 
   // Why an action from the email link cannot be offered.
   const unavailable =
-    initialAction && !changeable
+    initialAction && !changeable && !booking.wasRescheduled
       ? booking.status === 'cancelled'
         ? 'This booking is cancelled, so it can’t be changed.'
         : ended
@@ -411,7 +410,10 @@ function ManageView({
       return
     }
     if (fresh.status === 'cancelled') {
-      setMode({ kind: 'view', message: 'This booking was already cancelled.' })
+      setMode({
+        kind: 'view',
+        ...(fresh.wasRescheduled ? {} : { message: 'This booking was already cancelled.' }),
+      })
       return
     }
     if (Date.parse(fresh.start) <= currentTime()) {
@@ -877,7 +879,14 @@ function BookingSummary({
         (cancelled || !booking.conference || booking.conference.status === 'ready') && (
           <EmailDeliveryHint />
         )}
-      {!message && cancelled && (
+      {!message && cancelled && booking.wasRescheduled && (
+        <div className="alert alert-info">
+          <p role="status">
+            {t('This booking was moved to a new time. The new booking has its own link.')}
+          </p>
+        </div>
+      )}
+      {!message && cancelled && !booking.wasRescheduled && (
         <div className="alert alert-info">
           <p>
             {t('This booking is cancelled')}

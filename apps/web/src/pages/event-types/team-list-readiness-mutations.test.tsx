@@ -191,11 +191,7 @@ describe('team list review regression source-copy controls', () => {
 
   it('detects removing the team weekly-hours guidance', () => {
     assertHours(pageSource)
-    const mutant = mutate(
-      pageSource,
-      '!me.organization.personal && !state.data.schedules.some(validDefault)',
-      'false',
-    )
+    const mutant = mutate(pageSource, '!me.organization.personal && !availabilityDone', 'false')
     expect(() => assertHours(mutant)).toThrowError(
       expect.objectContaining({ name: 'AssertionError' }),
     )

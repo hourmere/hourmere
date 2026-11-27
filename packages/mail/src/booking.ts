@@ -329,15 +329,11 @@ export function meetingLocationText(location: MeetingLocation): string {
 export function teamsMeetingNotice(
   location: TeamsMeetingLocation,
   locale: string | null | undefined,
-  cancelled: boolean,
 ): string | undefined {
   const language = interfaceLanguage(locale) ?? 'en'
-  if (location.status === 'join_url_pending')
-    return message(language, cancelled ? 'teams.linkPendingCancelled' : 'teams.linkPending')
-  if (location.status === 'teams_unavailable')
-    return message(language, cancelled ? 'teams.unavailableCancelled' : 'teams.unavailable')
-  if (location.status === 'writeback_failed')
-    return message(language, cancelled ? 'teams.writebackFailedCancelled' : 'teams.writebackFailed')
+  if (location.status === 'join_url_pending') return message(language, 'teams.linkPending')
+  if (location.status === 'teams_unavailable') return message(language, 'teams.unavailable')
+  if (location.status === 'writeback_failed') return message(language, 'teams.writebackFailed')
 }
 
 function locationContent(
@@ -347,14 +343,7 @@ function locationContent(
 ): string | EmailContent {
   if (location.kind === 'microsoft_teams') {
     const label = 'Microsoft Teams'
-    const url = cancelled && location.status === 'ready' ? linkableUrl(location.url) : undefined
-    if (url) {
-      return {
-        text: `${label}\n${url}`,
-        html: `${label}<br>${emailUserText(url, language, 'ltr')}`,
-      }
-    }
-    const notice = teamsMeetingNotice(location, language, cancelled)
+    const notice = cancelled ? undefined : teamsMeetingNotice(location, language)
     return notice ? `${label}\n${notice}` : label
   }
   if (location.kind === 'link') {

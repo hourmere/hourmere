@@ -1617,7 +1617,7 @@ describe.skipIf(!serverUrl)('workflow definitions once workflows are enabled', (
       }).WORKFLOWS_ENABLED,
     })
     const on = setting('true')
-    const off = setting('')
+    const off = setting('false')
     const context = { db, principal: user.principal, ...on }
     const definition = await createWorkflow(context, {
       owner: { kind: 'personal', id: user.id },
