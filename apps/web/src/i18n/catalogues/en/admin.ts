@@ -3469,6 +3469,10 @@ export const admin = {
   'Team addresses are separate from personal handles.':
     'Team addresses are separate from personal handles.',
 
+  // SAML recovery
+  'If you are replacing signing certificates, enter the full set your identity provider uses.':
+    'If you are replacing signing certificates, enter the full set your identity provider uses.',
+
   // Paid booking management
   'Changes are unavailable for this paid booking. Contact your instance operator about cancellation or refunds.':
     'Changes are unavailable for this paid booking. Contact your instance operator about cancellation or refunds.',

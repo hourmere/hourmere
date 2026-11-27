@@ -8,9 +8,9 @@ import {
   teamSsoAccess,
   withScimResources,
 } from '@hourmere/auth'
-import { createDb, type Db } from '@hourmere/db'
+import { createDb, type Database, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
-import { sql } from 'kysely'
+import { Kysely, PostgresDialect, sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import { findSlots, selectDurationMinutes } from './availability.ts'
@@ -247,6 +247,38 @@ describe.skipIf(!serverUrl)('internal departure handoff preview', () => {
       ...offered,
       availability: 'unavailable',
     })
+  })
+
+  it('evaluates the original start on the current event slot grid', async () => {
+    const { input, ctx, scheduleId } = await setup()
+    await db
+      .updateTable('schedules')
+      .set({ weekly_hours: JSON.stringify(weekdays({ start: '08:45', end: '17:00' })) })
+      .where('id', '=', scheduleId)
+      .execute()
+
+    expect((await previewDepartureHandoff(ctx, input)).availability).toBe('unavailable')
+    const nextGridStart = start.add({ minutes: 15 })
+    expect(
+      (await previewDepartureHandoff(ctx, { ...input, start: nextGridStart })).availability,
+    ).toBe('available')
+  })
+
+  it('runs the preview in a PostgreSQL read-only repeatable-read transaction', async () => {
+    const { input, ctx } = await setup()
+    const statements: string[] = []
+    const loggedDb = new Kysely<Database>({
+      dialect: new PostgresDialect({ pool: owned.pool }),
+      log(event) {
+        if (event.level === 'query') statements.push(event.query.sql)
+      },
+    })
+
+    expect((await previewDepartureHandoff({ ...ctx, db: loggedDb }, input)).availability).toBe(
+      'available',
+    )
+    expect(statements[0]).toBe('start transaction isolation level repeatable read read only')
+    expect(statements.at(-1)).toBe('commit')
   })
 
   it('uses current working hours, booking notice, limits, and local bookings in other spaces', async () => {

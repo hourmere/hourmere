@@ -3311,6 +3311,10 @@ export const admin = {
     '请选择未被保留的团队标识，使用 1–64 个英文字母、数字或连字符，首尾须为字母或数字。新标识将以小写保存。',
   'Team addresses are separate from personal handles.': '团队地址与个人用户名互相独立。',
 
+  // SAML recovery
+  'If you are replacing signing certificates, enter the full set your identity provider uses.':
+    '如需更换签名证书，请填写身份提供方使用的全部证书。',
+
   // Paid booking management
   'Changes are unavailable for this paid booking. Contact your instance operator about cancellation or refunds.':
     '此付费预约暂无法变更。如需取消或退款，请联系实例管理员。',

@@ -142,6 +142,7 @@ export {
   TeamManagementError,
   type TeamManager,
   teamRoles,
+  teamSession,
 } from './team-management.ts'
 export {
   removeTeamMember,
