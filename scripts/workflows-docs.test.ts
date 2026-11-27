@@ -67,7 +67,7 @@ describe('workflow webhook guides', () => {
   ])('%s documents the event kinds and disabled behavior', (path) => {
     const guide = read(path)
     for (const event of WEBHOOK_EVENTS) expect(guide).toContain(`\`${event}\``)
-    expect(guide).toContain('`WORKFLOWS_ENABLED=true`')
+    expect(guide).toContain('`WORKFLOWS_ENABLED=false`')
     expect(guide).toMatch(/`(?:404 )?workflows_disabled`/)
     expect(guide).toMatch(/`(?:409 )?webhooks_disabled`/)
     expect(guide).toContain('`Webhook.events`')
@@ -1065,10 +1065,12 @@ describe('workflow design numeric contracts', () => {
     }
     const empty = loadConfig({
       ...synthetic,
+      WORKFLOWS_ENABLED: '',
       SLOT_SNIPPETS_ENABLED: '',
       FOLLOW_UP_HOST_NOTES_ENABLED: '',
       MAIL_MAX_PER_HOUR: '',
     })
+    expect(empty.WORKFLOWS_ENABLED).toBe(true)
     expect(empty.SLOT_SNIPPETS_ENABLED).toBe(false)
     expect(empty.FOLLOW_UP_HOST_NOTES_ENABLED).toBe(true)
     expect(empty.MAIL_MAX_PER_HOUR).toBe(number('MAIL_MAX_PER_HOUR'))
