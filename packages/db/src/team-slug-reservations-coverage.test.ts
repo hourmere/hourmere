@@ -1,12 +1,16 @@
 import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { copyFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type pg from 'pg'
 import { describe, expect, it } from 'vitest'
 import { migrationsDir, runMigrations } from './migrate.ts'
 import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
+import {
+  MIGRATION_COVERAGE_TIMEOUT,
+  MIGRATION_REPLAY_TIMEOUT,
+  useMigrationReplay,
+} from './testing/migration-replay.ts'
 import { createTestDatabase, type TestDatabase } from './testing.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 
@@ -214,14 +218,21 @@ async function predecessorRows(pool: pg.Pool, teamId: string) {
 }
 
 describe.skipIf(!serverUrl)('Team slug reservations migration', () => {
-  it('fails an assertion when any slug or audit protection is dropped', async () => {
-    const report = await checkConstraintCoverage({
-      serverUrl,
-      migration,
-      assertions: assertTeamSlugProtections,
-    })
-    expect(report.problems).toEqual([])
-  })
+  const replay = useMigrationReplay(serverUrl, migration)
+
+  it(
+    'fails an assertion when any slug or audit protection is dropped',
+    async () => {
+      const report = await checkConstraintCoverage({
+        serverUrl,
+        migration,
+        predecessorTemplate: replay.predecessor,
+        assertions: assertTeamSlugProtections,
+      })
+      expect(report.problems).toEqual([])
+    },
+    MIGRATION_COVERAGE_TIMEOUT,
+  )
 
   it('rejects a claim when a repeatable-read snapshot predates the reservation', async () => {
     const database = await createTestDatabase(serverUrl, undefined, { tag: 'team_slug_rr' })
@@ -254,84 +265,80 @@ describe.skipIf(!serverUrl)('Team slug reservations migration', () => {
     }
   })
 
-  it('reports case collisions, recovers with the documented SQL, matches a fresh install and reruns as a no-op', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'hourmere-team-slugs-'))
-    let upgraded: TestDatabase | undefined
-    let fresh: TestDatabase | undefined
-    try {
-      for (const file of await readdir(migrationsDir)) {
-        if (file.endsWith('.sql') && file < migration)
-          await copyFile(join(migrationsDir, file), join(directory, file))
-      }
-      upgraded = await createTestDatabase(serverUrl, directory, { tag: 'team_slug_up' })
-      const { pool } = upgraded
-      const teamId = randomUUID()
-      const conflictId = randomUUID()
-      await createTeam(pool, 'Legacy-Studio', teamId)
-      await createTeam(pool, 'legacy-studio', conflictId)
-      await createTeam(pool, 'another-studio')
-      await seedPredecessor(pool, teamId)
-      const before = await predecessorRows(pool, teamId)
-      expect(before).toHaveLength(1)
-      const organizationIds = [teamId, conflictId].sort()
-      await expect(pool.query(preflightSql)).resolves.toMatchObject({
-        rows: [
-          {
-            folded_slug: 'legacy-studio',
-            organization_ids: organizationIds,
-            addresses: organizationIds.map((id) =>
-              id === teamId ? 'Legacy-Studio' : 'legacy-studio',
-            ),
-          },
-        ],
-      })
-
-      await copyFile(join(migrationsDir, migration), join(directory, migration))
-      await expect(runMigrations(pool, directory)).rejects.toMatchObject({
-        cause: {
-          code: '23505',
-          message:
-            'Case-insensitive organization slug collisions must be resolved before upgrading',
-          detail: `Conflicting organization IDs by slug: ${organizationIds.join(', ')}`,
-        },
-      })
-      await expect(
-        pool.query('SELECT slug FROM auth.organization ORDER BY id'),
-      ).resolves.toMatchObject({
-        rowCount: 3,
-      })
-      await expect(
-        pool.query(`SELECT to_regclass('public.team_slug_reservations') AS reservations`),
-      ).resolves.toMatchObject({ rows: [{ reservations: null }] })
-      expect(await predecessorRows(pool, teamId)).toEqual(before)
-
-      const renameSql = recoverySql.replace("'<new>'", '$1').replace("'<id>'", '$2')
-      await expect(
-        pool.query(renameSql, ['studio-replacement', conflictId]),
-      ).resolves.toMatchObject({
-        rowCount: 1,
-      })
-      await expect(pool.query(preflightSql)).resolves.toMatchObject({ rows: [] })
-      await expect(runMigrations(pool, directory)).resolves.toEqual([migration])
-      expect(await predecessorRows(pool, teamId)).toEqual(before)
-      await expect(
-        pool.query('SELECT slug FROM auth.organization WHERE id = $1', [conflictId]),
-      ).resolves.toMatchObject({ rows: [{ slug: 'studio-replacement' }] })
-      await expect(pool.query('SELECT slug FROM team_slug_reservations')).resolves.toMatchObject({
-        rows: [],
-      })
-
-      fresh = await createTestDatabase(serverUrl, directory, { tag: 'team_slug_fresh' })
-      expect(await snapshotSchema(pool)).toEqual(await snapshotSchema(fresh.pool))
-      await expect(runMigrations(pool, directory)).resolves.toEqual([])
-      await expect(runMigrations(fresh.pool, directory)).resolves.toEqual([])
-      expect(await predecessorRows(pool, teamId)).toEqual(before)
-    } finally {
+  it(
+    'reports case collisions, recovers with the documented SQL, matches a fresh install and reruns as a no-op',
+    async () => {
+      const { directory, predecessor } = replay
+      let upgraded: TestDatabase | undefined
+      let fresh: TestDatabase | undefined
       try {
-        await Promise.all([upgraded?.drop(), fresh?.drop()])
+        upgraded = await predecessor.clone(undefined, { migrate: false, tag: 'team_slug_up' })
+        const { pool } = upgraded
+        const teamId = randomUUID()
+        const conflictId = randomUUID()
+        await createTeam(pool, 'Legacy-Studio', teamId)
+        await createTeam(pool, 'legacy-studio', conflictId)
+        await createTeam(pool, 'another-studio')
+        await seedPredecessor(pool, teamId)
+        const before = await predecessorRows(pool, teamId)
+        expect(before).toHaveLength(1)
+        const organizationIds = [teamId, conflictId].sort()
+        await expect(pool.query(preflightSql)).resolves.toMatchObject({
+          rows: [
+            {
+              folded_slug: 'legacy-studio',
+              organization_ids: organizationIds,
+              addresses: organizationIds.map((id) =>
+                id === teamId ? 'Legacy-Studio' : 'legacy-studio',
+              ),
+            },
+          ],
+        })
+
+        await copyFile(join(migrationsDir, migration), join(directory, migration))
+        await expect(runMigrations(pool, directory)).rejects.toMatchObject({
+          cause: {
+            code: '23505',
+            message:
+              'Case-insensitive organization slug collisions must be resolved before upgrading',
+            detail: `Conflicting organization IDs by slug: ${organizationIds.join(', ')}`,
+          },
+        })
+        await expect(
+          pool.query('SELECT slug FROM auth.organization ORDER BY id'),
+        ).resolves.toMatchObject({
+          rowCount: 3,
+        })
+        await expect(
+          pool.query(`SELECT to_regclass('public.team_slug_reservations') AS reservations`),
+        ).resolves.toMatchObject({ rows: [{ reservations: null }] })
+        expect(await predecessorRows(pool, teamId)).toEqual(before)
+
+        const renameSql = recoverySql.replace("'<new>'", '$1').replace("'<id>'", '$2')
+        await expect(
+          pool.query(renameSql, ['studio-replacement', conflictId]),
+        ).resolves.toMatchObject({
+          rowCount: 1,
+        })
+        await expect(pool.query(preflightSql)).resolves.toMatchObject({ rows: [] })
+        await expect(runMigrations(pool, directory)).resolves.toEqual([migration])
+        expect(await predecessorRows(pool, teamId)).toEqual(before)
+        await expect(
+          pool.query('SELECT slug FROM auth.organization WHERE id = $1', [conflictId]),
+        ).resolves.toMatchObject({ rows: [{ slug: 'studio-replacement' }] })
+        await expect(pool.query('SELECT slug FROM team_slug_reservations')).resolves.toMatchObject({
+          rows: [],
+        })
+
+        fresh = await predecessor.clone(directory, { tag: 'team_slug_fresh' })
+        expect(await snapshotSchema(pool)).toEqual(await snapshotSchema(fresh.pool))
+        await expect(runMigrations(pool, directory)).resolves.toEqual([])
+        await expect(runMigrations(fresh.pool, directory)).resolves.toEqual([])
+        expect(await predecessorRows(pool, teamId)).toEqual(before)
       } finally {
-        await rm(directory, { recursive: true, force: true })
+        await Promise.all([upgraded?.drop(), fresh?.drop()])
       }
-    }
-  })
+    },
+    MIGRATION_REPLAY_TIMEOUT,
+  )
 })
