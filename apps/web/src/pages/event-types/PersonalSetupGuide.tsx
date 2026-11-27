@@ -9,7 +9,6 @@ import { useI18n } from '../../i18n/runtime.tsx'
 import type { UiText } from '../../i18n/translate.ts'
 import { eventTypePath, PATHS, publicPageUrl } from '../../paths.ts'
 import type { Me } from '../../session.tsx'
-import { validDefault } from '../availability/valid-default.ts'
 
 /** Derived from personal account data; no completed-task records or required calendar grant. */
 export function PersonalSetupGuide({
@@ -17,13 +16,17 @@ export function PersonalSetupGuide({
   profile,
   schedules,
   eventTypes,
+  availabilityDone,
   reload,
+  refreshFailure,
 }: {
   me: Me
   profile: Profile | null
   schedules: Schedule[]
   eventTypes: EventType[]
+  availabilityDone: boolean
   reload: () => void
+  refreshFailure: UiText | null
 }) {
   const { t, ui, locale } = useI18n()
   const [saving, setSaving] = useState(false)
@@ -37,7 +40,6 @@ export function PersonalSetupGuide({
   const submitting = useRef(false)
   const mounted = useMounted()
   const profileDone = profile !== null && me.user.name.trim().length > 0
-  const availabilityDone = schedules.some(validDefault)
   const personalEvents = eventTypes.filter((event) => event.ownerUserId === me.user.id)
   const activeEvent = personalEvents.find((event) => event.isActive)
   const firstEvent = personalEvents[0]
@@ -159,11 +161,18 @@ export function PersonalSetupGuide({
               <Link to={PATHS.availability}>{t('Review default availability')}</Link>
             </>
           )}
-          {failure && !availabilityDone && (
+          {(failure || refreshFailure) && !availabilityDone && (
             <div className="alert alert-error" role="alert">
-              <p>
-                {t('Could not confirm your default availability.')} {ui(failure)}
-              </p>
+              {failure && (
+                <p>
+                  {t('Could not confirm your default availability.')} {ui(failure)}
+                </p>
+              )}
+              {refreshFailure && (
+                <p>
+                  {t('Could not refresh setup status.')} {ui(refreshFailure)}
+                </p>
+              )}
               <button type="button" className="button button-small" onClick={reload}>
                 {t('Refresh setup status')}
               </button>

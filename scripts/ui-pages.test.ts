@@ -274,6 +274,12 @@ it('covers every requested real page and limits en-GB to the booking page', () =
     'scim-mapping-approval',
     'scim-mapping-denial',
     'scim-mapping-applied',
+    'webhooks-list',
+    'webhooks-create',
+    'webhooks-edit',
+    'webhooks-rotate-confirm',
+    'webhooks-delete-confirm',
+    'webhooks-secret',
     'host',
     'booking',
     'booking-form',
@@ -417,6 +423,7 @@ const ssoDelegationAuditUrl = pathToFileURL(resolve('tools/e2e/sso-delegation-au
 const ssoMemberAuditUrl = pathToFileURL(resolve('tools/e2e/sso-member-audit.ts')).href
 const ssoRecoveryAuditUrl = pathToFileURL(resolve('tools/e2e/sso-recovery-audit.ts')).href
 const scimMappingAuditUrl = pathToFileURL(resolve('tools/e2e/scim-mapping-audit.ts')).href
+const webhookAuditUrl = pathToFileURL(resolve('tools/e2e/webhook-audit.ts')).href
 const visualSource = readFileSync('tools/e2e/specs/visual.spec.ts', 'utf8')
 const fixtureSource = readFileSync('tools/e2e/fixtures.ts', 'utf8')
 const shellSource = readFileSync('apps/web/src/components/AppShell.tsx', 'utf8')
@@ -496,7 +503,8 @@ function sourceCopyResult(
       .replace("'./sso-delegation-audit.ts'", JSON.stringify(ssoDelegationAuditUrl))
       .replace("'./sso-member-audit.ts'", JSON.stringify(ssoMemberAuditUrl))
       .replace("'./sso-recovery-audit.ts'", JSON.stringify(ssoRecoveryAuditUrl))
-      .replace("'./scim-mapping-audit.ts'", JSON.stringify(scimMappingAuditUrl)),
+      .replace("'./scim-mapping-audit.ts'", JSON.stringify(scimMappingAuditUrl))
+      .replace("'./webhook-audit.ts'", JSON.stringify(webhookAuditUrl)),
   )
   writeFileSync(join(directory, 'visual.spec.ts'), visual)
   writeFileSync(join(directory, 'fixtures.ts'), fixture)

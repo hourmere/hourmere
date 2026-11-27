@@ -70,6 +70,12 @@ import {
   ssoSetupAuditPages,
 } from './sso-setup-audit.ts'
 import {
+  isWebhookAuditPage,
+  openWebhookAuditPage,
+  type WebhookAuditPageId,
+  webhookAuditPages,
+} from './webhook-audit.ts'
+import {
   isWorkflowAuditPage,
   leavePendingWorkflowAudit,
   openWorkflowAuditPage,
@@ -124,6 +130,7 @@ export const auditPages = [
   ...ssoMemberAuditPages,
   ...ssoRecoveryAuditPages,
   ...scimMappingAuditPages,
+  ...webhookAuditPages,
   { id: 'host', title: 'Public host' },
   { id: 'booking', title: 'Public booking' },
   { id: 'booking-form', title: 'Booking form' },
@@ -343,6 +350,15 @@ export async function openAuditPage(
       await page.evaluate(settleAuditLayout)
       return
     }
+    if (isWebhookAuditPage(id)) {
+      await app.auditSignIn(true, locale, id === 'webhooks-list' ? 'team' : undefined)
+      await page.addInitScript(prepareAuditLocale, locale)
+      const path = await openWebhookAuditPage(page, app, id, locale === 'zh-CN' ? locale : 'en')
+      verifyAuditPath(page.url(), path)
+      await page.evaluate(() => window.scrollTo(0, 0))
+      await page.evaluate(settleAuditLayout)
+      return
+    }
     if (isSsoMemberAuditPage(id)) {
       const signedIn = isSsoMemberSettingsAuditPage(id)
       await app.auditSignIn(signedIn, locale, signedIn ? 'team' : undefined)
@@ -454,6 +470,7 @@ export async function openAuditPage(
         | SsoMemberAuditPageId
         | SsoRecoveryAuditPageId
         | SsoSetupAuditPageId
+        | WebhookAuditPageId
         | WorkflowAuditPageId
         | WorkflowEditorAuditPageId
         | WorkflowRunHistoryAuditPageId

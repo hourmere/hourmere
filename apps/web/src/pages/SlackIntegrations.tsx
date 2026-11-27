@@ -22,8 +22,7 @@ export function SlackIntegrations({ organizationId }: { organizationId: string }
   const [open, setOpen] = useState(false)
   const confirmLeave = useConfirmLeave()
   return (
-    <section className="panel slack-integrations" aria-labelledby="integrations-heading">
-      <h2 id="integrations-heading">{t('Integrations')}</h2>
+    <div>
       <button
         type="button"
         className="button"
@@ -44,7 +43,7 @@ export function SlackIntegrations({ organizationId }: { organizationId: string }
           />
         </div>
       )}
-    </section>
+    </div>
   )
 }
 

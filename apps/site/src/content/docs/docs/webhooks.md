@@ -14,6 +14,26 @@ automatically. [Make recipes](/docs/make) give manual module settings for
 `booking.created` and `booking.cancelled`. [Slack notifications](/docs/slack) provide a
 separate incoming-webhook destination in Settings → Integrations, reusing this delivery machinery.
 
+## Manage endpoints in Settings
+
+Select the personal or team space you want to manage, then open **Settings → Integrations →
+Webhooks**. The list shows each endpoint's destination origin, ID, events and enabled or
+paused configuration. A space can have up to ten endpoints, including paused endpoints.
+To change a destination URL, create a replacement and update any workflow that references
+the old endpoint ID before deleting it.
+
+Copy the signing secret to your receiver's secret store when you create an endpoint or rotate
+its secret. The dashboard displays it once, until you dismiss it or leave the view. Rotation
+replaces the old secret immediately, including for retry attempts. Before deleting, check
+the endpoint ID and confirm that you can lose its retained delivery history. If a write
+cannot be confirmed, refresh the list and verify the endpoint ID before taking another action.
+
+中文：选择个人或团队空间，然后打开 **设置 → 集成 → Webhook**。列表显示目标站点、端点 ID、
+订阅事件及启用或暂停状态。每个空间最多有十个端点，包含暂停的端点。更换目标 URL 时，请先
+新建端点，再更新引用旧端点 ID 的工作流，最后删除旧端点。创建或轮换后，请立即将仅展示一次的
+签名密钥复制到接收端的密钥存储。轮换立即替换旧密钥，也适用于重试。删除会永久清除保留的投递
+记录。若无法确认操作结果，请刷新列表并核对端点 ID，再采取下一步操作。
+
 ## Enable and configure
 
 Set `WEBHOOKS_ENABLED=true` and an independent `WEBHOOK_ENCRYPTION_KEY` containing exactly
@@ -83,15 +103,15 @@ endpoint or one outside the credential's organization. See
 `isActive: false` 暂停。删除会一并清除保留的投递记录，CLI 需加 `--yes` 确认；
 不存在或属于其他组织的端点均返回 `webhook_not_found`。
 没有单独的端点详情或测试投递操作。请从列表查找端点 ID，并通过触发已订阅事件的预约验证接收端。
-工作流默认关闭。关闭时创建或更新端点并新增 `workflow.executed` 订阅会返回
-`404 workflows_disabled`，创建时优先于 `409 webhooks_disabled`。
+工作流默认开启。设置 `WORKFLOWS_ENABLED=false` 后，创建或更新端点并新增
+`workflow.executed` 订阅会返回 `404 workflows_disabled`，创建时优先于 `409 webhooks_disabled`。
 
 `events` must be a nonempty, duplicate-free subset of `booking.created`,
 `booking.rescheduled`, `booking.cancelled`, `booking.reschedule_requested`,
 `booking.reschedule_request_expired`, `booking.attendee_no_show_changed` and `workflow.executed`.
-Adding `workflow.executed` requires `WORKFLOWS_ENABLED=true`. While workflows are off,
-adding it on creation or update returns `404 workflows_disabled`. On create, that takes
-precedence over `409 webhooks_disabled`. An existing subscription can be kept or removed.
+Workflows are enabled by default. With `WORKFLOWS_ENABLED=false`, adding
+`workflow.executed` on creation or update returns `404 workflows_disabled`. On create,
+that takes precedence over `409 webhooks_disabled`. An existing subscription can be kept or removed.
 
 Request events add `data.requestId`, keep `data.status` as `confirmed`, and omit notes and management links.
 Each replacement request has its own delivery identity. There are at most ten endpoints per organization.
