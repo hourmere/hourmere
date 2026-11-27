@@ -580,4 +580,9 @@ export const common = {
   // Microsoft Teams host authorization
   'The assigned host must configure Microsoft Teams in their own signed-in session.':
     '指定的主持人须登录自己的账户来配置 Microsoft Teams。',
+
+  // Team public home
+  'This team has no public events right now.': '此团队目前没有公开活动。',
+  'This team page is unavailable.': '此团队页面暂不可用。',
+  'Couldn’t load this team page.': '无法加载此团队页面。',
 } as const

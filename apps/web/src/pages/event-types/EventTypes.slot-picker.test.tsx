@@ -1,7 +1,8 @@
 import { act, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import type { EventType } from '../../api/resources.ts'
+import { resolveEventTypeEditor } from '../../test/event-type-editor.ts'
 import {
   fakeApi,
   json,
@@ -12,6 +13,8 @@ import {
   signedInAs,
 } from '../../test/fake-api.tsx'
 import { EVENT_TYPE_ID, eventType, schedule } from '../../test/fixtures.ts'
+
+beforeAll(resolveEventTypeEditor)
 
 const team = { ...ME, organization: { ...ME.organization, personal: false, slug: 'design-team' } }
 

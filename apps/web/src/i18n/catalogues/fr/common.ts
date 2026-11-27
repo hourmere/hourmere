@@ -615,4 +615,10 @@ export const common = {
   // Microsoft Teams host authorization
   'The assigned host must configure Microsoft Teams in their own signed-in session.':
     'L’hôte désigné doit se connecter à son propre compte pour configurer Microsoft Teams.',
+
+  // Team public home
+  'This team has no public events right now.':
+    'Cette équipe ne propose aucun événement public pour le moment.',
+  'This team page is unavailable.': 'Cette page d’équipe est indisponible.',
+  'Couldn’t load this team page.': 'Impossible de charger cette page d’équipe.',
 } as const

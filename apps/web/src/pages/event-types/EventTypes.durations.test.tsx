@@ -1,12 +1,15 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import type { EventType } from '../../api/resources.ts'
 import { chooseLanguage } from '../../i18n/store.ts'
+import { resolveEventTypeEditor } from '../../test/event-type-editor.ts'
 import { fakeApi, json, ME, profile, renderApp, signedInAs } from '../../test/fake-api.tsx'
 import { EVENT_TYPE_ID, eventType, schedule } from '../../test/fixtures.ts'
 import { DurationsEditor } from './DurationsEditor.tsx'
+
+beforeAll(resolveEventTypeEditor)
 
 const words = {
   en: {
