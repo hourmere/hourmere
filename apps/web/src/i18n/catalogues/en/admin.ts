@@ -3468,4 +3468,64 @@ export const admin = {
     'Choose a non-reserved team slug of 1–64 ASCII letters, digits or hyphens. Start and end with a letter or digit. New slugs are saved in lowercase.',
   'Team addresses are separate from personal handles.':
     'Team addresses are separate from personal handles.',
+
+  // Booking handoff
+  'Booking handoff': 'Booking handoff',
+  'Handoff status': 'Handoff status',
+  'Preview handoff': 'Preview handoff',
+  'Refresh handoff': 'Refresh handoff',
+  'Confirm handoff': 'Confirm handoff',
+  'Checking handoff…': 'Checking handoff…',
+  'Confirming handoff…': 'Confirming handoff…',
+  'Replacement host': 'Replacement host',
+  'Proposed time': 'Proposed time',
+  'Previewed at': 'Previewed at',
+  'Consent deadline: {time}': 'Consent deadline: {time}',
+  'Pending approvals: {count}': 'Pending approvals: {count}',
+  'Preview the replacement host and time. A preview does not reserve the slot.':
+    'Preview the replacement host and time. A preview does not reserve the slot.',
+  'No handoff offer is available yet.': 'No handoff offer is available yet.',
+  'Participant consent is pending. The booker and every guest must approve. The original booking stays confirmed.':
+    'Participant consent is pending. The booker and every guest must approve. The original booking stays confirmed.',
+  'All participants have approved.': 'All participants have approved.',
+  'Consent has expired. The offer leaves the booking unchanged. A new offer needs new approvals.':
+    'Consent has expired. The offer leaves the booking unchanged. A new offer needs new approvals.',
+  'This handoff offer is closed. Use manual rebooking if you still need to replace the booking.':
+    'This handoff offer is closed. Use manual rebooking if you still need to replace the booking.',
+  'That time is unavailable for the replacement host. Refresh the preview or use manual rebooking.':
+    'That time is unavailable for the replacement host. Refresh the preview or use manual rebooking.',
+  'The proposed time is available.': 'The proposed time is available.',
+  'Calendar availability could not be verified. Ask the replacement host to check calendar sync, then refresh the preview.':
+    'Calendar availability could not be verified. Ask the replacement host to check calendar sync, then refresh the preview.',
+  'The meeting location is unavailable. Ask the replacement host to check their meeting setup, then refresh the preview.':
+    'The meeting location is unavailable. Ask the replacement host to check their meeting setup, then refresh the preview.',
+  'This handoff changed. Refresh the preview before confirming.':
+    'This handoff changed. Refresh the preview before confirming.',
+  'This booking is no longer eligible for handoff. Refresh the booking or coordinate a replacement manually.':
+    'This booking is no longer eligible for handoff. Refresh the booking or coordinate a replacement manually.',
+  'The replacement host is no longer eligible. Check the event type’s host setup, then refresh the preview.':
+    'The replacement host is no longer eligible. Check the event type’s host setup, then refresh the preview.',
+  'Booking handoff is unavailable.': 'Booking handoff is unavailable.',
+  'Could not check the handoff. Refresh to try again.':
+    'Could not check the handoff. Refresh to try again.',
+  'Could not confirm whether the handoff completed. Refresh its status before trying again.':
+    'Could not confirm whether the handoff completed. Refresh its status before trying again.',
+  'Confirming checks the time again, cancels the original booking and creates a separate replacement.':
+    'Confirming checks the time again, cancels the original booking and creates a separate replacement.',
+  'Booking handoff completed.': 'Booking handoff completed.',
+  'The original booking was cancelled and a replacement was created. Cancellation and confirmation notices were queued.':
+    'The original booking was cancelled and a replacement was created. Cancellation and confirmation notices were queued.',
+  'View replacement booking': 'View replacement booking',
+  'The replacement meeting link is being prepared. Refresh the handoff to check its status.':
+    'The replacement meeting link is being prepared. Refresh the handoff to check its status.',
+  'The replacement meeting link is ready.': 'The replacement meeting link is ready.',
+  'The replacement meeting link could not be verified. The replacement booking is confirmed. Ask its host to check their meeting account, then refresh the handoff.':
+    'The replacement meeting link could not be verified. The replacement booking is confirmed. Ask its host to check their meeting account, then refresh the handoff.',
+  'The replacement meeting status is unavailable. Refresh the handoff to check again.':
+    'The replacement meeting status is unavailable. Refresh the handoff to check again.',
+  'Cleanup of the original meeting is pending.': 'Cleanup of the original meeting is pending.',
+  'Cleanup of the original meeting could not be verified. Ask the original meeting account owner to check for a remaining meeting.':
+    'Cleanup of the original meeting could not be verified. Ask the original meeting account owner to check for a remaining meeting.',
+  'Google Meet': 'Google Meet',
+  Zoom: 'Zoom',
 } as const

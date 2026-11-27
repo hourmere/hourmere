@@ -15,6 +15,7 @@ import { useCloseBookingPanel } from '../bookings/BookingPanel.tsx'
 import { hostZone } from '../bookings/booking-format.ts'
 import { type NoShowChange, withNoShowChange } from '../bookings/NoShowAttendees.tsx'
 import { MissingRecord } from '../NotFound.tsx'
+import { BookingHandoff } from './BookingHandoff.tsx'
 import { BookingDetail } from './TeamBookings.tsx'
 
 type Detail =
@@ -81,12 +82,25 @@ export function TeamBookingDetailPage({
   const [expectedOrganizationId] = useState(me.organization.id)
   const [conflict, setConflict] = useState<unknown>(access.contextError)
   const [revoked, setRevoked] = useState(false)
+  const [committedSourceId, setCommittedSourceId] = useState<string | null>(null)
   const load = useCallback(
     (signal: AbortSignal) => loadTeamBookingDetail(id, expectedOrganizationId, signal),
     [id, expectedOrganizationId],
   )
   const [state, reload] = useLoad(load)
   usePageTitle('Booking')
+  function handleConflict(error: unknown) {
+    setConflict(error)
+    if (onConflict) onConflict(error)
+    else access.reportContextChanged(error)
+  }
+
+  function handleRevoked() {
+    setRevoked(true)
+    if (onRevoked) onRevoked()
+    else access.revoke()
+  }
+
   if (revoked || (state.status === 'ready' && state.data.kind === 'missing'))
     return (
       <MissingRecord
@@ -96,6 +110,13 @@ export function TeamBookingDetailPage({
         onBack={embedded ? closePanel : undefined}
       />
     )
+  const detail = state.status === 'ready' && state.data.kind === 'booking' ? state.data : null
+  let booking = detail && (rowBooking ?? detail.booking)
+  if (booking && booking.id === committedSourceId && booking.status !== 'cancelled') {
+    booking =
+      detail?.booking.status === 'cancelled' ? detail.booking : { ...booking, status: 'cancelled' }
+  }
+  const currentConflict = listConflict ?? conflict
   return (
     <div className="team-bookings-page">
       {!embedded && (
@@ -119,34 +140,45 @@ export function TeamBookingDetailPage({
         </div>
       ) : state.data.kind === 'conflict' ? (
         <OrganizationContextConflict error={state.data.error} />
-      ) : state.data.kind === 'booking' ? (
+      ) : detail && booking ? (
         <>
           <OrganizationContextConflict error={conflict} />
           <BookingDetail
             embedded={embedded}
-            booking={rowBooking ?? state.data.booking}
-            teamsLocation={state.data.booking.location?.kind === 'microsoft_teams'}
-            timeZone={state.data.timeZone}
+            booking={booking}
+            teamsLocation={detail.booking.location?.kind === 'microsoft_teams'}
+            timeZone={detail.timeZone}
             expectedOrganizationId={expectedOrganizationId}
-            conflict={listConflict ?? conflict}
-            onConflict={(error) => {
-              setConflict(error)
-              if (onConflict) onConflict(error)
-              else access.reportContextChanged(error)
-            }}
-            onRevoked={() => {
-              setRevoked(true)
-              if (onRevoked) onRevoked()
-              else access.revoke()
-            }}
+            conflict={currentConflict}
+            onConflict={handleConflict}
+            onRevoked={handleRevoked}
+            handoff={
+              detail.booking.departureHandoffEnabled && (
+                <BookingHandoff
+                  key={booking.id}
+                  bookingId={booking.id}
+                  timeZone={detail.timeZone}
+                  expectedOrganizationId={expectedOrganizationId}
+                  conflict={currentConflict}
+                  onConflict={handleConflict}
+                  onRevoked={handleRevoked}
+                  onApplied={() => {
+                    if (booking.status === 'cancelled') return
+                    setCommittedSourceId(booking.id)
+                    onChanged?.({ ...booking, status: 'cancelled' })
+                    onRefresh?.()
+                    reload()
+                  }}
+                />
+              )
+            }
             onRefresh={onRefresh ?? reload}
             onNoShowChanged={(change) => {
               if (onNoShowChanged) {
                 onNoShowChanged(change)
                 return
               }
-              if (state.data.kind === 'booking')
-                onChanged?.(withNoShowChange(rowBooking ?? state.data.booking, change))
+              onChanged?.(withNoShowChange(booking, change))
             }}
             onCancelled={(background) => {
               if (onCancelled) {

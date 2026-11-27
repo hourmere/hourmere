@@ -163,6 +163,7 @@ import { brandingRoutes } from './routes/branding.ts'
 import { caldavRoutes } from './routes/caldav.ts'
 import { calendarRoutes } from './routes/calendars.ts'
 import { conferenceRoutes } from './routes/conferences.ts'
+import { type DepartureHandoffs, departureHandoffRoutes } from './routes/departure-handoffs.ts'
 import { eventTypeRoutes } from './routes/event-types.ts'
 import { instanceRoutes } from './routes/instance.ts'
 import { meetingPollHostRoutes } from './routes/meeting-poll-host.ts'
@@ -291,6 +292,7 @@ export function productRoutes({
   meetingPollSecret,
   routingSecret,
   routingBookingReceiptNow,
+  departureHandoffs,
   workflowRunCursorSecret,
   workflowsEnabled,
   smtpConfigured,
@@ -329,6 +331,8 @@ export function productRoutes({
   /** In-process test injection only; no operator setting exists during hard-off. */
   routingFormsEnabled?: boolean
   routingBookingReceiptNow?: () => Temporal.Instant
+  /** In-process injection for staged acceptance. The running server supplies no store. */
+  departureHandoffs?: DepartureHandoffs
   successRedirectAllowIpHosts?: boolean
   successRedirectPolicy?: ServiceContext['successRedirectPolicy']
   bookingMaxInviteeReschedules?: number | undefined
@@ -537,7 +541,20 @@ export function productRoutes({
       bookingMaxInviteeReschedules,
       bookingExportMaxConcurrent,
     }),
-    teamBookingRoutes({ db, notify }),
+    teamBookingRoutes({
+      db,
+      notify,
+      departureHandoffEnabled: Boolean(departureHandoffs && notify),
+    }),
+    departureHandoffRoutes({
+      db,
+      notify,
+      handoffs: departureHandoffs,
+      capabilities: ssoCapabilities,
+      automaticMeet,
+      automaticZoom,
+      microsoftCalendarEnabled,
+    }),
     teamBookingBulkPreviewRoutes({ db }),
     teamInvitationRoutes({ db, invitationMailLimits }),
     memberDepartureImpactRoutes({ db }),

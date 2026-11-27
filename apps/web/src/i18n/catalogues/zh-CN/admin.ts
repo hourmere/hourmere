@@ -3310,4 +3310,63 @@ export const admin = {
   'Choose a non-reserved team slug of 1–64 ASCII letters, digits or hyphens. Start and end with a letter or digit. New slugs are saved in lowercase.':
     '请选择未被保留的团队标识，使用 1–64 个英文字母、数字或连字符，首尾须为字母或数字。新标识将以小写保存。',
   'Team addresses are separate from personal handles.': '团队地址与个人用户名互相独立。',
+
+  // Booking handoff
+  'Booking handoff': '预约交接',
+  'Handoff status': '交接状态',
+  'Preview handoff': '试算交接',
+  'Refresh handoff': '刷新交接状态',
+  'Confirm handoff': '确认交接',
+  'Checking handoff…': '正在检查交接…',
+  'Confirming handoff…': '正在确认交接…',
+  'Replacement host': '接任主持人',
+  'Proposed time': '拟议时段',
+  'Previewed at': '试算时间',
+  'Consent deadline: {time}': '同意截止时间：{time}',
+  'Pending approvals: {count}': '待确认人数：{count}',
+  'Preview the replacement host and time. A preview does not reserve the slot.':
+    '试算接任主持人与时段。试算不会占用时段。',
+  'No handoff offer is available yet.': '尚无交接提议。',
+  'Participant consent is pending. The booker and every guest must approve. The original booking stays confirmed.':
+    '正在等待参加者同意。预订人和每位来宾都必须同意。原预约仍保持确认。',
+  'All participants have approved.': '所有参加者均已同意。',
+  'Consent has expired. The offer leaves the booking unchanged. A new offer needs new approvals.':
+    '同意期限已过。此提议不会更改预约。新提议需要重新获得同意。',
+  'This handoff offer is closed. Use manual rebooking if you still need to replace the booking.':
+    '此交接提议已关闭。如仍需替换预约，请手动重新预约。',
+  'That time is unavailable for the replacement host. Refresh the preview or use manual rebooking.':
+    '接任主持人无法接受该时段。请重新试算或手动重新预约。',
+  'The proposed time is available.': '拟议时段可预约。',
+  'Calendar availability could not be verified. Ask the replacement host to check calendar sync, then refresh the preview.':
+    '暂时无法核实日历可用性。请让接任主持人检查日历同步，然后重新试算。',
+  'The meeting location is unavailable. Ask the replacement host to check their meeting setup, then refresh the preview.':
+    '会议地点不可用。请让接任主持人检查会议设置，然后重新试算。',
+  'This handoff changed. Refresh the preview before confirming.':
+    '此交接已变更。请重新试算后再确认。',
+  'This booking is no longer eligible for handoff. Refresh the booking or coordinate a replacement manually.':
+    '此预约已不符合交接条件。请刷新预约或手动协调替换。',
+  'The replacement host is no longer eligible. Check the event type’s host setup, then refresh the preview.':
+    '接任主持人已不符合条件。请检查活动类型的主持人设置，然后重新试算。',
+  'Booking handoff is unavailable.': '预约交接暂不可用。',
+  'Could not check the handoff. Refresh to try again.': '无法检查交接。请刷新后重试。',
+  'Could not confirm whether the handoff completed. Refresh its status before trying again.':
+    '无法确认交接是否完成。请先刷新交接状态。',
+  'Confirming checks the time again, cancels the original booking and creates a separate replacement.':
+    '确认时会重新检查时段，然后取消原预约并创建独立的新预约。',
+  'Booking handoff completed.': '预约交接已完成。',
+  'The original booking was cancelled and a replacement was created. Cancellation and confirmation notices were queued.':
+    '原预约已取消，新预约已创建。取消和确认通知已进入发送队列。',
+  'View replacement booking': '查看新预约',
+  'The replacement meeting link is being prepared. Refresh the handoff to check its status.':
+    '正在生成新会议链接。请刷新交接查看状态。',
+  'The replacement meeting link is ready.': '新会议链接已就绪。',
+  'The replacement meeting link could not be verified. The replacement booking is confirmed. Ask its host to check their meeting account, then refresh the handoff.':
+    '无法核实新会议链接是否就绪。新预约已确认。请让接任主持人检查会议账户，然后刷新交接。',
+  'The replacement meeting status is unavailable. Refresh the handoff to check again.':
+    '暂时无法获取新会议状态。请刷新交接后重试。',
+  'Cleanup of the original meeting is pending.': '原会议等待清理。',
+  'Cleanup of the original meeting could not be verified. Ask the original meeting account owner to check for a remaining meeting.':
+    '无法核实原会议是否已清理。请让原会议账户的所有者检查是否还有残留会议。',
+  'Google Meet': 'Google Meet',
+  Zoom: 'Zoom',
 } as const

@@ -853,8 +853,8 @@ async function loadBooking(
 // --- Writing bookings -------------------------------------------------------------------
 
 /**
- * Resolve only against the locked configuration and the actual assigned hosts. Payment holds
- * share it so a hold stores the chosen option exactly as its confirmed booking would.
+ * Resolve against the actual assigned hosts. Booking writes use locked configuration and
+ * lock the Microsoft destination. Read-only handoff terms use a consistent snapshot.
  */
 export async function resolveBookingLocation(
   ctx: Pick<PublicContext, 'automaticMeet' | 'automaticZoom' | 'microsoftCalendarEnabled'>,
@@ -862,6 +862,7 @@ export async function resolveBookingLocation(
   event: PublicEventTypeRecord,
   hosts: string[],
   input: Pick<CreateBookingInput, 'locationOptionId' | 'inviteePhone'>,
+  lockMicrosoftDestination = true,
 ) {
   const options = event.locations
   const chosen = selectLocationOption(options, input.locationOptionId)
@@ -877,7 +878,7 @@ export async function resolveBookingLocation(
         hosts,
         event.id,
         ctx.microsoftCalendarEnabled,
-        true,
+        lockMicrosoftDestination,
       )
     }
     if (organizer && automaticMeet(chosen)) {
