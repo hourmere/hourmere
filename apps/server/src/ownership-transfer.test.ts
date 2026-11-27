@@ -194,6 +194,34 @@ describe.skipIf(!serverUrl)('ownership transfer service', () => {
     return { id, proof }
   }
 
+  async function linkDirectoryUser(organizationId: string, user: Session['user']) {
+    const membership = await db
+      .selectFrom('auth.member')
+      .select('id')
+      .where('organizationId', '=', organizationId)
+      .where('userId', '=', user.id)
+      .executeTakeFirstOrThrow()
+    const connection = await db
+      .insertInto('scim_connections')
+      .values({ organization_id: organizationId })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    const scimUser = await db
+      .insertInto('scim_users')
+      .values({
+        organization_id: organizationId,
+        connection_id: connection.id,
+        user_name: user.email,
+        display_name: user.name,
+        active: true,
+        linked_user_id: user.id,
+        linked_member_id: membership.id,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    return { connectionId: connection.id, scimUserId: scimUser.id }
+  }
+
   async function state(id: string) {
     return db
       .selectFrom('organization_ownership_transfers')
@@ -214,6 +242,7 @@ describe.skipIf(!serverUrl)('ownership transfer service', () => {
       .selectFrom('auth.member')
       .select(['id', 'role'])
       .where('organizationId', '=', f.team.id)
+      .orderBy('id')
       .execute()
 
   const journal = (f: Fixture) =>
@@ -581,6 +610,78 @@ describe.skipIf(!serverUrl)('ownership transfer service', () => {
     ])
     expect((await members(f)).filter(({ role }) => role === 'owner')).toEqual([
       { id: f.owner.membershipId, role: 'owner' },
+    ])
+  })
+
+  it.each([
+    {
+      change: 'the recipient becomes directly SCIM-managed',
+      apply: (f: Fixture) => linkDirectoryUser(f.team.id, f.recipient.principal.user),
+    },
+    {
+      change: 'the recipient becomes SCIM-managed in a child team',
+      apply: async (f: Fixture) => {
+        const parentOwner = await createTestUser(db, 'Directory parent owner')
+        const parent = await createTestTeam(db, [
+          { user: parentOwner, role: 'owner' },
+          { user: f.recipientUser, role: 'member' },
+        ])
+        const { connectionId, scimUserId } = await linkDirectoryUser(parent.id, f.recipientUser)
+        const mapping = await db
+          .insertInto('scim_team_mappings')
+          .values({
+            parent_organization_id: parent.id,
+            child_organization_id: f.team.id,
+            connection_id: connectionId,
+            external_id: 'directory-group',
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+        await db.insertInto('scim_groups').values({ mapping_id: mapping.id }).execute()
+        // Attach provenance to the existing membership the offer targets.
+        await db
+          .insertInto('scim_team_managed_memberships')
+          .values({
+            mapping_id: mapping.id,
+            child_organization_id: f.team.id,
+            member_id: f.recipient.membershipId,
+            user_id: f.recipientUser.id,
+            scim_user_id: scimUserId,
+          })
+          .execute()
+      },
+    },
+    {
+      change: 'the initiator becomes directly SCIM-managed',
+      apply: (f: Fixture) => linkDirectoryUser(f.team.id, f.owner.principal.user),
+    },
+    {
+      change: 'the initiator loses ownership outside the team role policy',
+      apply: (f: Fixture) =>
+        db
+          .updateTable('auth.member')
+          .set({ role: 'admin' })
+          .where('id', '=', f.owner.membershipId)
+          .returning('id')
+          .executeTakeFirstOrThrow(),
+    },
+  ])('invalidates on confirmation when $change', async ({ apply }) => {
+    const f = await fixture({ survivor: true })
+    const { id, proof } = await prepared(f)
+    await apply(f)
+    const rolesBeforeConfirm = await members(f)
+    expect(await state(id)).toEqual({ state: 'pending', terminal_at: null })
+
+    await expect(confirm(f, id, proof)).rejects.toMatchObject({
+      code: 'ownership_transfer_unavailable',
+    })
+
+    expect(await state(id)).toEqual({ state: 'invalidated', terminal_at: expect.any(Date) })
+    expect(await attempt(proof)).toEqual({ consumed_at: null })
+    expect(await members(f)).toEqual(rolesBeforeConfirm)
+    expect((await journal(f)).map(({ action }) => action)).toEqual([
+      'organization.ownership_transfer_offered',
+      'organization.ownership_transfer_invalidated',
     ])
   })
 
