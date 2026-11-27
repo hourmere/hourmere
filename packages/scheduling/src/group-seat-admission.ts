@@ -81,7 +81,7 @@ export async function admitGroupSlot(
     locationOptionId?: string | undefined
     expectedSlotId?: string | undefined
     /** Instance switches for the pinned conference preflight of an existing occurrence. */
-    conference: Pick<PublicContext, 'automaticMeet' | 'automaticZoom'>
+    conference: Pick<PublicContext, 'automaticMeet' | 'automaticZoom' | 'microsoftCalendarEnabled'>
   },
 ) {
   const config = await db
@@ -187,6 +187,7 @@ export async function admitGroupSlot(
       q.event.schedulingType,
       q.event.hostUserIds,
       config.id,
+      q.conference.microsoftCalendarEnabled,
       true,
     )
   }

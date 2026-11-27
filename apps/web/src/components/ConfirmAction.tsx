@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useId, useRef, useState } from 'react'
 import { errorMessage } from '../api/errors.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import type { UiText } from '../i18n/translate.ts'
@@ -22,7 +22,7 @@ export function ConfirmAction({
   label: string
   /** A fuller name for screen readers when the text alone is ambiguous in a list. */
   accessibleLabel?: string
-  prompt: string
+  prompt: ReactNode
   confirmLabel: string
   busyLabel: string
   /** Starts the error message, e.g. "Could not delete the event type." */
@@ -93,7 +93,7 @@ export function ConfirmAction({
         }
       }}
     >
-      <p id={promptId}>{uiText(prompt)}</p>
+      <p id={promptId}>{typeof prompt === 'string' ? uiText(prompt) : prompt}</p>
       <div className="confirm-buttons">
         <button
           type="button"

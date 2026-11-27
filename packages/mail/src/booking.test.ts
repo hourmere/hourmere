@@ -150,7 +150,7 @@ describe('bookingEmail', () => {
       'Answers\nWhat should we talk about?\n  Engines.\n  Analytical ones.\nPhone\n  +44 20 7946 0000',
     )
     expect(m.text).not.toContain('token=')
-    expect(m.html).toContain('Engines.<br>Analytical ones.')
+    expect(m.html).toContain('<bdi>Engines.</bdi><br><bdi>Analytical ones.</bdi>')
     expect(m.html).not.toContain('token=')
   })
 
@@ -201,6 +201,42 @@ describe('bookingEmail', () => {
     const m = bookingEmail('confirmed', meeting, guest)
     expect(m.text).not.toContain('Need to make a change?')
     expect(m.html).not.toContain('Reschedule')
+  })
+
+  it('isolates mixed names, titles, question labels and each answer line without changing plain text', () => {
+    const eventName = '🗓 12 موعد & planning'
+    const inviteeName = 'נועה (Noa)'
+    const names = ['موعد (A)', '中文', 'Ada (עברית)']
+    const question = 'שם (Name):'
+    const answer = 'موعد <work>\n\nSecond line 中文'
+    const input = { ...meeting, eventName, inviteeName, hostNames: names }
+    const forHost = bookingEmail('confirmed', input, { ...host, answers: [{ question, answer }] })
+    expect(forHost.html).toContain('<bdi>🗓 12 موعد &amp; planning</bdi>')
+    expect(forHost.html).toContain(
+      '<bdi>נועה (Noa)</bdi> &lt;<bdi dir="ltr">ada@example.com</bdi>&gt;',
+    )
+    expect(forHost.html).toContain('<bdi>שם (Name):</bdi>')
+    expect(forHost.html).toContain(
+      '<bdi>موعد &lt;work&gt;</bdi><br><br><bdi>Second line 中文</bdi>',
+    )
+    expect(forHost.text).toContain(`Invitee: ${inviteeName} <ada@example.com>`)
+    expect(forHost.text).toContain(`${question}\n  ${answer.replaceAll('\n', '\n  ')}`)
+    expect(forHost.subject).toContain(eventName)
+    for (const body of [forHost.subject, forHost.text]) {
+      expect(body).not.toMatch(/[\u202a-\u202e\u2066-\u2069]/u)
+    }
+
+    const en = bookingEmail('confirmed', input, { ...invitee, locale: 'en' })
+    const zh = bookingEmail('confirmed', input, { ...invitee, locale: 'zh-CN' })
+    expect(en.html).toContain(
+      'Your meeting with <bdi>موعد (A)</bdi>, <bdi>中文</bdi>, and <bdi>Ada (עברית)</bdi> is booked.',
+    )
+    expect(zh.html).toContain(
+      '你与<bdi>موعد (A)</bdi>、<bdi>中文</bdi>和<bdi>Ada (עברית)</bdi>的会议已预约。',
+    )
+    expect(en.html).toContain(`href="${links.reschedule.replaceAll('&', '&amp;')}"`)
+    expect(en.html).not.toContain('ada@example.com')
+    expect(en.html).not.toContain('Second line')
   })
 
   it.each([

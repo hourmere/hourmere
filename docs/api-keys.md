@@ -115,7 +115,9 @@ is listed explicitly. CLI `--help`, no arguments and `--version` are local and r
 New operations require explicit classification; `read` and `bookings` do not gain access
 because an endpoint uses GET or a tool advertises itself as read-only.
 
-Routing operations return `routing_forms_disabled` until an operator enables routing.
+Routing operations return `routing_forms_disabled` while routing is off.
+
+Team booking bulk cancellation preview returns 404 until the feature is released.
 
 <!-- api-key-scope-table:start -->
 
@@ -278,6 +280,7 @@ Routing operations return `routing_forms_disabled` until an operator enables rou
 | `GET /api/v1/team/bookings` | Browser session only | — |
 | `GET /api/v1/team/bookings/{id}` | Browser session only | — |
 | `POST /api/v1/team/bookings/{id}/cancel` | Browser session only | — |
+| `POST /api/v1/team/bookings/bulk-cancellations/preview` | Browser session only | — |
 | `GET /api/v1/team/invitations` | Browser session only | — |
 | `GET /api/v1/team/invitations/{invitationId}` | Browser session only | — |
 | `POST /api/v1/team/invitations/{invitationId}/cancel` | Browser session only | — |

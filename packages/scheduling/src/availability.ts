@@ -960,15 +960,21 @@ export function selectBookableLocationOption(
  * Checks that the option a query would book is usable and returns the round-robin pool that
  * can host it; Meet narrows that pool to hosts with a Meet-capable destination.
  */
-async function requireLocationAvailability(
-  ctx: PublicContext,
+export async function requireLocationAvailability(
+  ctx: Pick<PublicContext, 'db' | 'automaticMeet' | 'automaticZoom' | 'microsoftCalendarEnabled'>,
   et: PublicEventTypeRecord,
   optionId?: string,
 ): Promise<string[]> {
   const chosenOption = selectBookableLocationOption(et, optionId)
   return withLocationAvailability(et.locations, optionId, async () => {
     if (microsoftTeamsLocation(chosenOption)) {
-      await requireMicrosoftTeamsHost(ctx.db, et.schedulingType, et.hostUserIds, et.id)
+      await requireMicrosoftTeamsHost(
+        ctx.db,
+        et.schedulingType,
+        et.hostUserIds,
+        et.id,
+        ctx.microsoftCalendarEnabled,
+      )
     }
     if (automaticZoom(chosenOption)) {
       if (et.schedulingType !== 'individual' || et.hostUserIds.length !== 1)
@@ -1086,7 +1092,11 @@ async function groupEventSlots(
     try {
       await requireGroupSlotConferenceUsable(ctx, ctx.db, slot)
     } catch (error) {
-      if (error instanceof DomainError && error.code === 'slot_unavailable') continue
+      if (
+        error instanceof DomainError &&
+        (error.code === 'slot_unavailable' || error.code === 'location_unavailable')
+      )
+        continue
       throw error
     }
     offered.push({

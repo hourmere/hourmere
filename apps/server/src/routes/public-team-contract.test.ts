@@ -393,6 +393,32 @@ describe.skipIf(!serverUrl)('public team event contract', () => {
     expect((await disabled.request(s.path)).status).toBe(200)
   })
 
+  it('lists a Microsoft Teams event with only its location kind', async () => {
+    const s = await setup('individual')
+    // Inject a synthetic extra field at the storage boundary to exercise the public projection.
+    const joinUrl = 'https://teams.microsoft.com/meet/synthetic-directory-test'
+    await db
+      .updateTable('event_types')
+      .set({ location: JSON.stringify({ kind: 'microsoft_teams', url: joinUrl }) })
+      .where('id', '=', s.event.id)
+      .execute()
+
+    const response = await appWith([s.team.id]).request(s.catalogPath)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      team: { name: 'Research team', slug: s.teamSlug },
+      eventTypes: [
+        {
+          slug: s.event.slug,
+          title: s.event.title,
+          description: null,
+          durationMinutes: 30,
+          location: { kind: 'microsoft_teams' },
+        },
+      ],
+    })
+  })
+
   it.each(schedulingTypes)('exposes exact public DTO keys for a team %s event', async (type) => {
     const s = await setup(type)
     const servicePage = await getPublicTeamEventType({ db, now }, s.page)

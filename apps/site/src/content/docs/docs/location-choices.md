@@ -63,7 +63,7 @@ For example, save this JSON and run `hourmere create-event --input event-request
 | `phone` | Either a host `number` or `askInvitee: true`. Numbers use E.164: `+`, then 7–15 digits, starting with a nonzero digit. |
 | `google_meet` | Optional `autoCreate: true` uses the existing automatic Meet rules. |
 | `zoom` | Optional `autoCreate: true` uses the existing automatic Zoom rules. |
-| `microsoft_teams` | Automatically creates a Teams meeting on a single host’s Microsoft writeback destination when supported. |
+| `microsoft_teams` | Automatically creates a Teams meeting on a single host’s Microsoft writeback destination when supported. The assigned host enables it from their own signed-in session. |
 
 Meet and Zoom without `autoCreate` are passive labels; they do not create meetings.
 Automatic options require the appropriate connected account and destination settings.
@@ -132,6 +132,8 @@ Omitting the choice uses the default. A removed or unknown ID returns
 `invalid_location_choice`; an absent or invalid required phone returns
 `invalid_invitee_phone`. A chosen automatic location that cannot be provided for the
 assigned host returns `location_unavailable`, without silently switching hosts or locations.
+Teams slot and booking requests also return `409 location_unavailable` when Microsoft
+Calendar is disabled on the instance.
 An event with exactly one location keeps its earlier behavior when the choice is omitted,
 whatever that option's ID: slot lookup and booking return the existing automatic-meeting
 readiness codes (such as `automatic_meet_unavailable`), and the booking stores that location's

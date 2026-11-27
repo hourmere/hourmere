@@ -155,8 +155,8 @@ Delete takes JSON {id} and requires --yes to confirm deletion of the endpoint an
 Deliveries takes JSON {id, after?} and returns up to 50 metadata rows. Pass nextAfter as after for the next page.
 Events: booking.created, booking.rescheduled, booking.cancelled, booking.reschedule_requested,
         booking.reschedule_request_expired, booking.attendee_no_show_changed, workflow.executed.
-Adding workflow.executed on create or update requires WORKFLOWS_ENABLED=true.
-Without it, the server returns workflows_disabled (REST 404).
+Adding workflow.executed on create or update requires enabled workflows.
+With WORKFLOWS_ENABLED=false, the server returns workflows_disabled (REST 404).
 On create this takes precedence over webhooks_disabled (REST 409).
 Endpoint events and delivery eventType are open enums. Ignore unknown event kinds.
 Slack: slack create|list|update|delete|test (JSON input; list read/full, writes full).
@@ -207,7 +207,7 @@ Waitlists: event-waitlist, set-event-waitlist, waitlist-entries, remove-waitlist
            join-waitlist, resend-waitlist-verification (arguments through JSON input).
 SSO: sso providers list (optional limit 1–100, cursor), sso policy. Team owner/admin only,
      with read/full scope. OIDC SSO is off unless the operator sets SSO_OIDC_ENABLED=true.
-Routing forms are off by default. The server operator can enable them with ROUTING_FORMS_ENABLED=true.
+Routing forms are on by default. The server operator can turn them off with ROUTING_FORMS_ENABLED=false.
 Pass id, expectedRevision and an optional requestId (UUID) as JSON to routing-forms publish.
 Publication requires full scope. Repeat the same input with the same requestId to recover its version.
 Pass id and answers (keyed by question ID) as JSON to routing-forms preview. Preview requires full scope.
@@ -231,7 +231,8 @@ Workflows: workflows list (owner {kind, id}; optional limit, cursor), workflows 
            workflows delete (id, expectedRevision); authorized repeats are safe.
            workflows preview (owner, definition fields, optional synthetic example) accepts JSON from stdin or a file.
            Read or full scope for list/get/runs. Full scope for create/update/delete/preview.
-           All answer workflows_disabled until booking workflows are enabled on the instance.
+           Workflows are enabled by default. With WORKFLOWS_ENABLED=false, only reads,
+           disable-only updates and deletion are available. Other commands return workflows_disabled.
 Audit log: audit-log list (optional from, to, actorType, actorId, action, limit 1–100, cursor;
            newest first, UTC times), audit-log settings, audit-log set-retention
            ({"retention":"instance"|"forever"} or {"retention":"days","retentionDays":30–3650}).

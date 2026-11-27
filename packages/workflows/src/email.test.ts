@@ -54,7 +54,7 @@ describe('workflow email raw MIME', () => {
       'headers',
       'Ada\r\nBcc: injected@example.test',
       'Ada\nBcc: injected@example.test',
-      'Ada<br>Bcc: injected@example.test',
+      'Ada</bdi></span><br><span dir="auto"><bdi>Bcc: injected@example.test',
     ],
     ['controls', 'A\u0000\u0007\u007f\u009f\u202e\u2066\u200b\ufeffda', 'Ada', 'Ada'],
     ['invalid Unicode', 'A\ud800da', 'A�da', 'A�da'],
@@ -67,7 +67,7 @@ describe('workflow email raw MIME', () => {
       expect(rendered.subject).not.toMatch(/[\r\n]/)
       expect(Buffer.byteLength(rendered.subject)).toBeLessThanOrEqual(WORKFLOW_SUBJECT_MAX_BYTES)
       expect(rendered.text).toBe(`Hello ${plain}!`)
-      expect(rendered.html).toBe(`<p>Hello ${escaped}!</p>`)
+      expect(rendered.html).toBe(`<p><span dir="auto">Hello <bdi>${escaped}</bdi>!</span></p>`)
       expect(rendered.html).not.toMatch(/<(?:script|img)\b/i)
       await capture.mailer.send({ to: 'recipient@example.test', ...rendered })
       const message = capture.sent.at(-1)
@@ -91,7 +91,7 @@ describe('workflow email raw MIME', () => {
     )
     expect(rendered.subject).toBe('<script>Ada</script>')
     expect(rendered.html).toBe(
-      '<p>&lt;a href=&quot;/ada/consultation&quot;&gt;Example&lt;/a&gt;</p>',
+      '<p><span dir="auto">&lt;a href=&quot;<bdi dir="ltr">/ada/consultation</bdi>&quot;&gt;<bdi>Example</bdi>&lt;/a&gt;</span></p>',
     )
     await capture.mailer.send({ to: 'recipient@example.test', ...rendered })
     expect(capture.sent.at(-1)?.decoded).toContain(rendered.html)
@@ -100,6 +100,19 @@ describe('workflow email raw MIME', () => {
 })
 
 describe('workflow email rendering contract', () => {
+  it('keeps mixed-direction template lines and each substituted value independent', () => {
+    const value = input(
+      'Title: {{event_type.title}}',
+      ' اجتماع ({{recipient.name}})\n\nNext: {{event_type.title}} ',
+    )
+    value.recipient.name = 'Ada (נועה)'
+    value.eventType.title = '12 موعد 中文'
+    const rendered = renderWorkflowEmail(value)
+    expect(rendered.text).toBe('اجتماع (Ada (נועה))\n\nNext: 12 موعد 中文')
+    expect(rendered.html).toBe(
+      '<p><span dir="auto">اجتماع (<bdi>Ada (נועה)</bdi>)</span><br><br><span dir="auto">Next: <bdi>12 موعد 中文</bdi></span></p>',
+    )
+  })
   it('renders a validated template with an emoji variation selector unchanged', () => {
     const value = input('Hello ❤️', 'Thanks ❤️ {{recipient.name}}')
     validateWorkflowDefinition(candidate({ actions: [value.action] }), personalContext)

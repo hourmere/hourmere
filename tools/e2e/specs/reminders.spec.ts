@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test'
+import { selectAdminLanguage } from '../account-menu.ts'
 import { revealEventSetting } from '../event-settings.ts'
 import { waitUntilAtRest } from '../fixtures.ts'
 import { selectPublicLanguage } from '../public-language.ts'
@@ -41,9 +42,7 @@ for (const locale of ['en', 'zh-CN'] as const) {
     await page.clock.setFixedTime(new Date(REMINDER_NOW))
     await app.signIn(locale)
     await page.goto(app.url + app.editorPath)
-    await page
-      .getByRole('combobox', { name: /^(Interface language|界面语言)$/ })
-      .selectOption(locale)
+    await selectAdminLanguage(page, locale)
     const editor = page.locator('.notifications-editor')
     await revealEventSetting(editor)
     const reminder = editor.locator('fieldset[id="notifications.reminders"] .notification-card')

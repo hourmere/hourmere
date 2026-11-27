@@ -188,6 +188,7 @@ import { ssoDraftRoutes } from './routes/sso-drafts.ts'
 import { ssoIdentityRecoveryRoutes } from './routes/sso-link-recovery.ts'
 import { ssoPolicyRoutes } from './routes/sso-policy.ts'
 import { ssoRecoveryEnrollmentRoutes } from './routes/sso-recovery-enrollment.ts'
+import { teamBookingBulkPreviewRoutes } from './routes/team-booking-bulk-preview.ts'
 import { teamBookingRoutes } from './routes/team-bookings.ts'
 import { teamInvitationRoutes } from './routes/team-invitations.ts'
 import { webhookRoutes } from './routes/webhooks.ts'
@@ -351,6 +352,7 @@ export function productRoutes({
   enqueueCalendarWritebackRecovery?: CalendarDeps['enqueueWritebackRecovery']
 } & RecurringBookingAdmissionDeps &
   WorkflowSettings): RouteModule[] {
+  const microsoftCalendarEnabled = microsoftCalendar !== undefined
   const ssoCapabilities = withScimResources(
     { ssoOidcEnabled: oidcEnabled, ssoSamlEnabled: samlEnabled, ssoOperatorSetting },
     scimResourcesEnabled,
@@ -444,7 +446,7 @@ export function productRoutes({
       smsRemindersAvailable,
       automaticMeet,
       automaticZoom,
-      microsoftCalendarEnabled: microsoftCalendar !== undefined,
+      microsoftCalendarEnabled,
       successRedirectPolicy,
       recurringBookingsEnabled,
     }),
@@ -456,6 +458,7 @@ export function productRoutes({
       notify,
       automaticMeet,
       automaticZoom,
+      microsoftCalendarEnabled,
       smsRemindersAvailable,
     }),
     publicRoutes({
@@ -471,6 +474,7 @@ export function productRoutes({
       notify,
       automaticMeet,
       automaticZoom,
+      microsoftCalendarEnabled,
       successRedirectPolicy,
     }),
     routingContinuationRoutes({
@@ -480,6 +484,7 @@ export function productRoutes({
       routingSecret,
       automaticMeet,
       automaticZoom,
+      microsoftCalendarEnabled,
       smsRemindersAvailable,
     }),
     oneTimeBookingRoutes({
@@ -488,12 +493,25 @@ export function productRoutes({
       notify,
       automaticMeet,
       automaticZoom,
+      microsoftCalendarEnabled,
       successRedirectPolicy,
     }),
     oneTimeLinkRoutes({ db, publicUrl }),
-    openTimeSnippetRoutes({ db, publicUrl, slotSnippetsEnabled, automaticMeet, automaticZoom }),
+    openTimeSnippetRoutes({
+      db,
+      publicUrl,
+      slotSnippetsEnabled,
+      automaticMeet,
+      automaticZoom,
+      microsoftCalendarEnabled,
+    }),
     routingFormRoutes({ db, routingFormsEnabled: routingEnabled }),
-    availabilityTroubleshootingRoutes({ db, automaticMeet, automaticZoom }),
+    availabilityTroubleshootingRoutes({
+      db,
+      automaticMeet,
+      automaticZoom,
+      microsoftCalendarEnabled,
+    }),
     bookingRoutes({
       db,
       routingFormsEnabled: routingEnabled,
@@ -502,10 +520,12 @@ export function productRoutes({
       notifyAttendeeNoShow,
       automaticMeet,
       automaticZoom,
+      microsoftCalendarEnabled,
       bookingMaxInviteeReschedules,
       bookingExportMaxConcurrent,
     }),
     teamBookingRoutes({ db, notify }),
+    teamBookingBulkPreviewRoutes({ db }),
     teamInvitationRoutes({ db, invitationMailLimits }),
     memberDepartureImpactRoutes({ db }),
     memberRemovalRoutes({
@@ -521,7 +541,7 @@ export function productRoutes({
       db,
       automaticMeet,
       automaticZoom,
-      microsoftCalendarEnabled: microsoftCalendar !== undefined,
+      microsoftCalendarEnabled,
     }),
     // Recovery operations stay available when the operator pauses workflows.
     workflowRoutes({
@@ -595,6 +615,7 @@ export function productTools({
   caldavCalendar?: CalendarDeps['caldav']
   zoomConference?: ConferenceDeps['zoom']
 } & WorkflowSettings): Tool[] {
+  const microsoftCalendarEnabled = microsoftCalendar !== undefined
   return [
     whoamiTool,
     publicTeamTool({
@@ -611,6 +632,7 @@ export function productTools({
       notifyAttendeeNoShow,
       automaticMeet,
       automaticZoom,
+      microsoftCalendarEnabled,
       bookingMaxInviteeReschedules,
       routingFormsEnabled: routingEnabled,
       routingSecret,
@@ -623,7 +645,7 @@ export function productTools({
       db,
       automaticMeet,
       automaticZoom,
-      microsoftCalendarEnabled: microsoftCalendar !== undefined,
+      microsoftCalendarEnabled,
       smsRemindersAvailable,
       followUpHostNotesEnabled,
       successRedirectPolicy,
@@ -632,9 +654,21 @@ export function productTools({
     ...slackDestinationTools({ db, ...webhooks, queue: webhookQueue }),
     ...webhookTools({ db, ...webhooks, workflowsEnabled }),
     ...(slotSnippetsEnabled
-      ? openTimeSnippetTools({ db, publicUrl, slotSnippetsEnabled, automaticMeet, automaticZoom })
+      ? openTimeSnippetTools({
+          db,
+          publicUrl,
+          slotSnippetsEnabled,
+          automaticMeet,
+          automaticZoom,
+          microsoftCalendarEnabled,
+        })
       : []),
-    ...availabilityTroubleshootingTools({ db, automaticMeet, automaticZoom }),
+    ...availabilityTroubleshootingTools({
+      db,
+      automaticMeet,
+      automaticZoom,
+      microsoftCalendarEnabled,
+    }),
     ...integrationTools({
       calendar: { db, google: googleCalendar, caldav: caldavCalendar },
       conference: { db, zoom: zoomConference },
@@ -647,6 +681,7 @@ export function productTools({
       notify,
       automaticMeet,
       automaticZoom,
+      microsoftCalendarEnabled,
       smsRemindersAvailable,
     }),
     ...waitlistTools({ db, secret: waitlistSecret, publicUrl, smtpConfigured }),
@@ -665,6 +700,7 @@ export function productTools({
       publicUrl,
       automaticMeet,
       automaticZoom,
+      microsoftCalendarEnabled,
       smsRemindersAvailable,
     }),
   ]
@@ -971,10 +1007,13 @@ export interface RunningServer {
   close(): Promise<void>
 }
 
+type ServerTestOptions = RecurringBookingAdmissionDeps &
+  Pick<AuthConfig, 'organizationListRateLimitMaxForTests'>
+
 /** Starts Hourmere from environment variables (see .env.example) and optional test dependencies. */
 export async function startServer(
   env: NodeJS.ProcessEnv = process.env,
-  options: RecurringBookingAdmissionDeps = {},
+  options: ServerTestOptions = {},
 ): Promise<RunningServer> {
   // First, before anything can log: one line per console call, control characters escaped.
   const restoreConsole = installOneLineConsole()
@@ -988,7 +1027,7 @@ export async function startServer(
 
 async function start(
   env: NodeJS.ProcessEnv,
-  options: RecurringBookingAdmissionDeps,
+  options: ServerTestOptions,
   restoreConsole: () => void,
 ): Promise<RunningServer> {
   const config = loadConfig(env)
@@ -1018,8 +1057,8 @@ async function start(
     }
     await db.transaction().execute((trx) => ensureWaitlistKey(trx, config.BETTER_AUTH_SECRET))
     await db.transaction().execute((trx) => ensureMeetingPollKey(trx, config.BETTER_AUTH_SECRET))
-    // A paused worker still skips due runs from an earlier opt-in. A fresh default
-    // install has no workflow schedule or worker, and web roles never consume wakes.
+    // An explicitly paused worker still skips previously captured runs as they come due.
+    // A paused install without work to recover needs no workflow jobs. Web roles never consume wakes.
     runWorkflowJobs = role !== 'web' && (await shouldRunWorkflowJobs(db, { workflowsEnabled }))
   } catch (error) {
     await db.destroy()
@@ -1211,6 +1250,7 @@ async function start(
     publicUrl: config.PUBLIC_URL,
     automaticMeet: config.GOOGLE_MEET_ENABLED,
     automaticZoom: config.ZOOM_MEETINGS_ENABLED,
+    microsoftCalendarEnabled: microsoftCalendar !== undefined,
   }
   const runWaitlistEmail = createWaitlistEmailWorker({
     ...notificationDeps,
@@ -1498,8 +1538,8 @@ async function start(
       // Core notification intents precede workflow capture in the booking's transaction.
       await captureWorkflowBooking(trx, event, now, config.BETTER_AUTH_SECRET, { workflowsEnabled })
     }
-    const auth = createAuth(
-      productionAuthOptions({
+    const auth = createAuth({
+      ...productionAuthOptions({
         config,
         pool: authPool,
         db,
@@ -1508,7 +1548,8 @@ async function start(
         invitationMailLimits,
         jobs,
       }),
-    )
+      organizationListRateLimitMaxForTests: options.organizationListRateLimitMaxForTests,
+    })
     // db is closed below.
     fetch = createApp(
       productionAppOptions({

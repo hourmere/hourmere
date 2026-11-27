@@ -27,7 +27,7 @@ import { RoutingAnswersInput, routingFormsGuard } from '../routing-forms.ts'
 import { EXPECTED_ORGANIZATION_HEADER, organizationContextAccess } from '../team-management.ts'
 
 export const ROUTING_FORMS_DISABLED =
-  'Set ROUTING_FORMS_ENABLED=true to enable routing forms, which are off by default. This operation returns routing_forms_disabled while routing forms are off.'
+  'Routing forms are on by default. Set ROUTING_FORMS_ENABLED=false to turn them off. This operation returns routing_forms_disabled while routing forms are off.'
 export const ROUTING_FORM_PUBLICATION_BEHAVIOR =
   'Supply the last-read expectedRevision. Publication leaves enabled unchanged and revalidates all targets and mappings. Unsupported targets, including group and payment-required events, and invalid mappings return invalid_routing_target. Reuse the optional requestId UUID with identical input to return the original version and the current form. Changed input with the same key returns idempotency_key_reused.'
 export const ROUTING_FORM_PREVIEW_BEHAVIOR =

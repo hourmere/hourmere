@@ -129,14 +129,14 @@ async function issuedInvitation(db: Db, userId: string) {
 }
 
 function invitationAudit(
-  { db, organizationId, tokenId }: ScimScenario,
+  { db, organizationId, connectionId }: ScimScenario,
   invitationId: string,
   actions: string[],
 ) {
   return assertAudit(db, {
     organizationId,
-    actorType: 'scim_token',
-    actorId: tokenId,
+    actorType: 'scim_connection',
+    actorId: connectionId,
     targetId: invitationId,
     targetType: 'invitation',
     actions,
