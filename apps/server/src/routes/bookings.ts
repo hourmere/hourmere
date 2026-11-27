@@ -209,6 +209,10 @@ export const Booking = z
       description:
         'Authenticated reads only: whether this caller can change attendee no-show markers now.',
     }),
+    paidManagementUnavailable: z.literal(true).optional().openapi({
+      description:
+        'Authenticated host reads only: the payment binding prevents cancellation, rescheduling and reschedule requests.',
+    }),
     attendees: z.array(Attendee).openapi({ description: 'The invitee first, then guests' }),
     coHosts: z
       .array(z.object({ name: z.string() }))

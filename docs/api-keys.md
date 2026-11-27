@@ -472,14 +472,19 @@ setup and delegation binding. Domain setup, just-in-time admission and recovery 
 require at least one enabled protocol. A team needs a usable provider on an enabled
 protocol to start requiring SSO. The reads `list_sso_providers` and `get_sso_policy`
 (CLI `sso providers list` / `sso policy`) remain available to team owners and administrators.
-Stored enforcement still applies. Enrolled owners can use recovery, and trust-reducing
-operations remain available with their usual authorization.
+Stored enforcement still applies. Turning a protocol off suspends its existing proofs and
+delegations. Re-enabling it restores their use before the original deadline if they still
+meet the other validity checks. Machine reads without a usable delegation on an enforced
+team return `sso_required`. Enrolled owners can use browser recovery, and trust-reducing
+operations retain their usual authorization and proof requirements.
 
 OIDC 和 SAML 单点登录默认关闭。运营者可分别设置 `SSO_OIDC_ENABLED=true` 和
 `SSO_SAML_ENABLED=true`。通过已关闭协议增加信任的请求（如登录、关联、配置身份提供方和绑定
 委托）返回 `404 sso_disabled`。设置域名、即时入组和恢复登记需要至少启用一种协议；开启强制单点
 登录需要该协议上有可用的身份提供方。上述两个读取操作对团队所有者和管理员保持可用。已保存的
-强制要求继续生效；已登记的所有者仍可使用恢复流程，降低信任的操作仍需通过原有权限验证。
+强制要求继续生效。关闭协议会暂停其证明和委托，在原到期时间前重新启用且证明或委托仍有效时
+可以恢复使用。通过机器客户端读取已强制 SSO 的团队时仍需有效委托，否则返回 `sso_required`。
+已登记的所有者可通过浏览器恢复，降低信任的操作仍需通过原有的权限和证明验证。
 
 Booking workflow operations (`GET /api/v1/workflows`, `GET /api/v1/workflows/{id}`,
 `list_workflows`, `get_workflow`, `workflows list` and `workflows get`) are listed before the

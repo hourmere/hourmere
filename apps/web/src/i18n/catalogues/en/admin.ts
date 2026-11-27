@@ -3532,4 +3532,8 @@ export const admin = {
     'Cleanup of the original meeting could not be verified. Ask the original meeting account owner to check for a remaining meeting.',
   'Google Meet': 'Google Meet',
   Zoom: 'Zoom',
+
+  // Paid booking management
+  'Changes are unavailable for this paid booking. Contact your instance operator about cancellation or refunds.':
+    'Changes are unavailable for this paid booking. Contact your instance operator about cancellation or refunds.',
 } as const

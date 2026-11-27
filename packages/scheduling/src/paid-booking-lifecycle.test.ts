@@ -93,7 +93,9 @@ describe.skipIf(!serverUrl)('confirmed paid booking lifecycle', () => {
         },
       })
     await observePayment()
-    await expect(getHostBooking(hostCtx, id)).resolves.toMatchObject({ status: 'confirmed' })
+    const booking = await getHostBooking(hostCtx, id)
+    expect(booking.status).toBe('confirmed')
+    expect(booking.paidManagementUnavailable).toBeUndefined()
     const refunds = () =>
       db
         .selectFrom('payment_refund_obligations')
@@ -292,6 +294,7 @@ describe.skipIf(!serverUrl)('confirmed paid booking lifecycle', () => {
     const afterStart = { ...hostCtx, now: () => nextStart.add({ minutes: 1 }) }
     const detail = await getHostBooking(afterStart, second.booking.id)
     expect(detail.canManageNoShow).toBe(false)
+    expect(detail.paidManagementUnavailable).toBeUndefined()
     await expect(
       setAttendeeNoShow(afterStart, second.booking.id, detail.attendees[0]?.id as string, true),
     ).rejects.toMatchObject({ code: 'paid_booking_management_unavailable' })

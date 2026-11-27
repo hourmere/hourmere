@@ -91,6 +91,10 @@ Rescheduling keeps the original duration and payment. Cancellation of the curren
 requests one refund for the original payment across all moves. REST, MCP and CLI use the
 same booking management rules.
 
+If Hourmere cannot verify the Checkout payment binding, the host dashboard hides the
+booking change controls. Contact your instance operator about cancellation or refunds.
+Operators can review the payment in the reconciliation report.
+
 Host booking details and the invitee's private manage page show the original amount and
 the current refund state. The host also gets a link to the payment in Stripe Dashboard,
 which has its own account access controls. Confirmation and reschedule emails report

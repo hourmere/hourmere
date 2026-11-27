@@ -88,6 +88,23 @@ beforeEach(() => {
 const detail = () => within(screen.getByRole('region', { name: 'Team booking details' }))
 
 describe('team booking panel', () => {
+  it('hides cancellation for a confirmed paid booking with unavailable management', async () => {
+    const paid = {
+      ...first,
+      start: '2999-01-01T09:00:00Z',
+      end: '2999-01-01T09:30:00Z',
+      paidManagementUnavailable: true,
+    }
+    server({ [listRoute]: () => json(200, { data: [paid], nextCursor: null }) })
+    open('/app/team/bookings')
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'First team meeting' }))
+    await screen.findByRole('region', { name: 'Team booking details' })
+    expect(detail().queryByRole('button', { name: 'Cancel booking…' })).toBeNull()
+    expect(
+      detail().getByText(/contact your instance operator about cancellation or refunds/i),
+    ).toBeTruthy()
+  })
+
   it('keeps the team list mounted and navigates its next page with a single history entry', async () => {
     const api = server({
       [listRoute]: ({ path }) =>

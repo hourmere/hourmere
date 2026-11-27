@@ -3373,4 +3373,8 @@ export const admin = {
     '无法核实原会议是否已清理。请让原会议账户的所有者检查是否还有残留会议。',
   'Google Meet': 'Google Meet',
   Zoom: 'Zoom',
+
+  // Paid booking management
+  'Changes are unavailable for this paid booking. Contact your instance operator about cancellation or refunds.':
+    '此付费预约暂无法变更。如需取消或退款，请联系实例管理员。',
 } as const
