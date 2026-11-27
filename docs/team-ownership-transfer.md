@@ -22,7 +22,7 @@ Opening the page, following a navigation link or switching teams leaves the offe
 browser session, effective membership and the team's ordinary SSO access checks. Allowing other
 owners to revoke prevents one owner from blocking the team for the life of an offer. Members who
 are neither owners nor the named recipient see no offer. An owner acting only as revoker receives
-no participant identities.
+no participant identities in the offer view or revoke response.
 
 The server checks the initiator and recipient's current accounts, membership IDs, effective
 memberships and roles at creation and again at confirmation. An invitation, matching email address,
@@ -82,6 +82,12 @@ and the bound membership authorize it. Keep no email address, provider data or b
 the offer. Preserve the participant IDs across membership deletion while the offer record exists
 so that removing and re-adding a user cannot restore the offer.
 
+The storage migration creates empty `organization_ownership_transfers` and
+`organization_ownership_transfer_budgets` tables. It preserves existing memberships and roles.
+Transfer bindings and deadlines are immutable, and an offer can only move from pending to a
+terminal state. A team can store one counter per operation (`initiate` and `revoke`), with the
+window start and the successful transition count. The service will set the window and limits.
+
 Allow one pending offer per team. An offer expires 24 hours after creation on the database clock.
 Confirmation and revocation require `clock_timestamp() < expires_at` after lock waits. At the
 deadline itself, the offer is expired. Store one terminal state and its timestamp on transition
@@ -115,13 +121,16 @@ detail allow-list empty. Correlate the three events with the same journal reques
 
 Journal each stored lifecycle transition in its transaction. Use
 `organization.ownership_transfer_offered` for creation and `organization.ownership_transfer_revoked`
-for revocation, with the actual acting session as actor, the team as target and empty details.
+for revocation, with the actual acting session as actor and the team as target. The offer event
+requires exactly `targetMembershipId`, the lowercase UUID of the recipient's membership in that
+team. This gives existing readers of the team's management journal an audit trail for who was
+offered ownership. The revoke event uses empty details.
 When an authorized write retires an offer, record `organization.ownership_transfer_expired` or
 `organization.ownership_transfer_invalidated` with the team as target, a system actor and empty
 details. Record each terminal transition once, even if the authorized write returns an unavailable
 result after retirement commits. Keep the fresh-proof authorization callback read-only and record
-retirement in a locked write path. The lifecycle entries disclose no offer ID or recipient. Reads
-do not write lifecycle events.
+retirement in a locked write path. No lifecycle event records the offer ID, mailbox or a
+confirmation credential. Reads do not write lifecycle events.
 
 Queue a notification to the target on creation and to all current owners after promotion and to
 the former owner on confirmation, once per recipient. Queue [mail outbox jobs](notifications.md)
@@ -216,7 +225,8 @@ Better Auth's ordinary role endpoint retains its owner-write protections.
 | Step | Deliverable and acceptance |
 | --- | --- |
 | Storage | Add a reserved migration with constraint coverage. Verify upgrade preserves existing memberships and owners, and fresh install and repeated migration succeed. |
-| Service | Implement locked lifecycle transitions, fresh proof, rate limits, recovery cleanup and audit. Prove authorization, one-time consumption, deadline and owner continuity on Postgres. |
+| Service | Implement locked lifecycle transitions, fresh proof, recovery cleanup and audit. Prove authorization, one-time consumption, deadline and owner continuity on Postgres. |
+| Service rate limits | Debit the durable per-team initiate and revoke budgets in the lifecycle transactions. Verify concurrent requests, a carried-over offer and the retry deadline on Postgres before exposing the service. |
 | Notifications | Add en and zh-CN admin mail and wire transactional outbox jobs into create and confirm. Verify recipients, rollback and deduplication on Postgres before exposing the service. |
 | REST and interface parity | Add the four session-only REST routes, OpenAPI and parity exemptions. Regenerate API types. Run route-level Postgres tests for proof, origin, context and credential boundaries. |
 | Bilingual UI and two-party browser acceptance | Ship the en and zh-CN dashboard with jsdom coverage. Run the owner and recipient browser flow, including stale context, confirmation racing revocation and credential exclusions, before enabling. |
