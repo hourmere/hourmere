@@ -118,6 +118,9 @@ describe('SSO destination syntax', () => {
     'https://localhost/',
     'https://idp.internal/',
     'https://idp.local/',
+    'https://idp.home.arpa/',
+    'https://idp.alt/',
+    'https://idp.service.arpa/',
     'https://idp/',
     'https://idp.example.com./',
     'https://idp.example.com/\nvalue',
@@ -786,6 +789,8 @@ describe('SSO public name syntax', () => {
     'https://idp.localhost.example.org:8443/',
     'https://home.arpa.example.com:8443/',
     'https://idp.home-arpa.com:8443/',
+    'https://xhome.arpa:8443/',
+    'https://example.alt.com:8443/',
   ])('treats %s as a public name', (url) => {
     expect(ssoPublicName(new URL(url))).toBe(true)
   })
@@ -805,11 +810,15 @@ describe('SSO public name syntax', () => {
     'https://idp.home.arpa:8443/',
     'https://IDP.HOME.ARPA:8443/',
     'https://sso.idp.home.arpa/',
+    'https://idp.alt:8443/',
+    'https://idp.service.arpa:8443/',
     'https://idp.internal/',
     'https://keycloak/',
     'https://10.0.0.5:8443/',
     'https://127.0.0.1:8443/',
     'https://[fd12::5]:8443/',
+    'file:///tmp/file',
+    'ftp://idp.example.com:8443/',
   ])('treats %s as a name without public syntax', (url) => {
     expect(ssoPublicName(new URL(url))).toBe(false)
   })

@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { copyFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type pg from 'pg'
 import { describe, expect, it } from 'vitest'
@@ -8,7 +7,12 @@ import { migrationsDir, runMigrations } from './migrate.ts'
 import { detailsCheck, detailsCheckMigrations } from './sso-audit-check-source.ts'
 import { ssoAuditTestId } from './sso-audit-protections.ts'
 import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
-import { createTestDatabase, type TestDatabase } from './testing.ts'
+import {
+  MIGRATION_COVERAGE_TIMEOUT,
+  MIGRATION_REPLAY_TIMEOUT,
+  useMigrationReplay,
+} from './testing/migration-replay.ts'
+import type { TestDatabase } from './testing.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -68,57 +72,58 @@ async function assertDetails(pool: pg.Pool) {
 }
 
 describe.skipIf(!serverUrl)('SSO recovery audit migration', () => {
-  it('fails an assertion when the replacement check is dropped', async () => {
-    const report = await checkConstraintCoverage({
-      serverUrl: serverUrl as string,
-      migration,
-      assertions: assertDetails,
-    })
-    expect(report.problems).toEqual([])
-    expect(report.results.map(({ key, status }) => [key, status])).toEqual([
-      ['constraint public.audit_events.audit_events_details_check', 'covered'],
-    ])
-  }, 600_000)
+  const replay = useMigrationReplay(serverUrl as string, migration)
 
-  it('keeps existing journal entries and matches a fresh install after a no-op rerun', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'hourmere-sso-recovery-audit-'))
-    let upgraded: TestDatabase | undefined
-    let fresh: TestDatabase | undefined
-    try {
-      for (const file of await readdir(migrationsDir)) {
-        if (file.endsWith('.sql') && file < migration)
-          await copyFile(join(migrationsDir, file), join(directory, file))
-      }
-      upgraded = await createTestDatabase(serverUrl as string, directory, {
-        tag: 'sso_recovery_up',
+  it(
+    'fails an assertion when the replacement check is dropped',
+    async () => {
+      const report = await checkConstraintCoverage({
+        serverUrl: serverUrl as string,
+        migration,
+        predecessorTemplate: replay.predecessor,
+        assertions: assertDetails,
       })
-      for (const [name, details] of [
-        [action, { method: 'oidc', providerId: ssoAuditTestId(), revision: 4 }],
-        ['scim_user.updated', { operations: ['replace', 'add'] }],
-        ['webhook.updated', { events: ['booking.created', 'workflow.executed'] }],
-        ['sso_recovery.enrolled', {}],
-      ] as const)
-        await record(upgraded.pool, name, details)
-      const journal =
-        'SELECT to_jsonb(a) AS event, xmin::text, ctid::text FROM audit_events a ORDER BY id'
-      const before = (await upgraded.pool.query(journal)).rows
-      expect(before).toHaveLength(4)
-      await copyFile(join(migrationsDir, migration), join(directory, migration))
-      await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([migration])
-      expect((await upgraded.pool.query(journal)).rows).toEqual(before)
-      fresh = await createTestDatabase(serverUrl as string, directory, { tag: 'sso_recovery_new' })
-      expect(await snapshotSchema(fresh.pool)).toEqual(await snapshotSchema(upgraded.pool))
-      await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([])
-      await expect(runMigrations(fresh.pool, directory)).resolves.toEqual([])
-      expect((await upgraded.pool.query(journal)).rows).toEqual(before)
-      await assertDetails(upgraded.pool)
-      await assertDetails(fresh.pool)
-    } finally {
-      await Promise.all([
-        upgraded?.drop(),
-        fresh?.drop(),
-        rm(directory, { recursive: true, force: true }),
+      expect(report.problems).toEqual([])
+      expect(report.results.map(({ key, status }) => [key, status])).toEqual([
+        ['constraint public.audit_events.audit_events_details_check', 'covered'],
       ])
-    }
-  }, 120_000)
+    },
+    MIGRATION_COVERAGE_TIMEOUT,
+  )
+
+  it(
+    'keeps existing journal entries and matches a fresh install after a no-op rerun',
+    async () => {
+      const { directory, predecessor } = replay
+      let upgraded: TestDatabase | undefined
+      let fresh: TestDatabase | undefined
+      try {
+        upgraded = await predecessor.clone(undefined, { migrate: false, tag: 'sso_recovery_up' })
+        for (const [name, details] of [
+          [action, { method: 'oidc', providerId: ssoAuditTestId(), revision: 4 }],
+          ['scim_user.updated', { operations: ['replace', 'add'] }],
+          ['webhook.updated', { events: ['booking.created', 'workflow.executed'] }],
+          ['sso_recovery.enrolled', {}],
+        ] as const)
+          await record(upgraded.pool, name, details)
+        const journal =
+          'SELECT to_jsonb(a) AS event, xmin::text, ctid::text FROM audit_events a ORDER BY id'
+        const before = (await upgraded.pool.query(journal)).rows
+        expect(before).toHaveLength(4)
+        await copyFile(join(migrationsDir, migration), join(directory, migration))
+        await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([migration])
+        expect((await upgraded.pool.query(journal)).rows).toEqual(before)
+        fresh = await predecessor.clone(directory, { tag: 'sso_recovery_new' })
+        expect(await snapshotSchema(fresh.pool)).toEqual(await snapshotSchema(upgraded.pool))
+        await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([])
+        await expect(runMigrations(fresh.pool, directory)).resolves.toEqual([])
+        expect((await upgraded.pool.query(journal)).rows).toEqual(before)
+        await assertDetails(upgraded.pool)
+        await assertDetails(fresh.pool)
+      } finally {
+        await Promise.all([upgraded?.drop(), fresh?.drop()])
+      }
+    },
+    MIGRATION_REPLAY_TIMEOUT,
+  )
 })

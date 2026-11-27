@@ -2,11 +2,14 @@ import { copyFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type pg from 'pg'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { groupSeatsPredecessor } from './group-seats-upgrade-seed.ts'
 import { migrationsDir, runMigrations } from './migrate.ts'
+import { MIGRATION_REPLAY_TIMEOUT } from './testing/migration-replay.ts'
 import { createTestDatabase, type TestDatabase } from './testing.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
+
+vi.setConfig({ testTimeout: MIGRATION_REPLAY_TIMEOUT, hookTimeout: MIGRATION_REPLAY_TIMEOUT })
 
 const serverUrl = process.env.DATABASE_URL
 const migration = '0059_group_seats.sql'
