@@ -112,7 +112,9 @@ export interface FixtureApp {
   hostCounts: () => Promise<number[]>
   rows: () => Promise<{ source: string; status: string }[]>
   authorizeHost: (teamRole?: 'owner' | 'member') => Promise<void>
-  authorizeTeamSession: () => Promise<{ teamId: string; personalId: string }>
+  authorizeTeamSession: (
+    actor?: 'owner' | 'member' | 'other-team',
+  ) => Promise<{ teamId: string; personalId: string; expire: () => Promise<void> }>
   eventTypeTitles: () => Promise<string[]>
   bookingState: () => Promise<{
     total: number
@@ -1424,19 +1426,28 @@ export const test = base.extend<{
             ),
           )
         },
-        authorizeTeamSession: async () => {
+        authorizeTeamSession: async (actor = 'owner') => {
           authorization = undefined
+          const account =
+            actor === 'other-team'
+              ? await f.host({ name: 'Other team owner' })
+              : actor === 'member'
+                ? secondHost
+                : host
+          const teamId = actor === 'other-team' ? await f.organization('other-fixture-team') : team
+          if (actor === 'other-team') await f.member(account.userId, teamId, 'owner')
           const token = randomBytes(24).toString('base64url')
-          await db
+          const session = await db
             .insertInto('auth.session')
             .values({
-              userId: host.userId,
-              activeOrganizationId: team,
+              userId: account.userId,
+              activeOrganizationId: teamId,
               token,
               updatedAt: new Date(),
               expiresAt: new Date(Date.now() + 86_400_000),
             })
-            .execute()
+            .returning('id')
+            .executeTakeFirstOrThrow()
           await context.addCookies([
             {
               name: 'better-auth.session_token',
@@ -1448,7 +1459,17 @@ export const test = base.extend<{
               sameSite: 'Lax',
             },
           ])
-          return { teamId: team, personalId: host.organizationId }
+          return {
+            teamId,
+            personalId: account.organizationId,
+            expire: async () => {
+              await db
+                .updateTable('auth.session')
+                .set({ expiresAt: new Date(0) })
+                .where('id', '=', session.id)
+                .execute()
+            },
+          }
         },
         eventTypeTitles: async () =>
           (await db.selectFrom('event_types').select('title').orderBy('title').execute()).map(
