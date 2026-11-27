@@ -12,6 +12,12 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Added
 
+- Routing forms ask invitees questions and offer a booking or show a message based on
+  their answers. Hosts can manage forms, inspect saved answers and include them in
+  personal booking exports. Routing is on by default for unset or empty
+  `ROUTING_FORMS_ENABLED`. Explicit `false` or a legacy personal `route` handle
+  keeps routing off. See the [routing forms guide](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/routing-forms.md).
+
 - Booking workflows are enabled by default for unset or empty `WORKFLOWS_ENABLED`, including
   on upgrades. Set `WORKFLOWS_ENABLED=false` across web and worker to pause capture and
   delivery admissions. A slow workflow webhook receiver can no longer delay a booking's

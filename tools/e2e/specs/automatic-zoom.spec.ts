@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test'
+import { selectAdminLanguage } from '../account-menu.ts'
 import { expect, fillInvitee, pickSlot, test } from '../automatic-zoom-fixtures.ts'
 import { revealEventSetting } from '../event-settings.ts'
 
@@ -56,7 +57,7 @@ for (const locale of ['en', 'zh-CN'] as const) {
       .check()
     await expect(page.getByRole('button', { name: 'Retry', exact: true })).toBeVisible()
     await page.getByLabel('Title', { exact: true }).fill('Settings')
-    if (zh) await page.getByLabel('Interface language', { exact: true }).selectOption(locale)
+    if (zh) await selectAdminLanguage(page, locale)
     await expect(page.getByLabel(text.title, { exact: true })).toHaveValue('Settings')
     app.failAccountRead(false)
     await page.getByRole('button', { name: zh ? '重试' : 'Retry', exact: true }).click()

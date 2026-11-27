@@ -231,7 +231,7 @@ describe('UI measurement CI contract', () => {
     // Shards preserve the fixture and privacy gates; the stable required job aggregates them.
     ['e2e', 'cb4f31c9aa29924d293ef531c8014df4987124efc79c905b186ca73c72298709'],
     ['e2e-shard', 'a6b1fdd39bd8206fdb6678738a3f627bb524ac6e375a829d2ab97f8f80935033'],
-    ['docker', '2594f351267b97c37981b7889ae22495076c653543f5cd8ee11825ac4ed63d9a'],
+    ['docker', '07b95bbebc9b0eb8d76bc810aaa3e2ead295d1fc2ad3bd5970c92ba5a6d37d67'],
   ])('preserves required job %s and its behavior', (id, digest) => {
     expect(requiredWorkflow.jobs[id ?? '']).toBeDefined()
     expect(

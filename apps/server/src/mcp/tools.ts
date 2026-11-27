@@ -14,6 +14,7 @@ import {
 import {
   DomainError,
   type DomainErrorKind,
+  InvalidBookingAnswerError,
   MeetingPollAlreadyCreatedError,
   MeetingPollAlreadyScheduledError,
   MeetingPollKeyMismatchError,
@@ -134,7 +135,7 @@ export function defineTool<I extends z.ZodType, O extends z.ZodType>(tool: Tool<
 /** The body of an error result: the REST API's error shape, plus Retry-After's value. */
 export interface ToolErrorBody {
   error: string
-  field?: SuccessRedirectErrorField
+  field?: SuccessRedirectErrorField | InvalidBookingAnswerError['field']
   message?: string
   poll?: z.output<typeof MeetingPollHostOutput>
   pollId?: string | null
@@ -347,17 +348,18 @@ export async function runTool(
       // The lower-level error a service wrapped is for us, not the client.
       if (err.cause !== undefined)
         logError(`${tool.name}: ${err.code} caused by `, diagnostic(err.cause))
-      return errorResult(
-        err.detail && !privateInput
-          ? {
-              error: err.code,
-              message: err.detail,
-              ...(successRedirectErrorField(err.code, err.detail) && {
-                field: successRedirectErrorField(err.code, err.detail),
-              }),
-            }
-          : { error: err.code },
-      )
+      // Only a routed create_booking call uses private diagnostics in this tool.
+      const field = privateInput
+        ? tool.name === 'create_booking' &&
+          privateDiagnostics &&
+          err instanceof InvalidBookingAnswerError &&
+          err.field
+        : err.detail && successRedirectErrorField(err.code, err.detail)
+      return errorResult({
+        error: err.code,
+        ...(err.detail && !privateInput && { message: err.detail }),
+        ...(field && { field }),
+      })
     }
     logError(`${tool.name}: `, diagnostic(err))
     return errorResult({ error: 'internal_error' })

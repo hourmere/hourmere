@@ -9,8 +9,8 @@ describe('ROUTING_FORMS_ENABLED', () => {
   it.each([
     ['true', true],
     ['false', false],
-    ['', false],
-    [undefined, false],
+    ['', true],
+    [undefined, true],
   ])('parses %j as %s', (value, enabled) => {
     expect(parseRoutingFormsEnabled(value)).toBe(enabled)
   })
@@ -37,7 +37,7 @@ it.skipIf(!serverUrl)(
       resolveRoutingFormsEnabled({ db, routingFormsEnabled: parseRoutingFormsEnabled(value), warn })
 
     await createFixtures(db).organization('route')
-    expect(await effective(undefined)).toBe(false)
+    expect(await effective(undefined)).toBe(true)
     expect(await effective('true')).toBe(true)
     expect(warn).not.toHaveBeenCalled()
 
@@ -46,7 +46,7 @@ it.skipIf(!serverUrl)(
       .insertInto('profiles')
       .values({ user_id: owner.id, handle: 'route', time_zone: 'UTC' })
       .execute()
-    expect(await effective('true')).toBe(false)
+    expect(await effective(undefined)).toBe(false)
     expect(warn).toHaveBeenCalledExactlyOnceWith(
       expect.stringMatching(
         /legacy personal handle.*"route".*rename with the owner.*restart Hourmere/i,

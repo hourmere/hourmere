@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test'
 import type { components } from '../../apps/web/src/api/schema.d.ts'
+import { accountMenuButton, accountMenuPanel } from './account-menu.ts'
 import {
   AUDIT_CONFIRMATION_EMAIL,
   AUDIT_EMAIL,
@@ -143,6 +144,7 @@ export const auditPages = [
   { id: 'sign-in', title: 'Sign in' },
   { id: 'oauth-consent', title: 'OAuth consent' },
   { id: 'event-types', title: 'Event types' },
+  { id: 'admin-account-menu', title: 'Open account menu' },
   { id: 'event-type-editor', title: 'Event-type editor' },
   { id: 'event-type-editor-expanded', title: 'Event-type editor with all settings expanded' },
   { id: 'availability-editor', title: 'Availability editor' },
@@ -156,6 +158,7 @@ export const auditPages = [
   { id: 'calendars', title: 'Calendars' },
   { id: 'conferences', title: 'Conferences' },
   { id: 'api-keys', title: 'API keys' },
+  { id: 'admin-integrations', title: 'Integration navigation with API keys selected' },
   { id: 'connected-apps', title: 'Connected apps' },
   { id: 'settings', title: 'Settings' },
   { id: 'not-found', title: 'Not found' },
@@ -247,6 +250,7 @@ async function verifyAuditContent(page: Page, id: AuditPageId) {
         .waitFor()
       break
     case 'event-types':
+    case 'admin-account-menu':
       await page.getByText(AUDIT_TITLE, { exact: true }).waitFor()
       break
     case 'event-type-editor':
@@ -293,6 +297,7 @@ async function verifyAuditContent(page: Page, id: AuditPageId) {
       await page.getByText(/^(No Zoom accounts connected\.|尚未连接 Zoom 账号。)$/).waitFor()
       break
     case 'api-keys':
+    case 'admin-integrations':
       await page.getByText(/^(You have no API keys yet\.|你尚无 API 密钥。)$/).waitFor()
       break
     case 'connected-apps':
@@ -485,6 +490,7 @@ export async function openAuditPage(
       'sign-in': '/sign-in',
       'oauth-consent': '/oauth/consent',
       'event-types': '/app/event-types',
+      'admin-account-menu': '/app/event-types',
       'event-type-editor': `/app/event-types/${fixture.eventTypeId}`,
       'event-type-editor-expanded': `/app/event-types/${fixture.eventTypeId}`,
       'availability-editor': `/app/availability/${fixture.scheduleId}`,
@@ -498,6 +504,7 @@ export async function openAuditPage(
       calendars: '/app/calendars',
       conferences: '/app/conferences',
       'api-keys': '/app/api-keys',
+      'admin-integrations': '/app/api-keys',
       'connected-apps': '/app/connected-apps',
       settings: '/app/settings',
       'not-found': '/audit/not/a/real/page',
@@ -599,6 +606,17 @@ export async function openAuditPage(
       id === 'team-booking-detail' ? `/app/bookings/${fixture.teamBookingId}` : paths[id],
     )
     await verifyAuditContent(page, id)
+    if (id === 'admin-account-menu') {
+      await accountMenuButton(page).press('Enter')
+      await accountMenuPanel(page)
+        .getByRole('combobox', { name: /^(Interface language|界面语言)$/ })
+        .waitFor()
+    }
+    if (id === 'admin-integrations') {
+      const toggle = page.getByRole('button', { name: /^(Integrations|集成)$/ })
+      if (await toggle.isVisible()) await toggle.press('Enter')
+      await page.locator('.sidenav a[href="/app/api-keys"][aria-current="page"]').waitFor()
+    }
     if (
       [
         'host',

@@ -378,10 +378,6 @@ describe('one-time public protection source-copy controls', () => {
       expect(error instanceof Error).toBe(true)
       expect(error instanceof Error && error.message.includes(TOKEN)).toBe(false)
     }
-    const before = apiSource.slice(
-      apiSource.indexOf('    const safeError ='),
-      apiSource.indexOf('    throw new PublicRequestError'),
-    )
-    await killed(assertion, before, '    const safeError = error\n', apiSource)
+    await killed(assertion, 'privateResponse ? privateErrorBody(error) : error', 'error', apiSource)
   })
 })

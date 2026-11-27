@@ -50,9 +50,9 @@ unknown tools remain protocol errors. The table below comes from the shared auth
 registry, including each tool's modes and CLI equivalents. Regenerate it with
 `node scripts/generate-api-key-scope-docs.ts`.
 
-Routing operations return `routing_forms_disabled` until an operator enables routing.
-Routing forms are off by default. To enable them on a self-hosted instance, set
-`ROUTING_FORMS_ENABLED=true` and restart Hourmere. While routing is off, `tools/list`
+Routing operations return `routing_forms_disabled` while routing is off.
+Routing forms are on by default. To turn them off on a self-hosted instance, set
+`ROUTING_FORMS_ENABLED=false` and restart Hourmere. While routing is off, `tools/list`
 omits the eleven routing tools and direct calls return `routing_forms_disabled`.
 When enabled, discovery still follows the caller's key scope. See the
 [routing API guide](https://hourmere.com/docs/routing-forms-api) for examples and how
