@@ -198,7 +198,7 @@ export function OrderedLocationsEditor({
               />
               {t('Default location')}
             </label>
-            <div className="row">
+            <div className="location-option-actions">
               <button
                 id={`${id}-move-up`}
                 className="button button-small"
