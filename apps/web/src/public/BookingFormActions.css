@@ -1,0 +1,35 @@
+@media screen {
+  /* Reserve room to scroll every control and the footer above the dock. */
+  html:has(.booking-form-actions[data-docked]) {
+    scroll-padding-bottom: calc(
+      var(--booking-actions-height, 0px) +
+      var(--booking-viewport-inset, 0px) +
+      var(--space-3)
+    );
+  }
+
+  .public:has(.booking-form-actions[data-docked]) {
+    padding-bottom: calc(var(--booking-actions-height, 0px) + var(--booking-viewport-inset, 0px));
+  }
+
+  /* Older WebKit treats a query container as a containing block for fixed descendants. */
+  .public > .public-main:has(.booking-form-actions[data-docked]) {
+    container-type: normal;
+  }
+
+  .public .booking-form-actions[data-docked] {
+    position: fixed;
+    z-index: 5;
+    inset-inline: 0;
+    bottom: var(--booking-viewport-inset, 0px);
+    padding: var(--space-2) max(var(--space-4), env(safe-area-inset-right))
+      max(var(--space-2), env(safe-area-inset-bottom))
+      max(var(--space-4), env(safe-area-inset-left));
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+  }
+
+  .public .booking-form-actions[data-docked] .button {
+    min-height: 44px;
+  }
+}

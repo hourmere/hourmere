@@ -16,6 +16,7 @@ import { ErrorSummary, Field, type FieldErrors, parseWhole } from '../../compone
 import { PageHeader } from '../../components/PageHeader.tsx'
 import { PageSkeleton } from '../../components/PageSkeleton.tsx'
 import { StickyFormActions } from '../../components/StickyFormActions.tsx'
+import { UserContentMessage } from '../../components/UserContent.tsx'
 import { flash, useFlash } from '../../flash.ts'
 import { useLoad, useMounted, usePageTitle } from '../../hooks.ts'
 import { formatMinutes } from '../../i18n/duration.ts'
@@ -234,6 +235,8 @@ function EventTypeForm({
     teamsIssue = 'Microsoft Teams requires individual scheduling with one host.'
   } else if (me.organization.personal) {
     teamsIssue = microsoftTeamsCalendarIssue
+  } else if (draft.hostUserIds[0] !== me.user.id) {
+    teamsIssue = 'The assigned host must configure Microsoft Teams in their own signed-in session.'
   } else if (!canAssignHosts) {
     teamsIssue = 'Could not verify Microsoft Teams availability for the host.'
   } else if (teamsHostStatus === 'unavailable') {
@@ -293,7 +296,6 @@ function EventTypeForm({
     [...draft.hostUserIds].sort().join() === [...baseline.hostUserIds].sort().join()
 
   const editing = saved !== null
-  const title = editing ? msg('Edit “{0}”', { '0': saved.title }) : 'New event type'
 
   function set<K extends keyof EventTypeDraft>(name: K, value: EventTypeDraft[K]) {
     invalidateReadiness()
@@ -637,6 +639,7 @@ function EventTypeForm({
                 {(props) => (
                   <input
                     {...props}
+                    dir="auto"
                     value={draft.title}
                     autoComplete="off"
                     onChange={(e) => {
@@ -831,6 +834,7 @@ function EventTypeForm({
                   <textarea
                     {...props}
                     rows={4}
+                    dir="auto"
                     value={draft.description}
                     onChange={(e) => set('description', e.target.value)}
                   />
@@ -1260,7 +1264,7 @@ function EventTypeForm({
                             : ''}
                         </option>
                         {schedules.map((s) => (
-                          <option key={s.id} value={s.id}>
+                          <option key={s.id} value={s.id} dir="auto">
                             {s.name}
                           </option>
                         ))}
@@ -1443,7 +1447,12 @@ function EventTypeForm({
           </p>
           <ConfirmAction
             label={t('Delete event type')}
-            prompt={t('Delete “{0}”? This cannot be undone.', { '0': saved.title })}
+            prompt={
+              <UserContentMessage
+                message="Delete “{0}”? This cannot be undone."
+                values={{ '0': saved.title }}
+              />
+            }
             confirmLabel={t('Delete event type')}
             busyLabel={t('Deleting…')}
             failure={t('Could not delete the event type.')}
@@ -1460,7 +1469,13 @@ function EventTypeForm({
         <Link to={PATHS.eventTypes}>{t('Event types')}</Link>
       </p>
       <PageHeader
-        title={uiText(title)}
+        title={
+          saved ? (
+            <UserContentMessage message="Edit “{0}”" values={{ '0': saved.title }} />
+          ) : (
+            t('New event type')
+          )
+        }
         lede={t('Set the booking details, questions and availability for this event type.')}
       />
       <EventTypeEditorLayout
@@ -1656,6 +1671,7 @@ function LocationFields({
             <input
               {...props}
               autoComplete="street-address"
+              dir="auto"
               value={draft.address}
               onChange={(e) => set('address', e.target.value)}
             />

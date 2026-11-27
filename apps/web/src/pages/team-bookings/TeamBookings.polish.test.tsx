@@ -1,9 +1,10 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import type { Schemas } from '../../api/client.ts'
 import * as formatting from '../../format.ts'
 import { chooseLanguage } from '../../i18n/store.ts'
+import { AppShell, RequireSession, SessionLayout, TeamBookingsPage } from '../../lazy-pages.tsx'
 import { offsetAt, wallTime } from '../../public/time.ts'
 import styles from '../../styles.css?raw'
 import {
@@ -17,10 +18,12 @@ import {
   renderApp,
   signedInAs,
 } from '../../test/fake-api.tsx'
+import { resolveLazy } from '../../test/resolve-lazy.ts'
 import { teamBookingPanelApi } from '../../test/team-booking-panel-api.ts'
 import bookingStyles from './team-bookings.css?raw'
 
 const PAGE = '/app/team/bookings'
+beforeAll(() => resolveLazy(SessionLayout, RequireSession, AppShell, TeamBookingsPage))
 const LIST = 'GET /api/v1/team/bookings'
 const TEAM: Schemas['Me'] = {
   ...ME,

@@ -310,7 +310,7 @@ const schema = z
     MAIL_MAX_PER_HOUR: emailLimit('MAIL_MAX_PER_HOUR', 100, 0),
     WORKFLOWS_ENABLED: optional(
       z.enum(['true', 'false'], { error: 'WORKFLOWS_ENABLED must be true, false or empty' }),
-    ).transform((value) => value === 'true'),
+    ).transform((value) => value !== 'false'),
     WORKFLOW_MAIL_MAX_PER_HOUR: emailLimit('WORKFLOW_MAIL_MAX_PER_HOUR', 20, 0),
     WORKFLOW_OWNER_MAIL_MAX_PER_HOUR: emailLimit('WORKFLOW_OWNER_MAIL_MAX_PER_HOUR', 5, 0),
     GOOGLE_CLIENT_ID: optional(z.string()),

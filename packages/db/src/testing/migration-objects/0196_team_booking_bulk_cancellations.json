@@ -1,0 +1,21 @@
+{
+  "migration": "0196_team_booking_bulk_cancellations.sql",
+  "objects": {
+    "constraint public.team_booking_bulk_cancellation_items.team_booking_bulk_cancellation_items_batch_id_booking_id_key": "UNIQUE (batch_id, booking_id)",
+    "constraint public.team_booking_bulk_cancellation_items.team_booking_bulk_cancellation_items_batch_id_fkey": "FOREIGN KEY (batch_id) REFERENCES team_booking_bulk_cancellations(id) ON DELETE CASCADE",
+    "constraint public.team_booking_bulk_cancellation_items.team_booking_bulk_cancellation_items_ordinal_check": "CHECK (((ordinal >= 1) AND (ordinal <= 25)))",
+    "constraint public.team_booking_bulk_cancellation_items.team_booking_bulk_cancellation_items_pkey": "PRIMARY KEY (batch_id, ordinal)",
+    "constraint public.team_booking_bulk_cancellation_items.team_booking_bulk_cancellation_items_preview_outcome_check": "CHECK ((preview_outcome = ANY (ARRAY['eligible'::text, 'already_cancelled'::text, 'booking_started'::text, 'booking_not_supported'::text, 'booking_unavailable'::text, 'booking_host_departed'::text])))",
+    "constraint public.team_booking_bulk_cancellations.team_booking_bulk_cancellations_expiry_check": "CHECK (((expires_at > created_at) AND (expires_at <= (created_at + '00:10:00'::interval))))",
+    "constraint public.team_booking_bulk_cancellations.team_booking_bulk_cancellations_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES auth.organization(id) ON DELETE CASCADE",
+    "constraint public.team_booking_bulk_cancellations.team_booking_bulk_cancellations_pkey": "PRIMARY KEY (id)",
+    "index public.team_booking_bulk_cancellations.team_booking_bulk_cancellations_organization_idx": "CREATE INDEX team_booking_bulk_cancellations_organization_idx ON public.team_booking_bulk_cancellations USING btree (organization_id)",
+    "not_null public.team_booking_bulk_cancellation_items.booking_id": "NOT NULL",
+    "not_null public.team_booking_bulk_cancellation_items.preview_outcome": "NOT NULL",
+    "not_null public.team_booking_bulk_cancellations.actor_user_id": "NOT NULL",
+    "not_null public.team_booking_bulk_cancellations.created_at": "NOT NULL DEFAULT clock_timestamp()",
+    "not_null public.team_booking_bulk_cancellations.expires_at": "NOT NULL",
+    "not_null public.team_booking_bulk_cancellations.organization_id": "NOT NULL",
+    "not_null public.team_booking_bulk_cancellations.session_id": "NOT NULL"
+  }
+}

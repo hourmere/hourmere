@@ -2,6 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { widgetMessages } from '../embed/language.ts'
+import { openAccountMenu } from '../test/account-menu.ts'
 import { fakeApi, json, PROFILE, profile, renderApp, signedIn } from '../test/fake-api.tsx'
 import {
   booking,
@@ -225,14 +226,11 @@ describe('Spanish public booking language', () => {
       fakeApi({ ...signedIn, ...profile({ ...PROFILE, locale: 'es-US' }) })
       renderApp('/app/settings')
       await screen.findByRole('heading', { name: browser === 'en' ? 'Settings' : '设置' })
-      await waitFor(() =>
-        expect(document.querySelector<HTMLSelectElement>('.language-picker select')?.value).toBe(
-          browser,
-        ),
-      )
-      const picker = screen.getByLabelText<HTMLSelectElement>(
-        browser === 'en' ? 'Interface language' : '界面语言',
-      )
+      await openAccountMenu(userEvent)
+      const picker = screen.getByRole<HTMLSelectElement>('combobox', {
+        name: browser === 'en' ? 'Interface language' : '界面语言',
+      })
+      await waitFor(() => expect(picker.value).toBe(browser))
       expect([...picker.options].map(({ value }) => value)).toEqual(['en', 'zh-CN'])
       expect(localStorage.getItem('hourmere-language')).toBe('es')
     },

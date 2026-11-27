@@ -383,6 +383,7 @@ describe('explicit Zoom configuration', () => {
     'automatic_zoom_host_policy',
     'zoom_host_session_required',
     'invalid_zoom_connection',
+    'microsoft_teams_host_session_required',
   ])('maps %s to a bounded local message', (code) => {
     const result = serverErrors(new RequestError(403, code, 'unsafe provider detail'), emptyDraft())
     expect(JSON.stringify(result)).not.toContain('unsafe provider detail')

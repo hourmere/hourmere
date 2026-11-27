@@ -56,7 +56,7 @@ includes PostgreSQL 18.
 | `WEB_DIST` | Unset | Built SPA directory. Not forwarded by the default Compose file: Docker sets `/app/apps/web/dist`; development uses Vite instead. |
 | `EMBED_ALLOWED_ORIGINS` | Unset | Up to 32 comma-separated exact HTTPS website origins permitted to embed public booking pages. Empty disables embedding; no wildcards or paths. Loopback HTTP is accepted for local development. The app's own origin also requires an explicit entry. This list is not secret: every signed-in account can read it, including any newly registered account when `SIGNUP=open`. Do not include hostnames you need to keep private. See [embed configuration visibility](/docs/embedding#copy-from-the-editor) for the endpoint and UI. |
 | `TEAM_PUBLIC_HOME_ORGANIZATION_IDS` | Unset | Up to 256 comma-separated organization UUIDs to enable [team home catalogues](/docs/team-public-home). Empty keeps every team home off. Surrounding whitespace and empty entries are ignored, including a trailing comma. Case is normalized. Invalid nonempty entries fail startup. Compose forwards this setting. |
-| `ROUTING_FORMS_ENABLED` | `false` | Set `true` and restart the server to enable [routing forms](/docs/routing-forms). Unset or empty uses the server default. Only `true` and `false` are accepted as nonempty values. Invalid values fail startup. Compose forwards this setting. When you set `true`, a legacy personal `route` handle keeps routing off and triggers a startup warning. |
+| `ROUTING_FORMS_ENABLED` | `true` | Set `false` and restart the server to turn off [routing forms](/docs/routing-forms). Unset or empty uses the server default. Only `true` and `false` are accepted as nonempty values. Invalid values fail startup. Compose forwards this setting. With the default or explicit `true`, a legacy personal `route` handle keeps routing off and triggers a startup warning. |
 | `WEBHOOKS_ENABLED` | `false` | Capture and deliver organization booking events for outbound HTTPS webhooks and Slack. No backfill; set identically on web and worker. See [booking webhooks](/docs/webhooks). |
 | `WEBHOOK_ENCRYPTION_KEY` | Unset | Independent 32-byte base64 key required when webhooks are enabled or to configure [Slack notifications](/docs/slack). Encrypts signing secrets and Slack URLs; keep stable and backed up. Slack capture and delivery also require `WEBHOOKS_ENABLED=true`. |
 | `WEBHOOK_PRIVATE_TARGETS` | Unset | Self-hosting only: up to 32 comma-separated exact `hostname:port`, `IPv4[/CIDR]:port[-port]` or `[IPv6[/CIDR]]:port[-port]` entries permitting private HTTP(S) webhook destinations. Empty preserves public HTTPS-only delivery. Set identically on web and worker. |
@@ -161,9 +161,9 @@ a dotted name without a special-use suffix, may instead have them all public. Th
 public identity provider on a non-default port, such as `idp.example.com:8443`, is reached;
 list it by hostname, since public IP entries are refused. A single-label entry such as
 `keycloak:8443` or `localhost:8443`, or one under `.local`, `.internal`, `.localhost`,
-`.home.arpa`, `.test`, `.example`, `.invalid` or `.onion` such as `idp.internal:8443`,
-accepts only private or loopback answers. So if a search domain or wildcard DNS expands
-such a name to a public address, the request is refused before any connection. Answers that
+`.home.arpa`, `.service.arpa`, `.alt`, `.test`, `.example`, `.invalid` or `.onion`, accepts
+only private or loopback answers. If a search domain or wildcard DNS expands such a name
+to a public address, the request is refused before any connection. Answers that
 mix the two, or include metadata, link-local or other reserved addresses, are refused, and
 the checked address is pinned to the socket. A hostname that is not listed keeps the
 default rules: public addresses only, on port 443 only.
@@ -182,16 +182,16 @@ for the planned transport rules.
 | `BOOKING_MAX_INVITEE_RESCHEDULES` | `5` | Maximum invitee-initiated reschedules across one booking chain, including through old email links. `0` disables invitee rescheduling. Hosts may still reschedule; cancellation remains available. |
 | `SLOT_SNIPPETS_ENABLED` | `false` | Enable the saved-event open-times picker and [agent snippet generation](/docs/open-time-snippets) through REST, MCP and CLI. Available in full to self-hosters. Enable only after public direct-slot booking pages are deployed on this same instance. Generation creates no reservation. |
 | `FOLLOW_UP_HOST_NOTES_ENABLED` | `true` | Permit host-written follow-up notes. `false` rejects notification writes containing notes and omits notes from all outgoing follow-ups, including existing booking snapshots. Set identically on web and worker. Hourmere Cloud must set `false` until reviewed host-text abuse controls are implemented. |
-| `MAIL_RECIPIENT_MAX_PER_HOUR` | `5` | Maximum invitee/guest notification emails sent to the same trimmed, lowercased address in a rolling hour. Positive integer. Host emails are exempt. |
-| `MAIL_RECIPIENT_MAX_PER_DAY` | `20` | Same per-recipient limit over a rolling 24 hours. Positive integer. |
+| `MAIL_RECIPIENT_MAX_PER_HOUR` | `5` | Maximum invitee/guest notification emails sent to the same trimmed, lowercased address in a rolling hour. Host emails are exempt. Also sets the separate app and SCIM invitation recipient caps and, at four times this value, the ceiling across all invitations to the address. Positive integer. |
+| `MAIL_RECIPIENT_MAX_PER_DAY` | `20` | Same per-recipient limits over a rolling 24 hours. Positive integer. |
 | `SIGN_IN_MAIL_MAX_PER_HOUR` | `5` | Maximum sign-in emails sent to the same trimmed, lowercased address in a rolling hour, separate from booking recipient limits. Positive integer. |
 | `SIGN_IN_MAIL_MAX_PER_DAY` | `20` | Same sign-in recipient limit over a rolling 24 hours. Positive integer. |
-| `INVITATION_INVITER_MAX_PER_HOUR` | `20` | Maximum admitted team invitation creations and explicit resends per inviter in a rolling hour, across all their teams. Positive integer. |
+| `INVITATION_INVITER_MAX_PER_HOUR` | `20` | Maximum admitted app invitation creations and explicit resends per inviter in a rolling hour, across all their teams. Positive integer. |
 | `INVITATION_INVITER_MAX_PER_DAY` | `100` | Same per-inviter admission limit over a rolling 24 hours. Positive integer. |
-| `INVITATION_TEAM_MAX_PER_HOUR` | `50` | Maximum admitted invitation creations and explicit resends per team in a rolling hour, across its inviters. Positive integer. |
+| `INVITATION_TEAM_MAX_PER_HOUR` | `50` | Maximum admitted app invitation creations and explicit resends per team in a rolling hour, across its inviters. Positive integer. [SCIM invitations](/docs/scim#invitations-and-initial-sync) use a separate organization budget. |
 | `INVITATION_TEAM_MAX_PER_DAY` | `200` | Same per-team admission limit over a rolling 24 hours. Positive integer. |
 | `MAIL_MAX_PER_HOUR` | `100` | Instance-wide booking notification/sign-in sends and team invitation attempt reservations in a rolling hour. `0` is unlimited. Invitee/guest/team invitation mail stops at this cap; host and sign-in mail may use up to 120% (rounded down), counting all these sends and reservations. |
-| `WORKFLOWS_ENABLED` | `false` | Set `true` to enable booking workflows, including on self-hosted instances without a paid plan. Only `true`, `false` and an empty value are accepted. Empty uses the server default. |
+| `WORKFLOWS_ENABLED` | `true` | Set `false` to pause booking workflows. Unset and empty values enable workflows, including on upgrades and on self-hosted instances without a paid plan. Startup rejects any nonempty value other than `true` or `false`. |
 | `WORKFLOW_MAIL_MAX_PER_HOUR` | `20` | Instance-wide workflow email attempts in a rolling hour, only while workflows are enabled. A positive `MAIL_MAX_PER_HOUR` further limits this cap to 20% of the shared budget, rounded down. `0` suppresses all workflow email. |
 | `WORKFLOW_OWNER_MAIL_MAX_PER_HOUR` | `5` | Workflow email attempts per personal owner or team in a rolling hour, only while workflows are enabled. `0` suppresses all workflow email. |
 | `SIGNUP` | `first-user` | `first-user`, `closed` or `open`; existing users can always sign in. |
@@ -199,7 +199,7 @@ for the planned transport rules.
 
 Compose forwards the three workflow settings with empty defaults. Apply the same values to
 every web process, worker and scheduler for the instance, and recreate the processes together
-after changing them. Set `WORKFLOWS_ENABLED=false` to stop new capture and delivery while
+after changing them. Set `WORKFLOWS_ENABLED=false` to stop new capture and delivery admissions while
 keeping authorized recovery operations available. See the
 [booking workflow operating guide](https://github.com/hourmere/hourmere/blob/main/docs/workflows.md#operating-guide).
 
@@ -380,8 +380,9 @@ settings as the web process.
 | `CALDAV_PRIVATE_TARGETS` | Unset | Operator-only private host/port or CIDR/port exceptions, using the same syntax as `WEBHOOK_PRIVATE_TARGETS`. This is a separate allowlist; webhook exceptions do not permit CalDAV traffic. |
 | `CALDAV_ALLOWED_ORIGINS` | Unset | At most 32 comma-separated exact HTTPS origins allowed to receive CalDAV Basic credentials in addition to the submitted server origin. No wildcards, userinfo, paths, queries or fragments. Approve only origins you trust with every affected connection's credentials. |
 
-Public destinations require a DNS hostname and HTTPS port 443. Private exceptions do
-not permit link-local or cloud metadata targets and never disable TLS verification.
+Public destinations follow the [CalDAV hostname policy](/docs/caldav#known-limitations)
+and require HTTPS on port 443. Private exceptions keep TLS verification and block
+link-local and cloud metadata targets.
 An allowed private address does not authorize credentials to cross origins; an allowed
 origin does not bypass address checks. Both policies apply to discovery, sync and writes.
 An iCloud account may require exact shard origins to be approved; no generic Apple-domain

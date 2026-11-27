@@ -35,7 +35,7 @@ const verifyUrl = `${options.publicUrl}/booking/waitlist/verify#token=${token}&m
 function visibleText(html: string): string {
   return html
     .replace(/<head>[\s\S]*?<\/head>/i, '')
-    .replace(/<\/?span\b[^>]*>/g, '')
+    .replace(/<\/?(?:span|bdi)\b[^>]*>/g, '')
     .replace(/<[^>]*>/g, ' ')
     .replaceAll('&lt;', '<')
     .replaceAll('&gt;', '>')
@@ -535,7 +535,7 @@ describe('waitlist email templates', () => {
     ],
     [
       'user-text HTML escaping',
-      [`\${emailText(part.text, language)}`, `\${part.text}`],
+      ['emailUserValue(event, language)', '{ text: event, html: event }'],
       verifyEscaping,
     ],
     [

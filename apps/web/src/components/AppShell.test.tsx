@@ -63,6 +63,13 @@ function shell(path = '/app/event-types') {
   )
 }
 
+function primaryList() {
+  const nav = screen.getByRole('navigation')
+  const list = nav.querySelector<HTMLUListElement>('[data-layout-scroll="horizontal"]')
+  if (!list) throw new Error('The main navigation needs a horizontal list')
+  return list
+}
+
 describe('admin shell layout', () => {
   it('offers space switching only to browser sessions', () => {
     session.me.principal.kind = 'api_key'
@@ -93,25 +100,119 @@ describe('admin shell layout', () => {
     expect(screen.queryByText('Outer loading')).toBeNull()
   })
 
-  it.each(['en', 'zh-CN'] as const)('groups the compact topbar controls in %s', (language) => {
-    chooseLanguage(language)
-    shell()
-    const header = screen.getByRole('banner')
-    expect(header.className).toBe('topbar')
-    const inner = header.firstElementChild
-    expect(inner?.className).toBe('topbar-inner')
-    expect(inner?.children[0]?.className).toBe('brand')
-    expect(inner?.children[1]?.className).toBe('account')
-    const select = within(header).getByRole('combobox')
-    expect(select.closest('label')?.classList.contains('language-picker-compact')).toBe(true)
-    expect(select.getAttribute('aria-label')).toBe(
-      language === 'en' ? 'Interface language' : '界面语言',
+  it.each([
+    ['en', 'Main', 'Integrations', 'Event types', 'Calendars'],
+    ['zh-CN', '主导航', '集成', '活动类型', '日历'],
+  ] as const)(
+    'keeps everyday links in the horizontal strip and groups integrations in %s',
+    (language, main, integrations, eventTypes, calendars) => {
+      chooseLanguage(language)
+      shell('/app/calendars')
+      const nav = screen.getByRole('navigation', { name: main })
+      const group = within(nav).getByRole('region', { name: integrations })
+      const primary = within(primaryList())
+      expect(primary.getByRole('link', { name: eventTypes })).toBeDefined()
+      expect(primary.getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual(
+        expect.arrayContaining([
+          '/app/event-types',
+          '/app/availability',
+          '/app/bookings',
+          '/app/analytics',
+        ]),
+      )
+      expect(
+        within(group).getByRole('link', { name: calendars }).getAttribute('aria-current'),
+      ).toBe('page')
+      expect(
+        within(group)
+          .getAllByRole('link')
+          .map((link) => link.getAttribute('href')),
+      ).toEqual(['/app/conferences', '/app/calendars', '/app/api-keys', '/app/connected-apps'])
+      expect(primary.queryByRole('link', { name: calendars })).toBeNull()
+      for (const link of within(nav).getAllByRole('link')) {
+        expect(link.querySelector('svg[aria-hidden="true"]')).not.toBeNull()
+      }
+    },
+  )
+
+  it('exposes the current integration in the compact navigation disclosure', async () => {
+    const user = userEvent.setup()
+    shell('/app/api-keys')
+    const group = screen.getByRole('region', { name: 'Integrations' })
+    const trigger = within(group).getByRole('button', { name: 'Integrations' })
+    expect(trigger.getAttribute('aria-current')).toBe('location')
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    trigger.focus()
+    await user.keyboard('{Enter}')
+    expect(trigger.getAttribute('aria-expanded')).toBe('true')
+    expect(trigger.getAttribute('aria-current')).toBeNull()
+    const links = within(group).getByRole('list')
+    expect(links.id).toBe(trigger.getAttribute('aria-controls'))
+    await user.tab()
+    expect(document.activeElement).toBe(
+      within(links).getByRole('link', { name: 'Conference accounts' }),
     )
-    expect(
-      within(header)
-        .getByRole('button', { name: language === 'en' ? 'Sign out' : '退出登录' })
-        .classList.contains('button-small'),
-    ).toBe(true)
+    await user.keyboard('{Escape}')
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    expect(document.activeElement).toBe(trigger)
+  })
+
+  it.each([
+    ['en', 'Account menu', 'Hourmere home', 'Switch space', 'Interface language', 'Sign out'],
+    ['zh-CN', '账户菜单', 'Hourmere 主页', '切换空间', '界面语言', '退出登录'],
+  ] as const)(
+    'opens the %s account menu by keyboard and restores focus on Escape',
+    async (language, account, home, switchSpace, languagePicker, signOut) => {
+      chooseLanguage(language)
+      const user = userEvent.setup()
+      shell()
+      const header = within(screen.getByRole('banner'))
+      expect(header.getByRole('link', { name: home })).toBeDefined()
+      expect(header.getByRole('button', { name: new RegExp(`^${switchSpace}`) })).toBeDefined()
+      expect(header.queryByRole('combobox')).toBeNull()
+      expect(header.queryByRole('button', { name: signOut })).toBeNull()
+      expect(header.queryByText(session.me.user.email)).toBeNull()
+      const trigger = screen.getByRole('button', { name: account })
+      expect(within(trigger).getByText('A').getAttribute('aria-hidden')).toBe('true')
+      expect(trigger.getAttribute('aria-expanded')).toBe('false')
+      expect(screen.queryByRole('combobox', { name: languagePicker })).toBeNull()
+      expect(screen.queryByRole('button', { name: signOut })).toBeNull()
+      trigger.focus()
+      await user.keyboard('{Enter}')
+      expect(trigger.getAttribute('aria-expanded')).toBe('true')
+      const panel = screen.getByRole('region', { name: account })
+      expect(panel.id).toBe(trigger.getAttribute('aria-controls'))
+      expect(within(panel).getByText(session.me.user.email)).toBeDefined()
+      const select = within(panel).getByRole('combobox', { name: languagePicker })
+      await user.tab()
+      expect(document.activeElement).toBe(select)
+      await user.tab()
+      expect(document.activeElement).toBe(within(panel).getByRole('button', { name: signOut }))
+      await user.keyboard('{Escape}')
+      expect(screen.queryByRole('region', { name: account })).toBeNull()
+      expect(trigger.getAttribute('aria-expanded')).toBe('false')
+      expect(document.activeElement).toBe(trigger)
+    },
+  )
+
+  it('closes the account menu when clicked again or on pointer and focus outside', async () => {
+    const user = userEvent.setup()
+    shell()
+    const trigger = screen.getByRole('button', { name: 'Account menu' })
+    await user.click(trigger)
+    expect(trigger.getAttribute('aria-expanded')).toBe('true')
+    await user.click(trigger)
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    expect(document.activeElement).toBe(trigger)
+
+    await user.click(trigger)
+    await user.click(screen.getByRole('heading', { name: 'Page content' }))
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+
+    await user.click(trigger)
+    const link = within(primaryList()).getByRole('link', { name: 'Bookings' })
+    fireEvent.focusIn(link)
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
   })
 
   it.each([
@@ -139,41 +240,40 @@ describe('admin shell layout', () => {
   it('shows fades only where more navigation is hidden and updates on resize', () => {
     let width = 200
     vi.spyOn(Element.prototype, 'clientWidth', 'get').mockImplementation(function (this: Element) {
-      return this.matches('nav ul') ? width : 0
+      return this.matches('[data-layout-scroll="horizontal"]') ? width : 0
     })
     vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockImplementation(function (this: Element) {
-      return this.matches('nav ul') ? 1000 : 0
+      return this.matches('[data-layout-scroll="horizontal"]') ? 1000 : 0
     })
     const { unmount } = shell()
-    const nav = screen.getByRole('navigation')
-    const list = within(nav).getByRole('list')
-    expect(list.getAttribute('data-layout-scroll')).toBe('horizontal')
-    expect(nav.dataset.scrollStart).toBe('true')
-    expect(nav.dataset.scrollEnd).toBe('false')
+    const list = primaryList()
+    const strip = list.closest<HTMLElement>('.sidenav-primary')
+    expect(strip?.dataset.scrollStart).toBe('true')
+    expect(strip?.dataset.scrollEnd).toBe('false')
     list.scrollLeft = 400
     fireEvent.scroll(list)
-    expect(nav.dataset.scrollStart).toBe('false')
-    expect(nav.dataset.scrollEnd).toBe('false')
+    expect(strip?.dataset.scrollStart).toBe('false')
+    expect(strip?.dataset.scrollEnd).toBe('false')
     list.scrollLeft = 800
     fireEvent.scroll(list)
-    expect(nav.dataset.scrollEnd).toBe('true')
+    expect(strip?.dataset.scrollEnd).toBe('true')
     list.scrollLeft = 0
     width = 1000
     fireEvent(window, new Event('resize'))
-    expect(nav.dataset.scrollStart).toBe('true')
-    expect(nav.dataset.scrollEnd).toBe('true')
+    expect(strip?.dataset.scrollStart).toBe('true')
+    expect(strip?.dataset.scrollEnd).toBe('true')
     unmount()
     fireEvent(window, new Event('resize'))
   })
 
-  it('keeps the active item visible when translated navigation changes its width', () => {
+  it('keeps the active item visible when translated navigation changes its width', async () => {
     let translated = false
     const rect = (left: number, right: number) => ({ left, right, width: right - left }) as DOMRect
     vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(200)
     vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
       this: Element,
     ) {
-      if (this.matches('nav ul')) return rect(0, 200)
+      if (this.matches('[data-layout-scroll="horizontal"]')) return rect(0, 200)
       if (this.matches('nav a[aria-current="page"]')) {
         const offset = this.closest('ul')?.scrollLeft ?? 0
         return translated ? rect(240 - offset, 340 - offset) : rect(10, 80)
@@ -181,10 +281,13 @@ describe('admin shell layout', () => {
       return rect(0, 0)
     })
     shell()
-    const list = within(screen.getByRole('navigation')).getByRole('list')
+    const list = primaryList()
     expect(list.scrollLeft).toBe(0)
+    await userEvent.click(screen.getByRole('button', { name: 'Account menu' }))
     translated = true
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'zh-CN' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Interface language' }), {
+      target: { value: 'zh-CN' },
+    })
     expect(list.scrollLeft).toBe(140)
   })
 
@@ -192,12 +295,12 @@ describe('admin shell layout', () => {
     let width = 1000
     const rect = (left: number, right: number) => ({ left, right, width: right - left }) as DOMRect
     vi.spyOn(Element.prototype, 'clientWidth', 'get').mockImplementation(function (this: Element) {
-      return this.matches('nav ul') ? width : 0
+      return this.matches('[data-layout-scroll="horizontal"]') ? width : 0
     })
     vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
       this: Element,
     ) {
-      if (this.matches('nav ul')) return rect(0, width)
+      if (this.matches('[data-layout-scroll="horizontal"]')) return rect(0, width)
       if (this.matches('nav a[aria-current="page"]')) {
         const offset = this.closest('ul')?.scrollLeft ?? 0
         return rect(900 - offset, 1000 - offset)
@@ -205,7 +308,7 @@ describe('admin shell layout', () => {
       return rect(0, 0)
     })
     shell('/app/settings')
-    const list = within(screen.getByRole('navigation')).getByRole('list')
+    const list = primaryList()
     expect(list.scrollLeft).toBe(0)
     width = 200
     fireEvent(window, new Event('resize'))
@@ -219,7 +322,7 @@ describe('admin shell layout', () => {
     vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
       this: Element,
     ) {
-      if (this.matches('nav ul')) return rect(0, 200)
+      if (this.matches('[data-layout-scroll="horizontal"]')) return rect(0, 200)
       if (this.matches('nav a[aria-current="page"]')) {
         const offset = this.closest('ul')?.scrollLeft ?? 0
         return rect(150 - offset, 220 - offset)
@@ -227,7 +330,7 @@ describe('admin shell layout', () => {
       return rect(0, 0)
     })
     shell('/app/settings')
-    const list = within(screen.getByRole('navigation')).getByRole('list')
+    const list = primaryList()
     expect(list.scrollLeft).toBe(20)
     list.style.scrollPaddingInlineStart = '24px'
     list.style.scrollPaddingInlineEnd = '24px'

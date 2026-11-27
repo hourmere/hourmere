@@ -603,9 +603,17 @@ export const common = {
   // Booking page preview
   'These are sample times. Booking is disabled in the preview.':
     'Estes horários são exemplos. Não é possível fazer agendamentos na prévia.',
+  // Rescheduled booking links
+  'This booking was moved to a new time. The new booking has its own link.':
+    'Esta reserva foi remarcada para outro horário. A nova reserva tem seu próprio link.',
   // Booking location changes
   'The meeting location has changed. Please choose a time again.':
     'O local da reunião mudou. Escolha novamente um horário.',
+
+  // Microsoft Teams host authorization
+  'The assigned host must configure Microsoft Teams in their own signed-in session.':
+    'O anfitrião designado precisa entrar na própria conta para configurar o Microsoft Teams.',
+
   // Team public home
   'This team has no public events right now.': 'Esta equipe não tem eventos públicos no momento.',
   'This team page is unavailable.': 'Esta página da equipe está indisponível.',

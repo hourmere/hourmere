@@ -18,7 +18,7 @@ export function EventTypeSelect({
       {(control) => (
         <select {...control} value={value} onChange={(event) => onChange(event.target.value)}>
           {eventTypes.map((event) => (
-            <option key={event.id} value={event.id}>
+            <option key={event.id} value={event.id} dir="auto">
               {event.title}
             </option>
           ))}

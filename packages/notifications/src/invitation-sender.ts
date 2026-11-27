@@ -340,11 +340,11 @@ async function currentMessage(deps: InvitationEmailSenderDeps, claim: Claim) {
         to: invitation.email,
         invitationId: invitation.id,
         teamName: organization.name,
-        inviterName: inviter.name,
         expiresAt: invitation.expiresAt,
         publicUrl: deps.publicUrl,
         language: inviter.locale,
         defaultLanguage: deps.defaultLanguage,
+        ...(delivery.scim_issued ? { scimIssued: true } : { inviterName: inviter.name }),
       })
       const smtpDeadline =
         checkedAt +

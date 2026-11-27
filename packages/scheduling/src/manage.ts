@@ -1,6 +1,7 @@
 // Booking details for invitee links and reschedule slots shared by invitees and hosts.
-// Invitee reads go through getManagedBooking, while host slots use getHostBooking so the
-// same availability rules retain each caller's authorization boundary.
+// Invitee reads share manage-token authorization, while host slots use getHostBooking so
+// the same availability rules retain each caller's authorization boundary.
+import { jsonArrayFrom, jsonObjectFrom } from 'kysely/helpers/postgres'
 import {
   checkSlotRange,
   hasBookablePart,
@@ -18,7 +19,9 @@ import {
   getManagedBooking,
   type ManagedBookingSelector,
   type ManagedRescheduleRequestState,
-  managedLinkRescheduleRequest,
+  managedLinkRescheduleRequestQuery,
+  managedLinkRescheduleRequestState,
+  prepareManagedBookingRead,
 } from './bookings.ts'
 import { getPublicBranding, type PublicBranding } from './branding.ts'
 import {
@@ -43,6 +46,8 @@ export interface ManagedBooking extends Booking {
   routingAnswers?: { label: string; answer: string }[]
   /** Only for a reschedule request email's link: what became of that request. */
   rescheduleRequest?: { id: string; state: ManagedRescheduleRequestState }
+  /** True when this link still resolves to a cancelled predecessor with a successor. */
+  wasRescheduled?: true
   /**
    * The invitee's change deadlines this booking keeps (the ones that applied when it was
    * booked): from these instants on, the invitee can no longer reschedule or cancel it
@@ -56,12 +61,24 @@ export async function getManagedBookingDetails(
   ctx: PublicContext,
   token: ManagedBookingSelector,
 ): Promise<ManagedBooking> {
-  // One decision time for the request deadline in both reads (they are separate statements,
-  // so a write committing between them can still show a moment apart).
+  // The seed read picks the booking. Hydration can see changes committed since that
+  // read, but its lifecycle, pending request and link state share one snapshot.
   const now = ctx.now()
   const at = { ...ctx, now: () => now }
-  const booking = await getManagedBooking(at, token)
-  const [eventType, hosts, rescheduleRequest, cutoffs] = await Promise.all([
+  const hydrate = await prepareManagedBookingRead(at, token)
+  return ctx.db
+    .transaction()
+    .setIsolationLevel('repeatable read')
+    .setAccessMode('read only')
+    .execute(async (db) => readManagedBookingDetails({ ...at, db }, token, await hydrate(db)))
+}
+
+async function readManagedBookingDetails(
+  ctx: PublicContext,
+  token: ManagedBookingSelector,
+  booking: Booking,
+): Promise<ManagedBooking> {
+  const [eventType, details] = await Promise.all([
     booking.eventTypeId === null
       ? undefined
       : ctx.db
@@ -70,38 +87,54 @@ export async function getManagedBookingDetails(
           .where('id', '=', booking.eventTypeId)
           .where('deleted_at', 'is', null)
           .executeTakeFirst(),
+    // Fold these projections into one statement to offset the transaction's two statements.
     ctx.db
-      .selectFrom(resolvedBookingHosts(ctx.db).as('bh'))
-      .innerJoin('auth.user as u', 'u.id', 'bh.user_id')
-      .leftJoin('profiles as p', 'p.user_id', 'bh.user_id')
-      .select(['u.name', 'p.handle'])
-      .where('bh.booking_id', '=', booking.id)
-      .orderBy('bh.user_id')
-      .execute(),
-    typeof token !== 'object' ? managedLinkRescheduleRequest(at, token, booking.id) : undefined,
-    ctx.db
-      .selectFrom('bookings as booking')
-      .leftJoin('payment_checkout_attempts as moved', 'moved.current_booking_id', 'booking.id')
+      .selectFrom('bookings as b')
+      .leftJoin('payment_checkout_attempts as moved', 'moved.current_booking_id', 'b.id')
       .select([
-        'booking.organization_id',
-        'booking.reschedule_cutoff_minutes',
-        'booking.cancel_cutoff_minutes',
-        'booking.has_routing_snapshot',
-        'booking.payment_hold_expires_at',
+        'b.organization_id',
+        'b.reschedule_cutoff_minutes',
+        'b.cancel_cutoff_minutes',
+        'b.has_routing_snapshot',
+        'b.payment_hold_expires_at',
         'moved.current_booking_id',
       ])
-      .where('booking.id', '=', booking.id)
+      .select(({ exists, selectFrom }) => [
+        exists(
+          selectFrom('bookings as successor')
+            .select('successor.id')
+            .whereRef('successor.rescheduled_from_id', '=', 'b.id')
+            .whereRef('successor.organization_id', '=', 'b.organization_id'),
+        ).as('has_successor'),
+        jsonArrayFrom(
+          selectFrom(resolvedBookingHosts(ctx.db).as('bh'))
+            .innerJoin('auth.user as u', 'u.id', 'bh.user_id')
+            .leftJoin('profiles as p', 'p.user_id', 'bh.user_id')
+            .select(['u.name', 'p.handle'])
+            .whereRef('bh.booking_id', '=', 'b.id')
+            .orderBy('bh.user_id'),
+        ).as('hosts'),
+        jsonObjectFrom(
+          managedLinkRescheduleRequestQuery(ctx.db, typeof token === 'string' ? token : undefined),
+        ).as('link_request'),
+      ])
+      .where('b.id', '=', booking.id)
       .executeTakeFirstOrThrow(),
   ])
-  const branding = await getPublicBranding(ctx.db, cutoffs.organization_id)
+  const rescheduleRequest = managedLinkRescheduleRequestState(
+    details.link_request,
+    booking.id,
+    ctx.now(),
+  )
+  const branding = await getPublicBranding(ctx.db, details.organization_id)
   // Keep the same statements for ordinary bookings. Recurring member selectors have
   // their own authority, including guest links, and do not carry routing answers.
   const routingAnswers =
-    typeof token === 'string' && cutoffs.has_routing_snapshot
-      ? await readManagedRoutingAnswers(ctx.db, booking.id, cutoffs.organization_id)
+    typeof token === 'string' && details.has_routing_snapshot
+      ? await readManagedRoutingAnswers(ctx.db, booking.id, details.organization_id)
       : undefined
   const start = Temporal.Instant.from(booking.start)
-  const paid = cutoffs.payment_hold_expires_at || cutoffs.current_booking_id
+  const paid = details.payment_hold_expires_at || details.current_booking_id
   const durationOptions =
     !paid && eventType && eventType.allowed_durations_minutes.length > 1
       ? {
@@ -124,11 +157,12 @@ export async function getManagedBookingDetails(
           ...durationOptions,
         }
       : null,
-    hosts: hosts.map((h) => ({ name: h.name.trim() || h.handle || '' })),
+    hosts: details.hosts.map((h) => ({ name: h.name.trim() || h.handle || '' })),
     ...(rescheduleRequest && { rescheduleRequest }),
+    ...(booking.status === 'cancelled' && details.has_successor && { wasRescheduled: true }),
     changeDeadlines: {
-      rescheduleBy: instant(effectiveRescheduleCutoff(cutoffsOf(cutoffs))),
-      cancelBy: instant(cutoffs.cancel_cutoff_minutes),
+      rescheduleBy: instant(effectiveRescheduleCutoff(cutoffsOf(details))),
+      cancelBy: instant(details.cancel_cutoff_minutes),
     },
     ...(routingAnswers && { routingAnswers }),
   }

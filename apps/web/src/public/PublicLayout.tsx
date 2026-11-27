@@ -254,6 +254,7 @@ export function FocusHeading({
   id,
   className,
   describedBy,
+  dir,
   preserveFocus = false,
 }: {
   children: ReactNode
@@ -261,6 +262,7 @@ export function FocusHeading({
   id?: string
   className?: string
   describedBy?: string
+  dir?: 'auto' | undefined
   preserveFocus?: boolean
 }) {
   const ref = useRef<HTMLHeadingElement>(null)
@@ -270,7 +272,14 @@ export function FocusHeading({
   }, [preserveFocus])
   const Tag = level === 1 ? 'h1' : level === 2 ? 'h2' : 'h3'
   return (
-    <Tag ref={ref} id={id} tabIndex={-1} className={className} aria-describedby={describedBy}>
+    <Tag
+      ref={ref}
+      id={id}
+      tabIndex={-1}
+      className={className}
+      aria-describedby={describedBy}
+      dir={dir}
+    >
       {children}
     </Tag>
   )

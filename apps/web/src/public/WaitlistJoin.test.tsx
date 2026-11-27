@@ -65,7 +65,9 @@ describe('public waitlist entry', () => {
         'The host or the team’s owners and admins can see your email, name and requested period.',
       ),
     ).toBeDefined()
-    expect(screen.getByLabelText(/Your name/).getAttribute('required')).toBeNull()
+    const name = screen.getByLabelText(/Your name/)
+    expect(name.getAttribute('required')).toBeNull()
+    expect(name.getAttribute('dir')).toBe('auto')
     expect(screen.queryByLabelText('Guests')).toBeNull()
     await fill(user)
     await user.click(screen.getByRole('button', { name: 'Join the waitlist' }))

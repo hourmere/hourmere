@@ -382,7 +382,8 @@ describe('team booking cancellation outcome', () => {
       expect(summary.getByText(copy.zone)).toBeDefined()
       const hosts = summary.getByText(copy.hosts, { selector: 'dt' }).nextElementSibling
       for (const host of current.hosts) {
-        const row = summary.getByText(host.name, { exact: false, selector: 'li' })
+        const row = summary.getByText(host.name, { selector: 'bdi' }).closest('li')
+        if (!row) throw new Error('Expected the isolated name in a host row')
         if (host.timeZone && host.timeZone !== 'Asia/Shanghai') {
           expect(row.textContent).toContain(
             formatting.zoned(host.timeZone, copy.locale).dateTimeRange(current.start, current.end),

@@ -487,12 +487,12 @@ function DepartureReview({
         </button>
       </div>
       {memberName && (
-        <p className="user-content">
+        <p className="user-content" dir="auto">
           <BreakableText>{memberName.trim() || t('Unnamed team member')}</BreakableText>
         </p>
       )}
       {memberEmail && (
-        <p className="user-content">
+        <p className="user-content" dir="ltr">
           <BreakableText>{memberEmail}</BreakableText>
         </p>
       )}
@@ -588,7 +588,7 @@ function DepartureReview({
               <ul className="team-member-impact-list">
                 {removal.deactivatedEventTypeIds.map((id) => (
                   <li key={id}>
-                    <p className="user-content">
+                    <p className="user-content" dir="auto">
                       <BreakableText>
                         {impact?.eventTypes.data.find((eventType) => eventType.id === id)?.title ??
                           id}
@@ -689,7 +689,9 @@ function ImpactList({
               <li key={eventType.id}>
                 <p className="user-content">
                   <strong>
-                    <BreakableText>{eventType.title}</BreakableText>
+                    <bdi>
+                      <BreakableText>{eventType.title}</BreakableText>
+                    </bdi>
                   </strong>
                   {!eventType.isActive && <> · {t('Disabled')}</>}
                 </p>
@@ -787,7 +789,13 @@ function BookingList({
           <li key={booking.id}>
             <p className="user-content">
               <strong>
-                <BreakableText>{booking.eventType?.title ?? t('Deleted event type')}</BreakableText>
+                {booking.eventType?.title == null ? (
+                  t('Deleted event type')
+                ) : (
+                  <bdi>
+                    <BreakableText>{booking.eventType.title}</BreakableText>
+                  </bdi>
+                )}
               </strong>
             </p>
             <p className="hint">
@@ -814,7 +822,7 @@ function BookingList({
               <dt>{t('Hosts')}</dt>
               <dd>
                 {booking.hosts.map((host) => (
-                  <span key={host.userId} className="user-content">
+                  <span key={host.userId} className="user-content" dir="auto">
                     <BreakableText>{host.name}</BreakableText>
                   </span>
                 ))}
@@ -823,10 +831,14 @@ function BookingList({
               <dd>
                 {booking.attendees.map((person) => (
                   <span key={person.email} className="user-content">
-                    <BreakableText>{person.name}</BreakableText>
+                    <bdi>
+                      <BreakableText>{person.name}</BreakableText>
+                    </bdi>
                     {' · '}
                     <a href={`mailto:${person.email}`}>
-                      <BreakableText>{person.email}</BreakableText>
+                      <bdi dir="ltr">
+                        <BreakableText>{person.email}</BreakableText>
+                      </bdi>
                     </a>
                   </span>
                 ))}

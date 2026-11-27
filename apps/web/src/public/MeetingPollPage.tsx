@@ -286,7 +286,7 @@ function PollVisit({ entry, initialToken }: { entry: Entry; initialToken: string
         }
       >
         {/* Remount after opting out so focus leaves the removed button for the heading. */}
-        <FocusHeading key={optedOut ? 'opted-out' : 'page'}>
+        <FocusHeading key={optedOut ? 'opted-out' : 'page'} dir={poll ? 'auto' : undefined}>
           {poll?.title ?? t(entry === 'optOut' ? 'meetingPoll.optOutTitle' : 'meetingPoll.title')}
         </FocusHeading>
         {loading ? (
@@ -486,6 +486,7 @@ function PollVisit({ entry, initialToken }: { entry: Entry; initialToken: string
                             required
                             maxLength={200}
                             autoComplete="name"
+                            dir="auto"
                             value={name}
                             onChange={(event) => {
                               setNotice(null)
@@ -601,6 +602,7 @@ function PollVisit({ entry, initialToken }: { entry: Entry; initialToken: string
                           <input
                             required
                             autoComplete="name"
+                            dir="auto"
                             maxLength={200}
                             value={name}
                             onChange={(event) => {
@@ -659,7 +661,7 @@ function PollQuestion({
   const text = typeof value === 'string' ? value : ''
   const label = (
     <span>
-      {question.label}
+      <bdi>{question.label}</bdi>
       {question.required && <span> · {t('meetingPoll.required')}</span>}
     </span>
   )
@@ -681,7 +683,7 @@ function PollQuestion({
                 )
               }}
             />
-            {option}
+            <bdi>{option}</bdi>
           </label>
         ))}
       </fieldset>
@@ -704,6 +706,7 @@ function PollQuestion({
       {question.type === 'long_text' ? (
         <textarea
           id={id}
+          dir="auto"
           required={question.required}
           maxLength={5000}
           value={text}
@@ -718,13 +721,16 @@ function PollQuestion({
         >
           <option value="" />
           {question.options?.map((option) => (
-            <option key={option}>{option}</option>
+            <option key={option} dir="auto">
+              {option}
+            </option>
           ))}
         </select>
       ) : (
         <input
           id={id}
           type={question.type === 'phone' ? 'tel' : 'text'}
+          dir={question.type === 'phone' ? 'ltr' : 'auto'}
           required={question.required}
           maxLength={question.type === 'phone' ? 32 : 500}
           value={text}

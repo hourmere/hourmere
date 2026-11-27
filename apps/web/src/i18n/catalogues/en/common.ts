@@ -595,9 +595,17 @@ export const common = {
   // Booking page preview
   'These are sample times. Booking is disabled in the preview.':
     'These are sample times. Booking is disabled in the preview.',
+  // Rescheduled booking links
+  'This booking was moved to a new time. The new booking has its own link.':
+    'This booking was moved to a new time. The new booking has its own link.',
   // Booking location changes
   'The meeting location has changed. Please choose a time again.':
     'The meeting location has changed. Please choose a time again.',
+
+  // Microsoft Teams host authorization
+  'The assigned host must configure Microsoft Teams in their own signed-in session.':
+    'The assigned host must configure Microsoft Teams in their own signed-in session.',
+
   // Team public home
   'This team has no public events right now.': 'This team has no public events right now.',
   'This team page is unavailable.': 'This team page is unavailable.',

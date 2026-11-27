@@ -190,7 +190,7 @@ describe('documented Compose configuration', () => {
     expect(compose).toMatch(/^ {6}ZOOM_MEETINGS_ENABLED: \$\{ZOOM_MEETINGS_ENABLED:-false\}$/m)
   })
 
-  it('forwards the workflow opt-in and both mail sub-caps with empty defaults', () => {
+  it('forwards the workflow switch and both mail sub-caps with empty defaults', () => {
     const environment = composeAppEnvironment(compose)
     for (const key of [
       'WORKFLOWS_ENABLED',
@@ -201,6 +201,7 @@ describe('documented Compose configuration', () => {
       expect(example).toMatch(new RegExp(`^${key}=$`, 'm'))
       documentedVariable(key)
     }
+    expect(documentedVariable('WORKFLOWS_ENABLED')[1]).toBe('`true`')
     expect(worker).toMatch(/extends:\s+file: docker-compose\.yml\s+service: app/)
   })
 

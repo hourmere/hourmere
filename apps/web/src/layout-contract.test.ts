@@ -126,53 +126,52 @@ describe('responsive shell and shared CSS contract', () => {
     )
     expect(rule('.topbar-inner')).toContain('display: flex;')
     expect(rule('.topbar-inner')).not.toContain('flex-wrap: wrap;')
-    expect(rule('.account-email')).toContain('display: none;')
-    expect(rule('.account-email', '@media (min-width: 960px)')).toContain('display: block;')
     expect(rule('.topbar .logo-word')).toContain('display: none;')
     expect(rule('.topbar .logo-word', '@media (min-width: 480px)')).toContain('display: inline;')
     expect(rule('.language-picker')).toContain('white-space: nowrap;')
-    expect(
-      rule('.language-picker-compact > span,\n.card-header .language-picker > span'),
-    ).toContain('clip-path: inset(50%);')
-    expect(rule('.language-picker-compact > span', '@media (min-width: 960px)')).toContain(
-      'clip-path: none;',
-    )
+    expect(rule('.card-header .language-picker > span')).toContain('clip-path: inset(50%);')
   })
 
-  it('shows the sidebar at 960px and gives its sticky list bounded vertical scrolling', () => {
+  it('bounds the desktop sidebar so navigation can scroll above its account control', () => {
     const desktop = '@media (min-width: 960px)'
     expect(rule('.layout')).toContain('grid-template-columns: minmax(0, 1fr);')
     expect(rule('.layout', desktop)).toContain(
       'grid-template-columns: var(--sidebar-width) minmax(0, 1fr);',
     )
-    expect(rule('.sidenav ul', desktop)).toContain('position: sticky;')
-    expect(rule('.sidenav ul', desktop)).toContain(
-      'max-height: calc(100vh - var(--topbar-height));',
-    )
-    expect(rule('.sidenav ul', desktop)).toContain('overflow-y: auto;')
+    expect(rule('.sidebar-inner', desktop)).toContain('position: sticky;')
+    expect(rule('.sidebar-inner', desktop)).toContain('top: var(--sidebar-top);')
+    expect(rule('.sidebar-inner', desktop)).toContain('flex-direction: column;')
+    expect(rule('.sidenav', desktop)).toContain('flex: 1;')
+    expect(rule('.sidenav', desktop)).toContain('overflow-y: auto;')
     expect(rule('.sidenav a', desktop)).toContain('white-space: normal;')
     expect(rule('.sidenav a', desktop)).toContain('overflow-wrap: anywhere;')
-    expect(rule('.sidenav ul', '@media (max-height: 500px)')).toContain('top: 0;')
+    expect(rule('.account-menu', desktop)).toContain('flex: none;')
+    expect(rule('.account-panel', desktop)).toContain(
+      'inset-block: auto calc(100% + var(--space-1));',
+    )
+    expect(rule('.sidebar-inner', '@media (max-height: 500px)')).toContain('--sidebar-top: 0px;')
   })
 
   it('reveals overflowing horizontal navigation with noninteractive edge fades', () => {
-    expect(rule('.sidenav::before,\n.sidenav::after')).toContain('pointer-events: none;')
-    expect(rule('.sidenav::before')).toContain(
+    expect(rule('.sidenav-primary::before,\n.sidenav-primary::after')).toContain(
+      'pointer-events: none;',
+    )
+    expect(rule('.sidenav-primary::before')).toContain(
       'linear-gradient(to right, var(--surface), transparent)',
     )
-    expect(rule('.sidenav::after')).toContain(
+    expect(rule('.sidenav-primary::after')).toContain(
       'linear-gradient(to left, var(--surface), transparent)',
     )
     expect(
       rule(
-        '.sidenav[data-scroll-start="false"]::before,\n.sidenav[data-scroll-end="false"]::after',
+        '.sidenav-primary[data-scroll-start="false"]::before,\n.sidenav-primary[data-scroll-end="false"]::after',
       ),
     ).toContain('opacity: 1;')
-    expect(rule('.sidenav ul')).toContain('scroll-padding-inline: var(--space-5);')
-    expect(rule('.sidenav a')).toContain('scroll-margin-inline: var(--space-5);')
-    expect(rule('.sidenav::before,\n  .sidenav::after', '@media (min-width: 960px)')).toContain(
-      'display: none;',
-    )
+    expect(rule('.sidenav-primary ul')).toContain('scroll-padding-inline: var(--space-5);')
+    expect(rule('.sidenav-primary a')).toContain('scroll-margin-inline: var(--space-5);')
+    expect(
+      rule('.sidenav-primary::before,\n  .sidenav-primary::after', '@media (min-width: 960px)'),
+    ).toContain('display: none;')
   })
 
   it('respects the body text preference and keeps every editable field at least 16px', () => {
@@ -208,15 +207,11 @@ describe('responsive shell and shared CSS contract', () => {
     expect(bookingLinks).not.toMatch(/display:\s*(inline-)?flex/)
   })
 
-  it('retains viewport fallbacks while preferring the small viewport height', () => {
+  it('uses small viewport heights and keeps the centered and public fallbacks', () => {
     expect(rule('.centered')).toContain('min-height: 100vh;')
     expect(rule('.centered', '@supports (height: 100svh)')).toContain('min-height: 100svh;')
-    expect(rule('.sidenav', '@supports (height: 100svh)')).toContain(
-      'min-height: calc(100svh - var(--topbar-height));',
-    )
-    expect(rule('.sidenav ul', '@supports (height: 100svh)')).toContain(
-      'max-height: calc(100svh - var(--topbar-height));',
-    )
+    const sidebar = rule('.sidebar-inner', '@media (min-width: 960px)')
+    expect(sidebar).toContain('block-size: calc(100svh - var(--sidebar-top));')
     const publicSheet = sheets.find(({ path }) => path === 'public/public.css')?.source ?? ''
     const publicRules = blocks(publicSheet)
     expect(publicRules.find(({ selector }) => selector === '.public')?.body).toContain(

@@ -100,6 +100,7 @@ describe('pinned webhook HTTPS transport', () => {
     'https://hooks.example.com:8443/receive',
     'https://user:password@hooks.example.com/receive',
     'https://127.0.0.1/receive',
+    'https://hooks.home.arpa/receive',
   ])('revalidates stored destination %s before DNS or HTTPS', async (url) => {
     network.lookup.mockResolvedValue([{ address: '8.8.8.8', family: 4 }])
     respondWith(204)

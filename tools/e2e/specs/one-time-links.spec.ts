@@ -1,4 +1,5 @@
 import type { BrowserContext, Page } from '@playwright/test'
+import { selectAdminLanguage } from '../account-menu.ts'
 import { expect, fillInvitee, pickSlot, test } from '../fixtures.ts'
 
 const copy = {
@@ -94,9 +95,7 @@ for (const locale of ['en', 'zh-CN'] as const) {
       })
     })
     await host.goto(`${app.url}/app/event-types`)
-    await host
-      .getByRole('combobox', { name: /^(Interface language|界面语言)$/ })
-      .selectOption(locale)
+    await selectAdminLanguage(host, locale)
     await host.getByRole('link', { name: text.edit, exact: true }).click()
     const manager = host.getByRole('region', {
       name: locale === 'en' ? 'One-time links' : '一次性链接',
@@ -179,6 +178,9 @@ for (const locale of ['en', 'zh-CN'] as const) {
       const pages = await Promise.all(invitees.map((invitee) => invitee.newPage()))
       for (const invitee of pages) {
         await openPrivateLink(invitee, url)
+        await expect(
+          invitee.locator('.event-facts svg[aria-hidden="true"][focusable="false"]'),
+        ).toHaveCount(2)
         await pickSlot(invitee, invitee)
         await fillInvitee(invitee)
       }

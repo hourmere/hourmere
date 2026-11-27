@@ -1,12 +1,15 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createPool } from './index.ts'
 import { runMigrations } from './migrate.ts'
+import { MIGRATION_REPLAY_TIMEOUT } from './testing/migration-replay.ts'
 import { createTestDatabase, type TestDatabase } from './testing.ts'
 
 const url = process.env.DATABASE_URL
+
+vi.setConfig({ testTimeout: MIGRATION_REPLAY_TIMEOUT, hookTimeout: MIGRATION_REPLAY_TIMEOUT })
 
 function withSearchPath(connectionString: string, schema: string) {
   const u = new URL(connectionString)
@@ -22,7 +25,7 @@ describe.skipIf(!url)('runMigrations', () => {
 
   beforeAll(async () => {
     dir = await mkdtemp(join(tmpdir(), 'hourmere-migrations-'))
-    database = await createTestDatabase(url as string)
+    database = await createTestDatabase(url as string, undefined, { migrate: false })
     await database.pool.query(`CREATE SCHEMA ${schema}`)
     pool = createPool(withSearchPath(database.url, schema))
   })

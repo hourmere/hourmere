@@ -319,8 +319,15 @@ export function teamManagementAccess(
       principal: Principal,
       teamId: string,
       operation: (db: Db, actor: TeamManager) => Promise<T>,
+      options?: { expectedOrganizationId: string },
     ): Promise<T> {
-      const actor = await check(db, principal, teamId)
+      const actor = await check(
+        db,
+        principal,
+        teamId,
+        false,
+        options && { ...options, allowPersonal: false },
+      )
       if (actor.role === 'member') throw denied()
       return operation(db, { ...actor, role: actor.role })
     },

@@ -171,6 +171,19 @@ document the reason and assert the exact expected change or backfill instead of 
 excluding the affected columns from preservation checks. Keep migration-specific tests for
 behavior that needs additional fixtures.
 
+Vitest prepares the empty 0012 checkpoint once and builds the latest-schema template from
+it. `createTestDatabase` uses the checkpoint for staged directories with the same leading
+migrations and verifies the copied checksums. A source-copy mutation before or within the
+checkpoint uses its changed SQL. For multiple fixtures at the same later predecessor, use
+`useMigrationReplay` or `createTestDatabaseTemplate`, then clone the empty predecessor
+before seeding or applying the target. Keep historical-data, fresh-schema and no-op rerun
+assertions. Use an empty database when the assertion specifically exercises applying the
+entire history from scratch.
+
+Use `MIGRATION_REPLAY_TIMEOUT` (120 seconds) on tests and hooks that replay migrations.
+Replay-only files can set their own `testTimeout` and `hookTimeout` with `vi.setConfig`.
+In files with other tests, apply the timeout to the migration cases or hooks.
+
 ### Constraint coverage for new migrations
 
 A migration that adds constraints, NOT NULL columns, indexes or triggers gets a constraint
@@ -183,6 +196,8 @@ with their definitions, to the committed
 own `CREATE DATABASE … TEMPLATE` copy and requires your assertion suite to fail:
 
 ```ts
+import { MIGRATION_COVERAGE_TIMEOUT } from './testing/migration-replay.ts'
+
 const serverUrl = process.env.DATABASE_URL
 
 describe.skipIf(!serverUrl)('routing form constraint coverage', () => {
@@ -194,9 +209,15 @@ describe.skipIf(!serverUrl)('routing form constraint coverage', () => {
       allowList: { 'constraint public.t.t_key': 'One-line reason it is not a protection' },
     })
     expect(report.problems).toEqual([])
-  }, 600_000)
+  }, MIGRATION_COVERAGE_TIMEOUT)
 })
 ```
+
+Give each `checkConstraintCoverage` case `MIGRATION_COVERAGE_TIMEOUT` (600 seconds).
+The helper prepares a single isolated template for its baseline and dropped-object copies.
+When a coverage file also checks a historical upgrade, use `useMigrationReplay` to stage
+the predecessor, clone it in the upgrade test, and pass it as `predecessorTemplate` to
+`checkConstraintCoverage`. The migration test convention guard checks new coverage files.
 
 Write the suite as checks that create their own rows, because one copy serves the whole
 suite: rejected and accepted writes, cascades, defaults and, for an index that has no other
@@ -279,13 +300,14 @@ The Keycloak OIDC spec runs in the required browser suite and needs Docker and O
 See the [Keycloak fixture README](tools/e2e/keycloak/README.md) for its image pin, local
 command and resource ownership.
 
-CI also builds a disposable static-site fixture and checks documentation table geometry at
-360px and 1280px, including page overflow, identifier line counts and mid-word header wraps.
-Touch copy controls are checked at both widths. These site tests use only a local static
-server, block external requests and create no database. Rendered negative controls verify
-that the assertions detect the rejected wrapping, overflow and copy-button overlap. The site
-tests are skipped outside CI; any local browser run requires an escalated shell. CI restores
-the legal-date source and deletes the fixture output after the browser suite.
+CI builds the static site from committed sources and checks documentation table geometry at
+360px and 1280px across the published guides. The configuration guide also covers the
+1200px layout with both sidebars, URL breakpoints, and the 320px layout with long identifiers
+and visually hidden, accessible table headers. Touch copy controls are checked at 320px and
+1280px. These site tests use only a local static server, block external requests and create no
+database. Rendered negative controls verify that the assertions detect rejected wrapping,
+overflow and copy-button overlap. The site tests are skipped outside CI. Any local browser
+run requires an escalated shell.
 
 Traces, videos, screenshots and automatic failure DOM snapshots are disabled to keep
 one-time management capabilities out of artifacts. Playwright's pinned
@@ -310,7 +332,7 @@ The reusable [CI workflow](.github/workflows/ci.yml) runs the first three alongs
 jobs, and the [DCO workflow](.github/workflows/dco.yml) runs `sign-off`. Six `e2e-shard` jobs run the
 complete functional browser suite in parallel; the `e2e` aggregator succeeds only
 when every shard succeeds, including on merge-queue runs. Each shard builds its own
-web and disposable site fixture and retains the browser-artifact privacy check. The optional
+web and static site and retains the browser-artifact privacy check. The optional
 [UI checks workflow](.github/workflows/ui-checks.yml) runs on pushes to `main` and manual
 dispatches. To request the audits on a pull request, add the `ui-checks` label. Adding the
 label or pushing new commits while it is present runs the audits when the changed files match
@@ -328,6 +350,12 @@ British English on booking. Layout and axe include the booking calendar, form, c
 time-zone panel, embedded and team booking, and OAuth consent states. Axe checks WCAG
 2.0/2.1/2.2 A/AA tags, records passes/incomplete and moderate/minor counts and reports
 serious/critical violations.
+The admin account menu and integration navigation each have their own audit state. This
+checks the controls, contrast and document width of the open panels as well as the closed
+shell. The integrations state uses the existing API keys URL to show the current link in
+the desktop group and the open narrow-screen disclosure. Keyboard scans begin on the
+open disclosure's trigger so Tab reaches its controls. Masked visual cases use the same
+states in both themes and languages.
 A CI-only canary with known violations verifies the in-browser scan pipeline. Cross-engine
 smoke covers booking, sign-in and the embed popup in desktop WebKit, iPhone WebKit and
 Firefox. These measurements use synthetic data and the disposable-database fixture.
@@ -351,6 +379,7 @@ CI 和发布工作流都不调用它，合并队列和发布标签也不会运�
 中等和轻微项数，并报告严重和致命问题；漏扫也会导致失败。
 axe 每个浏览器会话最多扫描 32 个状态，CI 并行执行四个分片。所有分片通过后，`e2e-a11y` 才通过。
 检测涵盖预约表单、确认页、时区面板、嵌入页、团队预约和 OAuth 授权页。
+账号菜单和集成导航分别检测展开状态，以覆盖展开后的控件、对比度和页面宽度。
 跨引擎冒烟覆盖 WebKit 桌面版、iPhone 预设和 Firefox 的预约、登录及嵌入弹窗。
 
 Build the web app as above, then run from the repository root. In Codex, **every command

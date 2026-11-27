@@ -81,6 +81,7 @@
   "teamInvitation.defaultInviter": "Um membro da equipe",
   "teamInvitation.subject": "Convite para participar de {team}",
   "teamInvitation.introduction": "{inviter} convidou você para participar da equipe “{team}” no Hourmere.",
+  "teamInvitation.scimIntroduction": "Seu provedor de identidade enviou este convite em nome da equipe “{team}” no Hourmere.",
   "teamInvitation.identity": "Entre com {email}, o endereço de e-mail que recebeu o convite, e confirme esse endereço. Depois, aceite o convite na página. Aliases de e-mail não podem substituir esse endereço.",
   "teamInvitation.acceptance": "Entrar na conta não faz você participar da equipe; você precisa aceitar o convite explicitamente na página.",
   "teamInvitation.expiry": "Este convite expira em {expiry}.",
@@ -175,9 +176,6 @@
   "series.view": "Ver série",
   "series.repair": "Para tentar gerar o link da reunião novamente, abra o agendamento correspondente no Hourmere.",
   "teams.linkPending": "O link do Teams aparecerá nos detalhes da reserva assim que estiver disponível.",
-  "teams.linkPendingCancelled": "O link do Teams ainda estava pendente quando esta reserva foi cancelada.",
   "teams.unavailable": "O Microsoft Teams está indisponível. Esta reserva usará o evento do calendário do Outlook.",
-  "teams.unavailableCancelled": "O Microsoft Teams estava indisponível. A alternativa prevista era o evento do calendário do Outlook.",
-  "teams.writebackFailed": "O link do Teams está indisponível. A reunião continua agendada.",
-  "teams.writebackFailedCancelled": "O link do Teams estava indisponível quando esta reserva foi cancelada."
+  "teams.writebackFailed": "O link do Teams está indisponível. A reunião continua agendada."
 }

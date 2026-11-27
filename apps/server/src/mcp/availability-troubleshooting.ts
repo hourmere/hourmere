@@ -10,10 +10,12 @@ export function availabilityTroubleshootingTools({
   db,
   automaticMeet,
   automaticZoom,
+  microsoftCalendarEnabled,
 }: {
   db: Db
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
+  microsoftCalendarEnabled?: boolean | undefined
 }): Tool[] {
   return [
     defineTool({
@@ -35,6 +37,7 @@ export function availabilityTroubleshootingTools({
             db,
             automaticMeet,
             automaticZoom,
+            microsoftCalendarEnabled,
             principal: call.caller,
             ...(call.caller.scimResourcesEnabled && { scimResourcesEnabled: true }),
             now: () => Temporal.Now.instant(),

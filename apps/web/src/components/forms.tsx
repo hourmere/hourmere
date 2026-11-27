@@ -99,6 +99,7 @@ export function ErrorSummary({
   labels,
   message,
   attempt,
+  renderError,
 }: {
   errors: FieldErrors
   /** What to call each field in the list, by id; entries without one show the message alone. */
@@ -106,6 +107,7 @@ export function ErrorSummary({
   message?: UiText | null | undefined
   /** Changes with every submit, so the summary takes focus again. */
   attempt: number
+  renderError?: (id: string, error: UiText) => ReactNode
 }) {
   const { t, uiText } = useI18n()
 
@@ -151,7 +153,7 @@ export function ErrorSummary({
                     {t(': ')}
                   </>
                 )}
-                {uiText(error)}
+                {renderError ? renderError(id, error) : uiText(error)}
               </a>
             </li>
           ))}

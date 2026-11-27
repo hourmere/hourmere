@@ -3,9 +3,9 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Link, Navigate, useLocation, useParams } from 'react-router'
 import { ConferenceNotice } from '../components/ConferenceNotice.tsx'
 import { EmailDeliveryHint } from '../components/EmailDeliveryHint.tsx'
+import { UserContentList, UserContentMessage } from '../components/UserContent.tsx'
 import { usePageTitle } from '../hooks.ts'
 import { formatDuration } from '../i18n/duration.ts'
-import { formatList } from '../i18n/formatting.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import { literal, msg, type UiText } from '../i18n/translate.ts'
 import { AddToCalendar, ManageLink } from './AddToCalendar.tsx'
@@ -27,7 +27,13 @@ import {
   type Slot,
   type SlotLoader,
 } from './api.ts'
-import { DetailList, LocationDetails, locationText, When } from './BookingDetails.tsx'
+import {
+  BookingPerson,
+  DetailList,
+  LocationDetails,
+  locationText,
+  When,
+} from './BookingDetails.tsx'
 import { BookingForm, type BookingFormValues, selectedLocation } from './BookingForm.tsx'
 import {
   BookingDetailsStep,
@@ -688,7 +694,7 @@ function BookingFlow({
 
   return (
     <PublicLayout wide branding={event.branding}>
-      <div className="booking-layout">
+      <div className="booking-layout booking-page">
         <BookingEventInfo
           event={event}
           durationMinutes={durationMinutes}
@@ -849,6 +855,7 @@ function BookingFlow({
                 />
               }
               timeZone={timeZone}
+              showTimeZoneIcon
               onTimeZoneChange={(zone) => {
                 rememberVisitorTimeZone(zone)
                 setTimeZone(zone)
@@ -905,18 +912,25 @@ function Confirmation({
   const canCancel = booking.status === 'confirmed' && Date.parse(booking.start) > currentTime()
   const invitee = booking.attendees.find((a) => a.isBooker)
   const guests = booking.attendees.filter((a) => !a.isBooker)
-  const hostName =
+  const hostDisplayName =
     booking.assignedHost === null
-      ? t('Host no longer available')
+      ? undefined
       : booking.assignedHost
-        ? booking.assignedHost.name.trim() || t('Host')
+        ? booking.assignedHost.name.trim() || undefined
         : event.host.name
-  const hostDetail = booking.assignedHost
-    ? t('{name} ({detail})', {
-        name: hostName,
-        detail: zoneName(booking.assignedHost.timeZone),
-      })
-    : hostName
+  const hostName =
+    hostDisplayName ?? t(booking.assignedHost === null ? 'Host no longer available' : 'Host')
+  const hostText = hostDisplayName === undefined ? hostName : <bdi>{hostName}</bdi>
+  const hostDetail = booking.assignedHost ? (
+    <UserContentMessage
+      message="{name} ({detail})"
+      values={{ name: hostName }}
+      otherValues={{ detail: zoneName(booking.assignedHost.timeZone) }}
+      renderValues={{ name: hostText }}
+    />
+  ) : (
+    hostText
+  )
   const title = t('{event} with {host}', { event: event.title, host: hostName })
   if (booking.source === 'import' || booking.managementPolicy === 'local_only_read_only') {
     return (
@@ -952,24 +966,24 @@ function Confirmation({
           {!team && !event.schedulingType && (
             <HostAvatar name={hostName} image={event.host.image} />
           )}
-          <p className="event-host">{hostName}</p>
+          <p className="event-host">{hostText}</p>
         </div>
         <p className="lede">
-          {text(
-            booking.status === 'cancelled'
-              ? 'This booking was already cancelled.'
-              : ended
-                ? 'This meeting has ended.'
-                : 'Your {event} with {host} is confirmed.',
-            {
-              event: event.title,
-              host: hostName,
-            },
+          {booking.status === 'cancelled' ? (
+            t('This booking was already cancelled.')
+          ) : ended ? (
+            t('This meeting has ended.')
+          ) : (
+            <UserContentMessage
+              message="Your {event} with {host} is confirmed."
+              values={{ event: event.title, host: hostName }}
+              renderValues={{ host: hostText }}
+            />
           )}
         </p>
         <DetailList
           items={[
-            ['What', event.title],
+            ['What', <bdi key="title">{event.title}</bdi>],
             ...((event.allowedDurationsMinutes?.length ?? 0) > 1
               ? ([
                   [
@@ -1027,19 +1041,16 @@ function Confirmation({
               ['Host', hostDetail],
               ...(invitee
                 ? ([
-                    ['You', t('{name} ({detail})', { name: invitee.name, detail: invitee.email })],
-                  ] as [string, string][])
+                    [
+                      'You',
+                      <BookingPerson key="booker" name={invitee.name} email={invitee.email} />,
+                    ],
+                  ] as const)
                 : []),
               ...(guests.length
                 ? ([
-                    [
-                      'Guests',
-                      formatList(
-                        guests.map((g) => g.name),
-                        language,
-                      ),
-                    ],
-                  ] as [string, string][])
+                    ['Guests', <UserContentList key="guests" values={guests.map((g) => g.name)} />],
+                  ] as const)
                 : []),
             ]}
           />

@@ -141,6 +141,14 @@ function redirectField(code: string, value: unknown): string | undefined {
     : undefined
 }
 
+function bookingAnswerField(code: string, value: unknown): string | undefined {
+  return code === 'invalid_responses' &&
+    typeof value === 'string' &&
+    /^responses\.[A-Za-z0-9_-]{1,64}$/.test(value)
+    ? value
+    : undefined
+}
+
 function meetingPollErrorDetails(
   tool: string,
   code: string,
@@ -313,12 +321,16 @@ export async function callTool(options: {
         // Neither server errors nor SDK messages are safe to echo into a terminal.
       }
       const code = safeCode(isObject(detail) ? detail.error : undefined, 'tool_error', tool)
+      const field = isObject(detail) ? detail.field : undefined
       throw new CliError(
         code,
         undefined,
         retrySeconds(isObject(detail) ? detail.retryAfterSeconds : undefined),
         notificationDetail(code, isObject(detail) ? detail.message : undefined),
-        redirectField(code, isObject(detail) ? detail.field : undefined),
+        redirectField(code, field) ??
+          (tool === 'create_booking' && Object.hasOwn(input, 'routeToken')
+            ? bookingAnswerField(code, field)
+            : undefined),
         meetingPollErrorDetails(tool, code, detail),
       )
     }

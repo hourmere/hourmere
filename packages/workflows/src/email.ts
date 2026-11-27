@@ -6,7 +6,7 @@ import {
   interfaceLanguage,
 } from '@hourmere/core/language'
 import { mailMessage, mailMessageLocale } from '@hourmere/mail/catalogue'
-import { escapeHtml, multiLine, subjectLine } from '@hourmere/mail/text'
+import { emailUserText, escapeHtml, multiLine, subjectLine } from '@hourmere/mail/text'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { isMultiLineText, isSingleLineText } from '@hourmere/scheduling/text'
 import type { WorkflowAction, WorkflowTriggerType } from './definition.ts'
@@ -77,6 +77,7 @@ function bounded(value: string, max: number): string {
 }
 
 type Node = { text: string } | { variable: string }
+type ExpandedNode = { node: Node; text: string }
 function parse(text: string, multiline: boolean, context: WorkflowTemplateContext): Node[] {
   bounded(text, multiline ? WORKFLOW_BODY_MAX_BYTES : WORKFLOW_SUBJECT_MAX_BYTES)
   if (!(multiline ? isMultiLineText(text) : isSingleLineText(text)) || /\p{Cf}/u.test(text))
@@ -96,8 +97,8 @@ function parse(text: string, multiline: boolean, context: WorkflowTemplateContex
 }
 
 /** Scalar values are data, never parsed again as template instructions. */
-function expand(nodes: Node[], value: (name: string) => string, multiline: boolean): string {
-  const parts: string[] = []
+function expand(nodes: Node[], value: (name: string) => string, multiline: boolean) {
+  const parts: ExpandedNode[] = []
   const limit = multiline ? WORKFLOW_RENDERED_MAX_BYTES : WORKFLOW_SUBJECT_MAX_BYTES
   let bytes = 0
   for (const node of nodes) {
@@ -111,13 +112,49 @@ function expand(nodes: Node[], value: (name: string) => string, multiline: boole
     ).slice(1, -1)
     bytes += Buffer.byteLength(text, 'utf8')
     if (bytes > WORKFLOW_RENDERED_MAX_BYTES) throw renderLimit()
-    parts.push(text)
+    parts.push({ node, text })
   }
-  const joined = parts.join('')
-  return bounded(
+  const joined = parts.map(({ text }) => text).join('')
+  const text = bounded(
     multiline ? multiLine(joined) : subjectLine(joined, Number.MAX_SAFE_INTEGER),
     limit,
   )
+  return { text, parts, start: joined.length - joined.trimStart().length }
+}
+
+function htmlBody(
+  body: ReturnType<typeof expand>,
+  language: InterfaceLanguage,
+  custom: boolean,
+): string {
+  let offset = 0
+  const end = body.start + body.text.length
+  const html = body.parts
+    .map(({ node, text }) => {
+      // Use the same trim boundaries as the plain alternative, including whitespace
+      // supplied by a variable at the beginning or end of an otherwise empty template.
+      const visible = text.slice(Math.max(0, body.start - offset), Math.max(0, end - offset))
+      offset += text.length
+      if ('variable' in node) {
+        if (node.variable === 'event_type.public_path') {
+          return emailUserText(visible, language, 'ltr')
+        }
+        if (
+          node.variable === 'event_type.title' ||
+          node.variable === 'recipient.name' ||
+          node.variable.startsWith('answer.')
+        ) {
+          return emailUserText(visible, language)
+        }
+      }
+      return escapeHtml(visible).replaceAll('\n', '<br>')
+    })
+    .join('')
+  if (!custom) return `<p>${html}</p>`
+  return `<p>${html
+    .split('<br>')
+    .map((line) => (line ? `<span dir="auto">${line}</span>` : ''))
+    .join('<br>')}</p>`
 }
 
 export function renderWorkflowEmail(input: WorkflowEmailInput): RenderedWorkflowEmail {
@@ -184,12 +221,12 @@ export function renderWorkflowEmail(input: WorkflowEmailInput): RenderedWorkflow
       }
     }
   }
-  const subject = expand(subjectNodes, value, false)
-  const text = expand(bodyNodes, value, true)
+  const subject = expand(subjectNodes, value, false).text
+  const body = expand(bodyNodes, value, true)
   return {
     subject,
-    text,
-    html: `<p>${escapeHtml(text).replaceAll('\n', '<br>')}</p>`,
+    text: body.text,
+    html: htmlBody(body, templateLocale, custom !== undefined),
     locale,
     templateLocale,
     contentSource: custom ? 'custom' : 'built_in',

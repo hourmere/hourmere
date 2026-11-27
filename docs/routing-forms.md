@@ -1,18 +1,13 @@
-# Routing forms — proposed design
+# Routing forms — design and rollout
 
-Status: storage, internal services and hard-off configuration interfaces. Migration
-0072 adds the five storage tables and migration 0083 their idempotency records. The
-configuration list/get/create/update/archive/publish/preview operations are registered
-together in REST, MCP and CLI. Production returns `routing_forms_disabled` for all seven
-operations and discovery omits their MCP tools. There is no operator setting or public
-routing execution yet. The shared validator, evaluator, target checks and draft services
-are implemented. Target invalidation and retention cleanup run inside existing mutations
-and in a background job; with no routing form they change nothing.
-The eventual feature is free on self-hosted and Cloud alike,
-and is on by default once the final acceptance step passes (see [Rollout gating](#rollout-gating)).
+Routing forms are available on self-hosted Hourmere and Hourmere Cloud. In the final
+rollout, an unset or empty `ROUTING_FORMS_ENABLED` defaults to `true`. Explicit
+`false` opts out, and a legacy personal handle named `route` keeps routing off
+regardless of the setting. See [Rollout gating](#rollout-gating) for the effects of
+turning routing off and the staged implementation history.
 [Data model](data-model.md), [API conventions](api-conventions.md),
 [MCP](mcp.md) and [team administrator booking fields](team-admin-bookings.md) remain
-canonical for existing behavior. Contracts beyond storage below describe future implementation.
+canonical for existing behavior.
 
 ## Official reference check
 
@@ -907,9 +902,9 @@ Compose passes unset variables as empty strings) means the default, `false`; any
 fails configuration validation at startup. e4c adds `${ROUTING_FORMS_ENABLED:-}` to
 `docker-compose.yml` and an empty `ROUTING_FORMS_ENABLED=` to `.env.example`, with a comment
 that empty means the server default, so installs that copy either file follow the default.
-e5 changes the default to `true` once its acceptance passes, so self-hosted and Cloud
+**Default on from e5.** An unset or empty setting defaults to `true`. Self-hosted and Cloud
 instances get the full feature by default, including those whose `.env` was copied from the
-e4c `.env.example`; an explicit `false` remains the opt-out.
+e4c `.env.example`. Explicit `false` opts out, and invalid values still fail startup.
 
 **Effective state.** Before e4c, routing is always off outside tests. From e4c, routing is
 effectively on only when the setting is `true` and no stored personal handle `route` exists

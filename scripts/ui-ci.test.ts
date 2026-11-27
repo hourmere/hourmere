@@ -211,21 +211,27 @@ describe('UI measurement CI contract', () => {
     }
   })
 
+  it('builds committed sources in CI without substituting a legal publication date', () => {
+    expect(requiredWorkflow.jobs['check-static']?.steps).toContainEqual({ run: 'npm run build' })
+    expect(requiredSource).not.toContain('apps/site/src/data/legal.ts')
+    expect(requiredSource).not.toContain('SET_ON_PUBLICATION_DAY')
+  })
+
   // Canonical required job definitions after merging main. Changes need owner review.
   it.each([
     // The stable required job only aggregates check-static and check-tests and fails unless
     // both succeeded (a failed, cancelled or skipped part fails it).
     ['check', 'd18968eb8cf24725d3c282e48bf92a300db6dd99208ef74bd8bcdde56f063b1e'],
     // Lint, types, generated types, the build, the CLI tarball and MCP metadata.
-    ['check-static', '3bce9a980ab6c404fbf4ccc83607a7da40b8feb11e75b4918e8fe9c2057d5a0c'],
+    ['check-static', '265e5b65813f903f1e7a6c55cf0ee7d24d59ea26d4d0b042dd86cd7467ee24d5'],
     // The suite in seven shards. Also runs the isolated Caddy upgrade integration; PostgreSQL
     // limits stay unchanged. The deployment-test shell comes from the Actions cache when present.
     ['check-tests', '8b59583e0e92eb77d66a08cffe92d8fa0707033f2f7a390f4a63017876c68de8'],
     ['cli-compatibility', 'e6baff5e1cbf2e5b3339c961747ed5be373cc5d0b7874200d54b903f13a3e194'],
     // Shards preserve the fixture and privacy gates; the stable required job aggregates them.
     ['e2e', 'cb4f31c9aa29924d293ef531c8014df4987124efc79c905b186ca73c72298709'],
-    ['e2e-shard', '066535335da4857c0beba412509c97b51e5e1e52c370a0164747e8678da13e42'],
-    ['docker', '2594f351267b97c37981b7889ae22495076c653543f5cd8ee11825ac4ed63d9a'],
+    ['e2e-shard', 'a6b1fdd39bd8206fdb6678738a3f627bb524ac6e375a829d2ab97f8f80935033'],
+    ['docker', '07b95bbebc9b0eb8d76bc810aaa3e2ead295d1fc2ad3bd5970c92ba5a6d37d67'],
   ])('preserves required job %s and its behavior', (id, digest) => {
     expect(requiredWorkflow.jobs[id ?? '']).toBeDefined()
     expect(
@@ -498,12 +504,9 @@ describe('required browser shards', () => {
     expect(job?.strategy).toEqual({ 'fail-fast': false, matrix: { shard: [1, 2, 3, 4, 5, 6] } })
     expect(functionalConfig.fullyParallel).toBe(true)
     expect(job?.services?.postgres.options).not.toContain('max_connections')
-    const browser = job?.steps.find(
-      (step) => step.name === 'Build a disposable site fixture and run browser regressions',
-    )
+    const browser = job?.steps.find((step) => step.id === 'browser')
     expect(browser?.if).toBeUndefined()
     expect(browser?.['continue-on-error']).toBeUndefined()
-    expect(browser?.id).toBe('browser')
     // biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub Actions expression is literal.
     expect(browser?.env?.HOURMERE_E2E_SHARD).toBe('${{ matrix.shard }}')
     expect(job?.outputs).toEqual(
@@ -514,9 +517,8 @@ describe('required browser shards', () => {
         ]),
       ),
     )
-    expect(browser?.run).toContain('npm run build --workspace @hourmere/site')
-    expect(browser?.run).toContain('trap restore_legal_source EXIT')
-    expect(browser?.run?.split('\n').filter((line) => line.includes('npm run test'))).toEqual([
+    expect(browser?.run?.trimEnd().split('\n')).toEqual([
+      'npm run build --workspace @hourmere/site',
       // biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub Actions expression is literal.
       'npm run test --workspace @hourmere/e2e -- --shard=${{ matrix.shard }}/6',
     ])

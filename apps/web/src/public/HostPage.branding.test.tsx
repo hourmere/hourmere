@@ -11,7 +11,7 @@ beforeAll(async () => {
 it('shows each event’s owning brand and team name without removing personal or team links', async () => {
   const personal = { name: 'Ada', primaryColor: '#AABBCC', logoUrl: null, logoDataUrl: null }
   const team = {
-    name: 'Consulting team',
+    name: 'الدعم (Team 42)',
     primaryColor: '#123456',
     logoDataUrl: null,
     logoUrl: `/api/v1/public/branding/00000000-0000-7000-8000-000000000001/logo/${'a'.repeat(64)}`,
@@ -27,7 +27,7 @@ it('shows each event’s owning brand and team name without removing personal or
           {
             ...EVENT,
             slug: 'team',
-            title: 'Team call',
+            title: 'שלום (Team call)',
             branding: team,
             organizationName: team.name,
           },
@@ -36,14 +36,16 @@ it('shows each event’s owning brand and team name without removing personal or
       }),
   })
   renderApp('/ada')
-  await screen.findByRole('heading', { name: 'Ada Lovelace' })
+  const heading = await screen.findByRole('heading', { name: 'Ada Lovelace' })
+  expect(heading.getAttribute('dir')).toBe('auto')
   const personalLink = screen.getByRole('link', { name: /Personal call/ })
   const teamLink = screen.getByRole('link', { name: /Team call/ })
   const defaultLink = screen.getByRole('link', { name: /Default call/ })
   expect(personalLink.getAttribute('href')).toBe('/ada/personal')
   expect(teamLink.getAttribute('href')).toBe('/ada/team')
   expect(defaultLink.getAttribute('href')).toBe('/ada/default')
-  expect(within(teamLink).getByText('Consulting team')).toBeDefined()
+  expect(within(teamLink).getByText(team.name).getAttribute('dir')).toBe('auto')
+  expect(within(teamLink).getByText('שלום (Team call)').getAttribute('dir')).toBe('auto')
   expect(within(teamLink).getByRole('img', { name: team.name }).getAttribute('src')).toBe(
     team.logoUrl,
   )
