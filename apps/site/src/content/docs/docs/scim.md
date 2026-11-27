@@ -54,6 +54,11 @@ lists the exact requests exercised by the Keycloak fixture.
   resource. The person's account, personal space, other teams and booking
   history are preserved. Reactivation can restore team access after applicable
   blockers are cleared. Affected team credentials must be created again.
+- Deactivating an unlinked User pauses acceptance of its pending SCIM invitation.
+  Deleting the User cancels pending SCIM invitations for unfinished claims. Changing
+  or clearing the work address invalidates its pending claim and blocks acceptance
+  through its SCIM invitation. An administrator can independently issue or renew an
+  invitation under the team's usual rules.
 - Groups manage only the directory-sourced roster of one explicitly mapped child
   team. Nested groups and role mapping are unsupported. Group DELETE removes its
   managed roster and keeps the child team, manual members and booking history.
