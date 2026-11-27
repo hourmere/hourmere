@@ -1,6 +1,6 @@
 import { type ChildProcess, spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { copyFile, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -8,6 +8,8 @@ import pg from 'pg'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as databaseModule from './index.ts'
 import * as migrationModule from './migrate.ts'
+import { MIGRATED_PREFIX_LAST_FILE } from './test-database-registry.ts'
+import { MIGRATION_REPLAY_TIMEOUT } from './testing/migration-replay.ts'
 import {
   cleanupTestDatabases,
   createTestDatabase,
@@ -566,6 +568,45 @@ describe.skipIf(!serverUrl)('real test database cleanup', () => {
     }
   }, 30_000)
 
+  it(
+    "copies the run's historical prefix on the first compatible fixture and applies changed SQL",
+    async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'hourmere-predecessor-test-'))
+      directories.push(directory)
+      const checkpoint = join(directory, MIGRATED_PREFIX_LAST_FILE)
+      const files = (await readdir(migrationModule.migrationsDir))
+        .filter((file) => file.endsWith('.sql') && file <= MIGRATED_PREFIX_LAST_FILE)
+        .sort()
+      for (const file of files) {
+        await copyFile(join(migrationModule.migrationsDir, file), join(directory, file))
+      }
+      const since = new Date()
+      const original = await createTestDatabase(serverUrl as string, directory)
+      try {
+        const { entries, copied } = await ledger(original, since)
+        expect(entries.map(([name]) => name)).toEqual(files)
+        expect(copied).toBe(true)
+      } finally {
+        await original.drop()
+      }
+
+      const sql = await readFile(checkpoint, 'utf8')
+      await writeFile(checkpoint, `${sql}\nCREATE TABLE changed_checkpoint (id integer);\n`)
+      const changed = await createTestDatabase(serverUrl as string, directory)
+      try {
+        expect((await ledger(changed, since)).copied).toBe(false)
+        await expect(changed.pool.query('SELECT * FROM changed_checkpoint')).resolves.toMatchObject(
+          {
+            rows: [],
+          },
+        )
+      } finally {
+        await changed.drop()
+      }
+    },
+    MIGRATION_REPLAY_TIMEOUT,
+  )
+
   it('migrates repeated source copies from one template of their unchanged predecessors', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'hourmere-predecessor-test-'))
     directories.push(directory)
@@ -665,12 +706,13 @@ describe.skipIf(!serverUrl)('real test database cleanup', () => {
     const waitForBlockedCreate = async () => {
       const blocked = new RegExp(`^CREATE DATABASE hourmere_test_\\w+ TEMPLATE ${template}$`)
       for (let attempt = 0; attempt < 100; attempt += 1) {
-        const { rows } = await admin.query<{ query: string }>(
-          `SELECT query FROM pg_stat_activity
+        const { rows } = await admin.query<{ pid: number; query: string }>(
+          `SELECT pid, query FROM pg_stat_activity
             WHERE $1::int = ANY (pg_blocking_pids(pid)) AND query LIKE 'CREATE DATABASE %'`,
           [pid],
         )
-        if (rows.some(({ query }) => blocked.test(query))) return
+        const match = rows.find(({ query }) => blocked.test(query))
+        if (match) return match
         await delay(50)
       }
       throw new Error('CREATE DATABASE never waited for the held template')
@@ -724,51 +766,38 @@ describe.skipIf(!serverUrl)('real test database cleanup', () => {
     const weakened = new URL(serverUrl as string)
     weakened.searchParams.set('client_connection_check_interval', '0')
     weakened.searchParams.set('options', '-c client_connection_check_interval=0')
-    const clients: pg.Client[] = []
-    const connect = pg.Client.prototype.connect
-    vi.spyOn(pg.Client.prototype, 'connect').mockImplementation(function (
-      this: pg.Client,
-      ...args: unknown[]
-    ) {
-      clients.push(this)
-      return (connect as (...a: unknown[]) => unknown).apply(this, args) as never
-    } as never)
+    const queries = vi.spyOn(pg.Client.prototype, 'query')
     let template: Awaited<ReturnType<typeof createTestDatabaseTemplate>> | undefined
     let holder: Awaited<ReturnType<typeof holdTemplate>> | undefined
     let creation: ReturnType<typeof settle> | undefined
+    let blocked: { pid: number; query: string } | undefined
     try {
       template = await createTestDatabaseTemplate(weakened.toString(), async () => {}, {
         tag: 'gone_template',
       })
-      clients.length = 0
       holder = await holdTemplate(template.name)
       creation = settle(template.clone(undefined, { migrate: false, tag: 'gone_client' }))
-      await holder.waitForBlockedCreate()
-      // Only the connection this test's CREATE opened: the backend of that CREATE.
-      const { rows: backends } = await admin.query<{ pid: number }>(
-        "SELECT pid FROM pg_stat_activity WHERE query LIKE $1 || '%' AND query LIKE '% TEMPLATE ' || $2",
-        ['CREATE DATABASE hourmere_test_gone_client_', template.name],
-      )
-      expect(backends).toHaveLength(1)
-      const pid = backends[0]?.pid as number
-      const client = clients.find(
-        (candidate) => (candidate as unknown as { processID: number }).processID === pid,
-      )
-      expect(client).toBeDefined()
-      const stream = (client as unknown as { connection: { stream: { destroy(): void } } })
-        .connection.stream
-      stream.destroy()
+      blocked = await holder.waitForBlockedCreate()
+      const { pid, query } = blocked
+      // Match this test's exact blocked statement to the client that submitted it.
+      const call = queries.mock.calls.findIndex(([text]) => text === query)
+      const client = queries.mock.contexts[call]
+      if (!(client instanceof pg.Client))
+        throw new Error('Could not find the blocked CREATE client')
+      // Client.end() closes the active, non-pipelined connection without waiting for CREATE.
+      await client.end()
       const started = performance.now()
       let running = true
-      while (running && performance.now() - started < 3_000) {
+      while (running && performance.now() - started < 5_000) {
         await delay(100)
         const { rowCount } = await admin.query(
-          "SELECT 1 FROM pg_stat_activity WHERE pid = $1 AND query LIKE 'CREATE DATABASE %'",
-          [pid],
+          "SELECT 1 FROM pg_stat_activity WHERE pid = $1 AND query = $2 AND state = 'active'",
+          [pid, query],
         )
         running = rowCount !== 0
       }
       expect(running, 'server-side CREATE DATABASE kept running after its client went').toBe(false)
+      blocked = undefined
       const pattern = `hourmere_test_gone_client_${process.pid}_%`
       const leftovers = () =>
         admin.query('SELECT datname FROM pg_database WHERE datname LIKE $1', [pattern])
@@ -778,11 +807,22 @@ describe.skipIf(!serverUrl)('real test database cleanup', () => {
       expect((await leftovers()).rows).toEqual([])
       await creation
     } finally {
-      vi.restoreAllMocks()
+      queries.mockRestore()
       vi.unstubAllEnvs()
-      await holder?.release()
-      await (await creation)?.database?.drop()
-      await template?.drop()
+      // A regression can leave the disconnected backend waiting. End only this CREATE
+      // before releasing its template lock, so teardown cannot let it create an orphan.
+      try {
+        if (blocked) {
+          await admin.query(
+            "SELECT pg_terminate_backend(pid, 5000) FROM pg_stat_activity WHERE pid = $1 AND query = $2 AND state = 'active'",
+            [blocked.pid, blocked.query],
+          )
+        }
+      } finally {
+        await holder?.release()
+        await (await creation)?.database?.drop()
+        await template?.drop()
+      }
     }
   }, 30_000)
 

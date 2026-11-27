@@ -821,19 +821,31 @@ async function toBookings(
   })
 }
 
+function readBookingRow(db: Db, id: string): Promise<BookingRow> {
+  return db
+    .selectFrom('bookings as b')
+    .select(BOOKING_COLUMNS)
+    .where('b.id', '=', id)
+    .executeTakeFirstOrThrow()
+}
+
+async function hydrateBooking(
+  db: Db,
+  row: BookingRow,
+  now?: Temporal.Instant,
+  includeTeamsLink = true,
+): Promise<Booking> {
+  const [booking] = await toBookings(db, [row], undefined, now, includeTeamsLink)
+  return booking as Booking
+}
+
 async function loadBooking(
   db: Db,
   id: string,
   now?: Temporal.Instant,
   includeTeamsLink = true,
 ): Promise<Booking> {
-  const row = await db
-    .selectFrom('bookings as b')
-    .select(BOOKING_COLUMNS)
-    .where('b.id', '=', id)
-    .executeTakeFirstOrThrow()
-  const [booking] = await toBookings(db, [row], undefined, now, includeTeamsLink)
-  return booking as Booking
+  return hydrateBooking(db, await readBookingRow(db, id), now, includeTeamsLink)
 }
 
 // --- Writing bookings -------------------------------------------------------------------
@@ -2102,23 +2114,38 @@ export async function getManagedBooking(
   ctx: PublicContext,
   token: ManagedBookingSelector,
 ): Promise<Booking> {
+  const hydrate = await prepareManagedBookingRead(ctx, token)
+  return hydrate(ctx.db)
+}
+
+/** Authorizes and reads the seed row before hydrating its mutable lifecycle and details. */
+export async function prepareManagedBookingRead(ctx: PublicContext, token: ManagedBookingSelector) {
+  let id: string
+  let guestEmail: string | undefined
   if (token && typeof token === 'object') {
     const member = await resolveSeriesMember(ctx.db, token, { scope: 'read' })
     if (!member) throw bookingNotFound()
-    const booking = await loadBooking(ctx.db, member.bookingId, ctx.now())
-    if (member.guestEmail === undefined) return booking
+    id = member.bookingId
+    guestEmail = member.guestEmail
+  } else {
+    const hash = manageTokenHash(token)
+    const target = hash && (await resolveManagedTarget(ctx.db, hash))
+    if (!target) throw bookingNotFound()
+    id = target.id
+  }
+  const now = ctx.now()
+  const row = await readBookingRow(ctx.db, id)
+  return async (db: Db): Promise<Booking> => {
+    const booking = await hydrateBooking(db, row, now)
+    if (guestEmail === undefined) return booking
     delete booking.pendingReschedule
     return {
       ...booking,
-      attendees: booking.attendees.filter((a) => !a.isBooker && a.email === member.guestEmail),
+      attendees: booking.attendees.filter((a) => !a.isBooker && a.email === guestEmail),
       responses: {},
       cancelReason: null,
     }
   }
-  const hash = manageTokenHash(token)
-  const target = hash && (await resolveManagedTarget(ctx.db, hash))
-  if (!target) throw bookingNotFound()
-  return loadBooking(ctx.db, target.id, ctx.now())
 }
 
 /** Reload the selector after the series lock, then lock only its current member. */
@@ -2171,37 +2198,30 @@ const CLOSED_REQUEST_STATES: Readonly<Record<string, ManagedRescheduleRequestSta
   cancelled: 'cancelled',
 }
 
-/**
- * The request a reschedule request email's own link was sent for, and what became of it.
- * Undefined for every other manage token: only that email's token names its request, and
- * only a request of the booking the email was about. `bookingId` is the booking the token
- * resolves to now; a closed request whose booking has since moved reports the move.
- */
-export async function managedLinkRescheduleRequest(
-  ctx: PublicContext,
-  token: string | undefined,
+/** The request belongs to the email identified by this token and to that email's booking. */
+export function managedLinkRescheduleRequestQuery(db: Db, token: string | undefined) {
+  return db
+    .selectFrom('booking_notifications as n')
+    .innerJoin('booking_reschedule_requests as r', (join) =>
+      join.onRef('r.booking_id', '=', 'n.booking_id').on(sql<boolean>`r.id::text = n.message_key`),
+    )
+    .select(['r.id', 'r.state', 'r.expires_at', 'r.booking_id'])
+    .where('n.manage_token_hash', '=', manageTokenHash(token) ?? null)
+    .where('n.outcome', '=', 'sent')
+    .where('n.kind', '=', 'reschedule_requested')
+}
+
+/** A closed request reports a move when its email now opens a successor. */
+export function managedLinkRescheduleRequestState(
+  row: { id: string; state: string; expires_at: string; booking_id: string } | null,
   bookingId: string,
-): Promise<{ id: string; state: ManagedRescheduleRequestState } | undefined> {
-  const hash = manageTokenHash(token)
-  if (!hash) return undefined
-  const { rows } = await sql<{
-    id: string
-    state: string
-    expires_at: Date
-    booking_id: string
-  }>`
-    SELECT r.id, r.state, r.expires_at, r.booking_id
-      FROM booking_notifications n
-      JOIN booking_reschedule_requests r
-        ON r.booking_id = n.booking_id AND r.id::text = n.message_key
-     WHERE n.manage_token_hash = ${hash} AND n.outcome = 'sent'
-       AND n.kind = 'reschedule_requested'`.execute(ctx.db)
-  const row = rows[0]
+  now: Temporal.Instant,
+): { id: string; state: ManagedRescheduleRequestState } | undefined {
   if (!row) return undefined
   // An expiry job can run late; the deadline alone closes the request.
   const state =
     row.state === 'pending'
-      ? row.expires_at.getTime() > ctx.now().epochMilliseconds
+      ? Date.parse(row.expires_at) > now.epochMilliseconds
         ? 'pending'
         : 'expired'
       : CLOSED_REQUEST_STATES[row.state]

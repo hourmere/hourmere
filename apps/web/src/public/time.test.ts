@@ -113,8 +113,10 @@ describe('formatting', () => {
     const css = readFileSync('apps/web/src/public/SlotPicker.css', 'utf8')
     const day = css.match(/\.picker \.day:lang\(zh\)\s*\{([^}]+)\}/)?.[1]
     expect(day).toContain('white-space: nowrap;')
-    // At most 0.875rem, and bound to the column width so bold 22日 fits 36px cells at 320px.
-    expect(day).toContain('font-size: min(0.875rem, 5cqw);')
+    // Only labels without the suffix step up to the body size in wide calendars.
+    expect(css).toMatch(
+      /@container \(min-width: 308px\) \{\s*\.picker \.day:not\(:lang\(zh\)\) \{\s*font-size: var\(--text-md\);/,
+    )
   })
 
   it.each(['00:00', '04:00', '16:00'])(

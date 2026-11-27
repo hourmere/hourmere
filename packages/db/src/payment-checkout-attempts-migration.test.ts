@@ -2,11 +2,14 @@ import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type pg from 'pg'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { migrationsDir, runMigrations } from './migrate.ts'
 import { seedCheckoutHolds } from './payment-checkout-attempt-fixtures.ts'
-import { createTestDatabase, type TestDatabase } from './testing.ts'
+import { MIGRATION_REPLAY_TIMEOUT, useMigrationReplay } from './testing/migration-replay.ts'
+import type { TestDatabase } from './testing.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
+
+vi.setConfig({ testTimeout: MIGRATION_REPLAY_TIMEOUT, hookTimeout: MIGRATION_REPLAY_TIMEOUT })
 
 const migration = '0124_payment_checkout_attempts.sql'
 
@@ -31,16 +34,17 @@ async function retainedData(pool: pg.Pool) {
 }
 
 describe.skipIf(!process.env.DATABASE_URL)('payment Checkout attempts migration', () => {
+  const replay = useMigrationReplay(process.env.DATABASE_URL as string, migration)
+
   it('preserves existing payment holds, matches a fresh install and reruns without changes', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'hourmere-checkout-upgrade-'))
-    const serverUrl = process.env.DATABASE_URL as string
     let upgraded: TestDatabase | undefined
     let fresh: TestDatabase | undefined
     try {
       const files = await readdir(migrationsDir)
       for (const file of files.filter((file) => file.endsWith('.sql') && file < migration))
         await copyFile(join(migrationsDir, file), join(directory, file))
-      upgraded = await createTestDatabase(serverUrl, directory)
+      upgraded = await replay.predecessor.clone(directory)
       const [pending, cancelled] = await seedCheckoutHolds(upgraded.pool)
       await upgraded.pool.query(
         `UPDATE bookings SET status = 'cancelled', cancelled_at = clock_timestamp(),
@@ -61,7 +65,7 @@ describe.skipIf(!process.env.DATABASE_URL)('payment Checkout attempts migration'
         rows: [],
       })
 
-      fresh = await createTestDatabase(serverUrl, directory)
+      fresh = await replay.predecessor.clone(directory)
       const schema = await snapshotSchema(upgraded.pool)
       expect(await snapshotSchema(fresh.pool)).toEqual(schema)
       expect(await runMigrations(upgraded.pool, directory)).toEqual([])
@@ -73,5 +77,5 @@ describe.skipIf(!process.env.DATABASE_URL)('payment Checkout attempts migration'
       await upgraded?.drop()
       await rm(directory, { recursive: true, force: true })
     }
-  }, 120_000)
+  })
 })

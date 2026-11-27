@@ -1,7 +1,7 @@
 import { appendFile, copyFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { migrationsDir } from './migrate.ts'
 import {
   copySsoPredecessor,
@@ -11,7 +11,10 @@ import {
 } from './sso-storage-fixtures.ts'
 import { type SsoProtection, ssoProtections } from './sso-storage-protections.ts'
 import { checkActiveClaimRace } from './sso-storage-races.ts'
-import { createTestDatabase, type TestDatabase } from './testing.ts'
+import { MIGRATION_REPLAY_TIMEOUT, useMigrationReplay } from './testing/migration-replay.ts'
+import type { TestDatabase } from './testing.ts'
+
+vi.setConfig({ testTimeout: MIGRATION_REPLAY_TIMEOUT, hookTimeout: MIGRATION_REPLAY_TIMEOUT })
 
 const serverUrl = process.env.DATABASE_URL
 // Optional local report of which assertion each mutation failed (one JSON line each).
@@ -22,6 +25,8 @@ const cases = Object.entries(ssoProtections).flatMap(([protection, { mutants }])
 )
 
 describe.skipIf(!serverUrl)('SSO configuration storage source-copy mutations', () => {
+  const replay = useMigrationReplay(serverUrl as string, ssoMigration)
+
   let directory: string
   let predecessor: TestDatabase
   let source: string
@@ -31,7 +36,7 @@ describe.skipIf(!serverUrl)('SSO configuration storage source-copy mutations', (
   beforeAll(async () => {
     directory = await mkdtemp(join(tmpdir(), 'hourmere-sso-mutation-'))
     await copySsoPredecessor(directory)
-    predecessor = await createTestDatabase(serverUrl as string, directory, {
+    predecessor = await replay.predecessor.clone(directory, {
       tag: 'sso_mutation',
     })
     source = await readFile(join(migrationsDir, ssoMigration), 'utf8')
@@ -83,7 +88,7 @@ describe.skipIf(!serverUrl)('SSO configuration storage source-copy mutations', (
         join(mutated, ssoMigration),
         `${source}\nDROP INDEX sso_domains_active_name;\n`,
       )
-      owned = await createTestDatabase(serverUrl as string, mutated, { tag: 'sso_race' })
+      owned = await replay.predecessor.clone(mutated, { tag: 'sso_race' })
       await expect(checkActiveClaimRace(owned.pool)).rejects.toMatchObject({
         name: 'AssertionError',
       })

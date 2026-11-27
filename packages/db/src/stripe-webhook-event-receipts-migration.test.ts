@@ -3,11 +3,14 @@ import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type pg from 'pg'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { migrationsDir, runMigrations } from './migrate.ts'
 import { seedCheckoutHolds } from './payment-checkout-attempt-fixtures.ts'
-import { createTestDatabase, type TestDatabase } from './testing.ts'
+import { MIGRATION_REPLAY_TIMEOUT, useMigrationReplay } from './testing/migration-replay.ts'
+import type { TestDatabase } from './testing.ts'
 import { snapshotSchema } from './upgrade-schema-snapshot.ts'
+
+vi.setConfig({ testTimeout: MIGRATION_REPLAY_TIMEOUT, hookTimeout: MIGRATION_REPLAY_TIMEOUT })
 
 const migration = '0189_stripe_webhook_event_receipts.sql'
 
@@ -23,9 +26,10 @@ async function paymentData(pool: pg.Pool) {
 }
 
 describe.skipIf(!process.env.DATABASE_URL)('Stripe webhook event receipt migration', () => {
+  const replay = useMigrationReplay(process.env.DATABASE_URL as string, migration)
+
   it('preserves populated hold and Checkout data, matches a fresh install and reruns as a no-op', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'hourmere-stripe-webhook-upgrade-'))
-    const serverUrl = process.env.DATABASE_URL as string
     let upgraded: TestDatabase | undefined
     let fresh: TestDatabase | undefined
     try {
@@ -33,7 +37,7 @@ describe.skipIf(!process.env.DATABASE_URL)('Stripe webhook event receipt migrati
         if (file.endsWith('.sql') && file < migration)
           await copyFile(join(migrationsDir, file), join(directory, file))
       }
-      upgraded = await createTestDatabase(serverUrl, directory)
+      upgraded = await replay.predecessor.clone(directory)
       const [pending, cancelled] = await seedCheckoutHolds(upgraded.pool)
       await upgraded.pool.query(
         `UPDATE bookings SET status = 'cancelled', cancelled_at = clock_timestamp(),
@@ -56,7 +60,7 @@ describe.skipIf(!process.env.DATABASE_URL)('Stripe webhook event receipt migrati
         upgraded.pool.query('SELECT event_id FROM payment_stripe_events'),
       ).resolves.toMatchObject({ rows: [] })
 
-      fresh = await createTestDatabase(serverUrl, directory)
+      fresh = await replay.predecessor.clone(directory)
       const schema = await snapshotSchema(upgraded.pool)
       expect(await snapshotSchema(fresh.pool)).toEqual(schema)
       await upgraded.pool.query('INSERT INTO payment_stripe_events VALUES ($1)', ['evt_test_seen'])
@@ -74,5 +78,5 @@ describe.skipIf(!process.env.DATABASE_URL)('Stripe webhook event receipt migrati
         await rm(directory, { recursive: true, force: true })
       }
     }
-  }, 120_000)
+  })
 })

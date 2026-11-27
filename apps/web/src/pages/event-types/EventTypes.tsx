@@ -80,6 +80,8 @@ export function EventTypesPage() {
   const message = useFlash()
   const [search] = useSearchParams()
   const hostUserId = !me.organization.personal ? search.get('hostUserId') : null
+  const availabilityDone = state.status === 'ready' && state.data.schedules.some(validDefault)
+  const refreshInGuide = me.organization.personal && !availabilityDone
   const eventTypes =
     state.status === 'ready'
       ? state.data.eventTypes.filter(
@@ -116,7 +118,7 @@ export function EventTypesPage() {
       )}
       {state.status === 'ready' && (
         <>
-          {refreshFailure && (
+          {refreshFailure && !refreshInGuide && (
             <div className="alert alert-error" role="alert">
               <p>
                 {t('Could not refresh setup status.')} {uiText(refreshFailure)}
@@ -133,9 +135,11 @@ export function EventTypesPage() {
               schedules={state.data.schedules}
               eventTypes={state.data.eventTypes}
               reload={reloadSetup}
+              availabilityDone={availabilityDone}
+              refreshFailure={refreshInGuide ? refreshFailure : null}
             />
           )}
-          {!me.organization.personal && !state.data.schedules.some(validDefault) && (
+          {!me.organization.personal && !availabilityDone && (
             <div className="alert alert-info">
               <p>
                 {scheduleHint[0]}
