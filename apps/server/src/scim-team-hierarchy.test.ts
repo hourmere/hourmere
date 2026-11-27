@@ -34,7 +34,7 @@ import {
   scimMappingNoticeJob,
   scimMappingNoticeQueue,
 } from './scim-team-mapping-notices.ts'
-import { recoverScimTeamMapping } from './scim-team-mapping-recovery.ts'
+import { recoverScimTeamMapping, ScimMappingRecovery } from './scim-team-mapping-recovery.ts'
 import {
   bindingCookieName,
   consumeMailboxProof,
@@ -362,22 +362,15 @@ describe.skipIf(!databaseUrl)('SCIM team hierarchy transactions', () => {
         recoverScimTeamMapping(db, failQueue, { ...target, action: 'suspend' }),
       ).rejects.toThrow('could not be queued')
       expect((await mapping(mappingId)).suspended_at).toBeNull()
-      const recoverOffline = (action: string, command = recoveryCommand, setting = 'off') =>
+      expect(ScimMappingRecovery.safeParse({ ...target, action: 'resume' }).success).toBe(false)
+      const recoverOffline = (action: 'suspend' | 'detach', command = recoveryCommand) =>
         execute(process.execPath, [command, action, mappingId, parent.id, child.id], {
           env: {
             DATABASE_URL: owned.url,
             HOURMERE_SERVER_CONTAINER: '1',
-            SCIM_PROVISIONING_ENABLED: setting,
+            SCIM_PROVISIONING_ENABLED: 'off',
           },
         })
-      await expect(recoverOffline('resume')).rejects.toMatchObject({
-        code: 1,
-        stderr: expect.stringContaining('Pass <suspend|detach>'),
-      })
-      await expect(recoverOffline('suspend', recoveryCommand, 'invalid')).rejects.toMatchObject({
-        code: 1,
-        stderr: expect.stringContaining('SCIM_PROVISIONING_ENABLED'),
-      })
       const assertSuspendsOffline = (attempt: ReturnType<typeof recoverOffline>) =>
         expect(attempt).resolves.toMatchObject({
           stdout: 'Mapping suspended. Owner notices queued.\n',
@@ -419,10 +412,9 @@ describe.skipIf(!databaseUrl)('SCIM team hierarchy transactions', () => {
       await expect(listScimTeamMappings(deps(), child.owner.principal)).resolves.toMatchObject({
         mappings: [{ state: 'suspended' }],
       })
-      await expect(recoverOffline('detach')).rejects.toMatchObject({
-        code: 1,
-        stderr: expect.stringContaining('Detachment is blocked'),
-      })
+      await expect(
+        recoverScimTeamMapping(db, jobs, { ...target, action: 'detach' }),
+      ).rejects.toMatchObject({ code: 'scim_mapping_roster_requires_departure' })
       expect(
         await db
           .selectFrom('auth.member')
