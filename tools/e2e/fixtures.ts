@@ -131,6 +131,7 @@ export interface FixtureApp {
   authorizeTeamSession: (
     actor?: 'owner' | 'member' | 'other-team',
   ) => Promise<{ teamId: string; personalId: string; expire: () => Promise<void> }>
+  restartWithDefaultSso: () => Promise<void>
   eventTypeTitles: () => Promise<string[]>
   bookingState: () => Promise<{
     total: number
@@ -161,6 +162,7 @@ export const test = base.extend<{
   uiAudit: boolean
   notificationEditor: boolean
   slotSnippets: boolean
+  ssoOptOut: boolean
   waitlistSmtp: boolean
   paidStripe: boolean
   teamPublicHome: boolean
@@ -170,6 +172,7 @@ export const test = base.extend<{
   uiAudit: [false, { option: true }],
   notificationEditor: [false, { option: true }],
   slotSnippets: [false, { option: true }],
+  ssoOptOut: [false, { option: true }],
   waitlistSmtp: [false, { option: true }],
   paidStripe: [false, { option: true }],
   teamPublicHome: [false, { option: true }],
@@ -195,6 +198,7 @@ export const test = base.extend<{
       uiAudit,
       notificationEditor,
       slotSnippets,
+      ssoOptOut,
       waitlistSmtp,
       paidStripe,
       teamPublicHome,
@@ -685,42 +689,48 @@ export const test = base.extend<{
           },
         })
       }
-      app = await startFixtureServer(
-        appListener,
-        {
-          DATABASE_URL: owned.url,
-          BETTER_AUTH_SECRET: authSecret,
-          SIGNUP: 'closed',
-          HOURMERE_ROLE: 'web',
-          ...stripe?.env,
-          // SMTP availability enables waitlist admission. This web-only fixture never
-          // runs delivery workers; explicit waitlist delivery uses the in-memory sink.
-          ...(waitlistSmtp && {
-            SMTP_URL: 'smtp://127.0.0.1:1',
-            MAIL_FROM: 'Hourmere Fixture <fixture@hourmere.invalid>',
-          }),
-          EMBED_ALLOWED_ORIGINS: parentUrl,
-          ...(uiAudit && { MCP_OAUTH_ENABLED: 'true' }),
-          ...(notificationEditor && { FOLLOW_UP_HOST_NOTES_ENABLED: 'true' }),
-          ...(slotSnippets && { SLOT_SNIPPETS_ENABLED: 'true' }),
-          ...(teamPublicHome && { TEAM_PUBLIC_HOME_ORGANIZATION_IDS: directoryIds.join(',') }),
-          ...(automaticMeet && {
-            GOOGLE_MEET_ENABLED: 'true',
-            GOOGLE_CALENDAR_CLIENT_ID: 'synthetic-client',
-            GOOGLE_CALENDAR_CLIENT_SECRET: 'synthetic-secret',
-            CALENDAR_ENCRYPTION_KEY: TEST_CALENDAR_KEY,
-          }),
-          WEB_DIST:
-            process.env.HOURMERE_E2E_WEB_DIST ??
-            fileURLToPath(new URL('../../apps/web/dist', import.meta.url)),
-        },
-        undefined,
-        {
-          ...(stripe && { stripeTransport: stripe.transport }),
-          // Repeated page mounts share one loopback bucket across all apps in a worker.
-          ...(uiAudit && { organizationListRateLimitMaxForTests: 20_000 }),
-        },
-      )
+      const serverEnvironment = {
+        DATABASE_URL: owned.url,
+        BETTER_AUTH_SECRET: authSecret,
+        SIGNUP: 'closed',
+        HOURMERE_ROLE: 'web',
+        ...stripe?.env,
+        // SMTP availability enables waitlist admission. This web-only fixture never
+        // runs delivery workers; explicit waitlist delivery uses the in-memory sink.
+        ...(waitlistSmtp && {
+          SMTP_URL: 'smtp://127.0.0.1:1',
+          MAIL_FROM: 'Hourmere Fixture <fixture@hourmere.invalid>',
+        }),
+        EMBED_ALLOWED_ORIGINS: parentUrl,
+        ...(uiAudit && { MCP_OAUTH_ENABLED: 'true' }),
+        ...(notificationEditor && { FOLLOW_UP_HOST_NOTES_ENABLED: 'true' }),
+        ...(slotSnippets && { SLOT_SNIPPETS_ENABLED: 'true' }),
+        ...(teamPublicHome && { TEAM_PUBLIC_HOME_ORGANIZATION_IDS: directoryIds.join(',') }),
+        ...(automaticMeet && {
+          GOOGLE_MEET_ENABLED: 'true',
+          GOOGLE_CALENDAR_CLIENT_ID: 'synthetic-client',
+          GOOGLE_CALENDAR_CLIENT_SECRET: 'synthetic-secret',
+          CALENDAR_ENCRYPTION_KEY: TEST_CALENDAR_KEY,
+        }),
+        WEB_DIST:
+          process.env.HOURMERE_E2E_WEB_DIST ??
+          fileURLToPath(new URL('../../apps/web/dist', import.meta.url)),
+      }
+      const startApp = (listener: OwnedListener, optOut: boolean) =>
+        startFixtureServer(
+          listener,
+          {
+            ...serverEnvironment,
+            ...(optOut && { SSO_OIDC_ENABLED: 'false', SSO_SAML_ENABLED: 'false' }),
+          },
+          undefined,
+          {
+            ...(stripe && { stripeTransport: stripe.transport }),
+            // Repeated page mounts share one loopback bucket across all apps in a worker.
+            ...(uiAudit && { organizationListRateLimitMaxForTests: 20_000 }),
+          },
+        )
+      app = await startApp(appListener, ssoOptOut)
       let externalRequests = 0
       let authorization: string | undefined
       await context.route('**/*', async (route) => {
@@ -1640,6 +1650,11 @@ export const test = base.extend<{
                 .execute()
             },
           }
+        },
+        restartWithDefaultSso: async () => {
+          if (!appListener || !app) throw new Error('The fixture server has not started')
+          await app.close()
+          app = await startApp(appListener, false)
         },
         eventTypeTitles: async () =>
           (await db.selectFrom('event_types').select('title').orderBy('title').execute()).map(

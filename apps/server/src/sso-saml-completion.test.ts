@@ -254,7 +254,7 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
     })
   }
 
-  function productionCapabilities(saml?: string, oidc?: string) {
+  function productionCapabilities(saml: string, oidc: string) {
     return productionSsoCapabilities(
       loadConfig({
         DATABASE_URL: owned.url,
@@ -1131,7 +1131,7 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
         await acs(provider.id, assertion.encoded, attempt.relayState, request),
         attempt,
       )
-      const off = instance(productionCapabilities('', 'true'))
+      const off = instance(productionCapabilities('false', 'true'))
       const before = await protocolEffects(provider.id)
       const effects = await identityEffects()
       const proof = await readProof(write.attemptId)
@@ -1161,11 +1161,7 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
         requires_mailbox: false,
         consumed_at: null,
       })
-      const off = management(fixture.team, {
-        ssoOidcEnabled: true,
-        ssoSamlEnabled: false,
-        ssoOperatorSetting: true,
-      })
+      const off = management(fixture.team, productionCapabilities('false', 'true'))
       const input = { ...write.body, proofAttemptId: write.attemptId }
       const refused = await off.json(domainsPath, cookies, input)
       expect(refused.status).toBe(403)
@@ -1968,7 +1964,7 @@ describe.skipIf(!databaseUrl)('SAML ACS and browser completion', () => {
       .executeTakeFirstOrThrow()
     const provider = await enabledProvider({ organizationId: fixture.team, domainId: claim.id })
     const owner = await browserSession(fixture.owner, fixture.team)
-    const off = management(fixture.team, productionCapabilities())
+    const off = management(fixture.team, productionCapabilities('false', 'false'))
     await db.insertInto('sso_recovery_owners').values(recoveryOwnerValues(fixture)).execute()
     await db
       .insertInto('sso_policies')

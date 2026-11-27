@@ -23,9 +23,11 @@ import {
 import { createApp } from './app.ts'
 import { bindingCookieName, sha256 } from './sso-mailbox-proof.ts'
 import { LINK_SSO_ACCOUNT, OIDC_COMPLETE_LINK } from './sso-oidc-link.ts'
+import { configuredSsoCapabilities } from './sso-setting-fixtures.ts'
 import type { SsoTeamReadDeps } from './sso-team-reads.ts'
 
 const publicUrl = 'https://hourmere.example.test'
+const settingOff = configuredSsoCapabilities('false', 'false')
 const browser = 'a'.repeat(43)
 const otherBrowser = 'b'.repeat(43)
 const withoutSso = {
@@ -180,7 +182,6 @@ describe.skipIf(!process.env.DATABASE_URL)('SSO /me projection', () => {
     )
   })
   it('adds no summary while the OIDC setting is off for a team without stored SSO state', async () => {
-    const settingOff = { ssoOidcEnabled: false, ssoSamlEnabled: false, ssoOperatorSetting: true }
     const hardOff = await me(withoutSso, {
       db: deps.db,
       capabilities: { ...settingOff, ssoOperatorSetting: false },
@@ -194,7 +195,6 @@ describe.skipIf(!process.env.DATABASE_URL)('SSO /me projection', () => {
     expect(await response.text()).toBe(await hardOff.text())
   })
   it('keeps the caller’s own link while the OIDC setting is off and offers nothing that adds trust', async () => {
-    const settingOff = { ssoOidcEnabled: false, ssoSamlEnabled: false, ssoOperatorSetting: true }
     const response = await me(
       principal,
       { db: deps.db, capabilities: settingOff },

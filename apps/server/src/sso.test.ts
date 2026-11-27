@@ -110,18 +110,18 @@ const settingBase = {
 }
 
 const settings = [
-  [undefined, false],
-  ['', false],
+  [undefined, true],
+  ['', true],
   ['false', false],
   ['true', true],
 ] as const
 
-function verifySetting(capabilities = server.productionSsoCapabilities) {
+function verifySetting(capabilities = server.productionSsoCapabilities, load = loadConfig) {
   for (const [SSO_SAML_ENABLED, ssoSamlEnabled] of settings)
     for (const [SSO_OIDC_ENABLED, ssoOidcEnabled] of settings)
       expect(
         capabilities(
-          loadConfig({
+          load({
             ...settingBase,
             SCIM_PROVISIONING_ENABLED: 'off',
             SSO_OIDC_ENABLED,
@@ -150,6 +150,24 @@ it('derives each capability from its own setting and refuses invalid values', as
     )
   }
 })
+
+it.each(['SSO_OIDC_ENABLED', 'SSO_SAML_ENABLED'])(
+  'detects restoring the previous opt-in default for %s',
+  async (key) => {
+    const declaration = `    ${key}: optional(
+      z.enum(['true', 'false'], { error: '${key} must be true, false or empty' }),
+    ).transform((value) => value !== 'false'),`
+    const control = await sourceCopy<typeof import('./config.ts')>('./config.ts')
+    verifySetting(server.productionSsoCapabilities, control.loadConfig)
+    const mutant = await sourceCopy<typeof import('./config.ts')>('./config.ts', [
+      declaration,
+      declaration.replace("value !== 'false'", "value === 'true'"),
+    ])
+    expect(() => verifySetting(server.productionSsoCapabilities, mutant.loadConfig)).toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+  },
+)
 
 it('keeps reads, recovery and trust reduction available only under an operator setting', async () => {
   const verify = (guard = requireSsoRetained) => {
@@ -332,8 +350,8 @@ describe.skipIf(!process.env.DATABASE_URL)('production SSO setting startup', () 
         freshServer.startServer({ ...env, SSO_SAML_ENABLED: 'enabled' }),
       ).rejects.toThrow(/SSO_SAML_ENABLED/)
       for (const [setting, ssoOidcEnabled, ssoSamlEnabled] of [
-        [{}, false, false],
-        [{ SSO_OIDC_ENABLED: '', SSO_SAML_ENABLED: '' }, false, false],
+        [{}, true, true],
+        [{ SSO_OIDC_ENABLED: '', SSO_SAML_ENABLED: '' }, true, true],
         [{ SSO_OIDC_ENABLED: 'false', SSO_SAML_ENABLED: 'false' }, false, false],
         [{ SSO_OIDC_ENABLED: 'true', SSO_SAML_ENABLED: 'false' }, true, false],
         [{ SSO_OIDC_ENABLED: 'false', SSO_SAML_ENABLED: 'true' }, false, true],
@@ -370,9 +388,10 @@ describe.skipIf(!process.env.DATABASE_URL)('production SSO setting startup', () 
   }, 90_000)
 
   it.each([
-    ['', '', false, false],
-    ['true', 'false', true, false],
-    ['false', 'true', false, true],
+    [undefined, undefined, true, true],
+    ['', '', true, true],
+    ['', 'false', true, false],
+    ['false', '', false, true],
   ] as const)(
     'starts the real entry point with SSO_OIDC_ENABLED=%j and SSO_SAML_ENABLED=%j',
     async (oidc, saml, ssoOidcEnabled, ssoSamlEnabled) => {

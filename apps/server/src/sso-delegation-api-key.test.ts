@@ -24,6 +24,7 @@ import { insert } from '../../../packages/db/src/sso-storage-fixtures.ts'
 import { createApp } from './app.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
 import { whoamiTool } from './mcp/whoami.ts'
+import { configuredSsoCapabilities } from './sso-setting-fixtures.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const publicUrl = 'https://hourmere.example.test'
@@ -337,8 +338,8 @@ describe.skipIf(!serverUrl)('SSO delegation on the REST API-key path', () => {
         .execute()
     const before = await bindings()
     expect(before).toHaveLength(1)
-    const settingOff = { ...disabled, ssoOperatorSetting: true }
-    const settingOn = { ...enabled, ssoOperatorSetting: true }
+    const settingOff = configuredSsoCapabilities('false', 'false')
+    const settingOn = configuredSsoCapabilities('true', 'false')
     expect((await me(instance(settingOn), credential.headers)).status).toBe(200)
     // Suspended, not revoked: enforcement stays, the binding row and its deadline are untouched.
     await expectRefused(await me(instance(settingOff), credential.headers))

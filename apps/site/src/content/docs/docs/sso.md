@@ -1,24 +1,26 @@
 ---
 title: Single sign-on
-description: Enable organization single sign-on with OIDC or SAML, set up a team identity provider, and recover access when sign-in fails.
+description: Set up a team identity provider with OIDC or SAML single sign-on and recover access when sign-in fails.
 ---
 
 Organization single sign-on lets a team's members sign in to that team through the team's
 OpenID Connect (OIDC) or SAML 2.0 identity provider, and lets the team require it. It is
 available to every installation, including self-hosted ones, without a subscription or
-license requirement. **Both protocols are off by default.**
+license requirement. **Both protocols are on by default.** An upgrade on an instance
+with no SSO configuration adds SSO navigation and sign-in options. Team SSO still
+requires a configured provider, and enforcement requires a team owner to turn it on.
 
-## Turn it on
+## Instance configuration
 
-Set an encryption key and turn on the protocols your teams need. Use the same settings
+Set an encryption key before teams set up providers. Use the same settings
 on web and worker. For Compose, update the private `.env` and run
 `./scripts/compose-up.sh -d --wait` to recreate the affected services. For direct
 deployments, update the process environment and restart each role.
 
 | Variable | Value |
 |---|---|
-| `SSO_OIDC_ENABLED` | `true` enables OIDC. Empty or unset follows the release default, currently off. `false` keeps it off. Other values stop startup. |
-| `SSO_SAML_ENABLED` | `true` enables SAML. Empty or unset follows the release default, currently off. `false` keeps it off. Other values stop startup. |
+| `SSO_OIDC_ENABLED` | Unset, empty or `true` enables OIDC. `false` turns it off. Other values stop startup. |
+| `SSO_SAML_ENABLED` | Unset, empty or `true` enables SAML. `false` turns it off. Other values stop startup. |
 | `SSO_ENCRYPTION_KEY` | An independent 32-byte base64 key (`openssl rand -base64 32`) that seals identity provider configuration. Keep it stable and backed up privately: without it saved providers cannot be read. |
 
 Hourmere also needs a canonical HTTPS `PUBLIC_URL` and working SMTP, because every first
@@ -28,9 +30,9 @@ identity provider on a private network, or on a port other than 443, must be lis
 fetches data from it. See the [configuration reference](/docs/configuration).
 
 `GET /api/v1/instance` reports the effective state of each protocol as `ssoOidcEnabled`
-and `ssoSamlEnabled`. A fresh `.env` from `scripts/setup.sh` leaves both switches empty,
-and Compose passes these empty values through. Older `.env` files that omit either
-switch also use the default for that protocol.
+and `ssoSamlEnabled`. A `.env` created by `scripts/setup.sh` or copied from `.env.example`
+with empty settings uses the new default after an upgrade, including through Compose.
+Older `.env` files that omit either switch also use the default for that protocol.
 
 ## Set up a team
 
@@ -169,11 +171,14 @@ and the [API key scope table](/docs/api-keys) for permissions. The full design i
 
 ## 中文说明
 
-组织单点登录的 OIDC 和 SAML 默认关闭。实例运营者可分别设置 `SSO_OIDC_ENABLED=true` 或
-`SSO_SAML_ENABLED=true`，并配置独立的 `SSO_ENCRYPTION_KEY`（32 字节 base64）。网页和后台进程
-使用相同的设置。Compose 部署修改私有 `.env` 后运行 `./scripts/compose-up.sh -d --wait`，其他
-部署修改进程环境后重启各角色。留空或不设置时使用版本默认值（目前为关闭），`false` 明确关闭，
-其他取值会阻止启动。可用 `GET /api/v1/instance` 检查两种协议的实际状态。
+组织单点登录的 OIDC 和 SAML 默认开启。留空、不设置或设为 `true` 会启用对应协议，分别设置
+`SSO_OIDC_ENABLED=false` 或 `SSO_SAML_ENABLED=false` 可关闭，其他取值会阻止启动。升级时，
+由 `scripts/setup.sh` 生成或从 `.env.example` 复制的 `.env` 若留空，直接部署和 Compose 部署都
+会使用新默认值。从未配置单点登录的实例升级后会显示相关导航和登录选项，团队仍须配置提供方，
+强制单点登录需要团队所有者开启。保存提供方前，请配置独立的 `SSO_ENCRYPTION_KEY`（32 字节
+base64）。网页和后台进程使用相同的设置。Compose 部署修改私有 `.env` 后运行
+`./scripts/compose-up.sh -d --wait`，其他部署修改进程环境后重启各角色。可用
+`GET /api/v1/instance` 检查两种协议的实际状态。
 
 团队所有者或管理员在团队空间的**设置 → 单点登录**中验证域名、创建并测试身份提供方。SAML
 支持手动填写身份提供方资料和签名证书、粘贴元数据 XML 或通过 HTTPS 网址导入元数据。使用
