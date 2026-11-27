@@ -25,10 +25,10 @@ describe.skipIf(!serverUrl)('audit source-copy mutations', () => {
       "from 'kysely'",
       `from '${pathToFileURL(join(process.cwd(), 'node_modules/kysely/dist/index.js')).href}'`,
     )
-    // ...and the SSO catalogue it imports from its own directory.
+    // Resolve sibling modules from the original directory too.
     source = source.replaceAll(
-      "from './sso-audit.ts'",
-      `from '${new URL('./sso-audit.ts', import.meta.url).href}'`,
+      /from '(\.\/[^']+)'/g,
+      (_, path: string) => `from '${new URL(path, import.meta.url).href}'`,
     )
   })
   afterAll(async () => {

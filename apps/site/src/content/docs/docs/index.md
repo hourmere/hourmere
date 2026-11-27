@@ -213,6 +213,8 @@ not grant host rescheduling or reschedule-request authority through REST, MCP or
 - Prebuilt image installs have no runtime switch to disable app installation or the
   offline shell. Changing `VITE_PWA_ENABLED` requires rebuilding from source and replacing
   the deployed image; see [conversion steps](/docs/self-hosting#turn-off-app-installation).
+- Hourmere does not send Web Push notifications. The [Web Push assessment](/docs/install-app#web-push-assessment)
+  covers browser support, self-hosting dependencies and the proposed opt-in pilot.
 - Organization [OIDC single sign-on](/docs/sso) is off by default: the operator turns it
   on with `SSO_OIDC_ENABLED=true`, on every instance and without a paid-plan requirement.
   SAML is being built and is not available yet. The

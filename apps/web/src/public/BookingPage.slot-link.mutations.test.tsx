@@ -21,7 +21,9 @@ import { booking, EVENT, slot, slotsAnswer } from '../test/public-fixtures.ts'
 import * as calendar from './AddToCalendar.tsx'
 import * as publicApi from './api.ts'
 import * as details from './BookingDetails.tsx'
+import * as factIcon from './BookingFactIcon.tsx'
 import * as form from './BookingForm.tsx'
+import * as formActions from './BookingFormActions.tsx'
 import type { BookingPage, OneTimeBookingPage } from './BookingPage.tsx'
 import * as bookingParts from './BookingPageParts.tsx'
 import * as calendarDates from './calendar.ts'
@@ -92,6 +94,7 @@ function partsCopy(text: string) {
     '../i18n/formatting.ts': formatting,
     '../i18n/runtime.tsx': runtime,
     './BookingDetails.tsx': details,
+    './BookingFactIcon.tsx': factIcon,
     './EventDescription.tsx': description,
     './PublicLayout.tsx': layout,
     './time.ts': time,
@@ -736,6 +739,7 @@ it('detects rejecting formatted international phone input in the public form', (
       '../i18n/runtime.tsx': runtime,
       '../i18n/translate.ts': translate,
       './BookingDetails.tsx': details,
+      './BookingFormActions.tsx': formActions,
       './validation.ts': validation,
     })
     expect(

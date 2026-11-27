@@ -9,6 +9,7 @@ import {
   updateRefused,
 } from './sso-storage-fixtures.ts'
 import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
+import { MIGRATION_COVERAGE_TIMEOUT } from './testing/migration-replay.ts'
 
 export async function assertRetirementProtections(pool: pg.Pool) {
   const db = await pool.connect()
@@ -86,17 +87,21 @@ export async function assertRetirementProtections(pool: pg.Pool) {
 }
 
 describe.skipIf(!process.env.DATABASE_URL)('domain retirement constraint coverage', () => {
-  it('covers every new protection', async () => {
-    const report = await checkConstraintCoverage({
-      serverUrl: process.env.DATABASE_URL as string,
-      migration: '0117_sso_domain_retirement.sql',
-      assertions: assertRetirementProtections,
-      concurrency: 2,
-      allowList: {
-        'constraint public.sso_domain_retirements.sso_domain_retirements_pkey':
-          'Notification foreign keys require this target primary key; PostgreSQL cannot drop it alone.',
-      },
-    })
-    expect(report.problems).toEqual([])
-  }, 600_000)
+  it(
+    'covers every new protection',
+    async () => {
+      const report = await checkConstraintCoverage({
+        serverUrl: process.env.DATABASE_URL as string,
+        migration: '0117_sso_domain_retirement.sql',
+        assertions: assertRetirementProtections,
+        concurrency: 2,
+        allowList: {
+          'constraint public.sso_domain_retirements.sso_domain_retirements_pkey':
+            'Notification foreign keys require this target primary key; PostgreSQL cannot drop it alone.',
+        },
+      })
+      expect(report.problems).toEqual([])
+    },
+    MIGRATION_COVERAGE_TIMEOUT,
+  )
 })
