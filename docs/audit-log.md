@@ -22,7 +22,8 @@ Indexes cover organization plus time, actor, or action, with ID tie breakers.
 
 Actors form a database-checked closed set: `user`, `api_key`, `oauth_client`,
 `system` (job/service name as ID), `scim_token` (a SCIM provisioning token's ID, always with
-credential `none`, because the token is the credential), `external_api_key`,
+credential `none`, because the token is the credential), `scim_connection` (a team's SCIM
+connection ID with credential `none`), `external_api_key`,
 `external_oauth_client`, `external_user` and `anonymous` (the last four without IDs). Credentials are
 `session` (optional session ID), `api_key` (ID and actual scope), `oauth` (client
 and grant IDs), or `none`. Legacy internal calls without an authenticated
@@ -58,10 +59,10 @@ transaction and may drop failures past its bound (see [SSO actions](#sso-actions
 The application and database reject extra detail keys. Role changes allow only
 `oldRole` and `newRole`; API key creation and the reserved rotation action allow
 only `scope`; all webhook and Slack destination actions allow only `events` (the
-subscribed event list), which the database checks is an array of distinct event names
-from that destination's catalogue, at least one and at most the catalogue size (Slack's
-leaves out the attendee no-show change); OAuth token revocation allows only `familySize`
-(see below).
+subscribed event list). When present, the database checks that `events` is an array of
+distinct event names from that destination's catalogue, at least one and at most the catalogue
+size (Slack's leaves out the attendee no-show change). OAuth token revocation allows only
+`familySize` (see below).
 Branding updates allow only `logo` (`uploaded`, `selected` or `removed`) and
 `primaryColor` (`set` or `cleared`), at least one of them; the database also checks
 these values. Attendee no-show changes require exactly `attendeeId` (the attendee's
@@ -72,6 +73,11 @@ images, logo hashes, colours, attendee names, email addresses or free text are
 recorded. New detail keys require deliberate schema and documentation review. The
 [SSO actions](#sso-actions) and [workflow actions](#workflow-actions) have their own
 allow-lists and value checks.
+
+`organization.updated` records `oldSlug` and `newSlug` together when the address changes.
+`oldSlug` preserves the previous spelling for well-formed legacy slugs and is null for
+legacy addresses outside the allowed format. `nameChanged: true` records a display-name
+change without retaining either name. Previous events can have empty details.
 
 | Area | Actions |
 | --- | --- |
@@ -185,11 +191,12 @@ SCIM User creation (`POST /Users`) records
 `scim_user.created` on the new resource ID, attributed to the provisioning token that made the
 request (actor `scim_token`, credential `none`), with empty details: no `userName`, address,
 name or other attribute value is recorded. The invitation it issues records
-`membership.invited` with the same attribution; a create whose claim records no invitation
-(a member's address, or one another pending invitation holds) records only
-`scim_user.created`. Both are written in the transaction that
-creates the entry, its claim and the invitation, so a create that fails or is refused records
-nothing.
+`membership.invited` with actor `scim_connection`, the SCIM connection ID and credential
+`none`. Cancellation of such an invitation when SCIM retires its claim records
+`membership.invitation_cancelled` with the same connection attribution. A create whose claim
+records no invitation (a member's address, or one another pending invitation holds) records
+only `scim_user.created`. Creation writes its events in the transaction that creates the entry,
+its claim and the invitation, so a create that fails or is refused records nothing.
 
 While SCIM provisioning is enabled, accepting the invitation of a pending SCIM User claim
 completes the claim and records `scim_user.claimed` on the resource ID, beside the usual
@@ -313,15 +320,16 @@ Security failures (`sso_authentication.failed`, `sso_authentication.replay_rejec
 `sso_jit.refused` and `sso_link.conflicted`) have no business transaction, so
 `writeSsoSecurityFailure` writes each in a short transaction of its own, with the provider as
 target, once the request's own transaction has settled, never inside it; the request's
-rollback does not remove it, and the change writer refuses these actions. The actor is
+rollback does not remove it, and the change writer refuses these actions. The failure writer
+checks that the provider still exists and belongs to the team in the transaction that writes
+the audit event. The actor is
 anonymous, an external user or the signed-in user, with no credential or that user's session.
 Their details are redacted: a reason that is not on the list, such as a provider error, is
 recorded as `unclassified`, and a revision or correlation ID that is not a valid value is left
 out. At most 20 failures are recorded per provider and source (the failure action) in any 3,600
 seconds ([Audit limits](sso.md#audit-limits)); later failures in that window are dropped, so
-failed attempts cannot flood the journal. The tradeoff is that junk failures can fill a window
-and hide later failures of the same source until it slides; the writer reports each drop to
-its caller. When later steps emit them, SSO sign-ins and these bounded failures are the
+failed attempts cannot flood the journal. Each process reports a count of dropped failures
+by source in its logs without recording individual attempts. SSO sign-ins and these bounded failures are the
 exception to the access-log exclusion under [Not recorded](#not-recorded).
 
 ## Privacy, append-only behavior, and exclusions

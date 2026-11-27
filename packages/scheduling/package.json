@@ -6,6 +6,7 @@
     ".": "./src/index.ts",
     "./meeting-poll-delivery": "./src/meeting-poll-delivery.ts",
     "./booking-chain": "./src/booking-chain.ts",
+    "./booking-payment-details": "./src/booking-payment-details.ts",
     "./errors": "./src/errors.ts",
     "./text": "./src/text.ts",
     "./conferences": "./src/conferences.ts",
@@ -14,6 +15,7 @@
     "./routing-form-targets": "./src/routing-form-targets.ts",
     "./sealed-secret": "./src/sealed-secret.ts",
     "./series-confirmation": "./src/series-confirmation.ts",
+    "./teams-meeting-locations": "./src/teams-meeting-locations.ts",
     "./testing": "./src/testing.ts",
     "./conference-url": "./src/conference-url.ts"
   },

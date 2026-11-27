@@ -20,6 +20,7 @@ import { chooseLanguage } from '../i18n/store.ts'
 import { msg, translateMessage, type UiText } from '../i18n/translate.ts'
 import { signInPath } from '../next-path.ts'
 import { PATHS } from '../paths.ts'
+import { CHECKOUT_RETURN_PATH } from '../public/checkout-return.ts'
 import { compileSourceCopy } from '../test/compile-source-copy.ts'
 import {
   emptyAccount,
@@ -343,6 +344,7 @@ describe('accept invitation entry', () => {
       createRoutesFromElements,
       Route,
       PATHS,
+      CHECKOUT_RETURN_PATH,
       ...Object.fromEntries(
         [...routes.matchAll(/<([A-Z]\w*)/g)]
           .filter((match) => match[1] !== 'Route')

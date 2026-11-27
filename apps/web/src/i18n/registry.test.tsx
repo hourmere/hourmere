@@ -3,6 +3,7 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { widgetMessages } from '../embed/language.ts'
+import { selectAdminLanguage } from '../test/account-menu.ts'
 import {
   fakeApi,
   json,
@@ -170,7 +171,7 @@ describe('a locale registered only by metadata and catalogue files', () => {
     renderApp('/app/settings')
     const account = await screen.findByRole('region', { name: 'Account' })
     await waitFor(() => expect(within(account).queryByText('Admin')).not.toBeNull())
-    await user.selectOptions(screen.getByLabelText('Interface language'), fixture)
+    await selectAdminLanguage(user, fixture)
     expect(within(account).getByText('Your role')).toBeDefined()
     expect(within(account).getByText('Admin')).toBeDefined()
     expect(within(account).queryByRole('link', { name: 'Create team' })?.getAttribute('href')).toBe(

@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { screen, within } from '@testing-library/react'
+import { screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { fakeApi, json, renderApp } from '../test/fake-api.tsx'
 import { EVENT } from '../test/public-fixtures.ts'
@@ -74,11 +74,11 @@ describe('public booking polish CSS', () => {
     expect(rule('.public .guest-remove').gridColumn).toBe('1 / -1')
     // An error under one input must neither stretch nor push down the row's other input.
     expect(rule('.public .guest .field').alignContent).toBe('start')
-    const wide = 'public-page (min-width: 480px)'
+    const wide = 'booking-guests (min-width: 448px)'
     expect(rule('.public .guest', wide).alignItems).toBe('start')
     expect(rule('.public .guest-remove', wide).alignSelf).toBe('start')
     expect(rule('.public .guest-remove', wide).marginTop).toBe(
-      'calc(0.875rem * 1.55 + var(--space-1))',
+      'calc(var(--text-sm) * 1.55 + var(--space-1))',
     )
     expect(rule('.public .booking-form .choices').gap).toBe('var(--space-2)')
     expect(styles).toMatch(/--space-2:\s*8px/)
@@ -154,19 +154,20 @@ describe('public booking polish CSS', () => {
   })
 })
 
-it('renders host card descriptions with the preserved-line clamp hook', async () => {
-  const description = 'First line\nSecond line\nThird line\nFourth line'
+it('renders host card descriptions with isolated lines and the preserved-line clamp hook', async () => {
+  const lines = ['موعد (Intro)', 'Second line', 'שלום 17', 'Fourth line']
+  const description = lines.join('\n')
   fakeApi({
     'GET /api/v1/public/ada': () =>
       json(200, { handle: 'ada', host: EVENT.host, eventTypes: [{ ...EVENT, description }] }),
   })
   renderApp('/ada')
   const card = await screen.findByRole('link', { name: /Intro call/ })
-  expect(
-    within(card)
-      .getByText(description, { normalizer: (value) => value })
-      .classList.contains('event-card-description'),
-  ).toBe(true)
+  const content = card.querySelector('.event-card-description')
+  expect(content?.textContent).toBe(description)
+  expect(Array.from(content?.querySelectorAll('bdi') ?? [], (line) => line.textContent)).toEqual(
+    lines,
+  )
 })
 
 it.each(['\n', '\r\n', '\r'])(

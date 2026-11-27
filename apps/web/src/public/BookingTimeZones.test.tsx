@@ -165,6 +165,10 @@ describe('cross-zone public booking details', () => {
     expect(required.textContent).toMatchInlineSnapshot(
       '"Required hosts: Ada (America/Los Angeles), Grace (America/New York)"',
     )
+    expect(Array.from(required.querySelectorAll('bdi'), (host) => host.textContent)).toEqual([
+      'Ada',
+      'Grace',
+    ])
     expect(screen.queryByText(/^Host's time zone:/)).toBeNull()
     await chooseDay(user, '2026-11-11')
     await user.click(screen.getByRole('button', { name: '8:00 AM' }))
@@ -195,13 +199,11 @@ describe('cross-zone public booking details', () => {
     await user.type(screen.getByLabelText('Email'), 'invitee@example.invalid')
     await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
     await screen.findByRole('heading', { name: 'You’re booked' })
-    expect(screen.getByText('Grace (America/New York)').textContent).toMatchInlineSnapshot(
-      '"Grace (America/New York)"',
-    )
+    const host = screen.getByText('Host', { selector: 'dt' }).nextElementSibling
+    expect(host?.querySelector('bdi')?.textContent).toBe('Grace')
+    expect(host?.textContent).toMatchInlineSnapshot('"Grace (America/New York)"')
     await selectPublicLanguage(user, 'zh-CN')
-    expect(screen.getByText('Grace（America/New York）').textContent).toMatchInlineSnapshot(
-      '"Grace（America/New York）"',
-    )
+    expect(host?.textContent).toMatchInlineSnapshot('"Grace（America/New York）"')
   })
 })
 

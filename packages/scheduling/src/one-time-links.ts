@@ -1,5 +1,9 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { ApiKeyScopeError, requireActiveApiKey } from '@hourmere/auth'
+import {
+  ONE_TIME_LINK_PREFILL_EMAIL_MAX,
+  ONE_TIME_LINK_PREFILL_NAME_MAX,
+} from '@hourmere/core/one-time-links'
 import type { Database, Db } from '@hourmere/db'
 import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { type Selectable, sql, type Transaction } from 'kysely'
@@ -9,6 +13,8 @@ import { lockOrganization } from './hosts.ts'
 import { isConstraintViolation, isUuid, SQLSTATE, timestamp } from './internal.ts'
 import { cleanText } from './text.ts'
 
+export { ONE_TIME_LINK_PREFILL_EMAIL_MAX, ONE_TIME_LINK_PREFILL_NAME_MAX }
+
 /** Active, unexpired links per personal owner or team organization. */
 export const ONE_TIME_BOOKING_LINK_LIMIT = 1000
 /** Ordinary team members share this sub-limit across all of their team event types. */
@@ -16,8 +22,6 @@ export const ONE_TIME_BOOKING_LINK_MEMBER_LIMIT = 200
 export const ONE_TIME_LINK_PAGE_DEFAULT = 50
 export const ONE_TIME_LINK_PAGE_MIN = 1
 export const ONE_TIME_LINK_PAGE_MAX = 100
-export const ONE_TIME_LINK_PREFILL_NAME_MAX = 200
-export const ONE_TIME_LINK_PREFILL_EMAIL_MAX = 254
 export const ONE_TIME_LINK_ALREADY_CREATED_MESSAGE =
   'This link was already created. Its URL was shown once and cannot be retrieved. Use the id from its creation response, or ask a manager with history access to find it; revoke it before creating a replacement with a new key.'
 
@@ -136,6 +140,7 @@ export async function createOneTimeBookingLink(
         )
       }
     }
+    if (event.payment) throw new DomainError('conflict', 'payment_flow_unsupported')
     if (expiresAt !== null) {
       const { future } = await trx
         .selectNoFrom(sql<boolean>`${expiresAt}::timestamptz > clock_timestamp()`.as('future'))
@@ -502,7 +507,7 @@ async function authorizedEvent(db: Db, ctx: ServiceContext, eventTypeId: string)
   if (!membership) throw insufficientRole()
   const event = await db
     .selectFrom('event_types')
-    .select(['id', 'organization_id', 'owner_user_id', 'is_active', 'deleted_at'])
+    .select(['id', 'organization_id', 'owner_user_id', 'is_active', 'deleted_at', 'payment'])
     .where('id', '=', eventTypeId)
     .where('organization_id', '=', ctx.principal.organization.id)
     .forShare()

@@ -767,9 +767,12 @@ describe('slot picker CSS contracts', () => {
       expect(rule.style.getPropertyValue('justify-self')).toBe('')
     }
     expect(declaration(css, '.picker .picker-calendar', 'width')).toBe('100%')
-    // Day labels follow the column width instead, so bold 22日 fits a 36px cell on one line.
+    // The calendar track selects a smaller type token inside narrow cards.
     expect(styles).toMatch(/\.picker \.picker-calendar \{[^}]*container-type: inline-size;/)
-    expect(styles).toMatch(/\.picker \.day \{[^}]*font-size: min\(1rem, 5\.3cqw\);/)
+    expect(declaration(css, '.picker .day', 'font-size')).toBe('var(--text-sm)')
+    expect(styles).toMatch(
+      /@container \(max-width: 264px\) \{\s*\.picker \.day \{\s*font-size: var\(--text-xs\);/,
+    )
   })
 
   it('adds a noninteractive fade above remaining slots', () => {

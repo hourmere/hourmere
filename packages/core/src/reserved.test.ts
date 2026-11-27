@@ -5,9 +5,19 @@ import {
   CLAIM_RESERVED_HANDLES,
   isClaimReservedHandle,
   isPublicTeamSlug,
+  isPublicTeamSlugFormat,
   isReservedName,
   RESERVED_NAMES,
 } from './reserved.ts'
+
+it('checks the full public team slug against the ASCII format and length', () => {
+  for (const slug of ['A', 'Acme-9', 'a'.repeat(64), 'Admin']) {
+    expect(isPublicTeamSlugFormat(slug), slug).toBe(true)
+  }
+  for (const slug of ['', '-a', 'a-', 'a b', 'a/b', 'a\n', 'Kit', 'a'.repeat(65)]) {
+    expect(isPublicTeamSlugFormat(slug), slug).toBe(false)
+  }
+})
 
 describe('reserved names', () => {
   it('cover the top-level paths of the app, the server and the product', () => {

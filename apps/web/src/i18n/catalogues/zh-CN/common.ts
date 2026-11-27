@@ -562,10 +562,74 @@ export const common = {
     '请返回发起验证的标签页继续操作。',
   'Copy the link from your email and paste it into the tab where you requested verification.':
     '请从邮件中复制验证链接，并粘贴到发起验证的标签页。',
+  // Microsoft Teams meeting locations
+  'Microsoft Teams': 'Microsoft Teams',
+  'Join Microsoft Teams': '加入 Microsoft Teams 会议',
+  'The Teams link isn’t ready yet.': 'Teams 会议链接尚未就绪。',
+  'The booking is still scheduled without a Teams link.': '预约仍然有效，但没有 Teams 会议链接。',
   // Booking page preview
   'These are sample times. Booking is disabled in the preview.':
     '这些时间仅供示例。预览中无法提交预约。',
+  // Rescheduled booking links
+  'This booking was moved to a new time. The new booking has its own link.':
+    '此预约已改期。新预约有自己的链接。',
   // Booking location changes
   'The meeting location has changed. Please choose a time again.':
     '会议地点已变更。请重新选择时间。',
+
+  // Microsoft Teams host authorization
+  'The assigned host must configure Microsoft Teams in their own signed-in session.':
+    '指定的主持人须登录自己的账户来配置 Microsoft Teams。',
+
+  // Paid booking details
+  'bookingPayment.label': '付款',
+  'bookingPayment.paid': '已支付{amount}',
+  'bookingPayment.refund': '退款',
+  'bookingPayment.requested': '已申请退款',
+  'bookingPayment.pending': '退款处理中',
+  'bookingPayment.succeeded': '退款已发出',
+  'bookingPayment.failed': '退款失败',
+  'bookingPayment.none': '无退款',
+  'bookingPayment.unknown': '无法获取状态',
+  // Paid booking checkout
+  'Price: {amount}': '价格：{amount}',
+  'Starting Checkout…': '正在打开支付页面…',
+  'Continue to payment': '继续付款',
+  'Payment status': '付款状态',
+  'Waiting for payment confirmation': '正在等待付款确认',
+  'Reservation expired': '时间保留已到期',
+  'Reservation cancelled': '时间保留已取消',
+  'A full refund has been requested.': '已申请全额退款。',
+  'Stripe is processing the refund.': 'Stripe 正在处理退款。',
+  'Stripe has sent your refund. Your bank may take time to post it.':
+    'Stripe 已发出退款，银行入账可能需要一些时间。',
+  'The refund could not be completed. Contact the host for help.': '退款未能完成，请联系主持人。',
+  'We couldn’t find this payment attempt': '找不到此次付款',
+  'Return to the tab where you started payment. If your booking was confirmed, use the link in your confirmation email.':
+    '请返回发起付款的标签页。如果预约已确认，请使用确认邮件中的链接。',
+  'We couldn’t check the payment. Try again before starting another booking.':
+    '暂时无法查询付款状态。请先重试查询，再发起新的预约。',
+  'Your time is reserved for up to 30 minutes. Hourmere will confirm the booking after it receives the payment.':
+    '该时段最多保留 30 分钟。Hourmere 收到付款后会确认预约。',
+  'Release unpaid reservation': '取消保留的时段',
+  'Payment arrived after the reservation ended. Your booking was not confirmed.':
+    '付款在时间保留结束后到账，预约未确认。',
+  'Manage booking': '管理预约',
+  'Choose another time': '选择其他时间',
+  'The price has changed. Review the updated price and choose a time again.':
+    '价格已变动。请查看新价格并重新选择时间。',
+  'Online payment is temporarily unavailable. Please contact the host.':
+    '暂时无法在线付款，请联系主持人。',
+  'We couldn’t open Stripe Checkout. Try again to continue this payment attempt.':
+    '无法打开 Stripe 支付页面，请重试以继续此次付款。',
+  'Open booking page to pay': '打开预约页面付款',
+  'The suggested time is selected. Review the details before continuing to payment.':
+    '已选中建议的时间。请核对详情后继续付款。',
+  'You’ll pay securely on Stripe. Your booking is confirmed only after Hourmere receives the payment. If you cancel the booking, a full refund is requested.':
+    '你将在 Stripe 安全付款。Hourmere 收到付款后才会确认预约。如果取消预约，系统会申请全额退款。',
+
+  // Team public home
+  'This team has no public events right now.': '此团队目前没有公开活动。',
+  'This team page is unavailable.': '此团队页面暂不可用。',
+  'Couldn’t load this team page.': '无法加载此团队页面。',
 } as const

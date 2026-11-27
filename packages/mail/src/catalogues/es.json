@@ -81,6 +81,7 @@
   "teamInvitation.defaultInviter": "Un miembro del equipo",
   "teamInvitation.subject": "Invitación para unirse a {team}",
   "teamInvitation.introduction": "{inviter} le ha invitado a unirse al equipo «{team}» en Hourmere.",
+  "teamInvitation.scimIntroduction": "Su proveedor de identidad le ha enviado esta invitación en nombre del equipo «{team}» en Hourmere.",
   "teamInvitation.identity": "Inicie sesión con {email}, la dirección de correo electrónico que recibió la invitación, y verifíquela; después, acepte la invitación en la página. Los alias de correo electrónico no pueden sustituir esta dirección.",
   "teamInvitation.acceptance": "Iniciar sesión no le incorpora al equipo; debe aceptar expresamente la invitación en la página.",
   "teamInvitation.expiry": "Esta invitación caduca el {expiry}.",
@@ -153,6 +154,13 @@
   "scimMapping.linked": "Tu equipo aprobó la asignación SCIM {mappingId}. Cuando se aprovisione el grupo, el directorio vinculado podrá administrar el nombre del equipo secundario y los miembros gestionados por el directorio.",
   "scimMapping.unlinked": "Se desvinculó la asignación SCIM {mappingId} de tu equipo. El directorio ya no puede administrar el equipo mediante esta asignación.",
   "scimMapping.suspended": "Se suspendió el acceso del directorio mediante la asignación SCIM {mappingId}. Se conservan las membresías y los estados de suspensión existentes.",
+  "bookingPayment.label": "Pago",
+  "bookingPayment.paid": "{amount} pagados",
+  "bookingPayment.refund": "Reembolso",
+  "bookingPayment.requested": "Reembolso solicitado",
+  "bookingPayment.pending": "Reembolso pendiente",
+  "bookingPayment.succeeded": "Reembolso emitido",
+  "bookingPayment.failed": "Error en el reembolso",
   "series.confirmed.subject": "Serie de reuniones confirmada: {event}",
   "series.confirmed.booker": "Su serie de reuniones con {host} está reservada.",
   "series.confirmed.guest": "{invitee} le ha invitado a una serie de reuniones con {host}.",
@@ -173,5 +181,8 @@
   "series.cancelled.member": "Cancelada",
   "series.manage": "Gestionar la serie",
   "series.view": "Ver la serie",
-  "series.repair": "Para volver a intentar generar el enlace de reunión, abra la reserva afectada en Hourmere."
+  "series.repair": "Para volver a intentar generar el enlace de reunión, abra la reserva afectada en Hourmere.",
+  "teams.linkPending": "El enlace de Teams aparecerá en los detalles de la reserva en cuanto esté disponible.",
+  "teams.unavailable": "Microsoft Teams no está disponible. Esta reserva usará el evento del calendario de Outlook.",
+  "teams.writebackFailed": "El enlace de Teams no está disponible. La cita sigue programada."
 }

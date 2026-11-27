@@ -1,8 +1,9 @@
 import { appendFile, copyFile, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { migrationsDir, runMigrations } from './migrate.ts'
+import { MIGRATION_REPLAY_TIMEOUT } from './testing/migration-replay.ts'
 import { createTestDatabaseTemplate, type TestDatabaseTemplate } from './testing.ts'
 import {
   type ExecutionProtection,
@@ -10,6 +11,8 @@ import {
   executionMigration,
   executionProtections,
 } from './workflow-storage-execution-protections.ts'
+
+vi.setConfig({ testTimeout: MIGRATION_REPLAY_TIMEOUT, hookTimeout: MIGRATION_REPLAY_TIMEOUT })
 
 const serverUrl = process.env.DATABASE_URL
 // Optional local report of which assertion each mutant failed (one JSON line each).
@@ -46,7 +49,7 @@ describe.skipIf(!serverUrl)('workflow execution storage source-copy mutations', 
       await rm(predecessors, { recursive: true, force: true })
     }
     source = await readFile(join(migrationsDir, executionMigration), 'utf8')
-  }, 120_000)
+  })
   afterAll(() => template?.drop())
 
   /** Applies `sql` as 0079 to a predecessor copy and runs the protection's check on it. */
@@ -70,7 +73,7 @@ describe.skipIf(!serverUrl)('workflow execution storage source-copy mutations', 
 
   it('runs every check unmutated on the predecessor plus 0079', async () => {
     for (const protection of Object.values(executionProtections)) await run(source, protection)
-  }, 120_000)
+  })
 
   it.each(cases)(
     '%s: detects "%s"',

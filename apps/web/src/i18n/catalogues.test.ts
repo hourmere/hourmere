@@ -13,8 +13,7 @@ const teamMessages = {
   'Choose a name and public address for your team.': '为团队选择名称和公开地址。',
   'Use a name your teammates will recognize, up to 200 characters.':
     '使用团队成员熟悉的名称，最多 200 个字符。',
-  'Team addresses preserve letter case and are separate from personal handles.':
-    '团队地址区分字母大小写，与个人用户名互相独立。',
+  'Team addresses are separate from personal handles.': '团队地址与个人用户名互相独立。',
   'Team booking URL preview': '团队预约网址预览',
   'Each team event gets its own address at the end of this URL. Creating a team does not publish a booking page.':
     '每个团队活动都会在此网址末尾使用独立的活动地址。创建团队不会发布预约页面。',

@@ -5,6 +5,21 @@ development log mailers. Team invitation rendering is available independently of
 creating a Better Auth invitation still sends no email. This template adds no hooks, jobs,
 delivery storage or transport configuration.
 
+## User text direction
+
+HTML booking, invitation, waitlist, poll and workflow emails isolate user-supplied names,
+titles, locations, answers and notes independently of localized copy. Displayed contact
+addresses and standalone join and invitation URLs use a left-to-right boundary. Multi-line
+content keeps its line breaks, with direction resolved separately for each line. The selected
+message language still controls the surrounding copy, date and time formatting, and separators.
+
+Subjects, plain-text bodies, and iCalendar fields use literal text with the existing escaping
+rules. Mail and calendar clients determine how these values are displayed.
+
+中文：HTML 邮件会分别隔离用户填写的名称、标题、地点、答案和备注。周围的界面文案、
+日期时间和分隔符仍随邮件语言显示。主题、纯文本邮件和日历文件保留原有的文本和转义规则，
+由邮件或日历客户端决定显示方向。
+
 ## Team invitations
 
 `teamInvitationEmail(options)` returns a `MailMessage` containing an English, Simplified
@@ -33,7 +48,8 @@ This example renders a message only; it does not send one.
 | `publicUrl: string` | The instance's own configured canonical HTTP(S) origin, supplied by trusted server configuration; an optional trailing `/` is accepted. Never take it from a request, invitation field or callback parameter. |
 | `invitationId: string` | Invitation UUID; the only variable accepted in the join URL. |
 | `teamName: string` | User-controlled team display name. |
-| `inviterName: string` | User-controlled inviter display name; pass the name, without an email-address fallback. |
+| `inviterName: string` | For app invitations, pass the inviter's display name, without an email-address fallback. |
+| `scimIssued: true` | For SCIM-issued delivery, render the identity provider on behalf of the team. Omit `inviterName`. Language selection uses the same fallback chain. |
 | `expiresAt: Date \| string` | The invitation expiry instant: Better Auth's direct API returns `Date` objects; HTTP JSON uses ISO timestamps with a time-zone offset. Both bodies show the same localized date and time at minute precision, explicitly labeled UTC because the invitee's time zone is unknown. |
 | `language?: unknown` | An explicit language chosen by the inviter. |
 | `defaultLanguage?: unknown` | An optional instance language supplied by the caller; no new environment setting is added. |

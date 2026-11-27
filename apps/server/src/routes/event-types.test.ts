@@ -100,8 +100,8 @@ describe('event type routes in the OpenAPI document', () => {
       if (!schema) throw new Error(`no request body for ${method} ${path}`)
       expect(closedObjects(doc, schema)).toEqual([
         '$',
-        ...[0, 1, 2, 3, 4].map((i) => `$.location|oneOf${i}`),
-        ...[0, 1, 2, 3, 4].map((i) => `$.locations[]|oneOf${i}`),
+        ...[0, 1, 2, 3, 4, 5].map((i) => `$.location|oneOf${i}`),
+        ...[0, 1, 2, 3, 4, 5].map((i) => `$.locations[]|oneOf${i}`),
         '$.conferenceOrganizer',
         '$.questions[]',
         '$.notifications',
@@ -110,6 +110,8 @@ describe('event type routes in the OpenAPI document', () => {
         '$.notifications.followUps[]',
         '$.notifications.followUps[].recipients',
         '$.waitlist',
+        '$.payment',
+        '$.payment.prices[]',
         '$.successRedirect',
         '$.hosts[]',
       ])
@@ -411,6 +413,8 @@ describe.skipIf(!serverUrl)('event type routes', () => {
       questions: [{ id: 'company', label: 'Company', type: 'short_text', required: false }],
       notifications: DEFAULT_NOTIFICATIONS,
       waitlist: { enabled: false },
+      payment: null,
+      paymentAvailability: 'unsupported_event',
       successRedirect: null,
       isActive: true,
       isHidden: false,

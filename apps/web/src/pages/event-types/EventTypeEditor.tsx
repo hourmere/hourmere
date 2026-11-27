@@ -1,7 +1,7 @@
 import { isPublicTeamSlug } from '@hourmere/core/reserved'
 import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
-import { api, unwrap } from '../../api/client.ts'
+import { api, type Schemas, unwrap } from '../../api/client.ts'
 import { errorMessage, isOrganizationContextChanged, RequestError } from '../../api/errors.ts'
 import {
   type EventType,
@@ -16,6 +16,7 @@ import { ErrorSummary, Field, type FieldErrors, parseWhole } from '../../compone
 import { PageHeader } from '../../components/PageHeader.tsx'
 import { PageSkeleton } from '../../components/PageSkeleton.tsx'
 import { StickyFormActions } from '../../components/StickyFormActions.tsx'
+import { UserContentMessage } from '../../components/UserContent.tsx'
 import { flash, useFlash } from '../../flash.ts'
 import { useLoad, useMounted, usePageTitle } from '../../hooks.ts'
 import { formatMinutes } from '../../i18n/duration.ts'
@@ -52,6 +53,7 @@ import {
   LOCATION_KINDS,
   type LocationKind,
   orderedLocations,
+  paidDraftSupported,
   serverErrors,
   slugify,
   suggestedBookingSlug,
@@ -59,11 +61,13 @@ import {
   toPatchInput,
   validateDraft,
 } from './event-type-form.ts'
-import { HostAssignment } from './HostAssignment.tsx'
+import { HostAssignment, type TeamsHostReadiness } from './HostAssignment.tsx'
 import { NotificationsEditor } from './NotificationsEditor.tsx'
 import { pruneNotificationErrors } from './notifications-form.ts'
 import { OneTimeLinks } from './OneTimeLinks.tsx'
 import { OrderedLocationsEditor } from './OrderedLocationsEditor.tsx'
+import { PaymentSettings } from './PaymentSettings.tsx'
+import { paymentInput, unsupportedPayment, validatePayment } from './payment-form.ts'
 import { QuestionsEditor } from './QuestionsEditor.tsx'
 import { ReadOnlyHosts } from './ReadOnlyHosts.tsx'
 import { SavedEventShare } from './SavedEventShare.tsx'
@@ -79,8 +83,27 @@ interface Loaded {
   profile: Profile | null
   automaticGoogleMeet: boolean
   automaticZoom: boolean
+  microsoftTeamsCalendarIssue: MessageKey | undefined
   smsRemindersAvailable: boolean | undefined
   followUpHostNotesEnabled: boolean
+  paymentAvailability: Schemas['Instance']['eventTypePaymentAvailability']
+}
+
+function paymentAvailabilityReason(availability: Loaded['paymentAvailability']): MessageKey | null {
+  switch (availability) {
+    case 'available':
+      return null
+    case 'stripe_not_configured':
+      return 'Ask your instance operator to configure Stripe for paid bookings.'
+    case 'stripe_unverified':
+      return 'This instance could not verify its Stripe configuration. Contact your instance operator.'
+    case 'disabled':
+      return 'Paid bookings are turned off on this instance.'
+    case 'live_mode_unavailable':
+      return 'Paid bookings are currently available in Stripe test mode only.'
+    default:
+      return 'Paid booking settings are unavailable on this instance.'
+  }
 }
 
 /** Creates an event type (/app/event-types/new) or edits one (/app/event-types/:id). */
@@ -92,6 +115,7 @@ export function EventTypeEditorPage() {
 
 function EventTypeEditor({ id }: { id: string | undefined }) {
   const { t, ui } = useI18n()
+  const { organization } = useMe()
 
   const load = useCallback(
     async (signal: AbortSignal): Promise<Loaded | 'missing'> => {
@@ -108,7 +132,7 @@ function EventTypeEditor({ id }: { id: string | undefined }) {
           loadSchedules(signal),
           loadProfile(signal),
           unwrap(api.GET('/api/v1/instance', { signal })),
-          id === undefined
+          id === undefined || organization.personal
             ? unwrap(api.GET('/api/v1/calendar-connections', { signal })).catch(() => null)
             : null,
           id === undefined
@@ -118,31 +142,35 @@ function EventTypeEditor({ id }: { id: string | undefined }) {
       )
       if (eventType === 'missing') return 'missing'
       return {
-        defaultLocation: connections?.data.some(
-          (connection) =>
-            connection.provider === 'google' &&
-            connection.status === 'active' &&
-            connection.syncAuthorized,
-        )
-          ? 'google_meet'
-          : conferences?.data.some(
-                (connection) =>
-                  connection.provider === 'zoom' &&
-                  connection.status === 'active' &&
-                  connection.mode === 'meetings',
-              )
-            ? 'zoom'
-            : '',
+        defaultLocation:
+          id === undefined &&
+          connections?.data.some(
+            (connection) =>
+              connection.provider === 'google' &&
+              connection.status === 'active' &&
+              connection.syncAuthorized,
+          )
+            ? 'google_meet'
+            : conferences?.data.some(
+                  (connection) =>
+                    connection.provider === 'zoom' &&
+                    connection.status === 'active' &&
+                    connection.mode === 'meetings',
+                )
+              ? 'zoom'
+              : '',
         eventType,
         schedules,
         profile,
         automaticGoogleMeet: instance.automaticGoogleMeet === true,
         automaticZoom: instance.automaticZoom === true,
+        microsoftTeamsCalendarIssue: teamsCalendarIssue(connections),
         smsRemindersAvailable: instance.smsRemindersAvailable,
         followUpHostNotesEnabled: instance.followUpHostNotesEnabled === true,
+        paymentAvailability: instance.eventTypePaymentAvailability,
       }
     },
-    [id],
+    [id, organization.personal],
   )
   const [state, reload] = useLoad(load)
   usePageTitle(id === undefined ? 'New event type' : 'Edit event type')
@@ -182,8 +210,10 @@ function EventTypeForm({
   profile,
   automaticGoogleMeet,
   automaticZoom,
+  microsoftTeamsCalendarIssue,
   smsRemindersAvailable,
   followUpHostNotesEnabled,
+  paymentAvailability,
 }: Loaded) {
   const { t, text, ui, uiText, locale: displayLocale } = useI18n()
   const noScheduleHint = t('You have no schedule yet, so no times are offered. {0}.').split('{0}')
@@ -217,6 +247,38 @@ function EventTypeForm({
         },
   )
   const [draft, setDraft] = useState(baseline)
+  const savedPaymentUnsupported =
+    saved?.paymentAvailability === 'unsupported_event' &&
+    paidDraftSupported(baseline, me.organization.personal)
+  const paymentSupported =
+    !savedPaymentUnsupported && paidDraftSupported(draft, me.organization.personal)
+  const paymentReason = paymentSupported
+    ? paymentAvailabilityReason(paymentAvailability)
+    : unsupportedPayment
+  const [teamsHost, setTeamsHost] = useState<TeamsHostReadiness>()
+  const teamsHostStatus =
+    teamsHost && teamsHost.userId === draft.hostUserIds[0] ? teamsHost.status : 'checking'
+  let teamsIssue: MessageKey | undefined
+  if (
+    draft.schedulingType !== 'individual' ||
+    (!me.organization.personal && draft.hostUserIds.length !== 1)
+  ) {
+    teamsIssue = 'Microsoft Teams requires individual scheduling with one host.'
+  } else if (me.organization.personal) {
+    teamsIssue = microsoftTeamsCalendarIssue
+  } else if (draft.hostUserIds[0] !== me.user.id) {
+    teamsIssue = 'The assigned host must configure Microsoft Teams in their own signed-in session.'
+  } else if (!canAssignHosts) {
+    teamsIssue = 'Could not verify Microsoft Teams availability for the host.'
+  } else if (teamsHostStatus === 'unavailable') {
+    teamsIssue =
+      'The host needs a Microsoft 365 work or school calendar selected for booking write-back.'
+  } else if (teamsHostStatus !== 'ready') {
+    teamsIssue =
+      teamsHostStatus === 'checking'
+        ? 'Checking Microsoft Teams availability…'
+        : 'Could not verify Microsoft Teams availability for the host.'
+  }
   const ownSchedule =
     me.organization.personal ||
     (draft.hostUserIds.length === 1 && draft.hostUserIds[0] === me.user.id)
@@ -265,7 +327,6 @@ function EventTypeForm({
     [...draft.hostUserIds].sort().join() === [...baseline.hostUserIds].sort().join()
 
   const editing = saved !== null
-  const title = editing ? msg('Edit “{0}”', { '0': saved.title }) : 'New event type'
 
   function set<K extends keyof EventTypeDraft>(name: K, value: EventTypeDraft[K]) {
     invalidateReadiness()
@@ -326,6 +387,12 @@ function EventTypeForm({
       draft.hostUserIds.length !== 1
     )
       problems.hosts = 'Choose exactly one required host.'
+    if (draft.payment.enabled) {
+      if (!paymentSupported) problems.payment = unsupportedPayment
+      else if (!paymentReason)
+        Object.assign(problems, validatePayment(draft.payment, draft.allowedDurationsMinutes))
+      else if (toPatchInput(draft, baseline).payment !== undefined) problems.payment = paymentReason
+    }
     setErrors(problems)
     if (Object.keys(problems).length > 0) return
     // The fields are locked until the answer comes, so it cannot overwrite later edits.
@@ -609,6 +676,7 @@ function EventTypeForm({
                 {(props) => (
                   <input
                     {...props}
+                    dir="auto"
                     value={draft.title}
                     autoComplete="off"
                     onChange={(e) => {
@@ -761,7 +829,7 @@ function EventTypeForm({
                   )
                 }
               </Field>
-              <LocationFields draft={draft} errors={errors} set={set} />
+              <LocationFields draft={draft} errors={errors} set={set} teamsIssue={teamsIssue} />
             </div>
           </section>
           {!editing &&
@@ -803,6 +871,7 @@ function EventTypeForm({
                   <textarea
                     {...props}
                     rows={4}
+                    dir="auto"
                     value={draft.description}
                     onChange={(e) => set('description', e.target.value)}
                   />
@@ -941,6 +1010,25 @@ function EventTypeForm({
               onDefaultChange={(value) => set('durationMinutes', value)}
             />
           </SettingsGroup>
+          <SettingsGroup
+            label="Payments"
+            summary={t(
+              draft.payment.enabled
+                ? 'Payment required'
+                : paymentReason
+                  ? 'Unavailable'
+                  : 'Free booking',
+            )}
+            initiallyOpen={draft.payment.enabled}
+          >
+            <PaymentSettings
+              payment={draft.payment}
+              durations={draft.allowedDurationsMinutes}
+              reason={paymentReason}
+              errors={errors}
+              onChange={(payment) => set('payment', payment)}
+            />
+          </SettingsGroup>
           {showHosts && (
             <SettingsGroup label="Hosts" summary={summaries.hosts} initiallyOpen={editing}>
               {!me.organization.personal && canAssignHosts && (
@@ -952,6 +1040,7 @@ function EventTypeForm({
                   error={errors.hosts}
                   organizerError={errors.conferenceOrganizer}
                   set={set}
+                  onTeamsReadiness={setTeamsHost}
                 />
               )}
               {!me.organization.personal && !canAssignHosts && access.status === 'ready' && (
@@ -1016,6 +1105,7 @@ function EventTypeForm({
               editing &&
               ((saved?.locations?.length ?? 0) > 1 ||
                 saved?.locations?.some((option) => Boolean(option.label)) ||
+                orderedLocations(baseline).some((option) => option.kind === 'microsoft_teams') ||
                 baseline.autoCreateZoom ||
                 baseline.autoCreateMeet)
             }
@@ -1023,7 +1113,12 @@ function EventTypeForm({
             <h2 id="location-heading" tabIndex={-1}>
               {t('Location')}
             </h2>
-            <OrderedLocationsEditor draft={draft} errors={errors} set={set} />
+            <OrderedLocationsEditor
+              draft={draft}
+              errors={errors}
+              set={set}
+              teamsIssue={teamsIssue}
+            />
             {orderedLocations(draft).some((option) => option.kind === 'zoom') && (
               <ZoomMeetingFields
                 draft={{ ...draft, autoCreateZoom: hasAutomaticLocation(draft, 'zoom') }}
@@ -1225,7 +1320,7 @@ function EventTypeForm({
                             : ''}
                         </option>
                         {schedules.map((s) => (
-                          <option key={s.id} value={s.id}>
+                          <option key={s.id} value={s.id} dir="auto">
                             {s.name}
                           </option>
                         ))}
@@ -1408,7 +1503,12 @@ function EventTypeForm({
           </p>
           <ConfirmAction
             label={t('Delete event type')}
-            prompt={t('Delete “{0}”? This cannot be undone.', { '0': saved.title })}
+            prompt={
+              <UserContentMessage
+                message="Delete “{0}”? This cannot be undone."
+                values={{ '0': saved.title }}
+              />
+            }
             confirmLabel={t('Delete event type')}
             busyLabel={t('Deleting…')}
             failure={t('Could not delete the event type.')}
@@ -1425,7 +1525,13 @@ function EventTypeForm({
         <Link to={PATHS.eventTypes}>{t('Event types')}</Link>
       </p>
       <PageHeader
-        title={uiText(title)}
+        title={
+          saved ? (
+            <UserContentMessage message="Edit “{0}”" values={{ '0': saved.title }} />
+          ) : (
+            t('New event type')
+          )
+        }
         lede={t('Set the booking details, questions and availability for this event type.')}
       />
       <EventTypeEditorLayout
@@ -1433,6 +1539,12 @@ function EventTypeForm({
         me={me}
         profile={profile}
         smsRemindersAvailable={smsRemindersAvailable}
+        payment={
+          !paymentReason &&
+          Object.keys(validatePayment(draft.payment, draft.allowedDurationsMinutes)).length === 0
+            ? paymentInput(draft.payment, draft.allowedDurationsMinutes)
+            : null
+        }
         canReadBranding={
           me.principal.kind === 'session' &&
           (me.organization.personal ||
@@ -1549,12 +1661,19 @@ function LocationFields({
   draft,
   errors,
   set,
+  teamsIssue,
 }: {
   draft: EventTypeDraft
   errors: FieldErrors
   set: <K extends keyof EventTypeDraft>(name: K, value: EventTypeDraft[K]) => void
+  teamsIssue: MessageKey | undefined
 }) {
   const { t, ui } = useI18n()
+  const teamsHint =
+    teamsIssue ??
+    (draft.locationKind === 'microsoft_teams'
+      ? 'Microsoft Teams creates a meeting link for each booking on the host’s Microsoft 365 work or school calendar.'
+      : undefined)
 
   return (
     <div className="stack">
@@ -1562,6 +1681,7 @@ function LocationFields({
         id="location-kind"
         label={t('Where the meeting happens')}
         error={errors['location-kind']}
+        hint={teamsHint && t(teamsHint)}
       >
         {(props) => (
           <select
@@ -1570,7 +1690,11 @@ function LocationFields({
             onChange={(e) => set('locationKind', e.target.value as LocationKind | '')}
           >
             {LOCATION_KINDS.map((k) => (
-              <option key={k.value} value={k.value}>
+              <option
+                key={k.value}
+                value={k.value}
+                disabled={k.value === 'microsoft_teams' && Boolean(teamsIssue)}
+              >
                 {ui(k.label)}
               </option>
             ))}
@@ -1609,6 +1733,7 @@ function LocationFields({
             <input
               {...props}
               autoComplete="street-address"
+              dir="auto"
               value={draft.address}
               onChange={(e) => set('address', e.target.value)}
             />
@@ -1635,6 +1760,40 @@ function LocationFields({
       )}
     </div>
   )
+}
+
+function teamsCalendarIssue(
+  connections: {
+    data: Schemas['CalendarConnection'][]
+    destinationCalendarId: string | null
+    microsoftEnabled: boolean
+  } | null,
+): MessageKey | undefined {
+  if (!connections) return 'Could not verify Microsoft Teams availability for the host.'
+  if (connections.microsoftEnabled === false)
+    return 'Microsoft Calendar is unavailable on this instance.'
+  const microsoft = connections.data.filter((connection) => connection.provider === 'microsoft')
+  if (!microsoft.length)
+    return 'Connect a Microsoft 365 work or school calendar and select it for booking write-back.'
+  const active = microsoft.filter((connection) => connection.status === 'active')
+  const destination = active.find((connection) =>
+    connection.calendars.some(
+      (calendar) =>
+        calendar.id === connections.destinationCalendarId &&
+        calendar.accessRole === 'owner' &&
+        calendar.available,
+    ),
+  )
+  if (destination?.writeAuthorized) return undefined
+  if (
+    destination
+      ? destination.writeAuthorized === undefined
+      : active.some((conn) => conn.writeAuthorized === undefined)
+  )
+    return 'Could not verify Microsoft Teams availability for the host.'
+  if (destination || !active.some((connection) => connection.writeAuthorized))
+    return 'Reconnect Microsoft Calendar and allow calendar event writes to use Teams.'
+  return 'The host needs a Microsoft 365 work or school calendar selected for booking write-back.'
 }
 
 /** Native disclosure: keyboard activation and expanded state are provided by the browser. */

@@ -63,10 +63,12 @@ For example, save this JSON and run `hourmere create-event --input event-request
 | `phone` | Either a host `number` or `askInvitee: true`. Numbers use E.164: `+`, then 7–15 digits, starting with a nonzero digit. |
 | `google_meet` | Optional `autoCreate: true` uses the existing automatic Meet rules. |
 | `zoom` | Optional `autoCreate: true` uses the existing automatic Zoom rules. |
+| `microsoft_teams` | Automatically creates a Teams meeting on a single host’s Microsoft writeback destination when supported. The assigned host enables it from their own signed-in session. |
 
 Meet and Zoom without `autoCreate` are passive labels; they do not create meetings.
 Automatic options require the appropriate connected account and destination settings.
-See [automatic Google Meet](/docs/automatic-google-meet) and [automatic Zoom](/docs/automatic-zoom).
+See [automatic Google Meet](/docs/automatic-google-meet), [automatic Zoom](/docs/automatic-zoom)
+and [Microsoft Teams](/docs/microsoft-calendar#add-microsoft-teams-to-an-event-type).
 Every automatic option is validated, including options that are not the default.
 
 Read the saved configuration with REST `GET /api/v1/event-types/{id}`, MCP
@@ -96,6 +98,7 @@ invitations (ICS), subject to the recipient-specific phone rules.
 | Host calls invitee | Phone kind and a required invitee phone field | Host/invitee receive the collected number and call instructions; guests receive neutral phone-call text without that number |
 | Custom link | Kind and optional public label; no saved URL | Saved meeting link |
 | Google Meet or Zoom | Kind and optional public label | Automatic meetings follow pending/ready/failure status; the generated join link is sent when ready. Without automatic creation, only the meeting kind is available. |
+| Microsoft Teams | Kind and optional public label | The host and invitee receive the Teams link when it is available. Open the booking details to check for a pending link. |
 
 For agent discovery, REST `GET /api/v1/public/{handle}/{slug}` (or
 `GET /api/v1/public/teams/{teamSlug}/{slug}`) returns the safe `locations` list.
@@ -129,6 +132,8 @@ Omitting the choice uses the default. A removed or unknown ID returns
 `invalid_location_choice`; an absent or invalid required phone returns
 `invalid_invitee_phone`. A chosen automatic location that cannot be provided for the
 assigned host returns `location_unavailable`, without silently switching hosts or locations.
+Teams slot and booking requests also return `409 location_unavailable` when Microsoft
+Calendar is disabled on the instance.
 An event with exactly one location keeps its earlier behavior when the choice is omitted,
 whatever that option's ID: slot lookup and booking return the existing automatic-meeting
 readiness codes (such as `automatic_meet_unavailable`), and the booking stores that location's

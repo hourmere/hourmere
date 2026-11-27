@@ -872,6 +872,61 @@ describe.skipIf(!databaseUrl)('native and trusted team SSO enforcement', () => {
     expect(current.activeOrganizationId).toBeNull()
   })
 
+  it('rolls back a team details update if its owner loses SSO proof before the write', async () => {
+    const f = await fixture()
+    await policy(f)
+    const proofId = await grantProof(f)
+    const before = await effects(f)
+    const holder = await owned.pool.connect()
+    let pending: Promise<Response> | undefined
+    try {
+      await holder.query('BEGIN')
+      const {
+        rows: [{ pid } = { pid: 0 }],
+      } = await holder.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+      await holder.query('SELECT id FROM auth.organization WHERE id = $1 FOR UPDATE', [f.team])
+      pending = http(on, f, {
+        api: 'updateOrganization',
+        path: 'update',
+        body: {
+          organizationId: f.team,
+          data: { name: 'Unproven rename', slug: `edited-${f.slug}` },
+        },
+      })
+      void pending.catch(() => {})
+      // The request guard saw a live proof. Revoke it once the update reaches the row lock.
+      await vi.waitFor(
+        async () => {
+          const result = await owned.pool.query<{ blocked: boolean }>(
+            `SELECT EXISTS (
+              SELECT 1 FROM pg_stat_activity WHERE datname = current_database()
+              AND wait_event_type = 'Lock' AND $1 = ANY(pg_blocking_pids(pid))
+            ) AS blocked`,
+            [pid],
+          )
+          expect(result.rows[0]?.blocked).toBe(true)
+        },
+        { interval: 10, timeout: 3_000 },
+      )
+      await holder.query('DELETE FROM sso_browser_proofs WHERE id = $1', [proofId])
+      await holder.query('COMMIT')
+
+      await refused(await pending)
+      expect(await effects(f)).toEqual(before)
+      expect(
+        await db
+          .selectFrom('team_slug_reservations')
+          .select('slug')
+          .where('organization_id', '=', f.team)
+          .execute(),
+      ).toEqual([])
+    } finally {
+      await holder.query('ROLLBACK')
+      holder.release()
+      if (pending) await Promise.allSettled([pending])
+    }
+  })
+
   it.each(['HTTP', 'trusted'] as const)(
     'rechecks proof during %s member removal after waiting for the team lock',
     async (entry) => {

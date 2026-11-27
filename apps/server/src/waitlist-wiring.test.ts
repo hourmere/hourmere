@@ -117,7 +117,8 @@ describe.skipIf(!process.env.DATABASE_URL)('production waitlist discovery wiring
   it('kills dropping SMTP from the production booking-tool wiring', async () => {
     const location = new URL('./server.ts', import.meta.url)
     const source = readFileSync(location, 'utf8')
-    const anchor = '...bookingTools({\n      db,\n      waitlistSecret,\n      smtpConfigured,'
+    const anchor =
+      "...bookingTools({\n      db,\n      paidCheckoutAvailable: paidBookingAvailability === 'available',\n      waitlistSecret,\n      smtpConfigured,"
     expect(source).toContain(anchor)
     const javascript = stripTypeScriptTypes(
       source.replace(anchor, anchor.replace('\n      smtpConfigured,', '')),

@@ -1,4 +1,5 @@
 import { icsHasLocation } from '../../../packages/mail/src/booking-link-testing.ts'
+import { selectAdminLanguage } from '../account-menu.ts'
 import { revealEventSetting } from '../event-settings.ts'
 import { expect, fillInvitee, pickSlot, test } from '../fixtures.ts'
 
@@ -21,9 +22,7 @@ test('a host explicitly enables automatic Meet and language switching preserves 
   )
   await expect(optIn).not.toBeChecked()
   await optIn.check()
-  await page
-    .getByRole('combobox', { name: 'Interface language', exact: true })
-    .selectOption('zh-CN')
+  await selectAdminLanguage(page, 'zh-CN')
   await expect(page.getByLabel('标题', { exact: true })).toHaveValue('Automatic browser Meet')
   await expect(
     page.getByRole('checkbox', { name: '为每次预约创建独立的 Google Meet 链接', exact: true }),

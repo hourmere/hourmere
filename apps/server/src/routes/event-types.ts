@@ -2,6 +2,11 @@ import { createRoute, z } from '@hono/zod-openapi'
 import type { Principal } from '@hourmere/auth'
 import { EVENT_TYPE_RULE_BOUNDS, MAX_ALLOWED_DURATIONS } from '@hourmere/core'
 import {
+  PAYMENT_CURRENCIES,
+  PAYMENT_MAX_MINOR,
+  PAYMENT_PROVIDER_AVAILABILITIES,
+} from '@hourmere/core/payment'
+import {
   activateRoundRobin,
   CHANGE_CUTOFF_MAX_MINUTES,
   createEventType,
@@ -63,6 +68,7 @@ const eventTypeResponse = (eventType: ServiceEventType) => eventType
 const locationKinds = {
   googleMeet: { kind: z.literal('google_meet'), autoCreate: z.literal(true).optional() },
   zoom: { kind: z.literal('zoom'), autoCreate: z.literal(true).optional() },
+  microsoftTeams: { kind: z.literal('microsoft_teams') },
   phone: {
     kind: z.literal('phone'),
     number: z.string().openapi({
@@ -86,7 +92,7 @@ const locationKinds = {
 }
 const locationDoc = {
   description:
-    'Where the meeting happens, by kind; Meet and Zoom links are generated per booking. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location. Configure invitee phone collection through locations. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client.',
+    'Where the meeting happens, by kind. Microsoft Teams uses microsoft_teams with no other settings, requires individual scheduling with one host, and uses that host’s selected writable Microsoft calendar. New phone configuration requires a host number. askInvitee: true is accepted only as an unchanged echo of an existing saved location; creating or changing to it returns invalid_location. Configure invitee phone collection through locations. null = not set. An unchanged legacy value preserves all location options. Changing it is supported only for a single unlabelled option; otherwise use locations through an option-aware client.',
 }
 // Not named components: zod-to-openapi would add the null of `.nullable()` to the
 // component itself, and flattens a union with null.
@@ -101,6 +107,7 @@ const Location = z
     }),
     z.object(locationKinds.inPerson),
     z.object(locationKinds.link),
+    z.object(locationKinds.microsoftTeams),
   ])
   .nullable()
   .openapi(locationDoc)
@@ -121,6 +128,7 @@ const LocationInput = z
       ),
     z.strictObject(locationKinds.inPerson),
     z.strictObject(locationKinds.link),
+    z.strictObject(locationKinds.microsoftTeams),
   ])
   .nullable()
   .openapi(locationDoc)
@@ -144,9 +152,10 @@ const locationOptionVariants = [
   },
   { ...locationKinds.inPerson, ...optionMetadata },
   { ...locationKinds.link, ...optionMetadata },
+  { ...locationKinds.microsoftTeams, ...optionMetadata },
 ] as const
 const locationsDescription =
-  'Ordered list of 1–5 options with distinct ids and kinds, and at most one default. Omitted on update preserves options; null clears. Cannot be supplied together with location. Phone requires either number or askInvitee: true; the latter collects an invitee phone number at booking.'
+  'Ordered list of 1–5 options with distinct ids and kinds, and at most one default. Omitted on update preserves options; null clears. Cannot be supplied together with location. Phone requires either number or askInvitee: true; the latter collects an invitee phone number at booking. microsoft_teams requires individual scheduling with one host and a writable Microsoft calendar selected for booking events.'
 const LocationsInput = z
   .array(
     z.discriminatedUnion('kind', [
@@ -161,6 +170,7 @@ const LocationsInput = z
         ),
       z.strictObject(locationOptionVariants[3]),
       z.strictObject(locationOptionVariants[4]),
+      z.strictObject(locationOptionVariants[5]),
     ]),
   )
   .nullable()
@@ -173,6 +183,7 @@ export const Locations = z
       z.object(locationOptionVariants[2]),
       z.object(locationOptionVariants[3]),
       z.object(locationOptionVariants[4]),
+      z.object(locationOptionVariants[5]),
     ]),
   )
   .nullable()
@@ -299,6 +310,34 @@ const SuccessRedirect = z
 const rule = (name: keyof typeof EVENT_TYPE_RULE_BOUNDS, description: string) =>
   z.int().openapi({ description, ...minMax(EVENT_TYPE_RULE_BOUNDS[name]) })
 const minMax = ({ min, max }: { min: number; max: number }) => ({ minimum: min, maximum: max })
+
+const paymentPriceFields = {
+  durationMinutes: rule('durationMinutes', 'The corresponding offered duration in whole minutes'),
+  amountMinor: z.int().openapi({
+    description:
+      'Amount in currency minor units. The minimum is 30 for GBP, 50 for other supported currencies. JPY has zero decimal places.',
+    minimum: 30,
+    maximum: PAYMENT_MAX_MINOR,
+  }),
+}
+const paymentDetails = {
+  description:
+    'Stripe Checkout price for every offered duration. Available for personal, individual events with one host and without recurrence, guests, waitlist, phone or automatic conferences. Omission preserves the saved price on update; null makes future bookings free.',
+}
+const PaymentInput = z
+  .strictObject({
+    currency: z.enum(PAYMENT_CURRENCIES),
+    prices: z.array(z.strictObject(paymentPriceFields)).min(1).max(MAX_ALLOWED_DURATIONS),
+  })
+  .nullable()
+  .openapi(paymentDetails)
+const Payment = z
+  .object({
+    currency: z.enum(PAYMENT_CURRENCIES),
+    prices: z.array(z.object(paymentPriceFields)),
+  })
+  .nullable()
+  .openapi(paymentDetails)
 
 export const WaitlistSettings = z.object({ enabled: z.boolean() }).openapi('WaitlistSettings')
 const WaitlistSettingsInput = z
@@ -449,6 +488,13 @@ export const EventType = z
     smsRemindersAvailable: z.boolean().optional(),
     notifications: NotificationSettings,
     waitlist: WaitlistSettings,
+    payment: Payment.optional(),
+    paymentAvailability: z
+      .string()
+      .optional()
+      .openapi({
+        description: `Known values: ${[...PAYMENT_PROVIDER_AVAILABILITIES, 'unsupported_event'].join(', ')}. Treat unknown values as unavailable.`,
+      }),
     successRedirect: SuccessRedirect.optional(),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
@@ -485,6 +531,7 @@ export const EventTypeInput = z
     questions: questions.optional(),
     notifications: NotificationSettingsInput.optional(),
     waitlist: WaitlistSettingsInput.optional(),
+    payment: PaymentInput.optional(),
     successRedirect: SuccessRedirectInput.optional(),
     isActive: fields.isActive.optional().openapi({ default: true }),
     isHidden: fields.isHidden.optional().openapi({ default: false }),
@@ -526,6 +573,7 @@ export const EventTypeUpdate = z
     questions: questions.optional(),
     notifications: NotificationSettingsInput.optional(),
     waitlist: WaitlistSettingsInput.optional(),
+    payment: PaymentInput.optional(),
     successRedirect: SuccessRedirectInput.optional(),
     isActive: fields.isActive.optional(),
     isHidden: fields.isHidden.optional(),
@@ -568,11 +616,16 @@ export const EVENT_TYPE_BODY_LIMIT = 2 * 1024 * 1024
 const notFound =
   'event_type_not_found: no such event type in the organization, or one the caller cannot see'
 const invalid =
-  'invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules)'
+  'invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_notifications (message identifies the notification array or zero-based rule index, field and violated constraint; no submitted values), invalid_success_redirect (field identifies the setting; no submitted values), invalid_hosts, microsoft_teams_host_policy, invalid_schedule_id (scheduleId is not one of the host’s schedules), invalid_payment_price, or payment_flow_unsupported'
 const forbidden = `insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; ${CROSS_ORIGIN_WRITE}`
+const teamsSessionForbidden = `${forbidden}; microsoft_teams_host_session_required: adding a Microsoft Teams location, changing its host, reactivating or duplicating it requires the assigned host’s signed-in session`
 const slugTaken = 'slug_taken: another event type on the same page has this slug'
+const paymentSettingsUnavailable =
+  'payment_settings_unavailable: the instance does not currently accept new Checkout payments'
 const locationOptionsConflict =
   'location_options_conflict: changing legacy location would replace multiple or labelled options; use locations through an option-aware client'
+const microsoftTeamsUnavailable =
+  'microsoft_teams_calendar_unavailable: the host needs a connected Microsoft calendar selected for booking writeback'
 
 export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
   const writeContext = (principal: Principal, expectedOrganizationId?: string) => ({
@@ -620,7 +673,7 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
         responses: {
           200: { description: 'Saved settings', content: json(WaitlistSettings) },
           ...errorResponses({
-            400: 'invalid_request, waitlist_unsupported',
+            400: 'invalid_request, waitlist_unsupported, payment_flow_unsupported',
             403: forbidden,
             404: notFound,
             409: ORGANIZATION_CONTEXT_CHANGED,
@@ -823,8 +876,8 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
           201: { description: 'The new event type', content: json(EventType) },
           ...errorResponses({
             400: invalid,
-            403: forbidden,
-            409: `${slugTaken}; ${ORGANIZATION_CONTEXT_CHANGED}`,
+            403: teamsSessionForbidden,
+            409: `${slugTaken}; ${microsoftTeamsUnavailable}; ${paymentSettingsUnavailable}; ${ORGANIZATION_CONTEXT_CHANGED}`,
           }),
         },
       }),
@@ -859,9 +912,9 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
           201: { description: 'The copied event type', content: json(EventType) },
           ...errorResponses({
             400: invalid,
-            403: forbidden,
+            403: teamsSessionForbidden,
             404: notFound,
-            409: `${slugTaken}; ${ORGANIZATION_CONTEXT_CHANGED}`,
+            409: `${slugTaken}; ${microsoftTeamsUnavailable}; ${paymentSettingsUnavailable}; ${ORGANIZATION_CONTEXT_CHANGED}`,
           }),
         },
       }),
@@ -915,9 +968,9 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
           200: { description: 'The changed event type', content: json(EventType) },
           ...errorResponses({
             400: invalid,
-            403: forbidden,
+            403: teamsSessionForbidden,
             404: notFound,
-            409: `${slugTaken}; ${locationOptionsConflict}; ${ORGANIZATION_CONTEXT_CHANGED}`,
+            409: `${slugTaken}; ${locationOptionsConflict}; ${microsoftTeamsUnavailable}; ${paymentSettingsUnavailable}; ${ORGANIZATION_CONTEXT_CHANGED}`,
           }),
         },
       }),

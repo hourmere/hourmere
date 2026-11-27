@@ -81,6 +81,7 @@
   "teamInvitation.defaultInviter": "Un membre de l’équipe",
   "teamInvitation.subject": "Invitation à rejoindre {team}",
   "teamInvitation.introduction": "{inviter} vous a invité à rejoindre l’équipe « {team} » sur Hourmere.",
+  "teamInvitation.scimIntroduction": "Votre fournisseur d’identité vous a envoyé cette invitation au nom de l’équipe « {team} » sur Hourmere.",
   "teamInvitation.identity": "Connectez-vous avec l’adresse e-mail invitée {email} et vérifiez-la, puis acceptez l’invitation sur la page. Les alias de messagerie ne peuvent pas remplacer cette adresse.",
   "teamInvitation.acceptance": "La connexion seule ne vous fait pas rejoindre l’équipe ; vous devez accepter explicitement l’invitation sur la page.",
   "teamInvitation.expiry": "Cette invitation expire le {expiry}.",
@@ -153,6 +154,13 @@
   "scimMapping.linked": "Votre équipe a approuvé l’association SCIM {mappingId}. Une fois le groupe provisionné, l’annuaire associé pourra gérer le nom de l’équipe enfant et ses membres gérés par l’annuaire.",
   "scimMapping.unlinked": "L’association SCIM {mappingId} a été supprimée pour votre équipe. L’annuaire ne peut plus gérer l’équipe par cette association.",
   "scimMapping.suspended": "L’accès de l’annuaire par l’association SCIM {mappingId} a été suspendu. Les appartenances et les états de suspension existants sont conservés.",
+  "bookingPayment.label": "Paiement",
+  "bookingPayment.paid": "{amount} payés",
+  "bookingPayment.refund": "Remboursement",
+  "bookingPayment.requested": "Remboursement demandé",
+  "bookingPayment.pending": "Remboursement en cours",
+  "bookingPayment.succeeded": "Remboursement effectué",
+  "bookingPayment.failed": "Échec du remboursement",
   "series.confirmed.subject": "Série de réunions confirmée : {event}",
   "series.confirmed.booker": "Votre série de réunions avec {host} est réservée.",
   "series.confirmed.guest": "{invitee} vous invite à participer à une série de réunions avec {host}.",
@@ -173,5 +181,8 @@
   "series.cancelled.member": "Annulée",
   "series.manage": "Gérer la série",
   "series.view": "Voir la série",
-  "series.repair": "Pour relancer la création du lien de réunion, ouvrez la réservation concernée dans Hourmere."
+  "series.repair": "Pour relancer la création du lien de réunion, ouvrez la réservation concernée dans Hourmere.",
+  "teams.linkPending": "Le lien Teams s’affichera dans les détails de la réservation dès qu’il sera disponible.",
+  "teams.unavailable": "Microsoft Teams est indisponible. Cette réservation utilise l’événement du calendrier Outlook.",
+  "teams.writebackFailed": "Le lien Teams est indisponible. La réservation est maintenue."
 }

@@ -141,7 +141,7 @@ async function confirm(user: ReturnType<typeof userEvent.setup>, label: string, 
   await user.click(await screen.findByRole('button', { name: label }))
   const group = screen.getByRole('group', { name: question })
   const cancel = within(group).getByRole('button', { name: 'Cancel' })
-  expect(document.activeElement).toBe(cancel)
+  await waitFor(() => expect(document.activeElement).toBe(cancel))
   await user.click(within(group).getByRole('button', { name: label }))
 }
 
@@ -237,7 +237,8 @@ describe('SSO provider activation', () => {
       await screen.findByRole('button', { name: `Enable provider ${draft.displayName}` }),
     )
     const confirmation = within(screen.getByRole('group', { name: 'Enable this provider?' }))
-    expect(document.activeElement).toBe(confirmation.getByRole('button', { name: 'Cancel' }))
+    const cancel = confirmation.getByRole('button', { name: 'Cancel' })
+    await waitFor(() => expect(document.activeElement).toBe(cancel))
     expect(requests.to(activateProvider)).toHaveLength(0)
     await user.click(confirmation.getByRole('button', { name: 'Enable provider' }))
     await screen.findByRole('button', { name: `Disable provider ${draft.displayName}` })

@@ -31,6 +31,7 @@ import {
 } from './availability.ts'
 import { latestBookingId } from './booking-chain.ts'
 import { bookingPageQuery, encodeBookingCursor, type ListBookingsInput } from './booking-page.ts'
+import { type HostBookingPayment, readBookingPayment } from './booking-payment-details.ts'
 import {
   assertInviteeChangeOpen,
   type ChangeCutoffs,
@@ -63,6 +64,7 @@ import {
   selectLocationOption,
 } from './location-options.ts'
 import { enqueueMeetingPollBookingUpdate, meetingPollChainLinked } from './meeting-poll-outcomes.ts'
+import { microsoftTeamsLocation, requireMicrosoftTeamsHost } from './microsoft-teams.ts'
 import {
   createNotificationSnapshot,
   type NotificationSnapshot,
@@ -109,6 +111,7 @@ import {
   type SuccessRedirect,
   validateSuccessRedirect,
 } from './success-redirect.ts'
+import { readTeamsMeetingLocations } from './teams-meeting-locations.ts'
 import { cleanInviteeEmail, cleanText } from './text.ts'
 import { ensureWaitlistKey } from './waitlist.ts'
 import { attributeWaitlistBooking } from './waitlist-booking.ts'
@@ -186,6 +189,7 @@ export interface BookingWithToken {
 
 export interface HostBookingDetail extends Booking {
   routing?: RoutingBookingSnapshot
+  payment?: HostBookingPayment
 }
 
 export const MAX_GUESTS = 10
@@ -510,7 +514,7 @@ async function findReplay(
     throw reusedBookingIdempotencyKey()
   }
   return {
-    booking: await loadBooking(db, row.id),
+    booking: await loadBooking(db, row.id, undefined, false),
     manageToken: null,
     ...(row.success_redirect && {
       successRedirect: row.success_redirect as unknown as BookingSuccessRedirect,
@@ -573,6 +577,7 @@ async function toBookings(
   rows: readonly BookingRow[],
   host?: { userId: string; now: () => Temporal.Instant },
   readNow?: Temporal.Instant,
+  includeTeamsLink = true,
 ): Promise<Booking[]> {
   if (!rows.length) return []
   const requests = await db
@@ -724,6 +729,18 @@ async function toBookings(
         timeZone: host.time_zone,
       })
   }
+  const teamsLocations = includeTeamsLink
+    ? await readTeamsMeetingLocations(
+        db,
+        rows.flatMap((row) => {
+          const view = conferences.get(row.id)
+          return (view?.bookingStatus ?? row.status) === 'confirmed' && !imported.has(row.id)
+            ? [{ id: row.id, location: view ? view.location : row.location }]
+            : []
+        }),
+        { activeOnly: true },
+      )
+    : undefined
   const now = host?.now()
   return rows.map((row) => {
     const view = imported.has(row.id) ? undefined : conferences.get(row.id)
@@ -749,14 +766,16 @@ async function toBookings(
       end: toIso(toInstant(r.end_at)),
       title: r.title,
       ...(host ? { eventTypeTitle: r.event_type_title ?? null } : {}),
-      location: parseLocation(
-        (automaticZoom(location) || automaticMeet(location)) &&
-          (r.status !== 'confirmed' ||
-            view?.bookingStatus !== 'confirmed' ||
-            view?.conference?.status !== 'ready')
-          ? unresolvedLocation(location)
-          : location,
-      ),
+      location: microsoftTeamsLocation(location)
+        ? (teamsLocations?.get(r.id) ?? { kind: 'microsoft_teams' })
+        : parseLocation(
+            (automaticZoom(location) || automaticMeet(location)) &&
+              (r.status !== 'confirmed' ||
+                view?.bookingStatus !== 'confirmed' ||
+                view?.conference?.status !== 'ready')
+              ? unresolvedLocation(location)
+              : location,
+          ),
       ...(view?.conference ? { conference: view.conference } : {}),
       ...(now && view?.calendarCopy
         ? {
@@ -804,14 +823,31 @@ async function toBookings(
   })
 }
 
-async function loadBooking(db: Db, id: string, now?: Temporal.Instant): Promise<Booking> {
-  const row = await db
+function readBookingRow(db: Db, id: string): Promise<BookingRow> {
+  return db
     .selectFrom('bookings as b')
     .select(BOOKING_COLUMNS)
     .where('b.id', '=', id)
     .executeTakeFirstOrThrow()
-  const [booking] = await toBookings(db, [row], undefined, now)
+}
+
+async function hydrateBooking(
+  db: Db,
+  row: BookingRow,
+  now?: Temporal.Instant,
+  includeTeamsLink = true,
+): Promise<Booking> {
+  const [booking] = await toBookings(db, [row], undefined, now, includeTeamsLink)
   return booking as Booking
+}
+
+async function loadBooking(
+  db: Db,
+  id: string,
+  now?: Temporal.Instant,
+  includeTeamsLink = true,
+): Promise<Booking> {
+  return hydrateBooking(db, await readBookingRow(db, id), now, includeTeamsLink)
 }
 
 // --- Writing bookings -------------------------------------------------------------------
@@ -821,7 +857,7 @@ async function loadBooking(db: Db, id: string, now?: Temporal.Instant): Promise<
  * share it so a hold stores the chosen option exactly as its confirmed booking would.
  */
 export async function resolveBookingLocation(
-  ctx: Pick<PublicContext, 'automaticMeet' | 'automaticZoom'>,
+  ctx: Pick<PublicContext, 'automaticMeet' | 'automaticZoom' | 'microsoftCalendarEnabled'>,
   db: Db,
   event: PublicEventTypeRecord,
   hosts: string[],
@@ -834,6 +870,16 @@ export async function resolveBookingLocation(
   const meetReady: string[] = []
   const zoomReady: string[] = []
   try {
+    if (microsoftTeamsLocation(chosen)) {
+      await requireMicrosoftTeamsHost(
+        db,
+        event.schedulingType,
+        hosts,
+        event.id,
+        ctx.microsoftCalendarEnabled,
+        true,
+      )
+    }
     if (organizer && automaticMeet(chosen)) {
       await requireMeetDestination(db, organizer, event.id, ctx.automaticMeet)
       meetReady.push(organizer)
@@ -1104,9 +1150,9 @@ export async function insertBooking(
   return { id, manageToken: token }
 }
 
-/** Paid lifecycle writes call this after locking an authorized booking. */
-export async function assertBookingLocallyManaged(db: Db, id: string, allowPaid = false) {
-  const paid = await db
+/** A Checkout attempt binds both its original booking and its current successor. */
+export function bookingPaymentBindings(db: Db) {
+  return db
     .selectFrom('bookings as booking')
     .leftJoin('payment_checkout_attempts as attempt', (join) =>
       join.on((eb) =>
@@ -1116,6 +1162,11 @@ export async function assertBookingLocallyManaged(db: Db, id: string, allowPaid 
         ]),
       ),
     )
+}
+
+/** Paid lifecycle writes call this after locking an authorized booking. */
+export async function assertBookingLocallyManaged(db: Db, id: string, allowPaid = false) {
+  const paid = await bookingPaymentBindings(db)
     .leftJoin('bookings as root', (join) =>
       join
         .onRef('root.id', '=', 'attempt.booking_id')
@@ -1871,6 +1922,11 @@ async function createBookingInTransaction(
   if (!current || current.id !== et.id || current.organizationId !== et.organizationId) {
     throw bookingEventUnavailable(oneTimeLink !== undefined)
   }
+  if (current.payment) {
+    if (oneTimeLink) throw bookingEventUnavailable(true)
+    if (routing) throw routedBookingUnavailable()
+    throw new DomainError('conflict', 'payment_required')
+  }
   if (checkEvent) await checkEvent(current)
   if (current.schedulingType !== et.schedulingType) {
     throw bookingEventUnavailable(oneTimeLink !== undefined)
@@ -1994,6 +2050,7 @@ async function createBookingInTransaction(
     inviteeName: invitee.name,
     inviteeEmail: invitee.email,
   })
+  const location = groupSlot ? groupSlot.location : choice.location
   const { id, manageToken } = await insertBooking(trx, {
     successRedirect,
     groupSlotId: groupSlot?.id,
@@ -2005,7 +2062,7 @@ async function createBookingInTransaction(
     start: input.start,
     end,
     title: `${current.title} with ${invitee.name}`,
-    location: groupSlot ? groupSlot.location : choice.location,
+    location,
     locationOption: groupSlot ? groupSlot.locationOption : choice.locationOption,
     responses,
     source: origin.source,
@@ -2053,6 +2110,7 @@ async function createBookingInTransaction(
       type: 'created',
       bookingId: id,
       start: input.start,
+      ...(location?.kind === 'microsoft_teams' && { teamsMeeting: true }),
       ...(seriesOccurrence && { seriesAction: 'create' as const }),
     },
     now,
@@ -2075,23 +2133,38 @@ export async function getManagedBooking(
   ctx: PublicContext,
   token: ManagedBookingSelector,
 ): Promise<Booking> {
+  const hydrate = await prepareManagedBookingRead(ctx, token)
+  return hydrate(ctx.db)
+}
+
+/** Authorizes and reads the seed row before hydrating its mutable lifecycle and details. */
+export async function prepareManagedBookingRead(ctx: PublicContext, token: ManagedBookingSelector) {
+  let id: string
+  let guestEmail: string | undefined
   if (token && typeof token === 'object') {
     const member = await resolveSeriesMember(ctx.db, token, { scope: 'read' })
     if (!member) throw bookingNotFound()
-    const booking = await loadBooking(ctx.db, member.bookingId, ctx.now())
-    if (member.guestEmail === undefined) return booking
+    id = member.bookingId
+    guestEmail = member.guestEmail
+  } else {
+    const hash = manageTokenHash(token)
+    const target = hash && (await resolveManagedTarget(ctx.db, hash))
+    if (!target) throw bookingNotFound()
+    id = target.id
+  }
+  const now = ctx.now()
+  const row = await readBookingRow(ctx.db, id)
+  return async (db: Db): Promise<Booking> => {
+    const booking = await hydrateBooking(db, row, now)
+    if (guestEmail === undefined) return booking
     delete booking.pendingReschedule
     return {
       ...booking,
-      attendees: booking.attendees.filter((a) => !a.isBooker && a.email === member.guestEmail),
+      attendees: booking.attendees.filter((a) => !a.isBooker && a.email === guestEmail),
       responses: {},
       cancelReason: null,
     }
   }
-  const hash = manageTokenHash(token)
-  const target = hash && (await resolveManagedTarget(ctx.db, hash))
-  if (!target) throw bookingNotFound()
-  return loadBooking(ctx.db, target.id, ctx.now())
 }
 
 /** Reload the selector after the series lock, then lock only its current member. */
@@ -2144,37 +2217,30 @@ const CLOSED_REQUEST_STATES: Readonly<Record<string, ManagedRescheduleRequestSta
   cancelled: 'cancelled',
 }
 
-/**
- * The request a reschedule request email's own link was sent for, and what became of it.
- * Undefined for every other manage token: only that email's token names its request, and
- * only a request of the booking the email was about. `bookingId` is the booking the token
- * resolves to now; a closed request whose booking has since moved reports the move.
- */
-export async function managedLinkRescheduleRequest(
-  ctx: PublicContext,
-  token: string | undefined,
+/** The request belongs to the email identified by this token and to that email's booking. */
+export function managedLinkRescheduleRequestQuery(db: Db, token: string | undefined) {
+  return db
+    .selectFrom('booking_notifications as n')
+    .innerJoin('booking_reschedule_requests as r', (join) =>
+      join.onRef('r.booking_id', '=', 'n.booking_id').on(sql<boolean>`r.id::text = n.message_key`),
+    )
+    .select(['r.id', 'r.state', 'r.expires_at', 'r.booking_id'])
+    .where('n.manage_token_hash', '=', manageTokenHash(token) ?? null)
+    .where('n.outcome', '=', 'sent')
+    .where('n.kind', '=', 'reschedule_requested')
+}
+
+/** A closed request reports a move when its email now opens a successor. */
+export function managedLinkRescheduleRequestState(
+  row: { id: string; state: string; expires_at: string; booking_id: string } | null,
   bookingId: string,
-): Promise<{ id: string; state: ManagedRescheduleRequestState } | undefined> {
-  const hash = manageTokenHash(token)
-  if (!hash) return undefined
-  const { rows } = await sql<{
-    id: string
-    state: string
-    expires_at: Date
-    booking_id: string
-  }>`
-    SELECT r.id, r.state, r.expires_at, r.booking_id
-      FROM booking_notifications n
-      JOIN booking_reschedule_requests r
-        ON r.booking_id = n.booking_id AND r.id::text = n.message_key
-     WHERE n.manage_token_hash = ${hash} AND n.outcome = 'sent'
-       AND n.kind = 'reschedule_requested'`.execute(ctx.db)
-  const row = rows[0]
+  now: Temporal.Instant,
+): { id: string; state: ManagedRescheduleRequestState } | undefined {
   if (!row) return undefined
   // An expiry job can run late; the deadline alone closes the request.
   const state =
     row.state === 'pending'
-      ? row.expires_at.getTime() > ctx.now().epochMilliseconds
+      ? Date.parse(row.expires_at) > now.epochMilliseconds
         ? 'pending'
         : 'expired'
       : CLOSED_REQUEST_STATES[row.state]
@@ -2958,15 +3024,27 @@ export async function getHostBookingDetail(
   if (!UUID.test(id)) throw bookingNotFound()
   const { db, principal } = ctx
   const row = await hostBookingDetailQuery(ctx, id)
-    .select('b.has_routing_snapshot')
+    .select(['b.has_routing_snapshot', 'b.payment_confirmed_at'])
     .executeTakeFirst()
   if (!row) throw bookingNotFound()
 
-  // Ordinary detail keeps its existing statement count and response shape.
   const routing = row.has_routing_snapshot ? await readBookingRoutingSnapshot(ctx, row.id) : null
   if (routing === undefined) throw bookingNotFound()
   const [booking] = await toBookings(db, [row], { userId: principal.user.id, now: ctx.now })
-  return routing ? { ...(booking as Booking), routing } : (booking as Booking)
+  const payment =
+    row.payment_confirmed_at || row.rescheduled_from_id
+      ? await readBookingPayment(db, row.id, principal.organization.id)
+      : undefined
+  return {
+    ...(booking as Booking),
+    ...(routing && { routing }),
+    ...(payment && {
+      payment: {
+        ...payment.summary,
+        ...(payment.stripeDashboardUrl && { stripeDashboardUrl: payment.stripeDashboardUrl }),
+      },
+    }),
+  }
 }
 
 /**
@@ -3186,7 +3264,7 @@ const sameUuid = (left: unknown, right: unknown) =>
   typeof right === 'string' &&
   left.toLowerCase() === right.toLowerCase()
 
-async function auditBooking(
+export async function auditBooking(
   trx: Db,
   organizationId: string,
   targetId: string,

@@ -1,15 +1,21 @@
 import type { Principal } from '@hourmere/auth'
+import type { PaymentProviderAvailability } from '@hourmere/core/payment'
 import type { Db } from '@hourmere/db'
 import type { RecurringBookingAdmissionDeps } from './recurring-admission.ts'
 import type { SuccessRedirectPolicy } from './success-redirect.ts'
 
 /**
- * A change to a booking that people are told about (https://hourmere.com/docs/notifications). Only ids and
- * the start: whoever is notified loads the rest when it acts, and must check then that the
- * booking is still as described.
+ * A change to a booking that people are told about (https://hourmere.com/docs/notifications).
+ * The recipient loads current booking details when it acts.
  */
 export type BookingEvent =
-  | { type: 'created'; bookingId: string; start: Temporal.Instant; seriesAction?: 'create' }
+  | {
+      type: 'created'
+      bookingId: string
+      start: Temporal.Instant
+      seriesAction?: 'create'
+      teamsMeeting?: true
+    }
   /** `bookingId` is the new booking, the one that replaced the old. */
   | { type: 'rescheduled'; bookingId: string; start: Temporal.Instant }
   | { type: 'cancelled'; bookingId: string; seriesAction?: 'bulk_cancel' }
@@ -47,6 +53,7 @@ export interface ServiceContext extends RecurringBookingAdmissionDeps {
   requestId?: string | undefined
   /** Explicit operator SMS capability; defaults off. */
   smsRemindersAvailable?: boolean | undefined
+  paidBookingAvailability?: PaymentProviderAvailability | undefined
   /** Host-written follow-up body text; enabled unless the operator explicitly disables it. */
   followUpHostNotesEnabled?: boolean | undefined
   /** In-process SCIM resource capability. Defaults off. */
@@ -55,6 +62,8 @@ export interface ServiceContext extends RecurringBookingAdmissionDeps {
   /** Explicit instance capability; defaults off. */
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
+  /** Whether the instance has a configured Microsoft Calendar connection flow. */
+  microsoftCalendarEnabled?: boolean | undefined
   /** Per-process export capacity from validated server configuration; defaults to 2. */
   bookingExportMaxConcurrent?: number | undefined
   /** Effective routing forms availability for opt-in CSV columns. */
@@ -72,6 +81,9 @@ export interface ServiceContext extends RecurringBookingAdmissionDeps {
 
 /** For unauthenticated flows such as public booking pages and invitee links. */
 export interface PublicContext {
+  paidCheckoutAvailable?: boolean | undefined
+  /** Immutable team IDs the operator has opted into the public homepage catalog. */
+  teamPublicHomeOrganizationIds?: readonly string[] | undefined
   smsRemindersAvailable?: boolean | undefined
   /** In-process SCIM resource capability. Defaults off. */
   scimResourcesEnabled?: boolean | undefined
@@ -88,6 +100,8 @@ export interface PublicContext {
   /** Explicit instance capability; defaults off. */
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
+  /** Whether the instance has a configured Microsoft Calendar connection flow. */
+  microsoftCalendarEnabled?: boolean | undefined
   now: () => Temporal.Instant
   /** Told about booking changes in their transaction; nobody is told when absent. */
   notify?: BookingNotifier | undefined

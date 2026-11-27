@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { migrationsDir } from './migrate.ts'
 import {
   copyRoutingPredecessor,
@@ -9,10 +9,16 @@ import {
   routingMigration,
 } from './routing-storage-fixtures.ts'
 import { routingProtections } from './routing-storage-protections.ts'
-import { createTestDatabase, type TestDatabase } from './testing.ts'
+import { MIGRATION_REPLAY_TIMEOUT, useMigrationReplay } from './testing/migration-replay.ts'
+import type { TestDatabase } from './testing.ts'
+
+vi.setConfig({ testTimeout: MIGRATION_REPLAY_TIMEOUT, hookTimeout: MIGRATION_REPLAY_TIMEOUT })
 
 const serverUrl = process.env.DATABASE_URL
 describe.skipIf(!serverUrl)('routing storage source-copy mutations', () => {
+  // This source-copy test skips meeting polls, so the shared history ends at 0070.
+  const replay = useMigrationReplay(serverUrl as string, '0071_meeting_polls.sql')
+
   it.each(Object.keys(routingProtections))(
     'detects broken %s and passes restored SQL',
     async (name) => {
@@ -25,7 +31,7 @@ describe.skipIf(!serverUrl)('routing storage source-copy mutations', () => {
         if (!target) throw new Error(`Missing protection ${name}`)
         const check = async (sql: string) => {
           await writeFile(join(directory, routingMigration), sql)
-          owned = await createTestDatabase(serverUrl as string, directory, {
+          owned = await replay.predecessor.clone(directory, {
             tag: 'routing_mutation',
           })
           try {

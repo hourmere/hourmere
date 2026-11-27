@@ -95,6 +95,8 @@ const eventKeys = [
   'smsRemindersAvailable',
   'notifications',
   'waitlist',
+  'payment',
+  'paymentAvailability',
   'successRedirect',
   'isActive',
   'isHidden',
@@ -478,6 +480,8 @@ describe.skipIf(!adminUrl)('team launch DTO and selector security audit', () => 
     expect(item.notifications).toEqual(DEFAULT_NOTIFICATIONS)
     keys(item.waitlist, ['enabled'])
     expect(item.waitlist).toEqual({ enabled: false })
+    expect(item.payment).toBeNull()
+    expect(item.paymentAvailability).toBe('unsupported_event')
     expect(item.successRedirect).toBeNull()
     expect(JSON.stringify(item)).not.toContain(privateMarker)
   }

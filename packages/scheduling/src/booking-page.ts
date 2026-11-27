@@ -105,6 +105,23 @@ function decodeCursor(cursor: string): { start: Temporal.Instant; id: string } {
   return { start: instant, id }
 }
 
+/** Canonical query and cursor for a private page identity digest. */
+export function normalizedBookingPageIdentity(input: ListBookingsInput): string {
+  const after = input.cursor === undefined ? undefined : decodeCursor(input.cursor)
+  return JSON.stringify([
+    input.order ?? 'asc',
+    input.from?.toString(),
+    input.to?.toString(),
+    input.endAfter?.toString(),
+    input.endTo?.toString(),
+    input.status,
+    searchText(input.q),
+    input.limit ?? DEFAULT_PAGE_SIZE,
+    after?.start.toString(),
+    after?.id.toLowerCase(),
+  ])
+}
+
 /** Shared filters, ordering and exact-precision keyset cursor for booking lists. */
 export function bookingPageQuery(db: Db, input: ListBookingsInput) {
   const limit = input.limit ?? DEFAULT_PAGE_SIZE

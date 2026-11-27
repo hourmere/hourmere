@@ -596,10 +596,77 @@ export const common = {
     'Pour continuer, revenez à l’onglet dans lequel vous avez demandé la vérification.',
   'Copy the link from your email and paste it into the tab where you requested verification.':
     'Copiez le lien de votre e-mail et collez-le dans l’onglet où vous avez demandé la vérification.',
+  // Microsoft Teams meeting locations
+  'Microsoft Teams': 'Microsoft Teams',
+  'Join Microsoft Teams': 'Rejoindre la réunion Microsoft Teams',
+  'The Teams link isn’t ready yet.': 'Le lien Teams n’est pas encore disponible.',
+  'The booking is still scheduled without a Teams link.':
+    'La réservation reste confirmée, sans lien Teams.',
   // Booking page preview
   'These are sample times. Booking is disabled in the preview.':
     'Ces horaires sont donnés à titre d’exemple. Les réservations sont désactivées dans l’aperçu.',
+  // Rescheduled booking links
+  'This booking was moved to a new time. The new booking has its own link.':
+    'Cette réservation a été déplacée à un autre créneau. La nouvelle réservation a son propre lien.',
   // Booking location changes
   'The meeting location has changed. Please choose a time again.':
     'Le lieu de la réunion a changé. Veuillez choisir à nouveau un créneau.',
+
+  // Microsoft Teams host authorization
+  'The assigned host must configure Microsoft Teams in their own signed-in session.':
+    'L’hôte désigné doit se connecter à son propre compte pour configurer Microsoft Teams.',
+
+  // Paid booking details
+  'bookingPayment.label': 'Paiement',
+  'bookingPayment.paid': '{amount} payés',
+  'bookingPayment.refund': 'Remboursement',
+  'bookingPayment.requested': 'Remboursement demandé',
+  'bookingPayment.pending': 'Remboursement en cours',
+  'bookingPayment.succeeded': 'Remboursement effectué',
+  'bookingPayment.failed': 'Échec du remboursement',
+  'bookingPayment.none': 'Aucun remboursement',
+  'bookingPayment.unknown': 'État indisponible',
+  // Paid booking checkout
+  'Price: {amount}': 'Prix : {amount}',
+  'Starting Checkout…': 'Ouverture de la page de paiement…',
+  'Continue to payment': 'Passer au paiement',
+  'Payment status': 'État du paiement',
+  'Waiting for payment confirmation': 'En attente de la confirmation du paiement',
+  'Reservation expired': 'Réservation expirée',
+  'Reservation cancelled': 'Réservation annulée',
+  'A full refund has been requested.': 'Un remboursement intégral a été demandé.',
+  'Stripe is processing the refund.': 'Stripe traite le remboursement.',
+  'Stripe has sent your refund. Your bank may take time to post it.':
+    'Stripe a envoyé votre remboursement. Son apparition sur votre compte bancaire peut prendre un certain temps.',
+  'The refund could not be completed. Contact the host for help.':
+    'Le remboursement n’a pas pu aboutir. Contactez l’hôte pour obtenir de l’aide.',
+  'We couldn’t find this payment attempt': 'Cette tentative de paiement est introuvable',
+  'Return to the tab where you started payment. If your booking was confirmed, use the link in your confirmation email.':
+    'Revenez à l’onglet où vous avez lancé le paiement. Si votre rendez-vous a été confirmé, utilisez le lien dans l’e-mail de confirmation.',
+  'We couldn’t check the payment. Try again before starting another booking.':
+    'Nous n’avons pas pu vérifier le paiement. Réessayez avant de prendre un autre rendez-vous.',
+  'Your time is reserved for up to 30 minutes. Hourmere will confirm the booking after it receives the payment.':
+    'Votre créneau est réservé pendant 30 minutes au maximum. Hourmere confirme le rendez-vous à réception du paiement.',
+  'Release unpaid reservation': 'Libérer la réservation non payée',
+  'Payment arrived after the reservation ended. Your booking was not confirmed.':
+    'Le paiement est arrivé après la fin de la réservation. Votre rendez-vous n’a pas été confirmé.',
+  'Manage booking': 'Gérer le rendez-vous',
+  'Choose another time': 'Choisir un autre créneau',
+  'The price has changed. Review the updated price and choose a time again.':
+    'Le prix a changé. Consultez le nouveau prix et choisissez à nouveau un créneau.',
+  'Online payment is temporarily unavailable. Please contact the host.':
+    'Le paiement en ligne est temporairement indisponible. Veuillez contacter l’hôte.',
+  'We couldn’t open Stripe Checkout. Try again to continue this payment attempt.':
+    'Nous n’avons pas pu ouvrir Stripe Checkout. Réessayez pour reprendre ce paiement.',
+  'Open booking page to pay': 'Ouvrir la page de réservation pour payer',
+  'The suggested time is selected. Review the details before continuing to payment.':
+    'Le créneau suggéré est sélectionné. Vérifiez les détails avant de passer au paiement.',
+  'You’ll pay securely on Stripe. Your booking is confirmed only after Hourmere receives the payment. If you cancel the booking, a full refund is requested.':
+    'Vous paierez en toute sécurité sur Stripe. Hourmere confirme le rendez-vous à réception du paiement. Si vous annulez le rendez-vous, un remboursement intégral sera demandé.',
+
+  // Team public home
+  'This team has no public events right now.':
+    'Cette équipe ne propose aucun événement public pour le moment.',
+  'This team page is unavailable.': 'Cette page d’équipe est indisponible.',
+  'Couldn’t load this team page.': 'Impossible de charger cette page d’équipe.',
 } as const

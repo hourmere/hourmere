@@ -74,7 +74,7 @@ for (const locale of ['en-US', 'zh-CN'] as const) {
     await slug.focus()
     await slug.press('ControlOrMeta+A')
     await page.keyboard.insertText(longSlug)
-    const preview = page.locator('.preview').filter({ hasText: `/team/${longSlug}/` })
+    const preview = page.locator('.preview').filter({ hasText: `/team/${longSlug.toLowerCase()}/` })
     await expect(preview).toBeVisible()
     await expect(preview.locator('a')).toHaveCount(0)
     await expect(page.locator(`a[href^="/${longSlug}/"]`)).toHaveCount(0)
@@ -87,7 +87,7 @@ for (const locale of ['en-US', 'zh-CN'] as const) {
     expect(response.status()).toBe(200)
     const organization = (await response.json()) as { name: string; slug: string }
     expect(organization.name).toBe(name)
-    expect(organization.slug).toBe(longSlug)
+    expect(organization.slug).toBe(longSlug.toLowerCase())
     await expect.poll(() => new URL(page.url()).pathname).toBe('/app/settings')
     const account = page.getByRole('region', { name: text.account, exact: true })
     await expect(account).toContainText(name)
@@ -133,7 +133,7 @@ for (const locale of ['en-US', 'zh-CN'] as const) {
     const organizations = await page.request.get(`${app.url}/api/auth/organization/list`)
     expect(organizations.status()).toBe(200)
     const list = (await organizations.json()) as { slug: string }[]
-    expect(list.filter((organization) => organization.slug === 'Recovered-Research')).toHaveLength(
+    expect(list.filter((organization) => organization.slug === 'recovered-research')).toHaveLength(
       1,
     )
   })

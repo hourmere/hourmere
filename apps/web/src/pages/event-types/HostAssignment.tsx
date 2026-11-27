@@ -1,8 +1,11 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import { api, unwrap } from '../../api/client.ts'
 import { MemberReadiness } from '../../components/team-members/MemberReadiness.tsx'
-import { useMemberReadiness } from '../../components/team-members/member-readiness.ts'
+import {
+  type MemberHealth,
+  useMemberReadiness,
+} from '../../components/team-members/member-readiness.ts'
 import { useLoad } from '../../hooks.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import type { UiText } from '../../i18n/translate.ts'
@@ -17,6 +20,12 @@ interface Props {
   error?: UiText | undefined
   organizerError?: UiText | undefined
   set: <K extends keyof EventTypeDraft>(name: K, value: EventTypeDraft[K]) => void
+  onTeamsReadiness?: (observation: TeamsHostReadiness) => void
+}
+
+export type TeamsHostReadiness = {
+  userId: string
+  status: NonNullable<MemberHealth['microsoftTeams']> | 'checking'
 }
 
 interface Host {
@@ -34,6 +43,7 @@ export function HostAssignment({
   error,
   organizerError,
   set,
+  onTeamsReadiness,
 }: Props) {
   const { t, ui } = useI18n()
   const [after, setAfter] = useState<string | undefined>()
@@ -64,6 +74,17 @@ export function HostAssignment({
     role,
     selected.map((member) => ({ id: member.memberId })),
   )
+  const soloHostId = draft.schedulingType === 'individual' ? draft.hostUserIds[0] : undefined
+  const soloMember = selected.find((member) => member.id === soloHostId)
+  const teamsStatus =
+    readiness.status === 'ready' && soloMember
+      ? (readiness.data.get(soloMember.memberId)?.microsoftTeams ?? 'check_failed')
+      : state.status === 'loading' || (soloMember && readiness.status === 'loading')
+        ? 'checking'
+        : 'check_failed'
+  useEffect(() => {
+    if (soloHostId) onTeamsReadiness?.({ userId: soloHostId, status: teamsStatus })
+  }, [soloHostId, teamsStatus, onTeamsReadiness])
   return (
     <section className="panel" aria-labelledby="hosts-heading">
       <h2 id="hosts-heading">{t('Hosts')}</h2>
@@ -162,7 +183,7 @@ export function HostAssignment({
                   )
                 }}
               />
-              {member.name.trim() || t('Unnamed team member')}
+              <bdi>{member.name.trim() || t('Unnamed team member')}</bdi>
             </label>
             {canManage && draft.hostUserIds.includes(member.id) && (
               <>
@@ -224,7 +245,7 @@ export function HostAssignment({
             {members
               .filter((m) => draft.hostUserIds.includes(m.id))
               .map((m) => (
-                <option key={m.id} value={m.id}>
+                <option key={m.id} value={m.id} dir={m.name.trim() ? 'auto' : undefined}>
                   {m.name.trim() || t('Unnamed team member')}
                 </option>
               ))}

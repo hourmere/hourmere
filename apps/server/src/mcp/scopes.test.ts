@@ -16,6 +16,7 @@ const URL = 'http://localhost:4186'
 const scopes = ['full', 'read', 'bookings'] as const
 const all = [
   'whoami',
+  'get_public_team',
   'find_available_slots',
   'create_booking',
   'reschedule_booking',
@@ -541,6 +542,7 @@ describe('CLI scope parity', () => {
     ['whoami', 'whoami'],
     ['profile', 'get_profile'],
     ['catalog', 'list_event_types'],
+    ['team-home', 'get_public_team'],
     ['event', 'get_event_type'],
     ['create-event', 'create_event_type'],
     ['duplicate-event', 'duplicate_event_type'],

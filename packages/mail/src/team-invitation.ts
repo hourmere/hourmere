@@ -1,26 +1,31 @@
 // Rendering only. Invitation business state and eventual mail delivery belong to callers.
 import { type InterfaceLanguage, interfaceLanguage } from '@hourmere/core/language'
-import { mailMessage } from './catalogue.ts'
+import { mailContent, mailMessage } from './catalogue.ts'
 import { formatMailDateTime } from './date-time.ts'
 import type { MailMessage } from './index.ts'
 import { emailButton, emailLayout, emailLinkStyle, emailWrapStyle } from './layout.ts'
-import { emailText, escapeHtml, singleLine, subjectLine } from './text.ts'
+import { emailUserText, emailUserValue, escapeHtml, singleLine, subjectLine } from './text.ts'
 
-export interface TeamInvitationEmailOptions {
+export type TeamInvitationEmailOptions = {
   /** The exact invited address; never substitute an alias or the inviter's address. */
   to: string
   /** Trusted instance configuration (PUBLIC_URL), never a request URL or callback. */
   publicUrl: string
   invitationId: string
   teamName: string
-  /** Display name only; an empty name uses a generic localized label, never an email. */
-  inviterName: string
   /** Better Auth returns Date objects directly and ISO timestamps over HTTP. */
   expiresAt: Date | string
-  /** Explicit inviter choice, then instance default, then English. No URL negotiation. */
+  /** Explicit language, then instance default, then English. No URL negotiation. */
   language?: unknown
   defaultLanguage?: unknown
-}
+} & (
+  | {
+      scimIssued?: false
+      /** Display name only; an empty name uses a generic localized label. */
+      inviterName: string
+    }
+  | { scimIssued: true; inviterName?: never }
+)
 
 function acceptUrl(publicUrl: string, invitationId: string): string {
   let origin: string
@@ -79,6 +84,7 @@ export function teamInvitationEmail({
   publicUrl,
   invitationId,
   teamName,
+  scimIssued,
   inviterName,
   expiresAt,
   language: chosenLanguage,
@@ -88,35 +94,41 @@ export function teamInvitationEmail({
   const url = acceptUrl(publicUrl, invitationId)
   const expiry = expiryText(expiresAt, language)
   if (!to || safeText(to) !== to) throw new Error('Invalid invitation recipient')
-  const team = safeText(teamName) || mailMessage(language, 'teamInvitation.defaultTeam')
-  const inviter = safeText(inviterName) || mailMessage(language, 'teamInvitation.defaultInviter')
-  const t = (key: Parameters<typeof mailMessage>[1]) =>
-    mailMessage(language, key, { team, inviter, email: to, expiry })
-  const words = {
-    subject: t('teamInvitation.subject'),
-    introduction: t('teamInvitation.introduction'),
-    identity: t('teamInvitation.identity'),
-    acceptance: t('teamInvitation.acceptance'),
-    expiry: t('teamInvitation.expiry'),
-    button: t('teamInvitation.button'),
-    fallback: t('teamInvitation.fallback'),
-    footer: t('teamInvitation.footer'),
+  const team = safeText(teamName)
+  const inviter = scimIssued ? undefined : safeText(inviterName)
+  const values = {
+    team: team
+      ? emailUserValue(team, language)
+      : mailMessage(language, 'teamInvitation.defaultTeam'),
+    inviter: inviter
+      ? emailUserValue(inviter, language)
+      : mailMessage(language, 'teamInvitation.defaultInviter'),
+    email: emailUserValue(to, language, 'ltr'),
+    expiry,
   }
+  const t = (key: Parameters<typeof mailMessage>[1]) => mailContent(language, key, values)
   // The shared header limit counts UTF-16 units and can split an astral character.
-  const subject = subjectLine(words.subject).toWellFormed()
-  const facts = [words.introduction, words.identity, words.acceptance, words.expiry]
+  const subject = subjectLine(t('teamInvitation.subject').text).toWellFormed()
+  const facts = [
+    t(scimIssued ? 'teamInvitation.scimIntroduction' : 'teamInvitation.introduction'),
+    t('teamInvitation.identity'),
+    t('teamInvitation.acceptance'),
+    t('teamInvitation.expiry'),
+  ]
+  const button = t('teamInvitation.button').text
+  const footer = t('teamInvitation.footer')
   return {
     sensitive: true,
     to,
     subject,
-    text: `Hourmere\n\n${facts.join('\n\n')}\n\n${words.button}\n${url}\n\n${words.footer}\n`,
+    text: `Hourmere\n\n${facts.map(({ text }) => text).join('\n\n')}\n\n${button}\n${url}\n\n${footer.text}\n`,
     html: emailLayout(
       language,
       subject,
-      `${facts.map((fact) => `<p>${emailText(fact, language)}</p>`).join('\n')}
-${emailButton(words.button, url, false, language)}
-<p style="color: #555; font-size: 13px; ${emailWrapStyle}">${emailText(words.fallback, language)}<br><a href="${escapeHtml(url)}" style="${emailLinkStyle}">${emailText(url, language)}</a></p>
-<p style="margin-top: 24px; border-top: 1px solid #ddd; padding-top: 16px; color: #555; font-size: 13px;">${emailText(words.footer, language)}</p>`,
+      `${facts.map(({ html }) => `<p>${html}</p>`).join('\n')}
+${emailButton(button, url, false, language)}
+<p style="color: #555; font-size: 13px; ${emailWrapStyle}">${t('teamInvitation.fallback').html}<br><a href="${escapeHtml(url)}" style="${emailLinkStyle}">${emailUserText(url, language, 'ltr')}</a></p>
+<p style="margin-top: 24px; border-top: 1px solid #ddd; padding-top: 16px; color: #555; font-size: 13px;">${footer.html}</p>`,
     ),
   }
 }

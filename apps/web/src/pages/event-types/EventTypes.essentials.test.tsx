@@ -1,11 +1,14 @@
 import { readFileSync } from 'node:fs'
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import type { EventType } from '../../api/resources.ts'
 import { chooseLanguage } from '../../i18n/store.ts'
+import { resolveEventTypeEditor } from '../../test/event-type-editor.ts'
 import { fakeApi, json, later, ME, profile, renderApp, signedInAs } from '../../test/fake-api.tsx'
 import { EVENT_TYPE_ID, eventType, schedule } from '../../test/fixtures.ts'
+
+beforeAll(resolveEventTypeEditor)
 
 function setup(saved = eventType()) {
   return fakeApi({

@@ -8,6 +8,7 @@ import {
   AvailabilityInputError,
   type AvailabilityReason,
   type DateOverride,
+  type EventPayment,
   type ExistingBooking,
   type ExplainAvailabilityInput,
   type ExplainedSlot,
@@ -23,6 +24,7 @@ import {
 import { publicAvatarImage } from '@hourmere/core/public-avatar'
 import type { Database, Db, Json } from '@hourmere/db'
 import { type Expression, type ExpressionBuilder, sql } from 'kysely'
+import { jsonArrayFrom } from 'kysely/helpers/postgres'
 import { getPublicBranding, type PublicBranding } from './branding.ts'
 import {
   automaticMeet,
@@ -37,7 +39,7 @@ import type { PublicContext, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { assertCanExplainEventType } from './event-types.ts'
 import { requireGroupSlotConferenceUsable } from './group-conferences.ts'
-import { assertHosts, hasValidHostShape } from './hosts.ts'
+import { assertHosts, currentTeamHostMembership, hasValidHostShape } from './hosts.ts'
 import { LOCATION_KINDS, type LocationKind } from './location-kinds.ts'
 import {
   type LocationOption,
@@ -45,7 +47,9 @@ import {
   publicLocationOptions,
   selectLocationOption,
 } from './location-options.ts'
+import { microsoftTeamsLocation, requireMicrosoftTeamsHost } from './microsoft-teams.ts'
 import { type OneTimeBookingLinkPrefill, resolveOneTimeBookingLink } from './one-time-links.ts'
+import { PAYMENT_HOLD_MINUTES } from './payment-provider.ts'
 import { parseQuestions, type Question } from './questions.ts'
 import { eligibleRoundRobinHosts } from './round-robin.ts'
 import type { SuccessRedirect } from './success-redirect.ts'
@@ -126,6 +130,7 @@ export interface PublicEventTypeRecord {
   description: string | null
   durationMinutes: number
   allowedDurationsMinutes: number[]
+  payment?: EventPayment | null
   /** Distance between candidate starts (the duration unless set). */
   slotStepMinutes: number
   configuredSlotStepMinutes: number | null
@@ -191,6 +196,7 @@ async function findPersonalEventType(
       'et.description',
       'et.duration_minutes',
       'et.allowed_durations_minutes',
+      'et.payment',
       'et.slot_step_minutes',
       'et.minimum_notice_minutes',
       'et.booking_window_days',
@@ -250,6 +256,7 @@ async function findPersonalEventType(
     description: row.description,
     durationMinutes: row.duration_minutes,
     allowedDurationsMinutes: row.allowed_durations_minutes,
+    payment: row.payment as EventPayment | null,
     slotStepMinutes: row.slot_step_minutes ?? row.duration_minutes,
     configuredSlotStepMinutes: row.slot_step_minutes,
     minimumNoticeMinutes: row.minimum_notice_minutes,
@@ -270,9 +277,9 @@ async function findPersonalEventType(
 }
 
 /**
- * A team link has its own namespace, /team/{teamSlug}/{slug}. Organization slugs use exact
- * stored case (their unique constraint is case-sensitive), unlike lowercase personal handles.
- * Only existing individual types with exactly one current team member as host are served.
+ * A team link has its own namespace, /team/{teamSlug}/{slug}. The lookup keeps the
+ * stored case for existing links. New team slugs are lowercase.
+ * Team events require a supported scheduling mode and current eligible hosts.
  */
 export async function findPublicTeamEventType(
   db: Db,
@@ -290,31 +297,12 @@ async function findTeamEventType(
   identity: { teamSlug: string; slug: string } | { id: string },
   options: { lock?: boolean; explain?: boolean; scimResourcesEnabled?: boolean | undefined } = {},
 ): Promise<PublicEventTypeRecord | undefined> {
-  let query = db
-    .selectFrom('auth.organization as o')
-    .innerJoin('event_types as et', 'et.organization_id', 'o.id')
+  let query = activeTeamEvents(db)
+    .innerJoin('auth.organization as o', 'o.id', 'et.organization_id')
     .selectAll('et')
     .select(['o.slug as team_slug', 'o.name as team_name'])
     .where('o.id', 'not in', (eb) =>
       eb.selectFrom('personal_organizations').select('organization_id'),
-    )
-    .where('et.owner_user_id', 'is', null)
-    .where('et.is_active', '=', true)
-    .where('et.deleted_at', 'is', null)
-    .where((eb) =>
-      eb.or([
-        eb('et.scheduling_type', 'in', ['individual', 'collective']),
-        eb.and([
-          eb('et.scheduling_type', '=', 'round_robin'),
-          eb.exists(
-            eb
-              .selectFrom('round_robin_state as rr')
-              .select('rr.event_type_id')
-              .whereRef('rr.event_type_id', '=', 'et.id')
-              .where('rr.enabled', '=', true),
-          ),
-        ]),
-      ]),
     )
   if ('id' in identity) query = query.where('et.id', '=', identity.id)
   else query = query.where('o.slug', '=', identity.teamSlug).where('et.slug', '=', identity.slug)
@@ -397,6 +385,7 @@ async function findTeamEventType(
     description: row.description,
     durationMinutes: row.duration_minutes,
     allowedDurationsMinutes: row.allowed_durations_minutes,
+    payment: row.payment as EventPayment | null,
     slotStepMinutes: row.slot_step_minutes ?? row.duration_minutes,
     configuredSlotStepMinutes: row.slot_step_minutes,
     minimumNoticeMinutes: row.minimum_notice_minutes,
@@ -415,6 +404,29 @@ async function findTeamEventType(
     hostTimeZone: views[0]?.timeZone ?? 'UTC',
     team: { name: row.team_name, slug: row.team_slug },
   }
+}
+
+function activeTeamEvents(db: Db) {
+  return db
+    .selectFrom('event_types as et')
+    .where('et.owner_user_id', 'is', null)
+    .where('et.is_active', '=', true)
+    .where('et.deleted_at', 'is', null)
+    .where((eb) =>
+      eb.or([
+        eb('et.scheduling_type', 'in', ['individual', 'collective']),
+        eb.and([
+          eb('et.scheduling_type', '=', 'round_robin'),
+          eb.exists(
+            eb
+              .selectFrom('round_robin_state as rr')
+              .select('rr.event_type_id')
+              .whereRef('rr.event_type_id', '=', 'et.id')
+              .where('rr.enabled', '=', true),
+          ),
+        ]),
+      ]),
+    )
 }
 
 /** Resolve by capability-bound identity, without requiring a public catalog address. */
@@ -465,7 +477,7 @@ export async function getOneTimeBookingPage(
   const eventType = await findOneTimeEventType(ctx.db, link.eventTypeId, {
     scimResourcesEnabled: ctx.scimResourcesEnabled,
   })
-  if (!eventType) throw new DomainError('not_found', 'one_time_link_not_found')
+  if (!eventType || eventType.payment) throw new DomainError('not_found', 'one_time_link_not_found')
   const page = publicEventType(
     { ...eventType, waitlistEnabled: false },
     false,
@@ -503,6 +515,8 @@ export function eventTypeNotFound(): DomainError {
 
 /** What a public booking page shows. Location details are only revealed once booked. */
 export interface PublicEventType {
+  payment?: EventPayment
+  paymentAvailable?: boolean
   branding?: PublicBranding
   handle: string
   slug: string
@@ -534,7 +548,12 @@ export async function getPublicEventType(
     scimResourcesEnabled: ctx.scimResourcesEnabled,
   })
   if (!event) throw eventTypeNotFound()
-  const page = publicEventType(event, ctx.smtpConfigured, ctx.smsRemindersAvailable)
+  const page = publicEventType(
+    event,
+    ctx.smtpConfigured,
+    ctx.smsRemindersAvailable,
+    ctx.paidCheckoutAvailable,
+  )
   const branding = await getPublicBranding(ctx.db, event.organizationId)
   return { ...page, ...(branding && { branding }) }
 }
@@ -556,6 +575,7 @@ function publicEventType(
   et: PublicEventTypeRecord | undefined,
   smtpConfigured = false,
   smsRemindersAvailable = false,
+  paidCheckoutAvailable = false,
 ): PublicEventType {
   if (!et) throw eventTypeNotFound()
   return {
@@ -564,6 +584,7 @@ function publicEventType(
     title: et.title,
     description: et.description,
     durationMinutes: et.durationMinutes,
+    ...(et.payment && { payment: et.payment, paymentAvailable: paidCheckoutAvailable }),
     ...(et.allowedDurationsMinutes.length > 1 && {
       allowedDurationsMinutes: [...et.allowedDurationsMinutes].sort((a, b) => a - b),
     }),
@@ -573,6 +594,7 @@ function publicEventType(
     allowGuests: et.allowGuests,
     smsRemindersEnabled: smsRemindersAvailable && et.smsRemindersEnabled,
     ...(smtpConfigured &&
+      !et.payment &&
       et.waitlistEnabled &&
       et.schedulingType === 'individual' &&
       et.hostUserIds.length === 1 &&
@@ -589,16 +611,120 @@ function publicEventType(
   }
 }
 
-/** One event type as the host's page (/{handle}) lists it. */
-export interface PublicEventTypeSummary {
-  branding?: PublicBranding
-  /** Team space name when the event belongs outside the host’s personal space. */
-  organizationName?: string
+/** The event fields a public directory needs to render a booking link. */
+export interface PublicDirectoryEvent {
   slug: string
   title: string
   description: string | null
   durationMinutes: number
   location: { kind: LocationKind } | null
+}
+
+/** One event type as the host's page (/{handle}) lists it. */
+export interface PublicEventTypeSummary extends PublicDirectoryEvent {
+  branding?: PublicBranding
+  /** Team space name when the event belongs outside the host’s personal space. */
+  organizationName?: string
+}
+
+/** The public team homepage identity and its listed events. */
+export interface PublicTeam {
+  team: { name: string; slug: string }
+  eventTypes: PublicDirectoryEvent[]
+}
+
+const publicTeamNotFound = () =>
+  new DomainError('not_found', 'team_not_found', 'No such team booking page')
+
+export async function getPublicTeam(
+  ctx: PublicContext,
+  { handle }: { handle: string },
+): Promise<PublicTeam> {
+  const allowedIds = ctx.teamPublicHomeOrganizationIds
+  if (!allowedIds?.length || !isPublicTeamSlug(handle)) throw publicTeamNotFound()
+
+  // Read publication, listing and host eligibility from one snapshot. Hidden or deleted
+  // events never enter the result, even when their direct link still resolves.
+  const team = await ctx.db
+    .selectFrom('auth.organization as o')
+    .select(['o.name', 'o.slug'])
+    .select((eb) =>
+      jsonArrayFrom(
+        activeTeamEvents(ctx.db)
+          .select([
+            'et.slug',
+            'et.title',
+            'et.description',
+            'et.duration_minutes',
+            'et.location',
+            'et.scheduling_type',
+          ])
+          .select((eb) =>
+            jsonArrayFrom(
+              eb
+                .selectFrom('event_type_hosts as h')
+                .innerJoin('auth.user as u', 'u.id', 'h.user_id')
+                .select('h.user_id')
+                .select((eb) =>
+                  eb
+                    .and([
+                      eb('u.emailVerified', '=', true),
+                      eb.exists(
+                        currentTeamHostMembership(
+                          ctx.db,
+                          eb.ref('et.organization_id'),
+                          ctx.scimResourcesEnabled,
+                        )
+                          .select('id')
+                          .where('userId', '=', eb.ref('h.user_id')),
+                      ),
+                    ])
+                    .as('eligible'),
+                )
+                .whereRef('h.event_type_id', '=', 'et.id')
+                .limit(9),
+            ).as('hosts'),
+          )
+          .where('et.organization_id', '=', eb.ref('o.id'))
+          .where('et.is_hidden', '=', false)
+          .orderBy('et.position')
+          .orderBy('et.id'),
+      ).as('events'),
+    )
+    .where('o.id', 'in', allowedIds)
+    .where('o.slug', '=', handle)
+    .where('o.id', 'not in', (eb) =>
+      eb.selectFrom('personal_organizations').select('organization_id'),
+    )
+    .executeTakeFirst()
+  if (!team) throw publicTeamNotFound()
+
+  return {
+    team: { name: team.name, slug: team.slug },
+    eventTypes: team.events
+      .filter((event) => {
+        if (
+          !hasValidHostShape(
+            event.scheduling_type,
+            event.hosts.map((host) => host.user_id),
+          )
+        )
+          return false
+        return event.scheduling_type === 'round_robin'
+          ? event.hosts.some((host) => host.eligible)
+          : event.hosts.every((host) => host.eligible)
+      })
+      .map((event) => {
+        const location = parseLocation(event.location)
+        return {
+          slug: event.slug,
+          title: event.title,
+          description: event.description,
+          durationMinutes: event.duration_minutes,
+          location: location && { kind: location.kind },
+        }
+      }),
+  }
 }
 
 /** What the host's page at /{handle} shows: who they are and what can be booked. */
@@ -822,7 +948,7 @@ export async function listOneTimeBookingSlots(
   const et = await findOneTimeEventType(ctx.db, link.eventTypeId, {
     scimResourcesEnabled: ctx.scimResourcesEnabled,
   })
-  if (!et) throw new DomainError('not_found', 'one_time_link_not_found')
+  if (!et || et.payment) throw new DomainError('not_found', 'one_time_link_not_found')
   checkSlotRange(input.start, input.end)
   return eventSlots(ctx, input, et)
 }
@@ -850,13 +976,22 @@ export function selectBookableLocationOption(
  * Checks that the option a query would book is usable and returns the round-robin pool that
  * can host it; Meet narrows that pool to hosts with a Meet-capable destination.
  */
-async function requireLocationAvailability(
-  ctx: PublicContext,
+export async function requireLocationAvailability(
+  ctx: Pick<PublicContext, 'db' | 'automaticMeet' | 'automaticZoom' | 'microsoftCalendarEnabled'>,
   et: PublicEventTypeRecord,
   optionId?: string,
 ): Promise<string[]> {
   const chosenOption = selectBookableLocationOption(et, optionId)
   return withLocationAvailability(et.locations, optionId, async () => {
+    if (microsoftTeamsLocation(chosenOption)) {
+      await requireMicrosoftTeamsHost(
+        ctx.db,
+        et.schedulingType,
+        et.hostUserIds,
+        et.id,
+        ctx.microsoftCalendarEnabled,
+      )
+    }
     if (automaticZoom(chosenOption)) {
       if (et.schedulingType !== 'individual' || et.hostUserIds.length !== 1)
         throw new DomainError('conflict', 'automatic_zoom_host_policy')
@@ -894,17 +1029,21 @@ export async function eventSlots(
 ): Promise<SlotView[]> {
   const durationMinutes = selectDurationMinutes(et, input.durationMinutes)
   const now = ctx.now()
+  const start = et.payment
+    ? later(input.start, now.add({ minutes: PAYMENT_HOLD_MINUTES }))
+    : input.start
+  if (et.payment && !ctx.paidCheckoutAvailable) return []
   if (et.bookingMode === 'group') return groupEventSlots(ctx, input, et, durationMinutes, now)
   const eligibleHostUserIds = await requireLocationAvailability(ctx, et, input.locationOptionId)
   // Without an explicit step, each selected duration supplies its own start grid.
   const rules = { ...et, slotStepMinutes: et.configuredSlotStepMinutes ?? durationMinutes }
-  if (!hasBookablePart(rules, input.start, input.end, now, et.hostUserIds.length)) return []
+  if (!hasBookablePart(rules, start, input.end, now, et.hostUserIds.length)) return []
   if (et.schedulingType === 'round_robin')
     return unionRoundRobinSlots(
       ctx.db,
       et.id,
       eligibleHostUserIds,
-      input.start,
+      start,
       input.end,
       now,
       durationMinutes,
@@ -913,7 +1052,7 @@ export async function eventSlots(
     ctx.db,
     et.id,
     et.hostUserIds,
-    input.start,
+    start,
     input.end,
     now,
     undefined,
@@ -973,7 +1112,11 @@ async function groupEventSlots(
     try {
       await requireGroupSlotConferenceUsable(ctx, ctx.db, slot)
     } catch (error) {
-      if (error instanceof DomainError && error.code === 'slot_unavailable') continue
+      if (
+        error instanceof DomainError &&
+        (error.code === 'slot_unavailable' || error.code === 'location_unavailable')
+      )
+        continue
       throw error
     }
     offered.push({

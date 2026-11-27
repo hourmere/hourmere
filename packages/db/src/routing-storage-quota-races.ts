@@ -1,9 +1,7 @@
 import { setTimeout } from 'node:timers/promises'
-import { Kysely, PostgresDialect } from 'kysely'
 import type pg from 'pg'
 import { expect } from 'vitest'
 import { lockOrganization } from '../../scheduling/src/hosts.ts'
-import type { Database } from './index.ts'
 import {
   formValues,
   insertRow,
@@ -11,6 +9,7 @@ import {
   versionValues,
 } from './routing-storage-fixtures.ts'
 import { readRoutingStorageLimits } from './routing-storage-limits.ts'
+import { withBorrowedConnection } from './testing.ts'
 
 export async function checkQuotaRace(
   f: RoutingFixture,
@@ -128,29 +127,8 @@ export async function checkQuotaRace(
 }
 
 // Use the production lockOrganization implementation on the checked-out transaction.
-// The adapter borrows that client and neither creates a pool nor releases its owner.
-async function shareOrganization(client: pg.PoolClient, organization: string) {
-  const db = new Kysely<Database>({
-    dialect: new PostgresDialect({
-      pool: {
-        options: {},
-        connect: async () =>
-          new Proxy(client, {
-            get(target, property) {
-              if (property === 'release') return () => {}
-              const value = Reflect.get(target, property)
-              return typeof value === 'function' ? value.bind(target) : value
-            },
-          }),
-        end: async () => {},
-      },
-    }),
-  })
-  try {
-    await lockOrganization(db, organization)
-  } finally {
-    await db.destroy()
-  }
+function shareOrganization(client: pg.PoolClient, organization: string) {
+  return withBorrowedConnection(client, (db) => lockOrganization(db, organization))
 }
 
 export async function checkSharedOrganizationLocks(f: RoutingFixture, booking = false) {

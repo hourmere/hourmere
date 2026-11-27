@@ -7,11 +7,22 @@ import {
   type InterfaceLanguage,
   interfaceLanguage,
 } from '@hourmere/core/language'
-import { type MailKey, mailMessage as message } from './catalogue.ts'
+import { formatPaymentAmount } from '@hourmere/core/payment'
+import { type MailKey, mailContent, mailMessage as message } from './catalogue.ts'
 import { formatMailDateTime } from './date-time.ts'
 import type { MailAttachment, MailMessage } from './index.ts'
 import { emailButton, emailLayout, emailLinkStyle, emailWrapStyle } from './layout.ts'
-import { emailText, escapeHtml, linkableUrl, multiLine, singleLine, subjectLine } from './text.ts'
+import {
+  type EmailContent,
+  emailText,
+  emailUserText,
+  emailUserValue,
+  escapeHtml,
+  linkableUrl,
+  multiLine,
+  singleLine,
+  subjectLine,
+} from './text.ts'
 
 export type BookingEmailKind =
   | 'confirmed'
@@ -26,6 +37,12 @@ export type MeetingLocation =
   | { kind: 'phone'; number: string }
   | { kind: 'address'; address: string }
   | { kind: 'custom'; text: string }
+  | TeamsMeetingLocation
+
+export type TeamsMeetingLocation = { kind: 'microsoft_teams' } & (
+  | { status: 'ready'; url: string }
+  | { status: 'join_url_pending' | 'teams_unavailable' | 'writeback_failed' }
+)
 
 export interface BookingEmailMeeting {
   eventName: string
@@ -46,12 +63,20 @@ export interface BookingEmailMeeting {
   previous?: { start: Temporal.Instant; end: Temporal.Instant } | undefined
   /** For `cancelled`: the reason given, if any. */
   cancelReason?: string | null | undefined
+  payment?:
+    | {
+        amountMinor: number
+        currency: string
+        refundStatus: 'requested' | 'pending' | 'succeeded' | 'failed' | null
+      }
+    | undefined
 }
 
 /** Links of the invitee's manage page; the secret travels in the URL fragment. */
 export interface ManageLinks {
   reschedule: string
   cancel: string
+  details?: string | undefined
 }
 
 /** The invitee or a guest. Only the invitee gets manage links. */
@@ -76,7 +101,7 @@ export interface HostRecipient {
   timeZone: string
   locale?: string | null | undefined
   /** The invitee's answers to the booking questions. */
-  answers: readonly { question: string; answer: string }[]
+  answers: readonly { question: string; answer: string | readonly string[] }[]
   /** Other required hosts, names only; never contact addresses. */
   coHostNames?: readonly string[] | undefined
 }
@@ -120,6 +145,39 @@ const meetingHosts = (
     ? bookingHostNames(meeting.hostNames, language, compact)
     : singleLine(meeting.hostName)
 
+/** Keep localized separators outside each host's independent direction boundary. */
+function hostListContent(names: readonly string[], language: InterfaceLanguage): EmailContent {
+  const list = new Intl.ListFormat(formattingLocale(language), { type: 'conjunction' })
+  const namesAndFallbacks = names.map((name) => singleLine(name) || message(language, 'Host'))
+  const parts = list.formatToParts(namesAndFallbacks)
+  return {
+    text: parts.map(({ value }) => value).join(''),
+    html: parts
+      .map(({ type, value }) =>
+        type === 'element' ? emailUserText(value, language) : emailText(value, language),
+      )
+      .join(''),
+  }
+}
+
+function meetingHostContent(
+  meeting: Pick<BookingEmailMeeting, 'hostName' | 'hostNames'>,
+  language: InterfaceLanguage,
+): EmailContent {
+  return meeting.hostNames?.length
+    ? hostListContent(meeting.hostNames, language)
+    : emailUserValue(singleLine(meeting.hostName), language)
+}
+
+function personContent(name: string, email: string, language: InterfaceLanguage): EmailContent {
+  const person = emailUserValue(singleLine(name), language)
+  const address = emailUserValue(singleLine(email), language, 'ltr')
+  return {
+    text: `${person.text} <${address.text}>`,
+    html: `${person.html} &lt;${address.html}&gt;`,
+  }
+}
+
 /** Generated answer labels follow the host language; custom answers remain untouched. */
 export function bookingAnswerText(value: unknown, language: InterfaceLanguage): string | undefined {
   if (typeof value === 'string') return value
@@ -128,6 +186,20 @@ export function bookingAnswerText(value: unknown, language: InterfaceLanguage): 
   if (Array.isArray(value))
     return value.filter((v) => typeof v === 'string').join(message(language, 'answer.separator'))
   return undefined
+}
+
+function bookingAnswerContent(
+  answer: HostRecipient['answers'][number]['answer'],
+  language: InterfaceLanguage,
+): EmailContent {
+  if (typeof answer === 'string') return emailUserValue(multiLine(answer), language)
+  const separator = message(language, 'answer.separator')
+  return {
+    text: multiLine(answer.join(separator)),
+    html: answer
+      .map((option) => emailUserText(multiLine(option), language))
+      .join(emailText(separator, language)),
+  }
 }
 
 // --- Times --------------------------------------------------------------------------------
@@ -223,13 +295,15 @@ function formatShortTime(
 
 // --- Locations ----------------------------------------------------------------------------
 
-/** Recipient-specific phone wording; collected numbers never enter guest payloads. */
+/** Guest payloads omit the invitee's collected phone number and automatic Teams links. */
 export function bookingLocationForRecipient(
   location: MeetingLocation | null,
   inviteePhone: boolean,
   role: 'host' | 'invitee' | 'guest',
   locale?: string | null,
 ): MeetingLocation | null {
+  if (location?.kind === 'microsoft_teams' && role === 'guest')
+    return { kind: 'custom', text: 'Microsoft Teams' }
   if (location?.kind !== 'phone') return location
   const language = interfaceLanguage(locale) ?? 'en'
   const key = inviteePhone
@@ -255,16 +329,41 @@ export function meetingLocationText(location: MeetingLocation): string {
       return multiLine(location.address)
     case 'custom':
       return multiLine(location.text)
+    case 'microsoft_teams':
+      return location.status === 'ready' ? singleLine(location.url) : 'Microsoft Teams'
   }
 }
 
-function locationForText(location: MeetingLocation, language: InterfaceLanguage): string {
-  if (location.kind === 'link' && location.label) {
-    return textField(singleLine(location.label), singleLine(location.url), language)
+export function teamsMeetingNotice(
+  location: TeamsMeetingLocation,
+  locale: string | null | undefined,
+): string | undefined {
+  const language = interfaceLanguage(locale) ?? 'en'
+  if (location.status === 'join_url_pending') return message(language, 'teams.linkPending')
+  if (location.status === 'teams_unavailable') return message(language, 'teams.unavailable')
+  if (location.status === 'writeback_failed') return message(language, 'teams.writebackFailed')
+}
+
+function locationContent(
+  location: MeetingLocation,
+  language: InterfaceLanguage,
+  cancelled: boolean,
+): string | EmailContent {
+  if (location.kind === 'microsoft_teams') {
+    const label = 'Microsoft Teams'
+    const notice = cancelled ? undefined : teamsMeetingNotice(location, language)
+    return notice ? `${label}\n${notice}` : label
   }
-  if (location.kind === 'phone')
-    return `${message(language, 'Phone')} ${singleLine(location.number)}`
-  return meetingLocationText(location)
+  if (location.kind === 'link') {
+    const label = singleLine(location.label ?? '')
+    return label ? emailUserValue(label, language) : message(language, 'Online meeting')
+  }
+  if (location.kind === 'phone') {
+    const label = message(language, 'Phone')
+    const number = emailUserValue(singleLine(location.number), language, 'ltr')
+    return { text: `${label} ${number.text}`, html: `${emailText(label, language)} ${number.html}` }
+  }
+  return emailUserValue(meetingLocationText(location), language)
 }
 
 function joinLabel(
@@ -303,10 +402,10 @@ interface MeetingDates {
 interface Content {
   language: InterfaceLanguage
   subject: string
-  intro: string
+  intro: EmailContent
   /** Label and value, already cleaned. */
-  fields: { label: string; text: string; muted?: boolean }[]
-  answers: readonly { question: string; answer: string }[]
+  fields: { label: string; text: string; html?: string; muted?: boolean }[]
+  answers: readonly { question: string; answer: EmailContent }[]
   hostNote?: { label: string; text: string } | undefined
   join?: { label: string; url: string } | undefined
   bookingUrl?: string | undefined
@@ -314,7 +413,7 @@ interface Content {
   footer?: { language: InterfaceLanguage; text: string } | undefined
   /** Replies to this email do not reach the hosts. */
   replyNotice?: string | undefined
-  receivedWhy?: string
+  receivedWhy?: EmailContent
   meetingDates?: MeetingDates[]
   seriesAction?: { label: string; url: string }
   repairNote?: string
@@ -337,7 +436,7 @@ function render(to: string, c: Content, attachment?: MailAttachment): MailMessag
   const text = [
     'Hourmere',
     '',
-    c.intro,
+    c.intro.text,
     '',
     ...c.fields.map((f) => textField(f.label, f.text, c.language)),
     ...(c.meetingDates ?? []).flatMap(({ label, dates }) => [
@@ -355,7 +454,7 @@ function render(to: string, c: Content, attachment?: MailAttachment): MailMessag
       ? [
           '',
           t('Answers'),
-          ...c.answers.map((a) => `${a.question}\n  ${a.answer.replaceAll('\n', '\n  ')}`),
+          ...c.answers.map((a) => `${a.question}\n  ${a.answer.text.replaceAll('\n', '\n  ')}`),
         ]
       : []),
     ...(c.hostNote ? ['', c.hostNote.label, c.hostNote.text] : []),
@@ -368,7 +467,7 @@ function render(to: string, c: Content, attachment?: MailAttachment): MailMessag
     ...actionText,
     ...(c.footer && !c.manageLinks ? ['', c.footer.text] : []),
     ...(c.replyNotice ? ['', c.replyNotice] : []),
-    ...(c.receivedWhy === undefined ? [] : ['', c.receivedWhy]),
+    ...(c.receivedWhy === undefined ? [] : ['', c.receivedWhy.text]),
   ].join('\n')
 
   const cell = 'padding: 2px 16px 2px 0; vertical-align: top;'
@@ -380,14 +479,14 @@ function render(to: string, c: Content, attachment?: MailAttachment): MailMessag
         [...f.label].length > 20
           ? `white-space: normal; width: 35%; ${emailWrapStyle}`
           : 'white-space: nowrap; width: 1%;'
-      return `<tr><td style="${cell} color: #555; ${labelStyle}">${htmlText(f.label)}</td><td style="${cell} ${emailWrapStyle}${f.muted ? ' color: #777; text-decoration: line-through;' : ''}">${htmlLines(f.text, c.language)}</td></tr>`
+      return `<tr><td style="${cell} color: #555; ${labelStyle}">${htmlText(f.label)}</td><td style="${cell} ${emailWrapStyle}${f.muted ? ' color: #777; text-decoration: line-through;' : ''}">${f.html ?? htmlLines(f.text, c.language)}</td></tr>`
     })
     .join('\n')
   const answers = c.answers.length
     ? `<p style="margin: 24px 0 4px; font-weight: 600;">${htmlText(t('Answers'))}</p>\n${c.answers
         .map(
           (a) =>
-            `<p style="margin: 0 0 12px; ${emailWrapStyle}"><span style="color: #555;">${htmlLines(a.question, c.language)}</span><br>${htmlLines(a.answer, c.language)}</p>`,
+            `<p style="margin: 0 0 12px; ${emailWrapStyle}"><span style="color: #555;">${emailUserText(a.question, c.language)}</span><br>${a.answer.html}</p>`,
         )
         .join('\n')}`
     : ''
@@ -395,7 +494,7 @@ function render(to: string, c: Content, attachment?: MailAttachment): MailMessag
     ? `<p lang="${c.footer.language}" style="margin: ${c.manageLinks ? '0 0 8px' : '24px 0 0'}; color: #555; font-size: 13px; ${emailWrapStyle}">${emailText(c.footer.text, c.footer.language)}</p>`
     : ''
   const hostNote = c.hostNote
-    ? `<p style="margin: 24px 0 4px; font-weight: 600;">${htmlText(c.hostNote.label)}</p>\n<p style="margin: 0 0 12px; ${emailWrapStyle}">${htmlLines(c.hostNote.text, c.language)}</p>`
+    ? `<p style="margin: 24px 0 4px; font-weight: 600;">${htmlText(c.hostNote.label)}</p>\n<p style="margin: 0 0 12px; ${emailWrapStyle}">${emailUserText(c.hostNote.text, c.language)}</p>`
     : ''
   const links = c.manageLinks
     ? `<p style="margin: 24px 0 8px;">${htmlText(t('Need to make a change?'))}</p>
@@ -406,7 +505,7 @@ ${footer}${footer ? '\n' : ''}<p style="margin: 8px 0 0; color: #555; font-size:
   const join = c.join
     ? `<div style="margin: 24px 0 0;">
 ${emailButton(c.join.label, c.join.url, false, c.language)}
-<p style="margin: 4px 0 0; font-size: 13px; ${emailWrapStyle}"><a href="${escapeHtml(c.join.url)}" style="${emailLinkStyle}">${htmlText(c.join.url)}</a></p>
+<p style="margin: 4px 0 0; font-size: 13px; ${emailWrapStyle}"><a href="${escapeHtml(c.join.url)}" style="${emailLinkStyle}">${emailUserText(c.join.url, c.language, 'ltr')}</a></p>
 </div>`
     : ''
   const bookingLink = c.bookingUrl
@@ -440,14 +539,14 @@ ${emailButton(c.join.label, c.join.url, false, c.language)}
       : '',
     c.receivedWhy === undefined
       ? ''
-      : `<p style="margin: 24px 0 0; color: #555; font-size: 13px; ${emailWrapStyle}">${htmlText(c.receivedWhy)}</p>`,
+      : `<p style="margin: 24px 0 0; color: #555; font-size: 13px; ${emailWrapStyle}">${c.receivedWhy.html}</p>`,
   ]
     .filter(Boolean)
     .join('\n')
   const html = emailLayout(
     c.language,
     subject,
-    `<p style="margin: 0 0 16px; ${emailWrapStyle}">${htmlText(c.intro)}</p>
+    `<p style="margin: 0 0 16px; ${emailWrapStyle}">${c.intro.html}</p>
 <table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
 ${rows}
 </table>${afterDetails ? `\n${afterDetails}` : ''}`,
@@ -473,8 +572,8 @@ export function followUpEmail(
   const language = interfaceLanguage(recipient.locale) ?? 'en'
   const t = (key: MailKey, values?: Record<string, string>) => message(language, key, values)
   const event = singleLine(meeting.eventName)
-  const host = meetingHosts(meeting, language)
-  const invitee = singleLine(meeting.inviteeName)
+  const host = meetingHostContent(meeting, language)
+  const invitee = emailUserValue(singleLine(meeting.inviteeName), language)
   const isHost = recipient.role === 'host'
   const note = multiLine(normalizeFollowUpHostNote(options.hostNote ?? ''))
   const bookingUrl = isHost && options.bookingUrl ? linkableUrl(options.bookingUrl) : undefined
@@ -486,20 +585,20 @@ export function followUpEmail(
   const content: Content = {
     language,
     subject: t('followUp.subject', { event }),
-    intro: t('followUp.introduction', { other: isHost ? invitee : host }),
+    intro: mailContent(language, 'followUp.introduction', { other: isHost ? invitee : host }),
     fields: [
-      field(t('What'), event),
+      field(t('What'), emailUserValue(event, language)),
       field(t('When'), formatMeetingTime(meeting.start, meeting.end, recipient.timeZone, language)),
       field(t('Host'), host),
       ...(isHost && recipient.coHostNames?.length
-        ? [field(t('Co-hosts'), bookingHostNames(recipient.coHostNames, language))]
+        ? [field(t('Co-hosts'), hostListContent(recipient.coHostNames, language))]
         : []),
     ],
     answers: [],
     bookingUrl,
     hostNote: note ? { label: t('followUp.hostNote'), text: note } : undefined,
     replyNotice: replyNotice(recipient, undefined, language),
-    receivedWhy: t(receivedWhy, { host, invitee }),
+    receivedWhy: mailContent(language, receivedWhy, { host, invitee }),
   }
   return { ...render(recipient.email, content), sensitive: true }
 }
@@ -518,8 +617,8 @@ export function rescheduleRequestEmail(
   const language = interfaceLanguage(recipient.locale) ?? 'en'
   const t = (key: MailKey, values?: Record<string, string>) => message(language, key, values)
   const event = singleLine(meeting.eventName)
-  const host = meetingHosts(meeting, language)
-  const invitee = singleLine(meeting.inviteeName)
+  const host = meetingHostContent(meeting, language)
+  const invitee = emailUserValue(singleLine(meeting.inviteeName), language)
   const note = multiLine(normalizeFollowUpHostNote(options.hostNote ?? ''))
   const expired = options.expired === true
   const content: Content = {
@@ -528,8 +627,8 @@ export function rescheduleRequestEmail(
       event,
     }),
     intro: expired
-      ? t('rescheduleRequest.expiredIntroduction', { invitee })
-      : t('rescheduleRequest.introduction', {
+      ? mailContent(language, 'rescheduleRequest.expiredIntroduction', { invitee })
+      : mailContent(language, 'rescheduleRequest.introduction', {
           host,
           expiry: formatMailDateTime(
             options.expiresAt.toZonedDateTimeISO(recipient.timeZone),
@@ -538,7 +637,7 @@ export function rescheduleRequestEmail(
           ),
         }),
     fields: [
-      field(t('What'), event),
+      field(t('What'), emailUserValue(event, language)),
       field(t('When'), formatMeetingTime(meeting.start, meeting.end, recipient.timeZone, language)),
       field(t('Host'), host),
     ],
@@ -554,7 +653,8 @@ export function rescheduleRequestEmail(
       expired && recipient.role === 'host' && options.bookingUrl
         ? linkableUrl(options.bookingUrl)
         : undefined,
-    receivedWhy: t(
+    receivedWhy: mailContent(
+      language,
       recipient.role === 'host'
         ? 'You received this email because {invitee} booked a meeting with you via Hourmere.'
         : 'You received this email because you booked a meeting with {host} via Hourmere.',
@@ -566,7 +666,8 @@ export function rescheduleRequestEmail(
 
 // --- Emails -------------------------------------------------------------------------------
 
-const field = (label: string, text: string) => ({ label, text })
+const field = (label: string, content: string | EmailContent) =>
+  typeof content === 'string' ? { label, text: content } : { label, ...content }
 
 /** Says where replies go when no host address is offered, and how to make changes. */
 function replyNotice(
@@ -590,14 +691,13 @@ export function bookingEmail(
 ): MailMessage {
   const language = interfaceLanguage(recipient.locale) ?? 'en'
   const event = singleLine(meeting.eventName)
-  const host = meetingHosts(meeting, language)
-  const invitee = singleLine(meeting.inviteeName)
+  const host = meetingHostContent(meeting, language)
+  const invitee = emailUserValue(singleLine(meeting.inviteeName), language)
   const isHost = recipient.role === 'host'
   // Who the meeting is with, from the recipient's side.
   const other = isHost ? invitee : host
   const t = (key: MailKey, values?: Record<string, string>) => message(language, key, values)
   const when = formatShortTime(meeting.start, recipient.timeZone, language)
-  const values = { event, host, invitee, other, when }
 
   const subjects = {
     conference_failed: 'Meeting link needs attention: {event} on {when}',
@@ -610,9 +710,11 @@ export function bookingEmail(
   } satisfies Record<BookingEmailKind, MailKey>
   const subjectHost = meetingHosts(meeting, language, true)
   const subject = t(subjects[kind], {
-    ...values,
+    event,
     host: subjectHost,
-    other: isHost ? invitee : subjectHost,
+    invitee: invitee.text,
+    other: isHost ? invitee.text : subjectHost,
+    when,
   })
   const intros = {
     conference_failed: isHost
@@ -625,12 +727,21 @@ export function bookingEmail(
     cancelled: 'Your meeting with {other} has been cancelled.',
     reminder: 'Your meeting with {other} is coming up.',
   } satisfies Record<BookingEmailKind, MailKey>
-  const intro = t(intros[kind], values)
+  const intro = mailContent(language, intros[kind], { host, invitee, other })
 
   const fields: Content['fields'] = [
-    field(t('What'), event),
+    field(t('What'), emailUserValue(event, language)),
     field(t('When'), formatMeetingTime(meeting.start, meeting.end, recipient.timeZone, language)),
   ]
+  if (meeting.payment && (kind === 'confirmed' || kind === 'rescheduled' || kind === 'cancelled')) {
+    const amount = formatPaymentAmount(meeting.payment, formattingLocale(language))
+    fields.push(field(t('bookingPayment.label'), t('bookingPayment.paid', { amount })))
+    if (kind === 'cancelled' && meeting.payment.refundStatus) {
+      fields.push(
+        field(t('bookingPayment.refund'), t(`bookingPayment.${meeting.payment.refundStatus}`)),
+      )
+    }
+  }
   if (isHost && comparisonZone(meeting.inviteeTimeZone) !== comparisonZone(recipient.timeZone)) {
     fields.push(
       field(t("Invitee's time"), formatShortTime(meeting.start, meeting.inviteeTimeZone, language)),
@@ -650,30 +761,29 @@ export function bookingEmail(
       muted: true,
     })
   }
-  if (meeting.location) {
-    const location = meeting.location
-    // Join URLs belong to the action below the details, and never to a cancelled email.
-    const locationText =
-      location.kind === 'link'
-        ? singleLine(location.label ?? '') || t('Online meeting')
-        : locationForText(location, language)
-    fields.push(field(t('Where'), locationText))
+  const location = meeting.location
+  const teams = location?.kind === 'microsoft_teams' ? location : undefined
+  if (location) {
+    fields.push(field(t('Where'), locationContent(location, language, kind === 'cancelled')))
   } else if (kind !== 'conference_failed') {
     fields.push(
       field(t('Where'), t('No location has been specified. Contact the host for meeting details.')),
     )
   }
   if (isHost) {
-    fields.push(field(t('Invitee'), `${invitee} <${singleLine(meeting.inviteeEmail)}>`))
+    fields.push(
+      field(t('Invitee'), personContent(meeting.inviteeName, meeting.inviteeEmail, language)),
+    )
     if (recipient.coHostNames?.length) {
-      fields.push(field(t('Co-hosts'), bookingHostNames(recipient.coHostNames, language)))
+      fields.push(field(t('Co-hosts'), hostListContent(recipient.coHostNames, language)))
     }
     if (meeting.guests?.length) {
+      const guests = meeting.guests.map((guest) => personContent(guest.name, guest.email, language))
       fields.push(
-        field(
-          t('Guests'),
-          meeting.guests.map((g) => `${singleLine(g.name)} <${singleLine(g.email)}>`).join('\n'),
-        ),
+        field(t('Guests'), {
+          text: guests.map((guest) => guest.text).join('\n'),
+          html: guests.map((guest) => guest.html).join('<br>'),
+        }),
       )
     }
   } else {
@@ -681,13 +791,16 @@ export function bookingEmail(
   }
   if (kind === 'cancelled' && meeting.cancelReason) {
     const reason = multiLine(meeting.cancelReason)
-    if (reason) fields.push(field(t('Reason'), reason))
+    if (reason) fields.push(field(t('Reason'), emailUserValue(reason, language)))
   }
 
   const answers = isHost
     ? recipient.answers
-        .map((a) => ({ question: singleLine(a.question), answer: multiLine(a.answer) }))
-        .filter((a) => a.question && a.answer)
+        .map((a) => ({
+          question: singleLine(a.question),
+          answer: bookingAnswerContent(a.answer, language),
+        }))
+        .filter((a) => a.question && a.answer.text)
     : []
   const manageLinks =
     recipient.role === 'attendee' && kind !== 'cancelled' ? recipient.manageLinks : undefined
@@ -699,16 +812,23 @@ export function bookingEmail(
     kind !== 'cancelled' && kind !== 'conference_failed' && invitation
       ? { language, text: t(`calendar.email.${footerRole}`) }
       : undefined
-  const joinUrl = meeting.location?.kind === 'link' ? linkableUrl(meeting.location.url) : null
+  const joinLocation =
+    location?.kind === 'link'
+      ? location
+      : teams?.status === 'ready'
+        ? { kind: 'link' as const, label: 'Microsoft Teams', url: teams.url }
+        : undefined
+  const joinUrl = joinLocation && linkableUrl(joinLocation.url)
   const join =
-    joinUrl &&
-    meeting.location?.kind === 'link' &&
-    kind !== 'cancelled' &&
-    kind !== 'conference_failed'
-      ? { label: joinLabel(meeting.location, language), url: joinUrl }
+    joinLocation && joinUrl && kind !== 'cancelled' && kind !== 'conference_failed'
+      ? { label: joinLabel(joinLocation, language), url: joinUrl }
       : undefined
-  const bookingUrl =
-    isHost && options.bookingUrl ? (linkableUrl(options.bookingUrl) ?? undefined) : undefined
+  const bookingPage = isHost
+    ? options.bookingUrl
+    : teams?.status === 'join_url_pending'
+      ? manageLinks?.details
+      : undefined
+  const bookingUrl = bookingPage ? linkableUrl(bookingPage) : undefined
   // Cancellation and suppressed invitations can omit manage links; identity still
   // distinguishes the person who booked from the guests they added.
   const receivedWhy = isHost
@@ -730,7 +850,7 @@ export function bookingEmail(
       manageLinks,
       footer,
       replyNotice: replyNotice(recipient, manageLinks, language),
-      receivedWhy: t(receivedWhy, { host, invitee }),
+      receivedWhy: mailContent(language, receivedWhy, { host, invitee }),
     },
     options.attachment,
   )
@@ -835,8 +955,9 @@ export function seriesBookingEmail(
   const language = interfaceLanguage(isHost ? recipient.locale : series.locale) ?? 'en'
   const t = (key: MailKey, values?: Record<string, string>) => message(language, key, values)
   const event = singleLine(series.eventName)
-  const host = meetingHosts(series, language) || t('Host')
-  const invitee = singleLine(series.inviteeName)
+  const hostContent = meetingHostContent(series, language)
+  const host = hostContent.text ? hostContent : t('Host')
+  const invitee = emailUserValue(singleLine(series.inviteeName), language)
   const reason = kind === 'cancelled' && series.cancelReason ? multiLine(series.cancelReason) : ''
 
   const dates = (label: MailKey, members: readonly SeriesEmailMember[]): MeetingDates => ({
@@ -880,10 +1001,14 @@ export function seriesBookingEmail(
   const plural = new Intl.PluralRules(locale).select(count) === 'one' ? 'One' : 'Other'
   const intro =
     kind === 'confirmed'
-      ? t(`series.confirmed.${recipient.role}`, { host, invitee })
-      : t(`series.${kind === 'cancelled' ? 'cancelled' : 'linkUpdate'}.body${plural}`, {
-          count: new Intl.NumberFormat(locale).format(count),
-        })
+      ? mailContent(language, `series.confirmed.${recipient.role}`, { host, invitee })
+      : mailContent(
+          language,
+          `series.${kind === 'cancelled' ? 'cancelled' : 'linkUpdate'}.body${plural}`,
+          {
+            count: new Intl.NumberFormat(locale).format(count),
+          },
+        )
   const repair =
     isHost &&
     kind !== 'cancelled' &&
@@ -899,9 +1024,9 @@ export function seriesBookingEmail(
       subject: t(seriesSubjectKeys[kind], { event }),
       intro,
       fields: [
-        field(t('What'), event),
+        field(t('What'), emailUserValue(event, language)),
         isHost ? field(t('Invitee'), invitee) : field(t('Host'), host),
-        ...(reason ? [field(t('Reason'), reason)] : []),
+        ...(reason ? [field(t('Reason'), emailUserValue(reason, language))] : []),
       ],
       answers: [],
       meetingDates: meetingDates.filter((section) => section.dates.length > 0),
