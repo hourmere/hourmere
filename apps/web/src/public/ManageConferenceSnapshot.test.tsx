@@ -98,7 +98,7 @@ describe.each(providers)('%s booking snapshot adoption', (provider, join, joinLa
       }
       const responses = [
         ...(transition === 'conference poll' ? [pending(provider)] : []),
-        replaced(provider),
+        { ...replaced(provider), wasRescheduled: true },
         next,
       ]
       let reads = 0

@@ -180,6 +180,7 @@ describe('documentation table rendering', () => {
         '|---|---|---|',
         '| `DATABASE_URL` | Required | PostgreSQL URL, for example `postgres://hourmere@db:5432/hourmere`. |',
         '| `PUBLIC_URL` | `http://localhost:<PORT>` | Origin. |',
+        '| `EXAMPLE_URL` | `https://docs.example.test/guide?mode=full#example` | Example. |',
         '',
       ].join('\n'),
     )
@@ -196,6 +197,13 @@ describe('documentation table rendering', () => {
       '<td role="cell" data-cell="code" data-label="Default"><code>http://<wbr>localhost:&lt;PORT&gt;</code></td>',
     )
     expect(html).toContain('<td role="cell" data-cell="short" data-label="Meaning">Origin.</td>')
+
+    const document = new JSDOM(html).window.document
+    const url = document.querySelector('tbody tr:last-child td[data-cell="code"] code')
+    expect(url?.innerHTML).toBe(
+      'https://<wbr>docs.<wbr>example.<wbr>test/<wbr>guide?<wbr>mode=<wbr>full#<wbr>example',
+    )
+    expect(url?.textContent).toBe('https://docs.example.test/guide?mode=full#example')
   })
 })
 

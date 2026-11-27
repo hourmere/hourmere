@@ -4,6 +4,7 @@ import { TimeZonePicker } from '../components/TimeZonePicker.tsx'
 import { useI18n } from '../i18n/runtime.tsx'
 import type { UiText } from '../i18n/translate.ts'
 import { failureMessage, loadSlotsInRange, type Slot, type SlotLoader } from './api.ts'
+import { BookingFactIcon } from './BookingFactIcon.tsx'
 import {
   addMonths,
   compareMonths,
@@ -65,6 +66,7 @@ interface SlotPickerProps {
   timeZone: string
   onTimeZoneChange: (timeZone: string) => void
   timeZoneError?: UiText | undefined
+  showTimeZoneIcon?: boolean
   locale: string
   /** The current time; slots before it are not asked for. */
   now: number
@@ -136,6 +138,7 @@ export function SlotPicker({
   timeZone,
   onTimeZoneChange,
   timeZoneError,
+  showTimeZoneIcon,
   locale,
   now,
   selected,
@@ -419,6 +422,7 @@ export function SlotPicker({
             now={now}
             referenceDate={referenceDate}
             error={timeZoneError}
+            captionIcon={showTimeZoneIcon && <BookingFactIcon name="globe" />}
           />
         </div>
         <div className="picker-slots">

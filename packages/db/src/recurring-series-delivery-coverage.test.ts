@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { insertRecord } from './group-seats-fixtures.ts'
 import { createSeries, createTenant } from './recurring-series-protections.ts'
 import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
+import { MIGRATION_COVERAGE_TIMEOUT } from './testing/migration-replay.ts'
 import { createTestDatabase, reuseConnectionsAfterErrors, type TestDatabase } from './testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -421,15 +422,19 @@ describe.skipIf(!serverUrl)('recurring series delivery storage', () => {
 })
 
 describe.skipIf(!serverUrl)('recurring series delivery constraint coverage', () => {
-  it('fails a protection assertion when any 0127 object is dropped', async () => {
-    const report = await checkConstraintCoverage({
-      serverUrl: serverUrl as string,
-      migration,
-      assertions: assertDeliveryStorage,
-    })
-    expect(report.problems).toEqual([])
-    expect(report.results.filter(({ status }) => status === 'covered')).toHaveLength(
-      report.objects.length,
-    )
-  }, 600_000)
+  it(
+    'fails a protection assertion when any 0127 object is dropped',
+    async () => {
+      const report = await checkConstraintCoverage({
+        serverUrl: serverUrl as string,
+        migration,
+        assertions: assertDeliveryStorage,
+      })
+      expect(report.problems).toEqual([])
+      expect(report.results.filter(({ status }) => status === 'covered')).toHaveLength(
+        report.objects.length,
+      )
+    },
+    MIGRATION_COVERAGE_TIMEOUT,
+  )
 })

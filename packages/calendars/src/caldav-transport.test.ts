@@ -78,6 +78,15 @@ describe('CalDAV pinned transport', () => {
     await expect(sendCalDav(input())).rejects.toMatchObject({ code: 'destination_refused' })
     expect(network.request).not.toHaveBeenCalled()
   })
+  it('rejects a special-use hostname before DNS or HTTPS', async () => {
+    network.lookup.mockResolvedValue([{ address: '8.8.8.8', family: 4 }])
+    reply()
+    await expect(sendCalDav({ ...input(), url: 'https://dav.alt/' })).rejects.toMatchObject({
+      code: 'destination_refused',
+    })
+    expect(network.lookup).not.toHaveBeenCalled()
+    expect(network.request).not.toHaveBeenCalled()
+  })
   it('rejects mixed public/private DNS rather than choosing a safe answer', async () => {
     network.lookup.mockResolvedValue([
       { address: '8.8.8.8', family: 4 },

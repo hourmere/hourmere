@@ -1,13 +1,17 @@
 import { randomUUID } from 'node:crypto'
-import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { copyFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type pg from 'pg'
 import { describe, expect, it } from 'vitest'
 import { detailsCheckBranches, latestDetailsCheckMigration } from './audit-details-check-source.ts'
 import { migrationsDir, runMigrations } from './migrate.ts'
 import { checkConstraintCoverage } from './testing/constraint-coverage.ts'
-import { createTestDatabase, type TestDatabase } from './testing.ts'
+import {
+  MIGRATION_COVERAGE_TIMEOUT,
+  MIGRATION_REPLAY_TIMEOUT,
+  useMigrationReplay,
+} from './testing/migration-replay.ts'
+import type { TestDatabase } from './testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const migration = '0164_workflow_definition_audit.sql'
@@ -138,56 +142,58 @@ const checkDefinition = async (pool: pg.Pool) =>
   ).rows
 
 describe.skipIf(!serverUrl)('workflow definition audit details constraint', () => {
-  it('fails a redaction assertion when the check is dropped', async () => {
-    const report = await checkConstraintCoverage({
-      serverUrl: serverUrl as string,
-      migration,
-      assertions: assertWorkflowAuditDetails,
-    })
-    expect(report.problems).toEqual([])
-    expect(report.results.map(({ key, status }) => [key, status])).toEqual([
-      [`constraint public.audit_events.${constraint}`, 'covered'],
-    ])
-  }, 600_000)
+  const replay = useMigrationReplay(serverUrl as string, migration)
 
-  it('preserves the predecessor journal, matches a fresh install, and reruns as a no-op', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'hourmere-workflow-audit-'))
-    let upgraded: TestDatabase | undefined
-    let fresh: TestDatabase | undefined
-    try {
-      for (const file of await readdir(migrationsDir)) {
-        if (file.endsWith('.sql') && file < migration) {
-          await copyFile(join(migrationsDir, file), join(directory, file))
-        }
-      }
-      upgraded = await createTestDatabase(serverUrl as string, directory, { tag: 'wf_audit_up' })
-      const organization = randomUUID()
-      await seedJournal(upgraded.pool, organization)
-      const before = await journalRows(upgraded.pool, organization)
-      expect(before).toHaveLength(2 + validEvents.length)
-      const predecessorInsert = journalFixture(upgraded.pool, organization)
-      for (const [action, details] of validEvents) {
-        await expect(predecessorInsert(action, details)).rejects.toMatchObject(refused)
-      }
-
-      await copyFile(join(migrationsDir, migration), join(directory, migration))
-      await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([migration])
-      fresh = await createTestDatabase(serverUrl as string, directory, { tag: 'wf_audit_new' })
-      const freshCheck = await checkDefinition(fresh.pool)
-      expect(freshCheck).toEqual([{ definition: expect.any(String), validated: true }])
-      expect(await checkDefinition(upgraded.pool)).toEqual(freshCheck)
-      expect(await journalRows(upgraded.pool, organization)).toEqual(before)
-      await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([])
-      await expect(runMigrations(fresh.pool, directory)).resolves.toEqual([])
-      expect(await journalRows(upgraded.pool, organization)).toEqual(before)
-      await assertWorkflowAuditDetails(upgraded.pool)
-      await assertWorkflowAuditDetails(fresh.pool)
-    } finally {
-      await Promise.all([
-        upgraded?.drop(),
-        fresh?.drop(),
-        rm(directory, { recursive: true, force: true }),
+  it(
+    'fails a redaction assertion when the check is dropped',
+    async () => {
+      const report = await checkConstraintCoverage({
+        serverUrl: serverUrl as string,
+        migration,
+        predecessorTemplate: replay.predecessor,
+        assertions: assertWorkflowAuditDetails,
+      })
+      expect(report.problems).toEqual([])
+      expect(report.results.map(({ key, status }) => [key, status])).toEqual([
+        [`constraint public.audit_events.${constraint}`, 'covered'],
       ])
-    }
-  }, 120_000)
+    },
+    MIGRATION_COVERAGE_TIMEOUT,
+  )
+
+  it(
+    'preserves the predecessor journal, matches a fresh install, and reruns as a no-op',
+    async () => {
+      const { directory, predecessor } = replay
+      let upgraded: TestDatabase | undefined
+      let fresh: TestDatabase | undefined
+      try {
+        upgraded = await predecessor.clone(undefined, { migrate: false, tag: 'wf_audit_up' })
+        const organization = randomUUID()
+        await seedJournal(upgraded.pool, organization)
+        const before = await journalRows(upgraded.pool, organization)
+        expect(before).toHaveLength(2 + validEvents.length)
+        const predecessorInsert = journalFixture(upgraded.pool, organization)
+        for (const [action, details] of validEvents) {
+          await expect(predecessorInsert(action, details)).rejects.toMatchObject(refused)
+        }
+
+        await copyFile(join(migrationsDir, migration), join(directory, migration))
+        await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([migration])
+        fresh = await predecessor.clone(directory, { tag: 'wf_audit_new' })
+        const freshCheck = await checkDefinition(fresh.pool)
+        expect(freshCheck).toEqual([{ definition: expect.any(String), validated: true }])
+        expect(await checkDefinition(upgraded.pool)).toEqual(freshCheck)
+        expect(await journalRows(upgraded.pool, organization)).toEqual(before)
+        await expect(runMigrations(upgraded.pool, directory)).resolves.toEqual([])
+        await expect(runMigrations(fresh.pool, directory)).resolves.toEqual([])
+        expect(await journalRows(upgraded.pool, organization)).toEqual(before)
+        await assertWorkflowAuditDetails(upgraded.pool)
+        await assertWorkflowAuditDetails(fresh.pool)
+      } finally {
+        await Promise.all([upgraded?.drop(), fresh?.drop()])
+      }
+    },
+    MIGRATION_REPLAY_TIMEOUT,
+  )
 })

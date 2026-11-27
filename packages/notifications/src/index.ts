@@ -20,9 +20,9 @@ import {
   bookingHostNames,
   bookingLocationForRecipient,
   calendarBookingDescription,
+  calendarMeetingLocation,
   calendarResponseDescription,
   calendarSummary,
-  calendarTeamsDescription,
   type IcsPerson,
   icsAttachment,
   type Mailer,
@@ -30,7 +30,6 @@ import {
   MailRejectedError,
   type ManageLinks,
   type MeetingLocation,
-  meetingLocationText,
 } from '@hourmere/mail'
 import type { BookingEvent } from '@hourmere/scheduling'
 import { conferenceOrganizerAvailable } from '@hourmere/scheduling/conferences'
@@ -1010,6 +1009,7 @@ async function deliverBookingNotification(
       role,
       language,
     )
+    const calendarLocation = calendarMeetingLocation(location, method, language)
     return icsAttachment({
       method,
       // The first booking of the chain: a reschedule updates the same calendar entry.
@@ -1032,11 +1032,11 @@ async function deliverBookingNotification(
               )
             : undefined,
           kind !== 'cancelled' ? calendarResponseDescription(role, language) : undefined,
-          calendarTeamsDescription(location, method, language),
+          calendarLocation.description,
         ]
           .filter(Boolean)
           .join('\n\n') || undefined,
-      location: location ? meetingLocationText(location) : undefined,
+      location: calendarLocation.location,
       organizer: {
         ...calendarOrganizer,
         sentBy:
