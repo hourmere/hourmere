@@ -1,7 +1,15 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import type { Schemas } from '../../api/client.ts'
+import {
+  AppShell,
+  EventTypesPage,
+  RequireSession,
+  SessionLayout,
+  SettingsPage,
+  SsoRecoveryPage,
+} from '../../lazy-pages.tsx'
 import { PATHS } from '../../paths.ts'
 import {
   emptyAccount,
@@ -16,6 +24,18 @@ import {
   renderApp,
   signedInAs,
 } from '../../test/fake-api.tsx'
+import { resolveLazy } from '../../test/resolve-lazy.ts'
+
+beforeAll(() =>
+  resolveLazy(
+    SessionLayout,
+    RequireSession,
+    AppShell,
+    SettingsPage,
+    EventTypesPage,
+    SsoRecoveryPage,
+  ),
+)
 
 const TEAM: Schemas['Me'] = {
   ...ME,
