@@ -20,7 +20,7 @@ import { openMailboxSession, providerName } from '../keycloak/recovery.ts'
 
 const setupPath = '/app/settings/sso'
 
-test.use({ protocol: 'saml', oidcEnabled: false, samlEnabled: true })
+test.use({ protocol: 'saml' })
 
 async function verifyRotationWrite(page: Page, app: KeycloakFixture) {
   await proveMailbox(page, app, app.idp.linked.email)

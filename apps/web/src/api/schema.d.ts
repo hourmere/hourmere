@@ -7774,9 +7774,9 @@ export interface components {
             /** @description Whether hosts may copy open times; enable only after direct-slot pages are live */
             slotSnippetsEnabled?: boolean;
             smsRemindersAvailable?: boolean;
-            /** @description The effective SSO_OIDC_ENABLED operator setting (off by default); absent when unknown */
+            /** @description The effective SSO_OIDC_ENABLED operator setting (on by default); absent when unknown */
             ssoOidcEnabled?: boolean;
-            /** @description The effective SSO_SAML_ENABLED operator setting (off by default); absent when unknown */
+            /** @description The effective SSO_SAML_ENABLED operator setting (on by default); absent when unknown */
             ssoSamlEnabled?: boolean;
             /**
              * Format: uri

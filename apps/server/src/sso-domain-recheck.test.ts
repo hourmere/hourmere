@@ -1,3 +1,4 @@
+import '@hono/zod-openapi'
 import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { createDb, type Db } from '@hourmere/db'
@@ -10,10 +11,12 @@ import {
   ssoDomainRecheckJob,
 } from './sso-domain-recheck.ts'
 import { ssoDomainChallengeDigest } from './sso-domains.ts'
+import { configuredSsoCapabilities } from './sso-setting-fixtures.ts'
 
 const publicUrl = 'https://hourmere.example.com'
 const ON = { ssoOidcEnabled: true, ssoSamlEnabled: false }
 const OFF = { ssoOidcEnabled: false, ssoSamlEnabled: false }
+const settingOff = configuredSsoCapabilities('false', 'false')
 let owned: TestDatabase
 let db: Db
 let team: string
@@ -65,9 +68,9 @@ it('never schedules or accesses storage/DNS while hard-off, including queued rep
   expect(await recheckSsoDomains(options)).toBe(0)
   expect(resolveTxt).not.toHaveBeenCalled()
   // A setting turned off keeps the worker scheduled and running, so verification stays current.
-  const settingOff = { ...options, capabilities: { ...OFF, ssoOperatorSetting: true } }
-  expect(ssoDomainRecheckJob(settingOff).schedule).toEqual({ cron: '*/5 * * * *', payload: {} })
-  await expect(recheckSsoDomains(settingOff)).rejects.toThrow('storage accessed')
+  const off = { ...options, capabilities: settingOff }
+  expect(ssoDomainRecheckJob(off).schedule).toEqual({ cron: '*/5 * * * *', payload: {} })
+  await expect(recheckSsoDomains(off)).rejects.toThrow('storage accessed')
   const server = await readFile(new URL('./server.ts', import.meta.url), 'utf8')
   // The running server always passes its operator setting, so the schedule stays on.
   expect(server).toContain('...(ssoRetained(sso) ? [] : [SSO_DOMAIN_RECHECK_JOB])')
@@ -104,33 +107,40 @@ describe.skipIf(!process.env.DATABASE_URL)('periodic SSO domain authority', () =
     resolveTxt.mockReset()
   }
 
-  it('renews the current generation and audits a redacted system outcome once under replay', async () => {
-    await reset()
-    const { row, value } = await claim()
-    resolveTxt.mockResolvedValue([[value.slice(0, 8), value.slice(8)]])
-    expect(await recheckSsoDomains(deps())).toBe(1)
-    const result = await stored(row.id)
-    expect(result).toMatchObject({
-      generation: row.generation,
-      verified_at: row.verified_at,
-      last_check_outcome: 'positive',
-      retired_at: null,
-    })
-    expect(new Date(result.verification_expires_at as Date).getTime()).toBe(
-      Date.parse(current) + 7 * 86400000,
-    )
-    expect(await recheckSsoDomains(deps())).toBe(0)
-    expect(resolveTxt).toHaveBeenCalledExactlyOnceWith(`_hourmere-sso.${row.name}`)
-    const audit = await events(row.id)
-    expect(audit).toHaveLength(1)
-    expect(audit[0]).toMatchObject({
-      actor_type: 'system',
-      action: 'sso_domain.renewed',
-      details: { outcome: 'passed' },
-    })
-    expect(JSON.stringify(audit)).not.toContain(value)
-    expect(JSON.stringify(audit)).not.toContain(row.name)
-  })
+  it.each([
+    ['OIDC on', ON],
+    ['both protocols explicitly off', settingOff],
+  ] as const)(
+    'renews the current generation and audits a redacted system outcome once under replay with %s',
+    async (_state, capabilities) => {
+      await reset()
+      const options = { ...deps(), capabilities }
+      const { row, value } = await claim()
+      resolveTxt.mockResolvedValue([[value.slice(0, 8), value.slice(8)]])
+      expect(await recheckSsoDomains(options)).toBe(1)
+      const result = await stored(row.id)
+      expect(result).toMatchObject({
+        generation: row.generation,
+        verified_at: row.verified_at,
+        last_check_outcome: 'positive',
+        retired_at: null,
+      })
+      expect(new Date(result.verification_expires_at as Date).getTime()).toBe(
+        Date.parse(current) + 7 * 86400000,
+      )
+      expect(await recheckSsoDomains(options)).toBe(0)
+      expect(resolveTxt).toHaveBeenCalledExactlyOnceWith(`_hourmere-sso.${row.name}`)
+      const audit = await events(row.id)
+      expect(audit).toHaveLength(1)
+      expect(audit[0]).toMatchObject({
+        actor_type: 'system',
+        action: 'sso_domain.renewed',
+        details: { outcome: 'passed' },
+      })
+      expect(JSON.stringify(audit)).not.toContain(value)
+      expect(JSON.stringify(audit)).not.toContain(row.name)
+    },
+  )
 
   it('freezes on failure or unknown, retries daily without extending expiry and recovers inside the remaining lifetime', async () => {
     await reset()

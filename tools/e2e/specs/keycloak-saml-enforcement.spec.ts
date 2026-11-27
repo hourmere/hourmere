@@ -15,7 +15,7 @@ import {
 import { exerciseTeamDelegation, expectEnforcedTeamAccess } from '../keycloak/enforcement.ts'
 import { expect, test } from '../keycloak/fixture.ts'
 
-test.use({ protocol: 'saml', oidcEnabled: false, enforced: true })
+test.use({ protocol: 'saml', enforced: true })
 
 function requestsFreshAuthentication(authorization: URL) {
   const encodedRequest = authorization.searchParams.get('SAMLRequest')
@@ -40,9 +40,7 @@ function requestsFreshAuthentication(authorization: URL) {
   }
 }
 
-test.describe('with the SAML setting on', () => {
-  test.use({ samlEnabled: true })
-
+test.describe('with the default SAML setting', () => {
   test('refuses a mailbox session at the team boundary and admits the same owner through SAML', async ({
     page,
     keycloak: app,
@@ -92,17 +90,21 @@ test.describe('with the SAML setting on', () => {
   })
 })
 
-test('with the SAML setting off the seeded team still enforces SSO and offers no SAML sign-in', async ({
-  page,
-  keycloak: app,
-}) => {
-  const [instance] = await Promise.all([
-    page.waitForResponse((response) => response.url() === `${app.url}/api/v1/instance`),
-    page.goto(samlSignInUrl(app)),
-  ])
-  expect(instance.status()).toBe(200)
-  expect(await instance.json()).toMatchObject({ ssoOidcEnabled: false, ssoSamlEnabled: false })
-  await expect(button(page, emailLinkLabel)).toBeVisible()
-  await expect(button(page, ssoLabel)).toHaveCount(0)
-  await expectMailboxCannotEnterTeam(page, app)
+test.describe('with the SSO settings explicitly off', () => {
+  test.use({ oidcEnabled: false, samlEnabled: false })
+
+  test('the seeded team still enforces SSO and offers no SAML sign-in', async ({
+    page,
+    keycloak: app,
+  }) => {
+    const [instance] = await Promise.all([
+      page.waitForResponse((response) => response.url() === `${app.url}/api/v1/instance`),
+      page.goto(samlSignInUrl(app)),
+    ])
+    expect(instance.status()).toBe(200)
+    expect(await instance.json()).toMatchObject({ ssoOidcEnabled: false, ssoSamlEnabled: false })
+    await expect(button(page, emailLinkLabel)).toBeVisible()
+    await expect(button(page, ssoLabel)).toHaveCount(0)
+    await expectMailboxCannotEnterTeam(page, app)
+  })
 })

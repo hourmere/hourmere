@@ -171,17 +171,17 @@ describe('documented Compose configuration', () => {
   it.each(['SSO_OIDC_ENABLED', 'SSO_SAML_ENABLED'] as const)(
     'leaves %s empty in the template and Compose, so the install follows the default',
     (key) => {
-      // Never `=false` or a `:-false` fallback: an install made now follows a later default.
+      // Preserve the pass-through for both existing installations and new ones.
       expect(example).toMatch(new RegExp(`^${key}=$`, 'm'))
       expect(composeAppEnvironment(compose).get(key)).toBe(`\${${key}:-}`)
-      // The empty value Compose passes equals unset, and the default is still off.
+      // The empty value Compose passes follows the same default as an unset value.
       const base = {
         DATABASE_URL: 'postgres://synthetic@localhost:9/config-contract',
         BETTER_AUTH_SECRET: 'synthetic-config-contract-value-32',
       }
-      expect(loadConfig({ ...base, [key]: '' })[key]).toBe(false)
-      expect(loadConfig(base)[key]).toBe(false)
-      expect(documentedVariable(key)[1]).toBe('`false`')
+      expect(loadConfig({ ...base, [key]: '' })[key]).toBe(true)
+      expect(loadConfig(base)[key]).toBe(true)
+      expect(documentedVariable(key)[1]).toBe('`true`')
       expect(worker).toMatch(/extends:\s+file: docker-compose\.yml\s+service: app/)
     },
   )
