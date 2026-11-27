@@ -3176,6 +3176,8 @@ export const admin = {
   'A schedule can have at most 10,000 date overrides, including past dates. Remove some overrides before saving.':
     '每个日程最多可有 10,000 个特定日期安排（包括过去的日期）。请先移除一些安排再保存。',
 
+  // SCIM invitation attribution
+  'SCIM connection': 'SCIM 连接',
   // Additional durations
   'Removed {0}. Selected length: {1}.': '已移除{0}。当前选中的时长为{1}。',
 

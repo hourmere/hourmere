@@ -1654,8 +1654,8 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
     ],
     [
       'reservation failure rollback',
-      '!(await options.reserve(trx, { userId: actor.userId, organizationId, email }, now))',
-      '!(await options.reserve(trx, { userId: actor.userId, organizationId, email }, now).catch(() => true))',
+      '!(await options.reserve(trx, budget, now))',
+      '!(await options.reserve(trx, budget, now).catch(() => true))',
       verifyRollback,
     ],
     [
