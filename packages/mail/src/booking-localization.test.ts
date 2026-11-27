@@ -17,6 +17,8 @@ const bookingUrl = 'https://cal.example.com/app/bookings/019a1234-5678-7000-8000
 // Semantic copy/order assertions remain independent of the quote-only typography markup.
 const withoutQuoteSpans = (html: string | undefined) =>
   (html ?? '').replaceAll(/<span class="cjk-quote"[^>]*>([“”‘’])<\/span>/g, '$1')
+const withoutDirectionMarkup = (html: string | undefined) =>
+  (html ?? '').replaceAll(/<\/?bdi(?: dir="ltr")?>/g, '')
 
 const meeting: BookingEmailMeeting = {
   eventName: 'Intro call',
@@ -356,7 +358,7 @@ describe('booking email layout and action hierarchy', () => {
                 : message.text.indexOf(locale === 'en' ? 'Host:' : '主持人：'),
             )
             const urlParagraph = html.match(
-              /<p style="([^"]*)"><a href="[^"]*" style="([^"]*)">https:\/\/teams\.microsoft\.com[^<]*<\/a><\/p>/,
+              /<p style="([^"]*)"><a href="[^"]*" style="([^"]*)"><bdi dir="ltr">https:\/\/teams\.microsoft\.com[^<]*<\/bdi><\/a><\/p>/,
             )
             expect(urlParagraph?.[1]).toContain('font-size: 13px;')
             expect(urlParagraph?.[1]).toContain('overflow-wrap: anywhere;')
@@ -416,7 +418,7 @@ describe('booking email layout and action hierarchy', () => {
             expect(previous?.[3]).toContain('text-decoration: line-through;')
           }
           const reason = receiptReasons[locale][role]
-          expect(html).toContain(reason)
+          expect(withoutDirectionMarkup(html)).toContain(reason)
           expect(message.text.endsWith(`${reason}\n`)).toBe(true)
           if (attachment) expect(message.attachments?.[0]).toBe(attachment)
         })
@@ -471,7 +473,7 @@ describe('reason for receiving a booking email', () => {
           })
           const reason = receiptReasons[locale][role]
           expect(message.text.endsWith(`${reason}\n`)).toBe(true)
-          expect(message.html).toContain(`>${reason}</p>`)
+          expect(withoutDirectionMarkup(message.html)).toContain(`>${reason}</p>`)
         }
       })
 
@@ -499,7 +501,7 @@ describe('reason for receiving a booking email', () => {
         const htmlReason = message.html?.match(
           /<p style="[^"]*">((?:You received this email|你收到此邮件)[\s\S]*?)<\/p>/,
         )?.[1]
-        expect(htmlReason).toBe(
+        expect(withoutDirectionMarkup(htmlReason)).toBe(
           reason
             .replaceAll('&', '&amp;')
             .replaceAll('<', '&lt;')
@@ -516,13 +518,13 @@ describe('reason for receiving a booking email', () => {
       email: 'ADA@EXAMPLE.COM',
     })
     expect(message.text.endsWith(`${receiptReasons.en.invitee}\n`)).toBe(true)
-    expect(message.html).toContain(`>${receiptReasons.en.invitee}</p>`)
+    expect(withoutDirectionMarkup(message.html)).toContain(`>${receiptReasons.en.invitee}</p>`)
     const host = bookingEmail('cancelled', meeting, {
       ...recipients.host,
       email: meeting.inviteeEmail,
     })
     expect(host.text.endsWith(`${receiptReasons.en.host}\n`)).toBe(true)
-    expect(host.html).toContain(`>${receiptReasons.en.host}</p>`)
+    expect(withoutDirectionMarkup(host.html)).toContain(`>${receiptReasons.en.host}</p>`)
   })
 })
 
@@ -845,7 +847,7 @@ describe('localized dates and generated copy', () => {
       { ...recipients.invitee, locale: 'zh-CN' },
     )
     expect(message.text).toContain('地点：电话 +1 555 0100')
-    expect(message.html).toContain('电话 +1 555 0100')
+    expect(message.html).toContain('电话 <bdi dir="ltr">+1 555 0100</bdi>')
   })
 
   it('uses Chinese punctuation in every Chinese copy string', () => {

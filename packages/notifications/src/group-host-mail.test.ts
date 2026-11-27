@@ -12,6 +12,7 @@ import {
   icsAttachment,
   type MailMessage,
 } from '@hourmere/mail'
+import { emailUserText } from '@hourmere/mail/text'
 import { getEmailBranding } from '@hourmere/scheduling'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -58,6 +59,7 @@ function sourceCopy(change?: [string, string], bindings: Record<string, unknown>
     z,
     randomUUID,
     escapeHtml,
+    emailUserText,
     icsAttachment,
     interfaceLanguage,
     lockNotificationEmailBudget,

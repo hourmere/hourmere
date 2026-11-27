@@ -329,7 +329,9 @@ function ResultsView({
   return (
     <div data-testid="meeting-poll-results">
       <section className="panel" aria-labelledby="meeting-poll-title">
-        <h2 id="meeting-poll-title">{poll.title}</h2>
+        <h2 id="meeting-poll-title" dir="auto">
+          {poll.title}
+        </h2>
         <p>
           <span className="badge">{t(POLL_STATUS[poll.status] ?? 'Unknown')}</span>
         </p>

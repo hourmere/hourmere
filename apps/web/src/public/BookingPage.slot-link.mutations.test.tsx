@@ -10,6 +10,7 @@ import * as conferenceNotice from '../components/ConferenceNotice.tsx'
 import * as emailHint from '../components/EmailDeliveryHint.tsx'
 import * as formComponents from '../components/forms.tsx'
 import * as zonePicker from '../components/TimeZonePicker.tsx'
+import * as userContent from '../components/UserContent.tsx'
 import * as format from '../format.ts'
 import * as hooks from '../hooks.ts'
 import * as duration from '../i18n/duration.ts'
@@ -92,6 +93,7 @@ function partsCopy(text: string) {
     '@hourmere/core/payment': payment,
     react,
     '../components/TimeZonePicker.tsx': zonePicker,
+    '../components/UserContent.tsx': userContent,
     '../format.ts': format,
     '../i18n/duration.ts': duration,
     '../i18n/formatting.ts': formatting,
@@ -112,10 +114,10 @@ function pageCopy(text = source, parts = bookingParts): Pages {
     '../components/ConferenceNotice.tsx': conferenceNotice,
     '../components/EmailDeliveryHint.tsx': emailHint,
     '../components/TimeZonePicker.tsx': zonePicker,
+    '../components/UserContent.tsx': userContent,
     '../format.ts': format,
     '../hooks.ts': hooks,
     '../i18n/duration.ts': duration,
-    '../i18n/formatting.ts': formatting,
     '../i18n/runtime.tsx': runtime,
     '../i18n/translate.ts': translate,
     './AddToCalendar.tsx': calendar,
@@ -740,6 +742,7 @@ it('detects rejecting formatted international phone input in the public form', (
     const copied = compile<typeof form>('apps/web/src/public/BookingForm.tsx', text, {
       react,
       '../components/forms.tsx': formComponents,
+      '../components/UserContent.tsx': userContent,
       '../i18n/runtime.tsx': runtime,
       '../i18n/translate.ts': translate,
       './BookingDetails.tsx': details,

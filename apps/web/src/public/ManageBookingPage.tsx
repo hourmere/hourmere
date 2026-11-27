@@ -1,11 +1,24 @@
-import { type FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import {
+  type FormEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { cancelledBookingPayment, useBookingPaymentItems } from '../components/booking-payment.ts'
 import { ConferenceNotice } from '../components/ConferenceNotice.tsx'
 import { EmailDeliveryHint } from '../components/EmailDeliveryHint.tsx'
+import {
+  UserContentLines,
+  UserContentList,
+  UserContentMessage,
+} from '../components/UserContent.tsx'
 import { isKnownTimeZone } from '../format.ts'
 import { usePageTitle } from '../hooks.ts'
-import { formatList } from '../i18n/formatting.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import { type MessageKey, msg, type UiText } from '../i18n/translate.ts'
 import { ManageLink } from './AddToCalendar.tsx'
@@ -22,7 +35,7 @@ import {
   type Slot,
   type SlotLoader,
 } from './api.ts'
-import { DetailList, LocationDetails, When } from './BookingDetails.tsx'
+import { BookingPerson, DetailList, LocationDetails, When } from './BookingDetails.tsx'
 import { now as currentTime, detectTimeZone, preferredLocale } from './env.ts'
 import { FocusHeading, PublicLayout, PublicStatus } from './PublicLayout.tsx'
 import { useRequest } from './paths.ts'
@@ -281,7 +294,7 @@ function ManageView({
   /** Loads the booking again; null when that fails too. */
   onStale: () => Promise<ManagedBooking | null>
 }) {
-  const { t, formatLocale, locale: language } = useI18n()
+  const { t, formatLocale } = useI18n()
 
   const browserFormatLocale = useMemo(preferredLocale, [])
   const locale = formatLocale ?? browserFormatLocale
@@ -357,7 +370,8 @@ function ManageView({
     onSlotsRefused.current = (err) => void failed(err, 'reschedule')
   })
   const title = booking.eventType?.title ?? booking.title
-  const hosts = formatList(booking.hosts.map((h) => h.name).filter(Boolean), language)
+  const hostNames = booking.hosts.map((host) => host.name).filter(Boolean)
+  const hosts = hostNames.length > 0 ? <UserContentList values={hostNames} /> : null
   const durationMinutes = Math.round((Date.parse(booking.end) - Date.parse(booking.start)) / 60_000)
 
   // Why an action from the email link cannot be offered.
@@ -515,7 +529,9 @@ function ManageView({
         <div className="booking-layout reschedule">
           <aside className="event-info reschedule-summary" aria-label={t('Current booking')}>
             <p className="event-host">{t('Current booking')}</p>
-            <h1 className="event-title">{title}</h1>
+            <h1 className="event-title" dir="auto">
+              {title}
+            </h1>
             <DetailList
               items={[
                 [
@@ -528,7 +544,7 @@ function ManageView({
                     locale={locale}
                   />,
                 ],
-                ...(hosts ? [['Host', hosts] as [string, string]] : []),
+                ...(hosts ? ([['Host', hosts]] as const) : []),
               ]}
             />
             <button
@@ -842,7 +858,7 @@ function BookingSummary({
 }: {
   booking: ManagedBooking
   title: string
-  hosts: string
+  hosts: ReactNode
   timeZone: string
   locale: string
   started: boolean
@@ -851,7 +867,7 @@ function BookingSummary({
   emailNotice: boolean
   newToken: string | null
 }) {
-  const { t, ui, locale: language } = useI18n()
+  const { t, ui } = useI18n()
   const paymentItems = useBookingPaymentItems(booking.payment)
 
   const invitee = booking.attendees.find((a) => a.isBooker)
@@ -899,7 +915,7 @@ function BookingSummary({
       )}
       <DetailList
         items={[
-          ['What', title],
+          ['What', <bdi key="title">{title}</bdi>],
           ['Status', cancelled ? t('Cancelled booking') : ended ? t('Ended') : t('Confirmed')],
           ...paymentItems,
           [
@@ -912,28 +928,22 @@ function BookingSummary({
             'Where',
             <LocationDetails key="where" location={booking.location} cancelled={cancelled} />,
           ],
-          ...(hosts ? ([['Host', hosts]] as [string, string][]) : []),
+          ...(hosts ? ([['Host', hosts]] as const) : []),
           ...(invitee
             ? ([
                 [
                   'Booked by',
-                  t('{name} ({detail})', { name: invitee.name, detail: invitee.email }),
+                  <BookingPerson key="booker" name={invitee.name} email={invitee.email} />,
                 ],
-              ] as [string, string][])
+              ] as const)
             : []),
           ...(guests.length
             ? ([
-                [
-                  'Guests',
-                  formatList(
-                    guests.map((g) => g.name),
-                    language,
-                  ),
-                ],
-              ] as [string, string][])
+                ['Guests', <UserContentList key="guests" values={guests.map((g) => g.name)} />],
+              ] as const)
             : []),
           ...(cancelled && booking.cancelReason
-            ? ([['Reason', booking.cancelReason]] as [string, string][])
+            ? ([['Reason', <UserContentLines key="reason" text={booking.cancelReason} />]] as const)
             : []),
         ]}
       />
@@ -948,8 +958,10 @@ function BookingSummary({
               // Snapshot labels and answers may repeat. The saved order is immutable.
               // biome-ignore lint/suspicious/noArrayIndexKey: the snapshot carries no question IDs
               <div key={index} className="details-row">
-                <dt>{label}</dt>
-                <dd className="multiline">{answer}</dd>
+                <dt dir="auto">{label}</dt>
+                <dd className="multiline">
+                  <UserContentLines text={answer} />
+                </dd>
               </div>
             ))}
           </dl>
@@ -1008,7 +1020,13 @@ function CancelForm({
       <FocusHeading>{t('Cancel this booking?')}</FocusHeading>
       <CalendarResponseNote />
       {/* One booking's title, date and time: a sentence, not a list, so no list separators. */}
-      <p>{t('{title}, {date}, {time}', { title, date, time })}</p>
+      <p>
+        <UserContentMessage
+          message="{title}, {date}, {time}"
+          values={{ title }}
+          otherValues={{ date, time }}
+        />
+      </p>
       <div className="field">
         <label htmlFor={`${id}-reason`}>
           {t('Reason')}
@@ -1016,6 +1034,7 @@ function CancelForm({
         </label>
         <textarea
           id={`${id}-reason`}
+          dir="auto"
           rows={3}
           value={reason}
           onChange={(e) => setReason(e.target.value)}

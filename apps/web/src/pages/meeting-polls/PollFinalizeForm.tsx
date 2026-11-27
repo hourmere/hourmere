@@ -137,7 +137,7 @@ export function PollFinalizeForm({
                 >
                   <option value="">{t('Choose a booker')}</option>
                   {eligible.map((voter) => (
-                    <option key={voter.voterId} value={voter.voterId}>
+                    <option key={voter.voterId} value={voter.voterId} dir="auto">
                       {t('{name} ({email})', { name: voter.name, email: voter.email })}
                     </option>
                   ))}
@@ -171,9 +171,11 @@ export function PollFinalizeForm({
                             }}
                           />
                           <span data-private>
-                            {voter.name}
+                            <bdi>{voter.name}</bdi>
                             <span className="meeting-poll-cell-detail">
-                              <BreakableText>{voter.email}</BreakableText>
+                              <bdi dir="ltr">
+                                <BreakableText>{voter.email}</BreakableText>
+                              </bdi>
                             </span>
                           </span>
                         </label>

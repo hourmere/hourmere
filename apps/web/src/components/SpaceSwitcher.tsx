@@ -212,7 +212,11 @@ export function SpaceSwitcher({ onError }: { onError: (error: UiText | null) => 
           {t('Switch space')}
         </span>
         <span className="space-context" id={contextId}>
-          <span className="space-name" title={currentName}>
+          <span
+            className="space-name"
+            title={currentName}
+            dir={me.organization.personal ? undefined : 'auto'}
+          >
             {currentName}
           </span>
           <span className="space-role">
@@ -248,7 +252,11 @@ export function SpaceSwitcher({ onError }: { onError: (error: UiText | null) => 
                 }}
                 onClick={() => void choose(option)}
               >
-                <span className="space-name" title={option.name}>
+                <span
+                  className="space-name"
+                  title={option.name}
+                  dir={option.id === null ? undefined : 'auto'}
+                >
                   {option.name}
                 </span>
                 {option.current && <span className="space-current">{t('Current space')}</span>}

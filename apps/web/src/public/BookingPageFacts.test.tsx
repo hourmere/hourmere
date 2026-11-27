@@ -57,6 +57,7 @@ describe.each([
     const info = await screen.findByRole('complementary', { name: summary })
     const rows = within(info).getAllByRole('listitem')
     expect(rows.map((row) => row.textContent)).toEqual(facts)
+    expect(rows[1]?.lastElementChild?.hasAttribute('dir')).toBe(false)
     for (const row of rows) {
       expectDecorativeIcon(row.firstElementChild)
       expect(row.lastElementChild?.tagName).toBe('SPAN')
@@ -65,4 +66,20 @@ describe.each([
     const toggle = screen.getByRole('button', { name: picker })
     expectDecorativeIcon(toggle.querySelector('.tz-caption')?.firstElementChild)
   })
+})
+
+it('isolates a custom location label inside the row with its decorative icon', async () => {
+  const label = 'المكتب (Office 42)'
+  fakeApi({
+    'GET /api/v1/public/ada/intro': () =>
+      json(200, { ...EVENT, locations: [{ id: 'office', kind: 'in_person', label }] }),
+    'GET /api/v1/public/ada/intro/slots': slotsAnswer(['2026-11-02T14:00:00Z']),
+  })
+  renderApp('/ada/intro')
+
+  const info = await screen.findByRole('complementary', { name: 'About this event' })
+  const location = within(info).getByText(label)
+  expect(location.getAttribute('dir')).toBe('auto')
+  expect(location.parentElement?.hasAttribute('dir')).toBe(false)
+  expectDecorativeIcon(location.previousElementSibling)
 })
