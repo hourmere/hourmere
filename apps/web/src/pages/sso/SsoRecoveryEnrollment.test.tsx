@@ -1,8 +1,9 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, useLocation } from 'react-router'
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { App } from '../../App.tsx'
+import { AppShell, RequireSession, SessionLayout, SettingsPage } from '../../lazy-pages.tsx'
 import { PATHS } from '../../paths.ts'
 import {
   emptyTeamLists,
@@ -14,6 +15,9 @@ import {
   type Routes,
   signedInAs,
 } from '../../test/fake-api.tsx'
+import { resolveLazy } from '../../test/resolve-lazy.ts'
+
+beforeAll(() => resolveLazy(SessionLayout, RequireSession, AppShell, SettingsPage))
 
 const team = {
   id: '00000000-0000-7000-8000-000000000071',

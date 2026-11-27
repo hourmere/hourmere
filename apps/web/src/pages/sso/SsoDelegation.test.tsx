@@ -1,8 +1,15 @@
 import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import type { ApiKey } from '../../api/auth.ts'
 import type { Schemas } from '../../api/client.ts'
+import {
+  ApiKeysPage,
+  AppShell,
+  ConnectedAppsPage,
+  RequireSession,
+  SessionLayout,
+} from '../../lazy-pages.tsx'
 import { PATHS } from '../../paths.ts'
 import {
   fakeApi,
@@ -14,6 +21,11 @@ import {
   renderApp,
   signedInAs,
 } from '../../test/fake-api.tsx'
+import { resolveLazy } from '../../test/resolve-lazy.ts'
+
+beforeAll(() =>
+  resolveLazy(SessionLayout, RequireSession, AppShell, ApiKeysPage, ConnectedAppsPage),
+)
 
 const team = {
   id: '00000000-0000-7000-8000-0000000000d1',
