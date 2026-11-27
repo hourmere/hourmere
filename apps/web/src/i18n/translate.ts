@@ -57,6 +57,36 @@ export function translate(
   formatting?: TranslationFormat,
 ): string {
   const template = templateFor(locale, key) ?? key
+  return interpolate(locale, template, values, formatting)
+}
+
+export function translateParts(
+  locale: InterfaceLanguage,
+  key: MessageKey,
+  values: UiMessage['values'],
+  formatting: TranslationFormat,
+): (string | { name: string; text: string })[] {
+  const template = templateFor(locale, key) ?? key
+  const parts: ReturnType<typeof translateParts> = []
+  let position = 0
+  interpolate(locale, template, values, formatting, (name, offset, length, text, spaced) => {
+    const start = spaced.indexOf(text)
+    parts.push(template.slice(position, offset) + spaced.slice(0, start), { name, text })
+    position = offset + length
+    const trailing = spaced.slice(start + text.length)
+    if (trailing) parts.push(trailing)
+  })
+  parts.push(template.slice(position))
+  return parts
+}
+
+function interpolate(
+  locale: InterfaceLanguage,
+  template: string,
+  values: UiMessage['values'],
+  formatting: TranslationFormat | undefined,
+  onValue?: (name: string, offset: number, length: number, text: string, spaced: string) => void,
+): string {
   return template.replace(/\{(\w+)\}/g, (placeholder, name: string, offset: number) => {
     if (!Object.hasOwn(values, name)) return placeholder
     const value = values[name]
@@ -67,13 +97,16 @@ export function translate(
           ? new Intl.NumberFormat(locale, { useGrouping: false }).format(value)
           : String(value)
     // Web and mail share the Han/Latin boundary rule, including accents and combining marks.
-    return locale === 'zh-CN'
-      ? spaceCjkBoundaries(
-          template.slice(0, offset),
-          text,
-          template.slice(offset + placeholder.length),
-        )
-      : text
+    const spaced =
+      locale === 'zh-CN'
+        ? spaceCjkBoundaries(
+            template.slice(0, offset),
+            text,
+            template.slice(offset + placeholder.length),
+          )
+        : text
+    onValue?.(name, offset, placeholder.length, text, spaced)
+    return spaced
   })
 }
 /** Plain strings here are local semantic keys; dynamic arguments remain untouched user data. */

@@ -53,6 +53,12 @@ export interface FixtureApp {
   parentUrl: string
   personalPath: string
   setEmbedSnippet: (snippet: string) => void
+  configureMixedDirection: (content: {
+    title: string
+    description: string
+    hostName: string
+    question: { id: string; label: string; options: readonly string[] }
+  }) => Promise<string>
   configureGroupSeats: () => Promise<void>
   configureDurations: () => Promise<void>
   configureSuccessRedirect: (allowEmbedParent: boolean) => Promise<void>
@@ -541,6 +547,25 @@ export const test = base.extend<{
         url,
         parentUrl,
         personalPath: '/fixture-host/call',
+        configureMixedDirection: async ({ title, description, hostName, question }) => {
+          await db
+            .updateTable('auth.user')
+            .set({ name: hostName })
+            .where('id', '=', host.userId)
+            .execute()
+          const event = await db
+            .updateTable('event_types')
+            .set({
+              title,
+              description,
+              questions: JSON.stringify([{ ...question, type: 'select', required: true }]),
+            })
+            .where('organization_id', '=', host.organizationId)
+            .where('slug', '=', 'call')
+            .returning('id')
+            .executeTakeFirstOrThrow()
+          return event.id
+        },
         seedWebhookHistory: (fixture, space) => seedWebhookDeliveryHistory(db, fixture, space),
         auditPollState: async (state) => {
           // Poll backing events must not change the existing host/list audit states.

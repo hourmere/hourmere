@@ -347,12 +347,13 @@ describe('display name settings', () => {
     expect(input('Display name').value).toBe('')
     expect(leaving()).toBe(false)
     await user.type(input('Handle'), '-new')
-    await user.type(input('Display name'), '  Ada Lovelace  ')
+    expect(input('Display name').dir).toBe('auto')
+    await user.type(input('Display name'), '  נועה (Ada)  ')
     await user.click(screen.getByRole('button', { name: 'Save display name' }))
     expect(await screen.findByText('Display name saved.')).toBeDefined()
-    expect(input('Display name').value).toBe('Ada Lovelace')
+    expect(input('Display name').value).toBe('נועה (Ada)')
     expect(api.to('PATCH /api/v1/profile/name').map((call) => call.body)).toEqual([
-      { name: 'Ada Lovelace' },
+      { name: 'נועה (Ada)' },
     ])
     expect(api.to('GET /api/v1/me')).toHaveLength(2)
     expect(input('Handle').value).toBe('ada-new')

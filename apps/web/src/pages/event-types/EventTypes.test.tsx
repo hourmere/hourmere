@@ -754,6 +754,8 @@ describe('editing an event type', () => {
     const api = eventTypeServer([saved])
     await openExisting()
     expect(field('Title').value).toBe('Intro call')
+    expect(field('Title').dir).toBe('auto')
+    expect(field(/Description/).dir).toBe('auto')
     expect(field(/Weekly limit/).value).toBe('5')
     expect(field(/Monthly limit/).value).toBe('10')
     expect(field('Address').value).toBe('Unter den Linden 1')
@@ -764,7 +766,11 @@ describe('editing an event type', () => {
     expect(screen.getByLabelText<HTMLSelectElement>('Schedule').value).toBe(SCHEDULE_ID)
 
     await user.clear(field('Title'))
-    await user.type(field('Title'), 'First call')
+    const title = 'مراجعة (QA)'
+    const description = 'مرحبًا!\n\nBring questions.'
+    await user.type(field('Title'), title)
+    await user.clear(field(/Description/))
+    await user.type(field(/Description/), description.replaceAll('\n', '{Enter}'))
     // Editing the title of a saved event type leaves its link alone.
     expect(field('Booking link').value).toBe('intro-call')
     expect(screen.getByText('Unsaved changes')).toBeDefined()
@@ -772,13 +778,14 @@ describe('editing an event type', () => {
     await user.click(screen.getByRole('button', { name: 'Save changes' }))
 
     expect(await screen.findByText('Saved.')).toBeDefined()
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Edit “First call”')
+    const heading = screen.getByRole('heading', { level: 1, name: `Edit “${title}”` })
+    expect(heading.querySelector('bdi')?.textContent).toBe(title)
     expect(api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`).map((c) => c.body)).toEqual([
       {
         smsRemindersEnabled: false,
-        title: 'First call',
+        title,
         slug: 'intro-call',
-        description: 'A first call.',
+        description,
         slotStepMinutes: null,
         // Saved questions keep their ids, so earlier answers stay attached.
         questions: [
