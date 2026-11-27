@@ -51,7 +51,6 @@ export async function teamBookingBulkPreview(
   const imported = await importedBookingIds(
     db,
     rows.map((row) => row.id),
-    organizationId,
   )
   const byId = new Map(rows.map((row) => [row.id, row]))
   return bookingIds.map((bookingId): { bookingId: string; code: BulkBookingPreviewCode } => {

@@ -426,7 +426,7 @@ describe.skipIf(!serverUrl)('team booking bulk selection, preview and admission'
     expect(await receiptCount()).toBe(before)
   })
 
-  it('reports a paid successor, a departed required host and other preview skips in page order', async () => {
+  it('reports paid successors, imported chains and other preview skips in page order', async () => {
     const { owner, other } = data
     const team = await createTestTeam(db, [{ user: owner, role: 'owner' }])
     const actor = await session(owner, team.id)
@@ -464,7 +464,7 @@ describe.skipIf(!serverUrl)('team booking bulk selection, preview and admission'
     const foreignImport = await f.booking(other.id, [], '2099-01-01T14:00Z', '2099-01-01T14:30Z', {
       source: 'import',
     })
-    // A legacy cross-team link must not influence the local booking's preview.
+    // A legacy link to another team's imported booking makes the local successor read-only.
     await db
       .updateTable('bookings')
       .set({ rescheduled_from_id: foreignImport })
@@ -532,7 +532,7 @@ describe.skipIf(!serverUrl)('team booking bulk selection, preview and admission'
       { bookingId: unavailable, code: 'booking_unavailable' },
       { bookingId: hostDeparted, code: 'booking_host_departed' },
       { bookingId: outsideTeam, code: 'booking_unavailable' },
-      { bookingId: native, code: 'eligible' },
+      { bookingId: native, code: 'booking_not_supported' },
     ])
   })
 
