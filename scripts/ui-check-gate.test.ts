@@ -11,6 +11,7 @@ import type { ReportIdentity, UiCheckException } from '../tools/e2e/ui-check-gat
 const {
   evaluateUiGate,
   expectedFromPlaywrightList,
+  listExpectedReports,
   loadExpectedReports,
   reportIdentity,
   uiGateFindingsSummary,
@@ -412,7 +413,7 @@ describe('matrix-derived report completeness', () => {
     )
   })
 
-  it('takes axe viewports from configured projects', () => {
+  it('takes axe viewports from configured projects and selects only the listed batch', () => {
     const viewport = { width: 777, height: 999 }
     const selected = expectedFromPlaywrightList(
       {
@@ -421,7 +422,7 @@ describe('matrix-derived report completeness', () => {
             title: 'dark en-US',
             specs: [
               {
-                title: 'scan serious and critical WCAG violations',
+                title: 'scan serious and critical WCAG violations (batch 2)',
                 tests: [{ projectName: 'probe' }],
               },
             ],
@@ -431,7 +432,12 @@ describe('matrix-derived report completeness', () => {
       'a11y',
       new Map([['probe', viewport]]),
     )
-    expect(selected).toHaveLength(auditPages.length)
+    expect(selected.map((identity: ReportIdentity) => identity.page)).toEqual(
+      auditPages
+        .filter(({ id }) => auditLocales(id).includes('en-US'))
+        .slice(32, 64)
+        .map(({ id }) => id),
+    )
     expect(selected.every((identity: ReportIdentity) => identity.viewport === viewport)).toBe(true)
   })
 
@@ -471,13 +477,13 @@ describe('matrix-derived report completeness', () => {
   })
 
   it('partitions actual Playwright-selected shards without running browsers', async () => {
-    const matrices: Awaited<ReturnType<typeof loadExpectedReports>>[] = []
     // Mirrors the e2e-layout matrix in .github/workflows/ui-checks.yml.
-    // Each shard spawns its own Playwright listing, so this takes over 30 s on CI runners.
-    for (let shard = 1; shard <= 8; shard++)
-      matrices.push(await loadExpectedReports('layout', `${shard}/8`))
-    const allExpected = matrices[0]?.allExpected ?? []
-    const selected = matrices.flatMap((matrix) => matrix.expected)
+    // Enumerate the full report set once, then list only the remaining shards.
+    const { expected: firstShard, allExpected } = await loadExpectedReports('layout', '1/8')
+    const shards = [firstShard]
+    for (let shard = 2; shard <= 8; shard++)
+      shards.push(await listExpectedReports('layout', `${shard}/8`))
+    const selected = shards.flat()
     const reportsPerViewportAndTheme = auditPages.reduce(
       (total, page) => total + auditLocales(page.id).length,
       0,
@@ -486,7 +492,26 @@ describe('matrix-derived report completeness', () => {
     expect(new Set(selected.map(reportIdentity)).size).toBe(selected.length)
     expect(new Set(selected.map(reportIdentity))).toEqual(new Set(allExpected.map(reportIdentity)))
     // Preparation tests occupy shard slots but do not write measurement reports.
-    expect(new Set(matrices.map((matrix) => matrix.expected.length)).size).toBeGreaterThan(1)
+    expect(new Set(shards.map((shard) => shard.length)).size).toBeGreaterThan(1)
+  }, 30_000)
+
+  it('partitions the full axe matrix across CI shards without running browsers', async () => {
+    const matrices: Awaited<ReturnType<typeof loadExpectedReports>>[] = []
+    for (let shard = 1; shard <= 4; shard++)
+      matrices.push(await loadExpectedReports('a11y', `${shard}/4`))
+    const selected = matrices.flatMap(({ expected }) => expected)
+    const expected = auditPages.flatMap(({ id }) =>
+      auditLocales(id).flatMap((locale) =>
+        (['light', 'dark'] as const).flatMap((theme) =>
+          [
+            { width: 1280, height: 720 },
+            { width: 390, height: 844 },
+          ].map((viewport) => reportIdentity({ kind: 'a11y', page: id, locale, theme, viewport })),
+        ),
+      ),
+    )
+    expect(matrices.every((matrix) => matrix.expected.length > 0)).toBe(true)
+    expect(selected.map(reportIdentity).sort()).toEqual(expected.sort())
   }, 120_000)
 
   it('makes the terminal summary red for regression, loss, unreadable JSON and browser exit', async () => {
@@ -600,6 +625,10 @@ describe('matrix-derived report completeness', () => {
       await writeFile(
         copiedGate,
         gateSource
+          .replace(
+            "'./a11y-batches.ts'",
+            JSON.stringify(new URL('tools/e2e/a11y-batches.ts', root).href),
+          )
           .replace(
             "'./audit-pages.ts'",
             JSON.stringify(new URL('tools/e2e/audit-pages.ts', root).href),

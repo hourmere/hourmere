@@ -222,7 +222,7 @@ export function slackDestinationRoutes(
         operationId: 'testSlackDestination',
         summary: 'Queue one sample notification through the delivery outbox',
         description:
-          'At most five authorized attempts per organization per minute, shared with MCP on this server; refused (403) and unknown-destination (404) calls are not counted. Returns 409 slack_test_pending while a sample is pending.',
+          'At most five authorized attempts per organization per minute, shared with MCP on this server. An exhausted budget returns 429 after authorization, before the destination lookup. Refused (403) and unknown-destination (404) calls are not counted. Returns 409 slack_test_pending while a sample is pending.',
         security: authenticated,
         middleware: caller,
         request: { params: Params, headers: ExpectedWriteHeaders },
@@ -249,6 +249,10 @@ export function slackDestinationRoutes(
               // Counted only after the final owner/admin check found the destination.
               () => {
                 const retryAfter = slackTestLimiter.hit(c.var.principal.organization.id)
+                if (retryAfter !== undefined) throw new SlackTestRateLimited(retryAfter)
+              },
+              () => {
+                const retryAfter = slackTestLimiter.peek(c.var.principal.organization.id)
                 if (retryAfter !== undefined) throw new SlackTestRateLimited(retryAfter)
               },
             ),

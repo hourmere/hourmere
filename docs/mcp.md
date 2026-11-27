@@ -50,9 +50,9 @@ unknown tools remain protocol errors. The table below comes from the shared auth
 registry, including each tool's modes and CLI equivalents. Regenerate it with
 `node scripts/generate-api-key-scope-docs.ts`.
 
-Routing operations return `routing_forms_disabled` until an operator enables routing.
-Routing forms are off by default. To enable them on a self-hosted instance, set
-`ROUTING_FORMS_ENABLED=true` and restart Hourmere. While routing is off, `tools/list`
+Routing operations return `routing_forms_disabled` while routing is off.
+Routing forms are on by default. To turn them off on a self-hosted instance, set
+`ROUTING_FORMS_ENABLED=false` and restart Hourmere. While routing is off, `tools/list`
 omits the eleven routing tools and direct calls return `routing_forms_disabled`.
 When enabled, discovery still follows the caller's key scope. See the
 [routing API guide](https://hourmere.com/docs/routing-forms-api) for examples and how
@@ -90,6 +90,7 @@ to pass a private continuation to the invitee.
 | `publish_routing_form` | — | `routing-forms publish` | `full` |
 | `preview_routing_form` | — | `routing-forms preview` | `full` |
 | `get_public_routing_form` | — | `routing-forms public` | `full, read, bookings` |
+| `get_public_team` | — | `team-home` | `full, read, bookings` |
 | `route_lead` | — | `routing-forms route` | `full, bookings` |
 | `resolve_routing_continuation` | — | `routing-forms resolve` | `full, bookings` |
 | `find_routed_slots` | — | `routing-forms slots` | `full, bookings` |
@@ -188,7 +189,7 @@ can still be inspected and removed.
 配置、开启强制、委托绑定）返回 `404 sso_disabled`；上述两个读取操作、恢复操作和降低信任的
 操作对团队所有者和管理员保持可用，已保存的配置仍可查看和移除。
 
-The operator can enable booking workflows with `WORKFLOWS_ENABLED=true`. While off,
+Booking workflows are enabled by default. When the operator sets `WORKFLOWS_ENABLED=false`,
 `tools/list` omits workflow tools. Direct calls can still read workflows and run
 history, disable a workflow, or delete it with the required scope and role. Creation,
 preview, enabling and other edits return `isError: true` with `workflows_disabled`
@@ -250,9 +251,10 @@ API key. IDs that are missing or belong to another organization return `webhook_
 
 `create_webhook` and `update_webhook` accept `booking.created`, `booking.rescheduled`,
 `booking.cancelled`, `booking.reschedule_requested`, `booking.reschedule_request_expired`,
-`booking.attendee_no_show_changed` and `workflow.executed` in `events`. While workflows
-are off, adding `workflow.executed` returns a tool error with `workflows_disabled`
-(REST 404). On create, it takes precedence over `webhooks_disabled` (REST 409).
+`booking.attendee_no_show_changed` and `workflow.executed` in `events`. With
+`WORKFLOWS_ENABLED=false`, adding `workflow.executed` returns `workflows_disabled`
+(REST 404). On create, it takes precedence over
+`webhooks_disabled` (REST 409).
 
 `rotate_webhook_secret` takes `{ id }` and requires a `full` API key. Each successful
 call replaces the signing secret and returns the new `{ secret }` once. Save it directly
@@ -445,6 +447,10 @@ Configure an ordered `locations` list through the event-type create/update opera
 and choose `locationOptionId` for slot availability and booking. An invitee-phone option additionally requires
 `inviteePhone`, normalized to E.164 after removing common phone separators.
 CLI `slots` and `book` accept `locationOptionId` in their JSON input files.
+For a single-host event with a Microsoft writeback destination, the host enables
+`kind: "microsoft_teams"` in their own signed-in session. MCP and CLI can book configured
+Teams events. Configuration changes that require a host session return
+`microsoft_teams_host_session_required` through both clients.
 Rescheduling keeps the original choice. See [meeting location choices](https://hourmere.com/docs/location-choices)
 for configuration examples, public discovery, compatibility and conference rules.
 

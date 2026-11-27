@@ -188,6 +188,7 @@ it('attaches the team proof middleware to every private team write in the server
       'POST /api/v1/bookings/:id/reschedule',
       'POST /api/v1/bookings/:id/cancel',
       'POST /api/v1/team/bookings/:id/cancel',
+      'POST /api/v1/team/bookings/bulk-cancellations/preview',
       'POST /api/v1/team/invitations/:invitationId/cancel',
       'POST /api/v1/team/members/:memberUserId/removal',
       'POST /api/v1/teams/:teamId/leave',
@@ -235,6 +236,28 @@ describe('openApiDocument', () => {
     })
     expect(WebhookDelivery.properties.bookingId).toMatchObject({ type: 'string', format: 'uuid' })
     expect(WebhookDelivery.required).toContain('bookingId')
+  })
+
+  it('documents the webhook delivery cursor and its validation error', async () => {
+    const doc = (await openApiDocument()) as {
+      paths: Record<
+        string,
+        { get: { parameters: unknown[]; responses: Record<string, { description: string }> } }
+      >
+    }
+    const operation = doc.paths['/api/v1/webhooks/{id}/deliveries']?.get
+    expect(operation?.parameters).toContainEqual(
+      expect.objectContaining({
+        name: 'after',
+        in: 'query',
+        required: false,
+        schema: expect.objectContaining({
+          type: 'string',
+          description: expect.stringContaining('nextAfter UUID'),
+        }),
+      }),
+    )
+    expect(operation?.responses[400]?.description).toContain('invalid_cursor')
   })
 
   it("lists every route group's paths, without a database", async () => {

@@ -46,7 +46,7 @@ import { workflowsEnabledGuard, workflowsGuard, workflowUpdateGuard } from '../w
 
 /** Shown on every workflow operation, in OpenAPI and MCP discovery alike. */
 export const WORKFLOWS_AVAILABILITY =
-  'The operator can enable booking workflows with WORKFLOWS_ENABLED=true. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available.'
+  'Booking workflows are enabled by default. The operator can pause them with WORKFLOWS_ENABLED=false. While off, creation, preview, enabling and other edits return 404 workflows_disabled. Authorized reads, disable-only updates and deletion remain available.'
 
 const triggerTypes = (option: 'delayMinutes' | 'offsetMinutes') =>
   WorkflowTriggerSchema.options

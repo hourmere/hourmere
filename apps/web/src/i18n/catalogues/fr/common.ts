@@ -596,9 +596,26 @@ export const common = {
     'Pour continuer, revenez à l’onglet dans lequel vous avez demandé la vérification.',
   'Copy the link from your email and paste it into the tab where you requested verification.':
     'Copiez le lien de votre e-mail et collez-le dans l’onglet où vous avez demandé la vérification.',
+  // Microsoft Teams meeting locations
+  'Microsoft Teams': 'Microsoft Teams',
+  'Join Microsoft Teams': 'Rejoindre la réunion Microsoft Teams',
+  'The Teams link isn’t ready yet.': 'Le lien Teams n’est pas encore disponible.',
+  'The booking is still scheduled without a Teams link.':
+    'La réservation reste confirmée, sans lien Teams.',
   // Booking page preview
   'These are sample times. Booking is disabled in the preview.':
     'Ces horaires sont donnés à titre d’exemple. Les réservations sont désactivées dans l’aperçu.',
+  // Rescheduled booking links
+  'This booking was moved to a new time. The new booking has its own link.':
+    'Cette réservation a été déplacée à un autre créneau. La nouvelle réservation a son propre lien.',
+  // Booking location changes
+  'The meeting location has changed. Please choose a time again.':
+    'Le lieu de la réunion a changé. Veuillez choisir à nouveau un créneau.',
+
+  // Microsoft Teams host authorization
+  'The assigned host must configure Microsoft Teams in their own signed-in session.':
+    'L’hôte désigné doit se connecter à son propre compte pour configurer Microsoft Teams.',
+
   // Paid booking details
   'bookingPayment.label': 'Paiement',
   'bookingPayment.paid': '{amount} payés',
@@ -646,4 +663,10 @@ export const common = {
     'Le créneau suggéré est sélectionné. Vérifiez les détails avant de passer au paiement.',
   'You’ll pay securely on Stripe. Your booking is confirmed only after Hourmere receives the payment. If you cancel the booking, a full refund is requested.':
     'Vous paierez en toute sécurité sur Stripe. Hourmere confirme le rendez-vous à réception du paiement. Si vous annulez le rendez-vous, un remboursement intégral sera demandé.',
+
+  // Team public home
+  'This team has no public events right now.':
+    'Cette équipe ne propose aucun événement public pour le moment.',
+  'This team page is unavailable.': 'Cette page d’équipe est indisponible.',
+  'Couldn’t load this team page.': 'Impossible de charger cette page d’équipe.',
 } as const

@@ -1,5 +1,14 @@
 // One searchable IANA picker for public slot selection and editable admin fields.
-import { Fragment, type KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from 'react'
+import {
+  Fragment,
+  type KeyboardEvent,
+  type ReactNode,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { isKnownTimeZone } from '../format.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import type { UiText } from '../i18n/translate.ts'
@@ -18,6 +27,8 @@ interface TimeZonePickerProps {
   /** Fallback offset instant when no calendar date is supplied. */
   now?: number
   error?: UiText | undefined
+  /** Optional decoration before the label of the read-only toggle. */
+  captionIcon?: ReactNode
 }
 
 const MAX_SHOWN = 100
@@ -234,6 +245,7 @@ export function TimeZonePicker({
   now,
   referenceDate,
   error,
+  captionIcon,
 }: TimeZonePickerProps) {
   const { t, ui, text: translatedText } = useI18n()
 
@@ -377,7 +389,10 @@ export function TimeZonePicker({
             }
           }}
         >
-          <span className="tz-caption">{t('Time zone')}</span>
+          <span className="tz-caption">
+            {captionIcon}
+            {t('Time zone')}
+          </span>
           <span className="tz-current">
             <TimeZoneName className="tz-name" name={current?.name ?? zoneName(value)} />{' '}
             <span className="tz-offset">{current?.offset}</span>

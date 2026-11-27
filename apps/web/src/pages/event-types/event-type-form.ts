@@ -56,6 +56,7 @@ export const LOCATION_KINDS: { value: LocationKind | ''; label: string }[] = [
   { value: '', label: 'Not set' },
   { value: 'google_meet', label: 'Google Meet (provider label only)' },
   { value: 'zoom', label: 'Zoom (provider label only)' },
+  { value: 'microsoft_teams', label: 'Microsoft Teams' },
   { value: 'phone', label: 'Phone call' },
   { value: 'in_person', label: 'In person' },
   { value: 'link', label: 'Other video or meeting link' },
@@ -259,6 +260,7 @@ export function draftFromEventType(e: EventType): EventTypeDraft {
 export function comparable(draft: EventTypeDraft): string {
   return JSON.stringify({
     ...draft,
+    locationOptions: comparableLocations(draft),
     payment: draft.payment.enabled
       ? {
           currency: draft.payment.currency,
@@ -380,7 +382,7 @@ export function validateDraft(draft: EventTypeDraft, baseline?: EventTypeDraft):
     if (
       locations.length > 1 &&
       (baseline?.bookingMode !== 'group' ||
-        JSON.stringify(orderedLocations(baseline)) !== JSON.stringify(locations))
+        comparableLocations(baseline) !== comparableLocations(draft))
     )
       errors['location-kind'] =
         'Group events use one shared location for every seat. Remove the other location options.'
@@ -632,6 +634,16 @@ export function orderedLocations(draft: EventTypeDraft): LocationOption[] {
   return result
 }
 
+/** The first option is the default whether its marker is explicit or implicit. */
+function comparableLocations(draft: EventTypeDraft): string {
+  return JSON.stringify(
+    orderedLocations(draft).map(({ isDefault, ...option }, index) => ({
+      ...option,
+      ...(index > 0 && isDefault && { isDefault }),
+    })),
+  )
+}
+
 /** Conference controls apply to every offered provider, including a non-default choice. */
 export function hasAutomaticLocation(draft: EventTypeDraft, kind: 'google_meet' | 'zoom'): boolean {
   return orderedLocations(draft).some(
@@ -750,8 +762,7 @@ export function toPatchInput(draft: EventTypeDraft, baseline: EventTypeDraft): E
   // untouched, so metadata saves also preserve options configured by a newer client.
   if (JSON.stringify(body.location) === JSON.stringify(toInput(baseline).location))
     delete body.location
-  if (JSON.stringify(orderedLocations(draft)) === JSON.stringify(orderedLocations(baseline)))
-    delete body.locations
+  if (comparableLocations(draft) === comparableLocations(baseline)) delete body.locations
   // A metadata save must preserve waitlist changes made outside this editor session.
   if (draft.waitlistEnabled === baseline.waitlistEnabled) delete body.waitlist
   else body.waitlist = { enabled: draft.waitlistEnabled }
@@ -958,6 +969,18 @@ export function serverErrors(
       return field(
         'zoomConnectionId',
         'The assigned host must configure Zoom in their own signed-in session.',
+      )
+    case 'microsoft_teams_host_policy':
+      return field('location-kind', 'Microsoft Teams requires individual scheduling with one host.')
+    case 'microsoft_teams_host_session_required':
+      return field(
+        'location-kind',
+        'The assigned host must configure Microsoft Teams in their own signed-in session.',
+      )
+    case 'microsoft_teams_calendar_unavailable':
+      return field(
+        'location-kind',
+        'The host needs a Microsoft 365 work or school calendar selected for booking write-back.',
       )
     case 'invalid_conference_organizer':
       return field('conferenceOrganizer', 'Choose the meeting organizer from the required hosts.')

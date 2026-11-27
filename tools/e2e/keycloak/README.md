@@ -12,7 +12,7 @@ cache.
 ```sh
 npm run build --workspace @hourmere/web
 HOURMERE_E2E_BOOTSTRAP_URL=postgres://hourmere:hourmere@localhost:5432/hourmere \
-  npm run test --workspace @hourmere/e2e -- keycloak-oidc --project=desktop
+  npm run test --workspace @hourmere/e2e -- keycloak-oidc keycloak-saml --project=desktop
 ```
 
 The PostgreSQL bootstrap connection creates and drops a disposable Hourmere database.
@@ -45,18 +45,46 @@ admission requires instance signup eligibility and is refused with closed signup
 OIDC off, the sign-in and member-link controls are hidden and the link and admission
 requests are refused.
 
-The enforcement cases compare a mailbox session and a Keycloak session for the same
+The SAML sign-in cases add a SAML client to the same realm and register the exact SP
+entity ID and ACS URL. Keycloak 26.8.2 starts with **Sign documents** enabled and
+**Sign assertions** disabled. Hourmere refuses that response. After the fixture enables
+**Sign assertions**, Keycloak returns the issued RelayState and the browser completes
+sign-in for the linked persona. A second Hourmere process shares the disposable database
+and canonical SP URLs to check that changed RelayState, a damaged signature and a replayed
+response are refused. SAML is enabled only by an in-process test injection. The same seeded
+provider offers no SAML sign-in option without it.
+
+The SAML linking and admission cases enable assertion signing on that same fixture.
+An existing member verifies their Hourmere mailbox and explicitly consents to linking
+before the link can be used for sign-in. Unlinked subjects see the same browser outcome
+whether or not an Hourmere account already exists for the asserted email. The cases cover
+explicit invitation acceptance with closed signup, JIT admission with open signup, and
+JIT refusal with closed signup. Without the test injection, the SAML link and admission
+entries are hidden and their requests are refused.
+
+The OIDC enforcement cases compare a mailbox session and a Keycloak session for the same
 owner. Binding a CLI and MCP lease requires a second Keycloak login with
 `prompt=login` and `max_age=0`. An unbound or revoked key cannot read the team's
 catalog. Without OIDC injection, the seeded enforcement policy still blocks ordinary
 team access and the sign-in page has no SSO option.
 
-The recovery cases spend a fresh mailbox ceremony on each provider repair write and
+The OIDC recovery cases spend a fresh mailbox ceremony on each provider repair write and
 exercise the existing operator command while the fixture IdP is down. Both outage
 cases opt into a dedicated container that they can stop. The signing-key rotation
 case also uses a dedicated container and adds a higher-priority RS256 key to its
 realm. It verifies a new signing key and a fresh JWKS fetch after the verifier cooldown.
 The outage case checks existing proof, new sign-in refusal and the ordinary mailbox boundary.
+
+The SAML enforcement cases require `ForceAuthn="true"` and a fresh Keycloak login to
+bind a CLI and MCP lease. Without the SAML test injection, the seeded team still
+requires SSO and the sign-in page offers no SAML entry. SAML break-glass repair uses
+the browser's mailbox verification and the existing same-origin provider endpoints.
+Each edit, test and activation spends a separate recovery grant, and recovery leaves
+ordinary team access blocked. The rotation case exercises a real signer change and
+tests a revision with both signing certificates before enabling it, then proves sign-in
+with only the new certificate pinned. Keycloak logout
+and user disable leave an issued Hourmere proof usable, and the disabled account
+cannot authenticate again after the Hourmere session ends.
 
 The browser context and Hourmere database are disposable for every test. Container
 teardown removes the exact container it owns and its private temporary files. Each

@@ -34,8 +34,8 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [One-time booking links](/docs/one-time-links): create, list and revoke private links
   through the editor, REST, MCP or CLI, with the booking URL shown once.
 - Use [routing forms](/docs/routing-forms) to ask questions and direct each invitee to a
-  booking or a message. Routing is off by default. Enable it with
-  `ROUTING_FORMS_ENABLED=true` and a server restart. For REST, MCP and CLI examples,
+  booking or a message. Routing is on by default. Turn it off with
+  `ROUTING_FORMS_ENABLED=false` and a server restart. For REST, MCP and CLI examples,
   see [routing forms for agents](/docs/routing-forms-api).
 - [Reminders and follow-ups](/docs/reminders-and-follow-ups): choose email times, recipients
   and optional host notes, with delivery limits and configuration examples.
@@ -63,6 +63,22 @@ The website at hourmere.com is separate from your Hourmere instance.
   review responses and schedule a meeting in the app or through REST, MCP or CLI.
 - [Voting in a meeting poll](/docs/meeting-poll-voting): verify your email, submit or
   withdraw a ballot, and understand who can see your choices.
+
+## Navigate the admin app
+
+Use the main navigation for event types, availability, bookings and booking activity.
+Find **Conference accounts**, **Calendars**, **API keys** and **Connected apps** under
+**Integrations**. On a phone or narrow tablet, scroll the main tabs sideways and open
+**Integrations** below them. You can still use existing bookmarks for each page.
+
+Open the **Account menu** from the initials button at the bottom of the sidebar to see
+your email, choose an interface language or sign out. On a narrow screen, the same
+button sits beside **Integrations** below the tabs. Use Tab to move through the menu
+and Escape to close it and return focus to the initials button.
+
+中文：主导航可打开活动类型、可用时间、预约和预约统计。会议账号、日历、API 密钥及已连接应用位于
+**集成**分组。窄屏上可横向滚动主导航，并在下方展开集成列表。打开侧栏底部的**账户菜单**可查看邮箱、
+切换界面语言或退出登录。窄屏上的账户按钮位于**集成**旁。按 Tab 可在菜单内移动，按 Escape 可关闭菜单并返回按钮。
 
 ## Create an event type
 
@@ -204,7 +220,7 @@ not grant host rescheduling or reschedule-request authority through REST, MCP or
 ## Known limitations
 
 - [Microsoft Calendar](/docs/microsoft-calendar#known-limitations) supports Outlook booking
-  writeback. Event types cannot select automatic Microsoft Teams meetings yet.
+  writeback and Teams meetings for single-host event types. Real-tenant Teams acceptance is pending.
 - Event-type timing units are a web display preference and are not persisted. Notice and
   buffers require whole minutes; booking windows require whole calendar days, even when
   shown in hours or minutes. REST, MCP and CLI retain their existing units.
@@ -213,6 +229,8 @@ not grant host rescheduling or reschedule-request authority through REST, MCP or
 - Prebuilt image installs have no runtime switch to disable app installation or the
   offline shell. Changing `VITE_PWA_ENABLED` requires rebuilding from source and replacing
   the deployed image; see [conversion steps](/docs/self-hosting#turn-off-app-installation).
+- Hourmere does not send Web Push notifications. The [Web Push assessment](/docs/install-app#web-push-assessment)
+  covers browser support, self-hosting dependencies and the proposed opt-in pilot.
 - Organization [OIDC single sign-on](/docs/sso) is off by default: the operator turns it
   on with `SSO_OIDC_ENABLED=true`, on every instance and without a paid-plan requirement.
   SAML is being built and is not available yet. The
@@ -224,15 +242,18 @@ not grant host rescheduling or reschedule-request authority through REST, MCP or
   installation requires verification by n8n. Downstream effects need durable idempotency.
 - [Zapier](/docs/zapier) is not yet published in the Zapier directory. The source app
   can be deployed privately with your own Zapier account.
-- Booking workflows are available and off by default. Self-hosted operators can opt in
-  without a paid plan. Existing reminders, follow-ups and signed booking webhooks continue
-  to work. See the [configuration reference](/docs/configuration#email-and-registration)
+- Booking workflows are enabled by default, including on self-hosted instances.
+  Operators can pause them with `WORKFLOWS_ENABLED=false`. Existing reminders, follow-ups
+  and signed booking webhooks continue to work. See the [configuration reference](/docs/configuration#email-and-registration)
   and [workflow operating guide](https://github.com/hourmere/hourmere/blob/main/docs/workflows.md#operating-guide).
 - [Cal.com imports](/docs/calcom-import#known-limitations) create inactive drafts and read-only
   local busy records. Same-owner incremental completion is unavailable; group-slot overlaps
   block the batch, while daily/weekly/monthly limit differences are reported as warnings.
 - [Slack notifications](/docs/slack) support one incoming-webhook destination per organization,
   minimal booking data and at-least-once delivery; duplicate messages are possible.
+- [Signed booking webhooks](/docs/webhooks) use the endpoint list for lookup. To verify a
+  receiver, trigger a subscribed booking event and inspect delivery history.
+  中文：从列表查找签名 Webhook 端点。验证接收端时，请触发已订阅的预约事件并查看投递历史。
 - [Booking limits](/docs/booking-limits) apply per event type and actual host, across
   all meeting lengths. Organization-wide quotas and rolling windows are unavailable.
   Lowering a limit does not cancel existing bookings.

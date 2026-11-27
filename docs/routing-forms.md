@@ -1,18 +1,13 @@
-# Routing forms — proposed design
+# Routing forms — design and rollout
 
-Status: storage, internal services and hard-off configuration interfaces. Migration
-0072 adds the five storage tables and migration 0083 their idempotency records. The
-configuration list/get/create/update/archive/publish/preview operations are registered
-together in REST, MCP and CLI. Production returns `routing_forms_disabled` for all seven
-operations and discovery omits their MCP tools. There is no operator setting or public
-routing execution yet. The shared validator, evaluator, target checks and draft services
-are implemented. Target invalidation and retention cleanup run inside existing mutations
-and in a background job; with no routing form they change nothing.
-The eventual feature is free on self-hosted and Cloud alike,
-and is on by default once the final acceptance step passes (see [Rollout gating](#rollout-gating)).
+Routing forms are available on self-hosted Hourmere and Hourmere Cloud. In the final
+rollout, an unset or empty `ROUTING_FORMS_ENABLED` defaults to `true`. Explicit
+`false` opts out, and a legacy personal handle named `route` keeps routing off
+regardless of the setting. See [Rollout gating](#rollout-gating) for the effects of
+turning routing off and the staged implementation history.
 [Data model](data-model.md), [API conventions](api-conventions.md),
 [MCP](mcp.md) and [team administrator booking fields](team-admin-bookings.md) remain
-canonical for existing behavior. Contracts beyond storage below describe future implementation.
+canonical for existing behavior.
 
 ## Official reference check
 
@@ -170,14 +165,16 @@ the version content above. Migration 0072 has no versioned title or description,
 form text that a save changes at once; the public metadata step decides how it shows them. A
 draft save, like creation, must pass the shared validator; event targets are checked against
 current event types only at publication. Every successful write (save, enable/disable,
-publish, archive) increments `draftRevision`. Publication leaves `enabled` unchanged, and
-enabling needs a published version. An archived form is `routing_form_not_found` to every
-operation and keeps its slug. Publication also refuses an ID that a retained version used
-with another meaning (a question with another type, an option of another question, a question
-or option as a rule) or that the current version no longer has. Preview checks target
-eligibility, not answer mappings, as routing does at run time. Enabling, disabling and a slug
-change keep the stored draft as it is and do not validate it again, so a stricter later
-validator cannot block an urgent disable; any draft field revalidates the whole draft.
+publish, archive) increments `draftRevision`. Publication leaves `enabled` unchanged.
+An archived form is `routing_form_not_found` to every operation and keeps its slug.
+Publication also refuses an ID that a retained version used with another meaning
+(a question with another type, an option of another question, a question or option as a rule)
+or that the current version no longer has. Preview checks target
+eligibility, not answer mappings, as routing does at run time. Enabling, disabling and
+slug-only updates skip draft validation. Enabling requires a published version, and live
+routing uses only the immutable version validated at publication. A slug-only update changes
+the public address. An urgent disable can proceed under a stricter later validator. Any
+draft field revalidates the whole draft.
 
 Create and publish take an optional `requestId` (step a3b, migration 0083), as the contract
 sketch below describes. A retry with the same key and canonical input returns the original
@@ -211,8 +208,10 @@ same refresh, and reads see the change at once. Reads never trust a marker but r
 from the current event types: `get` returns each rule's and the fallback's target in the
 published version as `ok`, `unavailable` (with the eligibility reason) or `unknown`, and `list`
 the worst of them; a form with nothing published has no health (null). `unknown` means this
-release does not recognise how a target is stored. It is never reported as unavailable or as
-missing configuration.
+release does not recognise how a target is stored. Health reads use the publication validator's
+lowercase UUID format for event IDs. A stored uppercase ID yields `unknown` without an event
+lookup. A recognised target in another organization yields the same `unavailable` with
+`not_found` as a missing event.
 
 Cleanup runs every 15 minutes, also while routing is off. Each transaction deletes at most 500
 receipts that expired unconsumed, oldest first, together with their encrypted answers, or
@@ -744,7 +743,8 @@ Draft create and publish each take a client-generated UUID `requestId` scoped to
 actor/organization for idempotency; the actor is the credential (session user, API key or
 OAuth grant), so two credentials of one user never share a key. Publish/update/archive take
 `expectedRevision`; a repeated publish with the same requestId and canonical input returns
-its original version. Changed input with the same key, or the key of the other operation,
+its original version. After the form is archived, create and publish replays return
+`routing_form_not_found`. Changed input with the same key, or the key of the other operation,
 returns `idempotency_key_reused`. A key is retained as long as the form (creation) or the
 version (publication) it produced. Route submission takes
 `{ versionId, answers }`; it intentionally has no durable replay cache containing raw
@@ -902,9 +902,9 @@ Compose passes unset variables as empty strings) means the default, `false`; any
 fails configuration validation at startup. e4c adds `${ROUTING_FORMS_ENABLED:-}` to
 `docker-compose.yml` and an empty `ROUTING_FORMS_ENABLED=` to `.env.example`, with a comment
 that empty means the server default, so installs that copy either file follow the default.
-e5 changes the default to `true` once its acceptance passes, so self-hosted and Cloud
+**Default on from e5.** An unset or empty setting defaults to `true`. Self-hosted and Cloud
 instances get the full feature by default, including those whose `.env` was copied from the
-e4c `.env.example`; an explicit `false` remains the opt-out.
+e4c `.env.example`. Explicit `false` opts out, and invalid values still fail startup.
 
 **Effective state.** Before e4c, routing is always off outside tests. From e4c, routing is
 effectively on only when the setting is `true` and no stored personal handle `route` exists

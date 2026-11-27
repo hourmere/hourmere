@@ -12,6 +12,18 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Added
 
+- Routing forms ask invitees questions and offer a booking or show a message based on
+  their answers. Hosts can manage forms, inspect saved answers and include them in
+  personal booking exports. Routing is on by default for unset or empty
+  `ROUTING_FORMS_ENABLED`. Explicit `false` or a legacy personal `route` handle
+  keeps routing off. See the [routing forms guide](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/routing-forms.md).
+
+- Booking workflows are enabled by default for unset or empty `WORKFLOWS_ENABLED`, including
+  on upgrades. Set `WORKFLOWS_ENABLED=false` across web and worker to pause capture and
+  delivery admissions. A slow workflow webhook receiver can no longer delay a booking's
+  cancellation or reschedule. See the
+  [workflow operating guide](https://github.com/hourmere/hourmere/blob/main/docs/workflows.md#operating-guide).
+
 - SCIM 2.0 provisioning for team Users and explicitly mapped child-team Groups,
   available on every instance without a paid plan. Discovery, directory membership
   lifecycle, team credential revocation and child-team audit records ship together.
@@ -161,6 +173,9 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Security
 
+- OIDC account self-linking leaves pending SCIM claims and directory attachments unchanged.
+  New SCIM enrollment claims complete only through invitation acceptance with Hourmere
+  mailbox proof until explicit SCIM claim completion through SSO linking ships.
 - Public booking and sign-in email abuse is bounded by a chain-wide invitee reschedule cap
   (default 5), separate rolling recipient limits for booking and sign-in mail (each 5/hour
   and 20/day), and one instance-wide mail cap (100/hour with a 20% reserve shared by host
@@ -226,6 +241,11 @@ schema downgrade is not automatic. Direct source deployments require Node.js 26.
 Hourmere requires PostgreSQL 18+ because migrations use `uuidv7()`; the provided Compose
 stack includes PostgreSQL 18.
 
+- **Resolve case-insensitive team address collisions before migration 0194.** The
+  migration stops if existing addresses differ only in case and reports the conflicting
+  organization IDs. Check the database before upgrading and rename enough teams to make
+  every address unique. The renamed teams' published links change. See the
+  [team address preflight and recovery steps](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/self-hosting.md#resolve-team-address-collisions-migration-0194).
 - **SSO audit actions (migration 0085) upgrade in place.** The migration follows 0080: it
   replaces the audit details check with 0080's rules, unchanged, plus allow-lists for the SSO
   audit actions, which no version records yet. It is safe to apply while the previous version
@@ -262,7 +282,8 @@ stack includes PostgreSQL 18.
   including the delivery worker's automatic pause after Slack answers 404 or 410, fail with
   SQLSTATE 23514 (`audit_events_details_check`) and change nothing. Replacing the check
   makes writes to `audit_events` wait while existing rows are validated; that time grows
-  with the journal.
+  with the journal. See the
+  [audit event journal](https://github.com/hourmere/hourmere/blob/main/docs/audit-log.md#stable-actions-and-detail-allow-lists).
 - **Attendee no-show markers (migration 0070) upgrade in place.** The migration is safe to
   apply while the previous version is still running: it adds nullable attendee columns and
   only widens the webhook event checks, keeping the delivery uniqueness key from 0064. Apply

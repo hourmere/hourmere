@@ -806,10 +806,10 @@ docker compose up -d --wait --force-recreate --no-deps proxy`)
       expect(note).toMatch(/a guard, `docker compose pull` or `docker compose stop`.*fails/i)
       expect(note).toMatch(/before (?:the new-version `docker compose up` command runs)/)
       expect(note).toContain(
-        `Once that \`up\` is attempted, follow [Back up and restore](${restoreLink}), even if it fails:`,
+        `If you need to roll back after attempting that \`up\`, follow [Back up and restore](${restoreLink}) even if startup fails.`,
       )
       expect(note).toContain(
-        'a new app or worker may already have applied migrations; old code against the new schema is unsafe.',
+        'A new app or worker may already have applied migrations; old code against the new schema is unsafe.',
       )
     },
   )

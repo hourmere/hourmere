@@ -166,12 +166,22 @@ export async function listTeamAdminBookings(
 export async function getTeamAdminBooking(
   ctx: ServiceContext,
   id: string,
-): Promise<TeamAdminBookingListPage['data'][number]> {
+): Promise<TeamAdminBookingListPage['data'][number] & { location?: { kind: 'microsoft_teams' } }> {
   const teamId = await teamManager(ctx)
   const page = await readTeamBookingPage(ctx, teamId, { limit: 1 }, undefined, false, id)
   if (!page.data.length) throw new DomainError('not_found', 'booking_not_found')
   const result = await enrichTeamBookings(ctx, teamId, page)
-  return result.data[0] as TeamAdminBookingListPage['data'][number]
+  const teams = await ctx.db
+    .selectFrom('bookings')
+    .select('id')
+    .where('id', '=', id)
+    .where('organization_id', '=', teamId)
+    .where(sql<boolean>`location->>'kind' = 'microsoft_teams'`)
+    .executeTakeFirst()
+  return {
+    ...(result.data[0] as TeamAdminBookingListPage['data'][number]),
+    ...(teams && { location: { kind: 'microsoft_teams' } }),
+  }
 }
 
 async function enrichTeamBookings(

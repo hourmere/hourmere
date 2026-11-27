@@ -20,6 +20,7 @@ import {
   bookingHostNames,
   bookingLocationForRecipient,
   calendarBookingDescription,
+  calendarMeetingLocation,
   calendarResponseDescription,
   calendarSummary,
   type IcsPerson,
@@ -29,10 +30,11 @@ import {
   MailRejectedError,
   type ManageLinks,
   type MeetingLocation,
-  meetingLocationText,
 } from '@hourmere/mail'
+import type { BookingEvent } from '@hourmere/scheduling'
 import { readBookingPayment } from '@hourmere/scheduling/booking-payment-details'
 import { conferenceOrganizerAvailable } from '@hourmere/scheduling/conferences'
+import { readTeamsMeetingLocations } from '@hourmere/scheduling/teams-meeting-locations'
 import { sql } from 'kysely'
 import { z } from 'zod'
 import {
@@ -107,6 +109,7 @@ export const BOOKING_NOTIFICATION_JOB = 'booking-notification'
  * daylight saving change it arrives an hour earlier or later on the clock.
  */
 export const REMINDER_LEAD = { hours: 24 } as const
+const TEAMS_CONFIRMATION_GRACE = { seconds: 20 } as const
 
 export { REMINDER_MIN_GAP } from './scheduled.ts'
 
@@ -164,16 +167,7 @@ export function bookingNotificationJob(deps: NotificationDeps) {
 
 // --- Queueing (called by the booking services, inside their transactions) ----------------
 
-export type BookingEvent =
-  | { type: 'created'; bookingId: string; start: Temporal.Instant; seriesAction?: 'create' }
-  /** `bookingId` is the new booking, the one that replaced the old. */
-  | { type: 'rescheduled'; bookingId: string; start: Temporal.Instant }
-  | { type: 'cancelled'; bookingId: string; seriesAction?: 'bulk_cancel' }
-  | {
-      type: 'reschedule_requested' | 'reschedule_request_expired'
-      bookingId: string
-      requestId: string
-    }
+export type { BookingEvent } from '@hourmere/scheduling'
 
 /** What enqueueBookingNotifications needs of a Jobs instance. */
 export interface NotificationQueue {
@@ -225,8 +219,15 @@ export async function enqueueBookingNotifications(
     return
   }
   // Series creation owns the confirmation. Scheduled member email remains per booking.
-  if (event.type !== 'created' || event.seriesAction !== 'create')
-    await send(event.type === 'created' ? 'confirmed' : 'rescheduled')
+  if (event.type === 'rescheduled') await send('rescheduled')
+  else if (event.seriesAction !== 'create') {
+    // Give Graph's initial write a chance to return the link while allowing short-notice
+    // bookings to receive a confirmation promptly.
+    const graceEnd = now.add(TEAMS_CONFIRMATION_GRACE)
+    const teams =
+      event.teamsMeeting && Temporal.Instant.compare(graceEnd.add({ minutes: 1 }), event.start) <= 0
+    await send('confirmed', teams ? graceEnd : undefined)
+  }
   await enqueueBookingSmsReminders(
     queue as unknown as SmsReminderQueue,
     transaction,
@@ -269,7 +270,7 @@ export function bookingNotifier(queue: NotificationQueue) {
  */
 export function inviteeManageLinks(publicUrl: string, token: string): ManageLinks {
   const base = `${new URL(publicUrl).origin}/booking#token=${encodeURIComponent(token)}`
-  return { reschedule: `${base}&action=reschedule`, cancel: `${base}&action=cancel` }
+  return { details: base, reschedule: `${base}&action=reschedule`, cancel: `${base}&action=cancel` }
 }
 
 /** The booking ID alone locates the page; the server resolves authorized space access. */
@@ -328,18 +329,23 @@ export function answersOf(
   questions: Json | null,
   responses: Json,
   language: InterfaceLanguage,
-): { question: string; answer: string }[] {
+): { question: string; answer: string | string[] }[] {
   const given = isRecord(responses) ? responses : {}
-  const answers: { question: string; answer: string }[] = []
+  const answers: { question: string; answer: string | string[] }[] = []
   const seen = new Set<string>()
+  const answerValue = (value: unknown) => {
+    const text = bookingAnswerText(value, language)
+    // Retain the option boundaries for HTML while using the existing plain-text separator.
+    return text && Array.isArray(value) ? value.filter((item) => typeof item === 'string') : text
+  }
   for (const q of Array.isArray(questions) ? questions : []) {
     if (!isRecord(q) || typeof q.id !== 'string' || !Object.hasOwn(given, q.id)) continue
     seen.add(q.id)
-    const answer = bookingAnswerText(given[q.id], language)
+    const answer = answerValue(given[q.id])
     if (answer) answers.push({ question: typeof q.label === 'string' ? q.label : q.id, answer })
   }
   for (const [id, value] of Object.entries(given)) {
-    const answer = seen.has(id) ? undefined : bookingAnswerText(value, language)
+    const answer = seen.has(id) ? undefined : answerValue(value)
     if (answer) answers.push({ question: id, answer })
   }
   return answers
@@ -543,6 +549,10 @@ export function loadNotificationData(
       .select('id')
       .where('rescheduled_from_id', '=', bookingId)
       .executeTakeFirst()
+    const teamsLocation =
+      isRecord(b.location) && b.location.kind === 'microsoft_teams'
+        ? (await readTeamsMeetingLocations(conn, [b])).get(bookingId)
+        : undefined
 
     return {
       collective: b.scheduling_type === 'collective' || Number(hostRows.count) > 1,
@@ -565,7 +575,7 @@ export function loadNotificationData(
               isRecord(b.location)
               ? meetingLocation({ ...b.location, url: conference.join_url })
               : null
-            : meetingLocation(b.location),
+            : (teamsLocation ?? meetingLocation(b.location)),
         inviteePhone: isRecord(b.location_option) && b.location_option.askInvitee === true,
         questions: b.questions,
         responses: b.responses,
@@ -905,8 +915,10 @@ async function deliverBookingNotification(
     throw new NotificationRetryError(
       'The pinned invitation organizer is unavailable; delivery remains pending',
     )
+  const teams = booking.location?.kind === 'microsoft_teams'
   const invitee =
-    attendees.find((a) => a.isBooker) ?? (kind === 'conference_failed' ? undefined : attendees[0])
+    attendees.find((a) => a.isBooker) ??
+    (teams || kind === 'conference_failed' ? undefined : attendees[0])
   const log = deps.log ?? ((line: string) => console.warn(line))
   // Automatic invitation proof is checked above. Preserve the legacy no-host behavior.
   if (!organizer && kind !== 'conference_failed' && kind !== 'cancelled') {
@@ -927,7 +939,7 @@ async function deliverBookingNotification(
   const guests = kind === 'conference_failed' ? [] : attendees.filter((a) => a !== invitee)
   const email: typeof bookingEmail = (...args) => ({
     ...bookingEmail(...args),
-    sensitive: data.automaticConference,
+    sensitive: data.automaticConference || teams,
     // A collective booking's invitee and guests get no host address: their replies go to
     // MAIL_FROM, and the email says so. Single-host and round-robin reply to their host.
     replyTo:
@@ -995,80 +1007,83 @@ async function deliverBookingNotification(
     language: InterfaceLanguage,
     role: 'invitee' | 'host' | 'guest',
     hostId?: string,
-  ) =>
-    kind === 'reminder' ||
-    kind === 'conference_failed' ||
-    !calendarOrganizer ||
-    (hostId !== undefined &&
-      (Boolean(booking.groupSlotId) || (modern && data.calendarCopyHosts.has(hostId))))
-      ? undefined
-      : icsAttachment({
-          method: kind === 'cancelled' ? 'CANCEL' : 'REQUEST',
-          // The first booking of the chain: a reschedule updates the same calendar entry.
-          uid: `${data.root.id}@${CALENDAR_UID_DOMAIN}`,
-          // Each reschedule is a new version; a cancellation supersedes the current one.
-          sequence: data.root.depth + (kind === 'cancelled' ? 1 : 0),
-          stamp: now,
-          start: booking.start,
-          end: booking.end,
-          // Each recipient sees the other person, while UID/SEQUENCE retain event identity.
-          summary: calendarSummary(booking.eventName, other, language),
-          description:
-            [
-              modern
-                ? calendarBookingDescription(
-                    meeting.hostNames
-                      ? bookingHostNames(meeting.hostNames, language)
-                      : calendarOrganizer.name,
-                    language,
-                  )
-                : undefined,
-              kind !== 'cancelled' ? calendarResponseDescription(role, language) : undefined,
-            ]
-              .filter(Boolean)
-              .join('\n\n') || undefined,
-          location: (() => {
-            const location = bookingLocationForRecipient(
-              booking.location,
-              booking.inviteePhone,
-              role,
-              language,
-            )
-            return location ? meetingLocationText(location) : undefined
-          })(),
-          organizer: {
-            ...calendarOrganizer,
-            sentBy:
-              deps.mailer.senderEmail &&
-              deps.mailer.senderEmail.toLowerCase() !== calendarOrganizer.email.toLowerCase()
-                ? deps.mailer.senderEmail
-                : undefined,
-          },
-          attendees: modern
-            ? [
-                ...calendarHosts(role).map(({ id, name, email }) => ({
-                  name,
-                  email,
-                  role: id === organizer?.id ? ('CHAIR' as const) : ('REQ-PARTICIPANT' as const),
-                  partstat: 'ACCEPTED' as const,
-                })),
-                ...attendees.map(({ name, email }) => ({
-                  name,
-                  email,
-                  partstat: 'NEEDS-ACTION' as const,
-                })),
-              ].filter(
-                (a, index, people) =>
-                  people.findIndex((p) => p.email.toLowerCase() === a.email.toLowerCase()) ===
-                  index,
+  ) => {
+    if (
+      kind === 'reminder' ||
+      kind === 'conference_failed' ||
+      !calendarOrganizer ||
+      (hostId !== undefined &&
+        (Boolean(booking.groupSlotId) || (modern && data.calendarCopyHosts.has(hostId))))
+    )
+      return undefined
+    const method = kind === 'cancelled' ? 'CANCEL' : 'REQUEST'
+    const location = bookingLocationForRecipient(
+      booking.location,
+      booking.inviteePhone,
+      role,
+      language,
+    )
+    const calendarLocation = calendarMeetingLocation(location, method, language)
+    return icsAttachment({
+      method,
+      // The first booking of the chain: a reschedule updates the same calendar entry.
+      uid: `${data.root.id}@${CALENDAR_UID_DOMAIN}`,
+      // Each reschedule is a new version; a cancellation supersedes the current one.
+      sequence: data.root.depth + (kind === 'cancelled' ? 1 : 0),
+      stamp: now,
+      start: booking.start,
+      end: booking.end,
+      // Each recipient sees the other person, while UID/SEQUENCE retain event identity.
+      summary: calendarSummary(booking.eventName, other, language),
+      description:
+        [
+          modern
+            ? calendarBookingDescription(
+                meeting.hostNames
+                  ? bookingHostNames(meeting.hostNames, language)
+                  : calendarOrganizer.name,
+                language,
               )
-            : [
-                ...attendees.map(({ name, email }) => ({ name, email })),
-                ...calendarHosts(role)
-                  .filter((h) => h.id !== organizer?.id)
-                  .map(({ name, email }) => ({ name, email })),
-              ],
-        })
+            : undefined,
+          kind !== 'cancelled' ? calendarResponseDescription(role, language) : undefined,
+          calendarLocation.description,
+        ]
+          .filter(Boolean)
+          .join('\n\n') || undefined,
+      location: calendarLocation.location,
+      organizer: {
+        ...calendarOrganizer,
+        sentBy:
+          deps.mailer.senderEmail &&
+          deps.mailer.senderEmail.toLowerCase() !== calendarOrganizer.email.toLowerCase()
+            ? deps.mailer.senderEmail
+            : undefined,
+      },
+      attendees: modern
+        ? [
+            ...calendarHosts(role).map(({ id, name, email }) => ({
+              name,
+              email,
+              role: id === organizer?.id ? ('CHAIR' as const) : ('REQ-PARTICIPANT' as const),
+              partstat: 'ACCEPTED' as const,
+            })),
+            ...attendees.map(({ name, email }) => ({
+              name,
+              email,
+              partstat: 'NEEDS-ACTION' as const,
+            })),
+          ].filter(
+            (a, index, people) =>
+              people.findIndex((p) => p.email.toLowerCase() === a.email.toLowerCase()) === index,
+          )
+        : [
+            ...attendees.map(({ name, email }) => ({ name, email })),
+            ...calendarHosts(role)
+              .filter((h) => h.id !== organizer?.id)
+              .map(({ name, email }) => ({ name, email })),
+          ],
+    })
+  }
   const toAttendee = (attendee: (typeof attendees)[number]) => ({
     key: `attendee:${attendee.id}`,
     email: attendee.email,

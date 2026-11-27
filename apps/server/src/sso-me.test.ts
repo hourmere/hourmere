@@ -14,7 +14,12 @@ import {
   seeded,
   session,
 } from '../../../packages/db/src/sso-identity-fixtures.ts'
-import { at, insert, oidcProviderValues } from '../../../packages/db/src/sso-storage-fixtures.ts'
+import {
+  at,
+  insert,
+  oidcProviderValues,
+  samlProviderValues,
+} from '../../../packages/db/src/sso-storage-fixtures.ts'
 import { createApp } from './app.ts'
 import { bindingCookieName, sha256 } from './sso-mailbox-proof.ts'
 import { LINK_SSO_ACCOUNT, OIDC_COMPLETE_LINK } from './sso-oidc-link.ts'
@@ -60,6 +65,7 @@ describe.skipIf(!process.env.DATABASE_URL)('SSO /me projection', () => {
   let authorization: Record<string, unknown>
   let completion: Record<string, unknown>
   let proof: Record<string, unknown>
+  let samlProvider: Record<string, unknown>
   let secondSession: string
   const browserHeaders = (value = browser) => ({
     cookie: `${bindingCookieName(publicUrl)}=${value}`,
@@ -83,6 +89,10 @@ describe.skipIf(!process.env.DATABASE_URL)('SSO /me projection', () => {
         [sessionId, secondSession, f.sessions[f.admin], f.sessions[f.otherOwner]],
       ])
       await insert(client, 'sso_policies', { organization_id: f.team, require_sso: true })
+      samlProvider = await insert(client, 'sso_providers', {
+        ...samlProviderValues(f.team),
+        enabled: true,
+      })
       principal = {
         ...withoutSso,
         sessionId,
@@ -252,6 +262,23 @@ describe.skipIf(!process.env.DATABASE_URL)('SSO /me projection', () => {
         ],
       },
     })
+  })
+
+  it('identifies enabled SAML provider choices using only safe member fields', async () => {
+    const response = await me(principal, {
+      db: deps.db,
+      capabilities: { ssoOidcEnabled: false, ssoSamlEnabled: true },
+    })
+    expect(response.status).toBe(200)
+    const { sso } = (await response.json()) as { sso: { providers: unknown[] } }
+    expect(sso.providers).toEqual([
+      {
+        id: samlProvider.id,
+        revision: samlProvider.revision,
+        displayName: samlProvider.display_name,
+        protocol: 'saml',
+      },
+    ])
   })
 
   it('requires a current team session and its own browser for attempts', async () => {

@@ -15,6 +15,7 @@ import {
   rescheduleManagedBooking,
 } from './bookings.ts'
 import type { PublicContext, ServiceContext } from './context.ts'
+import { hasMicrosoftTeamsDestination } from './microsoft-teams.ts'
 import { createFixtures, type Fixtures } from './testing.ts'
 
 const NOW = Temporal.Instant.from('2027-10-31T12:00:00Z')
@@ -31,6 +32,7 @@ describe.skipIf(!process.env.DATABASE_URL)('group seat booking services', () => 
     ctx = {
       db,
       now: () => NOW,
+      microsoftCalendarEnabled: true,
       notify: async (trx, event) => {
         await trx
           .insertInto('booking_notifications')
@@ -125,6 +127,118 @@ describe.skipIf(!process.env.DATABASE_URL)('group seat booking services', () => 
       expect(seat.location).toEqual(slot.location)
       expect(seat.location_option).toEqual(slot.location_option)
     }
+  })
+  it('rechecks Teams destination eligibility for a new group occurrence on reschedule', async () => {
+    const s = await setup(3)
+    const { id: connectionId } = await db
+      .insertInto('calendar_connections')
+      .values({
+        user_id: s.userId,
+        provider: 'microsoft',
+        external_account_id: randomUUID(),
+        credentials: Buffer.from('synthetic-never-used-credential'),
+        status: 'active',
+        scopes: ['Calendars.ReadWrite'],
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    const { id: calendarId } = await db
+      .insertInto('calendars')
+      .values({
+        connection_id: connectionId,
+        external_id: randomUUID(),
+        name: 'Outlook calendar',
+        access_role: 'owner',
+        check_conflicts: false,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await db
+      .updateTable('profiles')
+      .set({ destination_calendar_id: calendarId })
+      .where('user_id', '=', s.userId)
+      .execute()
+    await db
+      .updateTable('event_types')
+      .set({ location: JSON.stringify({ kind: 'microsoft_teams' }) })
+      .where('id', '=', s.eventId)
+      .execute()
+    const source = await s.book('source@example.test')
+    const nearby = START.add({ hours: 1 })
+    await s.book('nearby@example.test', nearby)
+    const disabled = { ...ctx, microsoftCalendarEnabled: false }
+    await expect(
+      s.book('new-seat@example.test', nearby, randomUUID(), disabled),
+    ).rejects.toMatchObject({
+      code: 'location_unavailable',
+    })
+    await expect(
+      rescheduleManagedBooking(disabled, source.manageToken as string, {
+        start: nearby,
+        idempotencyKey: randomUUID(),
+      }),
+    ).rejects.toMatchObject({ code: 'location_unavailable' })
+    expect((await state(s.eventId)).map(({ active_seats }) => active_seats)).toEqual([1, 1])
+    const changer = await t.pool.connect()
+    try {
+      await changer.query('BEGIN')
+      await changer.query('SELECT id FROM auth."user" WHERE id = $1 FOR UPDATE', [s.userId])
+      const { rows } = await changer.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+      const destination = db
+        .transaction()
+        .execute((trx) => hasMicrosoftTeamsDestination(trx, s.userId, s.eventId, true))
+      const settled = destination.catch(() => undefined)
+      try {
+        await expect
+          .poll(
+            async () => {
+              const { rows: blocked } = await t.pool.query<{ waiting: boolean }>(
+                `SELECT EXISTS(SELECT 1 FROM pg_stat_activity
+                WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))) AS waiting`,
+                [rows[0]?.pid],
+              )
+              return blocked[0]?.waiting
+            },
+            { timeout: 3000 },
+          )
+          .toBe(true)
+        await changer.query(
+          'UPDATE profiles SET destination_calendar_id = NULL WHERE user_id = $1',
+          [s.userId],
+        )
+        await changer.query('COMMIT')
+      } finally {
+        await changer.query('ROLLBACK')
+        await settled
+      }
+      await expect(destination).resolves.toBe(false)
+    } finally {
+      changer.release()
+    }
+
+    const otherTime = START.add({ hours: 2 })
+    const proposed = { handle: s.handle, slug: 'group', start: otherTime }
+    await expect(
+      listPublicSlots(ctx, { ...proposed, end: otherTime.add({ hours: 1 }) }),
+    ).rejects.toMatchObject({ code: 'location_unavailable' })
+    await expect(
+      rescheduleManagedBooking(ctx, source.manageToken as string, {
+        start: otherTime,
+        idempotencyKey: randomUUID(),
+      }),
+    ).rejects.toMatchObject({ code: 'location_unavailable' })
+    expect((await getManagedBooking(ctx, source.manageToken as string)).status).toBe('confirmed')
+    expect(await state(s.eventId)).toHaveLength(2)
+
+    const moved = await rescheduleManagedBooking(ctx, source.manageToken as string, {
+      start: nearby,
+      idempotencyKey: randomUUID(),
+    })
+    expect(moved.booking).toMatchObject({
+      location: { kind: 'microsoft_teams' },
+      start: nearby.toString({ fractionalSecondDigits: 3 }),
+    })
+    expect((await state(s.eventId)).map(({ active_seats }) => active_seats)).toEqual([0, 2])
   })
   it('validates existing occurrence choices against its snapshot after the current default changes', async () => {
     const s = await setup(3)

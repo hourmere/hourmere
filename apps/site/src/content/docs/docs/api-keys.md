@@ -118,12 +118,14 @@ is listed explicitly. CLI `--help`, no arguments and `--version` are local and r
 New operations require explicit classification; `read` and `bookings` do not gain access
 because an endpoint uses GET or a tool advertises itself as read-only.
 
-Routing operations return `routing_forms_disabled` until an operator enables routing.
-Routing is off by default. Self-hosted operators can set `ROUTING_FORMS_ENABLED=true`
-and restart the server. The tables still list routing operations while off, but MCP
-discovery omits the dedicated routing tools. After enablement, form management requires
+Routing operations return `routing_forms_disabled` while routing is off.
+Routing is on by default. Self-hosted operators can turn it off by setting
+`ROUTING_FORMS_ENABLED=false` and restarting the server. While off, the tables still
+list routing operations and MCP discovery omits the dedicated routing tools. Form management requires
 the personal owner or a current team owner or admin in addition to the listed key scope.
 See [routing credentials and examples](/docs/routing-forms-api#availability-and-credentials).
+
+Team booking bulk cancellation preview returns 404 until the feature is released.
 
 <!-- api-key-scope-table:start -->
 
@@ -267,6 +269,7 @@ See [routing credentials and examples](/docs/routing-forms-api#availability-and-
 | `POST /api/v1/public/checkout/cancel` | Public or manage token; check a supplied key | `full, bookings` |
 | `GET /api/v1/public/{handle}/{slug}/slots` | Public or manage token; check a supplied key | `full, read, bookings` |
 | `GET /api/v1/public/teams/{handle}/{slug}` | Public or manage token; check a supplied key | `full, read, bookings` |
+| `GET /api/v1/public/teams/{handle}` | Public or manage token; check a supplied key | `full, read, bookings` |
 | `POST /api/v1/public/teams/{handle}/{slug}/bookings` | Public or manage token; check a supplied key | `full, bookings` |
 | `GET /api/v1/public/teams/{handle}/{slug}/slots` | Public or manage token; check a supplied key | `full, read, bookings` |
 | `POST /api/v1/public/{handle}/{slug}/waitlist` | Public or manage token; check a supplied key | `full, bookings` |
@@ -288,6 +291,7 @@ See [routing credentials and examples](/docs/routing-forms-api#availability-and-
 | `GET /api/v1/team/bookings` | Browser session only | — |
 | `GET /api/v1/team/bookings/{id}` | Browser session only | — |
 | `POST /api/v1/team/bookings/{id}/cancel` | Browser session only | — |
+| `POST /api/v1/team/bookings/bulk-cancellations/preview` | Browser session only | — |
 | `GET /api/v1/team/invitations` | Browser session only | — |
 | `GET /api/v1/team/invitations/{invitationId}` | Browser session only | — |
 | `POST /api/v1/team/invitations/{invitationId}/cancel` | Browser session only | — |
@@ -369,6 +373,7 @@ See [routing credentials and examples](/docs/routing-forms-api#availability-and-
 | `publish_routing_form` | — | `routing-forms publish` | `full` |
 | `preview_routing_form` | — | `routing-forms preview` | `full` |
 | `get_public_routing_form` | — | `routing-forms public` | `full, read, bookings` |
+| `get_public_team` | — | `team-home` | `full, read, bookings` |
 | `route_lead` | — | `routing-forms route` | `full, bookings` |
 | `resolve_routing_continuation` | — | `routing-forms resolve` | `full, bookings` |
 | `find_routed_slots` | — | `routing-forms slots` | `full, bookings` |

@@ -180,6 +180,7 @@ export function errorMessage(err: unknown): UiText {
       'Review your existing schedules and choose a valid default in Availability.',
     session_required: 'Your session has ended. Sign in again.',
     ORGANIZATION_ALREADY_EXISTS: 'This team address is already in use. Choose another one.',
+    ORGANIZATION_SLUG_ALREADY_TAKEN: 'This team address is already in use. Choose another one.',
     ORGANIZATION_SLUG_RESERVED: 'This team address is reserved. Choose another one.',
     YOU_ARE_NOT_ALLOWED_TO_CREATE_A_NEW_ORGANIZATION: "You don't have permission to create a team.",
     USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION:
@@ -204,6 +205,8 @@ export function errorMessage(err: unknown): UiText {
     microsoft_calendar_permissions_missing:
       'Reconnect Microsoft Calendar and allow the requested permissions.',
     microsoft_calendar_not_writable: 'Choose a Microsoft calendar you own.',
+    microsoft_teams_host_session_required:
+      'The assigned host must configure Microsoft Teams in their own signed-in session.',
     automatic_zoom_disabled: 'Automatic Zoom meetings are disabled on this instance.',
     automatic_zoom_unavailable:
       'Automatic Zoom meetings are unavailable. Contact the host or choose another meeting type.',

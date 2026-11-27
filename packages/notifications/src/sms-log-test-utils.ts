@@ -1,6 +1,11 @@
 import { inspect } from 'node:util'
 import { expect, vi } from 'vitest'
 
+function logged(output: string, value: string): boolean {
+  const formEncoded = new URLSearchParams({ value }).toString().slice('value='.length)
+  return [value, encodeURIComponent(value), formEncoded].some((form) => output.includes(form))
+}
+
 /** Capture both console methods and direct logger writes without emitting private fixtures. */
 export async function assertSmsLogsPrivate(
   run: () => Promise<void>,
@@ -36,8 +41,11 @@ export async function assertSmsLogsPrivate(
   try {
     await run()
     const output = logs.join('\n')
-    expect(output).not.toContain(input.to)
-    expect(output).not.toContain(input.body)
+    const digits = input.to.replace(/\D/g, '')
+    expect({
+      destination: logged(output, input.to) || output.includes(digits),
+      body: logged(output, input.body),
+    }).toEqual({ destination: false, body: false })
   } finally {
     for (const spy of spies) spy.mockRestore()
   }

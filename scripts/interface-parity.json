@@ -85,8 +85,13 @@
   "archiveRoutingForm": { "mcp": "archive_routing_form", "cli": "routing-forms archive" },
   "publishRoutingForm": { "mcp": "publish_routing_form", "cli": "routing-forms publish" },
   "previewRoutingForm": { "mcp": "preview_routing_form", "cli": "routing-forms preview" },
+  "previewTeamBookingBulkCancellation": {
+    "exemption": "browser-session-only",
+    "reason": "Preview binds the selected team booking page to its current owner/admin browser session."
+  },
   "getPublicRoutingForm": { "mcp": "get_public_routing_form", "cli": "routing-forms public" },
   "getPublicTeamRoutingForm": { "mcp": "get_public_routing_form", "cli": "routing-forms public" },
+  "getPublicTeam": { "mcp": "get_public_team", "cli": "team-home" },
   "routeLead": { "mcp": "route_lead", "cli": "routing-forms route" },
   "routeTeamLead": { "mcp": "route_lead", "cli": "routing-forms route" },
   "resolveRoutingContinuation": {

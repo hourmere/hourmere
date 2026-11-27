@@ -215,10 +215,13 @@ Organization OIDC sign-in is off unless you set `SSO_OIDC_ENABLED=true`; see
 [single sign-on](/docs/sso). `SSO_PRIVATE_TARGETS` lists identity
 providers on a private network or on a port other than 443, and is empty by default; leave
 it empty unless your identity provider needs it. It accepts only exact `host:port` entries
-and permits private routing for exactly those entries, or a public non-default port for an
-entry with a public DNS name (never a single label such as `keycloak` or a special-use name
-such as `idp.internal`), but never plain HTTP. It is separate from
-`WEBHOOK_PRIVATE_TARGETS`. An invalid value stops startup; a valid one routes nothing while OIDC is off.
+and permits private routing for exactly those entries. An entry can use public routing on a
+non-default port if its DNS name is dotted and outside the excluded domains: `.local`,
+`.internal`, `.localhost`, `home.arpa`, `service.arpa`, `.alt`, `.test`, `.example`,
+`.invalid` and `.onion`. The rule covers each domain and its subdomains. HTTPS is required.
+`SSO_PRIVATE_TARGETS` has its own allowlist
+separate from `WEBHOOK_PRIVATE_TARGETS`. An invalid value stops startup. This setting takes
+effect only when OIDC is enabled.
 See the [configuration reference](/docs/configuration#private-identity-providers).
 
 ## Proxy behavior and an existing proxy
@@ -775,6 +778,52 @@ side by side once scoped keys exist:** old code treats scoped keys as full acces
 Follow backup/restore for rollback; do not simply restart an old binary against scoped
 keys or rewrite them to `full`. See [API keys](/docs/api-keys#upgrade-safely).
 
+### Resolve team address collisions (migration 0194)
+
+Migration 0194 requires team addresses to be unique regardless of case. If existing
+addresses collide, the migration rolls back and reports the conflicting organization IDs.
+With `AUTO_MIGRATE=true` (the Compose default), startup stops until the collision is fixed.
+
+**Before upgrading**, run this read-only query in the Hourmere database. Each row lists
+the stored addresses in one collision group and their corresponding organization IDs in
+the same order. An empty result means there are no case collisions.
+
+```sql
+SELECT lower(slug COLLATE pg_catalog.pg_unicode_fast) AS folded_slug,
+       array_agg(id ORDER BY id) AS organization_ids,
+       array_agg(slug ORDER BY id) AS addresses
+FROM auth.organization
+GROUP BY lower(slug COLLATE pg_catalog.pg_unicode_fast)
+HAVING count(*) > 1
+ORDER BY folded_slug;
+```
+
+On the old version, if the team address editor is available, open **Settings → Team profile**
+(**Team details** on some builds) and change one team's public address
+per colliding pair. If a group has more than two teams, change all but one. If the old
+version has no address editor, use the stopped-app SQL procedure below before upgrading.
+Run the query again and confirm it returns no rows.
+
+**If the upgrade already stopped at migration 0194**, stop the app and every separate
+worker, including any on other hosts. With Compose, run `docker compose stop app` and,
+if configured, `docker compose stop worker`. Keep PostgreSQL running and connect to the
+Hourmere database. For each team you need to rename, substitute its organization ID and
+its new address in this statement.
+
+```sql
+UPDATE auth.organization SET slug = '<new>' WHERE id = '<id>';
+```
+
+Choose an address that is unused across all organizations regardless of case. Use 1–64
+characters drawn from ASCII lowercase letters (`a`–`z`), digits (`0`–`9`), and hyphens (`-`).
+Start and end with a letter or digit, and avoid reserved names such as `admin` and `sign-in`.
+Confirm each update changes exactly one row and the read-only query returns no rows.
+Restart the upgraded app and workers. With automatic migrations enabled, migration 0194
+reruns cleanly on startup. If you run migrations manually, rerun them before restarting.
+
+The renamed team's published links change. Replace links and embeds that use its old
+address.
+
 ### Single-container upgrade
 
 The app keeps the default `all` role. From the deployment checkout:
@@ -801,9 +850,9 @@ return with `git checkout <previous branch or tag>` using the recorded name **on
 the new-version `docker compose up` command runs**. Complete this rollback with the
 [pre-start recovery block](#checkout-only-recovery-before-startup) below, including its
 proxy recreation, even if the app and worker were never stopped.
-Once that `up` is attempted, follow [Back up and restore](#back-up-and-restore), even if
-it fails: a new app or worker may already have applied migrations; old code against the
-new schema is unsafe.
+If you need to roll back after attempting that `up`, follow
+[Back up and restore](#back-up-and-restore) even if startup fails. A new app or worker may
+already have applied migrations; old code against the new schema is unsafe.
 
 ### Separate-worker upgrade
 
@@ -833,9 +882,9 @@ return with `git checkout <previous branch or tag>` using the recorded name **on
 the new-version `docker compose up` command runs**. Complete this rollback with the
 [pre-start recovery block](#checkout-only-recovery-before-startup) below, including its
 proxy recreation, even if the app and worker were never stopped.
-Once that `up` is attempted, follow [Back up and restore](#back-up-and-restore), even if
-it fails: a new app or worker may already have applied migrations; old code against the
-new schema is unsafe.
+If you need to roll back after attempting that `up`, follow
+[Back up and restore](#back-up-and-restore) even if startup fails. A new app or worker may
+already have applied migrations; old code against the new schema is unsafe.
 
 Git does not undo [`enable-worker.sh`](https://github.com/hourmere/hourmere/blob/main/scripts/enable-worker.sh)'s private `.env` edit. Before checking out the prior
 revision, restore only the pre-upgrade `COMPOSE_FILE` assignment from the saved private

@@ -339,6 +339,12 @@ mismatch, provider change, logout, stale session, conflicting links and concurre
 attempts with different users.
 Do not enable the disabled general `/api/auth/link-social` route to implement this.
 
+Ordinary SSO self-linking leaves the member's directory-management status unchanged.
+New-enrollment SCIM claims complete only through explicit acceptance of a SCIM-issued
+invitation with Hourmere mailbox proof, including when SSO supplies the sign-in flow.
+Claim completion through SSO linking is hard-off in production until the corresponding
+work ships. See [SCIM claim completion and rollout](scim.md#ordered-implementation-plan).
+
 An unlinked IdP subject never creates a second user or an automatic link. Whether or
 not its email matches an existing account, and whatever `email_verified` says, the
 callback stores a frozen pending result and returns one generic outcome: “Complete
@@ -448,8 +454,8 @@ Slack 测试投递会在发送前复查发起者的会话。预约提醒、邮�
 Enabling enforcement requires a verified domain, an enabled tested provider of a protocol
 that is currently on and supports step-up, a successful owner SSO test against the exact
 current revision, and at least one usable recovery owner: a current owner with accepted
-recovery status. Until SAML step-up ships, only OIDC qualifies. A pending nomination does
-not count. An owner can enable enforcement before any owner or admin has linked an SSO
+recovery status. A pending nomination does not count. An owner can enable enforcement
+before any owner or admin has linked an SSO
 identity. The independent linking flow remains available, and an accepted recovery owner
 can turn enforcement off if nobody can finish linking. Only an owner can change
 enforcement or recovery. Owners and admins can prepare replacements, and an enforced team
@@ -581,13 +587,14 @@ ID-token `iat`. OIDC step-up sends `prompt=login` and `max_age=0` and requires a
 numeric `auth_time` no earlier than attempt creation minus `oidcClockSkew`, no later
 than now plus `oidcClockSkew`, and at most `freshAdministrationProof` before the
 callback. The lower bound uses the OIDC authorization attempt created at step-up initiation.
-SAML step-up sends `ForceAuthn="true"` and requires a signed AuthnStatement `AuthnInstant`
-within the same bounds, using `clockSkew`. An OIDC token with a missing `auth_time` proves
-only the linked identity and adds `mailbox`. A signed OIDC `auth_time` outside the allowed
-window is refused. The result must come from the attempt's own user
-and that user's existing link at that provider; it is recorded on the pending attempt
+SAML step-up sends `ForceAuthn="true"` and checks the signed AuthnStatement `AuthnInstant`
+against the same bounds, using `clockSkew` and the SAML authorization attempt. A missing
+OIDC `auth_time` or a missing or old SAML `AuthnInstant` proves only the linked identity
+and adds `mailbox`. A signed OIDC `auth_time` outside the allowed window, or a SAML
+`AuthnInstant` later than now plus `clockSkew`, is refused. The result must come from the
+attempt's own user and that user's existing link at that provider. It is recorded on the pending attempt
 and creates no session, browser proof or link. It expires at the earlier of attempt
-expiry and the authentication instant plus `freshAdministrationProof`. For the missing-claim
+expiry and the authentication instant plus `freshAdministrationProof`. For the mailbox
 fallback, receipt time caps the identity result until the mailbox is also proven. Silent IdP SSO,
 rolling sessions and refresh tokens never renew freshness.
 
@@ -830,10 +837,10 @@ with public syntax, a dotted DNS name without a special-use suffix, may instead 
 answer public: that is how a public IdP on a non-default port, such as
 `https://idp.example.com:8443`, is reached. A listed name without public syntax, a single
 label such as `keycloak` or a name under `.local`, `.internal`, `.localhost`, `.home.arpa`,
-`.test`, `.example`, `.invalid` or `.onion`, accepts only private or loopback answers. If a
-search domain, wildcard DNS or NXDOMAIN rewriting expands such a name to a public address,
-the request is therefore refused before any connection opens. Answers that mix the two, or
-that include metadata, link-local, IPv4-mapped or other reserved space, are refused. Hosts
+`.service.arpa`, `.alt`, `.test`, `.example`, `.invalid` or `.onion`, accepts only private or
+loopback answers. If a search domain, wildcard DNS or NXDOMAIN rewriting expands such a
+name to a public address, the request is refused before any connection opens. Answers that
+mix the two, or that include metadata, link-local, IPv4-mapped or other reserved space, are refused. Hosts
 that are not listed keep the default rules above: public answers only, on the default port
 only, and no private routing. HTTPS stays required, and a listed target is fetched like any
 other: the validated address is pinned to the socket and TLS verifies the original
@@ -886,6 +893,8 @@ The Audit actions step built this vocabulary. The [SSO actions](audit-log.md#sso
 are defined in `packages/db/src/sso-audit.ts` and checked by migration 0085. Later steps call
 `writeSsoAuditEvent` inside the transaction of the change they record, so a rollback removes
 the event with the change, and `writeSsoSecurityFailure` for a security failure. The
+change writer checks the stored-ID shape of user, API-key, OAuth-client and SCIM-token
+actors and any supplied session or API-key credential ID. System actors use service names. The
 provider and correlation IDs must be stored provider and attempt IDs (UUIDv7); the checks
 enforce that shape, which refuses a secret, a token, an assertion, a mailbox capability or an
 IdP subject of any other shape. The source of a security failure is its action: a failed
@@ -955,6 +964,7 @@ imports to pin this table.
 |---|---:|---|
 | `ssoSecurityFailureEvents` | 20 | events |
 | `ssoSecurityFailureWindow` | 3600 | seconds |
+| `ssoSecurityFailureDropReportWindow` | 60 | seconds |
 
 `writeSsoSecurityFailure` records a failure only while fewer than `ssoSecurityFailureEvents`
 failures of the same provider and source were recorded in the last `ssoSecurityFailureWindow`
@@ -962,11 +972,19 @@ seconds, by the database clock; it drops the rest and reports that it did. With 
 provider records at most 80 failures an hour, however many attempts fail. A transaction-level
 advisory lock per provider and source serializes the count and the insert, so a burst of
 parallel failures cannot exceed the bound, and a failure already past the bound is dropped from
-an unlocked count without waiting for that lock. Callers write a failure after the request's
-own transaction has settled, with the team, provider and protocol of the provider they loaded.
-A provider's successes and changes are never dropped: only security failures are bounded. The
-cost is that junk failures can fill a window and hide later failures of the same source until
-the window slides.
+an unlocked count without waiting for that lock.
+
+Callers use the team, ID and protocol of the provider they loaded and wait for any
+request transaction to settle. Passing the outer database handle from inside a transaction
+callback is invalid because the failure writer needs its own pool connection. Before inserting,
+the writer confirms under a row lock that the provider still exists in that team and uses that
+protocol. A missing or mismatched provider produces no event.
+
+Each process counts dropped failures by source and emits one structured
+`sso.security_failures_dropped` warning `ssoSecurityFailureDropReportWindow` seconds after
+the first drop in a batch. Reports contain counts only, with no provider, team or
+request identifiers. Pending counts are process-local and reset when the process exits.
+A provider's successes and changes are outside the failure bound.
 
 ## Proposed REST, MCP and CLI contracts
 
@@ -1181,8 +1199,8 @@ passed test for the exact current revision and at least one associated, unexpire
 domain with a positive latest recheck. Disabling the last usable provider while enforcing
 SSO returns `409 sso_last_provider`. Another enabled, non-retired provider can satisfy the
 guard if its protocol is on, it supports step-up, and it has an unexpired verified domain.
-Until SAML step-up ships, only OIDC providers count. A failed recheck freezes
-new activation while the existing provider can still serve that domain until verification expires.
+A failed recheck freezes new activation while the existing provider can still serve that
+domain until verification expires.
 Changing activation state keeps the provider revision and records an audit event.
 Disabling also increments `trustGeneration`. An authorized request to enable an already
 enabled provider still checks the current prerequisites.
@@ -1261,8 +1279,8 @@ SSO 的团队使用管理员自己的 Hourmere 邮箱完成证明。重试成功
 关闭，接口返回 `404 sso_disabled`。
 
 SAML uses the same test operation, expected revision and fresh administration flow.
-An enforcing team uses OIDC step-up until SAML step-up ships. A recovery owner can
-update, test and re-activate the provider using three separate recovery grants.
+An enforcing team uses step-up through an enabled OIDC or SAML provider. A recovery owner
+can update, test and re-activate the provider using three separate recovery grants.
 Follow the authorization URL in the initiating browser, then select **Continue**
 on the SAML completion page. The ACS verifies the response and stages its result.
 Completion checks the initiating browser, session and administrator, the provider
@@ -1485,8 +1503,8 @@ must append that cookie and return the challenge as HTTP 403, after its attempt 
 Successful proof consumption and the protected mutation share one transaction; a failed
 mutation rolls back consumption. The database clock is read after the row locks, and an
 expired recorded mailbox proof requires a new attempt. Teams without enforcement need
-`mailbox`. A stored enforcement policy requires OIDC step-up for fresh administration.
-Satisfying that proof requires an available OIDC protocol and an enabled provider where the
+`mailbox`. A stored enforcement policy requires SSO step-up for fresh administration.
+Satisfying that proof requires an available protocol and an enabled provider where the
 caller has a live link. The gate rechecks the recorded result's deadline, provider, link and
 trust generation before consuming the attempt.
 Independent local proof still requires `mailbox`.
@@ -1607,8 +1625,17 @@ discovery, code exchange and signing-key fetches run outside database transactio
 OIDC 二次验证沿用登录发起和回调端点，并要求身份提供方重新认证。回调在兑换授权码前及记录
 结果时，都检查原写入尝试、浏览器、会话、提供方版本、身份关联和团队信任代数。完成后返回
 `returnTo`，客户端用原 `proofAttemptId` 重试写入。如果令牌缺少 `auth_time`，重试会要求在
-同一个尝试中补做邮箱证明。签名中的认证时间超出允许范围时，二次验证会被拒绝。只有 OIDC
-已启用且团队已强制 SSO 并有活动的 OIDC 提供方时，管理写入才要求此验证。
+同一个尝试中补做邮箱证明。签名中的认证时间超出允许范围时，二次验证会被拒绝。
+
+SAML step-up uses the same initiation, ACS and same-origin completion as other SAML
+intents. The ACS verifies the assertion and reserves the replay keys before staging the
+result. Select **Continue** in the initiating browser to record the result on the original
+write attempt. Retry the write with the same `proofAttemptId`. If the signed authentication
+instant is missing or too old, complete the requested mailbox proof before retrying.
+
+SAML 二次验证沿用 SAML 登录发起、ACS 和同源完成端点。ACS 验证签名断言并记录防重放键，
+然后暂存结果。在发起请求的浏览器中选择**继续**，将结果写入原尝试。使用同一个
+`proofAttemptId` 重试原写入。若签名断言缺少认证时间或时间过早，须先补做邮箱验证。
 
 When the OIDC callback sees a changed email for a linked identity, it stores a short-lived,
 frozen result for the original browser and hands off to `/app/mailbox-proof` with the opaque
@@ -1690,6 +1717,23 @@ identifies the team's provider. The sign-in page offers no email or domain looku
 for SSO. Continue using your existing sign-in method for your personal space. If
 you are already signed in, sign out before using the team's SSO link.
 
+SAML remains off in production. Where SAML is enabled in an in-process fixture,
+team owners and admins can add a SAML provider under **Settings → Single sign-on**.
+Enter the IdP's details manually, paste its metadata XML, or import that metadata from
+a URL. The form shows the provider revision and offers the service provider metadata
+for configuring the IdP. Saved IdP metadata and certificates are write-only. To test a
+certificate rotation, use a disabled draft. Submit the complete overlapping list, test
+the new revision, then save a list without the old certificate after the IdP switches.
+Keep another usable provider enabled if the team requires single sign-on.
+
+A team's SAML sign-in link uses `/sign-in?sso=<providerId>&saml=1` and opens the same
+sign-in screen. In **Your team sign-in**, verify your mailbox to start linking and
+confirm **Link account** after returning from the IdP. When a write calls for fresh
+SSO verification, choose your linked provider, complete its verification in the new
+tab, then return to the original tab and select **Continue**. If prompted for email
+verification, complete it there before continuing. SAML controls only appear when
+the instance reports SAML as enabled.
+
 If prompted to verify your email, request a verification message. In the same
 browser, open the email link in another tab and explicitly verify it, then return
 to the tab where you started. You can also copy and paste the email link into
@@ -1712,6 +1756,19 @@ member who already has a link can still unlink it.
 OIDC 可用时，打开团队提供的登录链接（`/sign-in?sso=<providerId>`），选择
 **使用单点登录**。链接指定团队的身份提供方。登录页不会通过邮箱地址或域名查找单点登录
 提供方。个人空间仍可使用原有方式登录。如果你已经登录，请先退出，再使用团队的单点登录链接。
+
+生产环境中的 SAML 保持关闭。在启用 SAML 的进程内测试环境中，团队所有者和管理员可在
+**设置 → 单点登录**中添加 SAML 提供方。可以手动填写身份提供方信息、粘贴元数据 XML，
+或从网址导入。表单显示提供方版本，并提供配置身份提供方所需的服务提供方元数据下载。
+已保存的身份提供方元数据和证书只写。请在已停用的草稿上测试证书轮换。提交包含新旧证书的
+完整列表，测试新版本，等身份提供方切换后再保存去掉旧证书的列表。若团队强制使用单点登录，
+请保持另一个可用的提供方处于启用状态。
+
+团队 SAML 登录链接使用 `/sign-in?sso=<providerId>&saml=1`，打开同一个登录页面。
+在**你的团队登录方式**中验证邮箱后发起关联，从身份提供方返回后选择**关联账号**。
+写入操作要求重新验证身份时，选择已关联的提供方，在新标签页完成验证，再返回原标签页选择
+**继续**。若提示验证邮箱，请在原标签页完成后继续。仅当实例报告 SAML 已启用时，页面才显示
+相关选项。
 
 如需验证邮箱，请先发送验证邮件。在同一浏览器的新标签页中打开邮件链接，确认验证后返回
 发起请求的标签页。也可以把邮件链接粘贴到原标签页验证。如果浏览器无法跨标签页确认，请将链接

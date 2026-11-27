@@ -107,3 +107,7 @@ The CSV excludes custom answers, free-text booking titles, cancellation reasons,
 metadata/links, attribution and creation timestamps. It does not widen the whitelist above.
 The same bounded range, streaming limits and file privacy guidance apply as documented in
 [CSV booking exports](https://hourmere.com/docs/booking-export).
+
+The [bulk cancellation contract](team-booking-bulk-cancellation.md) describes a future
+release. The preview route returns 404 in production, and booking lists omit page proofs
+until the feature is enabled. Team administrators can still cancel individual bookings.

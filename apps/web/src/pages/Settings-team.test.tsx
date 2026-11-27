@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { App } from '../App.tsx'
 import type { OrganizationMember } from '../api/auth.ts'
 import { PATHS } from '../paths.ts'
+import { selectAdminLanguage } from '../test/account-menu.ts'
 import {
   emptyTeamLists,
   fakeApi,
@@ -102,14 +103,16 @@ describe('team context in account settings', () => {
       renderApp(PATHS.settings)
       const account = await screen.findByRole('region', { name: 'Account' })
       expect(await within(account).findByText(en)).toBeDefined()
-      const name = within(account).getByText(TEAM_ME.organization.name)
-      expect(name.classList.contains('user-content')).toBe(true)
+      const name = within(account).getByText(TEAM_ME.organization.name, { selector: 'bdi' })
+      expect(name.closest('dd.user-content')).not.toBeNull()
       expect(name.textContent).toBe(TEAM_ME.organization.name)
       expect(within(account).getByText('Your role')).toBeDefined()
-      await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+      await selectAdminLanguage(user, 'zh-CN')
       expect(within(account).getByText(zh)).toBeDefined()
       expect(within(account).getByText('你的角色')).toBeDefined()
-      expect(within(account).getByText(TEAM_ME.organization.name)).toBeDefined()
+      expect(
+        within(account).getByText(TEAM_ME.organization.name, { selector: 'bdi' }),
+      ).toBeDefined()
       expect(within(account).getByRole('link', { name: '创建团队' })).toBeDefined()
     },
   )
@@ -187,7 +190,7 @@ describe('team context in account settings', () => {
     expect(within(account).getByRole('alert').textContent).toBe('Could not load your team role.')
     expect(within(account).getByText('Owner')).toBeDefined()
     expect(within(account).getByText(TEAM_ME.organization.name)).toBeDefined()
-    await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    await selectAdminLanguage(user, 'zh-CN')
     expect(within(account).getByText('所有者')).toBeDefined()
     expect(within(account).getByText('上次确认的角色')).toBeDefined()
     expect(within(account).getByRole('button', { name: '重试' })).toBeDefined()

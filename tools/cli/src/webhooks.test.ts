@@ -124,7 +124,10 @@ describe('webhook CLI', () => {
     )
     for (const event of [...input.events, 'workflow.executed']) expect(eventList).toContain(event)
     expect(result.stdout).toContain(
-      'Adding workflow.executed on create or update is disabled (workflows_disabled, REST 404).',
+      'Adding workflow.executed on create or update requires enabled workflows.',
+    )
+    expect(result.stdout).toContain(
+      'With WORKFLOWS_ENABLED=false, the server returns workflows_disabled (REST 404).',
     )
     expect(result.stdout).toContain(
       'On create this takes precedence over webhooks_disabled (REST 409).',
@@ -133,6 +136,24 @@ describe('webhook CLI', () => {
       'Endpoint events and delivery eventType are open enums. Ignore unknown event kinds.',
     )
     expect(result.fetcher).not.toHaveBeenCalled()
+  })
+
+  it('takes a credential-bearing webhook destination through stdin and refuses it as an argument', async () => {
+    const destination = `${input.url}?key=fixture-receiver-credential`
+    const refused = await run([...create, '--json', '--webhook-url', destination])
+    expect(refused.code).toBe(1)
+    expect(refused.stdout).toBe('')
+    expect(JSON.parse(refused.stderr)).toEqual({ error: 'invalid_options' })
+    expect(refused.fetcher).not.toHaveBeenCalled()
+
+    const args = { ...input, url: destination }
+    const accepted = await run([...create, '--json'], { input: args })
+    expect(accepted.code).toBe(0)
+    expect(accepted.fetcher).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(String(accepted.fetcher.mock.calls[0]?.[1]?.body)).params).toMatchObject({
+      name: 'create_webhook',
+      arguments: args,
+    })
   })
 
   it('lists known and future webhook kinds in JSON without signing secrets', async () => {

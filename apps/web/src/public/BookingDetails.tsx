@@ -1,5 +1,6 @@
 import { displayConferenceUrl } from '@hourmere/core/conference-url'
 import type { ReactNode } from 'react'
+import { UserContentMessage } from '../components/UserContent.tsx'
 import { useI18n } from '../i18n/runtime.tsx'
 import type { Booking } from './api.ts'
 import { formatDate, formatTimeRange, offsetLabel, zoneName } from './time.ts'
@@ -7,6 +8,7 @@ import { formatDate, formatTimeRange, offsetLabel, zoneName } from './time.ts'
 export const LOCATION_LABELS: Record<string, string> = {
   google_meet: 'Google Meet',
   zoom: 'Zoom',
+  microsoft_teams: 'Microsoft Teams',
   phone: 'Phone call',
   in_person: 'In person',
   link: 'Online meeting',
@@ -25,16 +27,54 @@ function safeUrl(value: unknown): string | undefined {
   }
 }
 
+function bookingLocationUrl(location: NonNullable<Booking['location']>): string | undefined {
+  switch (location.kind) {
+    case 'microsoft_teams':
+      return location.status === 'ready'
+        ? displayConferenceUrl(location.kind, location.url)
+        : undefined
+    case 'google_meet':
+    case 'zoom':
+      return displayConferenceUrl(location.kind, location.url)
+    default:
+      return safeUrl(location.url)
+  }
+}
+
 /** Where a booked meeting happens, with the details the booking reveals (number, address, link). */
-export function LocationDetails({ location }: { location: Booking['location'] }) {
+export function LocationDetails({
+  location,
+  cancelled = false,
+}: {
+  location: Booking['location']
+  cancelled?: boolean
+}) {
   const { t, ui } = useI18n()
 
   if (!location)
     return <>{t('No location has been specified. Contact the host for meeting details.')}</>
-  const url =
-    location.kind === 'google_meet' || location.kind === 'zoom'
-      ? displayConferenceUrl(location.kind, location.url)
-      : safeUrl(location.url)
+  if (location.kind === 'microsoft_teams') {
+    const url = !cancelled && bookingLocationUrl(location)
+    return (
+      <>
+        {t('Microsoft Teams')}
+        {url ? (
+          <>
+            {t(': ')}
+            <a href={url} target="_blank" rel="noopener noreferrer">
+              {t('Join Microsoft Teams')}
+            </a>
+          </>
+        ) : !cancelled && location.status === 'join_url_pending' ? (
+          <p>{t('The Teams link isn’t ready yet.')}</p>
+        ) : !cancelled &&
+          (location.status === 'teams_unavailable' || location.status === 'writeback_failed') ? (
+          <p>{t('The booking is still scheduled without a Teams link.')}</p>
+        ) : null}
+      </>
+    )
+  }
+  const url = bookingLocationUrl(location)
   const number = typeof location.number === 'string' ? location.number : undefined
   const address = typeof location.address === 'string' ? location.address : undefined
   return (
@@ -43,24 +83,36 @@ export function LocationDetails({ location }: { location: Booking['location'] })
       {number && (
         <>
           {t(': ')}
-          <a href={`tel:${number.replace(/[^+\d]/g, '')}`}>{number}</a>
+          <a href={`tel:${number.replace(/[^+\d]/g, '')}`}>
+            <bdi dir="ltr">{number}</bdi>
+          </a>
         </>
       )}
       {address && (
         <>
           {t(': ')}
-          {address}
+          <bdi>{address}</bdi>
         </>
       )}
       {url && (
         <>
           {t(': ')}
           <a href={url} target="_blank" rel="noopener noreferrer">
-            {url}
+            <bdi dir="ltr">{url}</bdi>
           </a>
         </>
       )}
     </>
+  )
+}
+
+export function BookingPerson({ name, email }: { name: string; email: string }) {
+  return (
+    <UserContentMessage
+      message="{name} ({detail})"
+      values={{ name, detail: email }}
+      renderValues={{ detail: <bdi dir="ltr">{email}</bdi> }}
+    />
   )
 }
 
@@ -71,13 +123,13 @@ export function locationText(
   separator = ': ',
 ): string | undefined {
   if (!location) return undefined
-  const link =
-    location.kind === 'google_meet' || location.kind === 'zoom'
-      ? displayConferenceUrl(location.kind, location.url)
-      : safeUrl(location.url)
-  const detail = [location.number, location.address, link].find(
-    (v): v is string => typeof v === 'string' && v !== '',
-  )
+  const link = bookingLocationUrl(location)
+  const detail =
+    location.kind === 'microsoft_teams'
+      ? link
+      : [location.number, location.address, link].find(
+          (v): v is string => typeof v === 'string' && v !== '',
+        )
   return detail
     ? `${labelText(locationLabel(location.kind))}${separator}${detail}`
     : labelText(locationLabel(location.kind))
@@ -122,7 +174,7 @@ export function When({
   )
 }
 
-export function DetailList({ items }: { items: [string, ReactNode][] }) {
+export function DetailList({ items }: { items: readonly (readonly [string, ReactNode])[] }) {
   const { ui } = useI18n()
 
   return (

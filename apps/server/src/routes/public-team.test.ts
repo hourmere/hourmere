@@ -202,30 +202,41 @@ describe.skipIf(!serverUrl)('public single-host team booking', () => {
     expect(await canceled.json()).toMatchObject({ id: successor.booking.id, status: 'cancelled' })
   })
 
-  it('separates personal handles, team slugs and exact-case team slugs', async () => {
-    const t = await setup({ teamSlug: `Same-${randomUUID().slice(0, 8)}` })
-    const lower = await setup({ teamSlug: t.teamSlug.toLowerCase() })
-    await db
-      .updateTable('event_types')
-      .set({ title: 'Upper team' })
-      .where('id', '=', t.id)
-      .execute()
-    await db
-      .updateTable('event_types')
-      .set({ title: 'Lower team' })
-      .where('id', '=', lower.id)
-      .execute()
-    const personal = await f.host({ handle: t.teamSlug.toLowerCase(), timeZone: 'UTC' })
+  it('separates identical personal handles and team slugs', async () => {
+    const t = await setup()
+    const personal = await f.host({ handle: t.teamSlug, timeZone: 'UTC' })
     await f.eventType(personal.organizationId, personal.userId, {
-      slug: 'intro',
+      slug: t.slug,
       title: 'Personal introduction',
     })
     const app = appWith()
-    expect(await (await app.request(t.path)).json()).toMatchObject({ title: 'Upper team' })
-    expect(await (await app.request(lower.path)).json()).toMatchObject({ title: 'Lower team' })
-    expect(
-      await (await app.request(`/api/v1/public/${t.teamSlug.toLowerCase()}/intro`)).json(),
-    ).toMatchObject({ title: 'Personal introduction' })
+    const teamPage = await app.request(t.path)
+    expect(teamPage.status).toBe(200)
+    expect(await teamPage.json()).toMatchObject({ title: 'Team introduction' })
+    const personalPage = await app.request(`/api/v1/public/${t.teamSlug}/${t.slug}`)
+    expect(personalPage.status).toBe(200)
+    expect(await personalPage.json()).toMatchObject({ title: 'Personal introduction' })
+  })
+
+  it('preserves the stored spelling of a legacy team slug and rejects a case collision', async () => {
+    // The fixture inserts directly, modeling a legacy slug that survives migration 0194.
+    const t = await setup({ teamSlug: `Legacy-${randomUUID().slice(0, 8)}` })
+    const lowerSlug = t.teamSlug.toLowerCase()
+    await expect(f.organization(lowerSlug)).rejects.toMatchObject({
+      code: '23505',
+      constraint: 'organization_slug_lower_uidx',
+    })
+
+    const app = appWith()
+    const storedPage = await app.request(t.path)
+    expect(storedPage.status).toBe(200)
+    expect(await storedPage.json()).toMatchObject({
+      handle: t.teamSlug,
+      team: { slug: t.teamSlug },
+    })
+    const lowerPage = await app.request(`/api/v1/public/teams/${lowerSlug}/${t.slug}`)
+    expect(lowerPage.status).toBe(404)
+    expect(await lowerPage.json()).toMatchObject({ error: 'event_type_not_found' })
   })
 
   it('serves an event named slots before the personal wildcard slots route', async () => {

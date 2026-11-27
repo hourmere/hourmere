@@ -270,6 +270,31 @@ describe.skipIf(!serverUrl)('audit log over REST, MCP and the CLI (real Postgres
     }
   })
 
+  it('filters invitation attribution by SCIM connection over REST, MCP and the CLI', async () => {
+    const organization = await createTestTeam(db, [{ user: owner, role: 'owner' }])
+    const actorId = randomUUID()
+    const targetId = randomUUID()
+    await sql`INSERT INTO audit_events (organization_id, actor_type, actor_id, credential_type,
+        action, target_type, target_id)
+      VALUES (${organization.id}, 'scim_connection', ${actorId}, 'none', 'membership.invited',
+        'invitation', ${targetId})`.execute(db)
+    const token = bearer(owner, 'full', organization)
+    const filters = { actorType: 'scim_connection', actorId }
+    const viaRest = await rest(token, `/api/v1/audit-events?${query(filters)}`)
+    expect(viaRest.status).toBe(200)
+    expect(viaRest.body.data).toEqual([
+      expect.objectContaining({
+        actor: { type: 'scim_connection', id: actorId },
+        action: 'membership.invited',
+        target: { type: 'invitation', id: targetId },
+      }),
+    ])
+    expect((await tool(token, 'list_audit_events', filters)).structuredContent).toEqual(
+      viaRest.body,
+    )
+    expect((await cli(token, ['audit-log', 'list'], filters)).stdout).toEqual(viaRest.body)
+  })
+
   it('changes retention the same way on every surface and refuses admins alike', async () => {
     const token = bearer(owner, 'full', team)
     const viaRest = await rest(token, '/api/v1/audit-log/settings', {

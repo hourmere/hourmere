@@ -11,6 +11,7 @@ export {
   CLAIM_RESERVED_HANDLES,
   isClaimReservedHandle,
   isPublicTeamSlug,
+  isPublicTeamSlugFormat,
   isReservedName,
   RESERVED_NAMES,
 } from './reserved.ts'

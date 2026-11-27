@@ -475,13 +475,24 @@ type Member = 'access' | 'add' | 'count' | 'createBuilder' | 'createCounter' | '
 type Loose = ((...args: unknown[]) => Loose) & {
   [key in
     | Member
+    | 'alive'
+    | 'allLive'
     | 'holder'
     | 'holds'
+    | 'isCurrent'
     | 'isLive'
     | 'live'
     | 'map'
+    | 'members'
     | 'open'
     | 'parts'
+    | 'pool'
+    | 'push'
+    | 'ready'
+    | 'release'
+    | 'size'
+    | 'start'
+    | 'withHandle'
     | 'write'
     | 0]: Loose
 }
@@ -492,6 +503,12 @@ const compile = (source: string, exports: string, bindings: Record<string, unkno
   ) as Loose
 
 describe('source copy guard results', () => {
+  const registry = `const live = new WeakSet()
+    function open() {
+      const handle = { close() { live.delete(this) } };
+      live.add(handle);
+      return handle;
+    }`
   // Each copy keeps using an object it returned. Unmutated, it passes the verifier, so it must
   // never count as a kill.
   it.each<[string, string, string, (copy: Loose) => void]>([
@@ -529,6 +546,79 @@ describe('source copy guard results', () => {
         holder.handle = copy.open()
         expect(holder.holds(), 'as an assigned value').toBe(true)
       },
+    ],
+    [
+      'handles in an array argument',
+      `${registry}
+      function allLive(handles) { return handles.every((handle) => live.has(handle)) }`,
+      '{ open, allLive }',
+      (copy) => expect(copy.allLive([copy.open(), copy.open()])).toBe(true),
+    ],
+    [
+      'a handle in a cyclic options argument',
+      `${registry}
+      function release(options) {
+        return options === options.self && options.items[0] === options.handle &&
+          live.delete(options.handle);
+      }`,
+      '{ open, release }',
+      (copy) => {
+        const handle = copy.open()
+        const options = { handle, items: [handle], self: {} }
+        options.self = options
+        expect(copy.release(Object.freeze(options))).toBe(true)
+        expect(options.handle).toBe(handle)
+      },
+    ],
+    [
+      'a memoized promise',
+      `const pending = Promise.resolve('ok');
+      function ready() { return pending }`,
+      '{ ready }',
+      (copy) => expect(copy.ready()).toBe(copy.ready()),
+    ],
+    [
+      'a promise it gets back',
+      `let current;
+      function start() { current = Promise.resolve('ok'); return current }
+      function isCurrent(promise) { return promise === current }`,
+      '{ start, isCurrent }',
+      (copy) => expect(copy.isCurrent(copy.start())).toBe(true),
+    ],
+    [
+      'a handle returned by a test callback',
+      `${registry}
+      function withHandle(pick) { return live.has(pick()) }`,
+      '{ open, withHandle }',
+      (copy) => {
+        const handle = copy.open()
+        expect(copy.withHandle(() => handle)).toBe(true)
+      },
+    ],
+    [
+      'a handle pushed into an exposed data array',
+      `${registry}
+      function pool() {
+        const p = { members: [], size() { return p.members.filter((m) => live.has(m)).length } };
+        return p;
+      }`,
+      '{ open, pool }',
+      (copy) => {
+        const pool = copy.pool()
+        pool.members.push(copy.open())
+        expect(pool.size()).toBe(1)
+      },
+    ],
+    [
+      'a getter that checks its receiver',
+      `const live = new WeakSet();
+      function open() {
+        const handle = { get alive() { return live.has(this) } };
+        live.add(handle);
+        return handle;
+      }`,
+      '{ open }',
+      (copy) => expect(copy.open().alive).toBe(true),
     ],
   ])(
     'never counts an unmutated copy that keeps %s as a kill',

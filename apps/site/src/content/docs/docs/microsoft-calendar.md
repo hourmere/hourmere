@@ -168,15 +168,44 @@ for the retry and recovery behavior.
 Test organizational mailboxes separately from personal Outlook accounts before relying on
 company-specific consent policies.
 
+## Add Microsoft Teams to an event type
+
+Use a work or school Microsoft 365 account with Teams enabled. Connect that account in
+**Calendars**, grant write access, and select **Write new bookings here** on its Outlook
+calendar. In **Event types**, edit an event and choose **Microsoft Teams** as a location.
+The option requires one assigned host whose effective writeback destination is a Microsoft
+calendar they own. Collective and round-robin event types cannot use it. A group occurrence
+with one host has one Teams meeting shared by its booked seats. The seat count stays in
+Hourmere.
+
+The assigned host must use their own signed-in session to add Teams, duplicate a Teams
+event type, or reactivate one. Changing the host of a Teams event type also requires the
+new host's session. The host needs the usual event type edit permissions, including owner or
+admin access for a team event type.
+
+In a session-authenticated REST request, send `location: {"kind":"microsoft_teams"}` or use
+`{"id":"teams","kind":"microsoft_teams"}` in `locations`. If the caller lacks the host's
+session, REST returns `403 microsoft_teams_host_session_required`, and MCP and CLI report
+the same error code. Existing Teams events remain bookable through the usual booking
+surfaces. See [meeting location choices](/docs/location-choices).
+
+The host and the invitee can open the Teams link from their booking details. Confirmation and
+reschedule emails to those recipients include a known link in the message and any calendar
+attachment. Cancellation emails and calendar attachments show only the Microsoft Teams label.
+An individual reschedule keeps the same meeting.
+Moving a group seat uses the destination occurrence's meeting. Cancelling removes the
+Outlook copy when the last active seat is cancelled, or when an individual booking is cancelled.
+
+If Outlook confirms the event without a join link (`join_url_pending`), Hourmere retries
+reading that same event up to its writeback attempt limit. Open the booking details to see the
+link when it appears. If the calendar does not support Teams (`teams_unavailable`), Hourmere
+keeps the booking and writes an ordinary Outlook event. The booking and email explain the
+missing link. If writeback fails and there is no known Teams link (`writeback_failed`),
+the booking remains scheduled in Hourmere. Check **Calendars** for writeback errors and retry options.
+
 ## Known limitations
 
-Event types cannot select automatic Microsoft Teams meetings yet. The writeback worker can
-exercise this path in tests for single-host bookings on a host-owned Outlook calendar.
-The worker uses the calendar's allowed providers to decide whether to create a Teams meeting.
-Personal Outlook calendars and other calendars without Teams support still receive a regular
-booking copy, with `teams_unavailable` recorded internally. When Graph confirms an event but
-omits the Teams join link, the worker saves the event ID and retries reading that event within
-the usual attempt limit. A Teams join link stays on the private writeback record while Hourmere
-updates the same event on reschedule. Cancellation
-removes the event and clears the link. Join links are unavailable in booking confirmations.
-[Microsoft Graph online meetings in Outlook](https://learn.microsoft.com/en-us/graph/outlook-calendar-online-meetings)
+Personal Microsoft accounts can receive ordinary Outlook copies but cannot create Teams
+meetings through Hourmere. Microsoft Teams has been tested with a simulated provider.
+Acceptance with a real Microsoft 365 tenant is still pending.
+See [Microsoft Graph online meetings in Outlook](https://learn.microsoft.com/en-us/graph/outlook-calendar-online-meetings).

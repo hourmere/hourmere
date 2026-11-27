@@ -16,6 +16,7 @@ import { ErrorSummary, Field, type FieldErrors, parseWhole } from '../../compone
 import { PageHeader } from '../../components/PageHeader.tsx'
 import { PageSkeleton } from '../../components/PageSkeleton.tsx'
 import { StickyFormActions } from '../../components/StickyFormActions.tsx'
+import { UserContentMessage } from '../../components/UserContent.tsx'
 import { flash, useFlash } from '../../flash.ts'
 import { useLoad, useMounted, usePageTitle } from '../../hooks.ts'
 import { formatMinutes } from '../../i18n/duration.ts'
@@ -60,7 +61,7 @@ import {
   toPatchInput,
   validateDraft,
 } from './event-type-form.ts'
-import { HostAssignment } from './HostAssignment.tsx'
+import { HostAssignment, type TeamsHostReadiness } from './HostAssignment.tsx'
 import { NotificationsEditor } from './NotificationsEditor.tsx'
 import { pruneNotificationErrors } from './notifications-form.ts'
 import { OneTimeLinks } from './OneTimeLinks.tsx'
@@ -82,6 +83,7 @@ interface Loaded {
   profile: Profile | null
   automaticGoogleMeet: boolean
   automaticZoom: boolean
+  microsoftTeamsCalendarIssue: MessageKey | undefined
   smsRemindersAvailable: boolean | undefined
   followUpHostNotesEnabled: boolean
   paymentAvailability: Schemas['Instance']['eventTypePaymentAvailability']
@@ -113,6 +115,7 @@ export function EventTypeEditorPage() {
 
 function EventTypeEditor({ id }: { id: string | undefined }) {
   const { t, ui } = useI18n()
+  const { organization } = useMe()
 
   const load = useCallback(
     async (signal: AbortSignal): Promise<Loaded | 'missing'> => {
@@ -129,7 +132,7 @@ function EventTypeEditor({ id }: { id: string | undefined }) {
           loadSchedules(signal),
           loadProfile(signal),
           unwrap(api.GET('/api/v1/instance', { signal })),
-          id === undefined
+          id === undefined || organization.personal
             ? unwrap(api.GET('/api/v1/calendar-connections', { signal })).catch(() => null)
             : null,
           id === undefined
@@ -139,32 +142,35 @@ function EventTypeEditor({ id }: { id: string | undefined }) {
       )
       if (eventType === 'missing') return 'missing'
       return {
-        defaultLocation: connections?.data.some(
-          (connection) =>
-            connection.provider === 'google' &&
-            connection.status === 'active' &&
-            connection.syncAuthorized,
-        )
-          ? 'google_meet'
-          : conferences?.data.some(
-                (connection) =>
-                  connection.provider === 'zoom' &&
-                  connection.status === 'active' &&
-                  connection.mode === 'meetings',
-              )
-            ? 'zoom'
-            : '',
+        defaultLocation:
+          id === undefined &&
+          connections?.data.some(
+            (connection) =>
+              connection.provider === 'google' &&
+              connection.status === 'active' &&
+              connection.syncAuthorized,
+          )
+            ? 'google_meet'
+            : conferences?.data.some(
+                  (connection) =>
+                    connection.provider === 'zoom' &&
+                    connection.status === 'active' &&
+                    connection.mode === 'meetings',
+                )
+              ? 'zoom'
+              : '',
         eventType,
         schedules,
         profile,
         automaticGoogleMeet: instance.automaticGoogleMeet === true,
         automaticZoom: instance.automaticZoom === true,
+        microsoftTeamsCalendarIssue: teamsCalendarIssue(connections),
         smsRemindersAvailable: instance.smsRemindersAvailable,
         followUpHostNotesEnabled: instance.followUpHostNotesEnabled === true,
         paymentAvailability: instance.eventTypePaymentAvailability,
       }
     },
-    [id],
+    [id, organization.personal],
   )
   const [state, reload] = useLoad(load)
   usePageTitle(id === undefined ? 'New event type' : 'Edit event type')
@@ -204,6 +210,7 @@ function EventTypeForm({
   profile,
   automaticGoogleMeet,
   automaticZoom,
+  microsoftTeamsCalendarIssue,
   smsRemindersAvailable,
   followUpHostNotesEnabled,
   paymentAvailability,
@@ -216,6 +223,7 @@ function EventTypeForm({
   const access = useTeamManagementAccess()
   const canAssignHosts =
     me.principal.kind !== 'session' || (access.status === 'ready' && access.role !== null)
+  const teamRoleUnresolved = !canAssignHosts && access.status !== 'ready'
   const role = access.status === 'ready' ? (access.roles?.join(',') ?? null) : null
   // A form keeps the organization it started in; submitting never adopts another tab's
   // active organization. RequireSession remounts it after a confirmed context reload.
@@ -227,6 +235,8 @@ function EventTypeForm({
   const message = useFlash()
   const [shareFocusVersion, setShareFocusVersion] = useState(message ? 1 : 0)
   const [saved, setSaved] = useState<EventType | null>(eventType)
+  const showHosts =
+    !me.organization.personal && (!teamRoleUnresolved || saved?.schedulingType === 'round_robin')
   const [baseline, setBaseline] = useState(() =>
     eventType
       ? draftFromEventType(eventType)
@@ -245,6 +255,30 @@ function EventTypeForm({
   const paymentReason = paymentSupported
     ? paymentAvailabilityReason(paymentAvailability)
     : unsupportedPayment
+  const [teamsHost, setTeamsHost] = useState<TeamsHostReadiness>()
+  const teamsHostStatus =
+    teamsHost && teamsHost.userId === draft.hostUserIds[0] ? teamsHost.status : 'checking'
+  let teamsIssue: MessageKey | undefined
+  if (
+    draft.schedulingType !== 'individual' ||
+    (!me.organization.personal && draft.hostUserIds.length !== 1)
+  ) {
+    teamsIssue = 'Microsoft Teams requires individual scheduling with one host.'
+  } else if (me.organization.personal) {
+    teamsIssue = microsoftTeamsCalendarIssue
+  } else if (draft.hostUserIds[0] !== me.user.id) {
+    teamsIssue = 'The assigned host must configure Microsoft Teams in their own signed-in session.'
+  } else if (!canAssignHosts) {
+    teamsIssue = 'Could not verify Microsoft Teams availability for the host.'
+  } else if (teamsHostStatus === 'unavailable') {
+    teamsIssue =
+      'The host needs a Microsoft 365 work or school calendar selected for booking write-back.'
+  } else if (teamsHostStatus !== 'ready') {
+    teamsIssue =
+      teamsHostStatus === 'checking'
+        ? 'Checking Microsoft Teams availability…'
+        : 'Could not verify Microsoft Teams availability for the host.'
+  }
   const ownSchedule =
     me.organization.personal ||
     (draft.hostUserIds.length === 1 && draft.hostUserIds[0] === me.user.id)
@@ -276,8 +310,6 @@ function EventTypeForm({
       }
     }
     if (hiddenField) hiddenField.focus()
-    else if (Object.keys(errors).length === 1 && errors.durationMinutes)
-      document.getElementById('durationMinutes')?.focus()
   }, [attempt, errors])
   const mounted = useMounted()
   const [readiness, retryReadiness, invalidateReadiness, shareReadiness] = useEditorReadiness(
@@ -295,7 +327,6 @@ function EventTypeForm({
     [...draft.hostUserIds].sort().join() === [...baseline.hostUserIds].sort().join()
 
   const editing = saved !== null
-  const title = editing ? msg('Edit “{0}”', { '0': saved.title }) : 'New event type'
 
   function set<K extends keyof EventTypeDraft>(name: K, value: EventTypeDraft[K]) {
     invalidateReadiness()
@@ -645,6 +676,7 @@ function EventTypeForm({
                 {(props) => (
                   <input
                     {...props}
+                    dir="auto"
                     value={draft.title}
                     autoComplete="off"
                     onChange={(e) => {
@@ -797,7 +829,7 @@ function EventTypeForm({
                   )
                 }
               </Field>
-              <LocationFields draft={draft} errors={errors} set={set} />
+              <LocationFields draft={draft} errors={errors} set={set} teamsIssue={teamsIssue} />
             </div>
           </section>
           {!editing &&
@@ -810,6 +842,18 @@ function EventTypeForm({
                 {noScheduleHint[1]}
               </p>
             )}
+          {!me.organization.personal &&
+            teamRoleUnresolved &&
+            (access.status === 'loading' ? (
+              <p role="status">{t('Loading your team role…')}</p>
+            ) : (
+              <div role="alert">
+                <p>{t('Could not load your team role.')}</p>
+                <button type="button" onClick={access.reload}>
+                  {t('Try again')}
+                </button>
+              </div>
+            ))}
           <SettingsGroup
             label="Description and visibility"
             summary={summaries.visibility}
@@ -827,6 +871,7 @@ function EventTypeForm({
                   <textarea
                     {...props}
                     rows={4}
+                    dir="auto"
                     value={draft.description}
                     onChange={(e) => set('description', e.target.value)}
                   />
@@ -984,22 +1029,7 @@ function EventTypeForm({
               onChange={(payment) => set('payment', payment)}
             />
           </SettingsGroup>
-          {!me.organization.personal && !canAssignHosts && access.status !== 'ready' && (
-            <section className="panel" aria-labelledby="hosts-heading">
-              <h2 id="hosts-heading">{t('Hosts')}</h2>
-              {access.status === 'loading' ? (
-                <p role="status">{t('Loading your team role…')}</p>
-              ) : (
-                <div role="alert">
-                  <p>{t('Could not load your team role.')}</p>
-                  <button type="button" onClick={access.reload}>
-                    {t('Try again')}
-                  </button>
-                </div>
-              )}
-            </section>
-          )}
-          {!me.organization.personal && (
+          {showHosts && (
             <SettingsGroup label="Hosts" summary={summaries.hosts} initiallyOpen={editing}>
               {!me.organization.personal && canAssignHosts && (
                 <HostAssignment
@@ -1010,6 +1040,7 @@ function EventTypeForm({
                   error={errors.hosts}
                   organizerError={errors.conferenceOrganizer}
                   set={set}
+                  onTeamsReadiness={setTeamsHost}
                 />
               )}
               {!me.organization.personal && !canAssignHosts && access.status === 'ready' && (
@@ -1074,6 +1105,7 @@ function EventTypeForm({
               editing &&
               ((saved?.locations?.length ?? 0) > 1 ||
                 saved?.locations?.some((option) => Boolean(option.label)) ||
+                orderedLocations(baseline).some((option) => option.kind === 'microsoft_teams') ||
                 baseline.autoCreateZoom ||
                 baseline.autoCreateMeet)
             }
@@ -1081,7 +1113,12 @@ function EventTypeForm({
             <h2 id="location-heading" tabIndex={-1}>
               {t('Location')}
             </h2>
-            <OrderedLocationsEditor draft={draft} errors={errors} set={set} />
+            <OrderedLocationsEditor
+              draft={draft}
+              errors={errors}
+              set={set}
+              teamsIssue={teamsIssue}
+            />
             {orderedLocations(draft).some((option) => option.kind === 'zoom') && (
               <ZoomMeetingFields
                 draft={{ ...draft, autoCreateZoom: hasAutomaticLocation(draft, 'zoom') }}
@@ -1283,7 +1320,7 @@ function EventTypeForm({
                             : ''}
                         </option>
                         {schedules.map((s) => (
-                          <option key={s.id} value={s.id}>
+                          <option key={s.id} value={s.id} dir="auto">
                             {s.name}
                           </option>
                         ))}
@@ -1466,7 +1503,12 @@ function EventTypeForm({
           </p>
           <ConfirmAction
             label={t('Delete event type')}
-            prompt={t('Delete “{0}”? This cannot be undone.', { '0': saved.title })}
+            prompt={
+              <UserContentMessage
+                message="Delete “{0}”? This cannot be undone."
+                values={{ '0': saved.title }}
+              />
+            }
             confirmLabel={t('Delete event type')}
             busyLabel={t('Deleting…')}
             failure={t('Could not delete the event type.')}
@@ -1483,7 +1525,13 @@ function EventTypeForm({
         <Link to={PATHS.eventTypes}>{t('Event types')}</Link>
       </p>
       <PageHeader
-        title={uiText(title)}
+        title={
+          saved ? (
+            <UserContentMessage message="Edit “{0}”" values={{ '0': saved.title }} />
+          ) : (
+            t('New event type')
+          )
+        }
         lede={t('Set the booking details, questions and availability for this event type.')}
       />
       <EventTypeEditorLayout
@@ -1613,12 +1661,19 @@ function LocationFields({
   draft,
   errors,
   set,
+  teamsIssue,
 }: {
   draft: EventTypeDraft
   errors: FieldErrors
   set: <K extends keyof EventTypeDraft>(name: K, value: EventTypeDraft[K]) => void
+  teamsIssue: MessageKey | undefined
 }) {
   const { t, ui } = useI18n()
+  const teamsHint =
+    teamsIssue ??
+    (draft.locationKind === 'microsoft_teams'
+      ? 'Microsoft Teams creates a meeting link for each booking on the host’s Microsoft 365 work or school calendar.'
+      : undefined)
 
   return (
     <div className="stack">
@@ -1626,6 +1681,7 @@ function LocationFields({
         id="location-kind"
         label={t('Where the meeting happens')}
         error={errors['location-kind']}
+        hint={teamsHint && t(teamsHint)}
       >
         {(props) => (
           <select
@@ -1634,7 +1690,11 @@ function LocationFields({
             onChange={(e) => set('locationKind', e.target.value as LocationKind | '')}
           >
             {LOCATION_KINDS.map((k) => (
-              <option key={k.value} value={k.value}>
+              <option
+                key={k.value}
+                value={k.value}
+                disabled={k.value === 'microsoft_teams' && Boolean(teamsIssue)}
+              >
                 {ui(k.label)}
               </option>
             ))}
@@ -1673,6 +1733,7 @@ function LocationFields({
             <input
               {...props}
               autoComplete="street-address"
+              dir="auto"
               value={draft.address}
               onChange={(e) => set('address', e.target.value)}
             />
@@ -1699,6 +1760,40 @@ function LocationFields({
       )}
     </div>
   )
+}
+
+function teamsCalendarIssue(
+  connections: {
+    data: Schemas['CalendarConnection'][]
+    destinationCalendarId: string | null
+    microsoftEnabled: boolean
+  } | null,
+): MessageKey | undefined {
+  if (!connections) return 'Could not verify Microsoft Teams availability for the host.'
+  if (connections.microsoftEnabled === false)
+    return 'Microsoft Calendar is unavailable on this instance.'
+  const microsoft = connections.data.filter((connection) => connection.provider === 'microsoft')
+  if (!microsoft.length)
+    return 'Connect a Microsoft 365 work or school calendar and select it for booking write-back.'
+  const active = microsoft.filter((connection) => connection.status === 'active')
+  const destination = active.find((connection) =>
+    connection.calendars.some(
+      (calendar) =>
+        calendar.id === connections.destinationCalendarId &&
+        calendar.accessRole === 'owner' &&
+        calendar.available,
+    ),
+  )
+  if (destination?.writeAuthorized) return undefined
+  if (
+    destination
+      ? destination.writeAuthorized === undefined
+      : active.some((conn) => conn.writeAuthorized === undefined)
+  )
+    return 'Could not verify Microsoft Teams availability for the host.'
+  if (destination || !active.some((connection) => connection.writeAuthorized))
+    return 'Reconnect Microsoft Calendar and allow calendar event writes to use Teams.'
+  return 'The host needs a Microsoft 365 work or school calendar selected for booking write-back.'
 }
 
 /** Native disclosure: keyboard activation and expanded state are provided by the browser. */

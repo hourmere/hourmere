@@ -47,6 +47,7 @@ import { listenOwned, type OwnedListener } from './listeners.ts'
 import { type PollAuditState, seedPollAuditData } from './meeting-poll-audit-data.ts'
 import { type ScreenshotFixtureState, seedScreenshotData } from './screenshot-data.ts'
 import { stripeFixture } from './stripe-fixture.ts'
+import { seedWebhookDeliveryHistory } from './webhook-delivery-fixtures.ts'
 
 export interface FixtureApp {
   url: string
@@ -54,6 +55,12 @@ export interface FixtureApp {
   personalPath: string
   stripe?: ReturnType<typeof stripeFixture>
   setEmbedSnippet: (snippet: string) => void
+  configureMixedDirection: (content: {
+    title: string
+    description: string
+    hostName: string
+    question: { id: string; label: string; options: readonly string[] }
+  }) => Promise<string>
   configureGroupSeats: () => Promise<void>
   configureDurations: () => Promise<void>
   configureSuccessRedirect: (allowEmbedParent: boolean) => Promise<void>
@@ -66,6 +73,10 @@ export interface FixtureApp {
   waitlistState: () => Promise<{ states: string[]; acceptedEmails: number; messages: number }>
   auditState: () => Promise<AuditFixtureState>
   auditPollState: (state: PollAuditState) => ReturnType<typeof seedPollAuditData>
+  seedWebhookHistory: (
+    fixture: AuditFixtureState,
+    space?: 'team',
+  ) => ReturnType<typeof seedWebhookDeliveryHistory>
   meetingPollVerificationLink: (email: string) => Promise<URL>
   screenshotState: () => Promise<ScreenshotFixtureState>
   auditSignIn: (signedIn: boolean, locale?: string, space?: 'team') => Promise<void>
@@ -103,7 +114,9 @@ export interface FixtureApp {
   hostCounts: () => Promise<number[]>
   rows: () => Promise<{ source: string; status: string }[]>
   authorizeHost: (teamRole?: 'owner' | 'member') => Promise<void>
-  authorizeTeamSession: () => Promise<{ teamId: string; personalId: string }>
+  authorizeTeamSession: (
+    actor?: 'owner' | 'member' | 'other-team',
+  ) => Promise<{ teamId: string; personalId: string; expire: () => Promise<void> }>
   eventTypeTitles: () => Promise<string[]>
   bookingState: () => Promise<{
     total: number
@@ -120,6 +133,11 @@ export interface FixtureOptions {
   slotSnippets: boolean
   waitlistSmtp: boolean
 }
+
+export const TEAM_DIRECTORY_SLUG = `Public${'Directory'.repeat(6)}`
+export const EMPTY_TEAM_DIRECTORY_SLUG = 'EmptyDirectory'
+export const DISABLED_TEAM_DIRECTORY_SLUG = 'DisabledDirectory'
+
 export const test = base.extend<{
   app: FixtureApp
   suppressFailureDom: undefined
@@ -130,6 +148,7 @@ export const test = base.extend<{
   slotSnippets: boolean
   waitlistSmtp: boolean
   paidStripe: boolean
+  teamPublicHome: boolean
 }>({
   automaticMeet: [false, { option: true }],
   multiHostMeet: [false, { option: true }],
@@ -138,6 +157,7 @@ export const test = base.extend<{
   slotSnippets: [false, { option: true }],
   waitlistSmtp: [false, { option: true }],
   paidStripe: [false, { option: true }],
+  teamPublicHome: [false, { option: true }],
   suppressFailureDom: [
     async ({ context }, use, testInfo) => {
       // Depending on context runs this teardown before its artifact finalization.
@@ -162,6 +182,7 @@ export const test = base.extend<{
       slotSnippets,
       waitlistSmtp,
       paidStripe,
+      teamPublicHome,
     },
     use,
   ) => {
@@ -434,6 +455,41 @@ export const test = base.extend<{
         .insertInto('round_robin_state')
         .values({ event_type_id: roundId, enabled: true })
         .execute()
+      const directoryIds: string[] = []
+      if (teamPublicHome) {
+        const directory = await f.organization(TEAM_DIRECTORY_SLUG)
+        const emptyDirectory = await f.organization(EMPTY_TEAM_DIRECTORY_SLUG)
+        const disabledDirectory = await f.organization(DISABLED_TEAM_DIRECTORY_SLUG)
+        directoryIds.push(directory, emptyDirectory)
+        await db
+          .updateTable('auth.organization')
+          .set({ name: AUDIT_TEAM_NAME })
+          .where('id', '=', directory)
+          .execute()
+        await f.member(host.userId, directory, 'owner')
+        await f.eventType(directory, null, {
+          slug: 'public-event',
+          title: AUDIT_TITLE,
+          description: AUDIT_DESCRIPTION,
+          hosts: [{ userId: host.userId }],
+        })
+        const unlisted = await f.eventType(directory, null, {
+          slug: 'unlisted-event',
+          title: 'Unlisted fixture event',
+          hosts: [{ userId: host.userId }],
+        })
+        await db
+          .updateTable('event_types')
+          .set({ is_hidden: true })
+          .where('id', '=', unlisted)
+          .execute()
+        await f.member(host.userId, disabledDirectory, 'owner')
+        await f.eventType(disabledDirectory, null, {
+          slug: 'direct-event',
+          title: 'Direct fixture event',
+          hosts: [{ userId: host.userId }],
+        })
+      }
       let embedSnippet = ''
       parent = createHttpServer((request, response) => {
         if (request.url === '/generated-embed') {
@@ -501,6 +557,7 @@ export const test = base.extend<{
           ...(uiAudit && { MCP_OAUTH_ENABLED: 'true' }),
           ...(notificationEditor && { FOLLOW_UP_HOST_NOTES_ENABLED: 'true' }),
           ...(slotSnippets && { SLOT_SNIPPETS_ENABLED: 'true' }),
+          ...(teamPublicHome && { TEAM_PUBLIC_HOME_ORGANIZATION_IDS: directoryIds.join(',') }),
           ...(automaticMeet && {
             GOOGLE_MEET_ENABLED: 'true',
             GOOGLE_CALENDAR_CLIENT_ID: 'synthetic-client',
@@ -512,7 +569,11 @@ export const test = base.extend<{
             fileURLToPath(new URL('../../apps/web/dist', import.meta.url)),
         },
         undefined,
-        stripe ? { stripeTransport: stripe.transport } : {},
+        {
+          ...(stripe && { stripeTransport: stripe.transport }),
+          // Repeated page mounts share one loopback bucket across all apps in a worker.
+          ...(uiAudit && { organizationListRateLimitMaxForTests: 20_000 }),
+        },
       )
       let externalRequests = 0
       let authorization: string | undefined
@@ -546,6 +607,26 @@ export const test = base.extend<{
         parentUrl,
         personalPath: '/fixture-host/call',
         ...(stripe && { stripe }),
+        configureMixedDirection: async ({ title, description, hostName, question }) => {
+          await db
+            .updateTable('auth.user')
+            .set({ name: hostName })
+            .where('id', '=', host.userId)
+            .execute()
+          const event = await db
+            .updateTable('event_types')
+            .set({
+              title,
+              description,
+              questions: JSON.stringify([{ ...question, type: 'select', required: true }]),
+            })
+            .where('organization_id', '=', host.organizationId)
+            .where('slug', '=', 'call')
+            .returning('id')
+            .executeTakeFirstOrThrow()
+          return event.id
+        },
+        seedWebhookHistory: (fixture, space) => seedWebhookDeliveryHistory(db, fixture, space),
         auditPollState: async (state) => {
           // Poll backing events must not change the existing host/list audit states.
           const pollHost = await f.host()
@@ -859,6 +940,7 @@ export const test = base.extend<{
             title: AUDIT_TITLE,
             description: AUDIT_DESCRIPTION,
             minimumNoticeMinutes: 30,
+            location: { kind: 'in_person', address: 'Synthetic meeting room' },
           })
           // Opt in only for editor measurements; other audit pages keep their
           // existing notification data and operator settings.
@@ -891,6 +973,7 @@ export const test = base.extend<{
             title: AUDIT_TITLE,
             description: AUDIT_DESCRIPTION,
             minimumNoticeMinutes: 30,
+            location: { kind: 'in_person', address: 'Synthetic meeting room' },
             hosts: [{ userId: host.userId }],
           })
           const schedule = await db
@@ -1357,19 +1440,28 @@ export const test = base.extend<{
             ),
           )
         },
-        authorizeTeamSession: async () => {
+        authorizeTeamSession: async (actor = 'owner') => {
           authorization = undefined
+          const account =
+            actor === 'other-team'
+              ? await f.host({ name: 'Other team owner' })
+              : actor === 'member'
+                ? secondHost
+                : host
+          const teamId = actor === 'other-team' ? await f.organization('other-fixture-team') : team
+          if (actor === 'other-team') await f.member(account.userId, teamId, 'owner')
           const token = randomBytes(24).toString('base64url')
-          await db
+          const session = await db
             .insertInto('auth.session')
             .values({
-              userId: host.userId,
-              activeOrganizationId: team,
+              userId: account.userId,
+              activeOrganizationId: teamId,
               token,
               updatedAt: new Date(),
               expiresAt: new Date(Date.now() + 86_400_000),
             })
-            .execute()
+            .returning('id')
+            .executeTakeFirstOrThrow()
           await context.addCookies([
             {
               name: 'better-auth.session_token',
@@ -1381,7 +1473,17 @@ export const test = base.extend<{
               sameSite: 'Lax',
             },
           ])
-          return { teamId: team, personalId: host.organizationId }
+          return {
+            teamId,
+            personalId: account.organizationId,
+            expire: async () => {
+              await db
+                .updateTable('auth.session')
+                .set({ expiresAt: new Date(0) })
+                .where('id', '=', session.id)
+                .execute()
+            },
+          }
         },
         eventTypeTitles: async () =>
           (await db.selectFrom('event_types').select('title').orderBy('title').execute()).map(

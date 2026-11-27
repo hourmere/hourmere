@@ -1,9 +1,12 @@
 import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { migrationsDir, runMigrations } from './migrate.ts'
+import { MIGRATION_REPLAY_TIMEOUT } from './testing/migration-replay.ts'
 import { createTestDatabase, type TestDatabase } from './testing.ts'
+
+vi.setConfig({ testTimeout: MIGRATION_REPLAY_TIMEOUT, hookTimeout: MIGRATION_REPLAY_TIMEOUT })
 
 const serverUrl = process.env.DATABASE_URL
 const migration = '0030_mcp_oauth_client_activity.sql'
@@ -13,15 +16,11 @@ describe.skipIf(!serverUrl)('MCP OAuth activity migration', () => {
     const prior = await mkdtemp(join(tmpdir(), 'hourmere-oauth-predecessor-'))
     let owned: TestDatabase | undefined
     try {
-      owned = await createTestDatabase(serverUrl as string, undefined, {
-        migrate: false,
-        tag: 'activity',
-      })
-      const pool = owned.pool
       for (const file of await readdir(migrationsDir))
         if (file.endsWith('.sql') && file < migration)
           await copyFile(join(migrationsDir, file), join(prior, file))
-      await runMigrations(pool, prior)
+      owned = await createTestDatabase(serverUrl as string, prior, { tag: 'activity' })
+      const pool = owned.pool
       await pool.query(`INSERT INTO auth."oauthClient" ("clientId", "redirectUris", "createdAt", "updatedAt")
         VALUES ('approved', '["https://client.test/callback"]', '2026-01-01', '2026-01-01'),
                ('revoked', '["https://client.test/callback"]', '2026-01-01', '2026-01-01'),

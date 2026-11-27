@@ -1,12 +1,15 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import type { EventType } from '../../api/resources.ts'
 import { chooseLanguage } from '../../i18n/store.ts'
+import { resolveEventTypeEditor } from '../../test/event-type-editor.ts'
 import { fakeApi, json, ME, profile, renderApp, signedInAs } from '../../test/fake-api.tsx'
 import { EVENT_TYPE_ID, eventType, schedule } from '../../test/fixtures.ts'
 import { DurationsEditor } from './DurationsEditor.tsx'
+
+beforeAll(resolveEventTypeEditor)
 
 const words = {
   en: {
@@ -18,6 +21,7 @@ const words = {
     add: 'Add duration',
     preset: 'Add 45 min',
     remove: 'Remove 30 min',
+    removed: 'Removed 30 min. Selected length: 45 min.',
     list: 'Offered lengths',
     create: 'Create event type',
     save: 'Save changes',
@@ -38,6 +42,7 @@ const words = {
     add: '添加时长',
     preset: '添加 45 分钟',
     remove: '移除 30 分钟',
+    removed: '已移除 30 分钟。当前选中的时长为 45 分钟。',
     list: '已提供的时长',
     create: '创建活动类型',
     save: '保存更改',
@@ -305,7 +310,7 @@ describe.each(['en', 'zh-CN'] as const)('allowed durations editor in %s', (langu
       screen.getByRole('list', { name: copy.list }),
     ).getByRole<HTMLButtonElement>('button')
     expect(remove.disabled).toBe(true)
-    expect(screen.getByRole('status').textContent).toMatch(/45/)
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe(copy.removed))
     await user.click(remove)
     expect(select.options).toHaveLength(1)
   })

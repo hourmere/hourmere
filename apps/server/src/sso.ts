@@ -17,6 +17,20 @@ export interface SsoCapabilities {
   readonly ssoOperatorSetting?: boolean | undefined
 }
 
+export function ssoProtocolEnabled(capabilities: SsoCapabilities, protocol?: string): boolean {
+  return protocol === 'oidc'
+    ? capabilities.ssoOidcEnabled
+    : protocol === 'saml'
+      ? capabilities.ssoSamlEnabled
+      : protocol === undefined && (capabilities.ssoOidcEnabled || capabilities.ssoSamlEnabled)
+}
+
+export function enabledSsoProtocols(capabilities: SsoCapabilities): ('oidc' | 'saml')[] {
+  return (['oidc', 'saml'] as const).filter((protocol) =>
+    ssoProtocolEnabled(capabilities, protocol),
+  )
+}
+
 /**
  * Shared off guard for SSO operations that add trust. Call before lookup, writes or rate-limit
  * counting when both protocols are off or the input names a protocol. For a stored
@@ -24,13 +38,8 @@ export interface SsoCapabilities {
  * Omitting the protocol checks a protocol-neutral SSO operation; other values fail closed.
  */
 export function requireSsoEnabled(capabilities: SsoCapabilities, protocol?: 'oidc' | 'saml'): void {
-  const enabled =
-    protocol === 'oidc'
-      ? capabilities.ssoOidcEnabled
-      : protocol === 'saml'
-        ? capabilities.ssoSamlEnabled
-        : protocol === undefined && (capabilities.ssoOidcEnabled || capabilities.ssoSamlEnabled)
-  if (!enabled) throw new DomainError('not_found', 'sso_disabled')
+  if (!ssoProtocolEnabled(capabilities, protocol))
+    throw new DomainError('not_found', 'sso_disabled')
 }
 
 /** True unless every protocol is hard-off: stored SSO state can be read, recovered and reduced. */

@@ -71,7 +71,7 @@ describe('documentation layout polish', () => {
     expect(selectors.some((selector) => selector.includes('[data-cell="prose"]'))).toBe(true)
   })
 
-  it('never wraps a header or a short label or identifier', () => {
+  it('keeps headers, short labels and identifiers on one line in the table grid', () => {
     expect(declaration('.sl-markdown-content th', 'white-space', null)).toBe('nowrap')
     expect(declaration('.sl-markdown-content th', 'overflow-wrap', null)).toBe('normal')
     expect(declaration('.sl-markdown-content td[data-cell="short"]', 'white-space', null)).toBe(
@@ -79,7 +79,7 @@ describe('documentation layout polish', () => {
     )
   })
 
-  it('wraps code only at its build-time <wbr> points and prose only between words', () => {
+  it('keeps the table grid free of forced code breaks', () => {
     expect(declaration('.sl-markdown-content td code', 'overflow-wrap', null)).toBe('normal')
     expect(declaration('.sl-markdown-content td code', 'white-space', null)).toBeUndefined()
     expect(declaration('.sl-markdown-content td[data-cell="prose"]', 'overflow-wrap', null)).toBe(
@@ -120,7 +120,6 @@ describe('documentation layout polish', () => {
     expect(declaration('.sl-markdown-content', 'container', null)).toBe('docs / inline-size')
     expect(declaration('.sl-markdown-content table', 'overflow-x', cards)).toBe('visible')
     expect(declaration('.sl-markdown-content table', 'background', cards)).toBe('none')
-    expect(declaration('.sl-markdown-content thead', 'display', cards)).toBe('none')
     for (const selector of [
       '.sl-markdown-content tbody',
       '.sl-markdown-content tr',
@@ -138,6 +137,23 @@ describe('documentation layout polish', () => {
     expect(declaration(label, 'display', cards)).toBe('block')
     expect(declaration(label, 'color', cards)).toBe('var(--sl-color-gray-3)')
     expect(declaration(label, 'font-size', cards)).toBe('var(--sl-text-xs)')
+  })
+
+  it('visually hides the headings of stacked tables while retaining their semantics', () => {
+    const head = '.sl-markdown-content thead'
+    expect(declaration(head, 'position', cards)).toBe('absolute')
+    expect(declaration(head, 'display', cards)).toBe('block')
+    expect(declaration(head, 'width', cards)).toBe('1px')
+    expect(declaration(head, 'height', cards)).toBe('1px')
+    expect(declaration(head, 'overflow', cards)).toBe('hidden')
+    expect(declaration(head, 'clip-path', cards)).toBe('inset(50%)')
+  })
+
+  it('fits long identifiers and code segments in stacked cards', () => {
+    const short = '.sl-markdown-content td[data-cell="short"]'
+    expect(declaration(short, 'white-space', cards)).toBe('normal')
+    expect(declaration(short, 'overflow-wrap', cards)).toBe('break-word')
+    expect(declaration('.sl-markdown-content td code', 'overflow-wrap', cards)).toBe('break-word')
   })
 
   it('registers the table classifier with the Sätteri Markdown processor', () => {

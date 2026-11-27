@@ -81,6 +81,7 @@
   "teamInvitation.defaultInviter": "团队成员",
   "teamInvitation.subject": "邀请你加入团队：{team}",
   "teamInvitation.introduction": "{inviter} 邀请你加入 Hourmere 上的团队「{team}」。",
+  "teamInvitation.scimIntroduction": "你的身份提供商代表 Hourmere 上的团队「{team}」向你发送了此邀请。",
   "teamInvitation.identity": "请使用受邀邮箱 {email} 登录并完成邮箱验证，然后在邀请页面接受邀请。邮箱别名不能代替此地址。",
   "teamInvitation.acceptance": "仅登录不会加入团队；你需要在页面上明确接受邀请。",
   "teamInvitation.expiry": "邀请有效期至：{expiry}。",
@@ -180,5 +181,8 @@
   "series.cancelled.member": "已取消",
   "series.manage": "管理系列预约",
   "series.view": "查看系列预约",
-  "series.repair": "如需重试生成会议链接，请在 Hourmere 中打开对应的预约。"
+  "series.repair": "如需重试生成会议链接，请在 Hourmere 中打开对应的预约。",
+  "teams.linkPending": "Teams 链接准备好后会显示在预约详情中。",
+  "teams.unavailable": "Microsoft Teams 当前不可用。此预约将使用 Outlook 日历事件。",
+  "teams.writebackFailed": "Teams 链接不可用，预约仍按原定时间进行。"
 }

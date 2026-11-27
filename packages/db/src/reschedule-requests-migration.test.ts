@@ -2,16 +2,19 @@ import { randomUUID } from 'node:crypto'
 import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { migrationsDir, runMigrations } from './migrate.ts'
-import { createTestDatabase } from './testing.ts'
+import { MIGRATION_REPLAY_TIMEOUT } from './testing/migration-replay.ts'
+import { createTestDatabase, type TestDatabase } from './testing.ts'
+
+vi.setConfig({ testTimeout: MIGRATION_REPLAY_TIMEOUT, hookTimeout: MIGRATION_REPLAY_TIMEOUT })
 
 const serverUrl = process.env.DATABASE_URL
 const migration = '0064_reschedule_requests.sql'
 describe.skipIf(!serverUrl)('reschedule request migration', () => {
   it('preserves predecessor bookings and webhook receipts, supports fresh install and no-op rerun', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'hourmere-reschedule-predecessor-'))
-    const owned = await createTestDatabase(serverUrl as string, undefined, { migrate: false })
+    let upgraded: TestDatabase | undefined
     try {
       const migrations = (await readdir(migrationsDir))
         .filter((name) => name.endsWith('.sql'))
@@ -19,7 +22,8 @@ describe.skipIf(!serverUrl)('reschedule request migration', () => {
       for (const file of migrations)
         if (file.endsWith('.sql') && file < migration)
           await copyFile(join(migrationsDir, file), join(directory, file))
-      await runMigrations(owned.pool, directory)
+      const owned = await createTestDatabase(serverUrl as string, directory)
+      upgraded = owned
       const org = randomUUID(),
         booking = randomUUID(),
         webhook = randomUUID()
@@ -64,8 +68,11 @@ describe.skipIf(!serverUrl)('reschedule request migration', () => {
         ),
       ).rejects.toMatchObject({ code: '23505' })
     } finally {
-      await owned.drop()
-      await rm(directory, { recursive: true, force: true })
+      try {
+        await upgraded?.drop()
+      } finally {
+        await rm(directory, { recursive: true, force: true })
+      }
     }
     const fresh = await createTestDatabase(serverUrl as string)
     try {

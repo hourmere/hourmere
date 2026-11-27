@@ -20,7 +20,13 @@ import {
   MailboxProofEmailPayload,
   mailboxProofRoutes,
 } from '../../../apps/server/src/sso-mailbox-proof.ts'
-import { OIDC_CALLBACK_PATH, oidcSignInRoutes } from '../../../apps/server/src/sso-oidc-sign-in.ts'
+import {
+  OIDC_CALLBACK_PATH,
+  OIDC_SIGN_IN_PATH,
+  oidcSignInRoutes,
+} from '../../../apps/server/src/sso-oidc-sign-in.ts'
+import { samlSignInRoutes } from '../../../apps/server/src/sso-saml-sign-in.ts'
+import { samlServiceProviderUrls } from '../../../apps/server/src/sso-saml-state.ts'
 import {
   createAuth,
   createAuthPool,
@@ -35,12 +41,14 @@ import { createFixtures } from '../../../packages/scheduling/src/testing.ts'
 import { test as base, expect } from '../fixtures.ts'
 import { listenOwned, type OwnedListener } from '../listeners.ts'
 import { startKeycloak } from './keycloak.ts'
+import { startSamlPeer } from './saml-peer.ts'
 
 type KeycloakContainer = Awaited<ReturnType<typeof startKeycloak>>
 type KeycloakRealm = Awaited<ReturnType<KeycloakContainer['createRealm']>>
 type Keycloak = Omit<KeycloakRealm, 'close'> & { stop: () => Promise<void> }
 type TokenExchange = 'issued' | 'invalid_code' | 'failed'
 type Admission = 'invitation_only' | 'jit'
+type AuthorizationField = 'state' | 'nonce'
 
 interface AccountState {
   userId: string | null
@@ -69,6 +77,7 @@ export interface KeycloakFixture {
   tokenExchanges: () => readonly TokenExchange[]
   signingKeyIds: () => readonly string[]
   jwksRequests: () => number
+  postSamlToPeer: (fields: URLSearchParams) => Promise<{ status: number; location: string | null }>
 }
 
 function tokenExchange(response: SsoResponse): TokenExchange {
@@ -95,6 +104,30 @@ function readSigningKeyId(response: SsoResponse): string {
     // Keep raw token data out of failures.
   }
   throw new Error('The Keycloak ID token did not identify its signing key')
+}
+
+async function tamperAuthorization(
+  response: Response,
+  endpoint: string,
+  field: AuthorizationField,
+) {
+  const data = await response.json().catch(() => null)
+  const url = typeof data?.url === 'string' ? URL.parse(data.url) : null
+  if (!url || url.origin + url.pathname !== endpoint)
+    throw new Error('Hourmere did not return the owned Keycloak authorization URL')
+  const original = url.searchParams.get(field)
+  if (!original) throw new Error(`Keycloak authorization request has no ${field}`)
+  // Change ciphertext while keeping the state envelope header and attempt ID.
+  // Keycloak signs the changed nonce into its genuine ID token.
+  const index = field === 'state' ? original.length - 2 : 0
+  const replacement = original[index] === 'A' ? 'B' : 'A'
+  url.searchParams.set(
+    field,
+    `${original.slice(0, index)}${replacement}${original.slice(index + 1)}`,
+  )
+  const headers = new Headers(response.headers)
+  headers.delete('content-length')
+  return Response.json({ ...data, url: url.href }, { status: response.status, headers })
 }
 
 async function seedSignIn(
@@ -151,25 +184,34 @@ async function seedSignIn(
       .values({ organization_id: organizationId, admission, require_sso: enforced })
       .execute()
 
-  const { issuer, clientId, clientSecret } = idp
+  const { saml, clientId, clientSecret } = idp
+  const issuer = saml?.entityId ?? idp.issuer
+  const configuration = saml
+    ? {
+        ssoEndpoint: saml.ssoEndpoint,
+        // The fixture's HTTPS certificate is a valid RSA certificate with an unrelated key.
+        signingCertificates: brokenProvider ? [idp.certificate] : saml.signingCertificates,
+        subjectAttribute: saml.subjectAttribute,
+      }
+    : {
+        issuer,
+        clientId,
+        clientSecret: brokenProvider ? randomBytes(32).toString('base64url') : clientSecret,
+      }
   const revision = 1
   await db
     .insertInto('sso_providers')
     .values({
       id: providerId,
       organization_id: organizationId,
-      protocol: 'oidc',
+      protocol: saml ? 'saml' : 'oidc',
       display_name: 'Fixture Keycloak',
       issuer,
-      client_id: clientId,
+      client_id: saml ? null : clientId,
       configuration: sealSsoProviderConfiguration(
         configurationKey,
         { providerId, organizationId, revision },
-        JSON.stringify({
-          issuer,
-          clientId,
-          clientSecret: brokenProvider ? randomBytes(32).toString('base64url') : clientSecret,
-        }),
+        JSON.stringify(configuration),
       ),
       enabled: true,
     })
@@ -392,23 +434,29 @@ export async function describeStrandedPage(page: Page, app: { url: string }) {
 export const test = base.extend<
   {
     keycloak: KeycloakFixture
+    protocol: 'oidc' | 'saml'
     oidcEnabled: boolean
+    samlEnabled: boolean
     admission: Admission
     signupMode: SignupPolicy['mode']
     enforced: boolean
     brokenProvider: boolean
     keyRotation: boolean
     dedicatedKeycloak: boolean
+    tamperedAuthorizationField: AuthorizationField | undefined
   },
   { getWorkerKeycloak: () => Promise<KeycloakContainer> }
 >({
+  protocol: ['oidc', { option: true }],
   oidcEnabled: [true, { option: true }],
+  samlEnabled: [false, { option: true }],
   admission: ['invitation_only', { option: true }],
   signupMode: ['closed', { option: true }],
   enforced: [false, { option: true }],
   brokenProvider: [false, { option: true }],
   keyRotation: [false, { option: true }],
   dedicatedKeycloak: [false, { option: true }],
+  tamperedAuthorizationField: [undefined, { option: true }],
   getWorkerKeycloak: [
     // biome-ignore lint/correctness/noEmptyPattern: Playwright requires destructuring fixture dependencies.
     async ({}, use) => {
@@ -431,13 +479,16 @@ export const test = base.extend<
       {
         context,
         page,
+        protocol,
         oidcEnabled,
+        samlEnabled,
         admission,
         signupMode,
         enforced,
         brokenProvider,
         keyRotation,
         dedicatedKeycloak,
+        tamperedAuthorizationField,
         getWorkerKeycloak,
       },
       use,
@@ -450,6 +501,7 @@ export const test = base.extend<
       let dedicated: KeycloakContainer | undefined
       let closeRealm: (() => Promise<void>) | undefined
       let authPool: ReturnType<typeof createAuthPool> | undefined
+      let samlPeer: ReturnType<typeof startSamlPeer> | undefined
       const previousCAs = getCACertificates('default')
       try {
         listener = await listenOwned(createServer())
@@ -460,8 +512,10 @@ export const test = base.extend<
           .executeTakeFirstOrThrow()
         if (dedicatedKeycloak || keyRotation) dedicated = await startKeycloak()
         const container = dedicated ?? (await getWorkerKeycloak())
+        const samlSp = protocol === 'saml' ? samlServiceProviderUrls(url, providerId) : undefined
         const { close, rotateSigningKey, ...realm } = await container.createRealm(
           new URL(OIDC_CALLBACK_PATH.replace(':providerId', providerId), url).href,
+          samlSp,
         )
         closeRealm = close
         const idp: Keycloak = {
@@ -502,15 +556,16 @@ export const test = base.extend<
           }),
         }
         const mail = new Map<string, string>()
-        // The operator setting, parsed and derived exactly as the running server does it;
-        // nothing is injected. Empty is what a new install's .env and Compose pass.
+        // Parse the operator environment like production. The SAML variable has no effect.
         const config = loadConfig({
           DATABASE_URL: owned.url,
           BETTER_AUTH_SECRET: secret,
           SSO_OIDC_ENABLED: oidcEnabled ? 'true' : '',
+          SSO_SAML_ENABLED: protocol === 'saml' ? 'true' : undefined,
           SSO_ENCRYPTION_KEY: configurationKey.toString('base64'),
         })
-        const capabilities = productionSsoCapabilities(config)
+        const production = productionSsoCapabilities(config)
+        const capabilities = samlEnabled ? { ...production, ssoSamlEnabled: true } : production
         const ssoConfigurationKey = Buffer.from(config.SSO_ENCRYPTION_KEY ?? '', 'base64')
         const mailbox = mailboxProofSink({ db, capabilities, publicUrl: url, secret })
         authPool = createAuthPool(owned.url, signup)
@@ -548,6 +603,13 @@ export const test = base.extend<
         const exchanges: TokenExchange[] = []
         const signingKeyIds: string[] = []
         let jwksRequests = 0
+        const readSession = async (headers: Headers) =>
+          (
+            await auth.api.getSession({
+              headers,
+              query: { disableRefresh: true, disableCookieCache: true },
+            })
+          )?.session
         const app = createApp({
           publicUrl: url,
           checkDb: async () => {},
@@ -568,13 +630,7 @@ export const test = base.extend<
             privateTargets,
             signup,
             session: { secret },
-            readSession: async (headers) =>
-              (
-                await auth.api.getSession({
-                  headers,
-                  query: { disableRefresh: true, disableCookieCache: true },
-                })
-              )?.session,
+            readSession,
             send: async (request) => {
               if (new URL(request.url).origin !== issuer.origin)
                 throw new Error('Keycloak fixture transport refused an unowned origin')
@@ -588,6 +644,14 @@ export const test = base.extend<
               }
               return response
             },
+          }),
+          ssoSamlSignIn: samlSignInRoutes({
+            db,
+            capabilities,
+            configurationKey: ssoConfigurationKey,
+            signup,
+            session: { secret },
+            readSession,
           }),
           routes: productRoutes({
             db,
@@ -604,7 +668,25 @@ export const test = base.extend<
             },
           }),
         })
-        server.on('request', getRequestListener(app.fetch, { hostname: '127.0.0.1' }))
+        const handleRequest = tamperedAuthorizationField
+          ? async (request: Request, env: Parameters<typeof app.fetch>[1]) => {
+              const response = await app.fetch(request, env)
+              // Give the SPA the altered URL for every navigation. A one-shot
+              // Playwright override applies only to the first browser request.
+              if (
+                request.method === 'POST' &&
+                new URL(request.url).pathname === OIDC_SIGN_IN_PATH &&
+                response.ok
+              )
+                return tamperAuthorization(
+                  response,
+                  `${oidcEndpoint}/auth`,
+                  tamperedAuthorizationField,
+                )
+              return response
+            }
+          : app.fetch
+        server.on('request', getRequestListener(handleRequest, { hostname: '127.0.0.1' }))
         const checkBrowser = await guardBrowser(context, {
           url,
           idpOrigin: issuer.origin,
@@ -636,6 +718,19 @@ export const test = base.extend<
           tokenExchanges: () => [...exchanges],
           signingKeyIds: () => [...signingKeyIds],
           jwksRequests: () => jwksRequests,
+          postSamlToPeer: async (fields) => {
+            if (!samlSp || !samlEnabled) throw new Error('The Keycloak SAML fixture is disabled')
+            samlPeer ??= startSamlPeer({
+              databaseUrl: owned.url,
+              publicUrl: url,
+              capabilities,
+              configurationKey: ssoConfigurationKey,
+              signup,
+              secret,
+            })
+            const peer = await samlPeer
+            return peer.post(new URL(samlSp.acsUrl).pathname, fields)
+          },
         })
         // A failed sign-in round trip otherwise reports only a timeout. Name where it stopped.
         if (testInfo.status !== testInfo.expectedStatus)
@@ -643,7 +738,12 @@ export const test = base.extend<
         checkBrowser()
       } finally {
         try {
-          await listener?.close()
+          try {
+            await listener?.close()
+          } finally {
+            const peer = await samlPeer?.catch(() => undefined)
+            await peer?.close()
+          }
         } finally {
           setDefaultCACertificates(previousCAs)
           // An outage test may have stopped its IdP. Removing its dedicated container also

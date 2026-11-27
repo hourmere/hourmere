@@ -55,6 +55,7 @@ export const COMMANDS = {
   whoami: 'whoami',
   profile: 'get_profile',
   catalog: 'list_event_types',
+  'team-home': 'get_public_team',
   event: 'get_event_type',
   'create-event': 'create_event_type',
   'duplicate-event': 'duplicate_event_type',
@@ -129,6 +130,7 @@ export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [-
        hourmere sso providers list [--input FILE|-] [--url ORIGIN]
        hourmere sso policy [--input FILE|-] [--url ORIGIN]
        hourmere scim-team-mappings create|delete --input FILE|-
+       hourmere team-home --input FILE|- [--url ORIGIN]
        hourmere routing-forms list|get|create|update|archive|publish|preview|public [--input FILE|-] [--url ORIGIN]
        hourmere routing-forms route --input FILE|- [--output FILE] [--url ORIGIN]
        hourmere routing-forms resolve|slots --input FILE|- [--output FILE] [--url ORIGIN]
@@ -146,13 +148,15 @@ Webhook reads require read or full scope and writes require full scope.
 All webhook commands require personal ownership or a team owner/admin role.
 Create takes JSON {url, events, isActive?}. Rotate-secret takes JSON {id}.
 Both require --output FILE (new private file) or --json (stdout) and return the signing secret once.
+Use --input - for JSON containing destination credentials.
 Use a private file when stdout is logged.
 Update takes JSON {id, events?, isActive?}. The URL is immutable.
 Delete takes JSON {id} and requires --yes to confirm deletion of the endpoint and retained deliveries.
 Deliveries takes JSON {id, after?} and returns up to 50 metadata rows. Pass nextAfter as after for the next page.
 Events: booking.created, booking.rescheduled, booking.cancelled, booking.reschedule_requested,
         booking.reschedule_request_expired, booking.attendee_no_show_changed, workflow.executed.
-Adding workflow.executed on create or update is disabled (workflows_disabled, REST 404).
+Adding workflow.executed on create or update requires enabled workflows.
+With WORKFLOWS_ENABLED=false, the server returns workflows_disabled (REST 404).
 On create this takes precedence over webhooks_disabled (REST 409).
 Endpoint events and delivery eventType are open enums. Ignore unknown event kinds.
 Slack: slack create|list|update|delete|test (JSON input; list read/full, writes full).
@@ -168,6 +172,8 @@ Commands: whoami, profile, catalog, event, create-event, duplicate-event, update
           one-time-links create|list|revoke
 Read booking details with booking --input FILE|- and JSON {bookingId}.
 Requires a full, read or bookings key with access to the booking.
+Read a public team directory with team-home --input FILE|- and JSON {handle}.
+Use the exact-case team slug. Accepts read, bookings or full keys.
 Meeting polls
   Every poll command requires JSON on stdin (--input -). Input files and --output are refused.
   Keep tokens, invitation addresses and idempotency keys out of command arguments and shell history.
@@ -201,7 +207,7 @@ Waitlists: event-waitlist, set-event-waitlist, waitlist-entries, remove-waitlist
            join-waitlist, resend-waitlist-verification (arguments through JSON input).
 SSO: sso providers list (optional limit 1–100, cursor), sso policy. Team owner/admin only,
      with read/full scope. OIDC SSO is off unless the operator sets SSO_OIDC_ENABLED=true.
-Routing forms are off by default. The server operator can enable them with ROUTING_FORMS_ENABLED=true.
+Routing forms are on by default. The server operator can turn them off with ROUTING_FORMS_ENABLED=false.
 Pass id, expectedRevision and an optional requestId (UUID) as JSON to routing-forms publish.
 Publication requires full scope. Repeat the same input with the same requestId to recover its version.
 Pass id and answers (keyed by question ID) as JSON to routing-forms preview. Preview requires full scope.
@@ -225,7 +231,8 @@ Workflows: workflows list (owner {kind, id}; optional limit, cursor), workflows 
            workflows delete (id, expectedRevision); authorized repeats are safe.
            workflows preview (owner, definition fields, optional synthetic example) accepts JSON from stdin or a file.
            Read or full scope for list/get/runs. Full scope for create/update/delete/preview.
-           All answer workflows_disabled until booking workflows are enabled on the instance.
+           Workflows are enabled by default. With WORKFLOWS_ENABLED=false, only reads,
+           disable-only updates and deletion are available. Other commands return workflows_disabled.
 Audit log: audit-log list (optional from, to, actorType, actorId, action, limit 1–100, cursor;
            newest first, UTC times), audit-log settings, audit-log set-retention
            ({"retention":"instance"|"forever"} or {"retention":"days","retentionDays":30–3650}).
@@ -236,6 +243,7 @@ Event settings: create-event/update-event use JSON durationMinutes and allowedDu
                 minimumNoticeMinutes: 0–525600; bufferBeforeMinutes/bufferAfterMinutes: 0–1440,
                 all whole minutes. bookingWindowDays: 1–3650 whole calendar days or null (unlimited).
 Locations: create-event/update-event accept locations through JSON; slots/book accept locationOptionId.
+Use microsoft_teams for one host with a writable Microsoft calendar selected for booking events.
            book also accepts inviteePhone (normalized E.164). Reschedule preserves the choice.
 Booking limits: JSON maxBookingsPerDay, maxBookingsPerWeek, maxBookingsPerMonth;
                 integers 1–1000 or null. Set ceilings must not descend from day to week to month.

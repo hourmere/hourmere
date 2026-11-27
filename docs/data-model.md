@@ -52,14 +52,19 @@ attempts to bring the Outlook copy into line with the current booking or group o
 worker commits a checkpoint before calling Graph and uses the stable booking marker to recover an
 ambiguous create. Acknowledged writes retain the provider event ID and any ETag Graph supplies.
 The ID uses the same format as the busy snapshot.
-For a test-enabled Teams booking, the pinned destination also records `teamsStatus`.
+When a single-host booking chooses `microsoft_teams`, the pinned destination also records
+`teamsStatus`. Single-host group seats use the shared occurrence's destination and meeting.
 The worker checks the selected calendar's `allowedOnlineMeetingProviders` and persists the
 result before creating the event so job replays keep the same payload and `transactionId`.
 `ready` stores `teamsJoinUrl` in the private writeback record. `join_url_pending` records a
 confirmed event without a valid Teams link. The event mapping is saved so bounded retries can
 read the same event by ID. `teams_unavailable` records a calendar without Teams support, with
-an ordinary Outlook event still written. The link is
-cleared when cancellation reconciles; calendar connection summaries exclude it.
+an ordinary Outlook event still written. Successful cancellation writeback clears the stored
+join URL. Cancelled booking views, cancellation emails and calendar attachments, and calendar
+connection summaries exclude the link. Public event-type metadata exposes only the location
+option kind and label.
+The booking and notification views project `writeback_failed` when the writeback has failed
+and has no validated join URL.
 See [Microsoft Calendar](https://hourmere.com/docs/microsoft-calendar).
 
 `calendar_busy` stores each event ID with exactly one representation: a nonempty
@@ -322,6 +327,17 @@ for limits and client instructions.
 | `user`, `session`, `account`, `verification` | Accounts, sessions, sign-in methods (Google, Microsoft, email), email verification |
 | `organization`, `member`, `invitation` | Tenancy: personal and team organizations, roles, invitations |
 | `apikey` | Keys for agents (MCP, REST, CLI); hashed by Better Auth |
+
+Migration 0194 preserves existing organization slugs and adds a unique index on
+`lower(slug)`. It stops before changing the schema if existing rows collide, reporting
+their organization IDs so the operator can resolve the conflict before retrying.
+The organization trigger serializes slug inserts and changes using transaction advisory
+locks on the folded slugs, acquired in lock-key order for a rename. It records each
+released address in `public.team_slug_reservations` with the releasing organization ID
+and an expiry 90 elapsed days later. A claim consumes an expired hold or the same
+organization's hold in the claim transaction. Deleting the releasing organization
+clears its ID from the hold and leaves the expiration intact. Public lookup uses only
+the stored organization slug.
 
 Google and Microsoft sign-in ID tokens are used during authentication and are not stored:
 `account."idToken"` remains NULL on account creation and every update, including linking,
@@ -802,6 +818,7 @@ booking flow without showing a choice.
 | Kind | Settings |
 |---|---|
 | `google_meet`, `zoom` | Optional `autoCreate: true`, preserving today's explicit conference opt-in. Without it, retain today's passive kind-only behavior. Generated URLs are never event-type settings. |
+| `microsoft_teams` | No kind-specific settings. Selecting it requests a Teams meeting through the single host's Microsoft writeback calendar. |
 | `phone` | Exactly one of `number` (the host's E.164 number, `+` and 7–15 digits, first digit nonzero) or `askInvitee: true` (collect the invitee's E.164 number at booking). |
 | `in_person` | Required single-line `address`, 1–500 characters. |
 | `link` | Required absolute HTTP(S) `url`, at most 2000 characters before and after normalization. |
@@ -810,6 +827,7 @@ Unknown keys, false default/opt-in flags, malformed Unicode and control characte
 in text are rejected. Labels and addresses are trimmed; link URLs are normalized
 using the URL parser. Validation belongs to the shared scheduling service; database
 constraints also enforce the list envelope, identities, kinds and default count.
+Migration 0188 adds `microsoft_teams` to the allowed kinds without rewriting existing rows.
 Option IDs survive settings edits within the same kind and reordering. A kind change
 replaces the option identity. Removing and recreating an option must allocate a new ID
 so a stale page cannot accidentally select a different option under the old ID.
@@ -918,7 +936,7 @@ Validated by the application (zod), not by the database:
 - `event_types.locations`: ordered nullable option list, as specified above;
   `event_types.location` is its default/only compatibility projection.
 - `bookings.location_option`: chosen option snapshot; `bookings.location` is the
-  resolved `{ "kind": "google_meet" | "zoom" | "phone" | "in_person" | "link", ... }`.
+  resolved `{ "kind": "google_meet" | "zoom" | "microsoft_teams" | "phone" | "in_person" | "link", ... }`.
 - `event_types.questions`: booking-form fields beyond name and email, at most 20:
   `[{ "id": "company", "label": "Company", "type": "short_text", "required": true }]`.
   `id` is 1–64 letters, digits, `_` or `-`, unique within the event type, and not
@@ -1078,6 +1096,9 @@ under the existing booking lock and copies the snapshot to the successor, leavin
 evidence and the consumed receipt on the original booking. The snapshot insert marks its
 booking and refuses payment holds. Ordinary bookings use the default marker and need no
 snapshot lookup.
+
+Migration 0193 repairs inconsistent markers and guards writes against the snapshot in
+the same organization. Removing a snapshot clears the marker if its booking survives.
 
 Migration 0083 adds `routing_form_operations`, the idempotency records of form creation and
 publication requests that carry a client `requestId`. A record holds the organization, the
@@ -1367,8 +1388,8 @@ run IDs and never recreates identities or intents. The internal email attempt se
 commits the reservation and shared ledger charge with the recipient marker, then calls
 SMTP outside the transaction. Only the matching marker token can schedule a known-not-sent
 retry. Retry admission restamps both rows under the same organization and mail-budget locks.
-Expired marker leases resolve to `delivery_unknown`. `WORKFLOWS_ENABLED` opts the instance
-into capture and delivery. The worker installs workflow repair and retention when enabled
+Expired marker leases resolve to `delivery_unknown`. `WORKFLOWS_ENABLED` defaults to true
+and controls capture and delivery. The worker installs workflow repair and retention when enabled
 or when startup finds unfinished work or an interrupted attempt to recover.
 
 - **Enrollments** record a booking's capture of one workflow revision at one lifecycle
@@ -1421,23 +1442,28 @@ that share their locks:
 - **Organization first.** Every workflow writer takes the organization lock first, before the
   mail-budget lock and before any definition or run row. First means first among the workflow
   locks: identity locks that the existing order puts before the organization, such as the
-  personal owner's user row that `lockOrganization` share-locks, still come before it. A mail
-  admission, including a
-  retry's re-admission, locks the owner organization (`FOR KEY SHARE`) before
-  `lockNotificationEmailBudget`. Invitation creation holds its team `FOR UPDATE` and then
-  takes the budget lock, so an admission that reached the organization only through its
-  reservation's foreign key, after the budget lock, would deadlock with it.
+  personal owner's user row that `lockOrganization` share-locks, still come before it.
+  A mail admission, including a retry's re-admission, locks the owner organization
+  (`FOR KEY SHARE`) before `lockNotificationEmailBudget`. Invitation creation holds its team
+  `FOR UPDATE` and then takes the budget lock, so an admission that reached the organization
+  only through its reservation's foreign key, after the budget lock, would deadlock with it.
+  The dispatcher's due scan can read candidates across organizations. Each claim uses its own
+  transaction and locks that run's organization before the definition and run.
 - **Definition before runs.** Writers that touch both definitions and runs lock the definition
   before its runs. A deletion tombstones the definition and then retires its pending runs; if
-  it retired first, it would miss a pending run that a concurrent capture commits. A
-  reschedule or cancellation share-locks the live definitions it may capture, after the
-  organization and in ID order, before it retires or writes any run. A reschedule that retired
+  it retired first, it would miss a pending run that a concurrent capture commits. The
+  retirement uses a separate statement under READ COMMITTED so it sees a capture that
+  committed while the deletion was waiting for the definition lock. A reschedule or
+  cancellation share-locks the live definitions it may capture, after the organization and in
+  ID order, before it retires or writes any run. A reschedule that retired
   the predecessor's run and then carried its timer would wait for the definition in the
   enrollment guard while the deletion, holding the tombstone, waits for that run.
 
 `workflow-storage-lock-order.test.ts` races each reversed order on two connections into a
 deadlock (40P01) and each documented order to completion, with the lock statements of
-`workflow-storage-lock-order.ts` that later steps reuse.
+`workflow-storage-lock-order.ts`. To check the order inside a writer, take the competitor's
+first lock, run the workflow writer as one step, then request the competitor's second lock.
+Both transactions commit when the writer waits before taking its second lock.
 
 Execution identity outlives a definition's content. Enrollments name their workflow and
 revision without a foreign key to the definition and retain the unique capture identity until
@@ -1526,14 +1552,6 @@ or renamed, and the test fails until the check accepts exactly those kinds.
 
 ## Planned additions (each a new migration)
 
-The [booking workflows design](workflows.md) specifies proposed triggers, conditions,
-email and webhook actions, durable execution records and workflow sub-caps within the shared mail budget.
-Only its definition, execution and creation key storage exist ([workflow definition
-storage](#workflow-definition-storage), [workflow execution storage](#workflow-execution-storage),
-[workflow creation key storage](#workflow-creation-key-storage)),
-with definition read, creation, update and deletion operations that answer `workflows_disabled` while hard-off;
-no worker or runtime enablement exists yet.
-
 | When | Change |
 |---|---|
 | Cloud billing | `subscriptions` (organization ↔ Stripe customer/subscription, plan, seats) |
@@ -1603,10 +1621,10 @@ row ID and public origin are authenticated associated data.
 ## Invitation delivery storage
 
 Migration 0045 adds nullable `invitation_deliveries.authorized_by_user_id` without rewriting
-existing generations. Each new generation pins the acting administrator for sender authority
-checks and the invitation mail's name. Null legacy rows fall back to the invitation's original
-inviter. The recorded UUID has no user foreign key: deleting the actor keeps its identity,
-so the sender refuses it rather than falling back to a different administrator. The original
+existing generations. Each new generation pins an administrator for sender authority checks.
+App invitations also use that administrator's name in the mail. Null legacy rows fall back
+to the invitation's original inviter. The recorded UUID has no user foreign key. If the
+actor is deleted, the retained UUID lets the sender refuse the generation. The original
 `auth.invitation.inviterId` stays unchanged for non-transitive signup eligibility.
 Its current team membership also determines invitation validity independently of the
 generation's authorizing administrator. If the original inviter no longer belongs to the
@@ -1675,6 +1693,13 @@ new version. The migration itself installs storage and queries; management and q
 integration are application code. Explicit resend extends expiry under the approved
 protocol, independently of these storage queries.
 
+Migration 0192 adds `invitation_deliveries.scim_issued` for the current generation.
+The worker uses it to render mail from the identity provider on behalf of the team. The
+recorded owner's locale still selects the language. An administrator's resend records
+the new generation as an app invitation. The upgrade identifies current unexpired initial SCIM deliveries from the
+issuance audit journal. Stop old writers and senders before upgrading and restart all roles
+with the same version, so all generations carry their sender identity.
+
 Invitation admission now writes the invitation and its queued delivery intent in one
 transaction. The explicit resend cooldown uses the later of `generation_started_at`
 and `updated_at`. The sender updates `updated_at` on every delivery attempt
@@ -1684,11 +1709,14 @@ and seeds the known legacy 48-hour validity policy. Historic native resends chan
 without changing invitation creation time, so their difference cannot recover original
 validity. Invitation status, expiry, attempts and delivery outcomes remain unchanged.
 
-`invitation_email_requests` retains actor/team UUIDs, an invitation-domain recipient HMAC
-and request time for rolling inviter/team/recipient limits. It has no foreign keys, so
-deleting an invitation, account or team cannot reset the budget. Admission holds the
-existing global mail-budget lock without debiting the shared sending allowance in
-`notification_email_sends`. The sender checks and debits ordinary, non-reserved
+`invitation_email_requests` retains the team UUID, an invitation-domain recipient HMAC
+and request time for rolling limits. App admissions include the inviter's user UUID.
+Migration 0192 allows a null user UUID for SCIM admissions, which count toward their own
+organization and recipient limits as described in [the SCIM guide](scim.md#invitation-delivery-and-limits).
+Existing request records keep their original attribution and age out of the rolling windows.
+The ledger has no foreign keys, so deleting an invitation, account or team cannot reset
+the budget. Admission holds the existing global mail-budget lock without debiting the
+shared sending allowance in `notification_email_sends`. The sender checks and debits ordinary, non-reserved
 shared capacity at send time. Both ledgers retain two days. Every admission record
 requires its recipient hash; migration 0043 creates this ledger without changing earlier
 shared mail accounting.
@@ -2428,6 +2456,12 @@ reason even when the retry supplies a different reason. A replaced or expired re
 a different picked time or the opposite action fails with `reschedule_request_changed`. Keep the
 existing private email link when replay returns `manageToken: null`.
 
+After the managed read identifies the booking, it hydrates the booking lifecycle, pending
+request and linked request state in one read-only, repeatable-read transaction. Only a
+request email's token includes that email's `rescheduleRequest`. A link that resolves to a
+cancelled predecessor with a successor in the same organization returns
+`wasRescheduled: true` without the successor's ID or token.
+
 Notes follow follow-up host-note write sanitization: CRLF becomes LF, bidi embedding/isolate
 controls are removed, other controls (including tabs) are rejected, and the result must be
 well-formed Unicode of at most 2000 UTF-16 code units. The sender defensively normalizes
@@ -2703,6 +2737,20 @@ which cancellation or opt-out cannot recall an already-dispatched SMS.
 
 The ordinary SMS delivery ledger and rolling budgets remain in force. Job payloads carry
 booking/rule identity and scheduling instants, never phone numbers or message bodies.
+
+## Team booking bulk cancellation previews
+
+The preview receipt is keyed by a database-generated UUID in
+`team_booking_bulk_cancellations`. It stores the team, actor account, issuing session and
+expiry inherited from the page proof. Its lifetime is at most ten minutes. The page proof,
+filters and session bearer are never written to the receipt.
+
+`team_booking_bulk_cancellation_items` records the ordered booking UUIDs and preview codes.
+The primary key limits positions to one per ordinal, and the ordinal check and unique booking
+key enforce at most 25 distinct items. Deleting the team cascades to its receipts and items.
+Actor, session and booking IDs are retained when their corresponding rows are deleted.
+A preview writes these two tables in one transaction. It does not change bookings or enqueue
+jobs or notifications. Admission, execution and receipt cleanup are future release steps.
 
 ## Audit events
 

@@ -99,10 +99,21 @@ const ExpectedOrganizationHeaders = z.object({
   }),
 })
 
-export const BookingLocation = z.looseObject({ kind: LocationKind }).openapi('BookingLocation', {
-  description:
-    'Where the meeting happens. Details depend on the kind: `number` (phone), `address` (in_person), `url` (link)',
-})
+export const BookingLocation = z
+  .looseObject({
+    kind: LocationKind,
+    url: z.unknown().optional().openapi({
+      description: 'A ready Teams booking includes a validated HTTPS participant URL.',
+    }),
+    status: z.unknown().optional().openapi({
+      description:
+        'Microsoft Teams meeting state when available: join_url_pending, ready, teams_unavailable or writeback_failed. Clients must tolerate additional values.',
+    }),
+  })
+  .openapi('BookingLocation', {
+    description:
+      'Where the meeting happens. Details depend on the kind: `number` (phone), `address` (in_person), `url` (link or a ready online meeting). A Teams join URL requires host access or the invitee’s booking capability.',
+  })
 
 const Attendee = z
   .object({
@@ -320,6 +331,10 @@ export const ManagedBooking = Booking.extend({
       description:
         "Present only when the manage token came from a host's reschedule request email: the request that email was sent for and what became of it. Other manage tokens omit it.",
     }),
+  wasRescheduled: z.literal(true).optional().openapi({
+    description:
+      'Present when the manage link still resolves to a cancelled booking that was moved to a new time.',
+  }),
   changeDeadlines: z
     .object({
       rescheduleBy: z.iso.datetime().nullable(),
@@ -514,6 +529,7 @@ export interface BookingRoutesDeps {
   automaticMeet?: boolean | undefined
   smsRemindersAvailable?: boolean | undefined
   automaticZoom?: boolean | undefined
+  microsoftCalendarEnabled?: boolean | undefined
   now?: () => Temporal.Instant
   notifyAttendeeNoShow?: AttendeeNoShowNotifier | undefined
   /** Queues the booking emails in the transaction of each change; none are sent without it. */
@@ -540,6 +556,7 @@ export function bookingRoutes({
   automaticMeet,
   smsRemindersAvailable,
   automaticZoom,
+  microsoftCalendarEnabled,
   rateLimits = {},
   hostRateLimits = {},
 }: BookingRoutesDeps): RouteModule {
@@ -550,6 +567,7 @@ export function bookingRoutes({
     automaticMeet,
     smsRemindersAvailable,
     automaticZoom,
+    microsoftCalendarEnabled,
     bookingMaxInviteeReschedules,
   }
   const manageLimit = rateLimit(createRateLimiter(rateLimits.manage ?? PUBLIC_RATE_LIMITS.manage))
@@ -592,6 +610,7 @@ export function bookingRoutes({
       automaticMeet,
       smsRemindersAvailable,
       automaticZoom,
+      microsoftCalendarEnabled,
       bookingExportMaxConcurrent,
       routingFormsEnabled,
       authorizeOrganizationWrite: bookingWriteAccess(principal, expectedOrganizationId),
@@ -1174,7 +1193,7 @@ export function bookingRoutes({
               bom: z.enum(['true', 'false']).optional(),
               includeRoutingAnswers: z.enum(['true', 'false']).optional().openapi({
                 description:
-                  'Append routing provenance and saved answers to personal exports only. Requires routing forms to be enabled (ROUTING_FORMS_ENABLED=true, off by default). False is equivalent to omitting the option.',
+                  'Append routing provenance and saved answers to personal exports only. Requires routing forms to be enabled, which is the default. False is equivalent to omitting the option.',
               }),
             })
             .strict(),

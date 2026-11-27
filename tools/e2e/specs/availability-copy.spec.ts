@@ -1,4 +1,5 @@
 import AxeBuilder from '@axe-core/playwright'
+import { selectAdminLanguage } from '../account-menu.ts'
 import { openAuditPage } from '../audit-pages.ts'
 import { expect, test } from '../fixtures.ts'
 
@@ -95,9 +96,7 @@ for (const language of ['en', 'zh-CN'] as const) {
     app,
   }) => {
     await openAuditPage(page, app, 'availability-editor')
-    await page
-      .getByRole('combobox', { name: 'Interface language', exact: true })
-      .selectOption(language)
+    await selectAdminLanguage(page, language)
     const visible = language === 'en' ? 'Copy to…' : '复制到…'
     const controls = page.locator('.weekday-copy')
     await expect(controls).toHaveCount(7)

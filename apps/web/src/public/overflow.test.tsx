@@ -176,6 +176,25 @@ describe('public overflow protections', () => {
     })
   })
 
+  it('uses the shared five-size type scale for public booking styles', () => {
+    const sizes = [...(publicStyles + pickerStyles).matchAll(/font-size:\s*([^;]+);/g)].map(
+      ([, size]) => size,
+    )
+    expect([...new Set(sizes)].sort()).toEqual([
+      'var(--text-lg)',
+      'var(--text-md)',
+      'var(--text-sm)',
+      'var(--text-xl)',
+      'var(--text-xs)',
+    ])
+    inspectStyles(appStyles, (rules) => {
+      const tokens = declarations(rules, ':root')
+      expect(Number.parseFloat(tokens.getPropertyValue('--text-xs')) * 16).toBeGreaterThanOrEqual(
+        12.8,
+      )
+    })
+  })
+
   it('keeps the narrow picker track and time zone names shrinkable', () => {
     inspectStyles(pickerStyles, (rules) => {
       expect(
@@ -296,6 +315,10 @@ describe('public user-content coverage', () => {
     })
     renderApp(`/booking#token=${TOKEN}`)
     expectWrappingContent(await screen.findByRole('link', { name: longUrl }))
-    expectWrappingContent(screen.getByText(`${longName} (${longEmail})`))
+    const name = screen.getByText(longName, { selector: 'bdi' })
+    const email = screen.getByText(longEmail, { selector: 'bdi[dir=ltr]' })
+    expectWrappingContent(name)
+    expectWrappingContent(email)
+    expect(name.parentElement?.textContent).toBe(`${longName} (${longEmail})`)
   })
 })

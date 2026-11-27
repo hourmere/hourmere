@@ -271,6 +271,97 @@ test.describe('team administrator bookings at 320px', () => {
     })
 })
 
+for (const viewport of [
+  { width: 320, height: 568 },
+  { width: 1280, height: 720 },
+]) {
+  for (const theme of ['light', 'dark'] as const) {
+    const phone = viewport.width === 320
+    test.describe(`booking polish ${viewport.width}px ${theme}`, () => {
+      test.use({ viewport, colorScheme: theme, isMobile: phone, hasTouch: phone })
+      for (const locale of ['en-US', 'zh-CN'] as const) {
+        test(`keeps the booking states readable and operable ${locale}`, async ({ page, app }) => {
+          const sizes = new Set<number>()
+          for (const id of [
+            'booking',
+            'booking-time-zone',
+            'booking-form',
+            'booking-confirmation',
+            'team-booking',
+            'embedded-booking',
+          ] as const) {
+            await test.step(id, async () => {
+              await openAuditPage(page, app, id, { locale })
+              if (id !== 'booking-confirmation') {
+                const facts = page.locator('.event-facts')
+                await expect(facts.locator(':scope > li')).toHaveCount(3)
+                await expect(
+                  facts.locator(
+                    ':scope > li > svg:first-child[aria-hidden="true"][focusable="false"]',
+                  ),
+                ).toHaveCount(3)
+                if (id !== 'booking-form')
+                  await expect(page.locator('.tz-caption > svg[aria-hidden="true"]')).toHaveCount(1)
+                if (id !== 'embedded-booking') {
+                  const surface = await page.locator('.booking-layout').evaluate((element) => {
+                    const { left, width } = element.getBoundingClientRect()
+                    return { left, width, border: getComputedStyle(element).borderTopWidth }
+                  })
+                  if (phone) {
+                    expect(surface).toEqual({ left: 0, width: viewport.width, border: '0px' })
+                  } else {
+                    expect(surface.left).toBeGreaterThan(0)
+                    expect(surface.border).toBe('1px')
+                  }
+                }
+              }
+              if (id === 'booking-form') {
+                await expect(page.locator('.details-step h2')).toBeFocused()
+                const actions = page.locator('.booking-form .booking-form-actions')
+                const confirm = actions.getByRole('button', {
+                  name: /^(Confirm booking|确认预约)$/,
+                })
+                await expect(actions).toHaveCSS('position', phone ? 'fixed' : 'static')
+                if (phone) {
+                  const bounds = await confirm.boundingBox()
+                  if (!bounds) throw new Error('The confirmation control must have visible bounds')
+                  expect(bounds.height).toBeGreaterThanOrEqual(44)
+                  const bottom = await actions.evaluate(
+                    (element) => element.getBoundingClientRect().bottom,
+                  )
+                  expect(bottom).toBeCloseTo(viewport.height, 0)
+                }
+                expect(await measureKeyboard(page)).toEqual([])
+              }
+              const stateSizes = await page.locator('.public').evaluate((root) =>
+                [...root.querySelectorAll<HTMLElement>('*')].flatMap((element) => {
+                  const text = [...element.childNodes].some(
+                    (node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim(),
+                  )
+                  if (!text && !element.matches('input:not([type="hidden"]), select, textarea'))
+                    return []
+                  const rect = element.getBoundingClientRect()
+                  const style = getComputedStyle(element)
+                  return rect.width > 1 && rect.height > 1 && style.visibility === 'visible'
+                    ? [Number.parseFloat(style.fontSize)]
+                    : []
+                }),
+              )
+              for (const size of stateSizes) sizes.add(size)
+              expect(await page.evaluate(measureLayout, viewport)).toEqual([])
+              const scan = await scanA11y(page)
+              expect(a11yFindings(id, scan.violations, []).findings).toEqual([])
+            })
+          }
+          expect(Math.min(...sizes)).toBeGreaterThanOrEqual(12.8)
+          expect(sizes.size).toBeGreaterThanOrEqual(5)
+          expect(sizes.size).toBeLessThanOrEqual(6)
+        })
+      }
+    })
+  }
+}
+
 for (const viewport of layoutViewports) {
   const mobileViewport = viewport.width <= 480 || (viewport.width <= 960 && viewport.height <= 430)
   for (const theme of ['light', 'dark'] as const) {
@@ -303,7 +394,12 @@ for (const viewport of layoutViewports) {
               phase = 'layout'
               report.findings.push(...(await page.evaluate(measureLayout, viewport)))
               phase = 'keyboard'
-              report.findings.push(...(await measureKeyboard(page)))
+              // Leave focus on the open disclosure's trigger so Tab reaches its controls.
+              // The corresponding closed pages still scan from the skip link.
+              const fromCurrentFocus =
+                state.id === 'admin-account-menu' ||
+                (state.id === 'admin-integrations' && viewport.width < 960)
+              report.findings.push(...(await measureKeyboard(page, { fromCurrentFocus })))
             } catch {
               report.findings.push({ code: 'scan-error', phase })
             }
@@ -316,3 +412,23 @@ for (const viewport of layoutViewports) {
     }
   }
 }
+
+test('organization list supports an audit burst and still requires a session', async ({
+  page,
+  app,
+}) => {
+  const url = `${app.url}/api/auth/organization/list`
+  const status = async () => {
+    const response = await page.request.get(url)
+    const code = response.status()
+    await response.dispose()
+    return code
+  }
+  expect(await status()).toBe(401)
+  await app.auditSignIn(true)
+  // A full page-preparation run can exceed the normal 100-request budget from one IP.
+  for (let batch = 0; batch < 11; batch++) {
+    const statuses = await Promise.all(Array.from({ length: 10 }, status))
+    expect(statuses).toEqual(Array<number>(10).fill(200))
+  }
+})

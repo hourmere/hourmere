@@ -21,8 +21,9 @@ availability before expecting bookable times; calendar connections are optional.
 The remaining settings start folded: **Additional durations**, **Description and visibility**,
 **Location options and conferencing**, **Booking waitlist**, **Reminders and follow-ups**,
 **Booking form**, **After booking**, and **When people can book**. Team events also have
-host and scheduling controls and initially select you as the host. Open a section only
-when you need its settings. Its header summarizes the current values, even while the
+host and scheduling controls and initially select you as the host. The first screen
+shows progress or a retry action while the editor checks your team role. Open a section
+only when you need its settings. Its header summarizes the current values, even while the
 section is closed. The same controls are available on phones and desktop, in English
 and Simplified Chinese.
 
@@ -32,6 +33,17 @@ and Simplified Chinese.
 时间表、零提前预约时间和前后缓冲、不限制预约窗口与预约数量、不设置受邀人改期或取消截止。
 新事件默认启用且列出；创建事件不会创建工作时间。空账号需另设可用时间，连接日历不是必需条件。
 即使设置组处于折叠状态，标题下方也会显示当前设置摘要。
+团队活动的首屏会显示角色检查进度，检查失败时可在此重试。
+
+## Book on a phone
+
+Personal, team and one-time booking links use the full screen width on phones. The
+summary shows the meeting length, location and time-zone information with icons beside
+the text. After you choose a time, **Confirm booking** stays at the bottom as you scroll
+through your details.
+
+中文：个人、团队和一次性预约链接在手机上使用全宽布局。摘要中的时长、地点和时区信息旁
+有图标。选定时间后，滚动填写资料时，“确认预约”按钮保持在屏幕底部。
 
 ## Preview the booking page
 
@@ -56,11 +68,12 @@ the editor.
 ## Edit and save
 
 Choose the event title or **Edit** in the list. Sections with saved non-default values
-open automatically. Closing a section keeps its values; a validation error opens the
-relevant section and focuses the affected field. Saving an untouched form reports that
-there are no changes and sends no update. Changing only a timing unit also leaves the
-form unchanged. For actual edits, save before sharing: **View and share** uses the saved
-booking link, not an unsaved address.
+open automatically. Closing a section keeps its values. Validation focuses the error
+summary for visible fields and opens a closed section to focus its first invalid field.
+Saving an untouched form reports that there are no changes and sends no update. Changing
+only a timing unit or moving locations back to their original order also leaves the
+form unchanged. Save edits before sharing. **View and share** uses the saved booking
+link.
 
 Under **When people can book**, minimum notice means how far ahead a meeting must be
 booked; the booking window limits how far into the future invitees can book. Notice and
@@ -85,8 +98,9 @@ See [meeting location choices](/docs/location-choices). Reschedule and cancel de
 inputs remain in whole minutes; each booking keeps its original deadlines. See
 [change deadlines](/docs/change-deadlines), including the earlier effective reschedule cutoff.
 
-中文：在列表点标题或“编辑”，已保存且非默认的设置组会自动展开。收起不会清空数据，校验失败
-会展开出错组并聚焦字段。未修改时保存会提示无需保存，不发送更新；只切换时间单位也不算修改。
+中文：在列表点标题或“编辑”，已保存且非默认的设置组会自动展开。收起不会清空数据。可见字段
+校验失败时，焦点移到错误摘要。折叠组内有错时，会展开该组并聚焦第一个出错的字段。未修改时
+保存会提示无需保存，也不会发送更新。只切换时间单位或把地点移回原顺序都不算修改。
 保存后用“查看与分享”复制已保存链接。提前预约时间和缓冲值打开时，正数能被 1440 整除则显示天，
 否则能被 60 整除则显示小时，其余（含零）显示分钟；预约窗口始终先显示天。单位选择不保存，
 提示中的等值是当前草稿。列表和时长选项则按天、小时、分钟组合显示，例如 90 分钟显示为
@@ -117,6 +131,10 @@ Zoom。两者都有时优先 Meet，都没有时不设地点。此默认值只�
 
 ## Manage the list
 
+If the personal setup guide cannot confirm your default hours, use **Refresh setup status**
+to read your saved setup. If the refresh also fails, the page keeps the last loaded guide
+and list. Use the same refresh action when your connection returns.
+
 Each event row has an enable/disable switch. Disabled rows are visually muted and retain
 a readable status. Disabling stops new bookings; it does not cancel existing bookings.
 If saving fails, the switch returns to its previous state and reports the error.
@@ -127,9 +145,16 @@ bookings through that link, but does not cancel existing bookings or erase their
 Embed opens the existing sharing controls and follows the event's current readiness rules.
 The controls support keyboard navigation and screen readers.
 
-中文：列表开关可直接启停事件；停用不取消已有预约，保存失败会还原开关并显示错误。
+An enabled [team home catalogue](/docs/team-public-home) can list this team's saved, active
+event types. The event's saved visibility controls whether it can appear there.
+
+中文：如果个人设置引导无法确认默认每周时间段，点“刷新设置状态”查看已保存的设置。
+如果刷新也失败，页面会保留上次加载的引导和列表。连接恢复后，点同一个按钮再次刷新。
+
+列表开关可直接启停事件；停用不取消已有预约，保存失败会还原开关并显示错误。
 更多菜单提供复制、嵌入和删除；删除必须先确认，也可取消。删除停止此链接的新预约，但不取消
 已有预约或删除其历史。
+团队公开首页目录启用后，已保存且启用的团队活动是否可以列出，取决于该活动已保存的可见性设置。
 
 ## Duplicate an event type
 

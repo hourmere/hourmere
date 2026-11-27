@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { Db } from '@hourmere/db'
-import { type RawBuilder, sql } from 'kysely'
+import { sql } from 'kysely'
+import { databaseInstantText } from './sso-database-clock.ts'
 import { maximumSamlAssertionLifetime, samlClockSkew } from './sso-saml-limits.ts'
 import type { VerifiedSamlResponse } from './sso-saml-verifier.ts'
 
@@ -77,6 +78,26 @@ export function samlSessionDeadline(assertion: VerifiedSamlResponse['assertion']
   return deadline
 }
 
+/** Take the earliest signed authentication event when every statement supplies a time. */
+export function samlStepUpAuthTime(
+  assertion: VerifiedSamlResponse['assertion'],
+  now: Temporal.Instant,
+) {
+  let earliest: Temporal.Instant | undefined
+  let missing = false
+  const latest = now.add(skew)
+  for (const { authnInstant } of assertion.authnStatements) {
+    if (authnInstant === null) {
+      missing = true
+      continue
+    }
+    const instant = parseTime(authnInstant)
+    if (compare(instant, latest) > 0) throw new SamlTimingError('timing_invalid')
+    if (!earliest || compare(instant, earliest) < 0) earliest = instant
+  }
+  return missing ? undefined : earliest?.epochMilliseconds
+}
+
 type OutstandingSamlRequest = {
   id: string
   organizationId: string
@@ -84,14 +105,9 @@ type OutstandingSamlRequest = {
   expiresAt: Temporal.Instant
 }
 
-/** Retain PostgreSQL's microseconds independently of session DateStyle and TimeZone. */
-export function samlDatabaseInstantText(instant: RawBuilder<unknown>) {
-  return sql<string>`to_char(${instant} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`
-}
-
 export async function samlDatabaseNow(db: Db) {
   const { now } = await db
-    .selectNoFrom(samlDatabaseInstantText(sql`clock_timestamp()`).as('now'))
+    .selectNoFrom(databaseInstantText(sql`clock_timestamp()`).as('now'))
     .executeTakeFirstOrThrow()
   return Temporal.Instant.from(now)
 }

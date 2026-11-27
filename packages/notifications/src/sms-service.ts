@@ -137,7 +137,7 @@ export function createSmsService(deps: {
           count.organization_day >= limits.organizationPerDay
         )
           throw new SmsError('sms_rate_limited')
-        await tx
+        const write = await tx
           .insertInto('sms_deliveries')
           .values({
             key_hash: key,
@@ -148,14 +148,18 @@ export function createSmsService(deps: {
             status: 'dispatching',
           })
           .onConflict((conflict) =>
-            conflict.column('key_hash').doUpdateSet({
-              status: 'dispatching',
-              retry_not_before: null,
-              created_at: sql`clock_timestamp()`,
-              updated_at: sql`clock_timestamp()`,
-            }),
+            conflict
+              .column('key_hash')
+              .doUpdateSet({
+                status: 'dispatching',
+                retry_not_before: null,
+                created_at: sql`clock_timestamp()`,
+                updated_at: sql`clock_timestamp()`,
+              })
+              .where('sms_deliveries.status', '=', 'rate_limited'),
           )
-          .execute()
+          .executeTakeFirst()
+        if (write.numInsertedOrUpdatedRows !== 1n) throw new SmsError('sms_delivery_unknown')
         return undefined
       })
       if (reservation) return { providerMessageId: reservation }
