@@ -1,5 +1,5 @@
 import type { Page, Route } from '@playwright/test'
-import type { components } from '../../apps/web/src/api/schema.d.ts'
+import type { components, operations } from '../../apps/web/src/api/schema.d.ts'
 import { admin as englishAdmin } from '../../apps/web/src/i18n/catalogues/en/admin.ts'
 import { common as englishCommon } from '../../apps/web/src/i18n/catalogues/en/common.ts'
 import { admin as chineseAdmin } from '../../apps/web/src/i18n/catalogues/zh-CN/admin.ts'
@@ -22,10 +22,22 @@ export const webhookAuditPages = [
   { id: 'webhooks-delete-confirm', title: 'Confirm permanently deleting a webhook' },
   // A representative unbroken string exercises wrapping next to the explicit copy control.
   { id: 'webhooks-secret', title: 'One-time webhook signing secret with a synthetic marker' },
+  // Long IDs, localized times, all outcomes and the page action exercise wrapping and reading order.
+  { id: 'webhook-delivery-history', title: 'Webhook deliveries with all four outcomes' },
+  // A successful empty read has different copy and actions from a pagination failure.
+  { id: 'webhook-delivery-history-empty', title: 'Webhook history with no retained deliveries' },
+  // Check that the cursor error is announced and its recovery action stays reachable.
+  {
+    id: 'webhook-delivery-history-invalid-cursor',
+    title: 'Webhook history with a rejected cursor',
+  },
 ] as const
 
 export type WebhookAuditPageId = (typeof webhookAuditPages)[number]['id']
 type Webhook = components['schemas']['Webhook']
+type Delivery = components['schemas']['WebhookDelivery']
+type DeliveryPage =
+  operations['listWebhookDeliveries']['responses'][200]['content']['application/json']
 
 export function isWebhookAuditPage(id: string): id is WebhookAuditPageId {
   return webhookAuditPages.some((entry) => entry.id === id)
@@ -43,6 +55,58 @@ const events: Webhook['events'] = [
   'workflow.executed',
 ]
 const apiPath = '/api/v1/webhooks'
+const deliveryPath = `${apiPath}/${id}/deliveries`
+
+const pendingDelivery: Delivery = {
+  id: '72300000-0000-4000-8000-000000000004',
+  eventId: '72400000-0000-4000-8000-000000000004',
+  bookingId: '72500000-0000-4000-8000-000000000001',
+  eventType: 'booking.reschedule_request_expired',
+  status: 'pending',
+  attempts: 2,
+  httpStatus: 503,
+  lastError: 'http_error',
+  createdAt: '2030-01-07T09:45:00.000Z',
+  lastAttemptAt: '2030-01-07T09:55:00.000Z',
+  deliveredAt: null,
+}
+const history: DeliveryPage = {
+  data: [
+    pendingDelivery,
+    {
+      ...pendingDelivery,
+      id: '72300000-0000-4000-8000-000000000003',
+      eventId: '72400000-0000-4000-8000-000000000003',
+      status: 'delivered',
+      eventType: 'workflow.executed',
+      httpStatus: 204,
+      lastError: null,
+      deliveredAt: pendingDelivery.lastAttemptAt,
+    },
+    {
+      ...pendingDelivery,
+      id: '72300000-0000-4000-8000-000000000002',
+      eventId: '72400000-0000-4000-8000-000000000002',
+      eventType: 'booking.attendee_no_show_changed',
+      status: 'failed',
+      attempts: 13,
+      httpStatus: null,
+      lastError: 'transport_error',
+    },
+    {
+      ...pendingDelivery,
+      id: '72300000-0000-4000-8000-000000000001',
+      eventId: '72400000-0000-4000-8000-000000000001',
+      eventType: 'booking.created',
+      status: 'skipped',
+      attempts: 0,
+      httpStatus: null,
+      lastError: 'disabled',
+      lastAttemptAt: null,
+    },
+  ],
+  nextAfter: '72300000-0000-4000-8000-000000000001',
+}
 
 /** Render dashboard states using synthetic same-origin responses and the real signed-in shell. */
 export async function openWebhookAuditPage(
@@ -78,9 +142,17 @@ export async function openWebhookAuditPage(
     const request = route.request()
     if ((await request.headerValue('x-expected-organization-id')) !== organizationId)
       return route.fulfill({ status: 409, json: { error: 'organization_context_changed' } })
-    const { pathname } = new URL(request.url())
+    const { pathname, searchParams } = new URL(request.url())
     if (pathname === apiPath && request.method() === 'GET')
       return route.fulfill({ json: [endpoint, paused] })
+    if (pathname === deliveryPath && request.method() === 'GET') {
+      if (searchParams.has('after')) {
+        return route.fulfill({ status: 400, json: { error: 'invalid_cursor' } })
+      }
+      return route.fulfill({
+        json: state === 'webhook-delivery-history-empty' ? { data: [], nextAfter: null } : history,
+      })
+    }
     if (
       state === 'webhooks-secret' &&
       pathname === `${apiPath}/${id}/rotate-secret` &&
@@ -125,6 +197,38 @@ export async function openWebhookAuditPage(
       await form
         .getByRole('checkbox', { name: t('Workflow executed'), checked: false, exact: true })
         .waitFor()
+    } else if (
+      state === 'webhook-delivery-history' ||
+      state === 'webhook-delivery-history-empty' ||
+      state === 'webhook-delivery-history-invalid-cursor'
+    ) {
+      await list
+        .locator('.webhook-endpoint')
+        .filter({ hasText: id })
+        .getByRole('button', { name: t('Delivery history'), exact: true })
+        .press('Enter')
+      const panel = main.locator('.webhook-history')
+      await panel
+        .getByRole('heading', { name: t('Delivery history'), exact: true })
+        .and(panel.locator(':focus'))
+        .waitFor()
+      if (state === 'webhook-delivery-history-empty') {
+        await panel.getByText(t('No deliveries retained in the last 30 days.')).waitFor()
+      } else {
+        await panel.locator(`time[datetime="${pendingDelivery.createdAt}"]`).first().waitFor()
+        const older = button('Load older deliveries')
+        await older.waitFor()
+        if (state === 'webhook-delivery-history-invalid-cursor') {
+          await older.press('Enter')
+          await panel
+            .getByText(
+              t(
+                'This delivery history page is no longer available. Refresh history to start again.',
+              ),
+            )
+            .waitFor()
+        }
+      }
     } else {
       await list
         .locator('.webhook-endpoint')

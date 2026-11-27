@@ -125,6 +125,8 @@ discovery omits the dedicated routing tools. After enablement, form management r
 the personal owner or a current team owner or admin in addition to the listed key scope.
 See [routing credentials and examples](/docs/routing-forms-api#availability-and-credentials).
 
+Team booking bulk cancellation preview returns 404 until the feature is released.
+
 <!-- api-key-scope-table:start -->
 
 ### Operation groups
@@ -286,6 +288,7 @@ See [routing credentials and examples](/docs/routing-forms-api#availability-and-
 | `GET /api/v1/team/bookings` | Browser session only | — |
 | `GET /api/v1/team/bookings/{id}` | Browser session only | — |
 | `POST /api/v1/team/bookings/{id}/cancel` | Browser session only | — |
+| `POST /api/v1/team/bookings/bulk-cancellations/preview` | Browser session only | — |
 | `GET /api/v1/team/invitations` | Browser session only | — |
 | `GET /api/v1/team/invitations/{invitationId}` | Browser session only | — |
 | `POST /api/v1/team/invitations/{invitationId}/cancel` | Browser session only | — |

@@ -1148,9 +1148,9 @@ export async function insertBooking(
   return { id, manageToken: token }
 }
 
-/** Paid lifecycle writes call this after locking an authorized booking. */
-export async function assertBookingLocallyManaged(db: Db, id: string, allowPaid = false) {
-  const paid = await db
+/** A Checkout attempt binds both its original booking and its current successor. */
+export function bookingPaymentBindings(db: Db) {
+  return db
     .selectFrom('bookings as booking')
     .leftJoin('payment_checkout_attempts as attempt', (join) =>
       join.on((eb) =>
@@ -1160,6 +1160,11 @@ export async function assertBookingLocallyManaged(db: Db, id: string, allowPaid 
         ]),
       ),
     )
+}
+
+/** Paid lifecycle writes call this after locking an authorized booking. */
+export async function assertBookingLocallyManaged(db: Db, id: string, allowPaid = false) {
+  const paid = await bookingPaymentBindings(db)
     .leftJoin('bookings as root', (join) =>
       join
         .onRef('root.id', '=', 'attempt.booking_id')

@@ -188,6 +188,7 @@ import { ssoDraftRoutes } from './routes/sso-drafts.ts'
 import { ssoIdentityRecoveryRoutes } from './routes/sso-link-recovery.ts'
 import { ssoPolicyRoutes } from './routes/sso-policy.ts'
 import { ssoRecoveryEnrollmentRoutes } from './routes/sso-recovery-enrollment.ts'
+import { teamBookingBulkPreviewRoutes } from './routes/team-booking-bulk-preview.ts'
 import { teamBookingRoutes } from './routes/team-bookings.ts'
 import { teamInvitationRoutes } from './routes/team-invitations.ts'
 import { webhookRoutes } from './routes/webhooks.ts'
@@ -524,6 +525,7 @@ export function productRoutes({
       bookingExportMaxConcurrent,
     }),
     teamBookingRoutes({ db, notify }),
+    teamBookingBulkPreviewRoutes({ db }),
     teamInvitationRoutes({ db, invitationMailLimits }),
     memberDepartureImpactRoutes({ db }),
     memberRemovalRoutes({
@@ -1005,10 +1007,13 @@ export interface RunningServer {
   close(): Promise<void>
 }
 
+type ServerTestOptions = RecurringBookingAdmissionDeps &
+  Pick<AuthConfig, 'organizationListRateLimitMaxForTests'>
+
 /** Starts Hourmere from environment variables (see .env.example) and optional test dependencies. */
 export async function startServer(
   env: NodeJS.ProcessEnv = process.env,
-  options: RecurringBookingAdmissionDeps = {},
+  options: ServerTestOptions = {},
 ): Promise<RunningServer> {
   // First, before anything can log: one line per console call, control characters escaped.
   const restoreConsole = installOneLineConsole()
@@ -1022,7 +1027,7 @@ export async function startServer(
 
 async function start(
   env: NodeJS.ProcessEnv,
-  options: RecurringBookingAdmissionDeps,
+  options: ServerTestOptions,
   restoreConsole: () => void,
 ): Promise<RunningServer> {
   const config = loadConfig(env)
@@ -1533,8 +1538,8 @@ async function start(
       // Core notification intents precede workflow capture in the booking's transaction.
       await captureWorkflowBooking(trx, event, now, config.BETTER_AUTH_SECRET, { workflowsEnabled })
     }
-    const auth = createAuth(
-      productionAuthOptions({
+    const auth = createAuth({
+      ...productionAuthOptions({
         config,
         pool: authPool,
         db,
@@ -1543,7 +1548,8 @@ async function start(
         invitationMailLimits,
         jobs,
       }),
-    )
+      organizationListRateLimitMaxForTests: options.organizationListRateLimitMaxForTests,
+    })
     // db is closed below.
     fetch = createApp(
       productionAppOptions({

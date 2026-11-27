@@ -62,18 +62,29 @@ explicit invitation acceptance with closed signup, JIT admission with open signu
 JIT refusal with closed signup. Without the test injection, the SAML link and admission
 entries are hidden and their requests are refused.
 
-The enforcement cases compare a mailbox session and a Keycloak session for the same
+The OIDC enforcement cases compare a mailbox session and a Keycloak session for the same
 owner. Binding a CLI and MCP lease requires a second Keycloak login with
 `prompt=login` and `max_age=0`. An unbound or revoked key cannot read the team's
 catalog. Without OIDC injection, the seeded enforcement policy still blocks ordinary
 team access and the sign-in page has no SSO option.
 
-The recovery cases spend a fresh mailbox ceremony on each provider repair write and
+The OIDC recovery cases spend a fresh mailbox ceremony on each provider repair write and
 exercise the existing operator command while the fixture IdP is down. Both outage
 cases opt into a dedicated container that they can stop. The signing-key rotation
 case also uses a dedicated container and adds a higher-priority RS256 key to its
 realm. It verifies a new signing key and a fresh JWKS fetch after the verifier cooldown.
 The outage case checks existing proof, new sign-in refusal and the ordinary mailbox boundary.
+
+The SAML enforcement cases require `ForceAuthn="true"` and a fresh Keycloak login to
+bind a CLI and MCP lease. Without the SAML test injection, the seeded team still
+requires SSO and the sign-in page offers no SAML entry. SAML break-glass repair uses
+the browser's mailbox verification and the existing same-origin provider endpoints.
+Each edit, test and activation spends a separate recovery grant, and recovery leaves
+ordinary team access blocked. The rotation case exercises a real signer change and
+tests a revision with both signing certificates before enabling it, then proves sign-in
+with only the new certificate pinned. Keycloak logout
+and user disable leave an issued Hourmere proof usable, and the disabled account
+cannot authenticate again after the Hourmere session ends.
 
 The browser context and Hourmere database are disposable for every test. Container
 teardown removes the exact container it owns and its private temporary files. Each

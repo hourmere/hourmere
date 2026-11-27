@@ -1607,10 +1607,10 @@ row ID and public origin are authenticated associated data.
 ## Invitation delivery storage
 
 Migration 0045 adds nullable `invitation_deliveries.authorized_by_user_id` without rewriting
-existing generations. Each new generation pins the acting administrator for sender authority
-checks and the invitation mail's name. Null legacy rows fall back to the invitation's original
-inviter. The recorded UUID has no user foreign key: deleting the actor keeps its identity,
-so the sender refuses it rather than falling back to a different administrator. The original
+existing generations. Each new generation pins an administrator for sender authority checks.
+App invitations also use that administrator's name in the mail. Null legacy rows fall back
+to the invitation's original inviter. The recorded UUID has no user foreign key. If the
+actor is deleted, the retained UUID lets the sender refuse the generation. The original
 `auth.invitation.inviterId` stays unchanged for non-transitive signup eligibility.
 Its current team membership also determines invitation validity independently of the
 generation's authorizing administrator. If the original inviter no longer belongs to the
@@ -1679,6 +1679,13 @@ new version. The migration itself installs storage and queries; management and q
 integration are application code. Explicit resend extends expiry under the approved
 protocol, independently of these storage queries.
 
+Migration 0192 adds `invitation_deliveries.scim_issued` for the current generation.
+The worker uses it to render mail from the identity provider on behalf of the team. The
+recorded owner's locale still selects the language. An administrator's resend records
+the new generation as an app invitation. The upgrade identifies current unexpired initial SCIM deliveries from the
+issuance audit journal. Stop old writers and senders before upgrading and restart all roles
+with the same version, so all generations carry their sender identity.
+
 Invitation admission now writes the invitation and its queued delivery intent in one
 transaction. The explicit resend cooldown uses the later of `generation_started_at`
 and `updated_at`. The sender updates `updated_at` on every delivery attempt
@@ -1688,11 +1695,14 @@ and seeds the known legacy 48-hour validity policy. Historic native resends chan
 without changing invitation creation time, so their difference cannot recover original
 validity. Invitation status, expiry, attempts and delivery outcomes remain unchanged.
 
-`invitation_email_requests` retains actor/team UUIDs, an invitation-domain recipient HMAC
-and request time for rolling inviter/team/recipient limits. It has no foreign keys, so
-deleting an invitation, account or team cannot reset the budget. Admission holds the
-existing global mail-budget lock without debiting the shared sending allowance in
-`notification_email_sends`. The sender checks and debits ordinary, non-reserved
+`invitation_email_requests` retains the team UUID, an invitation-domain recipient HMAC
+and request time for rolling limits. App admissions include the inviter's user UUID.
+Migration 0192 allows a null user UUID for SCIM admissions, which count toward their own
+organization and recipient limits as described in [the SCIM guide](scim.md#invitation-delivery-and-limits).
+Existing request records keep their original attribution and age out of the rolling windows.
+The ledger has no foreign keys, so deleting an invitation, account or team cannot reset
+the budget. Admission holds the existing global mail-budget lock without debiting the
+shared sending allowance in `notification_email_sends`. The sender checks and debits ordinary, non-reserved
 shared capacity at send time. Both ledgers retain two days. Every admission record
 requires its recipient hash; migration 0043 creates this ledger without changing earlier
 shared mail accounting.
@@ -2708,6 +2718,20 @@ which cancellation or opt-out cannot recall an already-dispatched SMS.
 
 The ordinary SMS delivery ledger and rolling budgets remain in force. Job payloads carry
 booking/rule identity and scheduling instants, never phone numbers or message bodies.
+
+## Team booking bulk cancellation previews
+
+The preview receipt is keyed by a database-generated UUID in
+`team_booking_bulk_cancellations`. It stores the team, actor account, issuing session and
+expiry inherited from the page proof. Its lifetime is at most ten minutes. The page proof,
+filters and session bearer are never written to the receipt.
+
+`team_booking_bulk_cancellation_items` records the ordered booking UUIDs and preview codes.
+The primary key limits positions to one per ordinal, and the ordinal check and unique booking
+key enforce at most 25 distinct items. Deleting the team cascades to its receipts and items.
+Actor, session and booking IDs are retained when their corresponding rows are deleted.
+A preview writes these two tables in one transaction. It does not change bookings or enqueue
+jobs or notifications. Admission, execution and receipt cleanup are future release steps.
 
 ## Audit events
 
