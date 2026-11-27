@@ -11,8 +11,3 @@ in their own name through the invite form.
 The administrator list shows **No longer valid**, with derived `invalidReason: "inviter_left"`;
 cancellation remains allowed. Demotion while the inviter remains a member leaves validity
 unchanged. These checks do not rewrite the invitation's stored lifecycle.
-
-Team booking bulk cancellation is pending browser and release acceptance. Each successful
-item uses the ordinary cancellation path to queue its existing notifications and cleanup.
-A repeated confirmation or worker wake uses the recorded outcome and creates no new
-notification intent for a completed item.
