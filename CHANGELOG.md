@@ -18,6 +18,12 @@ must approve publication through the [release workflow](https://github.com/hourm
   `ROUTING_FORMS_ENABLED`. Explicit `false` or a legacy personal `route` handle
   keeps routing off. See the [routing forms guide](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/routing-forms.md).
 
+- Booking workflows are enabled by default for unset or empty `WORKFLOWS_ENABLED`, including
+  on upgrades. Set `WORKFLOWS_ENABLED=false` across web and worker to pause capture and
+  delivery admissions. A slow workflow webhook receiver can no longer delay a booking's
+  cancellation or reschedule. See the
+  [workflow operating guide](https://github.com/hourmere/hourmere/blob/main/docs/workflows.md#operating-guide).
+
 - SCIM 2.0 provisioning for team Users and explicitly mapped child-team Groups,
   available on every instance without a paid plan. Discovery, directory membership
   lifecycle, team credential revocation and child-team audit records ship together.

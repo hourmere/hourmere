@@ -78,10 +78,22 @@ async function tableLayout(page: Page) {
     const cards = firstRow ? getComputedStyle(firstRow).display === 'block' : false
     const cells = [...content.querySelectorAll('tbody td')]
     const kinds = cells.map((cell) => cell.getAttribute('data-cell'))
+    let clippedHeaders = 0
+    let visibleHeaders = 0
     const narrowColumns: string[] = []
     const label = (cell: Element) =>
       `${cell.getAttribute('data-label')}: ${(cell.textContent ?? '').trim().slice(0, 40)}`
     for (const table of tables) {
+      const head = table.querySelector('thead')
+      if (head) {
+        const bounds = head.getBoundingClientRect()
+        const style = getComputedStyle(head)
+        if (style.position === 'absolute' && style.clipPath === 'inset(50%)') {
+          if (bounds.width <= 1 && bounds.height <= 1) clippedHeaders++
+        } else if (bounds.width > 1 && bounds.height > 1 && style.visibility === 'visible') {
+          visibleHeaders++
+        }
+      }
       for (const row of table.querySelectorAll('tbody tr')) {
         for (const cell of row.children) {
           const kind = cell.getAttribute('data-cell')
@@ -117,10 +129,8 @@ async function tableLayout(page: Page) {
           table.scrollWidth > table.clientWidth + 1 && getComputedStyle(table).overflowX !== 'auto',
       ).length,
       scrollingTables: tables.filter((table) => table.scrollWidth > table.clientWidth + 1).length,
-      hiddenHeaders: tables.filter((table) => {
-        const head = table.querySelector('thead')
-        return head ? getComputedStyle(head).display === 'none' : true
-      }).length,
+      clippedHeaders,
+      visibleHeaders,
       missingLabels: cards
         ? cells.filter(
             (cell) =>
@@ -170,13 +180,13 @@ function assertTables(layout: Layout) {
   expect(layout.overflowingCells, 'Cell content never overflows its cell').toEqual([])
   expect(layout.narrowColumns, 'Columns keep their readable minimum width').toEqual([])
   if (layout.cards) {
-    expect(layout.hiddenHeaders, 'Stacked cards label cells instead of showing headers').toBe(
+    expect(layout.clippedHeaders, 'Stacked cards visually conceal the header row').toBe(
       layout.tables,
     )
     expect(layout.missingLabels, 'Every stacked cell shows its column header').toBe(0)
     expect(layout.scrollingTables, 'Stacked cards never scroll horizontally').toBe(0)
   } else {
-    expect(layout.hiddenHeaders, 'Table headers are visible').toBe(0)
+    expect(layout.visibleHeaders, 'Table headers are visible').toBe(layout.tables)
   }
 }
 
@@ -211,6 +221,71 @@ for (const path of pages) {
   })
 }
 
+test('the configuration tables stack at 1200px and preserve the URL breakpoints', async ({
+  page,
+  siteOrigin,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'site-desktop', 'Desktop viewport coverage')
+  await page.setViewportSize({ width: 1200, height: 1000 })
+  await open(page, siteOrigin, '/docs/configuration')
+
+  const layout = await tableLayout(page)
+  expect(layout.cards, 'The documentation column between both sidebars uses cards').toBe(true)
+  assertTables(layout)
+
+  const url = 'postgres://hourmere@db:5432/hourmere'
+  const example = page.locator('td code').filter({ hasText: url })
+  await expect(example).toHaveText(url)
+  expect(
+    await example
+      .locator('wbr')
+      .evaluateAll((breaks) => breaks.map((point) => point.previousSibling?.textContent)),
+  ).toEqual(['postgres://', 'hourmere@db:5432/'])
+})
+
+test('at 320px the full identifier fits and table headers remain accessible', async ({
+  page,
+  siteOrigin,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'site-mobile', 'Mobile viewport coverage')
+  await page.setViewportSize({ width: 320, height: 844 })
+  await open(page, siteOrigin, '/docs/configuration')
+
+  const layout = await tableLayout(page)
+  expect(layout.cards).toBe(true)
+  expect(layout.clippedHeaders, 'Every header row is visually clipped').toBe(layout.tables)
+  expect(layout.missingLabels).toBe(0)
+  expect(layout.overflow).toBeLessThanOrEqual(1)
+  expect(layout.scrollingTables).toBe(0)
+
+  const identifier = 'MICROSOFT_CALENDAR_CLIENT_SECRET'
+  const cell = page.locator('td[data-label="Variable"]').filter({ hasText: identifier })
+  const table = page.getByRole('table').filter({ has: cell })
+  await expect(table.getByRole('columnheader', { name: 'Variable', exact: true })).toHaveCount(1)
+  const code = cell.locator('code')
+  await expect(code).toHaveText(identifier)
+  expect(
+    await code.evaluate((element) => {
+      const bounds = element.closest('td')?.getBoundingClientRect()
+      if (!bounds) throw new Error('Missing identifier cell')
+      const range = document.createRange()
+      range.selectNodeContents(element)
+      const lines = [...range.getClientRects()].filter((rect) => rect.width > 0)
+      return (
+        lines.length > 0 &&
+        lines.every(
+          (rect) =>
+            rect.left >= bounds.left - 1 &&
+            rect.right <= bounds.right + 1 &&
+            rect.top >= bounds.top - 1 &&
+            rect.bottom <= bounds.bottom + 1,
+        )
+      )
+    }),
+    'The identifier is readable inside its own cell',
+  ).toBe(true)
+})
+
 test('table geometry assertions reject squeezed columns, wrapped words and page overflow', async ({
   page,
   siteOrigin,
@@ -221,7 +296,13 @@ test('table geometry assertions reject squeezed columns, wrapped words and page 
     // negative control independently of the font metrics. The stacked layout hides the
     // header row, so show it again for the header oracle.
     content: `
-      .sl-markdown-content thead { display: block !important; }
+      .sl-markdown-content thead {
+        position: static !important;
+        clip-path: none !important;
+        width: auto !important;
+        height: auto !important;
+        overflow: visible !important;
+      }
       .sl-markdown-content :is(th, td),
       .sl-markdown-content td code {
         overflow-wrap: anywhere !important;
@@ -316,7 +397,10 @@ test.describe('touch copy controls', () => {
   test('self-hosting copy buttons leave every code block readable', async ({
     page,
     siteOrigin,
-  }) => {
+  }, testInfo) => {
+    if (testInfo.project.name === 'site-mobile') {
+      await page.setViewportSize({ width: 320, height: 844 })
+    }
     await open(page, siteOrigin, '/docs/self-hosting')
     assertCopy(await copyLayout(page))
     const regression = await page.addStyleTag({

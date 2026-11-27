@@ -51,24 +51,7 @@ jobs:
         run: npm run db:migrate && npm run db:types -- --verify
       - name: Generated API types match the server's OpenAPI document
         run: npm run api:types && git diff --exit-code -- apps/web/src/api/schema.d.ts
-      - name: Build with a disposable legal publication fixture
-        run: |
-          legal_source=apps/site/src/data/legal.ts
-          legal_original=$(mktemp)
-          cp "$legal_source" "$legal_original"
-          restore_legal_source() {
-            cp "$legal_original" "$legal_source"
-            rm -f "$legal_original"
-            rm -rf apps/site/dist
-          }
-          trap restore_legal_source EXIT
-          node --input-type=module <<'NODE'
-          import { readFileSync, writeFileSync } from 'node:fs'
-          const path = 'apps/site/src/data/legal.ts'
-          const source = readFileSync(path, 'utf8')
-          writeFileSync(path, source.replace("'SET_ON_PUBLICATION_DAY'", "'2000-01-01'"))
-          NODE
-          npm run build
+      - run: npm run build
       - name: Inspect and smoke test the standalone npm CLI tarball
         run: npm run cli:pack-smoke
       - name: Validate the draft MCP Registry metadata against the official schema
@@ -295,26 +278,11 @@ jobs:
         run: google-chrome --version
       - run: npm ci --ignore-scripts --audit=false --fund=false
       - run: npm run build --workspace @hourmere/web
-      - name: Build a disposable site fixture and run browser regressions
+      - name: Build the static site and run browser regressions
         id: browser
         env:
           HOURMERE_E2E_SHARD: ${{ matrix.shard }}
         run: |
-          legal_source=apps/site/src/data/legal.ts
-          legal_original=$(mktemp)
-          cp "$legal_source" "$legal_original"
-          restore_legal_source() {
-            cp "$legal_original" "$legal_source"
-            rm -f "$legal_original"
-            rm -rf apps/site/dist
-          }
-          trap restore_legal_source EXIT
-          node --input-type=module <<'NODE'
-          import { readFileSync, writeFileSync } from 'node:fs'
-          const path = 'apps/site/src/data/legal.ts'
-          const source = readFileSync(path, 'utf8')
-          writeFileSync(path, source.replace("'SET_ON_PUBLICATION_DAY'", "'2000-01-01'"))
-          NODE
           npm run build --workspace @hourmere/site
           npm run test --workspace @hourmere/e2e -- --shard=${{ matrix.shard }}/6
       - run: npm run test:e2e:privacy

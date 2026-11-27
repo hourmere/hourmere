@@ -32,6 +32,7 @@ describe.skipIf(!process.env.DATABASE_URL)('group seat booking services', () => 
     ctx = {
       db,
       now: () => NOW,
+      microsoftCalendarEnabled: true,
       notify: async (trx, event) => {
         await trx
           .insertInto('booking_notifications')
@@ -165,6 +166,19 @@ describe.skipIf(!process.env.DATABASE_URL)('group seat booking services', () => 
     const source = await s.book('source@example.test')
     const nearby = START.add({ hours: 1 })
     await s.book('nearby@example.test', nearby)
+    const disabled = { ...ctx, microsoftCalendarEnabled: false }
+    await expect(
+      s.book('new-seat@example.test', nearby, randomUUID(), disabled),
+    ).rejects.toMatchObject({
+      code: 'location_unavailable',
+    })
+    await expect(
+      rescheduleManagedBooking(disabled, source.manageToken as string, {
+        start: nearby,
+        idempotencyKey: randomUUID(),
+      }),
+    ).rejects.toMatchObject({ code: 'location_unavailable' })
+    expect((await state(s.eventId)).map(({ active_seats }) => active_seats)).toEqual([1, 1])
     const changer = await t.pool.connect()
     try {
       await changer.query('BEGIN')

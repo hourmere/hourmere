@@ -210,7 +210,7 @@ can still be inspected and removed.
 配置、开启强制、委托绑定）返回 `404 sso_disabled`；上述两个读取操作、恢复操作和降低信任的
 操作对团队所有者和管理员保持可用，已保存的配置仍可查看和移除。
 
-The operator can enable booking workflows with `WORKFLOWS_ENABLED=true`. While off,
+Booking workflows are enabled by default. When the operator sets `WORKFLOWS_ENABLED=false`,
 `tools/list` omits workflow tools. Direct calls can still read workflows and run
 history, disable a workflow, or delete it with the required scope and role. Creation,
 preview, enabling and other edits return `isError: true` with `workflows_disabled`
@@ -358,9 +358,9 @@ API key. IDs that are missing or belong to another organization return `webhook_
 
 `create_webhook` and `update_webhook` accept `booking.created`, `booking.rescheduled`,
 `booking.cancelled`, `booking.reschedule_requested`, `booking.reschedule_request_expired`,
-`booking.attendee_no_show_changed` and `workflow.executed` in `events`. Adding
-`workflow.executed` requires `WORKFLOWS_ENABLED=true`. While workflows are off, adding it
-returns `workflows_disabled` (REST 404). On create, it takes precedence over
+`booking.attendee_no_show_changed` and `workflow.executed` in `events`. With
+`WORKFLOWS_ENABLED=false`, adding `workflow.executed` returns `workflows_disabled`
+(REST 404). On create, it takes precedence over
 `webhooks_disabled` (REST 409).
 
 `rotate_webhook_secret` takes `{ id }` and requires a `full` API key. Each successful
