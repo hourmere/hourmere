@@ -315,6 +315,10 @@ export const ManagedBooking = Booking.extend({
       description:
         "Present only when the manage token came from a host's reschedule request email: the request that email was sent for and what became of it. Other manage tokens omit it.",
     }),
+  wasRescheduled: z.literal(true).optional().openapi({
+    description:
+      'Present when the manage link still resolves to a cancelled booking that was moved to a new time.',
+  }),
   changeDeadlines: z
     .object({
       rescheduleBy: z.iso.datetime().nullable(),

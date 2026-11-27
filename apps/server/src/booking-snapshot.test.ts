@@ -197,6 +197,7 @@ describe.skipIf(!bootstrap)('REST/MCP booking hydration snapshot', () => {
             expect(moved && hydrated).toBe(true)
             expect(booking.id).toBe(created.booking.id)
             expect(booking.status).toBe('cancelled')
+            if (reader === 'REST manage') expect(booking).toHaveProperty('wasRescheduled', true)
             expect(booking.cancelledAt).toBe('2026-11-01T12:05:00.000Z')
             expect(booking.cancelReason).toBeNull()
             expect(booking.location).toEqual({ kind: provider, autoCreate: true })
