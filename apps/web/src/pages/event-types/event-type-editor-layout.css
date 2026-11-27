@@ -6,17 +6,27 @@
   margin-block-end: var(--space-4);
 }
 
-@media (width < 480px) {
+.location-option-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.location-option-actions > .button {
+  max-inline-size: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+@media (min-width: 480px) {
   .location-option-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-2);
+    display: block;
   }
 
   .location-option-actions > .button {
-    max-inline-size: 100%;
-    white-space: normal;
-    overflow-wrap: anywhere;
+    max-inline-size: none;
+    white-space: nowrap;
+    overflow-wrap: inherit;
   }
 }
 
