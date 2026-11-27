@@ -414,6 +414,15 @@ Creation requires `slug`, `title` and `durationMinutes`; omitting the list creat
 See [multiple meeting lengths](https://hourmere.com/docs/multiple-durations) for examples,
 update compatibility, invitee selection, rescheduling and shared-rule limits.
 
+## Configure paid bookings
+
+`create_event_type` and `update_event_type` accept `payment`, with a lower-case currency and
+one price in integer minor units for each offered duration. Omit the field to keep prices
+on update, or send `null` to make future bookings free. `get_event_type` shows the saved
+price and availability. The same full-key and ownership checks apply as for other event
+type edits. `find_available_slots` can list paid event slots. Invitees pay through hosted
+Checkout on the public booking page. See [Paid bookings](https://hourmere.com/docs/payments).
+
 ## Store organization branding
 
 `get_branding` reads the current organization's saved logo reference, primary color and

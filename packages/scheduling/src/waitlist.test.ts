@@ -580,8 +580,8 @@ describe.skipIf(!serverUrl)('internal waitlist admission and lifecycle', () => {
   it('detects removal of SMTP from the public page projection', async () => {
     const copy = await sourceCopy(
       './availability.ts',
-      '...(smtpConfigured &&\n      et.waitlistEnabled &&',
-      '...(et.waitlistEnabled &&',
+      '...(smtpConfigured &&\n      !et.payment &&\n      et.waitlistEnabled &&',
+      '...(!et.payment &&\n      et.waitlistEnabled &&',
     )
     await expectKilled(copy, assertSmtpPage)
   })

@@ -8,6 +8,7 @@ import {
   AvailabilityInputError,
   type AvailabilityReason,
   type DateOverride,
+  type EventPayment,
   type ExistingBooking,
   type ExplainAvailabilityInput,
   type ExplainedSlot,
@@ -48,6 +49,7 @@ import {
 } from './location-options.ts'
 import { microsoftTeamsLocation, requireMicrosoftTeamsHost } from './microsoft-teams.ts'
 import { type OneTimeBookingLinkPrefill, resolveOneTimeBookingLink } from './one-time-links.ts'
+import { PAYMENT_HOLD_MINUTES } from './payment-provider.ts'
 import { parseQuestions, type Question } from './questions.ts'
 import { eligibleRoundRobinHosts } from './round-robin.ts'
 import type { SuccessRedirect } from './success-redirect.ts'
@@ -128,6 +130,7 @@ export interface PublicEventTypeRecord {
   description: string | null
   durationMinutes: number
   allowedDurationsMinutes: number[]
+  payment?: EventPayment | null
   /** Distance between candidate starts (the duration unless set). */
   slotStepMinutes: number
   configuredSlotStepMinutes: number | null
@@ -193,6 +196,7 @@ async function findPersonalEventType(
       'et.description',
       'et.duration_minutes',
       'et.allowed_durations_minutes',
+      'et.payment',
       'et.slot_step_minutes',
       'et.minimum_notice_minutes',
       'et.booking_window_days',
@@ -252,6 +256,7 @@ async function findPersonalEventType(
     description: row.description,
     durationMinutes: row.duration_minutes,
     allowedDurationsMinutes: row.allowed_durations_minutes,
+    payment: row.payment as EventPayment | null,
     slotStepMinutes: row.slot_step_minutes ?? row.duration_minutes,
     configuredSlotStepMinutes: row.slot_step_minutes,
     minimumNoticeMinutes: row.minimum_notice_minutes,
@@ -380,6 +385,7 @@ async function findTeamEventType(
     description: row.description,
     durationMinutes: row.duration_minutes,
     allowedDurationsMinutes: row.allowed_durations_minutes,
+    payment: row.payment as EventPayment | null,
     slotStepMinutes: row.slot_step_minutes ?? row.duration_minutes,
     configuredSlotStepMinutes: row.slot_step_minutes,
     minimumNoticeMinutes: row.minimum_notice_minutes,
@@ -471,7 +477,7 @@ export async function getOneTimeBookingPage(
   const eventType = await findOneTimeEventType(ctx.db, link.eventTypeId, {
     scimResourcesEnabled: ctx.scimResourcesEnabled,
   })
-  if (!eventType) throw new DomainError('not_found', 'one_time_link_not_found')
+  if (!eventType || eventType.payment) throw new DomainError('not_found', 'one_time_link_not_found')
   const page = publicEventType(
     { ...eventType, waitlistEnabled: false },
     false,
@@ -509,6 +515,8 @@ export function eventTypeNotFound(): DomainError {
 
 /** What a public booking page shows. Location details are only revealed once booked. */
 export interface PublicEventType {
+  payment?: EventPayment
+  paymentAvailable?: boolean
   branding?: PublicBranding
   handle: string
   slug: string
@@ -540,7 +548,12 @@ export async function getPublicEventType(
     scimResourcesEnabled: ctx.scimResourcesEnabled,
   })
   if (!event) throw eventTypeNotFound()
-  const page = publicEventType(event, ctx.smtpConfigured, ctx.smsRemindersAvailable)
+  const page = publicEventType(
+    event,
+    ctx.smtpConfigured,
+    ctx.smsRemindersAvailable,
+    ctx.paidCheckoutAvailable,
+  )
   const branding = await getPublicBranding(ctx.db, event.organizationId)
   return { ...page, ...(branding && { branding }) }
 }
@@ -562,6 +575,7 @@ function publicEventType(
   et: PublicEventTypeRecord | undefined,
   smtpConfigured = false,
   smsRemindersAvailable = false,
+  paidCheckoutAvailable = false,
 ): PublicEventType {
   if (!et) throw eventTypeNotFound()
   return {
@@ -570,6 +584,7 @@ function publicEventType(
     title: et.title,
     description: et.description,
     durationMinutes: et.durationMinutes,
+    ...(et.payment && { payment: et.payment, paymentAvailable: paidCheckoutAvailable }),
     ...(et.allowedDurationsMinutes.length > 1 && {
       allowedDurationsMinutes: [...et.allowedDurationsMinutes].sort((a, b) => a - b),
     }),
@@ -579,6 +594,7 @@ function publicEventType(
     allowGuests: et.allowGuests,
     smsRemindersEnabled: smsRemindersAvailable && et.smsRemindersEnabled,
     ...(smtpConfigured &&
+      !et.payment &&
       et.waitlistEnabled &&
       et.schedulingType === 'individual' &&
       et.hostUserIds.length === 1 &&
@@ -932,7 +948,7 @@ export async function listOneTimeBookingSlots(
   const et = await findOneTimeEventType(ctx.db, link.eventTypeId, {
     scimResourcesEnabled: ctx.scimResourcesEnabled,
   })
-  if (!et) throw new DomainError('not_found', 'one_time_link_not_found')
+  if (!et || et.payment) throw new DomainError('not_found', 'one_time_link_not_found')
   checkSlotRange(input.start, input.end)
   return eventSlots(ctx, input, et)
 }
@@ -1013,17 +1029,21 @@ export async function eventSlots(
 ): Promise<SlotView[]> {
   const durationMinutes = selectDurationMinutes(et, input.durationMinutes)
   const now = ctx.now()
+  const start = et.payment
+    ? later(input.start, now.add({ minutes: PAYMENT_HOLD_MINUTES }))
+    : input.start
+  if (et.payment && !ctx.paidCheckoutAvailable) return []
   if (et.bookingMode === 'group') return groupEventSlots(ctx, input, et, durationMinutes, now)
   const eligibleHostUserIds = await requireLocationAvailability(ctx, et, input.locationOptionId)
   // Without an explicit step, each selected duration supplies its own start grid.
   const rules = { ...et, slotStepMinutes: et.configuredSlotStepMinutes ?? durationMinutes }
-  if (!hasBookablePart(rules, input.start, input.end, now, et.hostUserIds.length)) return []
+  if (!hasBookablePart(rules, start, input.end, now, et.hostUserIds.length)) return []
   if (et.schedulingType === 'round_robin')
     return unionRoundRobinSlots(
       ctx.db,
       et.id,
       eligibleHostUserIds,
-      input.start,
+      start,
       input.end,
       now,
       durationMinutes,
@@ -1032,7 +1052,7 @@ export async function eventSlots(
     ctx.db,
     et.id,
     et.hostUserIds,
-    input.start,
+    start,
     input.end,
     now,
     undefined,

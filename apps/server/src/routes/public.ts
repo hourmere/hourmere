@@ -1,12 +1,15 @@
 import { createRoute, z } from '@hono/zod-openapi'
+import { PAYMENT_CURRENCIES } from '@hourmere/core/payment'
 import type { Db } from '@hourmere/db'
 import {
   type BookingNotifier,
   type BookingOrigin,
+  cancelPublicCheckout,
   createPublicBooking,
   createPublicTeamBooking,
   createRoutedBooking,
   getPublicBrandLogo,
+  getPublicCheckoutStatus,
   getPublicEventType,
   getPublicHost,
   getPublicTeam,
@@ -16,11 +19,14 @@ import {
   listPublicTeamSlots,
   MAX_GUESTS,
   MAX_SLOT_RANGE_DAYS,
+  type PaymentProvider,
   type PublicContext,
   type RoutingContinuationContext,
   resendWaitlistVerification,
+  startPublicCheckout,
   WaitlistRateLimitError,
 } from '@hourmere/scheduling'
+import { createMiddleware } from 'hono/factory'
 import { routeBodyLimit } from '../body-limit.ts'
 import { localeDescription } from '../i18n/locale-description.ts'
 import { ErrorBody, json, Question, type RouteModule } from '../openapi.ts'
@@ -66,6 +72,25 @@ export const PublicEventType = z
     title: z.string(),
     description: z.string().nullable(),
     durationMinutes: z.number().int(),
+    payment: z
+      .object({
+        currency: z.enum(PAYMENT_CURRENCIES),
+        prices: z.array(
+          z.object({
+            durationMinutes: SelectedDurationMinutes,
+            amountMinor: z.number().int().positive().max(99_999_999),
+          }),
+        ),
+      })
+      .optional()
+      .openapi({
+        description:
+          'Price in minor units for each offered meeting length, when payment is required.',
+      }),
+    paymentAvailable: z.boolean().optional().openapi({
+      description:
+        'Whether a paid event can currently start Checkout. Only present for priced events.',
+    }),
     allowedDurationsMinutes: z.array(SelectedDurationMinutes).min(1).max(12).optional().openapi({
       description:
         'Allowed meeting lengths kept in ascending order. Present when invitees have a choice; omitted means only durationMinutes is offered.',
@@ -216,6 +241,56 @@ export const CreateBooking = z
   })
   .openapi('CreateBooking')
 
+const StartPublicCheckoutBody = z
+  .strictObject({
+    ...CreateBooking.omit({ guests: true, waitlistToken: true, source: true }).shape,
+    expectedAmountMinor: z.number().int().positive().max(99_999_999).openapi({
+      description:
+        'Displayed price in minor units. A stale quote is rejected; the saved price controls the charge.',
+    }),
+    expectedCurrency: z.enum(PAYMENT_CURRENCIES),
+  })
+  .openapi('StartPublicCheckout')
+
+const PublicCheckoutStarted = z
+  .object({
+    statusToken: z.string().openapi({
+      description: 'Private capability for local status and cancellation. Keep out of URLs.',
+    }),
+    expiresAt: Instant,
+    checkoutUrl: z
+      .url({ protocol: /^https$/ })
+      .optional()
+      .openapi({
+        description:
+          'Hosted Stripe Checkout. Omitted when the hold cannot start or resume an open Session.',
+      }),
+  })
+  .openapi('PublicCheckoutStarted')
+
+const PublicCheckoutStatus = z
+  .object({
+    status: z.string().openapi({
+      description: 'Known values: pending_payment, expired, cancelled, paid.',
+    }),
+    refundStatus: z.string().optional().openapi({
+      description:
+        'Known values: requested, pending, succeeded, failed. Omitted before a refund exists.',
+    }),
+    latePayment: z.literal(true).optional(),
+    manageToken: BookingWithToken.shape.manageToken.unwrap().optional().openapi({
+      description: 'Only issued for a payment that confirmed a booking.',
+    }),
+    successRedirect: PublicBookingResult.shape.successRedirect,
+  })
+  .openapi('PublicCheckoutStatus')
+
+const privateCheckout = createMiddleware(async (c, next) => {
+  c.header('Cache-Control', 'no-store')
+  c.header('Referrer-Policy', 'no-referrer')
+  await next()
+})
+
 export const RouteBookingToken = z.string().openapi({
   description:
     'Private capability from route submission. Use it instead of a direct booking address or one-time token.',
@@ -324,6 +399,9 @@ export interface PublicRoutesDeps {
   automaticZoom?: boolean | undefined
   microsoftCalendarEnabled?: boolean | undefined
   now?: () => Temporal.Instant
+  paidBookingsEnabled?: boolean | undefined
+  paymentProvider?: PaymentProvider | undefined
+  paymentStatusSecret?: string | undefined
   routingFormsEnabled?: boolean
   /** BETTER_AUTH_SECRET. Fixtures may omit it while routing forms are off. */
   routingSecret?: string | undefined
@@ -354,6 +432,9 @@ export function publicRoutes({
   routingFormsEnabled = false,
   routingSecret,
   receiptNow,
+  paidBookingsEnabled,
+  paymentProvider,
+  paymentStatusSecret,
   rateLimits = {},
 }: PublicRoutesDeps): RouteModule {
   const publicDeps: PublicContext = {
@@ -368,6 +449,7 @@ export function publicRoutes({
     successRedirectPolicy,
     waitlistSecret,
     smtpConfigured,
+    paidCheckoutAvailable: Boolean(paidBookingsEnabled && paymentProvider && paymentStatusSecret),
   }
   const limit = (group: keyof typeof PUBLIC_RATE_LIMITS) =>
     rateLimit(createRateLimiter(rateLimits[group] ?? PUBLIC_RATE_LIMITS[group]))
@@ -380,6 +462,92 @@ export function publicRoutes({
     const ctx: PublicContext = shared.scimResourcesEnabled
       ? { ...publicDeps, scimResourcesEnabled: true }
       : publicDeps
+    const paymentCtx = { ...ctx, paidBookingsEnabled, paymentProvider, paymentStatusSecret }
+    for (const action of ['status', 'cancel'] as const) {
+      app.openapi(
+        createRoute({
+          method: 'post',
+          path: `/api/v1/public/checkout/${action}`,
+          operationId: action === 'status' ? 'getPublicCheckoutStatus' : 'cancelPublicCheckout',
+          tags: ['Public'],
+          security: routedSecurity,
+          summary:
+            action === 'status'
+              ? 'Check a private paid booking attempt'
+              : 'Release an unpaid reservation',
+          description:
+            'Use the private status capability from checkout creation. Checking a Stripe return changes no booking.',
+          middleware: [
+            privateCheckout,
+            action === 'status' ? pageLimit : bookLimit,
+            routeBodyLimit(1024),
+          ],
+          request: {
+            body: { content: json(z.strictObject({ token: z.string().max(128) })), required: true },
+          },
+          responses: {
+            200: { description: 'Current local outcome', content: json(PublicCheckoutStatus) },
+            400: error('Invalid request'),
+            404: error('payment_checkout_not_found'),
+            429: rateLimited,
+          },
+        }),
+        async (c) => {
+          const { token } = c.req.valid('json')
+          const method = action === 'status' ? getPublicCheckoutStatus : cancelPublicCheckout
+          return c.json(await method(paymentCtx, token), 200)
+        },
+      )
+    }
+    app.openapi(
+      createRoute({
+        method: 'post',
+        path: '/api/v1/public/{handle}/{slug}/checkout',
+        operationId: 'startPublicCheckout',
+        tags: ['Public'],
+        security: routedSecurity,
+        summary: 'Reserve a paid time and start Stripe Checkout',
+        description:
+          'Paid personal events only. Matching replays keep the original hold and Session. Stripe-hosted Checkout collects payment.',
+        middleware: [privateCheckout, bookLimit, routeBodyLimit(BOOKING_BODY_LIMIT)],
+        request: {
+          params: PageParams,
+          headers: z.object({
+            'idempotency-key': z
+              .uuid()
+              .openapi({ description: 'Random UUID kept for identical retries.' }),
+          }),
+          body: { content: json(StartPublicCheckoutBody), required: true },
+        },
+        responses: {
+          200: {
+            description: 'Private paid checkout attempt',
+            content: json(PublicCheckoutStarted),
+          },
+          400: error('Invalid booking request or unsupported payment flow'),
+          404: eventTypeNotFound,
+          409: error(
+            'Paid checkout is unavailable, the quote changed, or the slot cannot be reserved',
+          ),
+          413: error('payload_too_large (maximum 2,097,152 bytes)'),
+          429: rateLimited,
+        },
+      }),
+      async (c) => {
+        const { expectedAmountMinor, expectedCurrency, ...body } = c.req.valid('json')
+        const result = await startPublicCheckout(
+          paymentCtx,
+          {
+            ...c.req.valid('param'),
+            ...body,
+            start: Temporal.Instant.from(body.start),
+            idempotencyKey: c.req.valid('header')['idempotency-key'],
+          },
+          { amountMinor: expectedAmountMinor, currency: expectedCurrency },
+        )
+        return c.json(result, 200)
+      },
+    )
     publicRoutingFormRoutes({
       db,
       pageLimit,
@@ -679,7 +847,7 @@ export function publicRoutes({
             ),
             404: eventTypeNotFound,
             409: error(
-              'The chosen location is unavailable (`location_unavailable`), the time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), the Idempotency-Key was used for a different request (`idempotency_key_reused`), or the round-robin host pool or activation changed while the request waited (`booking_changed`; fetch current availability before retrying)',
+              'The event requires checkout (`payment_required`), the chosen location is unavailable (`location_unavailable`), the time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), the Idempotency-Key was used for a different request (`idempotency_key_reused`), or the round-robin host pool or activation changed while the request waited (`booking_changed`; fetch current availability before retrying)',
             ),
             429: rateLimited,
           },

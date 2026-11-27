@@ -96,6 +96,23 @@ including stale receipts; no new manage link or ICS can be issued. The local imp
 is documented in the [repository operator guide](https://github.com/hourmere/hourmere/blob/main/docs/calcom-import.md);
 it adds no network import endpoint.
 
+### Paid booking additions
+
+Authenticated event-type settings add optional write field `payment`, containing one
+lower-case `currency` and a `prices` array of `{durationMinutes, amountMinor}`, or `null`
+to clear prices. Omission keeps saved prices on update. The response adds `payment` and
+`paymentAvailability`. Public instance discovery exposes `eventTypePaymentAvailability`.
+Clients must tolerate absent fields from older servers and display unknown availability
+values neutrally. MCP and CLI accept the same payment settings. Existing ownership, team
+and key-scope rules apply. Valid pricing requires an eligible personal event and verified
+Stripe test-mode configuration with the operator switch on.
+
+Public Checkout starts with a random idempotency key and the invitee's displayed price.
+Status and release use the private capability from checkout creation. Payment and refund
+states can gain new values. Booking details read by a host or by invitee manage token add
+optional `payment`, with the original amount, currency and refund state. Only a host read
+includes the Stripe Dashboard link. [Paid bookings](/docs/payments).
+
 ### Booking source compatibility
 
 `Booking.source` adds `"import"` to the response values `"web"`, `"embed"`, `"api"`

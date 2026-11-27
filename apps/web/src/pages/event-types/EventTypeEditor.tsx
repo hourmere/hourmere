@@ -53,6 +53,7 @@ import {
   LOCATION_KINDS,
   type LocationKind,
   orderedLocations,
+  paidDraftSupported,
   serverErrors,
   slugify,
   suggestedBookingSlug,
@@ -65,6 +66,8 @@ import { NotificationsEditor } from './NotificationsEditor.tsx'
 import { pruneNotificationErrors } from './notifications-form.ts'
 import { OneTimeLinks } from './OneTimeLinks.tsx'
 import { OrderedLocationsEditor } from './OrderedLocationsEditor.tsx'
+import { PaymentSettings } from './PaymentSettings.tsx'
+import { paymentInput, unsupportedPayment, validatePayment } from './payment-form.ts'
 import { QuestionsEditor } from './QuestionsEditor.tsx'
 import { ReadOnlyHosts } from './ReadOnlyHosts.tsx'
 import { SavedEventShare } from './SavedEventShare.tsx'
@@ -83,6 +86,24 @@ interface Loaded {
   microsoftTeamsCalendarIssue: MessageKey | undefined
   smsRemindersAvailable: boolean | undefined
   followUpHostNotesEnabled: boolean
+  paymentAvailability: Schemas['Instance']['eventTypePaymentAvailability']
+}
+
+function paymentAvailabilityReason(availability: Loaded['paymentAvailability']): MessageKey | null {
+  switch (availability) {
+    case 'available':
+      return null
+    case 'stripe_not_configured':
+      return 'Ask your instance operator to configure Stripe for paid bookings.'
+    case 'stripe_unverified':
+      return 'This instance could not verify its Stripe configuration. Contact your instance operator.'
+    case 'disabled':
+      return 'Paid bookings are turned off on this instance.'
+    case 'live_mode_unavailable':
+      return 'Paid bookings are currently available in Stripe test mode only.'
+    default:
+      return 'Paid booking settings are unavailable on this instance.'
+  }
 }
 
 /** Creates an event type (/app/event-types/new) or edits one (/app/event-types/:id). */
@@ -146,6 +167,7 @@ function EventTypeEditor({ id }: { id: string | undefined }) {
         microsoftTeamsCalendarIssue: teamsCalendarIssue(connections),
         smsRemindersAvailable: instance.smsRemindersAvailable,
         followUpHostNotesEnabled: instance.followUpHostNotesEnabled === true,
+        paymentAvailability: instance.eventTypePaymentAvailability,
       }
     },
     [id, organization.personal],
@@ -191,6 +213,7 @@ function EventTypeForm({
   microsoftTeamsCalendarIssue,
   smsRemindersAvailable,
   followUpHostNotesEnabled,
+  paymentAvailability,
 }: Loaded) {
   const { t, text, ui, uiText, locale: displayLocale } = useI18n()
   const noScheduleHint = t('You have no schedule yet, so no times are offered. {0}.').split('{0}')
@@ -224,6 +247,14 @@ function EventTypeForm({
         },
   )
   const [draft, setDraft] = useState(baseline)
+  const savedPaymentUnsupported =
+    saved?.paymentAvailability === 'unsupported_event' &&
+    paidDraftSupported(baseline, me.organization.personal)
+  const paymentSupported =
+    !savedPaymentUnsupported && paidDraftSupported(draft, me.organization.personal)
+  const paymentReason = paymentSupported
+    ? paymentAvailabilityReason(paymentAvailability)
+    : unsupportedPayment
   const [teamsHost, setTeamsHost] = useState<TeamsHostReadiness>()
   const teamsHostStatus =
     teamsHost && teamsHost.userId === draft.hostUserIds[0] ? teamsHost.status : 'checking'
@@ -356,6 +387,12 @@ function EventTypeForm({
       draft.hostUserIds.length !== 1
     )
       problems.hosts = 'Choose exactly one required host.'
+    if (draft.payment.enabled) {
+      if (!paymentSupported) problems.payment = unsupportedPayment
+      else if (!paymentReason)
+        Object.assign(problems, validatePayment(draft.payment, draft.allowedDurationsMinutes))
+      else if (toPatchInput(draft, baseline).payment !== undefined) problems.payment = paymentReason
+    }
     setErrors(problems)
     if (Object.keys(problems).length > 0) return
     // The fields are locked until the answer comes, so it cannot overwrite later edits.
@@ -973,6 +1010,25 @@ function EventTypeForm({
               onDefaultChange={(value) => set('durationMinutes', value)}
             />
           </SettingsGroup>
+          <SettingsGroup
+            label="Payments"
+            summary={t(
+              draft.payment.enabled
+                ? 'Payment required'
+                : paymentReason
+                  ? 'Unavailable'
+                  : 'Free booking',
+            )}
+            initiallyOpen={draft.payment.enabled}
+          >
+            <PaymentSettings
+              payment={draft.payment}
+              durations={draft.allowedDurationsMinutes}
+              reason={paymentReason}
+              errors={errors}
+              onChange={(payment) => set('payment', payment)}
+            />
+          </SettingsGroup>
           {showHosts && (
             <SettingsGroup label="Hosts" summary={summaries.hosts} initiallyOpen={editing}>
               {!me.organization.personal && canAssignHosts && (
@@ -1483,6 +1539,12 @@ function EventTypeForm({
         me={me}
         profile={profile}
         smsRemindersAvailable={smsRemindersAvailable}
+        payment={
+          !paymentReason &&
+          Object.keys(validatePayment(draft.payment, draft.allowedDurationsMinutes)).length === 0
+            ? paymentInput(draft.payment, draft.allowedDurationsMinutes)
+            : null
+        }
         canReadBranding={
           me.principal.kind === 'session' &&
           (me.organization.personal ||
