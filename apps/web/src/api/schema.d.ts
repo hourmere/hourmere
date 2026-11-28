@@ -618,7 +618,7 @@ export interface paths {
         put?: never;
         /**
          * Accept or decline your exact booking handoff offer version
-         * @description Requires the recipient capability and the reviewed version. The decision does not change the booking. Disabled in production.
+         * @description Requires the recipient capability and reviewed version in the JSON body. The decision does not change the booking. An optional bearer API key requires bookings or full scope and grants no recipient access by itself. Disabled in production.
          */
         post: operations["answerBookingHandoffOffer"];
         delete?: never;
@@ -638,7 +638,7 @@ export interface paths {
         put?: never;
         /**
          * Read the terms for your private handoff offer
-         * @description Requires the recipient capability. Reading records no decision. Disabled in production.
+         * @description Requires the recipient capability in the JSON body. Reading records no decision. An optional bearer API key requires read, bookings or full scope and grants no recipient access by itself. Disabled in production.
          */
         post: operations["readBookingHandoffOffer"];
         delete?: never;
@@ -4881,7 +4881,7 @@ export interface paths {
         };
         /**
          * Read a handoff proposal and recipient delivery status
-         * @description Defaults to the latest version. Returns opaque recipient IDs, matching source attendee IDs, decisions and safe delivery states. Disabled in production.
+         * @description Defaults to the latest version. Returns opaque recipient IDs, matching source attendee IDs, decisions and safe delivery states. Available to a current team owner or admin even if the mail queue is unavailable. Disabled in production.
          */
         get: operations["readDepartureHandoffProposal"];
         put?: never;
@@ -4943,7 +4943,7 @@ export interface paths {
         put?: never;
         /**
          * Withdraw a handoff proposal version
-         * @description Revokes the private links for the exact version and leaves the source booking confirmed. Disabled in production.
+         * @description Revokes the private links for the exact version and leaves the source booking confirmed. Available even if the mail queue is unavailable. Disabled in production.
          */
         post: operations["withdrawDepartureHandoffProposal"];
         delete?: never;
@@ -20980,6 +20980,15 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Request body exceeds 1024 bytes */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description The API key's rate limit is used up */
             429: {
                 headers: {
@@ -21256,6 +21265,15 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Request body exceeds 1024 bytes */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description The API key's rate limit is used up */
             429: {
                 headers: {
@@ -21344,6 +21362,15 @@ export interface operations {
             };
             /** @description organization_context_changed: reload the page before trying this team write again; the current booking, offer, consent or slot changed */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Request body exceeds 1024 bytes */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };

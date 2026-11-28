@@ -123,6 +123,8 @@ export interface Tool<I extends z.ZodType = z.ZodType, O extends z.ZodType = z.Z
   requireAvailable?(args?: unknown): void
   /** Controls discovery while keeping a tool available to authorized direct calls. */
   discoverable?(): boolean
+  /** Charges the call before argument validation, after feature and scope checks. */
+  checkRateLimit?(call: ToolCall): void
   /** Calls the service layer. Throw DomainError for failures the caller can act on. */
   run(args: z.output<I>, call: ToolCall): Promise<z.input<O>>
 }
@@ -151,12 +153,14 @@ function errorResult(body: ToolErrorBody): CallToolResult {
 /** Same text as the REST API's guard for JSON bodies. */
 const UNSAFE_TEXT = 'Text in the request must not contain NUL characters or malformed Unicode'
 
-/** Thrown by ToolCall.rateLimit; never leaves runTool. */
+/** Refuses a tool call with its retry delay; never leaves runTool. */
 export class RateLimited extends Error {
   readonly retryAfterSeconds: number
-  constructor(retryAfterSeconds: number) {
+  readonly scope: 'user' | 'ip'
+  constructor(retryAfterSeconds: number, scope: 'user' | 'ip' = 'user') {
     super('rate limited')
     this.retryAfterSeconds = retryAfterSeconds
+    this.scope = scope
   }
 }
 
@@ -280,6 +284,7 @@ export async function runTool(
     // A feature that is not available answers its DomainError code here, after the scope
     // check and before the argument checks.
     checkAvailable(tool, args)
+    tool.checkRateLimit?.(call)
     const teamRead = await call.checkTeamRead?.(tool.name)
     if (hasUnsafeJsonText(args)) {
       const field = privateInput ? undefined : successRedirectUnsafeField(args, hasUnsafeJsonText)
@@ -322,9 +327,10 @@ export async function runTool(
       return errorResult({ error: err.error, message: err.message })
     if (err instanceof InvalidApiKeyError) return errorResult({ error: 'unauthorized' })
     if (err instanceof RateLimited) {
+      const scope = err.scope === 'user' ? ' for this user' : ''
       return errorResult({
         error: 'rate_limited',
-        message: `Too many ${tool.name} calls for this user; try again in ${err.retryAfterSeconds} s`,
+        message: `Too many ${tool.name} calls${scope}; try again in ${err.retryAfterSeconds} s`,
         retryAfterSeconds: err.retryAfterSeconds,
       })
     }

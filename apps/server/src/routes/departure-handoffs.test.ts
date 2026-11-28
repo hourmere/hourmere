@@ -78,11 +78,12 @@ describe.skipIf(!serverUrl)('departure handoff browser routes', () => {
     const notify = vi.fn<BookingNotifier>(
       options.mailQueue ? bookingNotifier(options.mailQueue) : async () => {},
     )
+    const resolveCaller = vi.fn(createCallerResolver({ auth, db }))
     const app = createApp({
       publicUrl: origin,
       authHandler: auth.handler,
       checkDb: async () => {},
-      resolveCaller: createCallerResolver({ auth, db }),
+      resolveCaller,
       routes: productRoutes({
         db,
         socialProviders: {},
@@ -103,7 +104,7 @@ describe.skipIf(!serverUrl)('departure handoff browser routes', () => {
         }),
       }),
     })
-    return { app, readLatest, notify }
+    return { app, readLatest, notify, resolveCaller }
   }
 
   async function cookie(principal: Extract<Principal, { kind: 'session' }>) {
@@ -481,6 +482,155 @@ describe.skipIf(!serverUrl)('departure handoff browser routes', () => {
     expect(await withdrawn.json()).toMatchObject({ version: 2, state: 'withdrawn' })
     expect(enqueue).toHaveBeenCalledTimes(5)
     expect(notify).not.toHaveBeenCalled()
+    await expectUnchanged(f)
+  })
+
+  it('requires a browser management session for proposal status, resend and withdrawal', async () => {
+    const f = await fixture('pending')
+    const other = await fixture('pending')
+    const enqueue = vi.fn<EnqueueDepartureHandoffEmail>(async () => randomUUID())
+    const { app, resolveCaller } = application({ enqueue })
+    const recipient = await db
+      .selectFrom('departure_handoff_recipients')
+      .select('id')
+      .where('source_booking_id', '=', f.booking.id)
+      .where('decision', 'is', null)
+      .executeTakeFirstOrThrow()
+    const requestKey = randomUUID()
+    const actions = [
+      (path: string, headers: Record<string, string>) => app.request(path, { headers }),
+      (path: string, headers: Record<string, string>) =>
+        app.request(
+          `${path}/resend`,
+          post(
+            { ...headers, 'idempotency-key': requestKey },
+            { version: 1, recipientId: recipient.id },
+          ),
+        ),
+      (path: string, headers: Record<string, string>) =>
+        app.request(`${path}/withdraw`, post(headers)),
+    ]
+    const credentialHeaders: Record<string, string>[] = [
+      { 'x-expected-organization-id': f.team.id },
+      { ...f.headers, authorization: 'Bearer synthetic-invalid-agent' },
+      { ...f.headers, authorization: '' },
+    ]
+    const provisioningHeaders = { ...f.headers, authorization: 'Bearer scim_synthetic' }
+    credentialHeaders.push(provisioningHeaders)
+    const member = await handoffTestSession(db, f.candidate, f.team.as(f.candidate).organization)
+    credentialHeaders.push({ ...f.headers, cookie: await cookie(member) })
+    for (const scope of ['full', 'read', 'bookings'] as const) {
+      const { key } = await auth.api.createApiKey({
+        body: { userId: f.owner.id, metadata: { scope, organizationId: f.team.id } },
+      })
+      const authorization = `Bearer ${key}`
+      const result = await resolveCaller(new Headers({ authorization }))
+      if (!result.ok || result.principal.kind !== 'api_key') throw new Error('Invalid fixture key')
+      expect(result.principal.organization.id).toBe(f.team.id)
+      credentialHeaders.push(
+        { 'x-expected-organization-id': f.team.id, authorization },
+        { ...f.headers, authorization },
+      )
+    }
+    resolveCaller.mockClear()
+
+    const path = `${offers(f.base)}/${f.input.offerId}`
+    const otherPath = `${offers(other.base)}/${other.input.offerId}`
+    const missingPath = `${offers(`/api/v1/team/bookings/${randomUUID()}`)}/${other.input.offerId}`
+    for (const request of actions) {
+      for (const headers of credentialHeaders) {
+        await expectError(await request(path, headers), 403, 'team_management_access_denied')
+      }
+      await expectError(
+        await request(path, { ...other.headers, 'x-expected-organization-id': f.team.id }),
+        403,
+        'team_management_access_denied',
+      )
+      const missing = await request(missingPath, f.headers)
+      const foreign = await request(otherPath, f.headers)
+      expect(missing.status).toBe(404)
+      expect(foreign.status).toBe(missing.status)
+      expect(await foreign.json()).toEqual(await missing.json())
+    }
+    const live = await app.request(path, { headers: f.headers })
+    expect(live.status).toBe(200)
+    expect(await live.json()).toMatchObject({
+      state: 'live',
+      recipients: expect.arrayContaining([expect.objectContaining({ resendAvailable: true })]),
+    })
+    await expectError(
+      await app.request('/api/v1/me', { headers: provisioningHeaders }),
+      401,
+      'unauthorized',
+    )
+    expect(resolveCaller.mock.calls.some(([headers]) => headers.has('authorization'))).toBe(false)
+    expect(enqueue).not.toHaveBeenCalled()
+    await expectUnchanged(f)
+    await expectUnchanged(other)
+  })
+
+  it('projects safe proposal status and revokes links even when the mail queue is unavailable', async () => {
+    const f = await fixture('pending')
+    const { app } = application()
+    await db
+      .updateTable('auth.member')
+      .set({ role: 'admin' })
+      .where('organizationId', '=', f.team.id)
+      .where('userId', '=', f.candidate.id)
+      .execute()
+    const admin = await handoffTestSession(db, f.candidate, f.team.as(f.candidate).organization)
+    const headers = { ...f.headers, cookie: await cookie(admin) }
+    const pending = await db
+      .updateTable('departure_handoff_recipients')
+      .set({ token_digest: 'a'.repeat(64) })
+      .where('source_booking_id', '=', f.booking.id)
+      .where('decision', 'is', null)
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    const path = `${offers(f.base)}/${f.input.offerId}`
+    const read = await app.request(path, { headers })
+    expect(read.status).toBe(200)
+    expect(read.headers.get('cache-control')).toBe('no-store')
+    const recipients = await db
+      .selectFrom('departure_handoff_recipients as recipient')
+      .innerJoin('booking_attendees as attendee', (join) =>
+        join
+          .onRef('attendee.booking_id', '=', 'recipient.source_booking_id')
+          .onRef('attendee.email', '=', 'recipient.recipient_key'),
+      )
+      .select(['recipient.id', 'attendee.id as attendeeId', 'recipient.decision'])
+      .where('recipient.source_booking_id', '=', f.booking.id)
+      .orderBy('recipient.id')
+      .execute()
+    const projection = {
+      id: f.input.offerId,
+      version: 1,
+      expiresAt: expect.any(String),
+      state: 'live',
+      recipients: recipients.map(({ id, attendeeId, decision }) => ({
+        id,
+        attendeeIds: [attendeeId],
+        decision: decision ?? 'pending',
+        delivery: 'not_requested',
+        resendAvailable: false,
+      })),
+    }
+    expect(recipients).toHaveLength(2)
+    expect(await read.json()).toEqual(projection)
+    const withdrawn = await app.request(`${path}/withdraw`, post(headers))
+    expect(withdrawn.status).toBe(200)
+    expect(withdrawn.headers.get('cache-control')).toBe('no-store')
+    expect(await withdrawn.json()).toEqual({
+      ...projection,
+      state: 'withdrawn',
+    })
+    expect(
+      await db
+        .selectFrom('departure_handoff_recipients')
+        .select('token_digest')
+        .where('id', '=', pending.id)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ token_digest: null })
     await expectUnchanged(f)
   })
 

@@ -756,6 +756,19 @@ diagnostics are redacted. Calls never retry automatically; read and reconcile af
 只提交投票者明确同意的完整选择和当前选票版本，遇到 `poll_changed` 应重新读取核对，
 不要自动重试。目前无功能开关。
 
+## Private booking handoff offers
+
+On a staged server, `hourmere booking-handoff offer --input -` reads the recipient's terms
+from JSON containing the private `token` in their email link. After the recipient reviews
+the terms and chooses a decision, use `hourmere booking-handoff answer --input -` with
+`token`, the reviewed `version`, and `decision` set to `accept` or `decline`.
+The API key authorizes MCP access only. Offer reads allow `read`, `bookings` or `full`
+scope. Answers allow `bookings` or `full`. Pass the JSON through standard input and
+keep the token out of shell arguments, history and logs. Production keeps both commands disabled.
+
+中文：预发布的交接查看和答复命令需要邮件中该收件人的私密令牌。密钥只用于访问接口。
+请通过 `--input -` 从标准输入传入 JSON。核对版本后由收件人选择接受或拒绝。生产环境保持关闭。
+
 ## Duplicate an event type
 
 Save `{ "id": "EVENT_TYPE_UUID" }` in `duplicate.json`, then run

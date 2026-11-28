@@ -2867,7 +2867,9 @@ receipts keep their existing retention rules.
 `departure_handoff_runs` keys an explicit start by team and caller-supplied run UUID.
 The run keeps the departing host ID, current authorizing actor and session IDs, state,
 next due time and deadline. The active-run index permits one running or paused run per
-team. Admission takes the team update lock before checking its one-minute cooldown.
+team. Admission takes the team share lock, then a transaction advisory lock scoped to
+the team before checking for an existing run and enforcing the one-minute cooldown.
+Ordinary team booking writes can take their team share lock while admission runs.
 `departure_handoff_run_items` caps each run at ten ordered source bookings through its
 ordinal and unique source constraints. The item stores the exact offer version, safe result
 code and any replacement booking ID. Team deletion removes runs and items. Source and

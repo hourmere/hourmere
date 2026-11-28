@@ -35,6 +35,9 @@ const REQUIRED_READS: Readonly<Record<string, string>> = {
   listCustomTeamRoles: 'GET /api/v1/teams/{teamId}/roles',
   getCustomTeamRole: 'GET /api/v1/teams/{teamId}/roles/{roleId}',
   getOwnershipTransfer: 'GET /api/v1/teams/{teamId}/ownership-transfer',
+  previewDepartureHandoff: 'GET /api/v1/team/bookings/{id}/handoff-preview',
+  readDepartureHandoffProposal: 'GET /api/v1/team/bookings/{id}/handoff-offers/{offerId}',
+  readDepartureHandoffRun: 'GET /api/v1/team/bookings/handoff-runs/{runId}',
 }
 
 const KNOWN_GAPS_PATH = 'scripts/interface-parity-known-gaps.json'

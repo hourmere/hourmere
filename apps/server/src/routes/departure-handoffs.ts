@@ -144,8 +144,12 @@ export function departureHandoffRoutes(
       404: 'Handoffs are disabled or the source or offer is unavailable in the current team.',
       409: `${ORGANIZATION_CONTEXT_CHANGED}; the current booking, offer, consent or slot changed`,
     })
-    const proposalErrors = {
+    const writeErrors = {
       ...errors,
+      413: { description: 'Request body exceeds 1024 bytes', content: json(ErrorBody) },
+    }
+    const proposalErrors = {
+      ...writeErrors,
       503: {
         description: 'Required calendar availability or the mail outbox is unavailable',
         content: json(ErrorBody),
@@ -224,7 +228,7 @@ export function departureHandoffRoutes(
         operationId: 'readDepartureHandoffProposal',
         summary: 'Read a handoff proposal and recipient delivery status',
         description:
-          'Defaults to the latest version. Returns opaque recipient IDs, matching source attendee IDs, decisions and safe delivery states. Disabled in production.',
+          'Defaults to the latest version. Returns opaque recipient IDs, matching source attendee IDs, decisions and safe delivery states. Available to a current team owner or admin even if the mail queue is unavailable. Disabled in production.',
         tags: ['Team bookings'],
         security: [{ session: [] }],
         middleware: access.middleware,
@@ -241,21 +245,30 @@ export function departureHandoffRoutes(
         },
       }),
       async (c) => {
-        if (!handoffs?.enqueue) throw disabled()
+        if (!handoffs) throw disabled()
         const { principal } = c.var
         const { id, offerId } = c.req.valid('param')
         c.header('Cache-Control', 'no-store')
+        const proposal = await readDepartureHandoffProposal(
+          context(principal),
+          {
+            ...proposalAccess(principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+            bookingId: id,
+            offerId,
+            version: c.req.valid('query').version,
+          },
+          capabilities,
+        )
         return c.json(
-          await readDepartureHandoffProposal(
-            context(principal),
-            {
-              ...proposalAccess(principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
-              bookingId: id,
-              offerId,
-              version: c.req.valid('query').version,
-            },
-            capabilities,
-          ),
+          handoffs.enqueue
+            ? proposal
+            : {
+                ...proposal,
+                recipients: proposal.recipients.map((recipient) => ({
+                  ...recipient,
+                  resendAvailable: false,
+                })),
+              },
           200,
         )
       },
@@ -267,7 +280,7 @@ export function departureHandoffRoutes(
         operationId: 'withdrawDepartureHandoffProposal',
         summary: 'Withdraw a handoff proposal version',
         description:
-          'Revokes the private links for the exact version and leaves the source booking confirmed. Disabled in production.',
+          'Revokes the private links for the exact version and leaves the source booking confirmed. Available even if the mail queue is unavailable. Disabled in production.',
         tags: ['Team bookings'],
         security: [{ session: [] }],
         middleware: writeMiddleware,
@@ -278,11 +291,11 @@ export function departureHandoffRoutes(
         },
         responses: {
           200: { description: 'Proposal status after withdrawal', content: json(Proposal) },
-          ...errors,
+          ...writeErrors,
         },
       }),
       async (c) => {
-        if (!handoffs?.enqueue) throw disabled()
+        if (!handoffs) throw disabled()
         const { principal } = c.var
         const { id, offerId } = c.req.valid('param')
         c.header('Cache-Control', 'no-store')

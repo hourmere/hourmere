@@ -210,8 +210,17 @@ describe.skipIf(!serverUrl)('departure handoff queue', () => {
     const {
       rows: [row],
     } = await sql<{ pid: number }>`SELECT pg_backend_pid() AS pid`.execute(trx)
-    if (!row) throw new Error('Missing worker backend PID')
+    if (!row) throw new Error('Missing transaction backend PID')
     return row.pid
+  }
+
+  async function blocksAnotherTransaction(pid: number) {
+    const { rows } = await sql<{ blocked: boolean }>`
+      SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+        WHERE datname = current_database()
+        AND ${pid}::int = ANY(pg_blocking_pids(pid))) AS blocked
+    `.execute(db)
+    return rows[0]?.blocked === true
   }
 
   /** Observe PostgreSQL's actual lock wait before releasing the first transaction. */
@@ -247,12 +256,7 @@ describe.skipIf(!serverUrl)('departure handoff queue', () => {
       })
       for (;;) {
         signal.throwIfAborted()
-        const { rows } = await sql<{ blocked: boolean }>`
-          SELECT EXISTS (SELECT 1 FROM pg_stat_activity
-            WHERE datname = current_database()
-            AND ${blockerPid}::int = ANY(pg_blocking_pids(pid))) AS blocked
-        `.execute(db)
-        if (rows[0]?.blocked) break
+        if (await blocksAnotherTransaction(blockerPid)) break
         expect(secondSettled).toBe(false)
         await setTimeout(10, undefined, { signal })
       }
@@ -478,6 +482,74 @@ describe.skipIf(!serverUrl)('departure handoff queue', () => {
     await expect(
       startDepartureHandoffRun(f.ctx, { ...f.runInput, runId: randomUUID() }, f.enqueue),
     ).rejects.toMatchObject({ kind: 'conflict', code: 'handoff_run_rate_limited' })
+  })
+
+  it('serializes concurrent starts without blocking an ordinary booking for the same team', async () => {
+    const f = await setup()
+    const enqueuing = Promise.withResolvers<number>()
+    const release = Promise.withResolvers<void>()
+    const starting = startDepartureHandoffRun(f.ctx, f.runInput, async (trx, ...args) => {
+      enqueuing.resolve(await backendPid(trx))
+      await release.promise
+      return f.enqueue(trx, ...args)
+    })
+    const pending: Promise<unknown>[] = [starting]
+    try {
+      const startPid = await Promise.race([
+        enqueuing.promise,
+        starting.then(() => {
+          throw new Error('Run start settled before enqueueing')
+        }),
+      ])
+      let bookingSettled = false
+      const booking = Promise.allSettled([
+        createPublicTeamBooking(
+          { db, now },
+          {
+            handle: f.ctx.principal.organization.slug,
+            slug: 'handoff',
+            start: HANDOFF_START.add({ hours: 1 }),
+            invitee: { name: 'New Booker', email: 'new-booker@example.test', timeZone: 'UTC' },
+            responses: { notes: 'New booking' },
+          },
+        ),
+      ]).then((result) => {
+        bookingSettled = true
+        return result
+      })
+      pending.push(booking)
+      await expect
+        .poll(async () => bookingSettled || (await blocksAnotherTransaction(startPid)))
+        .toBe(true)
+      expect(bookingSettled, 'Run start blocked an ordinary team booking').toBe(true)
+      expect(await booking).toEqual([
+        {
+          status: 'fulfilled',
+          value: expect.objectContaining({
+            booking: expect.objectContaining({ status: 'confirmed' }),
+          }),
+        },
+      ])
+
+      let replaySettled = false
+      const replay = Promise.allSettled([start(f)]).then((result) => {
+        replaySettled = true
+        return result
+      })
+      pending.push(replay)
+      await expect
+        .poll(async () => replaySettled || (await blocksAnotherTransaction(startPid)))
+        .toBe(true)
+      expect(replaySettled, 'A second start passed admission before the first committed').toBe(
+        false,
+      )
+      release.resolve()
+      expect(await replay).toEqual([{ status: 'fulfilled', value: await starting }])
+      expect(f.wakes).toEqual([f.key])
+    } finally {
+      release.resolve()
+      await Promise.allSettled(pending)
+    }
   })
 
   it('rolls back start when its transactional wake cannot be written', async () => {

@@ -369,10 +369,19 @@ describe('MCP transport', () => {
     expect(refused.headers.get('cache-control')).toBe('no-store')
   })
 
-  it('answers malformed JSON with a JSON-RPC parse error', async () => {
-    const res = await rpc('{"jsonrpc":')
-    expect(res.status).toBe(400)
-    expect(await message(res)).toMatchObject({ error: { code: -32700 } })
+  it('answers malformed JSON with a JSON-RPC parse error and keeps request snippets private', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const privateSnippet = 'private_capability_input'
+    try {
+      const res = await rpc(privateSnippet)
+      expect(res.status).toBe(400)
+      const result = await message(res)
+      expect(result).toMatchObject({ error: { code: -32700 } })
+      expect(JSON.stringify(result)).not.toContain(privateSnippet)
+      expect(JSON.stringify(warn.mock.calls)).not.toContain(privateSnippet)
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   it('answers a message that is not JSON-RPC with a JSON-RPC error', async () => {
@@ -484,7 +493,7 @@ describe('MCP transport', () => {
     }
   })
 
-  it('logs what the SDK refuses on one bounded line, whatever the client sent', async () => {
+  it('logs a bounded warning without request details when the SDK refuses a request', async () => {
     const lines: string[] = []
     const spies = (['warn', 'error'] as const).map((m) =>
       vi.spyOn(console, m).mockImplementation((...args) => {
@@ -523,9 +532,7 @@ describe('MCP transport', () => {
       for (const spy of spies) spy.mockRestore()
     }
     expect(lines).toHaveLength(1)
-    expect(lines[0]).toMatch(/WARN POST \/mcp: /)
-    expect(lines[0]).toMatch(/…\(\+\d+ chars\)$/)
-    expect(lines[0]?.length).toBeLessThan(2200)
+    expect(lines[0]).toMatch(/WARN POST \/mcp: MCP protocol request failed$/)
   })
 
   it('answers OAuth discovery and GET /mcp itself, not the web app', async () => {

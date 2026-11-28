@@ -792,9 +792,10 @@ are available without a flag.
 ## Private booking handoff offers
 
 The staged tools `read_booking_handoff_offer` and `answer_booking_handoff_offer`
-require the recipient's private token from the offer email. An API key must have
-`read`, `bookings` or `full` scope to review it. Answering requires `bookings`
-or `full` and the exact reviewed `version`. Submit `decision` as `accept` or
+require the recipient's private `token` from the offer email. API keys authorize the
+connection and tool access only. Reading allows `read`, `bookings` or `full` scope.
+Answering requires `bookings` or `full` scope and the exact reviewed `version`.
+Submit `decision` as `accept` or
 `decline` after the recipient chooses. Declining closes the offer version.
 A decision by itself leaves the original booking confirmed. A successful answer
 consumes the token. Repeating the request returns `handoff_offer_unavailable`.
@@ -803,6 +804,10 @@ Use `booking-handoff offer --input -` and `booking-handoff answer --input -` in
 the CLI. Both take JSON on standard input. Keep the token out of command arguments,
 shell history and logs. These operations remain disabled in production.
 See [the staged participant flow](member-departure-handoff.md#staged-participant-flow).
+
+中文：预发布的交接工具要求邮件中该收件人的私密令牌。密钥只用于连接和工具访问。
+查看允许 `read`、`bookings` 或 `full`，答复允许 `bookings` 或 `full`，并需要刚核对的版本。
+CLI 通过 `--input -` 从标准输入接收 JSON。生产环境仍关闭这两个操作。
 
 ## Duplicate an event type
 

@@ -7,6 +7,7 @@ import { createRateLimiter, type RateLimiter } from './rate-limit.ts'
 const Token = z.string().max(128).openapi({
   description:
     'Private recipient capability from the emailed link fragment. Send only in the JSON body.',
+  writeOnly: true,
 })
 const Version = z.number().int().positive().max(2_147_483_647)
 const Decision = z.enum(['accept', 'decline'])

@@ -319,8 +319,8 @@ export function mcpEndpoint({ tools, oauth, db }: McpEndpointOptions): McpModule
       },
       {
         maxRequestBodySize: MCP_BODY_LIMIT,
-        // Requests the SDK refused (e.g. bad protocol headers) and its own failures.
-        onerror: (err) => logLine('WARN', `POST ${MCP_PATH}: `, err.message),
+        // The SDK can embed the raw body or headers in errors before dispatching a tool.
+        onerror: () => logLine('WARN', `POST ${MCP_PATH}: `, 'MCP protocol request failed'),
       },
     )
 

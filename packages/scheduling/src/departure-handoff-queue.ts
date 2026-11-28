@@ -231,12 +231,15 @@ export function startDepartureHandoffRun(
   return teamWriteTransaction(
     ctx.db.transaction().setIsolationLevel('read committed'),
     async (trx) => {
-      // The exclusive organization lock serializes admission and its team-wide cooldown.
-      const team = await lockDepartureHandoffTeam(trx, ctx, input, capabilities, true)
+      const team = await lockDepartureHandoffTeam(trx, ctx, input, capabilities)
       if (!isUuid(input.runId) || !isUuid(input.departingUserId))
         throw new DomainError('invalid', 'invalid_request')
       const key = { organizationId: team.organizationId, runId: input.runId.toLowerCase() }
       const userId = input.departingUserId.toLowerCase()
+      // Serialize admission and the team-wide cooldown alongside ordinary booking writes.
+      await sql`SELECT pg_advisory_xact_lock(hashtextextended(${`hourmere.departure-handoff-run-start:${key.organizationId}`}, 0))`.execute(
+        trx,
+      )
       const previous = await runRows(trx, key).select('departing_user_id').executeTakeFirst()
       if (previous) {
         if (previous.departing_user_id !== userId) throw conflict('handoff_run_id_conflict')

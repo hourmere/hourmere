@@ -166,8 +166,8 @@ Team booking bulk cancellation preview, confirmation and status return 404 until
 | `POST /api/v1/public/meeting-polls/vote` | Public or manage token; check a supplied key | `full, bookings` |
 | `POST /api/v1/public/meeting-polls/withdraw` | Public or manage token; check a supplied key | `full, bookings` |
 | `POST /api/v1/public/meeting-polls/reminder-opt-out` | Public or manage token; check a supplied key | `full, bookings` |
-| `POST /api/v1/booking-handoffs/offer` | Public or manage token; check a supplied key | `full, read, bookings` |
-| `POST /api/v1/booking-handoffs/answer` | Public or manage token; check a supplied key | `full, bookings` |
+| `POST /api/v1/booking-handoffs/offer` | Private recipient token required. Validate any supplied key. | `full, read, bookings` |
+| `POST /api/v1/booking-handoffs/answer` | Private recipient token required. Validate any supplied key. | `full, bookings` |
 | `GET /api/v1/analytics/bookings` | Session or API key | `full, read` |
 | `GET /api/v1/routing-forms` | Session or API key | `full, read` |
 | `GET /api/v1/routing-forms/{id}` | Session or API key | `full, read` |

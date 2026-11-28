@@ -250,8 +250,8 @@ known in-flight SMTP duplicate window. See the [notification guide](notification
 | Withdraw or apply the approved version | `POST /api/v1/team/bookings/{id}/handoff-offers/{offerId}/withdraw` or `/apply` | Browser session only. |
 | Read own terms and answer | `POST /api/v1/booking-handoffs/offer`, `POST /api/v1/booking-handoffs/answer` with the recipient capability in the body | MCP `read_booking_handoff_offer` and `answer_booking_handoff_offer`. CLI `booking-handoff offer` and `booking-handoff answer` via JSON input. The recipient capability is required in every transport. |
 
-Use shared service operations and explicit OpenAPI IDs and operation scopes. Register
-administrator writes with the existing session-only exemption in
+The REST routes use shared services and explicit OpenAPI IDs and operation scopes.
+Administrator operations use the session-only exemption in
 [`scripts/interface-parity.json`](../scripts/interface-parity.json). Register the two
 recipient operations with real MCP/CLI mappings, following the meeting-poll
 capability pattern. Scope tool discovery and direct calls as booking read/write
@@ -310,6 +310,11 @@ The offer ID stays the same and the version advances. The previous version and i
 become inactive, and the new version requires every recipient’s fresh approval. Use the
 optional `version` query parameter to inspect a specific historical version. Recipient
 status includes the matching source booking attendee IDs for selecting whom to contact.
+Use the current owner or admin browser session and include `X-Expected-Organization-Id`.
+Resend and withdrawal require the browser's same-origin request. Submit `{version}` to
+withdraw that version and revoke its links. The source booking stays confirmed.
+When the staged server has no mail outbox, it still serves status and withdrawal and
+reports resend unavailable.
 
 Send the version and opaque recipient ID to resend, with a random UUID in the
 `Idempotency-Key` header. Retry the same recipient and version with the same key. The
@@ -340,8 +345,10 @@ to `POST /api/v1/booking-handoffs/answer` with the reviewed version and `accept`
 `decline`. The answer response contains the recorded decision. Both operations
 return `404 handoff_offer_unavailable` for unavailable links or versions. A browser
 session and an API key grant no participant authority. If a bearer is supplied, it
-must be valid and have the scope for the operation. CLI commands use JSON on standard
-input with `--input -`.
+must be valid and have the scope for the operation. MCP and CLI also require their
+usual connection credentials to reach these operations. Use `booking-handoff offer --input -`
+and `booking-handoff answer --input -` with the same JSON fields on standard input.
+Keep the token out of command arguments and logs.
 
 The page clears the fragment before requesting the offer. It and the API responses
 are served with no-store and no-referrer headers. Offer and answer operations share
@@ -356,6 +363,8 @@ bookings. Administrators can refresh the receipt to check email acceptance. See
 参与者可用邮件里的私密链接查看原预约和拟议预约。预订人还可查看将分享给新主持人的已保存答案。
 打开链接不会记录决定。请选择接受或拒绝，再提交。任何来宾拒绝或尚未回复都会阻止交接。
 链接过期、被撤回、换版或已经使用时，页面统一提示联系发件团队。
+REST、MCP 和 CLI 都需要邮件中对应收件人的私密令牌。MCP 和 CLI 的连接凭证只用于访问接口。
+CLI 用 `--input -` 从标准输入读取 JSON，请勿将令牌放入命令行参数或日志。
 
 交接提交后，后台任务使用原主持人固定的账户和日历清理旧条目，并在接任主持人符合资格时写入新条目。
 如果原授权已撤销或无法核验清理结果，交接回执会提示原账户所有者检查日历或会议。新预约仍保持确认。

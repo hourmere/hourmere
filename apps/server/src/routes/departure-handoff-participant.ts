@@ -26,6 +26,7 @@ export function departureHandoffParticipantRoutes(deps: ParticipantHandoffDeps):
       routeBodyLimit(1024),
       featureGate(() => requireParticipantHandoffs(deps)),
     ]
+    const security: Record<string, string[]>[] = [{}, { apiKey: [] }]
     const errors = {
       400: { description: 'Invalid request', content: json(ErrorBody) },
       404: {
@@ -46,7 +47,8 @@ export function departureHandoffParticipantRoutes(deps: ParticipantHandoffDeps):
         tags: ['Booking handoffs'],
         summary: 'Read the terms for your private handoff offer',
         description:
-          'Requires the recipient capability. Reading records no decision. Disabled in production.',
+          'Requires the recipient capability in the JSON body. Reading records no decision. An optional bearer API key requires read, bookings or full scope and grants no recipient access by itself. Disabled in production.',
+        security,
         middleware,
         request: { body: { required: true, content: json(ParticipantOfferInput) } },
         responses: {
@@ -67,7 +69,8 @@ export function departureHandoffParticipantRoutes(deps: ParticipantHandoffDeps):
         tags: ['Booking handoffs'],
         summary: 'Accept or decline your exact booking handoff offer version',
         description:
-          'Requires the recipient capability and the reviewed version. The decision does not change the booking. Disabled in production.',
+          'Requires the recipient capability and reviewed version in the JSON body. The decision does not change the booking. An optional bearer API key requires bookings or full scope and grants no recipient access by itself. Disabled in production.',
+        security,
         middleware,
         request: { body: { required: true, content: json(ParticipantAnswerInput) } },
         responses: {
