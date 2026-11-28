@@ -3776,4 +3776,7 @@ export const admin = {
   'Mail server acceptance unconfirmed': 'Mail server acceptance unconfirmed',
   'Email delivery incomplete': 'Email delivery incomplete',
   'Email delivery unavailable': 'Email delivery unavailable',
+
+  // Effective team page permissions
+  'No event types yet.': 'No event types yet.',
 } as const

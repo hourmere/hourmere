@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { api, type Schemas } from '../api/client.ts'
 import { chooseLanguage } from '../i18n/store.ts'
-import { PATHS } from '../paths.ts'
+import { PATHS, workflowEditPath, workflowRunHistoryPath } from '../paths.ts'
 import {
   fakeApi,
   json,
@@ -237,7 +237,7 @@ describe('Workflow lifecycle', () => {
     expect(requests.to(`PATCH ${detail}`)).toHaveLength(0)
   })
 
-  it('does not load workflows for an ordinary member entering the team page directly', async () => {
+  it.each(['owner', 'admin', 'member'])('preserves the fixed %s workflow markup', async (role) => {
     const requests = fakeApi({
       ...signedInAs({ ...ME, organization: team }),
       ...enabled,
@@ -245,13 +245,92 @@ describe('Workflow lifecycle', () => {
         json(200, {
           userId: ME.user.id,
           organizationId: team.id,
-          role: 'member',
+          role,
         }),
+      [list]: () => page([teamWorkflow]),
     })
     renderApp(PATHS.workflows)
-    expect(await screen.findByText('Workflows are unavailable in this space.')).toBeTruthy()
+    const { id, name } = teamWorkflow
+    const heading =
+      '<div tabindex="-1"><header class="page-intro"><div class="page-header"><h1>Workflows</h1>'
+    const endHeading = '</div></header></div>'
+    const unavailable =
+      '<p role="alert" class="alert alert-error">Workflows are unavailable in this space.</p>'
+    if (role === 'member') {
+      expect(await screen.findByText('Workflows are unavailable in this space.')).toBeTruthy()
+      expect(screen.queryByRole('link', { name: 'Workflows' })).toBeNull()
+      expect(requests.to(list)).toHaveLength(0)
+      expect(screen.getByRole('main').innerHTML).toBe(`${heading}${endHeading}${unavailable}`)
+      return
+    }
+    const rowHeading = await screen.findByRole('heading', { name })
+    expect(rowHeading.id).toMatch(/_r_[0-9a-z]+_/)
+    const newLink = `<a class="button button-primary" href="${PATHS.newWorkflow}" data-discover="true">New workflow</a>`
+    const rowStart = `<ul class="card-list plain-list"><li class="panel card-item"><div class="card-main"><h2 id="${rowHeading.id}" class="card-title user-content">${name}</h2><p>Disabled</p></div><div class="card-actions">`
+    const links = `<a class="button button-small" aria-label="Run history for ${name}" href="${workflowRunHistoryPath(id)}" data-discover="true">Run history</a><a class="button button-small" aria-label="Edit ${name}" href="${workflowEditPath(id)}" data-discover="true">Edit</a>`
+    const buttons = `<button id="${rowHeading.id}-enable" class="button button-small" type="button" aria-label="Enable ${name}">Enable</button><button id="${rowHeading.id}-delete" class="button button-small" type="button" aria-label="Delete ${name}">Delete</button>`
+    expect(screen.getByRole('main').innerHTML).toBe(
+      `${heading}${newLink}${endHeading}${rowStart}${links}${buttons}</div></li></ul>`,
+    )
+  })
+
+  it('shows a granted Member only permitted workflow actions', async () => {
+    const id = teamWorkflow.id
+    const runs = `GET /api/v1/workflows/${id}/runs`
+    const requests = fakeApi({
+      ...signedInAs({
+        ...ME,
+        organization: team,
+        teamManagementPermissions: ['workflows.read', 'workflows.read_runs', 'workflows.preview'],
+      }),
+      ...enabled,
+      'GET /api/auth/organization/get-active-member': () =>
+        json(200, { userId: ME.user.id, organizationId: team.id, role: 'member' }),
+      [list]: () => page([teamWorkflow]),
+      [runs]: () => json(200, { data: [], nextCursor: null }),
+    })
+    renderApp(PATHS.workflows)
+    expect(await screen.findByRole('heading', { name: teamWorkflow.name })).toBeTruthy()
+    const main = within(screen.getByRole('main'))
+    expect(main.getByRole('link', { name: 'Details' }).getAttribute('href')).toBe(
+      workflowEditPath(id),
+    )
+    expect(main.getByRole('link', { name: 'Preview workflow' }).getAttribute('href')).toBe(
+      PATHS.newWorkflow,
+    )
+    expect(main.queryByRole('link', { name: 'New workflow' })).toBeNull()
+    expect(main.queryByRole('link', { name: /^Edit/ })).toBeNull()
+    expect(main.queryByRole('button', { name: /^(Enable|Disable|Delete)/ })).toBeNull()
+    await userEvent.click(main.getByRole('link', { name: `Run history for ${teamWorkflow.name}` }))
+    expect(await screen.findByText('No finished runs yet.')).toBeTruthy()
+    expect(requests.to(runs)).toHaveLength(1)
+  })
+
+  it.each([
+    [PATHS.workflows, 'Workflows are unavailable in this space.'],
+    [PATHS.newWorkflow, 'This workflow is unavailable.'],
+    [workflowEditPath(teamWorkflow.id), 'This workflow is unavailable.'],
+    [workflowRunHistoryPath(teamWorkflow.id), 'Run history is unavailable in this space.'],
+  ])('keeps unrenewed Admin workflow actions unavailable on %s', async (path, message) => {
+    const requests = fakeApi({
+      ...signedInAs({
+        ...ME,
+        organization: team,
+        teamManagementPermissions: [],
+        teamPermissionRenewalRequired: true,
+      }),
+      ...enabled,
+      'GET /api/auth/organization/get-active-member': () =>
+        json(200, { userId: ME.user.id, organizationId: team.id, role: 'admin' }),
+    })
+    renderApp(path)
+    expect(await screen.findByText(message)).toBeTruthy()
     expect(screen.queryByRole('link', { name: 'Workflows' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'New workflow' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Preview workflow' })).toBeNull()
     expect(requests.to(list)).toHaveLength(0)
+    expect(requests.to(`GET /api/v1/workflows/${teamWorkflow.id}`)).toHaveLength(0)
+    expect(requests.to(`GET /api/v1/workflows/${teamWorkflow.id}/runs`)).toHaveLength(0)
   })
 
   it.each([403, 500])(

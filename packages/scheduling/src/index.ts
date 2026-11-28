@@ -507,7 +507,11 @@ export {
   getTeamAdminBooking,
   listTeamAdminBookings,
 } from './team-bookings.ts'
-export { allowsManagedTeamOperations, lockVersionedTeamWrite } from './team-permission.ts'
+export {
+  allowsManagedTeamOperations,
+  lockVersionedTeamWrite,
+  managedTeamPermissionChecks,
+} from './team-permission.ts'
 export { readTeamsMeetingLocations, type TeamsMeetingLocation } from './teams-meeting-locations.ts'
 export {
   cleanText,

@@ -337,4 +337,7 @@ export const admin = {
   'Accepted by the mail server': 'Aceito pelo servidor de e-mail',
   'Email delivery incomplete': 'Entrega de e-mail incompleta',
   'Email delivery unavailable': 'Entrega de e-mail indisponível',
+
+  // Effective team page permissions
+  'No event types yet.': 'Ainda não há tipos de evento.',
 }

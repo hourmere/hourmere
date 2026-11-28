@@ -9,6 +9,7 @@ import type { EventType } from '../../api/resources.ts'
 import { CopyButton } from '../../components/CopyButton.tsx'
 import { Field } from '../../components/forms.tsx'
 import * as paths from '../../paths.ts'
+import { teamPageAllows } from '../../team-page-permissions.ts'
 import { compileSourceCopy } from '../../test/compile-source-copy.ts'
 import { ME } from '../../test/fake-api.tsx'
 import { eventType } from '../../test/fixtures.ts'
@@ -67,6 +68,7 @@ const common = {
   isPublicTeamSlug,
   useI18n: () => ({ t: (text: string) => text, locale: 'en' }),
   teamReadinessBlocksSharing,
+  teamPageAllows,
 }
 const ConfigurationChecks = () => null
 

@@ -7,6 +7,7 @@ import { Link, MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { CopyButton } from '../../components/CopyButton.tsx'
 import * as paths from '../../paths.ts'
+import { teamPageAllows } from '../../team-page-permissions.ts'
 import { compileSourceCopy } from '../../test/compile-source-copy.ts'
 import { ME } from '../../test/fake-api.tsx'
 import { eventType } from '../../test/fixtures.ts'
@@ -49,6 +50,7 @@ const common = {
   CopyButton,
   isPublicTeamSlug,
   teamReadinessBlocksSharing,
+  teamPageAllows,
   useI18n: () => ({ t: (text: string) => text, uiText: (text: string) => text, locale: 'en' }),
 }
 

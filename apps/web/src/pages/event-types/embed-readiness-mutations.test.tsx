@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EventType } from '../../api/resources.ts'
 import { CopyButton } from '../../components/CopyButton.tsx'
 import * as paths from '../../paths.ts'
+import { teamPageAllows } from '../../team-page-permissions.ts'
 import { compileSourceCopy } from '../../test/compile-source-copy.ts'
 import { fakeApi, json, ME } from '../../test/fake-api.tsx'
 import { eventType } from '../../test/fixtures.ts'
@@ -81,6 +82,7 @@ function copy<T>(source: string, exported: string): T {
     useI18n: () => ({ t: (text: string) => text, locale: 'en' }),
     useTeamManagementAccess: () => ({ status: 'ready', role: 'owner' }),
     teamReadinessBlocksSharing,
+    teamPageAllows,
     useEventReadiness: () => [{ status: 'ready', data: new Map([[EVENT.id, CHECK]]) }, () => {}],
     formatMinutes: () => '30 min',
     ConfigurationChecks,

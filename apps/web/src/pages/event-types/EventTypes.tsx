@@ -28,6 +28,7 @@ import {
 } from '../../paths.ts'
 import { type Me, useMe } from '../../session.tsx'
 import { useTeamManagementAccess } from '../../team-management.tsx'
+import { teamPageAllows } from '../../team-page-permissions.ts'
 import { validDefault } from '../availability/valid-default.ts'
 import { ConfigurationChecks } from './ConfigurationChecks.tsx'
 import { EventEmbedAction } from './EventEmbedAction.tsx'
@@ -66,11 +67,26 @@ function useEventTypesLoad() {
 }
 
 export function EventTypesPage() {
+  const me = useMe()
+  const { t } = useI18n()
+  usePageTitle('Event types')
+  if (!teamPageAllows(me, 'event_types.read', true)) {
+    return (
+      <>
+        <PageHeader title={t('Event types')} />
+        <p role="status">{t("You don't have permission to do that.")}</p>
+      </>
+    )
+  }
+  return <EventTypesCatalogue />
+}
+
+function EventTypesCatalogue() {
   const { t, uiText } = useI18n()
   const scheduleHint = t('{0}, so there are times to book.').split('{0}')
 
-  usePageTitle('Event types')
   const me = useMe()
+  const canCreate = teamPageAllows(me, 'event_types.create', true)
   const [state, reload, refreshFailure] = useEventTypesLoad()
   const [readinessVersion, setReadinessVersion] = useState(0)
   function reloadSetup() {
@@ -97,9 +113,11 @@ export function EventTypesPage() {
         title={t('Event types')}
         lede={t('The kinds of meetings people can book with you, each with its own link.')}
       >
-        <Link to={PATHS.newEventType} className="button button-primary">
-          {t('New event type')}
-        </Link>
+        {canCreate && (
+          <Link to={PATHS.newEventType} className="button button-primary">
+            {t('New event type')}
+          </Link>
+        )}
       </PageHeader>
       <p className="flash" role="status">
         {uiText(message)}
@@ -163,10 +181,13 @@ export function EventTypesPage() {
               title={t(
                 hostUserId
                   ? 'This member does not host any team events.'
-                  : 'You have no event types yet. Create one to start taking bookings.',
+                  : canCreate
+                    ? 'You have no event types yet. Create one to start taking bookings.'
+                    : 'No event types yet.',
               )}
               action={
                 !hostUserId &&
+                canCreate &&
                 !me.organization.personal && (
                   <Link to={PATHS.newEventType} className="button">
                     {t('Create your first event type')}
@@ -282,6 +303,35 @@ function EventTypeTable({
               const currentOverride =
                 override && (busy.includes(original.id) || override.base === original)
               const e = currentOverride ? override.value : original
+              const ownEvent = e.ownerUserId === me.user.id
+              const canEdit = ownEvent || teamPageAllows(me, 'event_types.update', canManage)
+              const canOpenEditor =
+                !me.teamManagementPermissions ||
+                canEdit ||
+                me.teamManagementPermissions.some((operation) =>
+                  [
+                    'event_types.assign_hosts',
+                    'event_types.list_host_candidates',
+                    'event_types.activate_round_robin',
+                    'event_notifications.update',
+                    'event_types.update_success_redirect',
+                    'event_types.delete',
+                    'waitlists.update_settings',
+                    'waitlists.list_entries',
+                    'one_time_links.read',
+                  ].includes(operation),
+                )
+              const canDuplicate = !me.teamManagementPermissions
+                ? canManage
+                : teamPageAllows(me, 'event_types.duplicate', false) &&
+                  teamPageAllows(me, 'event_types.assign_hosts', false) &&
+                  teamPageAllows(me, 'event_notifications.update', false) &&
+                  (!e.successRedirect ||
+                    teamPageAllows(me, 'event_types.update_success_redirect', false)) &&
+                  (!e.waitlist?.enabled || teamPageAllows(me, 'waitlists.update_settings', false))
+              const canDelete =
+                (me.teamManagementPermissions && ownEvent) ||
+                teamPageAllows(me, 'event_types.delete', canManage)
               const item = readiness.status === 'ready' ? readiness.data.get(e.id) : undefined
               const isActive =
                 e.isActive &&
@@ -360,7 +410,7 @@ function EventTypeTable({
                   </td>
                   <td data-label={t('Status')} className="fit">
                     <div className="table-value event-enablement">
-                      {canManage && (
+                      {(me.teamManagementPermissions ? canEdit : canManage) && (
                         <button
                           type="button"
                           role="switch"
@@ -405,18 +455,20 @@ function EventTypeTable({
                   )}
                   <td className="actions">
                     <span className="event-row-actions">
-                      <Link
-                        to={eventTypePath(e.id)}
-                        className="button button-small"
-                        aria-label={t('Edit {0}', { '0': e.title })}
-                      >
-                        {t('Edit')}
-                      </Link>
+                      {canOpenEditor && (
+                        <Link
+                          to={eventTypePath(e.id)}
+                          className="button button-small"
+                          aria-label={t('Edit {0}', { '0': e.title })}
+                        >
+                          {t('Edit')}
+                        </Link>
+                      )}
                       <EventEmbedAction
                         inMenu
                         disabled={busy.includes(e.id)}
                         onDuplicate={
-                          canManage
+                          canDuplicate
                             ? async () => {
                                 const copy = await unwrap(
                                   api.POST('/api/v1/event-types/{id}/duplicate', {
@@ -430,7 +482,7 @@ function EventTypeTable({
                             : undefined
                         }
                         onDelete={
-                          canManage
+                          canDelete
                             ? async () => {
                                 await unwrap(
                                   api.DELETE('/api/v1/event-types/{id}', {

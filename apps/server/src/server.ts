@@ -961,6 +961,7 @@ export function productionAppOptions({
     stripeWebhook: { db, config: config.stripe, enabled: config.PAID_BOOKINGS_ENABLED, notify },
     authHandler: auth.handler,
     resolveCaller,
+    teamPermissionsDb: db,
     publicUrl: config.PUBLIC_URL,
     embedOrigins: config.EMBED_ALLOWED_ORIGINS,
     hstsMaxAge: config.HSTS_MAX_AGE,

@@ -1,6 +1,6 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { assert, describe, expect, it, vi } from 'vitest'
 import { api, type Schemas } from '../api/client.ts'
 import { PATHS } from '../paths.ts'
 import { fakeApi, json, later, ME, renderApp, signedIn, signedInAs } from '../test/fake-api.tsx'
@@ -127,6 +127,71 @@ async function addTranslation(
 }
 
 describe('workflow editor', () => {
+  it('previews a saved team webhook workflow without write or webhook-catalogue permissions', async () => {
+    const teamWorkflow: Schemas['Workflow'] = {
+      ...workflow,
+      owner: { kind: 'team', id: team.id },
+      actions: [{ type: 'webhook', webhookId: endpoint.id }],
+    }
+    const requests = fakeApi({
+      ...editorRoutes,
+      ...signedInAs({
+        ...ME,
+        organization: team,
+        teamManagementPermissions: ['workflows.read', 'workflows.preview'],
+      }),
+      ...instanceRoute(true),
+      'GET /api/auth/organization/get-active-member': () =>
+        json(200, { organizationId: team.id, userId: ME.user.id, role: 'member' }),
+      [`GET ${DETAIL}`]: () => json(200, teamWorkflow),
+      [`POST ${PREVIEW}`]: () =>
+        json(200, {
+          ...matchedPreview,
+          emails: [],
+          estimates: { emailRecipientClasses: 0, webhookDeliveriesPerMatch: 1 },
+        }),
+    })
+    renderApp(EDIT)
+    const name = await screen.findByRole<HTMLInputElement>('textbox', { name: 'Workflow name' })
+    expect(name.value).toBe(teamWorkflow.name)
+    expect(main().queryByRole('button', { name: 'Save changes' })).toBeNull()
+    expect(main().getByText(endpoint.id)).toBeTruthy()
+    assert(name.form)
+    fireEvent.submit(name.form)
+    expect(requests.to(`PATCH ${DETAIL}`)).toHaveLength(0)
+
+    await userEvent.click(main().getByRole('button', { name: 'Preview workflow' }))
+    expect(await main().findByText('The example booking matches this workflow.')).toBeTruthy()
+    expect(requests.to(`POST ${PREVIEW}`).map(({ body }) => body)).toEqual([
+      expect.objectContaining({ owner: teamWorkflow.owner, actions: teamWorkflow.actions }),
+    ])
+    expect(requests.to('GET /api/v1/webhooks')).toHaveLength(0)
+  })
+
+  it('renders a saved workflow as read only when the Member lacks preview and write grants', async () => {
+    const teamWorkflow: Schemas['Workflow'] = {
+      ...workflow,
+      owner: { kind: 'team', id: team.id },
+    }
+    fakeApi({
+      ...editorRoutes,
+      ...signedInAs({
+        ...ME,
+        organization: team,
+        teamManagementPermissions: ['workflows.read'],
+      }),
+      ...instanceRoute(true),
+      'GET /api/auth/organization/get-active-member': () =>
+        json(200, { organizationId: team.id, userId: ME.user.id, role: 'member' }),
+      [`GET ${DETAIL}`]: () => json(200, teamWorkflow),
+    })
+    renderApp(EDIT)
+    const name = await screen.findByRole<HTMLInputElement>('textbox', { name: 'Workflow name' })
+    expect(name.value).toBe(teamWorkflow.name)
+    expect(name.closest('fieldset')?.disabled).toBe(true)
+    expect(main().queryByRole('button', { name: 'Save changes' })).toBeNull()
+    expect(main().queryByRole('button', { name: 'Preview workflow' })).toBeNull()
+  })
   it('retains the creation key after an unconfirmed save and draft changes', async () => {
     let attempts = 0
     const requests = fakeApi({

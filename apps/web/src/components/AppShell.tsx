@@ -7,6 +7,7 @@ import { AppNotFoundPage } from '../pages/NotFound.tsx'
 import { PATHS } from '../paths.ts'
 import { useMe, useSession } from '../session.tsx'
 import { TeamManagementProvider, useTeamManagementAccess } from '../team-management.tsx'
+import { routingFormPermissions, teamPageAllows } from '../team-page-permissions.ts'
 import { leavesPage, useConfirmLeave } from '../unsaved-changes.tsx'
 import { AccountMenu } from './AccountMenu.tsx'
 import { JoinedTeamNotice } from './JoinedTeamNotice.tsx'
@@ -182,8 +183,15 @@ function Shell() {
         !ssoSamlEnabled &&
         (me.sso !== undefined || Boolean(me.ssoRecoveryTeams?.length))
   const managesSpace = me.principal.kind === 'session' && (me.organization.personal || managesTeam)
-  const showWorkflows = workflowsEnabled === true && managesSpace
-  const showRoutingForms = routingFormsEnabled === true && managesSpace
+  const showWorkflows =
+    workflowsEnabled === true &&
+    (teamPageAllows(me, 'workflows.read', managesSpace) ||
+      teamPageAllows(me, 'workflows.create', false) ||
+      teamPageAllows(me, 'workflows.preview', false))
+  const showRoutingForms =
+    routingFormsEnabled === true &&
+    (teamPageAllows(me, routingFormPermissions.read, managesSpace) ||
+      teamPageAllows(me, routingFormPermissions.create, false))
   const showMeetingPolls = me.organization.personal || managesTeam
   const showAuditLog =
     teamAccess.status === 'ready' &&
@@ -196,6 +204,11 @@ function Shell() {
   const primaryList = useRef<HTMLUListElement>(null)
   const location = useLocation()
   const { pathname } = location
+  const canRenewHere =
+    me.teamPermissionRenewalRequired === true &&
+    [PATHS.eventTypes, PATHS.routingForms, PATHS.workflows].some((path) =>
+      matchPath({ path, end: false }, pathname),
+    )
   const widePage = WIDE_PAGES.includes(pathname) || matchPath(`${PATHS.eventTypes}/:id`, pathname)
   const shownPath = useRef(pathname)
   const confirmLeave = useConfirmLeave()
@@ -340,6 +353,18 @@ function Shell() {
           tabIndex={-1}
         >
           <JoinedTeamNotice />
+          {canRenewHere && (
+            <div className="alert alert-info">
+              <p>
+                {t(
+                  'Your team permissions changed. Verify your identity to use your current access in this browser.',
+                )}
+              </p>
+              <Link to={`${PATHS.settings}#team-access-renewal-heading`}>
+                {t('Renew team access')}
+              </Link>
+            </div>
+          )}
           {shownNotice && (
             <div className="alert alert-info notice">
               <p role={notice?.path === null ? 'status' : 'alert'}>{ui(shownNotice)}</p>

@@ -11,6 +11,7 @@ import type { MessageKey } from '../i18n/translate.ts'
 import { PATHS } from '../paths.ts'
 import { useMe } from '../session.tsx'
 import { useTeamManagementAccess } from '../team-management.tsx'
+import { useTeamPagePermissions } from '../team-page-permissions.ts'
 
 type Run = Schemas['WorkflowRunHistoryEntry']
 
@@ -44,30 +45,34 @@ export default function WorkflowRunHistoryPage() {
   const { t } = useI18n()
   const me = useMe()
   const access = useTeamManagementAccess()
+  const permissions = useTeamPagePermissions()
   const { id } = useParams()
   const { id: organizationId, personal } = me.organization
   const inSession = me.principal.kind === 'session'
-  const manage = inSession && (personal || (access.status === 'ready' && access.role !== null))
+  const canRead =
+    permissions.status === 'ready'
+      ? permissions.allows('workflows.read_runs')
+      : inSession && (personal || (access.status === 'ready' && access.role !== null))
   const heading = useRef<HTMLHeadingElement>(null)
   usePageTitle('Run history')
 
   return (
     <>
-      {manage && (
+      {canRead && (
         <p className="breadcrumb">
           <Link to={PATHS.workflows}>{t('Workflows')}</Link>
         </p>
       )}
       <PageHeader title={t('Run history')} headingRef={heading} />
-      {manage && id ? (
+      {canRead && id ? (
         <History
           key={JSON.stringify([me.user.id, organizationId, personal, id])}
           id={id}
           focusHeading={() => heading.current?.focus()}
         />
-      ) : inSession && access.status === 'loading' ? (
+      ) : permissions.status === 'fixed' && inSession && access.status === 'loading' ? (
         <PageSkeleton label="Loading run history…" />
-      ) : inSession && access.status === 'error' ? (
+      ) : permissions.status === 'fixed' && inSession && access.status === 'error' ? (
         <LoadError retry={access.reload} />
       ) : (
         <Unavailable />

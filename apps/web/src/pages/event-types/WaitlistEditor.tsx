@@ -8,6 +8,7 @@ import { useI18n } from '../../i18n/runtime.tsx'
 import type { MessageKey } from '../../i18n/translate.ts'
 import { useMe, useSession } from '../../session.tsx'
 import { useTeamManagementAccess } from '../../team-management.tsx'
+import { teamPageAllows } from '../../team-page-permissions.ts'
 
 /** Contact details are requested only after current management access is confirmed. */
 export function WaitlistEditor({
@@ -33,20 +34,25 @@ export function WaitlistEditor({
   const { confirmReload } = useSession()
   const [showEntries, setShowEntries] = useState(false)
   const canManage = me.organization.personal || (access.status === 'ready' && access.role !== null)
+  const canChangeSettings = teamPageAllows(me, 'waitlists.update_settings', canManage)
+  const canReadEntries = teamPageAllows(me, 'waitlists.list_entries', canManage)
   const accessUnknown =
-    access.status === 'error' || (access.status === 'ready' && access.roles === null)
+    !me.teamManagementPermissions &&
+    (access.status === 'error' || (access.status === 'ready' && access.roles === null))
   return (
     <section className="panel" aria-labelledby="waitlist-heading">
       <h2 id="waitlist-heading">{t('Booking waitlist')}</h2>
-      {!canManage ? (
+      {!canChangeSettings && !canReadEntries ? (
         <>
           <p>
             {t(
-              access.status === 'loading'
-                ? 'Checking waitlist management access…'
-                : accessUnknown
-                  ? 'Could not check waitlist management access. Try again.'
-                  : 'Only team owners and admins can manage the waitlist.',
+              me.teamManagementPermissions
+                ? "You don't have permission to do that."
+                : access.status === 'loading'
+                  ? 'Checking waitlist management access…'
+                  : accessUnknown
+                    ? 'Could not check waitlist management access. Try again.'
+                    : 'Only team owners and admins can manage the waitlist.',
             )}
           </p>
           {accessUnknown && (
@@ -66,7 +72,7 @@ export function WaitlistEditor({
               id="waitlist"
               type="checkbox"
               checked={enabled}
-              disabled={disabled || (!supported && !enabled)}
+              disabled={!canChangeSettings || disabled || (!supported && !enabled)}
               aria-describedby={`waitlist-hint${errors.waitlist ? ' waitlist-error' : ''}`}
               aria-invalid={errors.waitlist ? true : undefined}
               onChange={(e) => onChange(e.target.checked)}
@@ -87,6 +93,7 @@ export function WaitlistEditor({
           )}
           {errors.waitlist && <FieldError id="waitlist-error">{errors.waitlist}</FieldError>}
           {eventTypeId &&
+            canReadEntries &&
             (showEntries ? (
               <WaitlistEntries
                 key={`${eventTypeId}:${savedVersion}`}
@@ -121,6 +128,7 @@ const stateLabels = {
 function WaitlistEntries({ eventTypeId, disabled }: { eventTypeId: string; disabled: boolean }) {
   const { t, locale } = useI18n()
   const me = useMe()
+  const canRemove = teamPageAllows(me, 'waitlists.remove_entry', true)
   const access = useTeamManagementAccess()
   const { confirmReload } = useSession()
   const [expectedOrganizationId] = useState(me.organization.id)
@@ -162,6 +170,7 @@ function WaitlistEntries({ eventTypeId, disabled }: { eventTypeId: string; disab
     }).format(new Date(value))
 
   async function remove(entryId: string) {
+    if (!canRemove) return
     try {
       await unwrap(
         api.DELETE('/api/v1/event-types/{id}/waitlist/entries/{entryId}', {
@@ -262,7 +271,8 @@ function WaitlistEntries({ eventTypeId, disabled }: { eventTypeId: string; disab
                         )}
                       </dd>
                     </dl>
-                    {!erased &&
+                    {canRemove &&
+                      !erased &&
                       ['pending_verification', 'active', 'notified'].includes(entry.state) && (
                         <ConfirmAction
                           key={version}

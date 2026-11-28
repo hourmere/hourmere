@@ -328,7 +328,10 @@ export function SettingsPage() {
           key={`custom-role-renewal-${organizationId}`}
           context={customRoleProof}
           view={customPermissions}
-          onRenewed={customRoles.reload}
+          onRenewed={() => {
+            customRoles.reload()
+            void refresh({ fresh: true })
+          }}
         />
       )}
       {showCustomRoles && (

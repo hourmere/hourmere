@@ -16,6 +16,10 @@ interface Props {
   organizationId: string
   currentUserId: string
   role: string | null
+  effectiveReadiness?: boolean | undefined
+  canListCandidates?: boolean
+  canAssign?: boolean
+  knownHosts?: { id: string; name: string }[] | undefined
   draft: EventTypeDraft
   error?: UiText | undefined
   organizerError?: UiText | undefined
@@ -39,6 +43,10 @@ export function HostAssignment({
   organizationId,
   currentUserId,
   role,
+  effectiveReadiness,
+  canListCandidates = true,
+  canAssign = true,
+  knownHosts,
   draft,
   error,
   organizerError,
@@ -49,23 +57,32 @@ export function HostAssignment({
   const [after, setAfter] = useState<string | undefined>()
   const [previous, setPrevious] = useState<Host[]>([])
   const load = useCallback(
-    (signal: AbortSignal) =>
-      unwrap(
-        api.GET('/api/v1/event-type-hosts', {
-          params: { query: { limit: 100, ...(after && { after }) } },
-          signal,
-        }),
-      ),
-    [after],
+    async (signal: AbortSignal) =>
+      canListCandidates
+        ? unwrap(
+            api.GET('/api/v1/event-type-hosts', {
+              params: { query: { limit: 100, ...(after && { after }) } },
+              signal,
+            }),
+          )
+        : { data: [], nextAfter: null },
+    [after, canListCandidates],
   )
   const [state, reload] = useLoad(load)
-  const members = state.status === 'ready' ? [...previous, ...state.data.data] : previous
-  const missing = draft.hostUserIds.filter((id) => !members.some((member) => member.id === id))
+  const members = canListCandidates
+    ? state.status === 'ready'
+      ? [...previous, ...state.data.data]
+      : previous
+    : (knownHosts ?? []).map((host) => ({ ...host, memberId: '' }))
+  const missing = canListCandidates
+    ? draft.hostUserIds.filter((id) => !members.some((member) => member.id === id))
+    : []
   const roles = role?.split(',').map((value) => value.trim()) ?? []
-  const canManage =
-    roles.every((value) => ['owner', 'admin', 'member'].includes(value)) &&
-    (roles.includes('owner') || roles.includes('admin'))
-  const selected = canManage
+  const canReadTeam =
+    effectiveReadiness ??
+    (roles.every((value) => ['owner', 'admin', 'member'].includes(value)) &&
+      (roles.includes('owner') || roles.includes('admin')))
+  const selected = canReadTeam
     ? members.filter((member) => member.memberId && draft.hostUserIds.includes(member.id))
     : []
   const [readiness, retryReadiness] = useMemberReadiness(
@@ -73,6 +90,7 @@ export function HostAssignment({
     currentUserId,
     role,
     selected.map((member) => ({ id: member.memberId })),
+    effectiveReadiness,
   )
   const soloHostId = draft.schedulingType === 'individual' ? draft.hostUserIds[0] : undefined
   const soloMember = selected.find((member) => member.id === soloHostId)
@@ -91,6 +109,7 @@ export function HostAssignment({
       <label htmlFor="schedulingType">{t('Scheduling')}</label>
       <select
         id="schedulingType"
+        disabled={!canAssign}
         value={draft.schedulingType}
         onChange={(event) => {
           const mode = event.target.value as EventTypeDraft['schedulingType']
@@ -114,11 +133,17 @@ export function HostAssignment({
           {ui(error)}
         </p>
       )}
-      {state.status === 'loading' && <p role="status">{t('Loading team members…')}</p>}
-      {state.status === 'error' && (
+      {canListCandidates && state.status === 'loading' && (
+        <p role="status">{t('Loading team members…')}</p>
+      )}
+      {canListCandidates && state.status === 'error' && (
         <div role="alert">
           <p>
-            {t('Could not load team members. Only team owners and admins can assign hosts.')}{' '}
+            {t(
+              effectiveReadiness === undefined
+                ? 'Could not load team members. Only team owners and admins can assign hosts.'
+                : 'Could not load team members.',
+            )}{' '}
             {ui(state.message)}
           </p>
           <button
@@ -161,7 +186,12 @@ export function HostAssignment({
           )}
         </>
       )}
-      <fieldset id="hosts" aria-describedby="hosts-hint" aria-invalid={!!error}>
+      <fieldset
+        id="hosts"
+        aria-describedby="hosts-hint"
+        aria-invalid={!!error}
+        disabled={!canAssign}
+      >
         <legend>
           {t(draft.schedulingType === 'round_robin' ? 'Host pool' : 'Required hosts')}
         </legend>
@@ -185,7 +215,7 @@ export function HostAssignment({
               />
               <bdi>{member.name.trim() || t('Unnamed team member')}</bdi>
             </label>
-            {canManage && draft.hostUserIds.includes(member.id) && (
+            {canReadTeam && canListCandidates && draft.hostUserIds.includes(member.id) && (
               <>
                 <MemberReadiness
                   health={
@@ -193,7 +223,7 @@ export function HostAssignment({
                   }
                   status={readiness.status}
                   own={member.id === currentUserId}
-                  canManage={canManage}
+                  canManage={canReadTeam}
                 />
                 {member.id !== currentUserId && (
                   <p className="hint">
@@ -237,6 +267,7 @@ export function HostAssignment({
           <label htmlFor="conferenceOrganizer">{t('Meeting organizer')}</label>
           <select
             id="conferenceOrganizer"
+            disabled={!canAssign}
             value={draft.conferenceOrganizerUserId}
             aria-invalid={!!organizerError}
             onChange={(e) => set('conferenceOrganizerUserId', e.target.value)}
@@ -280,7 +311,7 @@ export function HostAssignment({
           )}
         </p>
       )}
-      {state.status === 'ready' && state.data.nextAfter && (
+      {canListCandidates && state.status === 'ready' && state.data.nextAfter && (
         <button
           type="button"
           onClick={() => {

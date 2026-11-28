@@ -8374,6 +8374,13 @@ export interface components {
                 id: string;
                 policyRevision: number;
             }[];
+            /** @description Allowed team-wide operation IDs for event types, routing forms and workflows for the active browser session with versioned team authority. Each operation independently enforces current feature, target and field checks. */
+            teamManagementPermissions?: string[];
+            /**
+             * @description This browser session needs explicit team permission renewal.
+             * @enum {boolean}
+             */
+            teamPermissionRenewalRequired?: true;
             user: {
                 email: string;
                 /** Format: uuid */

@@ -57,6 +57,7 @@ describe.skipIf(!databaseUrl)('custom roles across REST, API keys, MCP OAuth and
   let db: Db
   let auth: ReturnType<typeof createAuth>
   let app: ReturnType<typeof createApp>
+  let runtimeOff: ReturnType<typeof createApp>
   let server: ReturnType<typeof serve>
   let cliUrl: string
 
@@ -93,6 +94,7 @@ describe.skipIf(!databaseUrl)('custom roles across REST, API keys, MCP OAuth and
       checkDb: async () => {},
       authHandler: auth.handler,
       resolveCaller: createCallerResolver({ auth, db, customRolesEnabled: true }),
+      teamPermissionsDb: db,
       publicUrl,
       routes: productRoutes({
         db,
@@ -100,6 +102,9 @@ describe.skipIf(!databaseUrl)('custom roles across REST, API keys, MCP OAuth and
         ...capabilities,
         mcpAuth: auth,
         customRolesEnabled: true,
+        workflowsEnabled: true,
+        routingFormsEnabled: true,
+        routingSecret: secret,
         socialProviders: {},
         invitationMailLimits: { secret },
       }),
@@ -111,6 +116,14 @@ describe.skipIf(!databaseUrl)('custom roles across REST, API keys, MCP OAuth and
           handler: auth.handler,
         },
       }),
+    })
+    runtimeOff = createApp({
+      checkDb: async () => {},
+      authHandler: auth.handler,
+      resolveCaller: createCallerResolver({ auth, db }),
+      teamPermissionsDb: db,
+      publicUrl,
+      ssoTeamReads: { db, capabilities },
     })
     server = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: 0 })
     if (!server.listening)
@@ -838,5 +851,126 @@ describe.skipIf(!databaseUrl)('custom roles across REST, API keys, MCP OAuth and
     expect((await setRole('admin')).status).toBe(200)
     expect((await request(audit, f.memberBrowser.headers)).status).toBe(403)
     expect((await request(audit, bearer(renewed.key))).status).toBe(403)
+  })
+
+  it('projects only the current browser credential’s effective UI permissions', async () => {
+    const f = await fixture()
+    const mePath = '/api/v1/me'
+    const baseReads = ['event_types.read', 'event_notifications.read']
+    const grants = ['event_types.create', 'routing_forms.read', 'workflows.read']
+    const other = await createTestTeam(db, [{ user: f.member, role: 'owner' }])
+    const otherBrowser = await browser(f.member, other.id)
+    const legacyKey = await issueKey(f.memberBrowser, 'full')
+    for (const actor of [f.ownerBrowser, f.memberBrowser, otherBrowser]) {
+      const response = await request(mePath, actor.headers)
+      expect(response.status).toBe(200)
+      expect(response.headers.get('cache-control')).toBe('no-store')
+      const fixedBytes = await response.text()
+      expect(fixedBytes).not.toContain('teamManagementPermissions')
+      expect(fixedBytes).toBe(
+        await (await runtimeOff.request(mePath, { headers: actor.headers })).text(),
+      )
+    }
+
+    await changeMode(f.ownerBrowser, true, 0)
+    const team = teamPath(f.team.id)
+    const { role } = z.object({ role: z.object({ id: z.uuid() }) }).parse(
+      await provedWrite(f.ownerBrowser, `${team}/roles`, 'POST', {
+        name: 'Page actions',
+        permissionIds: grants,
+      }),
+    )
+    await provedWrite(f.ownerBrowser, `${team}/members/${f.memberId}/custom-role`, 'PUT', {
+      expectedGeneration: 1,
+      expectedRevision: 1,
+      roleId: role.id,
+    })
+
+    const assertPermissions = async (operations: string[], renewalRequired = false) => {
+      const response = await request(mePath, f.memberBrowser.headers)
+      expect(response.status).toBe(200)
+      const body = (await response.json()) as Record<string, unknown>
+      expect(body).toEqual({
+        user: expect.objectContaining({ id: f.member.id }),
+        personalOrganizationId: f.member.principal.organization.id,
+        organization: expect.objectContaining({ id: f.team.id, personal: false }),
+        principal: { kind: 'session', apiKeyId: null },
+        teamManagementPermissions: operations,
+        ...(renewalRequired && { teamPermissionRenewalRequired: true }),
+      })
+    }
+    await assertPermissions(baseReads, true)
+    await renewBrowser(f.memberBrowser, 2, 1)
+    await assertPermissions([...baseReads, ...grants])
+    const readPaths = [
+      '/api/v1/routing-forms',
+      `/api/v1/workflows?ownerKind=team&ownerId=${f.team.id}`,
+    ]
+    for (const path of readPaths)
+      expect((await request(path, f.memberBrowser.headers)).status, path).toBe(200)
+    const eventInput = {
+      title: 'Permission fixture',
+      slug: 'permission-fixture',
+      durationMinutes: 30,
+    }
+    const created = await request(
+      '/api/v1/event-types',
+      f.memberBrowser.headers,
+      'POST',
+      eventInput,
+    )
+    expect(created.status).toBe(201)
+    const event = z.object({ id: z.uuid() }).parse(await created.json())
+    expect(
+      (
+        await request(`/api/v1/event-types/${event.id}`, f.memberBrowser.headers, 'PATCH', {
+          title: 'Unauthorized edit',
+        })
+      ).status,
+    ).toBe(403)
+
+    const machineHeaders = {
+      ...Object.fromEntries(f.memberBrowser.headers),
+      ...bearer(legacyKey.key),
+    }
+    const machine = await request(mePath, machineHeaders)
+    expect(machine.status).toBe(200)
+    expect(await machine.json()).not.toHaveProperty('teamManagementPermissions')
+    const otherHeaders = new Headers(otherBrowser.headers)
+    otherHeaders.set(expectedOrganization, f.team.id)
+    const isolated = await request(mePath, otherHeaders)
+    expect(isolated.status).toBe(200)
+    const isolatedBody = await isolated.json()
+    expect(isolatedBody).toMatchObject({ organization: { id: other.id } })
+    expect(isolatedBody).not.toHaveProperty('teamManagementPermissions')
+
+    const promotion = await request(
+      '/api/auth/organization/update-member-role',
+      f.ownerBrowser.headers,
+      'POST',
+      { organizationId: f.team.id, memberId: f.memberId, role: 'admin' },
+    )
+    expect(promotion.status).toBe(200)
+    await assertPermissions(baseReads, true)
+    for (const path of readPaths)
+      expect((await request(path, f.memberBrowser.headers)).status, path).toBe(403)
+    const off = await runtimeOff.request(mePath, { headers: f.memberBrowser.headers })
+    expect(off.status).toBe(200)
+    const offBody = await off.json()
+    expect(offBody).toMatchObject({ teamManagementPermissions: baseReads })
+    expect(offBody).not.toHaveProperty('teamPermissionRenewalRequired')
+
+    await db
+      .insertInto('sso_policies')
+      .values({ organization_id: f.team.id, require_sso: true })
+      .execute()
+    const withoutSsoProof = await request(mePath, f.memberBrowser.headers)
+    expect(withoutSsoProof.status).toBe(200)
+    const withoutSsoProofBody = await withoutSsoProof.json()
+    expect(withoutSsoProofBody).toMatchObject({
+      organization: { id: f.team.id, name: '', slug: '' },
+      teamManagementPermissions: [],
+    })
+    expect(withoutSsoProofBody).not.toHaveProperty('teamPermissionRenewalRequired')
   })
 })
