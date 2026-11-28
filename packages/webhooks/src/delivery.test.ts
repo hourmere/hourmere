@@ -884,6 +884,72 @@ describe.skipIf(!serverUrl)('durable organization booking webhooks', () => {
     await deliverWebhook(d, old.delivery.id, signal())
   })
 
+  it.each([
+    { status: 404, shutdown: false },
+    { status: 410, shutdown: false },
+    { status: 404, shutdown: true },
+    { status: 410, shutdown: true },
+  ])(
+    'retries a signed webhook after HTTP $status (shutdown=$shutdown)',
+    async ({ status, shutdown }) => {
+      const { delivery, webhook, user } = await captured()
+      const abort = new AbortController()
+      const readDelivery = () =>
+        db
+          .selectFrom('webhook_deliveries')
+          .select(['attempts', 'status', 'http_status', 'last_error', 'delivered_at'])
+          .where('id', '=', delivery.id)
+          .executeTakeFirstOrThrow()
+
+      await expect(
+        deliverWebhook(
+          deps(async () => {
+            if (shutdown) abort.abort()
+            return status
+          }),
+          delivery.id,
+          abort.signal,
+        ),
+      ).rejects.toThrow(shutdown ? /^Webhook delivery interrupted$/ : /^Webhook delivery failed$/)
+      expect(await readDelivery()).toEqual({
+        attempts: 1,
+        status: 'pending',
+        http_status: shutdown ? null : status,
+        last_error: shutdown ? 'interrupted' : 'http_error',
+        delivered_at: null,
+      })
+      expect(
+        await db
+          .selectFrom('webhooks')
+          .select(['is_active', 'pause_reason'])
+          .where('id', '=', webhook.id)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({ is_active: true, pause_reason: null })
+      expect(
+        await db
+          .selectFrom('audit_events')
+          .select('id')
+          .where('organization_id', '=', user.principal.organization.id)
+          .where('action', '=', 'slack_destination.paused')
+          .execute(),
+      ).toEqual([])
+
+      await deliverWebhook(
+        deps(async () => 204),
+        delivery.id,
+        signal(),
+        2,
+      )
+      expect(await readDelivery()).toEqual({
+        attempts: 2,
+        status: 'delivered',
+        http_status: 204,
+        last_error: null,
+        delivered_at: new Date(NOW.epochMilliseconds),
+      })
+    },
+  )
+
   it.each([200, 204, 299])(
     'records a late %i acknowledgement after shutdown as delivered',
     async (status) => {
