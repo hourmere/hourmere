@@ -1,9 +1,31 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import type { Schemas } from '../../api/client.ts'
+import {
+  AppShell,
+  EditRoutingFormPage,
+  NewRoutingFormPage,
+  RequireRoutingForms,
+  RequireSession,
+  RoutingFormsPage,
+  SessionLayout,
+} from '../../lazy-pages.tsx'
 import { PATHS, routingFormPath } from '../../paths.ts'
 import { fakeApi, json, later, ME, renderApp, signedIn, signedInAs } from '../../test/fake-api.tsx'
+import { resolveLazy } from '../../test/resolve-lazy.ts'
+
+beforeAll(() =>
+  resolveLazy(
+    SessionLayout,
+    RequireSession,
+    AppShell,
+    RequireRoutingForms,
+    RoutingFormsPage,
+    NewRoutingFormPage,
+    EditRoutingFormPage,
+  ),
+)
 
 const id = '00000000-0000-7000-8000-000000000030'
 const team = {
@@ -72,9 +94,9 @@ describe('Routing form management', () => {
     })
     renderApp(PATHS.routingForms)
     const user = userEvent.setup()
-    await screen.findByRole('heading', { name: 'Routing forms' })
+    expect(await screen.findByText('No routing forms yet.')).toBeTruthy()
     const main = within(screen.getByRole('main'))
-    expect(await main.findByText('No routing forms yet.')).toBeTruthy()
+    expect(main.getByRole('heading', { name: 'Routing forms' })).toBeTruthy()
     await user.click(main.getByRole('link', { name: 'New routing form' }))
     await user.type(await main.findByRole('textbox', { name: 'Title' }), form.title)
     await user.type(main.getByRole('textbox', { name: 'Form address' }), form.slug)
@@ -82,7 +104,8 @@ describe('Routing form management', () => {
     await user.type(main.getByRole('textbox', { name: 'Question' }), 'Company')
     await user.click(main.getByRole('button', { name: 'Save draft' }))
 
-    expect(await main.findByRole('heading', { name: 'Edit routing form' })).toBeTruthy()
+    await main.findByRole('button', { name: 'Archive routing form' })
+    expect(main.getByRole('heading', { name: 'Edit routing form' })).toBeTruthy()
     const created = api.to(create)[0]?.body as Schemas['CreateRoutingForm']
     expect(created).toMatchObject({
       title: form.title,
@@ -93,7 +116,7 @@ describe('Routing form management', () => {
     })
     expect(screen.getByTestId('location').textContent).toBe(routingFormPath(id, ME.organization.id))
 
-    const question = await main.findByRole('textbox', { name: 'Question' })
+    const question = main.getByRole('textbox', { name: 'Question' })
     await user.clear(question)
     await user.type(question, 'Organization')
     await user.click(main.getByRole('button', { name: 'Save draft' }))
@@ -166,8 +189,6 @@ describe('Routing form management', () => {
       [list]: () => json(200, { data: [form], nextCursor: null }),
     })
     renderApp(PATHS.routingForms)
-    await screen.findByRole('heading', { name: 'Routing forms' })
-    const main = screen.getByRole('main')
     const heading =
       '<header class="page-intro"><div class="page-header"><h1>Routing forms</h1></div></header>'
     if (role === 'member') {
@@ -178,14 +199,14 @@ describe('Routing form management', () => {
       ).toBeTruthy()
       expect(api.to(list)).toHaveLength(0)
       expect(screen.queryByRole('link', { name: 'Routing forms' })).toBeNull()
-      expect(main.innerHTML).toBe(
+      expect(screen.getByRole('main').innerHTML).toBe(
         `${heading}<p class="alert alert-error" role="alert" data-testid="routing-forms-denied">Only team owners and admins can manage routing forms in this space.</p>`,
       )
     } else {
-      const row = await within(main).findByRole('link', { name: form.title })
+      const row = await screen.findByRole('link', { name: form.title })
       expect(row.getAttribute('href')).toBe(routingFormPath(id, team.id))
       expect(api.to(list)[0]?.headers.get('X-Expected-Organization-Id')).toBe(team.id)
-      expect(main.innerHTML).toBe(
+      expect(screen.getByRole('main').innerHTML).toBe(
         `${heading}<div class="form-actions"><a class="button button-primary" href="${PATHS.newRoutingForm}" data-discover="true">New routing form</a></div><ul class="card-list plain-list" data-testid="routing-forms-list"><li class="panel card-item"><div class="card-main"><h2 class="card-title"><a class="user-content" href="${routingFormPath(id, team.id)}" data-discover="true">${form.title}</a></h2><p class="muted user-content">${form.slug}</p></div></li></ul>`,
       )
     }
@@ -221,10 +242,10 @@ describe('Routing form management', () => {
         } satisfies Schemas['RoutingFormPreview']),
     })
     renderApp(PATHS.routingForms)
-    await screen.findByRole('heading', { name: 'Routing forms' })
+    const detail = await screen.findByRole('link', { name: form.title })
     const main = within(screen.getByRole('main'))
     const user = userEvent.setup()
-    const detail = await main.findByRole('link', { name: form.title })
+    expect(main.getByRole('heading', { name: 'Routing forms' })).toBeTruthy()
     expect(main.queryByRole('link', { name: 'New routing form' })).toBeNull()
     await user.click(detail)
     const title = await main.findByRole<HTMLInputElement>('textbox', { name: 'Title' })
@@ -306,7 +327,8 @@ describe('Routing form management', () => {
       await screen.findByText('Could not confirm creation. Try again to recover this draft.'),
     ).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Save draft' }))
-    expect(await screen.findByRole('heading', { name: 'Edit routing form' })).toBeTruthy()
+    await screen.findByRole('button', { name: 'Archive routing form' })
+    expect(screen.getByRole('heading', { name: 'Edit routing form' })).toBeTruthy()
     expect(api.to(create)[0]?.body).toEqual(api.to(create)[2]?.body)
   })
 })
