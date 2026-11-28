@@ -1131,14 +1131,36 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 219-operation contract and all 657 scope combinations', () => {
-      const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(219)
-      expect(new Set(ids).size).toBe(219)
-      expect([...ids].sort()).toEqual(
-        API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
+    it('covers every registered REST operation with every scope', () => {
+      // Hono includes middleware and repeats an operation for each of its handlers.
+      const registered = new Set(
+        app.routes
+          .filter(
+            ({ method, path }) =>
+              method !== 'ALL' && (path === '/api/v1' || path.startsWith('/api/v1/')),
+          )
+          .map(({ method, path }) => `${method} ${path.replace(/:([A-Za-z0-9_]+)/g, '{$1}')}`),
       )
-      expect(cases).toHaveLength(657)
+      const expected = [...registered].sort()
+      const classified: string[] = Object.values(classes).flat().sort()
+      expect(
+        expected.filter((operation) => !classified.includes(operation)),
+        'REST operations missing an explicit scope classification',
+      ).toEqual([])
+      expect(classified, 'Scope classifications must match registered REST operations').toEqual(
+        expected,
+      )
+      expect(
+        API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
+        'The scope policy must match registered REST operations',
+      ).toEqual(expected)
+      expect(
+        cases.map(({ operation, scope }) => `${scope} ${operation}`).sort(),
+        'The matrix must exercise every registered REST operation with every scope',
+      ).toEqual(
+        expected.flatMap((operation) => scopes.map((scope) => `${scope} ${operation}`)).sort(),
+      )
+      expect(cases).toHaveLength(registered.size * scopes.length)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
