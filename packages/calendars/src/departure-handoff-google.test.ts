@@ -3,7 +3,7 @@ import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import type { EnqueueOptions } from '@hourmere/jobs'
 import type { BookingNotifier } from '@hourmere/scheduling'
 import { sql } from 'kysely'
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { readDepartureHandoffAdminPreview } from '../../scheduling/src/departure-handoff-admin.ts'
 import { applyDepartureHandoff } from '../../scheduling/src/departure-handoff-apply.ts'
 import {
@@ -175,6 +175,39 @@ describe.skipIf(!databaseUrl)('departure handoff Google lifecycle (real Postgres
   const callsFor = (name: string) =>
     google.calls.filter(({ url }) => url.pathname.includes(`/${name}-calendar/`))
 
+  it('leaves a Google copy to handoff cleanup when cancellation commits during writeback', async () => {
+    const staged = await stage()
+    const source = staged.booking.id
+    await writeBookingCalendar(work, source)
+    const callsBefore = google.calls.length
+
+    // The ordinary worker has read the confirmed chain before opening its Google target
+    // transaction. Commit the handoff at that boundary so the inner read sees cancellation.
+    const apply = vi.fn(staged.apply)
+    const transaction = db.transaction.bind(db)
+    const boundary = vi.spyOn(db, 'transaction').mockImplementationOnce(() => {
+      const builder = transaction()
+      const execute = builder.execute.bind(builder)
+      builder.execute = async (callback) => {
+        await apply()
+        return execute(callback)
+      }
+      return builder
+    })
+    try {
+      await writeBookingCalendar(work, source)
+    } finally {
+      boundary.mockRestore()
+    }
+
+    expect(apply).toHaveBeenCalledOnce()
+    expect(await staged.receipt()).toMatchObject({ oldConferenceCleanup: 'pending' })
+    expect([...google.controls.storedEvents.values()]).toMatchObject([
+      { iCalUID: `${source}@hourmere`, status: 'confirmed' },
+    ])
+    expect(google.calls.length).toBe(callsBefore)
+  })
+
   it('reconciles lost cancellation acknowledgements under the original pinned account', async () => {
     const staged = await stage()
     const source = staged.booking.id
@@ -261,6 +294,58 @@ describe.skipIf(!databaseUrl)('departure handoff Google lifecycle (real Postgres
       .where('id', '=', staged.original.connectionId)
       .execute()
     expect(await staged.receipt()).toMatchObject({ oldConferenceCleanup: 'unresolved' })
+  })
+
+  it('leaves a Google copy unresolved when its pinned account belongs to an earlier host', async () => {
+    const staged = await stage()
+    const source = staged.booking.id
+    const eventId = 'earlier-host-event'
+    const { id: root } = await db
+      .insertInto('bookings')
+      .values({
+        organization_id: staged.team.id,
+        event_type_id: staged.eventTypeId,
+        title: 'Earlier booking',
+        source: 'web',
+        start_at: now().add({ hours: 2 }).toString(),
+        end_at: now().add({ hours: 2, minutes: 30 }).toString(),
+        status: 'cancelled',
+        cancelled_at: now().toString(),
+        required_host_user_ids: [staged.candidate.id],
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await db
+      .insertInto('booking_hosts')
+      .values({ booking_id: root, user_id: staged.candidate.id })
+      .execute()
+    await db
+      .updateTable('bookings')
+      .set({ rescheduled_from_id: root })
+      .where('id', '=', source)
+      .execute()
+    await db
+      .insertInto('booking_calendar_events')
+      .values({
+        booking_id: root,
+        calendar_id: staged.successor.calendarId,
+        external_event_id: eventId,
+      })
+      .execute()
+    google.controls.storedEvents.set(eventId, {
+      id: eventId,
+      iCalUID: `${root}@hourmere`,
+      status: 'confirmed',
+      etag: '"v1"',
+    })
+
+    await staged.apply()
+    expect(await staged.receipt()).toMatchObject({ oldConferenceCleanup: 'pending' })
+    await writeBookingCalendar(work, source)
+
+    expect(google.calls).toHaveLength(0)
+    expect(await staged.receipt()).toMatchObject({ oldConferenceCleanup: 'unresolved' })
+    expect(google.controls.storedEvents.get(eventId)).toMatchObject({ status: 'confirmed' })
   })
 
   it('retries an empty lookup after an old import response is lost', async () => {

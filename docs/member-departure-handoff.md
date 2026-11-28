@@ -291,8 +291,10 @@ ordinary cancellation and confirmation for two independent booking chains. If th
 uncertain, refresh to see the committed receipt before trying again. The receipt reports
 meeting readiness and old cleanup status when available. Pending or failed provider work
 leaves the booking changes committed. The corresponding provider account owner can follow
-the ordinary recovery process for that account. The administrator sees no join links,
-provider identifiers or credentials in the handoff results.
+the ordinary recovery process for that account. If a calendar connection was removed
+before the handoff, that account's owner must delete any remaining copies in that calendar.
+The administrator sees no join links, provider identifiers or credentials in the handoff
+results.
 
 The staged GET is `/api/v1/team/bookings/{id}/handoff-preview`. Apply uses
 `POST /api/v1/team/bookings/{id}/handoff-offers/{offerId}/apply` and the exact offer
@@ -356,6 +358,7 @@ calendar attachments and rollout remain pending.
 
 交接提交后，后台任务使用原主持人固定的账户和日历清理旧条目，并在接任主持人符合资格时写入新条目。
 如果原授权已撤销或无法核验清理结果，交接回执会提示原账户所有者检查日历或会议。新预约仍保持确认。
+如果日历连接在交接前已被移除，该账户的所有者必须删除该日历中仍保留的副本。
 
 Provider cleanup and creation reuse existing workers. Google Calendar, Meet, Outlook, Teams
 and Zoom handoffs use real PostgreSQL and fake providers for lifecycle acceptance, including

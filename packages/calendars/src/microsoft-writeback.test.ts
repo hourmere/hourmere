@@ -694,6 +694,38 @@ describe.skipIf(!process.env.DATABASE_URL)(
         },
       )
 
+      it('looks up and deletes a previously written Outlook copy whose mapping was lost', async () => {
+        const handoff = await setup(false)
+        const sourceId = handoff.booking.id
+        await work({ bookingId: sourceId })
+        expect(await pinned(sourceId)).toMatchObject({
+          microsoft_writeback: { status: 'succeeded' },
+        })
+        expect(await mappings(sourceId)).toMatchObject([{ external_event_id: eventId }])
+        const transactionId = provider.posts()[0]?.transactionId
+        expect(transactionId).toBeDefined()
+
+        await handoff.apply()
+        await db
+          .deleteFrom('booking_calendar_events')
+          .where('booking_id', '=', sourceId)
+          .where('calendar_id', '=', handoff.source.calendarId)
+          .execute()
+        expect(await handoff.receipt()).toMatchObject({ oldConferenceCleanup: 'pending' })
+
+        const callCount = provider.calls.length
+        await work({ bookingId: sourceId })
+
+        const destination = { calendar: oldCalendarName, authorization: `Bearer ${oldAccess}` }
+        expect(provider.calls.slice(callCount)).toEqual([
+          { ...destination, method: 'GET', transactionId },
+          expect.objectContaining({ ...destination, method: 'GET', id: eventId, transactionId }),
+          expect.objectContaining({ ...destination, method: 'DELETE', id: eventId, ifMatch: etag }),
+        ])
+        expect(provider.events.size).toBe(0)
+        expect(await handoff.receipt()).toMatchObject({ oldConferenceCleanup: 'complete' })
+      })
+
       it('keeps cleanup unresolved after revocation and retries only with the original account', async () => {
         const handoff = await setup()
         const sourceId = handoff.booking.id
