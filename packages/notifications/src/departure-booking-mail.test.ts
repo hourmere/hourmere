@@ -1,7 +1,7 @@
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs } from '@hourmere/jobs'
-import type { MailMessage } from '@hourmere/mail'
+import { createLogMailer, type MailMessage } from '@hourmere/mail'
 import { applyDepartureHandoff } from '@hourmere/scheduling/departure-handoff-admin'
 import { createFixtures } from '@hourmere/scheduling/testing'
 import ICAL from 'ical.js'
@@ -104,7 +104,7 @@ describe.skipIf(!databaseUrl)('departure handoff booking mail in PostgreSQL', ()
 
   beforeAll(async () => {
     owned = await createTestDatabase(databaseUrl as string, undefined, {
-      tag: 'handoff_booking_mail',
+      tag: 'handoff_mail',
     })
     owned.pool.options.max = 6
     db = createDb(owned.pool)
@@ -194,7 +194,7 @@ describe.skipIf(!databaseUrl)('departure handoff booking mail in PostgreSQL', ()
       .insertInto('profiles')
       .values({
         user_id: userId,
-        handle: `teams-${userId}`,
+        handle: `teams-${userId.slice(0, 8)}-${userId.slice(-12)}`,
         time_zone: 'UTC',
         destination_calendar_id: calendarId,
       })
@@ -380,6 +380,23 @@ describe.skipIf(!databaseUrl)('departure handoff booking mail in PostgreSQL', ()
     const jobs = await queued(sourceId, replacementBookingId)
     const cancellation = requireJob(jobs, sourceId, 'cancelled')
     const confirmation = requireJob(jobs, replacementBookingId, 'confirmed')
+    const print = vi.fn()
+    const sink = bookingNotificationJob({
+      db,
+      now,
+      publicUrl: 'https://hourmere.example.test',
+      secret: 'synthetic-notification-secret',
+      mailer: createLogMailer(print),
+    })
+    for (const job of [cancellation, confirmation]) {
+      await sink.handler(sink.payload.parse(job.data), {
+        id: job.id,
+        attempt: 1,
+        signal: new AbortController().signal,
+      })
+    }
+    expect(print).not.toHaveBeenCalled()
+    expect(await organizerPin(replacementBookingId)).toMatchObject({ ical_organizer_email: null })
     const worker = mail(newSender)
     await worker.run(cancellation.data, cancellation.id)
     expect(worker.sent.map(({ to }) => to)).toEqual([fixture.departing.email, ...attendees])
@@ -394,9 +411,11 @@ describe.skipIf(!databaseUrl)('departure handoff booking mail in PostgreSQL', ()
       ical_organizer_name: null,
     })
     worker.sent.length = 0
-    await worker.run(confirmation.data, confirmation.id)
+    // A provider can release confirmation later, with only the booking ID and kind.
+    await worker.run({ bookingId: replacementBookingId, kind: 'confirmed' })
     const replacement = worker.sent.find(({ to }) => to === attendees[0])
     if (!replacement) throw new Error('Missing replacement invitation')
+    expect(replacement.subject).toMatch(/^Host changed · /)
     expect(calendar(replacement)).toMatchObject({
       method: 'REQUEST',
       uid: `${replacementBookingId}@hourmere`,

@@ -1018,25 +1018,26 @@ async function deliverBookingNotification(
       ? { name: data.root.ical_organizer_name, email: data.root.ical_organizer_email }
       : undefined
   const plainText = handoff === 'source' && !calendarOrganizer
-  const modern =
-    data.root.ical_version === 2 && Boolean(calendarOrganizer || deps.mailer.senderEmail)
+  const senderEmail = deps.mailer.senderEmail
+  const modern = data.root.ical_version === 2 && Boolean(calendarOrganizer || senderEmail)
   if (
     !plainText &&
     !calendarOrganizer &&
     organizer &&
     kind !== 'reminder' &&
     kind !== 'conference_failed' &&
-    deps.mailer.senderEmail
+    (senderEmail || handoff === 'replacement')
   ) {
     // A collective root never pins a host address, even a legacy (v1) one first sent now.
-    const candidate = data.collective
-      ? {
-          name:
-            hosts.find((h) => h.id === organizer.id)?.displayName ||
-            bookingHostName(bookingLanguage),
-          email: deps.mailer.senderEmail,
-        }
-      : { name: organizer.name, email: modern ? deps.mailer.senderEmail : organizer.email }
+    const candidate =
+      data.collective && senderEmail
+        ? {
+            name:
+              hosts.find((h) => h.id === organizer.id)?.displayName ||
+              bookingHostName(bookingLanguage),
+            email: senderEmail,
+          }
+        : { name: organizer.name, email: modern && senderEmail ? senderEmail : organizer.email }
     calendarOrganizer = await pinCalendarOrganizer(deps.db, data.root.id, candidate)
   }
   if (!plainText) calendarOrganizer ??= organizer

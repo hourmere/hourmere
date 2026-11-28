@@ -17,9 +17,12 @@ import type { ServiceContext } from './context.ts'
 import { lockDepartureHandoffSource } from './departure-handoff-delivery.ts'
 import { DomainError } from './errors.ts'
 
-export interface DepartureHandoffSourceInput {
+export interface DepartureHandoffTeamInput {
   teamId: string
   expectedOrganizationId: string
+}
+
+export interface DepartureHandoffSourceInput extends DepartureHandoffTeamInput {
   bookingId: string
 }
 
@@ -45,6 +48,52 @@ function rethrowTeamManagementError(error: unknown): never {
   )
 }
 
+type TeamWriteContext = Pick<
+  DepartureHandoffWriteContext,
+  'lockOrganizationContext' | 'scimResourcesEnabled'
+> & { principal: Parameters<typeof checkTeamManagementAccess>[1] }
+
+export async function lockDepartureHandoffTeam(
+  trx: Transaction<Database>,
+  ctx: TeamWriteContext,
+  input: DepartureHandoffTeamInput,
+  ssoCapabilities: TeamSsoCapabilities,
+  organizationLock: 'share' | true = 'share',
+) {
+  if (ctx.principal.kind !== 'session')
+    throw new DomainError('forbidden', 'team_management_access_denied')
+  const capabilities = withScimResources(
+    ssoCapabilities,
+    ctx.scimResourcesEnabled || ctx.principal.scimResourcesEnabled,
+  )
+  const principal = capabilities.scimResourcesEnabled
+    ? { ...ctx.principal, scimResourcesEnabled: true as const }
+    : ctx.principal
+  await ctx.lockOrganizationContext?.(trx)
+  const manager = await checkTeamManagementAccess(trx, principal, input.teamId, organizationLock, {
+    expectedOrganizationId: input.expectedOrganizationId,
+    allowPersonal: false,
+  }).catch(rethrowTeamManagementError)
+  recordTeamWriteOrganizationLock(trx, manager.organizationId)
+  const actor = { userId: manager.userId, sessionId: principal.sessionId }
+  const deadline = await lockSharedTeamSsoProof(
+    trx,
+    capabilities,
+    actor,
+    manager.organizationId,
+    ssoRequired,
+  )
+  return {
+    actor,
+    organizationId: manager.organizationId,
+    scimResourcesEnabled: capabilities.scimResourcesEnabled,
+    async checkDeadline() {
+      await checkTeamWriteDeadline(trx, deadline, ssoRequired)
+      await teamSession(trx, principal, false).catch(rethrowTeamManagementError)
+    },
+  }
+}
+
 /** Keep proposal and apply on the same current team-management boundary. */
 export function withDepartureHandoffWrite<T>(
   ctx: DepartureHandoffWriteContext,
@@ -59,41 +108,23 @@ export function withDepartureHandoffWrite<T>(
 ): Promise<T> {
   if (ctx.principal.kind !== 'session')
     return Promise.reject(new DomainError('forbidden', 'team_management_access_denied'))
-  const capabilities = withScimResources(
-    ssoCapabilities,
-    ctx.scimResourcesEnabled || ctx.principal.scimResourcesEnabled,
-  )
-  const principal = capabilities.scimResourcesEnabled
-    ? { ...ctx.principal, scimResourcesEnabled: true as const }
-    : ctx.principal
-
   return teamWriteTransaction(
     ctx.db.transaction().setIsolationLevel('read committed'),
     async (trx) => {
-      await ctx.lockOrganizationContext?.(trx)
-      const actor = await checkTeamManagementAccess(trx, principal, input.teamId, 'share', {
-        expectedOrganizationId: input.expectedOrganizationId,
-        allowPersonal: false,
-      }).catch(rethrowTeamManagementError)
-      recordTeamWriteOrganizationLock(trx, actor.organizationId)
-      const deadline = await lockSharedTeamSsoProof(
-        trx,
-        capabilities,
-        { userId: principal.user.id, sessionId: principal.sessionId },
-        actor.organizationId,
-        ssoRequired,
-      )
-      const source = await lockDepartureHandoffSource(trx, actor.organizationId, input.bookingId)
+      const team = await lockDepartureHandoffTeam(trx, ctx, input, ssoCapabilities)
+      const source = await lockDepartureHandoffSource(trx, team.organizationId, input.bookingId)
       if (!source) throw handoffBookingNotFound()
 
+      const principal = team.scimResourcesEnabled
+        ? { ...ctx.principal, scimResourcesEnabled: true as const }
+        : ctx.principal
       const result = await write(
-        { ...ctx, db: trx, principal, scimResourcesEnabled: capabilities.scimResourcesEnabled },
-        { organizationId: actor.organizationId, sourceBookingId: source.id },
-        { userId: actor.userId, sessionId: principal.sessionId },
+        { ...ctx, db: trx, principal, scimResourcesEnabled: team.scimResourcesEnabled },
+        { organizationId: team.organizationId, sourceBookingId: source.id },
+        team.actor,
         source,
       )
-      await checkTeamWriteDeadline(trx, deadline, ssoRequired)
-      await teamSession(trx, principal, false).catch(rethrowTeamManagementError)
+      await team.checkDeadline()
       return result
     },
   )

@@ -18,6 +18,7 @@ import {
   resendDepartureHandoffProposal,
   withdrawDepartureHandoffProposal,
 } from '@hourmere/scheduling/departure-handoff-proposals'
+import type { EnqueueDepartureHandoffRun } from '@hourmere/scheduling/departure-handoff-queue'
 import type { MiddlewareHandler } from 'hono'
 import { routeBodyLimit } from '../body-limit.ts'
 import type { CallerEnv } from '../caller.ts'
@@ -39,6 +40,7 @@ import {
 export interface DepartureHandoffs {
   store: DepartureHandoffAdminStore
   enqueue?: EnqueueDepartureHandoffEmail | undefined
+  enqueueRun?: EnqueueDepartureHandoffRun | undefined
   now?: () => Temporal.Instant
 }
 

@@ -344,8 +344,9 @@ input with `--input -`.
 The page clears the fragment before requesting the offer. It and the API responses
 are served with no-store and no-referrer headers. Offer and answer operations share
 a rate limit of 30 requests per minute per trusted IP bucket on each server process.
-Production admission remains off, and handoff-specific replacement notifications,
-calendar attachments and rollout remain pending.
+Production admission remains off. A committed handoff queues localized notices for both
+bookings. Administrators can refresh the receipt to check email acceptance. See
+[staged booking handoff mail](notifications.md#staged-booking-handoff-mail).
 
 中文：预发布管理员可创建、查看、撤回和换版交接提议，也可向尚未决定的收件人重发私密链接。
 同一源预约的每个规范化邮箱最多发送三次，包含首发和送达不确定的尝试。重试同一请求时请沿用
@@ -355,7 +356,45 @@ calendar attachments and rollout remain pending.
 链接过期、被撤回、换版或已经使用时，页面统一提示联系发件团队。
 Provider cleanup and creation reuse existing workers. Zoom lost-response recovery is
 exercised with a fake, and handoff-specific Google and Microsoft lifecycle acceptance remains
-open. Bounded automatic handoff is a separate follow-on.
+open.
+
+### Staged automatic handoff runs
+
+After a host has left, a current team owner or administrator can start a run for that
+host. Pass a fresh UUID as `runId` and the former host's account ID as `departingUserId`
+to `POST /api/v1/team/bookings/handoff-runs`. Read the receipt at
+`GET /api/v1/team/bookings/handoff-runs/{runId}`. Use `POST` to the same path with
+`/control` appended and an `action` of `pause`, `resume` or `stop`. All operations require
+the browser's current team session and `X-Expected-Organization-Id`. Writes require a
+same-origin request. The routes and background processing remain disabled in production.
+
+A run records up to ten live proposals that already have every recorded recipient's
+approval, starting with the earliest expiry. It reuses those offers and their prior link
+deliveries. The worker processes one saved version per transaction, with at least ten seconds
+between attempts. One run per team can be running or paused, and new runs start at least
+one minute apart. Repeating the start with the same run ID and departing host returns the
+existing receipt. A worker restart resumes from the same saved versions. A manual apply
+that won the source lock can supply the same committed receipt without creating a second
+replacement. Each apply rechecks the complete recipient set, saved terms, slot and current
+authority. The original booking keeps its saved host and identity.
+
+Pause and stop take effect after any transaction already in flight. Resume keeps the
+same items and uses the resuming administrator's current session. Before each item, the
+worker checks that the former host is still absent and the authorizing session still has
+access. The run has a 30-minute deadline, including time paused. A completed run reports each item as applied,
+ineligible or processing failed. A stopped or failed run marks the remaining items stopped.
+Review any unapplied item in Team bookings and use the existing single-booking handoff or
+manual recovery flow. Some bookings may have been outside the run or missing approvals.
+Receipts are retained for seven days and contain only stored IDs, versions and status codes.
+The team journal records run starts, pauses, resumes and terminal transitions.
+
+中文：主持人离队后，当前团队所有者或管理员可在预发布流程显式启动一轮交接。每轮最多处理十笔
+已经获得全部参与者同意的有效提议，逐笔提交，间隔至少十秒。同一团队同时只能有一轮运行或暂停，
+新一轮启动间隔至少一分钟。每轮有三十分钟期限，包含暂停时间。用同一运行编号重试启动会取回
+原回执。暂停或停止会在下一笔前生效。恢复会沿用原提议版本，并复核当前管理员的会话权限。
+原主持人重新加入团队或会话失去权限时，本轮停止处理。请逐笔查看回执，用原有单笔交接或人工
+恢复流程处理未完成的预约。未获同意和超出本轮上限的预约需另行处理。原预约保留原主持人及
+原预约链身份。回执保留七天，生产入口和后台作业仍关闭。
 
 | Step | Deliverable and acceptance |
 | --- | --- |
@@ -391,7 +430,7 @@ those bookings and leaves their ordinary booking flows in place.
 界面禁止确认。确认时在锁内重新复核。提交结果不确定时，先刷新查看回执，再决定是否重试。
 提交后，外部会议仍可处于待创建或失败状态，由对应主持人使用原有恢复流程处理。
 预发布已提供提议生命周期、确认链接投递和参与者页面及接口。生产功能保持关闭。
-交接专用邮件、日历附件及上线启用留待后续阶段。
+交接提交后，系统会排队发送原预约取消邮件和新预约确认邮件，管理员可刷新回执查看投递状态。
 旧会议的取消沿用原 ICS UID 与原日历组织者，新邀请使用新 UID。Google Meet 和 Zoom
 按各自预约链的固定组织者身份处理。Outlook 和 Teams 按旧链固定的写回状态清理，新 Teams
 会议要求实例启用 Microsoft 日历，并复核接任主持人的写入资格。任一条件不满足时返回
