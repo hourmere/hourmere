@@ -97,6 +97,8 @@ async function row() {
   return within(tr)
 }
 const detail = () => within(screen.getByRole('region', { name: 'Team booking details' }))
+const findDetail = async () =>
+  within(await screen.findByRole('region', { name: 'Team booking details' }))
 
 describe('team bookings list no-show controls', () => {
   it('keeps a row change and the open details in step both ways', async () => {
@@ -110,6 +112,7 @@ describe('team bookings list no-show controls', () => {
     const cells = await row()
     await user.click(cells.getByRole('button', { name: 'Mark Grace Hopper as a no-show' }))
     await user.click(cells.getByRole('button', { name: 'Team discovery call' }))
+    const panel = await findDetail()
     await pending.answer(
       json(200, {
         attendeeId: GRACE,
@@ -118,7 +121,7 @@ describe('team bookings list no-show controls', () => {
       }),
     )
     expect(
-      await detail().findByRole('button', { name: 'Clear no-show for Grace Hopper' }),
+      await panel.findByRole('button', { name: 'Clear no-show for Grace Hopper' }),
     ).toBeTruthy()
     expect(detail().getByText('No-show')).toBeTruthy()
     expect(cells.getByText('No-show')).toBeTruthy()
@@ -157,7 +160,8 @@ describe('team bookings list no-show controls', () => {
     const button = cells.getByRole('button', { name: 'Mark Grace Hopper as a no-show' })
     expect((button as HTMLButtonElement).disabled).toBe(true)
     await user.click(cells.getByRole('button', { name: 'Team discovery call' }))
-    const inDetail = detail().getByRole('button', { name: 'Mark Grace Hopper as a no-show' })
+    const panel = await findDetail()
+    const inDetail = panel.getByRole('button', { name: 'Mark Grace Hopper as a no-show' })
     expect((inDetail as HTMLButtonElement).disabled).toBe(true)
     expect(api.to(NO_SHOW)).toHaveLength(1)
   })
@@ -186,8 +190,9 @@ it('keeps row and details synchronized when a pending next page arrives after ma
   const cells = await row()
   await userEvent.click(screen.getByRole('button', { name: 'Show more bookings' }))
   await userEvent.click(cells.getByRole('button', { name: 'Team discovery call' }))
-  await userEvent.click(detail().getByRole('button', { name: 'Mark Grace Hopper as a no-show' }))
-  await detail().findByRole('button', { name: 'Clear no-show for Grace Hopper' })
+  const panel = await findDetail()
+  await userEvent.click(panel.getByRole('button', { name: 'Mark Grace Hopper as a no-show' }))
+  await panel.findByRole('button', { name: 'Clear no-show for Grace Hopper' })
   await pending.answer(json(200, { data: [], nextCursor: null }))
   expect(cells.getByText('No-show')).toBeTruthy()
   expect(
@@ -243,7 +248,8 @@ it('shares one pending write lock between a row and its details', async () => {
   const cells = await row()
   await userEvent.click(cells.getByRole('button', { name: 'Mark Grace Hopper as a no-show' }))
   await userEvent.click(cells.getByRole('button', { name: 'Team discovery call' }))
-  const detailButton = detail().getByRole('button', { name: 'Mark Grace Hopper as a no-show' })
+  const panel = await findDetail()
+  const detailButton = panel.getByRole('button', { name: 'Mark Grace Hopper as a no-show' })
   expect((detailButton as HTMLButtonElement).disabled).toBe(true)
   await userEvent.click(detailButton)
   expect(api.to(NO_SHOW)).toHaveLength(1)
@@ -296,10 +302,11 @@ it('applies a late detail mark after closing details and refreshing through anot
   renderApp(PAGE)
   const cells = await row()
   await userEvent.click(cells.getByRole('button', { name: 'Team discovery call' }))
-  await userEvent.click(detail().getByRole('button', { name: 'Mark Grace Hopper as a no-show' }))
+  const panel = await findDetail()
+  await userEvent.click(panel.getByRole('button', { name: 'Mark Grace Hopper as a no-show' }))
   await userEvent.click(screen.getByRole('button', { name: 'Close details' }))
   await userEvent.click(screen.getByRole('button', { name: 'Future call' }))
-  await userEvent.click(screen.getByRole('button', { name: 'Cancel booking…' }))
+  await userEvent.click(await screen.findByRole('button', { name: 'Cancel booking…' }))
   await userEvent.click(screen.getByRole('button', { name: 'Cancel booking' }))
   await screen.findByText('The booking is cancelled.')
   // The panel preserves existing rows during refresh; row() alone can still return

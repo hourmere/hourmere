@@ -1,9 +1,13 @@
 import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { AppShell, RequireSession, SessionLayout, SsoSetupPage } from '../../lazy-pages.tsx'
 import { PATHS } from '../../paths.ts'
 import { fakeApi, json, ME, type Routes, renderApp, signedInAs } from '../../test/fake-api.tsx'
+import { resolveLazy } from '../../test/resolve-lazy.ts'
 import type { SsoDomain, SsoProvider } from './setup.ts'
+
+beforeAll(() => resolveLazy(SessionLayout, RequireSession, AppShell, SsoSetupPage))
 
 const team = {
   ...ME.organization,
@@ -63,8 +67,7 @@ function renderDomains(routes: Routes = {}) {
 }
 
 async function enterDomain(user: ReturnType<typeof userEvent.setup>) {
-  // Initial navigation loads the signed-in frame and the setup page in separate chunks.
-  const input = await screen.findByRole('textbox', { name: 'Domain name' }, { timeout: 3000 })
+  const input = await screen.findByRole('textbox', { name: 'Domain name' })
   await user.type(input, domain.name)
   await user.click(screen.getByRole('button', { name: 'Generate DNS challenge' }))
   return screen.findByRole('region', { name: 'DNS TXT record' })

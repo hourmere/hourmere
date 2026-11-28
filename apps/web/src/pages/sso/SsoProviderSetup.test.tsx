@@ -1,7 +1,8 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import type { Schemas } from '../../api/client.ts'
+import { AppShell, RequireSession, SessionLayout, SsoSetupPage } from '../../lazy-pages.tsx'
 import { PATHS } from '../../paths.ts'
 import {
   fakeApi,
@@ -14,7 +15,10 @@ import {
   renderApp,
   signedInAs,
 } from '../../test/fake-api.tsx'
+import { resolveLazy } from '../../test/resolve-lazy.ts'
 import type { SsoProvider } from './setup.ts'
+
+beforeAll(() => resolveLazy(SessionLayout, RequireSession, AppShell, SsoSetupPage))
 
 const organization = {
   id: '00000000-0000-7000-8000-000000000010',
@@ -98,8 +102,7 @@ describe('SSO provider setup', () => {
     })
     const user = userEvent.setup()
     renderApp(PATHS.sso)
-    // Wait for the signed-in frame and the lazy setup route on the initial visit.
-    const add = await screen.findByRole('button', { name: 'Add provider' }, { timeout: 3000 })
+    const add = await screen.findByRole('button', { name: 'Add provider' })
     await user.click(add)
     const form = within(screen.getByRole('form', { name: 'Add OIDC provider' }))
     await user.type(form.getByLabelText('Display name'), created.displayName)

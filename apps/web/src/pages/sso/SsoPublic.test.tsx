@@ -1,13 +1,17 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Link, MemoryRouter, useLocation } from 'react-router'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { App } from '../../App.tsx'
 import { goTo, replaceWith } from '../../browser.ts'
+import { MailboxProofPage, SessionLayout, SignInPage } from '../../lazy-pages.tsx'
 import { PATHS } from '../../paths.ts'
 import { fakeApi, json, later, renderApp, signedOut } from '../../test/fake-api.tsx'
+import { resolveLazy } from '../../test/resolve-lazy.ts'
 
 vi.mock('../../browser.ts', () => ({ goTo: vi.fn(), replaceWith: vi.fn() }))
+
+beforeAll(() => resolveLazy(SessionLayout, SignInPage, MailboxProofPage))
 
 const providerId = '00000000-0000-7000-8000-000000000010'
 const secondProviderId = '00000000-0000-7000-8000-000000000011'
