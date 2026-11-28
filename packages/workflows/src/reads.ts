@@ -10,9 +10,8 @@
 // `workflows_disabled` while workflows are off. The unguarded services are the internal entry
 // points that tests call directly with injected dependencies, as hard-off.ts describes.
 
-import type { Principal } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
-import { allowsManagedTeamOperations } from '@hourmere/scheduling'
+import { allowsManagedTeamOperations, type ServiceContext } from '@hourmere/scheduling'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { derivePurposeKey, openSecret, sealSecret } from '@hourmere/scheduling/sealed-secret'
 import { sql } from 'kysely'
@@ -50,7 +49,7 @@ export interface WorkflowReader {
 
 export interface WorkflowReadContext {
   db: Db
-  principal: WorkflowReader | Principal
+  principal: WorkflowReader | ServiceContext['principal']
 }
 
 /** A definition as the reads return it: its current revision and the live enabled flag. */

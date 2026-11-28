@@ -52,19 +52,31 @@ const slackUrl = (team: string) =>
   `https://hooks.slack.com/services/T${team}/BUPGRADE/private-upgrade-secret`
 
 /** Bridge current authorization reads only while invoking services against the old schema. */
-async function withCurrentScimReads<T>(db: Db, write: () => Promise<T>): Promise<T> {
-  // The empty fixture has the columns used by the current suspension predicate. Remove it
-  // before running 0080 or comparing predecessor and fresh-install snapshots.
-  await db.schema
-    .createTable('scim_team_managed_memberships')
-    .addColumn('child_organization_id', 'uuid')
-    .addColumn('user_id', 'uuid')
-    .addColumn('suspended_at', 'timestamptz')
-    .execute()
+async function withCurrentAuthorizationStorage<T>(db: Db, write: () => Promise<T>): Promise<T> {
+  // The current services read later authorization storage and pin a SCIM token's
+  // original directory protocol. Drop the fixture tables before applying or comparing 0080.
+  await sql`
+    CREATE TABLE scim_team_managed_memberships (
+      child_organization_id uuid,
+      user_id uuid,
+      suspended_at timestamptz
+    );
+    CREATE TABLE team_member_authorizations (
+      member_id uuid PRIMARY KEY,
+      organization_id uuid,
+      user_id uuid,
+      generation integer
+    );
+    CREATE TABLE scim_token_protocol_versions (
+      token_id uuid PRIMARY KEY REFERENCES scim_token_connections(token_id) ON DELETE CASCADE,
+      protocol_version integer NOT NULL CHECK (protocol_version = 1)
+    );
+  `.execute(db)
   try {
     return await write()
   } finally {
-    await db.schema.dropTable('scim_team_managed_memberships').execute()
+    await sql`DROP TABLE scim_token_protocol_versions, team_member_authorizations,
+      scim_team_managed_memberships`.execute(db)
   }
 }
 
@@ -305,7 +317,7 @@ it.skipIf(!serverUrl)(
       await runMigrations(pool, directory)
       await seedLater(pool)
       const db = createDb(pool)
-      const { ctx, oneWebhook } = await withCurrentScimReads(db, () => writeJournal(db))
+      const { ctx, oneWebhook } = await withCurrentAuthorizationStorage(db, () => writeJournal(db))
       // One row per change above: all six webhook and all six Slack destination actions.
       expect(
         (
@@ -414,7 +426,7 @@ it.skipIf(!serverUrl)(
       expect(await records()).toEqual(before)
 
       // The application keeps writing after the upgrade, and the new check holds on both.
-      await withCurrentScimReads(db, async () => {
+      await withCurrentAuthorizationStorage(db, async () => {
         await updateWebhook(ctx, oneWebhook, { isActive: false })
         await deleteWebhook(ctx, oneWebhook)
       })

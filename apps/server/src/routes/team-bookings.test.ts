@@ -22,6 +22,7 @@ import {
   type TeamAdminBookingListPage as TeamAdminBookingPage,
 } from '@hourmere/scheduling'
 import { DomainError } from '@hourmere/scheduling/errors'
+import { allowsManagedTeamOperations } from '@hourmere/scheduling/team-permission'
 import {
   createFixtures,
   createTestTeam,
@@ -918,6 +919,7 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
     ).replace(/\bexport /g, '')
     const bindings = {
       sql,
+      allowsManagedTeamOperations,
       findPublicEventType,
       findPublicTeamEventType,
       bookingPageQuery,

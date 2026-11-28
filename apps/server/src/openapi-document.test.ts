@@ -194,6 +194,8 @@ it('attaches the team proof middleware to every private team write in the server
       'POST /api/v1/team/invitations/:invitationId/cancel',
       'POST /api/v1/team/members/:memberUserId/removal',
       'POST /api/v1/teams/:teamId/leave',
+      'PUT /api/v1/teams/:teamId/permissions-mode',
+      'POST /api/v1/teams/:teamId/permissions/renew',
       'POST /api/v1/teams/:teamId/roles',
       'PATCH /api/v1/teams/:teamId/roles/:roleId',
       'DELETE /api/v1/teams/:teamId/roles/:roleId',

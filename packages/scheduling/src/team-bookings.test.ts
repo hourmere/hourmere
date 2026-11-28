@@ -26,6 +26,7 @@ import {
   toTeamAdminBooking,
 } from './team-admin-booking.ts'
 import { getTeamAdminBooking, listTeamAdminBookings } from './team-bookings.ts'
+import { allowsManagedTeamOperations } from './team-permission.ts'
 import {
   createFixtures,
   createTestTeam,
@@ -74,6 +75,7 @@ function sourceCopy(replacement?: Replacement, pageReplacement?: Replacement): L
     'findPublicEventType',
     'findPublicTeamEventType',
     'unavailablePaidManagementIds',
+    'allowsManagedTeamOperations',
     `${compile('packages/scheduling/src/team-bookings.ts', replacement)}; return listTeamAdminBookings`,
   )(
     sql,
@@ -87,6 +89,7 @@ function sourceCopy(replacement?: Replacement, pageReplacement?: Replacement): L
     findPublicEventType,
     findPublicTeamEventType,
     unavailablePaidManagementIds,
+    allowsManagedTeamOperations,
   ) as List
   return guardCopy(list)
 }
@@ -747,7 +750,7 @@ describe.skipIf(!serverUrl)('team admin booking list', () => {
     ],
     [
       'current owner/admin role',
-      ["(!roles.includes('owner') && !roles.includes('admin'))", 'false'],
+      ["roles.includes('owner') || roles.includes('admin')", 'true'],
       async (f) => f.memberCtx,
     ],
   ]

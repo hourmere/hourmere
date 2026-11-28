@@ -155,6 +155,20 @@ const STORAGE_LAYER =
 // `list_routing_forms` or `routing_forms_disabled` is not one.
 const STORAGE_NAMES =
   /routing-storage|(?<![a-z_])(?:routing_forms|routing_form_versions|routing_form_operations|routing_target_dependencies|routing_receipts|booking_routing)(?![a-z_])/i
+const ROUTING_PERMISSION_ID = /^routing_forms\.(archive|create|preview|publish|read|update)$/
+const ROLE_DATA_DECLARATIONS: Record<string, readonly string[]> = {
+  'packages/core/src/custom-role-catalogue.ts': ['customRoleCatalogueV1'],
+  'packages/auth/src/custom-role-credentials.ts': [
+    'readKeyCustomOperations',
+    'mcpCustomOperations',
+  ],
+  'apps/server/src/mcp/team-tools.ts': ['toolOperations'],
+  'apps/web/src/pages/custom-roles/permissions.ts': [
+    'permissionAreas',
+    'permissionLabels',
+    'keyReadPermissions',
+  ],
+}
 // Configuration and publication adapters load the existing service module.
 const CONFIGURATION_SERVICES = ['packages/scheduling/src/routing-form-service.ts']
 // Step a4's target invalidation and retention, loaded by event-type updates and deletion,
@@ -308,6 +322,71 @@ function walk(root: unknown, visit: (node: SyntaxNode, parent?: SyntaxNode) => v
       if (!POSITION_KEYS.has(key) && typeof child === 'object' && child !== null)
         stack.push([child, value])
   }
+}
+
+function inRoleData(parent: SyntaxNode, node: SyntaxNode) {
+  switch (parent.type) {
+    case 'ArrayExpression':
+    case 'ObjectExpression':
+      return true
+    case 'ObjectProperty':
+      return parent.computed === false
+    case 'TSAsExpression':
+    case 'TSSatisfiesExpression':
+      return parent.expression === node
+    case 'NewExpression':
+    case 'CallExpression': {
+      if (
+        !isNode(parent.callee) ||
+        !Array.isArray(parent.arguments) ||
+        parent.arguments[0] !== node
+      )
+        return false
+      const callee = parent.callee
+      if (parent.type === 'NewExpression') return callee.name === 'Set'
+      return (
+        callee.type === 'MemberExpression' &&
+        isNode(callee.object) &&
+        callee.object.name === 'Object' &&
+        isNode(callee.property) &&
+        callee.property.name === 'freeze'
+      )
+    }
+    default:
+      return false
+  }
+}
+
+/** Ignore only known permission literals in the statically declared role data. */
+function referencesRoutingStorage(file: string, source: string) {
+  if (!STORAGE_NAMES.test(source)) return false
+  const declarations = ROLE_DATA_DECLARATIONS[file]
+  if (!declarations) return true
+  const data = new WeakSet<SyntaxNode>()
+  const literals: [number, number][] = []
+  walk(parseSource(file, source), (node, parent) => {
+    if (!parent) return
+    const declared =
+      parent.type === 'VariableDeclarator' &&
+      parent.init === node &&
+      isNode(parent.id) &&
+      typeof parent.id.name === 'string' &&
+      declarations.includes(parent.id.name)
+    if (!declared && !(data.has(parent) && inRoleData(parent, node))) return
+    data.add(node)
+    if (
+      node.type === 'StringLiteral' &&
+      typeof node.value === 'string' &&
+      ROUTING_PERMISSION_ID.test(node.value) &&
+      typeof node.start === 'number' &&
+      typeof node.end === 'number'
+    )
+      literals.push([node.start, node.end])
+  })
+  let storage = source
+  for (const [start, end] of literals.sort(([left], [right]) => right - left))
+    storage = storage.slice(0, start) + storage.slice(end)
+  return STORAGE_NAMES.test(storage)
 }
 
 // Stands for an operand whose value the scan cannot know (an identifier, a call).
@@ -651,6 +730,25 @@ describe('routing forms remain hard-off with configuration and public metadata i
       expect(STORAGE_NAMES.test(source), source).toBe(true)
     for (const source of ['list_routing_forms', 'ROUTING_FORMS_DISABLED', 'routing_forms_disabled'])
       expect(STORAGE_NAMES.test(source), source).toBe(false)
+  })
+
+  it('ignores permission data and still detects references to routing storage in the same file', () => {
+    const file = 'apps/server/src/mcp/team-tools.ts'
+    const permissions = "const toolOperations = { read: [['routing_forms.read']] }"
+    expect(referencesRoutingStorage(file, permissions)).toBe(false)
+    for (const query of [
+      "db.selectFrom('routing_forms')",
+      "db.selectFrom(['routing_forms.read'])",
+      'sql`SELECT * FROM routing_forms.read`',
+      "import './routing-storage-limits.ts'",
+    ])
+      expect(referencesRoutingStorage(file, `${permissions}\n${query}`), query).toBe(true)
+    expect(
+      referencesRoutingStorage(
+        file,
+        "const toolOperations = { read: db.selectFrom(['routing_forms.read']) }",
+      ),
+    ).toBe(true)
   })
 
   it('documents exactly the registered routing paths, operations, tags and schemas', async () => {
@@ -1091,17 +1189,7 @@ describe('routing forms remain hard-off with configuration and public metadata i
     ).toBe(true)
     const referencing = sources
       .filter((file) => !STORAGE_LAYER.test(file))
-      .filter((file) => {
-        const source = readFileSync(new URL(file, root), 'utf8')
-        if (file !== 'packages/core/src/custom-role-catalogue.ts') return STORAGE_NAMES.test(source)
-        // These standalone catalogue entries are operation IDs. Scan the rest of the file.
-        return STORAGE_NAMES.test(
-          source.replace(
-            /^\s*'routing_forms\.(archive|create|preview|publish|read|update)',\s*$/gm,
-            '',
-          ),
-        )
-      })
+      .filter((file) => referencesRoutingStorage(file, readFileSync(new URL(file, root), 'utf8')))
     // The lifecycle storage and shared services name the tables (so the matcher
     // sees them), and no other source does; which of them production loads is asserted above.
     expect([...referencing].sort()).toEqual([...STORAGE_SERVICES].sort())

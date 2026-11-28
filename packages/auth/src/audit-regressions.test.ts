@@ -255,7 +255,9 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
       expect((await post(auth, '/api-key/delete', { keyId }, actor)).status).toBe(200)
       const remove = writeStatements()
 
-      expect({ create, update, remove }).toEqual({ create: 10, update: 14, remove: 11 })
+      // Binding changes lock the team and recheck live membership. Removal remains on its
+      // existing path because it cannot expand a credential.
+      expect({ create, update, remove }).toEqual({ create: 14, update: 17, remove: 11 })
     } finally {
       queries.mockRestore()
     }
@@ -1024,13 +1026,7 @@ describe.skipIf(!serverUrl)('auth audit review regressions', () => {
   })
   it('kills a source copy omitting API key creation scope', async () => {
     await expect(
-      reenable(
-        await sourceCopy(
-          './audit.ts',
-          "details = { scope: metadata?.scope ?? 'full' }",
-          'details = {}',
-        ),
-      ),
+      reenable(await sourceCopy('./audit.ts', 'details = { scope }', 'details = {}')),
     ).rejects.toThrow(/creation scope audit detail/)
   })
 })
