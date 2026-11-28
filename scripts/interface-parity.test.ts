@@ -761,6 +761,28 @@ describe('REST, MCP and CLI write parity', () => {
     ).toEqual([])
   })
 
+  it('registers the private handoff offer and answer across all participant interfaces', async () => {
+    const inventory = await loadInterfaceInventory()
+    for (const [operationId, action, tool] of [
+      ['readBookingHandoffOffer', 'offer', 'read_booking_handoff_offer'],
+      ['answerBookingHandoffOffer', 'answer', 'answer_booking_handoff_offer'],
+    ] as const) {
+      const cli = `booking-handoff ${action}`
+      expect(inventory.rest).toContainEqual({
+        operationId,
+        method: 'post',
+        path: `/api/v1/booking-handoffs/${action}`,
+        security: [{}, { apiKey: [] }],
+      })
+      expect((checkedMapping as Record<string, unknown>)[operationId]).toEqual({
+        mcp: tool,
+        cli,
+      })
+      expect(inventory.mcp).toContain(tool)
+      expect(inventory.cli[cli]).toBe(tool)
+    }
+  })
+
   it('keeps SSO trust writes precisely session-only with no machine equivalents', async () => {
     const inventory = await loadInterfaceInventory()
     for (const [operationId, method, path] of [

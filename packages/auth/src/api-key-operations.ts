@@ -94,6 +94,8 @@ export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.fr
   rest('POST', '/api/v1/public/meeting-polls/vote', 'booking_write', 'optional_key'),
   rest('POST', '/api/v1/public/meeting-polls/withdraw', 'booking_write', 'optional_key'),
   rest('POST', '/api/v1/public/meeting-polls/reminder-opt-out', 'booking_write', 'optional_key'),
+
+  // A supplied key controls transport access. The recipient capability is always required.
   rest('POST', '/api/v1/booking-handoffs/offer', 'booking_read', 'optional_key'),
   rest('POST', '/api/v1/booking-handoffs/answer', 'booking_write', 'optional_key'),
 

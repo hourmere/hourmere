@@ -58,7 +58,6 @@ export async function lockDepartureHandoffTeam(
   ctx: TeamWriteContext,
   input: DepartureHandoffTeamInput,
   ssoCapabilities: TeamSsoCapabilities,
-  organizationLock: 'share' | true = 'share',
 ) {
   if (ctx.principal.kind !== 'session')
     throw new DomainError('forbidden', 'team_management_access_denied')
@@ -70,7 +69,7 @@ export async function lockDepartureHandoffTeam(
     ? { ...ctx.principal, scimResourcesEnabled: true as const }
     : ctx.principal
   await ctx.lockOrganizationContext?.(trx)
-  const manager = await checkTeamManagementAccess(trx, principal, input.teamId, organizationLock, {
+  const manager = await checkTeamManagementAccess(trx, principal, input.teamId, 'share', {
     expectedOrganizationId: input.expectedOrganizationId,
     allowPersonal: false,
   }).catch(rethrowTeamManagementError)

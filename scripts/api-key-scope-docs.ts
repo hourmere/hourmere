@@ -45,6 +45,10 @@ const boundaryNames = {
   session_only: 'Browser session only',
   public_metadata: 'Public; no key needed',
 } as const
+const privateHandoffOperations = new Set([
+  'POST /api/v1/booking-handoffs/offer',
+  'POST /api/v1/booking-handoffs/answer',
+])
 
 export const SCOPE_TABLE_START = '<!-- api-key-scope-table:start -->'
 export const SCOPE_TABLE_END = '<!-- api-key-scope-table:end -->'
@@ -104,7 +108,9 @@ export function renderScopeTables(
         ['Method and path', 'Authentication boundary', 'Allowed key scopes'],
         policy.rest.map((operation) => [
           code(operation.id),
-          boundaryNames[operation.authentication],
+          privateHandoffOperations.has(operation.id)
+            ? 'Private recipient token required. Validate any supplied key.'
+            : boundaryNames[operation.authentication],
           scopes(operation),
         ]),
       ),

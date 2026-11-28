@@ -184,9 +184,17 @@
     "exemption": "invitee-checkout",
     "reason": "Paid admission hands off to Stripe Checkout and returns to the original invitee browser tab."
   },
+  "previewDepartureHandoff": {
+    "exemption": "browser-session-only",
+    "reason": "A current team owner or admin previews a replacement for a team booking from the browser."
+  },
   "createDepartureHandoffProposal": {
     "exemption": "browser-session-only",
     "reason": "A current team owner or admin proposes replacement terms and dispatches private links from the browser."
+  },
+  "readDepartureHandoffProposal": {
+    "exemption": "browser-session-only",
+    "reason": "Proposal status and outstanding recipient decisions require a current team owner or admin browser session."
   },
   "withdrawDepartureHandoffProposal": {
     "exemption": "browser-session-only",
@@ -203,6 +211,10 @@
   "startDepartureHandoffRun": {
     "exemption": "browser-session-only",
     "reason": "A current team owner or admin explicitly starts a bounded run of participant-approved replacements from the browser."
+  },
+  "readDepartureHandoffRun": {
+    "exemption": "browser-session-only",
+    "reason": "Run receipts require a current team owner or admin browser session."
   },
   "controlDepartureHandoffRun": {
     "exemption": "browser-session-only",

@@ -31,7 +31,7 @@ import { etag } from 'hono/etag'
 import { createMiddleware } from 'hono/factory'
 import { HTTPException } from 'hono/http-exception'
 import { logger } from 'hono/logger'
-import { routePath } from 'hono/route'
+import { matchedRoutes, routePath } from 'hono/route'
 import { apiBodyLimit, checkBodyAsRead } from './body-limit.ts'
 import { requireCaller } from './caller.ts'
 import { clientIp, withClientIp } from './client-ip.ts'
@@ -656,6 +656,16 @@ export function createApp({
       !c.req.path.startsWith('/scim/v2/')
     ) {
       c.header('Cache-Control', 'no-store')
+      // Match registered route templates so the handoff session boundary returns its
+      // uniform denial without letting a provisioning credential reach any resolver.
+      if (
+        matchedRoutes(c).some(({ path }) =>
+          /^\/api\/v1\/team\/bookings\/(?::id\/handoff-(?:offers|preview)|handoff-runs)(?:\/|$)/.test(
+            path,
+          ),
+        )
+      )
+        return c.json({ error: 'team_management_access_denied' }, 403)
       c.header('WWW-Authenticate', 'Bearer')
       return c.json({ error: 'unauthorized' }, 401)
     }

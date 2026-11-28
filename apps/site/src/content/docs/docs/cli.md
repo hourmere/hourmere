@@ -110,6 +110,8 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 | `polls cancel` | `cancel_meeting_poll` | [See inputs](#manage-meeting-polls) |
 | `polls delete` | `delete_meeting_poll` | [See inputs](#manage-meeting-polls) |
 | `polls finalize` | `finalize_meeting_poll` | `id`, `slotId`, `bookerVoterId`, `attendeeVoterIds`, `expectedResultsRevision`, `expectedBallotRevisions`, `acknowledgeConditional`, `idempotencyKey` and optional `locationOptionId` |
+| `booking-handoff offer` | `read_booking_handoff_offer` | Staged only. Private recipient `token` via `--input -`. Allows `read`, `bookings` or `full`. |
+| `booking-handoff answer` | `answer_booking_handoff_offer` | Staged only. Private recipient `token`, reviewed `version` and `decision` (`accept` or `decline`) via `--input -`. Requires `bookings` or `full`. |
 | `whoami` | `whoami` | `{}` |
 | `sso providers list` | `list_sso_providers` | optional `limit` and `cursor`; [team SSO access](#read-team-single-sign-on-configuration) |
 | `sso policy` | `get_sso_policy` | `{}`; [team SSO access](#read-team-single-sign-on-configuration) |

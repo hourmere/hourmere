@@ -18,15 +18,15 @@ import { defineTool, RateLimited, type Tool, type ToolCall } from './tools.ts'
 export function departureHandoffParticipantTools(deps: ParticipantHandoffDeps): Tool[] {
   const context = participantHandoffContext(deps)
   const limit = participantHandoffLimiter(deps.db)
-  const admission = (call: ToolCall) => {
-    const retryAfter = limit.hit(rateLimitKey(call.trustedIp))
-    if (retryAfter !== undefined) throw new RateLimited(retryAfter)
-  }
   const privateOffer = {
     privateInput: () => true,
     privateDiagnostics: true,
     privateValidationMessage: 'Invalid handoff offer request',
     requireEnabled: () => requireParticipantHandoffs(deps),
+    checkRateLimit(call: ToolCall) {
+      const retryAfter = limit.hit(rateLimitKey(call.trustedIp))
+      if (retryAfter !== undefined) throw new RateLimited(retryAfter, 'ip')
+    },
   }
   return [
     defineTool({
@@ -43,8 +43,7 @@ export function departureHandoffParticipantTools(deps: ParticipantHandoffDeps): 
         openWorldHint: false,
       },
       ...privateOffer,
-      run(args, call) {
-        admission(call)
+      run(args) {
         return readDepartureHandoffParticipantOffer(context, args.token)
       },
     }),
@@ -62,8 +61,7 @@ export function departureHandoffParticipantTools(deps: ParticipantHandoffDeps): 
         openWorldHint: false,
       },
       ...privateOffer,
-      run(args, call) {
-        admission(call)
+      run(args) {
         return answerDepartureHandoffParticipantOffer(context, args)
       },
     }),
