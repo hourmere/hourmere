@@ -3644,4 +3644,10 @@ export const admin = {
     'Verify your identity for this ownership transfer.',
   'Owner roles change only through a confirmed transfer. The team must retain at least one owner.':
     'Owner roles change only through a confirmed transfer. The team must retain at least one owner.',
+  // Booking handoff mail status
+  'Attendee cancellation email': 'Attendee cancellation email',
+  'Attendee confirmation email': 'Attendee confirmation email',
+  'Mail server acceptance unconfirmed': 'Mail server acceptance unconfirmed',
+  'Email delivery incomplete': 'Email delivery incomplete',
+  'Email delivery unavailable': 'Email delivery unavailable',
 } as const

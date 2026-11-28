@@ -11,3 +11,20 @@ in their own name through the invite form.
 The administrator list shows **No longer valid**, with derived `invalidReason: "inviter_left"`;
 cancellation remains allowed. Demotion while the inviter remains a member leaves validity
 unchanged. These checks do not rewrite the invitation's stored lifecycle.
+
+## Staged booking handoff mail
+
+A committed departure handoff queues a cancellation for the original booking and a
+confirmation for the replacement. Both notices explain the host change in the recipient's
+mail language. A booker or guest may receive either notice first.
+
+The cancellation uses the original calendar UID and saved organizer, with the sequence one
+higher than the last version of that event. If the organizer was never saved, recipients get
+a plain-text cancellation and may need to remove the original event from their calendars
+manually. The replacement uses a fresh UID and starts at sequence zero. Its invitation and
+manage link belong to the replacement booking.
+
+The staged administrator receipt reports when the mail server accepts each notice for all
+attendees. Refresh the handoff status after the background worker runs. Mail-server acceptance
+does not confirm inbox receipt. Replaying a committed handoff does not queue another notice.
+Production admission remains off.

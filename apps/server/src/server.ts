@@ -585,6 +585,7 @@ export function productRoutes({
       db,
       notify,
       handoffs: departureHandoffs,
+      smtpConfigured,
       capabilities: ssoCapabilities,
       automaticMeet,
       automaticZoom,

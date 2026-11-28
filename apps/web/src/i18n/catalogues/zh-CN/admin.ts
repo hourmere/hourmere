@@ -3478,4 +3478,10 @@ export const admin = {
   'Verify your identity for this ownership transfer.': '请验证身份以继续此次所有权转移。',
   'Owner roles change only through a confirmed transfer. The team must retain at least one owner.':
     '只有确认转移后，才能变更所有者角色。团队必须至少保留一名所有者。',
+  // Booking handoff mail status
+  'Attendee cancellation email': '参与者取消邮件',
+  'Attendee confirmation email': '参与者确认邮件',
+  'Mail server acceptance unconfirmed': '邮件服务器尚未确认接收',
+  'Email delivery incomplete': '邮件投递未完成',
+  'Email delivery unavailable': '邮件投递不可用',
 } as const

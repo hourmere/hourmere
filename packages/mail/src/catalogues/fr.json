@@ -192,5 +192,11 @@
   "departureHandoff.subject": "Consultez la modification proposée pour votre réservation",
   "departureHandoff.introduction": "Un administrateur de l’équipe propose de remplacer votre réservation. L’équipe ne pourra le faire qu’avec l’accord de la personne qui a réservé et de tous les invités. Si la proposition expire, la réservation actuelle reste confirmée.",
   "departureHandoff.privacy": "Gardez ce lien privé. Toute personne qui le détient peut répondre en votre nom. Seul le lien le plus récent fonctionne.",
-  "departureHandoff.review": "Consulter la proposition"
+  "departureHandoff.review": "Consulter la proposition",
+  "bookingHandoff.subject": "Changement d’hôte · {subject}",
+  "bookingHandoff.source": "L’hôte a changé. La réservation initiale a été annulée. Les participants reçoivent un e-mail séparé au sujet de la réservation de remplacement.",
+  "bookingHandoff.replacement": "L’hôte a changé. Cette réservation remplace la réservation initiale.",
+  "bookingHandoff.sourceTeamsPending": "Le lien Teams de la réservation initiale était toujours en attente au moment de l’annulation.",
+  "bookingHandoff.sourceTeamsUnavailable": "Teams était indisponible pour la réservation initiale.",
+  "bookingHandoff.sourceTeamsWritebackFailed": "Le lien Teams de la réservation initiale n’a pas pu être ajouté au calendrier."
 }

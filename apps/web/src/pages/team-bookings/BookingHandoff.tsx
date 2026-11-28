@@ -110,6 +110,7 @@ export function BookingHandoff({
 
   const { offer, preview, issue } = result ?? {}
   const receipt = result?.receipt ?? applied
+  const mail = result?.receipt?.mail
   const expiresAt = offer ? Date.parse(offer.expiresAt) : 0
   const offerState =
     (offer?.state === 'pending' || offer?.state === 'ready') && expiresAt <= Date.now()
@@ -224,16 +225,15 @@ export function BookingHandoff({
           {!failure && !receipt && result && (
             <PreviewDetails result={result} offerState={offerState} format={format} />
           )}
-          {receipt && (
-            <>
-              <p>
-                {t(
-                  'The original booking was cancelled and a replacement was created. Cancellation and confirmation notices were queued.',
-                )}
-              </p>
-              {!failure && result?.receipt && <ConferenceStatus receipt={result.receipt} />}
-            </>
+          {!failure && applied && !result?.receipt && (
+            <p>
+              {t(
+                'The original booking was cancelled and a replacement was created. Cancellation and confirmation notices were queued.',
+              )}
+            </p>
           )}
+          {!failure && mail && <MailStatus mail={mail} />}
+          {!failure && result?.receipt && <ConferenceStatus receipt={result.receipt} />}
         </div>
         {!failure && currentPreview && !receipt && (
           <dl className="details">
@@ -339,6 +339,27 @@ function PreviewDetails({
         offerState !== 'closed' &&
         preview?.availability === 'available' && <p>{t('The proposed time is available.')}</p>}
     </>
+  )
+}
+
+type MailReceipt = NonNullable<Preview['receipt']>['mail']
+
+const mailStatusMessages = {
+  pending: 'Mail server acceptance unconfirmed',
+  accepted: 'Accepted by the mail server',
+  incomplete: 'Email delivery incomplete',
+  unavailable: 'Email delivery unavailable',
+} as const satisfies Record<MailReceipt['cancellation'], MessageKey>
+
+function MailStatus({ mail }: { mail: MailReceipt }) {
+  const { t } = useI18n()
+  return (
+    <dl className="details">
+      <dt>{t('Attendee cancellation email')}</dt>
+      <dd>{t(mailStatusMessages[mail.cancellation])}</dd>
+      <dt>{t('Attendee confirmation email')}</dt>
+      <dd>{t(mailStatusMessages[mail.confirmation])}</dd>
+    </dl>
   )
 }
 

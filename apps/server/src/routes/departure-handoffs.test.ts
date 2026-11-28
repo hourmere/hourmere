@@ -55,6 +55,7 @@ describe.skipIf(!serverUrl)('departure handoff browser routes', () => {
       enabled?: boolean
       microsoft?: ReturnType<typeof fakeMicrosoft>
       enqueue?: EnqueueDepartureHandoffEmail
+      smtpConfigured?: boolean
     } = {},
   ) {
     const readLatest = vi.fn(storage.store.readLatest)
@@ -68,6 +69,7 @@ describe.skipIf(!serverUrl)('departure handoff browser routes', () => {
         db,
         socialProviders: {},
         invitationMailLimits: { secret },
+        smtpConfigured: options.smtpConfigured,
         ...(options.microsoft && {
           microsoftCalendar: { client: options.microsoft.client, encryptionKey: TEST_CALENDAR_KEY },
         }),
@@ -618,7 +620,11 @@ describe.skipIf(!serverUrl)('departure handoff browser routes', () => {
     expect(await (await app.request(preview(f.base), { headers })).json()).toEqual({
       offer: null,
       preview: null,
-      receipt: { ...receipt, conference: 'not_required' },
+      receipt: {
+        ...receipt,
+        conference: 'not_required',
+        mail: { cancellation: 'pending', confirmation: 'pending' },
+      },
     })
     expect(notify.mock.calls.map(([, event]) => [event.type, event.bookingId])).toEqual([
       ['cancelled', f.booking.id],
@@ -640,5 +646,95 @@ describe.skipIf(!serverUrl)('departure handoff browser routes', () => {
       rescheduled_from_id: null,
       required_host_user_ids: [f.candidate.id],
     })
+  })
+
+  it('reports both attendee mail states only on the authorized handoff receipt', async () => {
+    const f = await fixture()
+    const { app, notify } = application()
+    const path = preview(f.base)
+    const applied = await app.request(apply(f.base, f.input.offerId), post(f.headers))
+    expect(applied.status).toBe(200)
+    const handoff = (await applied.json()) as {
+      sourceBookingId: string
+      replacementBookingId: string
+    }
+    const { sourceBookingId, replacementBookingId } = handoff
+    const read = (server = app) => server.request(path, { headers: f.headers })
+    const record = await db
+      .selectFrom('booking_attendees')
+      .select(['booking_id', 'id', 'is_booker'])
+      .where('booking_id', 'in', [sourceBookingId, replacementBookingId])
+      .execute()
+    const cancellationRows = record.filter((row) => row.booking_id === sourceBookingId)
+    const replacementBooker = record.find(
+      (row) => row.booking_id === replacementBookingId && row.is_booker,
+    )
+    if (!replacementBooker) throw new Error('Missing replacement booker')
+
+    // Other kinds, host notices and receipts keyed to a different attendee cannot fill either state.
+    await db
+      .insertInto('booking_notifications')
+      .values([
+        ...cancellationRows.map((row) => ({
+          booking_id: sourceBookingId,
+          kind: 'confirmed',
+          recipient: `attendee:${row.id}`,
+        })),
+        {
+          booking_id: replacementBookingId,
+          kind: 'confirmed',
+          recipient: `host:${f.candidate.id}`,
+        },
+        {
+          booking_id: sourceBookingId,
+          kind: 'cancelled',
+          recipient: `attendee:${replacementBooker.id}`,
+        },
+      ])
+      .execute()
+    expect(await (await read()).json()).toMatchObject({
+      receipt: { mail: { cancellation: 'pending', confirmation: 'pending' } },
+    })
+    expect(await (await read(application({ smtpConfigured: false }).app)).json()).toMatchObject({
+      receipt: { mail: { cancellation: 'unavailable', confirmation: 'unavailable' } },
+    })
+
+    await db
+      .insertInto('booking_notifications')
+      .values([
+        ...cancellationRows.map((row) => ({
+          booking_id: sourceBookingId,
+          kind: 'cancelled',
+          recipient: `attendee:${row.id}`,
+        })),
+        {
+          booking_id: replacementBookingId,
+          kind: 'confirmed',
+          recipient: `attendee:${replacementBooker.id}`,
+          outcome: 'suppressed',
+          suppression_reason: 'recipient_hourly_limit',
+        },
+      ])
+      .execute()
+    const response = await read()
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    expect(await response.json()).toEqual({
+      offer: null,
+      preview: null,
+      receipt: {
+        ...handoff,
+        conference: 'not_required',
+        mail: { cancellation: 'accepted', confirmation: 'incomplete' },
+      },
+    })
+    expect(notify).toHaveBeenCalledTimes(2)
+
+    const other = await fixture('unproposed')
+    await expectError(await app.request(path, { headers: other.headers }), 404, 'booking_not_found')
+    await expectError(
+      await app.request(path, { headers: { ...f.headers, authorization: 'Bearer forbidden' } }),
+      403,
+      'team_management_access_denied',
+    )
   })
 })

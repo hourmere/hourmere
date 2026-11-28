@@ -340,7 +340,12 @@ export async function applyDepartureHandoff(
         source.sourceBookingId,
         () => now,
         {
-          notify: ctx.notify,
+          notify: (transaction, event, at) =>
+            ctx.notify(
+              transaction,
+              event.type === 'cancelled' ? { ...event, handoff: 'source' } : event,
+              at,
+            ),
           sessionId: actor.sessionId,
           seriesOccurrenceId: null,
           meetingPollLinked: false,
@@ -369,7 +374,10 @@ export async function applyDepartureHandoff(
         hostUserIds: [candidateUserId],
         hostsUseDefaultSchedule: false,
         attendees: terms.attendees,
-        notificationSnapshot: createNotificationSnapshot(policy.notifications),
+        notificationSnapshot: {
+          ...createNotificationSnapshot(policy.notifications),
+          departureHandoff: 'replacement',
+        },
         changeCutoffs: cutoffsOf(policy),
       })
       await auditBooking(trx, source.organizationId, id, 'booking.created', {
@@ -385,6 +393,7 @@ export async function applyDepartureHandoff(
           type: 'created',
           bookingId: id,
           start: terms.start,
+          handoff: 'replacement',
           ...(terms.location?.kind === 'microsoft_teams' && { teamsMeeting: true }),
         },
         now,

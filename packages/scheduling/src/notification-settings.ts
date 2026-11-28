@@ -19,6 +19,8 @@ export interface NotificationSettings {
 }
 export type NotificationRule = ReminderRule | FollowUpRule
 export interface NotificationSnapshot {
+  /** Private root marker used by delayed conference mail delivery. */
+  departureHandoff?: 'replacement'
   version: 1
   executionMode: 'legacy_default' | 'configurable'
   notifications: NotificationSettings
@@ -156,10 +158,12 @@ export function notificationSnapshot(value: unknown): NotificationSnapshot {
       version: z.literal(1),
       executionMode: z.enum(['legacy_default', 'configurable']),
       notifications: NotificationSettingsSchema,
+      departureHandoff: z.literal('replacement').optional(),
     })
     .parse(value)
   const snapshot = createNotificationSnapshot(parsed.notifications)
   if (snapshot.executionMode !== parsed.executionMode)
     throw new Error('Invalid notification snapshot')
+  // A later reschedule gets its own lifecycle mail. The handoff marker is root-only.
   return snapshot
 }

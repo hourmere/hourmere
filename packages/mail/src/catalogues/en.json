@@ -192,5 +192,11 @@
   "departureHandoff.subject": "Review a proposed change to your booking",
   "departureHandoff.introduction": "A team administrator has proposed a replacement for your booking. The booker and every guest must agree before the team can replace it. The current booking stays confirmed if the proposal expires.",
   "departureHandoff.privacy": "Keep this link private. Anyone with it can respond on your behalf. Only the latest link works.",
-  "departureHandoff.review": "Review the proposal"
+  "departureHandoff.review": "Review the proposal",
+  "bookingHandoff.subject": "Host changed · {subject}",
+  "bookingHandoff.source": "The host has changed. The original booking was cancelled. Attendees receive a separate email about the replacement.",
+  "bookingHandoff.replacement": "The host has changed. This booking replaces the original booking.",
+  "bookingHandoff.sourceTeamsPending": "The Teams link for the original booking was still pending at cancellation.",
+  "bookingHandoff.sourceTeamsUnavailable": "Teams was unavailable for the original booking.",
+  "bookingHandoff.sourceTeamsWritebackFailed": "The Teams link for the original booking could not be added to the calendar."
 }

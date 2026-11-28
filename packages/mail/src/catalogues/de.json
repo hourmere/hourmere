@@ -192,5 +192,11 @@
   "departureHandoff.subject": "Vorgeschlagene Änderung Ihrer Buchung ansehen",
   "departureHandoff.introduction": "Die Teamverwaltung hat einen Ersatz für Ihre Buchung vorgeschlagen. Erst wenn die buchende Person und alle Gäste zustimmen, kann das Team die Buchung ersetzen. Läuft der Vorschlag ab, bleibt die aktuelle Buchung bestätigt.",
   "departureHandoff.privacy": "Behandeln Sie diesen Link vertraulich. Wer ihn hat, kann in Ihrem Namen antworten. Nur der neueste Link ist gültig.",
-  "departureHandoff.review": "Vorschlag ansehen"
+  "departureHandoff.review": "Vorschlag ansehen",
+  "bookingHandoff.subject": "Gastgeber gewechselt · {subject}",
+  "bookingHandoff.source": "Der Gastgeber hat gewechselt. Die ursprüngliche Buchung wurde storniert. Die Teilnehmenden erhalten eine separate E-Mail zum Ersatztermin.",
+  "bookingHandoff.replacement": "Der Gastgeber hat gewechselt. Diese Buchung ersetzt die ursprüngliche Buchung.",
+  "bookingHandoff.sourceTeamsPending": "Bei der Stornierung lag der Teams-Link für die ursprüngliche Buchung noch nicht vor.",
+  "bookingHandoff.sourceTeamsUnavailable": "Teams war für die ursprüngliche Buchung nicht verfügbar.",
+  "bookingHandoff.sourceTeamsWritebackFailed": "Der Teams-Link für die ursprüngliche Buchung konnte nicht zum Kalender hinzugefügt werden."
 }

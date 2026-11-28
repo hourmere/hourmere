@@ -192,5 +192,11 @@
   "departureHandoff.subject": "查看预约变更提议",
   "departureHandoff.introduction": "团队管理员提议更换你的预约。预约人及每位来宾都同意后，团队才能更换预约。若提议过期，原预约仍然有效。",
   "departureHandoff.privacy": "请妥善保管此链接。任何持有该链接的人都可以代你答复。仅最新链接有效。",
-  "departureHandoff.review": "查看提议"
+  "departureHandoff.review": "查看提议",
+  "bookingHandoff.subject": "主持人已更换 · {subject}",
+  "bookingHandoff.source": "主持人已更换，原预约已取消。参会者会另行收到有关新预约的邮件。",
+  "bookingHandoff.replacement": "主持人已更换。此预约取代原预约。",
+  "bookingHandoff.sourceTeamsPending": "原预约取消时，Teams 链接尚未生成。",
+  "bookingHandoff.sourceTeamsUnavailable": "原预约无法使用 Teams。",
+  "bookingHandoff.sourceTeamsWritebackFailed": "原预约的 Teams 链接未能添加到日历。"
 }
