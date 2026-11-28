@@ -18,10 +18,10 @@ type Form = Schemas['RoutingForm']
 type Rule = Form['rules'][number]
 
 const introduction = { id: '40000000-0000-4000-8000-000000000011', label: 'Introduction' }
-const support = { id: '40000000-0000-4000-8000-000000000012', label: 'Support' }
+const support = { id: '40000000-0000-4000-8000-000000000012', label: 'תמיכה (Support)' }
 const topic = {
   id: '40000000-0000-4000-8000-000000000001',
-  label: 'Topic',
+  label: 'ما الموضوع؟ (Topic)',
   type: 'select',
   required: false,
   options: [introduction, support],
@@ -120,11 +120,13 @@ describe('Routing rules', () => {
     const first = within(screen.getByRole('group', { name: '条件 1' }))
     const source = first.getByRole('combobox', { name: '分流表单问题' })
     expect(document.activeElement).toBe(source)
+    expect(within(source).getByRole('option', { name: topic.label }).dir).toBe('auto')
     await user.selectOptions(source, topic.id)
     await user.selectOptions(first.getByRole('combobox', { name: '要匹配的回答' }), introduction.id)
     await user.selectOptions(first.getByRole('combobox', { name: '比较方式' }), 'one_of')
     const choices = within(first.getByRole('group', { name: '要匹配的回答' }))
-    const supportOption = choices.getByRole('checkbox', { name: 'Support' })
+    const supportOption = choices.getByRole('checkbox', { name: support.label })
+    expect(supportOption.closest('label')?.querySelector('bdi')?.textContent).toBe(support.label)
     supportOption.focus()
     await user.keyboard(' ')
 
@@ -134,12 +136,15 @@ describe('Routing rules', () => {
     await user.selectOptions(second.getByRole('combobox', { name: '分流表单问题' }), company.id)
     const comparison = within(second.getByRole('combobox', { name: '比较方式' }))
     expect(comparison.getAllByRole('option').map((option) => option.textContent)).toEqual(['等于'])
-    await user.type(second.getByRole('textbox', { name: '要匹配的回答' }), 'Example')
+    const answer = second.getByRole('textbox', { name: '要匹配的回答' })
+    const companyName = 'شركة (Example)'
+    expect(answer.dir).toBe('auto')
+    await user.type(answer, companyName)
     expect(latest()[0]).toMatchObject({
       id: addedId,
       conditions: [
         { questionId: topic.id, operator: 'one_of', values: [introduction.id, support.id] },
-        { questionId: company.id, operator: 'equals', value: 'Example' },
+        { questionId: company.id, operator: 'equals', value: companyName },
       ],
     })
     await user.click(second.getByRole('button', { name: '移除条件：条件 2' }))

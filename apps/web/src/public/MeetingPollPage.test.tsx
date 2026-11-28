@@ -6,6 +6,7 @@ import type { Schemas } from '../api/client.ts'
 import { common as english } from '../i18n/catalogues/en/common.ts'
 import { translateMessage } from '../i18n/translate.ts'
 import { fakeApi, json, later, renderApp } from '../test/fake-api.tsx'
+import { accessibleNameParts } from '../test/public-fixtures.ts'
 
 vi.mock('./env.ts', async (original) => ({
   ...(await original<typeof import('./env.ts')>()),
@@ -147,19 +148,22 @@ for (const locale of ['en', 'zh-CN', 'fr'] as const) {
 
     it('enrols with name and email then shows uniform check-email guidance', async () => {
       const t = language(locale)
+      const mixedName = 'ليلى (Layla) — נועה'
       const api = fakeApi({
         [endpoint('read')]: () => json(200, { ...poll, ownBallot: null }),
         [endpoint('enroll')]: () => json(202, { accepted: true }),
       })
       renderApp(`/poll#${token}`)
       const user = userEvent.setup()
-      await user.type(await screen.findByLabelText(t('Your name')), 'Grace')
+      const name = await screen.findByRole('textbox', { name: t('Your name') })
+      expect(name.getAttribute('dir')).toBe('auto')
+      await user.type(name, mixedName)
       await user.type(screen.getByLabelText(t('Email address')), 'grace@example.invalid')
       await user.click(screen.getByRole('button', { name: t('Send verification email') }))
       await screen.findByRole('heading', { name: t('Check your email') })
       expect(api.to(endpoint('enroll'))[0]?.body).toEqual({
         publicToken: token,
-        name: 'Grace',
+        name: mixedName,
         email: 'grace@example.invalid',
         timeZone: 'America/New_York',
         locale,
@@ -423,51 +427,75 @@ describe('meeting poll privacy and ballot boundaries', () => {
   })
 })
 
-it('validates required answers and consent, then sends only the visitor responses', async () => {
-  const t = language('en')
-  const api = fakeApi({
-    [endpoint('read')]: () =>
-      json(200, {
-        ...poll,
-        questions: [
-          { id: 'topic', type: 'short_text', label: 'Discussion topic', required: true },
-          {
-            id: 'choices',
-            type: 'multi_select',
-            label: 'Equipment',
-            required: true,
-            options: ['Laptop', 'Projector'],
-          },
-        ],
-      }),
-    [endpoint('vote')]: () =>
-      json(200, { ...saved, responses: { topic: 'Roadmap', choices: ['Laptop'] } }),
-  })
-  renderApp(`/poll/voter#${token}`)
-  const submit = await screen.findByRole('button', { name: 'Save ballot' })
-  const form = submit.closest('form')
-  if (!form) throw new Error('Expected ballot form')
-  fireEvent.submit(form)
-  await screen.findByRole('alert')
-  expect(api.to(endpoint('vote'))).toHaveLength(0)
-  const user = userEvent.setup()
-  const groups = screen
-    .getAllByRole('group')
-    .filter((group) => within(group).queryAllByRole('radio').length)
-  await user.click(within(groups[0] as HTMLElement).getByRole('radio', { name: t('Yes') }))
-  await user.click(within(groups[1] as HTMLElement).getByRole('radio', { name: t('If need be') }))
-  await user.type(screen.getByLabelText(/Discussion topic/), 'Roadmap')
-  await user.click(screen.getByLabelText('Laptop'))
-  fireEvent.submit(form)
-  expect(api.to(endpoint('vote'))).toHaveLength(0)
-  await user.click(screen.getByRole('checkbox', { name: /I agree to join the meeting/ }))
-  await user.click(submit)
-  await screen.findByText('Your ballot is saved.')
-  expect(api.to(endpoint('vote'))[0]?.body).toMatchObject({
-    responses: { topic: 'Roadmap', choices: ['Laptop'] },
-    consent: true,
-  })
-})
+it.each(['en', 'zh-CN'] as const)(
+  'validates and submits isolated mixed-direction answers for the visitor only in %s',
+  async (locale) => {
+    const t = language(locale)
+    const title = '✨ 42 (اجتماع) Planning'
+    const topicLabel = 'ما الموضوع؟ (Discussion topic)'
+    const choicesLabel = 'ציוד (Equipment)'
+    const equipment = 'מחשב (Laptop)'
+    const notes = 'راجع agenda@example.invalid\n\nSee https://room.example.invalid/42 (שלום).'
+    const responses = { topic: notes, choices: [equipment] }
+    const api = fakeApi({
+      [endpoint('read')]: () =>
+        json(200, {
+          ...poll,
+          title,
+          questions: [
+            { id: 'topic', type: 'long_text', label: topicLabel, required: true },
+            {
+              id: 'choices',
+              type: 'multi_select',
+              label: choicesLabel,
+              required: true,
+              options: [equipment, 'عارض (Projector)'],
+            },
+          ],
+        }),
+      [endpoint('vote')]: () => json(200, { ...saved, responses }),
+    })
+    renderApp(`/poll/voter#${token}`)
+    expect((await screen.findByRole('heading', { name: title })).dir).toBe('auto')
+    expect(document.documentElement.dir).toBe('ltr')
+    const submit = await screen.findByRole('button', { name: t('Save ballot') })
+    const form = submit.closest('form')
+    if (!form) throw new Error('Expected ballot form')
+    fireEvent.submit(form)
+    await screen.findByRole('alert')
+    expect(api.to(endpoint('vote'))).toHaveLength(0)
+    const user = userEvent.setup()
+    const groups = screen
+      .getAllByRole('group')
+      .filter((group) => within(group).queryAllByRole('radio').length)
+    await user.click(within(groups[0] as HTMLElement).getByRole('radio', { name: t('Yes') }))
+    await user.click(within(groups[1] as HTMLElement).getByRole('radio', { name: t('If need be') }))
+    const required = t('Required')
+    const topic = screen.getByRole('textbox', {
+      name: accessibleNameParts([topicLabel, '·', required]),
+    })
+    expect(topic.dir).toBe('auto')
+    expect(screen.getByText(topicLabel).tagName).toBe('BDI')
+    fireEvent.change(topic, { target: { value: notes } })
+    const choices = screen.getByRole('group', {
+      name: accessibleNameParts([choicesLabel, '·', required]),
+    })
+    expect(within(choices).getByText(choicesLabel).tagName).toBe('BDI')
+    const option = within(choices).getByRole('checkbox', { name: equipment })
+    expect(option.closest('label')?.querySelector('bdi')?.textContent).toBe(equipment)
+    await user.click(option)
+    fireEvent.submit(form)
+    expect(api.to(endpoint('vote'))).toHaveLength(0)
+    const consent = translateMessage(locale, 'meetingPoll.consent')
+    await user.click(screen.getByRole('checkbox', { name: consent }))
+    await user.click(submit)
+    await screen.findByText(t('Your ballot is saved.'))
+    expect(api.to(endpoint('vote'))[0]?.body).toMatchObject({
+      responses,
+      consent: true,
+    })
+  },
+)
 
 it.each(['en', 'zh-CN', 'fr'] as const)(
   'uses localized option plurals and verified aggregate counts in %s',

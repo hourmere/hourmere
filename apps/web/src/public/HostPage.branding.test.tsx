@@ -2,7 +2,7 @@ import { brandPalette } from '@hourmere/core/brand-contrast'
 import { screen, within } from '@testing-library/react'
 import { beforeAll, expect, it } from 'vitest'
 import { fakeApi, json, renderApp } from '../test/fake-api.tsx'
-import { EVENT } from '../test/public-fixtures.ts'
+import { accessibleNameParts, EVENT } from '../test/public-fixtures.ts'
 
 beforeAll(async () => {
   await import('./HostPage.tsx')
@@ -10,6 +10,9 @@ beforeAll(async () => {
 
 it('shows each event’s owning brand and team name without removing personal or team links', async () => {
   const personal = { name: 'Ada', primaryColor: '#AABBCC', logoUrl: null, logoDataUrl: null }
+  const hostName = 'ليلى (Ada 42)'
+  const teamTitle = 'שלום (Team call)'
+  const paragraphs = ['راسلوا agenda@example.invalid (Agenda).', '中文说明 (Details)']
   const team = {
     name: 'الدعم (Team 42)',
     primaryColor: '#123456',
@@ -20,14 +23,15 @@ it('shows each event’s owning brand and team name without removing personal or
     'GET /api/v1/public/ada': () =>
       json(200, {
         handle: 'ada',
-        host: EVENT.host,
+        host: { ...EVENT.host, name: hostName },
         branding: personal,
         eventTypes: [
           { ...EVENT, slug: 'personal', title: 'Personal call', branding: personal },
           {
             ...EVENT,
             slug: 'team',
-            title: 'שלום (Team call)',
+            title: teamTitle,
+            description: paragraphs.join('\n\n'),
             branding: team,
             organizationName: team.name,
           },
@@ -36,16 +40,22 @@ it('shows each event’s owning brand and team name without removing personal or
       }),
   })
   renderApp('/ada')
-  const heading = await screen.findByRole('heading', { name: 'Ada Lovelace' })
+  const heading = await screen.findByRole('heading', { name: hostName })
   expect(heading.getAttribute('dir')).toBe('auto')
   const personalLink = screen.getByRole('link', { name: /Personal call/ })
-  const teamLink = screen.getByRole('link', { name: /Team call/ })
+  const teamNameParts = [team.name, team.name, teamTitle, '30 min · Phone call', ...paragraphs]
+  const teamLink = screen.getByRole('link', {
+    name: accessibleNameParts(teamNameParts),
+  })
   const defaultLink = screen.getByRole('link', { name: /Default call/ })
   expect(personalLink.getAttribute('href')).toBe('/ada/personal')
   expect(teamLink.getAttribute('href')).toBe('/ada/team')
   expect(defaultLink.getAttribute('href')).toBe('/ada/default')
   expect(within(teamLink).getByText(team.name).getAttribute('dir')).toBe('auto')
-  expect(within(teamLink).getByText('שלום (Team call)').getAttribute('dir')).toBe('auto')
+  expect(within(teamLink).getByText(teamTitle).getAttribute('dir')).toBe('auto')
+  expect(Array.from(teamLink.querySelectorAll('bdi'), (value) => value.textContent)).toEqual(
+    paragraphs,
+  )
   expect(within(teamLink).getByRole('img', { name: team.name }).getAttribute('src')).toBe(
     team.logoUrl,
   )

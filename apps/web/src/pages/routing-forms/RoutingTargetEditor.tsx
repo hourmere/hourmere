@@ -6,6 +6,7 @@ import { routingMappingProblem } from '@hourmere/scheduling/routing-form-targets
 import { useEffect, useState } from 'react'
 import type { Schemas } from '../../api/client.ts'
 import { Field, FieldError, type FieldErrors } from '../../components/forms.tsx'
+import { UserContentMessage } from '../../components/UserContent.tsx'
 import { useI18n } from '../../i18n/runtime.tsx'
 import type { MessageKey } from '../../i18n/translate.ts'
 import {
@@ -64,6 +65,7 @@ export function RoutingTargetEditor(props: TargetProps) {
           {(control) => (
             <textarea
               {...control}
+              dir="auto"
               value={target.message}
               onChange={(event) => onChange({ ...target, message: event.target.value })}
               maxLength={ROUTING_FORM_LIMITS.messageLength}
@@ -178,7 +180,7 @@ function EventDestination({
               </option>
             )}
             {[...labels].map(([id, label]) => (
-              <option key={id} value={id}>
+              <option key={id} value={id} dir="auto">
                 {label}
               </option>
             ))}
@@ -385,7 +387,7 @@ function MappingRow({
                 </option>
               )}
               {choices.map(({ id, label }) => (
-                <option key={id} value={id}>
+                <option key={id} value={id} dir="auto">
                   {label.trim() || t('Question')}
                 </option>
               ))}
@@ -421,7 +423,11 @@ function MappingRow({
                   </option>
                 )}
               {allowed.map(({ destination, label }) => (
-                <option key={destinationKey(destination)} value={destinationKey(destination)}>
+                <option
+                  key={destinationKey(destination)}
+                  value={destinationKey(destination)}
+                  dir={destination.kind === 'question' ? 'auto' : undefined}
+                >
                   {label}
                 </option>
               ))}
@@ -455,9 +461,12 @@ function MappingRow({
                 key={id}
                 id={`${optionPath}.${id}`}
                 label={
-                  <bdi className="user-content">
-                    {t('Booking option for “{option}”', { option: label })}
-                  </bdi>
+                  <span className="user-content">
+                    <UserContentMessage
+                      message="Booking option for “{option}”"
+                      values={{ option: label }}
+                    />
+                  </span>
                 }
               >
                 {(control) => (
@@ -481,7 +490,7 @@ function MappingRow({
                       </option>
                     )}
                     {currentOptions.map((option) => (
-                      <option key={option} value={option}>
+                      <option key={option} value={option} dir="auto">
                         {option}
                       </option>
                     ))}

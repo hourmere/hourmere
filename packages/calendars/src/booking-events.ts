@@ -3,6 +3,7 @@ import type { EnqueueOptions } from '@hourmere/jobs'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { sql } from 'kysely'
 import { writeConferenceMirrors } from './conference-mirrors.ts'
+import { reconcileHandoffGoogleCopies } from './departure-handoff-google-cleanup.ts'
 import { GOOGLE_CALENDAR_SYNC_SCOPES, GoogleCalendarError } from './google.ts'
 import type { GoogleEventWrite } from './google-events.ts'
 import { writeGroupSlotCalendar } from './group-slot-events.ts'
@@ -282,25 +283,31 @@ export async function writeBookingCalendar(
   await writeMicrosoftCalendar(deps, { bookingId: root }, signal)
   if (!deps.google) return
   const client = deps.google.client
-  const chain = await sql<{ id: string; depth: number }>`WITH RECURSIVE chain(id,depth) AS (
-    SELECT id,0 FROM bookings WHERE id=${root}::uuid
-    UNION ALL SELECT b.id,c.depth+1 FROM bookings b JOIN chain c ON b.rescheduled_from_id=c.id
-  ) CYCLE id SET is_cycle USING path SELECT id,depth FROM chain WHERE NOT is_cycle ORDER BY depth DESC,id`.execute(
+  const chain = await sql<{
+    id: string
+    depth: number
+    status: string
+  }>`WITH RECURSIVE chain(id,depth,status) AS (
+    SELECT id,0,status FROM bookings WHERE id=${root}::uuid
+    UNION ALL SELECT b.id,c.depth+1,b.status FROM bookings b JOIN chain c ON b.rescheduled_from_id=c.id
+  ) CYCLE id SET is_cycle USING path SELECT id,depth,status FROM chain WHERE NOT is_cycle ORDER BY depth DESC,id`.execute(
     deps.db,
   )
   const latest = chain.rows[0]
   if (!latest) return
+  const chainIds = chain.rows.map((r) => r.id)
+  if (
+    latest.status === 'cancelled' &&
+    (await reconcileHandoffGoogleCopies(deps, root, latest, chainIds, signal))
+  )
+    return
   const mappings = await deps.db
     .selectFrom('booking_calendar_events as bce')
     .innerJoin('calendars as c', 'c.id', 'bce.calendar_id')
     .innerJoin('calendar_connections as cc', 'cc.id', 'c.connection_id')
     .select(['c.id', 'c.connection_id', 'cc.user_id'])
     .where('cc.provider', '=', 'google')
-    .where(
-      'bce.booking_id',
-      'in',
-      chain.rows.map((r) => r.id),
-    )
+    .where('bce.booking_id', 'in', chainIds)
     .distinct()
     .execute()
   const targets = new Map(mappings.map((m) => [m.id, m]))
@@ -357,6 +364,19 @@ export async function writeBookingCalendar(
           )
           const booking = current.rows[0]
           if (!booking) return
+          // A cancellation may have committed after the outer read. The queued
+          // handoff reconciliation owns this copy once its pin is visible.
+          if (
+            booking.status === 'cancelled' &&
+            (await trx
+              .selectFrom('departure_handoff_calendar_cleanup')
+              .select('source_booking_id')
+              .where('source_booking_id', '=', booking.id)
+              .where('provider', '=', 'google')
+              .where('calendar_id', '=', target.id)
+              .executeTakeFirst())
+          )
+            return
           const host = await trx
             .selectFrom('booking_hosts')
             .select('user_id')

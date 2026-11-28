@@ -81,32 +81,60 @@ describe('one-time public booking', () => {
 
   it('uses the token only in API paths, with editable prefill and the normal duration/questions/manage flow', async () => {
     const user = userEvent.setup()
-    const api = fakeApi(routes())
+    const title = 'موعد (Private call)'
+    const host = 'נועה (Noa)'
+    const prefill = { ...PREFILL, name: 'ليلى (Layla)' }
+    const nameAfterEdit = 'דנה (Dana)'
+    const question = { ...QUESTION, label: 'ما الموضوع؟ (Topic)' }
+    const answer = 'التصميم — agenda@example.invalid'
+    const api = fakeApi(
+      routes({
+        [`GET ${BASE}`]: () =>
+          json(200, {
+            eventType: { ...ONE_TIME_EVENT, title, host: { name: host }, questions: [question] },
+            prefill,
+          }),
+      }),
+    )
     renderApp(`${PAGE}?token=ignored-query-value&utm_source=ignored`)
+    const event = await screen.findByRole('complementary', { name: 'About this event' })
+    expect(within(event).getByRole('heading', { name: title }).dir).toBe('auto')
+    expect(within(event).getByText(host).dir).toBe('auto')
     await user.click(await screen.findByRole('radio', { name: '1 h' }))
     expect(document.head.innerHTML.includes('undefined')).toBe(false)
     expect(document.querySelector('link[rel="canonical"], meta[property="og:url"]')).toBeNull()
     await pick(user)
     const name = screen.getByLabelText<HTMLInputElement>('Your name')
     const email = screen.getByLabelText<HTMLInputElement>('Email')
-    expect(name.value).toBe(PREFILL.name)
+    expect(name.value).toBe(prefill.name)
     expect(email.value).toBe(PREFILL.email)
+    expect(name.dir).toBe('auto')
     expect(name.readOnly || name.disabled || email.readOnly || email.disabled).toBe(false)
     expect(screen.getByText(HINT)).toBeDefined()
     await user.clear(name)
-    await user.type(name, 'Different Visitor')
+    await user.type(name, nameAfterEdit)
     await user.clear(email)
     await user.type(email, 'different@example.invalid')
     await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
     expect(api.to(`POST ${BASE}/bookings`)).toHaveLength(0)
-    await user.type(screen.getByLabelText('Topic'), 'Compiler design')
+    const topic = screen.getByRole<HTMLInputElement>('textbox', { name: question.label })
+    expect(topic.dir).toBe('auto')
+    expect(topic.labels?.[0]?.querySelector('bdi')?.textContent).toBe(question.label)
+    await user.type(topic, answer)
     await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
-    await screen.findByRole('heading', { name: 'You’re booked' })
+    const confirmation = await screen.findByRole('heading', { name: 'You’re booked' })
+    expect(document.activeElement).toBe(confirmation)
+    const lede = screen.getByText(title, { selector: '.lede bdi' }).parentElement
+    expect(lede?.textContent).toBe(`Your ${title} with ${host} is confirmed.`)
+    expect(Array.from(lede?.querySelectorAll('bdi') ?? [], (value) => value.textContent)).toEqual([
+      title,
+      host,
+    ])
     const sent = api.to(`POST ${BASE}/bookings`)[0]
     expect(sent?.body).toMatchObject({
       durationMinutes: 60,
-      invitee: { name: 'Different Visitor', email: 'different@example.invalid' },
-      responses: { topic: 'Compiler design' },
+      invitee: { name: nameAfterEdit, email: 'different@example.invalid' },
+      responses: { topic: answer },
     })
     expect(screen.getByRole('link', { name: 'Cancel booking' }).getAttribute('href')).toMatch(
       /^\/booking#token=/,

@@ -276,7 +276,7 @@ function RuleCondition({
                 </option>
               )}
               {questions.map(({ id, label }, index) => (
-                <option key={id} value={id}>
+                <option key={id} value={id} dir="auto">
                   {label.trim() || t('Question {number}', { number: index + 1 })}
                 </option>
               ))}
@@ -432,7 +432,7 @@ function ConditionValue({
                 </option>
               )}
             {question.options.map((option, index) => (
-              <option key={option.id} value={option.id}>
+              <option key={option.id} value={option.id} dir="auto">
                 {option.label.trim() || t('Option {number}', { number: index + 1 })}
               </option>
             ))}
@@ -442,6 +442,7 @@ function ConditionValue({
             {...props}
             value={condition.value}
             type={question.type === 'email' ? 'email' : 'text'}
+            dir={question.type === 'email' ? 'ltr' : 'auto'}
             maxLength={ROUTING_FORM_LIMITS.textAnswerLength}
             onChange={(event) => onChange({ ...condition, value: event.target.value })}
             autoComplete="off"

@@ -5,7 +5,7 @@ import { beforeAll, expect, it, vi } from 'vitest'
 import { App } from '../App.tsx'
 import type { Schemas } from '../api/client.ts'
 import { fakeApi, json, later, type Routes, renderApp } from '../test/fake-api.tsx'
-import { EVENT, slotsAnswer } from '../test/public-fixtures.ts'
+import { accessibleNameParts, EVENT, slotsAnswer } from '../test/public-fixtures.ts'
 import { selectPublicLanguage } from '../test/public-language.ts'
 
 const slug = 'ResearchTeam'
@@ -92,6 +92,40 @@ it('publishes the exact-case address and saved event order with working booking 
   expect(await screen.findByRole('heading', { level: 1, name: intro.title })).toBeDefined()
   expect(screen.getByTestId('location').textContent).toBe(`${home}/intro`)
   expect(api.to(`GET ${endpoint}/intro`)).toHaveLength(1)
+})
+
+it.each([
+  ['en', '30 min · Phone call'],
+  ['zh-CN', '30 分钟 · 电话会议'],
+])('keeps a mixed-direction event link in reading order in %s', async (locale, facts) => {
+  localStorage.setItem('hourmere-language', locale)
+  const name = 'البحث (Research 42)'
+  const title = 'שלום (Team planning)'
+  const paragraphs = [
+    'راجع agenda@example.invalid (Agenda).',
+    'See https://room.example.invalid/42',
+  ]
+  fakeApi({
+    [read]: () =>
+      json(200, {
+        team: { name, slug },
+        eventTypes: [{ ...intro, title, description: paragraphs.join('\n\n') }],
+      }),
+  })
+  renderApp(home)
+
+  const heading = await screen.findByRole('heading', { name })
+  expect(heading.querySelector('bdi')?.textContent).toBe(name)
+  expect(screen.getByText(address).matches('bdi[dir="ltr"]')).toBe(true)
+  const linkNameParts = [title, facts, ...paragraphs]
+  const link = screen.getByRole('link', {
+    name: accessibleNameParts(linkNameParts),
+  })
+  expect(link.getAttribute('href')).toBe(`${home}/intro`)
+  expect(Array.from(link.querySelectorAll('bdi'), (value) => value.textContent)).toEqual([
+    title,
+    ...paragraphs,
+  ])
 })
 
 it('keeps a direct, unlisted team booking link independent of directory enablement', async () => {

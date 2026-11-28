@@ -503,7 +503,18 @@ describe('team bookings list and DTO details', () => {
 
   it('renders exactly the team DTO detail fields and never asks personal endpoints', async () => {
     const poison = 'private-field-must-stay-out'
-    const dto = teamBooking()
+    const seed = teamBooking()
+    const title = 'مراجعة (Research) [42]'
+    const hostName = 'נועה (Host)'
+    const inviteeName = 'ليلى (Grace)'
+    const inviteeEmail = 'grace@example.test'
+    const dto = teamBooking({
+      eventType: { id: 'mixed-event', title, publicBookingPath: null },
+      hosts: seed.hosts.map((host) => ({ ...host, name: hostName })),
+      attendees: seed.attendees.map((attendee) =>
+        attendee.isBooker ? { ...attendee, name: inviteeName, email: inviteeEmail } : attendee,
+      ),
+    })
     const api = server({
       [LIST]: () =>
         json(200, {
@@ -526,7 +537,10 @@ describe('team bookings list and DTO details', () => {
         }),
     })
     renderApp(PAGE)
-    await openDetail()
+    const button = await screen.findByRole('button', { name: title })
+    expect(button.querySelector('bdi')?.textContent).toBe(title)
+    await userEvent.click(button)
+    await screen.findByRole('region', { name: 'Team booking details' })
     const panel = within(detail())
     expect(panel.getAllByRole('term').map((term) => term.textContent)).toEqual([
       'Event',
@@ -537,15 +551,22 @@ describe('team bookings list and DTO details', () => {
     ])
     const values = panel.getAllByRole('definition')
     expect(values).toHaveLength(5)
-    expect(values[0]?.textContent).toBe(dto.eventType?.title)
+    expect(values[0]?.querySelector('bdi')?.textContent).toBe(title)
     expect([...(values[1]?.querySelectorAll('time') ?? [])].map((time) => time.dateTime)).toEqual([
       dto.start,
       dto.end,
     ])
     expect(values[2]?.textContent).toBe('Confirmed')
-    expect(values[3]?.textContent).toBe('Historical host')
-    expect(values[4]?.textContent).toContain('Grace Hopper')
-    expect(values[4]?.textContent).toContain('grace@example.com')
+    expect(values[3]?.querySelector('li[dir="auto"]')?.textContent).toBe(hostName)
+    const emailLink = panel.getByRole('link', { name: inviteeEmail })
+    expect(emailLink.getAttribute('href')).toBe(`mailto:${inviteeEmail}`)
+    expect(emailLink.querySelector('bdi[dir="ltr"]')?.textContent).toBe(inviteeEmail)
+    const person = emailLink.closest('li')
+    expect(person?.firstElementChild?.matches('bdi')).toBe(true)
+    expect(person?.firstElementChild?.textContent).toBe(inviteeName)
+    expect(person?.textContent).toBe(
+      `${inviteeName} (Invitee)${inviteeEmail}Time zone: America/New York`,
+    )
     expect(values[4]?.textContent).toContain('America/New York')
     expect(values[4]?.textContent).toContain('Invitee')
     expect(values[4]?.textContent).toContain('Alan Turing')

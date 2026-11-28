@@ -3644,6 +3644,11 @@ export const admin = {
     'Verify your identity for this ownership transfer.',
   'Owner roles change only through a confirmed transfer. The team must retain at least one owner.':
     'Owner roles change only through a confirmed transfer. The team must retain at least one owner.',
+  // Departure handoff calendar cleanup
+  'Cleanup in the original calendar or meeting account is pending.':
+    'Cleanup in the original calendar or meeting account is pending.',
+  'Cleanup in the original calendar or meeting account could not be verified. Ask the account owner to check for remaining entries.':
+    'Cleanup in the original calendar or meeting account could not be verified. Ask the account owner to check for remaining entries.',
 
   // Custom team roles
   'Roles and permissions': 'Roles and permissions',
