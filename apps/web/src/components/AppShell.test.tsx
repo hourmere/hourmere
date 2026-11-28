@@ -428,6 +428,40 @@ describe('the space selector in the admin frame', () => {
   })
 
   it.each([
+    ['en', 'Switch space', 'Owner', 'Current space'],
+    ['zh-CN', '切换空间', '所有者', '当前空间'],
+  ] as const)(
+    'keeps the team name between the %s switcher labels',
+    async (locale, action, role, current) => {
+      chooseLanguage(locale)
+      const team = { ...TEAM, name: 'שלום (Research) [42]' }
+      session.me.organization = { ...team, personal: false }
+      fakeApi({
+        'GET /api/auth/organization/list': () => json(200, [team]),
+        'GET /api/auth/organization/get-active-member': () =>
+          json(200, { organizationId: team.id, userId: session.me.user.id, role: 'owner' }),
+      })
+      const user = userEvent.setup()
+      shell()
+      const trigger = await screen.findByRole('button', {
+        name: `${action} ${team.name} ${role}`,
+      })
+      const name = within(trigger).getByText(team.name)
+      expect(name.dir).toBe('auto')
+      expect(name.nextElementSibling?.textContent).toBe(role)
+
+      await user.click(trigger)
+      const choice = await screen.findByRole('menuitemradio', {
+        name: `${team.name} ${current}`,
+      })
+      expect(within(choice).getByText(team.name).dir).toBe('auto')
+      expect(choice.getAttribute('aria-checked')).toBe('true')
+      await user.keyboard('{Escape}')
+      expect(document.activeElement).toBe(trigger)
+    },
+  )
+
+  it.each([
     ['another organization', 'another-team', 'shell-user'],
     ['another user', TEAM.id, 'another-user'],
   ])('does not borrow the owner role from %s', async (_, organizationId, userId) => {

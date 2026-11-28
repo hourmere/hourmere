@@ -94,3 +94,9 @@ export const eventRoutes = (event = EVENT, starts: string[] = []): Routes => ({
     event.durationMinutes,
   ),
 })
+
+/** jsdom may omit the space between separate layout boxes in a computed name. */
+export function accessibleNameParts(parts: readonly string[]) {
+  const escaped = parts.map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  return new RegExp(`^${escaped.join('\\s*')}$`, 'u')
+}

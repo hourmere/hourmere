@@ -225,7 +225,12 @@ describe('meeting poll results', () => {
     async (labels) => {
       chooseLanguage(labels.locale)
       const user = userEvent.setup()
-      const results = sampleResults()
+      const pollTitle = 'اجتماع (Team sync) [42]'
+      const mixedVoter = { ...ravi, name: 'רבי (Ravi) [7]' }
+      const results = sampleResults(
+        { title: pollTitle },
+        { roster: [alice, mixedVoter, declined, withdrawn, invited, noConsent] },
+      )
       const server = fakeApi({
         [getResults]: () => json(200, results),
         [postFinalize]: ({ body }) => json(201, scheduled(results, body)),
@@ -233,6 +238,15 @@ describe('meeting poll results', () => {
       renderResults()
       expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(labels.title)
       const matrix = await screen.findByRole('table', { name: labels.caption })
+      expect(screen.getByRole('heading', { name: pollTitle }).dir).toBe('auto')
+      const voterHeader = within(matrix).getByRole('rowheader', {
+        name: `${mixedVoter.name} ${mixedVoter.email} ${labels.locale === 'en' ? 'Verified voter' : '已验证'}`,
+      })
+      expect(Array.from(voterHeader.querySelectorAll('bdi'), (part) => part.textContent)).toEqual([
+        mixedVoter.name,
+        mixedVoter.email,
+      ])
+      expect(voterHeader.querySelector('bdi[dir="ltr"]')?.textContent).toBe(mixedVoter.email)
       expect(screen.getByText(labels.inference)).toBeTruthy()
       expect(within(matrix).getByText(labels.unavailable)).toBeTruthy()
       expect(within(matrix).getByRole('rowheader', { name: /Declined Voter/ })).toBeTruthy()
@@ -253,7 +267,11 @@ describe('meeting poll results', () => {
         }),
       ).toBeNull()
       await user.selectOptions(bookerChoices, alice.voterId)
-      await user.click(screen.getByRole('checkbox', { name: /Ravi Example/ }))
+      const attendee = screen.getByRole('checkbox', {
+        name: `${mixedVoter.name} ${mixedVoter.email}`,
+      })
+      expect(attendee.closest('label')?.querySelector('bdi')?.textContent).toBe(mixedVoter.name)
+      await user.click(attendee)
       const submit = screen.getByRole<HTMLButtonElement>('button', { name: labels.schedule })
       expect(submit.disabled).toBe(true)
       await user.click(screen.getByRole('checkbox', { name: labels.acknowledge }))

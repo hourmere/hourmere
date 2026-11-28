@@ -103,14 +103,22 @@ describe('workflow email rendering contract', () => {
   it('keeps mixed-direction template lines and each substituted value independent', () => {
     const value = input(
       'Title: {{event_type.title}}',
-      ' اجتماع ({{recipient.name}})\n\nNext: {{event_type.title}} ',
+      ' اجتماع ({{recipient.name}}) عبر {{event_type.public_path}}\n\nNext: {{event_type.title}}\nפרטי קשר ({{answer.company}}) ',
     )
-    value.recipient.name = 'Ada (נועה)'
+    value.recipient.name = 'נועה (Noa)'
     value.eventType.title = '12 موعد 中文'
+    value.answers = { company: 'layla@example.test' }
     const rendered = renderWorkflowEmail(value)
-    expect(rendered.text).toBe('اجتماع (Ada (נועה))\n\nNext: 12 موعد 中文')
+    expect(rendered.subject).toBe('Title: 12 موعد 中文')
+    expect(rendered.text).toBe(
+      'اجتماع (נועה (Noa)) عبر /ada/consultation\n\nNext: 12 موعد 中文\nפרטי קשר (layla@example.test)',
+    )
     expect(rendered.html).toBe(
-      '<p><span dir="auto">اجتماع (<bdi>Ada (נועה)</bdi>)</span><br><br><span dir="auto">Next: <bdi>12 موعد 中文</bdi></span></p>',
+      [
+        '<p><span dir="auto">اجتماع (<bdi>נועה (Noa)</bdi>) عبر <bdi dir="ltr">/ada/consultation</bdi></span>',
+        '<br><br><span dir="auto">Next: <bdi>12 موعد 中文</bdi></span>',
+        '<br><span dir="auto">פרטי קשר (<bdi>layla@example.test</bdi>)</span></p>',
+      ].join(''),
     )
   })
   it('renders a validated template with an emoji variation selector unchanged', () => {

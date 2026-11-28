@@ -70,8 +70,33 @@ describe('routing continuation', () => {
     const user = userEvent.setup()
     const hiddenPath = '/ada/private-discovery'
     const redirect = 'https://example.invalid/after-booking'
+    const title = 'جلسة (Private discovery)'
+    const host = 'נועה (Noa 42)'
+    const location = 'המשרד (Office 7)'
+    const referenceLabel = 'رقم المشروع (Reference)'
+    const updatedName = 'ليلى (Layla)'
+    const updatedTopic = 'עדכון (Design) — agenda@example.invalid'
+    const address = 'المكتب (Office 7), 42 Main Street'
+    const description = ['شارك خطة المشروع.', 'Read the agenda (שלום).']
     const api = fakeApi({
-      [resolveRoute]: () => json(200, projection),
+      [resolveRoute]: () =>
+        json(200, {
+          ...projection,
+          eventType: {
+            ...projection.eventType,
+            title,
+            host: { name: host },
+            description: description.join('\n'),
+            locations: [
+              { id: 'default-phone', kind: 'phone', isDefault: true },
+              { id: 'office', kind: 'in_person', label: location },
+            ],
+            questions: [
+              ...projection.eventType.questions.slice(0, 1),
+              { id: 'reference', label: referenceLabel, type: 'short_text', required: true },
+            ],
+          },
+        }),
       [slotsRoute]: ({ body }) =>
         json(200, {
           slots: [slot(start, (body as Schemas['RoutingContinuationSlotsInput']).durationMinutes)],
@@ -79,7 +104,13 @@ describe('routing continuation', () => {
       [bookingsRoute]: () =>
         json(201, {
           ...result,
-          booking: { ...result.booking, end: slot(start, 45).end },
+          booking: {
+            ...result.booking,
+            title,
+            assignedHost: { name: host, timeZone: 'Europe/Berlin' },
+            location: { kind: 'in_person', address },
+            end: slot(start, 45).end,
+          },
           eventPath: hiddenPath,
           successRedirect: { url: redirect, allowEmbedParent: true },
         }),
@@ -90,13 +121,19 @@ describe('routing continuation', () => {
     vi.stubGlobal('indexedDB', { open: openDatabase })
     render(<RoutingContinuationPage routeToken={TOKEN} />)
 
-    expect(await screen.findByRole('heading', { name: projection.eventType.title })).toBeDefined()
+    const event = await screen.findByRole('complementary', { name: 'About this event' })
+    expect(within(event).getByRole('heading', { name: title }).dir).toBe('auto')
+    expect(within(event).getByText(host).tagName).toBe('BDI')
+    expect(
+      Array.from(event.querySelectorAll('.event-description bdi'), (value) => value.textContent),
+    ).toEqual(description)
     const picker = screen.getByRole('heading', { name: 'Pick a time' })
     await waitFor(() => expect(document.activeElement).toBe(picker))
     await user.tab()
     expect(document.activeElement).toBe(screen.getByRole('radio', { name: 'Phone call' }))
     await user.keyboard('{ArrowRight}')
-    expect((screen.getByRole('radio', { name: 'Office' }) as HTMLInputElement).checked).toBe(true)
+    expect(screen.getByRole<HTMLInputElement>('radio', { name: location }).checked).toBe(true)
+    expect(within(event).getByText(location).tagName).toBe('BDI')
     await user.click(screen.getByRole('radio', { name: '45 min' }))
     await user.click(screen.getByRole('button', { name: /^Time zone/ }))
     await user.type(screen.getByRole('combobox', { name: 'Search time zones' }), 'Berlin')
@@ -119,7 +156,7 @@ describe('routing continuation', () => {
     const name = screen.getByRole<HTMLInputElement>('textbox', { name: 'Your name' })
     const email = screen.getByRole<HTMLInputElement>('textbox', { name: 'Email' })
     const topic = screen.getByRole<HTMLInputElement>('textbox', { name: 'Topic' })
-    const reference = screen.getByRole<HTMLInputElement>('textbox', { name: 'Project reference' })
+    const reference = screen.getByRole<HTMLInputElement>('textbox', { name: referenceLabel })
     expect(name.value).toBe('Original invitee')
     expect(email.value).toBe('original@example.invalid')
     expect(topic.value).toBe('Original topic')
@@ -127,19 +164,21 @@ describe('routing continuation', () => {
     expect(name.form?.method).toBe('post')
     expect(name.getAttribute('autocomplete')).toBe('off')
     expect(email.getAttribute('autocomplete')).toBe('off')
+    expect(name.dir).toBe('auto')
+    expect(reference.dir).toBe('auto')
     expect(reference.getAttribute('aria-required')).toBe('true')
-    fireEvent.change(name, { target: { value: 'Updated invitee' } })
+    fireEvent.change(name, { target: { value: updatedName } })
     fireEvent.change(email, { target: { value: 'updated@example.invalid' } })
-    fireEvent.change(topic, { target: { value: 'Updated topic' } })
+    fireEvent.change(topic, { target: { value: updatedTopic } })
 
     await selectPublicLanguage(user, 'es')
     expect(screen.getByRole('textbox', { name: 'Su nombre' })).toBe(name)
-    expect(name.value).toBe('Updated invitee')
+    expect(name.value).toBe(updatedName)
     await selectPublicLanguage(user, 'en')
 
     act(() => details.focus())
     await user.tab()
-    expect(document.activeElement).toBe(screen.getByRole('radio', { name: 'Office' }))
+    expect(document.activeElement).toBe(screen.getByRole('radio', { name: location }))
     for (const control of [name, email, topic, reference]) {
       await user.tab()
       expect(document.activeElement).toBe(control)
@@ -150,18 +189,19 @@ describe('routing continuation', () => {
     await user.keyboard('{Enter}')
     const alert = await screen.findByRole('alert')
     expect(document.activeElement).toBe(alert)
-    expect(
-      within(alert).getByRole('link', { name: 'Project reference: This answer is required.' }),
-    ).toBeDefined()
+    const errorLink = within(alert).getByRole('link', {
+      name: `${referenceLabel}: This answer is required.`,
+    })
+    expect(errorLink.querySelector('bdi')?.textContent).toBe(referenceLabel)
     expect(reference.getAttribute('aria-invalid')).toBe('true')
     expect(
       screen.getByRole('textbox', {
-        name: 'Project reference',
+        name: referenceLabel,
         description: 'This answer is required.',
       }),
     ).toBe(reference)
     expect(api.to(bookingsRoute)).toHaveLength(0)
-    await user.click(within(alert).getByRole('link'))
+    await user.click(errorLink)
     expect(document.activeElement).toBe(reference)
     await user.type(reference, 'PRJ-42')
     await user.tab()
@@ -169,7 +209,10 @@ describe('routing continuation', () => {
 
     const confirmation = await screen.findByRole('heading', { name: 'You’re booked' })
     expect(document.activeElement).toBe(confirmation)
-    expect(screen.getByText(projection.eventType.title)).toBeDefined()
+    const summary = confirmation.closest('.confirmation')
+    expect(
+      Array.from(summary?.querySelectorAll('dd bdi') ?? [], (value) => value.textContent),
+    ).toEqual([title, address, host])
     expect(screen.queryByRole('link', { name: /continue/i })).toBeNull()
     for (const privateValue of [hiddenPath, redirect, TOKEN])
       expect(document.body.innerHTML).not.toContain(privateValue)
@@ -187,12 +230,12 @@ describe('routing continuation', () => {
           durationMinutes: 45,
           locationOptionId: 'office',
           invitee: {
-            name: 'Updated invitee',
+            name: updatedName,
             email: 'updated@example.invalid',
             timeZone: 'Europe/Berlin',
             locale: 'en',
           },
-          responses: { topic: 'Updated topic', reference: 'PRJ-42' },
+          responses: { topic: updatedTopic, reference: 'PRJ-42' },
         },
       },
     ])

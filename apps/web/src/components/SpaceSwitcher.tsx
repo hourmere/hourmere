@@ -25,7 +25,8 @@ export function SpaceSwitcher({ onError }: { onError: (error: UiText | null) => 
   const firstFocus = useRef<'current' | 'first' | 'last'>('current')
   const switching = useRef<{ controller: AbortController; release: () => void } | null>(null)
   const menuId = useId()
-  const contextId = useId()
+  const spaceNameId = useId()
+  const spaceRoleId = useId()
   const triggerLabelId = useId()
   const userId = me.user.id
   const organizationId = me.organization.id
@@ -195,7 +196,7 @@ export function SpaceSwitcher({ onError }: { onError: (error: UiText | null) => 
         type="button"
         className="button space-trigger"
         ref={trigger}
-        aria-labelledby={`${triggerLabelId} ${contextId}`}
+        aria-labelledby={`${triggerLabelId} ${spaceNameId} ${spaceRoleId}`}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
@@ -211,15 +212,16 @@ export function SpaceSwitcher({ onError }: { onError: (error: UiText | null) => 
         <span className="visually-hidden" id={triggerLabelId}>
           {t('Switch space')}
         </span>
-        <span className="space-context" id={contextId}>
+        <span className="space-context">
           <span
             className="space-name"
+            id={spaceNameId}
             title={currentName}
             dir={me.organization.personal ? undefined : 'auto'}
           >
             {currentName}
           </span>
-          <span className="space-role">
+          <span className="space-role" id={spaceRoleId}>
             {busy
               ? t('Switching space…')
               : role.status === 'ready' && role.roles
@@ -259,7 +261,12 @@ export function SpaceSwitcher({ onError }: { onError: (error: UiText | null) => 
                 >
                   {option.name}
                 </span>
-                {option.current && <span className="space-current">{t('Current space')}</span>}
+                {option.current && (
+                  <>
+                    {' '}
+                    <span className="space-current">{t('Current space')}</span>
+                  </>
+                )}
               </button>
             ))}
           </div>

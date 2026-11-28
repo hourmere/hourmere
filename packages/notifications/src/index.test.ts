@@ -115,28 +115,47 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
     await db.deleteFrom('notification_email_sends').execute()
   })
 
-  /** A Berlin-scheduled host in New York with one event type, booked by Ada from Tokyo. */
   const mixedOptions = ['الخطة (Pro)', '中文', 'עברית (Team)']
+  const mixedBooking = {
+    host: 'נועה (Noa) [42]',
+    invitee: 'ليلى (Layla)',
+    guest: 'יעל (Yael)',
+    event: '📅 12 مراجعة (Review) & צוות',
+    location: 'شارع النور (Oak St), Room 12',
+    question: 'מה הנושא? (Topic)',
+    answer: 'راسلني <ada@example.com>\nراجع https://docs.example.test/brief?tab=2&mode=review',
+  }
 
+  /** A Berlin-scheduled host in New York with one event type, booked from Tokyo. */
   async function booked(
     options: {
       guests?: boolean
       now?: Temporal.Instant
       start?: Temporal.Instant
-      mixedAnswers?: boolean
+      mixedContent?: boolean
     } = {},
   ) {
-    const host = await f.host({ name: 'Grace Hopper', timeZone: 'America/New_York' })
+    const host = await f.host({
+      name: options.mixedContent ? mixedBooking.host : 'Grace Hopper',
+      timeZone: 'America/New_York',
+    })
     await f.schedule(host.userId)
     await f.eventType(host.organizationId, host.userId, {
       slug: 'intro',
       // These scenarios exercise a host that explicitly enabled guests.
       allowGuests: true,
-      title: 'Intro call',
-      location: { kind: 'link', url: 'https://meet.example.com/abc' },
+      title: options.mixedContent ? mixedBooking.event : 'Intro call',
+      location: options.mixedContent
+        ? { kind: 'in_person', address: mixedBooking.location }
+        : { kind: 'link', url: 'https://meet.example.com/abc' },
       questions: [
-        { id: 'topic', label: 'What should we talk about?', type: 'long_text', required: false },
-        ...(options.mixedAnswers
+        {
+          id: 'topic',
+          label: options.mixedContent ? mixedBooking.question : 'What should we talk about?',
+          type: 'long_text',
+          required: false,
+        },
+        ...(options.mixedContent
           ? [
               {
                 id: 'plans',
@@ -155,11 +174,22 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
         handle: host.handle,
         slug: 'intro',
         start: options.start ?? instant(START),
-        invitee: { name: 'Ada Lovelace', email: 'ada@example.com', timeZone: 'Asia/Tokyo' },
-        guests: options.guests ? [{ name: 'Charles Babbage', email: 'charles@example.com' }] : [],
+        invitee: {
+          name: options.mixedContent ? mixedBooking.invitee : 'Ada Lovelace',
+          email: 'ada@example.com',
+          timeZone: 'Asia/Tokyo',
+        },
+        guests: options.guests
+          ? [
+              {
+                name: options.mixedContent ? mixedBooking.guest : 'Charles Babbage',
+                email: 'charles@example.com',
+              },
+            ]
+          : [],
         responses: {
-          topic: 'Engines,\nanalytical ones.',
-          ...(options.mixedAnswers && { plans: mixedOptions }),
+          topic: options.mixedContent ? mixedBooking.answer : 'Engines,\nanalytical ones.',
+          ...(options.mixedContent && { plans: mixedOptions }),
         },
       },
     )
@@ -635,8 +665,8 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
     }
   })
 
-  it('confirms to the host, the invitee and guests, each in their own time zone', async () => {
-    const { bookingId, hostEmail } = await booked({ guests: true, mixedAnswers: true })
+  it('renders mixed booking content per recipient in their own time zone', async () => {
+    const { bookingId, hostEmail } = await booked({ guests: true, mixedContent: true })
     const { mailer, sent } = testMailer()
     await sendBookingNotification(deps(mailer), bookingId, 'confirmed')
 
@@ -644,39 +674,58 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
     expect(sent.map((m) => m.to)).toEqual([hostEmail, 'ada@example.com', 'charles@example.com'])
     const [toHost, toInvitee, toGuest] = sent
     expect(toInvitee?.subject).toBe(
-      'Confirmed: Intro call with Grace Hopper on Tue, Nov 3, 6:00 PM (Asia/Tokyo, GMT+09:00)',
+      `Confirmed: ${mixedBooking.event} with ${mixedBooking.host} on Tue, Nov 3, 6:00 PM (Asia/Tokyo, GMT+09:00)`,
     )
-    expect(toInvitee?.text.includes('Where: Online meeting')).toBe(true)
-    expect(toInvitee?.text.includes('Join meeting\nhttps://meet.example.com/abc')).toBe(true)
+    expect(toInvitee?.html).toContain(`<bdi>${mixedBooking.host}</bdi>`)
+    expect(toInvitee?.text).toContain(`Where: ${mixedBooking.location}`)
     expect(toInvitee?.text).toMatch(
       /Reschedule: https:\/\/cal\.example\.com\/booking#token=[A-Za-z0-9_-]{43}&action=reschedule/,
     )
     expect(toGuest?.subject).toContain('(Asia/Tokyo, GMT+09:00)')
-    expect(toGuest?.text).not.toContain('token=')
+    expect(toGuest?.text.includes('token=')).toBe(false)
     expect(toHost?.subject).toBe(
-      'New booking: Intro call with Ada Lovelace on Tue, Nov 3, 4:00 AM (America/New York, GMT-05:00)',
+      `New booking: ${mixedBooking.event} with ${mixedBooking.invitee} on Tue, Nov 3, 4:00 AM (America/New York, GMT-05:00)`,
     )
-    expect(toHost?.text).toContain('Invitee: Ada Lovelace <ada@example.com>')
-    expect(toHost?.text).toContain('Guests: Charles Babbage <charles@example.com>')
-    expect(toHost?.text).toContain('What should we talk about?\n  Engines,\n  analytical ones.')
+    expect(toHost?.text).toContain(`Invitee: ${mixedBooking.invitee} <ada@example.com>`)
+    expect(toHost?.html).toContain(
+      `<bdi>${mixedBooking.invitee}</bdi> &lt;<bdi dir="ltr">ada@example.com</bdi>&gt;`,
+    )
+    expect(toHost?.text).toContain(`Guests: ${mixedBooking.guest} <charles@example.com>`)
+    expect(toHost?.html).toContain(
+      `<bdi>${mixedBooking.guest}</bdi> &lt;<bdi dir="ltr">charles@example.com</bdi>&gt;`,
+    )
+    expect(toHost?.text).toContain(
+      `${mixedBooking.question}\n  ${mixedBooking.answer.replaceAll('\n', '\n  ')}`,
+    )
+    expect(toHost?.html).toContain(`<bdi>${mixedBooking.question}</bdi>`)
+    expect(toHost?.html).toContain(
+      '<bdi>راسلني &lt;ada@example.com&gt;</bdi><br><bdi>راجع https://docs.example.test/brief?tab=2&amp;mode=review</bdi>',
+    )
     expect(toHost?.text).toContain(`Plans\n  ${mixedOptions.join(', ')}`)
     expect(toHost?.html).toContain(mixedOptions.map((option) => `<bdi>${option}</bdi>`).join(', '))
-    expect(toInvitee?.html).not.toContain(mixedOptions[0])
-    expect(toGuest?.html).not.toContain(mixedOptions[0])
     expect(toHost?.text).not.toContain('token=')
 
+    for (const message of [toInvitee, toGuest]) {
+      for (const body of [message?.html, message?.text]) {
+        expect(body).not.toContain(mixedBooking.question)
+        expect(body).not.toContain('docs.example.test')
+        expect(body).not.toContain(mixedOptions[0])
+      }
+    }
     for (const m of sent) {
+      expect(m.html).toContain('<bdi>📅 12 مراجعة (Review) &amp; צוות</bdi>')
+      expect(m.html).toContain(`<bdi>${mixedBooking.location}</bdi>`)
       expect(invitation(m)).toMatchObject({
         method: 'REQUEST',
         // Not tied to PUBLIC_URL, so a domain change does not orphan calendar entries.
         uid: `${bookingId}@hourmere`,
         sequence: 0,
-        location: 'https://meet.example.com/abc',
+        location: mixedBooking.location,
       })
+      expect(m.attachments?.[0]?.content).not.toMatch(/token=|docs\.example\.test/)
     }
-    expect(invitation(toInvitee)?.summary).toBe('Intro call with Grace Hopper')
-    expect(invitation(toHost)?.summary).toBe('Intro call with Ada Lovelace')
-    expect(toInvitee?.attachments?.[0]?.content).not.toContain('token')
+    expect(invitation(toInvitee)?.summary).toBe(`${mixedBooking.event} with ${mixedBooking.host}`)
+    expect(invitation(toHost)?.summary).toBe(`${mixedBooking.event} with ${mixedBooking.invitee}`)
   })
 
   it.each([
@@ -769,7 +818,11 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
     const { bookingId, apiToken } = await booked()
     const { mailer, sent } = testMailer()
     await sendBookingNotification(deps(mailer), bookingId, 'confirmed')
-    const token = tokenIn(sent.find(to('ada@example.com')))
+    const invitee = sent.find(to('ada@example.com'))
+    expect(invitee?.text).toContain('Where: Online meeting')
+    expect(invitee?.text).toContain('Join meeting\nhttps://meet.example.com/abc')
+    expect(invitation(invitee)?.location).toBe('https://meet.example.com/abc')
+    const token = tokenIn(invitee)
     expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/)
     expect(token).not.toBe(apiToken)
     const rows = await records(bookingId)

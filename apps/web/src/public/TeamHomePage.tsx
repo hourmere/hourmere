@@ -1,5 +1,6 @@
 import { useCallback } from 'react'
 import { Link, useParams } from 'react-router'
+import { UserContentLines } from '../components/UserContent.tsx'
 import { usePageTitle } from '../hooks.ts'
 import { formatDuration } from '../i18n/duration.ts'
 import { useI18n } from '../i18n/runtime.tsx'
@@ -97,8 +98,8 @@ function TeamHomeContent({ slug }: { slug: string }) {
                   {event.location && ` · ${ui(locationLabel(event.location.kind))}`}
                 </span>
                 {event.description && (
-                  <span className="event-card-description" dir="auto">
-                    {collapseBlankLines(event.description)}
+                  <span className="event-card-description">
+                    <UserContentLines text={collapseBlankLines(event.description)} />
                   </span>
                 )}
               </Link>

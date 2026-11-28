@@ -1,0 +1,28 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`buildIcs > preserves mixed-direction calendar and contact values as literal text 1`] = `
+[
+  "BEGIN:VCALENDAR",
+  "VERSION:2.0",
+  "PRODID:-//Hourmere//Hourmere//EN",
+  "CALSCALE:GREGORIAN",
+  "METHOD:REQUEST",
+  "BEGIN:VEVENT",
+  "UID:0199f0c4-7a2b-7000-8000-000000000001@cal.example.com",
+  "SEQUENCE:0",
+  "DTSTAMP:20261016T101530Z",
+  "DTSTART:20261020T080000Z",
+  "DTEND:20261020T083000Z",
+  "SUMMARY:🗓 12 موعد\\; English\\, צוות",
+  "DESCRIPTION:موعد <layla+calendar@example.test> (https://video.example.t",
+  " est/room?team=12&layout=grid)\\n\\nNext: שלום",
+  "LOCATION:شارع النور (Oak St)\\, Room 12\\; Building \\\\ A",
+  "ORGANIZER;CN="נועה (Noa)":mailto:noa@example.test",
+  "ATTENDEE;CN="ليلى (Layla)";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;RSVP=",
+  " FALSE:mailto:layla+calendar@example.test",
+  "STATUS:CONFIRMED",
+  "TRANSP:OPAQUE",
+  "END:VEVENT",
+  "END:VCALENDAR",
+]
+`;
