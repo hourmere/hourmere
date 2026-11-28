@@ -2,6 +2,13 @@ import { randomUUID } from 'node:crypto'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import {
+  cancelHostBooking,
+  createPublicBooking,
+  expireRescheduleRequest,
+  requestReschedule,
+  rescheduleHostBooking,
+} from '@hourmere/scheduling'
+import {
   createFixtures,
   createTestTeam,
   createTestUser,
@@ -24,7 +31,8 @@ import {
   testSlackDestination,
   updateSlackDestination,
 } from './slack.ts'
-import { escapeSlackText, slackPayload, slackUrl } from './slack-format.ts'
+import { escapeSlackText, SLACK_EVENTS, slackPayload, slackUrl } from './slack-format.ts'
+import type { WebhookTransport } from './transport.ts'
 
 const url = 'https://hooks.slack.com/services/TTEST/BTEST/synthetic-secret'
 const settings = { enabled: true, encryptionKey: Buffer.alloc(32, 8).toString('base64') }
@@ -181,6 +189,88 @@ describe.skipIf(!process.env.DATABASE_URL)(
       ).rejects.toMatchObject({
         code: 'slack_destination_disabled',
       })
+    })
+    it('posts all five subscribed booking events with only the allowed message fields', async () => {
+      const owner = await createTestUser(db)
+      const fixtures = createFixtures(db)
+      const handle = `slack-${owner.id.slice(0, 8)}`
+      await db
+        .insertInto('profiles')
+        .values({ user_id: owner.id, handle, time_zone: 'UTC' })
+        .execute()
+      await fixtures.schedule(owner.id, { timeZone: 'UTC' })
+      await fixtures.eventType(owner.principal.organization.id, owner.id, {
+        slug: 'intro',
+        title: 'Intro & planning',
+      })
+      let clock = now
+      const transport = vi.fn<WebhookTransport>(async () => 200)
+      const enqueue = vi.fn(async () => null)
+      const options = { ...settings, publicUrl: 'https://calendar.example.com' }
+      const ctx = {
+        ...testContext(db, owner.principal, () => clock),
+        notify: webhookBookingNotifier({ enqueue }, options),
+      }
+      const destination = await createSlackDestination(ctx, options, { url, events: SLACK_EVENTS })
+      const checkPost = async (type: string, id: string, hour: string, status = 'confirmed') => {
+        const row = await db
+          .selectFrom('webhook_deliveries')
+          .select(['id', 'booking_id', 'event_type'])
+          .where('webhook_id', '=', destination.id)
+          .where('status', '=', 'pending')
+          .executeTakeFirstOrThrow()
+        expect(row).toMatchObject({ booking_id: id, event_type: type })
+        await deliverWebhook(
+          { ...options, db, now: ctx.now, transport },
+          row.id,
+          new AbortController().signal,
+        )
+        const request = transport.mock.lastCall?.[0]
+        const text = [
+          `Hourmere: ${type}`,
+          'Event: Intro &amp; planning',
+          `Booking: ${id}`,
+          `Start: 2026-11-04T${hour}:00+00:00[UTC]`,
+          `End: 2026-11-04T${hour}:30+00:00[UTC]`,
+          `Status: ${status}`,
+          'Invitee: Guest &lt;!here&gt;',
+          `${options.publicUrl}/app/bookings/${id}`,
+        ].join('\n')
+        expect(request).toMatchObject({ url, headers: {}, privateTargets: [] })
+        expect(JSON.parse(request?.body ?? '{}')).toEqual({
+          text,
+          mrkdwn: false,
+          unfurl_links: false,
+          unfurl_media: false,
+          blocks: [{ type: 'section', text: { type: 'plain_text', text, emoji: false } }],
+        })
+      }
+      const created = await createPublicBooking(ctx, {
+        handle,
+        slug: 'intro',
+        start: Temporal.Instant.from('2026-11-04T09:00Z'),
+        invitee: { name: 'Guest <!here>', email: 'invitee@example.com', timeZone: 'UTC' },
+      })
+      const id = created.booking.id
+      await checkPost('booking.created', id, '09')
+      const request = { idempotencyKey: randomUUID(), note: 'A private reschedule note' }
+      const requested = await requestReschedule(ctx, id, request)
+      await requestReschedule(ctx, id, request)
+      await checkPost('booking.reschedule_requested', id, '09')
+      if (!requested.pendingReschedule) throw new Error('Expected a pending reschedule request')
+      const pending = requested.pendingReschedule
+      clock = Temporal.Instant.from(pending.expiresAt)
+      await expireRescheduleRequest(ctx, pending.id)
+      await expireRescheduleRequest(ctx, pending.id)
+      await checkPost('booking.reschedule_request_expired', id, '09')
+      const moved = await rescheduleHostBooking(ctx, id, {
+        start: Temporal.Instant.from('2026-11-04T10:00Z'),
+      })
+      await checkPost('booking.rescheduled', moved.booking.id, '10')
+      await cancelHostBooking(ctx, moved.booking.id, { reason: 'A private cancellation reason' })
+      await checkPost('booking.cancelled', moved.booking.id, '10', 'cancelled')
+      expect(enqueue).toHaveBeenCalledTimes(5)
+      expect(transport).toHaveBeenCalledTimes(5)
     })
     it('keeps attendee no-show changes off Slack, even for a row widened outside the service', async () => {
       const { ctx, destination, bookingId } = await fixture()

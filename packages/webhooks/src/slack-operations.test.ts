@@ -181,19 +181,25 @@ describe.skipIf(!process.env.DATABASE_URL)(
       })
     })
     it.each([404, 410])(
-      'atomically pauses revoked HTTP %s destinations after one attempt',
+      'atomically pauses a Slack HTTP %s rejection even if worker shutdown races the response',
       async (status) => {
         const f = await fixture()
         await f.capture()
         const sample = await testSlackDestination(f.ctx, settings, f.destination.id, queue)
+        const shutdown = new AbortController()
         const transport = vi.fn(async () => {
           await new Promise((resolve) => setTimeout(resolve, 50))
+          shutdown.abort()
           return status
         })
         await expect(
           Promise.all(
             (await f.rows()).map((row) =>
-              deliverWebhook({ db, ...settings, transport, now: () => now }, row.id, signal()),
+              deliverWebhook(
+                { db, ...settings, transport, now: () => now },
+                row.id,
+                shutdown.signal,
+              ),
             ),
           ),
         ).resolves.toEqual([undefined, undefined])
@@ -207,6 +213,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
         expect(rows.find((row) => row.status === 'failed')).toMatchObject({
           attempts: 1,
           http_status: status,
+          last_error: 'http_error',
         })
         expect(rows.filter((row) => row.status === 'skipped')).toHaveLength(1)
         await deliverWebhook(
@@ -217,6 +224,58 @@ describe.skipIf(!process.env.DATABASE_URL)(
         expect(transport).toHaveBeenCalledTimes(1)
       },
     )
+    it.each([
+      ['HTTP 500', 500],
+      ['a transport error', null],
+    ])('retries Slack delivery interrupted by shutdown during %s', async (_, status) => {
+      const f = await fixture()
+      await f.capture()
+      const { id } = await db
+        .selectFrom('webhook_deliveries')
+        .select('id')
+        .where('webhook_id', '=', f.destination.id)
+        .executeTakeFirstOrThrow()
+      const shutdown = new AbortController()
+      const transport = vi
+        .fn(async () => 200)
+        .mockImplementationOnce(async () => {
+          shutdown.abort()
+          if (status === null) throw new Error('synthetic transport failure')
+          return status
+        })
+      const deps = { db, ...settings, transport, now: () => now }
+
+      await expect(deliverWebhook(deps, id, shutdown.signal)).rejects.toThrow(
+        /^Webhook delivery interrupted$/,
+      )
+      expect(await f.rows()).toMatchObject([
+        {
+          attempts: 1,
+          status: 'pending',
+          last_error: 'interrupted',
+          http_status: null,
+          delivered_at: null,
+        },
+      ])
+      expect((await listSlackDestinations(f.ctx))[0]).toMatchObject({
+        isActive: true,
+        pauseReason: null,
+      })
+
+      await deliverWebhook(deps, id, signal(), 2)
+      expect(transport).toHaveBeenCalledTimes(2)
+      expect(await f.rows()).toMatchObject([
+        { attempts: 2, status: 'delivered', last_error: null, http_status: 200 },
+      ])
+      expect(
+        await db
+          .selectFrom('audit_events')
+          .select('id')
+          .where('target_id', '=', f.destination.id)
+          .where('action', '=', 'slack_destination.paused')
+          .execute(),
+      ).toEqual([])
+    })
     it('does not block booking capture during an in-flight Slack network request', async () => {
       const f = await fixture()
       const sample = await testSlackDestination(f.ctx, settings, f.destination.id, queue)

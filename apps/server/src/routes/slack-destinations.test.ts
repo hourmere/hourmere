@@ -7,7 +7,7 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createTestTeam, createTestUser } from '@hourmere/scheduling/testing'
 import * as webhooks from '@hourmere/webhooks'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { slackDestinationTools } from '../mcp/slack-destinations.ts'
 import { type McpCaller, runTool, type Tool } from '../mcp/tools.ts'
 import * as openapi from '../openapi.ts'
@@ -87,6 +87,40 @@ describe.skipIf(!serverUrl)('Slack REST API', () => {
     expect((await request(`/${body.id}`, 'PATCH', { isActive: false })).status).toBe(200)
     expect((await request(`/${body.id}`, 'DELETE')).status).toBe(204)
     expect(await (await request()).json()).toEqual([])
+  })
+  it('keeps pending work isolated when an owner disconnects and connects a different channel', async () => {
+    const own = await client(true)
+    const other = await client(true)
+    const connect = (url: string) => own.request('', 'POST', { url, events: ['booking.created'] })
+    const created = await connect(secret)
+    expect(created.status).toBe(201)
+    const destination = (await created.json()) as { id: string }
+    const sample = await own.request(`/${destination.id}/test`, 'POST')
+    expect(sample.status).toBe(202)
+    const { deliveryId } = (await sample.json()) as { deliveryId: string }
+    expect((await other.request(`/${destination.id}`, 'DELETE')).status).toBe(404)
+    expect(await (await own.request()).json()).toEqual([expect.objectContaining(destination)])
+    expect((await own.request(`/${destination.id}`, 'DELETE')).status).toBe(204)
+    expect(await (await own.request()).json()).toEqual([])
+
+    const replacement = 'https://hooks.slack.com/services/TTEST/BNEW/synthetic-replacement'
+    const reconnected = await connect(replacement)
+    expect(reconnected.status).toBe(201)
+    const current = (await reconnected.json()) as { id: string }
+    expect(current.id).not.toBe(destination.id)
+    const newSample = await own.request(`/${current.id}/test`, 'POST')
+    expect(newSample.status).toBe(202)
+    const currentSample = (await newSample.json()) as { deliveryId: string }
+    const transport = vi.fn(async () => 200)
+    const deps = { ...settings, db, transport }
+    const signal = new AbortController().signal
+    await webhooks.deliverWebhook(deps, deliveryId, signal)
+    expect(transport).not.toHaveBeenCalled()
+    expect(
+      await db.selectFrom('webhook_deliveries').select('id').where('id', '=', deliveryId).execute(),
+    ).toEqual([])
+    await webhooks.deliverWebhook(deps, currentSample.deliveryId, signal)
+    expect(transport).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ url: replacement }))
   })
   it('masks replacement URLs in PATCH, list and storage', async () => {
     const { request } = await client()
