@@ -81,5 +81,5 @@ and `html`. Use `text` in a plain-text draft or `html` as formatted content.
   `409 calendar_sync_unavailable` if a host calendar is temporarily unavailable. Try
   another date range for the first error or retry after a short wait for the second.
 
-See the [hourmere.com guide](https://hourmere.com/docs/open-time-snippets) for
-disabled-feature responses and the full request reference.
+See [Share available times in email](https://hourmere.com/docs/open-time-snippets)
+for disabled-feature responses and the full request reference.
