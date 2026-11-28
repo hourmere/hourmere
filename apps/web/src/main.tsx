@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { RouterProvider } from 'react-router'
 import { createAppRouter, isRoutingContinuationPath } from './App.tsx'
 import { installPreloadRecovery } from './preload-recovery.ts'
+import '@hourmere/design-tokens/tokens.css'
 import './styles.css'
 
 const router = createAppRouter()

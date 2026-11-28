@@ -7,9 +7,9 @@
 
 @media (prefers-color-scheme: dark) {
   .public .event-card-own-brand {
-    --link: var(--event-brand-dark-link, #8faeff);
-    --accent: var(--event-brand-dark-accent, #3d68e6);
-    --focus: var(--event-brand-dark-focus, #8faeff);
+    --link: var(--event-brand-dark-link, var(--hm-color-link));
+    --accent: var(--event-brand-dark-accent, var(--hm-color-accent));
+    --focus: var(--event-brand-dark-focus, var(--hm-color-focus));
   }
 }
 

@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { darkTokens, tokens } from '@hourmere/design-tokens'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { type ComponentProps, useState } from 'react'
@@ -9,7 +10,6 @@ import { SlotPicker, type SlotPickerPosition } from './SlotPicker.tsx'
 import type { WaitlistWindow } from './waitlist-window.ts'
 
 const styles = readFileSync('apps/web/src/public/SlotPicker.css', 'utf8')
-const tokens = readFileSync('apps/web/src/styles.css', 'utf8')
 const originalScroll = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView')
 afterEach(() => {
   if (originalScroll) Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', originalScroll)
@@ -737,14 +737,9 @@ describe('slot picker CSS contracts', () => {
     expect(declaration(css, ':is(.public, .picker) .tz-toggle', 'border')).toBe(
       '1px solid var(--border-strong)',
     )
-    const themes = rules(tokens).filter((rule) => rule.selectorText === ':root')
-    expect(themes).toHaveLength(2)
-    for (const theme of themes) {
+    for (const theme of [tokens, darkTokens]) {
       expect(
-        contrast(
-          theme.style.getPropertyValue('--border-strong'),
-          theme.style.getPropertyValue('--surface'),
-        ),
+        contrast(theme['--hm-color-border-strong'], theme['--hm-color-surface']),
       ).toBeGreaterThanOrEqual(3)
     }
   })
