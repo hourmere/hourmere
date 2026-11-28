@@ -107,7 +107,7 @@ export function departureHandoffRunRoutes(
         operationId: 'startDepartureHandoffRun',
         summary: 'Start a bounded departure handoff run',
         description:
-          'Explicitly opts into processing eligible, approved offers for a departed team member. Retry the same request with the same runId. Disabled in production.',
+          'Explicitly opts into processing eligible, approved offers for a departed team member. Retry the same request with the same runId. Requires DEPARTURE_HANDOFFS_ENABLED=true.',
         tags: ['Team bookings'],
         security: [{ session: [] }],
         middleware: writeMiddleware,
@@ -145,7 +145,7 @@ export function departureHandoffRunRoutes(
         operationId: 'readDepartureHandoffRun',
         summary: 'Read a departure handoff run',
         description:
-          'Returns the bounded run receipt without private participant or provider details. Disabled in production.',
+          'Returns the bounded run receipt without private participant or provider details. Requires DEPARTURE_HANDOFFS_ENABLED=true.',
         tags: ['Team bookings'],
         security: [{ session: [] }],
         middleware: access.middleware,
@@ -176,7 +176,7 @@ export function departureHandoffRunRoutes(
         operationId: 'controlDepartureHandoffRun',
         summary: 'Pause, resume or stop a departure handoff run',
         description:
-          'A pause or stop takes effect before the next booking transaction. Resume continues only a paused run. Disabled in production.',
+          'A pause or stop takes effect before the next booking transaction. Resume continues only a paused run. Requires DEPARTURE_HANDOFFS_ENABLED=true.',
         tags: ['Team bookings'],
         security: [{ session: [] }],
         middleware: writeMiddleware,

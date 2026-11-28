@@ -680,9 +680,9 @@ export const common = {
   // Departure booking handoff
   'departureHandoff.title': 'Terminübergabe prüfen',
   'departureHandoff.allMustAccept':
-    'Die buchende Person und alle Gäste müssen zustimmen, bevor das Team den aktuellen Termin ersetzen kann.',
+    'Die buchende Person und alle Gäste müssen diesem Vorschlag zustimmen. Eine einzige Ablehnung oder fehlende Antwort blockiert die Übergabe.',
   'departureHandoff.privateLink':
-    'Halten Sie diesen Link vertraulich. Wer ihn hat, kann in Ihrem Namen antworten.',
+    'Halten Sie diesen Link vertraulich. Wer ihn hat, kann in Ihrem Namen antworten. Nur der neueste Link ist gültig.',
   'departureHandoff.deadline': 'Antwort erbeten bis',
   'departureHandoff.current': 'Aktueller Termin',
   'departureHandoff.proposed': 'Vorgeschlagener Termin',
@@ -695,7 +695,8 @@ export const common = {
   'departureHandoff.submitting': 'Entscheidung wird gesendet…',
   'departureHandoff.accepted': 'Zustimmung gespeichert',
   'departureHandoff.declined': 'Ablehnung gespeichert',
-  'departureHandoff.refused': 'Das Team kann diese Übergabe nicht durchführen.',
+  'departureHandoff.refused':
+    'Mit Ihrer Ablehnung wird dieser Vorschlag geschlossen. Ihr aktueller Termin bleibt unverändert.',
   'departureHandoff.unavailable': 'Dieser Link zur Terminübergabe ist nicht verfügbar',
   'departureHandoff.recovery':
     'Verwenden Sie den zuletzt erhaltenen Link oder wenden Sie sich an das Team.',
@@ -705,4 +706,6 @@ export const common = {
     'Wir konnten nicht bestätigen, dass Ihre Entscheidung gespeichert wurde. Prüfen Sie den Vorschlag vor einem erneuten Versuch.',
   'departureHandoff.rateLimited':
     'Zu viele Versuche. Warten Sie einen Moment, bevor Sie den Vorschlag erneut prüfen.',
+  'departureHandoff.currentUntilComplete':
+    'Ihr aktueller Termin bleibt bestätigt, bis das Team die Übergabe abgeschlossen hat.',
 } as const

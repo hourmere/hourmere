@@ -673,9 +673,9 @@ export const common = {
   // Departure booking handoff
   'departureHandoff.title': 'Examiner le transfert de réservation',
   'departureHandoff.allMustAccept':
-    'La personne qui a réservé et chaque invité doivent accepter avant que l’équipe puisse remplacer la réservation actuelle.',
+    'La personne qui a réservé et chaque invité doivent accepter cette proposition. Un seul refus ou une seule réponse manquante bloque le transfert.',
   'departureHandoff.privateLink':
-    'Gardez ce lien confidentiel. Toute personne qui le possède peut répondre en votre nom.',
+    'Gardez ce lien confidentiel. Toute personne qui le possède peut répondre en votre nom. Seul le lien le plus récent fonctionne.',
   'departureHandoff.deadline': 'Répondez avant le',
   'departureHandoff.current': 'Réservation actuelle',
   'departureHandoff.proposed': 'Réservation proposée',
@@ -688,7 +688,8 @@ export const common = {
   'departureHandoff.submitting': 'Envoi de la décision…',
   'departureHandoff.accepted': 'Acceptation enregistrée',
   'departureHandoff.declined': 'Refus enregistré',
-  'departureHandoff.refused': 'L’équipe ne peut pas effectuer ce transfert.',
+  'departureHandoff.refused':
+    'Votre refus clôt cette proposition et laisse votre réservation actuelle inchangée.',
   'departureHandoff.unavailable': 'Ce lien de transfert est indisponible',
   'departureHandoff.recovery': 'Utilisez le dernier lien reçu ou contactez l’équipe.',
   'departureHandoff.readAgain': 'Vérifier à nouveau la proposition',
@@ -697,4 +698,6 @@ export const common = {
     'Nous n’avons pas pu confirmer l’enregistrement de votre décision. Vérifiez la proposition avant de réessayer.',
   'departureHandoff.rateLimited':
     'Trop de tentatives. Patientez un instant avant de vérifier à nouveau la proposition.',
+  'departureHandoff.currentUntilComplete':
+    'Votre réservation actuelle reste confirmée jusqu’à ce que l’équipe termine le transfert.',
 } as const

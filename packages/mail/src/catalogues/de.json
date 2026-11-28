@@ -190,7 +190,7 @@
   "ownershipTransfer.confirmed.subject": "Teamverantwortung wurde übertragen",
   "ownershipTransfer.confirmed.message": "Die Inhaberrolle für {team} wurde übertragen. Melden Sie sich an und wählen Sie das Team aus, um die aktuellen Rollen in den Einstellungen zu sehen.",
   "departureHandoff.subject": "Vorgeschlagene Änderung Ihrer Buchung ansehen",
-  "departureHandoff.introduction": "Die Teamverwaltung hat einen Ersatz für Ihre Buchung vorgeschlagen. Erst wenn die buchende Person und alle Gäste zustimmen, kann das Team die Buchung ersetzen. Läuft der Vorschlag ab, bleibt die aktuelle Buchung bestätigt.",
+  "departureHandoff.introduction": "Die Teamverwaltung hat einen Ersatz für Ihre Buchung vorgeschlagen. Erst wenn die buchende Person und alle Gäste zustimmen, kann das Team die Buchung ersetzen. Eine einzige Ablehnung oder fehlende Antwort blockiert die Übergabe. Die aktuelle Buchung bleibt bestätigt, bis das Team die Übergabe abgeschlossen hat.",
   "departureHandoff.privacy": "Behandeln Sie diesen Link vertraulich. Wer ihn hat, kann in Ihrem Namen antworten. Nur der neueste Link ist gültig.",
   "departureHandoff.review": "Vorschlag ansehen",
   "bookingHandoff.subject": "Gastgeber gewechselt · {subject}",

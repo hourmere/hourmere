@@ -618,7 +618,7 @@ export interface paths {
         put?: never;
         /**
          * Accept or decline your exact booking handoff offer version
-         * @description Requires the recipient capability and reviewed version in the JSON body. The decision does not change the booking. An optional bearer API key requires bookings or full scope and grants no recipient access by itself. Disabled in production.
+         * @description Requires the recipient capability and reviewed version in the JSON body. The decision does not change the booking. An optional bearer API key requires bookings or full scope and grants no recipient access by itself. Requires DEPARTURE_HANDOFFS_ENABLED=true.
          */
         post: operations["answerBookingHandoffOffer"];
         delete?: never;
@@ -638,7 +638,7 @@ export interface paths {
         put?: never;
         /**
          * Read the terms for your private handoff offer
-         * @description Requires the recipient capability in the JSON body. Reading records no decision. An optional bearer API key requires read, bookings or full scope and grants no recipient access by itself. Disabled in production.
+         * @description Requires the recipient capability in the JSON body. Reading records no decision. An optional bearer API key requires read, bookings or full scope and grants no recipient access by itself. Requires DEPARTURE_HANDOFFS_ENABLED=true.
          */
         post: operations["readBookingHandoffOffer"];
         delete?: never;
@@ -4863,7 +4863,7 @@ export interface paths {
         put?: never;
         /**
          * Create a handoff proposal or supersede its current version
-         * @description Creates an offer and queues a private link for each distinct mailbox. Supply the latest offer ID and version in previous to replace an existing offer. The source remains confirmed and this does not reserve the proposed slot. Disabled in production.
+         * @description Creates an offer and queues a private link for each distinct mailbox. Supply the latest offer ID and version in previous to replace an existing offer. The source remains confirmed and this does not reserve the proposed slot. Requires DEPARTURE_HANDOFFS_ENABLED=true.
          */
         post: operations["createDepartureHandoffProposal"];
         delete?: never;
@@ -4881,7 +4881,7 @@ export interface paths {
         };
         /**
          * Read a handoff proposal and recipient delivery status
-         * @description Defaults to the latest version. Returns opaque recipient IDs, matching source attendee IDs, decisions and safe delivery states. Available to a current team owner or admin even if the mail queue is unavailable. Disabled in production.
+         * @description Defaults to the latest version. Returns opaque recipient IDs, matching source attendee IDs, decisions and safe delivery states. Available to a current team owner or admin even if the mail queue is unavailable. Requires DEPARTURE_HANDOFFS_ENABLED=true.
          */
         get: operations["readDepartureHandoffProposal"];
         put?: never;
@@ -4903,7 +4903,7 @@ export interface paths {
         put?: never;
         /**
          * Apply an explicitly approved booking handoff
-         * @description Requires a current owner/admin browser session and a same-origin write. Rechecks team authority, exact version, all recipient approvals, the currently offered slot and meeting eligibility in one transaction. Replays return the same limited receipt. Provider and mail work runs after commit.
+         * @description Requires a current owner/admin browser session and a same-origin write. Rechecks team authority, exact version, all recipient approvals, the currently offered slot and meeting eligibility in one transaction. Replays return the same limited receipt. Provider and mail work runs after commit. Requires DEPARTURE_HANDOFFS_ENABLED=true.
          */
         post: operations["applyDepartureHandoff"];
         delete?: never;
@@ -4923,7 +4923,7 @@ export interface paths {
         put?: never;
         /**
          * Queue a new private link for one pending recipient
-         * @description Use the same Idempotency-Key to retry a request for the same recipient and version. The delivery worker revokes the older link when it claims the new send. Each mailbox can receive up to three sends for the source booking across versions. Disabled in production.
+         * @description Use the same Idempotency-Key to retry a request for the same recipient and version. The delivery worker revokes the older link when it claims the new send. Each mailbox can receive up to three sends for the source booking across versions. Requires DEPARTURE_HANDOFFS_ENABLED=true.
          */
         post: operations["resendDepartureHandoffProposal"];
         delete?: never;
@@ -4943,7 +4943,7 @@ export interface paths {
         put?: never;
         /**
          * Withdraw a handoff proposal version
-         * @description Revokes the private links for the exact version and leaves the source booking confirmed. Available even if the mail queue is unavailable. Disabled in production.
+         * @description Revokes the private links for the exact version and leaves the source booking confirmed. Available even if the mail queue is unavailable. Requires DEPARTURE_HANDOFFS_ENABLED=true.
          */
         post: operations["withdrawDepartureHandoffProposal"];
         delete?: never;
@@ -4961,7 +4961,7 @@ export interface paths {
         };
         /**
          * Preview one booking handoff and read its current consent or receipt
-         * @description Reads one exact slot on the event type’s current grid. Does not reserve time, send consent links, or change a booking. Returns limited consent counts or a committed receipt with aggregate attendee mail status from the same team. Accepted means the mail server accepted all attendee messages of that kind. Staged and disabled unless a handoff store and booking notifier are wired in.
+         * @description Reads one exact slot on the event type’s current grid. Does not reserve time, send consent links, or change a booking. Returns limited consent counts or a committed receipt with aggregate attendee mail status from the same team. Accepted means the mail server accepted all attendee messages of that kind. Requires DEPARTURE_HANDOFFS_ENABLED=true.
          */
         get: operations["previewDepartureHandoff"];
         put?: never;
@@ -5043,7 +5043,7 @@ export interface paths {
         put?: never;
         /**
          * Start a bounded departure handoff run
-         * @description Explicitly opts into processing eligible, approved offers for a departed team member. Retry the same request with the same runId. Disabled in production.
+         * @description Explicitly opts into processing eligible, approved offers for a departed team member. Retry the same request with the same runId. Requires DEPARTURE_HANDOFFS_ENABLED=true.
          */
         post: operations["startDepartureHandoffRun"];
         delete?: never;
@@ -5061,7 +5061,7 @@ export interface paths {
         };
         /**
          * Read a departure handoff run
-         * @description Returns the bounded run receipt without private participant or provider details. Disabled in production.
+         * @description Returns the bounded run receipt without private participant or provider details. Requires DEPARTURE_HANDOFFS_ENABLED=true.
          */
         get: operations["readDepartureHandoffRun"];
         put?: never;
@@ -5083,7 +5083,7 @@ export interface paths {
         put?: never;
         /**
          * Pause, resume or stop a departure handoff run
-         * @description A pause or stop takes effect before the next booking transaction. Resume continues only a paused run. Disabled in production.
+         * @description A pause or stop takes effect before the next booking transaction. Resume continues only a paused run. Requires DEPARTURE_HANDOFFS_ENABLED=true.
          */
         post: operations["controlDepartureHandoffRun"];
         delete?: never;

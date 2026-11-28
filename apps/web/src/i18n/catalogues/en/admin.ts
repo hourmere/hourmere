@@ -3489,13 +3489,9 @@ export const admin = {
   'Preview the replacement host and time. A preview does not reserve the slot.':
     'Preview the replacement host and time. A preview does not reserve the slot.',
   'No handoff offer is available yet.': 'No handoff offer is available yet.',
-  'Participant consent is pending. The booker and every guest must approve. The original booking stays confirmed.':
-    'Participant consent is pending. The booker and every guest must approve. The original booking stays confirmed.',
   'All participants have approved.': 'All participants have approved.',
   'Consent has expired. The offer leaves the booking unchanged. A new offer needs new approvals.':
     'Consent has expired. The offer leaves the booking unchanged. A new offer needs new approvals.',
-  'This handoff offer is closed. Use manual rebooking if you still need to replace the booking.':
-    'This handoff offer is closed. Use manual rebooking if you still need to replace the booking.',
   'That time is unavailable for the replacement host. Refresh the preview or use manual rebooking.':
     'That time is unavailable for the replacement host. Refresh the preview or use manual rebooking.',
   'The proposed time is available.': 'The proposed time is available.',
@@ -3776,4 +3772,12 @@ export const admin = {
   'Mail server acceptance unconfirmed': 'Mail server acceptance unconfirmed',
   'Email delivery incomplete': 'Email delivery incomplete',
   'Email delivery unavailable': 'Email delivery unavailable',
+
+  // Departure booking handoff
+  'Participant consent is pending. The booker and every guest must approve. A single missing reply blocks the handoff. The original booking stays confirmed.':
+    'Participant consent is pending. The booker and every guest must approve. A single missing reply blocks the handoff. The original booking stays confirmed.',
+  'This handoff offer is closed. A new offer needs fresh approvals from everyone. You can also coordinate a replacement manually.':
+    'This handoff offer is closed. A new offer needs fresh approvals from everyone. You can also coordinate a replacement manually.',
+  'Cleanup of the tracked entries in the original calendar or meeting account is complete.':
+    'Cleanup of the tracked entries in the original calendar or meeting account is complete.',
 } as const

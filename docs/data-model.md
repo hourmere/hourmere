@@ -2838,8 +2838,7 @@ Team deletion cascades through its bookings. Deleting the source removes its off
 recipients and receipt. Deleting the replacement also removes the receipt. Team member
 removal preserves the proposal and receipt's historical actor IDs. A committed receipt
 retains the offer version it references and survives pruning of the recipient mailbox
-rows. Production admission stays disabled through rollout acceptance.
-See [the handoff design](member-departure-handoff.md).
+rows. Admission defaults to off. See [operator rollout and retention](member-departure-handoff.md#operator-rollout-and-retention).
 
 Proposal writes, link delivery and participant decisions use the organization → source booking →
 offer version → recipient lock order. A version records a withdrawal, supersession or expiry
@@ -2882,7 +2881,7 @@ A failed transaction leaves the item pending for a due-run recovery wake. If the
 roll back only the failed apply, the same transaction can record a terminal item result.
 The run marks remaining items stopped on operator stop, expiry, lost authority or detection
 that the former host is again a member. The run-level audit carries no mailbox or session ID.
-See the [staged run operations](member-departure-handoff.md#staged-automatic-handoff-runs).
+See [automatic run operations](member-departure-handoff.md#staged-automatic-handoff-runs).
 
 `departure_handoff_calendar_cleanup` records each source chain's pinned ordinary Google
 Calendar or Microsoft destination during apply. Calendar and connection IDs are historical

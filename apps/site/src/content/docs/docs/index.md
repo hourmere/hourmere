@@ -46,6 +46,8 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [REST quickstart](/docs/rest): create an API key and find, book and manage a time slot.
 - [CSV booking export](/docs/booking-export): download a bounded date range for reporting,
   with personal-owner and team-administrator permissions.
+- [Departure booking handoff](/docs/booking-handoffs) covers replacement proposals, private
+  participant decisions and team administrator controls.
 - [MCP quickstart](/docs/mcp): connect a client with an API key and use the booking tools.
 - [Google Calendar](/docs/google-calendar): configure separate calendar authorization and
   choose busy-time calendars and a booking destination.
@@ -216,6 +218,16 @@ not grant host rescheduling or reschedule-request authority through REST, MCP or
 中文：主持人可在未来且已确认的预约详情中直接改期、请求受邀人另选时间或取消预约。
 直接改期会创建替代预约；改期请求在受邀人回答前保留原时段。缺席标记是开始后的私人管理记录，
 不会发送邮件，也不会取消预约。导入记录仍需在原系统管理。
+
+### Hand off a departed host's booking
+
+On instances with handoff enabled, owners and admins can preview and confirm a replacement
+in **Team bookings** after the original host leaves. The booker and every guest must accept
+the same proposal version before the team can confirm the handoff. See the
+[departure booking handoff guide](/docs/booking-handoffs) for the complete steps.
+
+中文：启用预约交接后，团队所有者及管理员可在**团队预约**中试算和确认离队主持人的预约交接。
+请参阅[交接操作指南](/docs/booking-handoffs#中文操作指南)了解如何发出提议并收集全员同意。
 
 ### Cancel multiple team bookings
 

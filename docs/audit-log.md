@@ -108,7 +108,7 @@ bounded `counts` by outcome and identifies the worker. The two entries and each 
 The departure handoff queue records the administrator's start, pause, resume and stop actions
 and the worker's completion or failure against the run ID. These journal entries carry empty
 details. Item outcomes are available in the team-scoped run receipt.
-Production handoff admission and processing remain disabled pending release acceptance.
+Handoff admission and processing default to off. See [operator rollout](member-departure-handoff.md#operator-rollout-and-retention).
 
 `organization.ownership_transfer_offered` requires exactly `targetMembershipId`,
 the recipient's stored membership ID (a lowercase UUID). It is available to

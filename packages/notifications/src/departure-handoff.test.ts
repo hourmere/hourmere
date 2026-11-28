@@ -22,9 +22,19 @@ const publicUrl = 'https://hourmere.example.test'
 it('renders a private link in the fragment and explains unanimous consent in both languages', () => {
   const recipientId = randomUUID()
   const secret = 'N'.repeat(43)
-  for (const [locale, requiresAll, privacy] of [
-    ['en', 'the booker and every guest', 'keep this link private'],
-    ['zh-CN', '预约人及每位来宾都同意', '请妥善保管此链接'],
+  for (const [locale, requiresAll, blocked, privacy] of [
+    [
+      'en',
+      'the booker and every guest',
+      'a decline or a missing reply blocks the handoff',
+      'keep this link private',
+    ],
+    [
+      'zh-CN',
+      '预约人及每位来宾都同意',
+      '只要有一人拒绝或未回复，交接就无法进行',
+      '请妥善保管此链接',
+    ],
   ] as const) {
     const mail = departureHandoffEmail({
       to: 'booker@example.test',
@@ -40,6 +50,7 @@ it('renders a private link in the fragment and explains unanimous consent in bot
     expect(url.hash).toBe(`#token=${recipientId}.${secret}`)
     expect(mail).toMatchObject({ to: 'booker@example.test', sensitive: true })
     expect(mail.text.toLowerCase()).toContain(requiresAll)
+    expect(mail.text.toLowerCase()).toContain(blocked)
     expect(mail.text.toLowerCase()).toContain(privacy)
     expect(mail.html).toContain(`href="${url.href}"`)
     expect(mail.attachments).toBeUndefined()

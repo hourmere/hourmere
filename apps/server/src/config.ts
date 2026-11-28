@@ -281,6 +281,11 @@ const schema = z
         error: 'TEAM_BOOKING_BULK_CANCELLATION_ENABLED must be true, false or empty',
       }),
     ).transform((value) => value === 'true'),
+    DEPARTURE_HANDOFFS_ENABLED: optional(
+      z.enum(['true', 'false'], {
+        error: 'DEPARTURE_HANDOFFS_ENABLED must be true, false or empty',
+      }),
+    ).transform((value) => value === 'true'),
     SLOT_SNIPPETS_ENABLED: optional(z.enum(['true', 'false'])).transform(
       (value) => value === 'true',
     ),

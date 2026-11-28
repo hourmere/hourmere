@@ -3331,13 +3331,9 @@ export const admin = {
   'Preview the replacement host and time. A preview does not reserve the slot.':
     '试算接任主持人与时段。试算不会占用时段。',
   'No handoff offer is available yet.': '尚无交接提议。',
-  'Participant consent is pending. The booker and every guest must approve. The original booking stays confirmed.':
-    '正在等待参加者同意。预订人和每位来宾都必须同意。原预约仍保持确认。',
   'All participants have approved.': '所有参加者均已同意。',
   'Consent has expired. The offer leaves the booking unchanged. A new offer needs new approvals.':
     '同意期限已过。此提议不会更改预约。新提议需要重新获得同意。',
-  'This handoff offer is closed. Use manual rebooking if you still need to replace the booking.':
-    '此交接提议已关闭。如仍需替换预约，请手动重新预约。',
   'That time is unavailable for the replacement host. Refresh the preview or use manual rebooking.':
     '接任主持人无法接受该时段。请重新试算或手动重新预约。',
   'The proposed time is available.': '拟议时段可预约。',
@@ -3604,4 +3600,12 @@ export const admin = {
   'Mail server acceptance unconfirmed': '邮件服务器尚未确认接收',
   'Email delivery incomplete': '邮件投递未完成',
   'Email delivery unavailable': '邮件投递不可用',
+
+  // Departure booking handoff
+  'Participant consent is pending. The booker and every guest must approve. A single missing reply blocks the handoff. The original booking stays confirmed.':
+    '正在等待参加者同意。预约人和每位来宾都必须同意。只要有一人未回复，交接就无法进行。原预约仍保持确认。',
+  'This handoff offer is closed. A new offer needs fresh approvals from everyone. You can also coordinate a replacement manually.':
+    '此交接提议已关闭。发起新提议需要所有参与者重新同意，也可以人工协调新的预约。',
+  'Cleanup of the tracked entries in the original calendar or meeting account is complete.':
+    '已清理原日历或会议账号中有记录的条目。',
 } as const

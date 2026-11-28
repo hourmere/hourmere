@@ -271,8 +271,6 @@ export function productionSsoCapabilities(
 
 // Production completes SCIM claims through invitation acceptance only.
 const productionScimClaims = { invitation: scimClaimCompletion.invitation }
-// Admission stays hard-off until participants can approve offers in production.
-const productionDepartureHandoffsEnabled = false
 
 /**
  * The /api/v1 route groups, each created with what it needs. The OpenAPI document (and with
@@ -368,7 +366,7 @@ export function productRoutes({
   /** In-process test injection only; no operator setting exists during hard-off. */
   routingFormsEnabled?: boolean
   routingBookingReceiptNow?: () => Temporal.Instant
-  /** Staged acceptance can inject a store and a clock. Production admission stays hard-off. */
+  /** The running server supplies this only when the operator enables departure handoffs. */
   departureHandoffs?: DepartureHandoffs
   ownershipTransfer?: OwnershipTransferDeps | undefined
   successRedirectAllowIpHosts?: boolean
@@ -1053,7 +1051,7 @@ export function productionAppOptions({
       enqueueCalendarWritebackRecovery,
       routingFormsEnabled,
       routingSecret: config.BETTER_AUTH_SECRET,
-      departureHandoffs: productionDepartureHandoffsEnabled
+      departureHandoffs: config.DEPARTURE_HANDOFFS_ENABLED
         ? {
             store: departureHandoffStore,
             hasPendingCancellation: hasPendingHandoffCancellation,
@@ -1081,7 +1079,7 @@ export function productionAppOptions({
         publicUrl: config.PUBLIC_URL,
         followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,
         successRedirectPolicy,
-        departureHandoffs: productionDepartureHandoffsEnabled
+        departureHandoffs: config.DEPARTURE_HANDOFFS_ENABLED
           ? { store: departureHandoffStore }
           : undefined,
         paidBookingAvailability,
@@ -1208,6 +1206,7 @@ async function start(
   const sso = productionSsoCapabilities(config)
   const routingFormsRequested = parseRoutingFormsEnabled(env.ROUTING_FORMS_ENABLED)
   const workflowsEnabled = config.WORKFLOWS_ENABLED
+  const departureHandoffsEnabled = config.DEPARTURE_HANDOFFS_ENABLED
   const role = config.HOURMERE_ROLE
   if (config.WEBHOOK_PRIVATE_TARGETS.length)
     console.warn(
@@ -1473,7 +1472,7 @@ async function start(
       ...(ssoRetained(sso) ? [] : [SSO_DOMAIN_RECHECK_JOB]),
       ...(role !== 'web' && !runWorkflowJobs ? ['workflow-repair-v1'] : []),
       ...(bulkCancellationEnabled ? [] : [TEAM_BOOKING_BULK_RECOVERY_JOB]),
-      ...(productionDepartureHandoffsEnabled ? [] : [DEPARTURE_HANDOFF_RUN_RECOVERY_JOB]),
+      ...(departureHandoffsEnabled ? [] : [DEPARTURE_HANDOFF_RUN_RECOVERY_JOB]),
     ],
     definitions: [
       ...teamBookingBulkCancellationJobs(db, {
@@ -1569,10 +1568,10 @@ async function start(
       ),
       scimMappingNoticeJob(db, mailer),
       bookingNotificationJob(notificationDeps),
-      departureHandoffEmailJob(productionDepartureHandoffsEnabled ? notificationDeps : undefined),
+      departureHandoffEmailJob(departureHandoffsEnabled ? notificationDeps : undefined),
       ...departureHandoffRunJobs(
         db,
-        productionDepartureHandoffsEnabled
+        departureHandoffsEnabled
           ? {
               notify: (...args) => notify(...args),
               ssoCapabilities: sso,
@@ -1586,13 +1585,10 @@ async function start(
             }
           : undefined,
       ),
-      ...(productionDepartureHandoffsEnabled
-        ? [
-            departureHandoffCleanupJob(() =>
-              cleanupDepartureHandoffProposals(db, Temporal.Now.instant()),
-            ),
-          ]
-        : []),
+      // Expire links and prune mailbox details even after the operator turns off handoffs.
+      departureHandoffCleanupJob(() =>
+        cleanupDepartureHandoffProposals(db, Temporal.Now.instant()),
+      ),
       rescheduleRequestExpiryJob({
         db,
         notify: async (trx, event, now) => {

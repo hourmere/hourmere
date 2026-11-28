@@ -49,8 +49,9 @@ reject bookings that have already started; this preview does not relax them. Can
 bookings and bookings ending exactly at the evaluation instant are excluded. No booking is
 automatically cancelled or reassigned, and no notifications or provider calls occur.
 
-The [proposed team booking handoff](member-departure-handoff.md) describes a separate
-participant-approved replacement flow with a new booking chain.
+The [team booking handoff](https://hourmere.com/docs/booking-handoffs) is a separate
+participant-approved replacement flow with a new booking chain. Its operator switch is off
+by default, and departure preview and removal leave confirmed bookings intact.
 
 Each collection contains `data`, `nextCursor` and `totalCount`. `totalCount` counts all
 matching rows, independent of the cursor and page limit. `eventTypesLimit` and `bookingsLimit`

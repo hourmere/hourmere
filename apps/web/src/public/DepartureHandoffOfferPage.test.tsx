@@ -5,6 +5,7 @@ import { RouterProvider } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createAppRouter } from '../App.tsx'
 import type { Schemas } from '../api/client.ts'
+import { chooseLanguage } from '../i18n/store.ts'
 import { fakeApi, json } from '../test/fake-api.tsx'
 
 const path = '/booking/handoff'
@@ -66,6 +67,8 @@ describe('the participant handoff page', () => {
     open(link)
 
     await screen.findByRole('heading', { name: 'Review booking handoff' })
+    expect(screen.getByText(/A decline or a missing reply blocks the handoff/)).toBeDefined()
+    expect(screen.getByText(/Only the latest link works/)).toBeDefined()
     expect(screen.getByText('Private booker details')).toBeDefined()
     expect(screen.getByText('Main office')).toBeDefined()
     expect(document.body.innerHTML).not.toContain(capability)
@@ -83,6 +86,7 @@ describe('the participant handoff page', () => {
 
     const outcome = await screen.findByRole('heading', { name: 'Acceptance recorded' })
     expect(document.activeElement).toBe(outcome)
+    expect(screen.getByText(/Your current booking stays confirmed/)).toBeDefined()
     expect(screen.queryByText('Private booker details')).toBeNull()
     expect(api.calls.map(({ method, path: url }) => `${method} ${url}`)).toEqual([read, answer])
     expect(api.to(answer)[0]?.body).toEqual({ token: capability, version: 4, decision: 'accept' })
@@ -93,6 +97,24 @@ describe('the participant handoff page', () => {
         referrerPolicy: 'no-referrer',
       })
     }
+  })
+
+  it('explains in Simplified Chinese that one missing reply blocks handoff and a decline closes the proposal', async () => {
+    chooseLanguage('zh-CN')
+    const user = userEvent.setup()
+    fakeApi({
+      [read]: () => json(200, { ...offer, role: 'guest', answers: [] }),
+      [answer]: () => json(200, { decision: 'decline' }),
+    })
+    open(link)
+
+    await screen.findByRole('heading', { name: '查看预约交接提议' })
+    expect(screen.getByText(/只要有一人拒绝或未回复，交接就无法进行/)).toBeDefined()
+    expect(screen.getByText(/仅最新链接有效/)).toBeDefined()
+    await user.click(screen.getByRole('radio', { name: '拒绝' }))
+    await user.click(screen.getByRole('button', { name: '提交决定' }))
+    await screen.findByRole('heading', { name: '已记录拒绝' })
+    expect(screen.getByText('你已拒绝这份提议，提议随之关闭。当前预约保持原样。')).toBeDefined()
   })
 
   it('shows recovery for query-only capabilities without reading or submitting', async () => {

@@ -188,10 +188,12 @@ function OfferVisit({
             )}
           </FocusHeading>
           <p id="handoff-recorded">
-            {t(
-              state.decision === 'accept'
-                ? 'departureHandoff.allMustAccept'
-                : 'departureHandoff.refused',
+            {state.decision === 'accept' ? (
+              <>
+                {t('departureHandoff.allMustAccept')} {t('departureHandoff.currentUntilComplete')}
+              </>
+            ) : (
+              t('departureHandoff.refused')
             )}
           </p>
         </>
@@ -201,7 +203,9 @@ function OfferVisit({
       return (
         <>
           <FocusHeading preserveFocus>{t('departureHandoff.title')}</FocusHeading>
-          <p>{t('departureHandoff.allMustAccept')}</p>
+          <p>
+            {t('departureHandoff.allMustAccept')} {t('departureHandoff.currentUntilComplete')}
+          </p>
           <p>{t('departureHandoff.privateLink')}</p>
           <p>
             {t('departureHandoff.deadline')} <HandoffTime at={expiresAt} zone={proposed.timeZone} />

@@ -31,13 +31,9 @@ export const admin = {
   'Preview the replacement host and time. A preview does not reserve the slot.':
     'Verifique o novo anfitrião e o horário. A verificação não reserva o horário.',
   'No handoff offer is available yet.': 'Ainda não há uma proposta de transferência.',
-  'Participant consent is pending. The booker and every guest must approve. The original booking stays confirmed.':
-    'Há consentimentos pendentes. Quem reservou e cada convidado precisam dar seu consentimento. A reserva original continua confirmada.',
   'All participants have approved.': 'Todos os participantes deram seu consentimento.',
   'Consent has expired. The offer leaves the booking unchanged. A new offer needs new approvals.':
     'O prazo para consentimento expirou. A reserva permanece inalterada. Uma nova proposta exige novos consentimentos.',
-  'This handoff offer is closed. Use manual rebooking if you still need to replace the booking.':
-    'Esta proposta de transferência foi encerrada. Se ainda precisar substituir a reserva, faça uma nova manualmente.',
   'That time is unavailable for the replacement host. Refresh the preview or use manual rebooking.':
     'O novo anfitrião não está disponível nesse horário. Atualize a verificação ou faça uma nova reserva manualmente.',
   'The proposed time is available.': 'O horário proposto está disponível.',
@@ -337,4 +333,16 @@ export const admin = {
   'Accepted by the mail server': 'Aceito pelo servidor de e-mail',
   'Email delivery incomplete': 'Entrega de e-mail incompleta',
   'Email delivery unavailable': 'Entrega de e-mail indisponível',
+
+  // Departure booking handoff
+  'Participant consent is pending. The booker and every guest must approve. A single missing reply blocks the handoff. The original booking stays confirmed.':
+    'O consentimento dos participantes está pendente. Quem fez o agendamento e todos os convidados precisam aceitar. Basta uma resposta pendente para bloquear a transferência. O agendamento original continua confirmado.',
+  'This handoff offer is closed. A new offer needs fresh approvals from everyone. You can also coordinate a replacement manually.':
+    'Esta proposta de transferência foi encerrada. Todos precisam concordar novamente com uma nova proposta. Você também pode coordenar uma substituição manualmente.',
+  'Cleanup of the tracked entries in the original calendar or meeting account is complete.':
+    'As entradas registradas na agenda ou na conta de reuniões original foram limpas.',
+  'Cleanup in the original calendar or meeting account is pending.':
+    'A limpeza da agenda ou da conta de reuniões original está pendente.',
+  'Cleanup in the original calendar or meeting account could not be verified. Ask the account owner to check for remaining entries.':
+    'Não foi possível verificar a limpeza da agenda ou da conta de reuniões original. Peça ao titular da conta para verificar se ainda há entradas.',
 }

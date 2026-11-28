@@ -7,9 +7,15 @@ import { getRequestListener } from '@hono/node-server'
 import { DomainError } from '@hourmere/scheduling'
 import { sql } from 'kysely'
 import { createApp } from '../../apps/server/src/app.ts'
+import {
+  DEPARTURE_HANDOFF_RUN_JOB,
+  departureHandoffRunJobs,
+  enqueueDepartureHandoffRunJob,
+} from '../../apps/server/src/departure-handoff-run-jobs.ts'
 import { productRoutes } from '../../apps/server/src/server.ts'
 import { createAuth, createAuthPool, createCallerResolver } from '../../packages/auth/src/index.ts'
 import {
+  bookingConferenceJob,
   conferenceBookingNotifier,
   writeBookingConference,
 } from '../../packages/calendars/src/conferences.ts'
@@ -23,6 +29,7 @@ import { createTestDatabase } from '../../packages/db/src/testing.ts'
 import type { EnqueueOptions } from '../../packages/jobs/src/index.ts'
 import type { MailMessage } from '../../packages/mail/src/index.ts'
 import {
+  createDepartureHandoffEmailQueue,
   DEPARTURE_HANDOFF_EMAIL_JOB,
   deliverDepartureHandoffEmail,
 } from '../../packages/notifications/src/departure-handoff.ts'
@@ -40,18 +47,25 @@ import {
   handoffTestSession,
 } from '../../packages/scheduling/src/departure-handoff-apply-test-fixture.ts'
 import { createDepartureHandoffProposal } from '../../packages/scheduling/src/departure-handoff-proposals.ts'
+import type { EnqueueDepartureHandoffRun } from '../../packages/scheduling/src/departure-handoff-queue.ts'
 import { test as base, expect } from './fixtures.ts'
 import { listenOwned, type OwnedListener } from './listeners.ts'
+
+type ParticipantLinks = { booker: URL; guest: URL }
 
 interface HandoffApp {
   url: string
   teamId: string
   sourceId: string
   sourcePath: string
+  sourceStart: Temporal.Instant
+  departingUserId: string
   emails: { booker: string; guest: string; departing: string; candidate: string }
   signIn: (as?: 'owner' | 'candidate', locale?: 'en' | 'zh-CN') => Promise<void>
   offer: (state?: 'approved' | 'pending') => Promise<void>
-  participantLinks: () => Promise<{ booker: URL; guest: URL }>
+  participantLinks: () => Promise<ParticipantLinks>
+  deliverParticipantLinks: () => Promise<ParticipantLinks>
+  processRun: () => Promise<void>
   participantDecisions: () => Promise<{ booker: string | null; guest: string | null }>
   expireOffer: () => void
   occupySlot: () => Promise<void>
@@ -181,6 +195,7 @@ export const test = base.extend<{
       if (handoffZoom) await writeBookingConference(work(oldProvider), booking.id)
 
       await sql`CREATE TABLE e2e_handoff_jobs (
+        id uuid NOT NULL DEFAULT gen_random_uuid(),
         name text NOT NULL,
         singleton_key text NOT NULL,
         payload jsonb NOT NULL,
@@ -190,17 +205,26 @@ export const test = base.extend<{
       const queue = {
         async enqueue(name: string, payload: unknown, options?: EnqueueOptions) {
           const trx = options?.transaction as Db | undefined
-          if (!trx?.isTransaction || !options?.singletonKey)
-            throw new Error('Expected a transactional booking job')
+          if (!trx?.isTransaction) throw new Error('Expected a transactional handoff job')
           // Fail after the source cancellation has already queued its work in this transaction.
           if (failEnqueue && (payload as { kind?: string }).kind === 'confirmed')
             throw new DomainError('unavailable', 'booking_notification_queue_unavailable')
-          await sql`INSERT INTO e2e_handoff_jobs (name, singleton_key, payload)
-            VALUES (${name}, ${options.singletonKey}, ${JSON.stringify(payload)}::jsonb)
-            ON CONFLICT DO NOTHING`.execute(trx)
-          return null
+          const result = await sql<{
+            id: string
+          }>`INSERT INTO e2e_handoff_jobs (name, singleton_key, payload)
+            VALUES (${name}, ${options?.singletonKey ?? randomUUID()}, ${JSON.stringify(payload)}::jsonb)
+            ON CONFLICT DO NOTHING RETURNING id`.execute(trx)
+          return result.rows[0]?.id ?? null
         },
       }
+      const enqueueEmail = createDepartureHandoffEmailQueue(queue)
+      const enqueueRun: EnqueueDepartureHandoffRun = (
+        transaction,
+        organizationId,
+        runId,
+        startAfter,
+      ) =>
+        enqueueDepartureHandoffRunJob(queue, { organizationId, runId }, { transaction, startAfter })
       const notifyConference = conferenceBookingNotifier(queue)
       const notifyEmail = bookingNotifier(queue)
       const notify: BookingNotifier = async (trx, event, at) => {
@@ -235,9 +259,10 @@ export const test = base.extend<{
           invitationMailLimits: { secret },
           publicUrl: url,
           socialProviders: {},
+          smtpConfigured: true,
           notify,
           automaticZoom: handoffZoom,
-          departureHandoffs: { store: storage.store, now },
+          departureHandoffs: { store: storage.store, now, enqueue: enqueueEmail, enqueueRun },
         }),
       })
       server.on('request', getRequestListener(app.fetch, { hostname: '127.0.0.1' }))
@@ -249,11 +274,58 @@ export const test = base.extend<{
       })
 
       const sent: MailMessage[] = []
+      const jobRun = (id: string) => ({ id, attempt: 1, signal: new AbortController().signal })
+      const [runJob] = departureHandoffRunJobs(db, {
+        notify,
+        now,
+        automaticZoom: handoffZoom,
+        enqueue: enqueueRun,
+        async enqueueDelayed() {
+          throw new Error('Expected the single-item run to finish without another wake')
+        },
+      })
+      async function deliverParticipantLinks() {
+        const jobs = await sql<{ id: string; recipient_id: string }>`
+          DELETE FROM e2e_handoff_jobs WHERE name = ${DEPARTURE_HANDOFF_EMAIL_JOB}
+          RETURNING id, payload->>'recipientId' AS recipient_id
+        `.execute(db)
+        const links = new Map<string, URL>()
+        for (const { id, recipient_id } of jobs.rows) {
+          await deliverDepartureHandoffEmail(
+            {
+              db,
+              publicUrl: url,
+              secret,
+              now,
+              mailer: {
+                async send() {
+                  throw new Error('Expected a single sensitive SMTP attempt')
+                },
+                async sendWorkflowAttempt(message) {
+                  const href = message.text.match(/https?:\/\/\S+/)?.[0]
+                  if (!href || !message.sensitive)
+                    throw new Error('Missing sensitive participant link')
+                  links.set(message.to, new URL(href))
+                  return 'sent'
+                },
+              },
+            },
+            { recipientId: recipient_id },
+            jobRun(id),
+          )
+        }
+        const bookerLink = links.get(booker)
+        const guestLink = links.get(guest)
+        if (!bookerLink || !guestLink) throw new Error('Expected both participant emails')
+        return { booker: bookerLink, guest: guestLink }
+      }
       await use({
         url,
         teamId: team.id,
         sourceId: booking.id,
         sourcePath: `/app/bookings/${booking.id}`,
+        sourceStart: start,
+        departingUserId: departing.id,
         emails: { booker, guest, departing: departing.email, candidate: candidate.email },
         async signIn(as = 'owner', locale = 'en') {
           const actor = as === 'candidate' ? candidate : owner
@@ -302,48 +374,21 @@ export const test = base.extend<{
               bookingId: booking.id,
               departingUserId: departing.id,
             },
-            async (trx, recipientId) => {
-              const jobId = randomUUID()
-              await sql`INSERT INTO e2e_handoff_jobs (name, singleton_key, payload)
-                VALUES (${DEPARTURE_HANDOFF_EMAIL_JOB}, ${jobId}, ${JSON.stringify({ recipientId })}::jsonb)`.execute(
-                trx,
-              )
-              return jobId
-            },
+            enqueueEmail,
           )
-          const jobs = await sql<{ job_id: string; recipient_id: string }>`
-            SELECT singleton_key AS job_id, payload->>'recipientId' AS recipient_id
-            FROM e2e_handoff_jobs WHERE name = ${DEPARTURE_HANDOFF_EMAIL_JOB}
+          return deliverParticipantLinks()
+        },
+        deliverParticipantLinks,
+        async processRun() {
+          if (!runJob.handler) throw new Error('Expected the handoff run worker')
+          const { rows } = await sql<{ id: string; payload: unknown }>`
+            DELETE FROM e2e_handoff_jobs WHERE name = ${DEPARTURE_HANDOFF_RUN_JOB}
+            RETURNING id, payload
           `.execute(db)
-          const links = new Map<string, URL>()
-          for (const { job_id, recipient_id } of jobs.rows) {
-            await deliverDepartureHandoffEmail(
-              {
-                db,
-                publicUrl: url,
-                secret,
-                now,
-                mailer: {
-                  async send() {
-                    throw new Error('Expected a single sensitive SMTP attempt')
-                  },
-                  async sendWorkflowAttempt(message) {
-                    const href = message.text.match(/https?:\/\/\S+/)?.[0]
-                    if (!href || !message.sensitive)
-                      throw new Error('Missing sensitive participant link')
-                    links.set(message.to, new URL(href))
-                    return 'sent'
-                  },
-                },
-              },
-              { recipientId: recipient_id },
-              { id: job_id, signal: new AbortController().signal },
-            )
+          expect(rows).toHaveLength(1)
+          for (const { id, payload } of rows) {
+            await runJob.handler(runJob.payload.parse(payload), jobRun(id))
           }
-          const bookerLink = links.get(booker)
-          const guestLink = links.get(guest)
-          if (!bookerLink || !guestLink) throw new Error('Expected both participant emails')
-          return { booker: bookerLink, guest: guestLink }
         },
         async participantDecisions() {
           const decisions = await db
@@ -408,8 +453,18 @@ export const test = base.extend<{
           newProvider.controls.meetingHook = undefined
         },
         async reconcileProvider(replacementId) {
-          await writeBookingConference(work(oldProvider), booking.id)
-          await writeBookingConference(work(newProvider), replacementId)
+          for (const [id, provider] of [
+            [booking.id, oldProvider],
+            [replacementId, newProvider],
+          ] as const) {
+            const job = bookingConferenceJob(work(provider))
+            const { rows } = await sql<{ id: string; payload: unknown }>`SELECT id, payload
+              FROM e2e_handoff_jobs WHERE name = ${job.name} AND singleton_key = ${id}`.execute(db)
+            expect(rows).toHaveLength(1)
+            for (const row of rows) {
+              await job.handler(job.payload.parse(row.payload), jobRun(row.id))
+            }
+          }
         },
         providerState: () => ({
           newCreates: newProvider.calls.filter(({ init }) => init.method === 'POST').length,
@@ -429,6 +484,7 @@ export const test = base.extend<{
               secret,
               now,
               mailer: {
+                senderEmail: handoffZoom ? 'calendar@example.test' : undefined,
                 send: async (message) => {
                   if (reject && message.to === booker)
                     throw new Error('Synthetic mail service unavailable')

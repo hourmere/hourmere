@@ -39,6 +39,32 @@ describe.skipIf(!serverUrl)('startServer', () => {
     await testDb?.drop()
   })
 
+  it('schedules automatic handoff work only on opt-in and keeps offer cleanup running', async () => {
+    const env = {
+      DATABASE_URL: testDb.url,
+      PORT: '0',
+      PUBLIC_URL: 'http://localhost',
+      BETTER_AUTH_SECRET: randomBytes(32).toString('base64'),
+      HOURMERE_ROLE: 'worker',
+    }
+    const cleanup = 'departure-handoff-cleanup-v1'
+    const recovery = 'departure-handoff-run-recovery-v1'
+    await quietly(async () => {
+      for (const enabled of ['true', undefined]) {
+        const worker = await startServer({ ...env, DEPARTURE_HANDOFFS_ENABLED: enabled })
+        try {
+          const { rows } = await testDb.pool.query<{ name: string }>(
+            'SELECT name FROM pgboss.schedule WHERE name = ANY($1::text[]) ORDER BY name',
+            [[cleanup, recovery]],
+          )
+          expect(rows.map(({ name }) => name)).toEqual(enabled ? [cleanup, recovery] : [cleanup])
+        } finally {
+          await worker.close()
+        }
+      }
+    })
+  })
+
   it('serves the app and makes the console print one line per call until closed', async () => {
     // The process console, writing to a stream.
     let text = ''
