@@ -1026,15 +1026,15 @@ export function productionAppOptions({
         : {}),
       tools: productTools({
         db,
-        departureHandoffs: productionDepartureHandoffsEnabled
-          ? { store: departureHandoffStore }
-          : undefined,
         slotSnippetsEnabled: config.SLOT_SNIPPETS_ENABLED,
         waitlistSecret: config.BETTER_AUTH_SECRET,
         meetingPollSecret: config.BETTER_AUTH_SECRET,
         publicUrl: config.PUBLIC_URL,
         followUpHostNotesEnabled: config.FOLLOW_UP_HOST_NOTES_ENABLED,
         successRedirectPolicy,
+        departureHandoffs: productionDepartureHandoffsEnabled
+          ? { store: departureHandoffStore }
+          : undefined,
         paidBookingAvailability,
         smsRemindersAvailable: config.SMS_PROVIDER === 'twilio',
         smtpConfigured: Boolean(config.SMTP_URL && config.MAIL_FROM),
