@@ -171,7 +171,7 @@ export function PollFinalizeForm({
                             }}
                           />
                           <span data-private>
-                            <bdi>{voter.name}</bdi>
+                            <bdi>{voter.name}</bdi>{' '}
                             <span className="meeting-poll-cell-detail">
                               <bdi dir="ltr">
                                 <BreakableText>{voter.email}</BreakableText>

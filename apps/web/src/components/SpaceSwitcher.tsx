@@ -218,7 +218,7 @@ export function SpaceSwitcher({ onError }: { onError: (error: UiText | null) => 
             dir={me.organization.personal ? undefined : 'auto'}
           >
             {currentName}
-          </span>
+          </span>{' '}
           <span className="space-role">
             {busy
               ? t('Switching space…')
@@ -259,7 +259,12 @@ export function SpaceSwitcher({ onError }: { onError: (error: UiText | null) => 
                 >
                   {option.name}
                 </span>
-                {option.current && <span className="space-current">{t('Current space')}</span>}
+                {option.current && (
+                  <>
+                    {' '}
+                    <span className="space-current">{t('Current space')}</span>
+                  </>
+                )}
               </button>
             ))}
           </div>

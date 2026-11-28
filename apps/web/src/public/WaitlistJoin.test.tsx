@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { commonCatalogues } from '../i18n/common.ts'
 import { fakeApi, json, later, renderApp } from '../test/fake-api.tsx'
 import { EVENT, eventRoutes, slotsAnswer } from '../test/public-fixtures.ts'
+import { selectPublicLanguage } from '../test/public-language.ts'
 import { waitlistWindow } from './waitlist-window.ts'
 
 const clock = vi.hoisted(() => ({ now: Date.parse('2026-11-01T04:30:00Z') }))
@@ -88,6 +89,39 @@ describe('public waitlist entry', () => {
       'Confirmation email requested. Check your email; sending limits may prevent delivery.',
     )
     expect(api.to(`POST ${endpoint}/waitlist/resend`)).toHaveLength(1)
+  })
+
+  it('keeps the mixed-direction name while switching the open form to Simplified Chinese', async () => {
+    const endpoint = '/api/v1/public/ada/intro/waitlist'
+    const mixedName = '✨ 42 ليلى (Layla) [נועה]'
+    const email = 'visitor@example.invalid'
+    const api = fakeApi({
+      ...eventRoutes({ ...enabled, title: 'שלום (Team planning)' }, []),
+      [`POST ${endpoint}`]: () => json(202, { accepted: true }),
+    })
+    renderApp('/ada/intro')
+    const user = await openForm()
+    const name = screen.getByRole<HTMLInputElement>('textbox', { name: /^Your name/ })
+    fireEvent.change(name, { target: { value: mixedName } })
+    await user.type(screen.getByRole('textbox', { name: 'Email' }), email)
+    await user.click(screen.getByRole('checkbox', { name: consent }))
+
+    await selectPublicLanguage(user, 'zh-CN')
+    expect(screen.getByRole('textbox', { name: /^你的姓名/ })).toBe(name)
+    expect(name.getAttribute('dir')).toBe('auto')
+    expect(name.value).toBe(mixedName)
+    expect(document.documentElement.dir).toBe('ltr')
+    await user.click(screen.getByRole('button', { name: '加入候补名单' }))
+    const heading = await screen.findByRole('heading', { name: '请查收邮件并确认' })
+    expect(document.activeElement).toBe(heading)
+    expect(api.to(`POST ${endpoint}`)[0]?.body).toMatchObject({
+      name: mixedName,
+      email,
+      locale: 'zh-CN',
+      consent: true,
+    })
+    expect(screen.getByRole('main').textContent).not.toContain(mixedName)
+    expect(screen.getByRole('main').textContent).not.toContain(email)
   })
 
   it.each([false, undefined])('offers no join when enabled=%s', async (value) => {

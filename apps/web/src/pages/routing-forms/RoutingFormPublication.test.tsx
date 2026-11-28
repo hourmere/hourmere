@@ -426,7 +426,7 @@ describe('Routing form publication', () => {
       id: brokenEventId,
       organizationId: team.id,
       ownerUserId: null,
-      title: 'Consultation',
+      title: 'استشارة (Consultation)',
       slug: 'support-consultation',
       schedulingType: 'individual',
       bookingMode: 'individual',
@@ -449,10 +449,9 @@ describe('Routing form publication', () => {
     const confirmation = within(screen.getByRole('group', { name: reviewButton }))
     expect(confirmation.getByText('Loading event types…')).toBeTruthy()
     await catalog.answer(json(200, { data: [first, second], nextCursor: null }))
-    expect(
-      await confirmation.findByText('Consultation (support-consultation) (hidden)'),
-    ).toBeTruthy()
-    expect(confirmation.queryByText('Consultation (sales-consultation)')).toBeNull()
+    const name = await confirmation.findByText(`${first.title} (support-consultation) (hidden)`)
+    expect(name.tagName).toBe('BDI')
+    expect(confirmation.queryByText(`${second.title} (sales-consultation)`)).toBeNull()
   })
 
   it('reports a denied publication without implying that a configuration is missing', async () => {

@@ -26,6 +26,7 @@ import {
 } from '../../packages/notifications/src/index.ts'
 import { deliverMeetingPollEmail } from '../../packages/notifications/src/meeting-polls.ts'
 import { deliverWaitlistEmail } from '../../packages/notifications/src/waitlist.ts'
+import type { LocationOption } from '../../packages/scheduling/src/location-options.ts'
 import { createOneTimeBookingLink } from '../../packages/scheduling/src/one-time-links.ts'
 import {
   createRoutingForm,
@@ -76,6 +77,8 @@ export interface FixtureApp {
     description: string
     hostName: string
     question: { id: string; label: string; options: readonly string[] }
+    notesQuestion: { id: string; label: string }
+    locations: readonly LocationOption[]
   }) => Promise<string>
   configureGroupSeats: () => Promise<void>
   configureDurations: () => Promise<void>
@@ -794,7 +797,14 @@ export const test = base.extend<{
           return key.key
         },
         ...(stripe && { stripe }),
-        configureMixedDirection: async ({ title, description, hostName, question }) => {
+        configureMixedDirection: async ({
+          title,
+          description,
+          hostName,
+          question,
+          notesQuestion,
+          locations,
+        }) => {
           await db
             .updateTable('auth.user')
             .set({ name: hostName })
@@ -805,7 +815,11 @@ export const test = base.extend<{
             .set({
               title,
               description,
-              questions: JSON.stringify([{ ...question, type: 'select', required: true }]),
+              questions: JSON.stringify([
+                { ...question, type: 'select', required: true },
+                { ...notesQuestion, type: 'long_text', required: true },
+              ]),
+              locations: JSON.stringify(locations),
             })
             .where('organization_id', '=', host.organizationId)
             .where('slug', '=', 'call')

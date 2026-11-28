@@ -7,11 +7,13 @@ import { expect, pickSlot, test } from '../fixtures.ts'
 type Schemas = components['schemas']
 
 const slug = 'fixture-intake'
-const formTitle = 'Synthetic intake form'
-const intakeLabel = 'Intake topic'
-const intakeAnswer = 'Synthetic routing answer'
-const bookingLabel = 'Booking topic'
-const bookingAnswer = 'Edited booking answer'
+const formTitle = 'نموذج (Intake) [42]'
+const formDescription = 'שלום (Welcome) — Start with your questions.'
+const eventTitle = 'פגישה (Routed meeting)'
+const intakeLabel = 'ما الموضوع؟ (Topic)'
+const intakeAnswer = 'مرحبا (Original answer)'
+const bookingLabel = 'נושא (Booking topic)'
+const bookingAnswer = 'שלום (Edited answer)'
 const questionId = 'booking-topic'
 const inviteeEmail = 'routing-invitee@hourmere.invalid'
 
@@ -27,6 +29,7 @@ async function publishFixture(request: APIRequestContext, origin: string) {
     headers,
     data: {
       slug: hiddenSlug,
+      title: eventTitle,
       isHidden: true,
       questions: [{ id: questionId, type: 'short_text', label: bookingLabel, required: true }],
     } satisfies Schemas['EventTypeUpdate'],
@@ -42,6 +45,7 @@ async function publishFixture(request: APIRequestContext, origin: string) {
     data: {
       slug,
       title: formTitle,
+      description: formDescription,
       questions: [
         { id: intakeId, type: 'short_text', label: intakeLabel, required: true },
         { id: emailId, type: 'email', label: 'Contact email', required: true },
@@ -76,7 +80,7 @@ async function publishFixture(request: APIRequestContext, origin: string) {
     data: { expectedRevision: form.draftRevision, enabled: true },
   })
   expect(enabled.status()).toBe(200)
-  return { id, versionId: version.id, ruleId, hiddenSlug, eventTitle: event.title }
+  return { id, versionId: version.id, ruleId, hiddenSlug }
 }
 
 async function downloadCsv(page: Page) {
@@ -116,9 +120,21 @@ test('default routing accepts a public submission and protects saved answers on 
   })
 
   await page.goto(app.url + publicPath)
-  await expect(page.getByRole('heading', { name: formTitle, exact: true })).toBeVisible()
-  await page.getByLabel(intakeLabel).fill(intakeAnswer)
-  await page.getByLabel('Contact email').fill(inviteeEmail)
+  await expect(page.getByRole('heading', { name: formTitle, exact: true })).toHaveCSS(
+    'direction',
+    'rtl',
+  )
+  await expect(page.getByText(formDescription, { exact: true })).toHaveCSS('direction', 'rtl')
+  const intake = page.getByRole('textbox', { name: intakeLabel, exact: true })
+  await intake.fill(intakeAnswer)
+  await expect(intake).toHaveCSS('direction', 'rtl')
+  await expect(page.locator('label bdi').filter({ hasText: intakeLabel })).toHaveCSS(
+    'direction',
+    'rtl',
+  )
+  const email = page.getByRole('textbox', { name: 'Contact email', exact: true })
+  await email.fill(inviteeEmail)
+  await expect(email).toHaveCSS('direction', 'ltr')
   const submitUrl = `${app.url}/api/v1/public/-/routing/fixture-host/${slug}/route`
   let outcome: Schemas['RoutingSubmissionResponse'] | undefined
   await page.route(submitUrl, async (route) => {
@@ -142,7 +158,10 @@ test('default routing accepts a public submission and protects saved answers on 
       [...new URLSearchParams(handoff.hash.slice(1)).keys()].length === 1,
     'The continuation link carries only its private capability in the fragment',
   ).toBe(true)
-  await expect(page.getByRole('heading', { name: fixture.eventTitle, exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: eventTitle, exact: true })).toHaveCSS(
+    'direction',
+    'rtl',
+  )
   await expect
     .poll(() => page.url() === `${app.url}/route/continue`, {
       message: 'The continuation page clears the private fragment',
@@ -153,6 +172,7 @@ test('default routing accepts a public submission and protects saved answers on 
   await expect(page.getByLabel('Email', { exact: true })).toHaveValue(inviteeEmail)
   const topic = page.getByLabel(bookingLabel)
   await expect(topic).toHaveValue(intakeAnswer)
+  await expect(topic).toHaveCSS('direction', 'rtl')
   await topic.fill(bookingAnswer)
   const committing = page.waitForResponse(
     (response) => new URL(response.url()).pathname === '/api/v1/routing-continuations/bookings',
@@ -197,7 +217,9 @@ test('default routing accepts a public submission and protects saved answers on 
     'The invitee projection omits routing identifiers and the continuation capability',
   ).toBe(false)
   const answers = page.getByRole('region', { name: 'Your routing form answers' })
-  await expect(answers.getByText(intakeAnswer, { exact: true })).toBeVisible()
+  await expect(answers.getByText(intakeLabel, { exact: true })).toHaveCSS('direction', 'rtl')
+  await expect(answers.getByText(intakeAnswer, { exact: true })).toHaveCSS('direction', 'rtl')
+  await expect(answers.getByText(inviteeEmail, { exact: true })).toHaveCSS('direction', 'ltr')
   await expect
     .poll(() => page.url() === `${app.url}/booking`, {
       message: 'The manage page clears the private fragment',
@@ -216,10 +238,10 @@ test('default routing accepts a public submission and protects saved answers on 
   await page.goto(app.url + bookingPath(result.booking.id))
   await expect(
     page.getByRole('region', { name: 'Original routing answers' }).getByText(intakeAnswer),
-  ).toBeVisible()
+  ).toHaveCSS('direction', 'rtl')
   await expect(
     page.getByRole('region', { name: 'Final booking answers' }).getByText(bookingAnswer),
-  ).toBeVisible()
+  ).toHaveCSS('direction', 'rtl')
 
   await page.goto(app.url + PATHS.bookings)
   await page.getByText('Export bookings as CSV', { exact: true }).press('Enter')
