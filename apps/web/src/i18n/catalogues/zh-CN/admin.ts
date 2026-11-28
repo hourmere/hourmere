@@ -3433,4 +3433,9 @@ export const admin = {
     '无法确认提交是否成功。此页面会继续检查状态。',
   'No selected bookings are eligible for cancellation. Review a fresh selection.':
     '所选预约均不符合取消条件。请重新选择并查看。',
+
+  // Custom team roles
+  'Custom roles are unavailable.': '自定义角色暂不可用。',
+  'The role or assignment changed. Reload before saving.': '角色或分配已变更。请刷新后再保存。',
+  'Clear this role’s assignments before archiving it.': '请先清除此角色的所有分配，再归档。',
 } as const

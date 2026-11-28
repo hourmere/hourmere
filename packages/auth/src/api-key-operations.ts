@@ -128,6 +128,19 @@ export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.fr
     'session_only',
   ),
 
+  rest('GET', '/api/v1/teams/{teamId}/permissions', 'session_only', 'session_only'),
+  rest('GET', '/api/v1/teams/{teamId}/roles', 'session_only', 'session_only'),
+  rest('POST', '/api/v1/teams/{teamId}/roles', 'session_only', 'session_only'),
+  rest('GET', '/api/v1/teams/{teamId}/roles/{roleId}', 'session_only', 'session_only'),
+  rest('PATCH', '/api/v1/teams/{teamId}/roles/{roleId}', 'session_only', 'session_only'),
+  rest('DELETE', '/api/v1/teams/{teamId}/roles/{roleId}', 'session_only', 'session_only'),
+  rest(
+    'PUT',
+    '/api/v1/teams/{teamId}/members/{memberId}/custom-role',
+    'session_only',
+    'session_only',
+  ),
+
   rest('GET', '/api/v1/audit-events', 'audit_read', 'key'),
   rest('GET', '/api/v1/audit-log/settings', 'audit_read', 'key'),
   rest('PUT', '/api/v1/audit-log/settings', 'other_write', 'key'),

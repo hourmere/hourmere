@@ -66,6 +66,22 @@ export {
   createCallerResolver,
   type Principal,
 } from './caller.ts'
+export {
+  resolveTeamPermissions,
+  type TeamPermissionCheck,
+  type TeamPermissionDecision,
+  type TeamPermissionMembership,
+  type TeamPermissionOptions,
+  type TeamPermissionResult,
+} from './custom-role-permissions.ts'
+export {
+  type CustomRoleCommand,
+  type CustomRoleView,
+  CustomRoleWriteError,
+  type CustomRoleWriteResult,
+  customRoleWrite,
+  readCustomRoles,
+} from './custom-role-writes.ts'
 export { DISPLAY_NAME_MAX_LENGTH, sanitizeInitialDisplayName } from './display-name.ts'
 export {
   cancelTeamInvitation,
@@ -109,6 +125,7 @@ export {
   MemberDepartureBlockedError,
   MemberDepartureOwnerRequiredError,
 } from './member-departure.ts'
+export { canReadPrivateTeamRoster } from './member-read-privacy.ts'
 export { ensurePersonalOrganization } from './organizations.ts'
 export {
   assertSignupEnforced,
