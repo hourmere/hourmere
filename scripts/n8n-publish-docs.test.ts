@@ -5,6 +5,53 @@ import { describe, expect, it } from 'vitest'
 const root = resolve(import.meta.dirname, '..')
 const read = (path: string) => readFileSync(resolve(root, path), 'utf8')
 const guides = ['tools/n8n-nodes-hourmere/README.md', 'apps/site/src/content/docs/docs/n8n.md']
+const runbookPath = 'docs/n8n-release.md'
+
+// npm can contact its selected registry before refusing to publish a private package.
+// A verb like "reach" needs a remote destination. A dry-run can skip the private check.
+const noContact =
+  /\b(?:before|without|with no|prior to|ahead of)\b(?: any (?:registry|server)\b|(?:\W+\w+){0,3}?\W+(?:contact|quer|touch|request|connect|network|(?:registry|server|internet) access|(?:reach|talk|send)\w*\b[^.!?:]*\b(?:registr(?:y|ies)|servers?|network)\b))|\bno (?:registr(?:y|ies)|servers?) (?:ever )?hears? from npm\b/i
+const qualified = (sentence: string) =>
+  /\boutside CI\b/i.test(sentence) && /--(?:force|offline)\b/.test(sentence)
+const noContactClaims = (source: string) =>
+  source
+    .replace(/\s+/g, ' ')
+    .split(/(?<=[.!?:]) /)
+    .filter(
+      (sentence) =>
+        /EPRIVATE|\bprivate\b|refus/i.test(sentence) &&
+        noContact.test(sentence) &&
+        !qualified(sentence),
+    )
+
+it.each([
+  'npm refuses with `EPRIVATE` before contacting any registry.',
+  'npm refuses with `EPRIVATE` before it contacts any registry.',
+  'The refusal happens with no network request.',
+  'npm refuses the private package without network access.',
+  'Outside CI, npm refuses with `EPRIVATE` before contacting any registry.',
+  'npm refuses with `EPRIVATE` before talking to any registry.',
+  'The `EPRIVATE` refusal is purely local, so no registry ever hears from npm.',
+  'npm refuses with `EPRIVATE` before it sends anything to a registry.',
+  'The refusal comes without the registry being contacted.',
+])('flags an unqualified no-contact claim: %s', (sentence) => {
+  expect(noContactClaims(sentence)).toEqual([sentence])
+})
+
+it.each([
+  'Dry-runs stop before they reach the private check.',
+  'Dry-runs stop before they reach the `private` check.',
+  'Outside CI, a real publish with `--force` and `--offline` refuses with `EPRIVATE` with no connection to the local sink.',
+])('accepts qualified or unrelated statements: %s', (sentence) => {
+  expect(noContactClaims(sentence)).toEqual([])
+})
+
+it.each([...guides, runbookPath])(
+  '%s avoids claiming that npm refuses before contacting a registry',
+  (path) => {
+    expect(noContactClaims(read(path))).toEqual([])
+  },
+)
 
 describe.each(guides)('%s', (path) => {
   const source = read(path)
@@ -30,7 +77,7 @@ describe.each(guides)('%s', (path) => {
 })
 
 it('documents the separate release and verification approvals for the owner', () => {
-  const runbook = read('docs/n8n-release.md')
+  const runbook = read(runbookPath)
   expect(runbook).toContain('Required reviewers')
   expect(runbook).toMatch(
     /Turn off \*\*Allow administrators to bypass\s+configured protection rules/,
@@ -49,7 +96,7 @@ it('documents the separate release and verification approvals for the owner', ()
   expect(runbook).toContain('https://creators.n8n.io/nodes')
 })
 
-it.each(['README.md', 'tools/n8n-nodes-hourmere/README.md', 'docs/n8n-release.md'])(
+it.each(['README.md', 'tools/n8n-nodes-hourmere/README.md', runbookPath])(
   '%s documents the license and translation blockers for n8n Cloud verification',
   (path) => {
     const source = read(path).replace(/\s+/g, ' ')
