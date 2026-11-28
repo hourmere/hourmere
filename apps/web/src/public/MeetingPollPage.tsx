@@ -67,7 +67,7 @@ function PollEntry({ entry }: { entry: Entry }) {
 }
 
 function PollVisit({ entry, initialToken }: { entry: Entry; initialToken: string }) {
-  const { t, locale, formatLocale } = useI18n()
+  const { t, locale, requested, formatLocale } = useI18n()
   usePageTitle('meetingPoll.title')
   const [token, setToken] = useState(initialToken)
   const [poll, setPoll] = useState<Poll | null>(null)
@@ -238,7 +238,7 @@ function PollVisit({ entry, initialToken }: { entry: Entry; initialToken: string
             responses,
             name,
             timeZone: zone,
-            locale,
+            locale: requested,
             expectedBallotRevision: own.ballotRevision,
           },
           cache: 'no-store',
@@ -588,7 +588,13 @@ function PollVisit({ entry, initialToken }: { entry: Entry; initialToken: string
                           void perform(async () => {
                             await unwrap(
                               api.POST('/api/v1/public/meeting-polls/enroll', {
-                                body: { publicToken: token, name, email, timeZone: zone, locale },
+                                body: {
+                                  publicToken: token,
+                                  name,
+                                  email,
+                                  timeZone: zone,
+                                  locale: requested,
+                                },
                                 cache: 'no-store',
                                 referrerPolicy: 'no-referrer',
                               }),

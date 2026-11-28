@@ -883,13 +883,18 @@ export function createApp({
     })
     app.get('/assets/*', serveStatic({ root }))
     app.get('/assets/*', (c) => c.text('Not found', 404))
-    // The stable widget URL must pick up protocol upgrades on every visit. Keep an
-    // ETag so unchanged scripts can still be validated without downloading them again.
-    app.use('/hourmere-embed.js', async (c, next) => {
-      await next()
+    // The stable widget and translation URLs must pick up upgrades on every visit.
+    // Keep an ETag so unchanged scripts can be validated without downloading them again.
+    const widgetLocaleScript = /^\/hourmere-embed-locale-[^/]+\.js$/
+    const validateWidgetScript = etag()
+    const cacheWidgetScript = createMiddleware(async (c, next) => {
+      await validateWidgetScript(c, next)
       c.res.headers.set('Cache-Control', 'no-cache')
     })
-    app.use('/hourmere-embed.js', etag())
+    app.use('/hourmere-embed.js', cacheWidgetScript)
+    app.use('*', (c, next) =>
+      widgetLocaleScript.test(c.req.path) ? cacheWidgetScript(c, next) : next(),
+    )
     // The app shell must be revalidated on every load; a cached index.html would keep
     // pointing at bundles from the previous deploy, which now return 404.
     app.use('*', async (c, next) => {
@@ -899,7 +904,14 @@ export function createApp({
       }
     })
     app.use('*', serveStatic({ root }))
-    app.get('*', serveStatic({ root, path: 'index.html' }))
+    app.get(
+      '*',
+      (c, next) => {
+        if (widgetLocaleScript.test(c.req.path)) return c.text('Not found', 404)
+        return next()
+      },
+      serveStatic({ root, path: 'index.html' }),
+    )
   }
 
   return app

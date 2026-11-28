@@ -2,6 +2,7 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { EventType, Profile, Schedule } from '../../api/resources.ts'
+import { holdTestCatalogue } from '../../i18n/catalogues.fixture.ts'
 import { chooseLanguage } from '../../i18n/store.ts'
 import {
   fakeApi,
@@ -118,6 +119,22 @@ describe('personal booking page setup', () => {
       expect(api.to('POST /api/v1/schedules/default')[0]?.body).toEqual({ language })
     },
   )
+
+  it('requests a Chinese starter schedule while the admin catalogue is downloading', async () => {
+    chooseLanguage('zh-CN')
+    const download = holdTestCatalogue('zh-CN', 'admin')
+    const api = account({
+      schedules: [],
+      events: [],
+      routes: { 'POST /api/v1/schedules/default': () => json(201, schedule()) },
+    })
+    const guide = await openGuide()
+    await userEvent.click(within(guide).getByRole('button', { name: USE_DEFAULT }))
+    await waitFor(() =>
+      expect(api.to('POST /api/v1/schedules/default')[0]?.body).toEqual({ language: 'zh-CN' }),
+    )
+    expect(download).toHaveBeenCalledOnce()
+  })
 
   it('explains the starter hours naturally in Chinese with the saved profile time zone', async () => {
     chooseLanguage('zh-CN')

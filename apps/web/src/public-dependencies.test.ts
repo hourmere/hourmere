@@ -16,6 +16,8 @@ const widget = import.meta.glob<Catalog>('./i18n/catalogues/*/widget.ts', {
   import: 'widget',
 })
 const nonEnglishCatalogue = /\/i18n\/catalogues\/(?!en\/)[^/]+\/(common|admin|widget)\.ts$/
+const retryLoaderModule = /\/i18n\/catalogues\/(?!en\/)[^/]+\/(common|admin)\.ts\?url$/
+const retryQuery = /\.searchParams\.set\((["'`])retry\1,\s*String\(/g
 
 beforeAll(() => {
   // Vite otherwise inherits Vitest's NODE_ENV and keeps the development catalogue loaders.
@@ -42,6 +44,17 @@ it('keeps admin and non-English catalogue strings outside the static public bund
     build: { write: false, sourcemap: false },
   })
   const chunks = bundleOutputs(result).filter((entry) => entry.type === 'chunk')
+  // Plain dynamic imports still emit separate chunks, but cannot retry with a fresh URL.
+  const retryLoaders = new Set<string>()
+  for (const chunk of chunks) {
+    const loaders = Object.keys(chunk.modules).filter((id) => retryLoaderModule.test(id))
+    if (loaders.length === 0) continue
+    expect(
+      chunk.code.match(retryQuery) ?? [],
+      `Retry query setters in ${chunk.fileName}`,
+    ).toHaveLength(loaders.length)
+    for (const id of loaders) retryLoaders.add(id)
+  }
   const byName = new Map(chunks.map((chunk) => [chunk.fileName, chunk]))
   const publicFacades = ['HostPage.tsx', 'BookingPage.tsx', 'ManageBookingPage.tsx', 'Embed.tsx']
   const entries = chunks.filter((chunk) => chunk.facadeModuleId?.endsWith('/apps/web/index.html'))
@@ -87,6 +100,10 @@ it('keeps admin and non-English catalogue strings outside the static public bund
     for (const locale of interfaceLanguages('public')) {
       if (locale === 'en') continue
       const catalogue = `/i18n/catalogues/${locale}/${group}.ts`
+      expect(
+        [...retryLoaders].some((id) => id.endsWith(`${catalogue}?url`)),
+        `Production retry loader for ${catalogue}`,
+      ).toBe(true)
       const owners = chunks.filter((chunk) =>
         Object.keys(chunk.modules).some((path) => path.endsWith(catalogue)),
       )

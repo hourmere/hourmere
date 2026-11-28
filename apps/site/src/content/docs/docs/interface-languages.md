@@ -108,6 +108,8 @@ translations and shows a loading placeholder. If the download takes longer, the 
 in English and updates when the translations arrive. If the download fails, the page stays
 usable in English and selecting the language again retries the download. Widget controls
 follow the same fallback when they load.
+Meeting poll and waitlist emails, personalized setup guides, and the initial language for
+workflow previews and new profiles follow your language preference during English fallback.
 
 Every message resolves independently through the selected locale's fallback chain and then
 English. A partially translated language can show its translated labels alongside complete

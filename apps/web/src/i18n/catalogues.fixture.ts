@@ -1,6 +1,8 @@
-import { explicitLanguage } from '@hourmere/core/language'
+import { explicitLanguage, type InterfaceLanguage } from '@hourmere/core/language'
+import { vi } from 'vitest'
 import { primeWidgetCatalogue } from '../embed/language.ts'
 import { adminCatalogue } from './admin.ts'
+import { createCatalogueLoader } from './catalogue-loader.ts'
 import type { Catalog } from './catalogues.ts'
 import { commonCatalogue } from './common.ts'
 
@@ -27,4 +29,15 @@ export function primeTestCatalogues() {
       if (locale && locale !== 'en') prime(locale, catalogue)
     }
   }
+}
+
+/** Make one catalogue stay in flight even though the test setup primes translations. */
+export function holdTestCatalogue(locale: InterfaceLanguage, group: 'common' | 'admin') {
+  const chunk = new Promise<never>(() => {})
+  const download = vi.fn(() => chunk)
+  const pending = createCatalogueLoader({ [`./catalogues/${locale}/${group}.ts`]: download }, group)
+  const catalogue = group === 'admin' ? adminCatalogue : commonCatalogue
+  vi.spyOn(catalogue, 'status').mockImplementation(pending.status)
+  vi.spyOn(catalogue, 'load').mockImplementation(pending.load)
+  return download
 }

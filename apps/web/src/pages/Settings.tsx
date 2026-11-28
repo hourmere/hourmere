@@ -581,7 +581,7 @@ function profileServerErrors(err: unknown): FieldErrors | null {
 const LABELS = { handle: 'Handle', timeZone: 'Time zone', locale: 'Notification language' }
 
 function ProfileForm({ profile, me }: { profile: Profile | null; me: Me }) {
-  const { t, ui, locale } = useI18n()
+  const { t, ui, locale, requested } = useI18n()
 
   const [saved, setSaved] = useState(profile)
   const [baseline, setBaseline] = useState<ProfileDraft>(() =>
@@ -594,7 +594,7 @@ function ProfileForm({ profile, me }: { profile: Profile | null; me: Me }) {
       : {
           handle: suggestHandle(me.user.email),
           timeZone: browserTimeZone(),
-          locale,
+          locale: requested,
         },
   )
   const [draft, setDraft] = useState(baseline)

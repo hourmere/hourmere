@@ -2,7 +2,7 @@ import { registeredLocales } from '@hourmere/core/language'
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { commonCatalogues } from '../i18n/catalogues.fixture.ts'
+import { commonCatalogues, holdTestCatalogue } from '../i18n/catalogues.fixture.ts'
 import { fakeApi, json, later, renderApp } from '../test/fake-api.tsx'
 import { EVENT, eventRoutes, slotsAnswer } from '../test/public-fixtures.ts'
 import { selectPublicLanguage } from '../test/public-language.ts'
@@ -122,6 +122,23 @@ describe('public waitlist entry', () => {
     })
     expect(screen.getByRole('main').textContent).not.toContain(mixedName)
     expect(screen.getByRole('main').textContent).not.toContain(email)
+  })
+
+  it('sends the requested email language while the selected catalogue is downloading', async () => {
+    const download = holdTestCatalogue('de', 'common')
+    const endpoint = 'POST /api/v1/public/ada/intro/waitlist'
+    const api = fakeApi({
+      ...eventRoutes(enabled, []),
+      [endpoint]: () => json(202, { accepted: true }),
+    })
+    renderApp('/ada/intro')
+    const user = await openForm()
+    await fill(user)
+    await selectPublicLanguage(user, 'de')
+    await user.click(screen.getByRole('button', { name: 'Join the waitlist' }))
+    await screen.findByRole('heading', { name: success })
+    expect(download).toHaveBeenCalledOnce()
+    expect(api.to(endpoint)[0]?.body).toMatchObject({ locale: 'de' })
   })
 
   it.each([false, undefined])('offers no join when enabled=%s', async (value) => {

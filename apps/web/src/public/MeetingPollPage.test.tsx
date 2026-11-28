@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Schemas } from '../api/client.ts'
 import { common as english } from '../i18n/catalogues/en/common.ts'
+import { holdTestCatalogue } from '../i18n/catalogues.fixture.ts'
 import { translateMessage } from '../i18n/translate.ts'
 import { fakeApi, json, later, renderApp } from '../test/fake-api.tsx'
 import { accessibleNameParts } from '../test/public-fixtures.ts'
@@ -287,6 +288,41 @@ for (const locale of ['en', 'zh-CN', 'fr'] as const) {
     })
   })
 }
+
+describe('meeting poll language while a catalogue downloads', () => {
+  it('sends the requested language when enrolling with English labels', async () => {
+    vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['de-DE'])
+    const download = holdTestCatalogue('de', 'common')
+    const api = fakeApi({
+      [endpoint('read')]: () => json(200, { ...poll, ownBallot: null }),
+      [endpoint('enroll')]: () => json(202, { accepted: true }),
+    })
+    renderApp(`/poll#${token}`)
+    const user = userEvent.setup()
+    await user.type(await screen.findByLabelText('Your name'), 'Ada')
+    await user.type(screen.getByLabelText('Email address'), 'ada@example.invalid')
+    await user.click(screen.getByRole('button', { name: 'Send verification email' }))
+    await screen.findByRole('heading', { name: 'Check your email' })
+    expect(download).toHaveBeenCalledOnce()
+    expect(api.to(endpoint('enroll'))[0]?.body).toMatchObject({ locale: 'de' })
+  })
+
+  it('sends the requested language when voting with English labels', async () => {
+    vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['de-DE'])
+    const download = holdTestCatalogue('de', 'common')
+    const api = fakeApi({
+      [endpoint('read')]: () => json(200, poll),
+      [endpoint('vote')]: () => json(200, saved),
+    })
+    renderApp(`/poll/voter#${token}`)
+    const save = await screen.findByRole('button', { name: 'Save ballot' })
+    const user = await chooseBallot((text) => text)
+    await user.click(save)
+    await screen.findByText('Your ballot is saved.')
+    expect(download).toHaveBeenCalledOnce()
+    expect(api.to(endpoint('vote'))[0]?.body).toMatchObject({ locale: 'de' })
+  })
+})
 
 describe('meeting poll privacy and ballot boundaries', () => {
   it.each([null, { ...ballot, voter: { ...voter, status: 'invited' as const } }, withdrawn])(
