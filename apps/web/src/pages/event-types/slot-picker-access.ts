@@ -20,15 +20,20 @@ export async function verifySlotPickerAccess(me: Me, event: EventType, profile: 
   } else {
     if (current.organization.personal || current.organization.slug !== me.organization.slug)
       throw new Error('picker_access_denied')
-    const member = await getActiveOrganizationMember()
-    const roles = member.role.split(',').map((role) => role.trim())
-    if (
-      member.organizationId !== me.organization.id ||
-      member.userId !== me.user.id ||
-      !roles.some((role) => role === 'owner' || role === 'admin') ||
-      roles.some((role) => !['owner', 'admin', 'member'].includes(role))
-    )
-      throw new Error('picker_access_denied')
+    if (current.teamManagementPermissions) {
+      if (!current.teamManagementPermissions.includes('event_types.generate_open_time_snippet'))
+        throw new Error('picker_access_denied')
+    } else {
+      const member = await getActiveOrganizationMember()
+      const roles = member.role.split(',').map((role) => role.trim())
+      if (
+        member.organizationId !== me.organization.id ||
+        member.userId !== me.user.id ||
+        !roles.some((role) => role === 'owner' || role === 'admin') ||
+        roles.some((role) => !['owner', 'admin', 'member'].includes(role))
+      )
+        throw new Error('picker_access_denied')
+    }
   }
   const saved = await unwrap(
     api.GET('/api/v1/event-types/{id}', { params: { path: { id: event.id } } }),

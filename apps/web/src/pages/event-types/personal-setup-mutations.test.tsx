@@ -8,6 +8,7 @@ import { CopyButton } from '../../components/CopyButton.tsx'
 import { useLoad, useMounted } from '../../hooks.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import * as paths from '../../paths.ts'
+import { teamPageAllows } from '../../team-page-permissions.ts'
 import { compileSourceCopy } from '../../test/compile-source-copy.ts'
 import { ME, PROFILE } from '../../test/fake-api.tsx'
 import { eventType, schedule } from '../../test/fixtures.ts'
@@ -188,6 +189,7 @@ function assertGuideReload(code: string) {
     Link,
     validDefault,
     useI18n,
+    teamPageAllows,
     useMe: () => ME,
     usePageTitle: () => {},
     useFlash: () => '',

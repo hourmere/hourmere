@@ -16,6 +16,7 @@ import {
 } from '../../paths.ts'
 import type { Me } from '../../session.tsx'
 import { useTeamManagementAccess } from '../../team-management.tsx'
+import { teamPageAllows } from '../../team-page-permissions.ts'
 import { validSchedule } from '../availability/valid-default.ts'
 import { EventEmbedAction } from './EventEmbedAction.tsx'
 import type { EditorReadiness } from './editor-readiness.ts'
@@ -49,8 +50,9 @@ export function SavedEventShare({
   const access = useTeamManagementAccess()
   const [instance] = useLoad(loadInstance)
   const [pickerOpen, setPickerOpen] = useState(false)
+  const managesTeam = access.status === 'ready' && access.role !== null
   const canRetryUnavailable =
-    me.principal.kind === 'session' && access.status === 'ready' && access.role !== null
+    me.principal.kind === 'session' && teamPageAllows(me, 'readiness.read_team', managesTeam)
   const heading = useRef<HTMLHeadingElement>(null)
   useEffect(() => {
     if (focusVersion > 0) heading.current?.focus()
@@ -138,7 +140,9 @@ export function SavedEventShare({
     event.isActive &&
     needsActivation === false &&
     ((personal && !missingHandle) ||
-      (team && !invalidTeamSlug && access.status === 'ready' && access.role !== null))
+      (team &&
+        !invalidTeamSlug &&
+        teamPageAllows(me, 'event_types.generate_open_time_snippet', managesTeam)))
 
   return (
     <section className="panel" aria-labelledby="view-and-share">

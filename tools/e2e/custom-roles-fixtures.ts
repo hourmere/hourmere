@@ -19,10 +19,14 @@ interface CustomRolesFixture {
   memberId: string
   signIn: (actor: Actor, locale: 'en' | 'zh-CN') => Promise<void>
   proofLink: (index: number) => Promise<string>
+  seedTeamEvent: (title: string) => Promise<string>
+  grantMemberPermissions: (permissionIds: string[]) => Promise<void>
+  promoteMemberToAdmin: () => Promise<void>
 }
 
-export const test = base.extend<{ roles: CustomRolesFixture }>({
-  roles: async ({ context }, use) => {
+export const test = base.extend<{ roles: CustomRolesFixture; customRoleRuntime: boolean }>({
+  customRoleRuntime: [true, { option: true }],
+  roles: async ({ context, customRoleRuntime }, use) => {
     const bootstrap = process.env.HOURMERE_E2E_BOOTSTRAP_URL
     if (!bootstrap) throw new Error('Custom roles require HOURMERE_E2E_BOOTSTRAP_URL')
     const owned = await createTestDatabase(bootstrap, undefined, { tag: 'custom_roles' })
@@ -47,10 +51,12 @@ export const test = base.extend<{ roles: CustomRolesFixture }>({
         .where('organizationId', '=', teamId)
         .where('userId', '=', actors.member.userId)
         .executeTakeFirstOrThrow()
-      await db
-        .updateTable('custom_role_master_policy')
-        .set({ enabled: true, policy_epoch: 1 })
-        .executeTakeFirstOrThrow()
+      if (customRoleRuntime) {
+        await db
+          .updateTable('custom_role_master_policy')
+          .set({ enabled: true, policy_epoch: 1 })
+          .executeTakeFirstOrThrow()
+      }
       const smtp = fakeSmtpServer()
       smtpListener = await listenOwned(smtp.server)
       listener = await listenOwned(createServer({ allowHalfOpen: true }))
@@ -72,7 +78,7 @@ export const test = base.extend<{ roles: CustomRolesFixture }>({
             fileURLToPath(new URL('../../apps/web/dist', import.meta.url)),
         },
         undefined,
-        { customRolesEnabled: true },
+        { customRolesEnabled: customRoleRuntime },
       )
       await context.route('**/*', (route) =>
         new URL(route.request().url()).origin === url
@@ -85,6 +91,52 @@ export const test = base.extend<{ roles: CustomRolesFixture }>({
         url,
         teamId,
         memberId,
+        seedTeamEvent: (title) =>
+          fixture.eventType(teamId, null, {
+            title,
+            hosts: [{ userId: actors.owner.userId }],
+          }),
+        grantMemberPermissions: (permissionIds) =>
+          db.transaction().execute(async (trx) => {
+            await trx
+              .updateTable('team_custom_role_policies')
+              .set({ enabled: true, policy_epoch: 1 })
+              .where('organization_id', '=', teamId)
+              .executeTakeFirstOrThrow()
+            const { id: roleId } = await trx
+              .insertInto('custom_roles')
+              .values({ organization_id: teamId, active_revision: 1 })
+              .returning('id')
+              .executeTakeFirstOrThrow()
+            await trx
+              .insertInto('custom_role_revisions')
+              .values({
+                organization_id: teamId,
+                role_id: roleId,
+                revision: 1,
+                name: 'Scheduling coordinator',
+                permission_ids: permissionIds,
+              })
+              .execute()
+            await trx
+              .insertInto('custom_role_assignments')
+              .values({
+                organization_id: teamId,
+                member_id: memberId,
+                user_id: actors.member.userId,
+                role_id: roleId,
+                assigned_by_user_id: actors.owner.userId,
+              })
+              .execute()
+          }),
+        promoteMemberToAdmin: async () => {
+          // The normal membership trigger clears the role and advances authorization.
+          await db
+            .updateTable('auth.member')
+            .set({ role: 'admin' })
+            .where('id', '=', memberId)
+            .execute()
+        },
         signIn: async (actor, locale) => {
           const { userId } = actors[actor]
           await db.updateTable('profiles').set({ locale }).where('user_id', '=', userId).execute()

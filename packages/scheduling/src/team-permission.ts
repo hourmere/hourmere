@@ -5,6 +5,7 @@ import {
   type Principal,
   requireActiveApiKey,
   resolveTeamPermissions,
+  type TeamPermissionCheck,
 } from '@hourmere/auth'
 import { customRoleCatalogueV1 } from '@hourmere/core'
 import type { Db } from '@hourmere/db'
@@ -14,6 +15,29 @@ import { DomainError } from './errors.ts'
 export type PhaseOneGrant = (typeof customRoleCatalogueV1.phaseOne)[number]
 
 const phaseOne: ReadonlySet<string> = new Set(customRoleCatalogueV1.phaseOne)
+
+export function managedTeamPermissionChecks(
+  principal: Principal,
+  operations: readonly string[],
+  fixedManager: boolean,
+): TeamPermissionCheck[] {
+  return operations.map((operation) => ({
+    operation,
+    fixed: ({ role, personal }) =>
+      fixedManager &&
+      !personal &&
+      role.split(',').some((token) => ['owner', 'admin'].includes(token.trim()))
+        ? 'elevated'
+        : 'denied',
+    versionedFixed: true,
+    custom:
+      phaseOne.has(operation) &&
+      customOperationTransportAllows(
+        operation,
+        principal.kind === 'api_key' ? principal.apiKeyScope : principal.kind,
+      ),
+  }))
+}
 
 /** Fixed role predicates keep their existing behavior for unaffected memberships. */
 export async function allowsManagedTeamOperations(
@@ -29,22 +53,7 @@ export async function allowsManagedTeamOperations(
     db,
     principal,
     principal.organization.id,
-    operations.map((operation) => ({
-      operation,
-      fixed: ({ role, personal }) =>
-        fixedManager &&
-        !personal &&
-        role.split(',').some((token) => ['owner', 'admin'].includes(token.trim()))
-          ? 'elevated'
-          : 'denied',
-      versionedFixed: true,
-      custom:
-        phaseOne.has(operation) &&
-        customOperationTransportAllows(
-          operation,
-          principal.kind === 'api_key' ? principal.apiKeyScope : principal.kind,
-        ),
-    })),
+    managedTeamPermissionChecks(principal, operations, fixedManager),
     principal.customRoleAuthorization,
   )
   return result?.decisions.every(({ allowed }) => allowed) === true

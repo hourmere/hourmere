@@ -347,4 +347,7 @@ export const admin = {
     'Le nettoyage du calendrier ou du compte de visioconférence initial est en attente.',
   'Cleanup in the original calendar or meeting account could not be verified. Ask the account owner to check for remaining entries.':
     'Le nettoyage du calendrier ou du compte de visioconférence initial n’a pas pu être vérifié. Demandez au titulaire du compte de vérifier s’il reste des entrées.',
+
+  // Effective team page permissions
+  'No event types yet.': 'Aucun type d’événement pour le moment.',
 }

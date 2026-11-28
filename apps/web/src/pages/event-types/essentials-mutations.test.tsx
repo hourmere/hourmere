@@ -33,7 +33,7 @@ describe('essentials production-source negative controls', () => {
     ['useState(initiallyOpen)', 'useState(true)'],
     ['useState(initiallyOpen)', 'useState(false)'],
     [summaryMarkup, summaryMarkup.replace('<summary>', '<div>').replace('</summary>', '</div>')],
-    ['{children}</div>', '{open && children}</div>'],
+    ['{children}</ReadOnlyFields>', '{open && children}</ReadOnlyFields>'],
   ])('detects loss of disclosure state, semantics or retained fields: %s → %s', (before, after) => {
     detects(group, before, after, (copy) => {
       const Group = compile<

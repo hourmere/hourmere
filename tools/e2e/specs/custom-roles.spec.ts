@@ -1,6 +1,13 @@
-import type { Locator } from '@playwright/test'
+import { randomUUID } from 'node:crypto'
+import type { Locator, Page } from '@playwright/test'
+import type { components } from '../../../apps/web/src/api/schema.d.ts'
+import { admin as english } from '../../../apps/web/src/i18n/catalogues/en/admin.ts'
+import { admin as chinese } from '../../../apps/web/src/i18n/catalogues/zh-CN/admin.ts'
+import { eventTypePath, PATHS, workflowEditPath } from '../../../apps/web/src/paths.ts'
 import { scanA11y } from '../a11y.ts'
 import { expect, test } from '../custom-roles-fixtures.ts'
+
+type Schemas = components['schemas']
 
 async function prove(panel: Locator, nextLink: () => Promise<string>) {
   await expect(panel.getByRole('heading')).toBeFocused()
@@ -11,6 +18,194 @@ async function prove(panel: Locator, nextLink: () => Promise<string>) {
   await panel.getByRole('button', { name: /^(Verify email link|验证邮箱链接)$/u }).click()
   await panel.getByRole('button', { name: /^(Continue|继续)$/u }).click()
 }
+
+const eventTitle = 'Coordinator consultation'
+const formTitle = 'Coordinator intake'
+const workflowTitle = 'Coordinator reminder'
+
+function eventSwitch(page: Page) {
+  return page
+    .getByRole('row')
+    .filter({ has: page.getByRole('rowheader', { name: eventTitle, exact: true }) })
+    .getByRole('switch')
+}
+
+async function seedManagedDefinitions(page: Page, url: string, teamId: string) {
+  const headers = { origin: url, 'x-expected-organization-id': teamId }
+  const form = await page.request.post(`${url}/api/v1/routing-forms`, {
+    headers,
+    data: {
+      title: formTitle,
+      slug: 'coordinator-intake',
+      fallback: { kind: 'message', message: 'Contact the scheduling coordinator' },
+    } satisfies Schemas['CreateRoutingForm'],
+  })
+  expect(form.status()).toBe(201)
+  const workflow = await page.request.post(`${url}/api/v1/workflows`, {
+    headers,
+    data: {
+      owner: { kind: 'team', id: teamId },
+      name: workflowTitle,
+      idempotencyKey: randomUUID(),
+      scope: { type: 'all_event_types' },
+      trigger: { type: 'before_start', offsetMinutes: 60 },
+      conditions: [],
+      actions: [{ type: 'email', recipients: ['booker'] }],
+      enabled: false,
+    } satisfies Schemas['CreateWorkflowInput'],
+  })
+  expect(workflow.status()).toBe(201)
+  return ((await workflow.json()) as Schemas['Workflow']).id
+}
+
+test.describe('legacy controls with custom roles switched off', () => {
+  test.use({ customRoleRuntime: false })
+
+  test('fixed Admin can still manage event types, routing forms and workflows', async ({
+    isMobile,
+    page,
+    roles,
+  }) => {
+    const copy = isMobile ? chinese : english
+    await roles.seedTeamEvent(eventTitle)
+    await roles.signIn('admin', isMobile ? 'zh-CN' : 'en')
+    await seedManagedDefinitions(page, roles.url, roles.teamId)
+
+    const main = page.getByRole('main')
+    const nav = page.getByRole('navigation', { name: copy.Main, exact: true })
+    const routing = nav.getByRole('link', { name: copy['Routing forms'], exact: true })
+    const workflows = nav.getByRole('link', { name: copy.Workflows, exact: true })
+    await page.goto(roles.url + PATHS.eventTypes)
+    await expect(main.getByRole('link', { name: copy['New event type'] })).toBeVisible()
+    await expect(eventSwitch(page)).toBeEnabled()
+    await expect(main.getByRole('link', { name: copy['Set your weekly hours'] })).toBeVisible()
+
+    await routing.click()
+    await expect(main.getByRole('link', { name: copy['New routing form'] })).toBeVisible()
+    await main.getByRole('link', { name: formTitle }).click()
+    await expect(main.getByRole('button', { name: copy['Save draft'] })).toBeVisible()
+
+    await workflows.click()
+    await expect(main.getByRole('link', { name: copy['New workflow'] })).toBeVisible()
+    await expect(
+      main.getByRole('link', { name: copy['Edit {name}'].replace('{name}', workflowTitle) }),
+    ).toBeVisible()
+    await expect(
+      main.getByRole('button', { name: copy['Enable {name}'].replace('{name}', workflowTitle) }),
+    ).toBeEnabled()
+  })
+})
+
+test('custom Member actions disappear when the same browser becomes an unrenewed Admin', async ({
+  isMobile,
+  page,
+  roles,
+}) => {
+  const locale = isMobile ? 'zh-CN' : 'en'
+  const copy = isMobile ? chinese : english
+  const eventId = await roles.seedTeamEvent(eventTitle)
+  await roles.signIn('owner', locale)
+  const workflowId = await seedManagedDefinitions(page, roles.url, roles.teamId)
+  await roles.grantMemberPermissions([
+    'event_types.update',
+    'routing_forms.read',
+    'routing_forms.preview',
+    'workflows.read',
+    'workflows.read_runs',
+    'workflows.preview',
+  ])
+  await roles.signIn('member', locale)
+  await page.goto(roles.url + PATHS.settings)
+  await page.getByRole('button', { name: copy['Verify and renew team access'] }).click()
+  await prove(
+    page.getByRole('region', { name: copy['Confirm your identity to renew team access.'] }),
+    () => roles.proofLink(0),
+  )
+  await expect(
+    page.getByRole('region', { name: copy['Team actions available in this browser'] }),
+  ).toBeVisible()
+
+  const main = page.getByRole('main')
+  const nav = page.getByRole('navigation', { name: copy.Main, exact: true })
+  const routing = nav.getByRole('link', { name: copy['Routing forms'], exact: true })
+  const workflows = nav.getByRole('link', { name: copy.Workflows, exact: true })
+  const newEvent = main.getByRole('link', { name: copy['New event type'] })
+  const eventToggle = eventSwitch(page)
+  await page.goto(roles.url + PATHS.eventTypes)
+  await expect(eventToggle).toBeChecked()
+  await expect(newEvent).toHaveCount(0)
+  const toggled = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'PATCH' &&
+      new URL(response.url()).pathname === `/api/v1/event-types/${eventId}`,
+  )
+  await eventToggle.click()
+  expect((await toggled).status()).toBe(200)
+  await expect(eventToggle).not.toBeChecked()
+
+  await routing.click()
+  const form = main.getByRole('link', { name: formTitle })
+  await expect(form).toBeVisible()
+  await expect(main.getByRole('link', { name: copy['New routing form'] })).toHaveCount(0)
+  await form.click()
+  const runPreview = main.getByRole('button', { name: copy['Run preview'] })
+  await expect(runPreview).toBeEnabled()
+  await expect(main.getByRole('button', { name: copy['Save draft'] })).toHaveCount(0)
+  await runPreview.click()
+  await expect(main.getByRole('heading', { name: copy['Preview result'] })).toBeVisible()
+  await expect(
+    main.getByTestId('routing-preview-result').getByText('Contact the scheduling coordinator', {
+      exact: true,
+    }),
+  ).toBeVisible()
+
+  await workflows.click()
+  const details = main
+    .getByRole('link', { name: copy.Details, exact: true })
+    .and(main.locator(`[href="${workflowEditPath(workflowId)}"]`))
+  await expect(details).toBeVisible()
+  await expect(main.getByRole('link', { name: copy['New workflow'] })).toHaveCount(0)
+  await expect(
+    main.getByRole('button', { name: copy['Enable {name}'].replace('{name}', workflowTitle) }),
+  ).toHaveCount(0)
+  await main
+    .getByRole('link', { name: copy['Run history for {name}'].replace('{name}', workflowTitle) })
+    .click()
+  await expect(main.getByText(copy['No finished runs yet.'])).toBeVisible()
+  await main.getByRole('link', { name: copy.Workflows, exact: true }).click()
+  await details.click()
+  const preview = main.getByRole('region', { name: copy['Workflow preview'] })
+  const verdict = preview.getByText(copy['The example booking matches this workflow.'], {
+    exact: true,
+  })
+  await expect(verdict).toHaveCount(0)
+  await preview.getByRole('button', { name: copy['Preview workflow'] }).click()
+  await expect(verdict).toBeVisible()
+  await expect(main.getByRole('button', { name: copy['Save changes'] })).toHaveCount(0)
+
+  await roles.promoteMemberToAdmin()
+  await page.goto(roles.url + PATHS.eventTypes)
+  const event = main.getByRole('link', { name: eventTitle, exact: true })
+  await expect(event).toBeVisible()
+  await expect(main.getByRole('link', { name: copy['Set your weekly hours'] })).toBeVisible()
+  await expect(main.getByRole('link', { name: copy['Renew team access'] })).toBeVisible()
+  await expect(newEvent).toHaveCount(0)
+  await expect(eventToggle).toHaveCount(0)
+  await expect(routing).toHaveCount(0)
+  await expect(workflows).toHaveCount(0)
+  await page.goto(roles.url + eventTypePath(eventId))
+  await expect(main.getByRole('heading', { level: 1 })).toContainText(eventTitle)
+  await expect(main.getByRole('button', { name: copy['Save changes'] })).toHaveCount(0)
+
+  await page.goto(roles.url + PATHS.routingForms)
+  await expect(main.getByTestId('routing-forms-denied')).toBeVisible()
+  await expect(form).toHaveCount(0)
+  await expect(main.getByRole('link', { name: copy['New routing form'] })).toHaveCount(0)
+  await page.goto(roles.url + PATHS.workflows)
+  await expect(main.getByText(copy['Workflows are unavailable in this space.'])).toBeVisible()
+  await expect(details).toHaveCount(0)
+  await expect(main.getByRole('link', { name: copy['New workflow'] })).toHaveCount(0)
+})
 
 for (const locale of ['en', 'zh-CN'] as const) {
   test(`custom team roles opt-in, assignment and browser renewal in ${locale}`, async ({

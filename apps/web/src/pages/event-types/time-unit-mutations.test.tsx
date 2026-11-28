@@ -132,6 +132,8 @@ it('detects removing the pristine submit guard before a real PATCH call', async 
     const calls: unknown[] = []
     const noop = () => {}
     const deps = {
+      canSave: true,
+      usesEffective: false,
       saved: { id: 'saved', schedulingType: 'individual' },
       dirty: false,
       setAttempt: noop,

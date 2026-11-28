@@ -69,11 +69,15 @@ export async function loadEventReadiness(me: Me, signal: AbortSignal) {
   // is available to an API-key caller. A membership 401 would invalidate that valid caller.
   if (me.principal.kind !== 'session') return null
   if (!me.organization.personal) {
-    const member = await getActiveOrganizationMember(signal)
-    if (member.organizationId !== me.organization.id || member.userId !== me.user.id)
-      throw new Error('Membership context changed')
-    const roles = member.role.split(',').map((role) => role.trim())
-    if (!roles.includes('owner') && !roles.includes('admin')) return null
+    if (me.teamManagementPermissions) {
+      if (!me.teamManagementPermissions.includes('readiness.read_team')) return null
+    } else {
+      const member = await getActiveOrganizationMember(signal)
+      if (member.organizationId !== me.organization.id || member.userId !== me.user.id)
+        throw new Error('Membership context changed')
+      const roles = member.role.split(',').map((role) => role.trim())
+      if (!roles.includes('owner') && !roles.includes('admin')) return null
+    }
   }
   const items = new Map<string, EventReadiness>()
   const cursors = new Set<string>()

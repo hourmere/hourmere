@@ -3608,4 +3608,7 @@ export const admin = {
     '此交接提议已关闭。发起新提议需要所有参与者重新同意，也可以人工协调新的预约。',
   'Cleanup of the tracked entries in the original calendar or meeting account is complete.':
     '已清理原日历或会议账号中有记录的条目。',
+
+  // Effective team page permissions
+  'No event types yet.': '还没有活动类型。',
 } as const

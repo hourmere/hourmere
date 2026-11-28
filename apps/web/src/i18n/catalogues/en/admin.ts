@@ -3780,4 +3780,7 @@ export const admin = {
     'This handoff offer is closed. A new offer needs fresh approvals from everyone. You can also coordinate a replacement manually.',
   'Cleanup of the tracked entries in the original calendar or meeting account is complete.':
     'Cleanup of the tracked entries in the original calendar or meeting account is complete.',
+
+  // Effective team page permissions
+  'No event types yet.': 'No event types yet.',
 } as const

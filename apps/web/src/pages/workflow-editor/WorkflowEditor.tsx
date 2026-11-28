@@ -7,6 +7,7 @@ import { msg, type UiText } from '../../i18n/translate.ts'
 import { PATHS } from '../../paths.ts'
 import { randomHex } from '../../random.ts'
 import { useSession } from '../../session.tsx'
+import { useTeamPagePermissions } from '../../team-page-permissions.ts'
 import { useConfirmLeave, useUnsavedChanges } from '../../unsaved-changes.tsx'
 import { WorkflowConditionsFields, WorkflowRecipientsField } from './WorkflowAudienceFields.tsx'
 import {
@@ -61,6 +62,12 @@ export function WorkflowEditor({
   reload: () => void
 }) {
   const { t, ui, locale } = useI18n()
+  const permissions = useTeamPagePermissions()
+  const canSave =
+    permissions.status === 'fixed' ||
+    permissions.allows(workflow ? 'workflows.update' : 'workflows.create')
+  const canPreview = permissions.status === 'fixed' || permissions.allows('workflows.preview')
+  const canReadWebhooks = permissions.status === 'fixed' || permissions.allows('webhooks.read')
   const { confirmReload } = useSession()
   const confirmLeave = useConfirmLeave()
   const navigate = useNavigate()
@@ -81,7 +88,9 @@ export function WorkflowEditor({
     !followUpHostNotesEnabled && draft.action.type === 'email' && !!draft.action.content
 
   useUnsavedChanges(
-    block !== 'unavailable' && (replaceText || JSON.stringify(draft) !== JSON.stringify(original)),
+    canSave &&
+      block !== 'unavailable' &&
+      (replaceText || JSON.stringify(draft) !== JSON.stringify(original)),
   )
   useLayoutEffect(() => () => operation.current?.abort(), [])
   useLayoutEffect(() => {
@@ -113,6 +122,7 @@ export function WorkflowEditor({
     if (operation.current || block) return
     const isPreview =
       (event.nativeEvent as SubmitEvent).submitter?.getAttribute('value') === 'preview'
+    if (isPreview ? !canPreview : !canSave) return
     const { name, scope, trigger, conditions, action } = draft
     if (action.type === 'email' && action.recipients.length === 0) {
       setProblem(msg('Choose at least one recipient.'))
@@ -241,7 +251,7 @@ export function WorkflowEditor({
       )}
       <fieldset
         className="form-fieldset workflow-fields"
-        disabled={busy !== null || block !== null}
+        disabled={(!canSave && !canPreview) || busy !== null || block !== null}
       >
         <section className="panel workflow-fields">
           <WorkflowDefinitionFields
@@ -267,7 +277,9 @@ export function WorkflowEditor({
               onChange={(event) => changeAction(event.target.value as WorkflowAction['type'])}
             >
               <option value="email">{t('Send email')}</option>
-              <option value="webhook">{t('Send webhook')}</option>
+              {(canReadWebhooks || original.action.type === 'webhook') && (
+                <option value="webhook">{t('Send webhook')}</option>
+              )}
             </select>
           </label>
           {action.type === 'email' ? (
@@ -279,7 +291,7 @@ export function WorkflowEditor({
               {followUpHostNotesEnabled && (
                 <WorkflowTranslations content={action.content} onChange={changeText} />
               )}
-              {hiddenText && (
+              {hiddenText && canSave && (
                 <label className="checkbox">
                   <input
                     type="checkbox"
@@ -290,12 +302,16 @@ export function WorkflowEditor({
                 </label>
               )}
             </>
-          ) : (
+          ) : canReadWebhooks ? (
             <WorkflowWebhookField
               organizationId={organizationId}
               webhookId={action.webhookId}
               onChange={(webhookId) => change({ action: { ...action, webhookId } })}
             />
+          ) : (
+            <p>
+              {t('Webhook endpoint')} <bdi>{action.webhookId}</bdi>
+            </p>
           )}
         </section>
         {problem && (
@@ -304,32 +320,36 @@ export function WorkflowEditor({
           </p>
         )}
         <div className="form-actions">
-          <button
-            className="button button-primary"
-            type="submit"
-            disabled={hiddenText && !replaceText}
-          >
-            {t(workflow ? 'Save changes' : 'Create workflow')}
-          </button>
+          {canSave && (
+            <button
+              className="button button-primary"
+              type="submit"
+              disabled={hiddenText && !replaceText}
+            >
+              {t(workflow ? 'Save changes' : 'Create workflow')}
+            </button>
+          )}
           <Link className="button" to={PATHS.workflows}>
             {t('Cancel')}
           </Link>
         </div>
-        <WorkflowPreviewPanel
-          locale={previewLocale}
-          eventTypes={eventTypes}
-          eventTypeId={previewEventTypeId}
-          onEventTypeChange={(id) => {
-            setPreviewEventTypeId(id)
-            setPreview(null)
-          }}
-          onLocaleChange={(language) => {
-            setPreviewLocale(language)
-            setPreview(null)
-          }}
-          preview={preview}
-          loading={busy === 'preview'}
-        />
+        {canPreview && (
+          <WorkflowPreviewPanel
+            locale={previewLocale}
+            eventTypes={eventTypes}
+            eventTypeId={previewEventTypeId}
+            onEventTypeChange={(id) => {
+              setPreviewEventTypeId(id)
+              setPreview(null)
+            }}
+            onLocaleChange={(language) => {
+              setPreviewLocale(language)
+              setPreview(null)
+            }}
+            preview={preview}
+            loading={busy === 'preview'}
+          />
+        )}
       </fieldset>
       {busy === 'save' && <p role="status">{t('Saving workflow…')}</p>}
     </form>

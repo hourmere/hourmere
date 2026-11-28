@@ -39,6 +39,8 @@ export function RoutingFormPublication({
   draft,
   dirty,
   disabled,
+  canPublish = true,
+  canEditDraft = true,
   busy,
   status,
   publishedNumber,
@@ -51,6 +53,8 @@ export function RoutingFormPublication({
   draft: RoutingDraft
   dirty: boolean
   disabled: boolean
+  canPublish?: boolean
+  canEditDraft?: boolean
   busy: RoutingPublicationAction | null
   status: RoutingPublicationAction | null
   publishedNumber: number | null
@@ -68,7 +72,11 @@ export function RoutingFormPublication({
   const previousAction = useRef<RoutingPublicationAction | null>(null)
   const [review, setReview] = useState<{ action: RoutingPublicationAction; revision: number }>()
   const [acknowledged, setAcknowledged] = useState(false)
-  const action = review?.revision === form.draftRevision ? review.action : null
+  const action =
+    review?.revision === form.draftRevision &&
+    (review.action === 'publish' ? canPublish : canEditDraft)
+      ? review.action
+      : null
   const toggleAction = form.enabled ? 'disable' : 'enable'
   const version = form.publishedVersionNumber
   const locked = disabled || busy !== null
@@ -101,9 +109,16 @@ export function RoutingFormPublication({
       </p>
       <p>{form.enabled ? t('Enabled') : t('Disabled')}</p>
       {version !== null && (
-        <PublishedHealth form={form} draft={draft} disabled={locked} onRepair={onRepair} />
+        <PublishedHealth
+          form={form}
+          draft={draft}
+          disabled={locked}
+          canRepair={canEditDraft}
+          canPublish={canPublish}
+          onRepair={onRepair}
+        />
       )}
-      {dirty && (
+      {dirty && canPublish && (
         <p className="muted" id={saveHintId}>
           {t('Save your changes before publishing.')}
         </p>
@@ -186,19 +201,21 @@ export function RoutingFormPublication({
             </button>
           </div>
         </fieldset>
-      ) : (
+      ) : canPublish || (canEditDraft && version !== null) ? (
         <div className="form-actions">
-          <button
-            ref={publishButton}
-            type="button"
-            className="button button-primary"
-            disabled={locked || dirty}
-            aria-describedby={dirty ? saveHintId : undefined}
-            onClick={() => start('publish')}
-          >
-            {t(actions.publish.label)}
-          </button>
-          {version !== null && (
+          {canPublish && (
+            <button
+              ref={publishButton}
+              type="button"
+              className="button button-primary"
+              disabled={locked || dirty}
+              aria-describedby={dirty ? saveHintId : undefined}
+              onClick={() => start('publish')}
+            >
+              {t(actions.publish.label)}
+            </button>
+          )}
+          {canEditDraft && version !== null && (
             <button
               ref={toggleButton}
               type="button"
@@ -210,7 +227,7 @@ export function RoutingFormPublication({
             </button>
           )}
         </div>
-      )}
+      ) : null}
       <div role="status">
         {busy ? (
           <p data-testid="routing-publication-pending">{t(actions[busy].busy)}</p>
@@ -234,11 +251,15 @@ function PublishedHealth({
   form,
   draft,
   disabled,
+  canRepair,
+  canPublish,
   onRepair,
 }: {
   form: RoutingForm
   draft: RoutingDraft
   disabled: boolean
+  canRepair: boolean
+  canPublish: boolean
   onRepair(ruleId: string): void
 }) {
   const { t } = useI18n()
@@ -261,7 +282,8 @@ function PublishedHealth({
                   <strong>{fallback ? t('Fallback') : t('Rule {number}', { number })}</strong>{' '}
                   {t(routingHealthLabel[target.health])}
                 </p>
-                {target.health === 'unavailable' &&
+                {canRepair &&
+                  target.health === 'unavailable' &&
                   (fallback || draftRules.has(target.ruleId) ? (
                     <button
                       type="button"
@@ -271,17 +293,17 @@ function PublishedHealth({
                     >
                       {fallback ? t('Repair fallback') : t('Repair rule {number}', { number })}
                     </button>
-                  ) : (
+                  ) : canPublish ? (
                     <p className="muted">
                       {t('Publish without this rule to remove it from the current version.')}
                     </p>
-                  ))}
+                  ) : null)}
               </li>
             )
           })}
         </ul>
       )}
-      {health?.status === 'unavailable' && (
+      {health?.status === 'unavailable' && canRepair && canPublish && (
         <p>{t('Save and publish your draft to update the published destinations.')}</p>
       )}
     </section>

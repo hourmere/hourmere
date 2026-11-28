@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import type { Schemas } from '../../api/client.ts'
@@ -166,6 +166,10 @@ describe('Routing form management', () => {
       [list]: () => json(200, { data: [form], nextCursor: null }),
     })
     renderApp(PATHS.routingForms)
+    await screen.findByRole('heading', { name: 'Routing forms' })
+    const main = screen.getByRole('main')
+    const heading =
+      '<header class="page-intro"><div class="page-header"><h1>Routing forms</h1></div></header>'
     if (role === 'member') {
       expect(
         await screen.findByText(
@@ -174,14 +178,95 @@ describe('Routing form management', () => {
       ).toBeTruthy()
       expect(api.to(list)).toHaveLength(0)
       expect(screen.queryByRole('link', { name: 'Routing forms' })).toBeNull()
+      expect(main.innerHTML).toBe(
+        `${heading}<p class="alert alert-error" role="alert" data-testid="routing-forms-denied">Only team owners and admins can manage routing forms in this space.</p>`,
+      )
     } else {
-      await screen.findByRole('heading', { name: 'Routing forms' })
-      const main = within(screen.getByRole('main'))
-      const row = await main.findByRole('link', { name: form.title })
+      const row = await within(main).findByRole('link', { name: form.title })
       expect(row.getAttribute('href')).toBe(routingFormPath(id, team.id))
       expect(api.to(list)[0]?.headers.get('X-Expected-Organization-Id')).toBe(team.id)
+      expect(main.innerHTML).toBe(
+        `${heading}<div class="form-actions"><a class="button button-primary" href="${PATHS.newRoutingForm}" data-discover="true">New routing form</a></div><ul class="card-list plain-list" data-testid="routing-forms-list"><li class="panel card-item"><div class="card-main"><h2 class="card-title"><a class="user-content" href="${routingFormPath(id, team.id)}" data-discover="true">${form.title}</a></h2><p class="muted user-content">${form.slug}</p></div></li></ul>`,
+      )
     }
   })
+
+  it('shows a granted Member the saved form and preview, with draft and publication writes unavailable', async () => {
+    const preview = `POST /api/v1/routing-forms/${id}/preview`
+    const published = {
+      ...form,
+      enabled: true,
+      publishedVersionId: '00000000-0000-7000-8000-000000000032',
+      publishedVersionNumber: 1,
+    }
+    const api = fakeApi({
+      ...signedInAs({
+        ...ME,
+        organization: team,
+        teamManagementPermissions: ['routing_forms.read', 'routing_forms.preview'],
+      }),
+      ...enabled,
+      'GET /api/auth/organization/get-active-member': () =>
+        json(200, { organizationId: team.id, userId: ME.user.id, role: 'member' }),
+      [list]: () => json(200, { data: [published], nextCursor: null }),
+      [read]: () => json(200, published),
+      [preview]: () =>
+        json(200, {
+          draftRevision: form.draftRevision,
+          matchedRuleId: 'fallback',
+          resolvedRuleId: 'fallback',
+          target: form.fallback,
+          unavailableTargets: [],
+          rules: [],
+        } satisfies Schemas['RoutingFormPreview']),
+    })
+    renderApp(PATHS.routingForms)
+    await screen.findByRole('heading', { name: 'Routing forms' })
+    const main = within(screen.getByRole('main'))
+    const user = userEvent.setup()
+    const detail = await main.findByRole('link', { name: form.title })
+    expect(main.queryByRole('link', { name: 'New routing form' })).toBeNull()
+    await user.click(detail)
+    const title = await main.findByRole<HTMLInputElement>('textbox', { name: 'Title' })
+    expect(title.value).toBe(form.title)
+    expect(title.closest('fieldset')?.disabled).toBe(true)
+    for (const name of [
+      'Save draft',
+      'Archive routing form',
+      'Review publication',
+      'Disable routing form',
+    ])
+      expect(main.queryByRole('button', { name })).toBeNull()
+    fireEvent.submit(main.getByTestId('routing-form-editor'))
+    expect(api.to(save)).toHaveLength(0)
+    await user.click(main.getByRole('button', { name: 'Run preview' }))
+    expect(await main.findByTestId('routing-preview-result')).toBeTruthy()
+    expect(api.to(preview)).toHaveLength(1)
+  })
+
+  it.each([PATHS.routingForms, PATHS.newRoutingForm, routingFormPath(id, team.id)])(
+    'keeps unrenewed Admin routing actions unavailable on %s',
+    async (path) => {
+      const api = fakeApi({
+        ...signedInAs({
+          ...ME,
+          organization: team,
+          teamManagementPermissions: [],
+          teamPermissionRenewalRequired: true,
+        }),
+        ...enabled,
+        'GET /api/auth/organization/get-active-member': () =>
+          json(200, { organizationId: team.id, userId: ME.user.id, role: 'admin' }),
+      })
+      renderApp(path)
+      expect(await screen.findByText("You don't have permission to do that.")).toBeTruthy()
+      expect(screen.queryByRole('link', { name: 'Routing forms' })).toBeNull()
+      expect(screen.queryByRole('link', { name: 'New routing form' })).toBeNull()
+      expect(screen.queryByTestId('routing-form-editor')).toBeNull()
+      expect(api.to(list)).toHaveLength(0)
+      expect(api.to(read)).toHaveLength(0)
+    },
+  )
 
   it('does not read an editor link bound to another organization', async () => {
     const api = fakeApi({ ...signedIn, ...enabled })

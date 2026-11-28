@@ -349,4 +349,7 @@ export const admin = {
     'Die Bereinigung im ursprünglichen Kalender oder Meeting-Konto steht noch aus.',
   'Cleanup in the original calendar or meeting account could not be verified. Ask the account owner to check for remaining entries.':
     'Die Bereinigung im ursprünglichen Kalender oder Meeting-Konto konnte nicht bestätigt werden. Bitten Sie den Kontoinhaber, nach verbliebenen Einträgen zu suchen.',
+
+  // Effective team page permissions
+  'No event types yet.': 'Noch keine Ereignistypen.',
 }

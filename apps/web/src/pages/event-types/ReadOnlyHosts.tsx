@@ -13,11 +13,13 @@ export function ReadOnlyHosts({
   me,
   role,
   onReload,
+  usesEffective,
 }: {
   draft: EventTypeDraft
   me: Me
   role: string | null
   onReload: () => void
+  usesEffective?: boolean
 }) {
   const { t } = useI18n()
   const own = draft.hostUserIds.includes(me.user.id)
@@ -41,7 +43,7 @@ export function ReadOnlyHosts({
   return (
     <section className="panel" aria-labelledby="hosts-heading">
       <h2 id="hosts-heading">{t('Hosts')}</h2>
-      <p>{t('Only team owners and admins can change host assignments.')}</p>
+      {!usesEffective && <p>{t('Only team owners and admins can change host assignments.')}</p>}
       <p>
         {t(
           draft.schedulingType === 'individual'

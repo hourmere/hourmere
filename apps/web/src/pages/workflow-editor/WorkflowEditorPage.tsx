@@ -10,6 +10,7 @@ import { useI18n } from '../../i18n/runtime.tsx'
 import { PATHS } from '../../paths.ts'
 import { useMe } from '../../session.tsx'
 import { useTeamManagementAccess } from '../../team-management.tsx'
+import { useTeamPagePermissions } from '../../team-page-permissions.ts'
 import { isTeamWorkflowCondition } from './WorkflowAudienceFields.tsx'
 import { WorkflowEditor } from './WorkflowEditor.tsx'
 import './workflow-editor.css'
@@ -24,21 +25,37 @@ export function WorkflowEditorPage({
   const [version, setVersion] = useState(0)
   const me = useMe()
   const access = useTeamManagementAccess()
+  const permissions = useTeamPagePermissions()
   const { id: organizationId, personal } = me.organization
-  const title = id ? 'Edit workflow' : 'New workflow'
   const inSession = me.principal.kind === 'session'
-  const manage = inSession && (personal || (access.status === 'ready' && access.role !== null))
+  const fixed = inSession && (personal || (access.status === 'ready' && access.role !== null))
+  const canSave =
+    permissions.status === 'fixed' ||
+    permissions.allows(id ? 'workflows.update' : 'workflows.create')
+  const canOpen =
+    permissions.status === 'fixed'
+      ? fixed
+      : id
+        ? permissions.allows('workflows.read')
+        : canSave || permissions.allows('workflows.preview')
+  const title = canSave
+    ? id
+      ? 'Edit workflow'
+      : 'New workflow'
+    : id
+      ? 'Details'
+      : 'Preview workflow'
   usePageTitle(title)
 
   return (
     <>
-      {manage && (
+      {canOpen && (
         <p className="breadcrumb">
           <Link to={PATHS.workflows}>{t('Workflows')}</Link>
         </p>
       )}
       <PageHeader title={t(title)} />
-      {manage ? (
+      {canOpen ? (
         <EditorLoad
           key={JSON.stringify([me.user.id, organizationId, personal, id, version])}
           id={id}
@@ -48,9 +65,9 @@ export function WorkflowEditorPage({
           followUpHostNotesEnabled={followUpHostNotesEnabled}
           reload={() => setVersion((current) => current + 1)}
         />
-      ) : inSession && access.status === 'loading' ? (
+      ) : permissions.status === 'fixed' && inSession && access.status === 'loading' ? (
         <PageSkeleton label="Loading workflow editor…" />
-      ) : inSession && access.status === 'error' ? (
+      ) : permissions.status === 'fixed' && inSession && access.status === 'error' ? (
         <EditorLoadError retry={access.reload} />
       ) : (
         <EditorUnavailable />

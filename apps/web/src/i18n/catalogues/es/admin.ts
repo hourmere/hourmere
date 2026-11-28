@@ -345,4 +345,7 @@ export const admin = {
     'La limpieza del calendario o la cuenta de reuniones original está pendiente.',
   'Cleanup in the original calendar or meeting account could not be verified. Ask the account owner to check for remaining entries.':
     'No se pudo verificar la limpieza del calendario o la cuenta de reuniones original. Pide al titular de la cuenta que busque entradas que puedan quedar.',
+
+  // Effective team page permissions
+  'No event types yet.': 'Todavía no hay tipos de evento.',
 }

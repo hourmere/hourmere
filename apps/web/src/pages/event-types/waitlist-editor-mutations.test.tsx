@@ -13,6 +13,7 @@ import { useLoad } from '../../hooks.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import { literal, msg } from '../../i18n/translate.ts'
 import { EVENT_TYPE, QUESTIONS, RULES } from '../../limits.ts'
+import { teamPageAllows } from '../../team-page-permissions.ts'
 import { compileSourceCopy } from '../../test/compile-source-copy.ts'
 import { fakeApi, json, ME } from '../../test/fake-api.tsx'
 import { eventType } from '../../test/fixtures.ts'
@@ -146,6 +147,7 @@ async function assertEditor(
     FieldError,
     useLoad,
     useI18n,
+    teamPageAllows,
     useMe: () => ({
       ...ME,
       organization: { ...ME.organization, personal: options.personal ?? true },

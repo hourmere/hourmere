@@ -10,6 +10,7 @@ import { useI18n } from '../i18n/runtime.tsx'
 import { PATHS, workflowEditPath, workflowRunHistoryPath } from '../paths.ts'
 import { useMe, useSession } from '../session.tsx'
 import { useTeamManagementAccess } from '../team-management.tsx'
+import { useTeamPagePermissions } from '../team-page-permissions.ts'
 
 type Workflow = Schemas['Workflow']
 type Owner = Schemas['WorkflowOwner']
@@ -55,10 +56,14 @@ export default function WorkflowsPage() {
   const { t } = useI18n()
   const me = useMe()
   const access = useTeamManagementAccess()
+  const permissions = useTeamPagePermissions()
   const pageStart = useRef<HTMLDivElement>(null)
   const { id: organizationId, personal } = me.organization
   const inSession = me.principal.kind === 'session'
-  const manage = inSession && (personal || (access.status === 'ready' && access.role !== null))
+  const fixed = inSession && (personal || (access.status === 'ready' && access.role !== null))
+  const canRead = permissions.status === 'ready' ? permissions.allows('workflows.read') : fixed
+  const canCreate = permissions.status === 'ready' ? permissions.allows('workflows.create') : fixed
+  const canPreview = permissions.status === 'ready' && permissions.allows('workflows.preview')
   const focusPageStart = () => pageStart.current?.focus()
   usePageTitle('Workflows')
 
@@ -66,14 +71,14 @@ export default function WorkflowsPage() {
     <>
       <div ref={pageStart} tabIndex={-1}>
         <PageHeader title={t('Workflows')}>
-          {manage && (
+          {(canCreate || canPreview) && (
             <Link className="button button-primary" to={PATHS.newWorkflow}>
-              {t('New workflow')}
+              {t(canCreate ? 'New workflow' : 'Preview workflow')}
             </Link>
           )}
         </PageHeader>
       </div>
-      {manage ? (
+      {canRead ? (
         <WorkflowList
           key={`${me.user.id}:${organizationId}`}
           organizationId={organizationId}
@@ -82,11 +87,11 @@ export default function WorkflowsPage() {
           }
           focusPageStart={focusPageStart}
         />
-      ) : inSession && access.status === 'loading' ? (
+      ) : permissions.status === 'fixed' && inSession && access.status === 'loading' ? (
         <PageSkeleton label="Loading workflows…" />
-      ) : access.status === 'error' ? (
+      ) : permissions.status === 'fixed' && access.status === 'error' ? (
         <ReadFailure retry={access.reload} />
-      ) : (
+      ) : canCreate || canPreview ? null : (
         <Unavailable />
       )}
     </>
@@ -240,6 +245,11 @@ function WorkflowListPage({
   settled: (notice: Notice) => void
 }) {
   const { t } = useI18n()
+  const permissions = useTeamPagePermissions()
+  const canViewRuns = permissions.status === 'fixed' || permissions.allows('workflows.read_runs')
+  const canEdit = permissions.status === 'fixed' || permissions.allows('workflows.update')
+  const canAct = (action: Action) =>
+    permissions.status === 'fixed' || permissions.allows(`workflows.${action}`)
   const { kind, id } = owner
   const load = useCallback(
     async (signal: AbortSignal) => {
@@ -262,7 +272,8 @@ function WorkflowListPage({
     [kind, id, cursor],
   )
   const [page, retry] = useLoad(load)
-  const [selection, setSelection] = useState<Selection | null>(null)
+  const [selected, setSelection] = useState<Selection | null>(null)
+  const selection = selected && canAct(selected.action) ? selected : null
   const [busy, setBusy] = useState(false)
   const trigger = useRef<string | null>(null)
   const cancel = useRef<HTMLButtonElement>(null)
@@ -343,38 +354,43 @@ function WorkflowListPage({
                 <div className="card-actions">
                   {selection === null && (
                     <>
-                      <Link
-                        className="button button-small"
-                        to={workflowRunHistoryPath(workflow.id)}
-                        aria-label={t('Run history for {name}', { name: workflow.name })}
-                      >
-                        {t('Run history')}
-                      </Link>
+                      {canViewRuns && (
+                        <Link
+                          className="button button-small"
+                          to={workflowRunHistoryPath(workflow.id)}
+                          aria-label={t('Run history for {name}', { name: workflow.name })}
+                        >
+                          {t('Run history')}
+                        </Link>
+                      )}
                       <Link
                         className="button button-small"
                         to={workflowEditPath(workflow.id)}
-                        aria-label={t('Edit {name}', { name: workflow.name })}
+                        aria-label={canEdit ? t('Edit {name}', { name: workflow.name }) : undefined}
+                        aria-describedby={canEdit ? undefined : `${promptId}-${workflow.id}`}
                       >
-                        {t('Edit')}
+                        {t(canEdit ? 'Edit' : 'Details')}
                       </Link>
                     </>
                   )}
-                  {([workflow.enabled ? 'disable' : 'enable', 'delete'] as const).map((action) => (
-                    <button
-                      key={action}
-                      id={`${promptId}-${workflow.id}-${action}`}
-                      className="button button-small"
-                      type="button"
-                      aria-label={t(actions[action].accessibleLabel, { name: workflow.name })}
-                      disabled={selection !== null}
-                      onClick={(event) => {
-                        trigger.current = event.currentTarget.id
-                        setSelection({ action, workflow })
-                      }}
-                    >
-                      {t(actions[action].label)}
-                    </button>
-                  ))}
+                  {([workflow.enabled ? 'disable' : 'enable', 'delete'] as const)
+                    .filter(canAct)
+                    .map((action) => (
+                      <button
+                        key={action}
+                        id={`${promptId}-${workflow.id}-${action}`}
+                        className="button button-small"
+                        type="button"
+                        aria-label={t(actions[action].accessibleLabel, { name: workflow.name })}
+                        disabled={selection !== null}
+                        onClick={(event) => {
+                          trigger.current = event.currentTarget.id
+                          setSelection({ action, workflow })
+                        }}
+                      >
+                        {t(actions[action].label)}
+                      </button>
+                    ))}
                 </div>
               )}
             </li>
