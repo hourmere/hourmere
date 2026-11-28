@@ -31,6 +31,8 @@ const webhooks = { enabled: true, encryptionKey: randomBytes(32).toString('base6
  * write enforcement"). MCP has no enrollment-exception tools (link and unlink are REST only).
  */
 const ungated: Record<string, string> = {
+  'mcp:read_booking_handoff_offer': 'capability link: private terms for one participant',
+  'mcp:answer_booking_handoff_offer': 'capability link: only the linked participant can decide',
   'mcp:read_meeting_poll': 'capability link: voter reads a poll through its public link',
   'mcp:enroll_meeting_poll_voter': 'capability link: public poll enrollment',
   'mcp:recover_meeting_poll_voter': 'capability link: public poll voter recovery',

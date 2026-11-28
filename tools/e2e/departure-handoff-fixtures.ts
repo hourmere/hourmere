@@ -22,6 +22,10 @@ import { createDb, type Db } from '../../packages/db/src/index.ts'
 import { createTestDatabase } from '../../packages/db/src/testing.ts'
 import type { EnqueueOptions } from '../../packages/jobs/src/index.ts'
 import type { MailMessage } from '../../packages/mail/src/index.ts'
+import {
+  DEPARTURE_HANDOFF_EMAIL_JOB,
+  deliverDepartureHandoffEmail,
+} from '../../packages/notifications/src/departure-handoff.ts'
 import { bookingNotifier, sendBookingNotification } from '../../packages/notifications/src/index.ts'
 import { createPublicTeamBooking } from '../../packages/scheduling/src/bookings.ts'
 import type { BookingNotifier } from '../../packages/scheduling/src/context.ts'
@@ -30,6 +34,7 @@ import {
   handoffTestRecords,
   handoffTestSession,
 } from '../../packages/scheduling/src/departure-handoff-apply-test-fixture.ts'
+import { createDepartureHandoffProposal } from '../../packages/scheduling/src/departure-handoff-proposals.ts'
 import { test as base, expect } from './fixtures.ts'
 import { listenOwned, type OwnedListener } from './listeners.ts'
 
@@ -41,6 +46,8 @@ interface HandoffApp {
   emails: { booker: string; guest: string; departing: string; candidate: string }
   signIn: (as?: 'owner' | 'candidate', locale?: 'en' | 'zh-CN') => Promise<void>
   offer: (state?: 'approved' | 'pending') => Promise<void>
+  participantLinks: () => Promise<{ booker: URL; guest: URL }>
+  participantDecisions: () => Promise<{ booker: string | null; guest: string | null }>
   expireOffer: () => void
   occupySlot: () => Promise<void>
   failEnqueue: (fail: boolean) => void
@@ -280,6 +287,69 @@ export const test = base.extend<{
                   : offer.approvals,
             }),
           )
+        },
+        async participantLinks() {
+          await createDepartureHandoffProposal(
+            ctx,
+            {
+              teamId: team.id,
+              expectedOrganizationId: team.id,
+              bookingId: booking.id,
+              departingUserId: departing.id,
+            },
+            async (trx, recipientId) => {
+              const jobId = randomUUID()
+              await sql`INSERT INTO e2e_handoff_jobs (name, singleton_key, payload)
+                VALUES (${DEPARTURE_HANDOFF_EMAIL_JOB}, ${jobId}, ${JSON.stringify({ recipientId })}::jsonb)`.execute(
+                trx,
+              )
+              return jobId
+            },
+          )
+          const jobs = await sql<{ job_id: string; recipient_id: string }>`
+            SELECT singleton_key AS job_id, payload->>'recipientId' AS recipient_id
+            FROM e2e_handoff_jobs WHERE name = ${DEPARTURE_HANDOFF_EMAIL_JOB}
+          `.execute(db)
+          const links = new Map<string, URL>()
+          for (const { job_id, recipient_id } of jobs.rows) {
+            await deliverDepartureHandoffEmail(
+              {
+                db,
+                publicUrl: url,
+                secret,
+                now,
+                mailer: {
+                  async send() {
+                    throw new Error('Expected a single sensitive SMTP attempt')
+                  },
+                  async sendWorkflowAttempt(message) {
+                    const href = message.text.match(/https?:\/\/\S+/)?.[0]
+                    if (!href || !message.sensitive)
+                      throw new Error('Missing sensitive participant link')
+                    links.set(message.to, new URL(href))
+                    return 'sent'
+                  },
+                },
+              },
+              { recipientId: recipient_id },
+              { id: job_id, signal: new AbortController().signal },
+            )
+          }
+          const bookerLink = links.get(booker)
+          const guestLink = links.get(guest)
+          if (!bookerLink || !guestLink) throw new Error('Expected both participant emails')
+          return { booker: bookerLink, guest: guestLink }
+        },
+        async participantDecisions() {
+          const decisions = await db
+            .selectFrom('departure_handoff_recipients')
+            .select(['recipient_key', 'decision'])
+            .where('source_booking_id', '=', booking.id)
+            .execute()
+          const byMailbox = new Map(decisions.map((row) => [row.recipient_key, row.decision]))
+          if (!byMailbox.has(booker) || !byMailbox.has(guest))
+            throw new Error('Missing participant records')
+          return { booker: byMailbox.get(booker) ?? null, guest: byMailbox.get(guest) ?? null }
         },
         expireOffer() {
           current = baseNow.add({ hours: 2 })

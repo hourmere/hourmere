@@ -658,4 +658,32 @@ export const common = {
   'This team has no public events right now.': 'This team has no public events right now.',
   'This team page is unavailable.': 'This team page is unavailable.',
   'Couldn’t load this team page.': 'Couldn’t load this team page.',
+
+  // Departure booking handoff
+  'departureHandoff.title': 'Review booking handoff',
+  'departureHandoff.allMustAccept':
+    'The booker and every guest must accept before the team can replace the current booking.',
+  'departureHandoff.privateLink':
+    'Keep this link private. Anyone with it can respond on your behalf.',
+  'departureHandoff.deadline': 'Respond before',
+  'departureHandoff.current': 'Current booking',
+  'departureHandoff.proposed': 'Proposed booking',
+  'departureHandoff.duration': 'Duration',
+  'departureHandoff.answers': 'Answers shared with the new host',
+  'departureHandoff.decision': 'Your decision',
+  'departureHandoff.accept': 'Accept',
+  'departureHandoff.decline': 'Decline',
+  'departureHandoff.submit': 'Submit decision',
+  'departureHandoff.submitting': 'Submitting decision…',
+  'departureHandoff.accepted': 'Acceptance recorded',
+  'departureHandoff.declined': 'Decline recorded',
+  'departureHandoff.refused': 'The team cannot complete this proposal.',
+  'departureHandoff.unavailable': 'This handoff link is unavailable',
+  'departureHandoff.recovery': 'Use the latest link sent to you or contact the team for help.',
+  'departureHandoff.readAgain': 'Check offer again',
+  'departureHandoff.loadError': 'We couldn’t load the offer. Try checking it again.',
+  'departureHandoff.uncertain':
+    'We couldn’t confirm that your decision was recorded. Check the offer before trying again.',
+  'departureHandoff.rateLimited':
+    'Too many attempts. Wait a moment before checking the offer again.',
 } as const

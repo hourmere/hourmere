@@ -50,6 +50,7 @@ function productSourceCopy(change?: Change): Factory {
   }
   const bindings = {
     eventTypeTools,
+    departureHandoffParticipantTools: () => [],
     publicTeamTool,
     whoamiTool: { name: 'whoami' },
     bookingTools: () => [],

@@ -52,6 +52,7 @@ import { isPublicRoutingFormPath, privateRoutingApiPrefix } from './routing-form
 import { mountScim, type ScimOptions } from './scim.ts'
 import {
   DEFAULT_HSTS_MAX_AGE,
+  isPrivateHandoffPath,
   securityHeaders,
   strictTransportSecurity,
 } from './security-headers.ts'
@@ -213,7 +214,8 @@ function isWaitlistEntryPath(path: string): boolean {
 // Request validation failures (zod schemas on routes) answer like every other client error.
 const validationHook: Hook<unknown, Env, string, unknown> = (result, c) => {
   if (result.success) return
-  if (isMeetingPollPath(c.req.path)) return c.json({ error: 'invalid_request' }, 400)
+  if (isMeetingPollPath(c.req.path) || isPrivateHandoffPath(c.req.path))
+    return c.json({ error: 'invalid_request' }, 400)
   if (isSsoTrustPath(c.req.path, c.req.method) || isCalDavConnectionPath(c.req.path))
     return c.json({ error: 'invalid_request' }, 400)
   if (isWaitlistAdmissionPath(c.req.path)) return c.json({ error: 'invalid_request' }, 400)
@@ -398,7 +400,9 @@ const requestLineLogger = logger((line, ...rest) =>
 // Use the decoded path to catch encoded route segments too. Confirmation transports
 // carry their capabilities in fragments/bodies; booking suggestions carry them here.
 const ordinaryRequestLogger = createMiddleware((c, next) =>
-  isWaitlistLinkPath(c.req.path) || isMeetingPollPath(c.req.path)
+  isWaitlistLinkPath(c.req.path) ||
+  isMeetingPollPath(c.req.path) ||
+  isPrivateHandoffPath(c.req.path)
     ? next()
     : requestLineLogger(c, next),
 )
@@ -479,6 +483,13 @@ export function createApp({
       )
       return
     }
+    if (isPrivateHandoffPath(c.req.path)) {
+      const write = level === 'ERROR' ? console.error : console.warn
+      write(
+        `${new Date().toISOString()} ${level} ${c.req.method} /api/v1/booking-handoffs/[redacted]: private handoff request failed`,
+      )
+      return
+    }
     const ssoTrust = c.var.ssoInvitationAcceptance || isSsoTrustPath(c.req.path, c.req.method)
     const text = isMeetingPollPath(c.req.path)
       ? 'private meeting poll request failed'
@@ -546,6 +557,7 @@ export function createApp({
           !isWaitlistAdmissionPath(c.req.path) &&
           !isPublicRoutingFormPath(c.req.path) &&
           !isMeetingPollPath(c.req.path) &&
+          !isPrivateHandoffPath(c.req.path) &&
           !isSlackDestinationPath(c.req.path) &&
           !(isSsoTrustPath(c.req.path, c.req.method) || isCalDavConnectionPath(c.req.path))
           ? { error, message: err.message }
@@ -579,6 +591,8 @@ export function createApp({
     if (err instanceof DomainError && Object.hasOwn(domainStatus, err.kind)) {
       // The lower-level error a service wrapped is for us, not the client.
       if (err.cause !== undefined) logError(c, `${err.code} caused by `, err.cause)
+      if (isPrivateHandoffPath(c.req.path))
+        return c.json({ error: err.code }, domainStatus[err.kind])
       const errorAlias = errorAliasFor(err.code)
       const privateRouting = isPublicRoutingFormPath(c.req.path)
       const field =
