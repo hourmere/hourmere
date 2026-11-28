@@ -528,6 +528,26 @@ export function ssoOperatorRecoveryEmail(to: string, language: InterfaceLanguage
   return { to, subject, text: `Hourmere\n\n${message}\n`, sensitive: true }
 }
 
+export function ownershipTransferEmail({
+  to,
+  language,
+  kind,
+  teamName,
+  link,
+}: {
+  to: string
+  language: InterfaceLanguage
+  kind: 'offered' | 'confirmed'
+  teamName: string
+  link: URL
+}): MailMessage {
+  const subject = mailMessage(language, `ownershipTransfer.${kind}.subject`)
+  const message = mailMessage(language, `ownershipTransfer.${kind}.message`, {
+    team: singleLine(teamName),
+  })
+  return { to, subject, text: `Hourmere\n\n${message}\n\n${link.href}\n`, sensitive: true }
+}
+
 export function magicLinkEmail({
   to,
   url,

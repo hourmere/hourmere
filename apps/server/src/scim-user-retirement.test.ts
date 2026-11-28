@@ -12,6 +12,7 @@ import { createFixtures, createTestTeam, createTestUser } from '@hourmere/schedu
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
+import { seedPendingOwnershipTransfer } from './ownership-transfer-fixtures.ts'
 import { SCIM_ERROR_SCHEMA } from './scim.ts'
 import { SCIM_URN } from './scim-discovery.ts'
 import { scimUserCreation } from './scim-user-create.ts'
@@ -375,6 +376,28 @@ describe.skipIf(!databaseUrl)('SCIM User retirement', () => {
     expect(await blocks(f.id)).toEqual(suspension)
     expect((await entry(f.id)).retired_at).toEqual(expect.any(Date))
   })
+
+  it.each(['suspension', 'retirement'] as const)(
+    'invalidates an offer on SCIM %s',
+    async (action) => {
+      const f = await fixture()
+      const offer = await seedPendingOwnershipTransfer(db, f.team.id, f.owner.id, f.person.id)
+      const response =
+        action === 'suspension'
+          ? await f.send('PUT', undefined, { ...f.profile, active: false })
+          : await f.send('DELETE')
+      expect(response.status).toBe(action === 'suspension' ? 200 : 204)
+      expect(await offer()).toEqual({ state: 'invalidated', terminal_at: expect.any(Date) })
+      expect(
+        await db
+          .selectFrom('audit_events')
+          .select(['actor_type', 'credential_type', 'details'])
+          .where('organization_id', '=', f.team.id)
+          .where('action', '=', 'organization.ownership_transfer_invalidated')
+          .execute(),
+      ).toEqual([{ actor_type: 'system', credential_type: 'none', details: {} }])
+    },
+  )
 
   it('accepts a profile update echoing active true after local member removal', async () => {
     const f = await fixture()

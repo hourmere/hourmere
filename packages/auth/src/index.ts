@@ -570,6 +570,7 @@ export function createAuth({
           membershipLimit: teamMembershipLimit,
           organizationHooks: organizationGuards(db, teamRolePolicy.transaction),
         }),
+        teamRolePolicy.transaction,
       ),
       memberReadPrivacy(db),
       teamSso.plugin,

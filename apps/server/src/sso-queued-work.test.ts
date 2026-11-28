@@ -349,6 +349,7 @@ it('classifies every production worker by its source of authority', () => {
     // Delivery belongs to a committed proposal version and rechecks that it is still live.
     'departureHandoffEmailJob',
     'groupHostMailJob',
+    'ownershipTransferNoticeJob',
     'rescheduleRequestExpiryJob',
     'scheduledBookingEmailJob',
     'scheduledBookingEmailRepairJob',

@@ -23,6 +23,7 @@ import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createTeamRolePolicy } from '../../../packages/auth/src/team-role-policy.ts'
 import { createApp } from './app.ts'
+import { seedPendingOwnershipTransfer } from './ownership-transfer-fixtures.ts'
 import { memberLeaveRoutes } from './routes/member-leave.ts'
 import { memberRemovalRoutes } from './routes/member-removal.ts'
 import { openApiDocument, responseAndRequestStrictness } from './routes/test-app.ts'
@@ -1182,6 +1183,36 @@ describe.skipIf(!serverUrl)('team owner continuity through HTTP', () => {
       context: [["if (ctx.path === '/organization/delete')", 'if (false)']],
     })
     await expect(destructiveRefusal(copy)).rejects.toMatchObject({ name: 'AssertionError' })
+  })
+
+  it('journals pending transfer invalidation before a native team deletion cascades', async () => {
+    // Exercise the native transaction behind the launch guard without changing runtime policy.
+    const copy = await sourceCopy({
+      context: [["if (ctx.path === '/organization/delete')", 'if (false)']],
+    })
+    const f = await fixture('member')
+    await seedPendingOwnershipTransfer(db, f.teamId, f.first.user.id, f.second.user.id)
+    const response = await application(copy).auth.api.deleteOrganization({
+      headers: new Headers({ cookie: f.first.login.cookie }),
+      body: { organizationId: f.teamId },
+      asResponse: true,
+    })
+    expect(response.status).toBe(200)
+    expect(
+      await db
+        .selectFrom('organization_ownership_transfers')
+        .select('id')
+        .where('organization_id', '=', f.teamId)
+        .execute(),
+    ).toEqual([])
+    expect(
+      await db
+        .selectFrom('audit_events')
+        .select(['actor_type', 'credential_type', 'target_id', 'details'])
+        .where('organization_id', '=', f.teamId)
+        .where('action', '=', 'organization.ownership_transfer_invalidated')
+        .execute(),
+    ).toEqual([{ actor_type: 'system', credential_type: 'none', target_id: f.teamId, details: {} }])
   })
 
   it('detects omitted removal organization locks in rebuilt modules with a real HTTP assertion', async () => {

@@ -21,6 +21,7 @@ import {
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
+import { retirePendingOwnershipTransfer } from '@hourmere/db/ownership-transfer'
 import { scimManagedMember, scimSuspended } from '@hourmere/db/scim-suspension'
 import {
   checkTeamWriteBeforeAuthorityChange,
@@ -116,6 +117,7 @@ function serviceCopy(
   const bindings = {
     auditActor,
     writeAuditEvent,
+    retirePendingOwnershipTransfer,
     checkTeamWriteBeforeAuthorityChange,
     checkTeamWriteDeadline,
     teamWriteCheckFor,
@@ -1441,8 +1443,8 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
       'membership revocation',
       'departure',
       [
-        ".deleteFrom('auth.member')\n        .where('organizationId', '=', actor.organizationId)\n        .where('userId', '=', actor.userId)\n        .returning('role')",
-        ".selectFrom('auth.member')\n        .select('role')\n        .where('organizationId', '=', actor.organizationId)\n        .where('userId', '=', actor.userId)",
+        ".deleteFrom('auth.member')\n        .where('organizationId', '=', actor.organizationId)\n        .where('userId', '=', actor.userId)\n        .returning(['id', 'role'])",
+        ".selectFrom('auth.member')\n        .select(['id', 'role'])\n        .where('organizationId', '=', actor.organizationId)\n        .where('userId', '=', actor.userId)",
       ],
     ],
   ])('detects disabling %s with a real HTTP assertion', async (_, scenario, replacement) => {
