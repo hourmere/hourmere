@@ -329,6 +329,7 @@ it('classifies every production worker by its source of authority', () => {
   }
 
   const authenticated = [
+    'departureHandoffRunJobs',
     'invitationEmailJob',
     'meetingPollEmailJob',
     // The recovery wake only dispatches work. Each item rechecks the submitting session.

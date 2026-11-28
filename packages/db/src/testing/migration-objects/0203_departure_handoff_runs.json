@@ -1,0 +1,32 @@
+{
+  "migration": "0203_departure_handoff_runs.sql",
+  "objects": {
+    "constraint public.departure_handoff_run_items.departure_handoff_run_items_offer_version_check": "CHECK ((offer_version > 0))",
+    "constraint public.departure_handoff_run_items.departure_handoff_run_items_ordinal_check": "CHECK (((ordinal >= 1) AND (ordinal <= 10)))",
+    "constraint public.departure_handoff_run_items.departure_handoff_run_items_outcome_check": "CHECK (((outcome IS NULL) OR\nCASE outcome\n    WHEN 'applied'::text THEN ((replacement_booking_id IS NOT NULL) AND (replacement_booking_id <> source_booking_id))\n    WHEN 'pending'::text THEN (replacement_booking_id IS NULL)\n    WHEN 'ineligible'::text THEN (replacement_booking_id IS NULL)\n    WHEN 'processing_failed'::text THEN (replacement_booking_id IS NULL)\n    WHEN 'stopped'::text THEN (replacement_booking_id IS NULL)\n    ELSE false\nEND))",
+    "constraint public.departure_handoff_run_items.departure_handoff_run_items_pkey": "PRIMARY KEY (organization_id, run_id, ordinal)",
+    "constraint public.departure_handoff_run_items.departure_handoff_run_items_run_fk": "FOREIGN KEY (organization_id, run_id) REFERENCES departure_handoff_runs(organization_id, id) ON DELETE CASCADE",
+    "constraint public.departure_handoff_run_items.departure_handoff_run_items_source_key": "UNIQUE (organization_id, run_id, source_booking_id)",
+    "constraint public.departure_handoff_runs.departure_handoff_runs_organization_id_fkey": "FOREIGN KEY (organization_id) REFERENCES auth.organization(id) ON DELETE CASCADE",
+    "constraint public.departure_handoff_runs.departure_handoff_runs_pkey": "PRIMARY KEY (organization_id, id)",
+    "constraint public.departure_handoff_runs.departure_handoff_runs_state_check": "CHECK (((state IS NULL) OR\nCASE state\n    WHEN 'running'::text THEN ((finished_at IS NULL) AND (failure_code IS NULL))\n    WHEN 'paused'::text THEN ((finished_at IS NULL) AND (failure_code IS NULL))\n    WHEN 'stopped'::text THEN ((finished_at IS NOT NULL) AND (failure_code IS NULL))\n    WHEN 'completed'::text THEN ((finished_at IS NOT NULL) AND (failure_code IS NULL))\n    WHEN 'failed'::text THEN ((finished_at IS NOT NULL) AND (failure_code IS NOT NULL) AND (failure_code = ANY (ARRAY['departed_member_returned'::text, 'authorization_lost'::text, 'run_expired'::text])))\n    ELSE false\nEND))",
+    "constraint public.departure_handoff_runs.departure_handoff_runs_time_check": "CHECK ((isfinite(created_at) AND isfinite(next_item_at) AND isfinite(expires_at) AND (next_item_at >= created_at) AND (expires_at > created_at) AND ((finished_at IS NULL) OR (isfinite(finished_at) AND (finished_at >= created_at)))))",
+    "index public.departure_handoff_offers.departure_handoff_offers_run_candidates_idx": "CREATE INDEX departure_handoff_offers_run_candidates_idx ON public.departure_handoff_offers USING btree (organization_id, departing_user_id, expires_at, source_booking_id) WHERE (state = 'live'::text)",
+    "index public.departure_handoff_runs.departure_handoff_runs_due_idx": "CREATE INDEX departure_handoff_runs_due_idx ON public.departure_handoff_runs USING btree (next_item_at, organization_id, id) WHERE (state = 'running'::text)",
+    "index public.departure_handoff_runs.departure_handoff_runs_expiry_idx": "CREATE INDEX departure_handoff_runs_expiry_idx ON public.departure_handoff_runs USING btree (expires_at, organization_id, id) WHERE (state = ANY (ARRAY['running'::text, 'paused'::text]))",
+    "index public.departure_handoff_runs.departure_handoff_runs_one_active": "CREATE UNIQUE INDEX departure_handoff_runs_one_active ON public.departure_handoff_runs USING btree (organization_id) WHERE (state = ANY (ARRAY['running'::text, 'paused'::text]))",
+    "index public.departure_handoff_runs.departure_handoff_runs_retention_idx": "CREATE INDEX departure_handoff_runs_retention_idx ON public.departure_handoff_runs USING btree (finished_at, organization_id, id) WHERE (finished_at IS NOT NULL)",
+    "index public.departure_handoff_runs.departure_handoff_runs_team_created_idx": "CREATE INDEX departure_handoff_runs_team_created_idx ON public.departure_handoff_runs USING btree (organization_id, created_at DESC)",
+    "not_null public.departure_handoff_run_items.offer_id": "NOT NULL",
+    "not_null public.departure_handoff_run_items.offer_version": "NOT NULL",
+    "not_null public.departure_handoff_run_items.outcome": "NOT NULL DEFAULT 'pending'::text",
+    "not_null public.departure_handoff_run_items.source_booking_id": "NOT NULL",
+    "not_null public.departure_handoff_runs.actor_user_id": "NOT NULL",
+    "not_null public.departure_handoff_runs.created_at": "NOT NULL DEFAULT clock_timestamp()",
+    "not_null public.departure_handoff_runs.departing_user_id": "NOT NULL",
+    "not_null public.departure_handoff_runs.expires_at": "NOT NULL",
+    "not_null public.departure_handoff_runs.next_item_at": "NOT NULL DEFAULT clock_timestamp()",
+    "not_null public.departure_handoff_runs.session_id": "NOT NULL",
+    "not_null public.departure_handoff_runs.state": "NOT NULL DEFAULT 'running'::text"
+  }
+}

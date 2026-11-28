@@ -114,6 +114,7 @@ import {
   cleanupDepartureHandoffProposals,
   type EnqueueDepartureHandoffEmail,
 } from '@hourmere/scheduling/departure-handoff-proposals'
+import type { EnqueueDepartureHandoffRun } from '@hourmere/scheduling/departure-handoff-queue'
 import { departureHandoffStore } from '@hourmere/scheduling/departure-handoff-store'
 import {
   captureWorkflowWebhook,
@@ -135,6 +136,11 @@ import {
 import { sql } from 'kysely'
 import { type AppDeps, createApp } from './app.ts'
 import { type Config, loadConfig } from './config.ts'
+import {
+  DEPARTURE_HANDOFF_RUN_RECOVERY_JOB,
+  departureHandoffRunJobs,
+  enqueueDepartureHandoffRunJob,
+} from './departure-handoff-run-jobs.ts'
 import { httpServerOptions } from './http-timeouts.ts'
 import { auditLogTools } from './mcp/audit-log.ts'
 import { availabilityTroubleshootingTools } from './mcp/availability-troubleshooting.ts'
@@ -175,6 +181,7 @@ import { calendarRoutes } from './routes/calendars.ts'
 import { conferenceRoutes } from './routes/conferences.ts'
 import { customRoleRoutes } from './routes/custom-roles.ts'
 import { departureHandoffParticipantRoutes } from './routes/departure-handoff-participant.ts'
+import { departureHandoffRunRoutes } from './routes/departure-handoff-runs.ts'
 import { type DepartureHandoffs, departureHandoffRoutes } from './routes/departure-handoffs.ts'
 import { eventTypeRoutes } from './routes/event-types.ts'
 import { instanceRoutes } from './routes/instance.ts'
@@ -582,6 +589,7 @@ export function productRoutes({
       automaticZoom,
       microsoftCalendarEnabled,
     }),
+    departureHandoffRunRoutes({ db, handoffs: departureHandoffs, capabilities: ssoCapabilities }),
     departureHandoffParticipantRoutes({
       db,
       handoffs: departureHandoffs,
@@ -792,6 +800,7 @@ export function productTools({
 /** What the running server's app options need beyond the configuration. */
 export interface ProductionAppDeps extends RecurringBookingAdmissionDeps {
   enqueueDepartureHandoffEmail?: EnqueueDepartureHandoffEmail
+  enqueueDepartureHandoffRun?: EnqueueDepartureHandoffRun
   enqueueScimInvitation: ReturnType<typeof createInvitationEmailDispatcher>
   config: Config
   db: Db
@@ -846,6 +855,7 @@ export function productionAppOptions({
   waitlist,
   invitationMailLimits,
   enqueueDepartureHandoffEmail,
+  enqueueDepartureHandoffRun,
   enqueueScimInvitation,
   webhookSettings,
   webhookQueue,
@@ -1012,7 +1022,11 @@ export function productionAppOptions({
       routingFormsEnabled,
       routingSecret: config.BETTER_AUTH_SECRET,
       departureHandoffs: productionDepartureHandoffsEnabled
-        ? { store: departureHandoffStore, enqueue: enqueueDepartureHandoffEmail }
+        ? {
+            store: departureHandoffStore,
+            enqueue: enqueueDepartureHandoffEmail,
+            enqueueRun: enqueueDepartureHandoffRun,
+          }
         : undefined,
       workflowRunCursorSecret: config.BETTER_AUTH_SECRET,
       workflowsEnabled,
@@ -1403,6 +1417,12 @@ async function start(
     startAfter: Date,
   ): Promise<string | null> =>
     jobs.enqueue(TEAM_BOOKING_BULK_JOB, { batchId }, { singletonKey: batchId, startAfter })
+  const enqueueDepartureHandoffRun: EnqueueDepartureHandoffRun = (
+    transaction,
+    organizationId,
+    runId,
+    startAfter,
+  ) => enqueueDepartureHandoffRunJob(jobs, { organizationId, runId }, { transaction, startAfter })
   const workflowWakePort: WorkflowWakePort = {
     async ensureWake(trx, runId) {
       await jobs.enqueue(
@@ -1418,6 +1438,7 @@ async function start(
       ...(ssoRetained(sso) ? [] : [SSO_DOMAIN_RECHECK_JOB]),
       ...(role !== 'web' && !runWorkflowJobs ? ['workflow-repair-v1'] : []),
       ...(bulkCancellationEnabled ? [] : [TEAM_BOOKING_BULK_RECOVERY_JOB]),
+      ...(productionDepartureHandoffsEnabled ? [] : [DEPARTURE_HANDOFF_RUN_RECOVERY_JOB]),
     ],
     definitions: [
       ...teamBookingBulkCancellationJobs(db, {
@@ -1512,6 +1533,22 @@ async function start(
       scimMappingNoticeJob(db, mailer),
       bookingNotificationJob(notificationDeps),
       departureHandoffEmailJob(productionDepartureHandoffsEnabled ? notificationDeps : undefined),
+      ...departureHandoffRunJobs(
+        db,
+        productionDepartureHandoffsEnabled
+          ? {
+              notify: (...args) => notify(...args),
+              ssoCapabilities: sso,
+              scimResourcesEnabled: config.SCIM_PROVISIONING_ENABLED,
+              automaticMeet: config.GOOGLE_MEET_ENABLED,
+              automaticZoom: config.ZOOM_MEETINGS_ENABLED,
+              microsoftCalendarEnabled: microsoftCalendar !== undefined,
+              enqueue: enqueueDepartureHandoffRun,
+              enqueueDelayed: (args, startAfter): Promise<string | null> =>
+                enqueueDepartureHandoffRunJob(jobs, args, { startAfter }),
+            }
+          : undefined,
+      ),
       ...(productionDepartureHandoffsEnabled
         ? [
             departureHandoffCleanupJob(() =>
@@ -1631,7 +1668,7 @@ async function start(
     jobs.enqueue('booking-conference', group ? { groupSlotId: id } : { rootBookingId: id }, {
       singletonKey: group ? `group:${id}` : id,
     })
-  // REST, MCP and the bulk worker use the same transactional booking side effects.
+  // REST, MCP and booking workers use the same transactional booking side effects.
   const emailNotifier = bookingNotifier(jobs)
   const calendarNotifier = calendarBookingNotifier(jobs, { google: Boolean(googleCalendar) })
   const caldavNotifier = calDavBookingNotifier(jobs)
@@ -1745,6 +1782,7 @@ async function start(
         invitationMailLimits,
         webhookSettings,
         enqueueDepartureHandoffEmail: createDepartureHandoffEmailQueue(jobs),
+        enqueueDepartureHandoffRun,
         enqueueScimInvitation: createInvitationEmailDispatcher(invitationDeliveryDeps),
         webhookQueue: jobs,
         notify,

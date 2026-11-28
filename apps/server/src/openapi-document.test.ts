@@ -192,6 +192,8 @@ it('attaches the team proof middleware to every private team write in the server
       'POST /api/v1/team/bookings/:id/handoff-offers/:offerId/withdraw',
       'POST /api/v1/team/bookings/:id/handoff-offers/:offerId/resend',
       'POST /api/v1/team/bookings/:id/handoff-offers/:offerId/apply',
+      'POST /api/v1/team/bookings/handoff-runs',
+      'POST /api/v1/team/bookings/handoff-runs/:runId/control',
       'POST /api/v1/team/bookings/bulk-cancellations/preview',
       'POST /api/v1/team/bookings/bulk-cancellations/:id/confirm',
       'POST /api/v1/team/invitations/:invitationId/cancel',

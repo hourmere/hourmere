@@ -94,6 +94,7 @@ change without retaining either name. Previous events can have empty details.
 | OAuth | `oauth.client_registered`, `oauth.consent_granted`, `oauth.token_revoked` |
 | Account | `session.revoked`, `sign_in_method.added`, `sign_in_method.removed` |
 | Bookings | `booking.created`, `booking.rescheduled`, `booking.cancelled`, `booking.reschedule_requested`, `booking.attendee_no_show_changed`, `booking.bulk_cancellation_admitted`, `booking.bulk_cancellation_completed` |
+| Departure handoff runs | `booking.handoff_run_started`, `booking.handoff_run_paused`, `booking.handoff_run_resumed`, `booking.handoff_run_stopped`, `booking.handoff_run_completed`, `booking.handoff_run_failed` |
 | Event types | `event_type.created`, `event_type.updated`, `event_type.deleted`, `event_type.notifications_updated`, `event_type.waitlist_updated`, `event_type.round_robin_activated` |
 | Workflow definitions | `workflow.created`, `workflow.updated`, `workflow.enabled`, `workflow.disabled`, `workflow.deleted`, `workflow.previewed` |
 | Workflow execution | `workflow.run_scheduled`, `workflow.run_cancelled`, `workflow.run_skipped`, `workflow.email_attempted`, `workflow.email_sent`, `workflow.email_rejected`, `workflow.email_delivery_unknown`, `workflow.webhook_queued`, `workflow.webhook_completed`, `workflow.webhook_failed` |
@@ -103,6 +104,11 @@ Team booking bulk cancellation stays disabled pending release acceptance. Admiss
 `selectedCount` and identifies the submitting administrator and session. Completion records
 bounded `counts` by outcome and identifies the worker. The two entries and each ordinary
 `booking.cancelled` event committed by the batch share the batch UUID as `request_id`.
+
+The departure handoff queue records the administrator's start, pause, resume and stop actions
+and the worker's completion or failure against the run ID. These journal entries carry empty
+details. Item outcomes are available in the team-scoped run receipt.
+Production handoff admission and processing remain disabled pending release acceptance.
 
 `organization.ownership_transfer_offered` requires exactly `targetMembershipId`,
 the recipient's stored membership ID (a lowercase UUID). It is available to

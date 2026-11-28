@@ -307,6 +307,14 @@ export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.fr
     'session_only',
     'session_only',
   ),
+  rest('POST', '/api/v1/team/bookings/handoff-runs', 'session_only', 'session_only'),
+  rest('GET', '/api/v1/team/bookings/handoff-runs/{runId}', 'session_only', 'session_only'),
+  rest(
+    'POST',
+    '/api/v1/team/bookings/handoff-runs/{runId}/control',
+    'session_only',
+    'session_only',
+  ),
   rest('POST', '/api/v1/team/bookings/bulk-cancellations/preview', 'session_only', 'session_only'),
   rest(
     'POST',
