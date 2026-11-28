@@ -374,6 +374,31 @@ describe.skipIf(!serverUrl)('versioned team permission resolution', () => {
     }
   })
 
+  it.each([
+    { teamEnabled: true, masterEnabled: false, allowed: false },
+    { teamEnabled: false, masterEnabled: true, allowed: false },
+    { teamEnabled: true, masterEnabled: true, allowed: true },
+  ])(
+    'resolves a custom grant with team switch $teamEnabled and instance switch $masterEnabled',
+    async ({ teamEnabled, masterEnabled, allowed }) => {
+      const fixture = await customFixture(db)
+      const { principal, teamId } = fixture
+      await changeTeamPolicy(db, teamId, teamEnabled)
+      await changeMasterPolicy(db, masterEnabled)
+      // Use the current epochs so a stale ceiling cannot mask a missing switch guard.
+      const credential = await issue(db, fixture)
+
+      const result = await resolveTeamPermissions(db, principal, teamId, [customOperation], {
+        available: true,
+        credential,
+      })
+
+      expect(result?.decisions).toEqual([
+        { operation: customOperation.operation, allowed, source: allowed ? 'custom' : null },
+      ])
+    },
+  )
+
   it('takes the fixed path when a late team or membership lacks snapshots', async () => {
     const owner = await createTestUser(db)
     const fixture = await db.transaction().execute(async (trx) => {
@@ -508,6 +533,41 @@ describe.skipIf(!serverUrl)('versioned team permission resolution', () => {
       true,
       true,
     ])
+  })
+
+  it('denies a custom grant when the live role differs from the Member snapshot', async () => {
+    const fixture = await customFixture(db)
+    const { principal, teamId, memberId } = fixture
+    const credential = await issue(db, fixture)
+    const resolve = (connection: Db) =>
+      resolveTeamPermissions(connection, principal, teamId, [customOperation], {
+        available: true,
+        credential,
+      })
+    expect((await resolve(db))?.decisions).toEqual([
+      { operation: customOperation.operation, allowed: true, source: 'custom' },
+    ])
+
+    await db.transaction().execute(async (trx) => {
+      // Retain the assignment and Member snapshot while changing the live role.
+      await sql`ALTER TABLE auth.member DISABLE TRIGGER team_member_authorization_sync`.execute(trx)
+      await trx
+        .updateTable('auth.member')
+        .set({ role: 'admin' })
+        .where('id', '=', memberId)
+        .execute()
+      await sql`ALTER TABLE auth.member ENABLE TRIGGER team_member_authorization_sync`.execute(trx)
+
+      const snapshot = await trx
+        .selectFrom('team_member_authorizations')
+        .select(['fixed_role', 'legacy_role_tokens'])
+        .where('member_id', '=', memberId)
+        .executeTakeFirstOrThrow()
+      expect(snapshot).toEqual({ fixed_role: 'member', legacy_role_tokens: ['member'] })
+      expect((await resolve(trx))?.decisions).toEqual([
+        { operation: customOperation.operation, allowed: false, source: null },
+      ])
+    })
   })
 
   it('observes publication and its generation bump in one snapshot, despite a contended publish', async () => {
