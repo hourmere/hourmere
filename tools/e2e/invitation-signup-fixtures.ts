@@ -43,7 +43,7 @@ export interface InvitationSignupApp {
 
 export const test = base.extend<{
   invitationSignupApp: InvitationSignupApp
-  signupMode: 'closed' | 'first-user'
+  signupMode: 'closed' | 'first-user' | 'open'
   existingRecipient: boolean
 }>({
   signupMode: ['closed', { option: true }],

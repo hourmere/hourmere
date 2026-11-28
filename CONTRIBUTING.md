@@ -358,8 +358,12 @@ the desktop group and the open narrow-screen disclosure. Keyboard scans begin on
 open disclosure's trigger so Tab reaches its controls. Masked visual cases use the same
 states in both themes and languages.
 A CI-only canary with known violations verifies the in-browser scan pipeline. Cross-engine
-smoke covers booking, sign-in and the embed popup in desktop WebKit, iPhone WebKit and
-Firefox. These measurements use synthetic data and the disposable-database fixture.
+regression runs the `@cross-engine` cases in desktop Firefox and Playwright WebKit.
+The cases cover sign-in, onboarding, event types, booking and attendee management,
+team round-robin, routing, embeds, team settings, language switching and host slot copy.
+The password sign-in case uses the repository's loopback Keycloak fixture and requires
+Docker and OpenSSL. See [Cross-engine results](docs/cross-engine-results.md) for the
+flow-by-flow coverage and results.
 Axe splits registry states into batches of up to 32 per browser session and runs the
 batches in four parallel CI shards. The `e2e-a11y` job passes only when all shards pass.
 Every audit page pins the browser clock to the fixture's `AUDIT_NOW` before navigation,
@@ -381,7 +385,9 @@ CI 和发布工作流都不调用它，合并队列和发布标签也不会运�
 axe 每个浏览器会话最多扫描 32 个状态，CI 并行执行四个分片。所有分片通过后，`e2e-a11y` 才通过。
 检测涵盖预约表单、确认页、时区面板、嵌入页、团队预约和 OAuth 授权页。
 账号菜单和集成导航分别检测展开状态，以覆盖展开后的控件、对比度和页面宽度。
-跨引擎冒烟覆盖 WebKit 桌面版、iPhone 预设和 Firefox 的预约、登录及嵌入弹窗。
+跨引擎回归在 Firefox 和 Playwright WebKit 桌面项目中运行带有 `@cross-engine` 标签的测试。
+覆盖登录、首次设置、活动类型、预约与受邀人管理、团队轮询、路由、嵌入、团队设置、
+界面语言切换和主持人时段复制。密码登录使用本地 Keycloak 测试夹具，需要 Docker 和 OpenSSL。
 
 Build the web app as above, then run from the repository root. In Codex, **every command
 that launches a browser requires `sandbox_permissions: "require_escalated"`**; never run
@@ -405,14 +411,14 @@ export HOURMERE_E2E_BOOTSTRAP_URL=postgres://hourmere:hourmere@localhost:5432/ho
 npx playwright install --with-deps webkit firefox
 (
   export HOURMERE_UI_REPORT_DIR="$(mktemp -d)"
-  node tools/e2e/run-audit.ts cross-engine
+  HOURMERE_UI_BLOCKING=1 node tools/e2e/run-audit.ts cross-engine
   node tools/e2e/reports-summary.ts --suite=cross-engine
 )
 ```
 
 Reports go to ignored `temp/ui-audit-reports/` (override `HOURMERE_UI_REPORT_DIR`). Each
 **UI checks** job appends per-page finding counts and execution status to its GitHub Actions
-summary. Download the `ui-layout-*`, `ui-a11y-*`, `ui-cross-engine` and `ui-visual` artifacts
+summary. Download the `ui-layout-*`, `ui-a11y-*`, `ui-cross-engine-*` and `ui-visual` artifacts
 from that workflow run for sanitized JSON/Markdown; artifacts are retained for seven days.
 The `ui-visual` artifact contains browser execution metadata only. Local masked expected,
 actual and diff PNGs from failed screenshot comparisons are in `temp/ui-visual-results/`;

@@ -94,11 +94,9 @@ async function downloadCsv(page: Page) {
   return csv
 }
 
-test('default routing accepts a public submission and protects saved answers on each surface', async ({
-  app,
-  context,
-  page,
-}) => {
+test('default routing accepts a public submission and protects saved answers on each surface', {
+  tag: '@cross-engine',
+}, async ({ app, context, page }) => {
   const publicPath = `/route/fixture-host/${slug}`
   await app.auditSignIn(true)
   await page.goto(app.url + PATHS.eventTypes)
