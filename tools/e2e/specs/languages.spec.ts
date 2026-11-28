@@ -406,10 +406,9 @@ for (const selected of ['en', 'zh-CN'] as const) {
     privacy.check()
   })
 
-  test(`${selected} admin draft, localized validation and real saves survive language switches`, async ({
-    page,
-    app,
-  }, testInfo) => {
+  const adminSaveTitle = `${selected} admin draft, localized validation and real saves survive language switches`
+  const crossEngine = { tag: selected === 'en' ? '@cross-engine' : [] }
+  test(adminSaveTitle, crossEngine, async ({ page, app }, testInfo) => {
     await app.authorizeHost()
     await initialLanguage(page, selected)
     await page.setViewportSize({
@@ -498,7 +497,11 @@ for (const selected of ['en', 'zh-CN'] as const) {
       await expect(savedEventLink(selected)).toBeVisible()
     })
     await savedEventLink(selected).click()
-    await revealEventSetting(page.locator('#minimumNoticeMinutes'))
+    const notice = page.locator('#minimumNoticeMinutes')
+    const noticeUnit = notice.locator('..').locator('select')
+    expect(await noticeUnit.evaluate((select) => select.getBoundingClientRect().height)).toBe(0)
+    await revealEventSetting(notice)
+    await expect(noticeUnit).toBeVisible()
     for (const [unit, minutes, days, canonicalMinutes, canonicalDays] of [
       ['minutes', '90', '2880', 90, 2],
       ['hours', '2', '72', 120, 3],
@@ -520,7 +523,10 @@ for (const selected of ['en', 'zh-CN'] as const) {
           result.request().method() === 'PATCH',
       )
       await page
-        .getByRole('button', { name: selected === 'en' ? 'Save changes' : '保存更改', exact: true })
+        .getByRole('button', {
+          name: selected === 'en' ? 'Save changes' : '保存更改',
+          exact: true,
+        })
         .click()
       const result = await saving
       expect(result.status()).toBe(200)

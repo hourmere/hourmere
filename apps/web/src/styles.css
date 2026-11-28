@@ -2934,10 +2934,16 @@ h3:lang(zh) {
   padding: 0;
 }
 
-/* Native closed details may retain child layout boxes. Suppress those boxes too,
-   while keeping the controls mounted so collapsing never loses draft values. */
-.event-settings-group:not([open]) > .stack {
+/* Suppress closed layout boxes without changing the content's display on open.
+   WebKit can report controls as invisible after a display change inside details. */
+.event-settings-group:not([open])::details-content {
   display: none;
+}
+
+@supports not selector(::details-content) {
+  .event-settings-group:not([open]) > .stack {
+    display: none;
+  }
 }
 
 /* Availability troubleshooting: reasons under each time */

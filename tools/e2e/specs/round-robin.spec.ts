@@ -3,10 +3,9 @@ import { expect, fillInvitee, pickSlot, test, waitUntilAtRest } from '../fixture
 
 for (const selected of ['en', 'zh-CN'] as const) {
   const zh = selected === 'zh-CN'
-  test(`round-robin owner saves, explicitly activates and books actual hosts with stable management (${selected})`, async ({
-    page,
-    app,
-  }) => {
+  test(`round-robin owner saves, explicitly activates and books actual hosts with stable management (${selected})`, {
+    tag: selected === 'en' ? '@cross-engine' : [],
+  }, async ({ page, app }) => {
     await page.addInitScript((value) => localStorage.setItem('hourmere-language', value), selected)
     await app.authorizeHost('owner')
     await page.goto(`${app.url}/app/event-types/new`)
@@ -57,12 +56,20 @@ for (const selected of ['en', 'zh-CN'] as const) {
     expect(first.assignedNames).toHaveLength(1)
     const hostDetail = zh ? `${first.assignedNames[0]}（UTC）` : `${first.assignedNames[0]} (UTC)`
     await expect(page.getByText(hostDetail, { exact: true })).toBeVisible()
-    const manage = await page
-      .getByLabel(
-        zh ? '用于更改或取消此预约的链接' : 'Your link to change or cancel this booking',
-        { exact: true },
-      )
-      .inputValue()
+    const manage = URL.parse(
+      await page
+        .getByLabel(
+          zh ? '用于更改或取消此预约的链接' : 'Your link to change or cancel this booking',
+          { exact: true },
+        )
+        .inputValue(),
+    )
+    if (
+      manage?.origin !== app.url ||
+      manage.pathname !== '/booking' ||
+      !manage.hash.startsWith('#token=')
+    )
+      throw new Error('The management link must target the booking page with a private fragment')
     await page.goto(`${app.url}${path}`)
     await pickSlot(page, page)
     await fillInvitee(page)
@@ -75,7 +82,13 @@ for (const selected of ['en', 'zh-CN'] as const) {
     const second = await app.roundRobinState('rotating-introduction')
     expect(second.sequence).toBe('2')
     expect(new Set(second.assignedNames).size).toBe(2)
-    await page.goto(manage)
+    await page.goto(`${app.url}/booking`)
+    await expect(
+      page.getByRole('heading', { name: zh ? '打开预约链接' : 'Open your booking link' }),
+    ).toBeVisible()
+    await page.evaluate((hash) => {
+      window.location.hash = hash
+    }, manage.hash)
     await page.getByRole('button', { name: zh ? '改期' : 'Reschedule', exact: true }).click()
     await pickSlot(page, page)
     await page

@@ -32,10 +32,9 @@ for (const locale of ['en-US', 'zh-CN'] as const) {
   test.describe(locale, () => {
     test.use({ locale })
 
-    test('team address notice matches what happens to a shared booking page', async ({
-      page,
-      app,
-    }) => {
+    test('team address notice matches what happens to a shared booking page', {
+      tag: chinese ? [] : '@cross-engine',
+    }, async ({ page, app }) => {
       const oldLink = app.url + app.teamPath
       const newLink = `${app.url}/team/research-team/call`
       const settings = `${app.url}/app/settings`

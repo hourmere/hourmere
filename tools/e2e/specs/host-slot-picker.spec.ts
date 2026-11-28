@@ -191,11 +191,9 @@ function exactRechecks(page: Page, selected: Slot[]) {
   )
 }
 
-test('copies two saved open times as complete plain and rich email snippets', async ({
-  page,
-  app,
-  browserName,
-}) => {
+test('copies two saved open times as complete plain and rich email snippets', {
+  tag: '@cross-engine',
+}, async ({ page, app, browserName }) => {
   await app.auditSignIn(true)
   await app.configureDurations()
   const catalog = await page.request.get(`${app.url}/api/v1/event-types`)
