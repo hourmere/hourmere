@@ -103,7 +103,7 @@ export default defineConfig({
             { label: 'Routing forms', link: '/docs/routing-forms' },
             { label: 'Create and manage meeting polls', link: '/docs/meeting-polls' },
             { label: 'Voting in a meeting poll', link: '/docs/meeting-poll-voting' },
-            { label: 'Open-time snippets', link: '/docs/open-time-snippets' },
+            { label: 'Share available times in email', link: '/docs/open-time-snippets' },
             { label: 'Troubleshoot availability', link: '/docs/availability-troubleshooting' },
             { label: 'Reminders and follow-ups', link: '/docs/reminders-and-follow-ups' },
             { label: 'Request another time', link: '/docs/request-reschedule' },
