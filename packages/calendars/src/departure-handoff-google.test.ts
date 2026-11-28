@@ -223,6 +223,7 @@ describe.skipIf(!databaseUrl)('departure handoff Google lifecycle (real Postgres
       ...ids,
       conference: 'not_required',
       oldConferenceCleanup: 'pending',
+      mail: { cancellation: 'pending', confirmation: 'pending' },
     })
     expect(jobs).toContainEqual({
       name: BOOKING_CALENDAR_JOB,
@@ -252,6 +253,7 @@ describe.skipIf(!databaseUrl)('departure handoff Google lifecycle (real Postgres
       ...ids,
       conference: 'not_required',
       oldConferenceCleanup: 'complete',
+      mail: { cancellation: 'pending', confirmation: 'pending' },
     })
     expect(google.calls.slice(callsBeforeCleanup)).toEqual(
       callsFor('old').slice(callsBeforeCleanup),
@@ -284,6 +286,7 @@ describe.skipIf(!databaseUrl)('departure handoff Google lifecycle (real Postgres
       ...ids,
       conference: 'not_required',
       oldConferenceCleanup: 'unresolved',
+      mail: { cancellation: 'pending', confirmation: 'pending' },
     })
     expect(google.calls).toHaveLength(callsBefore)
     expect([...google.controls.storedEvents.values()]).toEqual([
@@ -407,6 +410,7 @@ describe.skipIf(!databaseUrl)('departure handoff Google lifecycle (real Postgres
       ...ids,
       conference: 'pending',
       oldConferenceCleanup: 'pending',
+      mail: { cancellation: 'pending', confirmation: 'pending' },
     })
     expect(jobs).toContainEqual({
       name: CONFERENCE_JOB,
@@ -474,6 +478,7 @@ describe.skipIf(!databaseUrl)('departure handoff Google lifecycle (real Postgres
       ...ids,
       conference: 'failed',
       oldConferenceCleanup: 'complete',
+      mail: { cancellation: 'pending', confirmation: 'pending' },
     })
     await expect(retryBookingConference(staged.ctx, replacement)).rejects.toMatchObject({
       code: 'conference_not_found',
@@ -495,6 +500,7 @@ describe.skipIf(!databaseUrl)('departure handoff Google lifecycle (real Postgres
       ...ids,
       conference: 'ready',
       oldConferenceCleanup: 'complete',
+      mail: { cancellation: 'pending', confirmation: 'pending' },
     })
     expect(await intent(replacement)).toMatchObject({
       external_event_id: eventId,

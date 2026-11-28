@@ -231,6 +231,7 @@ describe('team booking handoff', () => {
     vi.useFakeTimers({ toFake: ['Date'], now: new Date('2030-03-01T01:00:00Z') })
     try {
       let committed = false
+      let mail = { cancellation: 'pending', confirmation: 'pending' }
       const calls = server({
         [GET]: () =>
           json(200, {
@@ -250,6 +251,7 @@ describe('team booking handoff', () => {
                     replacementBookingId: REPLACEMENT_ID,
                     conference: 'failed',
                     oldConferenceCleanup: 'unresolved',
+                    mail,
                   },
                 }
               : { offer: { ...offer, state: 'ready' }, preview, receipt: null },
@@ -291,6 +293,13 @@ describe('team booking handoff', () => {
         handoff.getByRole('link', { name: 'View replacement booking' }).getAttribute('href'),
       ).toBe(`/app/bookings/${REPLACEMENT_ID}`)
       expect(handoff.queryByRole('button', { name: 'Confirm handoff' })).toBeNull()
+      expect(handoff.getByText('Attendee cancellation email')).toBeDefined()
+      expect(handoff.getByText('Attendee confirmation email')).toBeDefined()
+      expect(handoff.getAllByText('Mail server acceptance unconfirmed')).toHaveLength(2)
+      mail = { cancellation: 'accepted', confirmation: 'incomplete' }
+      await user.click(handoff.getByRole('button', { name: 'Refresh handoff' }))
+      await handoff.findByText('Accepted by the mail server')
+      expect(handoff.getByText('Email delivery incomplete')).toBeDefined()
     } finally {
       vi.useRealTimers()
     }

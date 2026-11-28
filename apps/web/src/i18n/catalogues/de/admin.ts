@@ -333,4 +333,12 @@ export const admin = {
     'Der Teamzugriff hat sich geändert. Prüfen Sie ihn erneut, bevor Sie den Schlüssel erstellen.',
   'Team access changed. Restart this connection from your AI app.':
     'Der Teamzugriff hat sich geändert. Starten Sie diese Verbindung erneut in Ihrer KI-App.',
+
+  // Booking handoff mail status
+  'Attendee cancellation email': 'Absage-E-Mail an Teilnehmende',
+  'Attendee confirmation email': 'Bestätigungs-E-Mail an Teilnehmende',
+  'Mail server acceptance unconfirmed': 'Annahme durch den Mailserver unbestätigt',
+  'Accepted by the mail server': 'Vom Mailserver angenommen',
+  'Email delivery incomplete': 'E-Mail-Zustellung unvollständig',
+  'Email delivery unavailable': 'E-Mail-Zustellung nicht verfügbar',
 }

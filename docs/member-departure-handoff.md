@@ -346,8 +346,9 @@ input with `--input -`.
 The page clears the fragment before requesting the offer. It and the API responses
 are served with no-store and no-referrer headers. Offer and answer operations share
 a rate limit of 30 requests per minute per trusted IP bucket on each server process.
-Production admission remains off, and handoff-specific replacement notifications,
-calendar attachments and rollout remain pending.
+Production admission remains off. A committed handoff queues localized notices for both
+bookings. Administrators can refresh the receipt to check email acceptance. See
+[staged booking handoff mail](#staged-booking-handoff-mail).
 
 中文：预发布管理员可创建、查看、撤回和换版交接提议，也可向尚未决定的收件人重发私密链接。
 同一源预约的每个规范化邮箱最多发送三次，包含首发和送达不确定的尝试。重试同一请求时请沿用
@@ -363,6 +364,25 @@ calendar attachments and rollout remain pending.
 Provider cleanup and creation reuse existing workers. Google Calendar, Meet, Outlook, Teams
 and Zoom handoffs use real PostgreSQL and fake providers for lifecycle acceptance, including
 revocation and ambiguous responses.
+
+### Staged booking handoff mail
+
+A committed departure handoff queues a cancellation for the original booking and a
+confirmation for the replacement. Both notices explain the host change in the recipient's
+mail language. A booker or guest may receive either notice first.
+
+The cancellation uses the original calendar UID and saved organizer, with the sequence one
+higher than the last version of that event. If the organizer was never saved, recipients get
+a plain-text cancellation and may need to remove the original event from their calendars
+manually. The replacement uses a fresh UID and starts at sequence zero. Its invitation and
+manage link belong to the replacement booking.
+
+The staged administrator receipt reports when the mail server accepts each notice for all
+attendees. If the cancellation job finishes, is skipped, or exhausts its retries before
+acceptance is recorded for every attendee, the cancellation status is **Email delivery
+incomplete**. Refresh the handoff status after the background worker runs. Mail-server
+acceptance does not confirm inbox receipt. Replaying a committed handoff does not queue
+another notice.
 
 ### Staged automatic handoff runs
 
@@ -436,7 +456,8 @@ those bookings and leaves their ordinary booking flows in place.
 界面禁止确认。确认时在锁内重新复核。提交结果不确定时，先刷新查看回执，再决定是否重试。
 提交后，外部会议仍可处于待创建或失败状态，由对应主持人使用原有恢复流程处理。
 预发布已提供提议生命周期、确认链接投递和参与者页面及接口。生产功能保持关闭。
-交接专用邮件、日历附件及上线启用留待后续阶段。
+交接提交后，系统会排队发送原预约取消邮件和新预约确认邮件，管理员可刷新回执查看投递状态。
+若取消邮件任务已结束、被跳过或耗尽重试，且仍有参与者缺少邮件服务器接受记录，回执会显示邮件投递未完成。
 旧会议的取消沿用原 ICS UID 与原日历组织者，新邀请使用新 UID。Google Meet 和 Zoom
 按各自预约链的固定组织者身份处理。Outlook 和 Teams 按旧链固定的写回状态清理，新 Teams
 会议要求实例启用 Microsoft 日历，并复核接任主持人的写入资格。任一条件不满足时返回

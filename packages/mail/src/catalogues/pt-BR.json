@@ -192,5 +192,11 @@
   "departureHandoff.subject": "Veja a alteração proposta para sua reserva",
   "departureHandoff.introduction": "Um administrador da equipe propôs substituir sua reserva. A equipe só pode fazer a substituição se a pessoa que reservou e todos os convidados concordarem. Se a proposta expirar, a reserva atual continua confirmada.",
   "departureHandoff.privacy": "Mantenha este link em sigilo. Quem tiver acesso a ele poderá responder em seu nome. Apenas o link mais recente funciona.",
-  "departureHandoff.review": "Ver a proposta"
+  "departureHandoff.review": "Ver a proposta",
+  "bookingHandoff.subject": "Mudança de anfitrião · {subject}",
+  "bookingHandoff.source": "O anfitrião mudou. A reserva original foi cancelada. Os participantes recebem outro e-mail sobre a reserva que a substitui.",
+  "bookingHandoff.replacement": "O anfitrião mudou. Esta reserva substitui a reserva original.",
+  "bookingHandoff.sourceTeamsPending": "O link do Teams para a reserva original ainda estava pendente no momento do cancelamento.",
+  "bookingHandoff.sourceTeamsUnavailable": "O Teams estava indisponível para a reserva original.",
+  "bookingHandoff.sourceTeamsWritebackFailed": "Não foi possível adicionar ao calendário o link do Teams para a reserva original."
 }

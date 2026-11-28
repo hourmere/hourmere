@@ -347,6 +347,7 @@ describe.skipIf(!databaseUrl)('SCIM team hierarchy transactions', () => {
     })
   })
 
+  // This case installs the pg-boss schema and waits for three sequential CLI processes to exit.
   it('suspends and detaches offline while provisioning is off, retaining scope and departure guards', async () => {
     const parent = await team()
     const child = await team()
@@ -578,7 +579,7 @@ describe.skipIf(!databaseUrl)('SCIM team hierarchy transactions', () => {
     } finally {
       await jobs.stop()
     }
-  })
+  }, 10_000)
 
   it('requires separate bound proof from both current owners and commits each intent once', async () => {
     const sameOwner = await createTestUser(db)

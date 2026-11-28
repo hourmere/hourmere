@@ -301,8 +301,13 @@ export function bookingLocationForRecipient(
   inviteePhone: boolean,
   role: 'host' | 'invitee' | 'guest',
   locale?: string | null,
+  handoff = false,
 ): MeetingLocation | null {
-  if (location?.kind === 'microsoft_teams' && role === 'guest')
+  if (
+    location?.kind === 'microsoft_teams' &&
+    role === 'guest' &&
+    (!handoff || location.status === 'ready')
+  )
     return { kind: 'custom', text: 'Microsoft Teams' }
   if (location?.kind !== 'phone') return location
   const language = interfaceLanguage(locale) ?? 'en'
@@ -348,9 +353,18 @@ function locationContent(
   location: MeetingLocation,
   language: InterfaceLanguage,
   cancelled: boolean,
+  handoffSource: boolean,
 ): string | EmailContent {
   if (location.kind === 'microsoft_teams') {
     const label = 'Microsoft Teams'
+    if (cancelled && handoffSource && location.status !== 'ready') {
+      const status = {
+        join_url_pending: 'bookingHandoff.sourceTeamsPending',
+        teams_unavailable: 'bookingHandoff.sourceTeamsUnavailable',
+        writeback_failed: 'bookingHandoff.sourceTeamsWritebackFailed',
+      } as const
+      return `${label}\n${message(language, status[location.status])}`
+    }
     const notice = cancelled ? undefined : teamsMeetingNotice(location, language)
     return notice ? `${label}\n${notice}` : label
   }
@@ -403,6 +417,7 @@ interface Content {
   language: InterfaceLanguage
   subject: string
   intro: EmailContent
+  handoffNotice?: string | undefined
   /** Label and value, already cleaned. */
   fields: { label: string; text: string; html?: string; muted?: boolean }[]
   answers: readonly { question: string; answer: EmailContent }[]
@@ -419,7 +434,12 @@ interface Content {
   repairNote?: string
 }
 
-function render(to: string, c: Content, attachment?: MailAttachment): MailMessage {
+function render(
+  to: string,
+  c: Content,
+  attachment?: MailAttachment,
+  plainText = false,
+): MailMessage {
   const subject = subjectLine(c.subject)
   const t = (key: MailKey) => message(c.language, key)
   const htmlText = (text: string) => emailText(text, c.language)
@@ -437,6 +457,7 @@ function render(to: string, c: Content, attachment?: MailAttachment): MailMessag
     'Hourmere',
     '',
     c.intro.text,
+    ...(c.handoffNotice ? ['', c.handoffNotice] : []),
     '',
     ...c.fields.map((f) => textField(f.label, f.text, c.language)),
     ...(c.meetingDates ?? []).flatMap(({ label, dates }) => [
@@ -469,6 +490,7 @@ function render(to: string, c: Content, attachment?: MailAttachment): MailMessag
     ...(c.replyNotice ? ['', c.replyNotice] : []),
     ...(c.receivedWhy === undefined ? [] : ['', c.receivedWhy.text]),
   ].join('\n')
+  if (plainText) return { to, subject, text: `${text}\n` }
 
   const cell = 'padding: 2px 16px 2px 0; vertical-align: top;'
   const rows = c.fields
@@ -546,7 +568,7 @@ ${emailButton(c.join.label, c.join.url, false, c.language)}
   const html = emailLayout(
     c.language,
     subject,
-    `<p style="margin: 0 0 16px; ${emailWrapStyle}">${c.intro.html}</p>
+    `<p style="margin: 0 0 16px; ${emailWrapStyle}">${c.intro.html}</p>${c.handoffNotice ? `\n<p style="margin: 0 0 16px; ${emailWrapStyle}">${htmlText(c.handoffNotice)}</p>` : ''}
 <table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
 ${rows}
 </table>${afterDetails ? `\n${afterDetails}` : ''}`,
@@ -687,7 +709,13 @@ export function bookingEmail(
   kind: BookingEmailKind,
   meeting: BookingEmailMeeting,
   recipient: BookingEmailRecipient,
-  options: { attachment?: MailAttachment | undefined; bookingUrl?: string | undefined } = {},
+  options: {
+    attachment?: MailAttachment | undefined
+    bookingUrl?: string | undefined
+    handoff?: 'source' | 'replacement' | undefined
+    /** Use text/plain when a handoff cancellation has no saved calendar organizer. */
+    plainText?: boolean | undefined
+  } = {},
 ): MailMessage {
   const language = interfaceLanguage(recipient.locale) ?? 'en'
   const event = singleLine(meeting.eventName)
@@ -709,13 +737,17 @@ export function bookingEmail(
     reminder: 'Reminder: {event} with {other} on {when}',
   } satisfies Record<BookingEmailKind, MailKey>
   const subjectHost = meetingHosts(meeting, language, true)
-  const subject = t(subjects[kind], {
+  const bookingSubject = t(subjects[kind], {
     event,
     host: subjectHost,
     invitee: invitee.text,
     other: isHost ? invitee.text : subjectHost,
     when,
   })
+  const handoff = options.handoff
+  const subject = handoff
+    ? t('bookingHandoff.subject', { subject: bookingSubject })
+    : bookingSubject
   const intros = {
     conference_failed: isHost
       ? 'The time is reserved, but Google Meet could not be prepared. Open this booking in Hourmere to review the problem, retry safe reconciliation or cancel. No final calendar invitation has been sent.'
@@ -764,7 +796,12 @@ export function bookingEmail(
   const location = meeting.location
   const teams = location?.kind === 'microsoft_teams' ? location : undefined
   if (location) {
-    fields.push(field(t('Where'), locationContent(location, language, kind === 'cancelled')))
+    fields.push(
+      field(
+        t('Where'),
+        locationContent(location, language, kind === 'cancelled', handoff === 'source'),
+      ),
+    )
   } else if (kind !== 'conference_failed') {
     fields.push(
       field(t('Where'), t('No location has been specified. Contact the host for meeting details.')),
@@ -843,6 +880,7 @@ export function bookingEmail(
       language,
       subject,
       intro,
+      handoffNotice: handoff && t(`bookingHandoff.${handoff}`),
       fields,
       answers,
       join,
@@ -850,9 +888,12 @@ export function bookingEmail(
       manageLinks,
       footer,
       replyNotice: replyNotice(recipient, manageLinks, language),
-      receivedWhy: mailContent(language, receivedWhy, { host, invitee }),
+      ...(handoff !== 'replacement' && {
+        receivedWhy: mailContent(language, receivedWhy, { host, invitee }),
+      }),
     },
     options.attachment,
+    options.plainText,
   )
 }
 

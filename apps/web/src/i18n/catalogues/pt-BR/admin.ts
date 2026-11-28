@@ -329,4 +329,12 @@ export const admin = {
     'O acesso à equipe mudou. Revise-o novamente antes de criar a chave.',
   'Team access changed. Restart this connection from your AI app.':
     'O acesso à equipe mudou. Reinicie a conexão pelo seu aplicativo de IA.',
+
+  // Booking handoff mail status
+  'Attendee cancellation email': 'E-mail de cancelamento para participantes',
+  'Attendee confirmation email': 'E-mail de confirmação para participantes',
+  'Mail server acceptance unconfirmed': 'Aceitação pelo servidor de e-mail não confirmada',
+  'Accepted by the mail server': 'Aceito pelo servidor de e-mail',
+  'Email delivery incomplete': 'Entrega de e-mail incompleta',
+  'Email delivery unavailable': 'Entrega de e-mail indisponível',
 }

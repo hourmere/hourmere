@@ -3597,4 +3597,11 @@ export const admin = {
     '团队权限已更改。请重新确认权限后再创建密钥。',
   'Team access changed. Restart this connection from your AI app.':
     '团队权限已更改。请从你的AI应用重新发起连接。',
+
+  // Booking handoff mail status
+  'Attendee cancellation email': '参与者取消邮件',
+  'Attendee confirmation email': '参与者确认邮件',
+  'Mail server acceptance unconfirmed': '邮件服务器尚未确认接收',
+  'Email delivery incomplete': '邮件投递未完成',
+  'Email delivery unavailable': '邮件投递不可用',
 } as const

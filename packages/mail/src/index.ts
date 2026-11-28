@@ -72,6 +72,8 @@ export interface SendOptions {
 export interface Mailer {
   /** One configured SMTP sender mailbox, used to align iMIP's organizer and email From. */
   readonly senderEmail?: string | undefined
+  /** A local sink can resolve send() without submitting anything to a mail server. */
+  readonly deliveryAvailable?: false
   send(message: MailMessage, options?: SendOptions): Promise<void>
   /** One SMTP exchange, with no transport-level requeue. */
   sendWorkflowAttempt?(message: MailMessage): Promise<WorkflowSmtpAttemptOutcome>
@@ -422,6 +424,7 @@ const unicodeEscape = (c: string) => `\\u${c.charCodeAt(0).toString(16).padStart
  */
 export function createLogMailer(print: (line: string) => void = console.log): Mailer {
   return {
+    deliveryAvailable: false,
     async send({ to, subject, text, attachments, sensitive }, { signal } = {}) {
       signal?.throwIfAborted()
       if (sensitive) {
