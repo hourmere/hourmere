@@ -1,11 +1,12 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import type { QueuedInvitation } from '../api/auth.ts'
 import type { Schemas } from '../api/client.ts'
 import { InterfaceScope } from '../i18n/runtime.tsx'
 import { chooseLanguage } from '../i18n/store.ts'
+import { AppShell, RequireSession, SessionLayout, SettingsPage } from '../lazy-pages.tsx'
 import { PATHS } from '../paths.ts'
 import { SessionProvider } from '../session.tsx'
 import {
@@ -19,7 +20,10 @@ import {
   renderApp,
   signedInAs,
 } from '../test/fake-api.tsx'
+import { resolveLazy } from '../test/resolve-lazy.ts'
 import { TeamInvitations } from './TeamInvitations.tsx'
+
+beforeAll(() => resolveLazy(SessionLayout, RequireSession, AppShell, SettingsPage))
 
 const TEAM_ME: Schemas['Me'] = {
   ...ME,
@@ -112,6 +116,8 @@ describe('inviting a team member in settings', () => {
         within(invitationForm).getByText('Invitations always use the member role.'),
       ).toBeDefined()
       expect(within(invitationForm).queryByRole('combobox')).toBeNull()
+      const initialPending = screen.getByRole('region', { name: 'Pending invitations' })
+      await within(initialPending).findByText('No pending invitations on this page.')
       const { emailInput } = await fillAndSubmit()
       expect((await within(invitationForm).findByRole('status')).textContent).toBe(
         'Invitation queued for delivery.',
@@ -413,6 +419,7 @@ describe('inviting a team member in settings', () => {
     const existing = await within(invitationForm).findByText(
       'An invitation already exists. Review its mail submission status below.',
     )
+    const resend = await screen.findByRole('button', { name: 'Resend invitation' })
     expect(document.activeElement).toBe(existing.parentElement)
     await user.tab()
     expect(document.activeElement).toBe(
@@ -423,7 +430,7 @@ describe('inviting a team member in settings', () => {
       screen.getByRole('combobox', { name: 'Filter invitations' }),
     )
     await user.tab()
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Resend invitation' }))
+    expect(document.activeElement).toBe(resend)
     await user.keyboard('{Enter}')
     const status = await screen.findByText('Invitation queued for delivery.')
     expect(status.getAttribute('role')).toBe('status')
@@ -638,19 +645,24 @@ describe('inviting a team member in settings', () => {
     expect(api.to(INVITE_ROUTE)).toHaveLength(1)
   })
 
-  it.each(['member', 'superadmin', 'owner-assistant', 'admin,custom-role', 'owner,'])(
-    'does not show the form for role %s',
-    async (role) => {
-      const api = server({}, role)
-      renderApp(PATHS.settings)
-      const members = await screen.findByRole('region', { name: 'Team members' })
-      await within(members).findByText('No team members found.')
-      expect(screen.queryByRole('region', { name: 'Invite member' })).toBeNull()
-      expect(screen.queryByRole('textbox', { name: 'Email' })).toBeNull()
-      expect(api.to(INVITE_ROUTE)).toHaveLength(0)
-      expect(api.to(PENDING_ROUTE)).toHaveLength(0)
-    },
-  )
+  it.each([
+    ['member', 'Member'],
+    ['superadmin', 'superadmin'],
+    ['owner-assistant', 'owner-assistant'],
+    ['admin,custom-role', 'Admin, custom-role'],
+    ['owner,', 'Owner,'],
+  ])('does not show the form for role %s', async (role, roleLabel) => {
+    const api = server({}, role)
+    renderApp(PATHS.settings)
+    const account = await screen.findByRole('region', { name: 'Account' })
+    await within(account).findByText(roleLabel)
+    const members = await screen.findByRole('region', { name: 'Team members' })
+    await within(members).findByText('No team members found.')
+    expect(screen.queryByRole('region', { name: 'Invite member' })).toBeNull()
+    expect(screen.queryByRole('textbox', { name: 'Email' })).toBeNull()
+    expect(api.to(INVITE_ROUTE)).toHaveLength(0)
+    expect(api.to(PENDING_ROUTE)).toHaveLength(0)
+  })
 
   it('shows the server refusal when permissions were removed after the form opened', async () => {
     server({ [INVITE_ROUTE]: () => json(403, { code: 'TEAM_MANAGEMENT_ACCESS_DENIED' }) })
