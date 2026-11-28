@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import type { ListedOrganizationMember } from '../api/auth.ts'
 import type { Schemas } from '../api/client.ts'
+import { departureHandoffRunPath } from '../components/team-members/DepartureHandoffRun.tsx'
 import { TeamMemberActions } from '../components/team-members/TeamMemberActions.tsx'
 import { InterfaceScope } from '../i18n/runtime.tsx'
 import { AppShell, RequireSession, SessionLayout, SettingsPage } from '../lazy-pages.tsx'
@@ -132,6 +133,8 @@ function teamServer(role = 'member', routes: Routes = {}) {
     [impactRoute(MEMBER_ID)]: () => json(200, impact()),
     [impactRoute(ADMIN_ID)]: () => json(200, impact()),
     [handlingRoute]: () => json(200, handling()),
+    [`GET /api/v1/team/bookings/${booking().id}`]: () => json(200, booking()),
+    [`GET /api/v1/team/bookings/${booking(2).id}`]: () => json(200, booking(2)),
     ...routes,
   })
 }
@@ -473,6 +476,47 @@ describe('team member leave actions', () => {
 })
 
 describe('team member removal actions', () => {
+  it('opens automatic handoff from the post-removal handling list only after feature eligibility is known', async () => {
+    const user = userEvent.setup()
+    const detail = later()
+    const source = booking()
+    const detailRoute = `GET /api/v1/team/bookings/${source.id}`
+    const api = teamServer('owner', {
+      [removalRoute(MEMBER_ID)]: () => json(200, removed()),
+      [handlingRoute]: () => json(200, handling([source])),
+      [detailRoute]: () => detail.response,
+    })
+    renderApp(PATHS.settings)
+    await openRemoval(user)
+    await user.click(await screen.findByRole('button', { name: 'Remove member' }))
+    await waitFor(() => expect(api.to(detailRoute)).toHaveLength(1))
+    expect(screen.queryByRole('region', { name: 'Automatic handoff' })).toBeNull()
+    expect(api.to(detailRoute)[0]?.headers.get('X-Expected-Organization-Id')).toBe(TEAM_ID)
+    await detail.answer(
+      json(200, {
+        ...source,
+        departureHandoffEnabled: true,
+        hosts: [{ userId: MEMBER_ID, name: 'Saved host', isCurrentMember: false, timeZone: null }],
+      }),
+    )
+    const review = screen.getByRole('region', { name: 'Remove team member' })
+    expect(
+      await within(review).findByRole('button', {
+        name: 'Start automatic handoff for this departed member',
+      }),
+    ).toBeDefined()
+  })
+
+  it('does not open a booking-scoped automatic handoff for an ordinary member', async () => {
+    const source = booking()
+    const detailRoute = `GET /api/v1/team/bookings/${source.id}`
+    const api = teamServer('member')
+    renderApp(departureHandoffRunPath(source.id))
+    await screen.findByText('4 joined members')
+    expect(api.to(detailRoute)).toHaveLength(0)
+    expect(screen.queryByRole('region', { name: 'Automatic handoff' })).toBeNull()
+  })
+
   it('offers managers their own future host links alongside team booking handling, before and after removal', async () => {
     const user = userEvent.setup()
     const bookings = [hostedBooking(), booking(2), hostedBooking(3, true)]
