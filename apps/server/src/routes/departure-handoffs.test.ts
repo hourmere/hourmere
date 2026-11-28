@@ -5,6 +5,7 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import type { BookingNotifier } from '@hourmere/scheduling'
 import type { EnqueueDepartureHandoffEmail } from '@hourmere/scheduling/departure-handoff-proposals'
+import type { EnqueueDepartureHandoffRun } from '@hourmere/scheduling/departure-handoff-queue'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { fakeMicrosoft, TEST_CALENDAR_KEY } from '../../../../packages/calendars/src/testing.ts'
 import {
@@ -55,6 +56,7 @@ describe.skipIf(!serverUrl)('departure handoff browser routes', () => {
       enabled?: boolean
       microsoft?: ReturnType<typeof fakeMicrosoft>
       enqueue?: EnqueueDepartureHandoffEmail
+      enqueueRun?: EnqueueDepartureHandoffRun
     } = {},
   ) {
     const readLatest = vi.fn(storage.store.readLatest)
@@ -77,6 +79,7 @@ describe.skipIf(!serverUrl)('departure handoff browser routes', () => {
             store: { ...storage.store, readLatest },
             now: () => HANDOFF_NOW,
             ...(options.enqueue && { enqueue: options.enqueue }),
+            ...(options.enqueueRun && { enqueueRun: options.enqueueRun }),
           },
         }),
       }),
@@ -119,6 +122,7 @@ describe.skipIf(!serverUrl)('departure handoff browser routes', () => {
   const preview = (base: string) => `${base}/handoff-preview`
   const offers = (base: string) => `${base}/handoff-offers`
   const apply = (base: string, offerId: string) => `${offers(base)}/${offerId}/apply`
+  const runs = '/api/v1/team/bookings/handoff-runs'
   const post = (headers: Record<string, string>, body: unknown = { version: 1 }) => ({
     method: 'POST',
     body: JSON.stringify(body),
@@ -197,6 +201,7 @@ describe.skipIf(!serverUrl)('departure handoff browser routes', () => {
         mailboxProofQueue: { enqueue: unexpected },
         scimMappingNotices: { enqueue: unexpected },
         enqueueScimInvitation: unexpected,
+        enqueueDepartureHandoffRun: unexpected,
       }),
     )
     const detail = await app.request(f.base, { headers: f.headers })
@@ -214,6 +219,7 @@ describe.skipIf(!serverUrl)('departure handoff browser routes', () => {
     )
     const path = `${offers(f.base)}/${f.input.offerId}`
     const recipientId = randomUUID()
+    const runId = randomUUID()
     for (const response of [
       await app.request(offers(f.base), post(f.headers, { departingUserId: f.departing.id })),
       await app.request(path, { headers: f.headers }),
@@ -222,9 +228,97 @@ describe.skipIf(!serverUrl)('departure handoff browser routes', () => {
         `${path}/resend`,
         post({ ...f.headers, 'idempotency-key': randomUUID() }, { version: 1, recipientId }),
       ),
+      await app.request(runs, post(f.headers, { runId, departingUserId: f.departing.id })),
+      await app.request(`${runs}/${runId}`, { headers: f.headers }),
+      await app.request(`${runs}/${runId}/control`, post(f.headers, { action: 'stop' })),
     ]) {
       await expectError(response, 404, 'handoffs_disabled')
     }
+    await expectUnchanged(f)
+  })
+
+  it('binds the staged run to a live team management session and returns only the receipt', async () => {
+    const f = await fixture()
+    const other = await fixture()
+    await db
+      .deleteFrom('auth.member')
+      .where('organizationId', '=', f.team.id)
+      .where('userId', '=', f.departing.id)
+      .execute()
+    const enqueueRun = vi.fn<EnqueueDepartureHandoffRun>(async () => randomUUID())
+    const { app, notify } = application({ enqueueRun })
+    const runId = randomUUID()
+    const body = { runId, departingUserId: f.departing.id }
+    const runPath = `${runs}/${runId}`
+    await expectError(
+      await app.request(runs, post({ ...f.headers, authorization: 'Bearer synthetic' }, body)),
+      403,
+      'team_management_access_denied',
+    )
+    await expectError(
+      await app.request(runs, post({ ...f.headers, origin: 'https://elsewhere.example' }, body)),
+      403,
+      'forbidden',
+    )
+    await expectError(
+      await app.request(runs, post({ cookie: f.headers.cookie }, body)),
+      409,
+      'organization_context_changed',
+    )
+    expect(enqueueRun).not.toHaveBeenCalled()
+
+    const start = await app.request(runs, post(f.headers, body))
+    expect(start.status).toBe(200)
+    expect(start.headers.get('cache-control')).toBe('no-store')
+    const receipt = {
+      id: runId,
+      departingUserId: f.departing.id,
+      state: 'running',
+      failureCode: null,
+      items: [
+        {
+          sourceBookingId: f.booking.id,
+          offerId: f.input.offerId,
+          version: 1,
+          outcome: 'pending',
+          replacementBookingId: null,
+        },
+      ],
+    }
+    expect(await start.json()).toEqual(receipt)
+    const replay = await app.request(runs, post(f.headers, body))
+    expect(replay.status).toBe(200)
+    expect(await replay.json()).toEqual(receipt)
+    expect(enqueueRun).toHaveBeenCalledTimes(1)
+    await expectError(
+      await app.request(runPath, { headers: other.headers }),
+      404,
+      'handoff_run_not_found',
+    )
+    await expectError(
+      await app.request(`${runPath}/control`, post(other.headers, { action: 'stop' })),
+      404,
+      'handoff_run_not_found',
+    )
+    const status = await app.request(runPath, { headers: f.headers })
+    expect(status.status).toBe(200)
+    expect(await status.json()).toEqual(receipt)
+
+    for (const [action, state] of [
+      ['pause', 'paused'],
+      ['resume', 'running'],
+      ['stop', 'stopped'],
+    ] as const) {
+      const result = await app.request(`${runPath}/control`, post(f.headers, { action }))
+      expect(result.status).toBe(200)
+      expect(await result.json()).toMatchObject({ state })
+    }
+    const stopped = await app.request(runPath, { headers: f.headers })
+    expect(await stopped.json()).toMatchObject({
+      state: 'stopped',
+      items: [{ outcome: 'stopped' }],
+    })
+    expect(notify).not.toHaveBeenCalled()
     await expectUnchanged(f)
   })
 

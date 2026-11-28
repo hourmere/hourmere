@@ -37,6 +37,9 @@ const fixedOutsideV1: ReadonlySet<string> = new Set([
   'team_bookings.withdraw_handoff_proposal',
   'team_bookings.resend_handoff_proposal',
   'team_bookings.apply_handoff',
+  'team_bookings.start_handoff_run',
+  'team_bookings.read_handoff_run',
+  'team_bookings.control_handoff_run',
 ])
 
 // These entry points have team-role checks. Mutations can perform multiple
@@ -172,6 +175,12 @@ const teamRest = new Map<string, readonly string[]>([
   [
     'POST /api/v1/team/bookings/{id}/handoff-offers/{offerId}/apply',
     ['team_bookings.apply_handoff'],
+  ],
+  ['POST /api/v1/team/bookings/handoff-runs', ['team_bookings.start_handoff_run']],
+  ['GET /api/v1/team/bookings/handoff-runs/{runId}', ['team_bookings.read_handoff_run']],
+  [
+    'POST /api/v1/team/bookings/handoff-runs/{runId}/control',
+    ['team_bookings.control_handoff_run'],
   ],
   [
     'POST /api/v1/team/bookings/bulk-cancellations/preview',

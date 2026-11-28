@@ -5032,6 +5032,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/team/bookings/handoff-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a bounded departure handoff run
+         * @description Explicitly opts into processing eligible, approved offers for a departed team member. Retry the same request with the same runId. Disabled in production.
+         */
+        post: operations["startDepartureHandoffRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/team/bookings/handoff-runs/{runId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a departure handoff run
+         * @description Returns the bounded run receipt without private participant or provider details. Disabled in production.
+         */
+        get: operations["readDepartureHandoffRun"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/team/bookings/handoff-runs/{runId}/control": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pause, resume or stop a departure handoff run
+         * @description A pause or stop takes effect before the next booking transaction. Resume continues only a paused run. Disabled in production.
+         */
+        post: operations["controlDepartureHandoffRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/team/invitations": {
         parameters: {
             query?: never;
@@ -7284,6 +7344,27 @@ export interface components {
             replacementBookingId: string;
             /** Format: uuid */
             sourceBookingId: string;
+        };
+        DepartureHandoffRun: {
+            /** Format: uuid */
+            departingUserId: string;
+            /** @enum {string|null} */
+            failureCode: "departed_member_returned" | "authorization_lost" | "run_expired" | null;
+            /** Format: uuid */
+            id: string;
+            items: {
+                /** Format: uuid */
+                offerId: string;
+                /** @enum {string} */
+                outcome: "pending" | "applied" | "ineligible" | "processing_failed" | "stopped";
+                /** Format: uuid */
+                replacementBookingId: string | null;
+                /** Format: uuid */
+                sourceBookingId: string;
+                version: number;
+            }[];
+            /** @enum {string} */
+            state: "running" | "paused" | "stopped" | "completed" | "failed";
         };
         DisplayName: {
             name: string;
@@ -21591,6 +21672,284 @@ export interface operations {
             429: {
                 headers: {
                     "Retry-After": number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    startDepartureHandoffRun: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Send the active team ID as X-Expected-Organization-Id. */
+                "x-expected-organization-id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    departingUserId: string;
+                    /** Format: uuid */
+                    runId: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Current run and per-booking results */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepartureHandoffRun"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A verified team owner or admin browser session is required. Authorization headers are denied. sso_required: This team requires a current SSO proof. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Handoffs are disabled or this run is unavailable in the current team. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed: reload the page before trying this team write again; the run cannot be started or changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The handoff queue is temporarily unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    readDepartureHandoffRun: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Send the active team ID as X-Expected-Organization-Id. */
+                "x-expected-organization-id": string;
+            };
+            path: {
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current run and per-booking results */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepartureHandoffRun"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A verified team owner or admin browser session is required. Authorization headers are denied. sso_required: This team requires a current SSO proof. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Handoffs are disabled or this run is unavailable in the current team. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed: reload the page before trying this team write again; the run cannot be started or changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The handoff queue is temporarily unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    controlDepartureHandoffRun: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Send the active team ID as X-Expected-Organization-Id. */
+                "x-expected-organization-id": string;
+            };
+            path: {
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    action: "pause" | "resume" | "stop";
+                };
+            };
+        };
+        responses: {
+            /** @description Current run and per-booking results */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepartureHandoffRun"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A verified team owner or admin browser session is required. Authorization headers are denied. sso_required: This team requires a current SSO proof. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Handoffs are disabled or this run is unavailable in the current team. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed: reload the page before trying this team write again; the run cannot be started or changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The handoff queue is temporarily unavailable. */
+            503: {
+                headers: {
                     [name: string]: unknown;
                 };
                 content: {
