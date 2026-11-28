@@ -116,6 +116,14 @@ function promiseClipboard() {
   vi.stubGlobal('ClipboardItem', PromiseItem)
   return { ...clip, committed }
 }
+function readClipboardBlob(blob: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(reader.error)
+    reader.readAsText(blob)
+  })
+}
 function server(offered = slots()) {
   return fakeApi({
     [ROUTE]: ({ path }) => {
@@ -340,29 +348,53 @@ describe('host open-time picker', () => {
     expect(screen.getByText('Selected times: 1 (maximum 10)')).toBeDefined()
   })
 
-  it('writes both rich MIME types in one action with complete plain text', async () => {
-    server()
-    const clip = clipboard()
-    class Item {
-      readonly data: Record<string, Blob | Promise<Blob>>
-      constructor(data: Record<string, Blob | Promise<Blob>>) {
-        this.data = data
-      }
-      getType(type: string) {
-        return Promise.resolve(this.data[type] as Blob | Promise<Blob>)
-      }
-    }
-    vi.stubGlobal('ClipboardItem', Item)
+  it('preserves HTTPS slot links and labels in plain paste and sanitized rich paste', async () => {
+    pinClock()
+    const offered = slots()
+    server(offered)
+    const clip = promiseClipboard()
     renderPicker()
-    await choose()
+    await choose([0, 1])
     await preview()
-    const text = textPreview().value
+    const expected = offered.map(({ start, end }) => ({
+      href: `https://booking.example.com/ada/intro-call?start=${encodeURIComponent(start)}&durationMinutes=30`,
+      label: formatSlotLabel(start, end, 'en', PROFILE.timeZone),
+    }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy plain text' }))
+    await screen.findByText('Plain text copied.')
+    const plainItem = clip.write.mock.calls[0]?.[0]?.[0] as PromiseItem
+    expect(plainItem.types).toEqual(['text/plain'])
+    const plain = await readClipboardBlob(await plainItem.getType('text/plain'))
+    expect(plain).toBe(textPreview().value)
+    expect(plain.split('\n').filter((line) => line.startsWith('https://'))).toEqual(
+      expected.map(({ href }) => href),
+    )
+    for (const { href, label } of expected) expect(plain).toContain(`${label}\n${href}`)
+
     fireEvent.click(screen.getByRole('button', { name: 'Copy rich text' }))
     await screen.findByText('Rich text copied with a plain-text fallback.')
-    expect(clip.write).toHaveBeenCalledOnce()
-    const item = clip.write.mock.calls[0]?.[0]?.[0] as Item
-    expect(Object.keys(item.data).sort()).toEqual(['text/html', 'text/plain'])
-    expect((await item.getType('text/plain')).size).toBe(new TextEncoder().encode(text).byteLength)
+    expect(clip.write).toHaveBeenCalledTimes(2)
+    const richItem = clip.write.mock.calls[1]?.[0]?.[0] as PromiseItem
+    expect(richItem.types.sort()).toEqual(['text/html', 'text/plain'])
+    expect(await readClipboardBlob(await richItem.getType('text/plain'))).toBe(plain)
+    const html = await readClipboardBlob(await richItem.getType('text/html'))
+
+    // Model an email composer dropping active content and presentation attributes.
+    const paste = new DOMParser().parseFromString(html, 'text/html')
+    for (const node of paste.querySelectorAll('script, style, iframe, object, form')) node.remove()
+    for (const element of paste.body.querySelectorAll('*')) {
+      for (const attr of [...element.attributes]) {
+        if (element.tagName !== 'A' || attr.name !== 'href' || !attr.value.startsWith('https://'))
+          element.removeAttribute(attr.name)
+      }
+    }
+    expect(
+      [...paste.body.querySelectorAll('a')].map((link) => ({
+        href: link.getAttribute('href'),
+        label: link.textContent,
+      })),
+    ).toEqual(expected)
     expect(clip.writeText).not.toHaveBeenCalled()
   })
 
