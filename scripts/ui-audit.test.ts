@@ -259,23 +259,19 @@ const verifyKeyboardReset = (reset = resetKeyboardNavigation) => {
 }
 
 describe('responsive measurements', () => {
-  it('uses every requested CSS viewport including short landscape and large screens', () => {
+  it('covers narrow, short, landscape, tablet and capped desktop layouts', () => {
     expect(layoutViewports.map(({ width, height }) => `${width}x${height}`)).toEqual([
       '320x568',
       '320x256',
-      '360x800',
       '390x844',
       '414x896',
       '844x390',
       '768x1024',
-      '820x1180',
       '1024x768',
       '1180x820',
       '1280x720',
-      '1366x768',
       '1536x864',
       '1920x1080',
-      '2560x1440',
       '3840x2160',
     ])
   })

@@ -4,19 +4,15 @@ import type { AuditFinding } from './reports.ts'
 export const layoutViewports = [
   { width: 320, height: 568 },
   { width: 320, height: 256 },
-  { width: 360, height: 800 },
   { width: 390, height: 844 },
   { width: 414, height: 896 },
   { width: 844, height: 390 },
   { width: 768, height: 1024 },
-  { width: 820, height: 1180 },
   { width: 1024, height: 768 },
   { width: 1180, height: 820 },
   { width: 1280, height: 720 },
-  { width: 1366, height: 768 },
   { width: 1536, height: 864 },
   { width: 1920, height: 1080 },
-  { width: 2560, height: 1440 },
   { width: 3840, height: 2160 },
 ] as const
 

@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { auditLocales, auditPages } from '../tools/e2e/audit-pages.ts'
 import { layoutViewports } from '../tools/e2e/layout.ts'
+import { layoutShardCount } from '../tools/e2e/layout-shards.ts'
 import type { AuditFinding, AuditReport } from '../tools/e2e/reports.ts'
 import type { ReportIdentity, UiCheckException } from '../tools/e2e/ui-check-gate.ts'
 
@@ -400,7 +401,7 @@ describe('matrix-derived report completeness', () => {
       {
         suites: [
           {
-            title: '320x568 light en-GB',
+            title: '320x568 light en-US',
             specs: [{ title: 'measure every page', tests: [{ projectName: 'layout' }] }],
           },
         ],
@@ -408,8 +409,11 @@ describe('matrix-derived report completeness', () => {
       'layout',
       new Map(),
     )
-    expect(selected.map((identity: ReportIdentity) => identity.page)).toEqual(
+    expect(selected.filter(({ locale }) => locale === 'en-GB').map(({ page }) => page)).toEqual(
       auditPages.filter(({ id }) => auditLocales(id).includes('en-GB')).map(({ id }) => id),
+    )
+    expect(selected.filter(({ locale }) => locale === 'en-US').map(({ page }) => page)).toEqual(
+      auditPages.filter(({ id }) => auditLocales(id).includes('en-US')).map(({ id }) => id),
     )
   })
 
@@ -476,13 +480,15 @@ describe('matrix-derived report completeness', () => {
     ).toThrow()
   })
 
-  it('partitions actual Playwright-selected shards without running browsers', async () => {
-    // Mirrors the e2e-layout matrix in .github/workflows/ui-checks.yml.
+  it('gives each layout shard one complete viewport and partitions the full matrix', async () => {
     // Enumerate the full report set once, then list only the remaining shards.
-    const { expected: firstShard, allExpected } = await loadExpectedReports('layout', '1/8')
+    const { expected: firstShard, allExpected } = await loadExpectedReports(
+      'layout',
+      `1/${layoutShardCount}`,
+    )
     const shards = [firstShard]
-    for (let shard = 2; shard <= 8; shard++)
-      shards.push(await listExpectedReports('layout', `${shard}/8`))
+    for (let shard = 2; shard <= layoutShardCount; shard++)
+      shards.push(await listExpectedReports('layout', `${shard}/${layoutShardCount}`))
     const selected = shards.flat()
     const reportsPerViewportAndTheme = auditPages.reduce(
       (total, page) => total + auditLocales(page.id).length,
@@ -491,8 +497,16 @@ describe('matrix-derived report completeness', () => {
     expect(allExpected).toHaveLength(layoutViewports.length * 2 * reportsPerViewportAndTheme)
     expect(new Set(selected.map(reportIdentity)).size).toBe(selected.length)
     expect(new Set(selected.map(reportIdentity))).toEqual(new Set(allExpected.map(reportIdentity)))
-    // Preparation tests occupy shard slots but do not write measurement reports.
-    expect(new Set(shards.map((shard) => shard.length)).size).toBeGreaterThan(1)
+    for (const [index, viewport] of layoutViewports.entries()) {
+      const shard = shards[index] ?? []
+      expect(shard).toHaveLength(2 * reportsPerViewportAndTheme)
+      expect(
+        shard.every(
+          (report) =>
+            report.viewport.width === viewport.width && report.viewport.height === viewport.height,
+        ),
+      ).toBe(true)
+    }
   }, 30_000)
 
   it('partitions the full axe matrix across CI shards without running browsers', async () => {
@@ -632,6 +646,11 @@ describe('matrix-derived report completeness', () => {
           .replace(
             "'./audit-pages.ts'",
             JSON.stringify(new URL('tools/e2e/audit-pages.ts', root).href),
+          )
+          .replace("'./layout.ts'", JSON.stringify(new URL('tools/e2e/layout.ts', root).href))
+          .replace(
+            "'./layout-shards.ts'",
+            JSON.stringify(new URL('tools/e2e/layout-shards.ts', root).href),
           )
           .replace("'./reports.ts'", JSON.stringify(new URL('tools/e2e/reports.ts', root).href))
           .replace(

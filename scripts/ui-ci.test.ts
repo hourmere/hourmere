@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import type { PlaywrightTestConfig } from '@playwright/test'
 import { describe, expect, it, vi } from 'vitest'
 import { parse } from 'yaml'
+import { auditShardArgs, layoutShardCount } from '../tools/e2e/layout-shards.ts'
 import functionalConfig from '../tools/e2e/playwright.config.ts'
 
 interface Step {
@@ -159,8 +160,27 @@ describe('UI measurement CI contract', () => {
     })
     expect(workflow.jobs['e2e-layout']?.strategy).toEqual({
       'fail-fast': false,
-      matrix: { shard: [1, 2, 3, 4, 5, 6, 7, 8] },
+      matrix: { shard: Array.from({ length: layoutShardCount }, (_, index) => index + 1) },
     })
+  })
+
+  it('assigns each focused layout check to exactly one CI shard', () => {
+    const source = readFileSync(join(root, 'tools/e2e/specs/layout.spec.ts'), 'utf8')
+    expect([...source.matchAll(/\btag:/g)]).toHaveLength(testNames(source).length)
+    const focusedTags = new Set(
+      [...source.matchAll(/tag: '(@layout-[\w-]+)'/g)].map((match) => match[1] ?? ''),
+    )
+    const filters = Array.from({ length: layoutShardCount }, (_, index) => {
+      const [filter = ''] = auditShardArgs('layout', `${index + 1}/${layoutShardCount}`)
+      expect(filter).toMatch(/^--grep=/)
+      return new RegExp(filter.slice('--grep='.length))
+    })
+    expect(focusedTags.size).toBeGreaterThan(0)
+    for (const tag of focusedTags)
+      expect(
+        filters.filter((filter) => filter.test(tag)),
+        tag,
+      ).toHaveLength(1)
   })
 
   it('skips every job on unlabeled PRs while allowing labeled PRs and main pushes', () => {
@@ -247,7 +267,7 @@ describe('UI measurement CI contract', () => {
   })
 
   it.each([
-    ['e2e-layout', 'layout', 8],
+    ['e2e-layout', 'layout', layoutShardCount],
     ['e2e-a11y-shard', 'a11y', 4],
     ['e2e-cross-engine', 'cross-engine', undefined],
   ] as const)(
@@ -255,6 +275,7 @@ describe('UI measurement CI contract', () => {
     (id, suite, shardCount) => {
       const job = workflow.jobs[id]
       expect(job?.['continue-on-error']).toBeUndefined()
+      if (suite === 'layout') expect(job?.['timeout-minutes']).toBe(35)
       const summary = job?.steps.find((step) => step.name === 'Summarize measurements')
       const shard = shardCount ? ` --shard=\${{ matrix.shard }}/${shardCount}` : ''
       expect(summary?.run).toBe(`node tools/e2e/reports-summary.ts --suite=${suite}${shard}`)
@@ -449,6 +470,10 @@ describe('report-only browser command', () => {
         process.env.HOURMERE_UI_RUNNER ?? join(root, 'tools/e2e/run-audit.ts'),
         'utf8',
       )
+        .replace(
+          "'./layout-shards.ts'",
+          JSON.stringify(new URL('../tools/e2e/layout-shards.ts', import.meta.url).href),
+        )
         .replace("fileURLToPath(new URL('../../', import.meta.url))", JSON.stringify(root))
         .replace(
           "fileURLToPath(import.meta.resolve('@playwright/test/cli'))",

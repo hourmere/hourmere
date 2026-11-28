@@ -346,8 +346,11 @@ exceptions apply. Sanitized-report uploads remain advisory. Visual-baseline dete
 comparison and baseline generation remain advisory with `continue-on-error: true`. The workflow
 is not called by CI or the release workflow and does not run in the merge queue or on release tags.
 
-Layout covers 16 CSS viewport sizes, light/dark, English and Simplified Chinese, plus
-British English on booking. Layout and axe include the booking calendar, form, confirmation,
+Layout covers 12 CSS viewports spanning small and short phones, landscape, tablets, and
+desktop through 4K. Each CI layout shard takes one viewport and runs four full registry
+scans (two themes × US English and Simplified Chinese), with two browser workers. The US
+English scan shares its server with the British English booking check in a separate tab.
+Layout and axe include the booking calendar, form, confirmation,
 time-zone panel, embedded and team booking, and OAuth consent states. Axe checks WCAG
 2.0/2.1/2.2 A/AA tags, records passes/incomplete and moderate/minor counts and reports
 serious/critical violations.
@@ -362,7 +365,7 @@ smoke covers booking, sign-in and the embed popup in desktop WebKit, iPhone WebK
 Firefox. These measurements use synthetic data and the disposable-database fixture.
 Axe splits registry states into batches of up to 32 per browser session and runs the
 batches in four parallel CI shards. The `e2e-a11y` job passes only when all shards pass.
-Every audit page pins the browser clock to the fixture's `AUDIT_NOW` before navigation,
+Audit tests pin the browser clock to the fixture's `AUDIT_NOW` before navigation,
 including form submissions that create rows read by later pages. After content readiness,
 audits await `document.fonts.ready` and 100 ms of stable DOM and geometry across paints;
 failure to settle within five seconds is a scan error.
@@ -376,7 +379,9 @@ Playwright installs system packages only when its dry-run check finds packages m
 未加标签的拉取请求会跳过所有 UI 检测任务。
 布局、axe 严重/致命问题和跨引擎测试回归会使任务失败；视觉检测仍为建议项。
 CI 和发布工作流都不调用它，合并队列和发布标签也不会运行这些检测。
-布局检测覆盖 16 种 CSS 视口、明暗主题、中英文，预约页另测英式英语；axe 记录通过、待人工确认、
+布局检测覆盖 12 种 CSS 视口，包括窄屏、低高度手机、横屏、平板和最高 4K 桌面屏幕。
+每个布局分片测一个视口，用两名浏览器工作进程运行美式英语和简体中文的明暗主题检测。
+英式英语预约页在独立标签页复用美式英语检测的服务器。axe 记录通过、待人工确认、
 中等和轻微项数，并报告严重和致命问题；漏扫也会导致失败。
 axe 每个浏览器会话最多扫描 32 个状态，CI 并行执行四个分片。所有分片通过后，`e2e-a11y` 才通过。
 检测涵盖预约表单、确认页、时区面板、嵌入页、团队预约和 OAuth 授权页。
@@ -394,9 +399,9 @@ these in its default sandbox. If escalation is denied, use CI and record the loc
 export HOURMERE_E2E_BOOTSTRAP_URL=postgres://hourmere:hourmere@localhost:5432/hourmere
 (
   export HOURMERE_UI_REPORT_DIR="$(mktemp -d)"
-  node tools/e2e/run-audit.ts layout --shard=1/4
-  node tools/e2e/reports-summary.ts --suite=layout --shard=1/4
-) # repeat 2/4, 3/4, 4/4 in new directories / 其余分片各用新目录
+  node tools/e2e/run-audit.ts layout --shard=1/12
+  node tools/e2e/reports-summary.ts --suite=layout --shard=1/12
+) # repeat 2/12 through 12/12 in new directories / 其余分片各用新目录
 (
   export HOURMERE_UI_REPORT_DIR="$(mktemp -d)"
   node tools/e2e/run-audit.ts a11y --shard=1/4
@@ -474,11 +479,10 @@ are rejected by the gate; use this shared file so every accepted finding remains
 已知问题例外须精确指定检测、页面、视口、语言、主题及问题类别（axe 另含规则），并填写原因与
 到期日。过期、无效或已不再匹配问题的例外均导致失败；扫描错误、漏扫和浏览器失败不允许豁免。
 
-Only the repository owner decides whether to make these checks required in branch protection:
-add the exact check names `e2e-layout (1)`, `e2e-layout (2)`, `e2e-layout (3)`,
-`e2e-layout (4)`, `e2e-a11y` and `e2e-cross-engine` from **UI checks**. This change does
-not alter repository settings; retain the four existing required CI checks and keep visual
-checks advisory until reviewed baselines are committed.
+Only the repository owner decides whether to make these checks required in branch protection.
+Use the check names `e2e-layout (1)` through `e2e-layout (12)`, `e2e-a11y` and
+`e2e-cross-engine` from **UI checks**. Retain the four existing required CI checks and keep
+visual checks advisory until reviewed baselines are committed.
 
 ## Conventions
 

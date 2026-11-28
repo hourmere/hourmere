@@ -195,6 +195,19 @@ export function prepareAuditLocale(selected: AuditLocale) {
   document.cookie = 'hourmere-language=; Path=/; SameSite=Lax; Max-Age=0'
 }
 
+const localeScripts = new WeakMap<
+  Page,
+  { locale: AuditLocale; script: Awaited<ReturnType<Page['addInitScript']>> }
+>()
+
+async function setAuditLocale(page: Page, locale: AuditLocale) {
+  const previous = localeScripts.get(page)
+  if (previous?.locale === locale) return
+  if (previous) await previous.script.dispose()
+  const script = await page.addInitScript(prepareAuditLocale, locale)
+  localeScripts.set(page, { locale, script })
+}
+
 export function verifyAuditPath(actualUrl: string, expectedPath: string) {
   if (new URL(actualUrl).pathname !== expectedPath)
     throw new Error('Synthetic audit state opened an unexpected route')
@@ -325,7 +338,7 @@ export async function openAuditPage(
   page: Page,
   app: FixtureApp,
   id: AuditPageId,
-  { locale = 'en-US' }: { locale?: AuditLocale } = {},
+  { locale = 'en-US', clockFixed = false }: { locale?: AuditLocale; clockFixed?: boolean } = {},
 ): Promise<void> {
   try {
     await leavePendingRoutingFormAudit(page, app.url)
@@ -338,12 +351,12 @@ export async function openAuditPage(
     await leaveSsoMemberAudit(page, app.url)
     await leaveSsoRecoveryAudit(page, app.url)
     await leavePendingScimMappingAudit(page, app.url)
-    // Earlier audit states create real bookings; pin the calendar and list filters
-    // before navigation so later pages never inherit wall-clock-dependent rows.
-    await page.clock.setFixedTime(new Date(AUDIT_NOW))
+    // Playwright retains clock and locale init scripts across navigations. A
+    // measurement that already pinned its context clock can reuse it for each state.
+    if (!clockFixed) await page.clock.setFixedTime(new Date(AUDIT_NOW))
+    await setAuditLocale(page, locale)
     if (isScimMappingAuditPage(id)) {
       await app.auditSignIn(true, locale, 'team')
-      await page.addInitScript(prepareAuditLocale, locale)
       const path = await openScimMappingAuditPage(page, app, id, locale === 'zh-CN' ? locale : 'en')
       verifyAuditPath(page.url(), path)
       await page.evaluate(() => window.scrollTo(0, 0))
@@ -352,7 +365,6 @@ export async function openAuditPage(
     }
     if (isWebhookAuditPage(id)) {
       await app.auditSignIn(true, locale, id === 'webhooks-list' ? 'team' : undefined)
-      await page.addInitScript(prepareAuditLocale, locale)
       const path = await openWebhookAuditPage(page, app, id, locale === 'zh-CN' ? locale : 'en')
       verifyAuditPath(page.url(), path)
       await page.evaluate(() => window.scrollTo(0, 0))
@@ -362,7 +374,6 @@ export async function openAuditPage(
     if (isSsoMemberAuditPage(id)) {
       const signedIn = isSsoMemberSettingsAuditPage(id)
       await app.auditSignIn(signedIn, locale, signedIn ? 'team' : undefined)
-      await page.addInitScript(prepareAuditLocale, locale)
       const path = await openSsoMemberAuditPage(page, app, id, locale === 'zh-CN' ? locale : 'en')
       verifyAuditPath(page.url(), path)
       await page.evaluate(() => window.scrollTo(0, 0))
@@ -371,7 +382,6 @@ export async function openAuditPage(
     }
     if (isSsoSetupAuditPage(id) || isSsoDelegationAuditPage(id)) {
       await app.auditSignIn(true, locale, 'team')
-      await page.addInitScript(prepareAuditLocale, locale)
       const language = locale === 'zh-CN' ? locale : 'en'
       const path = isSsoSetupAuditPage(id)
         ? await openSsoSetupAuditPage(page, app, id, language)
@@ -383,7 +393,6 @@ export async function openAuditPage(
     }
     if (isSsoRecoveryAuditPage(id)) {
       await app.auditSignIn(true, locale, 'team')
-      await page.addInitScript(prepareAuditLocale, locale)
       const path = await openSsoRecoveryAuditPage(page, app, id, locale === 'zh-CN' ? locale : 'en')
       verifyAuditPath(page.url(), path)
       await page.evaluate(() => window.scrollTo(0, 0))
@@ -396,7 +405,6 @@ export async function openAuditPage(
         locale,
         usesTeamRoutingFormManagerAuditSpace(id) ? 'team' : undefined,
       )
-      await page.addInitScript(prepareAuditLocale, locale)
       const path = await openRoutingFormManagerAuditPage(
         page,
         app,
@@ -420,7 +428,6 @@ export async function openAuditPage(
           ? 'team'
           : undefined,
       )
-      await page.addInitScript(prepareAuditLocale, locale)
       const language = locale === 'zh-CN' ? locale : 'en'
       const path = isWorkflowAuditPage(id)
         ? await openWorkflowAuditPage(page, app, id, language)
@@ -438,7 +445,6 @@ export async function openAuditPage(
         locale,
         id === 'host-poll-create-team' || id === 'host-poll-create-forbidden' ? 'team' : undefined,
       )
-      await page.addInitScript(prepareAuditLocale, locale)
       if (isPollAuditPage(id)) await openPollAuditPage(page, app, id)
       else {
         const language = locale === 'zh-CN' ? locale : 'en'
@@ -457,7 +463,6 @@ export async function openAuditPage(
       locale,
       id === 'team-bookings' || id === 'team-booking-detail' ? 'team' : undefined,
     )
-    await page.addInitScript(prepareAuditLocale, locale)
     const paths: Record<
       Exclude<
         AuditPageId,

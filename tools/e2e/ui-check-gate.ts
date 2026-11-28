@@ -1,7 +1,9 @@
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { a11yPageBatches } from './a11y-batches.ts'
-import { auditLocales, auditPages } from './audit-pages.ts'
+import { type AuditLocale, auditLocales, auditPages } from './audit-pages.ts'
+import { layoutViewports } from './layout.ts'
+import { auditShardArgs } from './layout-shards.ts'
 import {
   type AuditFinding,
   type AuditReport,
@@ -292,16 +294,16 @@ export function expectedFromPlaywrightList(
       const state = titles
         .map((title) =>
           suite === 'layout'
-            ? /^(\d+)x(\d+) (light|dark) (en-US|zh-CN|en-GB)$/.exec(title)
+            ? /^(\d+)x(\d+) (light|dark) (en-US|zh-CN)$/.exec(title)
             : /^(light|dark) (en-US|zh-CN|en-GB)$/.exec(title),
         )
         .find((match) => match !== null)
       if (!state) throw new Error('Unknown UI measurement test state')
       const theme = state[suite === 'layout' ? 3 : 1] as AuditReport['theme']
       const locale = state[suite === 'layout' ? 4 : 2] as AuditReport['locale']
-      const pages = batch
-        ? a11yPageBatches(locale)[Number(batch[1]) - 1]
-        : auditPages.filter(({ id }) => auditLocales(id).includes(locale))
+      const locales: AuditLocale[] =
+        suite === 'layout' && locale === 'en-US' ? [locale, 'en-GB'] : [locale]
+      const pages = batch ? a11yPageBatches(locale)[Number(batch[1]) - 1] : auditPages
       if (!pages) throw new Error('Unknown axe page batch')
       for (const test of spec.tests) {
         const viewport =
@@ -310,9 +312,10 @@ export function expectedFromPlaywrightList(
             : projectViewports.get(test.projectName)
         if (!viewport || !positiveInteger(viewport.width) || !positiveInteger(viewport.height))
           throw new Error('Unknown UI measurement project viewport')
-        for (const page of pages) {
-          expected.push({ kind: suite, page: page.id, theme, locale, viewport })
-        }
+        for (const page of pages)
+          for (const measuredLocale of locales)
+            if (auditLocales(page.id).includes(measuredLocale))
+              expected.push({ kind: suite, page: page.id, theme, locale: measuredLocale, viewport })
       }
     }
     for (const child of node.suites ?? []) visit(child, titles)
@@ -327,7 +330,6 @@ export function expectedFromPlaywrightList(
 }
 
 export async function listExpectedReports(suite: 'layout' | 'a11y', shard?: string) {
-  if (shard && !/^[1-9]\d*\/[1-9]\d*$/.test(shard)) throw new Error('Invalid UI shard')
   const root = fileURLToPath(new URL('../../', import.meta.url))
   const previousSuite = process.env.HOURMERE_UI_SUITE
   process.env.HOURMERE_UI_SUITE = suite
@@ -348,8 +350,8 @@ export async function listExpectedReports(suite: 'layout' | 'a11y', shard?: stri
     if (previousSuite === undefined) delete process.env.HOURMERE_UI_SUITE
     else process.env.HOURMERE_UI_SUITE = previousSuite
   }
-  // Playwright shards by test count and preparation tests occupy slots, so a shard
-  // may legitimately select no measurement test; the unsharded matrix never may.
+  // Custom local shard counts can still select only focused checks via Playwright's
+  // native sharding. Every CI layout shard must contain its full viewport matrix.
   const child = spawnSync(
     process.execPath,
     [
@@ -359,7 +361,7 @@ export async function listExpectedReports(suite: 'layout' | 'a11y', shard?: stri
       'tools/e2e/playwright.audit.config.ts',
       '--list',
       '--reporter=json',
-      ...(shard ? [`--shard=${shard}`] : []),
+      ...(shard ? auditShardArgs(suite, shard) : []),
     ],
     {
       cwd: root,
@@ -379,10 +381,11 @@ export async function listExpectedReports(suite: 'layout' | 'a11y', shard?: stri
     // Parsing diagnostics can contain stdout; expose only the safe child metadata.
     throw new UiMatrixEnumerationError(child)
   }
-  if (!shard && suite === 'a11y') {
+  if (!shard) {
     const pageLocales = auditPages.reduce((total, page) => total + auditLocales(page.id).length, 0)
-    if (expected.length !== pageLocales * themes.size * projectViewports.size)
-      throw new Error('Incomplete axe measurement matrix')
+    const viewports = suite === 'layout' ? layoutViewports.length : projectViewports.size
+    if (expected.length !== pageLocales * themes.size * viewports)
+      throw new Error(`Incomplete ${suite} measurement matrix`)
   }
   return expected
 }
