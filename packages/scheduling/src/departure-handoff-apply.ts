@@ -19,10 +19,12 @@ import type { BookingNotifier, ServiceContext } from './context.ts'
 import {
   type DepartureHandoffSourceInput,
   type DepartureHandoffWriteContext,
+  handoffBookingNotFound,
   handoffOfferChanged as offerChanged,
   handoffOfferNotFound as offerNotFound,
   withDepartureHandoffWrite,
 } from './departure-handoff-access.ts'
+import { lockDepartureHandoffSource } from './departure-handoff-delivery.ts'
 import { getDepartureHandoffEligibility } from './departure-handoff-eligibility.ts'
 import { getDepartureHandoffLocation } from './departure-handoff-location.ts'
 import { DomainError } from './errors.ts'
@@ -94,6 +96,16 @@ interface ApplyInput extends DepartureHandoffSourceInput {
 interface ApplyContext extends DepartureHandoffWriteContext {
   notify: BookingNotifier
 }
+
+type ApplyTransactionContext = Pick<
+  ServiceContext,
+  | 'now'
+  | 'requestId'
+  | 'automaticMeet'
+  | 'automaticZoom'
+  | 'microsoftCalendarEnabled'
+  | 'scimResourcesEnabled'
+> & { db: Transaction<Database>; notify: BookingNotifier }
 
 function before(left: Temporal.Instant, right: Temporal.Instant): boolean {
   return Temporal.Instant.compare(left, right) < 0
@@ -271,162 +283,187 @@ export async function applyDepartureHandoff(
   store: DepartureHandoffApplyStore,
   ssoCapabilities: TeamSsoCapabilities = ssoHardOff,
 ): Promise<{ sourceBookingId: string; replacementBookingId: string }> {
-  return withDepartureHandoffWrite(
+  return withDepartureHandoffWrite(ctx, input, ssoCapabilities, (writeContext, source, actor) =>
+    applyLockedDepartureHandoff(
+      { ...writeContext, notify: ctx.notify },
+      source,
+      input,
+      store,
+      actor,
+    ),
+  )
+}
+
+/** The queue and manual apply share the same locked transaction. Queue admission holds
+ * the team and run locks before taking the source lock. */
+export async function applyQueuedDepartureHandoff(
+  ctx: ApplyTransactionContext,
+  source: Pick<HandoffKey, 'organizationId' | 'sourceBookingId'>,
+  input: Pick<HandoffKey, 'offerId' | 'version'>,
+  store: DepartureHandoffApplyStore,
+  actor: { userId: string; sessionId: string },
+) {
+  if (!(await lockDepartureHandoffSource(ctx.db, source.organizationId, source.sourceBookingId)))
+    throw handoffBookingNotFound()
+  return applyLockedDepartureHandoff(ctx, source, input, store, actor)
+}
+
+async function applyLockedDepartureHandoff(
+  ctx: ApplyTransactionContext,
+  source: Pick<HandoffKey, 'organizationId' | 'sourceBookingId'>,
+  input: Pick<HandoffKey, 'offerId' | 'version'>,
+  store: DepartureHandoffApplyStore,
+  actor: { userId: string; sessionId: string },
+) {
+  const { db: trx } = ctx
+  if (!isUuid(input.offerId)) throw offerNotFound()
+  const key = {
+    ...source,
+    offerId: input.offerId.toLowerCase(),
+    version: input.version,
+  }
+  const offer = await store.lockOffer(trx, key)
+  if (!offer) throw offerNotFound()
+  if (offer === 'version_mismatch' || offer.version !== input.version) throw offerChanged()
+  if (offer.committed) {
+    return {
+      sourceBookingId: source.sourceBookingId,
+      replacementBookingId: offer.committed.replacementBookingId,
+    }
+  }
+  if (offer.state !== 'live') throw offerChanged()
+
+  const eligibilityInput = {
+    bookingId: source.sourceBookingId,
+    departingUserId: offer.departingUserId,
+  }
+  const preliminary = await getDepartureHandoffEligibility(
     ctx,
-    input,
-    ssoCapabilities,
-    async (writeContext, source, actor) => {
-      const { db: trx, principal } = writeContext
-      if (!isUuid(input.offerId)) throw offerNotFound()
-      const key = {
-        ...source,
-        offerId: input.offerId.toLowerCase(),
-        version: input.version,
-      }
-      const offer = await store.lockOffer(trx, key)
-      if (!offer) throw offerNotFound()
-      if (offer === 'version_mismatch' || offer.version !== input.version) throw offerChanged()
-      if (offer.committed) {
-        return {
-          sourceBookingId: source.sourceBookingId,
-          replacementBookingId: offer.committed.replacementBookingId,
-        }
-      }
-      if (offer.state !== 'live') throw offerChanged()
+    source.organizationId,
+    eligibilityInput,
+  )
+  await lockHosts(trx, [offer.departingUserId.toLowerCase(), preliminary.candidateUserId])
+  const eligible = await getDepartureHandoffEligibility(
+    ctx,
+    source.organizationId,
+    eligibilityInput,
+    ctx.now(),
+    true,
+  )
+  const { event, candidateUserId } = eligible
+  if (candidateUserId !== preliminary.candidateUserId || event.id !== preliminary.event.id)
+    throw offerChanged()
 
-      const eligibilityInput = {
-        bookingId: source.sourceBookingId,
-        departingUserId: offer.departingUserId,
-      }
-      const preliminary = await getDepartureHandoffEligibility(
-        writeContext,
-        source.organizationId,
-        eligibilityInput,
-      )
-      await lockHosts(trx, [offer.departingUserId.toLowerCase(), preliminary.candidateUserId])
-      const eligible = await getDepartureHandoffEligibility(
-        writeContext,
-        source.organizationId,
-        eligibilityInput,
-        ctx.now(),
-        true,
-      )
-      const { event, candidateUserId } = eligible
-      if (candidateUserId !== preliminary.candidateUserId || event.id !== preliminary.event.id)
-        throw offerChanged()
+  const terms = await readDepartureHandoffTerms(
+    ctx,
+    source.organizationId,
+    { bookingId: source.sourceBookingId, ...offer },
+    eligible,
+    true,
+  )
+  const now = ctx.now()
+  assertOfferLive(offer, eligible.source.start, terms.start, now)
+  if (terms.termsDigest !== offer.termsDigest) throw offerChanged()
+  const recipientIds = departureHandoffApprovedRecipientIds(offer, terms.recipientKeys, now)
+  if (recipientIds.length !== terms.recipientKeys.length)
+    throw new DomainError('conflict', 'handoff_consent_required')
 
-      const terms = await readDepartureHandoffTerms(
-        writeContext,
-        source.organizationId,
-        { bookingId: source.sourceBookingId, ...offer },
-        eligible,
-        true,
-      )
-      const now = ctx.now()
-      assertOfferLive(offer, eligible.source.start, terms.start, now)
-      if (terms.termsDigest !== offer.termsDigest) throw offerChanged()
-      const recipientIds = departureHandoffApprovedRecipientIds(offer, terms.recipientKeys, now)
-      if (recipientIds.length !== terms.recipientKeys.length)
-        throw new DomainError('conflict', 'handoff_consent_required')
-
-      const policy = await trx
-        .selectFrom('event_types')
-        .select(['notifications', 'reschedule_cutoff_minutes', 'cancel_cutoff_minutes'])
-        .where('id', '=', event.id)
-        .executeTakeFirstOrThrow()
-      // Capture the historical destinations before cancellation queues its work. A
-      // disconnected calendar cascades its normal writeback rows, but not this receipt.
-      await sql`
-        WITH RECURSIVE chain(id, rescheduled_from_id) AS (
-          SELECT id, rescheduled_from_id FROM bookings
-            WHERE id = ${source.sourceBookingId} AND organization_id = ${source.organizationId}
-          UNION ALL
-          SELECT b.id, b.rescheduled_from_id FROM bookings b JOIN chain ON b.id = chain.rescheduled_from_id
-            WHERE b.organization_id = ${source.organizationId}
-        ) CYCLE id SET is_cycle USING path,
-        root AS (SELECT id FROM chain WHERE rescheduled_from_id IS NULL AND NOT is_cycle),
-        destinations AS (
-          SELECT target.calendar_id, target.user_id,
-            CASE WHEN target.microsoft_writeback IS NULL THEN 'google' ELSE 'microsoft' END AS provider
-          FROM root JOIN booking_calendar_targets target ON target.root_booking_id = root.id
-          UNION
-          SELECT event.calendar_id, host.user_id, 'google'
-          FROM chain JOIN booking_calendar_events event ON event.booking_id = chain.id
-            JOIN booking_hosts host ON host.booking_id = chain.id WHERE NOT is_cycle
+  const policy = await trx
+    .selectFrom('event_types')
+    .select(['notifications', 'reschedule_cutoff_minutes', 'cancel_cutoff_minutes'])
+    .where('id', '=', event.id)
+    .executeTakeFirstOrThrow()
+  // Capture the historical destinations before cancellation queues its work. A
+  // disconnected calendar cascades its normal writeback rows, but not this receipt.
+  await sql`
+    WITH RECURSIVE chain(id, rescheduled_from_id) AS (
+      SELECT id, rescheduled_from_id FROM bookings
+        WHERE id = ${source.sourceBookingId} AND organization_id = ${source.organizationId}
+      UNION ALL
+      SELECT b.id, b.rescheduled_from_id FROM bookings b JOIN chain ON b.id = chain.rescheduled_from_id
+        WHERE b.organization_id = ${source.organizationId}
+    ) CYCLE id SET is_cycle USING path,
+    root AS (SELECT id FROM chain WHERE rescheduled_from_id IS NULL AND NOT is_cycle),
+    destinations AS (
+      SELECT target.calendar_id, target.user_id,
+        CASE WHEN target.microsoft_writeback IS NULL THEN 'google' ELSE 'microsoft' END AS provider
+      FROM root JOIN booking_calendar_targets target ON target.root_booking_id = root.id
+      UNION
+      SELECT event.calendar_id, host.user_id, 'google'
+      FROM chain JOIN booking_calendar_events event ON event.booking_id = chain.id
+        JOIN booking_hosts host ON host.booking_id = chain.id WHERE NOT is_cycle
+    )
+    INSERT INTO departure_handoff_calendar_cleanup (source_booking_id, calendar_id, connection_id, provider)
+    SELECT ${source.sourceBookingId}, c.id, cc.id, cc.provider
+      FROM destinations d JOIN calendars c ON c.id = d.calendar_id
+      JOIN calendar_connections cc ON cc.id = c.connection_id AND cc.user_id = d.user_id
+      WHERE cc.provider = d.provider AND (
+        cc.provider = 'microsoft' OR NOT EXISTS (
+          SELECT 1 FROM root JOIN booking_conferences conf ON conf.root_booking_id = root.id
         )
-        INSERT INTO departure_handoff_calendar_cleanup (source_booking_id, calendar_id, connection_id, provider)
-        SELECT ${source.sourceBookingId}, c.id, cc.id, cc.provider
-          FROM destinations d JOIN calendars c ON c.id = d.calendar_id
-          JOIN calendar_connections cc ON cc.id = c.connection_id AND cc.user_id = d.user_id
-          WHERE cc.provider = d.provider AND (
-            cc.provider = 'microsoft' OR NOT EXISTS (
-              SELECT 1 FROM root JOIN booking_conferences conf ON conf.root_booking_id = root.id
-            )
-          )
-      `.execute(trx)
-      await cancelTeamBookingInTransaction(
-        trx,
-        { ...actor, organizationId: source.organizationId },
-        source.sourceBookingId,
-        () => now,
-        {
-          notify: ctx.notify,
-          sessionId: actor.sessionId,
-          seriesOccurrenceId: null,
-          meetingPollLinked: false,
-        },
       )
-      await requireOfferedSlot(trx, {
-        eventTypeId: event.id,
-        hostUserId: candidateUserId,
-        start: terms.start,
-        end: terms.end,
-        now,
-        durationMinutes: terms.duration,
-        excludeBookingId: source.sourceBookingId,
-      })
-      const { id } = await insertBooking(trx, {
-        organizationId: source.organizationId,
-        eventTypeId: event.id,
-        start: terms.start,
-        end: terms.end,
-        title: terms.title,
-        location: terms.location,
-        locationOption: terms.locationOption,
-        responses: terms.responses,
-        source: 'web',
-        apiKeyId: null,
-        hostUserIds: [candidateUserId],
-        hostsUseDefaultSchedule: false,
-        attendees: terms.attendees,
-        notificationSnapshot: createNotificationSnapshot(policy.notifications),
-        changeCutoffs: cutoffsOf(policy),
-      })
-      await auditBooking(trx, source.organizationId, id, 'booking.created', {
-        source: 'web',
-        apiKeyId: null,
-        audit: auditActor(principal),
-        requestId: ctx.requestId,
-      })
-      await prepareBookingConference(ctx, trx, id)
-      await ctx.notify(
-        trx,
-        {
-          type: 'created',
-          bookingId: id,
-          start: terms.start,
-          ...(terms.location?.kind === 'microsoft_teams' && { teamsMeeting: true }),
-        },
-        now,
-      )
-      await store.commitHandoff(trx, key, {
-        applyingUserId: actor.userId,
-        appliedAt: now.toString(),
-        recipientIds,
-        replacementBookingId: id,
-      })
-      assertOfferLive(offer, eligible.source.start, terms.start, ctx.now())
-      return { sourceBookingId: source.sourceBookingId, replacementBookingId: id }
+  `.execute(trx)
+  await cancelTeamBookingInTransaction(
+    trx,
+    { ...actor, organizationId: source.organizationId },
+    source.sourceBookingId,
+    () => now,
+    {
+      notify: ctx.notify,
+      sessionId: actor.sessionId,
+      seriesOccurrenceId: null,
+      meetingPollLinked: false,
     },
   )
+  await requireOfferedSlot(trx, {
+    eventTypeId: event.id,
+    hostUserId: candidateUserId,
+    start: terms.start,
+    end: terms.end,
+    now,
+    durationMinutes: terms.duration,
+    excludeBookingId: source.sourceBookingId,
+  })
+  const { id } = await insertBooking(trx, {
+    organizationId: source.organizationId,
+    eventTypeId: event.id,
+    start: terms.start,
+    end: terms.end,
+    title: terms.title,
+    location: terms.location,
+    locationOption: terms.locationOption,
+    responses: terms.responses,
+    source: 'web',
+    apiKeyId: null,
+    hostUserIds: [candidateUserId],
+    hostsUseDefaultSchedule: false,
+    attendees: terms.attendees,
+    notificationSnapshot: createNotificationSnapshot(policy.notifications),
+    changeCutoffs: cutoffsOf(policy),
+  })
+  await auditBooking(trx, source.organizationId, id, 'booking.created', {
+    source: 'web',
+    apiKeyId: null,
+    audit: auditActor({ kind: 'session', user: { id: actor.userId }, sessionId: actor.sessionId }),
+    requestId: ctx.requestId,
+  })
+  await prepareBookingConference(ctx, trx, id)
+  await ctx.notify(
+    trx,
+    {
+      type: 'created',
+      bookingId: id,
+      start: terms.start,
+      ...(terms.location?.kind === 'microsoft_teams' && { teamsMeeting: true }),
+    },
+    now,
+  )
+  await store.commitHandoff(trx, key, {
+    applyingUserId: actor.userId,
+    appliedAt: now.toString(),
+    recipientIds,
+    replacementBookingId: id,
+  })
+  assertOfferLive(offer, eligible.source.start, terms.start, ctx.now())
+  return { sourceBookingId: source.sourceBookingId, replacementBookingId: id }
 }

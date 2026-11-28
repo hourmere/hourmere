@@ -2864,6 +2864,24 @@ versions in expiry order, processing up to 10 batches of 100 and deferring locke
 any remaining backlog to later runs. Offer version identifiers and committed consent
 receipts keep their existing retention rules.
 
+`departure_handoff_runs` keys an explicit start by team and caller-supplied run UUID.
+The run keeps the departing host ID, current authorizing actor and session IDs, state,
+next due time and deadline. The active-run index permits one running or paused run per
+team. Admission takes the team update lock before checking its one-minute cooldown.
+`departure_handoff_run_items` caps each run at ten ordered source bookings through its
+ordinal and unique source constraints. The item stores the exact offer version, safe result
+code and any replacement booking ID. Team deletion removes runs and items. Source and
+offer deletion can leave opaque historical IDs in the result for its seven-day retention.
+
+The item worker locks the current authority and team, then the run, then the source and
+offer using the single-booking apply path. The run lock fences pause, stop and duplicate
+workers. Apply, ordinary booking outbox writes and the item receipt commit together.
+A failed transaction leaves the item pending for a due-run recovery wake. If the worker can
+roll back only the failed apply, the same transaction can record a terminal item result.
+The run marks remaining items stopped on operator stop, expiry, lost authority or detection
+that the former host is again a member. The run-level audit carries no mailbox or session ID.
+See the [staged run operations](member-departure-handoff.md#staged-automatic-handoff-runs).
+
 `departure_handoff_calendar_cleanup` records each source chain's pinned ordinary Google
 Calendar or Microsoft destination during apply. Calendar and connection IDs are historical
 snapshots. They survive disconnection so the receipt can report unresolved cleanup or retain

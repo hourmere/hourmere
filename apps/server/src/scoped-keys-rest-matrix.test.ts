@@ -246,6 +246,9 @@ const classes = {
     'POST /api/v1/team/bookings/{id}/handoff-offers/{offerId}/withdraw',
     'POST /api/v1/team/bookings/{id}/handoff-offers/{offerId}/resend',
     'POST /api/v1/team/bookings/{id}/handoff-offers/{offerId}/apply',
+    'POST /api/v1/team/bookings/handoff-runs',
+    'GET /api/v1/team/bookings/handoff-runs/{runId}',
+    'POST /api/v1/team/bookings/handoff-runs/{runId}/control',
     'POST /api/v1/team/bookings/bulk-cancellations/preview',
     'POST /api/v1/team/bookings/bulk-cancellations/{id}/confirm',
     'GET /api/v1/team/bookings/bulk-cancellations/{id}',
@@ -588,6 +591,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
           .replaceAll('{transferId}', randomUUID())
           .replaceAll('{invitationId}', randomUUID())
           .replaceAll('{operationId}', randomUUID())
+          .replaceAll('{runId}', randomUUID())
           .replaceAll('{memberUserId}', owner.user.id)
           .replaceAll('{teamId}', teamId)
           .replaceAll('{organizationId}', teamId)
@@ -1127,14 +1131,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 216-operation contract and all 648 scope combinations', () => {
+    it('covers the exact 219-operation contract and all 657 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(216)
-      expect(new Set(ids).size).toBe(216)
+      expect(ids).toHaveLength(219)
+      expect(new Set(ids).size).toBe(219)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(648)
+      expect(cases).toHaveLength(657)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {

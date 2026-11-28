@@ -200,6 +200,14 @@
     "exemption": "browser-session-only",
     "reason": "A current team owner or admin must explicitly confirm the participant-approved booking replacement in a browser session."
   },
+  "startDepartureHandoffRun": {
+    "exemption": "browser-session-only",
+    "reason": "A current team owner or admin explicitly starts a bounded run of participant-approved replacements from the browser."
+  },
+  "controlDepartureHandoffRun": {
+    "exemption": "browser-session-only",
+    "reason": "A current team owner or admin pauses, resumes or stops a departure handoff run from the browser."
+  },
   "cancelTeamBooking": {
     "exemption": "browser-session-only",
     "reason": "Team-wide owner/admin cancellation is browser-session-only; host cancellation does not grant this authority."

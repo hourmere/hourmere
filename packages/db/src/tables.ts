@@ -770,6 +770,31 @@ export interface DepartureHandoffRecipients {
   token_digest: string | null;
 }
 
+export interface DepartureHandoffRunItems {
+  offer_id: string;
+  offer_version: number;
+  ordinal: number;
+  organization_id: string;
+  outcome: Generated<string>;
+  replacement_booking_id: string | null;
+  run_id: string;
+  source_booking_id: string;
+}
+
+export interface DepartureHandoffRuns {
+  actor_user_id: string;
+  created_at: Generated<Timestamp>;
+  departing_user_id: string;
+  expires_at: Timestamp;
+  failure_code: string | null;
+  finished_at: Timestamp | null;
+  id: string;
+  next_item_at: Generated<Timestamp>;
+  organization_id: string;
+  session_id: string;
+  state: Generated<string>;
+}
+
 export interface DepartureHandoffSendBudgets {
   counted_sends: number;
   organization_id: string;
@@ -2145,6 +2170,8 @@ export interface DB {
   departure_handoff_deliveries: DepartureHandoffDeliveries;
   departure_handoff_offers: DepartureHandoffOffers;
   departure_handoff_recipients: DepartureHandoffRecipients;
+  departure_handoff_run_items: DepartureHandoffRunItems;
+  departure_handoff_runs: DepartureHandoffRuns;
   departure_handoff_send_budgets: DepartureHandoffSendBudgets;
   event_type_hosts: EventTypeHosts;
   event_types: EventTypes;

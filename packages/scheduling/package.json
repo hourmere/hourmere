@@ -13,6 +13,7 @@
     "./departure-handoff-delivery": "./src/departure-handoff-delivery.ts",
     "./departure-handoff-participant": "./src/departure-handoff-participant.ts",
     "./departure-handoff-proposals": "./src/departure-handoff-proposals.ts",
+    "./departure-handoff-queue": "./src/departure-handoff-queue.ts",
     "./departure-handoff-store": "./src/departure-handoff-store.ts",
     "./conferences": "./src/conferences.ts",
     "./notification-settings": "./src/notification-settings.ts",

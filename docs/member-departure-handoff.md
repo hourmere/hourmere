@@ -211,12 +211,6 @@ any remaining copy in Outlook. If disconnection removed the target, only manual 
 in Outlook is available. The replacement host's credentials cannot be used to reconcile
 the old event.
 
-For an ordinary Google Calendar copy, the cleanup worker checks the old chain UID and
-any saved event ID on the original destination before cancelling the copy. After a lost
-response, it can verify that the same event is already cancelled. An inaccessible account
-or a copy whose identity cannot be verified leaves cleanup unresolved. The receipt shows
-only the cleanup outcome, including when the original target has been disconnected.
-
 For a new Teams booking, admission requires Microsoft calendars to be enabled on the
 instance and the new host to have an eligible owned Microsoft destination with
 `Calendars.ReadWrite`. If either check fails, return `location_unavailable`. After commit
@@ -350,8 +344,8 @@ input with `--input -`.
 The page clears the fragment before requesting the offer. It and the API responses
 are served with no-store and no-referrer headers. Offer and answer operations share
 a rate limit of 30 requests per minute per trusted IP bucket on each server process.
-Production admission remains off. Handoff-specific replacement notifications, calendar
-attachments and rollout remain pending.
+Production admission remains off, and handoff-specific replacement notifications,
+calendar attachments and rollout remain pending.
 
 中文：预发布管理员可创建、查看、撤回和换版交接提议，也可向尚未决定的收件人重发私密链接。
 同一源预约的每个规范化邮箱最多发送三次，包含首发和送达不确定的尝试。重试同一请求时请沿用
@@ -365,7 +359,45 @@ attachments and rollout remain pending.
 
 Provider cleanup and creation reuse existing workers. Google Calendar, Meet, Outlook, Teams
 and Zoom handoffs use real PostgreSQL and fake providers for lifecycle acceptance, including
-revocation and ambiguous responses. Bounded automatic handoff is a separate follow-on.
+revocation and ambiguous responses.
+
+### Staged automatic handoff runs
+
+After a host has left, a current team owner or administrator can start a run for that
+host. Pass a fresh UUID as `runId` and the former host's account ID as `departingUserId`
+to `POST /api/v1/team/bookings/handoff-runs`. Read the receipt at
+`GET /api/v1/team/bookings/handoff-runs/{runId}`. Use `POST` to the same path with
+`/control` appended and an `action` of `pause`, `resume` or `stop`. All operations require
+the browser's current team session and `X-Expected-Organization-Id`. Writes require a
+same-origin request. The routes and background processing remain disabled in production.
+
+A run records up to ten live proposals that already have every recorded recipient's
+approval, starting with the earliest expiry. It reuses those offers and their prior link
+deliveries. The worker processes one saved version per transaction, with at least ten seconds
+between attempts. One run per team can be running or paused, and new runs start at least
+one minute apart. Repeating the start with the same run ID and departing host returns the
+existing receipt. A worker restart resumes from the same saved versions. A manual apply
+that won the source lock can supply the same committed receipt without creating a second
+replacement. Each apply rechecks the complete recipient set, saved terms, slot and current
+authority. The original booking keeps its saved host and identity.
+
+Pause and stop take effect after any transaction already in flight. Resume keeps the
+same items and uses the resuming administrator's current session. Before each item, the
+worker checks that the former host is still absent and the authorizing session still has
+access. The run has a 30-minute deadline, including time paused. A completed run reports each item as applied,
+ineligible or processing failed. A stopped or failed run marks the remaining items stopped.
+Review any unapplied item in Team bookings and use the existing single-booking handoff or
+manual recovery flow. Some bookings may have been outside the run or missing approvals.
+Receipts are retained for seven days and contain only stored IDs, versions and status codes.
+The team journal records run starts, pauses, resumes and terminal transitions.
+
+中文：主持人离队后，当前团队所有者或管理员可在预发布流程显式启动一轮交接。每轮最多处理十笔
+已经获得全部参与者同意的有效提议，逐笔提交，间隔至少十秒。同一团队同时只能有一轮运行或暂停，
+新一轮启动间隔至少一分钟。每轮有三十分钟期限，包含暂停时间。用同一运行编号重试启动会取回
+原回执。暂停或停止会在下一笔前生效。恢复会沿用原提议版本，并复核当前管理员的会话权限。
+原主持人重新加入团队或会话失去权限时，本轮停止处理。请逐笔查看回执，用原有单笔交接或人工
+恢复流程处理未完成的预约。未获同意和超出本轮上限的预约需另行处理。原预约保留原主持人及
+原预约链身份。回执保留七天，生产入口和后台作业仍关闭。
 
 | Step | Deliverable and acceptance |
 | --- | --- |
