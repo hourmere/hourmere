@@ -1,7 +1,8 @@
 import { act, fireEvent, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Schemas } from '../../api/client.ts'
+import { AppShell, RequireSession, SessionLayout, TeamBookingsPage } from '../../lazy-pages.tsx'
 import {
   fakeApi,
   json,
@@ -12,7 +13,10 @@ import {
   renderApp,
   signedInAs,
 } from '../../test/fake-api.tsx'
+import { resolveLazy } from '../../test/resolve-lazy.ts'
 import { teamBookingPanelApi } from '../../test/team-booking-panel-api.ts'
+
+beforeAll(() => resolveLazy(SessionLayout, RequireSession, AppShell, TeamBookingsPage))
 
 const PAGE = '/app/team/bookings'
 beforeEach(() => {

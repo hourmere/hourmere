@@ -113,10 +113,11 @@ const detail = () => screen.getByRole('region', { name: 'Team booking details' }
 const titleButton = (title = 'Team discovery call') => screen.getByRole('button', { name: title })
 async function openDetail(user = userEvent.setup()) {
   await user.click(await screen.findByRole('button', { name: 'Team discovery call' }))
+  await screen.findByRole('region', { name: 'Team booking details' })
   return user
 }
 async function confirmCancellation(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole('button', { name: 'Cancel booking…' }))
+  await user.click(await screen.findByRole('button', { name: 'Cancel booking…' }))
   await user.click(screen.getByRole('button', { name: 'Cancel booking' }))
 }
 
@@ -585,8 +586,9 @@ describe('team bookings list and DTO details', () => {
     server({ [LIST]: () => json(200, { data: [dto], nextCursor: null }) })
     renderApp(PAGE)
     await userEvent.setup().click(await screen.findByRole('button', { name: 'Deleted event type' }))
-    expect(within(detail()).getByText('Deleted event type')).toBeDefined()
-    const cancelledAt = within(detail()).getByText('Cancelled', {
+    const panel = within(await screen.findByRole('region', { name: 'Team booking details' }))
+    expect(panel.getByText('Deleted event type')).toBeDefined()
+    const cancelledAt = panel.getByText('Cancelled', {
       selector: 'dt',
     }).nextElementSibling
     expect(cancelledAt?.querySelector('time')?.dateTime).toBe(dto.cancelledAt)
@@ -862,7 +864,7 @@ describe('team bookings states and translations', () => {
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: '重试' }))
     await user.click(await screen.findByRole('button', { name: 'Team discovery call' }))
-    const panel = within(screen.getByRole('region', { name: '团队预约详情' }))
+    const panel = within(await screen.findByRole('region', { name: '团队预约详情' }))
     expect(panel.getAllByRole('term').map((term) => term.textContent)).toEqual([
       '活动',
       '时间',

@@ -91,8 +91,9 @@ function required<T>(value: T | null | undefined): T {
 const detail = () => screen.getByRole('region', { name: 'Team booking details' })
 const displayed = (term: string) =>
   within(detail()).getByText(term, { selector: 'dt' }).nextElementSibling
-async function openDetail(title = 'Global sync') {
-  await userEvent.setup().click(await screen.findByRole('button', { name: title }))
+async function openDetail(name = 'Team booking details') {
+  await userEvent.setup().click(await screen.findByRole('button', { name: 'Global sync' }))
+  return screen.findByRole('region', { name })
 }
 const copy = [
   {
@@ -203,10 +204,7 @@ describe('team booking acceptance polish', () => {
       expect(row.querySelector('.booking-when time')?.textContent).toBe(
         `${format.date(current.start)} ${format.timeRange(current.start, current.end)}`,
       )
-      await openDetail()
-      const panel = screen.getByRole('region', {
-        name: text.locale === 'en' ? 'Team booking details' : '团队预约详情',
-      })
+      const panel = await openDetail(text.locale === 'en' ? 'Team booking details' : '团队预约详情')
       const when = within(panel).getByText(text.locale === 'en' ? 'When' : '时间', {
         selector: 'dt',
       }).nextElementSibling
@@ -364,10 +362,7 @@ describe('team booking acceptance polish', () => {
           .closest('tr')
           ?.querySelector('.badge')?.textContent,
       ).toBe(text.cancelled)
-      await openDetail()
-      const panel = screen.getByRole('region', {
-        name: text.locale === 'en' ? 'Team booking details' : '团队预约详情',
-      })
+      const panel = await openDetail(text.locale === 'en' ? 'Team booking details' : '团队预约详情')
       expect(within(panel).getByText(text.rescheduled, { selector: 'dd' })).toBeDefined()
       expect(within(panel).queryByText(text.cancelled, { selector: 'dt' })).toBeNull()
       expect(

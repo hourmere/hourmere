@@ -2090,8 +2090,8 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
     }
   }
 
-  /** Whether `work` queues behind a lock (`count` waiters in all) or settles first. */
-  async function queues(work: Promise<unknown>, count: number): Promise<'queued' | 'settled'> {
+  /** The lock wait event in this test database, or undefined if work settles first. */
+  async function lockWait(work: Promise<unknown>, pid: number | null = null) {
     let settled = false
     work.then(
       () => {
@@ -2102,15 +2102,16 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
       },
     )
     for (let attempt = 0; attempt < 400; attempt++) {
-      if (settled) return 'settled'
+      if (settled) return undefined
       const { rows } = await sql<{
-        count: string
-      }>`SELECT count(*)::text AS count FROM pg_stat_activity
-        WHERE datname = current_database() AND wait_event_type = 'Lock'`.execute(db)
-      if (Number(rows[0]?.count) >= count) return 'queued'
+        wait_event: string
+      }>`SELECT wait_event FROM pg_stat_activity
+        WHERE datname = current_database() AND wait_event_type = 'Lock'
+          AND (${pid}::int IS NULL OR pid = ${pid})`.execute(db)
+      if (rows[0]) return rows[0].wait_event
       await new Promise((resolve) => setTimeout(resolve, 25))
     }
-    throw new Error(`expected ${count} lock waiters or a settled operation`)
+    throw new Error('expected a lock waiter or a settled operation')
   }
 
   /**
@@ -2126,13 +2127,13 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
       await book(trx, s.organizationId, [s.user.id], taken, { eventTypeId: s.eventTypeId })
     })
     const creation = propose(M, s.ctx, s.eventTypeId, starts, deadline)
-    let order: 'queued' | 'settled'
+    let waitEvent: string | undefined
     try {
-      order = await queues(creation, 1)
+      waitEvent = await lockWait(creation)
     } finally {
       await commit()
     }
-    expect(order).toBe('queued')
+    expect(waitEvent).toBe('advisory')
     await refused(creation, s.eventTypeId, [taken])
   }
 
@@ -2155,19 +2156,27 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
     )
     const creation = propose(M, s.ctx, s.eventTypeId, starts, deadline)
     let booking: Promise<string> | undefined
-    let order: 'queued' | 'settled' | undefined
+    let waitEvent: string | undefined
     try {
-      if ((await queues(creation, 1)) === 'queued') {
-        booking = db.transaction().execute(async (trx) => {
-          await lockHosts(trx, [s.user.id])
-          return book(trx, s.organizationId, [s.user.id], proposed, { eventTypeId: s.eventTypeId })
-        })
-        order = await queues(booking, 2)
-      }
+      expect(await lockWait(creation)).toBeDefined()
+      const bookingBackend = Promise.withResolvers<number>()
+      booking = db.transaction().execute(async (trx) => {
+        const { pid } = await trx
+          .selectNoFrom(sql<number>`pg_backend_pid()`.as('pid'))
+          .executeTakeFirstOrThrow()
+        bookingBackend.resolve(pid)
+        await lockHosts(trx, [s.user.id])
+        return book(trx, s.organizationId, [s.user.id], proposed, { eventTypeId: s.eventTypeId })
+      })
+      booking.catch(bookingBackend.reject)
+      // The booking's foreign key can also wait on the held event row if creation skips
+      // the host lock. Check this booking backend's wait event before releasing the row.
+      waitEvent = await lockWait(booking, await bookingBackend.promise)
     } finally {
       await release()
+      await Promise.allSettled([creation, booking])
     }
-    expect(order).toBe('queued')
+    expect(waitEvent).toBe('advisory')
     const { poll } = await succeeds(() => creation)
     expect(poll.candidates.map((candidate) => candidate.startAt)).toEqual(starts)
     expect(await booking).toEqual(expect.any(String))
@@ -2179,9 +2188,9 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
     const named = [s.member.id, s.owner.id]
     const release = await holding((trx) => lockHosts(trx, named))
     const creation = (async () => M.createMeetingPoll(s.ctx, await input(s.eventTypeId)))()
-    let order: 'queued' | 'settled'
+    let waitEvent: string | undefined
     try {
-      order = await queues(creation, 1)
+      waitEvent = await lockWait(creation)
       await db
         .updateTable('event_type_hosts')
         .set({ user_id: s.admin.id })
@@ -2191,7 +2200,7 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
     } finally {
       await release()
     }
-    expect(order).toBe('queued')
+    expect(waitEvent).toBe('advisory')
     expect(await failure(() => creation)).toMatchObject({
       kind: 'conflict',
       code: 'poll_event_changed',
@@ -2265,16 +2274,16 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
       trx.selectFrom('auth.user').select('id').where('id', '=', s.member.id).forUpdate().execute(),
     )
     const creation = (async () => M.createMeetingPoll(s.ctx, await input(s.eventTypeId)))()
-    let order: 'queued' | 'settled'
+    let waitEvent: string | undefined
     let released: Temporal.Instant
     try {
-      order = await queues(creation, 1)
+      waitEvent = await lockWait(creation)
       await new Promise((resolve) => setTimeout(resolve, 250))
       released = await databaseNow()
     } finally {
       await release()
     }
-    expect(order).toBe('queued')
+    expect(waitEvent).toBeDefined()
     const { poll } = await succeeds(() => creation)
     expect(
       Temporal.Instant.compare(Temporal.Instant.from(poll.createdAt), released),
