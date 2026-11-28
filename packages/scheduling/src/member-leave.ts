@@ -13,6 +13,7 @@ import {
 } from '@hourmere/auth'
 import type { Database } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
+import { retirePendingOwnershipTransfer } from '@hourmere/db/ownership-transfer'
 import {
   checkTeamWriteBeforeAuthorityChange,
   checkTeamWriteDeadline,
@@ -129,8 +130,13 @@ export async function leaveTeamMember(
         .deleteFrom('auth.member')
         .where('organizationId', '=', actor.organizationId)
         .where('userId', '=', actor.userId)
-        .returning('role')
+        .returning(['id', 'role'])
         .executeTakeFirstOrThrow()
+      await retirePendingOwnershipTransfer(trx, {
+        organizationId: actor.organizationId,
+        membershipId: removed.id,
+        requestId: ctx.requestId,
+      })
       await trx
         .insertInto('organization_operations')
         .values({

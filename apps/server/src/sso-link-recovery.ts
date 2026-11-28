@@ -7,6 +7,7 @@ import {
 import { localeCodes, resolveAdminLanguage } from '@hourmere/core/language'
 import type { Db } from '@hourmere/db'
 import { auditActor, writeSsoAuditEvent } from '@hourmere/db/audit'
+import { retirePendingOwnershipTransfer } from '@hourmere/db/ownership-transfer'
 import { defineJob, type EnqueueOptions } from '@hourmere/jobs'
 import { type Mailer, ssoLinkRemovalEmail } from '@hourmere/mail'
 import { DomainError } from '@hourmere/scheduling'
@@ -238,6 +239,7 @@ export async function retireSsoIdentityLink(
             .execute()
           await trx.deleteFrom('sso_browser_proofs').where('link_id', '=', linkId).execute()
           await trx.deleteFrom('sso_delegation_bindings').where('link_id', '=', linkId).execute()
+          await retirePendingOwnershipTransfer(trx, { organizationId, userId: target.userId })
           await writeSsoAuditEvent(trx, {
             ...auditActor(principal),
             organizationId,

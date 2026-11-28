@@ -184,5 +184,9 @@
   "series.repair": "如需重试生成会议链接，请在 Hourmere 中打开对应的预约。",
   "teams.linkPending": "Teams 链接准备好后会显示在预约详情中。",
   "teams.unavailable": "Microsoft Teams 当前不可用。此预约将使用 Outlook 日历事件。",
-  "teams.writebackFailed": "Teams 链接不可用，预约仍按原定时间进行。"
+  "teams.writebackFailed": "Teams 链接不可用，预约仍按原定时间进行。",
+  "ownershipTransfer.offered.subject": "团队所有权转移邀请",
+  "ownershipTransfer.offered.message": "你收到了{team}的所有权转移邀请。请登录并选择该团队，在团队设置中查看邀请。",
+  "ownershipTransfer.confirmed.subject": "团队所有权转移已完成",
+  "ownershipTransfer.confirmed.message": "{team}的所有权转移已完成。请登录并选择该团队，在团队设置中查看当前角色。"
 }

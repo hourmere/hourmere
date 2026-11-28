@@ -26,6 +26,7 @@ import { z } from 'zod'
 import { withClientIpHeader } from './client-ip.ts'
 import { createRateLimiter, type RateLimiter, rateLimitKey } from './rate-limit.ts'
 import {
+  isOwnershipTransferProofOperation,
   requireSsoRetained,
   SCIM_MAPPING_CONSENT,
   type SsoCapabilities,
@@ -207,6 +208,8 @@ export interface MailboxProofDeliveryDeps {
   capabilities: SsoCapabilities
   /** Enabled with SCIM resources to deliver mailbox proof for mapping consent. */
   scimMappingConsentEnabled?: boolean
+  /** Set only when the ownership transfer transport is enabled. */
+  ownershipTransferEnabled?: boolean
   db: Db
   mailer: Mailer
   publicUrl: string
@@ -221,16 +224,16 @@ export interface MailboxProofDeliveryDeps {
 }
 
 // Recovery and trust-reducing operations keep their mailbox proof while a setting is off.
-function mailboxProofEnabled(capabilities: SsoCapabilities, mappingEnabled?: boolean) {
-  return mappingEnabled || ssoRetained(capabilities)
-}
-
 function attemptEnabled(
   attempt: AttemptState,
   {
     capabilities,
     scimMappingConsentEnabled,
-  }: Pick<MailboxProofDeliveryDeps, 'capabilities' | 'scimMappingConsentEnabled'>,
+    ownershipTransferEnabled,
+  }: Pick<
+    MailboxProofDeliveryDeps,
+    'capabilities' | 'scimMappingConsentEnabled' | 'ownershipTransferEnabled'
+  >,
 ) {
   if (
     attempt.operation === samlLinkOperation ||
@@ -238,9 +241,11 @@ function attemptEnabled(
     attempt.operation === samlAdmissionOperation
   )
     return capabilities.ssoSamlEnabled
+  if (isOwnershipTransferProofOperation(attempt.operation))
+    return ownershipTransferEnabled === true && attempt.kind === 'fresh_proof'
   return attempt.operation === SCIM_MAPPING_CONSENT
     ? scimMappingConsentEnabled === true
-    : mailboxProofEnabled(capabilities)
+    : ssoRetained(capabilities)
 }
 
 /**
@@ -253,7 +258,12 @@ export async function deliverMailboxProof(
   payload: MailboxProofEmailPayload,
   signal?: AbortSignal,
 ): Promise<void> {
-  if (!mailboxProofEnabled(deps.capabilities, deps.scimMappingConsentEnabled)) return
+  if (
+    !deps.ownershipTransferEnabled &&
+    !deps.scimMappingConsentEnabled &&
+    !ssoRetained(deps.capabilities)
+  )
+    return
   const limits = { ...MAILBOX_PROOF_LIMITS, ...deps.limits }
   const clock = deps.now ?? databaseClock
   let diagnostic: string | undefined
@@ -333,6 +343,7 @@ export interface MailboxProofConsumeDeps {
   capabilities: SsoCapabilities
   /** Allow mailbox proof for SCIM mapping consent when provisioning is enabled. */
   scimMappingConsentEnabled?: boolean
+  ownershipTransferEnabled?: boolean
   db: Db
   limits?: Partial<MailboxProofLimits> | undefined
   now?: MailboxProofClock | undefined
@@ -350,7 +361,8 @@ export async function consumeMailboxProof(
   input: { attemptId: string; token: string },
   presenter: Presenter,
 ): Promise<boolean> {
-  if (!deps.scimMappingConsentEnabled) requireSsoRetained(deps.capabilities)
+  if (!deps.ownershipTransferEnabled && !deps.scimMappingConsentEnabled)
+    requireSsoRetained(deps.capabilities)
   const clock = deps.now ?? databaseClock
   return deps.db.transaction().execute(async (trx) => {
     // Take the row locks first (a delivery may hold the attempt through SMTP), then read the
@@ -462,6 +474,7 @@ export const MailboxProofConsumeInput = MailboxProofSendInput.extend({
  */
 export function mailboxProofRoutes(deps: {
   capabilities: SsoCapabilities
+  ownershipTransferEnabled?: boolean
   db: Db
   queue: MailboxProofQueue
   limits?: Partial<MailboxProofLimits> | undefined
@@ -487,7 +500,8 @@ export function mailboxProofRoutes(deps: {
         schema: z.ZodType<T>,
       ): Promise<Response | { input: T; presenter: Presenter; language: InterfaceLanguage }> {
         // While every protocol is off: before Origin, input, rate limits or any lookup.
-        if (!scimMappingConsentEnabled) requireSsoRetained(deps.capabilities)
+        if (!deps.ownershipTransferEnabled && !scimMappingConsentEnabled)
+          requireSsoRetained(deps.capabilities)
         c.header('Cache-Control', 'no-store')
         if (c.req.method !== 'POST') return c.json({ error: 'method_not_allowed' }, 405)
         // A protocol endpoint, not a product write: exact Origin, never a Referer or a key.

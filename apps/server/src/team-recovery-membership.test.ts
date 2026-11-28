@@ -160,13 +160,13 @@ describe.skipIf(!databaseUrl)('team membership and SSO recovery ownership', () =
     }
   }
 
-  // Measured against the predecessor with the same HTTP composition and PostgreSQL driver.
+  // Each successful membership change includes one indexed check for a pending transfer.
   const queryCounts: Record<Operation, number> = {
-    'REST leave': 25,
-    'native leave': 43,
-    'REST removal': 35,
-    'native removal': 57,
-    demotion: 43,
+    'REST leave': 26,
+    'native leave': 44,
+    'REST removal': 36,
+    'native removal': 58,
+    demotion: 44,
   }
 
   it.each(operations)(

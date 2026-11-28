@@ -347,6 +347,7 @@ it('classifies every production worker by its source of authority', () => {
     'conferenceNotificationDispatchJob',
     'configuredSmsJobs',
     'groupHostMailJob',
+    'ownershipTransferNoticeJob',
     'rescheduleRequestExpiryJob',
     'scheduledBookingEmailJob',
     'scheduledBookingEmailRepairJob',

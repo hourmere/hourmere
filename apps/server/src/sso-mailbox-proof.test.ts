@@ -1106,7 +1106,7 @@ describe.skipIf(!databaseUrl)('SSO mailbox proof', () => {
         'offEndpoints',
         'endpoint guard',
         [
-          "if (!scimMappingConsentEnabled) requireSsoRetained(deps.capabilities)\n        c.header('Cache-Control', 'no-store')",
+          "if (!deps.ownershipTransferEnabled && !scimMappingConsentEnabled)\n          requireSsoRetained(deps.capabilities)\n        c.header('Cache-Control', 'no-store')",
           "c.header('Cache-Control', 'no-store')",
         ],
       ],
@@ -1114,7 +1114,7 @@ describe.skipIf(!databaseUrl)('SSO mailbox proof', () => {
         'offDelivery',
         'delivery guard',
         [
-          '  if (!mailboxProofEnabled(deps.capabilities, deps.scimMappingConsentEnabled)) return',
+          '  if (\n    !deps.ownershipTransferEnabled &&\n    !deps.scimMappingConsentEnabled &&\n    !ssoRetained(deps.capabilities)\n  )\n    return',
           '',
         ],
       ],

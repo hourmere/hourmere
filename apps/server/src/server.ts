@@ -155,6 +155,7 @@ import { workflowTools } from './mcp/workflows.ts'
 import { nativeTeamLeave } from './native-team-leave.ts'
 import { installOneLineConsole } from './one-line-console.ts'
 import type { RouteModule } from './openapi.ts'
+import { ownershipTransferNoticeJob } from './ownership-transfer-notices.ts'
 import { paymentRefundJob } from './payment-refund-job.ts'
 import { analyticsRoutes } from './routes/analytics.ts'
 import { auditLogRoutes } from './routes/audit-log.ts'
@@ -1457,6 +1458,7 @@ async function start(
         publicUrl: config.PUBLIC_URL,
         mailer,
       }),
+      ownershipTransferNoticeJob({ db, publicUrl: config.PUBLIC_URL, mailer }),
       ssoOperatorRecoveryEmailJob(
         db,
         config.SMTP_URL && config.MAIL_FROM ? mailer : undefined,
