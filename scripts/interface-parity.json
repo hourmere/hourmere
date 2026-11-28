@@ -1,4 +1,32 @@
 {
+  "getTeamPermissions": {
+    "exemption": "browser-session-only",
+    "reason": "Team permission decisions describe the current member's browser session."
+  },
+  "listCustomTeamRoles": {
+    "exemption": "browser-session-only",
+    "reason": "Listing custom team roles requires a verified fixed Owner's browser session."
+  },
+  "getCustomTeamRole": {
+    "exemption": "browser-session-only",
+    "reason": "Reading a custom team role requires a verified fixed Owner's browser session."
+  },
+  "createCustomTeamRole": {
+    "exemption": "browser-session-only",
+    "reason": "Custom role management requires a verified fixed Owner's browser session and fresh proof."
+  },
+  "publishCustomTeamRole": {
+    "exemption": "browser-session-only",
+    "reason": "Custom role management requires a verified fixed Owner's browser session and fresh proof."
+  },
+  "archiveCustomTeamRole": {
+    "exemption": "browser-session-only",
+    "reason": "Custom role management requires a verified fixed Owner's browser session and fresh proof."
+  },
+  "assignCustomTeamRole": {
+    "exemption": "browser-session-only",
+    "reason": "Custom role management requires a verified fixed Owner's browser session and fresh proof."
+  },
   "createSsoDomainChallenge": {
     "exemption": "browser-session-only",
     "reason": "Claiming domain authority requires interactive administrator proof."

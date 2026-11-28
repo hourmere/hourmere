@@ -31,6 +31,9 @@ const REQUIRED_READS: Readonly<Record<string, string>> = {
   listWebhooks: 'GET /api/v1/webhooks',
   listWebhookDeliveries: 'GET /api/v1/webhooks/{id}/deliveries',
   listWorkflowRuns: 'GET /api/v1/workflows/{id}/runs',
+  getTeamPermissions: 'GET /api/v1/teams/{teamId}/permissions',
+  listCustomTeamRoles: 'GET /api/v1/teams/{teamId}/roles',
+  getCustomTeamRole: 'GET /api/v1/teams/{teamId}/roles/{roleId}',
   getOwnershipTransfer: 'GET /api/v1/teams/{teamId}/ownership-transfer',
 }
 

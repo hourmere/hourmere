@@ -5,6 +5,7 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, outsideAuthTransaction, type TestDatabase } from '@hourmere/db/testing'
 import { leaveTeamMember } from '@hourmere/scheduling'
 import type { DBTransactionAdapter } from 'better-auth/adapters'
+import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { type Auth, createAuth, createAuthPool } from './index.ts'
 import { ensurePersonalOrganization } from './organizations.ts'
@@ -85,7 +86,7 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
     }
   }
 
-  async function fixture() {
+  async function fixture({ skipTargetAuthorization = false } = {}) {
     const owner = await actor()
     const target = await actor()
     const organizationId = randomUUID()
@@ -102,11 +103,26 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
       .insertInto('auth.member')
       .values({ organizationId, userId: owner.id, role: 'owner', createdAt: new Date() })
       .execute()
-    const member = await db
-      .insertInto('auth.member')
-      .values({ organizationId, userId: target.id, role: 'member', createdAt: new Date() })
-      .returning('id')
-      .executeTakeFirstOrThrow()
+    const insertTarget = (trx: Db) =>
+      trx
+        .insertInto('auth.member')
+        .values({ organizationId, userId: target.id, role: 'member', createdAt: new Date() })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+    const member = skipTargetAuthorization
+      ? await db.transaction().execute(async (trx) => {
+          // A historical row without an authorization snapshot can still be rebound by
+          // external maintenance. Exercise the attribution guard against that drift.
+          await sql`ALTER TABLE auth.member DISABLE TRIGGER team_member_authorization_sync`.execute(
+            trx,
+          )
+          const row = await insertTarget(trx)
+          await sql`ALTER TABLE auth.member ENABLE TRIGGER team_member_authorization_sync`.execute(
+            trx,
+          )
+          return row
+        })
+      : await insertTarget(db)
     await db
       .updateTable('auth.session')
       .set({ activeOrganizationId: organizationId })
@@ -534,7 +550,7 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
   it.each(['organizationId', 'userId'] as const)(
     'discards removal attribution if the stored %s changed before deletion',
     async (changedField) => {
-      const f = await fixture()
+      const f = await fixture({ skipTargetAuthorization: true })
       const other = await fixture()
       const context = await auth.$context
       const session = await auth.api.getSession({

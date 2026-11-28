@@ -3434,6 +3434,11 @@ export const admin = {
   'No selected bookings are eligible for cancellation. Review a fresh selection.':
     '所选预约均不符合取消条件。请重新选择并查看。',
 
+  // Custom team roles
+  'Custom roles are unavailable.': '自定义角色暂不可用。',
+  'The role or assignment changed. Reload before saving.': '角色或分配已变更。请刷新后再保存。',
+  'Clear this role’s assignments before archiving it.': '请先清除此角色的所有分配，再归档。',
+
   // Team ownership transfer
   'Team ownership transfer': '团队所有权转移',
   'Only owners can manage admins.': '只有所有者可以管理管理员。',
