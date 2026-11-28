@@ -666,4 +666,33 @@ export const common = {
   'This team has no public events right now.': 'Esta equipe não tem eventos públicos no momento.',
   'This team page is unavailable.': 'Esta página da equipe está indisponível.',
   'Couldn’t load this team page.': 'Não foi possível carregar esta página da equipe.',
+
+  // Departure booking handoff
+  'departureHandoff.title': 'Revisar a transferência do agendamento',
+  'departureHandoff.allMustAccept':
+    'Quem fez o agendamento e todos os convidados precisam aceitar para que a equipe possa substituir o agendamento atual.',
+  'departureHandoff.privateLink':
+    'Mantenha este link em sigilo. Qualquer pessoa com o link pode responder em seu nome.',
+  'departureHandoff.deadline': 'Responda antes de',
+  'departureHandoff.current': 'Agendamento atual',
+  'departureHandoff.proposed': 'Agendamento proposto',
+  'departureHandoff.duration': 'Duração',
+  'departureHandoff.answers': 'Respostas que serão compartilhadas com o novo anfitrião',
+  'departureHandoff.decision': 'Sua decisão',
+  'departureHandoff.accept': 'Aceitar',
+  'departureHandoff.decline': 'Recusar',
+  'departureHandoff.submit': 'Enviar decisão',
+  'departureHandoff.submitting': 'Enviando decisão…',
+  'departureHandoff.accepted': 'Aceite registrado',
+  'departureHandoff.declined': 'Recusa registrada',
+  'departureHandoff.refused': 'A equipe não pode concluir esta transferência.',
+  'departureHandoff.unavailable': 'Este link de transferência não está disponível',
+  'departureHandoff.recovery':
+    'Use o link mais recente que você recebeu ou entre em contato com a equipe.',
+  'departureHandoff.readAgain': 'Consultar a proposta novamente',
+  'departureHandoff.loadError': 'Não foi possível carregar a proposta. Consulte-a novamente.',
+  'departureHandoff.uncertain':
+    'Não foi possível confirmar se sua decisão foi registrada. Consulte a proposta antes de tentar novamente.',
+  'departureHandoff.rateLimited':
+    'Muitas tentativas. Aguarde um momento antes de consultar a proposta novamente.',
 } as const

@@ -2829,14 +2829,16 @@ Team deletion cascades through its bookings. Deleting the source removes its off
 recipients and receipt. Deleting the replacement also removes the receipt. Team member
 removal preserves the proposal and receipt's historical actor IDs. A committed receipt
 retains the offer version it references and survives pruning of the recipient mailbox
-rows. Production admission stays disabled while recipient decisions and rollout acceptance
-are pending. See [the handoff design](member-departure-handoff.md).
+rows. Production admission stays disabled through rollout acceptance.
+See [the handoff design](member-departure-handoff.md).
 
-Proposal writes and link delivery use the organization → source booking → offer version →
-recipient lock order. A version closes with a withdrawal, supersession or expiry reason.
+Proposal writes, link delivery and participant decisions use the organization → source booking →
+offer version → recipient lock order. A version records a withdrawal, supersession or expiry
+reason when closed for those reasons.
 Each recipient can hold one purpose-bound capability digest. Recording a decision must clear
 that digest in the same update. Withdrawal and supersession clear the affected version's
-digests in their transaction.
+digests in their transaction. A decline closes its version, clears the other digests and marks
+outstanding delivery attempts as revoked. The declined recipient row records why it closed.
 
 `departure_handoff_deliveries` links the durable intent to its transactional mail job ID.
 The job payload carries only the recipient ID. Delivery derives its authority from the

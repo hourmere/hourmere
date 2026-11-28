@@ -787,6 +787,20 @@ are available without a flag.
 `poll_changed`，应重新读取并核对，不要自动重试。退订使用专用邮件令牌。
 浏览器投票页面和主持人管理工具已提供，无功能开关。
 
+## Private booking handoff offers
+
+The staged tools `read_booking_handoff_offer` and `answer_booking_handoff_offer`
+require the recipient's private token from the offer email. An API key must have
+`read`, `bookings` or `full` scope to review it. Answering requires `bookings`
+or `full` and the exact reviewed `version`. Submit `decision` as `accept` or
+`decline` after the recipient chooses. Declining closes the offer version.
+A decision by itself leaves the original booking confirmed.
+
+Use `booking-handoff offer --input -` and `booking-handoff answer --input -` in
+the CLI. Both take JSON on standard input. Keep the token out of command arguments,
+shell history and logs. These operations remain disabled in production.
+See [the staged participant flow](member-departure-handoff.md#staged-participant-flow).
+
 ## Duplicate an event type
 
 Call `duplicate_event_type` with `{ "id": "EVENT_TYPE_UUID" }` and a `full` API key.

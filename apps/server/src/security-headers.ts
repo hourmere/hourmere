@@ -76,6 +76,14 @@ function isPollPage(path: string): boolean {
   }
 }
 
+export function isPrivateHandoffPath(path: string): boolean {
+  let decoded = path
+  try {
+    decoded = decodeURIComponent(path)
+  } catch {}
+  return /^\/(?:api\/v1\/booking-handoffs(?:\/|$)|booking\/handoff(?:\/|$))/i.test(decoded)
+}
+
 export interface SecurityHeadersOptions {
   /** The Strict-Transport-Security value (see strictTransportSecurity); none if undefined. */
   hsts?: string | undefined
@@ -142,7 +150,7 @@ export function securityHeaders({
       headers.set('Referrer-Policy', 'no-referrer')
       headers.set('Cache-Control', 'no-store')
     }
-    if (isPollPage(c.req.path)) {
+    if (isPollPage(c.req.path) || isPrivateHandoffPath(c.req.path)) {
       headers.set('Referrer-Policy', 'no-referrer')
       headers.set('Cache-Control', 'no-store')
       headers.set('X-Robots-Tag', 'noindex, nofollow')

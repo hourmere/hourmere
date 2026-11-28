@@ -46,6 +46,7 @@ const classes = {
     'GET /api/v1/meeting-polls/{id}',
     'GET /api/v1/meeting-polls/{id}/results',
     'POST /api/v1/public/meeting-polls/read',
+    'POST /api/v1/booking-handoffs/offer',
     'POST /api/v1/open-time-snippets',
     'GET /api/v1/book/{token}',
     'GET /api/v1/book/{token}/slots',
@@ -90,6 +91,7 @@ const classes = {
     'POST /api/v1/public/meeting-polls/recover',
     'POST /api/v1/public/meeting-polls/verify',
     'POST /api/v1/public/meeting-polls/vote',
+    'POST /api/v1/booking-handoffs/answer',
     'POST /api/v1/public/meeting-polls/withdraw',
     'POST /api/v1/public/meeting-polls/reminder-opt-out',
 
@@ -1082,14 +1084,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 202-operation contract and all 606 scope combinations', () => {
+    it('covers the exact 204-operation contract and all 612 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(202)
-      expect(new Set(ids).size).toBe(202)
+      expect(ids).toHaveLength(204)
+      expect(new Set(ids).size).toBe(204)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(606)
+      expect(cases).toHaveLength(612)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
@@ -1115,7 +1117,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
           },
           { incoming: { socket: { remoteAddress: `192.0.2.${(sequence % 250) + 1}` } } },
         )
-        if (kind === 'session_only') {
+        if (operation.startsWith('POST /api/v1/booking-handoffs/')) {
+          expect(response.status).toBe(404)
+          expect(await response.json()).toEqual({ error: 'handoff_offer_unavailable' })
+        } else if (kind === 'session_only') {
           expect(response.status).toBe(fixture.expectedStatus)
           const body = await response.json()
           expect(body).toMatchObject({ error: fixture.nativeError })

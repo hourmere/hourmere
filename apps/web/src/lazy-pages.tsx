@@ -199,6 +199,11 @@ export const MeetingPollPage = lazy(() =>
   import('./public/MeetingPollPage.tsx').then((module) => ({ default: module.MeetingPollPage })),
 )
 
+export const DepartureHandoffOfferPage = page(
+  () => import('./public/DepartureHandoffOfferPage.tsx'),
+  (m) => m.DepartureHandoffOfferPage,
+)
+
 export const RoutingFormPage = page(
   () => import('./public/RoutingFormPage.tsx'),
   (m) => m.RoutingFormPage,

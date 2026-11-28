@@ -47,6 +47,7 @@ describe('before route chunks are available', () => {
     '/poll/voter',
     '/poll/recover',
     '/poll/reminder-opt-out',
+    '/booking/handoff',
   ])('keeps public loading independent of the admin shell at %s', (path) => {
     render(
       <MemoryRouter initialEntries={[path]}>

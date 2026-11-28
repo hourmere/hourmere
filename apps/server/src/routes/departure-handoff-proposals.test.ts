@@ -210,7 +210,7 @@ describe.skipIf(!serverUrl)('departure handoff proposals and delivery', () => {
     if (!rawLink) throw new Error('Missing participant link')
     const link = new URL(rawLink)
     expect(link.origin).toBe(publicUrl)
-    expect(link.pathname).toBe('/booking-handoffs/offer')
+    expect(link.pathname).toBe('/booking/handoff')
     expect(link.search).toBe('')
     const [id, secret, extra] = (new URLSearchParams(link.hash.slice(1)).get('token') ?? '').split(
       '.',

@@ -141,6 +141,7 @@ import { availabilityTroubleshootingTools } from './mcp/availability-troubleshoo
 import { bookingTools } from './mcp/bookings.ts'
 import { brandingTools } from './mcp/branding.ts'
 import { catalogTools } from './mcp/catalog.ts'
+import { departureHandoffParticipantTools } from './mcp/departure-handoff-participant.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
 import { eventTypeTools } from './mcp/event-types.ts'
 import { integrationTools } from './mcp/integrations.ts'
@@ -172,6 +173,7 @@ import { brandingRoutes } from './routes/branding.ts'
 import { caldavRoutes } from './routes/caldav.ts'
 import { calendarRoutes } from './routes/calendars.ts'
 import { conferenceRoutes } from './routes/conferences.ts'
+import { departureHandoffParticipantRoutes } from './routes/departure-handoff-participant.ts'
 import { type DepartureHandoffs, departureHandoffRoutes } from './routes/departure-handoffs.ts'
 import { eventTypeRoutes } from './routes/event-types.ts'
 import { instanceRoutes } from './routes/instance.ts'
@@ -572,6 +574,13 @@ export function productRoutes({
       automaticZoom,
       microsoftCalendarEnabled,
     }),
+    departureHandoffParticipantRoutes({
+      db,
+      handoffs: departureHandoffs,
+      automaticMeet,
+      automaticZoom,
+      microsoftCalendarEnabled,
+    }),
     teamBookingBulkPreviewRoutes({ db, ssoCapabilities }),
     teamInvitationRoutes({ db, invitationMailLimits }),
     memberDepartureImpactRoutes({ db }),
@@ -603,6 +612,7 @@ export function productRoutes({
 /** The same tool registry is used by the running server and capability contract tests. */
 export function productTools({
   db,
+  departureHandoffs,
   webhooks = { enabled: false },
   webhookQueue,
   waitlistSecret,
@@ -634,6 +644,7 @@ export function productTools({
   auditLogRetentionDays = null,
 }: {
   db: Db
+  departureHandoffs?: DepartureHandoffs | undefined
   /** AUDIT_LOG_RETENTION_DAYS: days, or null (the default) to keep events forever. */
   auditLogRetentionDays?: number | null
   webhooks?: import('@hourmere/webhooks').WebhookSettings
@@ -730,6 +741,14 @@ export function productTools({
       conference: { db, zoom: zoomConference },
     }),
     ...meetingPollTools({ db, meetingPollSecret }),
+    ...departureHandoffParticipantTools({
+      db,
+      handoffs: departureHandoffs,
+      automaticMeet,
+      automaticZoom,
+      microsoftCalendarEnabled,
+      scimResourcesEnabled: sso.scimResourcesEnabled,
+    }),
     ...meetingPollHostTools({
       db,
       publicUrl: publicUrl ?? 'http://localhost',
@@ -992,6 +1011,9 @@ export function productionAppOptions({
         : {}),
       tools: productTools({
         db,
+        departureHandoffs: productionDepartureHandoffsEnabled
+          ? { store: departureHandoffStore }
+          : undefined,
         slotSnippetsEnabled: config.SLOT_SNIPPETS_ENABLED,
         waitlistSecret: config.BETTER_AUTH_SECRET,
         meetingPollSecret: config.BETTER_AUTH_SECRET,

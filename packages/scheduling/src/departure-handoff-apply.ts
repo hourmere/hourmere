@@ -149,7 +149,7 @@ export function departureHandoffApprovedRecipientIds(
 }
 
 export async function readDepartureHandoffTerms(
-  ctx: ServiceContext,
+  ctx: Pick<ServiceContext, 'db' | 'automaticMeet' | 'automaticZoom' | 'microsoftCalendarEnabled'>,
   organizationId: string,
   input: TermsInput,
   eligible: Awaited<ReturnType<typeof getDepartureHandoffEligibility>>,
@@ -234,6 +234,7 @@ export async function readDepartureHandoffTerms(
   return {
     attendees,
     recipientKeys,
+    sourceLocation: original.location,
     start,
     end,
     duration,

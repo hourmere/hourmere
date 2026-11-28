@@ -607,6 +607,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/booking-handoffs/answer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept or decline your exact booking handoff offer version
+         * @description Requires the recipient capability and the reviewed version. The decision does not change the booking. Disabled in production.
+         */
+        post: operations["answerBookingHandoffOffer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/booking-handoffs/offer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Read the terms for your private handoff offer
+         * @description Requires the recipient capability. Reading records no decision. Disabled in production.
+         */
+        post: operations["readBookingHandoffOffer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/bookings": {
         parameters: {
             query?: never;
@@ -6933,6 +6973,47 @@ export interface components {
         DeleteWorkflowInput: {
             expectedRevision: number;
         };
+        DepartureHandoffParticipantAnswer: {
+            /** @enum {string} */
+            decision: "accept" | "decline";
+        };
+        DepartureHandoffParticipantOffer: {
+            answers: {
+                label: string;
+                value: string | string[] | boolean;
+            }[];
+            current: {
+                /** Format: date-time */
+                end: string;
+                hostName: string | null;
+                location: {
+                    address?: string;
+                    /** @enum {string} */
+                    kind: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
+                } | null;
+                /** Format: date-time */
+                start: string;
+                timeZone: string;
+            };
+            /** Format: date-time */
+            expiresAt: string;
+            proposed: {
+                /** Format: date-time */
+                end: string;
+                hostName: string | null;
+                location: {
+                    address?: string;
+                    /** @enum {string} */
+                    kind: "google_meet" | "zoom" | "phone" | "in_person" | "link" | "microsoft_teams";
+                } | null;
+                /** Format: date-time */
+                start: string;
+                timeZone: string;
+            };
+            /** @enum {string} */
+            role: "booker" | "guest";
+            version: number;
+        };
         DepartureHandoffPreview: {
             /** @enum {string} */
             issue?: "calendar_sync_unavailable" | "location_unavailable" | "handoff_offer_changed" | "handoff_source_ineligible" | "handoff_candidate_ineligible";
@@ -10709,6 +10790,171 @@ export interface operations {
                 };
             };
             /** @description Too many requests; see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    answerBookingHandoffOffer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    decision: "accept" | "decline";
+                    /** @description Private recipient capability from the emailed link fragment. Send only in the JSON body. */
+                    token: string;
+                    version: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Recorded decision */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepartureHandoffParticipantAnswer"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description handoff_offer_unavailable: the link can no longer be used */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Request body exceeds 1024 bytes */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited; retry after the Retry-After interval */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    readBookingHandoffOffer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Private recipient capability from the emailed link fragment. Send only in the JSON body. */
+                    token: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Terms for this recipient */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepartureHandoffParticipantOffer"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The supplied API key is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden. insufficient_scope: This API key does not allow this operation. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description handoff_offer_unavailable: the link can no longer be used */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Request body exceeds 1024 bytes */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited; retry after the Retry-After interval */
             429: {
                 headers: {
                     [name: string]: unknown;

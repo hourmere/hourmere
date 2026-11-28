@@ -94,6 +94,8 @@ export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.fr
   rest('POST', '/api/v1/public/meeting-polls/vote', 'booking_write', 'optional_key'),
   rest('POST', '/api/v1/public/meeting-polls/withdraw', 'booking_write', 'optional_key'),
   rest('POST', '/api/v1/public/meeting-polls/reminder-opt-out', 'booking_write', 'optional_key'),
+  rest('POST', '/api/v1/booking-handoffs/offer', 'booking_read', 'optional_key'),
+  rest('POST', '/api/v1/booking-handoffs/answer', 'booking_write', 'optional_key'),
 
   rest('GET', '/api/v1/analytics/bookings', 'other_read', 'key'),
   rest('GET', '/api/v1/routing-forms', 'other_read', 'key'),
@@ -420,6 +422,8 @@ export const API_KEY_MCP_OPERATIONS: readonly ApiKeyMcpOperation[] = Object.free
   mcp('opt_out_meeting_poll_reminder', 'booking_write', [
     'POST /api/v1/public/meeting-polls/reminder-opt-out',
   ]),
+  mcp('read_booking_handoff_offer', 'booking_read', ['POST /api/v1/booking-handoffs/offer']),
+  mcp('answer_booking_handoff_offer', 'booking_write', ['POST /api/v1/booking-handoffs/answer']),
 
   mcp('list_routing_forms', 'other_read', ['GET /api/v1/routing-forms']),
   mcp('get_routing_form', 'other_read', ['GET /api/v1/routing-forms/{id}']),
@@ -617,6 +621,8 @@ export const API_KEY_CLI_OPERATIONS: readonly ApiKeyCliOperation[] = Object.free
   cli('polls recover', 'recover_meeting_poll_voter'),
   cli('polls verify', 'verify_meeting_poll_voter'),
   cli('polls vote', 'submit_meeting_poll_vote'),
+  cli('booking-handoff offer', 'read_booking_handoff_offer'),
+  cli('booking-handoff answer', 'answer_booking_handoff_offer'),
   cli('polls withdraw', 'withdraw_meeting_poll_vote'),
   cli('polls reminder-opt-out', 'opt_out_meeting_poll_reminder'),
 
