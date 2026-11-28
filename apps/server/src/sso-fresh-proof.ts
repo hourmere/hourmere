@@ -138,6 +138,7 @@ export async function runWithFreshProof<T>(
   deps: FreshProofDeps,
   request: FreshProofRequest,
   callbacks: {
+    /** The session context fence must be acquired before user and organization locks. */
     beforeLocks?: (trx: Transaction<Database>) => Promise<void>
     authorize: (trx: Transaction<Database>) => Promise<void>
     /** A locked lifecycle write can commit a terminal result without consuming proof. */

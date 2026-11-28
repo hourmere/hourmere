@@ -180,6 +180,13 @@ Team booking bulk cancellation preview, confirmation and status return 404 until
 | `POST /api/v1/organizations/{organizationId}/provisioning-tokens` | Browser session only | — |
 | `POST /api/v1/organizations/{organizationId}/provisioning-tokens/{id}/rotate` | Browser session only | — |
 | `DELETE /api/v1/organizations/{organizationId}/provisioning-tokens/{id}` | Browser session only | — |
+| `GET /api/v1/teams/{teamId}/permissions` | Browser session only | — |
+| `GET /api/v1/teams/{teamId}/roles` | Browser session only | — |
+| `POST /api/v1/teams/{teamId}/roles` | Browser session only | — |
+| `GET /api/v1/teams/{teamId}/roles/{roleId}` | Browser session only | — |
+| `PATCH /api/v1/teams/{teamId}/roles/{roleId}` | Browser session only | — |
+| `DELETE /api/v1/teams/{teamId}/roles/{roleId}` | Browser session only | — |
+| `PUT /api/v1/teams/{teamId}/members/{memberId}/custom-role` | Browser session only | — |
 | `GET /api/v1/audit-events` | Session or API key | `full` |
 | `GET /api/v1/audit-log/settings` | Session or API key | `full` |
 | `PUT /api/v1/audit-log/settings` | Session or API key | `full` |

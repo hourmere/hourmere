@@ -1,0 +1,7 @@
+{
+  "migration": "0200_custom_role_membership_lifecycle.sql",
+  "objects": {
+    "trigger auth.member.team_member_authorization_sync": "CREATE TRIGGER team_member_authorization_sync AFTER INSERT OR UPDATE OF role ON auth.member FOR EACH ROW EXECUTE FUNCTION sync_team_member_authorization() -- function SET search_path=public, pg_temp md5 53d2d0586257e0e309a7cb9df74ca2d4",
+    "trigger auth.organization.team_custom_role_policy_initialize": "CREATE CONSTRAINT TRIGGER team_custom_role_policy_initialize AFTER INSERT ON auth.organization DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION initialize_team_custom_role_policy() -- function SET search_path=public, pg_temp md5 56d4e9e6b30db46c179539f83fb840f8"
+  }
+}

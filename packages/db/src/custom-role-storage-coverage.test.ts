@@ -352,6 +352,12 @@ describe.skipIf(!serverUrl)('custom role storage migration', () => {
         },
         predecessorTemplate: replay.predecessor,
         assertions: async (pool) => {
+          // These historical fixture assertions insert authorization and policy rows directly.
+          // Their live initialization and promotion are covered by the lifecycle migration.
+          await pool.query(
+            'ALTER TABLE auth.organization DISABLE TRIGGER team_custom_role_policy_initialize',
+          )
+          await pool.query('ALTER TABLE auth.member DISABLE TRIGGER team_member_authorization_sync')
           await assertCustomRoleStorageProtections(pool)
           await assertPersonalSpaceExclusion(pool)
           await assertCustomRoleAuditProtections(pool)

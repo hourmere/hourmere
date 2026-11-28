@@ -15,6 +15,14 @@ interface MemberSummary {
   user: { id: string; name: string }
 }
 
+export function canReadPrivateTeamRoster(role: string): boolean {
+  const roles = teamRoles(role)
+  return (
+    roles.every((role) => ['owner', 'admin', 'member'].includes(role)) &&
+    roles.some((role) => role === 'owner' || role === 'admin')
+  )
+}
+
 /** Native organization reads otherwise expose emails and invitations to every member. */
 export function memberReadPrivacy(db: Db): BetterAuthPlugin {
   async function manager(ctx: AuthMiddlewareContext, organizationId: string) {
@@ -28,11 +36,7 @@ export function memberReadPrivacy(db: Db): BetterAuthPlugin {
       .where('m.userId', '=', session.user.id)
       .executeTakeFirst()
     if (!actor?.emailVerified) return false
-    const roles = teamRoles(actor.role)
-    return (
-      roles.every((role) => ['owner', 'admin', 'member'].includes(role)) &&
-      roles.some((role) => role === 'owner' || role === 'admin')
-    )
+    return canReadPrivateTeamRoster(actor.role)
   }
 
   return {

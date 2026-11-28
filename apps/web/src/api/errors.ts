@@ -146,6 +146,9 @@ export function errorMessage(err: unknown): UiText {
   if (!(err instanceof RequestError)) return msg(UNREACHABLE)
   if (err.displayMessage) return err.displayMessage
   const known: Readonly<Record<string, MessageKey>> = {
+    custom_roles_disabled: 'Custom roles are unavailable.',
+    role_revision_conflict: 'The role or assignment changed. Reload before saving.',
+    role_in_use: 'Clear this role’s assignments before archiving it.',
     reschedule_request_changed:
       'This request has expired or changed. Reload your booking to choose what to do next.',
     booking_group_seat_unsupported: 'Group-seat bookings do not support reschedule requests.',
