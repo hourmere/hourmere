@@ -169,7 +169,11 @@ import { workflowTools } from './mcp/workflows.ts'
 import { nativeTeamLeave } from './native-team-leave.ts'
 import { installOneLineConsole } from './one-line-console.ts'
 import type { RouteModule } from './openapi.ts'
-import { ownershipTransferNoticeJob } from './ownership-transfer-notices.ts'
+import type { OwnershipTransferDeps } from './ownership-transfer.ts'
+import {
+  type OwnershipTransferNoticeQueue,
+  ownershipTransferNoticeJob,
+} from './ownership-transfer-notices.ts'
 import { paymentRefundJob } from './payment-refund-job.ts'
 import { analyticsRoutes } from './routes/analytics.ts'
 import { auditLogRoutes } from './routes/audit-log.ts'
@@ -193,6 +197,7 @@ import { memberRemovalRoutes } from './routes/member-removal.ts'
 import { oneTimeBookingRoutes } from './routes/one-time-bookings.ts'
 import { oneTimeLinkRoutes } from './routes/one-time-links.ts'
 import { openTimeSnippetRoutes } from './routes/open-time-snippets.ts'
+import { ownershipTransferRoutes } from './routes/ownership-transfer.ts'
 import { profileRoutes } from './routes/profile.ts'
 import { provisioningTokenRoutes } from './routes/provisioning-tokens.ts'
 import { publicRoutes } from './routes/public.ts'
@@ -321,6 +326,7 @@ export function productRoutes({
   routingSecret,
   routingBookingReceiptNow,
   departureHandoffs,
+  ownershipTransfer,
   workflowRunCursorSecret,
   workflowsEnabled,
   smtpConfigured,
@@ -361,6 +367,7 @@ export function productRoutes({
   routingBookingReceiptNow?: () => Temporal.Instant
   /** Staged acceptance can inject a store and a clock. Production admission stays hard-off. */
   departureHandoffs?: DepartureHandoffs
+  ownershipTransfer?: OwnershipTransferDeps | undefined
   successRedirectAllowIpHosts?: boolean
   successRedirectPolicy?: ServiceContext['successRedirectPolicy']
   bookingMaxInviteeReschedules?: number | undefined
@@ -412,6 +419,7 @@ export function productRoutes({
       publicUrl,
       socialProviders,
       scimProvisioningEnabled,
+      teamOwnershipTransferEnabled: ownershipTransfer !== undefined,
       automaticMeet,
       smsRemindersAvailable,
       eventTypePaymentAvailability: paidBookingAvailability,
@@ -608,6 +616,7 @@ export function productRoutes({
       db,
       recordAdmissionRemoval: oidcEnabled || samlEnabled ? recordSsoAdmissionRemoval : undefined,
     }),
+    ownershipTransferRoutes(ownershipTransfer),
     analyticsRoutes({ db }),
     readinessRoutes({
       db,
@@ -831,6 +840,7 @@ export interface ProductionAppDeps extends RecurringBookingAdmissionDeps {
   enqueueBulkCancellation?: EnqueueBulkCancellation
   /** The job queue SSO mailbox proof emails are enqueued on. */
   mailboxProofQueue: MailboxProofQueue
+  ownershipTransferNoticeQueue?: OwnershipTransferNoticeQueue | undefined
   scimMappingNotices: ScimMappingNoticeQueue
   ssoLinkRemovalQueue?: SsoLinkRemovalQueue | undefined
   ssoRecoveryEnrollmentQueue?: SsoRecoveryEnrollmentQueue | undefined
@@ -869,6 +879,7 @@ export function productionAppOptions({
   enqueueCalendarWritebackRecovery,
   enqueueBulkCancellation,
   mailboxProofQueue,
+  ownershipTransferNoticeQueue,
   scimMappingNotices,
   ssoLinkRemovalQueue,
   ssoRecoveryEnrollmentQueue,
@@ -898,6 +909,15 @@ export function productionAppOptions({
     : undefined
   const ssoPrivateTargets = config.SSO_PRIVATE_TARGETS
   const sso = productionSsoCapabilities(config)
+  const ownershipTransfer =
+    config.TEAM_OWNERSHIP_TRANSFER_ENABLED && ownershipTransferNoticeQueue
+      ? {
+          db,
+          capabilities: sso,
+          publicUrl: config.PUBLIC_URL,
+          notificationQueue: ownershipTransferNoticeQueue,
+        }
+      : undefined
   const readSsoSession = async (headers: Headers) =>
     (
       await auth.api?.getSession({
@@ -947,6 +967,7 @@ export function productionAppOptions({
       capabilities: sso,
       db,
       queue: mailboxProofQueue,
+      ownershipTransferEnabled: ownershipTransfer !== undefined,
     }),
     ssoOidcSignIn: oidcSignInRoutes({
       capabilities: sso,
@@ -978,6 +999,7 @@ export function productionAppOptions({
       publicUrl: config.PUBLIC_URL,
       db,
       invitationMailLimits,
+      ownershipTransfer,
       waitlistSecret: config.BETTER_AUTH_SECRET,
       paymentStatusSecret: config.BETTER_AUTH_SECRET,
       paidBookingAvailability,
@@ -1505,6 +1527,7 @@ async function start(
       ...mailboxProofJobs({
         capabilities: sso,
         scimMappingConsentEnabled: config.SCIM_PROVISIONING_ENABLED,
+        ownershipTransferEnabled: config.TEAM_OWNERSHIP_TRANSFER_ENABLED,
         db,
         mailer,
         publicUrl: config.PUBLIC_URL,
@@ -1801,6 +1824,7 @@ async function start(
             { singletonKey: connectionId, transaction: trx },
           ),
         mailboxProofQueue: jobs,
+        ownershipTransferNoticeQueue: jobs,
         scimMappingNotices: jobs,
         ssoLinkRemovalQueue: jobs,
         ssoRecoveryEnrollmentQueue: jobs,

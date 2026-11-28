@@ -5973,6 +5973,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/teams/{teamId}/ownership-transfer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the active team ownership offer visible to the caller
+         * @description Only the original participants can read names or check the terminal state of an already known offer. Another owner can see the pending offer deadline and revoke it.
+         */
+        get: operations["getOwnershipTransfer"];
+        put?: never;
+        /**
+         * Offer ownership of the active team to a current member
+         * @description Requires a current owner, exact same-instance Origin, and fresh proof. Roles change only when the recipient confirms.
+         */
+        post: operations["createOwnershipTransfer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/teams/{teamId}/ownership-transfer/{transferId}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept an ownership offer as its named recipient
+         * @description Requires exact same-instance Origin and fresh proof. Both team roles are updated together.
+         */
+        post: operations["confirmOwnershipTransfer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/teams/{teamId}/ownership-transfer/{transferId}/decline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decline an ownership offer as its named recipient
+         * @description Requires exact same-instance Origin. The offer closes without changing either role.
+         */
+        post: operations["declineOwnershipTransfer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/teams/{teamId}/ownership-transfer/{transferId}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke an ownership offer as a current owner
+         * @description Requires exact same-instance Origin. No role changes take effect.
+         */
+        post: operations["revokeOwnershipTransfer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/teams/{teamId}/permissions": {
         parameters: {
             query?: never;
@@ -8111,6 +8195,11 @@ export interface components {
             ssoOidcEnabled?: boolean;
             /** @description The effective SSO_SAML_ENABLED operator setting (on by default); absent when unknown */
             ssoSamlEnabled?: boolean;
+            /**
+             * @description Present when the operator enabled browser-based team ownership transfer
+             * @enum {boolean}
+             */
+            teamOwnershipTransferEnabled?: true;
             /**
              * Format: uri
              * @description This instance operator's terms; absent when not configured
@@ -23837,6 +23926,395 @@ export interface operations {
             /** @description Team context changed, role revision conflict or role in use */
             409: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getOwnershipTransfer: {
+        parameters: {
+            query?: {
+                transferId?: string;
+            };
+            header: {
+                /** @description Must match the path team and current session. Reload if the active team changed. */
+                "x-expected-organization-id": string;
+            };
+            path: {
+                teamId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Caller-visible offer, if any */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        offer: {
+                            /** @enum {string} */
+                            action?: "revoke" | "confirm";
+                            /** Format: date-time */
+                            expiresAt: string;
+                            /** Format: uuid */
+                            id: string;
+                            initiator?: {
+                                displayName: string;
+                            };
+                            recipient?: {
+                                displayName: string;
+                            };
+                            /** @enum {string} */
+                            state: "pending" | "confirmed" | "revoked" | "expired" | "invalidated";
+                        } | null;
+                    };
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Verified team browser session required; Authorization headers are denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description ownership_transfer_disabled */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed: reload the active team */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    createOwnershipTransfer: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Must match the path team and current session. Reload if the active team changed. */
+                "x-expected-organization-id": string;
+            };
+            path: {
+                teamId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    proofAttemptId?: string;
+                    /** Format: uuid */
+                    targetMembershipId: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Pending offer and UTC deadline */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: date-time */
+                        expiresAt: string;
+                        /** Format: uuid */
+                        id: string;
+                    };
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Team access denied, or sso_reauthentication_required: complete the challenge and retry the exact input with proofAttemptId */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoFreshProofChallenge"];
+                };
+            };
+            /** @description ownership_transfer_disabled */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed, ownership_transfer_pending or scim_managed_resource */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The team transfer budget is exhausted; retry after the indicated delay */
+            429: {
+                headers: {
+                    /** @description Seconds until retry */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    confirmOwnershipTransfer: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Must match the path team and current session. Reload if the active team changed. */
+                "x-expected-organization-id": string;
+            };
+            path: {
+                teamId: string;
+                transferId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    proofAttemptId?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Resulting memberships and roles */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        initiator: {
+                            /** Format: uuid */
+                            membershipId: string;
+                            /** @enum {string} */
+                            role: "admin";
+                        };
+                        recipient: {
+                            /** Format: uuid */
+                            membershipId: string;
+                            /** @enum {string} */
+                            role: "owner";
+                        };
+                    };
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Team access denied, or sso_reauthentication_required: complete the challenge and retry the exact input with proofAttemptId */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoFreshProofChallenge"];
+                };
+            };
+            /** @description ownership_transfer_disabled */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed, ownership_transfer_unavailable or sso_recovery_required */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    declineOwnershipTransfer: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Must match the path team and current session. Reload if the active team changed. */
+                "x-expected-organization-id": string;
+            };
+            path: {
+                teamId: string;
+                transferId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The offer closed as revoked */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        state: "revoked";
+                    };
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Verified team browser session required; Authorization headers are denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description ownership_transfer_disabled */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed or ownership_transfer_unavailable: refresh the active team and offer */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    revokeOwnershipTransfer: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Must match the path team and current session. Reload if the active team changed. */
+                "x-expected-organization-id": string;
+            };
+            path: {
+                teamId: string;
+                transferId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The offer was revoked */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        state: "revoked";
+                    };
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Verified team browser session required; Authorization headers are denied */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description ownership_transfer_disabled */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed or ownership_transfer_unavailable: refresh the active team and offer */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The team transfer budget is exhausted; retry after the indicated delay */
+            429: {
+                headers: {
+                    /** @description Seconds until retry */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {

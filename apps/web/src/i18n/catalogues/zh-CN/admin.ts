@@ -3438,4 +3438,44 @@ export const admin = {
   'Custom roles are unavailable.': '自定义角色暂不可用。',
   'The role or assignment changed. Reload before saving.': '角色或分配已变更。请刷新后再保存。',
   'Clear this role’s assignments before archiving it.': '请先清除此角色的所有分配，再归档。',
+
+  // Team ownership transfer
+  'Team ownership transfer': '团队所有权转移',
+  'Only owners can manage admins.': '只有所有者可以管理管理员。',
+  'Offer ownership to {name}': '向{name}发出所有权转移提议',
+  'Choose a team member below to offer them ownership.':
+    '从下方选择一名团队成员，向其发出所有权转移提议。',
+  'Review ownership transfer': '核对所有权转移',
+  'You will become an admin when the recipient accepts.': '收件人接受后，你将成为管理员。',
+  '{initiator} will become an admin.': '{initiator}将成为管理员。',
+  '{recipient} will become the team owner.': '{recipient}将成为团队所有者。',
+  'Personal spaces, calendars and provider connections stay with their current accounts. API keys and agent authorizations are not transferred.':
+    '个人空间、日历和服务商连接仍归当前账户所有。API 密钥和代理授权不会转移。',
+  'Send transfer offer': '发送转移提议',
+  'Accept ownership': '接受所有权',
+  'Decline transfer': '拒绝转移',
+  'Revoke transfer': '撤回转移',
+  'Transfer deadline': '转移截止时间',
+  'Refresh transfer status': '刷新转移状态',
+  'Checking ownership transfer status…': '正在检查所有权转移状态…',
+  'Could not check the transfer status.': '无法检查转移状态。',
+  'No pending transfer offer.': '没有待处理的转移提议。',
+  'Transfer offer pending.': '转移提议待处理。',
+  'Ownership transfer completed.': '所有权转移已完成。',
+  'The transfer offer was revoked or declined.': '转移提议已撤回或被拒绝。',
+  'You declined the transfer offer.': '你已拒绝转移提议。',
+  'The transfer offer expired.': '转移提议已过期。',
+  'The transfer offer is no longer valid.': '转移提议已失效。',
+  'A transfer offer is already pending.': '已有一项待处理的转移提议。',
+  'This transfer offer is no longer available.': '此转移提议已无法处理。',
+  'Memberships managed by your identity provider cannot be transferred.':
+    '身份提供商管理的成员资格不能用于所有权转移。',
+  'The team needs another accepted SSO recovery owner before transferring ownership.':
+    '转移前，团队需要另一名已接受提名的单点登录恢复所有者。',
+  'This ownership transfer action is unavailable to you.': '你目前无法执行此所有权转移操作。',
+  'Could not update the transfer. Refresh its status before trying again.':
+    '无法更新转移。请刷新状态后重试。',
+  'Verify your identity for this ownership transfer.': '请验证身份以继续此次所有权转移。',
+  'Owner roles change only through a confirmed transfer. The team must retain at least one owner.':
+    '只有确认转移后，才能变更所有者角色。团队必须至少保留一名所有者。',
 } as const

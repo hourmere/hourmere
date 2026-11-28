@@ -46,6 +46,9 @@ const Instance = z
       description:
         'Whether the operator enabled SCIM provisioning and owner token creation and rotation',
     }),
+    teamOwnershipTransferEnabled: z.literal(true).optional().openapi({
+      description: 'Present when the operator enabled browser-based team ownership transfer',
+    }),
     slotSnippetsEnabled: z.boolean().optional().openapi({
       description:
         'Whether hosts may copy open times; enable only after direct-slot pages are live',
@@ -104,6 +107,7 @@ export function instanceRoutes({
   followUpHostNotesEnabled = true,
   embedAllowedOrigins,
   scimProvisioningEnabled = false,
+  teamOwnershipTransferEnabled = false,
   slotSnippetsEnabled = false,
   ssoOidcEnabled = false,
   ssoSamlEnabled = false,
@@ -125,6 +129,7 @@ export function instanceRoutes({
   /** Normalized EMBED_ALLOWED_ORIGINS; undefined preserves unknown capability readiness. */
   embedAllowedOrigins?: readonly string[]
   scimProvisioningEnabled?: boolean
+  teamOwnershipTransferEnabled?: boolean
   slotSnippetsEnabled?: boolean
   ssoOidcEnabled?: boolean
   ssoSamlEnabled?: boolean
@@ -152,6 +157,7 @@ export function instanceRoutes({
     routingFormsEnabled: routingFormsEnabled === true,
     workflowsEnabled: areWorkflowsEnabled({ workflowsEnabled }),
     scimProvisioningEnabled,
+    ...(teamOwnershipTransferEnabled && { teamOwnershipTransferEnabled: true }),
     signIn: {
       email: true,
       google: socialProviders.google !== undefined,
