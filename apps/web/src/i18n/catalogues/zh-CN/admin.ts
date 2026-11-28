@@ -3611,4 +3611,96 @@ export const admin = {
 
   // Effective team page permissions
   'No event types yet.': '还没有活动类型。',
+
+  // Departure handoff proposal management
+  'Departing host': '离队主持人',
+  'Create proposal': '创建提议',
+  'New version': '新版本',
+  'Handoff proposal': '交接提议',
+  'Version {version}': '版本{version}',
+  'Expires at': '截止时间',
+  Decision: '决定',
+  Delivery: '投递状态',
+  'Awaiting decision': '等待回复',
+  Approved: '已同意',
+  Declined: '已拒绝',
+  Queued: '等待发送',
+  'Delivery unconfirmed': '投递结果未确认',
+  'Delivery failed': '投递失败',
+  'Not sent': '未发送',
+  Closed: '已关闭',
+  Superseded: '已被新版本替代',
+  Withdrawn: '已撤回',
+  Withdraw: '撤回',
+  Resend: '重发',
+  'Resend proposal link?': '重发提议链接？',
+  'Withdraw proposal?': '撤回提议？',
+  'Sending a new link replaces the recipient’s previous link.':
+    '发送新链接后，该收件人的旧链接将失效。',
+  'Withdrawing revokes all links for this version. The original booking stays confirmed.':
+    '撤回会使此版本的所有链接失效，原预约仍保持确认。',
+  'Leave blank to keep the original booking time.': '留空以保留原预约的开始时间。',
+  'Enter a valid start time in the displayed time zone.': '请输入所示时区中的有效开始时间。',
+  'Creating proposal…': '正在创建提议…',
+  'Withdrawing proposal…': '正在撤回提议…',
+  'Could not verify the proposal change. Refresh handoff before trying again.':
+    '无法确认提议是否已更新。请刷新交接状态后重试。',
+  'The send limit for this booking has been reached.': '此预约已达到发送上限。',
+  'A link is already queued for this recipient.': '已有发给此收件人的链接在等待发送。',
+  'The proposal link could not be queued. Try again later.':
+    '无法将提议链接加入发送队列。请稍后重试。',
+  'No recipient status is available for this version.': '此版本没有可查看的收件人状态。',
+
+  'Resend unavailable': '暂不可重发',
+
+  'Proposal link queued.': '提议链接已加入发送队列。',
+
+  // Automatic departure handoff
+  'Manage automatic handoff': '管理自动交接',
+  'Automatic handoff': '自动交接',
+  'Start automatic handoff for this departed member': '为这位已离队成员启动自动交接',
+  'This run processes up to ten fully approved proposals. Pause or stop before the next booking is processed.':
+    '本轮最多处理十笔已获全员同意的提议。暂停或停止会在处理下一笔预约前生效。',
+  'Refresh run receipt': '刷新运行回执',
+  'Run receipt': '运行回执',
+  Pause: '暂停',
+  Resume: '恢复',
+  Stop: '停止',
+  Running: '运行中',
+  Stopped: '已停止',
+  Applied: '已交接',
+  'No longer eligible': '已不符合条件',
+  'Processing failed': '处理失败',
+  'Proposal version {version}': '提议版本{version}',
+  'View original booking': '查看原预约',
+  'Checking the run receipt…': '正在查看运行回执…',
+  'Updating automatic handoff…': '正在更新自动交接…',
+  'The departed member has rejoined this team.': '这位已离队成员已重新加入团队。',
+  'The session that started or resumed this run lost access.':
+    '启动或恢复本轮交接的会话已失去访问权限。',
+  'The run expired.': '本轮交接已过期。',
+  'No fully approved proposals are eligible for automatic handoff.':
+    '没有已获全员同意且符合自动交接条件的提议。',
+  'A handoff run is already running or paused for this team.':
+    '此团队已有一轮交接正在运行或处于暂停状态。',
+  'Wait at least one minute between starting handoff runs.': '两轮交接的启动时间至少间隔一分钟。',
+  'This run is no longer available.': '此轮交接已不可用。',
+  'The run changed. Refresh the run receipt.': '本轮交接状态已变化。请刷新运行回执。',
+  'Could not confirm that automatic handoff started. Try starting again.':
+    '无法确认自动交接是否已启动。请重试。',
+  'Could not update automatic handoff. Refresh the run receipt before trying again.':
+    '无法更新自动交接。请刷新运行回执后重试。',
+  'Could not load the run receipt. Try refreshing it.': '无法加载运行回执。请尝试刷新。',
+  'The automatic handoff queue is temporarily unavailable.': '自动交接队列暂时不可用。',
+
+  // Departure handoff confirmations and host labels
+  'Original host': '原主持人',
+  'Departed host': '已离队的主持人',
+  'Start automatic handoff?': '启动自动交接？',
+  'Stop automatic handoff?': '停止自动交接？',
+  'Start automatic handoff': '启动自动交接',
+  'This run processes up to {count} fully approved bookings, with at least {seconds} seconds between bookings. You can pause or stop it.':
+    '本轮最多处理{count}笔已获全员同意的预约，每笔之间至少间隔{seconds}秒。你可以暂停或停止本轮交接。',
+  'Remaining bookings will not be processed. Their original bookings stay unchanged.':
+    '尚未处理的预约将停止交接，相应的原预约保持不变。',
 } as const

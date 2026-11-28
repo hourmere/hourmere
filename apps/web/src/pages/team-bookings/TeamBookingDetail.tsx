@@ -6,6 +6,10 @@ import { loadProfile } from '../../api/resources.ts'
 import { OrganizationContextConflict } from '../../components/OrganizationContextConflict.tsx'
 import { PageHeader } from '../../components/PageHeader.tsx'
 import { PageSkeleton } from '../../components/PageSkeleton.tsx'
+import {
+  departedHandoffHost,
+  departureHandoffRunPath,
+} from '../../components/team-members/DepartureHandoffRun.tsx'
 import { useLoad, usePageTitle } from '../../hooks.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import { PATHS } from '../../paths.ts'
@@ -154,22 +158,39 @@ export function TeamBookingDetailPage({
             onRevoked={handleRevoked}
             handoff={
               detail.booking.departureHandoffEnabled && (
-                <BookingHandoff
-                  key={booking.id}
-                  bookingId={booking.id}
-                  timeZone={detail.timeZone}
-                  expectedOrganizationId={expectedOrganizationId}
-                  conflict={currentConflict}
-                  onConflict={handleConflict}
-                  onRevoked={handleRevoked}
-                  onApplied={() => {
-                    if (booking.status === 'cancelled') return
-                    setCommittedSourceId(booking.id)
-                    onChanged?.({ ...booking, status: 'cancelled' })
-                    onRefresh?.()
-                    reload()
-                  }}
-                />
+                <>
+                  <BookingHandoff
+                    key={booking.id}
+                    bookingId={booking.id}
+                    departingHost={
+                      booking.status === 'confirmed' && detail.booking.hosts.length === 1
+                        ? detail.booking.hosts[0]
+                        : undefined
+                    }
+                    bookerAttendeeId={
+                      detail.booking.attendees.find((attendee) => attendee.isBooker)?.id
+                    }
+                    timeZone={detail.timeZone}
+                    expectedOrganizationId={expectedOrganizationId}
+                    conflict={currentConflict}
+                    onConflict={handleConflict}
+                    onRevoked={handleRevoked}
+                    onApplied={() => {
+                      if (booking.status === 'cancelled') return
+                      setCommittedSourceId(booking.id)
+                      onChanged?.({ ...booking, status: 'cancelled' })
+                      onRefresh?.()
+                      reload()
+                    }}
+                  />
+                  {!currentConflict && departedHandoffHost(detail.booking) && (
+                    <p>
+                      <Link to={departureHandoffRunPath(booking.id)}>
+                        {t('Manage automatic handoff')}
+                      </Link>
+                    </p>
+                  )}
+                </>
               )
             }
             onRefresh={onRefresh ?? reload}

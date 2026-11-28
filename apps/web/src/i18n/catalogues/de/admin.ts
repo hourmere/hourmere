@@ -352,4 +352,120 @@ export const admin = {
 
   // Effective team page permissions
   'No event types yet.': 'Noch keine Ereignistypen.',
+
+  // Departure handoff proposal management
+  'Departing host': 'Ausscheidender Gastgeber',
+  'Create proposal': 'Vorschlag erstellen',
+  'New version': 'Neue Version',
+  'Handoff proposal': 'Übergabevorschlag',
+  'Version {version}': 'Version {version}',
+  'Expires at': 'Gültig bis',
+  Decision: 'Entscheidung',
+  Delivery: 'Zustellung',
+  'Awaiting decision': 'Antwort ausstehend',
+  Approved: 'Zugestimmt',
+  Declined: 'Abgelehnt',
+  Queued: 'In der Warteschlange',
+  'Delivery unconfirmed': 'Zustellung unbestätigt',
+  'Delivery failed': 'Zustellung fehlgeschlagen',
+  'Not sent': 'Nicht gesendet',
+  Closed: 'Geschlossen',
+  Superseded: 'Durch neue Version ersetzt',
+  Withdrawn: 'Zurückgezogen',
+  Withdraw: 'Zurückziehen',
+  Resend: 'Erneut senden',
+  'Resend proposal link?': 'Link zum Vorschlag erneut senden?',
+  'Withdraw proposal?': 'Vorschlag zurückziehen?',
+  'Sending a new link replaces the recipient’s previous link.':
+    'Ein neuer Link macht den bisherigen Link für diese Person ungültig.',
+  'Withdrawing revokes all links for this version. The original booking stays confirmed.':
+    'Beim Zurückziehen werden alle Links dieser Version ungültig. Die ursprüngliche Buchung bleibt bestätigt.',
+  'Leave blank to keep the original booking time.':
+    'Leer lassen, um die ursprüngliche Uhrzeit beizubehalten.',
+  'Enter a valid start time in the displayed time zone.':
+    'Gib eine gültige Startzeit in der angezeigten Zeitzone ein.',
+  'Creating proposal…': 'Vorschlag wird erstellt…',
+  'Withdrawing proposal…': 'Vorschlag wird zurückgezogen…',
+  'Could not verify the proposal change. Refresh handoff before trying again.':
+    'Die Änderung am Vorschlag konnte nicht bestätigt werden. Aktualisiere die Übergabe, bevor du es erneut versuchst.',
+  'The send limit for this booking has been reached.':
+    'Das Versandlimit für diese Buchung ist erreicht.',
+  'A link is already queued for this recipient.':
+    'Für diese Person ist bereits ein Link in der Warteschlange.',
+  'The proposal link could not be queued. Try again later.':
+    'Der Link zum Vorschlag konnte nicht in die Warteschlange aufgenommen werden. Versuch es später erneut.',
+  'No recipient status is available for this version.':
+    'Für diese Version ist kein Empfängerstatus verfügbar.',
+
+  'Resend unavailable': 'Erneutes Senden nicht verfügbar',
+
+  'Proposal link queued.': 'Der Link zum Vorschlag ist in der Warteschlange.',
+
+  // Automatic departure handoff
+  'Manage automatic handoff': 'Automatische Übergabe verwalten',
+  'Automatic handoff': 'Automatische Übergabe',
+  'Start automatic handoff for this departed member':
+    'Automatische Übergabe für dieses ausgeschiedene Mitglied starten',
+  'This run processes up to ten fully approved proposals. Pause or stop before the next booking is processed.':
+    'Dieser Lauf verarbeitet bis zu zehn vollständig genehmigte Vorschläge. Pausieren oder stoppen wirkt vor der nächsten Buchung.',
+  'Refresh run receipt': 'Ergebnisse aktualisieren',
+  'Run receipt': 'Ergebnisse des Laufs',
+  Pause: 'Pausieren',
+  Resume: 'Fortsetzen',
+  Stop: 'Stoppen',
+  Running: 'Läuft',
+  Stopped: 'Gestoppt',
+  Applied: 'Übergeben',
+  'No longer eligible': 'Nicht mehr geeignet',
+  'Processing failed': 'Verarbeitung fehlgeschlagen',
+  'Proposal version {version}': 'Vorschlagsversion {version}',
+  'View original booking': 'Ursprüngliche Buchung anzeigen',
+  'Checking the run receipt…': 'Ergebnisse werden abgerufen…',
+  'Updating automatic handoff…': 'Automatische Übergabe wird aktualisiert…',
+  'The departed member has rejoined this team.':
+    'Das ausgeschiedene Mitglied ist dem Team wieder beigetreten.',
+  'The session that started or resumed this run lost access.':
+    'Die Sitzung, die diesen Lauf gestartet oder fortgesetzt hat, hat keinen Zugriff mehr.',
+  'The run expired.': 'Der Lauf ist abgelaufen.',
+  'No fully approved proposals are eligible for automatic handoff.':
+    'Es gibt keine vollständig genehmigten Vorschläge, die automatisch übergeben werden können.',
+  'A handoff run is already running or paused for this team.':
+    'Für dieses Team läuft bereits eine Übergabe oder sie ist pausiert.',
+  'Wait at least one minute between starting handoff runs.':
+    'Warte zwischen dem Start zweier Übergabeläufe mindestens eine Minute.',
+  'This run is no longer available.': 'Dieser Lauf ist nicht mehr verfügbar.',
+  'The run changed. Refresh the run receipt.':
+    'Der Lauf hat sich geändert. Aktualisiere die Ergebnisse.',
+  'Could not confirm that automatic handoff started. Try starting again.':
+    'Der Start der automatischen Übergabe konnte nicht bestätigt werden. Versuch es erneut.',
+  'Could not update automatic handoff. Refresh the run receipt before trying again.':
+    'Die automatische Übergabe konnte nicht aktualisiert werden. Rufe die Ergebnisse erneut ab, bevor du es noch einmal versuchst.',
+  'Could not load the run receipt. Try refreshing it.':
+    'Die Ergebnisse konnten nicht geladen werden. Versuch, sie zu aktualisieren.',
+  'The automatic handoff queue is temporarily unavailable.':
+    'Die Warteschlange für automatische Übergaben ist vorübergehend nicht verfügbar.',
+  'Start time': 'Startzeit',
+  Active: 'Aktiv',
+  Expired: 'Abgelaufen',
+  Booker: 'Buchende Person',
+  Guest: 'Gast',
+  Skipped: 'Übersprungen',
+  Unavailable: 'Nicht verfügbar',
+  'Resending…': 'Wird erneut gesendet…',
+  Cancel: 'Abbrechen',
+  Paused: 'Pausiert',
+  Completed: 'Abgeschlossen',
+  Failed: 'Fehlgeschlagen',
+  Pending: 'Ausstehend',
+
+  // Departure handoff confirmations and host labels
+  'Original host': 'Ursprünglicher Gastgeber',
+  'Departed host': 'Ausgeschiedener Gastgeber',
+  'Start automatic handoff?': 'Automatische Übergabe starten?',
+  'Stop automatic handoff?': 'Automatische Übergabe stoppen?',
+  'Start automatic handoff': 'Automatische Übergabe starten',
+  'This run processes up to {count} fully approved bookings, with at least {seconds} seconds between bookings. You can pause or stop it.':
+    'In diesem Lauf werden bis zu {count} Buchungen verarbeitet, denen alle zugestimmt haben. Zwischen den Buchungen liegen mindestens {seconds} Sekunden. Du kannst den Lauf pausieren oder stoppen.',
+  'Remaining bookings will not be processed. Their original bookings stay unchanged.':
+    'Die verbleibenden Buchungen werden nicht verarbeitet. Die ursprünglichen Buchungen bleiben unverändert.',
 }

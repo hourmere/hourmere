@@ -4,6 +4,10 @@ import { type ListedOrganizationMember, listOrganizationMembers } from '../api/a
 import type { CustomTeamRole } from '../api/custom-roles.ts'
 import { errorMessage, isOrganizationContextChanged, RequestError } from '../api/errors.ts'
 import { BreakableText } from '../components/BreakableText.tsx'
+import {
+  DepartureHandoffRunForBooking,
+  handoffBookingParam,
+} from '../components/team-members/DepartureHandoffRun.tsx'
 import { MemberReadiness } from '../components/team-members/MemberReadiness.tsx'
 import {
   type ManagedMembership,
@@ -137,7 +141,8 @@ export function TeamMembers({
   onTransferRolesChanged?: () => void
 }) {
   const { t } = useI18n()
-  const { hash, key } = useLocation()
+  const { hash, key, search } = useLocation()
+  const handoffBooking = new URLSearchParams(search).get(handoffBookingParam)
   const section = useRef<HTMLElement>(null)
   const heading = useRef<HTMLHeadingElement>(null)
   // biome-ignore lint/correctness/useExhaustiveDependencies: repeat navigation to the same anchor requests focus again
@@ -242,6 +247,15 @@ export function TeamMembers({
               {t('Manage team events')}
             </Link>
           </p>
+        )}
+        {canManage && currentUserId && handoffBooking && !selectedMember && (
+          <DepartureHandoffRunForBooking
+            key={`${organizationId}:${currentUserId}:${handoffBooking}`}
+            organizationId={organizationId}
+            viewerUserId={currentUserId}
+            bookingId={handoffBooking}
+            onReload={onReload}
+          />
         )}
         <PageFeedback
           state={state}

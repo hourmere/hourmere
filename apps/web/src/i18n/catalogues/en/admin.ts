@@ -3783,4 +3783,104 @@ export const admin = {
 
   // Effective team page permissions
   'No event types yet.': 'No event types yet.',
+
+  // Departure handoff proposal management
+  'Departing host': 'Departing host',
+  'Create proposal': 'Create proposal',
+  'New version': 'New version',
+  'Handoff proposal': 'Handoff proposal',
+  'Version {version}': 'Version {version}',
+  'Expires at': 'Expires at',
+  Decision: 'Decision',
+  Delivery: 'Delivery',
+  'Awaiting decision': 'Awaiting decision',
+  Approved: 'Approved',
+  Declined: 'Declined',
+  Queued: 'Queued',
+  'Delivery unconfirmed': 'Delivery unconfirmed',
+  'Delivery failed': 'Delivery failed',
+  'Not sent': 'Not sent',
+  Closed: 'Closed',
+  Superseded: 'Superseded',
+  Withdrawn: 'Withdrawn',
+  Withdraw: 'Withdraw',
+  Resend: 'Resend',
+  'Resend proposal link?': 'Resend proposal link?',
+  'Withdraw proposal?': 'Withdraw proposal?',
+  'Sending a new link replaces the recipient’s previous link.':
+    'Sending a new link replaces the recipient’s previous link.',
+  'Withdrawing revokes all links for this version. The original booking stays confirmed.':
+    'Withdrawing revokes all links for this version. The original booking stays confirmed.',
+  'Leave blank to keep the original booking time.':
+    'Leave blank to keep the original booking time.',
+  'Enter a valid start time in the displayed time zone.':
+    'Enter a valid start time in the displayed time zone.',
+  'Creating proposal…': 'Creating proposal…',
+  'Withdrawing proposal…': 'Withdrawing proposal…',
+  'Could not verify the proposal change. Refresh handoff before trying again.':
+    'Could not verify the proposal change. Refresh handoff before trying again.',
+  'The send limit for this booking has been reached.':
+    'The send limit for this booking has been reached.',
+  'A link is already queued for this recipient.': 'A link is already queued for this recipient.',
+  'The proposal link could not be queued. Try again later.':
+    'The proposal link could not be queued. Try again later.',
+  'No recipient status is available for this version.':
+    'No recipient status is available for this version.',
+
+  'Resend unavailable': 'Resend unavailable',
+
+  'Proposal link queued.': 'Proposal link queued.',
+
+  // Automatic departure handoff
+  'Manage automatic handoff': 'Manage automatic handoff',
+  'Automatic handoff': 'Automatic handoff',
+  'Start automatic handoff for this departed member':
+    'Start automatic handoff for this departed member',
+  'This run processes up to ten fully approved proposals. Pause or stop before the next booking is processed.':
+    'This run processes up to ten fully approved proposals. Pause or stop before the next booking is processed.',
+  'Refresh run receipt': 'Refresh run receipt',
+  'Run receipt': 'Run receipt',
+  Pause: 'Pause',
+  Resume: 'Resume',
+  Stop: 'Stop',
+  Running: 'Running',
+  Stopped: 'Stopped',
+  Applied: 'Applied',
+  'No longer eligible': 'No longer eligible',
+  'Processing failed': 'Processing failed',
+  'Proposal version {version}': 'Proposal version {version}',
+  'View original booking': 'View original booking',
+  'Checking the run receipt…': 'Checking the run receipt…',
+  'Updating automatic handoff…': 'Updating automatic handoff…',
+  'The departed member has rejoined this team.': 'The departed member has rejoined this team.',
+  'The session that started or resumed this run lost access.':
+    'The session that started or resumed this run lost access.',
+  'The run expired.': 'The run expired.',
+  'No fully approved proposals are eligible for automatic handoff.':
+    'No fully approved proposals are eligible for automatic handoff.',
+  'A handoff run is already running or paused for this team.':
+    'A handoff run is already running or paused for this team.',
+  'Wait at least one minute between starting handoff runs.':
+    'Wait at least one minute between starting handoff runs.',
+  'This run is no longer available.': 'This run is no longer available.',
+  'The run changed. Refresh the run receipt.': 'The run changed. Refresh the run receipt.',
+  'Could not confirm that automatic handoff started. Try starting again.':
+    'Could not confirm that automatic handoff started. Try starting again.',
+  'Could not update automatic handoff. Refresh the run receipt before trying again.':
+    'Could not update automatic handoff. Refresh the run receipt before trying again.',
+  'Could not load the run receipt. Try refreshing it.':
+    'Could not load the run receipt. Try refreshing it.',
+  'The automatic handoff queue is temporarily unavailable.':
+    'The automatic handoff queue is temporarily unavailable.',
+
+  // Departure handoff confirmations and host labels
+  'Original host': 'Original host',
+  'Departed host': 'Departed host',
+  'Start automatic handoff?': 'Start automatic handoff?',
+  'Stop automatic handoff?': 'Stop automatic handoff?',
+  'Start automatic handoff': 'Start automatic handoff',
+  'This run processes up to {count} fully approved bookings, with at least {seconds} seconds between bookings. You can pause or stop it.':
+    'This run processes up to {count} fully approved bookings, with at least {seconds} seconds between bookings. You can pause or stop it.',
+  'Remaining bookings will not be processed. Their original bookings stay unchanged.':
+    'Remaining bookings will not be processed. Their original bookings stay unchanged.',
 } as const

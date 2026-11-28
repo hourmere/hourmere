@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
@@ -26,7 +26,12 @@ const GET = `GET /api/v1/team/bookings/${ID}`
 const CANCEL = `POST /api/v1/team/bookings/${ID}/cancel`
 const HANDOFF_PREVIEW = `GET /api/v1/team/bookings/${ID}/handoff-preview`
 const OFFER_ID = 'b0000000-0000-7000-8000-000000000002'
-const HANDOFF_APPLY = `POST /api/v1/team/bookings/${ID}/handoff-offers/${OFFER_ID}/apply`
+const OFFERS = `/api/v1/team/bookings/${ID}/handoff-offers`
+const HANDOFF_CREATE = `POST ${OFFERS}`
+const HANDOFF_STATUS = `GET ${OFFERS}/${OFFER_ID}`
+const HANDOFF_APPLY = `POST ${OFFERS}/${OFFER_ID}/apply`
+const HANDOFF_RESEND = `POST ${OFFERS}/${OFFER_ID}/resend`
+const HANDOFF_WITHDRAW = `POST ${OFFERS}/${OFFER_ID}/withdraw`
 const REPLACEMENT_ID = 'b0000000-0000-7000-8000-000000000003'
 const TEAM: Schemas['Me'] = {
   ...ME,
@@ -226,6 +231,52 @@ describe('team booking handoff', () => {
     version: 3,
     expiresAt: '2030-03-02T00:00:00Z',
   }
+  const bookerId = '00000000-0000-7000-8000-000000000020'
+  const guestId = '00000000-0000-7000-8000-000000000021'
+  const bookerRecipientId = '00000000-0000-7000-8000-000000000030'
+  const guestRecipientId = '00000000-0000-7000-8000-000000000031'
+  const handoffBooking = {
+    ...BOOKING,
+    departureHandoffEnabled: true,
+    attendees: [
+      { ...BOOKING.attendees[0], id: bookerId },
+      {
+        id: guestId,
+        name: 'Private guest',
+        email: 'guest@example.com',
+        timeZone: 'UTC',
+        isBooker: false,
+      },
+    ],
+  }
+  const approved: Schemas['DepartureHandoffProposal'] = {
+    ...offer,
+    state: 'live',
+    recipients: [
+      {
+        id: bookerRecipientId,
+        attendeeIds: [bookerId],
+        decision: 'approved',
+        delivery: 'sent',
+        resendAvailable: false,
+      },
+      {
+        id: guestRecipientId,
+        attendeeIds: [guestId],
+        decision: 'approved',
+        delivery: 'sent',
+        resendAvailable: false,
+      },
+    ],
+  }
+  const pending: Schemas['DepartureHandoffProposal'] = {
+    ...approved,
+    recipients: approved.recipients.map((recipient) => ({
+      ...recipient,
+      decision: 'pending',
+      resendAvailable: true,
+    })),
+  }
 
   it('requires a fresh approval check after losing the result of a confirm request', async () => {
     vi.useFakeTimers({ toFake: ['Date'], now: new Date('2030-03-01T01:00:00Z') })
@@ -261,6 +312,7 @@ describe('team booking handoff', () => {
           committed = true
           return json(503, { error: 'unavailable' })
         },
+        [HANDOFF_STATUS]: () => json(200, approved),
       })
       open()
       const user = userEvent.setup()
@@ -319,6 +371,7 @@ describe('team booking handoff', () => {
         [GET]: () => json(200, { ...BOOKING, departureHandoffEnabled: true }),
         [HANDOFF_PREVIEW]: () =>
           json(200, { offer: { ...offer, state: 'ready' }, preview, receipt: null }),
+        [HANDOFF_STATUS]: () => json(200, approved),
       })
       open()
       const user = userEvent.setup()
@@ -332,6 +385,255 @@ describe('team booking handoff', () => {
       expect((confirm as HTMLButtonElement).disabled).toBe(true)
       expect(handoff.queryByText('The proposed time is available.')).toBeNull()
       expect(calls.to(HANDOFF_APPLY)).toHaveLength(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it.each([
+    { isCurrentMember: true, label: 'Original host' },
+    { isCurrentMember: false, label: 'Departed host' },
+    { isCurrentMember: null, label: 'Original host' },
+  ])('labels the saved host as $label', async ({ isCurrentMember, label }) => {
+    server({
+      [GET]: () =>
+        json(200, {
+          ...handoffBooking,
+          hosts: [{ ...BOOKING.hosts[0], isCurrentMember }],
+        }),
+      [HANDOFF_PREVIEW]: () => json(200, { offer: null, preview, receipt: null }),
+    })
+    open()
+    const handoff = within(await screen.findByRole('region', { name: 'Booking handoff' }))
+    await userEvent.click(handoff.getByRole('button', { name: 'Preview handoff' }))
+    const host = await handoff.findByText(label, { selector: 'dt' })
+    expect(host.nextElementSibling?.textContent).toBe('Saved host')
+  })
+
+  it('creates, resends and withdraws proposals with role-only status and a versioned restart', async () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2030-03-01T01:00:00Z') })
+    try {
+      let current: Schemas['DepartureHandoffProposal'] | null = null
+      let available = false
+      const calls = server({
+        [GET]: () => json(200, handoffBooking),
+        [HANDOFF_PREVIEW]: () =>
+          json(200, {
+            offer: current && {
+              ...current,
+              state: current.state === 'live' ? 'pending' : 'closed',
+            },
+            preview:
+              current?.state === 'withdrawn'
+                ? null
+                : { ...preview, availability: available ? 'available' : 'unavailable' },
+            receipt: null,
+          }),
+        [HANDOFF_CREATE]: () => {
+          current = { ...pending, version: current ? current.version + 1 : 1 }
+          return json(201, current)
+        },
+        [HANDOFF_STATUS]: () => json(200, current),
+        [HANDOFF_RESEND]: () => json(200, current),
+        [HANDOFF_WITHDRAW]: () => {
+          if (!current) throw new Error('Expected a live proposal')
+          current = { ...current, state: 'withdrawn' }
+          return json(200, current)
+        },
+      })
+      open()
+      const user = userEvent.setup()
+      const region = await screen.findByRole('region', { name: 'Booking handoff' })
+      const handoff = within(region)
+      const create = () => handoff.queryByRole('button', { name: 'Create proposal' })
+      const refresh = () => user.click(handoff.getByRole('button', { name: 'Refresh handoff' }))
+      expect(create()).toBeNull()
+      await user.click(handoff.getByRole('button', { name: 'Preview handoff' }))
+      await handoff.findByText(
+        'That time is unavailable for the replacement host. Refresh the preview or use manual rebooking.',
+      )
+      expect(create()).toBeNull()
+      available = true
+      await refresh()
+      await handoff.findByText('The proposed time is available.')
+      expect(handoff.getByText(preview.candidateName)).toBeDefined()
+      expect(handoff.getByText('Saved host')).toBeDefined()
+      await user.click(handoff.getByRole('button', { name: 'Create proposal' }))
+      const status = await handoff.findByRole('region', { name: 'Handoff proposal' })
+      expect(within(status).getByText('Version 1')).toBeDefined()
+      expect(
+        within(status).getByText('Expires at').nextElementSibling?.querySelector('time')?.dateTime,
+      ).toBe(offer.expiresAt)
+      expect(create()).toBeNull()
+      expect(calls.to(HANDOFF_CREATE)[0]?.body).toEqual({ departingUserId: ID })
+      const booker = within(status).getByRole('article', { name: 'Booker' })
+      const guest = within(status).getByRole('article', { name: 'Guest' })
+      expect(within(booker).getByText('Awaiting decision')).toBeDefined()
+      expect(within(guest).getByText('Accepted by the mail server')).toBeDefined()
+      expect(region.innerHTML).not.toMatch(
+        /grace@example\.com|guest@example\.com|Grace|Private guest|0000000000[23][01]/,
+      )
+
+      const resend = within(guest).getByRole('button', { name: 'Resend' })
+      await user.click(resend)
+      const resendDialog = () =>
+        within(screen.getByRole('dialog', { name: 'Resend proposal link?' }))
+      expect(document.activeElement).toBe(resendDialog().getByRole('button', { name: 'Cancel' }))
+      await user.click(resendDialog().getByRole('button', { name: 'Cancel' }))
+      expect(document.activeElement).toBe(resend)
+      expect(calls.to(HANDOFF_RESEND)).toHaveLength(0)
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        await user.click(resend)
+        await user.click(resendDialog().getByRole('button', { name: 'Resend' }))
+        await handoff.findByText('Proposal link queued.')
+      }
+      const requests = calls.to(HANDOFF_RESEND)
+      expect(requests.map((request) => request.body)).toEqual([
+        { version: 1, recipientId: guestRecipientId },
+        { version: 1, recipientId: guestRecipientId },
+      ])
+      const keys = requests.map((request) => request.headers.get('Idempotency-Key'))
+      expect(keys[0]).toMatch(/^[0-9a-f]{8}-[0-9a-f-]{27}$/)
+      expect(keys[1]).toMatch(/^[0-9a-f]{8}-[0-9a-f-]{27}$/)
+      expect(new Set(keys).size).toBe(2)
+
+      await user.click(within(status).getByRole('button', { name: 'Withdraw' }))
+      const withdraw = within(screen.getByRole('dialog', { name: 'Withdraw proposal?' }))
+      expect(calls.to(HANDOFF_WITHDRAW)).toHaveLength(0)
+      await user.click(withdraw.getByRole('button', { name: 'Withdraw' }))
+      await handoff.findByText('Withdrawn')
+      expect(calls.to(HANDOFF_WITHDRAW)[0]?.body).toEqual({ version: 1 })
+      expect(within(status).getAllByText('Resend unavailable')).toHaveLength(2)
+      fireEvent.change(handoff.getByLabelText('Start time (optional)'), {
+        target: { value: '2030-03-04T10:30' },
+      })
+      await user.click(handoff.getByRole('button', { name: 'New version' }))
+      await handoff.findByText('Version 2')
+      expect(calls.to(HANDOFF_CREATE)[1]?.body).toEqual({
+        departingUserId: ID,
+        start: '2030-03-04T09:30:00.000Z',
+        previous: { offerId: OFFER_ID, version: 1 },
+      })
+      for (const route of [HANDOFF_CREATE, HANDOFF_STATUS, HANDOFF_RESEND, HANDOFF_WITHDRAW]) {
+        for (const call of calls.to(route)) {
+          expect(call.headers.get('x-expected-organization-id')).toBe(TEAM.organization.id)
+          expect(call.headers.has('authorization')).toBe(false)
+        }
+      }
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('shows proposal limits and requires a fresh read after an uncertain result', async () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2030-03-01T01:00:00Z') })
+    try {
+      let attempts = 0
+      let needsRecovery = true
+      const calls = server({
+        [GET]: () => json(200, handoffBooking),
+        [HANDOFF_PREVIEW]: () =>
+          attempts === 3 && needsRecovery
+            ? json(503, { error: 'unavailable' })
+            : json(200, {
+                offer: attempts === 3 ? { ...offer, state: 'pending' } : null,
+                preview,
+                receipt: null,
+              }),
+        [HANDOFF_CREATE]: () => {
+          attempts += 1
+          if (attempts === 1) return json(429, { error: 'rate_limited' })
+          if (attempts === 2) return json(409, { error: 'handoff_send_limit' })
+          return json(201, pending)
+        },
+        [HANDOFF_STATUS]: () => json(200, pending),
+      })
+      open()
+      const user = userEvent.setup()
+      const handoff = within(await screen.findByRole('region', { name: 'Booking handoff' }))
+      await user.click(handoff.getByRole('button', { name: 'Preview handoff' }))
+      const create = await handoff.findByRole('button', { name: 'Create proposal' })
+      const refresh = () => user.click(handoff.getByRole('button', { name: 'Refresh handoff' }))
+      for (const [index, message] of [
+        'Too many requests. Wait a minute and try again.',
+        'The send limit for this booking has been reached.',
+        'Could not verify the proposal change. Refresh handoff before trying again.',
+      ].entries()) {
+        await user.click(create)
+        await handoff.findByText(message)
+        expect(create.getAttribute('aria-disabled')).toBe('true')
+        await user.click(create)
+        expect(calls.to(HANDOFF_CREATE)).toHaveLength(index + 1)
+        if (index < 2) {
+          await refresh()
+          await waitFor(() => expect(create.getAttribute('aria-disabled')).toBe('false'))
+        }
+      }
+      needsRecovery = false
+      await refresh()
+      await handoff.findByText('Version 3')
+      expect(handoff.queryByRole('button', { name: 'Create proposal' })).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it.each([
+    { outcome: 'network failure', status: null, replay: true },
+    { outcome: 'server error', status: 503, replay: true },
+    { outcome: 'definite rejection', status: 409, replay: false },
+  ])('handles a resend retry after a $outcome', async ({ status, replay }) => {
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2030-03-01T01:00:00Z') })
+    try {
+      let attempts = 0
+      const calls = server({
+        [GET]: () => json(200, handoffBooking),
+        [HANDOFF_PREVIEW]: () =>
+          json(200, { offer: { ...offer, state: 'pending' }, preview, receipt: null }),
+        [HANDOFF_STATUS]: () => json(200, pending),
+        [HANDOFF_RESEND]: () => {
+          attempts += 1
+          if (attempts > 1) return json(200, pending)
+          if (status === null) throw new TypeError('Failed to fetch')
+          return json(status, { error: 'unavailable' })
+        },
+      })
+      const user = userEvent.setup()
+      async function resend(role: 'Booker' | 'Guest') {
+        const recipient = within(await screen.findByRole('article', { name: role }))
+        await user.click(recipient.getByRole('button', { name: 'Resend' }))
+        const dialog = within(screen.getByRole('dialog', { name: 'Resend proposal link?' }))
+        await user.click(dialog.getByRole('button', { name: 'Resend' }))
+      }
+
+      const page = open()
+      await user.click(await screen.findByRole('button', { name: 'Preview handoff' }))
+      await resend('Guest')
+      await screen.findByText(
+        'Could not verify the proposal change. Refresh handoff before trying again.',
+      )
+
+      page.unmount()
+      open()
+      await user.click(await screen.findByRole('button', { name: 'Preview handoff' }))
+      await resend('Booker')
+      await screen.findByText('Proposal link queued.')
+      await resend('Guest')
+      await screen.findByText('Proposal link queued.')
+
+      const requests = calls.to(HANDOFF_RESEND)
+      expect(requests.map((request) => request.body)).toEqual([
+        { version: offer.version, recipientId: guestRecipientId },
+        { version: offer.version, recipientId: bookerRecipientId },
+        { version: offer.version, recipientId: guestRecipientId },
+      ])
+      const [first, otherRecipient, retry] = requests.map(({ headers }) =>
+        headers.get('Idempotency-Key'),
+      )
+      for (const key of [first, otherRecipient, retry]) expect(key).toMatch(/^[0-9a-f-]{36}$/)
+      expect(otherRecipient).not.toBe(first)
+      if (replay) expect(retry).toBe(first)
+      else expect(retry).not.toBe(first)
     } finally {
       vi.useRealTimers()
     }

@@ -348,4 +348,117 @@ export const admin = {
 
   // Effective team page permissions
   'No event types yet.': 'Todavía no hay tipos de evento.',
+
+  // Departure handoff proposal management
+  'Departing host': 'Anfitrión saliente',
+  'Create proposal': 'Crear propuesta',
+  'New version': 'Nueva versión',
+  'Handoff proposal': 'Propuesta de traspaso',
+  'Version {version}': 'Versión {version}',
+  'Expires at': 'Vence el',
+  Decision: 'Decisión',
+  Delivery: 'Entrega',
+  'Awaiting decision': 'Pendiente de respuesta',
+  Approved: 'Aceptada',
+  Declined: 'Rechazada',
+  Queued: 'En cola',
+  'Delivery unconfirmed': 'Entrega sin confirmar',
+  'Delivery failed': 'Error de entrega',
+  'Not sent': 'Sin enviar',
+  Closed: 'Cerrada',
+  Superseded: 'Sustituida',
+  Withdrawn: 'Retirada',
+  Withdraw: 'Retirar',
+  Resend: 'Reenviar',
+  'Resend proposal link?': '¿Reenviar el enlace de la propuesta?',
+  'Withdraw proposal?': '¿Retirar la propuesta?',
+  'Sending a new link replaces the recipient’s previous link.':
+    'Al enviar un enlace nuevo, el anterior de esa persona dejará de funcionar.',
+  'Withdrawing revokes all links for this version. The original booking stays confirmed.':
+    'Al retirar esta versión, todos sus enlaces dejan de funcionar. La reserva original sigue confirmada.',
+  'Leave blank to keep the original booking time.':
+    'Déjalo en blanco para conservar la hora de la reserva original.',
+  'Enter a valid start time in the displayed time zone.':
+    'Introduce una hora de inicio válida en la zona horaria indicada.',
+  'Creating proposal…': 'Creando propuesta…',
+  'Withdrawing proposal…': 'Retirando propuesta…',
+  'Could not verify the proposal change. Refresh handoff before trying again.':
+    'No se pudo verificar el cambio de la propuesta. Actualiza el traspaso antes de volver a intentarlo.',
+  'The send limit for this booking has been reached.':
+    'Se alcanzó el límite de envíos de esta reserva.',
+  'A link is already queued for this recipient.': 'Ya hay un enlace en cola para esta persona.',
+  'The proposal link could not be queued. Try again later.':
+    'No se pudo poner en cola el enlace de la propuesta. Inténtalo más tarde.',
+  'No recipient status is available for this version.':
+    'El estado de las personas destinatarias no está disponible para esta versión.',
+
+  'Resend unavailable': 'Reenvío no disponible',
+
+  'Proposal link queued.': 'El enlace de la propuesta está en cola.',
+
+  // Automatic departure handoff
+  'Manage automatic handoff': 'Gestionar el traspaso automático',
+  'Automatic handoff': 'Traspaso automático',
+  'Start automatic handoff for this departed member':
+    'Iniciar el traspaso automático de este exmiembro',
+  'This run processes up to ten fully approved proposals. Pause or stop before the next booking is processed.':
+    'Esta ejecución procesa hasta diez propuestas aprobadas por todos. La pausa o la detención se aplica antes de procesar la siguiente reserva.',
+  'Refresh run receipt': 'Actualizar el resumen de ejecución',
+  'Run receipt': 'Resumen de ejecución',
+  Pause: 'Pausar',
+  Resume: 'Reanudar',
+  Stop: 'Detener',
+  Running: 'En curso',
+  Stopped: 'Detenido',
+  Applied: 'Traspasada',
+  'No longer eligible': 'Ya no cumple los requisitos',
+  'Processing failed': 'Error de procesamiento',
+  'Proposal version {version}': 'Versión {version} de la propuesta',
+  'View original booking': 'Ver la reserva original',
+  'Checking the run receipt…': 'Consultando el resumen de ejecución…',
+  'Updating automatic handoff…': 'Actualizando el traspaso automático…',
+  'The departed member has rejoined this team.': 'El exmiembro se ha reincorporado al equipo.',
+  'The session that started or resumed this run lost access.':
+    'La sesión que inició o reanudó esta ejecución perdió el acceso.',
+  'The run expired.': 'La ejecución caducó.',
+  'No fully approved proposals are eligible for automatic handoff.':
+    'No hay propuestas aprobadas por todos que cumplan los requisitos para el traspaso automático.',
+  'A handoff run is already running or paused for this team.':
+    'Este equipo ya tiene un traspaso en curso o en pausa.',
+  'Wait at least one minute between starting handoff runs.':
+    'Espera al menos un minuto entre el inicio de dos ejecuciones de traspaso.',
+  'This run is no longer available.': 'Esta ejecución ya no está disponible.',
+  'The run changed. Refresh the run receipt.': 'La ejecución cambió. Actualiza su resumen.',
+  'Could not confirm that automatic handoff started. Try starting again.':
+    'No se pudo confirmar el inicio del traspaso automático. Intenta iniciarlo de nuevo.',
+  'Could not update automatic handoff. Refresh the run receipt before trying again.':
+    'No se pudo actualizar el traspaso automático. Actualiza el resumen antes de volver a intentarlo.',
+  'Could not load the run receipt. Try refreshing it.':
+    'No se pudo cargar el resumen de ejecución. Intenta actualizarlo.',
+  'The automatic handoff queue is temporarily unavailable.':
+    'La cola de traspaso automático no está disponible temporalmente.',
+  'Start time': 'Hora de inicio',
+  Active: 'Activa',
+  Expired: 'Vencida',
+  Booker: 'Persona que reservó',
+  Guest: 'Invitado',
+  Skipped: 'Omitida',
+  Unavailable: 'No disponible',
+  'Resending…': 'Reenviando…',
+  Cancel: 'Cancelar',
+  Paused: 'En pausa',
+  Completed: 'Completada',
+  Failed: 'Error',
+  Pending: 'Pendiente',
+
+  // Departure handoff confirmations and host labels
+  'Original host': 'Anfitrión original',
+  'Departed host': 'Anfitrión que dejó el equipo',
+  'Start automatic handoff?': '¿Iniciar el traspaso automático?',
+  'Stop automatic handoff?': '¿Detener el traspaso automático?',
+  'Start automatic handoff': 'Iniciar el traspaso automático',
+  'This run processes up to {count} fully approved bookings, with at least {seconds} seconds between bookings. You can pause or stop it.':
+    'Se procesarán hasta {count} reservas aprobadas por todos, con al menos {seconds} segundos entre reservas. Puedes pausar o detener el traspaso.',
+  'Remaining bookings will not be processed. Their original bookings stay unchanged.':
+    'Las reservas pendientes no se procesarán. Esas reservas originales quedarán sin cambios.',
 }
