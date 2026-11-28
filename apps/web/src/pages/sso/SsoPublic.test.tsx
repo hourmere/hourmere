@@ -347,32 +347,35 @@ describe('SSO mailbox proof', () => {
     ).toBeDefined()
   })
 
-  it('allows SCIM mailbox confirmation with both SSO protocols off', async () => {
-    vi.stubGlobal(
-      'BroadcastChannel',
-      class {
-        close() {}
-        postMessage() {}
-      },
-    )
-    const api = fakeApi({
-      'GET /api/v1/instance': () =>
-        json(200, {
-          ssoOidcEnabled: false,
-          ssoSamlEnabled: false,
-          scimResourcesEnabled: true,
-        }),
-      [consume]: () => json(200, { status: 'proven' }),
-    })
-    const startPage = within(renderApp(proof).container)
-    await startPage.findByText(unavailable)
-    const confirmationPage = within(renderApp(emailedLink).container)
-    await userEvent.click(await confirmationPage.findByRole('button', { name: verify }))
-    await confirmationPage.findByText(verified)
-    expect(api.to(consume).map(({ body }) => body)).toEqual([{ attemptId, token }])
-    expect(api.to(send)).toEqual([])
-    expect(api.to(complete)).toEqual([])
-  })
+  it.each(['scimResourcesEnabled', 'teamOwnershipTransferEnabled'] as const)(
+    'allows mailbox confirmation with both SSO protocols off when %s is on',
+    async (capability) => {
+      vi.stubGlobal(
+        'BroadcastChannel',
+        class {
+          close() {}
+          postMessage() {}
+        },
+      )
+      const api = fakeApi({
+        'GET /api/v1/instance': () =>
+          json(200, {
+            ssoOidcEnabled: false,
+            ssoSamlEnabled: false,
+            [capability]: true,
+          }),
+        [consume]: () => json(200, { status: 'proven' }),
+      })
+      const startPage = within(renderApp(proof).container)
+      await startPage.findByText(unavailable)
+      const confirmationPage = within(renderApp(emailedLink).container)
+      await userEvent.click(await confirmationPage.findByRole('button', { name: verify }))
+      await confirmationPage.findByText(verified)
+      expect(api.to(consume).map(({ body }) => body)).toEqual([{ attemptId, token }])
+      expect(api.to(send)).toEqual([])
+      expect(api.to(complete)).toEqual([])
+    },
+  )
 
   it('reads and clears a fresh verification link opened on the same page', async () => {
     const api = fakeApi({ 'GET /api/v1/instance': () => instance() })

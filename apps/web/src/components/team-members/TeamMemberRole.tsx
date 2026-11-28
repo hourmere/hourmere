@@ -29,12 +29,28 @@ type RoleButtonProps = {
 const SCIM_PROMOTION_BLOCKED =
   'Restore this membership in your identity provider before making this member an admin.'
 
-export function RoleManagementNotice() {
+export function RoleManagementNotice({
+  ownershipTransferEnabled = false,
+}: {
+  ownershipTransferEnabled?: boolean
+}) {
   const { t } = useI18n()
   return (
     <div className="hint team-role-limits">
-      <p>{t('Only owners can manage admins. Ownership transfer is not available yet.')}</p>
-      <p>{t('Owner roles cannot be changed here. The team must retain at least one owner.')}</p>
+      <p>
+        {t(
+          ownershipTransferEnabled
+            ? 'Only owners can manage admins.'
+            : 'Only owners can manage admins. Ownership transfer is not available yet.',
+        )}
+      </p>
+      <p>
+        {t(
+          ownershipTransferEnabled
+            ? 'Owner roles change only through a confirmed transfer. The team must retain at least one owner.'
+            : 'Owner roles cannot be changed here. The team must retain at least one owner.',
+        )}
+      </p>
     </div>
   )
 }

@@ -11,6 +11,21 @@ const base = {
 }
 
 describe('loadConfig', () => {
+  it('keeps team ownership transfer off unless explicitly enabled', () => {
+    for (const value of [undefined, '', 'false'])
+      expect(
+        loadConfig({ ...base, TEAM_OWNERSHIP_TRANSFER_ENABLED: value })
+          .TEAM_OWNERSHIP_TRANSFER_ENABLED,
+      ).toBe(false)
+    expect(
+      loadConfig({ ...base, TEAM_OWNERSHIP_TRANSFER_ENABLED: 'true' })
+        .TEAM_OWNERSHIP_TRANSFER_ENABLED,
+    ).toBe(true)
+    expect(() => loadConfig({ ...base, TEAM_OWNERSHIP_TRANSFER_ENABLED: 'yes' })).toThrow(
+      /TEAM_OWNERSHIP_TRANSFER_ENABLED/,
+    )
+  })
+
   it('requires explicit organization IDs to publish team directories', () => {
     const id = '4ef4e257-e71a-4430-a73f-a1985dac9cca'
     expect(loadConfig(base).TEAM_PUBLIC_HOME_ORGANIZATION_IDS).toEqual([])

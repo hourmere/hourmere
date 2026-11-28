@@ -153,6 +153,56 @@ export const admin = {
   Bookings: 'Reservas',
   Order: 'Ordem',
 
+  // Team ownership transfer
+  'Team ownership transfer': 'Transferência de propriedade da equipe',
+  'Only owners can manage admins.': 'Somente proprietários podem gerenciar administradores.',
+  'Offer ownership to {name}': 'Oferecer a propriedade a {name}',
+  'Choose a team member below to offer them ownership.':
+    'Selecione um membro da equipe abaixo para oferecer a propriedade.',
+  'Review ownership transfer': 'Revisar a transferência de propriedade',
+  'You will become an admin when the recipient accepts.':
+    'Quando a pessoa destinatária aceitar, você passará a ser administrador.',
+  '{initiator} will become an admin.': '{initiator} passará a ser administrador.',
+  '{recipient} will become the team owner.': '{recipient} assumirá a propriedade da equipe.',
+  'Personal spaces, calendars and provider connections stay with their current accounts. API keys and agent authorizations are not transferred.':
+    'Espaços pessoais, calendários e conexões com provedores permanecem nas contas atuais. Chaves de API e autorizações de agentes não são transferidas.',
+  'Send transfer offer': 'Enviar proposta de transferência',
+  'Accept ownership': 'Aceitar a propriedade',
+  'Decline transfer': 'Recusar transferência',
+  'Revoke transfer': 'Revogar transferência',
+  'Transfer deadline': 'Prazo para a transferência',
+  'Refresh transfer status': 'Atualizar o status da transferência',
+  'Checking ownership transfer status…': 'Verificando o status da transferência…',
+  'Could not check the transfer status.': 'Não foi possível verificar o status da transferência.',
+  'No pending transfer offer.': 'Não há proposta de transferência pendente.',
+  'Transfer offer pending.': 'Proposta de transferência pendente.',
+  'Ownership transfer completed.': 'Transferência de propriedade concluída.',
+  'The transfer offer was revoked or declined.':
+    'A proposta de transferência foi revogada ou recusada.',
+  'You declined the transfer offer.': 'Você recusou a proposta de transferência.',
+  'The transfer offer expired.': 'A proposta de transferência expirou.',
+  'The transfer offer is no longer valid.': 'A proposta de transferência perdeu a validade.',
+  'A transfer offer is already pending.': 'Já existe uma proposta de transferência pendente.',
+  'This transfer offer is no longer available.':
+    'Esta proposta de transferência não está mais disponível.',
+  'Memberships managed by your identity provider cannot be transferred.':
+    'Vínculos gerenciados pelo seu provedor de identidade não podem participar da transferência.',
+  'The team needs another accepted SSO recovery owner before transferring ownership.':
+    'A equipe precisa de outro proprietário que tenha aceitado a função de recuperação de SSO antes de transferir a propriedade.',
+  'This ownership transfer action is unavailable to you.':
+    'Esta ação de transferência de propriedade não está disponível para você.',
+  'Could not update the transfer. Refresh its status before trying again.':
+    'Não foi possível atualizar a transferência. Atualize o status antes de tentar novamente.',
+  'Verify your identity for this ownership transfer.':
+    'Verifique sua identidade para esta transferência de propriedade.',
+  'Try again in {0} seconds.': 'Tente novamente em {0} segundos.',
+  'Reload team': 'Recarregar equipe',
+  'Unnamed team member': 'Membro da equipe sem nome',
+  'Too many requests. Please wait and try again later.':
+    'Muitas solicitações. Aguarde e tente novamente mais tarde.',
+  'Owner roles change only through a confirmed transfer. The team must retain at least one owner.':
+    'A função de proprietário só muda após uma transferência confirmada. A equipe deve manter pelo menos um proprietário.',
+
   // Custom team roles
   'Roles and permissions': 'Funções e permissões',
   'Loading custom roles…': 'Carregando funções personalizadas…',

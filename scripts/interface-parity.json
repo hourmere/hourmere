@@ -1,4 +1,16 @@
 {
+  "getTeamPermissions": {
+    "exemption": "browser-session-only",
+    "reason": "Team permission decisions describe the current member's browser session."
+  },
+  "listCustomTeamRoles": {
+    "exemption": "browser-session-only",
+    "reason": "Listing custom team roles requires a verified fixed Owner's browser session."
+  },
+  "getCustomTeamRole": {
+    "exemption": "browser-session-only",
+    "reason": "Reading a custom team role requires a verified fixed Owner's browser session."
+  },
   "createCustomTeamRole": {
     "exemption": "browser-session-only",
     "reason": "Custom role management requires a verified fixed Owner's browser session and fresh proof."
@@ -247,6 +259,26 @@
   "leaveTeam": {
     "exemption": "browser-session-only",
     "reason": "Leaving a team and resolving its scheduling dependencies requires a verified browser session."
+  },
+  "getOwnershipTransfer": {
+    "exemption": "browser-session-only",
+    "reason": "Ownership offers are visible only to eligible team members in a live browser session."
+  },
+  "createOwnershipTransfer": {
+    "exemption": "browser-session-only",
+    "reason": "Offering ownership requires a current owner and fresh browser-bound proof."
+  },
+  "confirmOwnershipTransfer": {
+    "exemption": "browser-session-only",
+    "reason": "Accepting ownership requires the named recipient's fresh browser-bound proof."
+  },
+  "revokeOwnershipTransfer": {
+    "exemption": "browser-session-only",
+    "reason": "Revoking an ownership offer requires a current owner's verified browser session."
+  },
+  "declineOwnershipTransfer": {
+    "exemption": "browser-session-only",
+    "reason": "Declining an ownership offer requires the named recipient's verified browser session."
   },
   "reconnectConferenceConnection": {
     "exemption": "browser-session-only",

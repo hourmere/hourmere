@@ -1,13 +1,12 @@
 # Team ownership transfer
 
-This is a post-launch design. Today the [team role policy](member-leave.md#safe-team-departure)
-still blocks owner assignment and demotion through ordinary role changes. The proposed flow
-adds a dedicated transfer that takes effect only after the recipient confirms.
+The [team role policy](member-leave.md#safe-team-departure) blocks owner assignment and
+demotion through ordinary role changes. The dedicated transfer in team member settings takes
+effect only after the named recipient confirms.
 
-The internal service implements the transfer lifecycle, proof checks, audit and notification
-jobs. It remains unavailable to users until the browser REST routes and bilingual dashboard
-have passed two-party acceptance. The service budgets allow five creates and six revocations
-per team in each aligned one-hour window on the database clock.
+`TEAM_OWNERSHIP_TRANSFER_ENABLED` defaults to off. Enable it in a test instance for two-party
+acceptance before enabling it for users. The service budgets allow five creates and six
+owner revocations per team in each aligned one-hour window on the database clock.
 
 ## Decisions and permissions
 
@@ -21,6 +20,7 @@ Opening the page, following a navigation link or switching teams leaves the offe
 | Create | A current, email-verified owner of the active team | Offer ownership to a different, current, email-verified `admin` or `member` of that same team. |
 | View | The verified initiating owner or verified named recipient, with their original effective membership | Show the pending offer, its participants and its UTC deadline. Other current, email-verified owners see only its ID, deadline and the revoke action. |
 | Confirm | The named recipient alone, through their current, email-verified membership in the active team | Before the deadline, set the recipient to `owner` and the initiating owner to `admin` atomically. |
+| Decline | The named recipient alone, through their original, current, email-verified membership in the active team | Cancel the pending offer before its deadline without changing any roles. |
 | Revoke | Any current, email-verified owner of the active team, including an owner other than the initiator | Revoke the pending offer before its deadline, without changing any roles. |
 
 “Verified” means the live account has `emailVerified = true`. Every operation requires a live
@@ -78,6 +78,8 @@ when SSO protocols are off. This lets non-enforced teams use mailbox proof while
 protocol hard-off switches. An enforced team still requires available SSO step-up. Revoke uses the
 live verified owner session and ordinary team SSO checks without fresh proof. It only cancels an
 offer and leaves all roles intact, so an eligible owner can stop a pending transfer promptly.
+Decline uses the original recipient's live verified session and ordinary team SSO checks without
+fresh proof.
 
 ## Data model and transaction
 
@@ -94,11 +96,12 @@ terminal state. A team can store one counter per operation (`initiate` and `revo
 window start and the successful transition count. The service will set the window and limits.
 
 Allow one pending offer per team. An offer expires 24 hours after creation on the database clock.
-Confirmation and revocation require `clock_timestamp() < expires_at` after lock waits. At the
-deadline itself, the offer is expired. Store one terminal state and its timestamp on transition
-to `confirmed`, `revoked`, `expired` or `invalidated`. Reads hide expired or structurally invalid
-offers without writing. Any authorized owner can view and revoke a pending offer while the
-recipient's verification or effective access is temporarily unavailable. The offer view does
+Confirmation and revocation require `clock_timestamp() < expires_at` after lock waits. Decline
+uses the same deadline. At the deadline itself, the offer is expired. Store one terminal state
+and its timestamp on transition to `confirmed`, `revoked`, `expired` or `invalidated`. Reads
+hide expired or structurally invalid offers from pending-offer discovery without writing. Both
+cancellation actions record `revoked`. Any authorized owner can view and revoke a pending offer
+while the recipient's verification or effective access is temporarily unavailable. The offer view does
 not disclose why the recipient cannot confirm. The recipient sees the offer only when both
 participants meet the account and membership checks for confirmation. A later write can retire
 an expired or structurally invalid pending row and allow a fresh request with a new ID. No expiry
@@ -129,7 +132,8 @@ Journal each stored lifecycle transition in its transaction. Use
 for revocation, with the actual acting session as actor and the team as target. The offer event
 requires exactly `targetMembershipId`, the lowercase UUID of the recipient's membership in that
 team. This gives existing readers of the team's management journal an audit trail for who was
-offered ownership. The revoke event uses empty details.
+offered ownership. The revoke event uses empty details. A recipient's decline uses the same
+event with the named recipient as actor and leaves the owner's revocation budget available.
 When an authorized write retires an offer, record `organization.ownership_transfer_expired` or
 `organization.ownership_transfer_invalidated` with the team as target, a system actor and empty
 details. Record each terminal transition once, even if the authorized write returns an unavailable
@@ -171,9 +175,9 @@ intact. Proof challenge delivery uses its existing mailbox limits.
 
 ## REST, MCP and CLI surfaces
 
-The following REST endpoints are planned for the dashboard. An untrusted caller must pass the
+The dashboard uses the following REST endpoints. A caller must pass the
 existing verified cookie-session and team-context checks. Require `X-Expected-Organization-Id`
-on all four operations, and the exact instance `Origin` on writes. Refuse requests with any
+on all operations, and the exact instance `Origin` on writes. Refuse requests with any
 `Authorization` header, even alongside a valid cookie. Scope lookups by team and check the actor's
 participant or owner authority for the requested action before returning offer data or a terminal conflict.
 
@@ -183,6 +187,20 @@ participant or owner authority for the requested action before returning offer d
 | `POST /ownership-transfer` | Create using the target membership ID and `proofAttemptId` on retry. Return the offer and expiration. |
 | `POST /ownership-transfer/{transferId}/confirm` | Confirm the bound offer using `proofAttemptId` on retry. Return the two resulting membership roles. |
 | `POST /ownership-transfer/{transferId}/revoke` | As a current owner, revoke the pending offer. Return its new state. |
+| `POST /ownership-transfer/{transferId}/decline` | As the original named recipient, decline the pending offer. Return its `revoked` state. |
+
+`GET /ownership-transfer?transferId=…` lets an original participant refresh a known offer's
+status. The caller must still use the same effective membership. Terminal status contains
+only the offer ID, deadline and state. An offer that has reached its deadline or lost its
+structural eligibility can appear as expired or invalidated before a write records that state.
+Ordinary discovery still returns only a visible pending offer.
+
+In **Settings → Members**, an owner opens **Offer ownership** on the eligible member's row,
+reviews both role changes and completes the verification prompt. The recipient selects the
+same team, opens **Settings → Members**, reviews the initiator, deadline and role changes,
+then accepts with their own verification or declines. A participant who has already viewed
+the offer on that page can refresh its status and see whether it expired, was revoked or
+declined, was invalidated, or completed.
 
 Declare OpenAPI security `[{session: []}]` and a `browser-session-only` exemption for each
 operation in the [interface parity registry](../scripts/interface-parity.json). MCP and CLI
@@ -233,5 +251,5 @@ Better Auth's ordinary role endpoint retains its owner-write protections.
 | Service | Implement locked lifecycle transitions, fresh proof, recovery cleanup and audit. Prove authorization, one-time consumption, deadline and owner continuity on Postgres. |
 | Service rate limits | Debit the durable per-team initiate and revoke budgets in the lifecycle transactions. Verify concurrent requests, a carried-over offer and the retry deadline on Postgres before exposing the service. |
 | Notifications | Add en and zh-CN admin mail and wire transactional outbox jobs into create and confirm. Verify recipients, rollback and deduplication on Postgres before exposing the service. |
-| REST and interface parity | Add the four session-only REST routes, OpenAPI and parity exemptions. Regenerate API types. Run route-level Postgres tests for proof, origin, context and credential boundaries. |
+| REST and interface parity | Add the session-only REST routes, OpenAPI and parity exemptions. Regenerate API types. Run route-level Postgres tests for proof, origin, context and credential boundaries. |
 | Bilingual UI and two-party browser acceptance | Ship the en and zh-CN dashboard with jsdom coverage. Run the owner and recipient browser flow, including stale context, confirmation racing revocation and credential exclusions, before enabling. |

@@ -22,6 +22,8 @@ it('attaches the team proof middleware to every private team read in the server 
     'GET /api/v1/conference-connections',
     'GET /api/v1/instance/embed',
     'GET /api/v1/mcp-oauth/connections',
+    // The transfer service verifies SSO access for the team named in the request.
+    'GET /api/v1/teams/:teamId/ownership-transfer',
   ])
   const privateReads = new Set(['POST /api/v1/routing-forms/:id/preview'])
   for (const operation of API_KEY_REST_OPERATIONS) {
@@ -105,6 +107,11 @@ it('attaches the team proof middleware to every private team write in the server
     'POST /api/v1/team/sso/recovery/use',
     // A current member may withdraw their delegated authority after browser proof expires.
     'DELETE /api/v1/team/sso/delegations/:bindingId',
+    // This service verifies bound-team SSO and context under the organization write lock.
+    'POST /api/v1/teams/:teamId/ownership-transfer',
+    'POST /api/v1/teams/:teamId/ownership-transfer/:transferId/confirm',
+    'POST /api/v1/teams/:teamId/ownership-transfer/:transferId/revoke',
+    'POST /api/v1/teams/:teamId/ownership-transfer/:transferId/decline',
   ])
   const privateWrites = new Set<string>()
   for (const { method, path } of routes) {

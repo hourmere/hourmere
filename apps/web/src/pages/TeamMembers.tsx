@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router'
 import { type ListedOrganizationMember, listOrganizationMembers } from '../api/auth.ts'
 import type { CustomTeamRole } from '../api/custom-roles.ts'
-import { errorMessage, RequestError } from '../api/errors.ts'
+import { errorMessage, isOrganizationContextChanged, RequestError } from '../api/errors.ts'
 import { BreakableText } from '../components/BreakableText.tsx'
 import { MemberReadiness } from '../components/team-members/MemberReadiness.tsx'
 import {
@@ -17,6 +17,10 @@ import {
   RoleManagementNotice,
   TeamMemberRoleButton,
 } from '../components/team-members/TeamMemberRole.tsx'
+import {
+  TeamOwnershipTransfer,
+  useTeamOwnershipTransfer,
+} from '../components/team-members/TeamOwnershipTransfer.tsx'
 import { UserContentMessage } from '../components/UserContent.tsx'
 import { useI18n } from '../i18n/runtime.tsx'
 import type { MessageKey, UiText } from '../i18n/translate.ts'
@@ -64,10 +68,10 @@ function useTeamPage<T>(load: (signal: AbortSignal) => Promise<T>) {
     return () => controller.abort()
   }, [load, version])
   const state: PageState<T> = result?.load === load ? result.state : { status: 'loading' }
-  const retry = () => {
+  const retry = useCallback(() => {
     setResult(undefined)
     setVersion((value) => value + 1)
-  }
+  }, [])
   const update = (transform: (data: T) => T) => {
     setResult((previous) =>
       previous?.load === load && previous.state.status === 'ready'
@@ -113,6 +117,9 @@ export function TeamMembers({
   onReload = () => {},
   canNominateRecoveryOwner = false,
   customRoleAssignments,
+  ownershipTransferEnabled = false,
+  stepUpProviders,
+  onTransferRolesChanged,
 }: {
   organizationId: string
   role: string | null
@@ -125,6 +132,9 @@ export function TeamMembers({
     context: RoleProofContext
     reload: () => void
   } | null
+  ownershipTransferEnabled?: boolean
+  stepUpProviders?: { id: string; displayName: string }[]
+  onTransferRolesChanged?: () => void
 }) {
   const { t } = useI18n()
   const { hash, key } = useLocation()
@@ -160,6 +170,15 @@ export function TeamMembers({
     [organizationId, offset],
   )
   const [state, retry, update] = useTeamPage(load)
+  const refreshTransferRoles = useCallback(() => {
+    retry()
+    onTransferRolesChanged?.()
+  }, [onTransferRolesChanged, retry])
+  const transfer = useTeamOwnershipTransfer(
+    ownershipTransferEnabled,
+    organizationId,
+    refreshTransferRoles,
+  )
   const [readiness, retryReadiness] = useMemberReadiness(
     organizationId,
     currentUserId,
@@ -167,9 +186,21 @@ export function TeamMembers({
     state.status === 'ready' ? state.data.members : [],
   )
   const roles = role?.split(',').map((value) => value.trim()) ?? []
+  const isOwner = roles.includes('owner')
   const canManage =
     roles.every((value) => ['owner', 'admin', 'member'].includes(value)) &&
     (roles.includes('owner') || roles.includes('admin'))
+  const reviewingMember =
+    reviewOpen || selectedMember !== null || roleReviewOpen || customRoleReviewOpen || nominating
+  const reviewingTransfer =
+    transfer.busy ||
+    (transfer.snapshot.status === 'ready' && (transfer.target !== null || transfer.proof !== null))
+  const canOfferTransfer =
+    ownershipTransferEnabled &&
+    isOwner &&
+    transfer.snapshot.status === 'ready' &&
+    transfer.offer?.state !== 'pending' &&
+    !isOrganizationContextChanged(transfer.issue)
   const labels: Record<string, string> = {
     owner: t('Owner'),
     admin: t('Admin'),
@@ -195,7 +226,16 @@ export function TeamMembers({
           {t('A missing default schedule is a configuration gap, not a report of no free time.')}{' '}
           {t('An external calendar is optional for basic bookings.')}
         </p>
-        <RoleManagementNotice />
+        <RoleManagementNotice ownershipTransferEnabled={ownershipTransferEnabled} />
+        {ownershipTransferEnabled && (
+          <TeamOwnershipTransfer
+            organizationId={organizationId}
+            owner={isOwner}
+            stepUpProviders={stepUpProviders ?? []}
+            transfer={transfer}
+            onReload={onReload}
+          />
+        )}
         {canManage && (
           <p>
             <Link className="button" to={PATHS.eventTypes}>
@@ -254,6 +294,7 @@ export function TeamMembers({
             <ul className="stack">
               {state.data.members.map((member) => {
                 const own = member.userId === currentUserId
+                const memberRoles = member.role.split(',').map((value) => value.trim())
                 const managedMembership =
                   (own || canManage) && readiness.status === 'ready'
                     ? readiness.managedMemberships.get(member.id)
@@ -313,13 +354,7 @@ export function TeamMembers({
                       member={member}
                       role={role}
                       currentUserId={currentUserId}
-                      disabled={
-                        reviewOpen ||
-                        selectedMember !== null ||
-                        roleReviewOpen ||
-                        customRoleReviewOpen ||
-                        nominating
-                      }
+                      disabled={reviewingMember || reviewingTransfer}
                       scimSuspended={blockers.includes('scim_suspension')}
                       onReviewChange={setRoleReviewOpen}
                       onChanged={(updated) =>
@@ -341,13 +376,7 @@ export function TeamMembers({
                           context={customRoleAssignments.context}
                           roles={customRoleAssignments.roles}
                           member={member}
-                          disabled={
-                            reviewOpen ||
-                            selectedMember !== null ||
-                            roleReviewOpen ||
-                            customRoleReviewOpen ||
-                            nominating
-                          }
+                          disabled={reviewingMember || reviewingTransfer}
                           onReviewChange={setCustomRoleReviewOpen}
                           onReload={customRoleAssignments.reload}
                         />
@@ -356,31 +385,40 @@ export function TeamMembers({
                       member={member}
                       role={role}
                       currentUserId={currentUserId}
-                      disabled={
-                        reviewOpen ||
-                        selectedMember !== null ||
-                        roleReviewOpen ||
-                        customRoleReviewOpen ||
-                        nominating
-                      }
+                      disabled={reviewingMember || reviewingTransfer}
                       onSelect={(target, opener) => {
                         removalOpener.current = opener
                         setSelectedMember(target)
                       }}
                     />
+                    {canOfferTransfer &&
+                      currentUserId &&
+                      !own &&
+                      member.organizationId === organizationId &&
+                      !memberRoles.includes('owner') &&
+                      memberRoles.some((value) => value === 'admin' || value === 'member') &&
+                      !managedMembership && (
+                        <div className="form-actions">
+                          <button
+                            type="button"
+                            className="button button-small button-wrap team-ownership-transfer-action"
+                            disabled={reviewingMember || transfer.proof !== null || transfer.busy}
+                            onClick={(event) => transfer.select(member, event.currentTarget)}
+                          >
+                            <UserContentMessage
+                              message="Offer ownership to {name}"
+                              values={{ name: member.user.name.trim() || t('Unnamed team member') }}
+                            />
+                          </button>
+                        </div>
+                      )}
                     {canNominateRecoveryOwner &&
                       member.role.split(',').some((value) => value.trim() === 'owner') && (
                         <div className="form-actions">
                           <button
                             type="button"
                             className="button button-small button-wrap user-content"
-                            disabled={
-                              reviewOpen ||
-                              selectedMember !== null ||
-                              roleReviewOpen ||
-                              customRoleReviewOpen ||
-                              nominating
-                            }
+                            disabled={reviewingMember || reviewingTransfer}
                             onClick={(event) => {
                               nominationOpener.current = event.currentTarget
                               setNomineeId(member.userId)
@@ -428,7 +466,9 @@ export function TeamMembers({
             <button
               type="button"
               className="button button-small"
-              disabled={state.status === 'loading' || roleReviewOpen || nominating}
+              disabled={
+                state.status === 'loading' || roleReviewOpen || nominating || reviewingTransfer
+              }
               onClick={() => setOffset((value) => Math.max(0, value - PAGE_SIZE))}
             >
               {t('Previous members page')}
@@ -438,7 +478,7 @@ export function TeamMembers({
             <button
               type="button"
               className="button button-small"
-              disabled={roleReviewOpen || nominating}
+              disabled={roleReviewOpen || nominating || reviewingTransfer}
               onClick={() => setOffset((value) => value + PAGE_SIZE)}
             >
               {t('Next members page')}
@@ -450,7 +490,7 @@ export function TeamMembers({
           organizationId={organizationId}
           currentUserId={currentUserId}
           role={role}
-          disabled={roleReviewOpen}
+          disabled={roleReviewOpen || reviewingTransfer}
           selectedMember={selectedMember?.organizationId === organizationId ? selectedMember : null}
           onClose={() => {
             setSelectedMember(null)

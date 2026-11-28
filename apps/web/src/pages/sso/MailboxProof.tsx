@@ -72,7 +72,8 @@ export function MailboxProofPage() {
       ? samlAvailable
       : oidcAvailable || (samlAvailable && !!visit.entry?.token)) ||
     (instance.status === 'ready' &&
-      instance.data.scimResourcesEnabled === true &&
+      (instance.data.scimResourcesEnabled === true ||
+        instance.data.teamOwnershipTransferEnabled === true) &&
       !!visit.entry?.token)
   usePageTitle('Verify your email')
 

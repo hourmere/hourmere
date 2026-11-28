@@ -20,6 +20,7 @@ export function SsoFreshProof({
   onRetry,
   onCancel,
   title = 'Confirm your identity before changing SSO settings.',
+  headingLevel = 2,
 }: {
   organizationId: string
   challenge: SsoProofChallenge
@@ -28,6 +29,7 @@ export function SsoFreshProof({
   onRetry: () => void
   onCancel: () => void
   title?: MessageKey
+  headingLevel?: 2 | 4
 }) {
   const { locale, t } = useI18n()
   const id = useId()
@@ -62,6 +64,7 @@ export function SsoFreshProof({
     canVerify && (!mailboxRequired || mailbox === 'proven') && (!stepUpRequired || !!stepUpUrl)
   const stepUpPending = stepUpRequired && submittedChallenge && submittedChallenge !== challenge
   const { attemptId } = challenge
+  const Heading = headingLevel === 4 ? 'h4' : 'h2'
 
   useEffect(() => heading.current?.focus(), [])
   useEffect(() => {
@@ -170,9 +173,9 @@ export function SsoFreshProof({
 
   return (
     <section className="panel stack sso-fresh-proof" aria-labelledby={`${id}-heading`}>
-      <h2 id={`${id}-heading`} ref={heading} tabIndex={-1}>
+      <Heading id={`${id}-heading`} ref={heading} tabIndex={-1}>
         {t(title)}
-      </h2>
+      </Heading>
       {expired ? (
         <p className="alert alert-error" role="alert">
           {t('This verification request expired. Start again.')}

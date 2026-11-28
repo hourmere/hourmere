@@ -313,6 +313,11 @@ Team booking bulk cancellation preview, confirmation and status return 404 until
 | `POST /api/v1/team/members/{memberUserId}/removal` | Browser session only | — |
 | `GET /api/v1/team/members/{memberUserId}/removal-handling` | Browser session only | — |
 | `POST /api/v1/teams/{teamId}/leave` | Browser session only | — |
+| `GET /api/v1/teams/{teamId}/ownership-transfer` | Browser session only | — |
+| `POST /api/v1/teams/{teamId}/ownership-transfer` | Browser session only | — |
+| `POST /api/v1/teams/{teamId}/ownership-transfer/{transferId}/confirm` | Browser session only | — |
+| `POST /api/v1/teams/{teamId}/ownership-transfer/{transferId}/revoke` | Browser session only | — |
+| `POST /api/v1/teams/{teamId}/ownership-transfer/{transferId}/decline` | Browser session only | — |
 | `GET /api/v1/teams/{teamId}/member-readiness` | Browser session only | — |
 | `GET /api/v1/teams/{teamId}/readiness` | Browser session only | — |
 | `GET /api/v1/slack-destinations` | Session or API key | `full, read` |

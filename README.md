@@ -377,8 +377,10 @@ Invitations from someone who no longer belongs to the team show **No longer vali
 cancel the old invitation and use the invite form to send a fresh invitation in your own name.
 The expired-row replacement action cannot reuse these invitations.
 Owners can promote members to admins or return admins to member access after reviewing
-the permission change. Only owners manage admins; owner roles cannot be changed, and
-ownership transfer is not available yet. A team must always retain at least one owner.
+the permission change. Only owners manage admins. The ordinary role picker blocks owner
+assignment and demotion, and a team must always retain at least one owner. The separate
+[ownership transfer](docs/team-ownership-transfer.md) requires both parties to verify and
+is off by default.
 See the [proposed custom roles design](docs/custom-roles.md) for the permission catalogue
 and compatibility plan.
 

@@ -36,6 +36,7 @@ type Tx = Transaction<Database>
 type SessionPrincipal = Extract<Principal, { kind: 'session' }>
 type TransferOperation = typeof CREATE_OWNERSHIP_TRANSFER | typeof CONFIRM_OWNERSHIP_TRANSFER
 const uuid = z.uuid().transform((id) => id.toLowerCase())
+const transferState = z.enum(['pending', 'confirmed', 'revoked', 'expired', 'invalidated'])
 const createInput = z.strictObject({ targetMembershipId: uuid })
 const confirmInput = z.strictObject({ transferId: uuid })
 const denied = () => new DomainError('forbidden', 'team_management_access_denied')
@@ -672,19 +673,20 @@ export async function confirmOwnershipTransfer(
   )
 }
 
-export async function revokeOwnershipTransfer(
+async function cancelOwnershipTransfer(
   deps: OwnershipTransferDeps,
   principal: Principal,
   headers: Headers,
   organizationId: string,
   transferId: string,
+  action: 'revoke' | 'decline',
 ) {
   const actor = sessionPrincipal(deps, principal, headers, organizationId, true)
   organizationId = organizationId.toLowerCase()
   const id = uuid.safeParse(transferId)
   if (!id.success) throw denied()
   const binding = await findOffer(deps.db, organizationId, id.data)
-  if (!binding) throw denied()
+  if (!binding || (action === 'decline' && binding.target_user_id !== actor.user.id)) throw denied()
   const userIds = [actor.user.id, binding.initiator_user_id, binding.target_user_id]
   const result = await retryAfterDeadline(() =>
     deps.db.transaction().execute(async (trx) => {
@@ -699,10 +701,11 @@ export async function revokeOwnershipTransfer(
         organizationId,
         member,
         true,
-        true,
+        action === 'revoke',
       )
       const offer = await findOffer(trx, organizationId, id.data, true)
       await ensureActorDeadline(trx, deadline)
+      if (action === 'decline' && offer?.target_membership_id !== member?.id) throw denied()
       if (offer?.state !== 'pending') return retired
       const { initiator, recipient } = participants(offer, members)
       const terminal = await retirePendingOwnershipTransfer(trx, {
@@ -711,7 +714,7 @@ export async function revokeOwnershipTransfer(
         expireOnly: structurallyEligible(initiator, recipient),
       })
       if (terminal) return retired
-      await debitBudget(trx, organizationId, 'revoke')
+      if (action === 'revoke') await debitBudget(trx, organizationId, 'revoke')
       await transitionOffer(trx, offer, 'revoked')
       await writeAuditEvent(
         trx,
@@ -725,38 +728,75 @@ export async function revokeOwnershipTransfer(
   return result
 }
 
+export function revokeOwnershipTransfer(
+  deps: OwnershipTransferDeps,
+  principal: Principal,
+  headers: Headers,
+  organizationId: string,
+  transferId: string,
+) {
+  return cancelOwnershipTransfer(deps, principal, headers, organizationId, transferId, 'revoke')
+}
+
+export function declineOwnershipTransfer(
+  deps: OwnershipTransferDeps,
+  principal: Principal,
+  headers: Headers,
+  organizationId: string,
+  transferId: string,
+) {
+  return cancelOwnershipTransfer(deps, principal, headers, organizationId, transferId, 'decline')
+}
+
 export async function viewOwnershipTransfer(
   deps: OwnershipTransferDeps,
   principal: Principal,
   headers: Headers,
   organizationId: string,
+  transferId?: string,
 ) {
   const actor = sessionPrincipal(deps, principal, headers, organizationId, false)
   organizationId = organizationId.toLowerCase()
+  const id = transferId === undefined ? undefined : uuid.safeParse(transferId)
+  if (id && !id.success) throw denied()
   return deps.db
     .transaction()
     .setIsolationLevel('repeatable read')
     .setAccessMode('read only')
     .execute(async (trx) => {
-      const offer = await findOffer(trx, organizationId)
+      const offer = await findOffer(trx, organizationId, id?.data)
       const userIds = offer
         ? [actor.user.id, offer.initiator_user_id, offer.target_user_id]
         : [actor.user.id]
       const members = await teamMembers(trx, organizationId, userIds, false)
       const member = members.find((m) => m.userId === actor.user.id)
       await authorizeActor(deps, trx, actor, headers, organizationId, member, false)
-      if (!offer?.unexpired) return null
+      if (!offer) return null
       const { initiator, recipient } = participants(offer, members)
-      if (!structurallyEligible(initiator, recipient) || !initiator || !recipient) return null
       const summary = { id: offer.id, expiresAt: offer.expires_at.toISOString() }
+      const participant = member && (member.id === initiator?.id || member.id === recipient?.id)
+      if (id && !participant) return null
+      // A known offer may be checked by its original participants without changing its state.
+      const storedState = transferState.parse(offer.state)
+      const state =
+        storedState !== 'pending'
+          ? storedState
+          : !offer.unexpired
+            ? 'expired'
+            : structurallyEligible(initiator, recipient)
+              ? 'pending'
+              : 'invalidated'
+      if (state !== 'pending') return id ? { ...summary, state } : null
+      if (!initiator || !recipient) return null
+      const pendingSummary = { ...summary, state } as const
       if (member?.id === initiator.id || (member?.id === recipient.id && effective(initiator))) {
         return {
-          ...summary,
+          ...pendingSummary,
           action: member.id === initiator.id ? ('revoke' as const) : ('confirm' as const),
           initiator: { displayName: initiator.name },
           recipient: { displayName: recipient.name },
         }
       }
-      return owner(member) ? { ...summary, action: 'revoke' as const } : null
+      return owner(member) ? { ...pendingSummary, action: 'revoke' as const } : null
     })
 }

@@ -123,6 +123,10 @@ export function SettingsPage() {
     [organizationId, userId, personal],
   )
   const [membership, reloadRole] = useLoad(loadRole)
+  const refreshTransferRoles = useCallback(() => {
+    reloadRole()
+    void refresh({ fresh: true })
+  }, [reloadRole, refresh])
   const role: Loaded<string | null> =
     membership.status === 'ready'
       ? typeof membership.data === 'object' && membership.data !== null
@@ -350,6 +354,11 @@ export function SettingsPage() {
               reload: customRoles.reload,
             }
           }
+          ownershipTransferEnabled={
+            me.principal.kind === 'session' && shell?.teamOwnershipTransferEnabled === true
+          }
+          stepUpProviders={ssoStepUpProviders(me.sso, shell)}
+          onTransferRolesChanged={refreshTransferRoles}
         />
       )}
     </>
