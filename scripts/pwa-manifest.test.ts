@@ -17,8 +17,11 @@ it('provides an installable manifest confined to the admin app', () => {
     background_color: '#f7f9fe',
   })
   const styles = readFileSync('apps/web/src/styles.css', 'utf8')
-  expect(styles).toContain(`--cobalt: ${manifest.theme_color};`)
-  expect(styles).toContain(`--bg: ${manifest.background_color};`)
+  const sharedStyles = readFileSync('packages/design-tokens/tokens.css', 'utf8')
+  expect(styles).toContain('--cobalt: var(--hm-color-cobalt);')
+  expect(styles).toContain('--bg: var(--hm-color-bg);')
+  expect(sharedStyles).toContain(`--hm-color-cobalt: ${manifest.theme_color};`)
+  expect(sharedStyles).toContain(`--hm-color-bg: ${manifest.background_color};`)
 })
 
 it('ships actual PNGs at each declared size, including both maskable sizes and Apple', () => {

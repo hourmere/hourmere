@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { darkTokens, tokens } from '@hourmere/design-tokens'
 import { screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { fakeApi, json, renderApp } from '../test/fake-api.tsx'
@@ -81,7 +82,8 @@ describe('public booking polish CSS', () => {
       'calc(var(--text-sm) * 1.55 + var(--space-1))',
     )
     expect(rule('.public .booking-form .choices').gap).toBe('var(--space-2)')
-    expect(styles).toMatch(/--space-2:\s*8px/)
+    expect(rule(':root').getPropertyValue('--space-2')).toBe('var(--hm-space-2)')
+    expect(tokens['--hm-space-2']).toBe('8px')
     expect(rule('.public .choice', '(pointer: coarse)').minHeight).toBe('44px')
   })
 
@@ -121,8 +123,6 @@ describe('public booking polish CSS', () => {
   it('uses the contrast-safe danger role for public danger panel borders in both themes', () => {
     expect(rule('.panel-danger').borderColor).toBe('var(--danger)')
     // Resolve the actual shared role values; do not silently substitute a test-only colour.
-    const tokenRules = rules(styles).filter((r) => r.selectorText === ':root')
-    expect(tokenRules).toHaveLength(2)
     const luminance = (hex: string) => {
       const channels =
         hex
@@ -133,10 +133,10 @@ describe('public booking polish CSS', () => {
         .map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4))
         .reduce((sum, c, i) => sum + c * ([0.2126, 0.7152, 0.0722][i] ?? 0), 0)
     }
-    for (const tokens of tokenRules) {
-      const foreground = luminance(tokens.style.getPropertyValue('--danger').trim())
-      for (const background of ['--surface', '--danger-soft']) {
-        const surface = luminance(tokens.style.getPropertyValue(background).trim())
+    for (const theme of [tokens, darkTokens]) {
+      const foreground = luminance(theme['--hm-color-danger'])
+      for (const background of ['--hm-color-surface', '--hm-color-danger-soft'] as const) {
+        const surface = luminance(theme[background])
         expect(
           (Math.max(foreground, surface) + 0.05) / (Math.min(foreground, surface) + 0.05),
         ).toBeGreaterThanOrEqual(3)

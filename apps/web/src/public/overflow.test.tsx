@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { darkTokens, tokens } from '@hourmere/design-tokens'
 import { render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { fakeApi, json, renderApp } from '../test/fake-api.tsx'
@@ -6,7 +7,6 @@ import { EVENT, eventRoutes, managed, TOKEN } from '../test/public-fixtures.ts'
 
 const publicStyles = readFileSync('apps/web/src/public/public.css', 'utf8')
 const pickerStyles = readFileSync('apps/web/src/public/SlotPicker.css', 'utf8')
-const appStyles = readFileSync('apps/web/src/styles.css', 'utf8')
 
 /** Inspect the real declarations: jsdom does not calculate intrinsic sizes or scroll clipping. */
 function inspectStyles(css: string, inspect: (rules: CSSRule[]) => void) {
@@ -104,29 +104,13 @@ describe('public overflow protections', () => {
       expect(name.getPropertyValue('color')).toBe('var(--text)')
       expect(name.getPropertyValue('font-size')).toBe('var(--text-lg)')
     })
-    inspectStyles(appStyles, (rules) => {
-      const light = declarations(rules, ':root')
-      const dark = rules.find(
-        (rule) =>
-          'selectorText' in rule &&
-          (rule as CSSStyleRule).selectorText === ':root' &&
-          (rule.parentRule as CSSMediaRule | null)?.conditionText ===
-            '(prefers-color-scheme: dark)',
-      ) as CSSStyleRule | undefined
-      expect(dark).toBeDefined()
-      for (const theme of [light, (dark as CSSStyleRule).style]) {
-        const color = (name: string): string => {
-          const value = theme.getPropertyValue(name).trim() || light.getPropertyValue(name).trim()
-          const variable = /^var\((--[\w-]+)\)$/.exec(value)?.[1]
-          return variable ? color(variable) : value
-        }
-        const foreground = luminance(color('--accent-soft-text'))
-        const background = luminance(color('--accent-soft'))
-        expect(
-          (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05),
-        ).toBeGreaterThanOrEqual(4.5)
-      }
-    })
+    for (const theme of [tokens, darkTokens]) {
+      const foreground = luminance(theme['--hm-color-accent-soft-text'])
+      const background = luminance(theme['--hm-color-accent-soft'])
+      expect(
+        (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05),
+      ).toBeGreaterThanOrEqual(4.5)
+    }
   })
 
   it('allows public action labels to wrap inside narrow cards', () => {
@@ -187,12 +171,7 @@ describe('public overflow protections', () => {
       'var(--text-xl)',
       'var(--text-xs)',
     ])
-    inspectStyles(appStyles, (rules) => {
-      const tokens = declarations(rules, ':root')
-      expect(Number.parseFloat(tokens.getPropertyValue('--text-xs')) * 16).toBeGreaterThanOrEqual(
-        12.8,
-      )
-    })
+    expect(Number.parseFloat(tokens['--hm-text-xs']) * 16).toBeGreaterThanOrEqual(12.8)
   })
 
   it('keeps the narrow picker track and time zone names shrinkable', () => {
