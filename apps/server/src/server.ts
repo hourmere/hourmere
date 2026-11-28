@@ -965,6 +965,7 @@ export function productionAppOptions({
     hstsMaxAge: config.HSTS_MAX_AGE,
     trustedProxies: config.trustedProxies,
     webDist: config.WEB_DIST,
+    eventOgImageDb: db,
     routingFormsEnabled,
     waitlist,
     ssoTeamReads: { capabilities: sso, db },

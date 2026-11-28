@@ -25,7 +25,7 @@ import { publicAvatarImage } from '@hourmere/core/public-avatar'
 import type { Database, Db, Json } from '@hourmere/db'
 import { type Expression, type ExpressionBuilder, sql } from 'kysely'
 import { jsonArrayFrom } from 'kysely/helpers/postgres'
-import { getPublicBranding, type PublicBranding } from './branding.ts'
+import { getPublicBranding, getPublicBrandPrimaryColor, type PublicBranding } from './branding.ts'
 import {
   automaticMeet,
   automaticZoom,
@@ -159,6 +159,13 @@ export function servedHandle(handle: string): string | undefined {
   return HANDLE.test(h) && !isReservedName(h) ? h : undefined
 }
 
+interface PublicEventLookupOptions {
+  lock?: boolean
+  scimResourcesEnabled?: boolean | undefined
+  /** Discovery surfaces must not reveal unlisted events that accept direct bookings. */
+  listedOnly?: boolean
+}
+
 /**
  * Finds the active, non-deleted personal event type at /{handle}/{slug}. The owner must
  * have a profile with a handle that is not reserved, and still belong to the event type's
@@ -168,7 +175,7 @@ export async function findPublicEventType(
   db: Db,
   handle: string,
   slug: string,
-  options: { lock?: boolean; scimResourcesEnabled?: boolean | undefined } = {},
+  options: PublicEventLookupOptions = {},
 ): Promise<PublicEventTypeRecord | undefined> {
   const h = servedHandle(handle)
   const s = slug.toLowerCase()
@@ -179,7 +186,7 @@ export async function findPublicEventType(
 async function findPersonalEventType(
   db: Db,
   identity: { handle: string; slug: string } | { id: string },
-  options: { lock?: boolean; scimResourcesEnabled?: boolean | undefined } = {},
+  options: PublicEventLookupOptions = {},
 ): Promise<PublicEventTypeRecord | undefined> {
   let query = db
     .selectFrom('profiles as p')
@@ -218,6 +225,7 @@ async function findPersonalEventType(
     ])
     .where('et.is_active', '=', true)
     .where('et.deleted_at', 'is', null)
+  if (options.listedOnly) query = query.where('et.is_hidden', '=', false)
   if ('id' in identity) query = query.where('et.id', '=', identity.id)
   else query = query.where('p.handle', '=', identity.handle).where('et.slug', '=', identity.slug)
   // Serialize host settings changes with approval of a new booking.
@@ -285,7 +293,7 @@ export async function findPublicTeamEventType(
   db: Db,
   teamSlug: string,
   slug: string,
-  options: { lock?: boolean; scimResourcesEnabled?: boolean | undefined } = {},
+  options: PublicEventLookupOptions = {},
 ): Promise<PublicEventTypeRecord | undefined> {
   const s = slug.toLowerCase()
   if (!isPublicTeamSlug(teamSlug) || !SLUG.test(s)) return undefined
@@ -295,7 +303,7 @@ export async function findPublicTeamEventType(
 async function findTeamEventType(
   db: Db,
   identity: { teamSlug: string; slug: string } | { id: string },
-  options: { lock?: boolean; explain?: boolean; scimResourcesEnabled?: boolean | undefined } = {},
+  options: PublicEventLookupOptions & { explain?: boolean } = {},
 ): Promise<PublicEventTypeRecord | undefined> {
   let query = activeTeamEvents(db)
     .innerJoin('auth.organization as o', 'o.id', 'et.organization_id')
@@ -304,6 +312,7 @@ async function findTeamEventType(
     .where('o.id', 'not in', (eb) =>
       eb.selectFrom('personal_organizations').select('organization_id'),
     )
+  if (options.listedOnly) query = query.where('et.is_hidden', '=', false)
   if ('id' in identity) query = query.where('et.id', '=', identity.id)
   else query = query.where('o.slug', '=', identity.teamSlug).where('et.slug', '=', identity.slug)
   if (options.lock) query = query.forShare('et')
@@ -569,6 +578,31 @@ export async function getPublicTeamEventType(
   const page = publicEventType(event, ctx.smtpConfigured, ctx.smsRemindersAvailable)
   const branding = await getPublicBranding(ctx.db, event.organizationId)
   return { ...page, ...(branding && { branding }) }
+}
+
+export interface PublicEventOgImage {
+  title: string
+  durationMinutes: number
+  name: string
+  primaryColor?: string
+}
+
+/** Share previews are a discovery surface, even for booking URLs that bypass the directory. */
+export async function getPublicEventOgImage(
+  db: Db,
+  { kind, handle, slug }: { kind: 'personal' | 'team'; handle: string; slug: string },
+  scimResourcesEnabled: boolean,
+): Promise<PublicEventOgImage | undefined> {
+  const find = kind === 'team' ? findPublicTeamEventType : findPublicEventType
+  const event = await find(db, handle, slug, { listedOnly: true, scimResourcesEnabled })
+  if (!event) return undefined
+  const primaryColor = await getPublicBrandPrimaryColor(db, event.organizationId)
+  return {
+    title: event.title,
+    durationMinutes: event.durationMinutes,
+    name: event.team?.name ?? event.hostName,
+    ...(primaryColor && { primaryColor }),
+  }
 }
 
 function publicEventType(

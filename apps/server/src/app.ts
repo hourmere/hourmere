@@ -36,6 +36,7 @@ import { apiBodyLimit, checkBodyAsRead } from './body-limit.ts'
 import { requireCaller } from './caller.ts'
 import { clientIp, withClientIp } from './client-ip.ts'
 import { errorAliasFor } from './error-aliases.ts'
+import { bookingPreviewMetadata, mountEventOgImages, OG_IMAGE_PREFIX } from './event-og-preview.ts'
 import type { McpModule } from './mcp/endpoint.ts'
 import { describeCaller, describeTeamManagementPermissions, Me } from './me.ts'
 import {
@@ -106,6 +107,7 @@ export interface AppDeps {
   trustedProxies?: readonly string[] | undefined
   /** Absolute path of the built web app, if this process should serve it. */
   webDist?: string | undefined
+  eventOgImageDb?: Db
   routingFormsEnabled?: boolean | undefined
   /** Groups of /api/v1 routes, created by the composition root with their services. */
   routes?: readonly RouteModule[]
@@ -409,10 +411,13 @@ const ordinaryRequestLogger = createMiddleware((c, next) =>
     : requestLineLogger(c, next),
 )
 
+const isOgImagePath = (path: string) => path.startsWith(`${OG_IMAGE_PREFIX}/`)
+
 // Keep one-time capabilities and public routing addresses out of URL logs.
 const requestLogger = createMiddleware(async (c, next) => {
   if (isOneTimeCapabilityPath(c.req.path)) return next()
   if (isPublicRoutingFormPath(c.req.path)) return next()
+  if (isOgImagePath(c.req.path)) return next()
   if (c.req.path.includes('/provisioning-tokens')) {
     await next()
     const managementRoute = routePath(c)
@@ -442,6 +447,7 @@ export function createApp({
   hstsMaxAge = DEFAULT_HSTS_MAX_AGE,
   trustedProxies = [],
   webDist,
+  eventOgImageDb,
   routingFormsEnabled,
   routes = [],
   mcp,
@@ -477,6 +483,11 @@ export function createApp({
   // (e.g. Postgres echoing a malformed value) and must not be able to forge log lines.
   // c.req.path is percent-decoded, so it is escaped too.
   const logLine = (c: Context, level: 'ERROR' | 'WARN', detail: () => string) => {
+    if (isOgImagePath(c.req.path)) {
+      const write = level === 'ERROR' ? console.error : console.warn
+      write(`${new Date().toISOString()} ${level} ${OG_IMAGE_PREFIX}: image request failed`)
+      return
+    }
     // Driver messages and disconnect causes can echo contact values and malformed keys.
     const routingPrefix = privateRoutingApiPrefix(c.req.path)
     if (routingPrefix) {
@@ -650,6 +661,7 @@ export function createApp({
   ssoSamlSignIn?.mount({ app, publicUrl, requestLogger, clientIp: resolveClientIp })
   app.use('/api/*', resolveClientIp)
   app.use('/api/v1/*', noStoreByDefault)
+  app.use(`${OG_IMAGE_PREFIX}/*`, noStoreByDefault)
   // Routing submissions and continuations count even when credentials or body lengths are refused.
   app.use('/api/v1/*', routeRateLimits({ beforeBodyLimit: true }))
   // Provisioning credentials never fall back to a browser cookie on another surface.
@@ -860,6 +872,7 @@ export function createApp({
     info: { title: 'Hourmere API', version: VERSION },
   })
 
+  if (eventOgImageDb) mountEventOgImages(app, eventOgImageDb, scimResourcesEnabled)
   app.all('/api/*', apiNotFound)
 
   // Where emailed sign-in links lead; served here, ahead of the web app.
@@ -899,6 +912,7 @@ export function createApp({
       }
     })
     app.use('*', serveStatic({ root }))
+    if (eventOgImageDb) app.get('*', bookingPreviewMetadata(webDist, publicUrl))
     app.get('*', serveStatic({ root, path: 'index.html' }))
   }
 

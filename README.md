@@ -85,6 +85,8 @@ npm run dev --workspace @hourmere/web
 Signed-in pages live under `/app` (`/app/event-types`, `/app/availability`, `/app/bookings`, `/app/api-keys`, `/app/settings`); `/sign-in` stays at the top level, and the rest of the root is for public booking pages (`/{handle}/{slug}` for personal types and
 `/team/{teamSlug}/{slug}` for individual, collective and activated round-robin team types). After signing in, people only return to pages under `/app`.
 
+Listed public event pages include [booking-link preview images](docs/og-images.md) for chat and social sharing.
+
 See the [public booking week-view design evaluation](docs/booking-week-view.md)
 for a proposed alternate layout and its implementation estimate.
 

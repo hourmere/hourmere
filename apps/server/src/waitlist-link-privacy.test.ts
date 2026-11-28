@@ -12,6 +12,7 @@ import { logger } from 'hono/logger'
 import { routePath } from 'hono/route'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
+import { OG_IMAGE_PREFIX } from './event-og-preview.ts'
 import { isOneTimeCapabilityPath, isOneTimeLinkPath } from './one-time-link-privacy.ts'
 import {
   isPublicRoutingContinuationPage,
@@ -220,6 +221,7 @@ describe('waitlist capability privacy source-copy controls', () => {
         'isCalDavConnectionPath',
         'routePath',
         'COLORS',
+        'OG_IMAGE_PREFIX',
         `${stripTypeScriptTypes(value)}; return requestLogger`,
       )(
         logger,
@@ -236,6 +238,7 @@ describe('waitlist capability privacy source-copy controls', () => {
         (path: string) => /^\/api\/v1\/calendar-connections\/caldav(?:\/|$)/i.test(path),
         routePath,
         /x^/,
+        OG_IMAGE_PREFIX,
       )
       const app = new Hono()
       app.onError((error) => {
@@ -279,6 +282,7 @@ describe('waitlist capability privacy source-copy controls', () => {
         'isCalDavConnectionPath',
         'routePath',
         'COLORS',
+        'OG_IMAGE_PREFIX',
         `${stripTypeScriptTypes(value)}; return requestLogger`,
       )(
         logger,
@@ -295,6 +299,7 @@ describe('waitlist capability privacy source-copy controls', () => {
         (path: string) => /^\/api\/v1\/calendar-connections\/caldav(?:\/|$)/i.test(path),
         routePath,
         /x^/,
+        OG_IMAGE_PREFIX,
       )
       const app = new Hono()
       app.onError((error) => {

@@ -21,7 +21,7 @@ RUN npm ci --ignore-scripts \
  && npm prune --omit=dev --omit=optional --ignore-scripts \
  && mkdir -p node_modules/@img \
  && cp -a /tmp/hourmere-sharp-img/. node_modules/@img/ \
- && node --input-type=module -e "import sharp from 'sharp'; await sharp({create:{width:1,height:1,channels:3,background:'white'}}).png().toBuffer()"
+ && node --input-type=module -e "import { renderOgImage } from './apps/server/src/og-image.ts'; await renderOgImage({title:'公开预约 — موعد 📅',name:'Hourmere',durationMinutes:30})"
 
 FROM base AS runtime
 ENV NODE_ENV=production \

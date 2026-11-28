@@ -120,7 +120,12 @@ export function securityHeaders({
       if (!headers.get(name)?.trim()) headers.set(name, value)
     }
     if (hsts) headers.set('Strict-Transport-Security', hsts)
-    if (isOneTimeLinkPath(c.req.path) || isPublicRoutingFormPath(c.req.path)) {
+    // A validated image address may end in a reserved-looking event slug such as "book".
+    // Actual capability paths and malformed image addresses keep their privacy headers.
+    if (
+      (!c.var.isOgEventAddress && isOneTimeLinkPath(c.req.path)) ||
+      isPublicRoutingFormPath(c.req.path)
+    ) {
       headers.set('Referrer-Policy', 'no-referrer')
       headers.set('Cache-Control', 'no-store')
     }
@@ -146,7 +151,7 @@ export function securityHeaders({
         headers.set('Cache-Control', 'no-store')
       }
     }
-    if (/\/waitlist(?:\/|$)/i.test(c.req.path)) {
+    if (!c.var.isOgEventAddress && /\/waitlist(?:\/|$)/i.test(c.req.path)) {
       headers.set('Referrer-Policy', 'no-referrer')
       headers.set('Cache-Control', 'no-store')
     }
