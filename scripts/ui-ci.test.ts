@@ -168,7 +168,7 @@ describe('UI measurement CI contract', () => {
     const source = readFileSync(join(root, 'tools/e2e/specs/layout.spec.ts'), 'utf8')
     expect([...source.matchAll(/\btag:/g)]).toHaveLength(testNames(source).length)
     const focusedTags = new Set(
-      [...source.matchAll(/tag: '(@layout-[\w-]+)'/g)].map((match) => match[1]),
+      [...source.matchAll(/tag: '(@layout-[\w-]+)'/g)].map((match) => match[1] ?? ''),
     )
     const filters = Array.from({ length: layoutShardCount }, (_, index) => {
       const [filter = ''] = auditShardArgs('layout', `${index + 1}/${layoutShardCount}`)
