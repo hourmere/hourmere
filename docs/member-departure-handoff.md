@@ -346,7 +346,7 @@ are served with no-store and no-referrer headers. Offer and answer operations sh
 a rate limit of 30 requests per minute per trusted IP bucket on each server process.
 Production admission remains off. A committed handoff queues localized notices for both
 bookings. Administrators can refresh the receipt to check email acceptance. See
-[staged booking handoff mail](notifications.md#staged-booking-handoff-mail).
+[staged booking handoff mail](#staged-booking-handoff-mail).
 
 中文：预发布管理员可创建、查看、撤回和换版交接提议，也可向尚未决定的收件人重发私密链接。
 同一源预约的每个规范化邮箱最多发送三次，包含首发和送达不确定的尝试。重试同一请求时请沿用
@@ -357,6 +357,22 @@ bookings. Administrators can refresh the receipt to check email acceptance. See
 Provider cleanup and creation reuse existing workers. Zoom lost-response recovery is
 exercised with a fake, and handoff-specific Google and Microsoft lifecycle acceptance remains
 open.
+
+### Staged booking handoff mail
+
+A committed departure handoff queues a cancellation for the original booking and a
+confirmation for the replacement. Both notices explain the host change in the recipient's
+mail language. A booker or guest may receive either notice first.
+
+The cancellation uses the original calendar UID and saved organizer, with the sequence one
+higher than the last version of that event. If the organizer was never saved, recipients get
+a plain-text cancellation and may need to remove the original event from their calendars
+manually. The replacement uses a fresh UID and starts at sequence zero. Its invitation and
+manage link belong to the replacement booking.
+
+The staged administrator receipt reports when the mail server accepts each notice for all
+attendees. Refresh the handoff status after the background worker runs. Mail-server acceptance
+does not confirm inbox receipt. Replaying a committed handoff does not queue another notice.
 
 ### Staged automatic handoff runs
 
