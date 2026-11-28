@@ -10,6 +10,10 @@ import { inlineAsset } from './sign-in-confirm-testing.ts'
 type Element = DefaultTreeAdapterTypes.Element
 const app = new Hono().get(MAGIC_LINK_CONFIRM_PATH, signInConfirmPage)
 const webStyle = readFileSync(new URL('../../web/src/styles.css', import.meta.url), 'utf8')
+const sharedStyle = readFileSync(
+  new URL('../../../packages/design-tokens/tokens.css', import.meta.url),
+  'utf8',
+)
 const webMark = readFileSync(
   new URL('../../web/src/assets/hourmere-mark.svg', import.meta.url),
   'utf8',
@@ -239,7 +243,7 @@ describe('branded sign-in confirmation appearance', () => {
     expect(style).not.toMatch(/\b(?:Canvas|CanvasText|GrayText)\b/)
     for (const dark of [false, true]) {
       const tokens = theme(style, dark)
-      const appTokens = theme(webStyle, dark)
+      const appTokens = { ...theme(sharedStyle, dark), ...theme(webStyle, dark) }
       for (const name of [
         '--bg',
         '--surface',
