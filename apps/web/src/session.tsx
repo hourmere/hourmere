@@ -16,10 +16,15 @@ import { signOut as endSession } from './api/auth.ts'
 import { api, onUnauthorized, type Schemas } from './api/client.ts'
 import { errorMessage, requestError } from './api/errors.ts'
 import { AdminLoading } from './components/AdminLoading.tsx'
-import { admin } from './i18n/admin.ts'
-import { AccountLanguage, useI18n } from './i18n/runtime.tsx'
+import { adminCatalogue } from './i18n/admin.ts'
+import {
+  AccountLanguage,
+  AdminCatalogueScope,
+  CatalogueBoundary,
+  useI18n,
+} from './i18n/runtime.tsx'
 import type { UiText } from './i18n/translate.ts'
-import { msg, registerCatalog } from './i18n/translate.ts'
+import { msg } from './i18n/translate.ts'
 import { signInPath } from './next-path.ts'
 import { parseRecoveryNomination } from './pages/sso/recovery-nomination.ts'
 import { PATHS } from './paths.ts'
@@ -28,8 +33,6 @@ import {
   useConfirmLeave,
   useHasUnsavedChanges,
 } from './unsaved-changes.tsx'
-
-registerCatalog(admin)
 
 export type Me = Schemas['Me']
 
@@ -47,6 +50,7 @@ export type SignedOutReason = 'visit' | 'signed-out' | 'expired'
 
 interface Session {
   state: SessionState
+  profilePending: boolean
   /** Asks the server again who is signed in, showing the loading state meanwhile. */
   reload: () => void
   /** Reloads a context conflict after asking before discarding the current draft. */
@@ -123,21 +127,28 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           setAccountLocale({ userId: signedInUserId, locale: data?.locale ?? undefined })
       },
       () => {
-        /* Account defaults are optional; UI remains usable offline. */
+        if (!controller.signal.aborted)
+          setAccountLocale({ userId: signedInUserId, locale: undefined })
       },
     )
     return () => controller.abort()
   }, [signedInUserId])
   return (
-    <AccountLanguage
-      locale={accountLocale?.userId === signedInUserId ? accountLocale?.locale : undefined}
-    >
-      <UnsavedChangesProvider>
-        <SessionController state={state} setState={setState}>
-          {children}
-        </SessionController>
-      </UnsavedChangesProvider>
-    </AccountLanguage>
+    <AdminCatalogueScope catalogue={adminCatalogue}>
+      <AccountLanguage
+        locale={accountLocale?.userId === signedInUserId ? accountLocale?.locale : undefined}
+      >
+        <UnsavedChangesProvider>
+          <SessionController
+            state={state}
+            setState={setState}
+            profilePending={signedInUserId !== null && accountLocale?.userId !== signedInUserId}
+          >
+            {children}
+          </SessionController>
+        </UnsavedChangesProvider>
+      </AccountLanguage>
+    </AdminCatalogueScope>
   )
 }
 
@@ -145,10 +156,12 @@ function SessionController({
   children,
   state,
   setState,
+  profilePending,
 }: {
   children: ReactNode
   state: SessionState
   setState: Dispatch<SetStateAction<SessionState>>
+  profilePending: boolean
 }) {
   const [notice, setNotice] = useState<Notice | null>(null)
   const confirmLeave = useConfirmLeave()
@@ -365,6 +378,7 @@ function SessionController({
   const session = useMemo(
     () => ({
       state,
+      profilePending,
       reload,
       confirmReload,
       refresh,
@@ -374,7 +388,17 @@ function SessionController({
       notice,
       setNotice,
     }),
-    [state, reload, confirmReload, refresh, accept, beginContextSwitch, signOut, notice],
+    [
+      state,
+      profilePending,
+      reload,
+      confirmReload,
+      refresh,
+      accept,
+      beginContextSwitch,
+      signOut,
+      notice,
+    ],
   )
   return <SessionContext value={session}>{children}</SessionContext>
 }
@@ -408,7 +432,7 @@ export function PageStatus({ children }: { children: ReactNode }) {
 export function RequireSession() {
   const { t, ui } = useI18n()
 
-  const { state, reload } = useSession()
+  const { state, reload, profilePending } = useSession()
   const location = useLocation()
   if (state.status === 'loading') return <AdminLoading />
   if (state.status === 'error') {
@@ -436,7 +460,9 @@ export function RequireSession() {
   const { user, organization } = state.me
   return (
     <Fragment key={`${user.id}:${organization.id}`}>
-      <Outlet />
+      <CatalogueBoundary awaitingProfile={profilePending} fallback={<AdminLoading />}>
+        <Outlet />
+      </CatalogueBoundary>
     </Fragment>
   )
 }

@@ -180,6 +180,26 @@ describe('route loading language', () => {
     },
   )
 
+  it('follows saved language choices after leaving an initial private continuation', async () => {
+    chooseLanguage('en')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise(() => {})),
+    )
+    render(
+      <MemoryRouter initialEntries={['/route/continue']}>
+        <Link to="/not/a/page">Open another page</Link>
+        <App continuation={{ routeToken: null }} />
+      </MemoryRouter>,
+    )
+    fireEvent.click(screen.getByRole('link', { name: 'Open another page' }))
+    const picker = await screen.findByRole<HTMLSelectElement>('combobox', {
+      name: 'Interface language',
+    })
+    fireEvent.change(picker, { target: { value: 'zh-CN' } })
+    expect(document.documentElement.lang).toBe('zh-CN')
+  })
+
   it('ignores the embed-only query language on ordinary booking routes', () => {
     chooseLanguage('en')
     render(

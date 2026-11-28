@@ -1,7 +1,10 @@
 import { cleanup } from '@testing-library/react'
 import { afterEach, vi } from 'vitest'
+import { primeTestCatalogues } from '../i18n/catalogues.fixture.ts'
 import { resetLanguagePreference } from '../i18n/store.ts'
 import { takeUnexpectedRequests } from './unexpected-requests.ts'
+
+primeTestCatalogues()
 
 afterEach(() => {
   cleanup()

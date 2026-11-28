@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Schemas } from '../../api/client.ts'
-import { admin } from '../../i18n/admin.ts'
+import { admin } from '../../i18n/catalogues/zh-CN/admin.ts'
 import { InterfaceScope } from '../../i18n/runtime.tsx'
 import { chooseLanguage } from '../../i18n/store.ts'
 import { registerCatalog } from '../../i18n/translate.ts'

@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Schemas } from '../api/client.ts'
 import { goTo } from '../browser.ts'
-import { admin } from '../i18n/admin.ts'
+import { admin } from '../i18n/catalogues/zh-CN/admin.ts'
 import { selectAdminLanguage } from '../test/account-menu.ts'
 import { fakeApi, json, later, renderApp, signedIn } from '../test/fake-api.tsx'
 

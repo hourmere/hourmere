@@ -320,7 +320,8 @@ npm exec --workspace @hourmere/web -- vite build --config vite.embed.config.ts
 npm run dev
 ```
 
-The ignored `apps/web/public/hourmere-embed.js` is generated automatically by production
-builds. Rerun the first command after changing widget sources during development. Use a
+Production builds generate the ignored `apps/web/public/hourmere-embed.js` and its
+`hourmere-embed-locale-*.js` translation files. Rerun the first command after changing
+widget sources during development. Use a
 separate loopback origin for the parent test page and include its exact origin in
 `EMBED_ALLOWED_ORIGINS`.

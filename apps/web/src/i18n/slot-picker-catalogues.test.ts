@@ -4,8 +4,8 @@ import { describe, expect, it } from 'vitest'
 import './admin.ts'
 import { admin as english } from './catalogues/en/admin.ts'
 import { admin as chinese } from './catalogues/zh-CN/admin.ts'
+import { commonCatalogues } from './catalogues.fixture.ts'
 import type { Catalog } from './catalogues.ts'
-import { commonCatalogues } from './common.ts'
 import { type MessageKey, translate } from './translate.ts'
 
 const reviewed = {

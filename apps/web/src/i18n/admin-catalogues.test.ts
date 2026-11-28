@@ -1,7 +1,7 @@
 import { type InterfaceLanguage, registeredLocales } from '@hourmere/core/language'
 import { describe, expect, it, vi } from 'vitest'
 import { errorMessage, requestError } from '../api/errors.ts'
-import './admin.ts'
+import { adminCatalogue } from './admin.ts'
 import { knownMessage, registerCatalogues } from './catalogues.ts'
 import { type MessageKey, translate, translateMessage } from './translate.ts'
 
@@ -31,7 +31,10 @@ vi.mock('./catalogues/en/admin.ts', async (importOriginal) => {
 })
 
 describe('admin catalogue discovery', () => {
-  it('loads both source and translated team messages through the lazy admin loader', () => {
+  it('loads both source and translated team messages through the lazy admin loader', async () => {
+    expect(translate('zh-CN', 'Create team')).toBe('Create team')
+    adminCatalogue.load('zh-CN')
+    await vi.waitFor(() => expect(adminCatalogue.status('zh-CN')).toBe('ready'))
     expect(knownMessage('Create team')).toBe(true)
     expect(translate('en', 'Create team')).toBe('Create team')
     expect(translate('zh-CN', 'Create team')).toBe('创建团队')
@@ -54,7 +57,9 @@ describe('admin catalogue discovery', () => {
       'This team must keep at least one usable provider while single sign-on is enforced.',
       '团队启用强制单点登录时，必须保留至少一个可用的提供者。',
     ],
-  ])('localizes the provider activation refusal %s', (code, english, chinese) => {
+  ])('localizes the provider activation refusal %s', async (code, english, chinese) => {
+    adminCatalogue.load('zh-CN')
+    await vi.waitFor(() => expect(adminCatalogue.status('zh-CN')).toBe('ready'))
     const message = errorMessage(requestError(409, { error: code }))
     expect(translateMessage('en', message)).toBe(english)
     expect(translateMessage('zh-CN', message)).toBe(chinese)

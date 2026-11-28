@@ -14,9 +14,15 @@ import { replaceWith } from '../../browser.ts'
 import { Field } from '../../components/forms.tsx'
 import { useInstance } from '../../components/LegalLinks.tsx'
 import { Logo } from '../../components/Logo.tsx'
+import { PageSkeleton } from '../../components/PageSkeleton.tsx'
 import { usePageTitle } from '../../hooks.ts'
-import '../../i18n/admin.ts'
-import { LanguageSwitcher, useI18n } from '../../i18n/runtime.tsx'
+import { adminCatalogue } from '../../i18n/admin.ts'
+import {
+  AdminCatalogueScope,
+  CatalogueBoundary,
+  LanguageSwitcher,
+  useI18n,
+} from '../../i18n/runtime.tsx'
 import type { MessageKey } from '../../i18n/translate.ts'
 import { signInPath } from '../../next-path.ts'
 import { PATHS } from '../../paths.ts'
@@ -58,6 +64,16 @@ function parseEntry(hash: string): MailboxEntry | null {
 
 /** The callback link starts a sign-in ceremony. The emailed link confirms possession only. */
 export function MailboxProofPage() {
+  return (
+    <AdminCatalogueScope catalogue={adminCatalogue}>
+      <CatalogueBoundary fallback={<PageSkeleton />}>
+        <MailboxProof />
+      </CatalogueBoundary>
+    </AdminCatalogueScope>
+  )
+}
+
+function MailboxProof() {
   const { t } = useI18n()
   const { pathname, hash } = useLocation()
   const navigate = useNavigate()

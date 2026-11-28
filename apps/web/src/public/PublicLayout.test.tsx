@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { EmbedLanguage, InterfaceScope, LanguageSwitcher } from '../i18n/runtime.tsx'
 import { resetLanguagePreference } from '../i18n/store.ts'
 import styles from '../styles.css?raw'
-import { fakeApi, renderApp } from '../test/fake-api.tsx'
+import { fakeApi } from '../test/fake-api.tsx'
 import { EVENT, eventRoutes } from '../test/public-fixtures.ts'
 import { selectPublicLanguage } from '../test/public-language.ts'
 import { EmbeddedContext } from './embed-context.ts'
@@ -123,6 +123,8 @@ describe('host avatars', () => {
 
 it('keeps the language control in a compact header above the booking content', async () => {
   const user = userEvent.setup()
+  // The module-reset tests above reload the route graph. Use its matching language context.
+  const { renderApp } = await import('../test/fake-api.tsx')
   fakeApi(eventRoutes(EVENT, ['2026-11-02T14:00:00Z']))
   const sheet = document.createElement('style')
   sheet.textContent = styles + publicStyles.replace(/^@import[^;]+;/m, '')
@@ -140,7 +142,9 @@ it('keeps the language control in a compact header above the booking content', a
     expect(getComputedStyle(header).width).toBe('100%')
     expect(getComputedStyle(header).justifyContent).toBe('flex-end')
     await selectPublicLanguage(user, 'zh-CN')
-    expect(screen.getByRole('button', { name: '语言：简体中文' }).closest('header')).toBe(header)
+    expect((await screen.findByRole('button', { name: '语言：简体中文' })).closest('header')).toBe(
+      header,
+    )
     expect(screen.getByRole('heading', { name: '选择时间' })).toBeDefined()
   } finally {
     sheet.remove()

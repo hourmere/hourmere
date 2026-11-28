@@ -32,7 +32,9 @@ it is skipped in favor of the next supported preference, or English when there i
 so it never silently selects Brazilian text. Brazilian Portuguese uses `pt-BR` Gregorian
 date and 24-hour time formatting without changing the selected IANA time zone.
 Changing the language updates the existing page without restarting a form, discarding a chosen time,
-reissuing a booking or replacing its private management link.
+reissuing a booking or replacing its private management link. The current interface stays visible
+while a newly selected language downloads. A language already loaded in the current page is
+reused when you switch back.
 
 An explicit interface choice takes precedence over a supported signed-in profile default,
 then the browser's supported language, then English. A choice unavailable for the current
@@ -101,6 +103,12 @@ completion messages contain no booking or attendee data.
 
 ## English fallback
 
+When opening a page in a language other than English, Hourmere waits briefly for its
+translations and shows a loading placeholder. If the download takes longer, the page opens
+in English and updates when the translations arrive. If the download fails, the page stays
+usable in English and selecting the language again retries the download. Widget controls
+follow the same fallback when they load.
+
 Every message resolves independently through the selected locale's fallback chain and then
 English. A partially translated language can show its translated labels alongside complete
 English messages; missing keys never display internal identifiers. Literal user content stays
@@ -124,7 +132,9 @@ An optional `interfaces` list limits a language to `public` or `admin` interface
 it enables both. Notification language choices remain independent of this UI scope.
 The registry's `excludedRegions` can leave a regional preference unsupported; for example,
 the `pt-BR` entry excludes `PT` while accepting bare Portuguese and other Latin-script variants.
-Add the corresponding catalogue files; loaders and language selectors discover them automatically:
+Add the corresponding catalogue files. The web build keeps English available locally and
+emits the other interface catalogues as separate files. The loaders and language selectors
+discover the files automatically:
 
 - `apps/web/src/i18n/catalogues/{code}/common.ts`: public/shared messages (`common` export).
 - `apps/web/src/i18n/catalogues/{code}/admin.ts`: account messages (`admin` export), kept in the lazy session graph.

@@ -1,8 +1,22 @@
-import { type Catalog, registerCatalogues } from './catalogues.ts'
+import { chunkSources, createCatalogueLoader } from './catalogue-loader.ts'
+import { admin } from './catalogues/en/admin.ts'
+import { type Catalog, registerCatalog } from './catalogues.ts'
 
-// Only the lazy session graph imports this module.
-registerCatalogues(
-  import.meta.glob<Catalog>('./catalogues/*/admin.ts', { eager: true, import: 'admin' }),
+registerCatalog(admin, 'en')
+
+// Only routes that already use the admin catalogue import its loader.
+export const adminCatalogue = createCatalogueLoader(
+  import.meta.env.PROD && !import.meta.env.SSR
+    ? chunkSources(
+        import.meta.glob<string>(['./catalogues/*/admin.ts', '!./catalogues/en/admin.ts'], {
+          eager: true,
+          import: 'default',
+          query: '?url',
+        }),
+        'admin',
+      )
+    : import.meta.glob<Catalog>(['./catalogues/*/admin.ts', '!./catalogues/en/admin.ts'], {
+        import: 'admin',
+      }),
+  'admin',
 )
-
-export { admin } from './catalogues/zh-CN/admin.ts'

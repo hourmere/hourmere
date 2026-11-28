@@ -18,6 +18,12 @@ import {
   useSyncExternalStore,
 } from 'react'
 import { ScopedRouteErrorBoundary } from '../components/route-error-scope.tsx'
+import {
+  type CatalogueLoader,
+  INITIAL_LOCALE_WAIT_MS,
+  subscribeCatalogues,
+} from './catalogue-loader.ts'
+import { commonCatalogue } from './common.ts'
 import { browserLanguage, chooseLanguage, languageChoice, subscribeLanguage } from './store.ts'
 import { renderUiText } from './text.tsx'
 import {
@@ -31,12 +37,24 @@ import {
 const Surface = createContext<InterfaceSurface>('public')
 export function InterfaceScope({
   surface,
+  fallback,
+  initialLanguage,
+  memoryOnly,
   children,
 }: {
   surface: InterfaceSurface
+  fallback?: ReactNode
+  initialLanguage?: InterfaceLanguage | undefined
+  memoryOnly?: boolean | undefined
   children: ReactNode
 }) {
-  return <Surface value={surface}>{children}</Surface>
+  return (
+    <Surface value={surface}>
+      <CatalogueBoundary fallback={fallback} language={initialLanguage} memoryOnly={memoryOnly}>
+        {children}
+      </CatalogueBoundary>
+    </Surface>
+  )
 }
 
 const ScopedLanguage = createContext<{
@@ -67,13 +85,15 @@ export function MemoryLanguage({ children }: { children: ReactNode }) {
 export function PreviewLanguage({ children }: { children: ReactNode }) {
   const preference = useSyncExternalStore(subscribeLanguage, languageChoice, emptyPreference)
   return (
-    <InterfaceScope surface="public">
+    <AdminCatalogue value={undefined}>
       <AccountDefault value={undefined}>
-        <LanguageScope fallbackLanguage={preference} memoryOnly>
-          {children}
-        </LanguageScope>
+        <Surface value="public">
+          <LanguageScope fallbackLanguage={preference} memoryOnly>
+            {children}
+          </LanguageScope>
+        </Surface>
       </AccountDefault>
-    </InterfaceScope>
+    </AdminCatalogue>
   )
 }
 
@@ -93,7 +113,9 @@ function LanguageScope({
     <ScopedLanguage
       value={{ language: current ?? fallbackLanguage, setLanguage: setCurrent, memoryOnly }}
     >
-      <ScopedRouteErrorBoundary>{children}</ScopedRouteErrorBoundary>
+      <CatalogueBoundary>
+        <ScopedRouteErrorBoundary>{children}</ScopedRouteErrorBoundary>
+      </CatalogueBoundary>
     </ScopedLanguage>
   )
 }
@@ -108,16 +130,36 @@ export function AccountLanguage({
 }) {
   return (
     <AccountDefault value={interfaceLanguage(locale)}>
-      <ScopedRouteErrorBoundary>{children}</ScopedRouteErrorBoundary>
+      <CatalogueBoundary>
+        <ScopedRouteErrorBoundary>{children}</ScopedRouteErrorBoundary>
+      </CatalogueBoundary>
     </AccountDefault>
   )
 }
 const subscribeInMemory = () => () => {}
 const emptyPreference = () => undefined
 
-export function useI18n() {
+const AdminCatalogue = createContext<CatalogueLoader | undefined>(undefined)
+const ActiveLocale = createContext<{ locale: InterfaceLanguage; pending: boolean } | undefined>(
+  undefined,
+)
+
+export function AdminCatalogueScope({
+  catalogue,
+  children,
+}: {
+  catalogue: CatalogueLoader
+  children: ReactNode
+}) {
+  return <AdminCatalogue value={catalogue}>{children}</AdminCatalogue>
+}
+
+function useLanguagePreference(override?: {
+  language?: InterfaceLanguage | undefined
+  memoryOnly?: boolean | undefined
+}) {
   const scoped = useContext(ScopedLanguage)
-  const memoryOnly = scoped?.memoryOnly === true
+  const memoryOnly = override?.memoryOnly ?? scoped?.memoryOnly ?? false
   const explicit = useSyncExternalStore(
     memoryOnly ? subscribeInMemory : subscribeLanguage,
     memoryOnly ? emptyPreference : languageChoice,
@@ -128,22 +170,94 @@ export function useI18n() {
   const available = interfaceLanguages(surface)
   const supported = (language: InterfaceLanguage | undefined) =>
     language && available.includes(language) ? language : undefined
-  const preference = scoped?.language ?? explicit
-  const selected = supported(preference)
-  const locale = selected ?? supported(account) ?? browserLanguage(surface)
+  const selected = supported(override?.language ?? scoped?.language ?? explicit)
+  const requested = selected ?? supported(account) ?? browserLanguage(surface)
+  return {
+    requested,
+    selected,
+    available,
+    surface,
+    memoryOnly,
+    scopedSetLanguage: scoped?.setLanguage,
+  }
+}
+
+/** An initial wait covers both profile resolution and the catalogue it selects. */
+export function CatalogueBoundary({
+  children,
+  fallback,
+  awaitingProfile = false,
+  language,
+  memoryOnly,
+}: {
+  children: ReactNode
+  fallback?: ReactNode
+  awaitingProfile?: boolean
+  language?: InterfaceLanguage | undefined
+  memoryOnly?: boolean | undefined
+}) {
+  const { requested, selected, available } = useLanguagePreference({ language, memoryOnly })
+  const admin = useContext(AdminCatalogue)
+  const status = useSyncExternalStore(
+    subscribeCatalogues,
+    () => {
+      const commonStatus = commonCatalogue.status(requested)
+      const adminStatus = admin?.status(requested)
+      if (commonStatus === 'failed' || adminStatus === 'failed') return 'failed'
+      return commonStatus === 'pending' || adminStatus === 'pending' ? 'pending' : 'ready'
+    },
+    () => 'ready',
+  )
+  useEffect(() => {
+    if (awaitingProfile && !selected) return
+    commonCatalogue.load(requested)
+    admin?.load(requested)
+  }, [requested, awaitingProfile, selected, admin])
+
+  const [previous, setPrevious] = useState<InterfaceLanguage>('en')
+  const locale =
+    status === 'ready'
+      ? requested
+      : status === 'pending' && available.includes(previous)
+        ? previous
+        : 'en'
+  if (locale !== previous) setPrevious(locale)
+
+  const [revealed, setRevealed] = useState(fallback === undefined)
+  const waiting = (awaitingProfile && !selected) || status === 'pending'
+  if (!revealed && !waiting) setRevealed(true)
+  useEffect(() => {
+    if (revealed) return
+    const timeout = setTimeout(() => setRevealed(true), INITIAL_LOCALE_WAIT_MS)
+    return () => clearTimeout(timeout)
+  }, [revealed])
+  return (
+    <ActiveLocale value={{ locale, pending: status === 'pending' }}>
+      {revealed || !waiting ? children : fallback}
+    </ActiveLocale>
+  )
+}
+
+export function useI18n() {
+  const { requested, selected, available, scopedSetLanguage, memoryOnly, surface } =
+    useLanguagePreference()
+  const active = useContext(ActiveLocale)
+  const locale = active?.locale ?? requested
+  const admin = useContext(AdminCatalogue)
   // Keep the browser's regional conventions for implicit English. Every other active
   // language, including a browser preference, uses its registered formatting locale.
-  const formatLanguage = selected ?? (locale === 'en' ? undefined : locale)
+  const formatLanguage = locale !== 'en' || selected === 'en' ? locale : undefined
   const formatLocale = formatLanguage ? formattingLocale(formatLanguage) : undefined
-  const scopedSetLanguage = scoped?.setLanguage
   const setLanguage = useCallback(
     (language: InterfaceLanguage) => {
       const valid = explicitLanguage(language)
       if (!valid || !interfaceLanguages(surface).includes(valid)) return
+      commonCatalogue.load(valid, true)
+      admin?.load(valid, true)
       scopedSetLanguage?.(valid)
       if (!memoryOnly) chooseLanguage(valid)
     },
-    [memoryOnly, scopedSetLanguage, surface],
+    [admin, memoryOnly, scopedSetLanguage, surface],
   )
   const t = useCallback(
     (key: MessageKey, values?: UiMessage['values']) =>
@@ -163,7 +277,19 @@ export function useI18n() {
     (message: UiText | null | undefined) => renderUiText(locale, ui(message)),
     [locale, ui],
   )
-  return { locale, explicit: selected, formatLocale, available, setLanguage, t, ui, text, uiText }
+  return {
+    locale,
+    requested,
+    selecting: active?.pending ? requested : locale,
+    explicit: selected,
+    formatLocale,
+    available,
+    setLanguage,
+    t,
+    ui,
+    text,
+    uiText,
+  }
 }
 export function useDocumentLanguage(locale: InterfaceLanguage) {
   useEffect(() => {
@@ -174,14 +300,14 @@ export function useDocumentLanguage(locale: InterfaceLanguage) {
 
 /** Changing this control updates text in place; router keys and form state do not change. */
 export function LanguageSwitcher() {
-  const { locale, t, available, setLanguage } = useI18n()
+  const { locale, selecting, t, available, setLanguage } = useI18n()
   useDocumentLanguage(locale)
   return (
     <label className="language-picker">
       <span>{t('Interface language')}</span>
       <select
         aria-label={t('Interface language')}
-        value={locale}
+        value={selecting}
         onChange={(event) => {
           const value = explicitLanguage(event.target.value)
           if (value) setLanguage(value)

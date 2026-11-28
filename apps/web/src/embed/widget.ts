@@ -1,7 +1,7 @@
 import { embedOrigin, publicBookingPath } from '@hourmere/core/embed'
 import { explicitLanguage, type InterfaceLanguage } from '@hourmere/core/language'
 import { randomHex } from '../random.ts'
-import { widgetLanguage, widgetMessages } from './language.ts'
+import { widgetLanguage, widgetMessages, withWidgetMessages } from './language.ts'
 
 export interface InlineOptions {
   element: HTMLElement
@@ -182,7 +182,7 @@ export function initInline({ element, url, height = 720, language }: InlineOptio
   target.searchParams.set('parentRedirect', 'disabled')
   mounted.get(element)?.destroy()
   let iframe = document.createElement('iframe')
-  iframe.title = widgetMessages(selectedLanguage).iframe
+  iframe.title = widgetMessages('en').iframe
   iframe.referrerPolicy = 'no-referrer'
   iframe.setAttribute('allow', 'clipboard-write')
   const sandbox =
@@ -318,6 +318,11 @@ export function initInline({ element, url, height = 720, language }: InlineOptio
   element.append(iframe)
   awaitReady()
   mounted.set(element, handle)
+  withWidgetMessages(selectedLanguage, (locale, text) => {
+    if (destroyed) return
+    iframe.lang = locale
+    iframe.title = text.iframe
+  })
   return handle
 }
 export function destroyInline(element: HTMLElement) {
@@ -338,8 +343,7 @@ export function closePopup() {
   }
 }
 export function openPopup({ url, language }: { url: string; language?: InterfaceLanguage }) {
-  const selectedLanguage = widgetLanguage(language),
-    text = widgetMessages(selectedLanguage)
+  const selectedLanguage = widgetLanguage(language)
   // Validate before closing an existing usable dialog or modifying the host document.
   iframeUrl(url, window.location.origin, randomHex(16))
   closePopup()
@@ -365,12 +369,12 @@ export function openPopup({ url, language }: { url: string; language?: Interface
     root.append(style)
   }
   title.id = `hourmere-title-${randomHex(16)}`
-  title.textContent = text.title
-  dialog.lang = selectedLanguage
-  dialog.setAttribute('aria-labelledby', title.id)
+  title.hidden = true
+  dialog.lang = 'en'
+  dialog.setAttribute('aria-label', widgetMessages('en').title)
   close.type = 'button'
   close.textContent = '×'
-  close.setAttribute('aria-label', text.closeLabel)
+  close.setAttribute('aria-label', widgetMessages('en').closeLabel)
   holder.className = 'content'
   // A retiring dialog's queued events and stale handle cannot close its replacement.
   const closeCurrent = () => {
@@ -403,6 +407,15 @@ export function openPopup({ url, language }: { url: string; language?: Interface
     popup = { dialog, host, handle, previous, restoreScroll: lockBackgroundScroll() }
     dialog.showModal()
     close.focus()
+    withWidgetMessages(selectedLanguage, (locale, text) => {
+      if (popup?.dialog !== dialog) return
+      dialog.lang = locale
+      title.textContent = text.title
+      title.hidden = false
+      dialog.setAttribute('aria-labelledby', title.id)
+      dialog.removeAttribute('aria-label')
+      close.setAttribute('aria-label', text.closeLabel)
+    })
     return { close: closeCurrent }
   } catch (error) {
     if (popup?.dialog === dialog) {
@@ -417,9 +430,9 @@ export function openPopup({ url, language }: { url: string; language?: Interface
 }
 
 const buttons = new WeakSet<HTMLElement>()
-const errors = new WeakMap<HTMLElement, HTMLParagraphElement>()
+const errors = new WeakMap<HTMLElement, { status: HTMLParagraphElement }>()
 function clearError(element: HTMLElement) {
-  errors.get(element)?.remove()
+  errors.get(element)?.status.remove()
   errors.delete(element)
 }
 function errorMessage(
@@ -427,14 +440,16 @@ function errorMessage(
   language?: InterfaceLanguage,
   container: HTMLElement = element,
 ) {
-  let status = errors.get(element)
-  if (!status) {
-    status = document.createElement('p')
-    status.setAttribute('role', 'alert')
-    errors.set(element, status)
-  }
-  status.textContent = widgetMessages(widgetLanguage(language)).failure
+  const status = errors.get(element)?.status ?? document.createElement('p')
+  status.setAttribute('role', 'alert')
+  const error = { status }
+  errors.set(element, error)
   container.append(status)
+  withWidgetMessages(widgetLanguage(language), (locale, text) => {
+    if (errors.get(element) !== error) return
+    status.lang = locale
+    status.textContent = text.failure
+  })
 }
 export function init() {
   for (const element of document.querySelectorAll<HTMLElement>('[data-hourmere-inline]')) {

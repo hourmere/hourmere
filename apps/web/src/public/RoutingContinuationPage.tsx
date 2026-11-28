@@ -186,7 +186,7 @@ function ContinuationBooking({
   routeToken: string
   initial: RoutingContinuation
 }) {
-  const { t, ui, locale: language, explicit, formatLocale } = useI18n()
+  const { t, ui, locale: language, requested, explicit, formatLocale } = useI18n()
   const browserLocale = useMemo(preferredLocale, [])
   const locale = formatLocale ?? browserLocale
   const [timeZone, setTimeZone] = useState(detectTimeZone)
@@ -314,7 +314,7 @@ function ContinuationBooking({
     const details = JSON.stringify(body)
     if (attempt.current?.details !== details) {
       const inviteeLocale = bookingLocale(
-        explicit ?? (interfaceLanguage(browserLocale) === language ? browserLocale : language),
+        explicit ?? (interfaceLanguage(browserLocale) === requested ? browserLocale : requested),
       )
       if (inviteeLocale) body.invitee.locale = inviteeLocale
       attempt.current = { key: randomKey(), details, body }

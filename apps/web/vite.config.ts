@@ -1,8 +1,17 @@
 import { fileURLToPath } from 'node:url'
 import react from '@vitejs/plugin-react'
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig, loadEnv, type Rolldown } from 'vite'
+import { catalogueChunks } from './i18n/catalogue-chunks.ts'
 import { offlineShell } from './pwa/build.ts'
 import { pwaEnabled } from './pwa/config.ts'
+
+function chunkFileName({ facadeModuleId }: Rolldown.PreRenderedChunk) {
+  const catalogue = facadeModuleId?.match(/\/i18n\/catalogues\/([^/]+)\/(common|admin)\.ts$/)
+  // Keep on-demand catalogues out of the offline shell's install-time precache.
+  return catalogue && catalogue[1] !== 'en'
+    ? `assets/locales/${catalogue[1]}-${catalogue[2]}-[hash].js`
+    : 'assets/[name]-[hash].js'
+}
 
 export default defineConfig(({ mode }) => {
   // The API server's port: PORT from the environment or the repository's .env, as the server
@@ -15,8 +24,14 @@ export default defineConfig(({ mode }) => {
   return {
     envDir: repoRoot,
     define: { 'import.meta.env.VITE_PWA_ENABLED': JSON.stringify(String(enabled)) },
-    plugins: [react(), offlineShell(enabled)],
+    plugins: [react(), catalogueChunks(), offlineShell(enabled)],
     build: {
+      rolldownOptions: {
+        output: {
+          entryFileNames: chunkFileName,
+          chunkFileNames: chunkFileName,
+        },
+      },
       // Lightning CSS rewrites container ranges despite this target; esbuild preserves
       // min-width queries for Safari 16.0–16.3, which ignores range syntax.
       cssMinify: 'esbuild',

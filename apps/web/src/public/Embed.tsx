@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react'
-import { embedQueryLanguage } from '../embed/language.ts'
+import { embedQueryLanguage } from '../embed/query-language.ts'
 import { EmbedLanguage } from '../i18n/runtime.tsx'
 import { BookingPage } from './BookingPage.tsx'
 import { EmbeddedContext, embedMessageContext } from './embed-context.ts'

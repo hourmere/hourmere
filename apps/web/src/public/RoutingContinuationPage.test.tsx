@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Schemas } from '../api/client.ts'
-import { commonCatalogues } from '../i18n/common.ts'
+import { commonCatalogues } from '../i18n/catalogues.fixture.ts'
 import { fakeApi, json } from '../test/fake-api.tsx'
 import { booking, NEW_TOKEN, slot, TOKEN } from '../test/public-fixtures.ts'
 import { selectPublicLanguage } from '../test/public-language.ts'

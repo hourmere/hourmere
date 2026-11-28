@@ -25,9 +25,8 @@ import { AdminLoading } from './components/AdminLoading.tsx'
 import type { AppShellContext } from './components/AppShell.tsx'
 import { PageSkeleton } from './components/PageSkeleton.tsx'
 import { RouteErrorBoundary } from './components/RouteErrorBoundary.tsx'
-import { embedQueryLanguage } from './embed/language.ts'
+import { embedQueryLanguage } from './embed/query-language.ts'
 import { InterfaceScope, MemoryLanguage, useI18n } from './i18n/runtime.tsx'
-import { translate } from './i18n/translate.ts'
 import {
   AcceptInvitationPage,
   AnalyticsPage,
@@ -283,12 +282,12 @@ function RouteLoadingStatus({ memoryOnly = false }: { memoryOnly?: boolean }) {
 }
 
 function LoadingStatus() {
-  const { t } = useI18n()
+  const { locale, t } = useI18n()
   const { pathname, search } = useLocation()
-  const language = pathname.startsWith('/embed/') ? embedQueryLanguage(search) : undefined
+  const embedLanguage = pathname.startsWith('/embed/') && embedQueryLanguage(search)
   return (
-    <div className="page-status" role="status" lang={language}>
-      {language ? translate(language, 'Loading…') : t('Loading…')}
+    <div className="page-status" role="status" lang={embedLanguage ? locale : undefined}>
+      {t('Loading…')}
     </div>
   )
 }
@@ -313,14 +312,22 @@ function PageDescription() {
  * kept: they are free for public pages.
  */
 export function App({ continuation }: { continuation?: RoutingContinuation | undefined }) {
-  const { pathname } = useLocation()
+  const { pathname, search, hash } = useLocation()
   const mailboxProof = useMatch(PATHS.mailboxProof)
   useAdminPwa(mailboxProof ? '/' : pathname)
   const admin = matchRoutes(appRoutes, pathname)?.some(
     ({ route }) => route.handle?.surface === 'admin',
   )
   return (
-    <InterfaceScope surface={admin ? 'admin' : 'public'}>
+    <InterfaceScope
+      surface={admin ? 'admin' : 'public'}
+      fallback={admin ? undefined : <PageSkeleton />}
+      initialLanguage={pathname.startsWith('/embed/') ? embedQueryLanguage(search) : undefined}
+      memoryOnly={
+        !!continuationParams(pathname, hash) ||
+        (!!continuation && isRoutingContinuationPath(pathname))
+      }
+    >
       <AppRoutes initialContinuation={continuation} publicMailbox={mailboxProof !== null} />
     </InterfaceScope>
   )
