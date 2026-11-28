@@ -6,6 +6,10 @@ import { recordTeamWriteOrganizationLock, teamWriteTransaction } from '@hourmere
 import type { ServiceContext } from '@hourmere/scheduling'
 import { DomainError } from '@hourmere/scheduling/errors'
 import {
+  allowsManagedTeamOperations,
+  lockVersionedTeamWrite,
+} from '@hourmere/scheduling/team-permission'
+import {
   requireWorkflowsEnabled,
   type WorkflowSettings,
 } from '@hourmere/workflows/operator-settings'
@@ -78,14 +82,28 @@ export async function requireAdmin(db: Db, ctx: ServiceContext, lock = false) {
   let query = db
     .selectFrom('auth.member as m')
     .innerJoin('auth.user as u', 'u.id', 'm.userId')
-    .select('m.role')
+    .leftJoin('team_member_authorizations as authorization', 'authorization.member_id', 'm.id')
+    .select(['m.role', 'authorization.generation'])
     .where('m.organizationId', '=', ctx.principal.organization.id)
     .where('m.userId', '=', ctx.principal.user.id)
     .where('u.emailVerified', '=', true)
   if (lock) query = query.forShare('m')
   const membership = await query.executeTakeFirst()
   const roles = membership?.role.split(',').map((role) => role.trim()) ?? []
-  if (!roles.includes('owner') && !roles.includes('admin')) throw insufficientRole()
+  const fixed = roles.includes('owner') || roles.includes('admin')
+  if (lock && !ctx.principal.organization.personal)
+    await lockVersionedTeamWrite(db, ctx.principal, Date.now)
+  if (
+    !membership ||
+    !(await allowsManagedTeamOperations(
+      db,
+      ctx.principal,
+      ['webhooks.read'],
+      fixed,
+      membership.generation,
+    ))
+  )
+    throw insufficientRole()
 }
 
 /**

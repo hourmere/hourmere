@@ -66,6 +66,35 @@ function credentialBinding(principal: Principal) {
   }
 }
 
+export async function getTeamCredentialAuthorization(db: Db, principal: Principal) {
+  const { field, id } = credentialBinding(principal)
+  if (!id || !isUuid(id) || !isUuid(principal.user.id) || !isUuid(principal.organization.id))
+    return undefined
+  const row = await db
+    .selectFrom('team_credential_authorizations')
+    .select(['id', 'credential_generation'])
+    .where(field, '=', id)
+    .where('organization_id', '=', principal.organization.id)
+    .where('user_id', '=', principal.user.id)
+    .executeTakeFirst()
+  return row && { authorizationId: row.id, generation: row.credential_generation }
+}
+
+export async function withTeamCredential<T extends Principal>(
+  db: Db,
+  principal: T,
+  available: boolean,
+  membershipGeneration: number,
+): Promise<T> {
+  if (principal.organization.personal) return principal
+  if (!available && membershipGeneration <= 1) return principal
+  const credential = await getTeamCredentialAuthorization(db, principal)
+  return {
+    ...principal,
+    customRoleAuthorization: { available, ...(credential && { credential }) },
+  }
+}
+
 /**
  * Resolve every operation against a single current PostgreSQL snapshot. Callers
  * authenticate the principal and enforce their credential/operation-specific

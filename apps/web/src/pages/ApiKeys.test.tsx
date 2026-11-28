@@ -6,6 +6,7 @@ import mcpDocs from '../../../../docs/mcp.md?raw'
 import { API_KEY_ORGANIZATION_MEMBERSHIP_MESSAGE } from '../../../../packages/auth/src/api-key-errors.ts'
 import siteMcpDocs from '../../../site/src/content/docs/docs/mcp.md?raw'
 import { API_KEY_NAME_MAX_LENGTH, type ApiKey } from '../api/auth.ts'
+import type { Schemas } from '../api/client.ts'
 import { chooseLanguage } from '../i18n/store.ts'
 import type { Me } from '../session.tsx'
 import styles from '../styles.css?raw'
@@ -49,10 +50,15 @@ const IN_TEAM: Me = { ...ME, organization: TEAM }
 function keyServer(
   initial: ApiKey[] = [existing],
   me: Me = ME,
-  options: { publicUrl?: string; refresh?: Promise<Response> } = {},
+  options: {
+    publicUrl?: string
+    refresh?: Promise<Response>
+    teamPermissions?: Schemas['TeamPermissions']
+  } = {},
 ) {
   let keys = [...initial]
   let reads = 0
+  const teamPermissions = options.teamPermissions
   const api = fakeApi({
     ...signedInAs(me),
     ...organizations([ME.organization, TEAM]),
@@ -62,7 +68,11 @@ function keyServer(
       json(200, {
         publicUrl: options.publicUrl ?? window.location.origin,
         signIn: { email: true, google: false, microsoft: false },
+        ...(teamPermissions && { customRolesAvailable: true }),
       }),
+    ...(teamPermissions && {
+      [`GET /api/v1/teams/${TEAM.id}/permissions`]: () => json(200, teamPermissions),
+    }),
     'GET /api/auth/api-key/list': () => {
       if (reads++ > 0 && options.refresh) return options.refresh
       return json(200, { apiKeys: keys, total: keys.length })
@@ -107,6 +117,60 @@ const rowFor = async (name: string) =>
   (await within(await table()).findByRole('rowheader', { name: new RegExp(name) })).closest('tr')
 
 describe('the API keys page', () => {
+  it('requires a separate, scope-specific review to issue a key with renewed team access', async () => {
+    const user = userEvent.setup()
+    const authorizationId = '00000000-0000-7000-8000-00000000004b'
+    const requests = keyServer([], IN_TEAM, {
+      teamPermissions: {
+        decisions: [],
+        membershipGeneration: 3,
+        policyVersion: { masterEpoch: 1, teamEpoch: 1 },
+        permissionIds: ['analytics.read', 'event_types.update', 'readiness.read_team'],
+        renewalRequired: false,
+        fixedRole: 'member',
+        credentialAuthorizationId: authorizationId,
+      },
+    })
+    renderApp('/app/api-keys')
+    await user.type(await screen.findByLabelText('Name'), 'Reviewed key')
+    await user.click(screen.getByRole('radio', { name: /Read — analytics and reporting/ }))
+    await user.click(screen.getByRole('button', { name: 'Create key' }))
+    const heading = await screen.findByRole('heading', { name: 'Review team access for this key' })
+    expect(document.activeElement).toBe(heading)
+    expect(screen.getByText('View aggregate booking activity')).toBeDefined()
+    expect(screen.queryByText('Edit event types')).toBeNull()
+    expect(screen.queryByText('View team setup readiness')).toBeNull()
+    expect(requests.to('POST /api/auth/api-key/create')).toHaveLength(0)
+    await user.click(screen.getByRole('button', { name: 'Confirm and create key' }))
+    await waitFor(() => expect(requests.to('POST /api/auth/api-key/create')).toHaveLength(1))
+    const issued = requests.to('POST /api/auth/api-key/create')[0]
+    expect(issued?.headers.get('X-Hourmere-Reviewed-Team-Authorization')).toBe(authorizationId)
+    expect(issued?.body).toEqual({
+      name: 'Reviewed key',
+      metadata: { organizationId: TEAM.id, scope: 'read' },
+    })
+  })
+
+  it('keeps key creation behind browser renewal when its team authorization is stale', async () => {
+    const user = userEvent.setup()
+    const requests = keyServer([], IN_TEAM, {
+      teamPermissions: {
+        decisions: [],
+        membershipGeneration: 3,
+        policyVersion: { masterEpoch: 1, teamEpoch: 1 },
+        permissionIds: ['analytics.read'],
+        renewalRequired: true,
+      },
+    })
+    renderApp('/app/api-keys')
+    await user.type(await screen.findByLabelText('Name'), 'Pending key')
+    await user.click(screen.getByRole('button', { name: 'Create key' }))
+    await screen.findByText(
+      'Renew your browser’s team access in Settings before issuing a new credential.',
+    )
+    expect(requests.to('POST /api/auth/api-key/create')).toHaveLength(0)
+  })
+
   it.each([
     { locale: 'en' as const, legend: 'Scope', name: 'Name' },
     { locale: 'zh-CN' as const, legend: '权限范围', name: '名称' },

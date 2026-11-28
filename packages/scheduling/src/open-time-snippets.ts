@@ -11,6 +11,7 @@ import { listPublicSlots, listPublicTeamSlots, selectDurationMinutes } from './a
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { isUuid } from './internal.ts'
+import { allowsManagedTeamOperations } from './team-permission.ts'
 
 /** Elapsed days, not calendar days: explicit offsets make DST boundaries unambiguous. */
 export const MAX_OPEN_TIME_SNIPPET_RANGE_DAYS = 31
@@ -71,7 +72,13 @@ export async function generateOpenTimeSnippet(
         .innerJoin('auth.user as u', 'u.id', 'm.userId')
         .innerJoin('auth.organization as o', 'o.id', 'm.organizationId')
         .leftJoin('personal_organizations as p', 'p.organization_id', 'o.id')
-        .select(['m.role', 'o.slug as teamSlug', 'p.user_id as personalOwnerId'])
+        .leftJoin('team_member_authorizations as authorization', 'authorization.member_id', 'm.id')
+        .select([
+          'm.role',
+          'o.slug as teamSlug',
+          'p.user_id as personalOwnerId',
+          'authorization.generation',
+        ])
         .where('m.organizationId', '=', ctx.principal.organization.id)
         .where('m.userId', '=', ctx.principal.user.id)
         .where('u.emailVerified', '=', true)
@@ -100,7 +107,13 @@ export async function generateOpenTimeSnippet(
       if (
         event.owner_user_id === null &&
         (roles.some((role) => !['owner', 'admin', 'member'].includes(role)) ||
-          (!roles.includes('owner') && !roles.includes('admin')))
+          !(await allowsManagedTeamOperations(
+            db,
+            ctx.principal,
+            ['event_types.generate_open_time_snippet'],
+            roles.includes('owner') || roles.includes('admin'),
+            membership.generation,
+          )))
       )
         throw new DomainError('forbidden', 'insufficient_role')
       if (!event.is_active) throw new DomainError('not_found', 'event_type_not_found')

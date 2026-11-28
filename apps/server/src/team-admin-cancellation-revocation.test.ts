@@ -4,7 +4,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import { createRoute, z } from '@hono/zod-openapi'
 import { type Auth, createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
-import { scimSuspended } from '@hourmere/db/scim-suspension'
+import { scimManagedMember, scimSuspended } from '@hourmere/db/scim-suspension'
 import { teamWriteTransaction } from '@hourmere/db/team-write'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs } from '@hourmere/jobs'
@@ -23,10 +23,12 @@ import { sql } from 'kysely'
 import type { PoolClient } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { isMember } from '../../../packages/auth/src/organizations.ts'
+import { ssoRecoveryOwner } from '../../../packages/auth/src/sso-recovery-membership.ts'
 import { createApp } from './app.ts'
 import * as openapi from './openapi.ts'
 import { CancelBody, ListBookingsQuery } from './routes/bookings.ts'
 import { teamBookingRoutes } from './routes/team-bookings.ts'
+import { bulkPageBinding, databaseWallTime, issueBulkPageProof } from './team-booking-bulk-proof.ts'
 
 const bootstrap = process.env.DATABASE_URL
 const origin = 'http://localhost:4397'
@@ -60,18 +62,29 @@ function sourceCopy<T>(
 async function copiedRoutes(replacements: [string, string][] = []): Promise<RouteFactory> {
   const shared = sourceCopy<Record<string, unknown>>(
     '../../../packages/auth/src/team-management.ts',
-    { sql, isMember, scimSuspended },
+    { sql, isMember, scimManagedMember, scimSuspended, ssoRecoveryOwner },
     ['checkTeamManagementAccess', 'TeamManagementError'],
     replacements,
   )
   const access = sourceCopy<Record<string, unknown>>(
     './team-management.ts',
-    { ...shared, DomainError, createMiddleware, sql, teamWriteTransaction },
+    { ...shared, DomainError, createMiddleware, scimSuspended, sql, teamWriteTransaction },
     ['teamManagementAccess', 'EXPECTED_ORGANIZATION_HEADER', 'ORGANIZATION_CONTEXT_CHANGED'],
   )
   return sourceCopy<{ teamBookingRoutes: RouteFactory }>(
     './routes/team-bookings.ts',
-    { createRoute, z, ...scheduling, ...openapi, ...access, CancelBody, ListBookingsQuery },
+    {
+      createRoute,
+      z,
+      ...scheduling,
+      ...openapi,
+      ...access,
+      CancelBody,
+      ListBookingsQuery,
+      bulkPageBinding,
+      databaseWallTime,
+      issueBulkPageProof,
+    },
     ['teamBookingRoutes'],
   ).teamBookingRoutes
 }
@@ -531,7 +544,7 @@ describe.skipIf(!bootstrap)(
         )
         // Take the membership snapshot without locks before the authorization locks are held.
         const start = source.indexOf('  const membership = await checkTeamManagementMembership(')
-        const end = source.indexOf('  const { personal, role } = membership', start)
+        const end = source.indexOf('  const { personal } = membership', start)
         expect(start).toBeGreaterThan(0)
         expect(end).toBeGreaterThan(start)
         const read = source.slice(start, end)

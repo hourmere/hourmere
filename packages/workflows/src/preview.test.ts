@@ -286,7 +286,7 @@ describe.skipIf(!serverUrl)('synthetic workflow preview', () => {
       emails: [],
       estimates: { emailRecipientClasses: 0, webhookDeliveriesPerMatch: 1 },
     })
-    expect(new Set(select.mock.calls.map(([table]) => table))).toEqual(
+    expect(new Set(select.mock.calls.map(([table]) => String(table).split(' as ')[0]))).toEqual(
       new Set([
         'auth.user',
         'auth.organization',

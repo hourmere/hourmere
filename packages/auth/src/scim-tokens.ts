@@ -120,6 +120,10 @@ export async function createScimToken(db: Db, input: ScimTokenActor & { name: st
         })
         .returning(metadata)
         .executeTakeFirstOrThrow()
+      await trx
+        .insertInto('scim_token_protocol_versions')
+        .values({ token_id: token.id, protocol_version: 1 })
+        .execute()
       await audit(trx, input, 'scim_token.created', token.id)
       return { token, secret }
     },
@@ -256,6 +260,9 @@ export async function authenticateScimToken(
     .set({ last_used_at: sql`clock_timestamp()` })
     .where('organization_id', '=', input.organizationId)
     .where('revoked_at', 'is', null)
+    .where(sql<boolean>`coalesce((SELECT protocol_version
+      FROM scim_token_protocol_versions
+      WHERE token_id = scim_provisioning_tokens.id), 1) = 1`)
     .where((eb) =>
       eb.or([
         eb('token_hash', '=', digest),

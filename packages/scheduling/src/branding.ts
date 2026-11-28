@@ -7,6 +7,11 @@ import sharp from 'sharp'
 import { z } from 'zod'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
+import {
+  allowsManagedTeamOperations,
+  lockVersionedTeamWrite,
+  type PhaseOneGrant,
+} from './team-permission.ts'
 
 export const BRAND_LOGO_MAX_BYTES = 512 * 1024
 export const BRAND_LOGO_OUTPUT_MAX_BYTES = 64 * 1024
@@ -40,13 +45,19 @@ const invalidLogo = () =>
 const tooLarge = () =>
   new DomainError('invalid', 'brand_logo_too_large', 'The upload must be at most 512 KiB')
 
-async function authorize(db: Db, ctx: ServiceContext, lock = false) {
+async function authorize(
+  db: Db,
+  ctx: ServiceContext,
+  operation: PhaseOneGrant = 'branding.read',
+  lock = false,
+) {
   let query = db
     .selectFrom('auth.member as m')
     .innerJoin('auth.user as u', 'u.id', 'm.userId')
     .innerJoin('auth.organization as o', 'o.id', 'm.organizationId')
     .leftJoin('personal_organizations as p', 'p.organization_id', 'o.id')
-    .select(['m.role', 'p.user_id'])
+    .leftJoin('team_member_authorizations as authorization', 'authorization.member_id', 'm.id')
+    .select(['m.role', 'p.user_id', 'authorization.generation'])
     .where('m.organizationId', '=', ctx.principal.organization.id)
     .where('m.userId', '=', ctx.principal.user.id)
     .where('u.emailVerified', '=', true)
@@ -57,7 +68,13 @@ async function authorize(db: Db, ctx: ServiceContext, lock = false) {
     !row ||
     (row.user_id
       ? row.user_id !== ctx.principal.user.id || !roles.includes('owner')
-      : !roles.some((role) => role === 'owner' || role === 'admin'))
+      : !(await allowsManagedTeamOperations(
+          db,
+          ctx.principal,
+          [operation],
+          roles.some((role) => role === 'owner' || role === 'admin'),
+          row.generation,
+        )))
   )
     throw denied()
 }
@@ -79,8 +96,16 @@ async function read(db: Db, organizationId: string) {
   return view(row ?? { brand_logo: null, brand_primary_color: null })
 }
 export async function getBranding(ctx: ServiceContext) {
-  await authorize(ctx.db, ctx)
-  return read(ctx.db, ctx.principal.organization.id)
+  return authorizedRead(ctx, (db) => read(db, ctx.principal.organization.id))
+}
+
+async function authorizedRead<T>(ctx: ServiceContext, action: (db: Db) => Promise<T>) {
+  const readAuthorized = async (db: Db) => {
+    await authorize(db, ctx)
+    return action(db)
+  }
+  if (!ctx.principal.customRoleAuthorization?.credential) return readAuthorized(ctx.db)
+  return ctx.db.transaction().setIsolationLevel('repeatable read').execute(readAuthorized)
 }
 /** Records which settings changed and how; never the image, its hash or the colour. */
 async function auditBranding(
@@ -98,12 +123,16 @@ async function auditBranding(
     requestId: ctx.requestId,
   })
 }
-async function write<T>(ctx: BrandingContext, action: (trx: Db) => Promise<T>) {
+async function write<T>(
+  ctx: BrandingContext,
+  operation: PhaseOneGrant,
+  action: (trx: Db) => Promise<T>,
+) {
   return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     await ctx.prepareOrganizationWrite?.(trx)
     // Reject non-admin callers before they can contend with booking writes.
     if (ctx.principal.kind !== 'session' || !ctx.authorizeOrganizationWrite)
-      await authorize(trx, ctx)
+      await authorize(trx, ctx, operation)
     const user = await trx
       .selectFrom('auth.user')
       .select('id')
@@ -120,7 +149,8 @@ async function write<T>(ctx: BrandingContext, action: (trx: Db) => Promise<T>) {
       .executeTakeFirst()
     if (!org) throw denied()
     await ctx.authorizeOrganizationWrite?.(trx, org.id)
-    await authorize(trx, ctx, true)
+    await lockVersionedTeamWrite(trx, ctx.principal, () => ctx.now().epochMilliseconds)
+    await authorize(trx, ctx, operation, true)
     return action(trx)
   })
 }
@@ -132,7 +162,7 @@ export async function setBranding(ctx: BrandingContext, input: unknown) {
       'invalid_brand_color',
       'Use a primary colour in #RRGGBB format and a valid uploaded logo reference',
     )
-  return write(ctx, async (trx) => {
+  return write(ctx, 'branding.update', async (trx) => {
     const org = ctx.principal.organization.id
     const { brandLogo, brandPrimaryColor } = parsed.data
     if (
@@ -221,10 +251,10 @@ export async function normalizeBrandLogo(data: Buffer, contentType: string) {
   }
 }
 export async function uploadBrandLogo(ctx: BrandingContext, data: Buffer, contentType: string) {
-  await authorize(ctx.db, ctx)
+  await authorize(ctx.db, ctx, 'branding.upload_logo')
   const normalized = await normalizeBrandLogo(data, contentType)
   const hash = createHash('sha256').update(normalized).digest('hex')
-  return write(ctx, async (trx) => {
+  return write(ctx, 'branding.upload_logo', async (trx) => {
     const org = ctx.principal.organization.id
     await trx
       .insertInto('organization_brand_logos')
@@ -241,13 +271,14 @@ export async function uploadBrandLogo(ctx: BrandingContext, data: Buffer, conten
   })
 }
 export async function getBrandLogo(ctx: ServiceContext, hash: string) {
-  await authorize(ctx.db, ctx)
-  const row = await ctx.db
-    .selectFrom('organization_brand_logos')
-    .select('data')
-    .where('organization_id', '=', ctx.principal.organization.id)
-    .where('hash', '=', hash)
-    .executeTakeFirst()
+  const row = await authorizedRead(ctx, (db) =>
+    db
+      .selectFrom('organization_brand_logos')
+      .select('data')
+      .where('organization_id', '=', ctx.principal.organization.id)
+      .where('hash', '=', hash)
+      .executeTakeFirst(),
+  )
   if (!row) throw new DomainError('not_found', 'brand_logo_not_found')
   return normalizeBrandLogo(row.data, 'image/png')
 }

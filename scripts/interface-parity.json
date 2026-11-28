@@ -27,6 +27,14 @@
     "exemption": "browser-session-only",
     "reason": "Custom role management requires a verified fixed Owner's browser session and fresh proof."
   },
+  "renewCustomTeamPermissions": {
+    "exemption": "browser-session-only",
+    "reason": "Renewing a team's browser authorization requires explicit, fresh identity verification in the existing session."
+  },
+  "setCustomTeamPermissionsMode": {
+    "exemption": "browser-session-only",
+    "reason": "Changing the custom role setting requires a verified fixed Owner's browser session and fresh proof."
+  },
   "createSsoDomainChallenge": {
     "exemption": "browser-session-only",
     "reason": "Claiming domain authority requires interactive administrator proof."

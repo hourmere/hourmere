@@ -336,8 +336,10 @@ export function productRoutes({
   paymentProvider,
   paymentStatusSecret,
   auditLogRetentionDays = null,
+  customRolesEnabled = false,
 }: {
   db: Db
+  customRolesEnabled?: boolean | undefined
   paidBookingAvailability?: ServiceContext['paidBookingAvailability']
   paymentProvider?: PaymentProvider | undefined
   paymentStatusSecret?: string | undefined
@@ -415,9 +417,11 @@ export function productRoutes({
       db,
       publicUrl,
       ssoCapabilities,
+      customRolesEnabled,
     }),
     instanceRoutes({
       publicUrl,
+      ...(customRolesEnabled && { customRolesDb: db }),
       socialProviders,
       scimProvisioningEnabled,
       teamOwnershipTransferEnabled: ownershipTransfer !== undefined,
@@ -458,7 +462,7 @@ export function productRoutes({
     brandingRoutes({ db }),
     auditLogRoutes({ db, auditLogRetentionDays }),
     ssoRoutes({ db, capabilities: ssoCapabilities }),
-    customRoleRoutes({ db, publicUrl, capabilities: ssoCapabilities }),
+    customRoleRoutes({ db, publicUrl, capabilities: ssoCapabilities, enabled: customRolesEnabled }),
     ssoPolicyRoutes({
       db,
       publicUrl,
@@ -810,6 +814,7 @@ export function productTools({
 
 /** What the running server's app options need beyond the configuration. */
 export interface ProductionAppDeps extends RecurringBookingAdmissionDeps {
+  customRolesEnabled?: boolean | undefined
   enqueueDepartureHandoffEmail?: EnqueueDepartureHandoffEmail
   enqueueDepartureHandoffRun?: EnqueueDepartureHandoffRun
   enqueueScimInvitation: ReturnType<typeof createInvitationEmailDispatcher>
@@ -859,6 +864,7 @@ export function productionAppOptions({
   db,
   stripeTransport,
   stripeAccountVerified = false,
+  customRolesEnabled,
   routingFormsEnabled = false,
   auth,
   resolveCaller,
@@ -967,6 +973,7 @@ export function productionAppOptions({
     // while the setting is off; the protocol endpoints answer 404 sso_disabled when off.
     ssoMailboxProof: mailboxProofRoutes({
       capabilities: sso,
+      ...(customRolesEnabled && { customRolesEnabled }),
       db,
       queue: mailboxProofQueue,
       ownershipTransferEnabled: ownershipTransfer !== undefined,
@@ -992,6 +999,7 @@ export function productionAppOptions({
     // db is closed by the caller.
     routes: productRoutes({
       ...sso,
+      customRolesEnabled,
       ssoConfigurationKey,
       ssoPrivateTargets,
       ssoLinkRemovalQueue,
@@ -1170,6 +1178,8 @@ export interface RunningServer {
 interface StartServerOptions
   extends RecurringBookingAdmissionDeps,
     Pick<AuthConfig, 'organizationListRateLimitMaxForTests'> {
+  /** Custom role admission is available only to an explicit in-process acceptance setup. */
+  customRolesEnabled?: boolean | undefined
   /** In-process transport injection for isolated test-mode acceptance. */
   stripeTransport?: typeof fetch | undefined
 }
@@ -1529,6 +1539,7 @@ async function start(
       // Mailbox proofs follow the relevant protocol setting. Cleanup runs in every state.
       ...mailboxProofJobs({
         capabilities: sso,
+        ...(options.customRolesEnabled && { customRolesEnabled: true }),
         scimMappingConsentEnabled: config.SCIM_PROVISIONING_ENABLED,
         ownershipTransferEnabled: config.TEAM_OWNERSHIP_TRANSFER_ENABLED,
         db,
@@ -1778,6 +1789,7 @@ async function start(
         jobs,
       }),
       organizationListRateLimitMaxForTests: options.organizationListRateLimitMaxForTests,
+      customRolesEnabled: options.customRolesEnabled,
     })
     // db is closed below.
     fetch = createApp(
@@ -1785,6 +1797,7 @@ async function start(
         config,
         stripeTransport: options.stripeTransport,
         stripeAccountVerified,
+        customRolesEnabled: options.customRolesEnabled,
         routingFormsEnabled,
         recurringBookingsEnabled: recurringBookingAdmissionEnabled(options),
         db,
@@ -1793,12 +1806,14 @@ async function start(
           auth,
           db,
           ssoCapabilities: sso,
+          customRolesEnabled: options.customRolesEnabled,
         }),
         resolveMcpOAuth: createMcpOAuthResolver({
           auth,
           db,
           publicUrl: config.PUBLIC_URL,
           ssoCapabilities: sso,
+          customRolesEnabled: options.customRolesEnabled,
         }),
         checkDb,
         waitlist: {

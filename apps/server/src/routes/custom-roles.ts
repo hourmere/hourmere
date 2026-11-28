@@ -5,8 +5,10 @@ import {
   canReadPrivateTeamRoster,
   checkTeamManagementAccess,
   customRoleWrite,
+  lockCustomRoleMaster,
   lockTeamSsoProof,
   type Principal,
+  readCustomRoleAssignment,
   readCustomRoles,
   resolveTeamPermissions,
   TeamManagementError,
@@ -18,6 +20,13 @@ import { DomainError } from '@hourmere/scheduling'
 import type { Context } from 'hono'
 import { createMiddleware } from 'hono/factory'
 import type { CallerEnv } from '../caller.ts'
+import {
+  customRoleMode,
+  renewalFacts,
+  renewTeamSession,
+  roleRevisionConflict,
+  setCustomRoleMode,
+} from '../custom-role-mode.ts'
 import { ErrorBody, json, type RouteModule } from '../openapi.ts'
 import { type FreshProofDeps, runWithFreshProof } from '../sso-fresh-proof.ts'
 import {
@@ -50,6 +59,22 @@ const assignment = z.strictObject({
   expectedGeneration: revision,
   roleId: z.uuid().nullable(),
   expectedRevision: revision.nullable(),
+})
+const permissionsMode = z.strictObject({
+  enabled: z.boolean(),
+  expectedTeamEpoch: epoch,
+  expectedMasterEpoch: epoch,
+})
+const renewal = z.strictObject({
+  expectedGeneration: revision,
+  expectedTeamEpoch: epoch,
+  expectedMasterEpoch: epoch,
+})
+const publicPolicyVersion = z.object({ masterEpoch: epoch, teamEpoch: epoch })
+const modeView = z.object({
+  enabled: z.boolean(),
+  policyVersion: publicPolicyVersion,
+  renewals: z.array(z.object({ memberId: z.uuid(), name: z.string() })),
 })
 const proofAttempt = { proofAttemptId: z.uuid().optional() }
 const headers = z.object({
@@ -88,7 +113,11 @@ const permissionView = z
       }),
     ),
     membershipGeneration: revision.nullable(),
-    policyVersion: z.object({ masterEpoch: epoch, teamEpoch: epoch }).nullable(),
+    policyVersion: publicPolicyVersion.nullable(),
+    renewalRequired: z.boolean(),
+    permissionIds: z.array(z.string()),
+    credentialAuthorizationId: z.uuid().optional(),
+    fixedRole: z.string().optional(),
   })
   .openapi('TeamPermissions')
 
@@ -130,6 +159,10 @@ function session(principal: Principal) {
   return principal
 }
 
+function principalIdentity(principal: Extract<Principal, { kind: 'session' }>) {
+  return { sessionId: principal.sessionId, userId: principal.user.id }
+}
+
 const elevated: TeamPermissionCheck['fixed'] = ({ role }) =>
   teamRoles(role).some((token) => token === 'owner' || token === 'admin') ? 'elevated' : 'denied'
 
@@ -149,13 +182,13 @@ const fixedSummaryChecks: readonly TeamPermissionCheck[] = [
   },
 ]
 
-const fixedSummaryOperations = new Set(fixedSummaryChecks.map(({ operation }) => operation))
 const summaryChecks: readonly TeamPermissionCheck[] = [
-  ...fixedSummaryChecks,
+  ...fixedSummaryChecks.map((check) => ({ ...check, versionedFixed: true })),
   ...customRoleCatalogueV1.phaseOne.map(
     (operation): TeamPermissionCheck => ({
       operation,
-      fixed: () => 'denied',
+      fixed: elevated,
+      versionedFixed: true,
       custom: true,
     }),
   ),
@@ -163,8 +196,22 @@ const summaryChecks: readonly TeamPermissionCheck[] = [
 
 export function customRoleRoutes(deps: FreshProofDeps & { enabled?: boolean }): RouteModule {
   const enabled = deps.enabled === true
-  const hardOff = createMiddleware<CallerEnv>(async (_c, next) => {
+  const runtimeOff = createMiddleware<CallerEnv>(async (_c, next) => {
     if (!enabled) throw disabled()
+    await next()
+  })
+  const hardOff = createMiddleware<CallerEnv>(async (_c, next) => {
+    if (
+      !enabled ||
+      !(
+        await deps.db
+          .selectFrom('custom_role_master_policy')
+          .select('enabled')
+          .where('singleton', '=', true)
+          .executeTakeFirst()
+      )?.enabled
+    )
+      throw disabled()
     await next()
   })
   const sameOrigin = createMiddleware<CallerEnv>(async (c, next) => {
@@ -214,6 +261,7 @@ export function customRoleRoutes(deps: FreshProofDeps & { enabled?: boolean }): 
           organizationId: teamId,
           operation: `customRoles_${command.kind}`,
           proofMode: 'administration',
+          customRolesEnabled: enabled,
           input: { ...input, target },
           schema: schema.extend({ target: z.uuid().nullable() }),
         },
@@ -230,7 +278,7 @@ export function customRoleRoutes(deps: FreshProofDeps & { enabled?: boolean }): 
         path: `${teamPath}/permissions`,
         operationId: 'getTeamPermissions',
         summary: 'Read the current browser session’s team-wide permission decisions',
-        middleware,
+        middleware: [runtimeOff, sessionCaller] as const,
         request: { params: teamParams, headers },
         responses: {
           ...errors,
@@ -268,35 +316,222 @@ export function customRoleRoutes(deps: FreshProofDeps & { enabled?: boolean }): 
               },
               { organizationLocked: true },
             )
-            const issued = await trx
-              .selectFrom('team_credential_authorizations')
-              .select(['id', 'credential_generation'])
-              .where('organization_id', '=', teamId)
-              .where('user_id', '=', principal.user.id)
-              .where('session_id', '=', principal.sessionId)
-              .executeTakeFirst()
-            return resolveTeamPermissions(trx, principal, teamId, summaryChecks, {
+            const renewal = await renewalFacts(trx, principal, teamId, enabled)
+            const result = await resolveTeamPermissions(trx, principal, teamId, summaryChecks, {
               available: enabled,
-              ...(issued && {
+              ...(renewal?.current && {
                 credential: {
-                  authorizationId: issued.id,
-                  generation: issued.credential_generation,
+                  authorizationId: renewal.current.id,
+                  generation: renewal.current.credential_generation,
                 },
               }),
             })
+            if (!result) throw denied()
+            return {
+              ...result,
+              renewalRequired: Boolean(renewal && !renewal.current),
+              permissionIds: renewal?.facts.permissionIds ?? [],
+              ...(renewal?.current && { credentialAuthorizationId: renewal.current.id }),
+              ...(renewal?.facts.fixedRole && { fixedRole: renewal.facts.fixedRole }),
+            }
           })
           .catch(translate)
-        if (!result) throw denied()
-        return c.json(
+        return c.json(result, 200)
+      },
+    )
+    app.openapi(
+      createRoute({
+        ...common,
+        method: 'get',
+        path: `${teamPath}/permissions-mode`,
+        operationId: 'getCustomTeamPermissionsMode',
+        summary: 'Preview the team’s custom role setting and affected memberships',
+        middleware,
+        request: { params: teamParams, headers },
+        responses: {
+          ...errors,
+          200: { description: 'Custom role setting', content: json(modeView) },
+        },
+      }),
+      async (c) => {
+        const principal = session(c.var.principal)
+        const { teamId } = c.req.valid('param')
+        const result = await deps.db
+          .transaction()
+          .execute(async (trx) => {
+            const mode = await customRoleMode(trx, principal, teamId, expected(c, teamId))
+            await lockTeamSsoProof(
+              deps,
+              trx,
+              principalIdentity(principal),
+              teamId,
+              () => {
+                throw denied()
+              },
+              { organizationLocked: true },
+            )
+            return mode
+          })
+          .catch(translate)
+        return c.json(result, 200)
+      },
+    )
+    app.openapi(
+      createRoute({
+        ...common,
+        method: 'put',
+        path: `${teamPath}/permissions-mode`,
+        operationId: 'setCustomTeamPermissionsMode',
+        summary: 'Enable or disable custom roles for a team',
+        middleware: writeMiddleware,
+        request: {
+          params: teamParams,
+          headers,
+          body: { required: true, content: json(permissionsMode.extend(proofAttempt)) },
+        },
+        responses: {
+          ...writeErrors,
+          200: { description: 'Custom role setting', content: json(modeView) },
+        },
+      }),
+      async (c) => {
+        const principal = session(c.var.principal)
+        const { teamId } = c.req.valid('param')
+        const input = c.req.valid('json')
+        const check = async (trx: Parameters<typeof customRoleMode>[0]) => {
+          const mode = await customRoleMode(trx, principal, teamId, expected(c))
+          if (
+            mode.policyVersion.teamEpoch !== input.expectedTeamEpoch ||
+            mode.policyVersion.masterEpoch !== input.expectedMasterEpoch
+          )
+            throw roleRevisionConflict()
+          return mode
+        }
+        await checkTeamManagementAccess(deps.db, principal, teamId, false, {
+          expectedOrganizationId: expected(c),
+          allowPersonal: false,
+        }).catch(translate)
+        const result = await runWithFreshProof(
+          deps,
           {
-            ...result,
-            decisions: result.decisions.filter(
-              ({ operation, source }) =>
-                source === 'custom' || fixedSummaryOperations.has(operation),
-            ),
+            headers: c.req.raw.headers,
+            ...principalIdentity(principal),
+            organizationId: teamId,
+            operation: 'customRoles_permissionsMode',
+            proofMode: 'administration',
+            customRolesEnabled: enabled,
+            input,
+            schema: permissionsMode,
           },
-          200,
+          {
+            beforeLocks: organizationContextWriteLock(principal),
+            authorize: async (trx) => {
+              await check(trx)
+            },
+            mutate: async (trx) =>
+              setCustomRoleMode(trx, principal, teamId, await check(trx), input.enabled),
+          },
+        ).catch(translate)
+        if (result.setCookie) c.header('Set-Cookie', result.setCookie, { append: true })
+        return result.status === 'proof_required'
+          ? c.json(result.body, 403)
+          : c.json(result.value, 200)
+      },
+    )
+    app.openapi(
+      createRoute({
+        ...common,
+        method: 'post',
+        path: `${teamPath}/permissions/renew`,
+        operationId: 'renewCustomTeamPermissions',
+        summary: 'Explicitly renew the browser’s authorization for the current team',
+        middleware: [runtimeOff, sameOrigin, sessionCaller] as const,
+        request: {
+          params: teamParams,
+          headers,
+          body: { required: true, content: json(renewal.extend(proofAttempt)) },
+        },
+        responses: {
+          ...writeErrors,
+          200: {
+            description: 'Renewed session',
+            content: json(z.object({ renewed: z.literal(true) })),
+          },
+        },
+      }),
+      async (c) => {
+        const principal = session(c.var.principal)
+        const { teamId } = c.req.valid('param')
+        const input = c.req.valid('json')
+        const context = { expectedOrganizationId: expected(c), allowPersonal: false }
+        await checkTeamManagementAccess(deps.db, principal, teamId, false, context, true).catch(
+          translate,
         )
+        const check = async (trx: Parameters<typeof customRoleMode>[0]) => {
+          await checkTeamManagementAccess(trx, principal, teamId, 'share', context, true)
+          if (!(await lockCustomRoleMaster(trx))) throw disabled()
+          const state = await renewalFacts(trx, principal, teamId, enabled)
+          const facts = state?.facts
+          if (
+            !facts ||
+            facts.generation !== input.expectedGeneration ||
+            facts.teamEpoch !== input.expectedTeamEpoch ||
+            facts.masterEpoch !== input.expectedMasterEpoch
+          )
+            throw roleRevisionConflict()
+          return facts
+        }
+        const result = await runWithFreshProof(
+          deps,
+          {
+            headers: c.req.raw.headers,
+            ...principalIdentity(principal),
+            organizationId: teamId,
+            operation: 'customRoles_renew',
+            proofMode: 'administration',
+            customRolesEnabled: enabled,
+            input,
+            schema: renewal,
+          },
+          {
+            beforeLocks: organizationContextWriteLock(principal),
+            authorize: async (trx) => {
+              await check(trx)
+            },
+            mutate: async (trx) => renewTeamSession(trx, principal, await check(trx)),
+          },
+        ).catch(translate)
+        if (result.setCookie) c.header('Set-Cookie', result.setCookie, { append: true })
+        return result.status === 'proof_required'
+          ? c.json(result.body, 403)
+          : c.json(result.value, 200)
+      },
+    )
+    app.openapi(
+      createRoute({
+        ...common,
+        method: 'get',
+        path: `${teamPath}/members/{memberId}/custom-role`,
+        operationId: 'getCustomTeamRoleAssignment',
+        summary: 'Read the current custom assignment for an eligible team member',
+        middleware,
+        request: { params: memberParams, headers },
+        responses: {
+          ...errors,
+          200: { description: 'Current custom assignment', content: json(assignmentView) },
+        },
+      }),
+      async (c) => {
+        const { teamId, memberId } = c.req.valid('param')
+        const result = await readCustomRoleAssignment(deps.db, {
+          enabled,
+          principal: session(c.var.principal),
+          teamId,
+          memberId,
+          expectedOrganizationId: expected(c, teamId),
+          ssoCapabilities: deps.capabilities,
+        }).catch(translate)
+        return c.json(result, 200)
       },
     )
     app.openapi(

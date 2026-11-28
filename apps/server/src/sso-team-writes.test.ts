@@ -282,12 +282,18 @@ describe.skipIf(!serverUrl)('SSO proof on team writes', () => {
         }),
       ],
     })
+    await db
+      .updateTable('custom_role_master_policy')
+      .set({ enabled: true, policy_epoch: 1 })
+      .execute()
     const customRoles = instance({
       routes: [
         customRoleRoutes({ db, publicUrl, capabilities: enabledCapabilities, enabled: true }),
       ],
     })
     const customRoleWrites = new Set([
+      'PUT /api/v1/teams/:teamId/permissions-mode',
+      'POST /api/v1/teams/:teamId/permissions/renew',
       'POST /api/v1/teams/:teamId/roles',
       'PATCH /api/v1/teams/:teamId/roles/:roleId',
       'DELETE /api/v1/teams/:teamId/roles/:roleId',

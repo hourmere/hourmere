@@ -3,6 +3,7 @@ import {
   PAYMENT_PROVIDER_AVAILABILITIES,
   type PaymentProviderAvailability,
 } from '@hourmere/core/payment'
+import type { Db } from '@hourmere/db'
 import { workflowsEnabled as areWorkflowsEnabled, type WorkflowSettings } from '@hourmere/workflows'
 import { createMiddleware } from 'hono/factory'
 import type { CallerEnv } from '../caller.ts'
@@ -68,6 +69,8 @@ const Instance = z
     followUpHostNotesEnabled: z.boolean().optional().openapi({
       description: 'Whether hosts may add plain-text notes to follow-up emails',
     }),
+    customRolesAvailable: z.literal(true).optional(),
+    customRoleRenewalAvailable: z.literal(true).optional(),
     workflowsEnabled: z.boolean().optional().openapi({
       description:
         'Effective WORKFLOWS_ENABLED setting (true by default). Treat an absent field on older servers as false.',
@@ -113,6 +116,7 @@ export function instanceRoutes({
   ssoSamlEnabled = false,
   routingFormsEnabled = false,
   workflowsEnabled,
+  customRolesDb,
   hostedSignupUrl = 'https://hourmere.com',
   privacyPolicyUrl,
   termsUrl,
@@ -135,6 +139,7 @@ export function instanceRoutes({
   ssoSamlEnabled?: boolean
   /** The effective routing-forms state after the startup collision check. */
   routingFormsEnabled?: boolean
+  customRolesDb?: Db
   hostedSignupUrl?: string
   privacyPolicyUrl?: string
   termsUrl?: string
@@ -192,7 +197,22 @@ export function instanceRoutes({
           },
         },
       }),
-      (c) => c.json({ ...body, ...(scimResourcesEnabled && { scimResourcesEnabled: true }) }, 200),
+      async (c) => {
+        const master = await customRolesDb
+          ?.selectFrom('custom_role_master_policy')
+          .select('enabled')
+          .where('singleton', '=', true)
+          .executeTakeFirst()
+        return c.json(
+          {
+            ...body,
+            ...(master?.enabled && { customRolesAvailable: true as const }),
+            ...(customRolesDb && { customRoleRenewalAvailable: true as const }),
+            ...(scimResourcesEnabled && { scimResourcesEnabled: true }),
+          },
+          200,
+        )
+      },
     )
     app.openapi(
       createRoute({

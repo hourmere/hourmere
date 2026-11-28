@@ -109,7 +109,7 @@ export async function previewWorkflowCandidate(
   const { db, followUpHostNotesEnabled, principal } = ctx
   return teamWriteTransaction(db.transaction(), async (trx) => {
     await ctx.prepareOrganizationWrite?.(trx)
-    const owner = await writableOwner(trx, ctx, selector)
+    const owner = await writableOwner(trx, ctx, selector, ['workflows.preview'])
     const facts = await loadWorkflowDefinitionFacts(trx, candidate, owner, followUpHostNotesEnabled)
     const definition = validateWorkflowDefinition(candidate, facts)
     const preview = renderPreview(definition, facts, example, followUpHostNotesEnabled)

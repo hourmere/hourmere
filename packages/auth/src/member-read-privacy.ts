@@ -2,6 +2,11 @@ import type { Db } from '@hourmere/db'
 import type { BetterAuthPlugin } from 'better-auth'
 import { createAuthMiddleware, getSessionFromCtx } from 'better-auth/api'
 import type { AuthMiddlewareContext } from './api-keys.ts'
+import type { Principal } from './caller.ts'
+import {
+  getTeamCredentialAuthorization,
+  resolveTeamPermissions,
+} from './custom-role-permissions.ts'
 import { isUuid } from './organizations.ts'
 import { teamRoles } from './team-management.ts'
 import { teamRoleDenied } from './team-role-policy.ts'
@@ -31,12 +36,36 @@ export function memberReadPrivacy(db: Db): BetterAuthPlugin {
     const actor = await db
       .selectFrom('auth.member as m')
       .innerJoin('auth.user as u', 'u.id', 'm.userId')
-      .select(['m.role', 'u.emailVerified'])
+      .leftJoin('team_member_authorizations as authorization', 'authorization.member_id', 'm.id')
+      .select(['m.role', 'u.emailVerified', 'authorization.generation'])
       .where('m.organizationId', '=', organizationId)
       .where('m.userId', '=', session.user.id)
       .executeTakeFirst()
-    if (!actor?.emailVerified) return false
-    return canReadPrivateTeamRoster(actor.role)
+    if (!actor?.emailVerified || !canReadPrivateTeamRoster(actor.role)) return false
+    if ((actor.generation ?? 1) <= 1) return true
+    const principal: Principal = {
+      kind: 'session',
+      sessionId: session.session.id,
+      user: session.user,
+      organization: { id: organizationId, name: '', slug: '', personal: false },
+    }
+    const credential = await getTeamCredentialAuthorization(db, principal)
+    if (!credential) return false
+    const resolved = await resolveTeamPermissions(
+      db,
+      principal,
+      organizationId,
+      [
+        {
+          operation: 'members.read_private',
+          fixed: ({ role, emailVerified }) =>
+            emailVerified && canReadPrivateTeamRoster(role) ? 'elevated' : 'denied',
+          versionedFixed: true,
+        },
+      ],
+      { credential },
+    )
+    return resolved?.decisions[0]?.allowed === true
   }
 
   return {

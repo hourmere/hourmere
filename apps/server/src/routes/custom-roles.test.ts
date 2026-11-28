@@ -33,11 +33,15 @@ it('hard-disables every custom-role route before lookup, credential resolution o
   })
   const paths = [
     ['GET', 'permissions'],
+    ['POST', 'permissions/renew'],
+    ['GET', 'permissions-mode'],
+    ['PUT', 'permissions-mode'],
     ['GET', 'roles'],
     ['POST', 'roles'],
     ['GET', 'roles/wrong'],
     ['PATCH', 'roles/wrong'],
     ['DELETE', 'roles/wrong'],
+    ['GET', 'members/wrong/custom-role'],
     ['PUT', 'members/wrong/custom-role'],
   ]
   for (const [method, suffix] of paths) {

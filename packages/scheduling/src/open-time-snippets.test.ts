@@ -446,7 +446,7 @@ describe.skipIf(!serverUrl)('agent open-time snippets', () => {
       [['if (!membership)', 'if (false)'], verifyOwner],
       [[".where('u.emailVerified', '=', true)", ''], verifyEmail],
       [[".where('organization_id', '=', ctx.principal.organization.id)", ''], verifyOrganization],
-      [["!roles.includes('owner') && !roles.includes('admin')", 'false'], verifyTeam],
+      [["roles.includes('owner') || roles.includes('admin')", 'true'], verifyTeam],
       [['MAX_OPEN_TIME_SNIPPET_RANGE_DAYS * 24', '100 * 24'], verifyRange],
       [['count < 1 || count > 10', 'count < 0 || count > 11'], verifyRange],
       [

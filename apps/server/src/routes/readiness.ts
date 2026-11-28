@@ -1,5 +1,8 @@
 import { createRoute, z } from '@hono/zod-openapi'
+import type { Principal } from '@hourmere/auth'
+import type { Db } from '@hourmere/db'
 import {
+  allowsManagedTeamOperations,
   getSelfReadiness,
   getTeamMemberReadiness,
   getTeamReadiness,
@@ -19,6 +22,27 @@ import {
   serviceContext,
 } from '../openapi.ts'
 import { teamManagementAccess } from '../team-management.ts'
+
+async function canReadTeam(db: Db, principal: Principal, teamId: string, fixedManager: boolean) {
+  const row = await db
+    .selectFrom('team_member_authorizations')
+    .select('generation')
+    .where('organization_id', '=', teamId)
+    .where('user_id', '=', principal.user.id)
+    .executeTakeFirst()
+  return allowsManagedTeamOperations(
+    db,
+    principal,
+    ['readiness.read_team'],
+    fixedManager,
+    row?.generation ?? null,
+  )
+}
+
+function withReadinessSnapshot<T>(db: Db, principal: Principal, read: (db: Db) => Promise<T>) {
+  if (!principal.customRoleAuthorization?.credential) return read(db)
+  return db.transaction().setIsolationLevel('repeatable read').execute(read)
+}
 
 const selfPageQuery = z.strictObject({
   limit: z.coerce.number().int().min(1).max(100).optional(),
@@ -65,6 +89,15 @@ export function readinessRoutes(deps: ServiceDeps): RouteModule {
       if (!current) throw new DomainError('forbidden', 'team_management_access_denied')
       await next()
     })
+    const teamContext = createMiddleware<CallerEnv>(async (c, next) => {
+      const { principal } = c.var
+      if (
+        principal.customRoleAuthorization?.available === true &&
+        principal.organization.id.toLowerCase() === c.req.param('teamId')?.toLowerCase()
+      )
+        return next()
+      return access.middleware[1](c, next)
+    })
     app.openapi(
       createRoute({
         method: 'get',
@@ -97,26 +130,36 @@ export function readinessRoutes(deps: ServiceDeps): RouteModule {
           500: internalError,
         },
       }),
-      async (c) =>
-        c.json(
+      async (c) => {
+        const principal = c.var.principal
+        return c.json(
           await memberAccess.readMember(
-            c.var.principal,
+            principal,
             c.req.valid('param').teamId,
-            async (db, actor) =>
-              getTeamMemberReadiness(
-                {
-                  db,
-                  ...actor,
-                  scimResourcesEnabled,
-                  microsoftCalendarEnabled: deps.microsoftCalendarEnabled,
-                  now: deps.now ?? (() => Temporal.Now.instant()),
-                },
-                c.req.valid('query').memberIds,
+            (db, actor) =>
+              withReadinessSnapshot(db, principal, async (db) =>
+                getTeamMemberReadiness(
+                  {
+                    db,
+                    ...actor,
+                    readTeam: await canReadTeam(
+                      db,
+                      principal,
+                      actor.organizationId,
+                      actor.role !== 'member',
+                    ),
+                    scimResourcesEnabled,
+                    microsoftCalendarEnabled: deps.microsoftCalendarEnabled,
+                    now: deps.now ?? (() => Temporal.Now.instant()),
+                  },
+                  c.req.valid('query').memberIds,
+                ),
               ),
             c.req.valid('header')['x-expected-organization-id'],
           ),
           200,
-        ),
+        )
+      },
     )
     app.openapi(
       createRoute({
@@ -160,9 +203,9 @@ export function readinessRoutes(deps: ServiceDeps): RouteModule {
           'Rechecks a current verified owner/admin web session whose active team matches teamId on every request, including after organization switches and role changes. Returns verified, display-safe member names or the neutral label Team member, coarse reason codes and repair kinds, with no private calendar, account or schedule details. Any Authorization header is denied, even with a valid session cookie; API keys and MCP OAuth tokens are not session callers. Every access denial, including missing or invalid sessions, an ordinary member, a different team and a missing team, uses the same 403 team_management_access_denied without revealing team existence. Member and event-type pages default to 50 items each, at most 100; pass their nextCursor as memberCursor and eventTypeCursor respectively. Optional X-Expected-Organization-Id binds this read to its opening team. A caller who still owns or administers the expected team receives 409 organization_context_changed after switching to any other space, including personal or a member-only team; inaccessible expected teams retain the uniform 403. Omitting the header keeps existing reads.',
         tags: ['Readiness'],
         security: sessionSecurity,
-        middleware: [...access.middleware, currentTeamSession] as [
+        middleware: [access.middleware[0], teamContext, currentTeamSession] as [
           typeof caller,
-          (typeof access.middleware)[1],
+          typeof teamContext,
           typeof currentTeamSession,
         ],
         request: {
@@ -203,11 +246,14 @@ export function readinessRoutes(deps: ServiceDeps): RouteModule {
         },
       }),
       async (c) => {
-        const result = await access.read(
-          c.var.principal,
-          c.req.valid('param').teamId,
-          async (db, actor) =>
-            getTeamReadiness(
+        const principal = c.var.principal
+        const teamId = c.req.valid('param').teamId
+        const expected = c.req.valid('header')['x-expected-organization-id']
+        const readTeam = (db: Db, actor: { organizationId: string; role: string }) =>
+          withReadinessSnapshot(db, principal, async (db) => {
+            if (!(await canReadTeam(db, principal, actor.organizationId, actor.role !== 'member')))
+              throw new DomainError('forbidden', 'team_management_access_denied')
+            return getTeamReadiness(
               {
                 db,
                 organizationId: actor.organizationId,
@@ -217,8 +263,14 @@ export function readinessRoutes(deps: ServiceDeps): RouteModule {
                 microsoftCalendarEnabled: deps.microsoftCalendarEnabled,
               },
               c.req.valid('query'),
-            ),
-        )
+            )
+          })
+        const customContext =
+          principal.customRoleAuthorization?.available === true &&
+          principal.organization.id.toLowerCase() === teamId.toLowerCase()
+        const result = customContext
+          ? await memberAccess.readMember(principal, teamId, readTeam, expected)
+          : await access.read(principal, teamId, readTeam)
         return c.json(result, 200)
       },
     )

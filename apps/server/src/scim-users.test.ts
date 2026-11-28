@@ -1276,8 +1276,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
       })
       // Creation: the organization's first binding instead of the token's own.
       const write = sourceCopyUrl('./scim-user-write.ts', [
-        "    .where('token_id', '=', principal.tokenId)\n    .where('organization_id', '=', principal.organizationId)\n    .executeTakeFirst()\n  if (!token",
-        "    .where('organization_id', '=', principal.organizationId)\n    .orderBy('connection_id', 'desc')\n    .executeTakeFirst()\n  if (!token",
+        "    .select('connection_id')\n    .where('token_id', '=', principal.tokenId)\n    .where('organization_id', '=', principal.organizationId)",
+        "    .select('connection_id')\n    .where('organization_id', '=', principal.organizationId)\n    .orderBy('connection_id', 'desc')",
       ])
       const creation = await sourceCopy<typeof import('./scim-user-create.ts')>(
         './scim-user-create.ts',

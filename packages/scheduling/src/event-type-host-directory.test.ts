@@ -18,6 +18,7 @@ import {
 } from './event-types.ts'
 import { isUuid } from './internal.ts'
 import { leaveTeamMember } from './member-leave.ts'
+import { allowsManagedTeamOperations, lockVersionedTeamWrite } from './team-permission.ts'
 import { createTestTeam, createTestUser, type TestUser, testContext } from './testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -42,7 +43,15 @@ function sourceCopy(replacement?: Replacement): SourceCopy {
     /\bexport /g,
     '',
   )
-  const bindings = { DomainError, catalogPage, checkedCatalogPage, isUuid, z }
+  const bindings = {
+    DomainError,
+    catalogPage,
+    checkedCatalogPage,
+    isUuid,
+    z,
+    allowsManagedTeamOperations,
+    lockVersionedTeamWrite,
+  }
   return new Function(
     ...Object.keys(bindings),
     `${source}; return { directory: listEventTypeHosts, hosts: validHosts, write: assertCanWrite }`,
@@ -343,8 +352,8 @@ describe.skipIf(!serverUrl)('team event host directory and assignment boundaries
     await expect(
       verify(
         sourceCopy([
-          'if (personalOwnerId !== ctx.principal.user.id && !canManageTeam) throw insufficientRole()',
-          'if (false) throw insufficientRole()',
+          "!(await managedEventAccess(ctx.db, ctx, current, ['event_types.list_host_candidates']))",
+          'false',
         ]).directory,
       ),
     ).rejects.toMatchObject({ name: 'AssertionError' })
@@ -361,10 +370,8 @@ describe.skipIf(!serverUrl)('team event host directory and assignment boundaries
     await verify(sourceCopy().write)
     await expect(
       verify(
-        sourceCopy([
-          'if (current.personalOwnerId !== null || !current.canManageTeam) throw insufficientRole()',
-          'if (current.personalOwnerId !== null) throw insufficientRole()',
-        ]).write,
+        sourceCopy(['!(await managedEventAccess(db, ctx, current, operations, lock))', 'false'])
+          .write,
       ),
     ).rejects.toMatchObject({ name: 'AssertionError' })
   })

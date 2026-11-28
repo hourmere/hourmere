@@ -273,6 +273,7 @@ export function workflowRoutes({
       principal: Principal,
       expectedOrganizationId: string | undefined,
       lock: boolean | 'key share' = false,
+      admitCustomMember = false,
     ) =>
     async (trx: Db, organizationId: string) => {
       try {
@@ -281,6 +282,7 @@ export function workflowRoutes({
           expectedOrganizationId,
           true,
           lock,
+          admitCustomMember,
         )(trx, organizationId)
       } catch (error) {
         // Keep workflow ownership refusals opaque across session and agent credentials.
@@ -290,16 +292,30 @@ export function workflowRoutes({
         throw error
       }
     }
-  const writeContext = (principal: Principal, expectedOrganizationId?: string) => ({
+  const writeContext = (
+    principal: Principal,
+    expectedOrganizationId?: string,
+    admitCustomMember = false,
+  ) => ({
     db,
     principal,
     followUpHostNotesEnabled,
     workflowsEnabled,
     prepareOrganizationWrite: async (trx: Db) => {
       await organizationContextWriteLock(principal)(trx)
-      await contextAccess(principal, expectedOrganizationId)(trx, principal.organization.id)
+      await contextAccess(
+        principal,
+        expectedOrganizationId,
+        false,
+        admitCustomMember,
+      )(trx, principal.organization.id)
     },
-    authorizeOrganizationWrite: contextAccess(principal, expectedOrganizationId, 'key share'),
+    authorizeOrganizationWrite: contextAccess(
+      principal,
+      expectedOrganizationId,
+      'key share',
+      admitCustomMember,
+    ),
   })
   return ({ app, caller }) => {
     // The guard answers after the caller and its scope check, before input validation.
@@ -386,7 +402,7 @@ export function workflowRoutes({
       async (c) =>
         c.json(
           await previewWorkflow(
-            writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+            writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER), true),
             c.req.valid('json'),
           ),
           200,

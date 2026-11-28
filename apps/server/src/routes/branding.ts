@@ -57,12 +57,30 @@ export function brandingRoutes(deps: ServiceDeps): RouteModule {
     ...serviceContext(deps, principal),
     prepareOrganizationWrite: async (trx: Db) => {
       await organizationContextWriteLock(principal)(trx)
-      await organizationContextAccess(principal, expected, true)(trx, principal.organization.id)
+      await organizationContextAccess(
+        principal,
+        expected,
+        true,
+        false,
+        true,
+      )(trx, principal.organization.id)
     },
-    authorizeOrganizationWrite: organizationContextAccess(principal, expected, true, 'key share'),
+    authorizeOrganizationWrite: organizationContextAccess(
+      principal,
+      expected,
+      true,
+      'key share',
+      true,
+    ),
   })
   const readContext = async (principal: Principal, expected?: string) => {
-    await organizationContextAccess(principal, expected)(deps.db, principal.organization.id)
+    await organizationContextAccess(
+      principal,
+      expected,
+      false,
+      false,
+      true,
+    )(deps.db, principal.organization.id)
     return serviceContext(deps, principal)
   }
   return ({ app, caller }) => {

@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
+import { getTeamCredentialAuthorization, teamAuthorizationFacts } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { sql } from 'kysely'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { expectKilled, guardCopy } from '../../../scripts/source-copy-guard.ts'
 import {
   activateRoundRobin,
@@ -17,7 +19,10 @@ import { createFixtures, createTestTeam, createTestUser, testContext } from './t
 
 const serverUrl = process.env.DATABASE_URL
 
-type Duplicate = { duplicateEventType: typeof duplicateEventType }
+type Duplicate = {
+  duplicateEventType: typeof duplicateEventType
+  createEventType: typeof createEventType
+}
 async function sourceCopy(change?: readonly [string, string]): Promise<Duplicate> {
   const moduleUrl = new URL('event-types.ts', import.meta.url)
   let source = readFileSync(moduleUrl, 'utf8')
@@ -44,7 +49,7 @@ async function sourceCopy(change?: readonly [string, string]): Promise<Duplicate
   return guardCopy(
     new Function(
       ...Object.keys(dependencies),
-      `${source.replace(/\bexport /g, '')}; return {duplicateEventType}`,
+      `${source.replace(/\bexport /g, '')}; return {duplicateEventType, createEventType}`,
     )(...Object.values(dependencies)) as Duplicate,
   )
 }
@@ -296,13 +301,182 @@ describe.skipIf(!serverUrl)('duplicate event type', () => {
   })
   it('detects removal of create authorization in a source copy', async () => {
     const copy = await sourceCopy([
-      'if (personalOwnerId !== null ? personalOwnerId !== ctx.principal.user.id : !canManageTeam) {\n        throw insufficientRole()\n      }',
-      '',
+      'return allowsManagedTeamOperations(',
+      'return true || allowsManagedTeamOperations(',
     ])
     await expectKilled(copy, assertCreateAuthorization)
   })
   it('detects removal of source organization isolation in a source copy', async () => {
     const copy = await sourceCopy(['await visibleRow(trx, ctx, sourceId, { lock: true })', ''])
     await expectKilled(copy, assertOrganizationIsolation)
+  })
+
+  async function customCoordinator(permissionIds: string[]) {
+    const owner = await createTestUser(db)
+    const member = await createTestUser(db)
+    const team = await createTestTeam(db, [
+      { user: owner, role: 'owner' },
+      { user: member, role: 'member' },
+    ])
+    await db
+      .updateTable('custom_role_master_policy')
+      .set((eb) => ({ enabled: true, policy_epoch: eb('policy_epoch', '+', 1) }))
+      .where('enabled', '=', false)
+      .execute()
+    await db
+      .updateTable('team_custom_role_policies')
+      .set((eb) => ({ enabled: true, policy_epoch: eb('policy_epoch', '+', 1) }))
+      .where('organization_id', '=', team.id)
+      .execute()
+    const { id: sessionId } = await db
+      .insertInto('auth.session')
+      .values({
+        token: randomUUID(),
+        userId: member.id,
+        activeOrganizationId: team.id,
+        expiresAt: new Date('2099-01-01'),
+        updatedAt: new Date(),
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    const memberRow = await db
+      .selectFrom('auth.member')
+      .select('id')
+      .where('organizationId', '=', team.id)
+      .where('userId', '=', member.id)
+      .executeTakeFirstOrThrow()
+    await db.transaction().execute(async (trx) => {
+      const { id } = await trx
+        .insertInto('custom_roles')
+        .values({ organization_id: team.id, active_revision: 1 })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      await trx
+        .insertInto('custom_role_revisions')
+        .values({
+          organization_id: team.id,
+          role_id: id,
+          revision: 1,
+          name: 'Coordinator',
+          permission_ids: permissionIds,
+        })
+        .execute()
+      await trx
+        .insertInto('custom_role_assignments')
+        .values({
+          organization_id: team.id,
+          member_id: memberRow.id,
+          user_id: member.id,
+          role_id: id,
+          assigned_by_user_id: owner.id,
+        })
+        .execute()
+    })
+    const facts = await teamAuthorizationFacts(db, team.id, member.id, true)
+    if (!facts) throw new Error('Missing fixture authorization')
+    await db
+      .insertInto('team_credential_authorizations')
+      .values({ ...facts.ceiling, session_id: sessionId })
+      .execute()
+    const session = { ...team.as(member), kind: 'session', sessionId } as const
+    const credential = await getTeamCredentialAuthorization(db, session)
+    if (!credential) throw new Error('Missing fixture ceiling')
+    const principal = { ...session, customRoleAuthorization: { available: true, credential } }
+    return { owner, member, team, memberId: memberRow.id, ctx: testContext(db, principal) }
+  }
+
+  it('uses the exact grants for an effective event write, including saved settings copied from another type', async () => {
+    const f = await customCoordinator([
+      'event_types.create',
+      'event_types.duplicate',
+      'event_types.update',
+    ])
+    const input = { slug: 'coordinator', title: 'Coordinator', durationMinutes: 30 }
+    const created = await createEventType(f.ctx, {
+      ...input,
+      waitlist: { enabled: false },
+      successRedirect: null,
+    })
+    expect(created.hosts).toEqual([{ userId: f.member.id }])
+    await expect(updateEventType(f.ctx, created.id, { title: 'Updated' })).resolves.toMatchObject({
+      title: 'Updated',
+    })
+
+    const explicitHosts = { ...input, slug: 'host-patch', hosts: [{ userId: f.owner.id }] }
+    const deniesExtraHost = async (api: Pick<Duplicate, 'createEventType'>) => {
+      await expect(api.createEventType(f.ctx, explicitHosts)).rejects.toMatchObject({
+        code: 'insufficient_role',
+      })
+    }
+    await deniesExtraHost({ createEventType })
+    const copy = await sourceCopy(["effects.push('event_types.assign_hosts')", 'void 0'])
+    await expectKilled(copy, deniesExtraHost)
+
+    const extras = await customCoordinator([
+      'event_types.duplicate',
+      'event_types.update',
+      'event_types.assign_hosts',
+      'event_notifications.update',
+    ])
+    const owner = testContext(db, extras.team.as(extras.owner))
+    const source = await createEventType(owner, { ...input, slug: 'original' })
+    await expect(duplicateEventType(extras.ctx, source.id)).resolves.toMatchObject({
+      slug: 'original-copy',
+    })
+    for (const protectedField of [
+      { waitlist: { enabled: true } },
+      { successRedirect: { url: 'https://example.test/complete' } },
+    ]) {
+      await expect(
+        updateEventType(extras.ctx, source.id, { title: 'Uncommitted', ...protectedField }),
+      ).rejects.toMatchObject({ code: 'insufficient_role' })
+      await updateEventType(owner, source.id, protectedField)
+      await expect(duplicateEventType(extras.ctx, source.id)).rejects.toMatchObject({
+        code: 'insufficient_role',
+      })
+      const saved = await getEventType(owner, source.id)
+      expect(saved.title).toBe('Coordinator')
+      await updateEventType(owner, source.id, {
+        waitlist: { enabled: false },
+        successRedirect: null,
+      })
+    }
+    await expect(duplicateEventType(f.ctx, source.id)).rejects.toMatchObject({
+      code: 'event_type_not_found',
+    })
+  })
+
+  it('rechecks an event write against a revocation that commits while it waits for the organization', async () => {
+    const f = await customCoordinator(['event_types.update'])
+    const owner = testContext(db, f.team.as(f.owner))
+    const event = await createEventType(owner, {
+      slug: 'revocation',
+      title: 'Before',
+      durationMinutes: 30,
+    })
+    let pending: ReturnType<typeof updateEventType> | undefined
+    await db.transaction().execute(async (trx) => {
+      await trx
+        .selectFrom('auth.organization')
+        .select('id')
+        .where('id', '=', f.team.id)
+        .forUpdate()
+        .executeTakeFirstOrThrow()
+      const {
+        rows: [backend],
+      } = await sql<{ pid: number }>`select pg_backend_pid() as pid`.execute(trx)
+      pending = updateEventType(f.ctx, event.id, { title: 'After' })
+      void pending.catch(() => {})
+      await vi.waitFor(async () => {
+        const { rows } =
+          await sql`select pid from pg_locks where not granted and ${backend?.pid} = any(pg_blocking_pids(pid))`.execute(
+            trx,
+          )
+        expect(rows).not.toHaveLength(0)
+      })
+      await trx.deleteFrom('custom_role_assignments').where('member_id', '=', f.memberId).execute()
+    })
+    await expect(pending).rejects.toMatchObject({ code: 'insufficient_role' })
+    await expect(getEventType(owner, event.id)).resolves.toMatchObject({ title: 'Before' })
   })
 })

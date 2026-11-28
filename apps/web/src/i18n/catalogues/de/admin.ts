@@ -207,6 +207,133 @@ export const admin = {
     'Zu viele Anfragen. Bitte warten Sie und versuchen Sie es später erneut.',
   'Owner roles change only through a confirmed transfer. The team must retain at least one owner.':
     'Die Eigentümerrolle ändert sich nur durch eine bestätigte Übertragung. Das Team muss mindestens einen Eigentümer behalten.',
+
+  // Custom team roles
+  'Roles and permissions': 'Rollen und Berechtigungen',
+  'Loading custom roles…': 'Benutzerdefinierte Rollen werden geladen…',
+  'Could not load custom roles.': 'Benutzerdefinierte Rollen konnten nicht geladen werden.',
+  'Shared team roster and event types, plus personal settings and assigned-host actions.':
+    'Gemeinsame Mitgliederliste und Ereignistypen sowie persönliche Einstellungen und Aktionen für zugewiesene Gastgeber.',
+  'Member access plus team settings, invitations, eligible member removal, scheduling and team integrations.':
+    'Mitgliedszugriff sowie Teameinstellungen, Einladungen, das Entfernen berechtigter Mitglieder, Terminplanung und Team-Integrationen.',
+  'Admin access plus fixed role changes, ownership transfer, audit retention and custom role management.':
+    'Admin-Zugriff sowie Änderungen fester Rollen, Übertragung der Inhaberschaft, Aufbewahrung des Audit-Logs und Verwaltung benutzerdefinierter Rollen.',
+  'Fixed roles are read-only here. Custom roles keep base Member access. They cannot grant member management, private booking data or team exports.':
+    'Feste Rollen sind hier schreibgeschützt. Benutzerdefinierte Rollen behalten den Basiszugriff für Mitglieder. Sie gewähren keinen Zugriff auf die Mitgliederverwaltung, private Buchungsdaten oder Team-Exporte.',
+  'Custom roles are on for this team.': 'Benutzerdefinierte Rollen sind für dieses Team aktiviert.',
+  'Custom roles are off for this team.':
+    'Benutzerdefinierte Rollen sind für dieses Team deaktiviert.',
+  'Turn off custom roles': 'Benutzerdefinierte Rollen deaktivieren',
+  'Turn on custom roles': 'Benutzerdefinierte Rollen aktivieren',
+  'Turning off custom roles pauses their additional access and keeps the saved roles and assignments.':
+    'Beim Deaktivieren wird der zusätzliche Zugriff ausgesetzt. Gespeicherte Rollen und Zuweisungen bleiben erhalten.',
+  'Turning on custom roles lets owners publish roles and assign them to eligible Members.':
+    'Nach der Aktivierung können Inhaber Rollen veröffentlichen und berechtigten Mitgliedern zuweisen.',
+  'Members assigned a custom role who must renew after activation: {count}':
+    'Mitglieder mit benutzerdefinierter Rolle, die nach der Aktivierung erneuern müssen: {count}',
+  'Confirm turning off custom roles': 'Deaktivierung der benutzerdefinierten Rollen bestätigen',
+  'Confirm turning on custom roles': 'Aktivierung der benutzerdefinierten Rollen bestätigen',
+  'Custom roles turned off.': 'Benutzerdefinierte Rollen wurden deaktiviert.',
+  'Custom roles turned on.': 'Benutzerdefinierte Rollen wurden aktiviert.',
+  'Custom roles': 'Benutzerdefinierte Rollen',
+  'Create custom role': 'Benutzerdefinierte Rolle erstellen',
+  'No custom roles have been published.':
+    'Es wurden keine benutzerdefinierten Rollen veröffentlicht.',
+  'Revision {revision}': 'Version {revision}',
+  'Edit custom role': 'Benutzerdefinierte Rolle bearbeiten',
+  'Edit custom role {name}': 'Benutzerdefinierte Rolle bearbeiten ({name})',
+  'Archive custom role': 'Benutzerdefinierte Rolle archivieren',
+  'Archive custom role {name}': 'Benutzerdefinierte Rolle archivieren ({name})',
+  'Archiving removes the role from future assignments and keeps its revision history.':
+    'Archivierte Rollen können nicht mehr zugewiesen werden. Ihre Versionshistorie bleibt erhalten.',
+  'Custom role name': 'Name der benutzerdefinierten Rolle',
+  'Each preset adds only the actions shown. Base Member access continues in every area.':
+    'Jede Vorlage fügt nur die angezeigten Aktionen hinzu. Der Basiszugriff für Mitglieder bleibt in allen Bereichen erhalten.',
+  'Publishing updates every member assigned this role. Affected members must renew to use additional access.':
+    'Durch die Veröffentlichung wird die Rolle für alle zugewiesenen Mitglieder aktualisiert. Betroffene Mitglieder müssen ihren Zugriff für zusätzliche Aktionen erneuern.',
+  'Custom role archived.': 'Benutzerdefinierte Rolle wurde archiviert.',
+  'Custom role published.': 'Benutzerdefinierte Rolle wurde veröffentlicht.',
+  'Confirm archive': 'Archivierung bestätigen',
+  'Create and publish role': 'Rolle erstellen und veröffentlichen',
+  'Publish new revision': 'Neue Version veröffentlichen',
+  'Access preset for {area}': 'Zugriffsvorlage für {area}',
+  'No additional access': 'Kein zusätzlicher Zugriff',
+  Custom: 'Benutzerdefiniert',
+  'Team setup readiness': 'Bereitschaft der Team-Einrichtung',
+  Branding: 'Branding',
+  'View aggregate booking activity': 'Zusammengefasste Buchungsaktivität ansehen',
+  'View team branding': 'Team-Branding ansehen',
+  'Edit team branding': 'Team-Branding bearbeiten',
+  'Upload the team logo': 'Team-Logo hochladen',
+  'Edit event notifications': 'Ereignisbenachrichtigungen bearbeiten',
+  'Activate round-robin events': 'Round-Robin-Ereignisse aktivieren',
+  'Assign hosts': 'Gastgeber zuweisen',
+  'Create event types': 'Ereignistypen erstellen',
+  'Delete event types': 'Ereignistypen löschen',
+  'Duplicate event types': 'Ereignistypen duplizieren',
+  'View eligible hosts and their readiness': 'Geeignete Gastgeber und ihre Bereitschaft ansehen',
+  'Edit event types': 'Ereignistypen bearbeiten',
+  'View team setup readiness': 'Bereitschaft der Team-Einrichtung ansehen',
+  'Preview routing with sample data': 'Routing-Vorschau mit Beispieldaten anzeigen',
+  'View routing forms': 'Routing-Formulare ansehen',
+  'Preview workflows with sample data': 'Workflow-Vorschau mit Beispieldaten anzeigen',
+  'View workflow definitions': 'Workflow-Definitionen ansehen',
+  'View workflow run metadata': 'Metadaten zu Workflow-Ausführungen ansehen',
+  'Change custom role': 'Benutzerdefinierte Rolle ändern',
+  'Change custom role for {name}': 'Benutzerdefinierte Rolle ändern ({name})',
+  'Custom role assignment saved.': 'Zuweisung der benutzerdefinierten Rolle wurde gespeichert.',
+  'Loading the current assignment…': 'Aktuelle Zuweisung wird geladen…',
+  'Could not load the current assignment.': 'Aktuelle Zuweisung konnte nicht geladen werden.',
+  'Your access to this assignment could not be verified.':
+    'Ihr Zugriff auf diese Zuweisung konnte nicht bestätigt werden.',
+  'Custom role for this member': 'Benutzerdefinierte Rolle für dieses Mitglied',
+  'Fixed Member only': 'Nur feste Mitgliedsrolle',
+  'The member keeps base Member access.': 'Das Mitglied behält den Basiszugriff für Mitglieder.',
+  'Additional actions gained': 'Hinzugewonnene Aktionen',
+  'Additional actions lost': 'Wegfallende Aktionen',
+  'Affected members must verify in their browser, replace their API keys and reconnect their MCP apps to use additional access.':
+    'Betroffene Mitglieder müssen sich im Browser verifizieren, ihre API-Schlüssel ersetzen und ihre MCP-Apps erneut verbinden, um zusätzliche Aktionen zu nutzen.',
+  'Save custom role assignment': 'Zuweisung der benutzerdefinierten Rolle speichern',
+  None: 'Keine',
+  'Your fixed team role applies.': 'Ihre feste Teamrolle gilt.',
+  'Your access to make this change could not be verified.':
+    'Ihre Berechtigung für diese Änderung konnte nicht bestätigt werden.',
+  'The change could not be saved. Try again.':
+    'Die Änderung konnte nicht gespeichert werden. Versuchen Sie es erneut.',
+  'Confirm your identity before changing team roles.':
+    'Bestätigen Sie Ihre Identität, bevor Sie Teamrollen ändern.',
+  'Your team access was renewed.': 'Ihr Teamzugriff wurde erneuert.',
+  'Your current team access could not be checked.':
+    'Ihr aktueller Teamzugriff konnte nicht geprüft werden.',
+  'Renew team access': 'Teamzugriff erneuern',
+  'Your team permissions changed. Verify your identity to use your current access in this browser.':
+    'Ihre Teamberechtigungen haben sich geändert. Bestätigen Sie Ihre Identität, um den aktuellen Zugriff in diesem Browser zu nutzen.',
+  'Replace affected API keys and reconnect affected MCP apps separately.':
+    'Ersetzen Sie betroffene API-Schlüssel und verbinden Sie betroffene MCP-Apps separat erneut.',
+  'Confirm your identity to renew team access.':
+    'Bestätigen Sie Ihre Identität, um den Teamzugriff zu erneuern.',
+  'Verify and renew team access': 'Identität bestätigen und Teamzugriff erneuern',
+  'Review team access for this key': 'Teamzugriff für diesen Schlüssel prüfen',
+  'Base team role: {role}': 'Feste Teamrolle: {role}',
+  'Additional team actions available within this scope':
+    'Zusätzliche Teamaktionen für diesen Geltungsbereich',
+  'Confirm and create key': 'Bestätigen und Schlüssel erstellen',
+  'Renew your browser’s team access in Settings before issuing a new credential.':
+    'Erneuern Sie den Teamzugriff Ihres Browsers in den Einstellungen, bevor Sie einen neuen Zugang erstellen.',
+  'Review team access for this connection': 'Teamzugriff für diese Verbindung prüfen',
+  'Additional team actions available to this app': 'Zusätzliche Teamaktionen für diese App',
+  'Team actions available in this browser': 'Teamaktionen in diesem Browser',
+  'Your custom role adds these actions in this team.':
+    'Ihre benutzerdefinierte Rolle fügt diese Aktionen in diesem Team hinzu.',
+  'Your current team permissions do not include viewing branding.':
+    'Ihre aktuellen Teamberechtigungen erlauben keine Ansicht des Brandings.',
+  'Some memberships have an ambiguous fixed role. Resolve their roles before turning on custom roles.':
+    'Einige Mitgliedschaften haben keine eindeutige feste Rolle. Klären Sie diese Rollen, bevor Sie benutzerdefinierte Rollen aktivieren.',
+  'Team access changed. Review it again before creating the key.':
+    'Der Teamzugriff hat sich geändert. Prüfen Sie ihn erneut, bevor Sie den Schlüssel erstellen.',
+  'Team access changed. Restart this connection from your AI app.':
+    'Der Teamzugriff hat sich geändert. Starten Sie diese Verbindung erneut in Ihrer KI-App.',
+
   // Booking handoff mail status
   'Attendee cancellation email': 'Absage-E-Mail an Teilnehmende',
   'Attendee confirmation email': 'Bestätigungs-E-Mail an Teilnehmende',

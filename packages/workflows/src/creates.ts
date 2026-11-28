@@ -4,7 +4,11 @@ import { createHash } from 'node:crypto'
 import { ApiKeyScopeError, type Principal } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import { teamWriteTransaction } from '@hourmere/db/team-write'
-import { lockWorkflowOwner } from '@hourmere/scheduling'
+import {
+  allowsManagedTeamOperations,
+  lockVersionedTeamWrite,
+  lockWorkflowOwner,
+} from '@hourmere/scheduling'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { sql } from 'kysely'
 import { z } from 'zod'
@@ -82,6 +86,7 @@ export async function writableOwner(
   trx: Db,
   ctx: WorkflowCreateContext,
   selector: CreateWorkflowInput['owner'],
+  operations: readonly string[] = ['workflows.create'],
 ): Promise<WorkflowOwner> {
   const actor = await trx
     .selectFrom('auth.user')
@@ -118,15 +123,36 @@ export async function writableOwner(
   )
   await ctx.authorizeOrganizationWrite?.(trx, organization.id)
   const member = await trx
-    .selectFrom('auth.member')
-    .select('role')
-    .where('organizationId', '=', organization.id)
-    .where('userId', '=', ctx.principal.user.id)
-    .forShare()
+    .selectFrom('auth.member as member')
+    .select('member.role')
+    .$if(owner.kind === 'team', (query) =>
+      query
+        .leftJoin(
+          'team_member_authorizations as authorization',
+          'authorization.member_id',
+          'member.id',
+        )
+        .select('authorization.generation'),
+    )
+    .where('member.organizationId', '=', organization.id)
+    .where('member.userId', '=', ctx.principal.user.id)
+    .forShare('member')
     .executeTakeFirst()
   const roles = member?.role.split(',').map((role) => role.trim()) ?? []
-  if (!member || (owner.kind === 'team' && !roles.includes('owner') && !roles.includes('admin')))
-    throw notFound()
+  if (!member) throw notFound()
+  if (owner.kind === 'team') {
+    await lockVersionedTeamWrite(trx, ctx.principal, Date.now)
+    if (
+      !(await allowsManagedTeamOperations(
+        trx,
+        ctx.principal,
+        operations,
+        roles.includes('owner') || roles.includes('admin'),
+        member.generation ?? null,
+      ))
+    )
+      throw notFound()
+  }
   return owner
 }
 

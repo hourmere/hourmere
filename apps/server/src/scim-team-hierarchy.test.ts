@@ -307,6 +307,46 @@ describe.skipIf(!databaseUrl)('SCIM team hierarchy transactions', () => {
     }
   })
 
+  it('requires current Owner authority to approve or submit, without replacing the other approval', async () => {
+    const parent = await team()
+    const child = await team()
+    const input = link(parent, child)
+    const owner = parent.owner.principal
+    const issued = await app.request(`${publicUrl}/api/auth/api-key/create`, {
+      method: 'POST',
+      headers: parent.owner.headers,
+      body: JSON.stringify({ metadata: { organizationId: parent.id, scope: 'full' } }),
+    })
+    expect(issued.status).toBe(200)
+    const { id: apiKeyId } = (await issued.json()) as { id: string }
+    const key: Principal = {
+      kind: 'api_key',
+      apiKeyId,
+      apiKeyScope: 'full',
+      user: owner.user,
+      organization: owner.organization,
+    }
+    await both(parent, child, input)
+    const denied = { code: 'scim_mapping_access_denied' }
+    // Advance the credential boundary without replacing either recorded consent.
+    await db
+      .updateTable('team_member_authorizations')
+      .set({ generation: 2 })
+      .where('organization_id', '=', parent.id)
+      .where('user_id', '=', owner.user.id)
+      .execute()
+    await expect(approve(parent.owner, link(parent, child))).rejects.toMatchObject(denied)
+    for (const principal of [owner, key]) {
+      await expect(listScimTeamMappings(deps(), principal)).rejects.toMatchObject(denied)
+      await expect(commitScimTeamMapping(deps(), principal, input.intentId)).rejects.toMatchObject(
+        denied,
+      )
+    }
+    await expect(commit(child.owner, input)).resolves.toMatchObject({
+      mappingId: expect.any(String),
+    })
+  })
+
   // This case installs the pg-boss schema and waits for three sequential CLI processes to exit.
   it('suspends and detaches offline while provisioning is off, retaining scope and departure guards', async () => {
     const parent = await team()

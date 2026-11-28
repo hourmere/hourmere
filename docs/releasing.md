@@ -164,7 +164,10 @@ initially be private; this does not claim that a public image exists already.
    CI. No real provider grant or external side effect is implied by synthetic tests.
 2. Verify `CHANGELOG.md` contains the exact version's section. For v1.0.0 the prepared
    candidate is already eligible; publication still waits for owner approval. Review any
-   known limitations against the actual supported scope.
+   known limitations against the actual supported scope. For a release introducing migration
+   0200, record team creation, member addition and role-change latency in the upgrade rehearsal
+   and monitor those paths after rollout. Membership snapshot writes include personal spaces
+   and run with custom roles disabled.
 3. Confirm the protected `release` environment and tag ruleset are active. Record the
    intended version and commit for the owner. No preparation automation should push tags,
    publish packages, create releases or approve its own deployment.

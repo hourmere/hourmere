@@ -61,7 +61,7 @@ const PUBLISH_TARGET_READ = `          await loadRoutingTargetEvents(
             trx,
             dependencies.map((target) => target.eventTypeId),
           ),`
-const PREVIEW_MATCH = '      const match = evaluateRoutingForm(config, answers)'
+const PREVIEW_MATCH = 'const match = evaluateRoutingForm(config, answers)'
 const RECEIPT_INSERT = `${PREVIEW_MATCH}
       await trx.insertInto('routing_receipts').values({
         organization_id: organizationId, form_id: form.id, version_id: form.published_version_id,

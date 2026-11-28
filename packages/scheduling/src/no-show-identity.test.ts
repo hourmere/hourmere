@@ -16,6 +16,7 @@ import { isUuid } from './internal.ts'
 import { listBookingAttendeeNoShows, setAttendeeNoShow } from './no-show.ts'
 import { toTeamAdminBooking } from './team-admin-booking.ts'
 import { getTeamAdminBooking, listTeamAdminBookings } from './team-bookings.ts'
+import { allowsManagedTeamOperations } from './team-permission.ts'
 import { createFixtures, createTestTeam, createTestUser, testContext } from './testing.ts'
 
 const now = () => Temporal.Instant.from('2030-11-03T12:00Z')
@@ -35,6 +36,7 @@ function emailIdentityMutant(): typeof getTeamAdminBooking {
   )
   const bindings = {
     sql,
+    allowsManagedTeamOperations,
     bookingPageQuery,
     encodeBookingCursor,
     DomainError,

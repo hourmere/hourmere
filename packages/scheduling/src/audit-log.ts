@@ -9,6 +9,7 @@ import { sql } from 'kysely'
 import { z } from 'zod'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
+import { allowsManagedTeamOperations, lockVersionedTeamWrite } from './team-permission.ts'
 
 export const AUDIT_PAGE_DEFAULT = 50
 export const AUDIT_PAGE_MAX = 100
@@ -91,12 +92,17 @@ const invalidCursor = () =>
  * or a verified team owner or admin. Everyone else gets the uniform team-management refusal,
  * whether they are a member, a former member or never belonged.
  */
-async function managementRole(db: Db, principal: Principal): Promise<'owner' | 'admin'> {
+async function managementRole(
+  db: Db,
+  principal: Principal,
+  operation: 'audit.read' | 'audit.read_retention' | 'audit.update_retention',
+): Promise<'owner' | 'admin'> {
   const row = await db
     .selectFrom('auth.member as m')
     .innerJoin('auth.user as u', 'u.id', 'm.userId')
     .leftJoin('personal_organizations as p', 'p.organization_id', 'm.organizationId')
-    .select(['m.role', 'p.user_id'])
+    .leftJoin('team_member_authorizations as authorization', 'authorization.member_id', 'm.id')
+    .select(['m.role', 'p.user_id', 'authorization.generation'])
     .where('m.organizationId', '=', principal.organization.id)
     .where('m.userId', '=', principal.user.id)
     .where('u.emailVerified', '=', true)
@@ -107,6 +113,9 @@ async function managementRole(db: Db, principal: Principal): Promise<'owner' | '
     if (row.user_id !== principal.user.id || !roles.includes('owner')) throw denied()
     return 'owner'
   }
+  const fixed = roles.includes('owner') || roles.includes('admin')
+  if (!(await allowsManagedTeamOperations(db, principal, [operation], fixed, row.generation)))
+    throw denied()
   if (roles.includes('owner')) return 'owner'
   if (roles.includes('admin')) return 'admin'
   throw denied()
@@ -212,7 +221,7 @@ export async function listAuditEvents(
   ctx: ServiceContext,
   query: AuditEventQuery,
 ): Promise<{ data: AuditEventView[]; nextCursor: string | null }> {
-  await managementRole(ctx.db, ctx.principal)
+  await managementRole(ctx.db, ctx.principal, 'audit.read')
   const filters = valid(
     AuditEventFilters,
     Object.fromEntries(
@@ -323,7 +332,7 @@ export async function getAuditLogSettings(
   ctx: ServiceContext,
   instance: AuditRetentionDays,
 ): Promise<AuditLogSettingsView> {
-  const role = await managementRole(ctx.db, ctx.principal)
+  const role = await managementRole(ctx.db, ctx.principal, 'audit.read_retention')
   return readSettings(ctx.db, ctx.principal.organization.id, instance, role)
 }
 
@@ -345,13 +354,23 @@ export async function setAuditLogSettings(
   const organizationId = ctx.principal.organization.id
   return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     await ctx.prepareOrganizationWrite?.(trx)
-    const role = await managementRole(trx, ctx.principal)
+    if (ctx.principal.customRoleAuthorization?.credential && !ctx.principal.organization.personal) {
+      await trx
+        .selectFrom('auth.organization')
+        .select('id')
+        .where('id', '=', organizationId)
+        .forShare()
+        .executeTakeFirst()
+      await lockVersionedTeamWrite(trx, ctx.principal, Date.now)
+    }
+    const role = await managementRole(trx, ctx.principal, 'audit.read_retention')
     if (role !== 'owner')
       throw new DomainError(
         'forbidden',
         'insufficient_role',
         'Only the personal owner or a team owner can change audit log retention',
       )
+    await managementRole(trx, ctx.principal, 'audit.update_retention')
     const update = valid(AuditLogSettingsUpdate, input)
     // Waits only for a running purge batch of this organization, which is short and bounded.
     await sql`SELECT pg_advisory_xact_lock(${auditRetentionLock(organizationId)})`.execute(trx)

@@ -16,6 +16,8 @@ const catalogue: ReadonlySet<string> = new Set([
 // Existing operations added after freezing the v1 catalogue remain Fixed.
 const fixedOutsideV1: ReadonlySet<string> = new Set([
   'permissions.read_self',
+  'permissions.renew',
+  'custom_roles.mode',
   'custom_roles.read',
   'custom_roles.create',
   'custom_roles.revise',
@@ -71,6 +73,10 @@ const teamRest = new Map<string, readonly string[]>([
     ['scim.rotate_token'],
   ],
   ['DELETE /api/v1/organizations/{organizationId}/provisioning-tokens/{id}', ['scim.revoke_token']],
+  ['GET /api/v1/teams/{teamId}/permissions-mode', ['custom_roles.read']],
+  ['PUT /api/v1/teams/{teamId}/permissions-mode', ['custom_roles.mode']],
+  ['POST /api/v1/teams/{teamId}/permissions/renew', ['permissions.renew']],
+  ['GET /api/v1/teams/{teamId}/members/{memberId}/custom-role', ['custom_roles.read']],
   ['GET /api/v1/teams/{teamId}/permissions', ['permissions.read_self']],
   ['GET /api/v1/teams/{teamId}/roles', ['custom_roles.read']],
   ['GET /api/v1/teams/{teamId}/roles/{roleId}', ['custom_roles.read']],
@@ -377,11 +383,11 @@ describe('team operation catalogue coverage', () => {
     const roleRoutes = new Set(
       [...teamRest]
         .filter(([, actions]) =>
-          actions.some((id) => id.startsWith('custom_roles.') || id === 'permissions.read_self'),
+          actions.some((id) => id.startsWith('custom_roles.') || id.startsWith('permissions.')),
         )
         .map(([route]) => route),
     )
-    expect(roleRoutes.size).toBe(7)
+    expect(roleRoutes.size).toBe(11)
     for (const id of roleRoutes) {
       expect(rest.get(id)).toMatchObject({
         authentication: 'session_only',

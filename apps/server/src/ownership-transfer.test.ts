@@ -453,6 +453,122 @@ describe.skipIf(!serverUrl)('ownership transfer service', () => {
     await expect(confirm(f, id, proof)).resolves.toMatchObject({ status: 'complete' })
   })
 
+  it('clears the recipient’s custom assignment and advances both generations atomically with transfer', async () => {
+    const f = await fixture()
+    const organizationId = f.team.id
+    const memberId = f.recipient.membershipId
+    const initiatorId = f.owner.membershipId
+    const authorization = (membershipId: string) =>
+      db
+        .selectFrom('team_member_authorizations')
+        .select(['generation', 'fixed_role'])
+        .where('organization_id', '=', organizationId)
+        .where('member_id', '=', membershipId)
+        .executeTakeFirstOrThrow()
+    const assignment = () =>
+      db
+        .selectFrom('custom_role_assignments')
+        .select('role_id')
+        .where('organization_id', '=', organizationId)
+        .where('member_id', '=', memberId)
+        .executeTakeFirst()
+
+    // Retain the initiator's renewed owner authority and the recipient's assignment while
+    // both custom-role switches are off.
+    const role = await db.transaction().execute(async (trx) => {
+      const { generation } = await trx
+        .updateTable('team_member_authorizations')
+        .set({ generation: 3 })
+        .where('organization_id', '=', organizationId)
+        .where('member_id', '=', initiatorId)
+        .returning('generation')
+        .executeTakeFirstOrThrow()
+      await trx
+        .insertInto('team_credential_authorizations')
+        .values({
+          organization_id: organizationId,
+          member_id: initiatorId,
+          user_id: f.owner.principal.user.id,
+          session_id: f.owner.principal.sessionId,
+          member_generation: generation,
+          policy_epoch: 0,
+          master_epoch: 0,
+          permission_ids: ['members.assign_role'],
+        })
+        .execute()
+      const { id } = await trx
+        .insertInto('custom_roles')
+        .values({ organization_id: organizationId, active_revision: 1 })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      await trx
+        .insertInto('custom_role_revisions')
+        .values({
+          organization_id: organizationId,
+          role_id: id,
+          revision: 1,
+          name: 'Coordinator',
+          permission_ids: ['event_types.create'],
+        })
+        .execute()
+      await trx
+        .insertInto('custom_role_assignments')
+        .values({
+          organization_id: organizationId,
+          member_id: memberId,
+          user_id: f.recipient.principal.user.id,
+          role_id: id,
+          assigned_by_user_id: f.owner.principal.user.id,
+        })
+        .execute()
+      return id
+    })
+    const before = await authorization(memberId)
+    const initiatorBefore = await authorization(initiatorId)
+    expect(before).toEqual({ generation: 2, fixed_role: 'member' })
+    expect(initiatorBefore).toEqual({ generation: 3, fixed_role: 'owner' })
+    expect(await assignment()).toEqual({ role_id: role })
+    const { id, proof } = await prepared(f)
+    const failingDeps = {
+      ...deps,
+      notificationQueue: {
+        async enqueue() {
+          throw new Error('Synthetic failure after role updates')
+        },
+      },
+    }
+    await expect(confirm(f, id, proof, f.recipient, failingDeps)).rejects.toThrow(
+      'Synthetic failure after role updates',
+    )
+    await assertPending(f, id, proof)
+    expect(await authorization(memberId)).toEqual(before)
+    expect(await authorization(initiatorId)).toEqual(initiatorBefore)
+    expect(await assignment()).toEqual({ role_id: role })
+
+    expect(completed(await confirm(f, id, proof)).recipient).toEqual({
+      membershipId: memberId,
+      role: 'owner',
+    })
+    expect(await authorization(memberId)).toEqual({
+      generation: before.generation + 1,
+      fixed_role: 'owner',
+    })
+    expect(await authorization(initiatorId)).toEqual({
+      generation: initiatorBefore.generation + 1,
+      fixed_role: 'admin',
+    })
+    expect(await assignment()).toBeUndefined()
+    expect(
+      (await journal(f)).filter(({ action }) => action === 'membership.custom_role_cleared'),
+    ).toEqual([
+      expect.objectContaining({
+        actor_type: 'system',
+        target_id: memberId,
+        details: expect.objectContaining({ roleId: role, oldRevision: 1 }),
+      }),
+    ])
+  })
+
   it('serializes two proved confirmations and rejects replay without consuming the losing proof', async () => {
     const f = await fixture()
     const { id, proof } = await prepared(f)

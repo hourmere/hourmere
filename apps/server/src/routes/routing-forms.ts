@@ -281,6 +281,9 @@ export function routingFormRoutes(
         await organizationContextAccess(
           c.var.principal,
           c.req.header(EXPECTED_ORGANIZATION_HEADER),
+          false,
+          false,
+          true,
         )(deps.db, c.var.principal.organization.id)
         return c.json(
           await listRoutingForms(serviceContext(deps, c.var.principal), c.req.valid('query')),
@@ -308,6 +311,9 @@ export function routingFormRoutes(
         await organizationContextAccess(
           c.var.principal,
           c.req.header(EXPECTED_ORGANIZATION_HEADER),
+          false,
+          false,
+          true,
         )(deps.db, c.var.principal.organization.id)
         return c.json(
           await getRoutingForm(serviceContext(deps, c.var.principal), c.req.valid('param').id),
@@ -466,6 +472,9 @@ export function routingFormRoutes(
         await organizationContextAccess(
           c.var.principal,
           c.req.header(EXPECTED_ORGANIZATION_HEADER),
+          false,
+          false,
+          true,
         )(deps.db, c.var.principal.organization.id)
         return c.json(
           await previewRoutingForm(

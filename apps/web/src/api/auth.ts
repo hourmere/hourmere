@@ -126,8 +126,12 @@ export function createApiKey(
   expiresInSeconds: number | null,
   organizationId: string,
   scope: ApiKeyScope,
+  reviewedTeamAuthorization?: string,
 ): Promise<CreatedApiKey> {
   return authRequest('/api-key/create', {
+    ...(reviewedTeamAuthorization && {
+      headers: { 'X-Hourmere-Reviewed-Team-Authorization': reviewedTeamAuthorization },
+    }),
     body: {
       name,
       ...(expiresInSeconds !== null && { expiresIn: expiresInSeconds }),

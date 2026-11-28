@@ -51,6 +51,7 @@ import {
   routingTokenDigest,
   sealRoutingAnswers,
 } from './routing-receipt-crypto.ts'
+import { allowsManagedTeamOperations, lockVersionedTeamWrite } from './team-permission.ts'
 
 /** Page size bounds of listRoutingForms. */
 export const ROUTING_FORM_PAGE = { default: 50, max: 100 } as const
@@ -399,7 +400,12 @@ function requireScope(ctx: ServiceContext, access: 'read' | 'write') {
  * organization's owner as account deletion requires (hosts.ts lockOrganization), then the
  * actor and member rows, and finally recheck an API key against revocation.
  */
-async function authorize(db: Db, ctx: ServiceContext, lock: boolean): Promise<void> {
+async function authorize(
+  db: Db,
+  ctx: ServiceContext,
+  lock: boolean,
+  operation = 'routing_forms.publish',
+): Promise<void> {
   const { principal } = ctx
   const organizationId = principal.organization.id
   if (!isUuid(principal.user.id) || !isUuid(organizationId)) throw denied()
@@ -426,17 +432,30 @@ async function authorize(db: Db, ctx: ServiceContext, lock: boolean): Promise<vo
   if (!(await organization.executeTakeFirst())) throw denied()
   if (!personal) await verifiedActor()
   let member = db
-    .selectFrom('auth.member')
-    .select('role')
-    .where('organizationId', '=', organizationId)
-    .where('userId', '=', principal.user.id)
-  if (lock) member = member.forShare()
+    .selectFrom('auth.member as member')
+    .leftJoin('team_member_authorizations as authorization', 'authorization.member_id', 'member.id')
+    .select(['member.role', 'authorization.generation'])
+    .where('member.organizationId', '=', organizationId)
+    .where('member.userId', '=', principal.user.id)
+  if (lock) member = member.forShare('member')
   const membership = await member.executeTakeFirst()
   if (!membership) throw denied()
+  if (lock && principal.customRoleAuthorization?.credential)
+    await lockVersionedTeamWrite(db, principal, () => ctx.now().epochMilliseconds)
   // Better Auth stores several roles comma-separated.
   const roles = membership.role.split(',').map((role) => role.trim())
-  if (!personal && !roles.includes('owner') && !roles.includes('admin')) throw denied()
-  if (lock && principal.kind === 'api_key')
+  if (
+    !personal &&
+    !(await allowsManagedTeamOperations(
+      db,
+      principal,
+      [operation],
+      roles.includes('owner') || roles.includes('admin'),
+      membership.generation,
+    ))
+  )
+    throw denied()
+  if (lock && principal.kind === 'api_key' && !principal.customRoleAuthorization?.credential)
     await requireActiveApiKey(db, principal, () => ctx.now().epochMilliseconds)
 }
 
@@ -848,7 +867,7 @@ export async function createRoutingForm(
       ctx.db.transaction().setIsolationLevel('read committed'),
       async (trx) => {
         await ctx.authorizeOrganizationWrite?.(trx, organizationId)
-        await authorize(trx, ctx, true)
+        await authorize(trx, ctx, true, 'routing_forms.create')
         await lockFormAdmission(trx, organizationId)
         // After admission, which already serializes the organization's creations, and before
         // the insert, so a retry meets neither the slug it took nor the quota.
@@ -876,10 +895,13 @@ export async function createRoutingForm(
 /** A live form of the caller's organization with its draft. */
 export async function getRoutingForm(ctx: ServiceContext, id: string): Promise<RoutingForm> {
   requireScope(ctx, 'read')
-  return ctx.db.transaction().execute(async (trx) => {
-    await authorize(trx, ctx, false)
-    return loadForm(trx, ctx.principal.organization.id, id)
-  })
+  return ctx.db
+    .transaction()
+    .setIsolationLevel('repeatable read')
+    .execute(async (trx) => {
+      await authorize(trx, ctx, false, 'routing_forms.read')
+      return loadForm(trx, ctx.principal.organization.id, id)
+    })
 }
 
 function encodeCursor(organizationId: string, row: { created: string; id: string }) {
@@ -921,29 +943,32 @@ export async function listRoutingForms(
     )
   const organizationId = ctx.principal.organization.id
   const after = input.cursor === undefined ? undefined : decodeCursor(organizationId, input.cursor)
-  return ctx.db.transaction().execute(async (trx) => {
-    await authorize(trx, ctx, false)
-    const rows = await selectForms(trx, organizationId)
-      .$if(after !== undefined, (query) =>
-        query.where(
-          sql<boolean>`(f.created_at, f.id) < (${after?.created}::timestamptz, ${after?.id}::uuid)`,
-        ),
-      )
-      .orderBy('f.created_at', 'desc')
-      .orderBy('f.id', 'desc')
-      .limit(limit + 1)
-      .execute()
-    const page = rows.slice(0, limit)
-    const last = page.at(-1)
-    const health = await formHealth(trx, organizationId, page)
-    return {
-      data: page.map((row) => ({
-        ...toSummary(row, storedDraft(row.draft)),
-        health: health.get(row.id)?.status ?? null,
-      })),
-      nextCursor: rows.length > limit && last ? encodeCursor(organizationId, last) : null,
-    }
-  })
+  return ctx.db
+    .transaction()
+    .setIsolationLevel('repeatable read')
+    .execute(async (trx) => {
+      await authorize(trx, ctx, false, 'routing_forms.read')
+      const rows = await selectForms(trx, organizationId)
+        .$if(after !== undefined, (query) =>
+          query.where(
+            sql<boolean>`(f.created_at, f.id) < (${after?.created}::timestamptz, ${after?.id}::uuid)`,
+          ),
+        )
+        .orderBy('f.created_at', 'desc')
+        .orderBy('f.id', 'desc')
+        .limit(limit + 1)
+        .execute()
+      const page = rows.slice(0, limit)
+      const last = page.at(-1)
+      const health = await formHealth(trx, organizationId, page)
+      return {
+        data: page.map((row) => ({
+          ...toSummary(row, storedDraft(row.draft)),
+          health: health.get(row.id)?.status ?? null,
+        })),
+        nextCursor: rows.length > limit && last ? encodeCursor(organizationId, last) : null,
+      }
+    })
 }
 
 const UPDATE_FIELDS = ['expectedRevision', 'slug', 'enabled', ...DRAFT_FIELDS] as const
@@ -975,7 +1000,7 @@ export async function updateRoutingForm(
       ctx.db.transaction().setIsolationLevel('read committed'),
       async (trx) => {
         await ctx.authorizeOrganizationWrite?.(trx, organizationId)
-        await authorize(trx, ctx, true)
+        await authorize(trx, ctx, true, 'routing_forms.update')
         const form = await findForm(trx, organizationId, id, true)
         assertRevision(form, expected)
         const draft = DRAFT_FIELDS.some((key) => fields[key] !== undefined)
@@ -1027,7 +1052,7 @@ export async function archiveRoutingForm(
     ctx.db.transaction().setIsolationLevel('read committed'),
     async (trx) => {
       await ctx.authorizeOrganizationWrite?.(trx, organizationId)
-      await authorize(trx, ctx, true)
+      await authorize(trx, ctx, true, 'routing_forms.archive')
       const form = await findForm(trx, organizationId, id, true)
       assertRevision(form, expected)
       await trx
@@ -1248,11 +1273,15 @@ export async function previewRoutingForm(
   requireScope(ctx, 'write')
   const fields = fieldsOf(input, ['answers'])
   const organizationId = ctx.principal.organization.id
-  return ctx.db
-    .transaction()
+  const preview = ctx.db.transaction()
+  return (
+    ctx.principal.customRoleAuthorization?.credential
+      ? preview.setIsolationLevel('repeatable read')
+      : preview
+  )
     .setAccessMode('read only')
     .execute(async (trx) => {
-      await authorize(trx, ctx, false)
+      await authorize(trx, ctx, false, 'routing_forms.preview')
       const form = await findForm(trx, organizationId, id, false)
       const config = validStoredConfig(form.draft)
       const answers = validateRoutingAnswers(config.questions, fields.answers)

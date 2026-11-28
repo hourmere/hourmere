@@ -67,6 +67,7 @@ import {
   type SuccessRedirectPolicy,
   validateSuccessRedirect,
 } from './success-redirect.ts'
+import { allowsManagedTeamOperations, lockVersionedTeamWrite } from './team-permission.ts'
 import { cleanText } from './text.ts'
 import { lockWorkflowOwner } from './workflow-owner-lock.ts'
 
@@ -333,7 +334,7 @@ export async function setEventTypeNotifications(
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
     await lockOrganization(trx, ctx.principal.organization.id)
     const row = await visibleRow(trx, ctx, id, { lock: true })
-    await assertCanWrite(trx, ctx, row, true)
+    await assertCanWrite(trx, ctx, row, true, ['event_notifications.update'])
     if (JSON.stringify(parseNotifications(row.notifications)) !== JSON.stringify(notifications)) {
       await trx
         .updateTable('event_types')
@@ -349,11 +350,17 @@ export async function setEventTypeNotifications(
 export const WaitlistSettingsSchema = z.strictObject({ enabled: z.boolean() })
 export type WaitlistSettings = z.infer<typeof WaitlistSettingsSchema>
 
-async function waitlistManager(db: Db, ctx: ServiceContext, row: { owner_user_id: string | null }) {
+async function waitlistManager(
+  db: Db,
+  ctx: ServiceContext,
+  row: { owner_user_id: string | null },
+  operation: string,
+) {
   const current = await access(db, ctx, true)
   if (row.owner_user_id !== null) {
     if (current.personalOwnerId !== ctx.principal.user.id) throw notFound()
-  } else if (!current.canManageTeam) throw insufficientRole()
+  } else if (!(await managedEventAccess(db, ctx, current, [operation], true)))
+    throw insufficientRole()
 }
 
 /** Only personal owners and team owners/admins can manage waitlist settings. */
@@ -364,7 +371,7 @@ export async function getEventTypeWaitlist(
   return ctx.db.transaction().execute(async (trx) => {
     await lockOrganization(trx, ctx.principal.organization.id)
     const row = await visibleRow(trx, ctx, id)
-    await waitlistManager(trx, ctx, row)
+    await waitlistManager(trx, ctx, row, 'waitlists.read_settings')
     return { enabled: row.waitlist_enabled }
   })
 }
@@ -380,7 +387,7 @@ export async function setEventTypeWaitlist(
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
     await lockOrganization(trx, ctx.principal.organization.id)
     const row = await visibleRow(trx, ctx, id, { lock: true })
-    await waitlistManager(trx, ctx, row)
+    await waitlistManager(trx, ctx, row, 'waitlists.update_settings')
     await writeWaitlistSettings(trx, row, settings, ctx.scimResourcesEnabled === true)
     await auditEventType(ctx, trx, row.id, 'event_type.waitlist_updated')
     return settings
@@ -458,7 +465,7 @@ export async function listEventTypeWaitlistEntries(
   return ctx.db.transaction().execute(async (trx) => {
     await lockOrganization(trx, ctx.principal.organization.id)
     const row = await visibleRow(trx, ctx, id)
-    await waitlistManager(trx, ctx, row)
+    await waitlistManager(trx, ctx, row, 'waitlists.list_entries')
     let query = trx
       .selectFrom('waitlist_entries as e')
       .select([
@@ -516,7 +523,7 @@ export async function removeEventTypeWaitlistEntry(
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
     await lockOrganization(trx, ctx.principal.organization.id)
     const row = await visibleRow(trx, ctx, id, { lock: true })
-    await waitlistManager(trx, ctx, row)
+    await waitlistManager(trx, ctx, row, 'waitlists.remove_entry')
     const entry = await trx
       .selectFrom('waitlist_entries')
       .select(['id', 'status'])
@@ -545,7 +552,7 @@ export async function getEventTypeWaitlistSummary(ctx: ServiceContext, id: strin
   return ctx.db.transaction().execute(async (trx) => {
     await lockOrganization(trx, ctx.principal.organization.id)
     const row = await visibleRow(trx, ctx, id)
-    await waitlistManager(trx, ctx, row)
+    await waitlistManager(trx, ctx, row, 'waitlists.list_entries')
     const counts = await sql<{
       pending: number
       active: number
@@ -664,8 +671,14 @@ async function createEventTypeWrite(
     teamWriteTransaction(ctx.db.transaction(), async (trx) => {
       await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id)
       await lockOrganization(trx, ctx.principal.organization.id)
-      const { personalOwnerId, canManageTeam } = await access(trx, ctx, true)
-      if (personalOwnerId !== null ? personalOwnerId !== ctx.principal.user.id : !canManageTeam) {
+      const current = await access(trx, ctx, true)
+      const { personalOwnerId } = current
+      const operation = sourceId === undefined ? 'event_types.create' : 'event_types.duplicate'
+      if (
+        personalOwnerId !== null
+          ? personalOwnerId !== ctx.principal.user.id
+          : !(await managedEventAccess(trx, ctx, current, [operation], true))
+      ) {
         throw insufficientRole()
       }
       await lockWorkflowOwner(trx, ctx.principal.organization.id, personalOwnerId)
@@ -709,6 +722,22 @@ async function createEventTypeWrite(
         }
       }
       if (!input) throw notFound()
+      if (personalOwnerId === null) {
+        const effects = [operation]
+        if (
+          input.hosts !== undefined ||
+          (input.schedulingType !== undefined && input.schedulingType !== 'individual') ||
+          input.scheduleId != null ||
+          input.conferenceOrganizer != null ||
+          input.zoomConnectionId != null
+        )
+          effects.push('event_types.assign_hosts')
+        if (input.notifications !== undefined || input.smsRemindersEnabled === true)
+          effects.push('event_notifications.update')
+        if (input.waitlist?.enabled === true) effects.push('waitlists.update_settings')
+        if (input.successRedirect != null) effects.push('event_types.update_success_redirect')
+        if (!(await managedEventAccess(trx, ctx, current, effects))) throw insufficientRole()
+      }
       const fields = validFields({ ...DEFAULTS, ...defined(input) }, ctx.successRedirectPolicy)
       const notifications =
         input.notifications === undefined
@@ -817,12 +846,37 @@ export async function updateEventType(
       await lockOrganization(trx, ctx.principal.organization.id)
       // Locked, so concurrent updates of different fields cannot undo each other.
       const row = await visibleRow(trx, ctx, id, { lock: true })
-      await assertCanWrite(trx, ctx, row, true)
       const changes = defined(input, fieldsOf(row).locations)
       const notificationsChanged =
         notifications !== undefined &&
         JSON.stringify(parseNotifications(row.notifications)) !== JSON.stringify(notifications)
       const changingHosts = input.hosts !== undefined || input.schedulingType !== undefined
+      const effects: string[] = []
+      if (
+        changingHosts ||
+        input.scheduleId !== undefined ||
+        input.conferenceOrganizer !== undefined ||
+        input.zoomConnectionId !== undefined
+      )
+        effects.push('event_types.assign_hosts')
+      if (input.notifications !== undefined || input.smsRemindersEnabled !== undefined)
+        effects.push('event_notifications.update')
+      if (waitlist !== undefined && waitlist.enabled !== row.waitlist_enabled)
+        effects.push('waitlists.update_settings')
+      if (
+        input.successRedirect !== undefined &&
+        (input.successRedirect !== null || row.success_redirect !== null)
+      )
+        effects.push('event_types.update_success_redirect')
+      if (
+        effects.length === 0 ||
+        input.payment !== undefined ||
+        Object.keys(changes).some(
+          (field) => !['successRedirect', 'smsRemindersEnabled'].includes(field),
+        )
+      )
+        effects.push('event_types.update')
+      await assertCanWrite(trx, ctx, row, true, effects)
       if (
         input.schedulingType !== undefined &&
         input.schedulingType !== row.scheduling_type &&
@@ -1039,7 +1093,7 @@ export async function deleteEventType(ctx: ServiceContext, id: string): Promise<
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
     await lockOrganization(trx, ctx.principal.organization.id)
     const row = await visibleRow(trx, ctx, id, { lock: true })
-    await assertCanWrite(trx, ctx, row, true)
+    await assertCanWrite(trx, ctx, row, true, ['event_types.delete'])
     const deletedAt = new Date(ctx.now().epochMilliseconds)
     await trx
       .updateTable('event_types')
@@ -1114,7 +1168,7 @@ export async function assertCanExplainEventType(ctx: ServiceContext, id: string)
   if (ctx.principal.kind === 'api_key' && ctx.principal.apiKeyScope !== 'full') throw notFound()
   const row = await visibleRow(ctx.db, ctx, id)
   try {
-    await assertCanWrite(ctx.db, ctx, row)
+    await assertCanWrite(ctx.db, ctx, row, false, ['event_types.diagnose_availability'])
   } catch (error) {
     if (error instanceof DomainError && error.code === 'insufficient_role') throw notFound()
     throw error
@@ -1127,10 +1181,34 @@ async function assertCanWrite(
   ctx: ServiceContext,
   row: { owner_user_id: string | null },
   lock = false,
+  operations: readonly string[] = ['event_types.update'],
 ) {
   if (row.owner_user_id !== null) return
   const current = await access(db, ctx, lock)
-  if (current.personalOwnerId !== null || !current.canManageTeam) throw insufficientRole()
+  if (
+    current.personalOwnerId !== null ||
+    !(await managedEventAccess(db, ctx, current, operations, lock))
+  )
+    throw insufficientRole()
+}
+
+async function managedEventAccess(
+  db: Db,
+  ctx: ServiceContext,
+  current: Awaited<ReturnType<typeof access>>,
+  operations: readonly string[],
+  lock = false,
+) {
+  if (current.canManageTeam && (current.generation === null || current.generation === 1))
+    return true
+  if (lock) await lockVersionedTeamWrite(db, ctx.principal, () => ctx.now().epochMilliseconds)
+  return allowsManagedTeamOperations(
+    db,
+    ctx.principal,
+    operations,
+    current.canManageTeam,
+    current.generation,
+  )
 }
 
 /** The caller's standing in the organization they act in. */
@@ -1143,14 +1221,16 @@ async function access(db: Db, ctx: ServiceContext, lock = false) {
       .where('id', '=', ctx.principal.user.id)
       .forShare()
       .executeTakeFirst()
-    if (!actor?.emailVerified) return { personalOwnerId: null, canManageTeam: false }
+    if (!actor?.emailVerified)
+      return { personalOwnerId: null, canManageTeam: false, generation: null }
   }
   let query = db
     .selectFrom('auth.member as m')
     .innerJoin('auth.user as u', 'u.id', 'm.userId')
     .where('u.emailVerified', '=', true)
     .leftJoin('personal_organizations as p', 'p.organization_id', 'm.organizationId')
-    .select(['m.role', 'p.user_id as personalOwnerId'])
+    .leftJoin('team_member_authorizations as authorization', 'authorization.member_id', 'm.id')
+    .select(['m.role', 'p.user_id as personalOwnerId', 'authorization.generation'])
     .where('m.userId', '=', ctx.principal.user.id)
     .where('m.organizationId', '=', ctx.principal.organization.id)
   if (lock) query = query.forShare('m')
@@ -1160,6 +1240,7 @@ async function access(db: Db, ctx: ServiceContext, lock = false) {
   return {
     personalOwnerId: row?.personalOwnerId ?? null,
     canManageTeam: roles.includes('owner') || roles.includes('admin'),
+    generation: row?.generation ?? null,
   }
 }
 
@@ -1614,8 +1695,20 @@ export async function listEventTypeHosts(
   ctx: ServiceContext,
   input: CatalogPageInput = {},
 ): Promise<CatalogPage<{ id: string; memberId: string; name: string }>> {
-  const { personalOwnerId, canManageTeam } = await access(ctx.db, ctx)
-  if (personalOwnerId !== ctx.principal.user.id && !canManageTeam) throw insufficientRole()
+  if (!ctx.principal.customRoleAuthorization?.credential) return readEventTypeHosts(ctx, input)
+  return ctx.db
+    .transaction()
+    .setIsolationLevel('repeatable read')
+    .execute((db) => readEventTypeHosts({ ...ctx, db }, input))
+}
+
+async function readEventTypeHosts(ctx: ServiceContext, input: CatalogPageInput) {
+  const current = await access(ctx.db, ctx)
+  if (
+    current.personalOwnerId !== ctx.principal.user.id &&
+    !(await managedEventAccess(ctx.db, ctx, current, ['event_types.list_host_candidates']))
+  )
+    throw insufficientRole()
   const { limit, after } = checkedCatalogPage(input)
   let query = ctx.db
     .selectFrom('auth.member as m')
@@ -1639,7 +1732,7 @@ export async function activateRoundRobin(ctx: ServiceContext, id: string): Promi
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
     await lockOrganization(trx, ctx.principal.organization.id)
     const row = await visibleRow(trx, ctx, id, { lock: true })
-    await assertCanWrite(trx, ctx, row, true)
+    await assertCanWrite(trx, ctx, row, true, ['event_types.activate_round_robin'])
     if (row.owner_user_id !== null || row.scheduling_type !== 'round_robin')
       throw invalidHosts('Only team round-robin configurations can be activated')
     const hosts = await trx

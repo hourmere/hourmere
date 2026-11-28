@@ -2597,7 +2597,7 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
     [
       'team members manage polls',
       verifyRoleAuthority,
-      ["if (!personal && !roles.includes('owner') && !roles.includes('admin')) throw denied()", ''],
+      ["const fixed = roles.includes('owner') || roles.includes('admin')", 'const fixed = true'],
     ],
     [
       'unverified actors keep authority',
@@ -2611,6 +2611,7 @@ describe.skipIf(!serverUrl)('meeting poll host lifecycle', () => {
         'if (!membership) throw denied()\n  const roles = membership.role',
         "const roles = (membership?.role ?? 'owner')",
       ],
+      ['membership.generation,', 'membership?.generation ?? null,'],
     ],
     [
       'a member row in another personal space grants authority',

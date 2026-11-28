@@ -107,6 +107,12 @@ function verifyClaimWiring(serverSource: string) {
             key: identifier('organizationListRateLimitMaxForTests'),
             value: member('options', 'organizationListRateLimitMaxForTests'),
           },
+          {
+            type: 'ObjectProperty',
+            computed: false,
+            key: identifier('customRolesEnabled'),
+            value: member('options', 'customRolesEnabled'),
+          },
         ],
       },
     ],

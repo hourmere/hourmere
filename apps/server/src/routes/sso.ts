@@ -90,7 +90,7 @@ export function ssoRoutes(deps: SsoReadDeps): RouteModule {
       async (c) => {
         const recovery = ssoRecoveryReadPrincipal(c)
         const principal = recovery ?? c.var.principal
-        await authorizeSsoRead(deps, principal)
+        await authorizeSsoRead(deps, principal, ['sso.read_providers'], Boolean(recovery))
         if (principal === c.var.principal)
           await organizationContextAccess(principal, c.req.header(EXPECTED_ORGANIZATION_HEADER))(
             deps.db,
@@ -102,6 +102,7 @@ export function ssoRoutes(deps: SsoReadDeps): RouteModule {
             ...query,
             limit: queryLimit(query.limit),
             includeRecoveryLinks: !c.req.raw.headers.has('authorization') && !recovery,
+            recovery: Boolean(recovery),
           }),
           200,
         )
@@ -125,9 +126,10 @@ export function ssoRoutes(deps: SsoReadDeps): RouteModule {
         },
       }),
       async (c) => {
-        const principal = ssoRecoveryReadPrincipal(c) ?? c.var.principal
-        await authorizeSsoRead(deps, principal)
-        if (principal !== c.var.principal) return c.json(await getSsoPolicy(deps, principal), 200)
+        const recovery = ssoRecoveryReadPrincipal(c)
+        const principal = recovery ?? c.var.principal
+        await authorizeSsoRead(deps, principal, ['sso.read_policy'], Boolean(recovery))
+        if (recovery) return c.json(await getSsoPolicy(deps, principal, undefined, true), 200)
         await organizationContextAccess(principal, c.req.header(EXPECTED_ORGANIZATION_HEADER))(
           deps.db,
           principal.organization.id,

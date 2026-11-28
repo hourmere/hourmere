@@ -2,7 +2,10 @@ import { createHash } from 'node:crypto'
 import { createRoute, z } from '@hono/zod-openapi'
 import {
   type Auth,
+  currentSessionTeamCeiling,
+  customCredentialPermissions,
   liveSsoDelegationSummaries,
+  lockCustomRoleMaster,
   lockSsoDelegation,
   lockTeamSsoProof,
   MCP_OAUTH_SCOPE,
@@ -11,7 +14,9 @@ import {
   type Principal,
   ssoHardOff,
   ssoRetained,
+  TEAM_AUTHORIZATION_REVIEW_HEADER,
   type TeamSsoCapabilities,
+  teamAuthorizationFacts,
   withMcpOAuthIntent,
 } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
@@ -50,13 +55,20 @@ const Query = z.string().min(1).max(16000)
 const Input = z.strictObject({ oauthQuery: Query })
 const IntentInput = Input.extend({ intentId: z.uuid() })
 const Organization = z.object({ id: z.uuid(), name: z.string(), slug: z.string() })
+const SelectedOrganization = Organization.extend({
+  teamPermissionIds: z.array(z.string()).optional(),
+  teamFixedRole: z.string().optional(),
+  teamAuthorizationReviewRequired: z.boolean().optional(),
+  teamAuthorizationRenewalRequired: z.boolean().optional(),
+  teamCredentialAuthorizationId: z.uuid().optional(),
+})
 const Info = z.object({
   clientName: z.string(),
   clientId: z.string(),
   redirectUri: z.string(),
   scopes: z.array(z.string()),
   organizations: z.array(Organization),
-  selectedOrganization: Organization.nullable(),
+  selectedOrganization: SelectedOrganization.nullable(),
 })
 const Redirect = z.object({ redirectUrl: z.string() })
 
@@ -65,6 +77,7 @@ type Deps = {
   db: Db
   publicUrl: string
   ssoCapabilities?: TeamSsoCapabilities
+  customRolesEnabled?: boolean | undefined
 }
 type Session = Extract<Principal, { kind: 'session' }>
 function session(principal: Principal): Session {
@@ -89,7 +102,13 @@ async function recordConsent(db: Db, clientId: string) {
     .execute()
 }
 
-export function mcpOAuthBroker({ auth, db, publicUrl, ssoCapabilities = ssoHardOff }: Deps) {
+export function mcpOAuthBroker({
+  auth,
+  db,
+  publicUrl,
+  ssoCapabilities = ssoHardOff,
+  customRolesEnabled = false,
+}: Deps) {
   const origin = new URL(publicUrl).origin
   const { resource } = mcpOAuthUrls(publicUrl)
   async function native(path: string, body: object, headers: Headers, clientIp?: string) {
@@ -255,6 +274,32 @@ export function mcpOAuthBroker({ auth, db, publicUrl, ssoCapabilities = ssoHardO
       .executeTakeFirst()
     if (!row) throw expired()
   }
+  async function affectedTeam(client: Db, p: Session, organizationId: string) {
+    const facts = await teamAuthorizationFacts(
+      client,
+      organizationId,
+      p.user.id,
+      customRolesEnabled,
+      ssoCapabilities.scimResourcesEnabled === true,
+    )
+    return facts && facts.generation > 1 ? facts : undefined
+  }
+  async function retireGrant(trx: Db, userId: string, clientId: string, grantId: string) {
+    await trx
+      .updateTable('auth.oauthRefreshToken')
+      .set({ revoked: new Date(), rotationReplayResponse: null })
+      .where('userId', '=', userId)
+      .where('clientId', '=', clientId)
+      .where('referenceId', '=', grantId)
+      .execute()
+    await trx
+      .deleteFrom('auth.oauthConsent')
+      .where('userId', '=', userId)
+      .where('clientId', '=', clientId)
+      .where('referenceId', '=', grantId)
+      .execute()
+    await trx.deleteFrom('mcp_oauth_grants').where('id', '=', grantId).execute()
+  }
   async function bound(trx: Db, p: Session, intentId: string, q: URLSearchParams, writing = false) {
     const intent = trx
       .selectFrom('mcp_oauth_intents')
@@ -311,7 +356,19 @@ export function mcpOAuthBroker({ auth, db, publicUrl, ssoCapabilities = ssoHardO
       const selected = intentId
         ? await db.transaction().execute(async (trx) => {
             const row = await bound(trx, p, intentId, v.q)
-            return orgs.find((o) => o.id === row.organization_id) ?? null
+            const selected = orgs.find((o) => o.id === row.organization_id)
+            if (!selected) return null
+            const facts = await affectedTeam(trx, p, row.organization_id)
+            if (!facts) return selected
+            const current = await currentSessionTeamCeiling(trx, facts, p.sessionId)
+            return {
+              ...selected,
+              teamPermissionIds: facts.elevated ? [] : customCredentialPermissions(facts, 'oauth'),
+              ...(facts.fixedRole && { teamFixedRole: facts.fixedRole }),
+              teamAuthorizationReviewRequired: true,
+              teamAuthorizationRenewalRequired: !current,
+              ...(current && { teamCredentialAuthorizationId: current.id }),
+            }
           })
         : null
       return {
@@ -352,22 +409,7 @@ export function mcpOAuthBroker({ auth, db, publicUrl, ssoCapabilities = ssoHardO
           .executeTakeFirst()
         // A new explicit approval starts a new lifetime and grant generation. Keeping the
         // old reference would reuse expired consent and leave every new token unusable.
-        if (previous) {
-          await trx
-            .updateTable('auth.oauthRefreshToken')
-            .set({ revoked: new Date(), rotationReplayResponse: null })
-            .where('userId', '=', p.user.id)
-            .where('clientId', '=', v.clientId)
-            .where('referenceId', '=', previous.id)
-            .execute()
-          await trx
-            .deleteFrom('auth.oauthConsent')
-            .where('userId', '=', p.user.id)
-            .where('clientId', '=', v.clientId)
-            .where('referenceId', '=', previous.id)
-            .execute()
-          await trx.deleteFrom('mcp_oauth_grants').where('id', '=', previous.id).execute()
-        }
+        if (previous) await retireGrant(trx, p.user.id, v.clientId, previous.id)
         const grant = await trx
           .insertInto('mcp_oauth_grants')
           .values({ user_id: p.user.id, organization_id: organizationId, client_id: v.clientId })
@@ -390,6 +432,7 @@ export function mcpOAuthBroker({ auth, db, publicUrl, ssoCapabilities = ssoHardO
           })
           .returning('id')
           .executeTakeFirstOrThrow()
+        const forceConsent = Boolean(await affectedTeam(trx, p, organizationId))
         const nativeResult = await withMcpOAuthIntent(
           {
             id: intent.id,
@@ -397,12 +440,14 @@ export function mcpOAuthBroker({ auth, db, publicUrl, ssoCapabilities = ssoHardO
             sessionId: p.sessionId,
             organizationId,
             grantId: grant.id,
+            forceConsent,
           },
           () => native('continue', { postLogin: true, oauth_query: oauthQuery }, headers, clientIp),
           trx,
         )
         const result = redirect(nativeResult.value, intent.id)
         if (!result.consent) {
+          if (forceConsent) throw invalid()
           if (ssoProof && !(await hasDelegation(trx, p, organizationId, grant.id))) return null
           await trx
             .updateTable('mcp_oauth_intents')
@@ -423,6 +468,7 @@ export function mcpOAuthBroker({ auth, db, publicUrl, ssoCapabilities = ssoHardO
       accept: boolean,
       headers: Headers,
       clientIp?: string,
+      reviewedTeamAuthorization = false,
     ) {
       const p = session(principal),
         v = await validated(oauthQuery, headers, clientIp)
@@ -430,13 +476,72 @@ export function mcpOAuthBroker({ auth, db, publicUrl, ssoCapabilities = ssoHardO
         const row = await bound(trx, p, intentId, v.q, true)
         const ssoProof =
           accept && row.hasPolicy ? await approvalProof(trx, p, row.organization_id) : undefined
+        let grantId = row.grant_id
+        const facts = accept ? await affectedTeam(trx, p, row.organization_id) : undefined
+        if (facts) {
+          const reviewed = headers.get(TEAM_AUTHORIZATION_REVIEW_HEADER)
+          await lockCustomRoleMaster(trx)
+          const currentFacts = await affectedTeam(trx, p, row.organization_id)
+          if (
+            !currentFacts ||
+            !reviewedTeamAuthorization ||
+            !reviewed ||
+            !(await currentSessionTeamCeiling(trx, currentFacts, p.sessionId, reviewed))
+          )
+            throw new DomainError('forbidden', 'team_authorization_review_required')
+          // An enforced team may need to bind the newly reviewed grant before returning
+          // the code. Retrying the same intent after binding preserves that identity.
+          const prepared = await trx
+            .selectFrom('mcp_oauth_grants as grant')
+            .innerJoin(
+              'team_credential_authorizations as ceiling',
+              'ceiling.oauth_grant_id',
+              'grant.id',
+            )
+            .select('grant.id')
+            .where('grant.id', '=', grantId)
+            .where('grant.created_at', '>', row.created_at)
+            .where('ceiling.member_generation', '=', currentFacts.generation)
+            .where('ceiling.policy_epoch', '=', currentFacts.teamEpoch)
+            .where('ceiling.master_epoch', '=', currentFacts.masterEpoch)
+            .executeTakeFirst()
+          if (!prepared) {
+            await retireGrant(trx, p.user.id, v.clientId, grantId)
+            const grant = await trx
+              .insertInto('mcp_oauth_grants')
+              .values({
+                user_id: p.user.id,
+                organization_id: row.organization_id,
+                client_id: v.clientId,
+                created_at: sql<string>`clock_timestamp()`,
+              })
+              .returning('id')
+              .executeTakeFirstOrThrow()
+            grantId = grant.id
+            await trx
+              .updateTable('mcp_oauth_intents')
+              .set({ grant_id: grantId })
+              .where('id', '=', row.id)
+              .execute()
+            await trx
+              .insertInto('team_credential_authorizations')
+              .values({
+                ...currentFacts.ceiling,
+                oauth_grant_id: grantId,
+                permission_ids: customCredentialPermissions(currentFacts, 'oauth'),
+              })
+              .execute()
+          }
+        }
+        if (facts) await sql`SET LOCAL search_path TO auth, public`.execute(trx)
         const nativeResult = await withMcpOAuthIntent(
           {
             id: intentId,
             userId: p.user.id,
             sessionId: p.sessionId,
             organizationId: row.organization_id,
-            grantId: row.grant_id,
+            grantId,
+            atomicConsent: Boolean(facts),
           },
           () => native('consent', { accept, oauth_query: oauthQuery }, headers, clientIp),
           trx,
@@ -445,8 +550,7 @@ export function mcpOAuthBroker({ auth, db, publicUrl, ssoCapabilities = ssoHardO
         if (result.consent) throw invalid()
         // An approved consent must exist before the user can bind its grant. Keep this
         // signed intent open, and withhold the code until the same approval is retried.
-        if (ssoProof && !(await hasDelegation(trx, p, row.organization_id, row.grant_id)))
-          return null
+        if (ssoProof && !(await hasDelegation(trx, p, row.organization_id, grantId))) return null
         await trx
           .updateTable('mcp_oauth_intents')
           .set({ used_at: new Date() })
@@ -643,7 +747,15 @@ export function mcpOAuthRoutes(deps: Deps): RouteModule {
         path: `${prefix}/consent`,
         operationId: 'submitMcpOAuthConsent',
         request: {
-          body: { required: true, content: json(IntentInput.extend({ accept: z.boolean() })) },
+          body: {
+            required: true,
+            content: json(
+              IntentInput.extend({
+                accept: z.boolean(),
+                reviewedTeamAuthorization: z.boolean().optional(),
+              }),
+            ),
+          },
         },
         responses: responses(Redirect, true),
       }),
@@ -656,6 +768,7 @@ export function mcpOAuthRoutes(deps: Deps): RouteModule {
           b.accept,
           c.req.raw.headers,
           c.var.clientIp,
+          b.reviewedTeamAuthorization,
         )
         for (const cookie of r.cookies) c.header('Set-Cookie', cookie, { append: true })
         return c.json({ redirectUrl: r.redirectUrl }, 200)

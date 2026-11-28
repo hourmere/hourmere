@@ -40,6 +40,10 @@ import { productRoutes } from './server.ts'
 
 const scopes = ['full', 'read', 'bookings'] as const
 const customRoleOperations = [
+  'GET /api/v1/teams/{teamId}/permissions-mode',
+  'PUT /api/v1/teams/{teamId}/permissions-mode',
+  'POST /api/v1/teams/{teamId}/permissions/renew',
+  'GET /api/v1/teams/{teamId}/members/{memberId}/custom-role',
   'GET /api/v1/teams/{teamId}/permissions',
   'GET /api/v1/teams/{teamId}/roles',
   'POST /api/v1/teams/{teamId}/roles',

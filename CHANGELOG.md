@@ -250,6 +250,11 @@ schema downgrade is not automatic. Direct source deployments require Node.js 26.
 Hourmere requires PostgreSQL 18+ because migrations use `uuidv7()`; the provided Compose
 stack includes PostgreSQL 18.
 
+- **Membership authorization snapshots (migration 0200).** PostgreSQL writes a snapshot
+  on every membership insert or role update, including personal spaces and installations
+  with custom roles disabled. Record team creation, member addition and role-change
+  latency during the release rehearsal and monitor those paths after upgrade. See the
+  [migration details](https://github.com/hourmere/hourmere/blob/main/docs/data-model.md#custom-role-storage).
 - **Resolve case-insensitive team address collisions before migration 0194.** The
   migration stops if existing addresses differ only in case and reports the conflicting
   organization IDs. Check the database before upgrading and rename enough teams to make

@@ -2,6 +2,7 @@ import type { Db } from '@hourmere/db'
 import { scimProvisioned, scimSuspended } from '@hourmere/db/scim-suspension'
 import { sql } from 'kysely'
 import { type ApiKeyScope, parsePersistedApiKeyMetadata } from './api-key-metadata.ts'
+import { type TeamPermissionOptions, withTeamCredential } from './custom-role-permissions.ts'
 import type { Auth } from './index.ts'
 import { ensurePersonalOrganization, isUuid } from './organizations.ts'
 import { type SsoDelegationStatus, ssoDelegationStatus } from './sso-delegation-access.ts'
@@ -41,6 +42,8 @@ export type Principal = {
    * membership checks for this caller read the same managed child suspension.
    */
   scimResourcesEnabled?: true
+  /** Set by the credential resolver, never by request parameters. */
+  customRoleAuthorization?: TeamPermissionOptions
 } & (
   | { kind: 'session'; sessionId: string }
   | {
@@ -54,6 +57,8 @@ export type Principal = {
       kind: 'oauth'
       oauthConsentId: string
       oauthGrantId?: string
+      /** Session required by a signed online-only OAuth token. */
+      oauthSessionId?: string
       clientId: string
       scopes: readonly string[]
       ssoDelegationStatus?: SsoDelegationStatus
@@ -87,12 +92,14 @@ export function createCallerResolver({
   db,
   ssoCapabilities: protocolCapabilities = ssoHardOff,
   scimResourcesEnabled = false,
+  customRolesEnabled = false,
 }: {
   auth: Auth
   db: Db
   ssoCapabilities?: TeamSsoCapabilities
   /** Whether directory resource management is enabled on this instance. */
   scimResourcesEnabled?: boolean
+  customRolesEnabled?: boolean | undefined
 }): CallerResolver {
   const ssoCapabilities = withScimResources(protocolCapabilities, scimResourcesEnabled)
   const resourceCapability = ssoCapabilities.scimResourcesEnabled
@@ -103,6 +110,7 @@ export function createCallerResolver({
     'user' | 'organization' | 'personalOrganizationId' | 'scimProvisioned'
   > & {
     emailVerified: boolean
+    membershipGeneration: number
     apiKeyScope?: ApiKeyScope
     ssoDelegationStatus?: SsoDelegationStatus
     ssoRecoveryTeams?: SsoRecoveryTeam[]
@@ -125,6 +133,7 @@ export function createCallerResolver({
     const row = await db
       .selectFrom('auth.member as m')
       .innerJoin('auth.user as u', 'u.id', 'm.userId')
+      .leftJoin('team_member_authorizations as authorization', 'authorization.member_id', 'm.id')
       .innerJoin('auth.organization as o', 'o.id', 'm.organizationId')
       .leftJoin('personal_organizations as p', 'p.organization_id', 'o.id')
       .leftJoin('personal_organizations as own', 'own.user_id', 'u.id')
@@ -143,6 +152,7 @@ export function createCallerResolver({
         'u.name as userName',
         'u.email',
         'u.emailVerified',
+        'authorization.generation as memberGeneration',
         'o.id as organizationId',
         'o.name as organizationName',
         'o.slug',
@@ -192,6 +202,7 @@ export function createCallerResolver({
       ...(apiKeyId === undefined ? {} : { ssoDelegationStatus: row.ssoDelegationStatus ?? null }),
       ...(row.ssoRecoveryTeams?.length && { ssoRecoveryTeams: row.ssoRecoveryTeams }),
       emailVerified: row.emailVerified,
+      membershipGeneration: row.memberGeneration ?? 1,
       user: { id: row.userId, name: row.userName, email: row.email },
       personalOrganizationId: row.personalOrganizationId,
       ...(row.scimProvisioned && { scimProvisioned: true }),
@@ -248,16 +259,21 @@ export function createCallerResolver({
     // slip through as belonging to a now-verified user.
     if (!membership?.emailVerified || !membership.apiKeyScope)
       return { ok: false, error: 'unauthorized', setCookie: [] }
-    const { emailVerified: _, apiKeyScope, ...caller } = membership
+    const { emailVerified: _, apiKeyScope, membershipGeneration, ...caller } = membership
     return {
       ok: true,
-      principal: {
-        ...caller,
-        ...resourceCapability,
-        kind: 'api_key',
-        apiKeyId: result.key.id,
-        apiKeyScope,
-      },
+      principal: await withTeamCredential(
+        db,
+        {
+          ...caller,
+          ...resourceCapability,
+          kind: 'api_key',
+          apiKeyId: result.key.id,
+          apiKeyScope,
+        },
+        customRolesEnabled,
+        membershipGeneration,
+      ),
       setCookie: [],
     }
   }
@@ -296,16 +312,22 @@ export function createCallerResolver({
       apiKeyScope: _scope,
       ssoDelegationStatus: _sso,
       ssoRecoveryTeams,
+      membershipGeneration,
       ...caller
     } = membership
     return {
       ok: true,
-      principal: {
-        ...caller,
-        ...resourceCapability,
-        kind: 'session',
-        sessionId: session.session.id,
-      },
+      principal: await withTeamCredential(
+        db,
+        {
+          ...caller,
+          ...resourceCapability,
+          kind: 'session',
+          sessionId: session.session.id,
+        },
+        customRolesEnabled,
+        membershipGeneration,
+      ),
       ...(ssoRecoveryTeams && { ssoRecoveryTeams }),
       setCookie,
     }

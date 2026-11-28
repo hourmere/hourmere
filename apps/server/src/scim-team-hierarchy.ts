@@ -1,7 +1,11 @@
 import { ApiKeyScopeError, MCP_OAUTH_SCOPE, type Principal, teamRoles } from '@hourmere/auth'
 import type { Database, Db } from '@hourmere/db'
 import { checkTeamWriteDeadline } from '@hourmere/db/team-write'
-import { DomainError } from '@hourmere/scheduling'
+import {
+  allowsManagedTeamOperations,
+  DomainError,
+  lockVersionedTeamWrite,
+} from '@hourmere/scheduling'
 import { type Selectable, sql, type Transaction } from 'kysely'
 import { z } from 'zod'
 import {
@@ -81,6 +85,27 @@ function mappingActor(deps: ScimTeamHierarchyDeps, principal: Principal): Mappin
   return { organizationId: organizationId.data, userId: userId.data, sessionId: sessionId.data }
 }
 
+async function requireMappingPermission(
+  db: Db,
+  principal: Principal,
+  member: NonNullable<Awaited<ReturnType<typeof mappingMember>>>,
+  operation: 'scim.read_mappings' | 'scim.approve_mapping' | 'scim.link_team' | 'scim.unlink_team',
+) {
+  const roles = teamRoles(member.role)
+  const manager =
+    roles.includes('owner') || (operation === 'scim.read_mappings' && roles.includes('admin'))
+  if (
+    !(await allowsManagedTeamOperations(
+      db,
+      principal,
+      [operation],
+      manager,
+      member.authorizationGeneration,
+    ))
+  )
+    throw mappingDenied()
+}
+
 function intentInput(input: z.output<typeof ScimTeamMappingApproval>) {
   return {
     id: input.intentId,
@@ -154,6 +179,7 @@ export async function approveScimTeamMapping(
         owner = await lockMappingOwner(trx, actor)
         await lockMappingOwnerSession(trx, actor)
         if (!expected.success || expected.data !== actor.organizationId) throw mappingDenied()
+        await requireMappingPermission(trx, principal, owner, 'scim.approve_mapping')
         if (teams[0] === teams[1]) throw topologyConflict()
       },
       mutate: async (trx, _input, _browserBinding, _mailboxProof, attemptId) => {
@@ -296,7 +322,9 @@ async function lockApprovedOwners(
     await recheckMappingConsentProof(trx, identity, owner, consent, ssoOidcEnabled)
   }
   await assertLiveApprovals(trx, intent.id)
-  return consents
+  const submitting = owners.find(({ consent }) => ownsApproval(actor, consent))
+  if (!submitting) throw mappingDenied()
+  return { consents, submittingOwner: submitting.owner }
 }
 
 async function currentLinkGeneration(trx: Db, childOrganizationId: string) {
@@ -324,9 +352,9 @@ export async function listScimTeamMappings(
     .setIsolationLevel('repeatable read')
     .execute(async (trx) => {
       const member = await mappingMember(trx, { organizationId, userId }, false)
-      const roles = teamRoles(member?.role)
-      const owner = roles.includes('owner')
-      if (!owner && !roles.includes('admin')) throw mappingDenied()
+      if (!member) throw mappingDenied()
+      await requireMappingPermission(trx, principal, member, 'scim.read_mappings')
+      const owner = teamRoles(member.role).includes('owner')
       if (sessionId !== null)
         await lockMappingOwnerSession(trx, { organizationId, userId, sessionId }, false)
       const access = await teamReadAccess({ ...deps, db: trx }, principal)()
@@ -456,13 +484,20 @@ export async function commitScimTeamMapping(
       if (consents.length !== 2 || !consents.some((consent) => ownsApproval(actor, consent)))
         throw mappingDenied()
 
-      const current = await lockApprovedOwners(
+      const { consents: current, submittingOwner } = await lockApprovedOwners(
         trx,
         intent,
         consents,
         actor,
         deps.capabilities.ssoOidcEnabled,
       )
+      await requireMappingPermission(
+        trx,
+        principal,
+        submittingOwner,
+        intent.action === 'link' ? 'scim.link_team' : 'scim.unlink_team',
+      )
+      await lockVersionedTeamWrite(trx, principal, Date.now)
       const delegationDeadline =
         principal.kind === 'session'
           ? undefined

@@ -6,6 +6,7 @@ import { sql } from 'kysely'
 import {
   API_KEY_ORGANIZATION_CHANGED_MESSAGE,
   API_KEY_ORGANIZATION_MEMBERSHIP_MESSAGE,
+  API_KEY_TEAM_AUTHORIZATION_REVIEW_MESSAGE,
 } from './api-key-errors.ts'
 import {
   type ApiKeyScope,
@@ -33,7 +34,10 @@ export function nativeApiKey(options: Parameters<typeof apiKey>[0]) {
       // The native update catches persistence exceptions and wraps them as 500s.
       // Restore these two deliberate refusals after the audit transaction rolls back.
       if (error instanceof APIError && error.status === 'INTERNAL_SERVER_ERROR') {
-        if (error.message === API_KEY_ORGANIZATION_MEMBERSHIP_MESSAGE)
+        if (
+          error.message === API_KEY_ORGANIZATION_MEMBERSHIP_MESSAGE ||
+          error.message === API_KEY_TEAM_AUTHORIZATION_REVIEW_MESSAGE
+        )
           throw new APIError('FORBIDDEN', { message: error.message })
         if (error.message === API_KEY_ORGANIZATION_CHANGED_MESSAGE)
           throw new APIError('CONFLICT', { message: error.message })
@@ -41,6 +45,19 @@ export function nativeApiKey(options: Parameters<typeof apiKey>[0]) {
       throw error
     }
   }, update) as typeof update
+  const create = plugin.endpoints.createApiKey
+  plugin.endpoints.createApiKey = Object.assign(async (context: Parameters<typeof create>[0]) => {
+    try {
+      return await create(context)
+    } catch (error) {
+      if (error instanceof APIError && error.message === API_KEY_TEAM_AUTHORIZATION_REVIEW_MESSAGE)
+        throw new APIError('FORBIDDEN', {
+          code: 'TEAM_AUTHORIZATION_REVIEW_REQUIRED',
+          message: error.message,
+        })
+      throw error
+    }
+  }, create) as typeof create
   return plugin
 }
 

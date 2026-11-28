@@ -9,6 +9,7 @@ import type {
 } from 'better-auth/plugins/organization'
 import { sql, type Transaction } from 'kysely'
 import { withAuthAuditTransaction } from './audit.ts'
+import { mcpOAuthConsentTransaction } from './mcp-oauth.ts'
 import { scimMappingDetachRequired } from './organization-context.ts'
 import { isUuid, mapOrganizationSlugConflict } from './organizations.ts'
 
@@ -120,51 +121,74 @@ export function teamTransactionAdapter(
   const adapter = kyselyAdapter(db, { type: 'postgres', transaction: true })
   return (options: BetterAuthOptions) => {
     const instance = adapter(options)
-    instance.transaction = (callback) =>
-      db
-        .transaction()
-        .setIsolationLevel('read committed')
-        .execute((trx) =>
-          heldAuthTransaction.run(true, async () => {
-            // Native models resolve to auth first; the policy also reads public tables.
-            // Set this only for the transaction. A withSchema plugin would also rewrite
-            // qualified auth-table aliases in the application's existing join queries.
-            await sql`SET LOCAL search_path TO auth, public`.execute(trx)
-            let originalError: unknown
-            const transactionAdapter = new Proxy(
-              kyselyAdapter(trx, { type: 'postgres', transaction: false })(options),
-              {
-                get(target, key, receiver) {
-                  const operation = Reflect.get(target, key, receiver)
-                  if (typeof operation !== 'function') return operation
-                  return async (...args: unknown[]) => {
-                    try {
-                      return await Reflect.apply(operation, target, args)
-                    } catch (error) {
-                      if (isOriginalDatabaseError(error)) {
-                        originalError ??= error
-                      }
-                      throw error
+    // Consent issuance reads its just-written native consent before returning the
+    // code. Bind base adapter operations to the same transaction as the new grant.
+    for (const method of [
+      'findOne',
+      'findMany',
+      'count',
+      'create',
+      'update',
+      'updateMany',
+      'delete',
+      'deleteMany',
+    ] as const) {
+      const base = instance[method].bind(instance)
+      Object.assign(instance, {
+        [method]: (...args: unknown[]) => {
+          const consent = mcpOAuthConsentTransaction()
+          if (!consent) return Reflect.apply(base, instance, args)
+          const scoped = kyselyAdapter(consent, { type: 'postgres', transaction: false })(options)
+          return Reflect.apply(scoped[method], scoped, args)
+        },
+      })
+    }
+    instance.transaction = (callback) => {
+      const run = (trx: Transaction<Database>) =>
+        heldAuthTransaction.run(true, async () => {
+          // Native models resolve to auth first; the policy also reads public tables.
+          // Set this only for the transaction. A withSchema plugin would also rewrite
+          // qualified auth-table aliases in the application's existing join queries.
+          await sql`SET LOCAL search_path TO auth, public`.execute(trx)
+          let originalError: unknown
+          const transactionAdapter = new Proxy(
+            kyselyAdapter(trx, { type: 'postgres', transaction: false })(options),
+            {
+              get(target, key, receiver) {
+                const operation = Reflect.get(target, key, receiver)
+                if (typeof operation !== 'function') return operation
+                return async (...args: unknown[]) => {
+                  try {
+                    return await Reflect.apply(operation, target, args)
+                  } catch (error) {
+                    if (isOriginalDatabaseError(error)) {
+                      originalError ??= error
                     }
+                    throw error
                   }
-                },
+                }
               },
+            },
+          )
+          try {
+            return await withAuthAuditTransaction(trx, () =>
+              runInTransaction(trx, async () => callback(transactionAdapter)),
             )
-            try {
-              return await withAuthAuditTransaction(trx, () =>
-                runInTransaction(trx, async () => callback(transactionAdapter)),
-              )
-            } catch (error) {
-              // Native invitation compensation can run after a PostgreSQL error has
-              // already aborted the transaction. Keep that original exception for the
-              // existing caller/logger, rather than its secondary 25P02 cleanup failure.
-              if (originalError !== undefined && databaseErrorCode(error) === '25P02') {
-                throw originalError
-              }
-              throw error
+          } catch (error) {
+            // Native invitation compensation can run after a PostgreSQL error has
+            // already aborted the transaction. Keep that original exception for the
+            // existing caller/logger, rather than its secondary 25P02 cleanup failure.
+            if (originalError !== undefined && databaseErrorCode(error) === '25P02') {
+              throw originalError
             }
-          }),
-        )
+            throw error
+          }
+        })
+      const consent = mcpOAuthConsentTransaction()
+      return consent
+        ? run(consent)
+        : db.transaction().setIsolationLevel('read committed').execute(run)
+    }
     return instance
   }
 }

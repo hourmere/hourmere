@@ -20,6 +20,8 @@ import { PATHS } from '../paths.ts'
 import { type Me, useMe, useSession } from '../session.tsx'
 import { useUnsavedChanges } from '../unsaved-changes.tsx'
 import { BrandSettings } from './BrandSettings.tsx'
+import { CustomRoleRenewal, useCustomRolePermissions } from './custom-roles/CustomRoleRenewal.tsx'
+import { CustomRolesSettings, useCustomRolesSettings } from './custom-roles/CustomRolesSettings.tsx'
 import { ProvisioningTokens } from './ProvisioningTokens.tsx'
 import { ScimTeamMappings } from './ScimTeamMappings.tsx'
 import { SlackIntegrations } from './SlackIntegrations.tsx'
@@ -135,6 +137,29 @@ export function SettingsPage() {
     role.status === 'ready' ? (role.data?.split(',').map((value) => value.trim()) ?? []) : []
   const knownRoles = roles.every((value) => ['owner', 'admin', 'member'].includes(value))
   const currentOwner = knownRoles && roles.includes('owner')
+  const teamBrowser = !personal && me.principal.kind === 'session'
+  const customRolesAvailable = teamBrowser && shell?.customRolesAvailable === true
+  const customRoleRenewalAvailable =
+    customRolesAvailable || (teamBrowser && shell?.customRoleRenewalAvailable === true)
+  const showCustomRoles = customRolesAvailable && roles.includes('owner')
+  const customRoles = useCustomRolesSettings(organizationId, showCustomRoles)
+  const customPermissions = useCustomRolePermissions(organizationId, customRoleRenewalAvailable)
+  const customRoleProof = {
+    organizationId,
+    stepUpProviders: ssoStepUpProviders(me.sso, shell),
+    reloadContext: confirmReload,
+  }
+  const assignedRoles =
+    showCustomRoles && customRoles.view.status === 'ready' && customRoles.view.data?.mode.enabled
+      ? customRoles.view.data.roles
+      : null
+  const brandingPermissions =
+    customRoleRenewalAvailable && customPermissions.status.status === 'ready'
+      ? customPermissions.status.data?.decisions
+      : undefined
+  const canBrand = (operation: string) =>
+    brandingPermissions?.some((decision) => decision.operation === operation && decision.allowed) ??
+    false
   const canEditTeamDetails = currentOwner || (knownRoles && roles.includes('admin'))
   const canStartRecovery = recoveryEnabled && (currentOwner || Boolean(me.ssoRecoveryTeams?.length))
   const blockedBySso =
@@ -227,6 +252,13 @@ export function SettingsPage() {
       <BrandSettings
         key={organizationId}
         organizationId={organizationId}
+        {...(brandingPermissions?.some(({ operation }) => operation === 'branding.read') && {
+          permissionView: {
+            read: canBrand('branding.read'),
+            update: canBrand('branding.update'),
+            upload: canBrand('branding.upload_logo'),
+          },
+        })}
         canManage={
           personal
             ? me.personalOrganizationId === organizationId
@@ -291,6 +323,21 @@ export function SettingsPage() {
           </div>
         </section>
       )}
+      {customRoleRenewalAvailable && (
+        <CustomRoleRenewal
+          key={`custom-role-renewal-${organizationId}`}
+          context={customRoleProof}
+          view={customPermissions}
+          onRenewed={customRoles.reload}
+        />
+      )}
+      {showCustomRoles && (
+        <CustomRolesSettings
+          key={`custom-roles-${organizationId}`}
+          settings={customRoles}
+          context={customRoleProof}
+        />
+      )}
       {!personal && (
         <TeamMembers
           key={`team-members-${organizationId}`}
@@ -300,6 +347,13 @@ export function SettingsPage() {
           onLeft={() => void refresh({ fresh: true })}
           onReload={confirmReload}
           canNominateRecoveryOwner={recoveryEnabled && currentOwner && shell?.ssoStored !== true}
+          customRoleAssignments={
+            assignedRoles && {
+              roles: assignedRoles,
+              context: customRoleProof,
+              reload: customRoles.reload,
+            }
+          }
           ownershipTransferEnabled={
             me.principal.kind === 'session' && shell?.teamOwnershipTransferEnabled === true
           }

@@ -244,6 +244,8 @@ export interface ReadinessTeamContext {
 export interface ReadinessMemberContext extends ReadinessTeamContext {
   userId: string
   role: 'owner' | 'admin' | 'member'
+  /** Live permission decision for the expanded coarse readiness projection. */
+  readTeam?: boolean
   scimResourcesEnabled?: boolean
 }
 
@@ -456,7 +458,9 @@ export async function getTeamMemberReadiness(
     .select(['m.id', 'm.userId', 'u.name', 'u.emailVerified'])
     .where('m.organizationId', '=', actor.organizationId)
     .where('m.id', 'in', [...new Set(memberIds)])
-    .$if(actor.role === 'member', (query) => query.where('m.userId', '=', actor.userId))
+    .$if(!(actor.readTeam ?? actor.role !== 'member'), (query) =>
+      query.where('m.userId', '=', actor.userId),
+    )
     .$if(ctx.scimResourcesEnabled === true, (query) =>
       query.select((eb) => {
         const localBlocks = eb

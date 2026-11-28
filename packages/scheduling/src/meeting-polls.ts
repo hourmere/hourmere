@@ -25,6 +25,7 @@ import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { isUuid, validTimeZone } from './internal.ts'
 import { MEETING_POLL_LIMITS } from './meeting-poll-policy.ts'
+import { allowsManagedTeamOperations, lockVersionedTeamWrite } from './team-permission.ts'
 
 export type MeetingPollStatus = 'open' | 'closed' | 'scheduled' | 'canceled'
 export type MeetingPollAdmissionMode = 'public_link' | 'invited'
@@ -570,7 +571,7 @@ export function requireWriteScope(ctx: ServiceContext) {
  */
 export async function lockAuthority(db: Db, ctx: ServiceContext): Promise<Authority> {
   const { principal } = ctx
-  const { personal, userId } = await lockMeetingPollManager(db, principal)
+  const { personal, userId } = await lockMeetingPollManager(db, principal, principal)
   if (principal.kind === 'api_key') await requireActiveApiKey(db, principal, Date.now)
   return { personal, userId }
 }
@@ -579,6 +580,7 @@ export async function lockAuthority(db: Db, ctx: ServiceContext): Promise<Author
 export async function lockMeetingPollManager(
   db: Db,
   principal: { user: { id: string }; organization: { id: string } },
+  credential?: ServiceContext['principal'],
 ): Promise<Authority & { email: string }> {
   if (!isUuid(principal.user.id) || !isUuid(principal.organization.id)) throw denied()
   const personal = await db
@@ -602,15 +604,32 @@ export async function lockMeetingPollManager(
     .executeTakeFirst()
   if (!organization) throw denied()
   const membership = await db
-    .selectFrom('auth.member')
-    .select('role')
-    .where('organizationId', '=', principal.organization.id)
-    .where('userId', '=', principal.user.id)
-    .forShare()
+    .selectFrom('auth.member as member')
+    .leftJoin('team_member_authorizations as authorization', 'authorization.member_id', 'member.id')
+    .select(['member.role', 'authorization.generation'])
+    .where('member.organizationId', '=', principal.organization.id)
+    .where('member.userId', '=', principal.user.id)
+    .forShare('member')
     .executeTakeFirst()
   if (!membership) throw denied()
   const roles = membership.role.split(',').map((role) => role.trim())
-  if (!personal && !roles.includes('owner') && !roles.includes('admin')) throw denied()
+  if (!personal) {
+    const fixed = roles.includes('owner') || roles.includes('admin')
+    if (!fixed) throw denied()
+    if (credential) {
+      await lockVersionedTeamWrite(db, credential, Date.now)
+      if (
+        !(await allowsManagedTeamOperations(
+          db,
+          credential,
+          ['polls.read'],
+          fixed,
+          membership.generation,
+        ))
+      )
+        throw denied()
+    }
+  }
   return { personal: personal !== undefined, userId: principal.user.id, email: actor.email }
 }
 

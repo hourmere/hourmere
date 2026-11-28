@@ -455,6 +455,7 @@ export function registerTools(
   trustedIp?: string | undefined,
   checkTeamRead?: ToolCall['checkTeamRead'],
   runTeamWrite?: ToolCall['runTeamWrite'],
+  hiddenTeamTools?: ReadonlySet<string>,
 ): void {
   const call: ToolCall = {
     caller,
@@ -469,7 +470,12 @@ export function registerTools(
   const visible = new Map<string, PreparedTool>()
   for (const prepared of tools) {
     const { tool, inputSchema, outputSchema } = prepared
-    if (!isDiscoverable(tool) || !apiKeyAllows(caller, `mcp:${tool.name}`)) continue
+    if (
+      hiddenTeamTools?.has(tool.name) ||
+      !isDiscoverable(tool) ||
+      !apiKeyAllows(caller, `mcp:${tool.name}`)
+    )
+      continue
     visible.set(tool.name, prepared)
     server.registerTool(
       tool.name,

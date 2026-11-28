@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router'
 import { type ListedOrganizationMember, listOrganizationMembers } from '../api/auth.ts'
+import type { CustomTeamRole } from '../api/custom-roles.ts'
 import { errorMessage, isOrganizationContextChanged, RequestError } from '../api/errors.ts'
 import { BreakableText } from '../components/BreakableText.tsx'
 import { MemberReadiness } from '../components/team-members/MemberReadiness.tsx'
@@ -24,6 +25,8 @@ import { UserContentMessage } from '../components/UserContent.tsx'
 import { useI18n } from '../i18n/runtime.tsx'
 import type { MessageKey, UiText } from '../i18n/translate.ts'
 import { PATHS } from '../paths.ts'
+import { CustomRoleAssignmentButton } from './custom-roles/CustomRoleAssignment.tsx'
+import type { RoleProofContext } from './custom-roles/role-write.tsx'
 import { SsoRecoveryNomination } from './sso/SsoRecoveryEnrollment.tsx'
 import { TeamInvitations } from './TeamInvitations.tsx'
 
@@ -113,6 +116,7 @@ export function TeamMembers({
   onLeft = () => {},
   onReload = () => {},
   canNominateRecoveryOwner = false,
+  customRoleAssignments,
   ownershipTransferEnabled = false,
   stepUpProviders,
   onTransferRolesChanged,
@@ -123,6 +127,11 @@ export function TeamMembers({
   onLeft?: () => void
   onReload?: () => void
   canNominateRecoveryOwner?: boolean
+  customRoleAssignments?: {
+    roles: CustomTeamRole[]
+    context: RoleProofContext
+    reload: () => void
+  } | null
   ownershipTransferEnabled?: boolean
   stepUpProviders?: { id: string; displayName: string }[]
   onTransferRolesChanged?: () => void
@@ -145,6 +154,7 @@ export function TeamMembers({
   const [selectedMember, setSelectedMember] = useState<ListedOrganizationMember | null>(null)
   const [reviewOpen, setReviewOpen] = useState(false)
   const [roleReviewOpen, setRoleReviewOpen] = useState(false)
+  const [customRoleReviewOpen, setCustomRoleReviewOpen] = useState(false)
   const [nomineeId, setNomineeId] = useState<string | null>(null)
   const removalOpener = useRef<HTMLButtonElement | null>(null)
   const nominationOpener = useRef<HTMLButtonElement | null>(null)
@@ -180,7 +190,8 @@ export function TeamMembers({
   const canManage =
     roles.every((value) => ['owner', 'admin', 'member'].includes(value)) &&
     (roles.includes('owner') || roles.includes('admin'))
-  const reviewingMember = reviewOpen || selectedMember !== null || roleReviewOpen || nominating
+  const reviewingMember =
+    reviewOpen || selectedMember !== null || roleReviewOpen || customRoleReviewOpen || nominating
   const reviewingTransfer =
     transfer.busy ||
     (transfer.snapshot.status === 'ready' && (transfer.target !== null || transfer.proof !== null))
@@ -356,6 +367,20 @@ export function TeamMembers({
                       }
                       onReload={onReload}
                     />
+                    {role?.trim() === 'owner' &&
+                      customRoleAssignments &&
+                      !own &&
+                      member.role.trim() === 'member' &&
+                      blockers.length === 0 && (
+                        <CustomRoleAssignmentButton
+                          context={customRoleAssignments.context}
+                          roles={customRoleAssignments.roles}
+                          member={member}
+                          disabled={reviewingMember || reviewingTransfer}
+                          onReviewChange={setCustomRoleReviewOpen}
+                          onReload={customRoleAssignments.reload}
+                        />
+                      )}
                     <RemoveMemberButton
                       member={member}
                       role={role}

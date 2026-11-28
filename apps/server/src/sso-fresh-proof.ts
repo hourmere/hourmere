@@ -12,6 +12,7 @@ import { sql, type Transaction } from 'kysely'
 import { z } from 'zod'
 import {
   enabledSsoProtocols,
+  isCustomRoleProofOperation,
   isOwnershipTransferProofOperation,
   requireSsoEnabled,
   requireSsoRetained,
@@ -48,6 +49,7 @@ export interface FreshProofRequest {
   operation: string
   /** Mapping consent can request mailbox proof without SSO. */
   scimMappingConsentEnabled?: boolean
+  customRolesEnabled?: boolean
   /** Trust reduction uses administration proof and points to recovery when step-up is unavailable. */
   proofMode?: 'mailbox' | 'sso' | 'administration' | 'trust_reduction'
   input: unknown
@@ -170,6 +172,8 @@ export async function runWithFreshProof<T>(
   if (request.operation === SCIM_MAPPING_CONSENT) {
     if (!request.scimMappingConsentEnabled)
       throw new DomainError('not_found', 'scim_resources_disabled')
+  } else if (isCustomRoleProofOperation(request.operation)) {
+    if (!request.customRolesEnabled) throw new DomainError('not_found', 'custom_roles_disabled')
   } else if (!ownershipTransfer) {
     requireSsoRetained(deps.capabilities)
   }
@@ -293,7 +297,7 @@ export async function runWithFreshProof<T>(
           AND expires_at > ${now}::timestamptz
           AND (mailbox_proven_at IS NULL OR mailbox_proof_expires_at > ${now}::timestamptz)
           AND requires_sso = ${needsSso}
-          AND (NOT ${independentMailbox || (ownershipTransfer && needsMailbox)} OR mailbox = ${mailbox})
+          AND (NOT ${independentMailbox || ((ownershipTransfer || request.customRolesEnabled) && needsMailbox)} OR mailbox = ${mailbox})
           AND (requires_mailbox OR NOT ${needsMailbox})
           AND (step_up_link_id IS NULL OR (
             step_up_proof_expires_at > ${now}::timestamptz

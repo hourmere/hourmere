@@ -1133,7 +1133,10 @@ describe.skipIf(!serverUrl)('booking notification settings storage', () => {
   })
 
   it.each<[string, Replacement]>([
-    ['settings write permission', ['await assertCanWrite(trx, ctx, row, true)', '']],
+    [
+      'settings write permission',
+      ["await assertCanWrite(trx, ctx, row, true, ['event_notifications.update'])", ''],
+    ],
     [
       'settings organization boundary',
       [

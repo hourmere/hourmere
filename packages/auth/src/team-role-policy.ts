@@ -3,6 +3,7 @@ import { tryGetCurrentAuthEndpointContext } from '@better-auth/core/context'
 import { isPublicTeamSlugFormat } from '@hourmere/core'
 import type { Database, Db } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
+import { advanceAffectedMembership } from '@hourmere/db/custom-role-authorization'
 import { retirePendingOwnershipTransfer } from '@hourmere/db/ownership-transfer'
 import { scimManagedMember, scimProvisioned, scimSuspended } from '@hourmere/db/scim-suspension'
 import type { DBTransactionAdapter, Where } from 'better-auth/adapters'
@@ -474,6 +475,14 @@ export function createTeamRolePolicy(
       .selectFrom('auth.member')
       .selectAll()
       .select(ssoRecoveryOwner)
+      .select((eb) =>
+        eb
+          .selectFrom('team_member_authorizations')
+          .select('generation')
+          .whereRef('member_id', '=', 'auth.member.id')
+          .as('authorizationGeneration'),
+      )
+
       .where('id', '=', memberId)
       .where('organizationId', '=', facts.organizationId)
     if (lock) targetQuery = targetQuery.forUpdate()
@@ -1110,6 +1119,13 @@ export function createTeamRolePolicy(
               .executeTakeFirstOrThrow()
             await recordTeamRoleChange(trx, target, facts.userId, role)
             if (target.role !== role) {
+              await advanceAffectedMembership(
+                trx,
+                facts.organizationId,
+                target.id,
+                target.authorizationGeneration,
+              )
+
               await retirePendingOwnershipTransfer(trx, {
                 organizationId: facts.organizationId,
                 membershipId: target.id,

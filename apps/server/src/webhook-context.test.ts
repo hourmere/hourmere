@@ -16,8 +16,13 @@ import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { recordTeamWriteOrganizationLock, teamWriteTransaction } from '@hourmere/db/team-write'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { DomainError } from '@hourmere/scheduling/errors'
+import {
+  allowsManagedTeamOperations,
+  lockVersionedTeamWrite,
+} from '@hourmere/scheduling/team-permission'
 import { createTestTeam, createTestUser, testContext } from '@hourmere/scheduling/testing'
 import * as webhooks from '@hourmere/webhooks'
+import { requireWorkflowsEnabled } from '@hourmere/workflows/operator-settings'
 import { createMiddleware } from 'hono/factory'
 import { sql } from 'kysely'
 import type { PoolClient } from 'pg'
@@ -89,6 +94,9 @@ function routeCopy(
       writeAuditEvent,
       recordTeamWriteOrganizationLock,
       teamWriteTransaction,
+      allowsManagedTeamOperations,
+      lockVersionedTeamWrite,
+      requireWorkflowsEnabled,
       z,
       DomainError,
       encryptWebhookSecret,
@@ -748,7 +756,7 @@ describe.skipIf(!bootstrap)('webhook browser organization context', () => {
       'inaccessible',
       {
         context: [
-          'expectedOrganizationId.toLowerCase() === principal.organization.id.toLowerCase(),',
+          'ownPersonal !== undefined ||\n          expectedOrganizationId.toLowerCase() === principal.organization.id.toLowerCase(),',
           'true,',
         ],
       },

@@ -67,6 +67,15 @@ export {
   type Principal,
 } from './caller.ts'
 export {
+  currentSessionTeamCeiling,
+  customCredentialPermissions,
+  customOperationTransportAllows,
+  lockCustomRoleMaster,
+  TEAM_AUTHORIZATION_REVIEW_HEADER,
+  teamAuthorizationFacts,
+} from './custom-role-credentials.ts'
+export {
+  getTeamCredentialAuthorization,
   resolveTeamPermissions,
   type TeamPermissionCheck,
   type TeamPermissionDecision,
@@ -80,7 +89,9 @@ export {
   CustomRoleWriteError,
   type CustomRoleWriteResult,
   customRoleWrite,
+  readCustomRoleAssignment,
   readCustomRoles,
+  requireFixedRoleOwner,
 } from './custom-role-writes.ts'
 export { DISPLAY_NAME_MAX_LENGTH, sanitizeInitialDisplayName } from './display-name.ts'
 export {
@@ -248,6 +259,7 @@ export interface OAuthClient {
 }
 
 export interface AuthConfig {
+  customRolesEnabled?: boolean | undefined
   /** Better Auth's own pool, from createAuthPool. */
   pool: pg.Pool
   /** The application database, for the personal organization and membership checks. */
@@ -333,6 +345,7 @@ export function createAuth({
   socialProviders = {},
   socialProviderOptions = {},
   mcpOAuth = false,
+  customRolesEnabled = false,
   organizationListRateLimitMaxForTests,
   mcpMetadataFetcher,
   leaveTeamMember,
@@ -564,7 +577,7 @@ export function createAuth({
         },
       },
       ...(mcpOAuth ? mcpOAuthPlugins(db, baseURL, mcpMetadataFetcher, ssoCapabilities) : []),
-      authAuditRecords(scimResourcesEnabled),
+      authAuditRecords(scimResourcesEnabled, customRolesEnabled),
       organizationOperationRecords(),
       {
         id: 'team-role-policy',

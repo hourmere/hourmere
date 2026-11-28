@@ -19,7 +19,17 @@ import { z } from 'zod'
 import {
   API_KEY_ORGANIZATION_CHANGED_MESSAGE,
   API_KEY_ORGANIZATION_MEMBERSHIP_MESSAGE,
+  API_KEY_TEAM_AUTHORIZATION_REVIEW_MESSAGE,
 } from './api-key-errors.ts'
+import { isApiKeyScope } from './api-key-metadata.ts'
+import {
+  currentSessionTeamCeiling,
+  customCredentialPermissions,
+  lockCustomRoleMaster,
+  TEAM_AUTHORIZATION_REVIEW_HEADER,
+  teamAuthorizationFacts,
+} from './custom-role-credentials.ts'
+import { mcpOAuthForcedConsentReference } from './mcp-oauth.ts'
 import { isUuid } from './organizations.ts'
 
 const transactions = new AsyncLocalStorage<{
@@ -71,7 +81,10 @@ function keyOrganization(row: Row | undefined) {
 }
 
 /** Audit native persistence, never a response hook: failures roll back the changed row. */
-export function authAuditRecords(scimResourcesEnabled = false): BetterAuthPlugin {
+export function authAuditRecords(
+  scimResourcesEnabled = false,
+  customRolesEnabled = false,
+): BetterAuthPlugin {
   const sessionEndpoints = {
     revokeSession: Object.assign((context: Parameters<typeof revokeSession>[0]) => {
       if (!context?.context) return revokeSession(context)
@@ -122,6 +135,15 @@ export function authAuditRecords(scimResourcesEnabled = false): BetterAuthPlugin
         const findOne = adapter.findOne?.bind(adapter)
         if (findOne)
           adapter.findOne = (async (request: Parameters<DBTransactionAdapter['findOne']>[0]) => {
+            const reviewedGrant = mcpOAuthForcedConsentReference()
+            if (
+              reviewedGrant &&
+              request.model === 'oauthConsent' &&
+              request.where?.some(
+                (item) => item.field === 'referenceId' && item.value === reviewedGrant,
+              )
+            )
+              return null
             const found = await findOne<Row>(request)
             const endpoint = tryGetCurrentAuthEndpointContext()
             if (
@@ -233,7 +255,12 @@ export function authAuditRecords(scimResourcesEnabled = false): BetterAuthPlugin
               let before = method === 'create' ? [] : await selectedRows()
               // When resource handlers are enabled, a lifecycle write can revoke keys even
               // for a team whose SCIM connection first appears during this request.
-              const lockKeyOrganizations = scimResourcesEnabled && request.model === 'apikey'
+              const writesKeyBinding =
+                request.model === 'apikey' &&
+                (method === 'create' ||
+                  (method === 'update' && Object.hasOwn((request.update ?? {}) as Row, 'metadata')))
+              const lockKeyOrganizations =
+                request.model === 'apikey' && (scimResourcesEnabled || writesKeyBinding)
               const proposedKey = lockKeyOrganizations
                 ? ((request.data ?? request.update) as Row | undefined)
                 : undefined
@@ -297,6 +324,79 @@ export function authAuditRecords(scimResourcesEnabled = false): BetterAuthPlugin
                       throw new APIError('FORBIDDEN', {
                         message: API_KEY_ORGANIZATION_MEMBERSHIP_MESSAGE,
                       })
+                  }
+                }
+              }
+              let keyCeiling: Awaited<ReturnType<typeof teamAuthorizationFacts>> | undefined
+              if (writesKeyBinding && keyTarget) {
+                const owner =
+                  method === 'create' ? proposedKey?.referenceId : before[0]?.referenceId
+                const source = keyOrganization(before[0])
+                if (typeof owner === 'string' && isUuid(owner)) {
+                  // Recheck live membership after both organization locks and the key lock.
+                  const membership = await trx
+                    .selectFrom('auth.member')
+                    .select('id')
+                    .where('organizationId', '=', keyTarget)
+                    .where('userId', '=', owner)
+                    .executeTakeFirst()
+                  if (!membership)
+                    throw new APIError('FORBIDDEN', {
+                      message: API_KEY_ORGANIZATION_MEMBERSHIP_MESSAGE,
+                    })
+                  if (method === 'update' && source !== keyTarget) {
+                    const boundary = await trx
+                      .selectFrom('team_member_authorizations')
+                      .select('member_id')
+                      .where('user_id', '=', owner)
+                      .where('generation', '>', 1)
+                      .where('organization_id', 'in', source ? [source, keyTarget] : [keyTarget])
+                      .executeTakeFirst()
+                    const pinned =
+                      before[0] &&
+                      (await trx
+                        .selectFrom('team_credential_authorizations')
+                        .select('id')
+                        .where('api_key_id', '=', String(before[0].id))
+                        .executeTakeFirst())
+                    if (pinned || boundary)
+                      throw new APIError('CONFLICT', {
+                        message: API_KEY_ORGANIZATION_CHANGED_MESSAGE,
+                      })
+                  }
+                  if (method === 'create') {
+                    const affected = await trx
+                      .selectFrom('team_member_authorizations')
+                      .select('generation')
+                      .where('member_id', '=', membership.id)
+                      .where('generation', '>', 1)
+                      .executeTakeFirst()
+                    if (affected) {
+                      const master = await lockCustomRoleMaster(trx)
+                      const headers = endpoint?.request?.headers
+                      const reviewed = headers?.get(TEAM_AUTHORIZATION_REVIEW_HEADER)
+                      const session = endpoint?.context.session
+                      const facts =
+                        master &&
+                        (await teamAuthorizationFacts(
+                          trx,
+                          keyTarget,
+                          owner,
+                          customRolesEnabled,
+                          scimResourcesEnabled,
+                        ))
+                      if (
+                        !facts ||
+                        !reviewed ||
+                        !session ||
+                        headers?.get('origin') !== new URL(endpoint.context.baseURL).origin ||
+                        !(await currentSessionTeamCeiling(trx, facts, session.session.id, reviewed))
+                      )
+                        throw new APIError('FORBIDDEN', {
+                          message: API_KEY_TEAM_AUTHORIZATION_REVIEW_MESSAGE,
+                        })
+                      keyCeiling = facts
+                    }
                   }
                 }
               }
@@ -458,7 +558,20 @@ export function authAuditRecords(scimResourcesEnabled = false): BetterAuthPlugin
                             row.enabled === false
                           ? 'api_key.reenabled'
                           : 'api_key.updated'
-                  if (method === 'create') details = { scope: metadata?.scope ?? 'full' }
+                  if (method === 'create') {
+                    const scope = metadata?.scope ?? 'full'
+                    details = { scope }
+                    if (keyCeiling && isApiKeyScope(scope)) {
+                      await trx
+                        .insertInto('team_credential_authorizations')
+                        .values({
+                          ...keyCeiling.ceiling,
+                          api_key_id: targetId,
+                          permission_ids: customCredentialPermissions(keyCeiling, scope),
+                        })
+                        .execute()
+                    }
+                  }
                 } else if (request.model === 'oauthClient') {
                   action = 'oauth.client_registered'
                   targetId = String(row.clientId)
