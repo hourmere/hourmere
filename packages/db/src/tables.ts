@@ -725,7 +725,16 @@ export interface DepartureBookingHandoffs {
   source_booking_id: string;
 }
 
+export interface DepartureHandoffDeliveries {
+  created_at: Generated<Timestamp>;
+  job_id: string;
+  recipient_id: string;
+  request_key: string | null;
+  state: Generated<string>;
+}
+
 export interface DepartureHandoffOffers {
+  close_reason: string | null;
   departing_user_id: string;
   duration_minutes: number;
   expires_at: Timestamp;
@@ -749,6 +758,14 @@ export interface DepartureHandoffRecipients {
   offer_version: number;
   organization_id: string;
   recipient_key: string;
+  source_booking_id: string;
+  token_digest: string | null;
+}
+
+export interface DepartureHandoffSendBudgets {
+  counted_sends: number;
+  organization_id: string;
+  recipient_hash: string;
   source_booking_id: string;
 }
 
@@ -2116,8 +2133,10 @@ export interface DB {
   custom_role_revisions: CustomRoleRevisions;
   custom_roles: CustomRoles;
   departure_booking_handoffs: DepartureBookingHandoffs;
+  departure_handoff_deliveries: DepartureHandoffDeliveries;
   departure_handoff_offers: DepartureHandoffOffers;
   departure_handoff_recipients: DepartureHandoffRecipients;
+  departure_handoff_send_budgets: DepartureHandoffSendBudgets;
   event_type_hosts: EventTypeHosts;
   event_types: EventTypes;
   group_booking_move_receipts: GroupBookingMoveReceipts;

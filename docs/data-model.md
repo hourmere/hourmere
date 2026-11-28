@@ -2838,8 +2838,29 @@ Team deletion cascades through its bookings. Deleting the source removes its off
 recipients and receipt. Deleting the replacement also removes the receipt. Team member
 removal preserves the proposal and receipt's historical actor IDs. A committed receipt
 retains the offer version it references and survives pruning of the recipient mailbox
-rows. Production admission stays disabled while proposal lifecycle, delivery and
-recipient decisions are built. See [the handoff design](member-departure-handoff.md).
+rows. Production admission stays disabled while recipient decisions and rollout acceptance
+are pending. See [the handoff design](member-departure-handoff.md).
+
+Proposal writes and link delivery use the organization → source booking → offer version →
+recipient lock order. A version closes with a withdrawal, supersession or expiry reason.
+Each recipient can hold one purpose-bound capability digest. Recording a decision must clear
+that digest in the same update. Withdrawal and supersession clear the affected version's
+digests in their transaction.
+
+`departure_handoff_deliveries` links the durable intent to its transactional mail job ID.
+The job payload carries only the recipient ID. Delivery derives its authority from the
+committed, still-live proposal version created or resent by an authorized administrator.
+The worker commits the send claim, digest
+rotation and mailbox count before SMTP. Its pending outcome is `unknown` until the worker
+has a definitive result. A duplicate job cannot reclaim an intent. A resend uses a request
+key scoped to the version's recipient row.
+
+`departure_handoff_send_budgets` retains the count and a source-specific mailbox hash until
+the source booking is deleted. The hourly cleanup closes expired versions and removes
+their mailbox and delivery rows 48 hours after the offer deadline. Each run walks eligible
+versions in expiry order, processing up to 10 batches of 100 and deferring locked rows and
+any remaining backlog to later runs. Offer version identifiers and committed consent
+receipts keep their existing retention rules.
 
 ## Audit events
 

@@ -4,6 +4,7 @@ import { createAuth, createAuthPool, createCallerResolver, type Principal } from
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import type { BookingNotifier } from '@hourmere/scheduling'
+import type { EnqueueDepartureHandoffEmail } from '@hourmere/scheduling/departure-handoff-proposals'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { fakeMicrosoft, TEST_CALENDAR_KEY } from '../../../../packages/calendars/src/testing.ts'
 import {
@@ -53,6 +54,7 @@ describe.skipIf(!serverUrl)('departure handoff browser routes', () => {
       notifier?: boolean
       enabled?: boolean
       microsoft?: ReturnType<typeof fakeMicrosoft>
+      enqueue?: EnqueueDepartureHandoffEmail
     } = {},
   ) {
     const readLatest = vi.fn(storage.store.readLatest)
@@ -74,6 +76,7 @@ describe.skipIf(!serverUrl)('departure handoff browser routes', () => {
           departureHandoffs: {
             store: { ...storage.store, readLatest },
             now: () => HANDOFF_NOW,
+            ...(options.enqueue && { enqueue: options.enqueue }),
           },
         }),
       }),
@@ -91,17 +94,18 @@ describe.skipIf(!serverUrl)('departure handoff browser routes', () => {
     return `better-auth.session_token=${encodeURIComponent(`${token}.${signature}`)}`
   }
 
-  async function fixture(state: 'pending' | 'approved' | 'expired' = 'approved') {
+  async function fixture(state: 'pending' | 'approved' | 'expired' | 'unproposed' = 'approved') {
     const f = await createHandoffTestFixture(db)
-    await storage.offer(f.ctx, f.input, { departingUserId: f.departing.id }, (offer) => ({
-      ...offer,
-      ...(state === 'pending' && {
-        approvals: offer.approvals.filter(
-          ({ recipientKey }) => recipientKey !== 'guest@example.test',
-        ),
-      }),
-      ...(state === 'expired' && { expiresAt: HANDOFF_NOW.toString() }),
-    }))
+    if (state !== 'unproposed')
+      await storage.offer(f.ctx, f.input, { departingUserId: f.departing.id }, (offer) => ({
+        ...offer,
+        ...(state === 'pending' && {
+          approvals: offer.approvals.filter(
+            ({ recipientKey }) => recipientKey !== 'guest@example.test',
+          ),
+        }),
+        ...(state === 'expired' && { expiresAt: HANDOFF_NOW.toString() }),
+      }))
     return {
       ...f,
       base: `/api/v1/team/bookings/${f.booking.id}`,
@@ -113,7 +117,8 @@ describe.skipIf(!serverUrl)('departure handoff browser routes', () => {
   }
 
   const preview = (base: string) => `${base}/handoff-preview`
-  const apply = (base: string, offerId: string) => `${base}/handoff-offers/${offerId}/apply`
+  const offers = (base: string) => `${base}/handoff-offers`
+  const apply = (base: string, offerId: string) => `${offers(base)}/${offerId}/apply`
   const post = (headers: Record<string, string>, body: unknown = { version: 1 }) => ({
     method: 'POST',
     body: JSON.stringify(body),
@@ -207,6 +212,162 @@ describe.skipIf(!serverUrl)('departure handoff browser routes', () => {
       404,
       'handoffs_disabled',
     )
+    const path = `${offers(f.base)}/${f.input.offerId}`
+    const recipientId = randomUUID()
+    for (const response of [
+      await app.request(offers(f.base), post(f.headers, { departingUserId: f.departing.id })),
+      await app.request(path, { headers: f.headers }),
+      await app.request(`${path}/withdraw`, post(f.headers)),
+      await app.request(
+        `${path}/resend`,
+        post({ ...f.headers, 'idempotency-key': randomUUID() }, { version: 1, recipientId }),
+      ),
+    ]) {
+      await expectError(response, 404, 'handoffs_disabled')
+    }
+    await expectUnchanged(f)
+  })
+
+  it('authorizes the staged proposal actions and binds them to the exact team and offer version', async () => {
+    const f = await fixture('unproposed')
+    const enqueue = vi.fn<EnqueueDepartureHandoffEmail>(async () => randomUUID())
+    const { app, notify } = application({ enqueue })
+    const collection = offers(f.base)
+    const body = { departingUserId: f.departing.id }
+
+    await expectError(
+      await app.request(
+        collection,
+        post({ ...f.headers, authorization: 'Bearer synthetic' }, body),
+      ),
+      403,
+      'team_management_access_denied',
+    )
+    await expectError(
+      await app.request(
+        collection,
+        post({ ...f.headers, origin: 'https://untrusted.example' }, body),
+      ),
+      403,
+      'forbidden',
+    )
+    await expectError(
+      await app.request(collection, post({ cookie: f.headers.cookie }, body)),
+      409,
+      'organization_context_changed',
+    )
+    expect(enqueue).not.toHaveBeenCalled()
+
+    const proposed = await app.request(collection, post(f.headers, body))
+    expect(proposed.status).toBe(201)
+    expect(proposed.headers.get('cache-control')).toBe('no-store')
+    const first = (await proposed.json()) as {
+      id: string
+      version: number
+      recipients: { id: string; delivery: string }[]
+    }
+    expect(first).toMatchObject({
+      id: expect.any(String),
+      version: 1,
+      state: 'live',
+      recipients: [
+        { id: expect.any(String), delivery: 'queued' },
+        { id: expect.any(String), delivery: 'queued' },
+      ],
+    })
+    expect(enqueue).toHaveBeenCalledTimes(2)
+    const path = `${collection}/${first.id}`
+    const current = await app.request(`${path}?version=1`, { headers: f.headers })
+    expect(current.status).toBe(200)
+    expect(current.headers.get('cache-control')).toBe('no-store')
+    expect(await current.json()).toEqual(first)
+
+    const member = await handoffTestSession(db, f.candidate, f.team.as(f.candidate).organization)
+    const memberHeaders = { ...f.headers, cookie: await cookie(member) }
+    const recipientId = first.recipients[0]?.id
+    if (!recipientId) throw new Error('Missing proposal recipient')
+    const resendBody = { version: 1, recipientId }
+    const resendHeaders = { ...f.headers, 'idempotency-key': randomUUID() }
+    await expectError(
+      await app.request(path, { headers: memberHeaders }),
+      403,
+      'team_management_access_denied',
+    )
+    await expectError(
+      await app.request(
+        `${path}/resend`,
+        post({ ...resendHeaders, authorization: '' }, resendBody),
+      ),
+      403,
+      'team_management_access_denied',
+    )
+    await expectError(
+      await app.request(`${path}/withdraw`, post(memberHeaders)),
+      403,
+      'team_management_access_denied',
+    )
+    await expectError(
+      await app.request(`${path}/resend`, post(resendHeaders, resendBody)),
+      409,
+      'handoff_delivery_pending',
+    )
+    const other = await fixture('unproposed')
+    await expectError(
+      await app.request(`${offers(other.base)}/${first.id}`, { headers: f.headers }),
+      404,
+      'booking_not_found',
+    )
+    await expectError(
+      await app.request(`${collection}/${randomUUID()}`, { headers: f.headers }),
+      404,
+      'handoff_offer_not_found',
+    )
+
+    await db
+      .updateTable('departure_handoff_deliveries')
+      .set({ state: 'failed' })
+      .where('recipient_id', '=', recipientId)
+      .execute()
+    const resent = await app.request(`${path}/resend`, post(resendHeaders, resendBody))
+    expect(resent.status).toBe(200)
+    const replay = await app.request(`${path}/resend`, post(resendHeaders, resendBody))
+    expect(replay.status).toBe(200)
+    expect(await replay.json()).toEqual(await resent.json())
+    expect(enqueue).toHaveBeenCalledTimes(3)
+
+    await db
+      .updateTable('departure_handoff_recipients')
+      .set({ decision: 'approved', decided_at: HANDOFF_NOW.toString() })
+      .where('id', '=', recipientId)
+      .execute()
+    const revised = await app.request(
+      collection,
+      post(f.headers, { ...body, previous: { offerId: first.id, version: 1 } }),
+    )
+    expect(revised.status).toBe(201)
+    expect(await revised.json()).toMatchObject({
+      id: first.id,
+      version: 2,
+      state: 'live',
+      recipients: [{ decision: 'pending' }, { decision: 'pending' }],
+    })
+    expect(
+      await (await app.request(`${path}?version=1`, { headers: f.headers })).json(),
+    ).toMatchObject({ version: 1, state: 'superseded' })
+    await expectError(
+      await app.request(
+        `${path}/resend`,
+        post({ ...resendHeaders, 'idempotency-key': randomUUID() }, resendBody),
+      ),
+      409,
+      'handoff_offer_changed',
+    )
+    const withdrawn = await app.request(`${path}/withdraw`, post(f.headers, { version: 2 }))
+    expect(withdrawn.status).toBe(200)
+    expect(withdrawn.headers.get('cache-control')).toBe('no-store')
+    expect(await withdrawn.json()).toMatchObject({ version: 2, state: 'withdrawn' })
+    expect(enqueue).toHaveBeenCalledTimes(5)
+    expect(notify).not.toHaveBeenCalled()
     await expectUnchanged(f)
   })
 

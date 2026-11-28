@@ -10,6 +10,8 @@
     "./errors": "./src/errors.ts",
     "./text": "./src/text.ts",
     "./departure-handoff-admin": "./src/departure-handoff-admin.ts",
+    "./departure-handoff-delivery": "./src/departure-handoff-delivery.ts",
+    "./departure-handoff-proposals": "./src/departure-handoff-proposals.ts",
     "./departure-handoff-store": "./src/departure-handoff-store.ts",
     "./conferences": "./src/conferences.ts",
     "./notification-settings": "./src/notification-settings.ts",
