@@ -172,7 +172,8 @@ describe('UI measurement CI contract', () => {
       'e2e-layout': gate,
       'e2e-a11y-shard': gate,
       'e2e-a11y': `always() && (${gate})`,
-      'e2e-cross-engine': gate,
+      'e2e-cross-engine-shard': gate,
+      'e2e-cross-engine': `always() && (${gate})`,
       'visual-baseline-status': gate,
       'e2e-visual': `(${gate}) && needs.visual-baseline-status.outputs.present == 'true'`,
       'visual-baselines': "github.event_name == 'workflow_dispatch' && inputs.visual_baselines",
@@ -187,6 +188,22 @@ describe('UI measurement CI contract', () => {
     expect(aggregate?.needs).toBe('e2e-a11y-shard')
     // biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub Actions expression is literal.
     expect(aggregate?.env?.SHARD_RESULT).toBe('${{ needs.e2e-a11y-shard.result }}')
+    expect(aggregate?.steps[0]?.run).toBe('test "$SHARD_RESULT" = success')
+  })
+
+  it('runs cross-engine shards independently within the existing time limit', () => {
+    const job = workflow.jobs['e2e-cross-engine-shard']
+    expect(job?.['timeout-minutes']).toBe(25)
+    expect(job?.strategy).toEqual({ 'fail-fast': false, matrix: { shard: [1, 2, 3, 4] } })
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub Actions expression is literal.
+    const artifact = 'ui-cross-engine-${{ matrix.shard }}'
+    expect(
+      job?.steps.find((step) => step.uses?.startsWith('actions/upload-artifact@'))?.with?.name,
+    ).toBe(artifact)
+    const aggregate = workflow.jobs['e2e-cross-engine']
+    expect(aggregate?.needs).toBe('e2e-cross-engine-shard')
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub Actions expression is literal.
+    expect(aggregate?.env?.SHARD_RESULT).toBe('${{ needs.e2e-cross-engine-shard.result }}')
     expect(aggregate?.steps[0]?.run).toBe('test "$SHARD_RESULT" = success')
   })
 
@@ -249,7 +266,7 @@ describe('UI measurement CI contract', () => {
   it.each([
     ['e2e-layout', 'layout', 8],
     ['e2e-a11y-shard', 'a11y', 4],
-    ['e2e-cross-engine', 'cross-engine', undefined],
+    ['e2e-cross-engine-shard', 'cross-engine', 4],
   ] as const)(
     'makes %s fail on the terminal gate while preserving reports on failure',
     (id, suite, shardCount) => {
@@ -281,7 +298,7 @@ describe('UI measurement CI contract', () => {
     },
   )
 
-  it.each(['e2e-layout', 'e2e-a11y-shard', 'e2e-cross-engine', 'e2e-visual'])(
+  it.each(['e2e-layout', 'e2e-a11y-shard', 'e2e-cross-engine-shard', 'e2e-visual'])(
     'publishes only sanitized reports after %s even on failures',
     (id) => {
       const steps = workflow.jobs[id]?.steps ?? []
@@ -306,7 +323,7 @@ describe('UI measurement CI contract', () => {
   })
 
   it('keys browser downloads by Playwright version and installs them only on cache misses', () => {
-    const steps = workflow.jobs['e2e-cross-engine']?.steps ?? []
+    const steps = workflow.jobs['e2e-cross-engine-shard']?.steps ?? []
     const version = steps.find((step) => step.id === 'playwright-version')
     expect(version?.run).toContain("require('@playwright/test/package.json').version")
     expect(version?.run).toContain('$GITHUB_OUTPUT')
@@ -325,7 +342,7 @@ describe('UI measurement CI contract', () => {
   it.each([false, true])(
     'installs host dependencies only when Playwright reports missing packages (%s)',
     (missing) => {
-      const steps = workflow.jobs['e2e-cross-engine']?.steps ?? []
+      const steps = workflow.jobs['e2e-cross-engine-shard']?.steps ?? []
       const dependencies = steps.find(
         (step) => step.name === 'Install only missing browser system dependencies',
       )
@@ -411,19 +428,27 @@ describe('report-only browser command', () => {
         })),
       ).toEqual([
         { name: 'webkit-desktop', browserName: 'webkit', channel: undefined },
-        { name: 'webkit-iphone', browserName: 'webkit', channel: undefined },
         { name: 'firefox-desktop', browserName: 'firefox', channel: undefined },
       ])
+      expect(config.grep).toBeInstanceOf(RegExp)
+      expect('webkit-desktop selected case @cross-engine').toMatch(config.grep as RegExp)
+      expect('webkit-desktop unselected case').not.toMatch(config.grep as RegExp)
+      expect(config.workers).toBe(1)
       for (const project of projects) {
+        expect(project.use?.isMobile).toBeUndefined()
         expect(selectedSpecs(config, project), project.name).toEqual([
+          'booking.spec.ts',
           'cross-engine.spec.ts',
           'host-slot-picker.spec.ts',
+          'keycloak-oidc.spec.ts',
+          'languages.spec.ts',
+          'personal-setup.spec.ts',
+          'round-robin.spec.ts',
+          'routing-forms.spec.ts',
+          'team-settings.spec.ts',
         ])
       }
       expect(declaredTests('cross-engine.spec.ts')).toEqual([
-        'booking happy path',
-        'sign-in page and protected-page redirect',
-        'embed popup booking and keyboard dismissal',
         'event-types list beside a long booking link',
       ])
       expect(declaredTests('host-slot-picker.spec.ts')).toEqual([

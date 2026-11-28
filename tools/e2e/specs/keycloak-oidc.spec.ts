@@ -45,10 +45,9 @@ async function expectRefusal(page: Page, app: KeycloakFixture) {
   await expectSignedOut(page, app)
 }
 
-test('linked Keycloak sign-in coexists with personal email, Google and Microsoft sign-in', async ({
-  page,
-  keycloak: app,
-}) => {
+test('linked Keycloak sign-in coexists with personal email, Google and Microsoft sign-in', {
+  tag: '@cross-engine',
+}, async ({ page, keycloak: app }) => {
   await page.goto(signInUrl(app))
   await expect(button(page, emailLinkLabel)).toBeVisible()
   for (const label of personalSignInLabels) await expect(button(page, label)).toBeVisible()

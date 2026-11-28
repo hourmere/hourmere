@@ -1,11 +1,17 @@
 import { expect, fillInvitee, pickSlot, test } from '../fixtures.ts'
 
 for (const kind of ['personal', 'team'] as const)
-  test(`anonymous ${kind} booking uses the real API without a session`, async ({ page, app }) => {
+  test(`anonymous ${kind} booking uses the real API without a session`, {
+    tag: kind === 'personal' ? '@cross-engine' : [],
+  }, async ({ page, app }) => {
     let sessionReads = 0
+    let bookedTimeZone: unknown
     page.on('request', (request) => {
       const path = new URL(request.url()).pathname
       if (path === '/api/v1/me' || path.startsWith('/api/auth/')) sessionReads++
+      if (kind === 'personal' && path.endsWith('/bookings') && request.method() === 'POST') {
+        bookedTimeZone = request.postDataJSON()?.invitee?.timeZone
+      }
     })
     const slots = page.waitForResponse(
       (response) => response.url().includes('/slots') && response.status() === 200,
@@ -33,19 +39,35 @@ for (const kind of ['personal', 'team'] as const)
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
       ),
     ).toBe(true)
+    if (kind === 'personal') {
+      const zone = page.getByRole('button', { name: /^Time zone/ })
+      await expect(zone).toContainText('UTC')
+      await zone.click()
+      const search = page.getByRole('combobox', { name: 'Search time zones' })
+      await search.fill('Tokyo')
+      await page.getByRole('option', { name: /Tokyo/ }).click()
+      await expect(zone).toContainText('Asia/Tokyo')
+      await expect(zone).toHaveAttribute('aria-expanded', 'false')
+    }
     await pickSlot(page, page)
     await expect(page.getByRole('button', { name: 'Add a guest' })).toHaveCount(0)
     await fillInvitee(page)
     await page.getByRole('button', { name: 'Confirm booking' }).click()
     await expect(page.getByRole('heading', { name: 'You’re booked', exact: true })).toBeVisible()
+    if (kind === 'personal') {
+      expect(bookedTimeZone).toBe('Asia/Tokyo')
+      const when = page.locator('.details-row').filter({
+        has: page.getByText('When', { exact: true }),
+      })
+      await expect(when).toContainText('Asia/Tokyo, GMT+09:00')
+    }
     expect(sessionReads).toBe(0)
     expect(await app.rows()).toEqual([{ source: 'web', status: 'confirmed' }])
   })
 
-test('an invitee can reschedule then cancel through a scrubbed manage-token fragment', async ({
-  page,
-  app,
-}) => {
+test('an invitee can reschedule then cancel through a scrubbed manage-token fragment', {
+  tag: '@cross-engine',
+}, async ({ page, app }) => {
   const managedRequests: { hasHeader: boolean; queryHasToken: boolean; hasReferrer: boolean }[] = []
   page.on('request', (request) => {
     const url = new URL(request.url())
@@ -62,17 +84,16 @@ test('an invitee can reschedule then cancel through a scrubbed manage-token frag
   await slots
   await pickSlot(page, page)
   await fillInvitee(page)
-  const created = page.waitForResponse(
-    (r) => r.request().method() === 'POST' && r.url().endsWith('/bookings'),
-  )
   await page.getByRole('button', { name: 'Confirm booking' }).click()
-  const result = (await (await created).json()) as { manageToken: string }
-  expect(typeof result.manageToken === 'string').toBe(true)
-  await page.goto(`${app.url}/booking`)
+  const managePage = `${app.url}/booking`
+  const link = await page.getByLabel('Your link to change or cancel this booking').inputValue()
+  expect(link.startsWith(`${managePage}#token=`)).toBe(true)
+  await page.goto(managePage)
   await expect(page.getByRole('heading', { name: 'Open your booking link' })).toBeVisible()
-  await page.evaluate((token) => {
-    window.location.hash = new URLSearchParams({ token }).toString()
-  }, result.manageToken)
+  // Passing the fragment to browser code keeps it out of navigation diagnostics.
+  await page.evaluate((hash) => {
+    window.location.hash = hash
+  }, link.slice(managePage.length))
   await expect.poll(() => page.evaluate(() => window.location.hash === '')).toBe(true)
   const movingSlots = page.waitForResponse((r) => r.url().includes('/slots') && r.status() === 200)
   await page.getByRole('button', { name: 'Reschedule', exact: true }).click()
@@ -226,10 +247,9 @@ test('a stale public form recovers from a real database booking conflict', async
   ])
 })
 
-test('popup booking keeps completion data private and supports cross-frame Escape', async ({
-  page,
-  app,
-}) => {
+test('popup booking keeps completion data private and supports cross-frame Escape', {
+  tag: '@cross-engine',
+}, async ({ page, app }) => {
   await page.goto(app.parentUrl)
   await page.addStyleTag({
     content:
@@ -343,10 +363,9 @@ test('popup booking keeps completion data private and supports cross-frame Escap
   await expect(opener).toBeFocused()
 })
 
-test('account pages require sign-in while public booking remains anonymous', async ({
-  page,
-  app,
-}) => {
+test('account pages require sign-in while public booking remains anonymous', {
+  tag: '@cross-engine',
+}, async ({ page, app }) => {
   await page.goto(`${app.url}/app/settings`)
   await expect(page.getByRole('heading', { name: 'Sign in to Hourmere' })).toBeVisible()
   expect(new URL(page.url()).pathname).toBe('/sign-in')

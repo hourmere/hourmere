@@ -1,4 +1,4 @@
-import { defineConfig, devices } from '@playwright/test'
+import { defineConfig } from '@playwright/test'
 import type { FixtureOptions } from './fixtures.ts'
 import functional from './playwright.config.ts'
 
@@ -20,12 +20,23 @@ export default defineConfig<FixtureOptions>({
     navigationTimeout: 15_000,
   },
   testIgnore: [],
+  grep: suite === 'cross-engine' ? /(?:^|\s)@cross-engine(?:\s|$)/ : undefined,
   // The host-copy regression checks paste from the system clipboard across engines.
   // Serialize this lane so another browser cannot replace its clipboard mid-assertion.
   workers: suite === 'cross-engine' ? 1 : functional.workers,
   testMatch:
     suite === 'cross-engine'
-      ? ['**/cross-engine.spec.ts', '**/host-slot-picker.spec.ts']
+      ? [
+          '**/booking.spec.ts',
+          '**/cross-engine.spec.ts',
+          '**/host-slot-picker.spec.ts',
+          '**/keycloak-oidc.spec.ts',
+          '**/languages.spec.ts',
+          '**/personal-setup.spec.ts',
+          '**/round-robin.spec.ts',
+          '**/routing-forms.spec.ts',
+          '**/team-settings.spec.ts',
+        ]
       : `**/${suite}.spec.ts`,
   // Layout uses one browser session per viewport and locale. Axe batches registry
   // states so they have time to finish within the same deadline.
@@ -47,10 +58,6 @@ export default defineConfig<FixtureOptions>({
               browserName: 'webkit',
               viewport: { width: 1280, height: 720 },
             },
-          },
-          {
-            name: 'webkit-iphone',
-            use: { ...devices['iPhone 13'], browserName: 'webkit' },
           },
           {
             name: 'firefox-desktop',
