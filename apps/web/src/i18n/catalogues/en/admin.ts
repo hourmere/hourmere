@@ -3536,4 +3536,47 @@ export const admin = {
   // Paid booking management
   'Changes are unavailable for this paid booking. Contact your instance operator about cancellation or refunds.':
     'Changes are unavailable for this paid booking. Contact your instance operator about cancellation or refunds.',
+
+  // Team ownership transfer
+  'Team ownership transfer': 'Team ownership transfer',
+  'Only owners can manage admins.': 'Only owners can manage admins.',
+  'Offer ownership to {name}': 'Offer ownership to {name}',
+  'Choose a team member below to offer them ownership.':
+    'Choose a team member below to offer them ownership.',
+  'Review ownership transfer': 'Review ownership transfer',
+  'You will become an admin when the recipient accepts.':
+    'You will become an admin when the recipient accepts.',
+  '{initiator} will become an admin.': '{initiator} will become an admin.',
+  '{recipient} will become the team owner.': '{recipient} will become the team owner.',
+  'Personal spaces, calendars and provider connections stay with their current accounts. API keys and agent authorizations are not transferred.':
+    'Personal spaces, calendars and provider connections stay with their current accounts. API keys and agent authorizations are not transferred.',
+  'Send transfer offer': 'Send transfer offer',
+  'Accept ownership': 'Accept ownership',
+  'Decline transfer': 'Decline transfer',
+  'Revoke transfer': 'Revoke transfer',
+  'Transfer deadline': 'Transfer deadline',
+  'Refresh transfer status': 'Refresh transfer status',
+  'Checking ownership transfer status…': 'Checking ownership transfer status…',
+  'Could not check the transfer status.': 'Could not check the transfer status.',
+  'No pending transfer offer.': 'No pending transfer offer.',
+  'Transfer offer pending.': 'Transfer offer pending.',
+  'Ownership transfer completed.': 'Ownership transfer completed.',
+  'The transfer offer was revoked or declined.': 'The transfer offer was revoked or declined.',
+  'You declined the transfer offer.': 'You declined the transfer offer.',
+  'The transfer offer expired.': 'The transfer offer expired.',
+  'The transfer offer is no longer valid.': 'The transfer offer is no longer valid.',
+  'A transfer offer is already pending.': 'A transfer offer is already pending.',
+  'This transfer offer is no longer available.': 'This transfer offer is no longer available.',
+  'Memberships managed by your identity provider cannot be transferred.':
+    'Memberships managed by your identity provider cannot be transferred.',
+  'The team needs another accepted SSO recovery owner before transferring ownership.':
+    'The team needs another accepted SSO recovery owner before transferring ownership.',
+  'This ownership transfer action is unavailable to you.':
+    'This ownership transfer action is unavailable to you.',
+  'Could not update the transfer. Refresh its status before trying again.':
+    'Could not update the transfer. Refresh its status before trying again.',
+  'Verify your identity for this ownership transfer.':
+    'Verify your identity for this ownership transfer.',
+  'Owner roles change only through a confirmed transfer. The team must retain at least one owner.':
+    'Owner roles change only through a confirmed transfer. The team must retain at least one owner.',
 } as const

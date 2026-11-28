@@ -209,6 +209,11 @@ const schema = z
       ),
     ),
     SCIM_PROVISIONING_ENABLED: scimProvisioningEnabled,
+    TEAM_OWNERSHIP_TRANSFER_ENABLED: optional(
+      z.enum(['true', 'false'], {
+        error: 'TEAM_OWNERSHIP_TRANSFER_ENABLED must be true, false or empty',
+      }),
+    ).transform((value) => value === 'true'),
     // Organization single sign-on. Empty or unset leaves the protocol on.
     SSO_OIDC_ENABLED: optional(
       z.enum(['true', 'false'], { error: 'SSO_OIDC_ENABLED must be true, false or empty' }),

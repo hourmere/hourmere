@@ -1,0 +1,29 @@
+.team-ownership-transfer,
+.team-ownership-transfer-action {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.team-ownership-transfer {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: clamp(0.75rem, 3vw, 1.25rem);
+  margin-block: var(--space-4);
+}
+
+.team-ownership-transfer h3,
+.team-ownership-transfer .form-actions:last-child {
+  margin-block: 0;
+}
+
+.team-ownership-transfer .button,
+.team-ownership-transfer .sso-fresh-proof input,
+.team-ownership-transfer .sso-fresh-proof select {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.team-ownership-transfer-review h4 {
+  margin-block-end: var(--space-2);
+}

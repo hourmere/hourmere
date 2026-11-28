@@ -44,6 +44,7 @@ import {
   redactOneTimeLogDetails,
 } from './one-time-link-privacy.ts'
 import { authenticated, ErrorBody, json, type RouteModule } from './openapi.ts'
+import { OwnershipTransferRateLimitError } from './ownership-transfer.ts'
 import { pwaStatic } from './pwa-static.ts'
 import { createRateLimiter, rateLimit, routeRateLimits } from './rate-limit.ts'
 import { installRestApiKeyScopes } from './rest-scopes.ts'
@@ -172,7 +173,7 @@ function isSlackDestinationPath(path: string): boolean {
   return /^\/api\/v1\/slack-destinations(?:\/|$)/i.test(path)
 }
 
-/** SSO protocol requests and trust writes (including recovery use) carry proof material. */
+/** SSO protocol requests and trust writes, including team ownership, carry proof material. */
 function isSsoTrustPath(path: string, method: string): boolean {
   try {
     path = decodeURIComponent(path)
@@ -181,6 +182,7 @@ function isSsoTrustPath(path: string, method: string): boolean {
     (method === 'PUT' && /^\/api\/v1\/team\/sso\/policy\/?$/i.test(path)) ||
     /^\/api\/v1\/team\/sso\/(?:providers|domains|delegations|recovery)(?:\/|$)/i.test(path) ||
     /^\/api\/v1\/scim\/team-mappings(?:\/|$)/i.test(path) ||
+    /^\/api\/v1\/teams\/[^/]+\/ownership-transfer(?:\/|$)/i.test(path) ||
     /^\/api\/auth\/(?:sign-in\/sso|sso\/(?:callback|oidc\/complete|saml2\/(?:complete|sp\/(?:acs|metadata))))(?:\/|$)/i.test(
       path,
     )
@@ -555,6 +557,10 @@ export function createApp({
       if (err.retryAfterSeconds !== undefined)
         c.header('Retry-After', String(err.retryAfterSeconds))
       return c.json({ error: 'rate_limited' }, 429)
+    }
+    if (err instanceof OwnershipTransferRateLimitError) {
+      c.header('Retry-After', String(err.retryAfterSeconds))
+      return c.json({ error: err.code }, 429)
     }
     if (err instanceof RoutingAdmissionError) return c.json({ error: 'rate_limited' }, 429)
     if (err instanceof MeetingPollKeyMismatchError)

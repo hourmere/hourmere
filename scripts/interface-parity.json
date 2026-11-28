@@ -208,6 +208,26 @@
     "exemption": "browser-session-only",
     "reason": "Leaving a team and resolving its scheduling dependencies requires a verified browser session."
   },
+  "getOwnershipTransfer": {
+    "exemption": "browser-session-only",
+    "reason": "Ownership offers are visible only to eligible team members in a live browser session."
+  },
+  "createOwnershipTransfer": {
+    "exemption": "browser-session-only",
+    "reason": "Offering ownership requires a current owner and fresh browser-bound proof."
+  },
+  "confirmOwnershipTransfer": {
+    "exemption": "browser-session-only",
+    "reason": "Accepting ownership requires the named recipient's fresh browser-bound proof."
+  },
+  "revokeOwnershipTransfer": {
+    "exemption": "browser-session-only",
+    "reason": "Revoking an ownership offer requires a current owner's verified browser session."
+  },
+  "declineOwnershipTransfer": {
+    "exemption": "browser-session-only",
+    "reason": "Declining an ownership offer requires the named recipient's verified browser session."
+  },
   "reconnectConferenceConnection": {
     "exemption": "browser-session-only",
     "reason": "Reconnecting a Zoom identity requires a live browser session and provider consent."

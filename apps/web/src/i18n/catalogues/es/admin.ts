@@ -79,4 +79,53 @@ export const admin = {
   'Your time zone: {zone}': 'Su zona horaria: {zone}',
   'Sign in with this team’s SSO to continue.':
     'Inicie sesión con el SSO de este equipo para continuar.',
+
+  // Team ownership transfer
+  'Team ownership transfer': 'Transferencia de la titularidad del equipo',
+  'Only owners can manage admins.': 'Solo los propietarios pueden gestionar a los administradores.',
+  'Offer ownership to {name}': 'Ofrecer la titularidad a {name}',
+  'Choose a team member below to offer them ownership.':
+    'Seleccione a un miembro del equipo para ofrecerle la titularidad.',
+  'Review ownership transfer': 'Revisar la transferencia de titularidad',
+  'You will become an admin when the recipient accepts.':
+    'Cuando la persona destinataria acepte, pasará a ser administrador.',
+  '{initiator} will become an admin.': '{initiator} pasará a ser administrador.',
+  '{recipient} will become the team owner.': '{recipient} asumirá la titularidad del equipo.',
+  'Personal spaces, calendars and provider connections stay with their current accounts. API keys and agent authorizations are not transferred.':
+    'Los espacios personales, los calendarios y las conexiones con proveedores siguen vinculados a sus cuentas actuales. Las claves de API y las autorizaciones de agentes no se transfieren.',
+  'Send transfer offer': 'Enviar la oferta de transferencia',
+  'Accept ownership': 'Aceptar la titularidad',
+  'Decline transfer': 'Rechazar la transferencia',
+  'Revoke transfer': 'Revocar la transferencia',
+  'Transfer deadline': 'Plazo de transferencia',
+  'Refresh transfer status': 'Actualizar el estado de la transferencia',
+  'Checking ownership transfer status…': 'Comprobando el estado de la transferencia…',
+  'Could not check the transfer status.': 'No se pudo comprobar el estado de la transferencia.',
+  'No pending transfer offer.': 'No hay ninguna oferta de transferencia pendiente.',
+  'Transfer offer pending.': 'Oferta de transferencia pendiente.',
+  'Ownership transfer completed.': 'Se completó la transferencia de titularidad.',
+  'The transfer offer was revoked or declined.': 'La oferta de transferencia se revocó o rechazó.',
+  'You declined the transfer offer.': 'Rechazó la oferta de transferencia.',
+  'The transfer offer expired.': 'La oferta de transferencia venció.',
+  'The transfer offer is no longer valid.': 'La oferta de transferencia ya no es válida.',
+  'A transfer offer is already pending.': 'Ya hay una oferta de transferencia pendiente.',
+  'This transfer offer is no longer available.':
+    'Esta oferta de transferencia ya no está disponible.',
+  'Memberships managed by your identity provider cannot be transferred.':
+    'Las membresías gestionadas por su proveedor de identidad no pueden participar en la transferencia.',
+  'The team needs another accepted SSO recovery owner before transferring ownership.':
+    'Antes de transferir la titularidad, otra persona del equipo debe haber aceptado el rol de propietario de recuperación de SSO.',
+  'This ownership transfer action is unavailable to you.':
+    'Esta acción de transferencia de titularidad no está disponible para usted.',
+  'Could not update the transfer. Refresh its status before trying again.':
+    'No se pudo actualizar la transferencia. Actualice su estado antes de volver a intentarlo.',
+  'Verify your identity for this ownership transfer.':
+    'Verifique su identidad para transferir la titularidad.',
+  'Try again in {0} seconds.': 'Vuelva a intentarlo en {0} segundos.',
+  'Reload team': 'Volver a cargar el equipo',
+  'Unnamed team member': 'Miembro del equipo sin nombre',
+  'Too many requests. Please wait and try again later.':
+    'Demasiadas solicitudes. Espere y vuelva a intentarlo más tarde.',
+  'Owner roles change only through a confirmed transfer. The team must retain at least one owner.':
+    'La titularidad solo cambia mediante una transferencia confirmada. El equipo debe conservar al menos un propietario.',
 }

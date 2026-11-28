@@ -14,7 +14,7 @@ const INVITEE_CHECKOUT_ROUTES: Readonly<Record<string, string>> = {
   cancelPublicCheckout: 'POST /api/v1/public/checkout/cancel',
 }
 
-// These reads explicitly ship on all three interfaces. Webhook reads are also covered by path.
+// These reads require a mapping or an explicit exemption. Webhook reads are also covered by path.
 // Exact routes prevent an operation ID from moving silently.
 const REQUIRED_READS: Readonly<Record<string, string>> = {
   listMeetingPolls: 'GET /api/v1/meeting-polls',
@@ -31,6 +31,7 @@ const REQUIRED_READS: Readonly<Record<string, string>> = {
   listWebhooks: 'GET /api/v1/webhooks',
   listWebhookDeliveries: 'GET /api/v1/webhooks/{id}/deliveries',
   listWorkflowRuns: 'GET /api/v1/workflows/{id}/runs',
+  getOwnershipTransfer: 'GET /api/v1/teams/{teamId}/ownership-transfer',
 }
 
 const KNOWN_GAPS_PATH = 'scripts/interface-parity-known-gaps.json'

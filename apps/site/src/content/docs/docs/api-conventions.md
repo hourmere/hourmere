@@ -692,9 +692,9 @@ an otherwise ineligible address.
 
 Only a current verified team owner may assign the fixed `admin` or `member` role.
 Owner targets cannot be demoted, including by themselves; only their own safe departure
-is allowed. Admins cannot change roles, including their own. Assigning `owner` and custom roles is
-unavailable; full ownership transfer is not offered at launch. Stored comma-separated
-roles are checked as exact role tokens.
+is allowed. Admins cannot change roles, including their own. Ordinary role management
+blocks assignment of `owner` and custom roles. Stored comma-separated roles are checked
+as exact role tokens.
 
 Role changes, removal and departure retain the same organization row `FOR UPDATE` lock
 and defensive current-owner check inside the membership write transaction. Owner-target
@@ -712,14 +712,35 @@ denial instead.
 Team deletion at `/api/auth/organization/delete` returns
 `403 TEAM_OPERATION_NOT_SUPPORTED`, including trusted server-side calls, before any
 cascade can delete booking history. Owner assignments through `update-member-role`
-return `403 TEAM_MANAGEMENT_ACCESS_DENIED`; this instance exposes no separate ownership
-transfer endpoint. Personal-organization protections remain unchanged.
+return `403 TEAM_MANAGEMENT_ACCESS_DENIED`. Personal-organization protections remain unchanged.
 
 These rules apply to direct Better Auth requests as well as the web app. Policy denials
 use HTTP 403 `TEAM_MANAGEMENT_ACCESS_DENIED` in Better Auth's error shape; missing and
 inaccessible role targets receive the same denial. Browser context mismatches use the
 409 or uniform 403 rules above. The server-only Better Auth add-member operation is not an HTTP
 onboarding path; joining a team requires accepting a member invitation.
+
+### Team ownership transfer
+
+Instances can enable a dedicated transfer in **Settings → Members** with
+`TEAM_OWNERSHIP_TRANSFER_ENABLED=true`. A verified current owner offers ownership to a
+verified, manually managed member or admin. For 24 hours the named recipient can accept
+or decline the offer. Acceptance promotes the recipient to owner and makes the initiator
+an admin in the same transaction. The current roles stay in effect while the offer is
+pending and after a decline, revocation, expiry or invalidation. Personal calendars,
+provider authorizations and existing agent credentials retain their original bindings.
+
+The dashboard uses `GET` and `POST` on `/api/v1/teams/{teamId}/ownership-transfer` and
+`POST` on its `/{transferId}/confirm`, `/{transferId}/decline` and `/{transferId}/revoke`
+subpaths. Each request needs a verified browser session and `X-Expected-Organization-Id`.
+Writes also need the exact instance `Origin`. Requests carrying `Authorization` are
+refused. The offer and acceptance require fresh mailbox verification or enforced SSO
+step-up. Revocation is available to current verified owners, while only the original
+recipient can decline. These operations have no MCP or CLI equivalent.
+
+中文：实例开启功能后，所有者可在「设置 → 成员」向已验证的普通成员或管理员发起转移。
+接收人可在 24 小时内接受或拒绝。接受后，接收人成为所有者，发起人成为管理员。
+发起和接受需要在各自的浏览器会话重新验证。个人日历、第三方授权和现有代理凭证仍绑定原身份。
 
 ### Team invitation delivery summaries
 

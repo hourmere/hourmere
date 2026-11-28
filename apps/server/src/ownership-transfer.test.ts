@@ -22,6 +22,7 @@ import {
 import {
   confirmOwnershipTransfer,
   createOwnershipTransfer,
+  declineOwnershipTransfer,
   type OwnershipTransferDeps,
   revokeOwnershipTransfer,
   viewOwnershipTransfer,
@@ -163,6 +164,14 @@ describe.skipIf(!serverUrl)('ownership transfer service', () => {
     return confirmOwnershipTransfer(d, actor.principal, actor.headers, f.team.id, id, {
       ...(proofAttemptId === undefined ? {} : { proofAttemptId }),
     })
+  }
+
+  function decline(f: Fixture, id: string, actor = f.recipient) {
+    return declineOwnershipTransfer(deps, actor.principal, actor.headers, f.team.id, id)
+  }
+
+  function view(f: Fixture, actor: Browser, id?: string) {
+    return viewOwnershipTransfer(deps, actor.principal, actor.headers, f.team.id, id)
   }
 
   // Seed a completed mailbox ceremony through the same token and attempt guards.
@@ -310,6 +319,11 @@ describe.skipIf(!serverUrl)('ownership transfer service', () => {
         ]),
       )
       expect(await state(id)).toEqual({ state: 'confirmed', terminal_at: expect.any(Date) })
+      await expect(view(f, f.owner)).resolves.toBeNull()
+      const terminal = { id, state: 'confirmed', expiresAt: expect.any(String) }
+      await expect(view(f, f.owner, id)).resolves.toEqual(terminal)
+      await expect(view(f, f.recipient, id)).resolves.toEqual(terminal)
+      await expect(view(f, f.other, id)).resolves.toBeNull()
       expect(await attempt(proof)).toEqual({ consumed_at: expect.any(Date) })
       const events = await journal(f)
       expect(events[0]).toMatchObject({
@@ -467,6 +481,11 @@ describe.skipIf(!serverUrl)('ownership transfer service', () => {
       await result
     }
     expect(await state(id)).toMatchObject({ state: 'invalidated' })
+    await expect(view(f, f.owner, id)).resolves.toEqual({
+      id,
+      state: 'invalidated',
+      expiresAt: expect.any(String),
+    })
     expect(await attempt(proof)).toEqual({ consumed_at: null })
     expect(await members(f)).toEqual(
       expect.arrayContaining([{ id: f.owner.membershipId, role: 'owner' }]),
@@ -485,6 +504,8 @@ describe.skipIf(!serverUrl)('ownership transfer service', () => {
     await expect(confirm(f, id, proof)).rejects.toMatchObject({
       code: 'team_management_access_denied',
     })
+    await expect(decline(f, id)).rejects.toMatchObject({ code: 'team_management_access_denied' })
+    await expect(view(f, f.recipient, id)).resolves.toBeNull()
     expect(
       (await journal(f)).filter(
         ({ action }) => action === 'organization.ownership_transfer_invalidated',
@@ -673,6 +694,74 @@ describe.skipIf(!serverUrl)('ownership transfer service', () => {
       credential_id: f.other.principal.sessionId,
       details: {},
     })
+  })
+
+  it('allows only the original verified recipient to decline without consuming proof or changing roles', async () => {
+    const f = await fixture({ survivor: true })
+    const { id, proof } = await prepared(f)
+    for (const actor of [f.owner, f.other]) {
+      await expect(decline(f, id, actor)).rejects.toMatchObject({
+        code: 'team_management_access_denied',
+      })
+    }
+    await expect(
+      revokeOwnershipTransfer(deps, f.recipient.principal, f.recipient.headers, f.team.id, id),
+    ).rejects.toMatchObject({ code: 'team_management_access_denied' })
+    await assertPending(f, id, proof)
+
+    await expect(decline(f, id)).resolves.toEqual({ state: 'revoked' })
+    await expect(decline(f, id)).rejects.toMatchObject({ code: 'ownership_transfer_unavailable' })
+    await expect(confirm(f, id, proof)).rejects.toMatchObject({
+      code: 'ownership_transfer_unavailable',
+    })
+    await expect(view(f, f.owner, id)).resolves.toEqual({
+      id,
+      state: 'revoked',
+      expiresAt: expect.any(String),
+    })
+    expect(await attempt(proof)).toEqual({ consumed_at: null })
+    expect(await members(f)).toEqual(
+      expect.arrayContaining([
+        { id: f.owner.membershipId, role: 'owner' },
+        { id: f.recipient.membershipId, role: 'member' },
+      ]),
+    )
+    const events = await journal(f)
+    expect(events.map(({ action }) => action)).toEqual([
+      'organization.ownership_transfer_offered',
+      'organization.ownership_transfer_revoked',
+    ])
+    expect(events[1]).toMatchObject({
+      actor_id: f.recipient.principal.user.id,
+      credential_id: f.recipient.principal.sessionId,
+      details: {},
+    })
+    expect(await notices(f)).toHaveLength(1)
+  })
+
+  it('reports a known offer past its database deadline to its participants without retiring it on read', async () => {
+    const f = await fixture({ survivor: true })
+    const { id } = await offer(f)
+    await db.transaction().execute(async (trx) => {
+      await sql`SET LOCAL session_replication_role = replica`.execute(trx)
+      await sql`
+        UPDATE organization_ownership_transfers
+        SET expires_at = clock_timestamp() - interval '1 minute',
+            created_at = clock_timestamp() - interval '24 hours 1 minute'
+        WHERE id = ${id}::uuid`.execute(trx)
+    })
+
+    await expect(view(f, f.recipient)).resolves.toBeNull()
+    await expect(view(f, f.other, id)).resolves.toBeNull()
+    await expect(view(f, f.recipient, id)).resolves.toEqual({
+      id,
+      state: 'expired',
+      expiresAt: expect.any(String),
+    })
+    expect(await state(id)).toEqual({ state: 'pending', terminal_at: null })
+    expect((await journal(f)).map(({ action }) => action)).toEqual([
+      'organization.ownership_transfer_offered',
+    ])
   })
 
   it('shares aligned create and revoke budgets across owners and allows revocation of a carried offer', async () => {

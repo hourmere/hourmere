@@ -79,4 +79,54 @@ export const admin = {
   'Your time zone: {zone}': 'Votre fuseau horaire : {zone}',
   'Sign in with this team’s SSO to continue.':
     'Connectez-vous avec le SSO de cette équipe pour continuer.',
+
+  // Team ownership transfer
+  'Team ownership transfer': 'Transfert de la propriété de l’équipe',
+  'Only owners can manage admins.': 'Seuls les propriétaires peuvent gérer les administrateurs.',
+  'Offer ownership to {name}': 'Proposer la propriété à {name}',
+  'Choose a team member below to offer them ownership.':
+    'Sélectionnez un membre de l’équipe ci-dessous pour lui proposer la propriété.',
+  'Review ownership transfer': 'Vérifier le transfert de propriété',
+  'You will become an admin when the recipient accepts.':
+    'Lorsque la personne destinataire acceptera, vous deviendrez administrateur.',
+  '{initiator} will become an admin.': '{initiator} deviendra administrateur.',
+  '{recipient} will become the team owner.': '{recipient} deviendra propriétaire de l’équipe.',
+  'Personal spaces, calendars and provider connections stay with their current accounts. API keys and agent authorizations are not transferred.':
+    'Les espaces personnels, les calendriers et les connexions aux fournisseurs restent liés à leurs comptes actuels. Les clés API et les autorisations des agents ne sont pas transférées.',
+  'Send transfer offer': 'Envoyer la proposition de transfert',
+  'Accept ownership': 'Accepter la propriété',
+  'Decline transfer': 'Refuser le transfert',
+  'Revoke transfer': 'Révoquer le transfert',
+  'Transfer deadline': 'Date limite du transfert',
+  'Refresh transfer status': 'Actualiser l’état du transfert',
+  'Checking ownership transfer status…': 'Vérification de l’état du transfert…',
+  'Could not check the transfer status.': 'Impossible de vérifier l’état du transfert.',
+  'No pending transfer offer.': 'Aucune proposition de transfert en attente.',
+  'Transfer offer pending.': 'Proposition de transfert en attente.',
+  'Ownership transfer completed.': 'Le transfert de propriété est terminé.',
+  'The transfer offer was revoked or declined.':
+    'La proposition de transfert a été révoquée ou refusée.',
+  'You declined the transfer offer.': 'Vous avez refusé la proposition de transfert.',
+  'The transfer offer expired.': 'La proposition de transfert a expiré.',
+  'The transfer offer is no longer valid.': 'La proposition de transfert n’est plus valide.',
+  'A transfer offer is already pending.': 'Une proposition de transfert est déjà en attente.',
+  'This transfer offer is no longer available.':
+    'Cette proposition de transfert n’est plus disponible.',
+  'Memberships managed by your identity provider cannot be transferred.':
+    'Les adhésions gérées par votre fournisseur d’identité ne permettent pas ce transfert.',
+  'The team needs another accepted SSO recovery owner before transferring ownership.':
+    'L’équipe a besoin d’un autre propriétaire ayant accepté le rôle de récupération SSO avant de transférer la propriété.',
+  'This ownership transfer action is unavailable to you.':
+    'Cette action de transfert de propriété n’est pas disponible pour vous.',
+  'Could not update the transfer. Refresh its status before trying again.':
+    'Impossible de mettre à jour le transfert. Actualisez son état avant de réessayer.',
+  'Verify your identity for this ownership transfer.':
+    'Vérifiez votre identité pour ce transfert de propriété.',
+  'Try again in {0} seconds.': 'Réessayez dans {0} secondes.',
+  'Reload team': 'Recharger l’équipe',
+  'Unnamed team member': 'Membre de l’équipe sans nom',
+  'Too many requests. Please wait and try again later.':
+    'Trop de requêtes. Attendez avant de réessayer.',
+  'Owner roles change only through a confirmed transfer. The team must retain at least one owner.':
+    'Le rôle de propriétaire ne change qu’après un transfert confirmé. L’équipe doit garder au moins un propriétaire.',
 }
