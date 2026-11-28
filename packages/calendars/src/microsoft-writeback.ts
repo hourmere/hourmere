@@ -3,6 +3,7 @@ import type { Db } from '@hourmere/db'
 import { latestBookingId } from '@hourmere/scheduling/booking-chain'
 import { sql } from 'kysely'
 import { z } from 'zod'
+import { canWriteHandoffReplacement } from './departure-handoff-provider-access.ts'
 import { type CalendarDeps, getMicrosoftCalendarToken } from './index.ts'
 import {
   hasMicrosoftCalendarWriteAccess,
@@ -326,6 +327,37 @@ const projectionOf = (value: { start: Date; end: Date; seatCount?: number }): Ev
 const sameProjection = (a: EventProjection, b: EventProjection) =>
   a.start === b.start && a.end === b.end && a.seatCount === b.seatCount
 
+async function isCancelledHandoffSource(db: Db, desired: DesiredEvent) {
+  return (
+    !desired.active &&
+    desired.bookingId !== undefined &&
+    Boolean(
+      await db
+        .selectFrom('departure_booking_handoffs')
+        .select('source_booking_id')
+        .where('source_booking_id', '=', desired.bookingId)
+        .executeTakeFirst(),
+    )
+  )
+}
+
+async function recordHandoffCleanup(
+  db: Db,
+  sourceBookingId: string | undefined,
+  target: Destination,
+  status: 'pending' | 'complete' | 'unresolved',
+) {
+  if (!sourceBookingId || !target.connectionId) return
+  await db
+    .updateTable('departure_handoff_calendar_cleanup')
+    .set({ status })
+    .where('source_booking_id', '=', sourceBookingId)
+    .where('calendar_id', '=', target.calendarId)
+    .where('connection_id', '=', target.connectionId)
+    .where('provider', '=', 'microsoft')
+    .execute()
+}
+
 async function claim(
   db: Db,
   payload: CalendarWritePayload,
@@ -351,6 +383,7 @@ async function claim(
     const changed = priorRevision !== undefined && priorRevision !== desired.revision
     if (!state.nextAttemptAt && !changed) return
     const attempts = changed ? 0 : state.attempts
+    const handoffSource = await isCancelledHandoffSource(trx, desired)
     if (attempts >= maxAttempts) {
       await setState(
         trx,
@@ -362,11 +395,18 @@ async function claim(
           state.lookupOnly ? 'outcome_unknown' : (state.reason ?? 'provider_unavailable'),
         ),
       )
+      if (handoffSource) await recordHandoffCleanup(trx, desired.bookingId, target, 'unresolved')
       return
     }
-    const possiblyCreated = state.lookupOnly === true
+    // A formerly mapped handoff copy can still exist after losing its local mapping.
+    const possiblyCreated =
+      state.lookupOnly === true ||
+      (handoffSource &&
+        !mapping &&
+        (Boolean(state.mappedBookingId) || state.status === 'succeeded'))
     if (!desired.active && !mapping && !possiblyCreated) {
       await setState(trx, payload, target, null)
+      if (handoffSource) await recordHandoffCleanup(trx, desired.bookingId, target, 'complete')
       return
     }
     const mayCreate = !mapping && desired.active && state.teamsStatus !== 'pending'
@@ -415,7 +455,7 @@ async function claim(
       patchProjections,
     } satisfies WriteState
     await setState(trx, payload, target, lease)
-    return { lease, possiblyCreated, desired, mapping, priorPatches }
+    return { lease, possiblyCreated, desired, mapping, priorPatches, handoffSource }
   })
 }
 
@@ -694,7 +734,7 @@ async function writeDestination(
   const clock = deps.now ?? Date.now
   const attempt = await claim(deps.db, payload, target, clock)
   if (!attempt) return
-  const { lease, possiblyCreated, desired, mapping, priorPatches } = attempt
+  const { lease, possiblyCreated, desired, mapping, priorPatches, handoffSource } = attempt
   const { connectionId } = target
   if (!connectionId) {
     // A group slot retains its pinned destination after explicit disconnection.
@@ -769,6 +809,15 @@ async function writeDestination(
             }
           : state,
       )
+      if (handoffSource) {
+        const cleanupStatus =
+          state.status === 'succeeded'
+            ? 'complete'
+            : state.status === 'failed'
+              ? 'unresolved'
+              : 'pending'
+        await recordHandoffCleanup(trx, desired.bookingId, target, cleanupStatus)
+      }
       return changed
     }
     let patchSent = false
@@ -801,6 +850,12 @@ async function writeDestination(
       return finish('calendar_unavailable')
     if (connection.status !== 'active') return finish('needs_reauth')
     if (!hasMicrosoftCalendarWriteAccess(connection.scopes)) return finish('permissions_missing')
+    if (
+      desired.active &&
+      'bookingId' in payload &&
+      !(await canWriteHandoffReplacement(trx, payload.bookingId, target.userId))
+    )
+      return finish('calendar_unavailable')
 
     const resource =
       'bookingId' in payload ? ['booking', payload.bookingId] : ['group', payload.groupSlotId]
@@ -872,6 +927,11 @@ async function writeDestination(
           if (possiblyCreated && (await findRelocatedEvent(scope)).relocated) throw eventConflict()
           if (!(await desiredEvent(trx, payload, target))?.active) {
             if (possiblyCreated) return finish('provider_unavailable', backoff)
+          } else if (
+            'bookingId' in payload &&
+            !(await canWriteHandoffReplacement(trx, payload.bookingId, target.userId))
+          ) {
+            return finish('calendar_unavailable')
           } else {
             const original = lease.createProjection
             // A replay keeps the original POST projection and transaction ID.
@@ -955,8 +1015,9 @@ async function writeDestination(
         return finish('calendar_unavailable')
       return finish('provider_unavailable', backoff, posted || possiblyCreated)
     }
-    const joinUrl =
-      desired.active && includeTeams ? (event?.teamsJoinUrl ?? lease.teamsJoinUrl) : undefined
+    // A handoff cancellation notice may still need the old root's last validated URL.
+    const keepJoinUrl = includeTeams && (desired.active || handoffSource)
+    const joinUrl = keepJoinUrl ? (event?.teamsJoinUrl ?? lease.teamsJoinUrl) : undefined
     return complete(
       {
         status: 'succeeded',

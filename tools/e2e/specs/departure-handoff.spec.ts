@@ -206,7 +206,9 @@ test.describe('provider ambiguity after commit', () => {
 
     await refresh.click()
     await expect(status).toContainText('The replacement meeting link is being prepared.')
-    await expect(status).toContainText('Cleanup of the original meeting is pending.')
+    await expect(status).toContainText(
+      'Cleanup in the original calendar or meeting account is pending.',
+    )
     await handoff.loseProviderResponse(replacementId)
     await refresh.click()
     await expect(status).toContainText('The replacement meeting link could not be verified.')
@@ -245,7 +247,11 @@ test.describe('provider ambiguity after commit', () => {
     await page.goto(url)
     await region.getByRole('button', { name: 'Preview handoff' }).click()
     await expect(status).toContainText('The replacement meeting link could not be verified.')
-    await expect(status).not.toContainText('Cleanup of the original meeting is pending.')
-    await expect(status).not.toContainText('Cleanup of the original meeting could not be verified.')
+    await expect(status).not.toContainText(
+      'Cleanup in the original calendar or meeting account is pending.',
+    )
+    await expect(status).not.toContainText(
+      'Cleanup in the original calendar or meeting account could not be verified.',
+    )
   })
 })

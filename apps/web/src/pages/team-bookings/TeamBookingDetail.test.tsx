@@ -283,7 +283,9 @@ describe('team booking handoff', () => {
       await handoff.findByText('Booking handoff completed.')
       expect(handoff.getByText(/The replacement meeting link could not be verified/)).toBeDefined()
       expect(
-        handoff.getByText(/Cleanup of the original meeting could not be verified/),
+        handoff.getByText(
+          /Cleanup in the original calendar or meeting account could not be verified/,
+        ),
       ).toBeDefined()
       expect(
         handoff.getByRole('link', { name: 'View replacement booking' }).getAttribute('href'),
