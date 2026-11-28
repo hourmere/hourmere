@@ -89,6 +89,25 @@
   opacity: 0.6;
 }
 
+.team-handoff-proposal-draft,
+.team-handoff-proposal-status {
+  margin-top: var(--space-5);
+}
+
+.team-handoff-proposal-draft input {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.team-handoff-proposal-status article {
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-3);
+}
+
+.team-handoff-proposal-status :is(h5, article p) {
+  margin-block: 0 var(--space-2);
+}
+
 .team-bookings-page .details {
   grid-template-columns: minmax(0, 1fr);
   row-gap: 0.35rem;

@@ -1,0 +1,11 @@
+.departure-handoff-run {
+  min-width: 0;
+  margin-block: 1rem;
+  border-block-start: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+
+.departure-handoff-run .button {
+  max-inline-size: 100%;
+  white-space: normal;
+}

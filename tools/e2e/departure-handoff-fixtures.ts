@@ -65,6 +65,7 @@ interface HandoffApp {
   offer: (state?: 'approved' | 'pending') => Promise<void>
   participantLinks: () => Promise<ParticipantLinks>
   deliverParticipantLinks: () => Promise<ParticipantLinks>
+  deliverResentLink: (recipient: keyof ParticipantLinks) => Promise<URL>
   processRun: () => Promise<void>
   participantDecisions: () => Promise<{ booker: string | null; guest: string | null }>
   expireOffer: () => void
@@ -284,7 +285,7 @@ export const test = base.extend<{
           throw new Error('Expected the single-item run to finish without another wake')
         },
       })
-      async function deliverParticipantLinks() {
+      async function deliverProposalMail() {
         const jobs = await sql<{ id: string; recipient_id: string }>`
           DELETE FROM e2e_handoff_jobs WHERE name = ${DEPARTURE_HANDOFF_EMAIL_JOB}
           RETURNING id, payload->>'recipientId' AS recipient_id
@@ -314,6 +315,10 @@ export const test = base.extend<{
             jobRun(id),
           )
         }
+        return links
+      }
+      async function deliverParticipantLinks() {
+        const links = await deliverProposalMail()
         const bookerLink = links.get(booker)
         const guestLink = links.get(guest)
         if (!bookerLink || !guestLink) throw new Error('Expected both participant emails')
@@ -379,6 +384,12 @@ export const test = base.extend<{
           return deliverParticipantLinks()
         },
         deliverParticipantLinks,
+        async deliverResentLink(recipient) {
+          const links = await deliverProposalMail()
+          const link = links.get(recipient === 'booker' ? booker : guest)
+          if (links.size !== 1 || !link) throw new Error('Expected a single resend email')
+          return link
+        },
         async processRun() {
           if (!runJob.handler) throw new Error('Expected the handoff run worker')
           const { rows } = await sql<{ id: string; payload: unknown }>`

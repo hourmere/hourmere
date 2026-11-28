@@ -278,7 +278,7 @@ inherits the setting from the app, while a custom deployment must pass it explic
 both roles. Restart or recreate the processes together. Keep production at the default
 until the operator has accepted the flow.
 
-With the setting off, the booking detail hides handoff actions, team handoff endpoints
+With the setting off, the booking detail and Teams settings hide handoff actions, team handoff endpoints
 return `handoffs_disabled` for authorized callers, and participant capabilities return the
 unavailable-link response. Offer email and automatic apply workers stop processing handoff
 work. An ordinary booking cancellation or creation already committed by a handoff still
@@ -312,8 +312,13 @@ disposable PostgreSQL databases and fake provider/mail transports.
 ### Staged administrator flow
 
 The browser and REST flows use the production PostgreSQL store. An authorized
-owner or admin opens the source in Team bookings and selects **Preview handoff**. The preview
-shows the proposed host, time and location type. A slot judged unavailable on the current
+owner or admin opens the source in **Team bookings** and selects **Preview handoff**. The preview
+shows the proposed host, time and location type. **Create proposal** sends invitations for
+an available preview with no existing proposal. An optional start time overrides the original
+time and is checked when the proposal is created. **Refresh handoff** shows the version,
+expiry, and the decision, delivery and resend status for each recipient, identified by
+their role. **Resend** and **Withdraw** require confirmation. **New version** opens
+a fresh proposal after decline, expiry or withdrawal. A slot judged unavailable on the current
 event grid, calendar uncertainty, a changed offer, any outstanding approval, or an expired
 offer prevents confirmation. An expired offer leaves the source intact. If a slot changed
 since the preview, refresh it before trying again. A different offer requires fresh consent.
@@ -426,8 +431,12 @@ another notice.
 
 ### Staged automatic handoff runs
 
-After a host has left, a current team owner or administrator can start a run for that
-host. Pass a fresh UUID as `runId` and the former host's account ID as `departingUserId`
+After a host has left, a current team owner or administrator can open **Automatic handoff**
+from the departure review in **Team members**, or select **Manage automatic handoff** in an
+affected booking. Start the run for that host and use **Pause**, **Resume**, **Stop** and
+**Refresh run receipt** to control it and review the outcome of each booking.
+
+For the REST operation, pass a fresh UUID as `runId` and the former host's account ID as `departingUserId`
 to `POST /api/v1/team/bookings/handoff-runs`. Read the receipt at
 `GET /api/v1/team/bookings/handoff-runs/{runId}`. Use `POST` to the same path with
 `/control` appended and an `action` of `pause`, `resume` or `stop`. All operations require
@@ -497,9 +506,11 @@ those bookings and leaves their ordinary booking flows in place.
 内部试算按活动类型当前的可预约时段网格检查指定开始时间。即使接任者有空，网格之外的开始
 时间也不可预约。试算不占用时段、不发邀请。日历数据不可信时返回
 `calendar_sync_unavailable`，不会公开私人忙碌区间或日历事件映射。正式应用需在锁内重新检查。
-验收使用正式运行所用的 PostgreSQL 存储结构。团队所有者或管理员可在团队预约详情试算单笔交接，
-查看接任主持人、时段和地点类型。来宾尚未回复、同意已过期、日历状态未知或时段不可用时，
-界面禁止确认。确认时在锁内重新复核。提交结果不确定时，先刷新查看回执，再决定是否重试。
+团队所有者或管理员可按[中文操作指南](https://hourmere.com/docs/booking-handoffs#中文操作指南)在浏览器完成验收。
+在**团队预约**打开原预约，点**试算交接**，核对接任主持人、时段和地点类型，然后点**创建提议**。
+点**刷新交接状态**查看版本与收件人状态。按需点**重发**或**撤回**并确认，或在拒绝、过期或撤回后点**新版本**。
+等预订人和每位来宾都同意同一版本，点**确认交接**。提交结果不确定时，先刷新查看回执，再决定是否重试。
+主持人离队后，在**团队成员**的离队审查启动自动交接，点**暂停**、**恢复**、**停止**并刷新查看逐笔结果。
 提交后，外部会议仍可处于待创建或失败状态，由对应主持人使用原有恢复流程处理。
 提议操作、确认链接投递、参与者页面和接口均需启用交接功能，默认关闭。
 交接提交后，系统会排队发送原预约取消邮件和新预约确认邮件，管理员可刷新回执查看投递状态。

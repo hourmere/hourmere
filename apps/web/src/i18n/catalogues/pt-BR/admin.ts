@@ -348,4 +348,107 @@ export const admin = {
 
   // Effective team page permissions
   'No event types yet.': 'Ainda não há tipos de evento.',
+
+  // Departure handoff proposal management
+  'Departing host': 'Anfitrião que saiu',
+  'Create proposal': 'Criar proposta',
+  'New version': 'Nova versão',
+  'Handoff proposal': 'Proposta de transferência',
+  'Version {version}': 'Versão {version}',
+  'Expires at': 'Expira em',
+  Decision: 'Decisão',
+  Delivery: 'Entrega',
+  'Awaiting decision': 'Aguardando resposta',
+  Approved: 'Aceita',
+  Declined: 'Recusada',
+  Queued: 'Na fila de envio',
+  'Delivery unconfirmed': 'Entrega não confirmada',
+  'Delivery failed': 'Falha na entrega',
+  'Not sent': 'Não enviado',
+  Closed: 'Encerrada',
+  Superseded: 'Substituída',
+  Withdrawn: 'Retirada',
+  Withdraw: 'Retirar',
+  Resend: 'Reenviar',
+  'Resend proposal link?': 'Reenviar o link da proposta?',
+  'Withdraw proposal?': 'Retirar a proposta?',
+  'Sending a new link replaces the recipient’s previous link.':
+    'O envio de um novo link invalida o link anterior da pessoa.',
+  'Withdrawing revokes all links for this version. The original booking stays confirmed.':
+    'A retirada invalida todos os links desta versão. A reserva original continua confirmada.',
+  'Leave blank to keep the original booking time.':
+    'Deixe em branco para manter o horário da reserva original.',
+  'Enter a valid start time in the displayed time zone.':
+    'Insira um horário de início válido no fuso horário exibido.',
+  'Creating proposal…': 'Criando proposta…',
+  'Withdrawing proposal…': 'Retirando proposta…',
+  'Could not verify the proposal change. Refresh handoff before trying again.':
+    'Não foi possível verificar a alteração da proposta. Atualize a transferência antes de tentar novamente.',
+  'The send limit for this booking has been reached.':
+    'O limite de envios desta reserva foi atingido.',
+  'A link is already queued for this recipient.':
+    'Já há um link na fila de envio para essa pessoa.',
+  'The proposal link could not be queued. Try again later.':
+    'Não foi possível colocar o link da proposta na fila de envio. Tente novamente mais tarde.',
+  'No recipient status is available for this version.':
+    'O estado dos destinatários está indisponível para esta versão.',
+
+  'Resend unavailable': 'Reenvio indisponível',
+
+  'Proposal link queued.': 'O link da proposta está na fila de envio.',
+
+  // Automatic departure handoff
+  'Manage automatic handoff': 'Gerenciar a transferência automática',
+  'Automatic handoff': 'Transferência automática',
+  'Start automatic handoff for this departed member':
+    'Iniciar a transferência automática para este ex-membro',
+  'This run processes up to ten fully approved proposals. Pause or stop before the next booking is processed.':
+    'Esta execução processa até dez propostas aprovadas por todos. A pausa ou a interrupção entra em vigor antes da próxima reserva.',
+  'Refresh run receipt': 'Atualizar o resumo da execução',
+  'Run receipt': 'Resumo da execução',
+  Pause: 'Pausar',
+  Resume: 'Retomar',
+  Stop: 'Parar',
+  Running: 'Em andamento',
+  Stopped: 'Interrompida',
+  Applied: 'Transferida',
+  'No longer eligible': 'Não atende mais aos requisitos',
+  'Processing failed': 'Falha no processamento',
+  'Proposal version {version}': 'Versão {version} da proposta',
+  'View original booking': 'Ver a reserva original',
+  'Checking the run receipt…': 'Consultando o resumo da execução…',
+  'Updating automatic handoff…': 'Atualizando a transferência automática…',
+  'The departed member has rejoined this team.': 'O ex-membro voltou para a equipe.',
+  'The session that started or resumed this run lost access.':
+    'A sessão que iniciou ou retomou esta execução perdeu o acesso.',
+  'The run expired.': 'A execução expirou.',
+  'No fully approved proposals are eligible for automatic handoff.':
+    'Nenhuma proposta aprovada por todos atende aos requisitos da transferência automática.',
+  'A handoff run is already running or paused for this team.':
+    'Esta equipe já tem uma transferência em andamento ou pausada.',
+  'Wait at least one minute between starting handoff runs.':
+    'Aguarde pelo menos um minuto entre o início de duas execuções.',
+  'This run is no longer available.': 'Esta execução não está mais disponível.',
+  'The run changed. Refresh the run receipt.': 'A execução mudou. Atualize o resumo.',
+  'Could not confirm that automatic handoff started. Try starting again.':
+    'Não foi possível confirmar o início da transferência automática. Tente iniciá-la novamente.',
+  'Could not update automatic handoff. Refresh the run receipt before trying again.':
+    'Não foi possível atualizar a transferência automática. Atualize o resumo antes de tentar novamente.',
+  'Could not load the run receipt. Try refreshing it.':
+    'Não foi possível carregar o resumo da execução. Tente atualizá-lo.',
+  'The automatic handoff queue is temporarily unavailable.':
+    'A fila de transferência automática está temporariamente indisponível.',
+  'Start time': 'Horário de início',
+  Active: 'Ativa',
+  Expired: 'Expirada',
+  Booker: 'Pessoa que reservou',
+  Guest: 'Convidado',
+  Skipped: 'Ignorado',
+  Unavailable: 'Indisponível',
+  'Resending…': 'Reenviando…',
+  Cancel: 'Cancelar',
+  Paused: 'Pausada',
+  Completed: 'Concluída',
+  Failed: 'Falhou',
+  Pending: 'Pendente',
 }
