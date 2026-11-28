@@ -15,6 +15,7 @@ import { browserTimeZone, zoned } from '../../format.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import { bookingPath, eventTypePath, PATHS } from '../../paths.ts'
 import { BreakableText } from '../BreakableText.tsx'
+import { DepartureHandoffRunForBooking } from './DepartureHandoffRun.tsx'
 import './TeamMemberActions.css'
 
 type Impact = Schemas['MemberDepartureImpact']
@@ -292,6 +293,9 @@ function DepartureReview({
   const feedback = useRef<HTMLDivElement>(null)
   const active = useRef<AbortController | null>(null)
   const headingId = useId()
+  const handoffBookingId = handling?.bookings.data.find(
+    (booking) => booking.hosts.length === 1 && booking.hosts[0]?.userId === memberUserId,
+  )?.id
 
   const begin = useCallback(() => {
     active.current?.abort()
@@ -630,6 +634,16 @@ function DepartureReview({
                 >
                   {t('More bookings')}
                 </button>
+              )}
+              {canManage && viewerUserId && handoffBookingId && (
+                <DepartureHandoffRunForBooking
+                  key={handoffBookingId}
+                  organizationId={organizationId}
+                  viewerUserId={viewerUserId}
+                  bookingId={handoffBookingId}
+                  onReload={onReload}
+                  inRemovalReview
+                />
               )}
             </>
           )}

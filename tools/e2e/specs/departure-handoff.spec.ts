@@ -1,11 +1,11 @@
-import { randomUUID } from 'node:crypto'
-import type { Page } from '@playwright/test'
-import type { components } from '../../../apps/web/src/api/schema.d.ts'
+import type { Browser, Locator, Page } from '@playwright/test'
 import { expect, test } from '../departure-handoff-fixtures.ts'
 
-type Schemas = components['schemas']
-
 test.use({ colorScheme: 'light' })
+
+function handoffStatus(region: Locator, name = 'Handoff status') {
+  return region.getByRole('region', { name }).getByRole('status')
+}
 
 function applyResponse(page: Page, sourceId: string) {
   return page.waitForResponse((response) => {
@@ -33,6 +33,9 @@ test('one silent guest blocks confirmation and expiry leaves the original confir
         pending: '正在等待参加者同意。',
         outstanding: '待确认人数：1',
         expired: '同意期限已过。',
+        proposal: '交接提议',
+        newVersion: '新版本',
+        version: '版本 2',
       }
     : {
         handoff: 'Booking handoff',
@@ -43,6 +46,9 @@ test('one silent guest blocks confirmation and expiry leaves the original confir
         pending: 'Participant consent is pending.',
         outstanding: 'Pending approvals: 1',
         expired: 'Consent has expired.',
+        proposal: 'Handoff proposal',
+        newVersion: 'New version',
+        version: 'Version 2',
       }
   await handoff.offer('pending')
   await handoff.signIn('owner', chinese ? 'zh-CN' : 'en')
@@ -51,7 +57,7 @@ test('one silent guest blocks confirmation and expiry leaves the original confir
   await page.goto(handoff.url + handoff.sourcePath)
 
   const region = page.getByRole('region', { name: labels.handoff })
-  const status = region.getByRole('status')
+  const status = handoffStatus(region, labels.status)
   const preview = region.getByRole('button', { name: labels.preview })
   const confirm = region.getByRole('button', { name: labels.confirm })
   await preview.focus()
@@ -72,6 +78,10 @@ test('one silent guest blocks confirmation and expiry leaves the original confir
   await region.getByRole('button', { name: labels.refresh }).click()
   await expect(status).toContainText(labels.expired)
   await expect(confirm).toBeDisabled()
+  const proposal = region.getByRole('region', { name: labels.proposal })
+  await region.getByRole('button', { name: labels.newVersion }).click()
+  await expect(proposal.getByText(labels.version, { exact: true })).toBeVisible()
+  await expect(confirm).toBeDisabled()
   expect(await handoff.result()).toMatchObject({
     source: 'confirmed',
     bookingCount: 1,
@@ -87,19 +97,19 @@ test('confirmation rechecks a slot taken after preview', async ({ page, handoff 
   const region = page.getByRole('region', { name: 'Booking handoff' })
   const confirm = region.getByRole('button', { name: 'Confirm handoff' })
   await region.getByRole('button', { name: 'Preview handoff' }).click()
-  await expect(region.getByRole('status')).toContainText('All participants have approved.')
+  await expect(handoffStatus(region)).toContainText('All participants have approved.')
   await expect(confirm).toBeEnabled()
 
   await handoff.occupySlot()
   const response = applyResponse(page, handoff.sourceId)
   await confirm.click()
   expect((await response).status()).toBe(409)
-  await expect(region.getByRole('status')).toContainText(
+  await expect(handoffStatus(region)).toContainText(
     'That time is unavailable for the replacement host.',
   )
   await expect(confirm).toBeDisabled()
   await region.getByRole('button', { name: 'Refresh handoff' }).click()
-  await expect(region.getByRole('status')).toContainText(
+  await expect(handoffStatus(region)).toContainText(
     'That time is unavailable for the replacement host.',
   )
   await expect(confirm).toBeDisabled()
@@ -128,7 +138,7 @@ test('notification enqueue failure rolls back and a refreshed confirmation deliv
   const failed = applyResponse(page, handoff.sourceId)
   await confirm.click()
   expect((await failed).status()).toBe(503)
-  await expect(region.getByRole('status')).toContainText(
+  await expect(handoffStatus(region)).toContainText(
     'Could not confirm whether the handoff completed.',
   )
   await expect(confirm).toBeDisabled()
@@ -143,7 +153,7 @@ test('notification enqueue failure rolls back and a refreshed confirmation deliv
   await refresh.click()
   await expect(confirm).toBeEnabled()
   await confirm.click()
-  await expect(region.getByRole('status')).toContainText('Booking handoff completed.')
+  await expect(handoffStatus(region)).toContainText('Booking handoff completed.')
   const result = await handoff.result()
   expect(result).toMatchObject({
     source: 'cancelled',
@@ -195,7 +205,7 @@ test.describe('provider ambiguity after commit', () => {
     await page.goto(url)
     const region = page.getByRole('region', { name: 'Booking handoff' })
     const refresh = region.getByRole('button', { name: 'Refresh handoff' })
-    const status = region.getByRole('status')
+    const status = handoffStatus(region)
     await region.getByRole('button', { name: 'Preview handoff' }).click()
     await region.getByRole('button', { name: 'Confirm handoff' }).click()
     await expect(status).toContainText('Booking handoff completed.')
@@ -256,151 +266,199 @@ test.describe('provider ambiguity after commit', () => {
   })
 })
 
+async function removeDepartingHost(page: Page, url: string) {
+  await page.goto(`${url}/app/settings`)
+  await page.getByRole('button', { name: 'Remove member: Departing host' }).click()
+  const review = page.getByRole('region', { name: 'Remove team member' })
+  await review.getByRole('button', { name: 'Remove member', exact: true }).click()
+  await expect(review.getByText('Member removed. Access was revoked immediately.')).toBeVisible()
+  return review
+}
+
+async function openSourceBooking(page: Page, removal: Locator) {
+  await removal.getByRole('link', { name: 'Review team bookings' }).click()
+  await page.getByRole('button', { name: 'Intro call', exact: true }).click()
+  const handoff = page.getByRole('region', { name: 'Booking handoff' })
+  await expect(handoff.getByRole('button', { name: 'Create proposal' })).toHaveCount(0)
+  await expect(handoff.getByRole('button', { name: 'Confirm handoff' })).toHaveCount(0)
+  await handoff.getByRole('button', { name: 'Preview handoff' }).press('Enter')
+  return handoff
+}
+
+async function confirmAutomaticHandoffStart(page: Page, start: Locator) {
+  await start.click()
+  const dialog = page.getByRole('dialog', { name: 'Start automatic handoff?' })
+  await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeFocused()
+  await expect(dialog).toContainText(
+    'This run processes up to 10 fully approved bookings, with at least 10 seconds between bookings. You can pause or stop it.',
+  )
+  await dialog.getByRole('button', { name: 'Start automatic handoff', exact: true }).click()
+}
+
+async function openParticipantContext(browser: Browser, url: string) {
+  const participant = await browser.newContext({ locale: 'en-US', serviceWorkers: 'block' })
+  await participant.route('**/*', (route) =>
+    new URL(route.request().url()).origin === url ? route.continue() : route.abort(),
+  )
+  return participant
+}
+
+async function openPrivateOffer(page: Page, link: URL) {
+  await page.goto('about:blank')
+  // Keep the private fragment out of Playwright's navigation diagnostics.
+  await page.evaluate((href) => {
+    window.setTimeout(() => window.location.replace(href), 0)
+  }, link.href)
+}
+
+async function decide(
+  page: Page,
+  link: URL,
+  decision: 'Accept' | 'Decline',
+  proposedStart?: Temporal.Instant,
+) {
+  await openPrivateOffer(page, link)
+  if (proposedStart) {
+    const terms = page.locator('section').filter({
+      has: page.getByRole('heading', { name: 'Proposed booking', exact: true }),
+    })
+    await expect(terms.getByText('Replacement host', { exact: true })).toBeVisible()
+    await expect
+      .poll(async () => {
+        const value = await terms.locator('time').first().getAttribute('datetime')
+        return value !== null && Temporal.Instant.from(value).equals(proposedStart)
+      })
+      .toBe(true)
+  }
+  await page.getByRole('radio', { name: decision, exact: true }).check()
+  await page.getByRole('button', { name: 'Submit decision' }).click()
+  await expect(
+    page.getByRole('heading', {
+      name: decision === 'Accept' ? 'Acceptance recorded' : 'Decline recorded',
+    }),
+  ).toBeVisible()
+}
+
+const originalBooking = {
+  source: 'confirmed',
+  bookingCount: 1,
+  replacementId: undefined,
+  replacementConfirmed: false,
+  notificationCount: 0,
+}
+
 test.describe('departure handoff acceptance', () => {
   test.use({ handoffZoom: true })
 
-  test('a declined proposal needs fresh consent before the automatic run hands off the booking', async ({
+  test('the administrator re-versions a declined proposal and completes an automatic handoff from the UI', async ({
     browser,
     page,
     handoff,
   }) => {
     await handoff.signIn()
-    // The original invitation pins the organizer so the later cancellation can use its UID.
+    // Pin the original organizer so its cancellation can reuse the original UID.
     await handoff.mail(handoff.sourceId, 'confirmed')
     const initialMail = handoff.mailState()
     expect(initialMail).toHaveLength(3)
     expect(initialMail.every((mail) => mail.method === 'REQUEST' && mail.hasZoomLink)).toBe(true)
 
-    const headers = { Origin: handoff.url, 'X-Expected-Organization-Id': handoff.teamId }
-    const post = (path: string, data: object) =>
-      page.request.post(handoff.url + path, { headers, data })
-    const booking = `/api/v1/team/bookings/${handoff.sourceId}`
-    const proposals = `${booking}/handoff-offers`
-    const runs = '/api/v1/team/bookings/handoff-runs'
-    const { departingUserId } = handoff
-    const run = { runId: randomUUID(), departingUserId }
-    const runPath = `${runs}/${run.runId}`
-    const original = {
-      source: 'confirmed',
-      bookingCount: 1,
-      replacementId: undefined,
-      replacementConfirmed: false,
-      notificationCount: 0,
-    }
-    async function expectRunBlocked() {
-      const response = await post(runs, run)
-      expect(response.status()).toBe(409)
-      expect(await response.json()).toMatchObject({ error: 'handoff_run_no_eligible_offers' })
-      expect(await handoff.result()).toEqual(original)
-    }
-    async function propose(data: object) {
-      const response = await post(proposals, { departingUserId, ...data })
-      expect(response.status()).toBe(201)
-      return (await response.json()) as Schemas['DepartureHandoffProposal']
-    }
-    async function control(action: 'pause' | 'resume') {
-      const response = await post(`${runPath}/control`, { action })
-      expect(response.status()).toBe(200)
-      return (await response.json()) as Schemas['DepartureHandoffRun']
-    }
-    const removal = await post(`/api/v1/team/members/${departingUserId}/removal`, {
-      teamId: handoff.teamId,
+    const removal = await removeDepartingHost(page, handoff.url)
+    const queue = page.getByRole('region', { name: 'Automatic handoff' })
+    const start = queue.getByRole('button', {
+      name: 'Start automatic handoff for this departed member',
     })
-    expect(removal.status()).toBe(200)
-    const first = await propose({})
-    expect(first.version).toBe(1)
-    const firstLinks = await handoff.deliverParticipantLinks()
+    await confirmAutomaticHandoffStart(page, start)
+    await expect(queue.getByRole('alert')).toContainText(
+      'No fully approved proposals are eligible for automatic handoff.',
+    )
+    expect(await handoff.result()).toEqual(originalBooking)
 
-    const participant = await browser.newContext({ locale: 'en-US', serviceWorkers: 'block' })
+    const region = await openSourceBooking(page, removal)
+    const status = handoffStatus(region)
+    const proposal = region.getByRole('region', { name: 'Handoff proposal' })
+    const booker = proposal.getByRole('article', { name: 'Booker' })
+    const guest = proposal.getByRole('article', { name: 'Guest' })
+    const confirm = region.getByRole('button', { name: 'Confirm handoff' })
+    const refresh = region.getByRole('button', { name: 'Refresh handoff' })
+    await expect(region.locator('dd').getByText('Replacement host', { exact: true })).toBeVisible()
+    await expect(region.locator('dd').getByText('Departing host', { exact: true })).toBeVisible()
+    await expect(region.locator('dt').getByText('Departed host', { exact: true })).toBeVisible()
+    await region.getByRole('button', { name: 'Create proposal' }).click()
+    await expect(proposal.getByText('Version 1', { exact: true })).toBeVisible()
+    await expect(proposal.getByText('Expires at', { exact: true })).toBeVisible()
+    await expect(proposal.locator('time')).toHaveAttribute('datetime', /Z$/)
+    await expect(
+      region.getByRole('button', { name: /^(Create proposal|New version)$/ }),
+    ).toHaveCount(0)
+    await expect(confirm).toBeDisabled()
+    for (const recipient of [booker, guest]) {
+      await expect(recipient).toContainText('Awaiting decision')
+      await expect(recipient).toContainText('Queued')
+      await expect(recipient).toContainText('Resend unavailable')
+    }
+    for (const email of [handoff.emails.booker, handoff.emails.guest])
+      await expect(proposal).not.toContainText(email)
+    const first = await handoff.deliverParticipantLinks()
+    const participant = await openParticipantContext(browser, handoff.url)
     try {
-      await participant.route('**/*', (route) =>
-        new URL(route.request().url()).origin === handoff.url ? route.continue() : route.abort(),
-      )
       const reader = await participant.newPage()
-      async function decide(link: URL, decision: 'Accept' | 'Decline', version: number) {
-        await reader.goto('about:blank')
-        const terms = reader.waitForResponse(
-          (response) => new URL(response.url()).pathname === '/api/v1/booking-handoffs/offer',
-        )
-        // Keep the private fragment out of Playwright's navigation diagnostics.
-        await reader.evaluate((href) => {
-          window.setTimeout(() => window.location.replace(href), 0)
-        }, link.href)
-        const offer = await terms
-        expect(offer.status()).toBe(200)
-        expect(await offer.json()).toMatchObject({ version })
-        await reader.getByRole('radio', { name: decision, exact: true }).check()
-        await reader.getByRole('button', { name: 'Submit decision' }).click()
-        await expect(
-          reader.getByRole('heading', {
-            name: decision === 'Accept' ? 'Acceptance recorded' : 'Decline recorded',
-          }),
-        ).toBeVisible()
-      }
-
-      await decide(firstLinks.booker, 'Accept', 1)
-      await page.goto(handoff.url + handoff.sourcePath)
-      const region = page.getByRole('region', { name: 'Booking handoff' })
-      const status = region.getByRole('status')
-      const confirm = region.getByRole('button', { name: 'Confirm handoff' })
-      const refresh = region.getByRole('button', { name: 'Refresh handoff' })
-      await region.getByRole('button', { name: 'Preview handoff' }).click()
+      await decide(reader, first.booker, 'Accept')
+      await refresh.click()
       await expect(status).toContainText('Pending approvals: 1')
+      await expect(booker).toContainText('Approved')
+      await expect(guest).toContainText('Accepted by the mail server')
       await expect(confirm).toBeDisabled()
-      await expectRunBlocked()
 
-      await decide(firstLinks.guest, 'Decline', 1)
+      await decide(reader, first.guest, 'Decline')
       await refresh.click()
       await expect(status).toContainText('This handoff offer is closed.')
+      await expect(guest).toContainText('Declined')
       await expect(confirm).toBeDisabled()
-      await expectRunBlocked()
+      expect(await handoff.result()).toEqual(originalBooking)
 
       const proposedStart = handoff.sourceStart.add({ minutes: 30 })
-      const second = await propose({
-        start: proposedStart.toString(),
-        previous: { offerId: first.id, version: first.version },
-      })
-      expect(second.id).toBe(first.id)
-      expect(second.version).toBe(2)
-      expect(second.recipients.map(({ decision }) => decision)).toEqual(['pending', 'pending'])
-      await refresh.click()
+      await region
+        .getByLabel('Start time (optional)')
+        .fill(
+          proposedStart
+            .toZonedDateTimeISO('UTC')
+            .toPlainDateTime()
+            .toString({ smallestUnit: 'minute' }),
+        )
+      await region.getByRole('button', { name: 'New version' }).click()
+      await expect(proposal.getByText('Version 2', { exact: true })).toBeVisible()
       await expect(status).toContainText('Pending approvals: 2')
       await expect(confirm).toBeDisabled()
-      const secondLinks = await handoff.deliverParticipantLinks()
-      await decide(secondLinks.guest, 'Accept', 2)
-      await expectRunBlocked()
-      await decide(secondLinks.booker, 'Accept', 2)
+      const second = await handoff.deliverParticipantLinks()
+      await decide(reader, second.guest, 'Accept', proposedStart)
+      await refresh.click()
+      await expect(status).toContainText('Pending approvals: 1')
+      await expect(confirm).toBeDisabled()
+      await decide(reader, second.booker, 'Accept')
       await refresh.click()
       await expect(status).toContainText('All participants have approved.')
       await expect(confirm).toBeEnabled()
 
-      const start = await post(runs, run)
-      expect(start.status()).toBe(200)
-      const pending = {
-        sourceBookingId: handoff.sourceId,
-        offerId: second.id,
-        version: 2,
-        outcome: 'pending',
-        replacementBookingId: null,
-      }
-      expect(await start.json()).toMatchObject({ state: 'running', items: [pending] })
-      expect(await control('pause')).toMatchObject({ state: 'paused', items: [pending] })
+      await page.getByRole('link', { name: 'Manage automatic handoff' }).click()
+      await confirmAutomaticHandoffStart(page, start)
+      await expect(queue.getByRole('status')).toContainText('Running')
+      const receipt = queue.getByRole('list')
+      await expect(queue.getByRole('heading', { name: 'Run receipt' })).toBeVisible()
+      await expect(receipt.getByRole('listitem')).toHaveCount(1)
+      await expect(receipt).toContainText('Proposal version 2 · Pending')
+      await queue.getByRole('button', { name: 'Pause', exact: true }).click()
+      await expect(queue.getByRole('status')).toContainText('Paused')
       await handoff.processRun()
-      expect(await handoff.result()).toEqual(original)
-      expect(await control('resume')).toMatchObject({ state: 'running', items: [pending] })
+      expect(await handoff.result()).toEqual(originalBooking)
+      await queue.getByRole('button', { name: 'Resume', exact: true }).click()
+      await expect(queue.getByRole('status')).toContainText('Running')
       await handoff.processRun()
-
-      const receipt = await page.request.get(handoff.url + runPath, { headers })
-      expect(receipt.status()).toBe(200)
-      const completed = (await receipt.json()) as Schemas['DepartureHandoffRun']
-      const [item] = completed.items
-      const replacementId = item?.replacementBookingId
-      if (!replacementId) throw new Error('Expected one completed replacement')
-      expect(completed).toMatchObject({
-        state: 'completed',
-        items: [{ ...pending, outcome: 'applied', replacementBookingId: replacementId }],
-      })
+      await queue.getByRole('button', { name: 'Refresh run receipt' }).click()
+      await expect(queue.getByRole('status')).toContainText('Completed')
+      await expect(receipt).toContainText('Proposal version 2 · Applied')
       const result = await handoff.result()
+      const replacementId = result.replacementId
+      if (!replacementId) throw new Error('Expected one completed replacement')
       expect(result).toEqual({
         source: 'cancelled',
         bookingCount: 2,
@@ -408,20 +466,13 @@ test.describe('departure handoff acceptance', () => {
         replacementConfirmed: true,
         notificationCount: 2,
       })
-      const replay = await post(runs, run)
-      expect(replay.status()).toBe(200)
-      expect(await replay.json()).toEqual(completed)
-      expect(await handoff.result()).toEqual(result)
-      const replacementBooking = await page.request.get(
-        `${handoff.url}/api/v1/team/bookings/${replacementId}`,
-        { headers },
+      await expect(queue.getByRole('link', { name: 'View replacement booking' })).toHaveAttribute(
+        'href',
+        `/app/bookings/${replacementId}`,
       )
-      expect(replacementBooking.status()).toBe(200)
-      const detail = (await replacementBooking.json()) as Schemas['TeamAdminBookingDetail']
-      expect(Temporal.Instant.from(detail.start).equals(proposedStart)).toBe(true)
-      expect(detail.hosts.map(({ name }) => name)).toEqual(['Replacement host'])
 
-      await refresh.click()
+      await receipt.getByRole('link', { name: 'View original booking' }).click()
+      await region.getByRole('button', { name: /^(Preview|Refresh) handoff$/ }).click()
       await expect(status).toContainText('Booking handoff completed.')
       await expect(status).toContainText('The replacement meeting link is being prepared.')
       await expect(status).toContainText(
@@ -459,8 +510,125 @@ test.describe('departure handoff acceptance', () => {
       await expect(status.getByText('Accepted by the mail server')).toHaveCount(2)
       const replacement = region.getByRole('link', { name: 'View replacement booking' })
       await expect(replacement).toHaveAttribute('href', `/app/bookings/${replacementId}`)
+      await replacement.click()
+      await expect(
+        page
+          .getByRole('region', { name: 'Team booking details' })
+          .getByText('Replacement host', { exact: true }),
+      ).toBeVisible()
     } finally {
       await participant.close()
     }
   })
+})
+
+test('the administrator can resend individual links, stop a run and withdraw through the UI', async ({
+  browser,
+  page,
+  handoff,
+}) => {
+  await handoff.signIn()
+  await page.setViewportSize({ width: 320, height: 800 })
+  await page.emulateMedia({ colorScheme: 'dark' })
+  const removal = await removeDepartingHost(page, handoff.url)
+  const region = await openSourceBooking(page, removal)
+  const proposal = region.getByRole('region', { name: 'Handoff proposal' })
+  const booker = proposal.getByRole('article', { name: 'Booker' })
+  const guest = proposal.getByRole('article', { name: 'Guest' })
+  const resend = booker.getByRole('button', { name: 'Resend' })
+  const refresh = region.getByRole('button', { name: 'Refresh handoff' })
+  await region.getByRole('button', { name: 'Create proposal' }).click()
+  await expect(proposal.getByText('Version 1', { exact: true })).toBeVisible()
+  const first = await handoff.deliverParticipantLinks()
+  await refresh.click()
+  await expect(resend).toBeEnabled()
+
+  const resendDialog = page.getByRole('dialog', { name: 'Resend proposal link?' })
+  await resend.press('Enter')
+  await expect(resendDialog).toBeVisible()
+  await expect(
+    await resendDialog.evaluate((element) => element.contains(document.activeElement)),
+  ).toBe(true)
+  await page.keyboard.press('Escape')
+  await expect(resendDialog).toHaveCount(0)
+  await expect(resend).toBeFocused()
+
+  const requestKeys: string[] = []
+  async function resendBooker() {
+    await resend.press('Enter')
+    const request = page.waitForRequest(
+      (candidate) =>
+        candidate.method() === 'POST' && new URL(candidate.url()).pathname.endsWith('/resend'),
+    )
+    await resendDialog.getByRole('button', { name: 'Resend', exact: true }).click()
+    const key = await (await request).headerValue('idempotency-key')
+    if (!key) throw new Error('The resend request needs a key')
+    requestKeys.push(key)
+    await expect(booker).toContainText('Queued')
+    await expect(guest).toContainText('Accepted by the mail server')
+    const link = await handoff.deliverResentLink('booker')
+    await refresh.click()
+    await expect(booker).toContainText('Accepted by the mail server')
+    return link
+  }
+
+  await resendBooker()
+  const latest = await resendBooker()
+  expect(new Set(requestKeys).size).toBe(2)
+  await expect(booker).toContainText('Resend unavailable')
+  await expect(resend).toHaveCount(0)
+  await expect(guest.getByRole('button', { name: 'Resend' })).toBeEnabled()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+
+  const participant = await openParticipantContext(browser, handoff.url)
+  try {
+    const reader = await participant.newPage()
+    await openPrivateOffer(reader, first.booker)
+    await expect(
+      reader.getByRole('heading', { name: 'This handoff link is unavailable' }),
+    ).toBeVisible()
+    await decide(reader, latest, 'Accept')
+    await decide(reader, first.guest, 'Accept')
+  } finally {
+    await participant.close()
+  }
+
+  await refresh.click()
+  await expect(handoffStatus(region)).toContainText('All participants have approved.')
+  await page.getByRole('link', { name: 'Manage automatic handoff' }).click()
+  const queue = page.getByRole('region', { name: 'Automatic handoff' })
+  await confirmAutomaticHandoffStart(
+    page,
+    queue.getByRole('button', { name: 'Start automatic handoff for this departed member' }),
+  )
+  await expect(queue.getByRole('status')).toContainText('Running')
+  const stop = queue.getByRole('button', { name: 'Stop', exact: true })
+  await stop.click()
+  const stopDialog = page.getByRole('dialog', { name: 'Stop automatic handoff?' })
+  await expect(stopDialog.getByRole('button', { name: 'Cancel' })).toBeFocused()
+  await expect(stopDialog).toContainText(
+    'Remaining bookings will not be processed. Their original bookings stay unchanged.',
+  )
+  await page.keyboard.press('Escape')
+  await expect(stopDialog).toBeHidden()
+  await expect(stop).toBeFocused()
+  await expect(queue.getByRole('status')).toContainText('Running')
+  await stop.click()
+  await stopDialog.getByRole('button', { name: 'Stop', exact: true }).click()
+  await expect(queue.getByRole('status')).toContainText('Stopped')
+  await expect(queue.getByRole('heading', { name: 'Run receipt' })).toBeVisible()
+  const receipt = queue.getByRole('list')
+  await expect(receipt).toContainText('Proposal version 1 · Stopped')
+  await expect(queue.getByRole('link', { name: 'View replacement booking' })).toHaveCount(0)
+  await handoff.processRun()
+  expect(await handoff.result()).toEqual(originalBooking)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+
+  await receipt.getByRole('link', { name: 'View original booking' }).click()
+  await region.getByRole('button', { name: /^(Preview|Refresh) handoff$/ }).click()
+  await proposal.getByRole('button', { name: 'Withdraw', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Withdraw proposal?' })
+  await dialog.getByRole('button', { name: 'Withdraw', exact: true }).click()
+  await expect(proposal.getByText('Withdrawn', { exact: true })).toBeVisible()
+  expect(await handoff.result()).toEqual(originalBooking)
 })
