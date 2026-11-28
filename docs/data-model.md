@@ -2794,7 +2794,7 @@ which cancellation or opt-out cannot recall an already-dispatched SMS.
 The ordinary SMS delivery ledger and rolling budgets remain in force. Job payloads carry
 booking/rule identity and scheduling instants, never phone numbers or message bodies.
 
-## Team booking bulk cancellation previews
+## Team booking bulk cancellation receipts
 
 The preview receipt is keyed by a database-generated UUID in
 `team_booking_bulk_cancellations`. It stores the team, actor account, issuing session and
@@ -2805,8 +2805,41 @@ filters and session bearer are never written to the receipt.
 The primary key limits positions to one per ordinal, and the ordinal check and unique booking
 key enforce at most 25 distinct items. Deleting the team cascades to its receipts and items.
 Actor, session and booking IDs are retained when their corresponding rows are deleted.
-A preview writes these two tables in one transaction. It does not change bookings or enqueue
-jobs or notifications. Admission, execution and receipt cleanup are future release steps.
+A preview writes these two tables in one transaction. The issuing session can admit the
+unexpired receipt using its UUID. Admission freezes preview skips, marks eligible items
+pending and commits the queue wake and journal entry together. Confirmation replay and
+status are scoped to the same team and account, including after the actor signs in again.
+
+One active receipt per team and a database-wide budget of 100 bound admission. The
+rolling request ledger stores team and actor IDs, operation kind and database time.
+Each worker wake carries only the batch ID. An item has at most three attempts and
+can start within five minutes of admission. A committed claim has a short lease so an
+interrupted worker can be replaced. The booking update, ordinary cancellation effects
+and terminal item result share one transaction. Recovery requeues due batches and leaves
+live claims in place. Bounded cleanup removes completed results after seven days and
+unused receipts one day after expiry. Production admission and processing remain off
+pending browser and release acceptance.
+
+## Departure booking handoff storage
+
+`departure_handoff_offers` stores one immutable row per source booking version. The
+source and team are linked by a composite foreign key. A source has at most one live
+version. Its saved terms may be closed, and different terms require a new version.
+`departure_handoff_recipients` stores one normalized mailbox per exact version and a
+pending, approved or declined decision. Each recipient has a globally unique record ID.
+
+`departure_booking_handoffs` is both the internal link and the immutable receipt. It
+uniquely binds a source to a distinct same-team replacement and records the exact offer
+version, applying actor, time and opaque approval IDs. Apply writes it and closes the
+offer in the transaction that cancels the source and creates the replacement. Booking
+chain traversal continues to use `rescheduled_from_id`.
+
+Team deletion cascades through its bookings. Deleting the source removes its offers,
+recipients and receipt. Deleting the replacement also removes the receipt. Team member
+removal preserves the proposal and receipt's historical actor IDs. A committed receipt
+retains the offer version it references and survives pruning of the recipient mailbox
+rows. Production admission stays disabled while proposal lifecycle, delivery and
+recipient decisions are built. See [the handoff design](member-departure-handoff.md).
 
 ## Audit events
 

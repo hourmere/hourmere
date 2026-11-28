@@ -107,6 +107,7 @@ import {
   scanWaitlists,
   verifyWaitlist,
 } from '@hourmere/scheduling'
+import { departureHandoffStore } from '@hourmere/scheduling/departure-handoff-store'
 import {
   captureWorkflowWebhook,
   type WebhookQueue,
@@ -218,6 +219,12 @@ import {
 import { samlSignInRoutes } from './sso-saml-sign-in.ts'
 import { createStripePaymentProvider } from './stripe-checkout.ts'
 import { createStripeClient } from './stripe-client.ts'
+import {
+  TEAM_BOOKING_BULK_JOB,
+  TEAM_BOOKING_BULK_RECOVERY_JOB,
+  teamBookingBulkCancellationJobs,
+} from './team-booking-bulk-jobs.ts'
+import type { EnqueueBulkCancellation } from './team-booking-bulk-worker.ts'
 import type { InvitationSummaryMailLimits } from './team-invitations.ts'
 import { createWorkerHealthApp } from './worker-health.ts'
 
@@ -241,6 +248,8 @@ export function productionSsoCapabilities(
 
 // Production completes SCIM claims through invitation acceptance only.
 const productionScimClaims = { invitation: scimClaimCompletion.invitation }
+// Admission stays hard-off until participants can approve offers in production.
+const productionDepartureHandoffsEnabled = false
 
 /**
  * The /api/v1 route groups, each created with what it needs. The OpenAPI document (and with
@@ -332,7 +341,7 @@ export function productRoutes({
   /** In-process test injection only; no operator setting exists during hard-off. */
   routingFormsEnabled?: boolean
   routingBookingReceiptNow?: () => Temporal.Instant
-  /** In-process injection for staged acceptance. The running server supplies no store. */
+  /** Staged acceptance can inject a store and a clock. Production admission stays hard-off. */
   departureHandoffs?: DepartureHandoffs
   successRedirectAllowIpHosts?: boolean
   successRedirectPolicy?: ServiceContext['successRedirectPolicy']
@@ -557,7 +566,7 @@ export function productRoutes({
       automaticZoom,
       microsoftCalendarEnabled,
     }),
-    teamBookingBulkPreviewRoutes({ db }),
+    teamBookingBulkPreviewRoutes({ db, ssoCapabilities }),
     teamInvitationRoutes({ db, invitationMailLimits }),
     memberDepartureImpactRoutes({ db }),
     memberRemovalRoutes({
@@ -958,6 +967,9 @@ export function productionAppOptions({
       enqueueCalendarWritebackRecovery,
       routingFormsEnabled,
       routingSecret: config.BETTER_AUTH_SECRET,
+      departureHandoffs: productionDepartureHandoffsEnabled
+        ? { store: departureHandoffStore }
+        : undefined,
       workflowRunCursorSecret: config.BETTER_AUTH_SECRET,
       workflowsEnabled,
     }),
@@ -1308,6 +1320,7 @@ async function start(
     invitationInviterMaxPerDay: config.INVITATION_INVITER_MAX_PER_DAY,
     invitationTeamMaxPerHour: config.INVITATION_TEAM_MAX_PER_HOUR,
     invitationTeamMaxPerDay: config.INVITATION_TEAM_MAX_PER_DAY,
+    invitationGlobalRecipientMultiplier: config.INVITATION_GLOBAL_RECIPIENT_MULTIPLIER,
   }
   const waitlistDeps = {
     db,
@@ -1331,6 +1344,19 @@ async function start(
     log: (line) => console.info(line),
   })
   const workflowWorker = { db, now: () => Temporal.Now.instant(), workflowsEnabled }
+  // Bulk cancellation stays hard-off until the browser and release acceptance slice.
+  const bulkCancellationEnabled = false
+  const enqueueBulkCancellation: EnqueueBulkCancellation = (transaction, batchId, startAfter) =>
+    jobs.enqueue(
+      TEAM_BOOKING_BULK_JOB,
+      { batchId },
+      { singletonKey: batchId, transaction, startAfter },
+    )
+  const enqueueDelayedBulkCancellation = (
+    batchId: string,
+    startAfter: Date,
+  ): Promise<string | null> =>
+    jobs.enqueue(TEAM_BOOKING_BULK_JOB, { batchId }, { singletonKey: batchId, startAfter })
   const workflowWakePort: WorkflowWakePort = {
     async ensureWake(trx, runId) {
       await jobs.enqueue(
@@ -1345,8 +1371,17 @@ async function start(
     disabledSchedules: [
       ...(ssoRetained(sso) ? [] : [SSO_DOMAIN_RECHECK_JOB]),
       ...(role !== 'web' && !runWorkflowJobs ? ['workflow-repair-v1'] : []),
+      ...(bulkCancellationEnabled ? [] : [TEAM_BOOKING_BULK_RECOVERY_JOB]),
     ],
     definitions: [
+      ...teamBookingBulkCancellationJobs(db, {
+        enabled: bulkCancellationEnabled,
+        notify: (...args) => notify(...args),
+        ssoCapabilities: sso,
+        scimResourcesEnabled: config.SCIM_PROVISIONING_ENABLED,
+        enqueue: enqueueBulkCancellation,
+        enqueueDelayed: enqueueDelayedBulkCancellation,
+      }),
       ssoDomainRecheckJob({
         db,
         publicUrl: config.PUBLIC_URL,
@@ -1541,6 +1576,22 @@ async function start(
     jobs.enqueue('booking-conference', group ? { groupSlotId: id } : { rootBookingId: id }, {
       singletonKey: group ? `group:${id}` : id,
     })
+  // REST, MCP and the bulk worker use the same transactional booking side effects.
+  const emailNotifier = bookingNotifier(jobs)
+  const calendarNotifier = calendarBookingNotifier(jobs, { google: Boolean(googleCalendar) })
+  const caldavNotifier = calDavBookingNotifier(jobs)
+  const conferenceNotifier = conferenceBookingNotifier(jobs)
+  const notifyAttendeeNoShow = webhookAttendeeNoShowNotifier(jobs, webhookSettings)
+  const webhookNotifier = webhookBookingNotifier(jobs, webhookSettings)
+  const notify: BookingNotifier = async (trx, event, now) => {
+    if (!('requestId' in event)) await conferenceNotifier(trx, event)
+    await emailNotifier(trx, event, now)
+    if (!('requestId' in event)) await calendarNotifier(trx, event)
+    if (caldavCalendar && !('requestId' in event)) await caldavNotifier(trx, event)
+    await webhookNotifier(trx, event, now)
+    // Core notification intents precede workflow capture in the booking's transaction.
+    await captureWorkflowBooking(trx, event, now, config.BETTER_AUTH_SECRET, { workflowsEnabled })
+  }
   try {
     await jobs.start()
   } catch (err) {
@@ -1598,22 +1649,6 @@ async function start(
               () => false,
             )
         : false
-    // Booking changes over REST and MCP queue their emails in their own transactions.
-    const emailNotifier = bookingNotifier(jobs)
-    const calendarNotifier = calendarBookingNotifier(jobs, { google: Boolean(googleCalendar) })
-    const caldavNotifier = calDavBookingNotifier(jobs)
-    const conferenceNotifier = conferenceBookingNotifier(jobs)
-    const notifyAttendeeNoShow = webhookAttendeeNoShowNotifier(jobs, webhookSettings)
-    const webhookNotifier = webhookBookingNotifier(jobs, webhookSettings)
-    const notify: BookingNotifier = async (trx, event, now) => {
-      if (!('requestId' in event)) await conferenceNotifier(trx, event)
-      await emailNotifier(trx, event, now)
-      if (!('requestId' in event)) await calendarNotifier(trx, event)
-      if (caldavCalendar && !('requestId' in event)) await caldavNotifier(trx, event)
-      await webhookNotifier(trx, event, now)
-      // Core notification intents precede workflow capture in the booking's transaction.
-      await captureWorkflowBooking(trx, event, now, config.BETTER_AUTH_SECRET, { workflowsEnabled })
-    }
     const auth = createAuth({
       ...productionAuthOptions({
         config,

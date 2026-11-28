@@ -1,5 +1,6 @@
 import { createHmac, randomBytes, randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
+import { z } from '@hono/zod-openapi'
 import {
   type Auth,
   createAuth,
@@ -9,6 +10,7 @@ import {
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { createJobs, defineJob, type Jobs } from '@hourmere/jobs'
 import {
   createFixtures,
   createTestTeam,
@@ -16,9 +18,10 @@ import {
   type TestUser,
 } from '@hourmere/scheduling/testing'
 import { sql } from 'kysely'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from '../app.ts'
 import { productRoutes } from '../server.ts'
+import type { EnqueueBulkCancellation } from '../team-booking-bulk-admission.ts'
 import { issueBulkPageProof } from '../team-booking-bulk-proof.ts'
 import { EXPECTED_ORGANIZATION_HEADER } from '../team-management.ts'
 import { teamBookingBulkPreviewRoutes } from './team-booking-bulk-preview.ts'
@@ -28,7 +31,12 @@ const serverUrl = process.env.DATABASE_URL
 const origin = 'http://localhost:4389'
 const secret = 'synthetic-bulk-booking-selection-test-secret'
 const listPath = '/api/v1/team/bookings'
-const previewPath = `${listPath}/bulk-cancellations/preview`
+const bulkPath = `${listPath}/bulk-cancellations`
+const previewPath = `${bulkPath}/preview`
+const wake = defineJob({
+  name: 'test-bulk-cancellation-wake',
+  payload: z.strictObject({ batchId: z.uuid() }),
+})
 const { signJWT } = createRequire(import.meta.resolve('@hourmere/auth'))('better-auth/plugins/jwt')
 
 interface Session {
@@ -45,12 +53,13 @@ interface BulkPage {
   bulkPageExpiresAt: string
 }
 
-describe.skipIf(!serverUrl)('team booking bulk selection and preview', () => {
+describe.skipIf(!serverUrl)('team booking bulk selection, preview and admission', () => {
   let owned: TestDatabase
   let db: Db
   let auth: Auth
   let authPool: ReturnType<typeof createAuthPool>
   let resolveCaller: ReturnType<typeof createCallerResolver>
+  let jobs: Jobs<readonly [typeof wake]>
   let enabled: ReturnType<typeof createApp>
   let data: Awaited<ReturnType<typeof seed>>
   const notify = vi.fn()
@@ -70,24 +79,51 @@ describe.skipIf(!serverUrl)('team booking bulk selection and preview', () => {
       mcpOAuth: true,
     })
     resolveCaller = createCallerResolver({ auth, db })
-    enabled = application([
-      teamBookingRoutes({ db, notify, bulkSelectionSecret: secret }),
-      teamBookingBulkPreviewRoutes({ db, bulkSelectionSecret: secret }),
-    ])
+    jobs = createJobs({
+      connectionString: owned.url,
+      definitions: [wake],
+      migrate: true,
+      work: false,
+      maxConnections: 1,
+    })
+    await jobs.start()
+    enabled = bulkApp()
     data = await seed()
   })
 
-  afterAll(async () => {
-    await authPool?.end()
-    await owned?.drop()
+  beforeEach(async () => {
+    await db.deleteFrom('team_booking_bulk_request_limits').execute()
+    await db.deleteFrom('team_booking_bulk_cancellations').execute()
   })
 
-  function application(routes: Parameters<typeof createApp>[0]['routes']) {
+  afterAll(async () => {
+    try {
+      await jobs?.stop()
+    } finally {
+      try {
+        await authPool?.end()
+      } finally {
+        await owned?.drop()
+      }
+    }
+  })
+
+  const enqueue: EnqueueBulkCancellation = (trx, batchId) =>
+    jobs.enqueue(wake.name, { batchId }, { transaction: trx })
+
+  function bulkApp(enqueueBulkCancellation = enqueue) {
+    return application([
+      teamBookingRoutes({ db, notify, bulkSelectionSecret: secret }),
+      teamBookingBulkPreviewRoutes({ db, bulkSelectionSecret: secret, enqueueBulkCancellation }),
+    ])
+  }
+
+  function application(routes: Parameters<typeof createApp>[0]['routes'], caller = resolveCaller) {
     return createApp({
       publicUrl: origin,
       checkDb: async () => {},
       authHandler: auth.handler,
-      resolveCaller,
+      resolveCaller: caller,
       routes,
     })
   }
@@ -201,6 +237,70 @@ describe.skipIf(!serverUrl)('team booking bulk selection and preview', () => {
     })
   }
 
+  function confirmation(
+    actor: Session | undefined,
+    id: string,
+    {
+      app = enabled,
+      body,
+      overrides,
+    }: {
+      app?: ReturnType<typeof createApp>
+      body?: string
+      overrides?: Record<string, string>
+    } = {},
+  ) {
+    const headers = headersFor(actor, overrides)
+    if (body !== undefined) headers.set('content-type', 'application/json')
+    return app.request(`${bulkPath}/${id}/confirm`, {
+      method: 'POST',
+      headers,
+      ...(body !== undefined && { body }),
+    })
+  }
+
+  function status(actor: Session | undefined, id: string, app = enabled) {
+    return app.request(`${bulkPath}/${id}`, { headers: headersFor(actor) })
+  }
+
+  async function previewReceipt(actor: Session, ids: string[]) {
+    const proof = await page(actor)
+    const response = await preview(actor, proof.bulkPageToken, ids)
+    expect(response.status).toBe(200)
+    return (await response.json()) as { confirmationId: string; expiresAt: string }
+  }
+
+  async function admissionEffects(id: string) {
+    const events = await db
+      .selectFrom('audit_events')
+      .select(['request_id', 'actor_id', 'credential_id', 'details', 'action'])
+      .where('target_id', '=', id)
+      .execute()
+    const queued = (
+      await owned.pool.query<{ data: unknown }>(
+        "SELECT data FROM pgboss.job WHERE name = $1 AND data->>'batchId' = $2",
+        [wake.name, id],
+      )
+    ).rows
+    return { events, queued }
+  }
+
+  async function completeTestBatch(id: string) {
+    await db.transaction().execute(async (trx) => {
+      await trx
+        .updateTable('team_booking_bulk_cancellation_items')
+        .set({ outcome: 'processing_failed', next_attempt_at: null })
+        .where('batch_id', '=', id)
+        .where('outcome', '=', 'pending')
+        .execute()
+      await trx
+        .updateTable('team_booking_bulk_cancellations')
+        .set({ state: 'completed', completed_at: sql`clock_timestamp()` })
+        .where('id', '=', id)
+        .execute()
+    })
+  }
+
   async function expectError(response: Response, status: number, error: string) {
     expect(response.status).toBe(status)
     expect(await response.json()).toMatchObject({ error })
@@ -247,7 +347,7 @@ describe.skipIf(!serverUrl)('team booking bulk selection and preview', () => {
     expect(
       await db
         .selectFrom('team_booking_bulk_cancellation_items')
-        .selectAll()
+        .select(['batch_id', 'ordinal', 'booking_id', 'preview_outcome'])
         .where('batch_id', '=', receipt.id)
         .orderBy('ordinal')
         .execute(),
@@ -280,7 +380,7 @@ describe.skipIf(!serverUrl)('team booking bulk selection and preview', () => {
     const secondPage = await page(manager, { limit: '1', cursor: firstPage.nextCursor as string })
     expect(secondPage.data.map(({ id }) => id)).toEqual([second])
     const searched = await page(manager, { q: 'Search term' })
-    const descending = await page(manager, { order: 'desc', limit: '1' })
+    const descending = await page(admin, { order: 'desc', limit: '1' })
     expect(descending.data.map(({ id }) => id)).toEqual([third])
     expect((await page(otherManager)).data.map(({ id }) => id)).toEqual([foreign])
     const newSession = await session(owner, team.id)
@@ -290,7 +390,7 @@ describe.skipIf(!serverUrl)('team booking bulk selection and preview', () => {
       [manager, firstPage.bulkPageToken, [first, randomUUID()]],
       [manager, secondPage.bulkPageToken, [first]],
       [manager, searched.bulkPageToken, [second]],
-      [manager, descending.bulkPageToken, [first]],
+      [admin, descending.bulkPageToken, [first]],
       [admin, firstPage.bulkPageToken, [first]],
       [newSession, firstPage.bulkPageToken, [first]],
       [otherManager, firstPage.bulkPageToken, [first]],
@@ -326,7 +426,7 @@ describe.skipIf(!serverUrl)('team booking bulk selection and preview', () => {
     expect(await receiptCount()).toBe(before)
   })
 
-  it('reports a paid successor, a departed required host and other preview skips in page order', async () => {
+  it('reports paid successors, imported chains and other preview skips in page order', async () => {
     const { owner, other } = data
     const team = await createTestTeam(db, [{ user: owner, role: 'owner' }])
     const actor = await session(owner, team.id)
@@ -364,7 +464,7 @@ describe.skipIf(!serverUrl)('team booking bulk selection and preview', () => {
     const foreignImport = await f.booking(other.id, [], '2099-01-01T14:00Z', '2099-01-01T14:30Z', {
       source: 'import',
     })
-    // A legacy cross-team link must not influence the local booking's preview.
+    // A legacy link to another team's imported booking makes the local successor read-only.
     await db
       .updateTable('bookings')
       .set({ rescheduled_from_id: foreignImport })
@@ -432,7 +532,7 @@ describe.skipIf(!serverUrl)('team booking bulk selection and preview', () => {
       { bookingId: unavailable, code: 'booking_unavailable' },
       { bookingId: hostDeparted, code: 'booking_host_departed' },
       { bookingId: outsideTeam, code: 'booking_unavailable' },
-      { bookingId: native, code: 'eligible' },
+      { bookingId: native, code: 'booking_not_supported' },
     ])
   })
 
@@ -590,12 +690,24 @@ describe.skipIf(!serverUrl)('team booking bulk selection and preview', () => {
           403,
           'team_management_access_denied',
         )
+        await expectError(
+          await confirmation(actor, randomUUID(), { overrides: headers }),
+          403,
+          'team_management_access_denied',
+        )
+        await expectError(
+          await enabled.request(`${bulkPath}/${randomUUID()}`, {
+            headers: headersFor(actor, headers),
+          }),
+          403,
+          'team_management_access_denied',
+        )
       }
     }
     expect(await receiptCount()).toBe(before)
   })
 
-  it('keeps proof and preview inaccessible in the production route composition', async () => {
+  it('keeps proof, preview, confirmation and status inaccessible in production', async () => {
     const product = application(
       productRoutes({ db, socialProviders: {}, invitationMailLimits: { secret } }),
     )
@@ -617,6 +729,360 @@ describe.skipIf(!serverUrl)('team booking bulk selection and preview', () => {
       body: JSON.stringify({ pageToken: bulkPageToken, bookingIds: [first] }),
     })
     expect(previewResponse.status).toBe(404)
+    await expectError(await confirmation(manager, randomUUID(), { app: product }), 404, 'not_found')
+    await expectError(await status(manager, randomUUID(), product), 404, 'not_found')
     expect(await receiptCount()).toBe(before)
+  })
+
+  it('serializes parallel confirmation across web apps and replays the same batch after sign-in', async () => {
+    const { manager, owner, team, first } = data
+    const skipped = await createFixtures(db).booking(
+      team.id,
+      [owner.id],
+      '2099-01-02T09:05Z',
+      '2099-01-02T09:10Z',
+      { status: 'cancelled' },
+    )
+    const { confirmationId: id, expiresAt } = await previewReceipt(manager, [skipped, first])
+    const waiting = await status(manager, id)
+    expect(waiting.status).toBe(200)
+    expect(await waiting.json()).toEqual({ id, state: 'awaiting_confirmation', expiresAt })
+    const actor = await session(owner, team.id)
+    await expectError(await confirmation(actor, id), 404, 'bulk_cancellation_not_found')
+
+    // A preview skip is frozen even if a later booking read would find it eligible.
+    await db
+      .updateTable('bookings')
+      .set({ status: 'confirmed', cancelled_at: null })
+      .where('id', '=', skipped)
+      .execute()
+    const replica = bulkApp()
+    const answers = await Promise.all([
+      confirmation(manager, id),
+      confirmation(manager, id, { app: replica }),
+    ])
+    for (const answer of answers) {
+      expect(answer.status).toBe(202)
+      expect(await answer.json()).toEqual({ id, state: 'queued' })
+    }
+    const admitted = await status(actor, id)
+    expect(admitted.status).toBe(200)
+    expect(admitted.headers.get('cache-control')).toContain('no-store')
+    expect(await admitted.json()).toEqual({
+      id,
+      state: 'queued',
+      counts: {
+        pending: 1,
+        cancelled: 0,
+        already_cancelled: 1,
+        booking_started: 0,
+        booking_not_supported: 0,
+        booking_unavailable: 0,
+        booking_host_departed: 0,
+        authorization_lost: 0,
+        processing_failed: 0,
+      },
+      items: [
+        { bookingId: first, code: 'pending' },
+        { bookingId: skipped, code: 'already_cancelled' },
+      ],
+    })
+    await completeTestBatch(id)
+    const replay = await confirmation(actor, id)
+    expect(replay.status).toBe(200)
+    expect(await replay.json()).toEqual({ id, state: 'completed' })
+    expect(await admissionEffects(id)).toEqual({
+      events: [
+        {
+          request_id: id,
+          actor_id: manager.userId,
+          credential_id: manager.sessionId,
+          action: 'booking.bulk_cancellation_admitted',
+          details: { selectedCount: 2 },
+        },
+      ],
+      queued: [{ data: { batchId: id } }],
+    })
+    expect(notify).not.toHaveBeenCalled()
+    await db
+      .updateTable('team_booking_bulk_cancellations')
+      .set({
+        created_at: sql`clock_timestamp() - interval '8 days 2 minutes'`,
+        admitted_at: sql`clock_timestamp() - interval '8 days 1 minute'`,
+        expires_at: sql`clock_timestamp() - interval '8 days'`,
+        completed_at: sql`clock_timestamp() - interval '8 days'`,
+      })
+      .where('id', '=', id)
+      .execute()
+    await expectError(await status(actor, id), 404, 'bulk_cancellation_not_found')
+    await expectError(await confirmation(actor, id), 404, 'bulk_cancellation_not_found')
+  })
+
+  it('keeps confirmation receipt scope private and refuses mutable, expired and empty admissions', async () => {
+    const { manager, first, owner, team, admin, host, otherManager, other } = data
+    const { confirmationId: id } = await previewReceipt(manager, [first])
+    const missing = randomUUID()
+    for (const actor of [admin, otherManager]) {
+      for (const candidate of [id, missing]) {
+        await expectError(await status(actor, candidate), 404, 'bulk_cancellation_not_found')
+        await expectError(await confirmation(actor, candidate), 404, 'bulk_cancellation_not_found')
+      }
+    }
+    for (const actor of [undefined, host, data.personal]) {
+      for (const candidate of [id, missing]) {
+        await expectError(await status(actor, candidate), 403, 'team_management_access_denied')
+        await expectError(
+          await confirmation(actor, candidate),
+          403,
+          'team_management_access_denied',
+        )
+      }
+    }
+    await expectError(await confirmation(manager, id, { body: '{}' }), 400, 'invalid_request')
+    await expectError(
+      await confirmation(manager, id, { body: JSON.stringify({ bookingIds: [first] }) }),
+      400,
+      'invalid_request',
+    )
+    await expectError(
+      await enabled.request(`${bulkPath}/${id}/confirm?bookingIds=${first}`, {
+        method: 'POST',
+        headers: headersFor(manager),
+      }),
+      400,
+      'invalid_request',
+    )
+    await expectError(
+      await confirmation(manager, id, { overrides: { origin: 'https://other.example' } }),
+      403,
+      'forbidden',
+    )
+    await expectError(
+      await confirmation(manager, id, { overrides: { [EXPECTED_ORGANIZATION_HEADER]: other.id } }),
+      409,
+      'organization_context_changed',
+    )
+    await db
+      .updateTable('team_booking_bulk_cancellations')
+      .set({
+        created_at: sql`clock_timestamp() - interval '2 minutes'`,
+        expires_at: sql`clock_timestamp() - interval '1 minute'`,
+      })
+      .where('id', '=', id)
+      .execute()
+    await expectError(await status(manager, id), 409, 'bulk_confirmation_expired')
+    await expectError(await confirmation(manager, id), 409, 'bulk_confirmation_expired')
+    expect(await admissionEffects(id)).toEqual({ events: [], queued: [] })
+
+    const cancelled = await createFixtures(db).booking(
+      team.id,
+      [owner.id],
+      '2099-01-01T07:00Z',
+      '2099-01-01T07:30Z',
+      { status: 'cancelled' },
+    )
+    const { confirmationId } = await previewReceipt(manager, [cancelled])
+    await expectError(await confirmation(manager, confirmationId), 409, 'bulk_no_eligible_bookings')
+    expect(await admissionEffects(confirmationId)).toEqual({ events: [], queued: [] })
+  })
+
+  it('rolls back admission, its audit, its pending items and the durable wake together', async () => {
+    const { manager, first } = data
+    const { confirmationId: id } = await previewReceipt(manager, [first])
+    const failing = bulkApp(async (trx, batchId) => {
+      const jobId = await enqueue(trx, batchId)
+      expect(jobId).toEqual(expect.any(String))
+      throw new Error('Synthetic failure after inserting the wake')
+    })
+    await expectError(await confirmation(manager, id, { app: failing }), 500, 'internal_error')
+    expect(await admissionEffects(id)).toEqual({ events: [], queued: [] })
+    expect(await (await status(manager, id)).json()).toMatchObject({
+      state: 'awaiting_confirmation',
+    })
+    const item = await db
+      .selectFrom('team_booking_bulk_cancellation_items')
+      .select(['outcome', 'next_attempt_at'])
+      .where('batch_id', '=', id)
+      .executeTakeFirstOrThrow()
+    expect(item).toEqual({ outcome: null, next_attempt_at: null })
+    expect((await confirmation(manager, id)).status).toBe(202)
+    await completeTestBatch(id)
+  })
+
+  it('refuses admission when the issuing session expires during a capacity lock wait', async () => {
+    const { owner, team, first } = data
+    const actor = await session(owner, team.id)
+    const { confirmationId: id } = await previewReceipt(actor, [first])
+    const resolved = await resolveCaller(headersFor(actor))
+    expect(resolved.ok).toBe(true)
+    // Capture the request's resolved identity before setting a short lifetime. A real
+    // Better Auth read at that lifetime can renew the session before the capacity wait.
+    const app = application(
+      [
+        teamBookingBulkPreviewRoutes({
+          db,
+          bulkSelectionSecret: secret,
+          enqueueBulkCancellation: enqueue,
+        }),
+      ],
+      async () => resolved,
+    )
+    let pending: Promise<Response> | undefined
+    try {
+      await db.transaction().execute(async (trx) => {
+        const { rows } = await sql<{ pid: number }>`
+          SELECT pg_backend_pid() AS pid,
+            pg_advisory_xact_lock(hashtextextended('hourmere.team-booking-bulk-admission', 0))
+        `.execute(trx)
+        const { expiresAt } = await db
+          .updateTable('auth.session')
+          .set({ expiresAt: sql`clock_timestamp() + interval '2 seconds'` })
+          .where('id', '=', actor.sessionId)
+          .returning('expiresAt')
+          .executeTakeFirstOrThrow()
+        pending = Promise.resolve(confirmation(actor, id, { app }))
+        await vi.waitFor(async () => {
+          const blocked = await owned.pool.query(
+            'SELECT pid FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))',
+            [rows[0]?.pid],
+          )
+          expect(blocked.rowCount).toBe(1)
+        })
+        await sql`
+          SELECT pg_sleep(greatest(0, extract(epoch FROM (${expiresAt}::timestamptz - clock_timestamp()))) + 0.01)
+        `.execute(trx)
+      })
+      if (!pending) throw new Error('Expected a waiting confirmation')
+      await expectError(await pending, 403, 'team_management_access_denied')
+    } finally {
+      await pending
+    }
+    expect(await admissionEffects(id)).toEqual({ events: [], queued: [] })
+    expect(await (await status(data.manager, id)).json()).toMatchObject({
+      state: 'awaiting_confirmation',
+    })
+  })
+
+  it('shares rolling admission and read budgets and the active team capacity', async () => {
+    const { owner, first } = data
+    const team = await createTestTeam(db, [{ user: owner, role: 'owner' }])
+    const actor = await session(owner, team.id)
+    const bookingId = await createFixtures(db).booking(
+      team.id,
+      [owner.id],
+      '2099-01-03T09:00Z',
+      '2099-01-03T09:30Z',
+    )
+    const ids = await Promise.all(
+      [1, 2, 3].map(async () => (await previewReceipt(actor, [bookingId])).confirmationId),
+    )
+    const [firstId, secondId, thirdId] = ids as [string, string, string]
+    const replica = bulkApp()
+    expect((await confirmation(actor, firstId)).status).toBe(202)
+    const full = await confirmation(actor, secondId, { app: replica })
+    expect(Number(full.headers.get('Retry-After'))).toBeGreaterThan(0)
+    await expectError(full, 429, 'bulk_queue_full')
+    expect((await confirmation(actor, firstId, { app: replica })).status).toBe(202)
+    await completeTestBatch(firstId)
+    expect((await confirmation(actor, secondId, { app: replica })).status).toBe(202)
+    await completeTestBatch(secondId)
+    const limited = await confirmation(actor, thirdId)
+    expect(Number(limited.headers.get('Retry-After'))).toBeGreaterThan(0)
+    await expectError(limited, 429, 'rate_limited')
+    expect(await admissionEffects(thirdId)).toEqual({ events: [], queued: [] })
+    expect(await (await status(actor, thirdId)).json()).toMatchObject({
+      state: 'awaiting_confirmation',
+    })
+
+    // Existing replay and status calls share the actor's one read budget.
+    await db
+      .insertInto('team_booking_bulk_request_limits')
+      .values(
+        Array.from({ length: 27 }, () => ({
+          organization_id: team.id,
+          actor_user_id: actor.userId,
+          kind: 'status',
+        })),
+      )
+      .execute()
+    expect((await confirmation(actor, firstId)).status).toBe(200)
+    const staleAt = new Date('2020-01-01T00:00:00Z')
+    await db
+      .insertInto('team_booking_bulk_request_limits')
+      .values(
+        Array.from({ length: 41 }, (_, index) => ({
+          organization_id: team.id,
+          actor_user_id: index === 40 ? data.admin.userId : actor.userId,
+          kind: 'status',
+          created_at: staleAt,
+        })),
+      )
+      .execute()
+    const readLimited = await status(actor, secondId, replica)
+    expect(Number(readLimited.headers.get('Retry-After'))).toBeGreaterThan(0)
+    await expectError(readLimited, 429, 'rate_limited')
+    const stale = await db
+      .selectFrom('team_booking_bulk_request_limits')
+      .select('actor_user_id')
+      .where('organization_id', '=', team.id)
+      .where('created_at', '=', staleAt)
+      .execute()
+    expect(stale.filter((row) => row.actor_user_id === actor.userId)).toHaveLength(10)
+    expect(stale.filter((row) => row.actor_user_id === data.admin.userId)).toHaveLength(1)
+
+    // Three successful previews and three invalid proofs fill this team's actor budget.
+    for (const app of [enabled, replica, enabled]) {
+      await expectError(
+        await app.request(previewPath, {
+          method: 'POST',
+          headers: headersFor(actor, { 'content-type': 'application/json' }),
+          body: JSON.stringify({ pageToken: 'invalid-proof', bookingIds: [first] }),
+        }),
+        409,
+        'bulk_selection_changed',
+      )
+    }
+    const previewLimited = await preview(actor, 'invalid-proof', [first])
+    expect(Number(previewLimited.headers.get('Retry-After'))).toBeGreaterThan(0)
+    await expectError(previewLimited, 429, 'rate_limited')
+  })
+
+  it('refuses new admission at instance capacity without consuming the receipt', async () => {
+    const { owner } = data
+    const team = await createTestTeam(db, [{ user: owner, role: 'owner' }])
+    const actor = await session(owner, team.id)
+    const bookingId = await createFixtures(db).booking(
+      team.id,
+      [owner.id],
+      '2099-01-04T09:00Z',
+      '2099-01-04T09:30Z',
+    )
+    const { confirmationId: id } = await previewReceipt(actor, [bookingId])
+    const capacity = await sql<{ organization_id: string }>`
+      WITH teams AS (
+        INSERT INTO auth.organization (name, slug, "createdAt")
+        SELECT 'Capacity fixture', gen_random_uuid()::text, statement_timestamp()
+        FROM generate_series(1, 100)
+        RETURNING id
+      )
+      INSERT INTO team_booking_bulk_cancellations
+        (organization_id, actor_user_id, session_id, created_at, expires_at, state, admitted_at)
+      SELECT id, ${actor.userId}, ${actor.sessionId},
+        statement_timestamp() - interval '1 second',
+        statement_timestamp() + interval '1 minute', 'queued', statement_timestamp()
+      FROM teams
+      RETURNING organization_id
+    `.execute(db)
+    expect(capacity.rows).toHaveLength(100)
+    const full = await confirmation(actor, id)
+    expect(Number(full.headers.get('Retry-After'))).toBeGreaterThan(0)
+    await expectError(full, 429, 'bulk_queue_full')
+    expect(await admissionEffects(id)).toEqual({ events: [], queued: [] })
+    expect(await (await status(actor, id)).json()).toMatchObject({ state: 'awaiting_confirmation' })
+    const removed = capacity.rows[0]?.organization_id
+    if (!removed) throw new Error('Expected a capacity fixture')
+    await db.deleteFrom('auth.organization').where('id', '=', removed).execute()
+    expect((await confirmation(actor, id)).status).toBe(202)
+    await completeTestBatch(id)
   })
 })

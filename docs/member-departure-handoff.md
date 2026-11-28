@@ -279,7 +279,7 @@ disposable PostgreSQL databases and fake provider/mail transports.
 ### Staged administrator flow
 
 The production server keeps handoff admission off. The staged browser and REST acceptance
-flow uses a PostgreSQL test store with versioned offers and recorded decisions. An authorized
+flow exercises the production PostgreSQL store with seeded offers and consent records. An authorized
 owner or admin opens the source in Team bookings and selects **Preview handoff**. The preview
 shows the proposed host, time and location type. A slot judged unavailable on the current
 event grid, calendar uncertainty, a changed offer, any outstanding approval, or an expired
@@ -301,8 +301,9 @@ The staged GET is `/api/v1/team/bookings/{id}/handoff-preview`. Apply uses
 consent state and deadline, or the limited committed receipt. The production assembly
 leaves the detail capability absent and returns `handoffs_disabled` to authorized callers.
 
-Production offer and receipt storage, proposal and consent delivery, recipient decisions and
-transports, handoff-specific messages and calendar attachments, and rollout remain pending.
+Production storage is in place. Proposal lifecycle and confirmation-link delivery, recipient
+decisions and transports, handoff-specific messages and calendar attachments, and rollout
+remain pending.
 Provider cleanup and creation reuse existing workers. Zoom lost-response recovery is
 exercised with a fake, and handoff-specific Google and Microsoft lifecycle acceptance remains
 open. Bounded automatic handoff is a separate follow-on.
@@ -336,12 +337,12 @@ those bookings and leaves their ordinary booking flows in place.
 内部试算按活动类型当前的可预约时段网格检查指定开始时间。即使接任者有空，网格之外的开始
 时间也不可预约。试算不占用时段、不发邀请。日历数据不可信时返回
 `calendar_sync_unavailable`，不会公开私人忙碌区间或日历事件映射。正式应用需在锁内重新检查。
-预发布验收使用 PostgreSQL 测试存储。团队所有者或管理员可在团队预约详情试算单笔交接，
+预发布验收在生产 PostgreSQL 存储结构中预置提议和同意记录。团队所有者或管理员可在团队预约详情试算单笔交接，
 查看接任主持人、时段和地点类型。来宾尚未回复、同意已过期、日历状态未知或时段不可用时，
 界面禁止确认。确认时在锁内重新复核。提交结果不确定时，先刷新查看回执，再决定是否重试。
 提交后，外部会议仍可处于待创建或失败状态，由对应主持人使用原有恢复流程处理。
-生产功能保持关闭。生产存储、提议与同意投递、参与者页面和接口、交接专用邮件与日历附件及
-上线启用仍待后续阶段。
+生产存储已就绪，功能保持关闭。提议生命周期与确认链接投递、参与者页面和接口、交接专用邮件与
+日历附件及上线启用仍待后续阶段。
 旧会议的取消沿用原 ICS UID 与原日历组织者，新邀请使用新 UID。Google Meet 和 Zoom
 按各自预约链的固定组织者身份处理。Outlook 和 Teams 按旧链固定的写回状态清理，新 Teams
 会议要求实例启用 Microsoft 日历，并复核接任主持人的写入资格。任一条件不满足时返回

@@ -747,8 +747,9 @@ App invitations count app requests for an address across teams and SCIM requests
 their own team against `MAIL_RECIPIENT_MAX_PER_HOUR` and `MAIL_RECIPIENT_MAX_PER_DAY`.
 SCIM admissions use the
 same settings to count an address's invitations within the organization and have a separate
-team budget. An instance-wide ceiling of four times each configured recipient limit
-counts all invitations for that address. [SCIM provisioning](/docs/scim#invitations-and-initial-sync)
+team budget. `INVITATION_GLOBAL_RECIPIENT_MULTIPLIER` (default four) multiplies each
+configured recipient limit to cap invitations for that address across the instance.
+[SCIM provisioning](/docs/scim#invitations-and-initial-sync)
 describes these limits for initial syncs. Invitations use their own recipient HMAC domain
 and share the global mail-budget lock. `MAIL_MAX_PER_HOUR` is debited at send time.
 Ordinary request retries and exact

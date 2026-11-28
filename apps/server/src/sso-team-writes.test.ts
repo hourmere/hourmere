@@ -270,9 +270,17 @@ describe.skipIf(!serverUrl)('SSO proof on team writes', () => {
   it('checks every registered team write with operational features enabled', async () => {
     await requireSso()
     const app = instance()
-    // The preview route has no production opt-in until bulk cancellation ships.
+    // Bulk cancellation routes are injected here until the production release gate.
     const bulk = instance({
-      routes: [teamBookingBulkPreviewRoutes({ db, bulkSelectionSecret: secret })],
+      routes: [
+        teamBookingBulkPreviewRoutes({
+          db,
+          bulkSelectionSecret: secret,
+          enqueueBulkCancellation: async () => {
+            throw new Error('SSO-denied confirmation must not enqueue a job')
+          },
+        }),
+      ],
     })
     const customRoles = instance({
       routes: [
@@ -295,10 +303,12 @@ describe.skipIf(!serverUrl)('SSO proof on team writes', () => {
         return eventId
       })
       let target = app
-      if (path === '/api/v1/team/bookings/bulk-cancellations/preview') target = bulk
+      if (path.startsWith('/api/v1/team/bookings/bulk-cancellations/')) target = bulk
       if (customRoleWrites.has(operation)) target = customRoles
       await expectRefused(await send(target, method, path, {}), operation)
     }
+    const statusPath = `/api/v1/team/bookings/bulk-cancellations/${eventId}`
+    await expectRefused(await send(bulk, 'GET', statusPath, undefined), `GET ${statusPath}`)
     expect(await currentTitle()).toBe('Before writing')
   })
 

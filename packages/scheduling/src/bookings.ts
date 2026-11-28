@@ -3269,6 +3269,11 @@ export async function cancelTeamBookingInTransaction(
     meetingPollLinked?: boolean | undefined
     /** Series occurrence (null: none) from the same pre-lock read; omitted, read under the locks. */
     seriesOccurrenceId?: string | null | undefined
+    bulk?: {
+      batchId: string
+      /** Classify the target and return the eligibility-check time, under the booking lock. */
+      eligibleAt: () => Promise<Temporal.Instant | undefined>
+    }
   } = {},
 ): Promise<void> {
   if (!trx.isTransaction) throw new Error('Team cancellation requires a transaction')
@@ -3291,15 +3296,21 @@ export async function cancelTeamBookingInTransaction(
     .where('organization_id', '=', actor.organizationId)
     .forUpdate()
     .executeTakeFirst()
-  if (!row) throw bookingNotFound()
+  if (!row) {
+    if (options.bulk) return
+    throw bookingNotFound()
+  }
+  const cancellationTime = options.bulk ? await options.bulk.eligibleAt() : now()
+  if (!cancellationTime) return
   await cancelLocked(
     trx,
     row,
-    now(),
+    cancellationTime,
     normalizeReason(options.reason),
     options.notify,
     {
       ...BOOKING_PAGE,
+      ...(options.bulk && { requestId: options.bulk.batchId }),
       audit: {
         actor: { type: 'user', id: actor.userId },
         credential: { type: 'session', ...(options.sessionId ? { id: options.sessionId } : {}) },

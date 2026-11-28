@@ -22,6 +22,8 @@ const fixedOutsideV1: ReadonlySet<string> = new Set([
   'custom_roles.archive',
   'custom_roles.assign',
   'team_bookings.preview_bulk_cancellation',
+  'team_bookings.confirm_bulk_cancellation',
+  'team_bookings.read_bulk_cancellation',
   'team_bookings.preview_handoff',
   'team_bookings.apply_handoff',
 ])
@@ -147,6 +149,11 @@ const teamRest = new Map<string, readonly string[]>([
     'POST /api/v1/team/bookings/bulk-cancellations/preview',
     ['team_bookings.preview_bulk_cancellation'],
   ],
+  [
+    'POST /api/v1/team/bookings/bulk-cancellations/{id}/confirm',
+    ['team_bookings.confirm_bulk_cancellation'],
+  ],
+  ['GET /api/v1/team/bookings/bulk-cancellations/{id}', ['team_bookings.read_bulk_cancellation']],
   ['GET /api/v1/team/invitations', ['invitations.read']],
   ['GET /api/v1/team/invitations/{invitationId}', ['invitations.read']],
   ['POST /api/v1/team/invitations/{invitationId}/cancel', ['invitations.cancel']],

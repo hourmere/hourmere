@@ -714,6 +714,44 @@ export interface CustomRoles {
   organization_id: string;
 }
 
+export interface DepartureBookingHandoffs {
+  applied_at: Timestamp;
+  applying_user_id: string;
+  offer_id: string;
+  offer_version: number;
+  organization_id: string;
+  recipient_ids: string[];
+  replacement_booking_id: string;
+  source_booking_id: string;
+}
+
+export interface DepartureHandoffOffers {
+  departing_user_id: string;
+  duration_minutes: number;
+  expires_at: Timestamp;
+  id: Generated<string>;
+  issued_at: Timestamp;
+  location_option_id: string | null;
+  organization_id: string;
+  proposer_user_id: string;
+  source_booking_id: string;
+  state: Generated<string>;
+  target_start_at: Timestamp;
+  terms_digest: string;
+  version: number;
+}
+
+export interface DepartureHandoffRecipients {
+  decided_at: Timestamp | null;
+  decision: string | null;
+  id: Generated<string>;
+  offer_id: string;
+  offer_version: number;
+  organization_id: string;
+  recipient_key: string;
+  source_booking_id: string;
+}
+
 export interface EventTypeHosts {
   destination_calendar_id: string | null;
   event_type_id: string;
@@ -1694,19 +1732,35 @@ export interface SsoReplayCache {
 }
 
 export interface TeamBookingBulkCancellationItems {
+  attempt_count: Generated<number>;
   batch_id: string;
   booking_id: string;
+  claim_expires_at: Timestamp | null;
+  claim_token: string | null;
+  next_attempt_at: Timestamp | null;
   ordinal: number;
+  outcome: string | null;
   preview_outcome: string;
 }
 
 export interface TeamBookingBulkCancellations {
   actor_user_id: string;
+  admitted_at: Timestamp | null;
+  completed_at: Timestamp | null;
   created_at: Generated<Timestamp>;
   expires_at: Timestamp;
   id: Generated<string>;
   organization_id: string;
   session_id: string;
+  state: Generated<string>;
+}
+
+export interface TeamBookingBulkRequestLimits {
+  actor_user_id: string;
+  created_at: Generated<Timestamp>;
+  id: Generated<Int8>;
+  kind: string;
+  organization_id: string;
 }
 
 export interface TeamCredentialAuthorizations {
@@ -2061,6 +2115,9 @@ export interface DB {
   custom_role_master_policy: CustomRoleMasterPolicy;
   custom_role_revisions: CustomRoleRevisions;
   custom_roles: CustomRoles;
+  departure_booking_handoffs: DepartureBookingHandoffs;
+  departure_handoff_offers: DepartureHandoffOffers;
+  departure_handoff_recipients: DepartureHandoffRecipients;
   event_type_hosts: EventTypeHosts;
   event_types: EventTypes;
   group_booking_move_receipts: GroupBookingMoveReceipts;
@@ -2141,6 +2198,7 @@ export interface DB {
   sso_replay_cache: SsoReplayCache;
   team_booking_bulk_cancellation_items: TeamBookingBulkCancellationItems;
   team_booking_bulk_cancellations: TeamBookingBulkCancellations;
+  team_booking_bulk_request_limits: TeamBookingBulkRequestLimits;
   team_credential_authorizations: TeamCredentialAuthorizations;
   team_custom_role_policies: TeamCustomRolePolicies;
   team_member_authorizations: TeamMemberAuthorizations;

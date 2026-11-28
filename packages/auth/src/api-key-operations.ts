@@ -287,6 +287,13 @@ export const API_KEY_REST_OPERATIONS: readonly ApiKeyRestOperation[] = Object.fr
     'session_only',
   ),
   rest('POST', '/api/v1/team/bookings/bulk-cancellations/preview', 'session_only', 'session_only'),
+  rest(
+    'POST',
+    '/api/v1/team/bookings/bulk-cancellations/{id}/confirm',
+    'session_only',
+    'session_only',
+  ),
+  rest('GET', '/api/v1/team/bookings/bulk-cancellations/{id}', 'session_only', 'session_only'),
   rest('GET', '/api/v1/team/invitations', 'session_only', 'session_only'),
   rest('GET', '/api/v1/team/invitations/{invitationId}', 'session_only', 'session_only'),
   rest('POST', '/api/v1/team/invitations/{invitationId}/cancel', 'session_only', 'session_only'),
