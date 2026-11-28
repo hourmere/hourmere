@@ -19,6 +19,7 @@ describe('brand raster exports and delivery', () => {
       >
     }
     const tools = ['sharp', 'jsdom', 'parse5', 'fontkit', 'wawoff2', 'postcss']
+    const sharpConsumers = ['apps/server', 'packages/scheduling']
     for (const [path, metadata] of Object.entries(lock.packages)) {
       if (!path.includes('node_modules')) {
         const manifest = JSON.parse(read(`../../../${path}/package.json`).toString())
@@ -31,7 +32,7 @@ describe('brand raster exports and delivery', () => {
           // Runtime consumers need these tools; site-only tooling stays dev-only.
           if (path === 'packages/import-calcom' && tool === 'parse5')
             expect(manifest.dependencies?.[tool], `${path}: production ${tool}`).toBe('8.0.1')
-          else if (path === 'packages/scheduling' && tool === 'sharp')
+          else if (sharpConsumers.includes(path) && tool === 'sharp')
             expect(manifest.dependencies?.[tool], `${path}: production ${tool}`).toBe('0.35.5')
           else expect(manifest.dependencies?.[tool], `${path}: production ${tool}`).toBeUndefined()
           expect(manifest.optionalDependencies?.[tool], `${path}: optional ${tool}`).toBeUndefined()
@@ -47,7 +48,8 @@ describe('brand raster exports and delivery', () => {
           expect(metadata.dev || metadata.devOptional).not.toBe(true)
         } else if (path === 'node_modules/sharp') {
           expect(metadata.version).toBe('0.35.5')
-          expect(lock.packages['packages/scheduling']?.dependencies?.sharp).toBe('0.35.5')
+          for (const consumer of sharpConsumers)
+            expect(lock.packages[consumer]?.dependencies?.sharp, consumer).toBe('0.35.5')
           expect(metadata.dev || metadata.devOptional).not.toBe(true)
         } else
           expect(metadata.dev || metadata.devOptional, `${path}: production lock entry`).toBe(true)
