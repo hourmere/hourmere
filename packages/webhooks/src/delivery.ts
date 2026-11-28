@@ -775,14 +775,14 @@ async function attemptWebhook(
       error = 'transport_error'
     }
   }
-  // A received 2xx acknowledges delivery even if shutdown raced its response. Otherwise
-  // commit shutdown consumption before retrying. A killed process is accounted for by
-  // the next jobAttempt or by periodic orphan reconciliation.
-  if (signal.aborted && (status === null || error !== null)) {
+  const slackRevoked = isSlack && (status === 404 || status === 410)
+  // Honor a success or definitive Slack rejection even if shutdown raced its response.
+  // Otherwise commit shutdown consumption before retrying. A killed process is accounted for
+  // by the next jobAttempt or by periodic orphan reconciliation.
+  if (signal.aborted && !slackRevoked && (status === null || error !== null)) {
     error = 'interrupted'
     status = null
   }
-  const slackRevoked = isSlack && (status === 404 || status === 410)
   if (slackRevoked) {
     await trx
       .updateTable('webhooks')
