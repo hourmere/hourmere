@@ -31,13 +31,9 @@ export const admin = {
   'Preview the replacement host and time. A preview does not reserve the slot.':
     'Prüfen Sie die neue gastgebende Person und den Termin. Dabei wird kein Zeitfenster reserviert.',
   'No handoff offer is available yet.': 'Es liegt noch kein Übergabeangebot vor.',
-  'Participant consent is pending. The booker and every guest must approve. The original booking stays confirmed.':
-    'Zustimmungen stehen noch aus. Die buchende Person und alle Gäste müssen zustimmen. Die ursprüngliche Buchung bleibt bestätigt.',
   'All participants have approved.': 'Alle Teilnehmenden haben zugestimmt.',
   'Consent has expired. The offer leaves the booking unchanged. A new offer needs new approvals.':
     'Die Zustimmungsfrist ist abgelaufen. Die Buchung bleibt unverändert. Für ein neues Angebot sind neue Zustimmungen nötig.',
-  'This handoff offer is closed. Use manual rebooking if you still need to replace the booking.':
-    'Dieses Übergabeangebot ist geschlossen. Buchen Sie bei Bedarf manuell neu.',
   'That time is unavailable for the replacement host. Refresh the preview or use manual rebooking.':
     'Der Termin ist für die neue gastgebende Person nicht verfügbar. Aktualisieren Sie die Vorschau oder buchen Sie manuell neu.',
   'The proposed time is available.': 'Der vorgeschlagene Termin ist verfügbar.',
@@ -341,6 +337,18 @@ export const admin = {
   'Accepted by the mail server': 'Vom Mailserver angenommen',
   'Email delivery incomplete': 'E-Mail-Zustellung unvollständig',
   'Email delivery unavailable': 'E-Mail-Zustellung nicht verfügbar',
+
+  // Departure booking handoff
+  'Participant consent is pending. The booker and every guest must approve. A single missing reply blocks the handoff. The original booking stays confirmed.':
+    'Die Zustimmung der Teilnehmenden steht noch aus. Die buchende Person und alle Gäste müssen zustimmen. Eine einzige fehlende Antwort blockiert die Übergabe. Der ursprüngliche Termin bleibt bestätigt.',
+  'This handoff offer is closed. A new offer needs fresh approvals from everyone. You can also coordinate a replacement manually.':
+    'Dieses Übergabeangebot ist geschlossen. Für ein neues Angebot müssen alle erneut zustimmen. Sie können auch manuell einen Ersatztermin vereinbaren.',
+  'Cleanup of the tracked entries in the original calendar or meeting account is complete.':
+    'Die erfassten Einträge im ursprünglichen Kalender oder Meeting-Konto wurden bereinigt.',
+  'Cleanup in the original calendar or meeting account is pending.':
+    'Die Bereinigung im ursprünglichen Kalender oder Meeting-Konto steht noch aus.',
+  'Cleanup in the original calendar or meeting account could not be verified. Ask the account owner to check for remaining entries.':
+    'Die Bereinigung im ursprünglichen Kalender oder Meeting-Konto konnte nicht bestätigt werden. Bitten Sie den Kontoinhaber, nach verbliebenen Einträgen zu suchen.',
 
   // Effective team page permissions
   'No event types yet.': 'Noch keine Ereignistypen.',

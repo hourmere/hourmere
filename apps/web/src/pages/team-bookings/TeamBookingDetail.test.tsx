@@ -232,6 +232,7 @@ describe('team booking handoff', () => {
     try {
       let committed = false
       let mail = { cancellation: 'pending', confirmation: 'pending' }
+      let cleanup = 'unresolved'
       const calls = server({
         [GET]: () =>
           json(200, {
@@ -250,7 +251,7 @@ describe('team booking handoff', () => {
                     sourceBookingId: ID,
                     replacementBookingId: REPLACEMENT_ID,
                     conference: 'failed',
-                    oldConferenceCleanup: 'unresolved',
+                    oldConferenceCleanup: cleanup,
                     mail,
                   },
                 }
@@ -297,9 +298,15 @@ describe('team booking handoff', () => {
       expect(handoff.getByText('Attendee confirmation email')).toBeDefined()
       expect(handoff.getAllByText('Mail server acceptance unconfirmed')).toHaveLength(2)
       mail = { cancellation: 'accepted', confirmation: 'incomplete' }
+      cleanup = 'complete'
       await user.click(handoff.getByRole('button', { name: 'Refresh handoff' }))
       await handoff.findByText('Accepted by the mail server')
       expect(handoff.getByText('Email delivery incomplete')).toBeDefined()
+      expect(
+        handoff.getByText(
+          'Cleanup of the tracked entries in the original calendar or meeting account is complete.',
+        ),
+      ).toBeDefined()
     } finally {
       vi.useRealTimers()
     }

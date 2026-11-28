@@ -124,6 +124,10 @@ authorization and execution details.
 
 ## Departure handoff
 
-The [departure handoff design](member-departure-handoff.md#staged-administrator-flow) describes
-the staged owner/admin preview and confirmation for one future booking. Production keeps the
-feature off until the production offer and consent flow is complete and verified.
+When the operator enables departure handoff, current team owners and admins can preview and
+confirm a replacement in **Team bookings**. The booker and every distinct guest mailbox must
+accept the same version, and confirmation rechecks the exact proposed slot and current team
+authority. [Departure booking handoff](https://hourmere.com/docs/booking-handoffs) describes
+the browser flow, participant decisions and REST controls. See the
+[handoff contract](member-departure-handoff.md#staged-administrator-flow) for the authorization
+and data boundaries.

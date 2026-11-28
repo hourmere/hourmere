@@ -176,7 +176,7 @@ export function departureHandoffRoutes(
         operationId: 'createDepartureHandoffProposal',
         summary: 'Create a handoff proposal or supersede its current version',
         description:
-          'Creates an offer and queues a private link for each distinct mailbox. Supply the latest offer ID and version in previous to replace an existing offer. The source remains confirmed and this does not reserve the proposed slot. Disabled in production.',
+          'Creates an offer and queues a private link for each distinct mailbox. Supply the latest offer ID and version in previous to replace an existing offer. The source remains confirmed and this does not reserve the proposed slot. Requires DEPARTURE_HANDOFFS_ENABLED=true.',
         tags: ['Team bookings'],
         security: [{ session: [] }],
         middleware: writeMiddleware,
@@ -228,7 +228,7 @@ export function departureHandoffRoutes(
         operationId: 'readDepartureHandoffProposal',
         summary: 'Read a handoff proposal and recipient delivery status',
         description:
-          'Defaults to the latest version. Returns opaque recipient IDs, matching source attendee IDs, decisions and safe delivery states. Available to a current team owner or admin even if the mail queue is unavailable. Disabled in production.',
+          'Defaults to the latest version. Returns opaque recipient IDs, matching source attendee IDs, decisions and safe delivery states. Available to a current team owner or admin even if the mail queue is unavailable. Requires DEPARTURE_HANDOFFS_ENABLED=true.',
         tags: ['Team bookings'],
         security: [{ session: [] }],
         middleware: access.middleware,
@@ -280,7 +280,7 @@ export function departureHandoffRoutes(
         operationId: 'withdrawDepartureHandoffProposal',
         summary: 'Withdraw a handoff proposal version',
         description:
-          'Revokes the private links for the exact version and leaves the source booking confirmed. Available even if the mail queue is unavailable. Disabled in production.',
+          'Revokes the private links for the exact version and leaves the source booking confirmed. Available even if the mail queue is unavailable. Requires DEPARTURE_HANDOFFS_ENABLED=true.',
         tags: ['Team bookings'],
         security: [{ session: [] }],
         middleware: writeMiddleware,
@@ -321,7 +321,7 @@ export function departureHandoffRoutes(
         operationId: 'resendDepartureHandoffProposal',
         summary: 'Queue a new private link for one pending recipient',
         description:
-          'Use the same Idempotency-Key to retry a request for the same recipient and version. The delivery worker revokes the older link when it claims the new send. Each mailbox can receive up to three sends for the source booking across versions. Disabled in production.',
+          'Use the same Idempotency-Key to retry a request for the same recipient and version. The delivery worker revokes the older link when it claims the new send. Each mailbox can receive up to three sends for the source booking across versions. Requires DEPARTURE_HANDOFFS_ENABLED=true.',
         tags: ['Team bookings'],
         security: [{ session: [] }],
         middleware: writeMiddleware,
@@ -375,7 +375,7 @@ export function departureHandoffRoutes(
         operationId: 'previewDepartureHandoff',
         summary: 'Preview one booking handoff and read its current consent or receipt',
         description:
-          'Reads one exact slot on the event type’s current grid. Does not reserve time, send consent links, or change a booking. Returns limited consent counts or a committed receipt with aggregate attendee mail status from the same team. Accepted means the mail server accepted all attendee messages of that kind. Staged and disabled unless a handoff store and booking notifier are wired in.',
+          'Reads one exact slot on the event type’s current grid. Does not reserve time, send consent links, or change a booking. Returns limited consent counts or a committed receipt with aggregate attendee mail status from the same team. Accepted means the mail server accepted all attendee messages of that kind. Requires DEPARTURE_HANDOFFS_ENABLED=true.',
         tags: ['Team bookings'],
         security: [{ session: [] }],
         middleware: access.middleware,
@@ -412,7 +412,7 @@ export function departureHandoffRoutes(
         operationId: 'applyDepartureHandoff',
         summary: 'Apply an explicitly approved booking handoff',
         description:
-          'Requires a current owner/admin browser session and a same-origin write. Rechecks team authority, exact version, all recipient approvals, the currently offered slot and meeting eligibility in one transaction. Replays return the same limited receipt. Provider and mail work runs after commit.',
+          'Requires a current owner/admin browser session and a same-origin write. Rechecks team authority, exact version, all recipient approvals, the currently offered slot and meeting eligibility in one transaction. Replays return the same limited receipt. Provider and mail work runs after commit. Requires DEPARTURE_HANDOFFS_ENABLED=true.',
         tags: ['Team bookings'],
         security: [{ session: [] }],
         middleware: writeMiddleware,

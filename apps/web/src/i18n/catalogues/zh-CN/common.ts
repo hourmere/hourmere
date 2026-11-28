@@ -635,8 +635,10 @@ export const common = {
 
   // Departure booking handoff
   'departureHandoff.title': '查看预约交接提议',
-  'departureHandoff.allMustAccept': '预订人和每位来宾都必须接受，团队才能替换当前预约。',
-  'departureHandoff.privateLink': '请妥善保管此链接。任何获得链接的人都能代你回复。',
+  'departureHandoff.allMustAccept':
+    '预约人和每位来宾都必须接受这份提议。只要有一人拒绝或未回复，交接就无法进行。',
+  'departureHandoff.privateLink':
+    '请妥善保管此链接。任何获得链接的人都能代你回复。仅最新链接有效。',
   'departureHandoff.deadline': '请在此时间之前回复',
   'departureHandoff.current': '当前预约',
   'departureHandoff.proposed': '拟议预约',
@@ -649,11 +651,12 @@ export const common = {
   'departureHandoff.submitting': '正在提交决定…',
   'departureHandoff.accepted': '已记录接受',
   'departureHandoff.declined': '已记录拒绝',
-  'departureHandoff.refused': '团队无法完成此次交接提议。',
+  'departureHandoff.refused': '你已拒绝这份提议，提议随之关闭。当前预约保持原样。',
   'departureHandoff.unavailable': '此交接链接不可用',
   'departureHandoff.recovery': '请使用收到的最新链接，或联系团队寻求帮助。',
   'departureHandoff.readAgain': '重新查看提议',
   'departureHandoff.loadError': '无法加载提议，请重新查看。',
   'departureHandoff.uncertain': '无法确认你的决定是否已记录。再次尝试前，请先重新查看提议。',
   'departureHandoff.rateLimited': '尝试次数过多，请稍候再查看提议。',
+  'departureHandoff.currentUntilComplete': '团队完成交接之前，当前预约仍保持确认。',
 } as const

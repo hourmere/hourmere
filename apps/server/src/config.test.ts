@@ -11,6 +11,21 @@ const base = {
 }
 
 describe('loadConfig', () => {
+  it.each(['all', 'web', 'worker'])('keeps departure handoffs off by default in %s', (role) => {
+    const env = { ...base, HOURMERE_ROLE: role }
+    for (const value of [undefined, '', 'false']) {
+      expect(
+        loadConfig({ ...env, DEPARTURE_HANDOFFS_ENABLED: value }).DEPARTURE_HANDOFFS_ENABLED,
+      ).toBe(false)
+    }
+    expect(
+      loadConfig({ ...env, DEPARTURE_HANDOFFS_ENABLED: 'true' }).DEPARTURE_HANDOFFS_ENABLED,
+    ).toBe(true)
+    expect(() => loadConfig({ ...env, DEPARTURE_HANDOFFS_ENABLED: '1' })).toThrow(
+      'DEPARTURE_HANDOFFS_ENABLED must be true, false or empty',
+    )
+  })
+
   it('keeps team ownership transfer off unless explicitly enabled', () => {
     for (const value of [undefined, '', 'false'])
       expect(

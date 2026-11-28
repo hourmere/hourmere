@@ -190,7 +190,7 @@
   "ownershipTransfer.confirmed.subject": "Transferência de propriedade da equipe concluída",
   "ownershipTransfer.confirmed.message": "A transferência de propriedade de {team} foi concluída. Entre e selecione a equipe para ver as funções atuais nas configurações.",
   "departureHandoff.subject": "Veja a alteração proposta para sua reserva",
-  "departureHandoff.introduction": "Um administrador da equipe propôs substituir sua reserva. A equipe só pode fazer a substituição se a pessoa que reservou e todos os convidados concordarem. Se a proposta expirar, a reserva atual continua confirmada.",
+  "departureHandoff.introduction": "Um administrador da equipe propôs substituir sua reserva. A equipe só pode fazer a substituição se a pessoa que reservou e todos os convidados concordarem. Basta uma recusa ou uma resposta pendente para bloquear a transferência. A reserva atual continua confirmada até a equipe concluir a transferência.",
   "departureHandoff.privacy": "Mantenha este link em sigilo. Quem tiver acesso a ele poderá responder em seu nome. Apenas o link mais recente funciona.",
   "departureHandoff.review": "Ver a proposta",
   "bookingHandoff.subject": "Mudança de anfitrião · {subject}",

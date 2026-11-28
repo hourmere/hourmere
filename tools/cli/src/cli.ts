@@ -206,7 +206,7 @@ Meeting polls
       and optional responses. withdraw takes the voting token and expectedBallotRevision.
       On poll_changed, use view and reconcile before submitting again.
     reminder-opt-out takes the separate opt-out token from the poll email.
-Private booking handoff offers (staged)
+Private booking handoff offers (requires server opt-in)
   booking-handoff offer takes {token}. Answer only after reviewing the returned terms.
   booking-handoff answer takes {token, version, decision}, with accept or decline.
   Pass JSON on stdin (--input -). Keep the token out of command arguments and logs.

@@ -189,7 +189,7 @@ describe.skipIf(!serverUrl)('departure handoff browser routes', () => {
     },
   )
 
-  it('keeps production admission off with a saved offer and a booking notifier', async () => {
+  it.each([undefined, 'true'])('sets team admission (%s)', async (enabled) => {
     const f = await fixture()
     const unexpected = async (): Promise<never> => {
       throw new Error('Production handoff should not dispatch work')
@@ -198,6 +198,7 @@ describe.skipIf(!serverUrl)('departure handoff browser routes', () => {
       DATABASE_URL: owned.url,
       PUBLIC_URL: origin,
       BETTER_AUTH_SECRET: secret,
+      DEPARTURE_HANDOFFS_ENABLED: enabled,
     })
     const app = createApp(
       productionAppOptions({
@@ -226,6 +227,15 @@ describe.skipIf(!serverUrl)('departure handoff browser routes', () => {
     )
     const detail = await app.request(f.base, { headers: f.headers })
     expect(detail.status).toBe(200)
+    const path = `${offers(f.base)}/${f.input.offerId}`
+    if (enabled === 'true') {
+      expect(await detail.json()).toHaveProperty('departureHandoffEnabled', true)
+      const proposal = await app.request(path, { headers: f.headers })
+      expect(proposal.status).toBe(200)
+      expect(await proposal.json()).toMatchObject({ id: f.input.offerId, version: 1 })
+      await expectUnchanged(f)
+      return
+    }
     expect(await detail.json()).not.toHaveProperty('departureHandoffEnabled')
     await expectError(
       await app.request(preview(f.base), { headers: f.headers }),
@@ -237,7 +247,6 @@ describe.skipIf(!serverUrl)('departure handoff browser routes', () => {
       404,
       'handoffs_disabled',
     )
-    const path = `${offers(f.base)}/${f.input.offerId}`
     const recipientId = randomUUID()
     const runId = randomUUID()
     for (const response of [

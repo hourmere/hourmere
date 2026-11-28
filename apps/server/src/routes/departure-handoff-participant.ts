@@ -47,7 +47,7 @@ export function departureHandoffParticipantRoutes(deps: ParticipantHandoffDeps):
         tags: ['Booking handoffs'],
         summary: 'Read the terms for your private handoff offer',
         description:
-          'Requires the recipient capability in the JSON body. Reading records no decision. An optional bearer API key requires read, bookings or full scope and grants no recipient access by itself. Disabled in production.',
+          'Requires the recipient capability in the JSON body. Reading records no decision. An optional bearer API key requires read, bookings or full scope and grants no recipient access by itself. Requires DEPARTURE_HANDOFFS_ENABLED=true.',
         security,
         middleware,
         request: { body: { required: true, content: json(ParticipantOfferInput) } },
@@ -69,7 +69,7 @@ export function departureHandoffParticipantRoutes(deps: ParticipantHandoffDeps):
         tags: ['Booking handoffs'],
         summary: 'Accept or decline your exact booking handoff offer version',
         description:
-          'Requires the recipient capability and reviewed version in the JSON body. The decision does not change the booking. An optional bearer API key requires bookings or full scope and grants no recipient access by itself. Disabled in production.',
+          'Requires the recipient capability and reviewed version in the JSON body. The decision does not change the booking. An optional bearer API key requires bookings or full scope and grants no recipient access by itself. Requires DEPARTURE_HANDOFFS_ENABLED=true.',
         security,
         middleware,
         request: { body: { required: true, content: json(ParticipantAnswerInput) } },

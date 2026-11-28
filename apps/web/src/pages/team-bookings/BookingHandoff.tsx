@@ -12,7 +12,7 @@ type Receipt = Schemas['DepartureHandoffReceipt']
 type Action = 'preview' | 'apply'
 
 const pendingConsent =
-  'Participant consent is pending. The booker and every guest must approve. The original booking stays confirmed.'
+  'Participant consent is pending. The booker and every guest must approve. A single missing reply blocks the handoff. The original booking stays confirmed.'
 const slotUnavailable =
   'That time is unavailable for the replacement host. Refresh the preview or use manual rebooking.'
 
@@ -52,7 +52,7 @@ const offerMessages = {
   expired:
     'Consent has expired. The offer leaves the booking unchanged. A new offer needs new approvals.',
   closed:
-    'This handoff offer is closed. Use manual rebooking if you still need to replace the booking.',
+    'This handoff offer is closed. A new offer needs fresh approvals from everyone. You can also coordinate a replacement manually.',
 } as const
 
 function failureMessage(error: unknown, action: Action): MessageKey {
@@ -204,7 +204,9 @@ export function BookingHandoff({
           (receipt
             ? 'Booking handoff completed.'
             : result &&
-              (offerState ? offerMessages[offerState] : 'No handoff offer is available yet.')))
+              (offerState
+                ? offerMessages[offerState]
+                : !issue && 'No handoff offer is available yet.')))
   const currentPreview = offerState === 'expired' || offerState === 'closed' ? null : preview
   const selectedLocation = currentPreview?.locationKind
 
@@ -389,6 +391,13 @@ function ConferenceStatus({ receipt }: { receipt: NonNullable<Preview['receipt']
       )}
       {receipt.oldConferenceCleanup === 'pending' && (
         <p>{t('Cleanup in the original calendar or meeting account is pending.')}</p>
+      )}
+      {receipt.oldConferenceCleanup === 'complete' && (
+        <p>
+          {t(
+            'Cleanup of the tracked entries in the original calendar or meeting account is complete.',
+          )}
+        </p>
       )}
       {receipt.oldConferenceCleanup === 'unresolved' && (
         <p>

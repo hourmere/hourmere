@@ -672,9 +672,9 @@ export const common = {
   // Departure booking handoff
   'departureHandoff.title': 'Revisar el traspaso de la reserva',
   'departureHandoff.allMustAccept':
-    'La persona que hizo la reserva y todos los invitados deben aceptar antes de que el equipo pueda sustituir la reserva actual.',
+    'La persona que hizo la reserva y todos los invitados deben aceptar esta propuesta. Basta un rechazo o una respuesta pendiente para bloquear el traspaso.',
   'departureHandoff.privateLink':
-    'Mantenga este enlace en privado. Cualquiera que lo tenga puede responder en su nombre.',
+    'Mantenga este enlace en privado. Cualquiera que lo tenga puede responder en su nombre. Solo funciona el enlace más reciente.',
   'departureHandoff.deadline': 'Responda antes de',
   'departureHandoff.current': 'Reserva actual',
   'departureHandoff.proposed': 'Reserva propuesta',
@@ -687,7 +687,8 @@ export const common = {
   'departureHandoff.submitting': 'Enviando decisión…',
   'departureHandoff.accepted': 'Aceptación registrada',
   'departureHandoff.declined': 'Rechazo registrado',
-  'departureHandoff.refused': 'El equipo no puede completar este traspaso.',
+  'departureHandoff.refused':
+    'Su rechazo cierra esta propuesta y deja su reserva actual sin cambios.',
   'departureHandoff.unavailable': 'Este enlace de traspaso no está disponible',
   'departureHandoff.recovery':
     'Use el enlace más reciente que recibió o póngase en contacto con el equipo.',
@@ -697,4 +698,6 @@ export const common = {
     'No pudimos confirmar que se registró su decisión. Consulte la propuesta antes de volver a intentarlo.',
   'departureHandoff.rateLimited':
     'Demasiados intentos. Espere un momento antes de volver a consultar la propuesta.',
+  'departureHandoff.currentUntilComplete':
+    'Su reserva actual sigue confirmada hasta que el equipo complete el traspaso.',
 } as const

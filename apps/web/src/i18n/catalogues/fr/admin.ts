@@ -31,13 +31,9 @@ export const admin = {
   'Preview the replacement host and time. A preview does not reserve the slot.':
     'Vérifiez le nouvel hôte et le créneau. Cette vérification ne réserve pas le créneau.',
   'No handoff offer is available yet.': 'Aucune proposition de transfert n’est encore disponible.',
-  'Participant consent is pending. The booker and every guest must approve. The original booking stays confirmed.':
-    'Des consentements sont en attente. La personne qui a réservé et chaque invité doivent donner leur accord. La réservation initiale reste confirmée.',
   'All participants have approved.': 'Tous les participants ont donné leur accord.',
   'Consent has expired. The offer leaves the booking unchanged. A new offer needs new approvals.':
     'Le délai de consentement a expiré. La réservation reste inchangée. Une nouvelle proposition exige de nouveaux accords.',
-  'This handoff offer is closed. Use manual rebooking if you still need to replace the booking.':
-    'Cette proposition de transfert est close. Si vous devez encore remplacer la réservation, effectuez une nouvelle réservation manuellement.',
   'That time is unavailable for the replacement host. Refresh the preview or use manual rebooking.':
     'Le nouvel hôte n’est pas disponible à ce créneau. Actualisez la vérification ou effectuez une nouvelle réservation manuellement.',
   'The proposed time is available.': 'Le créneau proposé est disponible.',
@@ -339,6 +335,18 @@ export const admin = {
   'Accepted by the mail server': 'Accepté par le serveur de messagerie',
   'Email delivery incomplete': 'Envoi des e-mails incomplet',
   'Email delivery unavailable': 'Envoi des e-mails indisponible',
+
+  // Departure booking handoff
+  'Participant consent is pending. The booker and every guest must approve. A single missing reply blocks the handoff. The original booking stays confirmed.':
+    'Le consentement des participants est en attente. La personne qui a réservé et chaque invité doivent accepter. Une seule réponse manquante bloque le transfert. La réservation initiale reste confirmée.',
+  'This handoff offer is closed. A new offer needs fresh approvals from everyone. You can also coordinate a replacement manually.':
+    'Cette proposition de transfert est close. Une nouvelle proposition exige l’accord de tous. Vous pouvez aussi organiser une réservation de remplacement manuellement.',
+  'Cleanup of the tracked entries in the original calendar or meeting account is complete.':
+    'Les entrées suivies dans le calendrier ou le compte de visioconférence initial ont été nettoyées.',
+  'Cleanup in the original calendar or meeting account is pending.':
+    'Le nettoyage du calendrier ou du compte de visioconférence initial est en attente.',
+  'Cleanup in the original calendar or meeting account could not be verified. Ask the account owner to check for remaining entries.':
+    'Le nettoyage du calendrier ou du compte de visioconférence initial n’a pas pu être vérifié. Demandez au titulaire du compte de vérifier s’il reste des entrées.',
 
   // Effective team page permissions
   'No event types yet.': 'Aucun type d’événement pour le moment.',

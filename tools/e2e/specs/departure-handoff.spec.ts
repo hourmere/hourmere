@@ -1,5 +1,9 @@
+import { randomUUID } from 'node:crypto'
 import type { Page } from '@playwright/test'
+import type { components } from '../../../apps/web/src/api/schema.d.ts'
 import { expect, test } from '../departure-handoff-fixtures.ts'
+
+type Schemas = components['schemas']
 
 test.use({ colorScheme: 'light' })
 
@@ -249,5 +253,214 @@ test.describe('provider ambiguity after commit', () => {
     await expect(status).not.toContainText(
       'Cleanup in the original calendar or meeting account could not be verified.',
     )
+  })
+})
+
+test.describe('departure handoff acceptance', () => {
+  test.use({ handoffZoom: true })
+
+  test('a declined proposal needs fresh consent before the automatic run hands off the booking', async ({
+    browser,
+    page,
+    handoff,
+  }) => {
+    await handoff.signIn()
+    // The original invitation pins the organizer so the later cancellation can use its UID.
+    await handoff.mail(handoff.sourceId, 'confirmed')
+    const initialMail = handoff.mailState()
+    expect(initialMail).toHaveLength(3)
+    expect(initialMail.every((mail) => mail.method === 'REQUEST' && mail.hasZoomLink)).toBe(true)
+
+    const headers = { Origin: handoff.url, 'X-Expected-Organization-Id': handoff.teamId }
+    const post = (path: string, data: object) =>
+      page.request.post(handoff.url + path, { headers, data })
+    const booking = `/api/v1/team/bookings/${handoff.sourceId}`
+    const proposals = `${booking}/handoff-offers`
+    const runs = '/api/v1/team/bookings/handoff-runs'
+    const { departingUserId } = handoff
+    const run = { runId: randomUUID(), departingUserId }
+    const runPath = `${runs}/${run.runId}`
+    const original = {
+      source: 'confirmed',
+      bookingCount: 1,
+      replacementId: undefined,
+      replacementConfirmed: false,
+      notificationCount: 0,
+    }
+    async function expectRunBlocked() {
+      const response = await post(runs, run)
+      expect(response.status()).toBe(409)
+      expect(await response.json()).toMatchObject({ error: 'handoff_run_no_eligible_offers' })
+      expect(await handoff.result()).toEqual(original)
+    }
+    async function propose(data: object) {
+      const response = await post(proposals, { departingUserId, ...data })
+      expect(response.status()).toBe(201)
+      return (await response.json()) as Schemas['DepartureHandoffProposal']
+    }
+    async function control(action: 'pause' | 'resume') {
+      const response = await post(`${runPath}/control`, { action })
+      expect(response.status()).toBe(200)
+      return (await response.json()) as Schemas['DepartureHandoffRun']
+    }
+    const removal = await post(`/api/v1/team/members/${departingUserId}/removal`, {
+      teamId: handoff.teamId,
+    })
+    expect(removal.status()).toBe(200)
+    const first = await propose({})
+    expect(first.version).toBe(1)
+    const firstLinks = await handoff.deliverParticipantLinks()
+
+    const participant = await browser.newContext({ locale: 'en-US', serviceWorkers: 'block' })
+    try {
+      await participant.route('**/*', (route) =>
+        new URL(route.request().url()).origin === handoff.url ? route.continue() : route.abort(),
+      )
+      const reader = await participant.newPage()
+      async function decide(link: URL, decision: 'Accept' | 'Decline', version: number) {
+        await reader.goto('about:blank')
+        const terms = reader.waitForResponse(
+          (response) => new URL(response.url()).pathname === '/api/v1/booking-handoffs/offer',
+        )
+        // Keep the private fragment out of Playwright's navigation diagnostics.
+        await reader.evaluate((href) => {
+          window.setTimeout(() => window.location.replace(href), 0)
+        }, link.href)
+        const offer = await terms
+        expect(offer.status()).toBe(200)
+        expect(await offer.json()).toMatchObject({ version })
+        await reader.getByRole('radio', { name: decision, exact: true }).check()
+        await reader.getByRole('button', { name: 'Submit decision' }).click()
+        await expect(
+          reader.getByRole('heading', {
+            name: decision === 'Accept' ? 'Acceptance recorded' : 'Decline recorded',
+          }),
+        ).toBeVisible()
+      }
+
+      await decide(firstLinks.booker, 'Accept', 1)
+      await page.goto(handoff.url + handoff.sourcePath)
+      const region = page.getByRole('region', { name: 'Booking handoff' })
+      const status = region.getByRole('status')
+      const confirm = region.getByRole('button', { name: 'Confirm handoff' })
+      const refresh = region.getByRole('button', { name: 'Refresh handoff' })
+      await region.getByRole('button', { name: 'Preview handoff' }).click()
+      await expect(status).toContainText('Pending approvals: 1')
+      await expect(confirm).toBeDisabled()
+      await expectRunBlocked()
+
+      await decide(firstLinks.guest, 'Decline', 1)
+      await refresh.click()
+      await expect(status).toContainText('This handoff offer is closed.')
+      await expect(confirm).toBeDisabled()
+      await expectRunBlocked()
+
+      const proposedStart = handoff.sourceStart.add({ minutes: 30 })
+      const second = await propose({
+        start: proposedStart.toString(),
+        previous: { offerId: first.id, version: first.version },
+      })
+      expect(second.id).toBe(first.id)
+      expect(second.version).toBe(2)
+      expect(second.recipients.map(({ decision }) => decision)).toEqual(['pending', 'pending'])
+      await refresh.click()
+      await expect(status).toContainText('Pending approvals: 2')
+      await expect(confirm).toBeDisabled()
+      const secondLinks = await handoff.deliverParticipantLinks()
+      await decide(secondLinks.guest, 'Accept', 2)
+      await expectRunBlocked()
+      await decide(secondLinks.booker, 'Accept', 2)
+      await refresh.click()
+      await expect(status).toContainText('All participants have approved.')
+      await expect(confirm).toBeEnabled()
+
+      const start = await post(runs, run)
+      expect(start.status()).toBe(200)
+      const pending = {
+        sourceBookingId: handoff.sourceId,
+        offerId: second.id,
+        version: 2,
+        outcome: 'pending',
+        replacementBookingId: null,
+      }
+      expect(await start.json()).toMatchObject({ state: 'running', items: [pending] })
+      expect(await control('pause')).toMatchObject({ state: 'paused', items: [pending] })
+      await handoff.processRun()
+      expect(await handoff.result()).toEqual(original)
+      expect(await control('resume')).toMatchObject({ state: 'running', items: [pending] })
+      await handoff.processRun()
+
+      const receipt = await page.request.get(handoff.url + runPath, { headers })
+      expect(receipt.status()).toBe(200)
+      const completed = (await receipt.json()) as Schemas['DepartureHandoffRun']
+      const [item] = completed.items
+      const replacementId = item?.replacementBookingId
+      if (!replacementId) throw new Error('Expected one completed replacement')
+      expect(completed).toMatchObject({
+        state: 'completed',
+        items: [{ ...pending, outcome: 'applied', replacementBookingId: replacementId }],
+      })
+      const result = await handoff.result()
+      expect(result).toEqual({
+        source: 'cancelled',
+        bookingCount: 2,
+        replacementId,
+        replacementConfirmed: true,
+        notificationCount: 2,
+      })
+      const replay = await post(runs, run)
+      expect(replay.status()).toBe(200)
+      expect(await replay.json()).toEqual(completed)
+      expect(await handoff.result()).toEqual(result)
+      const replacementBooking = await page.request.get(
+        `${handoff.url}/api/v1/team/bookings/${replacementId}`,
+        { headers },
+      )
+      expect(replacementBooking.status()).toBe(200)
+      const detail = (await replacementBooking.json()) as Schemas['TeamAdminBookingDetail']
+      expect(Temporal.Instant.from(detail.start).equals(proposedStart)).toBe(true)
+      expect(detail.hosts.map(({ name }) => name)).toEqual(['Replacement host'])
+
+      await refresh.click()
+      await expect(status).toContainText('Booking handoff completed.')
+      await expect(status).toContainText('The replacement meeting link is being prepared.')
+      await expect(status).toContainText(
+        'Cleanup in the original calendar or meeting account is pending.',
+      )
+      await handoff.reconcileProvider(replacementId)
+      expect(handoff.providerState()).toEqual({ newCreates: 1, newMeetings: 1, oldMeetings: 0 })
+
+      await handoff.mail(handoff.sourceId, 'cancelled')
+      await handoff.mail(replacementId, 'confirmed')
+      const handoffMail = handoff.mailState().slice(initialMail.length)
+      expect(handoffMail.filter((mail) => mail.method === 'CANCEL')).toHaveLength(2)
+      expect(handoffMail.filter((mail) => mail.method === 'REQUEST')).toHaveLength(3)
+      for (const recipient of [handoff.emails.booker, handoff.emails.guest]) {
+        expect(handoffMail).toContainEqual({
+          to: recipient,
+          method: 'CANCEL',
+          uid: `${handoff.sourceId}@hourmere`,
+          sequence: '1',
+          hasZoomLink: false,
+        })
+        expect(handoffMail).toContainEqual({
+          to: recipient,
+          method: 'REQUEST',
+          uid: `${replacementId}@hourmere`,
+          sequence: '0',
+          hasZoomLink: true,
+        })
+      }
+      await refresh.click()
+      await expect(status).toContainText('The replacement meeting link is ready.')
+      await expect(status).toContainText(
+        'Cleanup of the tracked entries in the original calendar or meeting account is complete.',
+      )
+      await expect(status.getByText('Accepted by the mail server')).toHaveCount(2)
+      const replacement = region.getByRole('link', { name: 'View replacement booking' })
+      await expect(replacement).toHaveAttribute('href', `/app/bookings/${replacementId}`)
+    } finally {
+      await participant.close()
+    }
   })
 })

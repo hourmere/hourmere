@@ -436,6 +436,12 @@ nothing is reserved and the first successful ordinary booking wins. Waitlists us
 meeting length. Hosts can view and remove their event's entries; team contacts are restricted
 to owners/admins. REST, MCP and CLI provide the same settings, list and removal operations.
 
+[Departure booking handoff](https://hourmere.com/docs/booking-handoffs) lets a team owner or
+administrator propose a replacement for an eligible future appointment when its host leaves.
+The booker and every guest must accept the same version. The feature is off by default.
+After test-environment acceptance, set `DEPARTURE_HANDOFFS_ENABLED=true` on both the web and
+worker processes and recreate them together. See the [operator guide](docs/member-departure-handoff.md#operator-rollout-and-retention).
+
 Configure event-type reminders and follow-ups through REST, MCP
 `set_event_type_notifications` or CLI `set-event-notifications` with `full` scope.
 Follow-up rules may carry bounded plain-text host notes. These are sent from the instance's

@@ -1,6 +1,6 @@
 # Team booking handoff after host departure
 
-Proposed contract. The current product offers a [departure impact preview](member-departure-impact.md),
+[Booking handoff](https://hourmere.com/docs/booking-handoffs) is an opt-in feature. Hourmere also offers a [departure impact preview](member-departure-impact.md),
 [safe self-departure](member-leave.md), and [administrator cancellation and manual rebooking](team-admin-bookings.md).
 Ordinary rescheduling requires the original saved hosts and returns `booking_hosts_unavailable`
 when a required host is gone. A handoff changes who will host a future appointment, so it
@@ -91,8 +91,8 @@ proposed start. Reissuing an offer revokes the previous version and its approval
 The per-recipient send cap still applies, and a fresh version requires a send available for
 every recipient. Keep one live offer for a source and stop offering decisions once it is
 committed, declined, expired, withdrawn or superseded.
-Repeat submission of the same decision can return the saved outcome without another
-side effect. Applying twice returns the same limited result after authorization.
+A successful decision consumes the private link. Reusing it returns the unavailable-link
+response. Applying twice returns the same limited result after authorization.
 The result excludes management tokens, conference links and provider details.
 Internal administrator status shows outstanding approvals and neutral failure states within
 the existing [team booking field boundary](team-admin-bookings.md).
@@ -241,9 +241,9 @@ known in-flight SMTP duplicate window. See the [notification guide](notification
 [conference storage rules](data-model.md#automatic-conferences) and
 [iTIP storage rules](data-model.md#booking-calendar-email-identity).
 
-## Proposed REST, MCP and CLI surfaces
+## REST, MCP and CLI surfaces
 
-| Operation | REST proposal | MCP and CLI |
+| Operation | REST | MCP and CLI |
 | --- | --- | --- |
 | Propose and inspect | `POST /api/v1/team/bookings/{id}/handoff-offers`, `GET /api/v1/team/bookings/{id}/handoff-offers/{offerId}` | Browser session only. |
 | Resend a pending recipient's link | `POST /api/v1/team/bookings/{id}/handoff-offers/{offerId}/resend` with the offer-scoped recipient identifier | Browser session only. |
@@ -269,6 +269,39 @@ REST booking management, MCP reschedule and CLI reschedule gain no new capabilit
 | Concurrent apply, cancel or reschedule | At most one valid source transition. A committed apply replay returns the saved limited result without minting new capabilities or duplicating work. |
 | Post-commit worker or provider failure | Keep both committed booking states. Reconcile only the affected root through its normal bounded jobs and safe status. |
 
+## Operator rollout and retention
+
+Handoff admission defaults to off. In an isolated test instance, configure a test SMTP
+sink and set `DEPARTURE_HANDOFFS_ENABLED=true` on every web and worker process. Use the same
+setting on the combined `all` process when it serves both roles. The bundled Compose worker
+inherits the setting from the app, while a custom deployment must pass it explicitly to
+both roles. Restart or recreate the processes together. Keep production at the default
+until the operator has accepted the flow.
+
+With the setting off, the booking detail hides handoff actions, team handoff endpoints
+return `handoffs_disabled` for authorized callers, and participant capabilities return the
+unavailable-link response. Offer email and automatic apply workers stop processing handoff
+work. An ordinary booking cancellation or creation already committed by a handoff still
+uses its ordinary notification and provider jobs. After switching on, use a current team
+session to check existing run and proposal receipts before initiating more work. Deadlines
+keep running while the feature is off.
+
+The hourly offer cleanup runs in worker-enabled roles even with admission off. It closes
+expired offers and clears their digests, then prunes mailbox and delivery rows beginning
+48 hours after the offer deadline. Each pass considers up to ten batches of 100 versions.
+Later passes pick up locked rows and any backlog. The source-specific hashed send counters
+remain until deletion of the source booking. The retained offer version and committed
+handoff receipt follow the source and replacement deletion rules. When the feature is on,
+the automatic run recovery job also purges terminal run receipts after seven days in
+bounded batches. See [handoff storage](data-model.md#departure-booking-handoff-storage).
+
+中文：验收时在隔离测试实例配置测试邮件收件器，同时为 Web 和 Worker 设置
+`DEPARTURE_HANDOFFS_ENABLED=true` 并一起重启或重建。合并运行的 `all` 进程只需设置一次。
+生产在负责人验收完成前保持默认关闭。关停交接后，已提交的取消和新预约仍由常规任务处理，
+提议和队列期限继续计时。每小时的提议清理在关停后仍执行，并从截止时间过四十八小时起分批
+清理收件邮箱和投递记录。同一原预约的哈希发送计数保留至原预约删除。启用交接时，
+队列恢复任务分批清理终态超过七天的队列回执。
+
 ## Test plan and implementation steps
 
 Plan about one working day per row, including its acceptance checks. Split any row that
@@ -278,8 +311,7 @@ disposable PostgreSQL databases and fake provider/mail transports.
 
 ### Staged administrator flow
 
-The production server keeps handoff admission off. The staged browser and REST acceptance
-flow exercises the production PostgreSQL store. An authorized
+The browser and REST flows use the production PostgreSQL store. An authorized
 owner or admin opens the source in Team bookings and selects **Preview handoff**. The preview
 shows the proposed host, time and location type. A slot judged unavailable on the current
 event grid, calendar uncertainty, a changed offer, any outstanding approval, or an expired
@@ -296,14 +328,13 @@ before the handoff, that account's owner must delete any remaining copies in tha
 The administrator sees no join links, provider identifiers or credentials in the handoff
 results.
 
-The staged GET is `/api/v1/team/bookings/{id}/handoff-preview`. Apply uses
+The preview GET is `/api/v1/team/bookings/{id}/handoff-preview`. Apply uses
 `POST /api/v1/team/bookings/{id}/handoff-offers/{offerId}/apply` and the exact offer
 `version` in the JSON body. Both bind the current browser session to
 `X-Expected-Organization-Id`. A successful preview returns the safe slot, aggregate
-consent state and deadline, or the limited committed receipt. The production assembly
-leaves the detail capability absent and returns `handoffs_disabled` to authorized callers.
+consent state and deadline, or the limited committed receipt.
 
-The staged administrator API can create and inspect proposals, withdraw a version, and resend
+The administrator API can create and inspect proposals, withdraw a version, and resend
 one pending recipient’s link. Create with the departing host ID and optional start, duration
 and location choice. Pass the latest offer ID and version in `previous` to replace the terms.
 The offer ID stays the same and the version advances. The previous version and its links
@@ -313,7 +344,7 @@ status includes the matching source booking attendee IDs for selecting whom to c
 Use the current owner or admin browser session and include `X-Expected-Organization-Id`.
 Resend and withdrawal require the browser's same-origin request. Submit `{version}` to
 withdraw that version and revoke its links. The source booking stays confirmed.
-When the staged server has no mail outbox, it still serves status and withdrawal and
+When email is unavailable, the enabled server still serves status and withdrawal and
 reports resend unavailable.
 
 Send the version and opaque recipient ID to resend, with a random UUID in the
@@ -353,13 +384,13 @@ Keep the token out of command arguments and logs.
 The page clears the fragment before requesting the offer. It and the API responses
 are served with no-store and no-referrer headers. Offer and answer operations share
 a rate limit of 30 requests per minute per trusted IP bucket on each server process.
-Production admission remains off. A committed handoff queues localized notices for both
+A committed handoff queues localized notices for both
 bookings. Administrators can refresh the receipt to check email acceptance. See
 [staged booking handoff mail](#staged-booking-handoff-mail).
 
-中文：预发布管理员可创建、查看、撤回和换版交接提议，也可向尚未决定的收件人重发私密链接。
+中文：管理员可创建、查看、撤回和换版交接提议，也可向尚未决定的收件人重发私密链接。
 同一源预约的每个规范化邮箱最多发送三次，包含首发和送达不确定的尝试。重试同一请求时请沿用
-`Idempotency-Key`。撤回、过期或换版都会使旧链接失效，源预约仍保持确认。生产环境保持关闭。
+`Idempotency-Key`。撤回、过期或换版都会使旧链接失效，源预约仍保持确认。
 参与者可用邮件里的私密链接查看原预约和拟议预约。预订人还可查看将分享给新主持人的已保存答案。
 打开链接不会记录决定。请选择接受或拒绝，再提交。任何来宾拒绝或尚未回复都会阻止交接。
 链接过期、被撤回、换版或已经使用时，页面统一提示联系发件团队。
@@ -386,7 +417,7 @@ a plain-text cancellation and may need to remove the original event from their c
 manually. The replacement uses a fresh UID and starts at sequence zero. Its invitation and
 manage link belong to the replacement booking.
 
-The staged administrator receipt reports when the mail server accepts each notice for all
+The administrator receipt reports when the mail server accepts each notice for all
 attendees. If the cancellation job finishes, is skipped, or exhausts its retries before
 acceptance is recorded for every attendee, the cancellation status is **Email delivery
 incomplete**. Refresh the handoff status after the background worker runs. Mail-server
@@ -401,7 +432,7 @@ to `POST /api/v1/team/bookings/handoff-runs`. Read the receipt at
 `GET /api/v1/team/bookings/handoff-runs/{runId}`. Use `POST` to the same path with
 `/control` appended and an `action` of `pause`, `resume` or `stop`. All operations require
 the browser's current team session and `X-Expected-Organization-Id`. Writes require a
-same-origin request. The routes and background processing remain disabled in production.
+same-origin request. The routes and background processing require `DEPARTURE_HANDOFFS_ENABLED=true`.
 
 A run records up to ten live proposals that already have every recorded recipient's
 approval, starting with the earliest expiry. It reuses those offers and their prior link
@@ -413,23 +444,29 @@ that won the source lock can supply the same committed receipt without creating 
 replacement. Each apply rechecks the complete recipient set, saved terms, slot and current
 authority. The original booking keeps its saved host and identity.
 
-Pause and stop take effect after any transaction already in flight. Resume keeps the
-same items and uses the resuming administrator's current session. Before each item, the
-worker checks that the former host is still absent and the authorizing session still has
-access. The run has a 30-minute deadline, including time paused. A completed run reports each item as applied,
+Pause and stop take effect after any transaction already in flight. A running queue is
+bound to the starting administrator's session or the session that most recently resumed it.
+Before each due item, the worker checks that the former host is still absent and the session
+still has access. Switching the session to another team or ending it fails the run with
+`authorization_lost`. Resume a paused run from a current authorized session in the same team
+to preserve the saved items and versions. After a terminal failure, start a new run from
+that current session for the remaining eligible proposals once the cooldown allows it.
+The run has a 30-minute deadline, including time paused. A completed run reports each item as applied,
 ineligible or processing failed. A stopped or failed run marks the remaining items stopped.
 Review any unapplied item in Team bookings and use the existing single-booking handoff or
 manual recovery flow. Some bookings may have been outside the run or missing approvals.
 Receipts are retained for seven days and contain only stored IDs, versions and status codes.
 The team journal records run starts, pauses, resumes and terminal transitions.
 
-中文：主持人离队后，当前团队所有者或管理员可在预发布流程显式启动一轮交接。每轮最多处理十笔
+中文：主持人离队后，当前团队所有者或管理员可显式启动一轮交接。每轮最多处理十笔
 已经获得全部参与者同意的有效提议，逐笔提交，间隔至少十秒。同一团队同时只能有一轮运行或暂停，
 新一轮启动间隔至少一分钟。每轮有三十分钟期限，包含暂停时间。用同一运行编号重试启动会取回
-原回执。暂停或停止会在下一笔前生效。恢复会沿用原提议版本，并复核当前管理员的会话权限。
-原主持人重新加入团队或会话失去权限时，本轮停止处理。请逐笔查看回执，用原有单笔交接或人工
+原回执。暂停或停止会在下一笔前生效。请从同一团队当前有权限的会话恢复已暂停的队列。
+运行绑定启动或最近一次恢复的会话。该会话切换团队或结束时，下一笔到期处理会导致
+`authorization_lost`，本轮失败。请用当前会话在启动间隔满足后，为其余合格提议开启新一轮。
+原主持人重新加入团队时，本轮也会停止。请逐笔查看回执，用原有单笔交接或人工
 恢复流程处理未完成的预约。未获同意和超出本轮上限的预约需另行处理。原预约保留原主持人及
-原预约链身份。回执保留七天，生产入口和后台作业仍关闭。
+原预约链身份。回执保留七天。
 
 | Step | Deliverable and acceptance |
 | --- | --- |
@@ -460,11 +497,11 @@ those bookings and leaves their ordinary booking flows in place.
 内部试算按活动类型当前的可预约时段网格检查指定开始时间。即使接任者有空，网格之外的开始
 时间也不可预约。试算不占用时段、不发邀请。日历数据不可信时返回
 `calendar_sync_unavailable`，不会公开私人忙碌区间或日历事件映射。正式应用需在锁内重新检查。
-预发布验收在生产 PostgreSQL 存储结构中预置提议和同意记录。团队所有者或管理员可在团队预约详情试算单笔交接，
+验收使用正式运行所用的 PostgreSQL 存储结构。团队所有者或管理员可在团队预约详情试算单笔交接，
 查看接任主持人、时段和地点类型。来宾尚未回复、同意已过期、日历状态未知或时段不可用时，
 界面禁止确认。确认时在锁内重新复核。提交结果不确定时，先刷新查看回执，再决定是否重试。
 提交后，外部会议仍可处于待创建或失败状态，由对应主持人使用原有恢复流程处理。
-预发布已提供提议生命周期、确认链接投递和参与者页面及接口。生产功能保持关闭。
+提议操作、确认链接投递、参与者页面和接口均需启用交接功能，默认关闭。
 交接提交后，系统会排队发送原预约取消邮件和新预约确认邮件，管理员可刷新回执查看投递状态。
 若取消邮件任务已结束、被跳过或耗尽重试，且仍有参与者缺少邮件服务器接受记录，回执会显示邮件投递未完成。
 旧会议的取消沿用原 ICS UID 与原日历组织者，新邀请使用新 UID。Google Meet 和 Zoom

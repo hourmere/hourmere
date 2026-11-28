@@ -662,9 +662,9 @@ export const common = {
   // Departure booking handoff
   'departureHandoff.title': 'Review booking handoff',
   'departureHandoff.allMustAccept':
-    'The booker and every guest must accept before the team can replace the current booking.',
+    'The booker and every guest must accept this proposal. A decline or a missing reply blocks the handoff.',
   'departureHandoff.privateLink':
-    'Keep this link private. Anyone with it can respond on your behalf.',
+    'Keep this link private. Anyone with it can respond on your behalf. Only the latest link works.',
   'departureHandoff.deadline': 'Respond before',
   'departureHandoff.current': 'Current booking',
   'departureHandoff.proposed': 'Proposed booking',
@@ -677,7 +677,8 @@ export const common = {
   'departureHandoff.submitting': 'Submitting decision…',
   'departureHandoff.accepted': 'Acceptance recorded',
   'departureHandoff.declined': 'Decline recorded',
-  'departureHandoff.refused': 'The team cannot complete this proposal.',
+  'departureHandoff.refused':
+    'Your decline closes this proposal and leaves your current booking unchanged.',
   'departureHandoff.unavailable': 'This handoff link is unavailable',
   'departureHandoff.recovery': 'Use the latest link sent to you or contact the team for help.',
   'departureHandoff.readAgain': 'Check offer again',
@@ -686,4 +687,6 @@ export const common = {
     'We couldn’t confirm that your decision was recorded. Check the offer before trying again.',
   'departureHandoff.rateLimited':
     'Too many attempts. Wait a moment before checking the offer again.',
+  'departureHandoff.currentUntilComplete':
+    'Your current booking stays confirmed until the team completes the handoff.',
 } as const

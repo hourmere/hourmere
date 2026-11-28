@@ -670,9 +670,9 @@ export const common = {
   // Departure booking handoff
   'departureHandoff.title': 'Revisar a transferência do agendamento',
   'departureHandoff.allMustAccept':
-    'Quem fez o agendamento e todos os convidados precisam aceitar para que a equipe possa substituir o agendamento atual.',
+    'Quem fez o agendamento e todos os convidados precisam aceitar esta proposta. Basta uma recusa ou uma resposta pendente para bloquear a transferência.',
   'departureHandoff.privateLink':
-    'Mantenha este link em sigilo. Qualquer pessoa com o link pode responder em seu nome.',
+    'Mantenha este link em sigilo. Qualquer pessoa com o link pode responder em seu nome. Apenas o link mais recente funciona.',
   'departureHandoff.deadline': 'Responda antes de',
   'departureHandoff.current': 'Agendamento atual',
   'departureHandoff.proposed': 'Agendamento proposto',
@@ -685,7 +685,8 @@ export const common = {
   'departureHandoff.submitting': 'Enviando decisão…',
   'departureHandoff.accepted': 'Aceite registrado',
   'departureHandoff.declined': 'Recusa registrada',
-  'departureHandoff.refused': 'A equipe não pode concluir esta transferência.',
+  'departureHandoff.refused':
+    'Sua recusa encerra esta proposta e mantém seu agendamento atual como está.',
   'departureHandoff.unavailable': 'Este link de transferência não está disponível',
   'departureHandoff.recovery':
     'Use o link mais recente que você recebeu ou entre em contato com a equipe.',
@@ -695,4 +696,6 @@ export const common = {
     'Não foi possível confirmar se sua decisão foi registrada. Consulte a proposta antes de tentar novamente.',
   'departureHandoff.rateLimited':
     'Muitas tentativas. Aguarde um momento antes de consultar a proposta novamente.',
+  'departureHandoff.currentUntilComplete':
+    'Seu agendamento atual continua confirmado até a equipe concluir a transferência.',
 } as const
