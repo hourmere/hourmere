@@ -4,7 +4,7 @@ import { embedOrigin, publicBookingPath } from '@hourmere/core/embed'
 import { explicitLanguage } from '@hourmere/core/language'
 import { describe, expect, it, vi } from 'vitest'
 import { randomHex } from '../random.ts'
-import { widgetLanguage, widgetMessages } from './language.ts'
+import { widgetLanguage, widgetMessages, withWidgetMessages } from './language.ts'
 import type * as Widget from './widget.ts'
 
 function sourceCopy(mutate: (source: string) => string): typeof Widget {
@@ -23,8 +23,17 @@ function sourceCopy(mutate: (source: string) => string): typeof Widget {
     'randomHex',
     'widgetLanguage',
     'widgetMessages',
+    'withWidgetMessages',
     `${source}\nreturn { initInline }`,
-  )(embedOrigin, publicBookingPath, explicitLanguage, randomHex, widgetLanguage, widgetMessages)
+  )(
+    embedOrigin,
+    publicBookingPath,
+    explicitLanguage,
+    randomHex,
+    widgetLanguage,
+    widgetMessages,
+    withWidgetMessages,
+  )
 }
 
 function sandbox(module: typeof Widget, flag?: unknown, extra: Record<string, unknown> = {}) {

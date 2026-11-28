@@ -1,8 +1,8 @@
 import { formattingLocale, type InterfaceLanguage, localeFallbacks } from '@hourmere/core/language'
 import type { admin } from './catalogues/en/admin.ts'
 import type { common } from './catalogues/en/common.ts'
-import { catalogTemplate, knownMessage, registerCatalogues } from './catalogues.ts'
-import { commonCatalogues } from './common.ts'
+import { catalogTemplate, knownMessage } from './catalogues.ts'
+import './common.ts'
 import { spaceCjkBoundaries } from './formatting.ts'
 export type MessageKey = keyof typeof common | keyof typeof admin
 export { type Catalog, registerCatalog } from './catalogues.ts'
@@ -38,7 +38,6 @@ export function literal(text: string): UiLiteral {
 export function msg(key: MessageKey, values: UiMessage['values'] = {}): UiMessage {
   return { key, values }
 }
-registerCatalogues(commonCatalogues)
 function templateFor(locale: InterfaceLanguage, key: string): string | undefined {
   for (const fallback of localeFallbacks(locale)) {
     const template = catalogTemplate(fallback, key)

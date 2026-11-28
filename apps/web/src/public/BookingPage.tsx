@@ -320,7 +320,7 @@ function BookingFlow({
   waitlist?: WaitlistLink | undefined
   directLink?: DirectLink | undefined
 } & BookingAddress) {
-  const { t, ui, locale: displayLocale, explicit, formatLocale } = useI18n()
+  const { t, ui, requested, explicit, formatLocale } = useI18n()
 
   const embedded = useEmbedded()
   const navigate = useNavigate()
@@ -620,9 +620,7 @@ function BookingFlow({
     if (attempt.current?.details !== details) {
       const inviteeLocale = bookingLocale(
         explicit ??
-          (interfaceLanguage(browserFormatLocale) === displayLocale
-            ? browserFormatLocale
-            : displayLocale),
+          (interfaceLanguage(browserFormatLocale) === requested ? browserFormatLocale : requested),
       )
       if (inviteeLocale) body.invitee.locale = inviteeLocale
       attempt.current = { key: randomKey(), details, body }

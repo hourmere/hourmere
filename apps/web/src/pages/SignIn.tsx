@@ -124,7 +124,7 @@ function SignInEntry({ next, expired }: { next: string; expired: boolean }) {
       : samlValues.length === 0 && instance.data.ssoOidcEnabled === true)
   const ssoProvider = ssoAvailable && sso.length === 1 ? oidcAttemptId(sso[0]) : null
   return (
-    <InterfaceScope surface={saml && ssoProvider ? 'public' : 'admin'}>
+    <InterfaceScope surface={saml && ssoProvider ? 'public' : 'admin'} fallback={<SignInLoading />}>
       <SignInForm
         next={next}
         expired={expired}

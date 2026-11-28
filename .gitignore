@@ -165,3 +165,4 @@ packages/auth/auth-schema.generated.sql
 
 # Standalone widget built before the web app
 apps/web/public/hourmere-embed.js
+apps/web/public/hourmere-embed-locale-*.js

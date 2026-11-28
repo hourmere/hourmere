@@ -1,7 +1,7 @@
 import { registeredLocales } from '@hourmere/core/language'
 import { describe, expect, it } from 'vitest'
+import { commonCatalogues } from './catalogues.fixture.ts'
 import { type Catalog, catalogueCoverage, registerCatalogues } from './catalogues.ts'
-import { commonCatalogues } from './common.ts'
 import { type MessageKey, translate, translateMessage } from './translate.ts'
 
 const teamMessages = {

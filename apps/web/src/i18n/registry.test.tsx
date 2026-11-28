@@ -16,7 +16,9 @@ import {
 } from '../test/fake-api.tsx'
 import { booking, EVENT, eventRoutes } from '../test/public-fixtures.ts'
 import { selectPublicLanguage } from '../test/public-language.ts'
+import { primeTestCatalogues } from './catalogues.fixture.ts'
 import { registerCatalogues } from './catalogues.ts'
+import { commonCatalogue } from './common.ts'
 import { formatDuration, formatMinutes } from './duration.ts'
 import { AccountLanguage, LanguageSwitcher, useI18n } from './runtime.tsx'
 import { resetLanguagePreference } from './store.ts'
@@ -40,19 +42,6 @@ vi.mock('@hourmere/core/locales', async (importOriginal) => {
     },
   }
 })
-vi.mock('./common.ts', async (importOriginal) => {
-  const original = await importOriginal<typeof import('./common.ts')>()
-  return {
-    ...original,
-    commonCatalogues: {
-      ...original.commonCatalogues,
-      './catalogues/qaa/common.ts': {
-        'Your details': 'Fixture details',
-        '{count} min': 'Fixture {count}m',
-      },
-    },
-  }
-})
 vi.mock('../public/env.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../public/env.ts')>()),
   detectTimeZone: () => 'America/New_York',
@@ -61,6 +50,11 @@ vi.mock('../public/env.ts', async (importOriginal) => ({
 }))
 
 const fixture = 'qaa' as InterfaceLanguage
+primeTestCatalogues()
+commonCatalogue.prime(fixture, {
+  'Your details': 'Fixture details',
+  '{count} min': 'Fixture {count}m',
+})
 beforeEach(() => resetLanguagePreference())
 
 function Notice() {

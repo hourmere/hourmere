@@ -1094,8 +1094,8 @@ restrictive sandbox, replacing the iframe first if a permission upgrade was in p
 so the retiring document cannot retain navigation permission.
 Later readiness cannot trigger a reload after input becomes available. An embed instance
 ID without the permission marker identifies a legacy widget and keeps Continue in a new
-tab. The widget script is served with `Cache-Control: no-cache` and ETag validation so
-protocol upgrades reach returning visitors.
+tab. The widget and its translation scripts use `Cache-Control: no-cache` and ETag
+validation so upgrades reach returning visitors. Missing translation scripts return 404.
 The ready message carries only that
 capability; no redirect URL or personal data is added to the embed completion message.
 Canceling from the confirmation removes the continuation link.

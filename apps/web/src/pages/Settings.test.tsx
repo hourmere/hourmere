@@ -3,6 +3,8 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Schemas } from '../api/client.ts'
+import { holdTestCatalogue } from '../i18n/catalogues.fixture.ts'
+import { chooseLanguage } from '../i18n/store.ts'
 import { openAccountMenu, selectAdminLanguage } from '../test/account-menu.ts'
 import {
   emptyTeamLists,
@@ -155,6 +157,18 @@ describe('the profile settings', () => {
       { handle: 'ada', timeZone: 'Europe/Lisbon', locale: 'zh-CN' },
     ])
     expect(screen.getByRole('button', { name: 'Save profile' })).toBeDefined()
+  })
+
+  it('defaults a new profile to the requested notification language during catalogue download', async () => {
+    chooseLanguage('zh-CN')
+    const download = holdTestCatalogue('zh-CN', 'admin')
+    const api = profileServer(null)
+    renderApp('/app/settings')
+    const create = await screen.findByRole('button', { name: 'Create profile' })
+    await userEvent.click(create)
+    await screen.findByText('Profile created. Your booking links are ready.')
+    expect(download).toHaveBeenCalledOnce()
+    expect(api.to('PUT /api/v1/profile')[0]?.body).toMatchObject({ locale: 'zh-CN' })
   })
 
   it('saves a changed handle, warning that shared links stop working', async () => {

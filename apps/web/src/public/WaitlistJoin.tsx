@@ -28,7 +28,7 @@ export function WaitlistJoin({
   locale: string
   onRefresh?: (() => void) | undefined
 }) {
-  const { t, locale: emailLocale } = useI18n()
+  const { t, requested: emailLocale } = useI18n()
   const id = useId()
   const [open, setOpen] = useState(false)
   const [email, setEmail] = useState('')

@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Schemas } from '../api/client.ts'
 import { goTo } from '../browser.ts'
-import { commonCatalogues } from '../i18n/common.ts'
+import { commonCatalogues } from '../i18n/catalogues.fixture.ts'
 import { fakeApi, json, later, renderApp } from '../test/fake-api.tsx'
 
 vi.mock('../browser.ts', async (original) => ({

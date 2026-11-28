@@ -2,6 +2,8 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { assert, describe, expect, it, vi } from 'vitest'
 import { api, type Schemas } from '../api/client.ts'
+import { holdTestCatalogue } from '../i18n/catalogues.fixture.ts'
+import { chooseLanguage } from '../i18n/store.ts'
 import { PATHS } from '../paths.ts'
 import { fakeApi, json, later, ME, renderApp, signedIn, signedInAs } from '../test/fake-api.tsx'
 import { EVENT_TYPE_ID, eventType } from '../test/fixtures.ts'
@@ -493,6 +495,24 @@ describe('workflow editor', () => {
       }),
     ])
     expect(requests.to('GET /api/v1/instance')).toHaveLength(1)
+  })
+
+  it('defaults the preview language to the requested locale while its catalogue downloads', async () => {
+    chooseLanguage('zh-CN')
+    const download = holdTestCatalogue('zh-CN', 'admin')
+    const requests = fakeApi({
+      ...editorRoutes,
+      [`GET ${DETAIL}`]: () => json(200, workflow),
+      [`POST ${PREVIEW}`]: () => json(200, matchedPreview),
+    })
+    renderApp(EDIT)
+    const preview = await screen.findByRole('button', { name: 'Preview workflow' })
+    await userEvent.click(preview)
+    await screen.findByText('The example booking matches this workflow.')
+    expect(download).toHaveBeenCalledOnce()
+    expect(requests.to(`POST ${PREVIEW}`)[0]?.body).toMatchObject({
+      example: { locale: 'zh-CN' },
+    })
   })
 
   it('previews rendered text, fallback and skip reasons through the generated client', async () => {

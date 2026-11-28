@@ -28,7 +28,7 @@ export function PersonalSetupGuide({
   reload: () => void
   refreshFailure: UiText | null
 }) {
-  const { t, ui, locale } = useI18n()
+  const { t, ui, requested } = useI18n()
   const [saving, setSaving] = useState(false)
   const [failure, setFailure] = useState<UiText | null>(null)
   const [calendarSkipped, skipCalendar] = useRememberedFlag(me.user.id, 'calendar-skipped')
@@ -92,7 +92,7 @@ export function PersonalSetupGuide({
     try {
       await unwrap(
         api.POST('/api/v1/schedules/default', {
-          body: { language: locale === 'zh-CN' ? 'zh-CN' : 'en' },
+          body: { language: requested === 'zh-CN' ? 'zh-CN' : 'en' },
         }),
       )
       if (mounted.current) reload()

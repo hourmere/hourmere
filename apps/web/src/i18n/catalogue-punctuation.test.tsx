@@ -1,7 +1,7 @@
 import { render } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { admin } from './admin.ts'
-import { common } from './common.ts'
+import { admin } from './catalogues/zh-CN/admin.ts'
+import { common } from './catalogues/zh-CN/common.ts'
 import { type MessageKey, registerCatalog, translate } from './translate.ts'
 
 registerCatalog(admin)

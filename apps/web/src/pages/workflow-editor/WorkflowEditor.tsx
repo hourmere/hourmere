@@ -61,7 +61,7 @@ export function WorkflowEditor({
   followUpHostNotesEnabled: boolean
   reload: () => void
 }) {
-  const { t, ui, locale } = useI18n()
+  const { t, ui, requested } = useI18n()
   const permissions = useTeamPagePermissions()
   const canSave =
     permissions.status === 'fixed' ||
@@ -74,7 +74,7 @@ export function WorkflowEditor({
   const [original] = useState(() => workflowDraft(workflow))
   const [draft, setDraft] = useState(original)
   const [replaceText, setReplaceText] = useState(false)
-  const [previewLocale, setPreviewLocale] = useState(locale)
+  const [previewLocale, setPreviewLocale] = useState(requested)
   const [previewEventTypeId, setPreviewEventTypeId] = useState('')
   const [preview, setPreview] = useState<Schemas['WorkflowPreview'] | null>(null)
   const [busy, setBusy] = useState<'save' | 'preview' | null>(null)

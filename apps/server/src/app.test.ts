@@ -162,13 +162,25 @@ describe('API surface', () => {
 describe('serving the built web app', () => {
   let dist: string
   let app: ReturnType<typeof createApp>
+  const widgetScripts = [
+    {
+      file: 'hourmere-embed.js',
+      body: 'window.Hourmere = { version: 1 }',
+      upgradedBody: 'window.Hourmere = { version: 2 }',
+    },
+    {
+      file: 'hourmere-embed-locale-pt-BR.js',
+      body: 'document.currentScript.hourmereMessages({ closeLabel: "Fechar" });',
+      upgradedBody: 'document.currentScript.hourmereMessages({ closeLabel: "Fechar janela" });',
+    },
+  ]
 
   beforeAll(async () => {
     dist = await mkdtemp(join(tmpdir(), 'hourmere-web-'))
     await mkdir(join(dist, 'assets'))
     await writeFile(join(dist, 'index.html'), '<title>Hourmere</title>')
     await writeFile(join(dist, 'assets', 'app-abc123.js'), 'console.log(1)')
-    await writeFile(join(dist, 'hourmere-embed.js'), 'window.Hourmere = { version: 1 }')
+    for (const { file, body } of widgetScripts) await writeFile(join(dist, file), body)
     app = createApp({ ...noAuth, checkDb: async () => {}, webDist: dist })
   })
 
@@ -201,41 +213,47 @@ describe('serving the built web app', () => {
     expect(res.headers.get('cache-control')).toBeNull()
   })
 
-  it('revalidates the widget script and serves upgrades with a new ETag', async () => {
-    const path = '/hourmere-embed.js'
-    const initial = await app.request(path)
-    expect(initial.status).toBe(200)
-    expect(initial.headers.get('content-type')).toMatch(/javascript/)
-    expect(initial.headers.get('cache-control')).toBe('no-cache')
-    const tag = initial.headers.get('etag')
-    expect(tag).toMatch(/^".+"$/)
-    expect(await initial.text()).toBe('window.Hourmere = { version: 1 }')
+  it.each(widgetScripts)(
+    'revalidates $file and serves upgrades with a new ETag',
+    async ({ file, body, upgradedBody }) => {
+      const path = `/${file}`
+      const initial = await app.request(path)
+      expect(initial.status).toBe(200)
+      expect(initial.headers.get('content-type')).toMatch(/^(text|application)\/javascript\b/)
+      expect(initial.headers.get('cache-control')).toBe('no-cache')
+      const tag = initial.headers.get('etag')
+      expect(tag).toMatch(/^".+"$/)
+      expect(await initial.text()).toBe(body)
 
-    const unchanged = await app.request(path, { headers: { 'If-None-Match': tag as string } })
-    expect(unchanged.status).toBe(304)
-    expect(unchanged.headers.get('etag')).toBe(tag)
-    expect(unchanged.headers.get('cache-control')).toBe('no-cache')
-    expect(await unchanged.text()).toBe('')
+      const unchanged = await app.request(path, { headers: { 'If-None-Match': tag as string } })
+      expect(unchanged.status).toBe(304)
+      expect(unchanged.headers.get('etag')).toBe(tag)
+      expect(unchanged.headers.get('cache-control')).toBe('no-cache')
+      expect(await unchanged.text()).toBe('')
 
-    try {
-      await writeFile(join(dist, path), 'window.Hourmere = { version: 2 }')
-      const upgraded = await app.request(path, { headers: { 'If-None-Match': tag as string } })
-      expect(upgraded.status).toBe(200)
-      expect(upgraded.headers.get('etag')).not.toBe(tag)
-      expect(upgraded.headers.get('cache-control')).toBe('no-cache')
-      expect(await upgraded.text()).toBe('window.Hourmere = { version: 2 }')
-    } finally {
-      await writeFile(join(dist, path), 'window.Hourmere = { version: 1 }')
-    }
+      try {
+        await writeFile(join(dist, file), upgradedBody)
+        const upgraded = await app.request(path, { headers: { 'If-None-Match': tag as string } })
+        expect(upgraded.status).toBe(200)
+        expect(upgraded.headers.get('etag')).not.toBe(tag)
+        expect(upgraded.headers.get('cache-control')).toBe('no-cache')
+        expect(await upgraded.text()).toBe(upgradedBody)
+      } finally {
+        await writeFile(join(dist, file), body)
+      }
+    },
+  )
+
+  it('returns a plain-text 404 for a missing widget translation', async () => {
+    const res = await app.request('/hourmere-embed-locale-fr.js')
+    expect(res.status).toBe(404)
+    expect(res.headers.get('content-type')).toMatch(/^text\/plain\b/)
+    expect(await res.text()).toBe('Not found')
   })
 
   it.each([
-    [
-      "app.use('/hourmere-embed.js', async (c, next) => {\n      await next()\n      c.res.headers.set('Cache-Control', 'no-cache')\n    })",
-      '',
-      'cache-control',
-    ],
-    ["app.use('/hourmere-embed.js', etag())", '', 'validation'],
+    ["c.res.headers.set('Cache-Control', 'no-cache')", '', 'cache-control'],
+    ['await validateWidgetScript(c, next)', 'await next()', 'validation'],
   ])(
     'detects removed widget cache protection with a source-copy assertion failure (%s)',
     async (before, after, protection) => {

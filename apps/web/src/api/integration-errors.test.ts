@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import { errorAliases } from '../../../server/src/error-aliases.ts'
-import { admin } from '../i18n/admin.ts'
+import { admin } from '../i18n/catalogues/zh-CN/admin.ts'
 import { registerCatalog, translateMessage } from '../i18n/translate.ts'
 import { errorMessage, requestError } from './errors.ts'
 
