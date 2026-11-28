@@ -846,10 +846,10 @@ describe.skipIf(!serverUrl)('ownership transfer service', () => {
     await db.transaction().execute(async (trx) => {
       await sql`SET LOCAL session_replication_role = replica`.execute(trx)
       await sql`
+        WITH deadline AS MATERIALIZED (SELECT clock_timestamp() - interval '1 minute' AS instant)
         UPDATE organization_ownership_transfers
-        SET expires_at = clock_timestamp() - interval '1 minute',
-            created_at = clock_timestamp() - interval '24 hours 1 minute'
-        WHERE id = ${id}::uuid`.execute(trx)
+        SET expires_at = deadline.instant, created_at = deadline.instant - interval '24 hours'
+        FROM deadline WHERE id = ${id}::uuid`.execute(trx)
     })
 
     await expect(view(f, f.recipient)).resolves.toBeNull()
