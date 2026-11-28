@@ -89,7 +89,9 @@ describe('mixed-direction transactional mail', () => {
         { ...attendee, locale },
       )
       expect(message.html).toContain(`<bdi>${meetingLinkLabel}</bdi>`)
-      expect(message.html).toContain(`<bdi dir="ltr">${meetingUrl.replace('&', '&amp;')}</bdi></a>`)
+      expect(message.html).toContain(
+        `<bdi dir="ltr">${meetingUrl.replaceAll('&', '&amp;')}</bdi></a>`,
+      )
       expect(message.text).toContain(meetingUrl)
       expect(snapshotContent(message, locale)).toMatchSnapshot()
     },
@@ -180,7 +182,7 @@ describe('mixed-direction transactional mail', () => {
       language: locale,
     })
     const href = `${publicUrl}/booking/waitlist/verify#token=${token}&management=${removalToken}`
-    const escaped = href.replace('&', '&amp;')
+    const escaped = href.replaceAll('&', '&amp;')
     expect(message.html).toContain(`href="${escaped}"`)
     expect(message.html).toContain(`<bdi dir="ltr">${escaped}</bdi>`)
     expect(message.text).toContain(href)
