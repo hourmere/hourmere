@@ -320,9 +320,14 @@ describe.skipIf(!serverUrl)('team writes without an SSO policy', () => {
       },
     })
     const removalQueries = [...statements]
-    expect(roleQueries).toHaveLength(30)
+    expect(roleQueries).toHaveLength(31)
     // Default-on SSO records a local block so a later IdP configuration cannot readmit this member.
-    expect(removalQueries).toHaveLength(39)
+    expect(removalQueries).toHaveLength(40)
+    for (const queries of [roleQueries, removalQueries]) {
+      expect(
+        queries.filter((query) => query.includes('organization_ownership_transfers')),
+      ).toHaveLength(1)
+    }
     expect(
       await db
         .selectFrom('scim_membership_blocks')

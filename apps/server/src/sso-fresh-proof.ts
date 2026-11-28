@@ -1,6 +1,6 @@
-/** Shared, session-only SSO write gate. No route enables this while protocols are off. */
+/** Shared, session-only gate for writes requiring fresh SSO or mailbox proof. */
 import { randomBytes } from 'node:crypto'
-import type { Db } from '@hourmere/db'
+import type { Database, Db } from '@hourmere/db'
 import {
   checkTeamWriteBeforeAuthorityChange,
   checkTeamWriteDeadline,
@@ -8,10 +8,11 @@ import {
 } from '@hourmere/db/team-write'
 import { DomainError } from '@hourmere/scheduling'
 import { HTTPException } from 'hono/http-exception'
-import { sql } from 'kysely'
+import { sql, type Transaction } from 'kysely'
 import { z } from 'zod'
 import {
   enabledSsoProtocols,
+  isOwnershipTransferProofOperation,
   requireSsoEnabled,
   requireSsoRetained,
   SCIM_MAPPING_CONSENT,
@@ -40,6 +41,8 @@ export interface FreshProofRequest {
   userId: string
   /** An affected account whose login mailbox must stay stable through the write. */
   affectedUserId?: string | undefined
+  /** Accounts whose accepted recovery standing is used to preserve team access. */
+  recoveryUserIds?: string[]
   sessionId: string
   organizationId: string
   operation: string
@@ -135,7 +138,10 @@ export async function runWithFreshProof<T>(
   deps: FreshProofDeps,
   request: FreshProofRequest,
   callbacks: {
-    authorize: (trx: Db) => Promise<void>
+    beforeLocks?: (trx: Transaction<Database>) => Promise<void>
+    authorize: (trx: Transaction<Database>) => Promise<void>
+    /** A locked lifecycle write can commit a terminal result without consuming proof. */
+    beforeProof?: (trx: Transaction<Database>) => Promise<T | undefined>
     /** The operation can revoke the acting session's team proof in this transaction. */
     changesAuthority?: boolean
     /** Only a recovery-enabled operation supplies this and consumes authority under the team lock. */
@@ -150,7 +156,7 @@ export async function runWithFreshProof<T>(
     /** Optional I/O after preflight, outside the transaction. Authority is checked again. */
     prepare?: () => Promise<void>
     mutate: (
-      trx: Db,
+      trx: Transaction<Database>,
       input: Record<string, unknown>,
       browserBinding: string,
       mailboxProof: FreshMailboxProof | undefined,
@@ -159,10 +165,11 @@ export async function runWithFreshProof<T>(
     ) => Promise<T>
   },
 ): Promise<FreshProofResult<T>> {
+  const ownershipTransfer = isOwnershipTransferProofOperation(request.operation)
   if (request.operation === SCIM_MAPPING_CONSENT) {
     if (!request.scimMappingConsentEnabled)
       throw new DomainError('not_found', 'scim_resources_disabled')
-  } else {
+  } else if (!ownershipTransfer) {
     requireSsoRetained(deps.capabilities)
   }
   const publicUrl = new URL(deps.publicUrl)
@@ -187,13 +194,19 @@ export async function runWithFreshProof<T>(
   }
   const cookie = setCookie === undefined ? {} : { setCookie }
   const clock = deps.now ?? databaseClock
+  const lockedUsers = [
+    request.userId,
+    request.affectedUserId ?? request.userId,
+    ...(request.recoveryUserIds ?? []),
+  ]
   const prepare = Symbol('prepare')
   let preparedGrantId: string | undefined
   const run = (prepared: boolean): Promise<FreshProofResult<T> | typeof prepare> =>
     teamWriteTransaction(deps.db.transaction(), async (trx) => {
+      await callbacks.beforeLocks?.(trx)
       // Follow the shared team-write lock order: person, organization, then session/attempt.
       await sql`SELECT id FROM auth."user"
-      WHERE id IN (${request.userId}::uuid, ${request.affectedUserId ?? request.userId}::uuid)
+      WHERE id = ANY(${lockedUsers}::uuid[])
       ORDER BY id FOR SHARE`.execute(trx)
       // All team authority changes use the organization parent as their serialization point.
       const organization = await sql`SELECT id FROM auth.organization
@@ -218,6 +231,8 @@ export async function runWithFreshProof<T>(
         AND s."expiresAt" > ${now}::timestamptz`.execute(trx)
       const mailbox = session.rows[0]?.mailbox
       if (!mailbox) throw new HTTPException(403, { message: 'forbidden' })
+      const terminal = await callbacks.beforeProof?.(trx)
+      if (terminal !== undefined) return { status: 'complete', value: terminal, ...cookie }
       const recovery = await callbacks.consumeRecovery?.(trx, binding, now, {
         preflight: !prepared,
         enforced: policies[0]?.require_sso === true,
@@ -277,7 +292,7 @@ export async function runWithFreshProof<T>(
           AND expires_at > ${now}::timestamptz
           AND (mailbox_proven_at IS NULL OR mailbox_proof_expires_at > ${now}::timestamptz)
           AND requires_sso = ${needsSso}
-          AND (NOT ${independentMailbox} OR mailbox = ${mailbox})
+          AND (NOT ${independentMailbox || (ownershipTransfer && needsMailbox)} OR mailbox = ${mailbox})
           AND (requires_mailbox OR NOT ${needsMailbox})
           AND (step_up_link_id IS NULL OR (
             step_up_proof_expires_at > ${now}::timestamptz

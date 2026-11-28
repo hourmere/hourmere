@@ -10,7 +10,7 @@ import type {
 import { sql, type Transaction } from 'kysely'
 import { withAuthAuditTransaction } from './audit.ts'
 import { scimMappingDetachRequired } from './organization-context.ts'
-import { mapOrganizationSlugConflict } from './organizations.ts'
+import { isUuid, mapOrganizationSlugConflict } from './organizations.ts'
 
 const AUTH_TRANSACTION = Symbol.for('hourmere.auth-transaction')
 
@@ -36,6 +36,7 @@ globalStore[AUTH_TRANSACTION] = heldAuthTransaction
 /** Keep the native validators, middleware, hooks, response shapes and error codes. */
 export function nativeTeamTransactions<O extends OrganizationOptions>(
   plugin: DefaultOrganizationPlugin<O>,
+  currentTransaction: () => Transaction<Database> | undefined,
 ): DefaultOrganizationPlugin<O> {
   const createOrganization = plugin.endpoints.createOrganization
   plugin.endpoints.createOrganization = Object.assign(
@@ -72,7 +73,23 @@ export function nativeTeamTransactions<O extends OrganizationOptions>(
   plugin.endpoints.deleteOrganization = Object.assign(
     async (context: Parameters<typeof deleteOrganization>[0]) => {
       try {
-        return await deleteOrganization(context)
+        if (!context?.context) return await deleteOrganization(context)
+        return await runWithTransaction(context.context.adapter, async () => {
+          // The launch guard refuses deletion. If enabled later, take the team lock
+          // before Better Auth checks the owner's role or clears their session.
+          const trx = currentTransaction()
+          const organizationId = context.body?.organizationId
+          if (!trx) throw new Error('Team deletion requires a transaction')
+          if (typeof organizationId === 'string' && isUuid(organizationId)) {
+            await trx
+              .selectFrom('auth.organization')
+              .select('id')
+              .where('id', '=', organizationId)
+              .forUpdate()
+              .executeTakeFirst()
+          }
+          return deleteOrganization(context)
+        })
       } catch (error) {
         // The FK is the final check if a link is created between a preflight and the cascade.
         if (

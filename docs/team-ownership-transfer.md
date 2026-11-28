@@ -4,6 +4,11 @@ This is a post-launch design. Today the [team role policy](member-leave.md#safe-
 still blocks owner assignment and demotion through ordinary role changes. The proposed flow
 adds a dedicated transfer that takes effect only after the recipient confirms.
 
+The internal service implements the transfer lifecycle, proof checks, audit and notification
+jobs. It remains unavailable to users until the browser REST routes and bilingual dashboard
+have passed two-party acceptance. The service budgets allow five creates and six revocations
+per team in each aligned one-hour window on the database clock.
+
 ## Decisions and permissions
 
 Use the signed-in team's member settings. The initiating owner selects an existing member
