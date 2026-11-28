@@ -31,8 +31,11 @@ for (const locale of ['en', 'zh-CN'] as const) {
     const members = page.getByRole('region', { name: /^(Team members|团队成员)$/ })
     const row = members.getByRole('listitem').filter({ hasText: 'Second Required Host' })
     const ownerRow = members.getByRole('listitem').filter({ hasText: 'Fixture Host' })
+    const ownerRoleActions = ownerRow.getByRole('button', {
+      name: /^(Make admin|Make member|Remove member|设为管理员|设为成员|移除成员)[:：]/,
+    })
     await expect(row).toBeVisible()
-    await expect(ownerRow.getByRole('button')).toHaveCount(0)
+    await expect(ownerRoleActions).toHaveCount(0)
     await expect(
       members.getByText(/Only owners can manage admins|只有所有者可以管理管理员/),
     ).toBeVisible()
@@ -93,6 +96,6 @@ for (const locale of ['en', 'zh-CN'] as const) {
     expect((await denied.json()).code).toBe('TEAM_MANAGEMENT_ACCESS_DENIED')
     await page.reload()
     await expect(ownerRow.getByText(/^(Owner|所有者)$/)).toBeVisible()
-    await expect(ownerRow.getByRole('button')).toHaveCount(0)
+    await expect(ownerRoleActions).toHaveCount(0)
   })
 }

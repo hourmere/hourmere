@@ -59,9 +59,10 @@ result before creating the event so job replays keep the same payload and `trans
 `ready` stores `teamsJoinUrl` in the private writeback record. `join_url_pending` records a
 confirmed event without a valid Teams link. The event mapping is saved so bounded retries can
 read the same event by ID. `teams_unavailable` records a calendar without Teams support, with
-an ordinary Outlook event still written. The last known link stays in the private writeback
-record for cancellation email delivery. Cancelled booking views and calendar connection
-summaries exclude it. Public event-type metadata exposes only the location option kind and label.
+an ordinary Outlook event still written. Successful cancellation writeback clears the stored
+join URL. Cancelled booking views, cancellation emails and calendar attachments, and calendar
+connection summaries exclude the link. Public event-type metadata exposes only the location
+option kind and label.
 The booking and notification views project `writeback_failed` when the writeback has failed
 and has no validated join URL.
 See [Microsoft Calendar](https://hourmere.com/docs/microsoft-calendar).
@@ -125,12 +126,23 @@ names the invitation it issued or reused. That reference is null when the addres
 already belongs to a member or another pending invitation holds it. The new resource
 starts without an account or membership link. While provisioning is enabled, accepting
 the attached invitation sets both links and the claim's `completed_at`, subject to
-the live account and mailbox blockers. Re-admission confirmation can complete a claim
+the entry and claim lifecycle and the live account and mailbox blockers. A retired entry
+or invalid claim refuses admission through an invitation still authorized by SCIM.
+Re-admission confirmation can complete a claim
 without an invitation for a retained ordinary member and clear that account's matching
 retired SCIM suspension in the same organization transaction. User replacement updates
 the mapped profile and timestamp in the existing row. If the normalized work address
 changes, the same transaction sets the unfinished claim's `invalidated_at` and keeps its
 mailbox and invitation reference.
+
+With either SSO protocol enabled, a member removal writes a team-local admission block
+in `scim_membership_blocks` for the removed member's normalized account email, even if
+that team has never configured an identity provider. Distinct verified emails on active
+SSO links in that team each get their own block. The records identify a local removal
+(`source = 'local'`, `kind = 'removal'`). Active blocks prevent automatic readmission
+through SSO or SCIM, including after the team adopts either feature. The mailbox records
+have no expiration and are kept until that team is deleted, even after the account is
+deleted or the block is cleared.
 
 Migration `0181_scim_team_hierarchy.sql` adds storage for the
 [SCIM Groups-to-teams hierarchy](scim.md#groups-to-teams-hierarchy-authorization).
@@ -164,6 +176,39 @@ source User and, for suspended rows, by child team and account.
 The [paid-booking design](payments.md) describes pending-payment holds, bounded slot
 occupancy, the Stripe webhook receiver, leased refund obligations and operator reconciliation.
 Public Checkout remains disabled.
+
+## Custom role storage
+
+Migration `0197_custom_role_storage.sql` creates storage for [team custom roles](custom-roles.md).
+The instance master switch and team opt-ins start off. New teams without a policy row
+are off. The master and team epochs form the policy version for custom authority.
+Changing the master epoch leaves the team opt-in intact and invalidates the old version
+for every opted-in team. Fixed-role traffic continues through the existing predicates.
+
+Each role has an organization-scoped identity and a pointer to one immutable revision.
+The revision records a catalogue version and explicit permission IDs. The database
+rejects unknown versions, wildcards, fixed-only actions and duplicate IDs in role
+revisions. The v1 catalogue includes the deferred phase-two IDs. Rollout controls
+which permissions can be granted. An assignment binds a fixed Member incarnation
+to a role in the same team and records the assigning user. Assigning a role to
+oneself fails. Role definitions and assignments are restricted to team spaces, and
+an organization with role history cannot be marked as personal. Publishing a revision
+or changing an assignment advances the affected members' authorization generations in
+the same transaction.
+
+The migration snapshots exact, trimmed role tokens and sets the initial generation to
+one on existing memberships. A single recognized token maps to the corresponding
+fixed policy. Other token sets remain ambiguous for the future activation preflight.
+The snapshot conveys no authorization. Existing members, invitations, sessions, keys
+and OAuth grants remain intact. Credential ceiling rows start empty because the
+current role cannot prove a credential's original ceiling. SCIM token associations
+record their separate directory protocol version.
+
+Normal application traffic does not resolve or manage custom roles during this
+storage-only step. To downgrade, use the supported database backup and restore
+procedure. After a future activation, follow the credential revocation and reissue
+steps in the [disable and recover design](custom-roles.md#storage-migration-and-credential-versions)
+before returning traffic to the restored database.
 
 ## Principles
 
@@ -326,6 +371,17 @@ for limits and client instructions.
 | `user`, `session`, `account`, `verification` | Accounts, sessions, sign-in methods (Google, Microsoft, email), email verification |
 | `organization`, `member`, `invitation` | Tenancy: personal and team organizations, roles, invitations |
 | `apikey` | Keys for agents (MCP, REST, CLI); hashed by Better Auth |
+
+Migration 0194 preserves existing organization slugs and adds a unique index on
+`lower(slug)`. It stops before changing the schema if existing rows collide, reporting
+their organization IDs so the operator can resolve the conflict before retrying.
+The organization trigger serializes slug inserts and changes using transaction advisory
+locks on the folded slugs, acquired in lock-key order for a rename. It records each
+released address in `public.team_slug_reservations` with the releasing organization ID
+and an expiry 90 elapsed days later. A claim consumes an expired hold or the same
+organization's hold in the claim transaction. Deleting the releasing organization
+clears its ID from the hold and leaves the expiration intact. Public lookup uses only
+the stored organization slug.
 
 Google and Microsoft sign-in ID tokens are used during authentication and are not stored:
 `account."idToken"` remains NULL on account creation and every update, including linking,
@@ -1085,6 +1141,9 @@ evidence and the consumed receipt on the original booking. The snapshot insert m
 booking and refuses payment holds. Ordinary bookings use the default marker and need no
 snapshot lookup.
 
+Migration 0193 repairs inconsistent markers and guards writes against the snapshot in
+the same organization. Removing a snapshot clears the marker if its booking survives.
+
 Migration 0083 adds `routing_form_operations`, the idempotency records of form creation and
 publication requests that carry a client `requestId`. A record holds the organization, the
 operation (`create` or `publish`), the acting credential by kind (`session`, `api_key` or
@@ -1121,9 +1180,8 @@ Browser-only policy writes share the organization write lock. Enabling enforceme
 the latest general and owner test receipts for the current provider revision after taking the
 organization lock. An eligible OIDC provider must have passing results from both receipts and a
 verified domain, and the team must have an accepted current recovery owner. The policy and its audit
-event commit together.
-OIDC and SAML stay hard-off. A test restricts table references to
-the storage layer and each explicitly named data owner.
+event commit together. A test restricts table references to the storage layer and each
+explicitly named data owner.
 
 All six belong to a team: a personal organization's rows are refused, and deleting the
 organization deletes them. Policies, providers and domain claims are deleted only with
@@ -1198,8 +1256,8 @@ step): `sso_identity_links`, `sso_attempts`, `sso_mailbox_tokens`, `sso_replay_c
 `sso_browser_proofs` and `sso_delegation_bindings`. The Mailbox proof step's module
 (`apps/server/src/sso-mailbox-proof.ts`) uses them: its endpoints and delivery job write
 attempts' mailbox proofs and their tokens, and its cleanup job deletes consumed and expired
-attempts, at most 1000 a minute, with their tokens. Its endpoints answer `404 sso_disabled`
-while OIDC and SAML stay hard-off, so nothing writes attempts in production yet. The test
+attempts, at most 1000 a minute, with their tokens. Mailbox proof remains available
+for recovery and supported trust-reducing operations when both protocols are off. The test
 that keeps production modules from naming the configuration tables covers these too, and
 lets that module name only attempts, tokens and providers. The shared fresh-proof gate
 (`apps/server/src/sso-fresh-proof.ts`) creates and consumes operation-bound attempts and
@@ -1373,8 +1431,8 @@ run IDs and never recreates identities or intents. The internal email attempt se
 commits the reservation and shared ledger charge with the recipient marker, then calls
 SMTP outside the transaction. Only the matching marker token can schedule a known-not-sent
 retry. Retry admission restamps both rows under the same organization and mail-budget locks.
-Expired marker leases resolve to `delivery_unknown`. `WORKFLOWS_ENABLED` opts the instance
-into capture and delivery. The worker installs workflow repair and retention when enabled
+Expired marker leases resolve to `delivery_unknown`. `WORKFLOWS_ENABLED` defaults to true
+and controls capture and delivery. The worker installs workflow repair and retention when enabled
 or when startup finds unfinished work or an interrupted attempt to recover.
 
 - **Enrollments** record a booking's capture of one workflow revision at one lifecycle
@@ -1537,21 +1595,12 @@ or renamed, and the test fails until the check accepts exactly those kinds.
 
 ## Planned additions (each a new migration)
 
-The [booking workflows design](workflows.md) specifies proposed triggers, conditions,
-email and webhook actions, durable execution records and workflow sub-caps within the shared mail budget.
-Only its definition, execution and creation key storage exist ([workflow definition
-storage](#workflow-definition-storage), [workflow execution storage](#workflow-execution-storage),
-[workflow creation key storage](#workflow-creation-key-storage)),
-with definition read, creation, update and deletion operations that answer `workflows_disabled` while hard-off;
-no worker or runtime enablement exists yet.
-
 | When | Change |
 |---|---|
 | Cloud billing | `subscriptions` (organization ↔ Stripe customer/subscription, plan, seats) |
 | Weeks 5–8 | Better Auth teams (sub-groups for round-robin pools) |
 | With Google/Microsoft sign-in | Already configured: Better Auth encrypts sign-in OAuth tokens (`encryptOAuthTokens`) |
 | After launch | Better Auth `two-factor` |
-| Planned, all instances | Organization SSO (OIDC/SAML): [evaluation and design](sso.md); audit integration |
 
 Background jobs (notification emails, reminders, calendar synchronization and webhook
 delivery/retries) use pg-boss (`@hourmere/jobs`), which keeps its queue in its own `pgboss` schema and
@@ -1614,10 +1663,10 @@ row ID and public origin are authenticated associated data.
 ## Invitation delivery storage
 
 Migration 0045 adds nullable `invitation_deliveries.authorized_by_user_id` without rewriting
-existing generations. Each new generation pins the acting administrator for sender authority
-checks and the invitation mail's name. Null legacy rows fall back to the invitation's original
-inviter. The recorded UUID has no user foreign key: deleting the actor keeps its identity,
-so the sender refuses it rather than falling back to a different administrator. The original
+existing generations. Each new generation pins an administrator for sender authority checks.
+App invitations also use that administrator's name in the mail. Null legacy rows fall back
+to the invitation's original inviter. The recorded UUID has no user foreign key. If the
+actor is deleted, the retained UUID lets the sender refuse the generation. The original
 `auth.invitation.inviterId` stays unchanged for non-transitive signup eligibility.
 Its current team membership also determines invitation validity independently of the
 generation's authorizing administrator. If the original inviter no longer belongs to the
@@ -1686,6 +1735,13 @@ new version. The migration itself installs storage and queries; management and q
 integration are application code. Explicit resend extends expiry under the approved
 protocol, independently of these storage queries.
 
+Migration 0192 adds `invitation_deliveries.scim_issued` for the current generation.
+The worker uses it to render mail from the identity provider on behalf of the team. The
+recorded owner's locale still selects the language. An administrator's resend records
+the new generation as an app invitation. The upgrade identifies current unexpired initial SCIM deliveries from the
+issuance audit journal. Stop old writers and senders before upgrading and restart all roles
+with the same version, so all generations carry their sender identity.
+
 Invitation admission now writes the invitation and its queued delivery intent in one
 transaction. The explicit resend cooldown uses the later of `generation_started_at`
 and `updated_at`. The sender updates `updated_at` on every delivery attempt
@@ -1695,11 +1751,14 @@ and seeds the known legacy 48-hour validity policy. Historic native resends chan
 without changing invitation creation time, so their difference cannot recover original
 validity. Invitation status, expiry, attempts and delivery outcomes remain unchanged.
 
-`invitation_email_requests` retains actor/team UUIDs, an invitation-domain recipient HMAC
-and request time for rolling inviter/team/recipient limits. It has no foreign keys, so
-deleting an invitation, account or team cannot reset the budget. Admission holds the
-existing global mail-budget lock without debiting the shared sending allowance in
-`notification_email_sends`. The sender checks and debits ordinary, non-reserved
+`invitation_email_requests` retains the team UUID, an invitation-domain recipient HMAC
+and request time for rolling limits. App admissions include the inviter's user UUID.
+Migration 0192 allows a null user UUID for SCIM admissions, which count toward their own
+organization and recipient limits as described in [the SCIM guide](scim.md#invitation-delivery-and-limits).
+Existing request records keep their original attribution and age out of the rolling windows.
+The ledger has no foreign keys, so deleting an invitation, account or team cannot reset
+the budget. Admission holds the existing global mail-budget lock without debiting the
+shared sending allowance in `notification_email_sends`. The sender checks and debits ordinary, non-reserved
 shared capacity at send time. Both ledgers retain two days. Every admission record
 requires its recipient hash; migration 0043 creates this ledger without changing earlier
 shared mail accounting.
@@ -1862,6 +1921,11 @@ The phases within that organization boundary are:
   order, then share-locks their member rows in sorted user-ID order. Round-robin bookings
   next lock their assignment state. A changed host set is refused; do not append newly
   discovered advisory locks out of order.
+- Internal departure handoff takes the actor's user share lock, the organization share lock,
+  and the actor's member and session share locks before checking SSO proof. It locks the
+  source booking and then the offer before taking the source and candidate host advisory locks
+  in sorted user-ID order. The organization share lock fences membership changes while allowing
+  other team booking writers to take their organization locks.
 - Routing form creation takes the organization share lock, then the transaction advisory
   lock `hashtextextended('hourmere.routing-form-quota:' || organizationId, 0)` before
   inserting the form. It never upgrades or writes the organization row. Any transaction
@@ -2471,7 +2535,7 @@ An immutable 30-minute deadline bounds the hold. Expiry releases host occupancy 
 confirmation after the deadline records refund intent without reviving the booking.
 The transition guard prevents changing retained deadlines/references or resurrecting terminal
 holds. Group seats and imported bookings cannot carry payment holds. See the
-[paid-booking design](payments.md) for the internal-only rollout boundary, refund
+[paid-booking design](payments.md) for the test-mode rollout boundary, refund
 ledger, retention and operator responsibilities. Stop old app and worker processes before
 migration and restart all roles together.
 
@@ -2503,6 +2567,11 @@ the leased operation and its provider refund ID. Booking changes atomically upda
 attempt's current booking association while keeping the original PaymentIntent reference
 on the root. The receiver retains the receipt, account, mode and provider IDs of a signed
 paid Session with a binding mismatch for operator reconciliation.
+
+Migration `0191_event_type_payment.sql` adds optional `event_types.payment` configuration
+with one currency and one integer minor-unit price per offered duration. Existing event
+types stay free. Service writes normalize the duration order and preserve it in the price
+list. The setting affects future holds only. Checkout attempts keep their own price snapshot.
 
 ## Private attendee no-show markers
 
@@ -2741,6 +2810,27 @@ and terminal item result share one transaction. Recovery requeues due batches an
 live claims in place. Bounded cleanup removes completed results after seven days and
 unused receipts one day after expiry. Production admission and processing remain off
 pending browser and release acceptance.
+
+## Departure booking handoff storage
+
+`departure_handoff_offers` stores one immutable row per source booking version. The
+source and team are linked by a composite foreign key. A source has at most one live
+version. Its saved terms may be closed, and different terms require a new version.
+`departure_handoff_recipients` stores one normalized mailbox per exact version and a
+pending, approved or declined decision. Each recipient has a globally unique record ID.
+
+`departure_booking_handoffs` is both the internal link and the immutable receipt. It
+uniquely binds a source to a distinct same-team replacement and records the exact offer
+version, applying actor, time and opaque approval IDs. Apply writes it and closes the
+offer in the transaction that cancels the source and creates the replacement. Booking
+chain traversal continues to use `rescheduled_from_id`.
+
+Team deletion cascades through its bookings. Deleting the source removes its offers,
+recipients and receipt. Deleting the replacement also removes the receipt. Team member
+removal preserves the proposal and receipt's historical actor IDs. A committed receipt
+retains the offer version it references and survives pruning of the recipient mailbox
+rows. Production admission stays disabled while proposal lifecycle, delivery and
+recipient decisions are built. See [the handoff design](member-departure-handoff.md).
 
 ## Audit events
 

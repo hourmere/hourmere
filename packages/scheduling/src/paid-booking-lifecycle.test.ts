@@ -6,6 +6,7 @@ import {
   cancelHostBooking,
   cancelManagedBooking,
   getHostBooking,
+  getHostBookingDetail,
   newManageToken,
   requestReschedule,
   rescheduleHostBooking,
@@ -92,7 +93,9 @@ describe.skipIf(!serverUrl)('confirmed paid booking lifecycle', () => {
         },
       })
     await observePayment()
-    await expect(getHostBooking(hostCtx, id)).resolves.toMatchObject({ status: 'confirmed' })
+    const booking = await getHostBooking(hostCtx, id)
+    expect(booking.status).toBe('confirmed')
+    expect(booking.paidManagementUnavailable).toBeUndefined()
     const refunds = () =>
       db
         .selectFrom('payment_refund_obligations')
@@ -148,6 +151,9 @@ describe.skipIf(!serverUrl)('confirmed paid booking lifecycle', () => {
       ...hostCtx,
       principal: { ...hostCtx.principal, user: stranger.principal.user },
     }
+    await expect(getHostBookingDetail(unauthorizedHost, id)).rejects.toMatchObject({
+      code: 'booking_not_found',
+    })
     await expect(cancelHostBooking(unauthorizedHost, id)).rejects.toMatchObject({
       code: 'booking_not_found',
     })
@@ -267,6 +273,15 @@ describe.skipIf(!serverUrl)('confirmed paid booking lifecycle', () => {
       id: second.booking.id,
       eventType: { durationMinutes: 30 },
     })
+    const paid = { status: 'paid', ...price, refundStatus: null }
+    const dashboard = `https://dashboard.stripe.com/${original.account_id}/test/payments/${expectedRefund.payment_reference}`
+    expect((await getManagedBookingDetails(publicCtx, token)).payment).toEqual(paid)
+    for (const bookingId of [id, first.booking.id, second.booking.id]) {
+      expect((await getHostBookingDetail(hostCtx, bookingId)).payment).toEqual({
+        ...paid,
+        stripeDashboardUrl: dashboard,
+      })
+    }
     expect((await getManagedBookingDetails(publicCtx, token)).eventType).not.toHaveProperty(
       'allowedDurationsMinutes',
     )
@@ -279,6 +294,7 @@ describe.skipIf(!serverUrl)('confirmed paid booking lifecycle', () => {
     const afterStart = { ...hostCtx, now: () => nextStart.add({ minutes: 1 }) }
     const detail = await getHostBooking(afterStart, second.booking.id)
     expect(detail.canManageNoShow).toBe(false)
+    expect(detail.paidManagementUnavailable).toBeUndefined()
     await expect(
       setAttendeeNoShow(afterStart, second.booking.id, detail.attendees[0]?.id as string, true),
     ).rejects.toMatchObject({ code: 'paid_booking_management_unavailable' })
@@ -289,6 +305,10 @@ describe.skipIf(!serverUrl)('confirmed paid booking lifecycle', () => {
       status: 'cancelled',
     })
     expect(await refunds()).toEqual([expectedRefund])
+    expect((await getManagedBookingDetails(publicCtx, token)).payment).toEqual({
+      ...paid,
+      refundStatus: 'requested',
+    })
     expect(create).toHaveBeenCalledOnce()
     await expect(
       db

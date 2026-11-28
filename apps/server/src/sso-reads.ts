@@ -3,7 +3,7 @@ import type { Db } from '@hourmere/db'
 import { DomainError } from '@hourmere/scheduling'
 import { sql } from 'kysely'
 import { z } from 'zod'
-import { requireSsoRetained, type SsoCapabilities } from './sso.ts'
+import { requireSsoRetained, type SsoCapabilities, samlLinkRecoveryAvailable } from './sso.ts'
 import { currentSsoProviderTestStatus } from './sso-oidc-test-receipts.ts'
 import type { TeamReadPolicy } from './sso-team-reads.ts'
 
@@ -154,13 +154,13 @@ export async function listSsoProviders(
     .execute()
   const page = rows.slice(0, limit)
   const recoveryProviderIds =
-    // OIDC recovery remains available with the setting off. SAML is still hard-off.
     query.includeRecoveryLinks && principal.kind === 'session'
       ? new Set(
           page
             .filter(
               ({ protocol }) =>
-                protocol === 'oidc' || (protocol === 'saml' && deps.capabilities.ssoSamlEnabled),
+                protocol === 'oidc' ||
+                (protocol === 'saml' && samlLinkRecoveryAvailable(deps.capabilities)),
             )
             .map(({ id }) => id),
         )

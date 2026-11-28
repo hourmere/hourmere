@@ -70,6 +70,32 @@ export function emailText(text: string, language: InterfaceLanguage): string {
   )
 }
 
+/** Isolate each visible line of an already normalized user value. */
+export function emailUserText(
+  text: string,
+  language: InterfaceLanguage,
+  direction: 'auto' | 'ltr' = 'auto',
+): string {
+  const dir = direction === 'ltr' ? ' dir="ltr"' : ''
+  return text
+    .split('\n')
+    .map((line) => (line ? `<bdi${dir}>${emailText(line, language)}</bdi>` : ''))
+    .join('<br>')
+}
+
+export interface EmailContent {
+  text: string
+  html: string
+}
+
+export function emailUserValue(
+  text: string,
+  language: InterfaceLanguage,
+  direction?: 'auto' | 'ltr',
+): EmailContent {
+  return { text, html: emailUserText(text, language, direction) }
+}
+
 /** A URL that may be linked: absolute http(s) only, so no `javascript:` or `data:` links. */
 export function linkableUrl(url: string): string | undefined {
   const trimmed = url.trim()

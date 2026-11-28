@@ -52,6 +52,35 @@ For `hourmere one-time-links create|list|revoke`, see
 stdout and refuses `--output`; list/revoke use metadata IDs without the booking token.
 Create/revoke require `bookings` or `full` API key scope, while listing allows `read` or `full`.
 
+## Read team single sign-on configuration
+
+Use a `read` or `full` API key created for the team by a current, verified owner or
+administrator. These commands use the key's organization.
+
+```sh
+printf '%s\n' '{"limit":10}' | hourmere sso providers list --input -
+hourmere sso policy
+```
+
+The provider list returns `data` and `nextCursor`. Pass a non-null `nextCursor` as
+`cursor` in a later JSON input for the same team. The optional `limit` accepts 1–100
+and defaults to 50. The policy command uses an empty input object. Results omit
+provider secrets, raw metadata and identity claims.
+
+OIDC and SAML are on by default. The server operator can turn either protocol off with
+`SSO_OIDC_ENABLED=false` or `SSO_SAML_ENABLED=false`. Both commands remain available with either
+or both protocol settings off. Stored enforcement still applies. If the team requires SSO,
+bind an SSO delegation to the key in the credential's team space under **API keys**,
+using fresh SSO verification. A missing, expired or suspended delegation causes the
+CLI to report `sso_required` on stderr and exit **1**. A delegation lasts up to 30 days.
+Use the browser for all SSO setup and recovery.
+See [single sign-on](/docs/sso) for the instance settings and their effects.
+
+中文：当前团队所有者或管理员可用团队的 `read` 或 `full` 密钥读取提供方和策略。
+两种协议默认开启，关闭后仍可用这两个命令读取。已强制 SSO 的团队要求密钥具有有效委托，
+否则 CLI 会向标准错误输出 `sso_required` 并以状态码 **1** 退出。请在浏览器绑定委托、
+配置 SSO 或恢复访问。
+
 ## Commands and JSON arguments
 
 Arguments are the corresponding [MCP tool's](/docs/mcp#tools) JSON object. Supply them with
@@ -82,6 +111,8 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 | `polls delete` | `delete_meeting_poll` | [See inputs](#manage-meeting-polls) |
 | `polls finalize` | `finalize_meeting_poll` | `id`, `slotId`, `bookerVoterId`, `attendeeVoterIds`, `expectedResultsRevision`, `expectedBallotRevisions`, `acknowledgeConditional`, `idempotencyKey` and optional `locationOptionId` |
 | `whoami` | `whoami` | `{}` |
+| `sso providers list` | `list_sso_providers` | optional `limit` and `cursor`; [team SSO access](#read-team-single-sign-on-configuration) |
+| `sso policy` | `get_sso_policy` | `{}`; [team SSO access](#read-team-single-sign-on-configuration) |
 | `profile` | `get_profile` | `{}` |
 | `catalog` | `list_event_types` | optional `limit`, `after` |
 | `event` | `get_event_type` | `id` from `catalog` |
@@ -111,21 +142,21 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 | `webhooks delete` | `delete_webhook` | `id`. Requires `full` and `--yes`. |
 | `webhooks rotate-secret` | `rotate_webhook_secret` | `id`. Requires `full` and either `--output FILE` or `--json`. |
 | `webhooks deliveries` | `list_webhook_deliveries` | `id` and optional `after`. Requires `read` or `full`. |
-| `workflows create` | `create_workflow` | `owner`, retained `idempotencyKey`, `name`, `scope`, `trigger`, `actions`; optional `enabled`, `conditions`; requires `full`; hard-off (`workflows_disabled`) |
-| `workflows update` | `update_workflow` | `id`, `expectedRevision`, changed definition fields; requires `full`; hard-off (`workflows_disabled`) |
-| `workflows delete` | `delete_workflow` | `id`, `expectedRevision`; requires `full`; hard-off (`workflows_disabled`) |
-| `workflows preview` | `preview_workflow` | `owner`, `name`, `scope`, `trigger`, `actions`; optional `enabled`, `conditions`, synthetic `example`. Requires `full`. Returns `workflows_disabled` while hard-off. |
-| `workflows list` | `list_workflows` | `owner` (`{"kind":"personal","id":USER_ID}` or `{"kind":"team","id":TEAM_ID}`); optional `limit`, `cursor`; requires `read` or `full`; hard-off (`workflows_disabled`) |
-| `workflows get` | `get_workflow` | `id`; requires `read` or `full`; hard-off (`workflows_disabled`) |
-| `workflows runs` | `list_workflow_runs` | `id`; optional `limit` (1–100, default 50) and `cursor`; requires `read` or `full`; returns `workflows_disabled` while hard-off. |
+| `workflows create` | `create_workflow` | `owner`, retained `idempotencyKey`, `name`, `scope`, `trigger`, `actions`; optional `enabled`, `conditions`; requires `full` |
+| `workflows update` | `update_workflow` | `id`, `expectedRevision`, changed definition fields; requires `full` |
+| `workflows delete` | `delete_workflow` | `id`, `expectedRevision`; requires `full` |
+| `workflows preview` | `preview_workflow` | `owner`, `name`, `scope`, `trigger`, `actions`; optional `enabled`, `conditions`, synthetic `example`. Requires `full`. |
+| `workflows list` | `list_workflows` | `owner` (`{"kind":"personal","id":USER_ID}` or `{"kind":"team","id":TEAM_ID}`); optional `limit`, `cursor`; requires `read` or `full` |
+| `workflows get` | `get_workflow` | `id`; requires `read` or `full` |
+| `workflows runs` | `list_workflow_runs` | `id`; optional `limit` (1–100, default 50) and `cursor`; requires `read` or `full`. |
 
 `workflows list`, `workflows get` and `workflows runs` read booking workflows. See the
 [workflow operating guide](https://github.com/hourmere/hourmere/blob/main/docs/workflows.md#operating-guide)
-for the shared preview example and lifecycle rules. While the feature is hard-off, these
-commands exit `1` with `workflows_disabled` on stderr
-(a `bookings` key gets `insufficient_scope` first). Once enabled they read only the owner the
-key acts as: your personal workflows from a personal key, or a team's from a team key held by a
-current owner or admin.
+for the shared preview example and lifecycle rules. Workflows are enabled by default.
+A personal key reads your personal workflows. A team key held by a current owner or admin
+reads that team's workflows. With `WORKFLOWS_ENABLED=false`, reads, disable-only updates and deletion
+remain available. Create, preview, enable and other edits exit `1` with `workflows_disabled`
+on stderr.
 
 `hourmere workflows runs --input history.json` reads one page of run history, newest first.
 Pass `nextCursor` as `cursor` with the same workflow ID for the next page. Rows contain
@@ -134,15 +165,15 @@ names, emails, answers and URLs are omitted from the history.
 
 中文：`workflows runs` 接收工作流 `id` 和可选的 `limit`、`cursor`，按完成时间从新到旧返回历史。
 使用同一工作流 ID，将 `nextCursor` 作为 `cursor` 读取下一页。结果包含元数据、汇总结果和
-`workflow_disabled` 等跳过原因，不含预约 ID、姓名、邮箱、答案或链接。功能仍硬关闭，命令
-退出码为 `1`，并在标准错误输出 `workflows_disabled`。
+`workflow_disabled` 等跳过原因，不含预约 ID、姓名、邮箱、答案或链接。工作流默认启用。设置 `WORKFLOWS_ENABLED=false` 后，
+仍可读取、仅停用或删除工作流，其他操作以状态码 `1` 退出，并在标准错误输出 `workflows_disabled`。
 
 `hourmere workflows preview --input candidate.json` reads the preview request from a file.
 Use `--input -` or pipe JSON on stdin to preview the same candidate. The response
 contains synthetic match reasons, email samples and static limits.
 
 中文：`workflows preview` 从 `--input FILE` 指定的文件或标准输入读取候选定义。
-结果仅包含合成示例的匹配状态、邮件样本和静态额度。功能仍硬关闭。
+结果仅包含合成示例的匹配状态、邮件样本和静态额度。工作流暂停时无法预览。
 
 `catalog` includes the key's visible team and personal configurations. Booking and slot
 commands accept exactly one of `handle` (personal link) or `teamSlug` (team link). Team
@@ -268,7 +299,7 @@ destination URL contains a credential.
 The `events` values for `webhooks create` and `webhooks update` are `booking.created`,
 `booking.rescheduled`, `booking.cancelled`, `booking.reschedule_requested`,
 `booking.reschedule_request_expired`, `booking.attendee_no_show_changed` and
-`workflow.executed`. Adding `workflow.executed` requires `WORKFLOWS_ENABLED=true`.
+`workflow.executed`. Adding `workflow.executed` requires enabled workflows.
 While workflows are off, adding it exits with status `1` and `workflows_disabled`
 on stderr (REST 404). On create, this takes precedence over `webhooks_disabled` (REST 409).
 
@@ -437,10 +468,10 @@ field errors and the current limitations.
 
 ## Use routing forms
 
-The `routing-forms` commands are in CLI help even while routing is off. On a
-self-hosted instance, routing is off by default and the operator can enable it with
-`ROUTING_FORMS_ENABLED=true` and a server restart. Calls to routing commands while
-off report `routing_forms_disabled` on stderr and exit with status 1.
+Routing forms are on by default. A self-hosted operator can turn them off with
+`ROUTING_FORMS_ENABLED=false` and a server restart. The `routing-forms` commands
+stay in CLI help while off, but calls report `routing_forms_disabled` on stderr
+and exit with status 1.
 Submit answers with `routing-forms route` and save a continuation to a private file with
 `--output`. Use `routing-forms resolve` and `routing-forms slots` to choose a time,
 then pass `routeToken` as the only event selector to `book --input FILE`.

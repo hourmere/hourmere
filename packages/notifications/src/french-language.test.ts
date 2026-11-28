@@ -127,7 +127,7 @@ describe.skipIf(!serverUrl)('French booking notification language', () => {
         expect(message?.text).toContain('mardi 3 novembre 2026')
         expect(message?.text).toContain('10:00')
         expect(message?.html).toContain('<html lang="fr">')
-        expect(message?.html).toContain('Votre réunion avec Grace Hopper est réservée.')
+        expect(message?.html).toContain('Votre réunion avec <bdi>Grace Hopper</bdi> est réservée.')
         expect(invitation(message as MailMessage)).toMatchObject({
           summary: 'Intro call avec Grace Hopper',
           description: expect.stringContaining('Réservé avec Grace Hopper via Hourmere.'),

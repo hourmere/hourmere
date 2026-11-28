@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { isPaidEventSupported } from '@hourmere/core/payment'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import * as react from 'react'
@@ -16,6 +17,7 @@ import { isMultiLineText, isSingleLineText, singleLineProblem } from '../../text
 import type { DurationsEditor } from './DurationsEditor.tsx'
 import * as formFunctions from './event-type-form.ts'
 import * as notificationFunctions from './notifications-form.ts'
+import * as paymentFunctions from './payment-form.ts'
 
 const form = readFileSync('apps/web/src/pages/event-types/event-type-form.ts', 'utf8')
 const editor = readFileSync('apps/web/src/pages/event-types/DurationsEditor.tsx', 'utf8')
@@ -44,6 +46,8 @@ function mutate(source: string, before: string, after: string) {
 
 const formDeps = {
   ...notificationFunctions,
+  ...paymentFunctions,
+  isPaidEventSupported,
   RequestError,
   parseWhole,
   wholeNumberProblem,

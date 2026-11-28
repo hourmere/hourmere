@@ -178,14 +178,14 @@ describe('published API key scope tables', () => {
   })
 
   it.each(documents)(
-    '$path explains the OIDC setting and its off state outside generated tables',
+    '$path explains both SSO settings and their off state outside generated tables',
     ({ document }) => {
       const after = document.slice(document.indexOf(SCOPE_TABLE_END) + SCOPE_TABLE_END.length)
-      expect(after).toContain('off unless the operator sets `SSO_OIDC_ENABLED=true`')
-      expect(after).toContain('SAML is\nbeing built and no setting enables it')
+      expect(after).toContain('OIDC and SAML single sign-on are on by default.')
+      expect(after).toContain('`SSO_OIDC_ENABLED=false` or `SSO_SAML_ENABLED=false`')
       expect(after).toContain('404 sso_disabled')
-      expect(after).toContain('除非运营者设置 `SSO_OIDC_ENABLED=true`，否则 OIDC 单点登录保持关闭')
-      expect(after).not.toContain('SSO is being built and is not available yet')
+      expect(after).toContain('OIDC 和 SAML 单点登录默认开启。')
+      expect(after).toContain('Stored enforcement still applies.')
       for (const name of [
         'list_sso_providers',
         'get_sso_policy',
@@ -245,20 +245,24 @@ describe('published API key scope tables', () => {
   })
 
   it('keeps the public SSO limitation current', () => {
-    expect(
-      readFileSync(new URL('../apps/site/src/content/docs/docs/index.md', import.meta.url), 'utf8'),
-    ).toContain('the operator turns it\n  on with `SSO_OIDC_ENABLED=true`')
+    const site = readFileSync(
+      new URL('../apps/site/src/content/docs/docs/index.md', import.meta.url),
+      'utf8',
+    )
+    expect(site).toContain('Organization single sign-on is on by default.')
     const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8')
-    expect(readme).toContain('Organization OIDC single sign-on is off by default.')
-    expect(readme).toContain('`SSO_OIDC_ENABLED=true`')
-    expect(readme).not.toContain('Organization OIDC/SAML SSO is being built')
+    expect(readme).toContain('Organization single sign-on is on by default for both OIDC and SAML')
+    for (const doc of [site, readme]) {
+      expect(doc).toContain('`SSO_OIDC_ENABLED=false`')
+      expect(doc).toContain('`SSO_SAML_ENABLED=false`')
+    }
   })
 
   it.each(documents)(
-    '$path explains the routing hard-off beside the generated table',
+    '$path explains disabled routing operations beside the generated table',
     ({ document }) => {
       expect(document.slice(0, document.indexOf(SCOPE_TABLE_START))).toContain(
-        'Routing operations return `routing_forms_disabled` until an operator enables routing.',
+        'Routing operations return `routing_forms_disabled` while routing is off.',
       )
     },
   )

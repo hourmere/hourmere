@@ -19,6 +19,8 @@ export type RoutedBookingInput = Schemas['RoutedBookingInput']
 export type RoutedBookingResult = Schemas['RoutedBookingResult']
 export type OneTimeBookingPage = Schemas['OneTimeBookingPage']
 export type JoinWaitlist = Schemas['JoinWaitlist']
+export type PublicCheckoutStatus = Schemas['PublicCheckoutStatus']
+export type StartPublicCheckout = Schemas['StartPublicCheckout']
 
 /** A request the server refused; `retryAfter` (seconds) comes with 429. */
 export class PublicRequestError extends RequestError {
@@ -26,7 +28,16 @@ export class PublicRequestError extends RequestError {
   readonly privateResponse: boolean
 
   constructor(base: RequestError, retryAfter: number | undefined, privateResponse = false) {
-    super(base.status, base.code, base.message, base.displayMessage)
+    super(
+      base.status,
+      base.code,
+      base.message,
+      base.displayMessage,
+      undefined,
+      undefined,
+      undefined,
+      base.field,
+    )
     this.name = 'PublicRequestError'
     this.retryAfter = retryAfter
     this.privateResponse = privateResponse
@@ -46,6 +57,19 @@ function retryAfterOf(response: Response): number | undefined {
   return Number.isFinite(value) && value > 0 ? Math.ceil(value) : undefined
 }
 
+function privateErrorBody(error: unknown) {
+  if (!error || typeof error !== 'object' || !('error' in error)) return undefined
+  // Capability requests use the structured question reference. Discard arbitrary prose.
+  const field =
+    error.error === 'invalid_responses' &&
+    'field' in error &&
+    typeof error.field === 'string' &&
+    /^responses\.[A-Za-z0-9_-]{1,64}$/.test(error.field)
+      ? error.field
+      : undefined
+  return { error: error.error, field }
+}
+
 /** The data of a call; throws PublicRequestError for an error status, NetworkError offline. */
 async function call<T>(
   request: () => Promise<{ data?: T; error?: unknown; response: Response }>,
@@ -61,15 +85,8 @@ async function call<T>(
   }
   const { data, error, response } = result
   if (!response.ok) {
-    // Capability requests never reflect server prose, including an accidentally echoed URL.
-    const safeError =
-      privateResponse && error && typeof error === 'object' && 'error' in error
-        ? { error: error.error }
-        : privateResponse
-          ? undefined
-          : error
     throw new PublicRequestError(
-      requestError(response.status, safeError),
+      requestError(response.status, privateResponse ? privateErrorBody(error) : error),
       retryAfterOf(response),
       privateResponse,
     )
@@ -92,7 +109,7 @@ export function failureMessage(err: unknown): UiText {
       : 'Too many requests from your network. Wait a minute and try again.'
   }
   const message = errorMessage(err)
-  // Private responses have no server prose. Localize their synthesized fallback as well.
+  // Private responses use localized, predefined messages instead of server prose.
   return err instanceof PublicRequestError &&
     err.privateResponse &&
     typeof message === 'object' &&
@@ -213,6 +230,29 @@ export async function getHost(handle: string, signal: AbortSignal): Promise<Publ
     () => api.GET('/api/v1/public/{handle}', { params: { path: { handle } }, signal }),
     signal,
   )
+  return data
+}
+
+export async function getTeamHome(
+  handle: string,
+  signal: AbortSignal,
+): Promise<Schemas['PublicTeam']> {
+  const { data } = await call(
+    () =>
+      api.GET('/api/v1/public/teams/{handle}', {
+        params: { path: { handle } },
+        credentials: 'omit',
+        cache: 'no-store',
+        signal,
+      }),
+    signal,
+  )
+  if (
+    data?.team?.slug !== handle ||
+    typeof data.team.name !== 'string' ||
+    !Array.isArray(data.eventTypes)
+  )
+    throw new NetworkError()
   return data
 }
 
@@ -379,6 +419,53 @@ export async function createBooking(
         }),
   )
   return { result: data, replayed: status === 200 }
+}
+
+export async function startPublicCheckout(
+  handle: string,
+  slug: string,
+  body: StartPublicCheckout,
+  idempotencyKey: string,
+) {
+  const { data } = await call(
+    () =>
+      api.POST('/api/v1/public/{handle}/{slug}/checkout', {
+        ...privateRoutingRequest,
+        params: { path: { handle, slug }, header: { 'idempotency-key': idempotencyKey } },
+        body,
+      }),
+    undefined,
+    true,
+  )
+  return data
+}
+
+export async function getPublicCheckoutStatus(token: string, signal: AbortSignal) {
+  const { data } = await call(
+    () =>
+      api.POST('/api/v1/public/checkout/status', {
+        ...privateRoutingRequest,
+        body: { token },
+        signal,
+      }),
+    signal,
+    true,
+  )
+  return data
+}
+
+export async function cancelPublicCheckout(token: string, signal: AbortSignal) {
+  const { data } = await call(
+    () =>
+      api.POST('/api/v1/public/checkout/cancel', {
+        ...privateRoutingRequest,
+        body: { token },
+        signal,
+      }),
+    signal,
+    true,
+  )
+  return data
 }
 
 export async function joinWaitlist(

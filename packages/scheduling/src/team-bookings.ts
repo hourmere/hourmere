@@ -2,7 +2,7 @@ import { type Database, type Db, importedBookingIds } from '@hourmere/db'
 import { sql, type Transaction } from 'kysely'
 import { findPublicEventType, findPublicTeamEventType } from './availability.ts'
 import { bookingPageQuery, encodeBookingCursor, type ListBookingsInput } from './booking-page.ts'
-import { cancelTeamBookingInTransaction } from './bookings.ts'
+import { cancelTeamBookingInTransaction, unavailablePaidManagementIds } from './bookings.ts'
 import type { BookingNotifier, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { resolvedBookingHosts } from './hosts.ts'
@@ -233,7 +233,14 @@ async function enrichTeamBookings(
     ctx.db
       .selectFrom('bookings as booking')
       .leftJoin('payment_checkout_attempts as moved', 'moved.current_booking_id', 'booking.id')
-      .select(['booking.id', 'booking.payment_hold_expires_at', 'moved.current_booking_id'])
+      .leftJoin('payment_checkout_attempts as original', 'original.booking_id', 'booking.id')
+      .select([
+        'booking.id',
+        'booking.status',
+        'booking.payment_hold_expires_at',
+        'moved.current_booking_id',
+        'original.booking_id as paid_root_id',
+      ])
       .select((eb) =>
         eb
           .exists(
@@ -256,6 +263,15 @@ async function enrichTeamBookings(
   const paidIds = new Set(
     replacements
       .filter((booking) => booking.payment_hold_expires_at !== null || booking.current_booking_id)
+      .map((booking) => booking.id),
+  )
+  const unavailablePaidManagement = await unavailablePaidManagementIds(
+    ctx.db,
+    replacements
+      .filter(
+        (booking) =>
+          booking.status === 'confirmed' && (booking.paid_root_id || paidIds.has(booking.id)),
+      )
       .map((booking) => booking.id),
   )
   // Reuse public resolution, including current configured hosts and round-robin activation.
@@ -291,6 +307,9 @@ async function enrichTeamBookings(
         !paidIds.has(booking.id) &&
         !imported.has(booking.id) &&
         Temporal.Instant.compare(ctx.now(), Temporal.Instant.from(booking.start)) > 0,
+      ...(booking.status === 'confirmed' && unavailablePaidManagement.has(booking.id)
+        ? { paidManagementUnavailable: true }
+        : {}),
       attendees: (attendanceByBooking.get(booking.id) ?? []).map((attendee) => ({
         id: attendee.id,
         name: attendee.name,

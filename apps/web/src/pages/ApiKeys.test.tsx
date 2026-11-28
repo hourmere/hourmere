@@ -1144,8 +1144,15 @@ describe('the API keys page', () => {
       ] as const) {
         // Only a shell function runs: no Claude process, network or provider call.
         const run = spawnSync(
-          'zsh',
-          ['-f', '-c', `${program}() { printf '%s\\0' "$@"; }\n${region.textContent}`],
+          'bash',
+          [
+            '--noprofile',
+            '--norc',
+            '-O',
+            'failglob',
+            '-c',
+            `${program}() { printf '%s\\0' "$@"; }\n${region.textContent}`,
+          ],
           { encoding: 'utf8' },
         )
         expect(run.status).toBe(0)

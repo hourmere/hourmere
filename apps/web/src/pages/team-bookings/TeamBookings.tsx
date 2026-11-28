@@ -8,6 +8,7 @@ import {
 import './team-bookings.css'
 import {
   type FormEvent,
+  type ReactNode,
   useCallback,
   useEffect,
   useId,
@@ -110,7 +111,7 @@ export function TeamBookingsPage() {
       <dl className="details team-bookings-context">
         <dt>{t('Team')}</dt>
         <dd className="user-content">
-          {me.organization.personal ? t('Personal') : me.organization.name}
+          {me.organization.personal ? t('Personal') : <bdi>{me.organization.name}</bdi>}
         </dd>
         <dt>{t('Your role')}</dt>
         <dd>
@@ -1021,14 +1022,18 @@ function BookingList({
                           }
                         }}
                       >
-                        {booking.eventType?.title ?? t('Deleted event type')}
+                        {booking.eventType?.title == null ? (
+                          t('Deleted event type')
+                        ) : (
+                          <bdi>{booking.eventType.title}</bdi>
+                        )}
                       </button>
                     </th>
                     <td data-label={t('Invitee')} className="user-content">
                       <div className="table-value">
                         {invitee ? (
                           <>
-                            {invitee.name}
+                            <bdi>{invitee.name}</bdi>
                             <br />
                             <BookingEmail email={invitee.email} />
                             {booking.attendees.length > 1 && (
@@ -1047,7 +1052,9 @@ function BookingList({
                         {booking.hosts.length ? (
                           <ul className="plain-list team-booking-hosts">
                             {booking.hosts.map((host) => (
-                              <li key={host.userId}>{host.name}</li>
+                              <li key={host.userId} dir="auto">
+                                {host.name}
+                              </li>
                             ))}
                           </ul>
                         ) : (
@@ -1193,11 +1200,11 @@ function BookingList({
 function BookingEmail({ email }: { email: string }) {
   const separator = email.lastIndexOf('@') + 1
   return (
-    <span className="muted team-booking-email">
+    <bdi dir="ltr" className="muted team-booking-email">
       <span>{email.slice(0, separator)}</span>
       <wbr />
       <span>{email.slice(separator)}</span>
-    </span>
+    </bdi>
   )
 }
 
@@ -1217,6 +1224,7 @@ export function BookingDetail({
   conflict,
   onConflict,
   onRevoked,
+  handoff,
   onNoShowChanged,
   onRefresh,
   onClose,
@@ -1231,6 +1239,7 @@ export function BookingDetail({
   conflict: unknown
   onConflict: (error: unknown) => void
   onRevoked: () => void
+  handoff?: ReactNode
   onNoShowChanged?: (change: NoShowChange) => void
   onRefresh: () => void
   onClose: () => void
@@ -1270,7 +1279,13 @@ export function BookingDetail({
       </div>
       <dl className="details">
         <dt>{t('Event')}</dt>
-        <dd>{booking.eventType?.title ?? t('Deleted event type')}</dd>
+        <dd>
+          {booking.eventType?.title == null ? (
+            t('Deleted event type')
+          ) : (
+            <bdi>{booking.eventType.title}</bdi>
+          )}
+        </dd>
         <dt>{t('When')}</dt>
         <dd>
           <time dateTime={booking.start}>{format.dateTime(booking.start)}</time>
@@ -1310,7 +1325,9 @@ export function BookingDetail({
           {booking.hosts.length ? (
             <ul className="plain-list">
               {booking.hosts.map((host) => (
-                <li key={host.userId}>{host.name}</li>
+                <li key={host.userId} dir="auto">
+                  {host.name}
+                </li>
               ))}
             </ul>
           ) : (
@@ -1323,11 +1340,13 @@ export function BookingDetail({
             <ul className="plain-list">
               {booking.attendees.map((person) => (
                 <li key={person.email}>
-                  {person.name}
+                  <bdi>{person.name}</bdi>
                   {t(' ({detail})', { detail: person.isBooker ? t('Invitee') : t('Guest') })}
                   <br />
                   <a href={`mailto:${person.email}`}>
-                    <BreakableText>{person.email}</BreakableText>
+                    <bdi dir="ltr">
+                      <BreakableText>{person.email}</BreakableText>
+                    </bdi>
                   </a>
                   <br />
                   <span className="muted">
@@ -1342,7 +1361,13 @@ export function BookingDetail({
         </dd>
       </dl>
       {booking.status === 'confirmed' &&
-        (new Date(booking.start).getTime() > Date.now() ? (
+        (booking.paidManagementUnavailable === true ? (
+          <p className="hint">
+            {t(
+              'Changes are unavailable for this paid booking. Contact your instance operator about cancellation or refunds.',
+            )}
+          </p>
+        ) : new Date(booking.start).getTime() > Date.now() ? (
           <CancelBooking
             booking={booking}
             timeZone={timeZone}
@@ -1381,6 +1406,7 @@ export function BookingDetail({
           return true
         }}
       />
+      {handoff}
       <ManualRebooking booking={booking} expectedOrganizationId={expectedOrganizationId} />
     </section>
   )
@@ -1556,6 +1582,7 @@ function CancelBooking({
                 {...props}
                 ref={reasonInput}
                 rows={3}
+                dir="auto"
                 value={reason}
                 onChange={(event) => setReason(event.target.value)}
               />
@@ -1618,7 +1645,7 @@ function CancellationSummary({ booking, timeZone }: { booking: Booking; timeZone
             <ul className="plain-list">
               {booking.hosts.map((host) => (
                 <li key={host.userId}>
-                  {host.name}
+                  <bdi>{host.name}</bdi>
                   {host.timeZone && isKnownTimeZone(host.timeZone) ? (
                     host.timeZone !== format.timeZone && (
                       <>
@@ -1658,7 +1685,10 @@ function CancellationSummary({ booking, timeZone }: { booking: Booking; timeZone
           <ul className="plain-list">
             {booking.attendees.map((person) => (
               <li key={person.email}>
-                {person.name} <BreakableText>{person.email}</BreakableText>
+                <bdi>{person.name}</bdi>{' '}
+                <bdi dir="ltr">
+                  <BreakableText>{person.email}</BreakableText>
+                </bdi>
               </li>
             ))}
           </ul>

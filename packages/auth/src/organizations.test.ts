@@ -127,6 +127,34 @@ describe.skipIf(!serverUrl)('ensurePersonalOrganization', () => {
     ])
   })
 
+  it('skips folded live claims and held team addresses without aborting personal provisioning', async () => {
+    await db
+      .insertInto('auth.organization')
+      .values([
+        { name: 'Legacy team', slug: 'Folded-Team', createdAt: new Date() },
+        { name: 'Renaming team', slug: 'held-team', createdAt: new Date() },
+      ])
+      .execute()
+    await db
+      .updateTable('auth.organization')
+      .set({ slug: 'renamed-team' })
+      .where('slug', '=', 'held-team')
+      .execute()
+
+    for (const [name, expected] of [
+      ['Folded Team', /^folded-team-[a-z0-9]{6}$/],
+      ['Held Team', /^held-team-[a-z0-9]{6}$/],
+    ] as const) {
+      const id = await ensurePersonalOrganization(db, await user(name))
+      const { slug } = await db
+        .selectFrom('auth.organization')
+        .select('slug')
+        .where('id', '=', id)
+        .executeTakeFirstOrThrow()
+      expect(slug).toMatch(expected)
+    }
+  })
+
   it('gives a user named like a reserved path a slug that is not reserved', async () => {
     const orgId = await ensurePersonalOrganization(db, await user('Support'))
     const org = await db

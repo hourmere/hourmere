@@ -618,4 +618,62 @@ export const common = {
   // Booking location changes
   'The meeting location has changed. Please choose a time again.':
     'Der Treffpunkt hat sich geändert. Bitte wählen Sie erneut einen Termin.',
+
+  // Microsoft Teams host authorization
+  'The assigned host must configure Microsoft Teams in their own signed-in session.':
+    'Die zugewiesene gastgebende Person muss sich mit ihrem eigenen Konto anmelden, um Microsoft Teams einzurichten.',
+
+  // Paid booking details
+  'bookingPayment.label': 'Zahlung',
+  'bookingPayment.paid': '{amount} bezahlt',
+  'bookingPayment.refund': 'Rückerstattung',
+  'bookingPayment.requested': 'Rückerstattung angefordert',
+  'bookingPayment.pending': 'Rückerstattung ausstehend',
+  'bookingPayment.succeeded': 'Rückerstattung veranlasst',
+  'bookingPayment.failed': 'Rückerstattung fehlgeschlagen',
+  'bookingPayment.none': 'Keine Rückerstattung',
+  'bookingPayment.unknown': 'Status nicht verfügbar',
+  // Paid booking checkout
+  'Price: {amount}': 'Preis: {amount}',
+  'Starting Checkout…': 'Weiterleitung zur Zahlung…',
+  'Continue to payment': 'Weiter zur Zahlung',
+  'Payment status': 'Zahlungsstatus',
+  'Waiting for payment confirmation': 'Zahlungsbestätigung ausstehend',
+  'Reservation expired': 'Reservierung abgelaufen',
+  'Reservation cancelled': 'Reservierung storniert',
+  'A full refund has been requested.': 'Eine vollständige Rückerstattung wurde veranlasst.',
+  'Stripe is processing the refund.': 'Stripe bearbeitet die Rückerstattung.',
+  'Stripe has sent your refund. Your bank may take time to post it.':
+    'Stripe hat Ihre Rückerstattung gesendet. Die Gutschrift bei Ihrer Bank kann etwas dauern.',
+  'The refund could not be completed. Contact the host for help.':
+    'Die Rückerstattung konnte nicht abgeschlossen werden. Wenden Sie sich an den Gastgeber.',
+  'We couldn’t find this payment attempt': 'Dieser Zahlungsvorgang wurde nicht gefunden',
+  'Return to the tab where you started payment. If your booking was confirmed, use the link in your confirmation email.':
+    'Kehren Sie zum Tab zurück, in dem Sie die Zahlung gestartet haben. Wenn Ihre Buchung bestätigt wurde, verwenden Sie den Link in der Bestätigungs-E-Mail.',
+  'We couldn’t check the payment. Try again before starting another booking.':
+    'Die Zahlung konnte nicht geprüft werden. Versuchen Sie es erneut, bevor Sie eine weitere Buchung starten.',
+  'Your time is reserved for up to 30 minutes. Hourmere will confirm the booking after it receives the payment.':
+    'Ihr Termin ist bis zu 30 Minuten für Sie reserviert. Hourmere bestätigt die Buchung nach Zahlungseingang.',
+  'Release unpaid reservation': 'Unbezahlte Reservierung stornieren',
+  'Payment arrived after the reservation ended. Your booking was not confirmed.':
+    'Die Zahlung ist nach Ende der Reservierung eingegangen. Ihre Buchung wurde nicht bestätigt.',
+  'Manage booking': 'Buchung verwalten',
+  'Choose another time': 'Andere Uhrzeit wählen',
+  'The price has changed. Review the updated price and choose a time again.':
+    'Der Preis hat sich geändert. Prüfen Sie den neuen Preis und wählen Sie erneut einen Termin.',
+  'Online payment is temporarily unavailable. Please contact the host.':
+    'Die Online-Zahlung ist vorübergehend nicht verfügbar. Wenden Sie sich an den Gastgeber.',
+  'We couldn’t open Stripe Checkout. Try again to continue this payment attempt.':
+    'Stripe Checkout konnte nicht geöffnet werden. Versuchen Sie es erneut, um die Zahlung fortzusetzen.',
+  'Open booking page to pay': 'Buchungsseite zur Zahlung öffnen',
+  'The suggested time is selected. Review the details before continuing to payment.':
+    'Der vorgeschlagene Termin ist ausgewählt. Prüfen Sie die Angaben, bevor Sie zur Zahlung weitergehen.',
+  'You’ll pay securely on Stripe. Your booking is confirmed only after Hourmere receives the payment. If you cancel the booking, a full refund is requested.':
+    'Sie bezahlen sicher über Stripe. Hourmere bestätigt die Buchung erst nach Zahlungseingang. Wenn Sie die Buchung stornieren, wird eine vollständige Rückerstattung veranlasst.',
+
+  // Team public home
+  'This team has no public events right now.':
+    'Dieses Team hat derzeit keine öffentlichen Termine.',
+  'This team page is unavailable.': 'Diese Teamseite ist nicht verfügbar.',
+  'Couldn’t load this team page.': 'Diese Teamseite konnte nicht geladen werden.',
 } as const

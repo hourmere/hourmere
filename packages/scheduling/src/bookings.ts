@@ -12,7 +12,7 @@ import {
 } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
 import { recordTeamWriteOrganizationLock, teamWriteTransaction } from '@hourmere/db/team-write'
-import { sql, type Transaction } from 'kysely'
+import { type InferResult, sql, type Transaction } from 'kysely'
 import { parsePhoneNumberFromString } from 'libphonenumber-js/max'
 import { z } from 'zod'
 import {
@@ -31,6 +31,7 @@ import {
 } from './availability.ts'
 import { latestBookingId } from './booking-chain.ts'
 import { bookingPageQuery, encodeBookingCursor, type ListBookingsInput } from './booking-page.ts'
+import { type HostBookingPayment, readBookingPayment } from './booking-payment-details.ts'
 import {
   assertInviteeChangeOpen,
   type ChangeCutoffs,
@@ -137,6 +138,8 @@ export interface Attendee {
 
 export interface Booking {
   canManageNoShow?: boolean
+  /** Authenticated host reads only: the payment binding prevents booking changes. */
+  paidManagementUnavailable?: true
   id: string
   isGroupSeat?: boolean
   /** Private occurrence identifier, present only in authenticated host reads. */
@@ -188,6 +191,7 @@ export interface BookingWithToken {
 
 export interface HostBookingDetail extends Booking {
   routing?: RoutingBookingSnapshot
+  payment?: HostBookingPayment
 }
 
 export const MAX_GUESTS = 10
@@ -547,6 +551,7 @@ const BOOKING_COLUMNS = [
 ] as const
 
 interface BookingRow {
+  paid_root_id?: string | null
   paid_successor_id?: string | null
   payment_hold_expires_at: Date | null
   id: string
@@ -578,6 +583,18 @@ async function toBookings(
   includeTeamsLink = true,
 ): Promise<Booking[]> {
   if (!rows.length) return []
+  const unavailablePaidManagement = host
+    ? await unavailablePaidManagementIds(
+        db,
+        rows
+          .filter(
+            (row) =>
+              row.status === 'confirmed' &&
+              (row.payment_hold_expires_at !== null || row.paid_root_id || row.paid_successor_id),
+          )
+          .map((row) => row.id),
+      )
+    : new Set<string>()
   const requests = await db
     .selectFrom('booking_reschedule_requests')
     .selectAll()
@@ -803,6 +820,9 @@ async function toBookings(
               Temporal.Instant.compare(host.now(), toInstant(r.start_at)) > 0,
           }
         : {}),
+      ...(r.status === 'confirmed' && unavailablePaidManagement.has(r.id)
+        ? { paidManagementUnavailable: true as const }
+        : {}),
       attendees: byBooking.get(r.id) ?? [],
       ...(coHosts.has(r.id) ? { coHosts: coHosts.get(r.id) } : {}),
       ...(r.status === 'confirmed' && pending.has(r.id)
@@ -851,15 +871,16 @@ async function loadBooking(
 // --- Writing bookings -------------------------------------------------------------------
 
 /**
- * Resolve only against the locked configuration and the actual assigned hosts. Payment holds
- * share it so a hold stores the chosen option exactly as its confirmed booking would.
+ * Resolve against the actual assigned hosts. Booking writes use locked configuration and
+ * lock the Microsoft destination. Read-only handoff terms use a consistent snapshot.
  */
 export async function resolveBookingLocation(
-  ctx: Pick<PublicContext, 'automaticMeet' | 'automaticZoom'>,
+  ctx: Pick<PublicContext, 'automaticMeet' | 'automaticZoom' | 'microsoftCalendarEnabled'>,
   db: Db,
   event: PublicEventTypeRecord,
   hosts: string[],
   input: Pick<CreateBookingInput, 'locationOptionId' | 'inviteePhone'>,
+  lockMicrosoftDestination = true,
 ) {
   const options = event.locations
   const chosen = selectLocationOption(options, input.locationOptionId)
@@ -869,7 +890,14 @@ export async function resolveBookingLocation(
   const zoomReady: string[] = []
   try {
     if (microsoftTeamsLocation(chosen)) {
-      await requireMicrosoftTeamsHost(db, event.schedulingType, hosts, event.id, true)
+      await requireMicrosoftTeamsHost(
+        db,
+        event.schedulingType,
+        hosts,
+        event.id,
+        ctx.microsoftCalendarEnabled,
+        lockMicrosoftDestination,
+      )
     }
     if (organizer && automaticMeet(chosen)) {
       await requireMeetDestination(db, organizer, event.id, ctx.automaticMeet)
@@ -1155,9 +1183,8 @@ export function bookingPaymentBindings(db: Db) {
     )
 }
 
-/** Paid lifecycle writes call this after locking an authorized booking. */
-export async function assertBookingLocallyManaged(db: Db, id: string, allowPaid = false) {
-  const paid = await bookingPaymentBindings(db)
+function paidBookingBindingQuery(db: Db) {
+  return bookingPaymentBindings(db)
     .leftJoin('bookings as root', (join) =>
       join
         .onRef('root.id', '=', 'attempt.booking_id')
@@ -1187,38 +1214,62 @@ export async function assertBookingLocallyManaged(db: Db, id: string, allowPaid 
         'current_matches_chain',
       ),
     )
-    .where('booking.id', '=', id)
-    .executeTakeFirst()
-  if (paid?.payment_hold_expires_at || paid?.attempt_id) {
-    if (
-      !allowPaid ||
-      !paid.attempt_id ||
-      !paid.payment_hold_expires_at ||
-      !paid.session_id ||
-      !paid.payment_confirmed_at ||
-      !paid.payment_reference ||
-      !paid.account_id ||
-      !paid.mode ||
-      paid.amount_minor === null ||
-      !paid.currency ||
-      !paid.current_matches_chain ||
-      (paid.status !== 'cancelled' &&
-        paid.current_booking_id &&
-        paid.current_booking_id !== paid.id)
+}
+
+function verifiedPaidBookingBinding(
+  paid: InferResult<ReturnType<typeof paidBookingBindingQuery>>[number],
+) {
+  if (
+    !paid.attempt_id ||
+    !paid.payment_hold_expires_at ||
+    !paid.session_id ||
+    !paid.payment_confirmed_at ||
+    !paid.payment_reference ||
+    !paid.account_id ||
+    !paid.mode ||
+    paid.amount_minor === null ||
+    !paid.currency ||
+    !paid.current_matches_chain ||
+    (paid.status !== 'cancelled' && paid.current_booking_id && paid.current_booking_id !== paid.id)
+  )
+    return undefined
+  return {
+    attemptId: paid.attempt_id,
+    accountId: paid.account_id,
+    mode: paid.mode,
+    paymentReference: paid.payment_reference,
+    amountMinor: paid.amount_minor,
+    currency: paid.currency,
+  }
+}
+
+/** Payment-only restriction, for booking IDs already authorized by the caller's read. */
+export async function unavailablePaidManagementIds(db: Db, ids: string[]) {
+  if (!ids.length) return new Set<string>()
+  const rows = await paidBookingBindingQuery(db)
+    .where('booking.id', 'in', ids)
+    .where((eb) =>
+      eb.or([
+        eb('booking.payment_hold_expires_at', 'is not', null),
+        eb('attempt.id', 'is not', null),
+      ]),
     )
+    .execute()
+  return new Set(rows.filter((row) => !verifiedPaidBookingBinding(row)).map((row) => row.id))
+}
+
+/** Paid lifecycle writes call this after locking an authorized booking. */
+export async function assertBookingLocallyManaged(db: Db, id: string, allowPaid = false) {
+  const paid = await paidBookingBindingQuery(db).where('booking.id', '=', id).executeTakeFirst()
+  if (paid?.payment_hold_expires_at || paid?.attempt_id) {
+    const binding = allowPaid ? verifiedPaidBookingBinding(paid) : undefined
+    if (!binding)
       throw new DomainError(
         'conflict',
         'paid_booking_management_unavailable',
         'Paid booking management is not available yet',
       )
-    return {
-      attemptId: paid.attempt_id,
-      accountId: paid.account_id,
-      mode: paid.mode,
-      paymentReference: paid.payment_reference,
-      amountMinor: paid.amount_minor,
-      currency: paid.currency,
-    }
+    return binding
   }
   if (await isImportedBooking(db, id)) {
     throw new DomainError(
@@ -1912,6 +1963,11 @@ async function createBookingInTransaction(
   const current = seriesOccurrence ? et : await resolve(trx, { lock: true })
   if (!current || current.id !== et.id || current.organizationId !== et.organizationId) {
     throw bookingEventUnavailable(oneTimeLink !== undefined)
+  }
+  if (current.payment) {
+    if (oneTimeLink) throw bookingEventUnavailable(true)
+    if (routing) throw routedBookingUnavailable()
+    throw new DomainError('conflict', 'payment_required')
   }
   if (checkEvent) await checkEvent(current)
   if (current.schedulingType !== et.schedulingType) {
@@ -2954,8 +3010,13 @@ export async function listHostBookings(
       join.onRef('et.id', '=', 'b.event_type_id').on('et.deleted_at', 'is', null),
     )
     .leftJoin('payment_checkout_attempts as moved', 'moved.current_booking_id', 'b.id')
+    .leftJoin('payment_checkout_attempts as original', 'original.booking_id', 'b.id')
     .select(BOOKING_COLUMNS)
-    .select(['et.title as event_type_title', 'moved.current_booking_id as paid_successor_id'])
+    .select([
+      'et.title as event_type_title',
+      'original.booking_id as paid_root_id',
+      'moved.current_booking_id as paid_successor_id',
+    ])
     .where('bh.user_id', '=', ctx.principal.user.id)
     .where('b.organization_id', '=', ctx.principal.organization.id)
     .execute()
@@ -2976,8 +3037,13 @@ function hostBookingDetailQuery(ctx: ServiceContext, id: string) {
       join.onRef('et.id', '=', 'b.event_type_id').on('et.deleted_at', 'is', null),
     )
     .leftJoin('payment_checkout_attempts as moved', 'moved.current_booking_id', 'b.id')
+    .leftJoin('payment_checkout_attempts as original', 'original.booking_id', 'b.id')
     .select(BOOKING_COLUMNS)
-    .select(['et.title as event_type_title', 'moved.current_booking_id as paid_successor_id'])
+    .select([
+      'et.title as event_type_title',
+      'original.booking_id as paid_root_id',
+      'moved.current_booking_id as paid_successor_id',
+    ])
     .where('b.id', '=', id)
     .where('b.status', 'in', ['confirmed', 'cancelled'])
     .where((eb) =>
@@ -3010,15 +3076,27 @@ export async function getHostBookingDetail(
   if (!UUID.test(id)) throw bookingNotFound()
   const { db, principal } = ctx
   const row = await hostBookingDetailQuery(ctx, id)
-    .select('b.has_routing_snapshot')
+    .select(['b.has_routing_snapshot', 'b.payment_confirmed_at'])
     .executeTakeFirst()
   if (!row) throw bookingNotFound()
 
-  // Ordinary detail keeps its existing statement count and response shape.
   const routing = row.has_routing_snapshot ? await readBookingRoutingSnapshot(ctx, row.id) : null
   if (routing === undefined) throw bookingNotFound()
   const [booking] = await toBookings(db, [row], { userId: principal.user.id, now: ctx.now })
-  return routing ? { ...(booking as Booking), routing } : (booking as Booking)
+  const payment =
+    row.payment_confirmed_at || row.rescheduled_from_id
+      ? await readBookingPayment(db, row.id, principal.organization.id)
+      : undefined
+  return {
+    ...(booking as Booking),
+    ...(routing && { routing }),
+    ...(payment && {
+      payment: {
+        ...payment.summary,
+        ...(payment.stripeDashboardUrl && { stripeDashboardUrl: payment.stripeDashboardUrl }),
+      },
+    }),
+  }
 }
 
 /**
@@ -3249,7 +3327,7 @@ const sameUuid = (left: unknown, right: unknown) =>
   typeof right === 'string' &&
   left.toLowerCase() === right.toLowerCase()
 
-async function auditBooking(
+export async function auditBooking(
   trx: Db,
   organizationId: string,
   targetId: string,

@@ -69,6 +69,45 @@ describe.skipIf(!serverUrl)('audit journal', () => {
       ).rejects.toThrow('allow-listed')
     }
   })
+  it('writes ownership-transfer actions and restricts the recipient ID to the offer', async () => {
+    const targetMembershipId = randomUUID()
+    const actions = [
+      ['organization.ownership_transfer_offered', { targetMembershipId }],
+      ['organization.ownership_transfer_revoked', {}],
+      ['organization.ownership_transfer_expired', {}],
+      ['organization.ownership_transfer_invalidated', {}],
+      ['organization.ownership_transferred', {}],
+    ] as const
+
+    for (const [action, details] of actions) {
+      const transferEvent = {
+        ...event,
+        action,
+        targetType: 'organization',
+        targetId: organizationId,
+        details,
+      }
+      await db.transaction().execute((trx) => writeAuditEvent(trx, transferEvent))
+      expect(
+        await db
+          .selectFrom('audit_events')
+          .select('details')
+          .where('organization_id', '=', organizationId)
+          .where('action', '=', action)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({ details })
+
+      const disallowedDetails =
+        action === 'organization.ownership_transfer_offered'
+          ? { targetMembershipId, transferId: randomUUID() }
+          : { targetMembershipId }
+      await expect(
+        db
+          .transaction()
+          .execute((trx) => writeAuditEvent(trx, { ...transferEvent, details: disallowedDetails })),
+      ).rejects.toThrow('allow-listed')
+    }
+  })
   it('allows only action-specific details in both application and database', async () => {
     const cases = [
       ['membership.role_changed', { oldRole: 'member', newRole: 'admin' }],

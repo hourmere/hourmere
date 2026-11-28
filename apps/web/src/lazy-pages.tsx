@@ -152,6 +152,10 @@ export const HostPage = page(
   () => import('./public/HostPage.tsx'),
   (m) => m.HostPage,
 )
+export const TeamHomePage = page(
+  () => import('./public/TeamHomePage.tsx'),
+  (m) => m.TeamHomePage,
+)
 export const BookingPage = page(
   () => import('./public/BookingPage.tsx'),
   (m) => m.BookingPage,
@@ -167,6 +171,11 @@ export const TeamBookingPage = page(
 export const ManageBookingPage = page(
   () => import('./public/ManageBookingPage.tsx'),
   (m) => m.ManageBookingPage,
+)
+
+export const CheckoutReturnPage = page(
+  () => import('./public/CheckoutReturnPage.tsx'),
+  (m) => m.CheckoutReturnPage,
 )
 
 export const EmbeddedBookingPage = page(

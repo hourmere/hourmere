@@ -568,7 +568,7 @@ describe.skipIf(!databaseUrl)('SCIM User profile replacement and PATCH', () => {
     ['PATCH', 'profile write'],
     ['PATCH', 'claim'],
   ] as const)(
-    'preserves admission and personal identity in a %s race when %s commits first',
+    'honors claim validity and preserves personal identity in a %s race when %s commits first',
     async (method, first) => {
       const organization = await team()
       const oldOwner = await createTestUser(db, 'Personal name')
@@ -596,7 +596,14 @@ describe.skipIf(!databaseUrl)('SCIM User profile replacement and PATCH', () => {
         first === 'profile write'
           ? await ordered(id, replaceProfile, acceptClaim)
           : await ordered(id, acceptClaim, replaceProfile)
-      expect([one.status, two.status]).toEqual([200, 200])
+      const linked = first === 'claim'
+      expect(one.status).toBe(200)
+      expect(two.status).toBe(linked ? 200 : 403)
+      if (!linked)
+        expect(await two.json()).toEqual({
+          code: 'TEAM_MANAGEMENT_ACCESS_DENIED',
+          message: 'team_management_access_denied',
+        })
       expect(await users()).toEqual(before)
 
       const members = await db
@@ -606,14 +613,17 @@ describe.skipIf(!databaseUrl)('SCIM User profile replacement and PATCH', () => {
         .where('userId', 'in', [oldOwner.id, otherOwner.id])
         .execute()
       const [member] = members
-      expect(members).toEqual([{ id: expect.any(String), role: 'member', userId: oldOwner.id }])
+      expect(members).toEqual(
+        linked ? [{ id: expect.any(String), role: 'member', userId: oldOwner.id }] : [],
+      )
       const invitations = await db
         .selectFrom('auth.invitation')
         .select(['id', 'status', 'email'])
         .where('organizationId', '=', organization.id)
         .execute()
-      expect(invitations).toEqual([{ id: invitationId, status: 'accepted', email: oldOwner.email }])
-      const linked = first === 'claim'
+      expect(invitations).toEqual([
+        { id: invitationId, status: linked ? 'accepted' : 'pending', email: oldOwner.email },
+      ])
       expect(await stored(id)).toMatchObject({
         user_name: 'provider-login',
         display_name: 'Updated managed display',
@@ -634,6 +644,13 @@ describe.skipIf(!databaseUrl)('SCIM User profile replacement and PATCH', () => {
           .execute(),
       ).toEqual([{ id: claim.id }])
       expect(await updates(id)).toHaveLength(1)
+      const claims = await db
+        .selectFrom('audit_events')
+        .select('target_id')
+        .where('organization_id', '=', organization.id)
+        .where('action', '=', 'scim_user.claimed')
+        .execute()
+      expect(claims).toEqual(linked ? [{ target_id: id }] : [])
     },
     15_000,
   )
@@ -739,7 +756,7 @@ describe.skipIf(!databaseUrl)('SCIM User profile replacement and PATCH', () => {
         await send(organization, `Users/${id}`, 'PUT', profile('would-change'), {}, application),
         404,
       )
-      expect(unavailable.detail).toBe('SCIM provisioning is disabled.')
+      expect(unavailable.detail).toBe('Resource not found.')
       expect(
         await expectError(
           await send(

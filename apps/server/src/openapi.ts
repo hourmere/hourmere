@@ -27,7 +27,7 @@ export const ErrorBody = z
       .string()
       .optional()
       .openapi({
-        description: `Optional stable validation field name. Known values: ${SUCCESS_REDIRECT_ERROR_FIELDS.join(', ')}. New values may appear within /api/v1; ignore unknown values.`,
+        description: `Optional stable validation field name. Known values: ${SUCCESS_REDIRECT_ERROR_FIELDS.join(', ')}, and responses.<questionId> for a rejected routed booking answer. New values may appear within /api/v1; ignore unknown values.`,
       }),
     message: z.string().optional().openapi({ description: 'Human-readable detail' }),
   })
@@ -77,6 +77,7 @@ export interface ServiceDeps extends RecurringBookingAdmissionDeps {
   db: Db
   successRedirectPolicy?: ServiceContext['successRedirectPolicy']
   smsRemindersAvailable?: ServiceContext['smsRemindersAvailable']
+  paidBookingAvailability?: ServiceContext['paidBookingAvailability']
   followUpHostNotesEnabled?: ServiceContext['followUpHostNotesEnabled']
   scimResourcesEnabled?: ServiceContext['scimResourcesEnabled']
   automaticMeet?: boolean | undefined
@@ -96,6 +97,7 @@ export function serviceContext(
     microsoftCalendarEnabled,
     successRedirectPolicy,
     smsRemindersAvailable,
+    paidBookingAvailability,
     followUpHostNotesEnabled,
     scimResourcesEnabled,
     recurringBookingsEnabled,
@@ -111,6 +113,7 @@ export function serviceContext(
     microsoftCalendarEnabled,
     successRedirectPolicy,
     smsRemindersAvailable,
+    paidBookingAvailability,
     followUpHostNotesEnabled,
     recurringBookingsEnabled,
     // A resolver holding the SCIM resource capability marks the callers it resolves.

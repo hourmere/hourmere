@@ -1,14 +1,16 @@
-import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import { stripTypeScriptTypes } from 'node:module'
+import { createRequire, stripTypeScriptTypes } from 'node:module'
+import { pathToFileURL } from 'node:url'
 import { serve } from '@hono/node-server'
-import type { SignupPolicy } from '@hourmere/auth'
+import { createAuth, createAuthPool, type SignupPolicy } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import type { MailMessage } from '@hourmere/mail'
 import {
   deliverInvitationEmail,
   type InvitationMailLimits,
+  lockNotificationEmailBudget,
   reserveInvitationEmailBudget,
 } from '@hourmere/notifications'
 import { type KyselyPlugin, sql } from 'kysely'
@@ -40,7 +42,7 @@ const errorBody = (status: number, detail: string, scimType?: string) => ({
   ...(scimType === undefined ? {} : { scimType }),
   detail,
 })
-const unavailable = errorBody(404, 'SCIM resources are not available yet.')
+const unavailable = errorBody(404, 'Resource not found.')
 const identifierTaken = errorBody(
   409,
   'A User of this connection already has this userName or externalId.',
@@ -69,13 +71,15 @@ const signupRefused = errorBody(
 )
 const open: SignupPolicy = { mode: 'open', allowedDomains: [] }
 const closed: SignupPolicy = { mode: 'closed', allowedDomains: ['allowed.example'] }
-// Generous admission limits: these tests create many invitations from one owner.
+// Generous admission limits for tests focused on the invitation lifecycle.
 const roomy: InvitationMailLimits & { secret: string } = {
   secret: signingSecret,
   invitationInviterMaxPerHour: 1000,
   invitationInviterMaxPerDay: 1000,
   invitationTeamMaxPerHour: 1000,
   invitationTeamMaxPerDay: 1000,
+  scimInvitationMaxPerHour: 1000,
+  scimInvitationMaxPerDay: 1000,
 }
 
 function sourceCopyUrl(file: string, ...mutations: [string, string][]) {
@@ -87,8 +91,15 @@ function sourceCopyUrl(file: string, ...mutations: [string, string][]) {
   }
   const javascript = stripTypeScriptTypes(source).replace(
     /((?:from|import)\s*)'([^']+)'/g,
-    (_, prefix: string, specifier: string) =>
-      `${prefix}'${specifier.startsWith('.') ? new URL(specifier, location).href : import.meta.resolve(specifier)}'`,
+    (_, prefix: string, specifier: string) => {
+      if (specifier.startsWith('.')) return `${prefix}'${new URL(specifier, location).href}'`
+      try {
+        return `${prefix}'${import.meta.resolve(specifier)}'`
+      } catch {
+        // npm can install auth-only dependencies beside packages/auth.
+        return `${prefix}'${pathToFileURL(createRequire(location).resolve(specifier)).href}'`
+      }
+    },
   )
   return `data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`
 }
@@ -99,6 +110,7 @@ async function sourceCopy<T>(file: string, ...mutations: [string, string][]): Pr
 
 describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () => {
   let owned: TestDatabase, db: Db
+  let authPool: ReturnType<typeof createAuthPool>
   // Every queued delivery generation, and every message the real sender produced from them.
   const enqueued: { invitationId: string; generation: number }[] = []
   let delivered = 0
@@ -113,6 +125,7 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
       tag: 'scim_create',
     })
     db = createDb(owned.pool)
+    authPool = createAuthPool(owned.url, open)
     // Injected failures: the claim insert for refuse-claim-* addresses, and the creation
     // event for refuse-audit-* names. Nothing else is affected.
     await sql`CREATE FUNCTION test_refuse_claim() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -135,7 +148,11 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
   })
   afterAll(async () => {
     for (const server of servers) server.close()
-    await owned?.drop()
+    try {
+      await authPool?.end()
+    } finally {
+      await owned?.drop()
+    }
   })
 
   const unique = () => randomBytes(6).toString('hex')
@@ -165,10 +182,11 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
    * Two tokens share its one connection.
    */
   async function team() {
+    const name = `Team ${unique()}`
     const id = (
       await db
         .insertInto('auth.organization')
-        .values({ name: `Team ${unique()}`, slug: `team-${unique()}`, createdAt: new Date() })
+        .values({ name, slug: `team-${unique()}`, createdAt: new Date() })
         .returning('id')
         .executeTakeFirstOrThrow()
     ).id
@@ -198,7 +216,7 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
         .where('id', '=', people.member)
         .executeTakeFirstOrThrow()
     ).email
-    return { id, people, secrets, memberEmail }
+    return { id, name, people, secrets, memberEmail }
   }
   type Team = Awaited<ReturnType<typeof team>>
 
@@ -216,10 +234,15 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
     (create: Create, options: ScimUserCreationDeps): ScimResourceHandler =>
     (request) =>
       scimDiscovery(request) ?? create(options)(request) ?? scimUsers(db)(request)
-  function harness(resources: ScimResourceHandler | undefined, enabled = true) {
+  function harness(
+    resources: ScimResourceHandler | undefined,
+    enabled = true,
+    authHandler: Parameters<typeof createApp>[0]['authHandler'] = async () =>
+      new Response(null, { status: 404 }),
+  ) {
     return createApp({
       checkDb: async () => {},
-      authHandler: async () => new Response(null, { status: 404 }),
+      authHandler,
       resolveCaller: async () => ({ ok: false, error: 'unauthorized', setCookie: [] }),
       publicUrl,
       scim: { db, enabled, resources },
@@ -307,13 +330,17 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
     }
   }
   /** A signed-in session of a team member, for invitations sent from the app. */
-  async function session(userId: string, organizationId: string) {
+  async function session(
+    userId: string,
+    organizationId: string,
+    token = randomBytes(24).toString('base64url'),
+  ) {
     return (
       await db
         .insertInto('auth.session')
         .values({
           userId,
-          token: randomBytes(24).toString('base64url'),
+          token,
           activeOrganizationId: organizationId,
           expiresAt: new Date(Date.now() + 3_600_000),
           updatedAt: new Date(),
@@ -366,7 +393,13 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
       db
         .selectFrom('invitation_deliveries as d')
         .innerJoin('auth.invitation as i', 'i.id', 'd.invitation_id')
-        .select(['d.invitation_id', 'd.generation', 'd.state', 'd.authorized_by_user_id'])
+        .select([
+          'd.invitation_id',
+          'd.generation',
+          'd.state',
+          'd.authorized_by_user_id',
+          'd.scim_issued',
+        ])
         .where('i.organizationId', '=', organizationId)
         .orderBy('d.invitation_id')
         .execute(),
@@ -422,8 +455,9 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
       )
     }
   }
-  const mailTo = (address: string) =>
-    sent.filter((message) => message.to.toLowerCase() === address.toLowerCase()).length
+  const messagesTo = (address: string) =>
+    sent.filter((message) => message.to.toLowerCase() === address.toLowerCase())
+  const mailTo = (address: string) => messagesTo(address).length
 
   /** Holds the first matching query's transaction until another backend waits on a lock. */
   function holdAfter(match: (node: string) => boolean, hold: () => Promise<void>): KyselyPlugin {
@@ -462,8 +496,40 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
     return false
   }
 
+  async function blockedBackend(blockerPid: number, request: Promise<unknown>, label: string) {
+    let settled = false
+    const markSettled = () => {
+      settled = true
+    }
+    void request.then(markSettled, markSettled)
+    const backendPid = await vi.waitFor(
+      async () => {
+        const { rows } = await owned.pool.query<{ pid: number }>(
+          `SELECT pid FROM pg_stat_activity
+            WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))`,
+          [blockerPid],
+        )
+        const pid = rows[0]?.pid
+        if (pid !== undefined || settled) return pid ?? 0
+        throw new Error('The request has not reached its PostgreSQL lock.')
+      },
+      { timeout: 1500, interval: 10 },
+    )
+    expect(backendPid, label).toBeGreaterThan(0)
+    return backendPid
+  }
+
   async function verifyCreation(create: Create) {
     const organization = await team()
+    await db
+      .insertInto('profiles')
+      .values({
+        user_id: organization.people.owner,
+        handle: `owner-${unique()}`,
+        time_zone: 'UTC',
+        locale: 'es',
+      })
+      .execute()
     const { post, get } = client(create, organization)
     const before = await accounts()
     const queuedBefore = enqueued.length
@@ -564,7 +630,7 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
       work_email: address,
     })
     expect(await accounts()).toEqual(before)
-    // One pending claim, through one pending member invitation from the earliest owner.
+    // Better Auth records the earliest owner as the backing member of the invitation.
     const mailbox = address.toLowerCase()
     expect(state.invitations).toEqual([
       expect.objectContaining({
@@ -593,13 +659,26 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
         generation: 1,
         state: 'queued',
         authorized_by_user_id: organization.people.owner,
+        scim_issued: true,
       },
     ])
     expect(enqueued.slice(queuedBefore)).toEqual([{ invitationId: invitation.id, generation: 1 }])
-    // The real sender sends exactly one invitation email for it.
+    // The real sender attributes this generation to the IdP on behalf of the team.
     await deliver()
-    expect(mailTo(mailbox)).toBe(1)
-    // Attributed to the token, with empty details: no name, address or other value.
+    const messages = messagesTo(mailbox)
+    const owner = await db
+      .selectFrom('auth.user')
+      .select('name')
+      .where('id', '=', organization.people.owner)
+      .executeTakeFirstOrThrow()
+    const attribution = (team: string) =>
+      `Su proveedor de identidad le ha enviado esta invitación en nombre del equipo «${team}» en Hourmere.`
+    expect(messages).toHaveLength(1)
+    expect(messages[0]?.text).toContain(attribution(organization.name))
+    expect(messages[0]?.html).toContain(attribution(`<bdi>${organization.name}</bdi>`))
+    expect(messages[0]?.text).not.toContain(owner.name)
+    expect(messages[0]?.html).not.toContain(owner.name)
+    // The User event identifies the credential. Invitation issuance names the connection.
     const tokenId = (
       await db
         .selectFrom('scim_provisioning_tokens')
@@ -624,9 +703,10 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
         details: {},
       }),
       expect.objectContaining({
-        actor_type: 'scim_token',
-        actor_id: tokenId,
+        actor_type: 'scim_connection',
+        actor_id: entry?.connection_id,
         credential_type: 'none',
+        credential_id: null,
         action: 'membership.invited',
         target_type: 'invitation',
         target_id: invitation.id,
@@ -825,6 +905,7 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
         invitation_id: nativeInvitation.id,
         generation: 1,
         state: 'smtp_accepted',
+        scim_issued: false,
       }),
     ])
     expect(enqueued.length).toBe(queued)
@@ -1010,18 +1091,20 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
   }
 
   async function verifyLimits(create: Create) {
-    // Default admission limits, with a team limit of one invitation an hour.
+    // Two credentials share their organization's provisioning budget.
     const limitedTeam = await team()
     const options = deps({
       reserve: (trx, input, now) =>
-        reserveInvitationEmailBudget(trx, input, { ...roomy, invitationTeamMaxPerHour: 1 }, now),
+        reserveInvitationEmailBudget(trx, input, { ...roomy, scimInvitationMaxPerHour: 1 }, now),
     })
     const { post } = client(create, limitedTeam, options)
     expect(
       (await post(user(`first-${unique()}`, work(`first-${unique()}@example.com`)))).status,
     ).toBe(201)
     const state = await written(limitedTeam.id)
-    const refused = await post(user(`second-${unique()}`, work(`second-${unique()}@example.com`)))
+    const refused = await client(create, limitedTeam, options, limitedTeam.secrets.second).post(
+      user(`second-${unique()}`, work(`second-${unique()}@example.com`)),
+    )
     expect(refused.status).toBe(429)
     expect(refused.retryAfter).toBe('3600')
     expect(refused.body).toEqual(limited)
@@ -1050,6 +1133,219 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
     expect(capped.status).toBe(429)
     expect(capped.retryAfter).toBe('3600')
     expect(await written(full.id)).toEqual(before)
+  }
+
+  function invitationApp(create: Create, reserve: NonNullable<ScimUserCreationDeps['reserve']>) {
+    const auth = createAuth({
+      pool: authPool,
+      db,
+      signup: open,
+      baseURL: publicUrl,
+      secret: signingSecret,
+      mailer: { send: async () => {} },
+      reserveInvitationEmail: reserve,
+    })
+    return harness(flagged(create, deps({ reserve })), true, auth.handler)
+  }
+
+  async function appInviter(application: ReturnType<typeof harness>, organization: Team) {
+    const token = randomBytes(24).toString('base64url')
+    await session(organization.people.owner, organization.id, token)
+    const signature = createHmac('sha256', signingSecret).update(token).digest('base64')
+    const cookie = `__Secure-better-auth.session_token=${encodeURIComponent(`${token}.${signature}`)}`
+    return (email: string) =>
+      application.request(`${publicUrl}/api/auth/organization/invite-member`, {
+        method: 'POST',
+        headers: {
+          origin: publicUrl,
+          cookie,
+          'content-type': 'application/json',
+          'x-expected-organization-id': organization.id,
+        },
+        body: JSON.stringify({
+          organizationId: organization.id,
+          role: 'member',
+          email,
+        }),
+      })
+  }
+
+  async function verifyOwnerBudget(create: Create) {
+    const organization = await team()
+    const application = invitationApp(create, (trx, input, now) =>
+      reserveInvitationEmailBudget(trx, input, { ...roomy, invitationInviterMaxPerHour: 2 }, now),
+    )
+    const inviteFromApp = await appInviter(application, organization)
+    const invite = () => inviteFromApp(`manual-${unique()}@example.com`)
+    for (let i = 0; i < 2; i++) {
+      const provisioned = await call(
+        application,
+        organization.id,
+        organization.secrets.first,
+        'Users',
+        'POST',
+        user(`provisioned-${unique()}`, work(`provisioned-${unique()}@example.com`)),
+      )
+      expect(provisioned.status).toBe(201)
+    }
+    for (let i = 0; i < 2; i++) {
+      const invited = await invite()
+      const { code } = (await invited.json()) as { code?: string }
+      expect({ status: invited.status, code }).toEqual({
+        status: 200,
+        code: undefined,
+      })
+    }
+    const refused = await invite()
+    expect(refused.status).toBe(429)
+    expect(await refused.json()).toMatchObject({ code: 'INVITATION_RATE_LIMITED' })
+    const { requests } = await written(organization.id)
+    expect(requests).toHaveLength(4)
+    expect(requests.filter((request) => request.user_id === null)).toHaveLength(2)
+    expect(
+      requests.filter((request) => request.user_id === organization.people.owner),
+    ).toHaveLength(2)
+  }
+
+  async function verifyOrganizationBudgetRace(reserve: typeof reserveInvitationEmailBudget) {
+    const organization = await team()
+    const options = deps({
+      reserve: (trx, input, now) =>
+        reserve(trx, input, { ...roomy, scimInvitationMaxPerHour: 1 }, now),
+    })
+    const provision = (secret: string, mailbox: string) =>
+      client(scimUserCreation, organization, options, secret).post(
+        user(`budget-race-${unique()}`, work(mailbox)),
+      )
+    const firstAddress = `budget-first-${unique()}@example.com`
+    const queued = enqueued.length
+    const requests: ReturnType<typeof provision>[] = []
+    try {
+      const pending = await db.transaction().execute(async (holder) => {
+        await lockNotificationEmailBudget(holder)
+        const { pid: holderPid } = await holder
+          .selectNoFrom(sql<number>`pg_backend_pid()`.as('pid'))
+          .executeTakeFirstOrThrow()
+        const first = provision(organization.secrets.first, firstAddress)
+        requests.push(first)
+        const firstPid = await blockedBackend(holderPid, first, 'shared invitation budget lock')
+        const second = provision(
+          organization.secrets.second,
+          `budget-second-${unique()}@example.com`,
+        )
+        requests.push(second)
+        // The second token uses another database backend. It waits behind the first
+        // request's organization lock while that request waits for the budget lock.
+        const secondPid = await blockedBackend(firstPid, second, 'organization lock')
+        expect(secondPid).not.toBe(firstPid)
+        return [first, second] as const
+      })
+      const [accepted, refused] = await Promise.all(pending)
+      expect(accepted.status).toBe(201)
+      expect(refused).toMatchObject({ status: 429, body: limited, retryAfter: '3600' })
+      const {
+        requests: charges,
+        entries,
+        invitations,
+        claims,
+        deliveries,
+      } = await written(organization.id)
+      expect(charges).toEqual([expect.objectContaining({ user_id: null })])
+      expect(entries.map(({ id }) => id)).toEqual([accepted.body?.id])
+      expect(invitations).toEqual([
+        expect.objectContaining({ email: firstAddress, status: 'pending' }),
+      ])
+      const invitationId = invitations[0]?.id
+      expect(claims).toEqual([
+        expect.objectContaining({ invitation_id: invitationId, scim_user_id: accepted.body?.id }),
+      ])
+      expect(deliveries).toEqual([
+        expect.objectContaining({ invitation_id: invitationId, scim_issued: true }),
+      ])
+      expect(enqueued.slice(queued)).toEqual([{ invitationId, generation: 1 }])
+    } finally {
+      await Promise.allSettled(requests)
+    }
+  }
+
+  async function verifyAppRecipientBudget(reserve: typeof reserveInvitationEmailBudget) {
+    const organization = await team()
+    const other = await team()
+    const mailbox = `shared-${unique()}@example.com`
+    const application = invitationApp(scimUserCreation, (trx, input, now) =>
+      reserve(trx, input, roomy, now),
+    )
+    for (let i = 0; i < 5; i++) {
+      const provisioned = await call(
+        application,
+        organization.id,
+        organization.secrets.first,
+        'Users',
+        'POST',
+        user(`provisioned-${unique()}`, work(mailbox)),
+      )
+      expect(provisioned.status).toBe(201)
+      // Close the pending invitation so the next request needs a fresh delivery.
+      await db
+        .updateTable('auth.invitation')
+        .set({ status: 'canceled' })
+        .where('organizationId', '=', organization.id)
+        .where('email', '=', mailbox)
+        .where('status', '=', 'pending')
+        .execute()
+    }
+    const before = await written(organization.id)
+    expect(before.deliveries).toHaveLength(5)
+    expect(before.requests.map((request) => request.user_id)).toEqual([
+      null,
+      null,
+      null,
+      null,
+      null,
+    ])
+    const inviteFromApp = await appInviter(application, organization)
+    const refused = await inviteFromApp(mailbox)
+    const { code } = (await refused.json()) as { code?: string }
+    expect({ status: refused.status, code }).toEqual({
+      status: 429,
+      code: 'INVITATION_RATE_LIMITED',
+    })
+    expect(await written(organization.id)).toEqual(before)
+    const inviteFromOther = await appInviter(application, other)
+    expect((await inviteFromOther(mailbox)).status).toBe(200)
+    expect((await written(other.id)).requests).toHaveLength(1)
+  }
+
+  async function verifyRecipientBudget() {
+    const mailbox = `shared-${unique()}@example.com`
+    const other = await team()
+    // The first reservation came from the application in another organization.
+    await native(other.people.owner, await session(other.people.owner, other.id), other.id, mailbox)
+    const options = deps({
+      reserve: (trx, input, now) =>
+        reserveInvitationEmailBudget(trx, input, { ...roomy, mailRecipientMaxPerHour: 1 }, now),
+    })
+    const provision = (organization: Team, email = mailbox) =>
+      client(scimUserCreation, organization, options).post(user(`person-${unique()}`, work(email)))
+    const organization = await team()
+    expect((await provision(organization)).status).toBe(201)
+    // Cancel the link so the next create needs a delivery. The mailbox ledger still counts it.
+    await db
+      .updateTable('auth.invitation')
+      .set({ status: 'canceled' })
+      .where('organizationId', '=', organization.id)
+      .where('email', '=', mailbox)
+      .execute()
+    const before = await written(organization.id)
+    expect(await provision(organization)).toMatchObject({ status: 429, body: limited })
+    expect(await written(organization.id)).toEqual(before)
+    // Four reservations can co-exist across organizations. The fifth is refused everywhere.
+    expect((await provision(await team(), mailbox.toUpperCase())).status).toBe(201)
+    expect((await provision(await team())).status).toBe(201)
+    const capped = await team()
+    const empty = await written(capped.id)
+    expect(await provision(capped)).toMatchObject({ status: 429, body: limited })
+    expect(await written(capped.id)).toEqual(empty)
   }
 
   async function verifyRefusals(create: Create) {
@@ -1591,116 +1887,188 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
    * Admission runs once more: the expired invitation is retired and the claim gets a new
    * invitation and its email, never a claim without one.
    */
-  async function verifyExpiryRace(create: Create) {
-    for (const variant of ['delivery', 'budget', 'administrator'] as const) {
-      const organization = await team()
-      const { post } = await httpClient(create, organization)
-      const address = `expiring-${variant}-${unique()}@example.com`
-      const pending =
-        variant === 'budget'
-          ? (
-              await db
-                .insertInto('auth.invitation')
-                .values({
-                  organizationId: organization.id,
-                  inviterId: organization.people.owner,
-                  email: address,
-                  role: 'member',
-                  status: 'pending',
-                  expiresAt: new Date(Date.now() + 3_600_000),
-                })
-                .returning('id')
-                .executeTakeFirstOrThrow()
-            ).id
-          : (
-              await native(
-                variant === 'delivery' ? organization.people.owner : organization.people.admin,
-                await session(
-                  variant === 'delivery' ? organization.people.owner : organization.people.admin,
-                  organization.id,
-                ),
-                organization.id,
-                address,
-              )
-            ).id
-      const holder = await owned.pool.connect()
-      let answer: ReturnType<typeof post> | undefined
-      try {
-        await holder.query('BEGIN')
-        if (variant === 'budget')
-          await holder.query('SELECT pg_advisory_xact_lock(1852798057, 1835100524)')
-        else
-          await holder.query(
-            'SELECT 1 FROM invitation_deliveries WHERE invitation_id = $1 FOR UPDATE',
-            [pending],
-          )
-        const pid = (await holder.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]
-          ?.pid as number
-        // Expires by the database clock while the create waits for the held lock.
-        const { expiresAt } = await db
-          .updateTable('auth.invitation')
-          .set({ expiresAt: sql<Date>`clock_timestamp() + interval '2 seconds'` })
-          .where('id', '=', pending)
-          .returning('expiresAt')
-          .executeTakeFirstOrThrow()
-        answer = post(user(`expiring-${unique()}`, work(address)))
-        await vi.waitFor(
-          async () => {
-            const { rows } = await holder.query<{ n: number }>(
-              `SELECT count(*)::int AS n FROM pg_stat_activity
-                WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))`,
-              [pid],
-            )
-            expect(rows[0]?.n).toBeGreaterThan(0)
-          },
-          { timeout: 10_000, interval: 20 },
+  async function verifyExpiryRace(
+    create: Create,
+    variant: 'delivery' | 'budget' | 'administrator',
+  ) {
+    const organization = await team()
+    const { post } = await httpClient(create, organization)
+    const address = `expiring-${variant}-${unique()}@example.com`
+    const inviter =
+      variant === 'administrator' ? organization.people.admin : organization.people.owner
+    const pending =
+      variant === 'budget'
+        ? (
+            await db
+              .insertInto('auth.invitation')
+              .values({
+                organizationId: organization.id,
+                inviterId: organization.people.owner,
+                email: address,
+                role: 'member',
+                status: 'pending',
+                expiresAt: new Date(Date.now() + 3_600_000),
+              })
+              .returning('id')
+              .executeTakeFirstOrThrow()
+          ).id
+        : (await native(inviter, await session(inviter, organization.id), organization.id, address))
+            .id
+    const holder = await owned.pool.connect()
+    let answer: ReturnType<typeof post> | undefined
+    try {
+      await holder.query('BEGIN')
+      if (variant === 'budget')
+        await holder.query('SELECT pg_advisory_xact_lock(1852798057, 1835100524)')
+      else
+        await holder.query(
+          'SELECT 1 FROM invitation_deliveries WHERE invitation_id = $1 FOR UPDATE',
+          [pending],
         )
-        await vi.waitFor(
-          async () => {
-            const { rows } = await holder.query<{ lapsed: boolean }>(
-              'SELECT clock_timestamp() > $1 AS lapsed',
-              [expiresAt],
-            )
-            expect(rows[0]?.lapsed).toBe(true)
-          },
-          { timeout: 10_000, interval: 50 },
-        )
-        await holder.query('COMMIT')
-      } finally {
-        await holder.query('ROLLBACK')
-        holder.release()
-      }
-      const created = await answer
-      expect(created?.status, variant).toBe(201)
-      const invitations = await db
-        .selectFrom('auth.invitation')
-        .selectAll()
-        .where('organizationId', '=', organization.id)
-        .execute()
-      expect(invitations.find((row) => row.id === pending)?.status, variant).toBe('canceled')
-      const fresh = invitations.filter((row) => row.id !== pending)
-      expect(fresh, variant).toEqual([
-        expect.objectContaining({
-          email: address,
-          status: 'pending',
-          role: 'member',
-          inviterId: organization.people.owner,
-        }),
-      ])
-      const issued = fresh[0] as (typeof fresh)[number]
-      const claim = await db
-        .selectFrom('scim_user_claims')
-        .selectAll()
-        .where('scim_user_id', '=', created?.body?.id as string)
+      const pid = (await holder.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]
+        ?.pid as number
+      // Expires by the database clock while the create waits for the held lock.
+      const { expiresAt } = await db
+        .updateTable('auth.invitation')
+        .set({ expiresAt: sql<Date>`clock_timestamp() + interval '2 seconds'` })
+        .where('id', '=', pending)
+        .returning('expiresAt')
         .executeTakeFirstOrThrow()
-      expect(claim.invitation_id, variant).toBe(issued.id)
-      expect(claim.expires_at).toEqual(issued.expiresAt)
-      expect(enqueued, variant).toContainEqual({ invitationId: issued.id, generation: 1 })
+      answer = post(user(`expiring-${unique()}`, work(address)))
+      await vi.waitFor(
+        async () => {
+          const { rows } = await holder.query<{ n: number }>(
+            `SELECT count(*)::int AS n FROM pg_stat_activity
+              WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))`,
+            [pid],
+          )
+          expect(rows[0]?.n).toBeGreaterThan(0)
+        },
+        { timeout: 10_000, interval: 20 },
+      )
+      await vi.waitFor(
+        async () => {
+          const { rows } = await holder.query<{ lapsed: boolean }>(
+            'SELECT clock_timestamp() > $1 AS lapsed',
+            [expiresAt],
+          )
+          expect(rows[0]?.lapsed).toBe(true)
+        },
+        { timeout: 10_000, interval: 50 },
+      )
+      await holder.query('COMMIT')
+    } finally {
+      await holder.query('ROLLBACK')
+      holder.release()
+    }
+    const created = await answer
+    expect(created?.status).toBe(201)
+    const { claims, invitations, requests } = await written(organization.id)
+    expect(claims).toHaveLength(1)
+    const [claim] = claims
+    expect(claim?.scim_user_id).toBe(created?.body?.id)
+    expect(claim?.invitation_id, 'SCIM claim invitation').not.toBeNull()
+    expect(invitations.find((row) => row.id === pending)?.status).toBe('canceled')
+    const fresh = invitations.filter((row) => row.id !== pending)
+    expect(fresh).toEqual([
+      expect.objectContaining({
+        email: address,
+        status: 'pending',
+        role: 'member',
+        inviterId: organization.people.owner,
+      }),
+    ])
+    const [issued] = fresh
+    expect(claim?.invitation_id).toBe(issued?.id)
+    expect(claim?.expires_at).toEqual(issued?.expiresAt)
+    expect(enqueued).toContainEqual({ invitationId: issued?.id, generation: 1 })
+    // The initial app invite has its own charge. A legacy row has none. Each case
+    // must add exactly one charge for the replacement SCIM invitation.
+    expect(requests.length, 'invitation budget charges').toBe(variant === 'budget' ? 1 : 2)
+  }
+
+  async function verifyRepeatedExpiry(create: Create) {
+    const organization = await team()
+    const { post } = client(create, organization)
+    const address = `repeated-expiry-${unique()}@example.com`
+    const addInvitation = async (status: 'pending' | 'canceled') => {
+      const { id } = await db
+        .insertInto('auth.invitation')
+        .values({
+          organizationId: organization.id,
+          inviterId: organization.people.owner,
+          email: address,
+          role: 'member',
+          status,
+          expiresAt: sql<Date>`clock_timestamp() + interval '1 hour'`,
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      await db
+        .insertInto('invitation_deliveries')
+        .values({ invitation_id: id, state: 'queued' })
+        .execute()
+      return id
+    }
+    const first = await addInvitation('pending')
+    const second = await addInvitation('canceled')
+    const expireSoon = async (id: string) => {
+      const { expiresAt } = await db
+        .updateTable('auth.invitation')
+        .set({
+          status: 'pending',
+          expiresAt: sql<Date>`date_trunc('milliseconds', clock_timestamp()) + interval '1.5 seconds'`,
+        })
+        .where('id', '=', id)
+        .returning('expiresAt')
+        .executeTakeFirstOrThrow()
+      return expiresAt
+    }
+    const queued = enqueued.length
+    const holder = await owned.pool.connect()
+    const holdDelivery = (id: string) =>
+      holder.query('SELECT 1 FROM invitation_deliveries WHERE invitation_id = $1 FOR UPDATE', [id])
+    const sleepUntilExpiry = (expiry: Date) =>
+      holder.query('SELECT pg_sleep_until($1::timestamptz)', [expiry])
+    let answer: ReturnType<typeof post> | undefined
+    try {
+      await holder.query('BEGIN')
+      await holdDelivery(second)
+      await holder.query('SAVEPOINT first_delivery')
+      await holdDelivery(first)
+      const { rows } = await holder.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+      const holderPid = rows[0]?.pid as number
+      const firstExpiry = await expireSoon(first)
+      answer = post(user(`repeated-expiry-${unique()}`, work(address)))
+      await blockedBackend(holderPid, answer, 'first delivery lock')
+      await sleepUntilExpiry(firstExpiry)
+      // Stage a second pending candidate for the retry, independently of the create.
+      const secondExpiry = await expireSoon(second)
+      await holder.query('ROLLBACK TO SAVEPOINT first_delivery')
+      await blockedBackend(holderPid, answer, 'second delivery lock')
+      await sleepUntilExpiry(secondExpiry)
+      const before = await written(organization.id)
+      await holder.query('COMMIT')
+      const received = await answer
+      expect(received.status, 'repeated expiry SCIM response status').toBe(503)
+      expect(received.body).toEqual(
+        errorBody(503, 'User provisioning is temporarily unavailable. Retry shortly.'),
+      )
+      expect(received.retryAfter).toBe('1')
+      expect(await written(organization.id)).toEqual(before)
+      expect(enqueued).toHaveLength(queued)
+    } finally {
+      try {
+        await holder.query('ROLLBACK')
+      } finally {
+        holder.release()
+        if (answer) await Promise.allSettled([answer])
+      }
     }
   }
 
   const verifiers = {
-    expiry: verifyExpiryRace,
+    expiry: (create: Create) => verifyExpiryRace(create, 'delivery'),
     creation: verifyCreation,
     emails: verifyEmailChoice,
     held: verifyHeldAddresses,
@@ -1775,16 +2143,108 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
   it('commits the entry, claim, invitation and audit events together', () =>
     verifyAtomicity(scimUserCreation))
   it('refuses a token revoked while the create waits', () => verifyRevocation(scimUserCreation))
-  it(
-    'issues a new invitation when the pending one expires during the wait',
-    () => verifyExpiryRace(scimUserCreation),
+  it.each([
+    ['the owner’s delivery row', 'delivery'],
+    ['the mail budget', 'budget'],
+    ['another administrator’s delivery row', 'administrator'],
+  ] as const)(
+    'issues a new invitation when the pending one expires while waiting for %s',
+    (_lock, variant) => verifyExpiryRace(scimUserCreation, variant),
     60_000,
   )
+  it('detects a source copy that leaves a claim without an invitation after expiry', async () => {
+    const copy = await sourceCopy<typeof import('./scim-user-create.ts')>('./scim-user-create.ts', [
+      "  'INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION',\n",
+      "  'INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION',\n  'INVITATION_INELIGIBLE',\n",
+    ])
+    await expect(verifyExpiryRace(copy.scimUserCreation, 'delivery')).rejects.toMatchObject({
+      name: 'AssertionError',
+      message: expect.stringContaining('SCIM claim invitation'),
+    })
+  }, 60_000)
+  it('detects a source copy that charges twice when the invitation expires during the budget wait', async () => {
+    const copy = await sourceCopy<typeof import('./scim-user-create.ts')>('./scim-user-create.ts', [
+      '            await sql`ROLLBACK TO SAVEPOINT scim_user_invitation`.execute(trx)\n',
+      '',
+    ])
+    await expect(verifyExpiryRace(copy.scimUserCreation, 'budget')).rejects.toMatchObject({
+      name: 'AssertionError',
+      actual: 2,
+      expected: 1,
+    })
+  }, 60_000)
+  it('returns a retryable SCIM 503 and rolls back when the second invitation expires too', () =>
+    verifyRepeatedExpiry(scimUserCreation))
+  it('detects a source copy that returns an internal error after the second expiry', async () => {
+    const copy = await sourceCopy<typeof import('./scim-user-create.ts')>('./scim-user-create.ts', [
+      "    if (code === 'INVITATION_INELIGIBLE')\n",
+      '    if (false)\n',
+    ])
+    await expect(verifyRepeatedExpiry(copy.scimUserCreation)).rejects.toMatchObject({
+      name: 'AssertionError',
+      message: expect.stringContaining('repeated expiry SCIM response status'),
+      actual: 500,
+      expected: 503,
+    })
+  })
   it('lets the earliest owner with a verified address invite', () =>
     verifyInviter(scimUserCreation))
   it('still answers 201 when the queue is down after commit', () =>
     verifyQueueOutage(scimUserCreation))
   it('applies the invitation admission limits', () => verifyLimits(scimUserCreation))
+  it('keeps the owner’s in-app invitation budget after SCIM provisioning', () =>
+    verifyOwnerBudget(scimUserCreation))
+  it('issues exactly one invitation when two SCIM requests race for the last organization slot', () =>
+    verifyOrganizationBudgetRace(reserveInvitationEmailBudget))
+  it('detects a source copy that skips the shared invitation budget lock', async () => {
+    const copy = await sourceCopy<{
+      reserveInvitationEmailBudget: typeof reserveInvitationEmailBudget
+    }>('../../../packages/notifications/src/invitation-mail-limits.ts', [
+      '  await lockNotificationEmailBudget(db)\n',
+      '',
+    ])
+    await expect(
+      verifyOrganizationBudgetRace(copy.reserveInvitationEmailBudget),
+    ).rejects.toMatchObject({
+      name: 'AssertionError',
+      message: expect.stringContaining('shared invitation budget lock'),
+      actual: 0,
+    })
+  })
+  it('counts same-tenant recipient requests and enforces a separate global ceiling', () =>
+    verifyRecipientBudget())
+  it('counts five SCIM invitations against the in-app recipient cap only in their own team', () =>
+    verifyAppRecipientBudget(reserveInvitationEmailBudget))
+  it('detects a source copy that excludes same-team SCIM requests from the in-app recipient cap', async () => {
+    const copy = await sourceCopy<{
+      reserveInvitationEmailBudget: typeof reserveInvitationEmailBudget
+    }>('../../../packages/notifications/src/invitation-mail-limits.ts', [
+      'scim ? sameTeam : eb.or([human, sameTeam])',
+      'scim ? sameTeam : human',
+    ])
+    await expect(verifyAppRecipientBudget(copy.reserveInvitationEmailBudget)).rejects.toMatchObject(
+      {
+        name: 'AssertionError',
+        actual: { status: 200, code: undefined },
+        expected: { status: 429, code: 'INVITATION_RATE_LIMITED' },
+      },
+    )
+  })
+  it('detects a source copy that makes SCIM spend the owner’s invitation budget', async () => {
+    const invitations = sourceCopyUrl('../../../packages/auth/src/invitations.ts', [
+      'scimIssued ? null : actor.userId',
+      'actor.userId',
+    ])
+    const copy = await sourceCopy<typeof import('./scim-user-create.ts')>('./scim-user-create.ts', [
+      "from '@hourmere/auth'",
+      `from '${invitations}'`,
+    ])
+    await expect(verifyOwnerBudget(copy.scimUserCreation)).rejects.toMatchObject({
+      name: 'AssertionError',
+      actual: { status: 429, code: 'INVITATION_RATE_LIMITED' },
+      expected: { status: 200, code: undefined },
+    })
+  })
   it('refuses invalid users with SCIM Errors that echo nothing', () =>
     verifyRefusals(scimUserCreation))
 
@@ -1848,15 +2308,7 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
       ['held', ["  'TEAM_MANAGEMENT_ACCESS_DENIED',\n", '']],
       ['held', ["  'INVITATION_CONFLICT',\n", '']],
       ['held', ["  'INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION',\n", '']],
-      // An invitation that expired during the wait swallowed into a claim without an
-      // invitation, or answered as a server error without a second admission.
-      [
-        'expiry',
-        [
-          "  'INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION',\n",
-          "  'INVITER_IS_NO_LONGER_A_MEMBER_OF_THE_ORGANIZATION',\n  'INVITATION_INELIGIBLE',\n",
-        ],
-      ],
+      // An expiry during the wait answered as an error without a second admission.
       [
         'expiry',
         [
@@ -2028,11 +2480,11 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM User creation over HTTP', () =>
     expect(await answer(harness(undefined))).toMatchObject({ status: 404, body: unavailable })
     expect(await answer(harness(flagged(scimUserCreation, deps()), false))).toMatchObject({
       status: 404,
-      body: errorBody(404, 'SCIM provisioning is disabled.'),
+      body: unavailable,
     })
     expect(await productionAnswers(organization, false)).toMatchObject({
       status: 404,
-      body: errorBody(404, 'SCIM provisioning is disabled.'),
+      body: unavailable,
     })
     expect(await written(organization.id)).toEqual(state)
     expect((await productionAnswers(organization, true)).status).toBe(201)

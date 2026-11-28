@@ -315,7 +315,7 @@ describe('compact public language menu', () => {
     const user = userEvent.setup()
     render(
       <InterfaceScope surface="admin">
-        <LanguageSwitcher compact />
+        <LanguageSwitcher />
       </InterfaceScope>,
     )
     const select = screen.getByRole('combobox', { name: 'Interface language' })

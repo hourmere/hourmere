@@ -1,5 +1,4 @@
 import type { Db } from '@hourmere/db'
-import { DomainError } from '@hourmere/scheduling'
 import { sql } from 'kysely'
 import { z } from 'zod'
 import { mappingDenied, mappingUuid } from './scim-team-hierarchy-proof.ts'
@@ -19,10 +18,8 @@ export const ScimMappingRecovery = z.strictObject({
 export async function recoverScimTeamMapping(
   db: Db,
   queue: ScimMappingNoticeQueue,
-  resourcesEnabled: boolean,
   input: z.input<typeof ScimMappingRecovery>,
 ) {
-  if (!resourcesEnabled) throw new DomainError('not_found', 'scim_resources_disabled')
   const parsed = ScimMappingRecovery.safeParse(input)
   if (!parsed.success) throw mappingDenied()
   const { action, mappingId, parentOrganizationId, childOrganizationId } = parsed.data

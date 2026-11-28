@@ -49,6 +49,35 @@ hourmere list
 HTTPS is required except for loopback development origins such as `http://localhost:4187`.
 Use `--url ORIGIN` to override the URL for one call.
 
+## Read team single sign-on configuration
+
+Use a `read` or `full` API key created for the team by a current, verified owner or
+administrator. These commands use the key's organization.
+
+```sh
+printf '%s\n' '{"limit":10}' | hourmere sso providers list --input -
+hourmere sso policy
+```
+
+The provider list returns `data` and `nextCursor`. Pass a non-null `nextCursor` as
+`cursor` in a later JSON input for the same team. The optional `limit` accepts 1–100
+and defaults to 50. The policy command uses an empty input object. Results omit
+provider secrets, raw metadata and identity claims.
+
+OIDC and SAML are on by default. The server operator can turn either protocol off with
+`SSO_OIDC_ENABLED=false` or `SSO_SAML_ENABLED=false`. Both commands remain available with either
+or both protocol settings off. Stored enforcement still applies. If the team requires SSO,
+bind an SSO delegation to the key in the credential's team space under **API keys**,
+using fresh SSO verification. A missing, expired or suspended delegation causes the
+CLI to report `sso_required` on stderr and exit **1**. A delegation lasts up to 30 days.
+Use the browser for all SSO setup and recovery.
+See the [single sign-on guide](https://hourmere.com/docs/sso) for the instance settings and their effects.
+
+中文：当前团队所有者或管理员可用团队的 `read` 或 `full` 密钥读取提供方和策略。
+两种协议默认开启，关闭后仍可用这两个命令读取。已强制 SSO 的团队要求密钥具有有效委托，
+否则 CLI 会向标准错误输出 `sso_required` 并以状态码 **1** 退出。请在浏览器绑定委托、
+配置 SSO 或恢复访问。
+
 ## Find and book a time
 
 Commands accept a JSON object through `--input FILE` or `--input -` for stdin. For example,
@@ -303,6 +332,13 @@ Disabling does not cancel existing bookings. Delete uses the web confirmation or
 There is currently no event-type deletion MCP tool or CLI command. See
 [creating and managing event types](https://hourmere.com/docs/event-types) for the editor, copying rules and limitations.
 
+For a supported personal event on an instance with Stripe test mode enabled, send
+`"payment":{"currency":"usd","prices":[{"durationMinutes":30,"amountMinor":5000}]}`
+in the create or update JSON. Include one integer minor-unit price for each offered duration.
+Use `"payment":null` to make future bookings free. The `event` command reads the saved
+price and availability. Invitees use the public page to go to Stripe Checkout. See
+[Paid bookings](https://hourmere.com/docs/payments) for setup, currencies and limits.
+
 中文：三个接口均需明确传入创建字段，不套用网页的链接建议或已连接会议服务默认值。
 用 `isActive` 启停不会取消已有预约；删除仅支持网页确认或 REST，目前没有 MCP／CLI 删除命令。
 
@@ -415,7 +451,7 @@ verified personal owner or a current team owner/admin and use REST's error codes
 The subscription kinds are `booking.created`, `booking.rescheduled`, `booking.cancelled`,
 `booking.reschedule_requested`, `booking.reschedule_request_expired`,
 `booking.attendee_no_show_changed` and `workflow.executed`. Adding `workflow.executed`
-through create or update requires `WORKFLOWS_ENABLED=true` on the server. While workflows
+through create or update requires enabled workflows on the server. While workflows
 are off, the CLI exits `1` with `workflows_disabled` on stderr, the equivalent of REST's
 HTTP 404. On create this takes precedence over `webhooks_disabled` (REST HTTP 409).
 Existing subscriptions to that kind can be kept or removed while workflows are off.
@@ -464,24 +500,23 @@ event types and continue processing known ones. Every delivery has a required `b
 
 `workflows list` (JSON `owner` as `{"kind":"personal","id":USER_ID}` or
 `{"kind":"team","id":TEAM_ID}`, optional `limit` and `cursor`) and `workflows get` (JSON `id`)
-read booking workflows with a `read` or `full` key. In this hard-off release, both commands
-exit `1` with `workflows_disabled`. See the [workflow operating guide](../../docs/workflows.md#operating-guide).
+read booking workflows with a `read` or `full` key. Workflows are enabled by default.
+With `WORKFLOWS_ENABLED=false`, reads, disable-only updates and deletion remain available.
+See the [workflow operating guide](../../docs/workflows.md#operating-guide).
 
 `workflows runs --input FILE|-` accepts the workflow `id` and optional `limit` (1–100,
 default 50) and `cursor` as JSON. It requires a `read` or `full` key and personal ownership
 or the current team owner/admin role in the key's organization. History shows metadata
 and aggregate outcomes, including the `workflow_disabled` skip reason. Rows omit booking IDs,
 names, emails, answers and URLs. Send `nextCursor` as `cursor` with the same workflow ID to
-read the next page. The command exits `1` with `workflows_disabled` on stderr while workflows
-are hard-off.
+read the next page. Authorized callers can read history while workflows are paused.
 
 中文：`workflows runs --input FILE|-` 接收工作流 `id` 和可选的 `limit`（1–100，默认 50）及
 `cursor`。需要 `read` 或 `full` 密钥，以及密钥所属组织中的个人所有者或当前团队所有者／管理员
 权限。历史仅包含元数据和汇总结果，包括 `workflow_disabled` 跳过原因，不含预约 ID、姓名、邮箱、
-答案或链接。使用同一工作流 ID，将 `nextCursor` 作为 `cursor` 读取下一页。功能仍硬关闭，命令
-退出码为 `1`，并在标准错误输出 `workflows_disabled`。
+答案或链接。使用同一工作流 ID，将 `nextCursor` 作为 `cursor` 读取下一页。工作流暂停时，有权限的调用者仍可读取历史。
 
-`workflows create` requires a `full` key and returns `workflows_disabled` while hard-off.
+`workflows create` requires a `full` key and returns `workflows_disabled` while workflows are paused.
 Its JSON input carries `owner`, a retained `idempotencyKey`, `name`, `scope`, `trigger`,
 `actions`, and optional `enabled` and `conditions`. Identical normalized retries return
 the stored definition and changed input conflicts. The server assigns IDs and rejects
@@ -590,14 +625,15 @@ previous values. Content edits append a revision, while an `enabled`-only change
 it. A stale expectation returns `workflow_revision_conflict`. Disabling and re-enabling
 leave existing booking enrollments and execution rows unchanged. A webhook action must
 reference an active endpoint in the key's organization subscribed to `workflow.executed`.
-These operations return `workflows_disabled` while hard-off.
+While workflows are paused, an update that only sets `enabled: false` is allowed.
+Enabling or editing returns `workflows_disabled`.
 
 中文：`update_workflow` / `workflows update` 需要 `full` 权限，输入 `id`、
 `expectedRevision` 和要修改的字段。REST 使用 `PATCH /api/v1/workflows/{id}`，正文不含
 `id`。省略的字段保持不变，数组整体替换。内容修改会新增修订，仅切换 `enabled` 不改变
 修订号；旧修订返回 `workflow_revision_conflict`。停用和重新启用不会修改已有预约的工作流
 登记或执行记录。Webhook 动作须引用当前组织中已订阅 `workflow.executed` 的启用端点。
-功能仍硬关闭，返回 `workflows_disabled`。
+工作流暂停时仍可仅设置 `enabled: false`。启用或修改其他字段会返回 `workflows_disabled`。
 
 
 `delete_workflow` / `workflows delete` requires `full` scope and accepts `id` and
@@ -606,29 +642,28 @@ These operations return `workflows_disabled` while hard-off.
 A stale revision conflicts. A repeated delete succeeds while the tombstone is retained,
 but always rechecks current owner/admin permission. Missing or unauthorized IDs return the
 same `workflow_not_found`. Deletion retires pending runs and preserves creation-key replay
-protection, minimal history and mail charges. All three interfaces remain unavailable
-(`workflows_disabled`) while workflows are hard-off, and MCP discovery omits the tool.
+protection, minimal history and mail charges. Authorized deletion remains available through
+all three interfaces while workflows are paused. MCP discovery omits the tool during the pause.
 
 中文：`delete_workflow` / `workflows delete` 需要 `full` 权限，输入 `id` 和
 `expectedRevision`。REST 使用 `DELETE /api/v1/workflows/{id}`，JSON 正文只含
 `expectedRevision`，成功返回 `204`；MCP/CLI 返回 `{ "deleted": true }`。
 版本过期会冲突；保留删除标记期间可以安全重试，但每次都会重新检查当前所有者或管理员权限。
 不存在和无权限的 ID 均返回 `workflow_not_found`。删除会终止待执行任务，保留创建幂等键、
-最小历史记录和邮件额度记录。目前功能仍硬关闭，三个接口均返回 `workflows_disabled`，
-MCP 工具列表不显示此工具。
+最小历史记录和邮件额度记录。工作流暂停时，三个接口仍允许有权限的调用者删除工作流，MCP 工具列表隐藏此工具。
 
 `workflows preview --input FILE|-` takes a JSON candidate with `owner`, `name`, `scope`,
 `trigger`, `actions`, and optional `enabled`, `conditions` and synthetic `example` values.
 It requires a `full` key and current personal owner or team owner/admin access. The response
 reports match results, rendered email and estimates based on published limits. Preview uses
-synthetic booking details and performs no delivery. While workflows are hard-off, the command
+synthetic booking details and performs no delivery. While workflows are paused, the command
 exits `1` with `workflows_disabled` on stderr.
 
 中文：`workflows preview --input FILE|-` 从文件或标准输入读取候选工作流 JSON，包含
 `owner`、`name`、`scope`、`trigger`、`actions`，以及可选的 `enabled`、`conditions`
 和合成示例 `example`。需要 `full` 密钥和当前个人所有者或团队所有者／管理员权限。
 结果包含匹配状态、邮件预览以及根据公开限制计算的估算值。预览使用合成预约数据，
-不会发起投递。工作流硬关闭时，命令退出码为 `1`，并在标准错误输出 `workflows_disabled`。
+不会发起投递。工作流暂停时，命令退出码为 `1`，并在标准错误输出 `workflows_disabled`。
 
 ## Manage meeting polls
 

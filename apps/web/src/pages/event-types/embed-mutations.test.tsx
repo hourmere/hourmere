@@ -6,6 +6,7 @@ import * as react from 'react'
 import { createPortal } from 'react-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CopyButton } from '../../components/CopyButton.tsx'
+import { UserContentMessage } from '../../components/UserContent.tsx'
 import { compileSourceCopy } from '../../test/compile-source-copy.ts'
 import { eventType } from '../../test/fixtures.ts'
 import type { EventEmbedAction } from './EventEmbedAction.tsx'
@@ -60,6 +61,7 @@ function copy(code: string, state: InstanceState, snippet = embedSnippet): Dialo
     embedOrigin,
     publicBookingPath,
     CopyButton,
+    UserContentMessage,
     loadInstance: () => {},
     useLoad: () => [state, () => {}],
     useI18n: () => ({ t: (text: string) => text }),

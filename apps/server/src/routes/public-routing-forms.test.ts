@@ -712,6 +712,29 @@ describe.skipIf(!process.env.DATABASE_URL)('public routing form REST with publis
     }
   })
 
+  it('moves published team routing metadata to the new team address', async () => {
+    const owner = await createTestUser(db)
+    const team = await createTestTeam(db, [{ user: owner, role: 'owner' }])
+    const setSlug = (slug: string) =>
+      db.updateTable('auth.organization').set({ slug }).where('id', '=', team.id).execute()
+    await setSlug('Legacy-Routing')
+    const form = await configure(team.as(owner), { title: 'Published team consultation' })
+    const metadata = { title: form.title, versionId: form.publishedVersionId, questions }
+    const get = (slug: string) =>
+      enabled.request(`/api/v1/public/-/routing/teams/${slug}/consultation`)
+
+    await assertReply(await get('Legacy-Routing'), 200, metadata)
+    await assertReply(await get('legacy-routing'), 404, formNotFound)
+    await assertReply(await get('new-routing-team'), 404, formNotFound)
+
+    // The settings endpoint's authorization and persistence are exercised in team-settings.test.ts.
+    await setSlug('new-routing-team')
+    const old = await get('Legacy-Routing')
+    expect(old.headers.get('Location')).toBeNull()
+    await assertReply(old, 404, formNotFound)
+    await assertReply(await get('new-routing-team'), 200, metadata)
+  })
+
   it('keeps existing named namespaces and reserved handles separate', async () => {
     for (const [path, title] of [
       ['/api/v1/public/route/consultation', 'Personal booking'],

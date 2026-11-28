@@ -72,9 +72,9 @@ equivalent. Your current role, organization, ownership and host restrictions sti
 visible attendee details, answers or ready meeting links. Normal booking actions can send
 notifications and trigger configured integrations.
 
-Routing operations return `routing_forms_disabled` until an operator enables routing.
-On self-hosted Hourmere, routing is off by default. Set `ROUTING_FORMS_ENABLED=true`
-and restart the server to enable it. While routing is off, `tools/list` omits the
+Routing operations return `routing_forms_disabled` while routing is off.
+Routing forms are on by default. On self-hosted Hourmere, set `ROUTING_FORMS_ENABLED=false`
+and restart the server to turn them off. While routing is off, `tools/list` omits the
 eleven dedicated tools below, and direct calls to them return `routing_forms_disabled`.
 When routing is on, discovery still applies the credential's permissions.
 See [routing forms for agents](/docs/routing-forms-api) for submission, private handoff
@@ -112,6 +112,7 @@ and booking examples.
 | `publish_routing_form` | — | `routing-forms publish` | `full` |
 | `preview_routing_form` | — | `routing-forms preview` | `full` |
 | `get_public_routing_form` | — | `routing-forms public` | `full, read, bookings` |
+| `get_public_team` | — | `team-home` | `full, read, bookings` |
 | `route_lead` | — | `routing-forms route` | `full, bookings` |
 | `resolve_routing_continuation` | — | `routing-forms resolve` | `full, bookings` |
 | `find_routed_slots` | — | `routing-forms slots` | `full, bookings` |
@@ -197,20 +198,28 @@ and booking examples.
 
 <!-- api-key-scope-table:end -->
 
-OIDC single sign-on is off unless the operator sets `SSO_OIDC_ENABLED=true`; SAML is
-being built and no setting enables it. While OIDC is off, the SSO operations in these
-tables that add trust (sign-in, linking, provider and domain setup, enabling enforcement,
-delegation binding) return `404 sso_disabled`. The reads `list_sso_providers` and
-`get_sso_policy` (CLI `sso providers list` / `sso policy`), recovery and trust-reducing
-operations stay available to a team's owners and administrators, so stored configuration
-can still be inspected and removed.
+OIDC and SAML single sign-on are on by default. The operator can turn either protocol
+off with `SSO_OIDC_ENABLED=false` or `SSO_SAML_ENABLED=false`. Requests that add trust
+through a disabled protocol return `404 sso_disabled`, including sign-in, linking, provider
+setup and delegation binding. Domain setup, just-in-time admission and recovery enrollment
+require at least one enabled protocol. A team needs a usable provider on an enabled
+protocol to start requiring SSO. The reads `list_sso_providers` and `get_sso_policy`
+(CLI `sso providers list` / `sso policy`) remain available to team owners and administrators.
+Stored enforcement still applies. Turning a protocol off suspends its existing proofs and
+delegations. Re-enabling it restores their use before the original deadline if they still
+meet the other validity checks. Machine reads without a usable delegation on an enforced
+team return `sso_required`. Enrolled owners can use browser recovery, and trust-reducing
+operations retain their usual authorization and proof requirements.
 
-除非运营者设置 `SSO_OIDC_ENABLED=true`，否则 OIDC 单点登录保持关闭；SAML 仍在开发中，
-没有可启用它的设置。OIDC 关闭时，表中增加信任的 SSO 操作（登录、关联、身份提供方和域名
-配置、开启强制、委托绑定）返回 `404 sso_disabled`；上述两个读取操作、恢复操作和降低信任的
-操作对团队所有者和管理员保持可用，已保存的配置仍可查看和移除。
+OIDC 和 SAML 单点登录默认开启。运营者可设置 `SSO_OIDC_ENABLED=false` 或
+`SSO_SAML_ENABLED=false` 来关闭对应协议。通过已关闭协议增加信任的请求（如登录、关联、配置身份提供方和绑定
+委托）返回 `404 sso_disabled`。设置域名、即时入组和恢复登记需要至少启用一种协议；开启强制单点
+登录需要该协议上有可用的身份提供方。上述两个读取操作对团队所有者和管理员保持可用。已保存的
+强制要求继续生效。关闭协议会暂停其证明和委托，在原到期时间前重新启用且证明或委托仍有效时
+可以恢复使用。通过机器客户端读取已强制 SSO 的团队时仍需有效委托，否则返回 `sso_required`。
+已登记的所有者可通过浏览器恢复，降低信任的操作仍需通过原有的权限和证明验证。
 
-The operator can enable booking workflows with `WORKFLOWS_ENABLED=true`. While off,
+Booking workflows are enabled by default. When the operator sets `WORKFLOWS_ENABLED=false`,
 `tools/list` omits workflow tools. Direct calls can still read workflows and run
 history, disable a workflow, or delete it with the required scope and role. Creation,
 preview, enabling and other edits return `isError: true` with `workflows_disabled`
@@ -233,6 +242,35 @@ When upgrading, stop every old web/all/worker and other old key-authenticating p
 apply migrations, then restart all roles with the new code before using scoped keys.
 **Do not run old and new servers side by side once scoped keys exist:** old code treats
 them as full access. Follow the supported backup/restore procedure for rollback.
+
+## Inspect team single sign-on
+
+Call `list_sso_providers` and `get_sso_policy` in the team bound to your connection.
+You must be a current team owner or administrator with a verified Hourmere email.
+Use a `read` or `full` API key or an authorized MCP OAuth connection with `mcp:tools`.
+Both tools remain available with both protocol settings off, subject to scope, role
+and team enforcement.
+
+Send either of these as the `params` object in a `tools/call` request.
+
+- `{"name":"list_sso_providers","arguments":{"limit":10}}`
+- `{"name":"get_sso_policy","arguments":{}}`
+
+The provider list returns `data` and `nextCursor`. Pass a non-null `nextCursor` as
+`cursor` in the next call for the same team. `limit` defaults to 50 and accepts 1–100.
+The policy reports `requireSso`, `admission`, `policyRevision` and `trustGeneration`.
+The tools return safe summaries without credentials, raw metadata or identity claims.
+
+An enforced team requires a usable SSO delegation on the calling key or OAuth grant.
+A missing, expired or suspended delegation yields an MCP result with `isError: true`
+and `sso_required`. In the browser, the credential owner can bind a delegation after
+fresh SSO verification. Its lease lasts up to 30 days and OAuth token refresh cannot
+extend it. Manage SSO configuration and recovery in the browser.
+See [single sign-on](/docs/sso) and [OAuth on enforcing teams](#connect-with-oauth).
+
+中文：当前团队所有者或管理员可用 `read` 或 `full` 密钥、或具有 `mcp:tools` 权限的
+OAuth 连接读取提供方和策略。两种协议关闭时仍可读取。已强制 SSO 的团队要求调用凭证具有
+有效委托，否则工具返回 `sso_required`。请在浏览器绑定委托、修改配置或执行恢复。
 
 ## Generate open-time email snippets
 
@@ -358,9 +396,9 @@ API key. IDs that are missing or belong to another organization return `webhook_
 
 `create_webhook` and `update_webhook` accept `booking.created`, `booking.rescheduled`,
 `booking.cancelled`, `booking.reschedule_requested`, `booking.reschedule_request_expired`,
-`booking.attendee_no_show_changed` and `workflow.executed` in `events`. Adding
-`workflow.executed` requires `WORKFLOWS_ENABLED=true`. While workflows are off, adding it
-returns `workflows_disabled` (REST 404). On create, it takes precedence over
+`booking.attendee_no_show_changed` and `workflow.executed` in `events`. With
+`WORKFLOWS_ENABLED=false`, adding `workflow.executed` returns `workflows_disabled`
+(REST 404). On create, it takes precedence over
 `webhooks_disabled` (REST 409).
 
 `rotate_webhook_secret` takes `{ id }` and requires a `full` API key. Each successful
@@ -514,6 +552,12 @@ that deadline; reconnect when it expires. Every request checks your current memb
 permissions. Removal from the organization or revocation ends access immediately. Revoke an
 app at **Connected apps**; old tokens stop working immediately. API keys remain available
 when OAuth is disabled. Calendar connections are configured separately.
+
+For a team that requires SSO, approve the connection from a browser with a live SSO proof
+for that team. The first approval saves the connection and returns `sso_required` until
+you bind a delegation. Keep the approval tab open. In the same team's **Connected apps**
+page, use **Bind SSO delegation** and complete fresh SSO verification. Return to the approval
+tab and retry while the authorization is still valid.
 
 OAuth limits apply regardless of `NODE_ENV`: registration allows 5 requests per minute per
 IP, authorization 30 and token requests 20. Code exchanges, refreshes and failed token

@@ -1,0 +1,107 @@
+.webhook-list,
+.webhook-subpanel,
+.webhook-endpoint,
+.webhook-events {
+  min-width: 0;
+}
+
+.webhook-endpoints {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.webhook-endpoint,
+.webhook-subpanel {
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+}
+
+.webhook-subpanel > h4:first-child,
+.webhook-list > p:first-child {
+  margin-top: 0;
+}
+
+.webhook-actions.form-actions {
+  margin: 0;
+}
+
+.webhook-actions.form-actions,
+.webhook-actions .copy {
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.webhook-status-hint,
+.webhook-status-hint + .webhook-actions {
+  margin-top: var(--space-3);
+}
+
+.webhook-events {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+}
+
+.webhook-events legend {
+  max-width: 100%;
+  font-weight: 600;
+}
+
+.webhook-events input[type="checkbox"],
+.webhook-enabled input[type="checkbox"] {
+  min-width: 24px;
+  min-height: 24px;
+}
+
+.webhook-secret-value {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--surface-muted);
+  user-select: text;
+}
+
+.webhook-history-details,
+.webhook-delivery-details {
+  margin: 0;
+}
+
+.webhook-history-details > dd:last-child,
+.webhook-delivery-details dd {
+  margin: 0;
+}
+
+.webhook-delivery > h5 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-base);
+}
+
+.webhook-delivery-details {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: var(--space-2) var(--space-3);
+}
+
+.webhook-delivery:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.webhook-actions .button[aria-disabled="true"] {
+  opacity: 0.65;
+  cursor: default;
+}
+
+@media (min-width: 480px) {
+  .webhook-actions.form-actions,
+  .webhook-actions .copy {
+    align-items: center;
+    flex-direction: row;
+  }
+}

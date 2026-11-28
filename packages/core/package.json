@@ -14,7 +14,8 @@
     "./conference-url": "./src/conference-url.ts",
     "./follow-up-note": "./src/follow-up-note.ts",
     "./public-avatar": "./src/public-avatar.ts",
-    "./slot-snippet": "./src/slot-snippet.ts"
+    "./slot-snippet": "./src/slot-snippet.ts",
+    "./payment": "./src/payment.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"

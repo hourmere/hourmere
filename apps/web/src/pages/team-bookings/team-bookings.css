@@ -77,10 +77,16 @@
   margin-top: 0.75rem;
 }
 
-.team-booking-cancel {
+.team-booking-cancel,
+.team-booking-handoff {
   margin-top: 1.5rem;
   border-top: 1px solid var(--border);
   padding-top: 1rem;
+}
+
+.team-booking-handoff .button[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .team-bookings-page .details {

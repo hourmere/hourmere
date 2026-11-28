@@ -34,7 +34,7 @@ export interface ScimUserCreationDeps {
   db: Db
   /** The instance sign-up policy (SIGNUP and SIGNUP_ALLOWED_DOMAINS). */
   signup: SignupPolicy
-  /** The invitation mail budget, as the invitation entrance of Better Auth reserves it. */
+  /** Reserves durable admission capacity for a SCIM invitation generation. */
   reserve?: ReserveInvitationEmail | undefined
   /** Queues a committed delivery generation, as the invitation entrance does after commit. */
   enqueue?: EnqueueInvitationEmail | undefined
@@ -44,7 +44,7 @@ export interface ScimUserCreationDeps {
 // "already exists".
 const noInviter = () =>
   refuse(403, 'No owner of this organization with a verified email address can invite.')
-// The per-recipient limit counts every organization's invitations, so the detail names none.
+// Keep the detail the same for the organization, recipient and pending limits.
 const invitationsLimited = () =>
   refuse(429, 'Invitation sending is limited right now. Retry later.', undefined, {
     'Retry-After': '3600',
@@ -126,10 +126,9 @@ async function create(
         let queued: { invitationId: string; generation: number } | undefined
         if (active && entry.work_email !== null) {
           const mailbox = entry.work_email.toLowerCase()
-          // The earliest current owner with a verified address invites: the organization's
-          // authority, whichever token or person set provisioning up, and one the invitation
-          // sender accepts. The update lock keeps that owner in place. It is required for
-          // every work address, so this refusal never depends on the address.
+          // Better Auth and the delivery worker require a current member backing the link.
+          // The organization lock keeps this verified owner in place. Select the owner for
+          // every work address, so this precondition never depends on the address.
           const inviter = await trx
             .selectFrom('auth.member')
             .innerJoin('auth.user', 'auth.user.id', 'auth.member.userId')
@@ -151,7 +150,7 @@ async function create(
               // TEAM_MANAGEMENT_ACCESS_DENIED can only be the refusal of a legacy role.
               return await admitInvitation(
                 trx,
-                { userId: inviter.userId, audit },
+                { userId: inviter.userId, scimConnectionId: connection },
                 {
                   organizationId: principal.organizationId,
                   email: mailbox,
@@ -222,6 +221,17 @@ async function create(
     const code = invitationRefusalCode(error)
     if (code === 'INVITATION_RATE_LIMITED' || code === 'INVITATION_PENDING_LIMIT')
       return invitationsLimited().reply
+    // The first expiry is retried inside the transaction. A second expiry rolls the
+    // entire create back and tells the identity provider when it can try again.
+    if (code === 'INVITATION_INELIGIBLE')
+      return refuse(
+        503,
+        'User provisioning is temporarily unavailable. Retry shortly.',
+        undefined,
+        {
+          'Retry-After': '1',
+        },
+      ).reply
     // Anything else rolls everything back as a server error the provider retries.
     throw error
   }

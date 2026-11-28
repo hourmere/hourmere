@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
+import { openAccountMenu } from '../test/account-menu.ts'
 import { fakeApi, PROFILE, profile, renderApp, signedIn } from '../test/fake-api.tsx'
 import { AccountLanguage, InterfaceScope, LanguageSwitcher, useI18n } from './runtime.tsx'
 import { chooseLanguage } from './store.ts'
@@ -65,16 +66,10 @@ describe('interface catalogue scope', () => {
       fakeApi({ ...signedIn, ...profile({ ...PROFILE, locale: 'de-AT' }) })
       renderApp(path)
       await screen.findByRole('heading', { name: 'Settings' })
-      await waitFor(() =>
-        expect(document.querySelector<HTMLSelectElement>('.language-picker select')?.value).toBe(
-          'en',
-        ),
-      )
-      expect(
-        [...screen.getByLabelText<HTMLSelectElement>('Interface language').options].map(
-          ({ value }) => value,
-        ),
-      ).toEqual(['en', 'zh-CN'])
+      await openAccountMenu(userEvent)
+      const picker = screen.getByRole<HTMLSelectElement>('combobox', { name: 'Interface language' })
+      await waitFor(() => expect(picker.value).toBe('en'))
+      expect([...picker.options].map(({ value }) => value)).toEqual(['en', 'zh-CN'])
       const notificationLanguage =
         await screen.findByLabelText<HTMLSelectElement>('Notification language')
       expect([...notificationLanguage.options].map(({ value }) => value)).toContain('de')

@@ -178,6 +178,7 @@ export async function resolveWaitlistEvent(
   )
   if (!et) throw new DomainError('not_found', 'event_type_not_found')
   if (
+    et.payment ||
     et.schedulingType !== 'individual' ||
     et.hostUserIds.length !== 1 ||
     et.eligibleHostUserIds.length !== 1
@@ -200,6 +201,7 @@ export async function resolveWaitlistEvent(
     )
     if (!et) throw new DomainError('not_found', 'event_type_not_found')
     if (
+      et.payment ||
       et.schedulingType !== 'individual' ||
       et.hostUserIds.length !== 1 ||
       et.eligibleHostUserIds.length !== 1

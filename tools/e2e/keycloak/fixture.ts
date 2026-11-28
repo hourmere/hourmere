@@ -189,7 +189,8 @@ async function seedSignIn(
   const configuration = saml
     ? {
         ssoEndpoint: saml.ssoEndpoint,
-        signingCertificates: saml.signingCertificates,
+        // The fixture's HTTPS certificate is a valid RSA certificate with an unrelated key.
+        signingCertificates: brokenProvider ? [idp.certificate] : saml.signingCertificates,
         subjectAttribute: saml.subjectAttribute,
       }
     : {
@@ -434,8 +435,8 @@ export const test = base.extend<
   {
     keycloak: KeycloakFixture
     protocol: 'oidc' | 'saml'
-    oidcEnabled: boolean
-    samlEnabled: boolean
+    oidcEnabled: boolean | undefined
+    samlEnabled: boolean | undefined
     admission: Admission
     signupMode: SignupPolicy['mode']
     enforced: boolean
@@ -447,8 +448,8 @@ export const test = base.extend<
   { getWorkerKeycloak: () => Promise<KeycloakContainer> }
 >({
   protocol: ['oidc', { option: true }],
-  oidcEnabled: [true, { option: true }],
-  samlEnabled: [false, { option: true }],
+  oidcEnabled: [undefined, { option: true }],
+  samlEnabled: [undefined, { option: true }],
   admission: ['invitation_only', { option: true }],
   signupMode: ['closed', { option: true }],
   enforced: [false, { option: true }],
@@ -555,15 +556,15 @@ export const test = base.extend<
           }),
         }
         const mail = new Map<string, string>()
-        // Parse the OIDC operator setting like production. Only this fixture injects SAML.
+        // Positive cases inherit the production defaults. Off cases explicitly opt out.
         const config = loadConfig({
           DATABASE_URL: owned.url,
           BETTER_AUTH_SECRET: secret,
-          SSO_OIDC_ENABLED: oidcEnabled ? 'true' : '',
+          ...(oidcEnabled !== undefined && { SSO_OIDC_ENABLED: String(oidcEnabled) }),
+          ...(samlEnabled !== undefined && { SSO_SAML_ENABLED: String(samlEnabled) }),
           SSO_ENCRYPTION_KEY: configurationKey.toString('base64'),
         })
-        const production = productionSsoCapabilities(config)
-        const capabilities = samlEnabled ? { ...production, ssoSamlEnabled: true } : production
+        const capabilities = productionSsoCapabilities(config)
         const ssoConfigurationKey = Buffer.from(config.SSO_ENCRYPTION_KEY ?? '', 'base64')
         const mailbox = mailboxProofSink({ db, capabilities, publicUrl: url, secret })
         authPool = createAuthPool(owned.url, signup)
@@ -717,7 +718,8 @@ export const test = base.extend<
           signingKeyIds: () => [...signingKeyIds],
           jwksRequests: () => jwksRequests,
           postSamlToPeer: async (fields) => {
-            if (!samlSp || !samlEnabled) throw new Error('The Keycloak SAML fixture is disabled')
+            if (!samlSp || !capabilities.ssoSamlEnabled)
+              throw new Error('The Keycloak SAML fixture is disabled')
             samlPeer ??= startSamlPeer({
               databaseUrl: owned.url,
               publicUrl: url,

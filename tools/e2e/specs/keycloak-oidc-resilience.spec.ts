@@ -78,7 +78,7 @@ test.describe('', () => {
 })
 
 test.describe('with the OIDC setting off', () => {
-  test.use({ oidcEnabled: false })
+  test.use({ oidcEnabled: false, samlEnabled: false })
 
   test('the seeded team still enforces SSO when the OIDC setting is off', async ({
     page,

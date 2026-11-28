@@ -195,6 +195,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       COMPOSE_PROJECT_NAME: hourmere-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      # The template retains the empty SSO settings used by existing installations.
+      COMPOSE_ENV_FILES: .env.example
       # Deliberately contains URL-special characters: self-hosters' passwords will.
       POSTGRES_PASSWORD: ci/pass#word?with+specials=
       BETTER_AUTH_SECRET: ci-only-secret-not-used-anywhere-else-0123456789
@@ -212,6 +214,14 @@ jobs:
             printf 'Unknown well-known route returned HTTP %s; expected 404\n' "$unknown_well_known_status" >&2
             exit 1
           }
+      - name: Smoke test the default routing setting
+        run: |
+          curl --fail --silent --show-error http://127.0.0.1:3000/api/v1/instance |
+            jq --exit-status '.routingFormsEnabled == true'
+      - name: Smoke test SSO defaults
+        run: |
+          curl --fail --silent --show-error http://127.0.0.1:3000/api/v1/instance |
+            jq -e '.ssoOidcEnabled == true and .ssoSamlEnabled == true'
       - name: Smoke test the separate worker overlay
         timeout-minutes: 2
         run: |

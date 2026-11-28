@@ -8,6 +8,7 @@ import { TeamMemberActions } from '../components/team-members/TeamMemberActions.
 import { InterfaceScope } from '../i18n/runtime.tsx'
 import { AppShell, RequireSession, SessionLayout, SettingsPage } from '../lazy-pages.tsx'
 import { bookingPath, eventTypePath, PATHS } from '../paths.ts'
+import { selectAdminLanguage } from '../test/account-menu.ts'
 import {
   fakeApi,
   json,
@@ -1043,7 +1044,7 @@ describe('member action recovery and accessibility', () => {
     })
     renderApp(PATHS.settings)
     await findLeaveTrigger()
-    await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    await selectAdminLanguage(user, 'zh-CN')
     await user.click(await screen.findByRole('button', { name: '退出团队' }))
     await screen.findByText(eventType().title)
     expect(screen.queryByRole('heading', { name: 'Review leaving this team' })).toBeNull()

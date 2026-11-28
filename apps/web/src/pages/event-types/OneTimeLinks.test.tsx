@@ -1,8 +1,9 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import type { Schemas } from '../../api/client.ts'
 import { chooseLanguage } from '../../i18n/store.ts'
+import { resolveEventTypeEditor } from '../../test/event-type-editor.ts'
 import {
   fakeApi,
   json,
@@ -19,6 +20,8 @@ vi.mock('@hourmere/core/one-time-links', () => ({
   ONE_TIME_LINK_PREFILL_NAME_MAX: 17,
   ONE_TIME_LINK_PREFILL_EMAIL_MAX: 31,
 }))
+
+beforeAll(resolveEventTypeEditor)
 
 const ID = 'a0000000-0000-7000-8000-000000000001'
 const ID2 = 'a0000000-0000-7000-8000-000000000002'

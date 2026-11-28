@@ -268,7 +268,7 @@ describe.skipIf(!databaseUrl)('SAML sign-in initiation', () => {
     expect(await db.selectFrom('auth.session').select('id').execute()).toEqual([])
   })
 
-  it('keeps production SAML hard-off while the OIDC setting enables OIDC sign-in', async () => {
+  it('keeps SAML off while the OIDC setting enables OIDC sign-in', async () => {
     const samlId = await samlProvider()
     const oidcId = await providerId()
     const oidcIssuer = 'https://login.example.com/oidc'
@@ -297,15 +297,16 @@ describe.skipIf(!databaseUrl)('SAML sign-in initiation', () => {
       DATABASE_URL: owned.url,
       PUBLIC_URL: publicUrl,
       BETTER_AUTH_SECRET: secret,
-      SSO_SAML_ENABLED: 'true',
+      SSO_OIDC_ENABLED: 'false',
+      SSO_SAML_ENABLED: 'false',
     }
     const oidcOff = appFor(productionSsoCapabilities(loadConfig(env)))
-    const defaults = await oidcOff.request(
+    const oidcDisabled = await oidcOff.request(
       startPath,
       post({ providerId: oidcId, intent: 'sign_in' }),
     )
-    expect(defaults.status).toBe(404)
-    expect(await defaults.json()).toEqual({ error: 'sso_disabled' })
+    expect(oidcDisabled.status).toBe(404)
+    expect(await oidcDisabled.json()).toEqual({ error: 'sso_disabled' })
     expect(await attempts(oidcId).execute()).toEqual([])
 
     const app = appFor(productionSsoCapabilities(loadConfig({ ...env, SSO_OIDC_ENABLED: 'true' })))

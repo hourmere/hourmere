@@ -204,6 +204,7 @@ export function WaitlistJoin({
               <input
                 {...props}
                 autoComplete="name"
+                dir="auto"
                 value={name}
                 onChange={(event) => setName(event.target.value)}
               />

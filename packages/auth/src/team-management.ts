@@ -80,7 +80,7 @@ export async function checkTeamManagementAccess(
   db: Db,
   principal: TeamAccessPrincipal,
   teamId: string,
-  lock: boolean | 'key share' = false,
+  lock: boolean | 'share' | 'key share' = false,
   context?: {
     expectedOrganizationId: string
     allowPersonal: boolean
@@ -122,6 +122,7 @@ export async function checkTeamManagementAccess(
   // Serialize team-management writes, including organization edits and self role changes,
   // without competing SHARE → UPDATE upgrades in their callbacks.
   if (lock === true) organizationQuery = organizationQuery.forUpdate()
+  if (lock === 'share') organizationQuery = organizationQuery.forShare()
   // Webhook mutations already hold user → organization → endpoint locks. Rechecking
   // member/session authority must not upgrade their organization KEY SHARE to UPDATE,
   // which could deadlock mutations of different endpoints in the same organization.

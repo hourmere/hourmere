@@ -1,10 +1,10 @@
 # User content direction
 
-This inventory and proposed design cover browser rendering of user-entered names, titles,
-descriptions and mixed-direction text. They describe the existing markup on `main` and the
-work needed to isolate each value from nearby interface copy, punctuation and other values.
+This inventory covers the rendering of user-entered names, titles, descriptions and
+mixed-direction text. Each value resolves independently of the surrounding interface copy,
+punctuation and other values.
 
-## Current behavior
+## Interface direction
 
 | Existing behavior | Observed value | Source |
 | --- | --- | --- |
@@ -19,9 +19,9 @@ of its own controls to `ltr`. The [booking preview](../apps/web/src/public/Booki
 uses scoped language. The `.user-content` rules provide wrapping and sizing. Keep the
 existing `<bdi>` boundaries in the routing preview, publication, rules and target editors.
 
-## Inventory of remaining gaps
+## Browser rendering inventory
 
-| Surface | Observed gaps and proposed placement |
+| Surface | Isolation boundaries |
 | --- | --- |
 | [Host profile](../apps/web/src/public/HostPage.tsx) | Isolate the profile name, organization name and event card title and description. In the empty state, isolate the name next to the translated copy. |
 | [Booking event info](../apps/web/src/public/BookingPageParts.tsx) and [description](../apps/web/src/public/EventDescription.tsx) | Isolate event titles, host or team names and custom locations. In the required-host list, isolate each name separately from zone names and localized separators. Put the description boundary inside its disclosure control. The same event info serves personal, team, embedded, one-time-link and draft preview flows. |
@@ -80,8 +80,20 @@ booking details.
 
 Existing operations continue to return and accept the same text, schemas and errors across
 REST, MCP and CLI. The rendering work requires no parity registry entry or generated API types.
-Calendar exports, redirect parameters, logs, notifications, email and site content are outside
-this browser rendering design.
+
+## Email and calendar files
+
+HTML booking, invitation and poll emails isolate user-authored text inside the translated
+message. A host's multiline follow-up or workflow message resolves one line at a time.
+Displayed email and URL tokens have their own left-to-right boundary where they appear beside
+names. Plain-text mail, mail subjects and calendar files carry their original text and
+protocol escaping. The mail or calendar client controls direction when it displays those
+strings. Browser tab titles, string-only accessible labels and native select menus likewise
+depend on how the browser or platform presents their text.
+
+中文：预约页面、管理后台和 HTML 邮件会按姓名、标题、说明等内容各自确定文字方向。
+界面仍按所选语言排版。纯文本邮件、邮件主题和日历文件保留原始文字，由客户端决定
+显示方向。浏览器标签页标题、纯文本无障碍标签和原生下拉菜单由浏览器或平台呈现。
 
 ## Failure modes
 

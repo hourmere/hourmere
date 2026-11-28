@@ -168,29 +168,29 @@ describe('documented Compose configuration', () => {
     expect([...excluded].filter((name) => forwarded.has(name))).toEqual([])
   })
 
-  it('leaves the OIDC SSO setting empty in the template and Compose, so the install follows the default', () => {
-    // Never `=false` or a `:-false` fallback: an install made now follows a later default.
-    expect(example).toMatch(/^SSO_OIDC_ENABLED=$/m)
-    expect(compose).toMatch(/^ {6}SSO_OIDC_ENABLED: \$\{SSO_OIDC_ENABLED:-\}$/m)
-    expect(composeAppEnvironment(compose).get('SSO_OIDC_ENABLED')).toBe('${SSO_OIDC_ENABLED:-}')
-    // The empty value Compose passes equals unset, and the default is still off.
-    const base = {
-      DATABASE_URL: 'postgres://synthetic@localhost:9/config-contract',
-      BETTER_AUTH_SECRET: 'synthetic-config-contract-value-32',
-    }
-    expect(loadConfig({ ...base, SSO_OIDC_ENABLED: '' }).SSO_OIDC_ENABLED).toBe(false)
-    expect(loadConfig(base).SSO_OIDC_ENABLED).toBe(false)
-    expect(documentedVariable('SSO_OIDC_ENABLED')[1]).toBe('`false`')
-    // SAML has no setting yet: nothing offers or forwards one.
-    for (const text of [example, compose, worker, reference])
-      expect(text).not.toContain('SSO_SAML_ENABLED')
-  })
+  it.each(['SSO_OIDC_ENABLED', 'SSO_SAML_ENABLED'] as const)(
+    'leaves %s empty in the template and Compose, so the install follows the default',
+    (key) => {
+      // Preserve the pass-through for both existing installations and new ones.
+      expect(example).toMatch(new RegExp(`^${key}=$`, 'm'))
+      expect(composeAppEnvironment(compose).get(key)).toBe(`\${${key}:-}`)
+      // The empty value Compose passes follows the same default as an unset value.
+      const base = {
+        DATABASE_URL: 'postgres://synthetic@localhost:9/config-contract',
+        BETTER_AUTH_SECRET: 'synthetic-config-contract-value-32',
+      }
+      expect(loadConfig({ ...base, [key]: '' })[key]).toBe(true)
+      expect(loadConfig(base)[key]).toBe(true)
+      expect(documentedVariable(key)[1]).toBe('`true`')
+      expect(worker).toMatch(/extends:\s+file: docker-compose\.yml\s+service: app/)
+    },
+  )
 
   it('passes the opt-in Zoom flag to app and its inherited worker with a false default', () => {
     expect(compose).toMatch(/^ {6}ZOOM_MEETINGS_ENABLED: \$\{ZOOM_MEETINGS_ENABLED:-false\}$/m)
   })
 
-  it('forwards the workflow opt-in and both mail sub-caps with empty defaults', () => {
+  it('forwards the workflow switch and both mail sub-caps with empty defaults', () => {
     const environment = composeAppEnvironment(compose)
     for (const key of [
       'WORKFLOWS_ENABLED',
@@ -201,6 +201,7 @@ describe('documented Compose configuration', () => {
       expect(example).toMatch(new RegExp(`^${key}=$`, 'm'))
       documentedVariable(key)
     }
+    expect(documentedVariable('WORKFLOWS_ENABLED')[1]).toBe('`true`')
     expect(worker).toMatch(/extends:\s+file: docker-compose\.yml\s+service: app/)
   })
 

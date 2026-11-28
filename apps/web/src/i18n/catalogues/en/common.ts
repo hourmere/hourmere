@@ -601,4 +601,61 @@ export const common = {
   // Booking location changes
   'The meeting location has changed. Please choose a time again.':
     'The meeting location has changed. Please choose a time again.',
+
+  // Microsoft Teams host authorization
+  'The assigned host must configure Microsoft Teams in their own signed-in session.':
+    'The assigned host must configure Microsoft Teams in their own signed-in session.',
+
+  // Paid booking details
+  'bookingPayment.label': 'Payment',
+  'bookingPayment.paid': 'Paid {amount}',
+  'bookingPayment.refund': 'Refund',
+  'bookingPayment.requested': 'Refund requested',
+  'bookingPayment.pending': 'Refund pending',
+  'bookingPayment.succeeded': 'Refund issued',
+  'bookingPayment.failed': 'Refund failed',
+  'bookingPayment.none': 'No refund',
+  'bookingPayment.unknown': 'Status unavailable',
+  // Paid booking checkout
+  'Price: {amount}': 'Price: {amount}',
+  'Starting Checkout…': 'Starting Checkout…',
+  'Continue to payment': 'Continue to payment',
+  'Payment status': 'Payment status',
+  'Waiting for payment confirmation': 'Waiting for payment confirmation',
+  'Reservation expired': 'Reservation expired',
+  'Reservation cancelled': 'Reservation cancelled',
+  'A full refund has been requested.': 'A full refund has been requested.',
+  'Stripe is processing the refund.': 'Stripe is processing the refund.',
+  'Stripe has sent your refund. Your bank may take time to post it.':
+    'Stripe has sent your refund. Your bank may take time to post it.',
+  'The refund could not be completed. Contact the host for help.':
+    'The refund could not be completed. Contact the host for help.',
+  'We couldn’t find this payment attempt': 'We couldn’t find this payment attempt',
+  'Return to the tab where you started payment. If your booking was confirmed, use the link in your confirmation email.':
+    'Return to the tab where you started payment. If your booking was confirmed, use the link in your confirmation email.',
+  'We couldn’t check the payment. Try again before starting another booking.':
+    'We couldn’t check the payment. Try again before starting another booking.',
+  'Your time is reserved for up to 30 minutes. Hourmere will confirm the booking after it receives the payment.':
+    'Your time is reserved for up to 30 minutes. Hourmere will confirm the booking after it receives the payment.',
+  'Release unpaid reservation': 'Release unpaid reservation',
+  'Payment arrived after the reservation ended. Your booking was not confirmed.':
+    'Payment arrived after the reservation ended. Your booking was not confirmed.',
+  'Manage booking': 'Manage booking',
+  'Choose another time': 'Choose another time',
+  'The price has changed. Review the updated price and choose a time again.':
+    'The price has changed. Review the updated price and choose a time again.',
+  'Online payment is temporarily unavailable. Please contact the host.':
+    'Online payment is temporarily unavailable. Please contact the host.',
+  'We couldn’t open Stripe Checkout. Try again to continue this payment attempt.':
+    'We couldn’t open Stripe Checkout. Try again to continue this payment attempt.',
+  'Open booking page to pay': 'Open booking page to pay',
+  'The suggested time is selected. Review the details before continuing to payment.':
+    'The suggested time is selected. Review the details before continuing to payment.',
+  'You’ll pay securely on Stripe. Your booking is confirmed only after Hourmere receives the payment. If you cancel the booking, a full refund is requested.':
+    'You’ll pay securely on Stripe. Your booking is confirmed only after Hourmere receives the payment. If you cancel the booking, a full refund is requested.',
+
+  // Team public home
+  'This team has no public events right now.': 'This team has no public events right now.',
+  'This team page is unavailable.': 'This team page is unavailable.',
+  'Couldn’t load this team page.': 'Couldn’t load this team page.',
 } as const

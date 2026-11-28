@@ -3,8 +3,8 @@ title: Routing forms for agents and integrations
 description: Publish routing forms, submit answers, and hand off or book an offered time through REST, MCP and the CLI.
 ---
 
-Routing forms are off by default. On self-hosted Hourmere, set
-`ROUTING_FORMS_ENABLED=true` and restart the server to enable them. Hourmere operates
+Routing forms are on by default. On self-hosted Hourmere, set
+`ROUTING_FORMS_ENABLED=false` and restart the server to turn them off. Hourmere operates
 the setting on Cloud. See [Routing forms](/docs/routing-forms#availability-and-the-operator-setting)
 for deployment steps and handle collision recovery.
 Use the examples below once `GET /api/v1/instance` reports `routingFormsEnabled: true`.
@@ -241,6 +241,8 @@ booking input, route token, idempotency key and credential. An exact replay retu
 original booking with `manageToken: null`, even after expiry or disablement. A failed booking
 leaves the token usable until its original expiry, subject to current form and target availability.
 For `routing_unavailable` on a new booking attempt, ask the invitee to restart from the form.
+For `invalid_responses`, resolve the current booking questions again. If the error includes
+`field: "responses.<questionId>"`, ask the invitee to review that booking answer.
 A routed booking ends at the normal confirmation without an after-booking redirect.
 
 ## Read or export saved answers

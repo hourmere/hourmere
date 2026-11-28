@@ -9,7 +9,7 @@ import { webhookAttendeeNoShowNotifier } from '../../webhooks/src/delivery.ts'
 import { createWebhook } from '../../webhooks/src/service.ts'
 import { findPublicEventType, findPublicTeamEventType } from './availability.ts'
 import { bookingPageQuery, encodeBookingCursor } from './booking-page.ts'
-import { getHostBooking } from './bookings.ts'
+import { getHostBooking, unavailablePaidManagementIds } from './bookings.ts'
 import { DomainError } from './errors.ts'
 import { resolvedBookingHosts } from './hosts.ts'
 import { isUuid } from './internal.ts'
@@ -44,6 +44,7 @@ function emailIdentityMutant(): typeof getTeamAdminBooking {
     toTeamAdminBooking,
     findPublicEventType,
     findPublicTeamEventType,
+    unavailablePaidManagementIds,
   }
   return new Function(...Object.keys(bindings), `${source}; return getTeamAdminBooking`)(
     ...Object.values(bindings),

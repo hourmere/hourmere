@@ -1,40 +1,50 @@
 import { type MouseEvent, Suspense, useEffect, useRef, useState } from 'react'
 import { Link, matchPath, NavLink, Outlet, useLocation, useOutletContext } from 'react-router'
 import { errorMessage } from '../api/errors.ts'
-import { LanguageSwitcher, useI18n } from '../i18n/runtime.tsx'
+import { useI18n } from '../i18n/runtime.tsx'
 import { msg, type UiText } from '../i18n/translate.ts'
 import { AppNotFoundPage } from '../pages/NotFound.tsx'
 import { PATHS } from '../paths.ts'
 import { useMe, useSession } from '../session.tsx'
 import { TeamManagementProvider, useTeamManagementAccess } from '../team-management.tsx'
 import { leavesPage, useConfirmLeave } from '../unsaved-changes.tsx'
+import { AccountMenu } from './AccountMenu.tsx'
 import { JoinedTeamNotice } from './JoinedTeamNotice.tsx'
 import { LegalLinks, useInstance } from './LegalLinks.tsx'
 import { Logo } from './Logo.tsx'
 import { PageSkeleton } from './PageSkeleton.tsx'
+import { ShellIcon, type ShellIconName } from './ShellIcon.tsx'
 import { SpaceSwitcher } from './SpaceSwitcher.tsx'
+import { useShellDisclosure } from './use-shell-disclosure.ts'
 
-export const NAV_ITEMS = [
-  { to: PATHS.eventTypes, label: 'Event types' },
-  { to: PATHS.availability, label: 'Availability' },
-  { to: PATHS.bookings, label: 'Bookings' },
-  { to: PATHS.meetingPolls, label: 'Meeting polls' },
-  { to: PATHS.workflows, label: 'Workflows' },
-  { to: PATHS.teamBookings, label: 'Team bookings' },
-  { to: PATHS.analytics, label: 'Booking activity' },
-  { to: PATHS.conferences, label: 'Conference accounts' },
-  { to: PATHS.calendars, label: 'Calendars' },
-  { to: PATHS.apiKeys, label: 'API keys' },
-  { to: PATHS.connectedApps, label: 'Connected apps' },
-  { to: PATHS.auditLog, label: 'Audit log' },
-  { to: PATHS.settings, label: 'Settings' },
+const PRIMARY_NAV = [
+  { to: PATHS.eventTypes, label: 'Event types', icon: 'event' },
+  { to: PATHS.availability, label: 'Availability', icon: 'clock' },
+  { to: PATHS.bookings, label: 'Bookings', icon: 'booking' },
+  { to: PATHS.meetingPolls, label: 'Meeting polls', icon: 'poll' },
+  { to: PATHS.workflows, label: 'Workflows', icon: 'workflow' },
+  { to: PATHS.teamBookings, label: 'Team bookings', icon: 'team' },
+  { to: PATHS.analytics, label: 'Booking activity', icon: 'activity' },
+  { to: PATHS.auditLog, label: 'Audit log', icon: 'audit' },
+  { to: PATHS.settings, label: 'Settings', icon: 'settings' },
 ] as const
 
-const ROUTING_FORM_NAV = { to: PATHS.routingForms, label: 'Routing forms' } as const
+const INTEGRATION_NAV = [
+  { to: PATHS.conferences, label: 'Conference accounts', icon: 'camera' },
+  { to: PATHS.calendars, label: 'Calendars', icon: 'calendar' },
+  { to: PATHS.apiKeys, label: 'API keys', icon: 'key' },
+  { to: PATHS.connectedApps, label: 'Connected apps', icon: 'plug' },
+] as const
 
-const WIDE_PAGES: readonly string[] = NAV_ITEMS.map(({ to }) => to).filter(
-  (to) => to !== PATHS.settings && to !== PATHS.workflows,
-)
+const ROUTING_FORM_NAV = {
+  to: PATHS.routingForms,
+  label: 'Routing forms',
+  icon: 'routing',
+} as const
+
+const WIDE_PAGES: readonly string[] = [...PRIMARY_NAV, ...INTEGRATION_NAV]
+  .map(({ to }) => to)
+  .filter((to) => to !== PATHS.settings && to !== PATHS.workflows)
 
 export type AppShellContext = {
   workflowsEnabled: boolean | undefined
@@ -61,6 +71,63 @@ function keepActiveVisible(list: HTMLUListElement) {
   const item = selected.getBoundingClientRect()
   if (item.left < left) list.scrollLeft += item.left - left
   else if (item.right > right) list.scrollLeft += item.right - right
+}
+
+function ShellNavLink({
+  to,
+  label,
+  icon,
+  onClick,
+}: {
+  to: string
+  label: string
+  icon: ShellIconName
+  onClick?: () => void
+}) {
+  return (
+    <li>
+      <NavLink to={to} onClick={onClick}>
+        <ShellIcon name={icon} />
+        <span>{label}</span>
+      </NavLink>
+    </li>
+  )
+}
+
+function IntegrationNav({ pathname }: { pathname: string }) {
+  const { t } = useI18n()
+  const menu = useShellDisclosure()
+  const current = INTEGRATION_NAV.some(({ to }) => matchPath(to, pathname))
+
+  return (
+    <section className="integration-nav" aria-label={t('Integrations')}>
+      <p className="integration-heading" aria-hidden="true">
+        {t('Integrations')}
+      </p>
+      <div {...menu.containerProps}>
+        <button
+          type="button"
+          className="integration-toggle"
+          aria-current={current && !menu.open ? 'location' : undefined}
+          {...menu.triggerProps}
+        >
+          <ShellIcon name="plug" />
+          {t('Integrations')}
+          <ShellIcon name="chevron" />
+        </button>
+        <ul id={menu.panelId} className="integration-links">
+          {INTEGRATION_NAV.map((item) => (
+            <ShellNavLink
+              key={item.to}
+              {...item}
+              label={t(item.label)}
+              onClick={menu.open ? menu.closeAndRestoreFocus : undefined}
+            />
+          ))}
+        </ul>
+      </div>
+    </section>
+  )
 }
 
 /** The frame around signed-in pages: header, navigation and the page itself. */
@@ -114,12 +181,16 @@ function Shell() {
   const managesSpace = me.principal.kind === 'session' && (me.organization.personal || managesTeam)
   const showWorkflows = workflowsEnabled === true && managesSpace
   const showRoutingForms = routingFormsEnabled === true && managesSpace
+  const showMeetingPolls = me.organization.personal || managesTeam
+  const showAuditLog =
+    teamAccess.status === 'ready' &&
+    teamAccess.roles?.some((role) => role === 'owner' || role === 'admin') === true
   const { signOut, notice, setNotice } = useSession()
   const [signOutError, setSignOutError] = useState<UiText | null>(null)
   const [spaceError, setSpaceError] = useState<UiText | null>(null)
   const [navEdges, setNavEdges] = useState({ start: true, end: true })
   const main = useRef<HTMLElement>(null)
-  const nav = useRef<HTMLElement>(null)
+  const primaryList = useRef<HTMLUListElement>(null)
   const location = useLocation()
   const { pathname } = location
   const widePage = WIDE_PAGES.includes(pathname) || matchPath(`${PATHS.eventTypes}/:id`, pathname)
@@ -133,7 +204,7 @@ function Shell() {
     // On narrow screens the navigation scrolls sideways; keep the current page's link in view.
     // scrollIntoView also changes the browser's sequential focus starting point, which
     // skips the skip link on the first Tab. Scroll only the navigation list horizontally.
-    const list = nav.current?.querySelector('ul')
+    const list = primaryList.current
     if (list) keepActiveVisible(list)
     if (shownPath.current === pathname) return
     shownPath.current = pathname
@@ -142,20 +213,19 @@ function Shell() {
   }, [pathname, locale])
 
   // Fade only the edges that hide more navigation, including after zoom or a locale change.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: instance discovery can add navigation items after mount
+  // biome-ignore lint/correctness/useExhaustiveDependencies: instance and role discovery can add navigation items after mount
   useEffect(() => {
-    const list = nav.current?.querySelector('ul')
+    const list = primaryList.current
     if (!list) return
-    function updateEdges() {
-      if (!list) return
+    const updateEdges = () => {
       const start = list.scrollLeft <= 1
       const end = list.scrollLeft + list.clientWidth >= list.scrollWidth - 1
       setNavEdges((previous) =>
         previous.start === start && previous.end === end ? previous : { start, end },
       )
     }
-    function updateLayout() {
-      if (list) keepActiveVisible(list)
+    const updateLayout = () => {
+      keepActiveVisible(list)
       updateEdges()
     }
     updateLayout()
@@ -170,7 +240,7 @@ function Shell() {
       window.removeEventListener('resize', updateLayout)
       observer?.disconnect()
     }
-  }, [showWorkflows, showRoutingForms])
+  }, [showWorkflows, showRoutingForms, showMeetingPolls, managesTeam, showAuditLog])
 
   // A notice belongs to one page: drop it once the person is elsewhere, also when it arrives
   // after they left. (Not on the page starting over in place, which is what it explains.)
@@ -194,7 +264,6 @@ function Shell() {
   }
 
   async function handleSignOut() {
-    if (!confirmLeave()) return
     setSignOutError(null)
     try {
       await signOut()
@@ -213,16 +282,11 @@ function Shell() {
           <Link to={PATHS.home} className="brand" aria-label={t('Hourmere home')}>
             <Logo />
           </Link>
-          <div className="account">
-            <LanguageSwitcher compact />
-            <span className="account-email" title={me.user.email}>
-              {me.user.email}
-            </span>
-            <button type="button" className="button button-small" onClick={handleSignOut}>
-              {t('Sign out')}
-            </button>
-            {me.principal.kind === 'session' && <SpaceSwitcher onError={setSpaceError} />}
-          </div>
+          {me.principal.kind === 'session' && (
+            <div className="topbar-space">
+              <SpaceSwitcher onError={setSpaceError} />
+            </div>
+          )}
         </div>
       </header>
       {signOutError && (
@@ -239,33 +303,33 @@ function Shell() {
         </div>
       )}
       <div className="layout">
-        <nav
-          className="sidenav"
-          aria-label={t('Main')}
-          ref={nav}
-          data-scroll-start={navEdges.start}
-          data-scroll-end={navEdges.end}
-        >
-          <ul data-layout-scroll="horizontal">
-            {(showRoutingForms ? [...NAV_ITEMS, ROUTING_FORM_NAV] : NAV_ITEMS)
-              .filter(({ to }) => {
-                if (to === PATHS.teamBookings) return managesTeam
-                if (to === PATHS.meetingPolls) return me.organization.personal || managesTeam
-                if (to === PATHS.workflows) return showWorkflows
-                if (to === PATHS.auditLog)
-                  return (
-                    teamAccess.status === 'ready' &&
-                    teamAccess.roles?.some((role) => role === 'owner' || role === 'admin') === true
-                  )
-                return true
-              })
-              .map((item) => (
-                <li key={item.to}>
-                  <NavLink to={item.to}>{ui(item.label)}</NavLink>
-                </li>
-              ))}
-          </ul>
-        </nav>
+        <div className="sidebar">
+          <div className="sidebar-inner">
+            <nav className="sidenav" aria-label={t('Main')}>
+              <div
+                className="sidenav-primary"
+                data-scroll-start={navEdges.start}
+                data-scroll-end={navEdges.end}
+              >
+                <ul ref={primaryList} data-layout-scroll="horizontal">
+                  {(showRoutingForms ? [...PRIMARY_NAV, ROUTING_FORM_NAV] : PRIMARY_NAV)
+                    .filter(({ to }) => {
+                      if (to === PATHS.teamBookings) return managesTeam
+                      if (to === PATHS.meetingPolls) return showMeetingPolls
+                      if (to === PATHS.workflows) return showWorkflows
+                      if (to === PATHS.auditLog) return showAuditLog
+                      return true
+                    })
+                    .map((item) => (
+                      <ShellNavLink key={item.to} {...item} label={t(item.label)} />
+                    ))}
+                </ul>
+              </div>
+              <IntegrationNav pathname={pathname} />
+            </nav>
+            <AccountMenu user={me.user} confirmLeave={confirmLeave} onSignOut={handleSignOut} />
+          </div>
+        </div>
         <main
           id="main"
           className={widePage ? 'main-content-wide' : 'main-content'}

@@ -38,7 +38,7 @@ it('enables SCIM by default and honors explicit operator opt-outs', () => {
   }
   expect(loadConfig(env).SCIM_PROVISIONING_ENABLED).toBe(true)
   // An empty value copied from .env.example follows the release default.
-  for (const value of ['', 'true']) {
+  for (const value of ['', 'true', '1', 'on']) {
     expect(loadConfig({ ...env, SCIM_PROVISIONING_ENABLED: value }).SCIM_PROVISIONING_ENABLED).toBe(
       true,
     )
@@ -48,9 +48,11 @@ it('enables SCIM by default and honors explicit operator opt-outs', () => {
       false,
     )
   }
-  expect(() => loadConfig({ ...env, SCIM_PROVISIONING_ENABLED: 'garbage' })).toThrow(
-    'SCIM_PROVISIONING_ENABLED must be true, false, 0, off or empty',
-  )
+  for (const value of ['garbage', ' ', 'yes', 'no', '2']) {
+    expect(() => loadConfig({ ...env, SCIM_PROVISIONING_ENABLED: value })).toThrow(
+      'SCIM_PROVISIONING_ENABLED must be true, 1, on, false, 0, off or empty',
+    )
+  }
 })
 
 describe.skipIf(!process.env.DATABASE_URL)('SCIM credential HTTP boundaries', () => {
@@ -389,11 +391,29 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM credential HTTP boundaries', ()
   }
   it('keeps disabled and unknown SCIM paths off the SPA', async () => {
     await verifyDisabled()
-    for (const target of ['/scim/v2', '/scim/v2/Users', `/scim/v2/${organizationId}/Users`]) {
-      const response = await request(app(false), target)
+    const enabled = productionApp('on')
+    const disabled = productionApp('off')
+    const issued = await issue(enabled)
+    const expectNotFound = async (response: Response) => {
       expect(response.status).toBe(404)
-      expect(response.headers.get('content-type')).toContain('application/scim+json')
+      expect(response.headers.get('content-type')).toBe('application/scim+json')
+      expect(response.headers.get('cache-control')).toBe('no-store')
+      expect(response.headers.get('referrer-policy')).toBe('no-referrer')
+      expect(response.headers.get('www-authenticate')).toBeNull()
+      expect(await response.json()).toEqual({
+        schemas: ['urn:ietf:params:scim:api:messages:2.0:Error'],
+        status: '404',
+        detail: 'Resource not found.',
+      })
     }
+    for (const target of ['/scim/v2', '/scim/v2/Users']) {
+      await expectNotFound(await enabled.request(target))
+      await expectNotFound(await disabled.request(target))
+    }
+    const base = `/scim/v2/${organizationId}`
+    const headers = { authorization: `Bearer ${issued.secret}` }
+    await expectNotFound(await enabled.request(`${base}/Unknown`, { headers }))
+    await expectNotFound(await disabled.request(`${base}/Users`, { headers }))
   })
   function productionApp(setting: string) {
     const unavailable = async (): Promise<never> => expect.unreachable('Unexpected dependency')
@@ -436,6 +456,7 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM credential HTTP boundaries', ()
     for (const enabled of [false, true]) {
       const ssoCapabilities = productionSsoCapabilities({
         SSO_OIDC_ENABLED: false,
+        SSO_SAML_ENABLED: false,
         SCIM_PROVISIONING_ENABLED: enabled,
       })
       const resolve = createCallerResolver({ auth, db, ssoCapabilities })
@@ -484,7 +505,7 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM credential HTTP boundaries', ()
         expect(await response.json()).toEqual({
           schemas: ['urn:ietf:params:scim:api:messages:2.0:Error'],
           status: '404',
-          detail: 'SCIM provisioning is disabled.',
+          detail: 'Resource not found.',
         })
       }
       const response = await application.request(target, { method, headers: valid })
@@ -668,7 +689,7 @@ describe.skipIf(!process.env.DATABASE_URL)('SCIM credential HTTP boundaries', ()
     const control = await sourceCopy<typeof import('./scim.ts')>('./scim.ts')
     await verify(control.mountScim)
     const mutant = await sourceCopy<typeof import('./scim.ts')>('./scim.ts', [
-      "      return respond(c, 404, 'SCIM resources are not available yet.')",
+      '      return notFound(c)',
       '      return c.json({ Resources: [] })',
     ])
     await expect(verify(mutant.mountScim)).rejects.toMatchObject({ name: 'AssertionError' })

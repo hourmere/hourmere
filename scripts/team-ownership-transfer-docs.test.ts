@@ -36,7 +36,7 @@ it('lets other verified owners revoke within 24 hours without participant detail
     'Other current, email-verified owners see only its ID, deadline and the revoke action.',
   )
   expect(permissions).toContain(
-    'An owner acting only as revoker receives no participant identities.',
+    'An owner acting only as revoker receives no participant identities in the offer view or revoke response.',
   )
   const transaction = section('Data model and transaction')
   expect(transaction).toContain('An offer expires 24 hours after creation on the database clock.')
@@ -88,6 +88,8 @@ it('commits the transfer audit trail and notification jobs with lifecycle writes
     expect(audit).toContain(`\`organization.ownership_transfer_${action}\``)
   }
   expect(audit).toContain('confirming transaction, write `organization.ownership_transferred`')
+  expect(audit).toContain('requires exactly `targetMembershipId`')
+  expect(audit).toContain("existing readers of the team's management journal")
   expect(audit).toContain(
     '`membership.role_changed` for both memberships, each targeted by its membership ID with `oldRole` and `newRole`',
   )
@@ -135,8 +137,10 @@ it('preserves resource ownership and applies the new role to already-open sessio
   )
 })
 
-it('plans REST and interface parity separately from bilingual browser acceptance', () => {
+it('plans rate limits, REST parity and bilingual acceptance as separate steps', () => {
   const steps = section('One-day implementation steps')
+  expect(steps).toMatch(/\| Service \|[^|]*locked lifecycle transitions[^|]*\|/)
+  expect(steps).toMatch(/\| Service rate limits \|[^|]*carried-over offer[^|]*\|/)
   expect(steps).toMatch(/\| REST and interface parity \|[^|]*OpenAPI[^|]*Postgres[^|]*\|/)
   expect(steps).toMatch(
     /\| Bilingual UI and two-party browser acceptance \|[^|]*en[^|]*zh-CN[^|]*jsdom[^|]*credential exclusions[^|]*\|/,

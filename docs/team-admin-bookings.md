@@ -113,6 +113,7 @@ The same bounded range, streaming limits and file privacy guidance apply as docu
 Bulk cancellation is off by default pending operator acceptance. Enable it with
 `TEAM_BOOKING_BULK_CANCELLATION_ENABLED=true` on the app server and any separate workers.
 While the switch is off, list responses omit page proofs and the bulk routes return 404.
+Team administrators can still cancel individual bookings.
 
 When enabled, an opted-in list read also returns `bulkPageToken` and `bulkPageExpiresAt`.
 The proof covers a single returned page. The preview and status interfaces return booking
@@ -120,3 +121,9 @@ IDs and outcome codes. The browser uses the existing list fields for recognizabl
 in the confirmation and keeps only the submitted receipt reference for recovery in the
 current tab. See the [bulk cancellation contract](team-booking-bulk-cancellation.md) for
 authorization and execution details.
+
+## Departure handoff
+
+The [departure handoff design](member-departure-handoff.md#staged-administrator-flow) describes
+the staged owner/admin preview and confirmation for one future booking. Production keeps the
+feature off until the production offer and consent flow is complete and verified.

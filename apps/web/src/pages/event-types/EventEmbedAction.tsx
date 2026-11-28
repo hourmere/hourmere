@@ -7,6 +7,7 @@ import { api, unwrap } from '../../api/client.ts'
 import { errorMessage } from '../../api/errors.ts'
 import type { EventType } from '../../api/resources.ts'
 import { CopyButton } from '../../components/CopyButton.tsx'
+import { UserContentMessage } from '../../components/UserContent.tsx'
 import { useLoad } from '../../hooks.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import type { UiText } from '../../i18n/translate.ts'
@@ -229,7 +230,12 @@ function DeleteEventDialog({
         if (!busy) onClose()
       }}
     >
-      <h2 id={id}>{t('Delete “{0}”? This cannot be undone.', { '0': event.title })}</h2>
+      <h2 id={id}>
+        <UserContentMessage
+          message="Delete “{0}”? This cannot be undone."
+          values={{ '0': event.title }}
+        />
+      </h2>
       <button
         type="button"
         className="button button-danger"
@@ -311,7 +317,9 @@ function EventEmbedDialog({
       }}
     >
       <div className="embed-dialog-heading">
-        <h2 id={`${id}-title`}>{t('Embed {0}', { '0': event.title })}</h2>
+        <h2 id={`${id}-title`}>
+          <UserContentMessage message="Embed {0}" values={{ '0': event.title }} />
+        </h2>
         <button type="button" className="button button-small" onClick={closeDialog}>
           {t('Close')}
         </button>

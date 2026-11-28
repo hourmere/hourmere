@@ -239,15 +239,18 @@ async function createSamlClient(
     throw new Error('The owned Keycloak SAML client did not return an identifier')
   const clientPath = `${clientsPath}/${id}`
   const ssoEndpoint = `${issuer}/protocol/saml`
-  const metadataDocument = await keycloakRequest(`${ssoEndpoint}/descriptor`, ca, {
-    action: 'read the owned Keycloak SAML descriptor',
-    expectedStatus: 200,
-  })
   const { hostname, port } = new URL(issuer)
-  const { entityId, configuration } = await resolveSamlProviderInput(
-    { metadataDocument, entityId: issuer, ssoUrl: ssoEndpoint, subjectAttribute },
-    { privateTargets: [{ host: hostname, port: Number(port) }] },
-  )
+  const readMetadata = async () => {
+    const metadataDocument = await keycloakRequest(`${ssoEndpoint}/descriptor`, ca, {
+      action: 'read the owned Keycloak SAML descriptor',
+      expectedStatus: 200,
+    })
+    return resolveSamlProviderInput(
+      { metadataDocument, entityId: issuer, ssoUrl: ssoEndpoint, subjectAttribute },
+      { privateTargets: [{ host: hostname, port: Number(port) }] },
+    )
+  }
+  const { entityId, configuration } = await readMetadata()
 
   const readAttributes = async (authorization: string) => {
     const action = 'read the owned Keycloak SAML client attributes'
@@ -265,6 +268,9 @@ async function createSamlClient(
     entityId,
     ...configuration,
     subjectAttribute,
+    async readSigningCertificates() {
+      return (await readMetadata()).configuration.signingCertificates
+    },
     async signingSettings() {
       const attributes = await readAttributes(await authorize())
       return {
@@ -381,6 +387,7 @@ function realmFactory(origin: string, ca: string, connection: ReturnType<typeof 
       throw error
     }
 
+    const linkedUserPath = `${adminRealm}/users/${personas.linked.subject}`
     return {
       issuer,
       clientId: client.clientId,
@@ -390,6 +397,39 @@ function realmFactory(origin: string, ca: string, connection: ReturnType<typeof 
       saml,
       ...personas,
       close,
+      async linkedSessionCount() {
+        const action = 'count the linked fixture user’s Keycloak sessions'
+        const payload = await admin(`${linkedUserPath}/sessions`, {
+          action,
+          expectedStatus: 200,
+          authorization: await authorize(),
+        })
+        try {
+          const sessions = JSON.parse(payload)
+          if (Array.isArray(sessions)) return sessions.length
+        } catch {
+          // Session representations are private fixture data.
+        }
+        throw new Error(`Unable to ${action}`)
+      },
+      async logoutLinkedUser() {
+        await admin(`${linkedUserPath}/logout`, {
+          action: 'sign the linked fixture user out of Keycloak',
+          expectedStatus: 204,
+          method: 'POST',
+          authorization: await authorize(),
+        })
+      },
+      async disableLinkedUser() {
+        await admin(linkedUserPath, {
+          action: 'disable the linked fixture user in Keycloak',
+          expectedStatus: 204,
+          method: 'PUT',
+          authorization: await authorize(),
+          contentType: 'application/json',
+          body: JSON.stringify({ enabled: false }),
+        })
+      },
       async rotateSigningKey() {
         const authorization = await authorize()
         const action = 'rotate the owned Keycloak realm signing key'

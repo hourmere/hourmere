@@ -12,6 +12,7 @@ const base = {
   BETTER_AUTH_SECRET: 'synthetic-stripe-test-secret-at-least-32-characters',
 }
 const apiKey = ['rk', 'test', 'synthetic'.repeat(4)].join('_')
+const liveApiKey = ['rk', 'live', 'synthetic'.repeat(4)].join('_')
 const signingSecret = ['whsec', 'synthetic'.repeat(4)].join('_')
 const configured = {
   ...base,
@@ -22,6 +23,7 @@ const configured = {
 
 function expectRedacted(text: string) {
   expect(text.includes(apiKey), 'Stripe API key remains private').toBe(false)
+  expect(text.includes(liveApiKey), 'Stripe live API key remains private').toBe(false)
   expect(text.includes(signingSecret), 'Stripe endpoint signing secret remains private').toBe(false)
 }
 
@@ -98,9 +100,13 @@ describe('Stripe startup configuration', () => {
   })
 })
 
-it.skipIf(!process.env.DATABASE_URL)(
-  'keeps Stripe settings out of production instance responses and logs with the paid flag set',
-  async () => {
+it.skipIf(!process.env.DATABASE_URL).each([
+  { mode: 'test', matches: true, availability: 'available' },
+  { mode: 'test', matches: false, availability: 'stripe_unverified' },
+  { mode: 'live', matches: true, availability: 'live_mode_unavailable' },
+])(
+  'reports $availability for Stripe $mode mode in production',
+  async ({ mode, matches, availability }) => {
     const db = await createTestDatabase(process.env.DATABASE_URL as string, undefined, {
       tag: 'stripe_config',
     })
@@ -113,23 +119,41 @@ it.skipIf(!process.env.DATABASE_URL)(
         throw new Error('Unexpected outbound request in startup test')
       return fetchOnLoopback(input, init)
     })
-    try {
-      const server = await startServer({
-        ...configured,
-        DATABASE_URL: db.url,
-        HOURMERE_ROLE: 'web',
-        NODE_ENV: 'production',
-        STRIPE_MODE: 'test',
-        PAID_BOOKINGS_ENABLED: 'true',
-        PORT: '0',
-        PUBLIC_URL: 'http://localhost',
+    const stripeTransport = vi.fn<typeof fetch>(async (input, init) => {
+      const url = new URL(String(input))
+      expect(url.origin).toBe('https://api.stripe.com')
+      expect(url.pathname).toBe('/v1/account')
+      expect(init?.method).toBe('GET')
+      return Response.json({
+        object: 'account',
+        id: matches ? configured.STRIPE_ACCOUNT_ID : 'acct_differentfixture',
       })
+    })
+    try {
+      const server = await startServer(
+        {
+          ...configured,
+          DATABASE_URL: db.url,
+          HOURMERE_ROLE: 'web',
+          NODE_ENV: 'production',
+          STRIPE_MODE: mode,
+          STRIPE_API_KEY: mode === 'live' ? liveApiKey : apiKey,
+          PAID_BOOKINGS_ENABLED: 'true',
+          PORT: '0',
+          PUBLIC_URL: 'http://localhost',
+        },
+        { stripeTransport },
+      )
       try {
         const result = await fetch(`http://127.0.0.1:${server.port}/api/v1/instance`)
         expect(result.status).toBe(200)
         const response = await result.text()
         expectRedacted(response)
-        expect(response.toLowerCase().includes('stripe')).toBe(false)
+        // Check both guards even if one assertion fails.
+        expect.soft(JSON.parse(response)).toMatchObject({
+          eventTypePaymentAvailability: availability,
+        })
+        expect.soft(stripeTransport).toHaveBeenCalledTimes(mode === 'live' ? 0 : 1)
         expect(response.includes(configured.STRIPE_ACCOUNT_ID)).toBe(false)
         expect(http).toHaveBeenCalledTimes(1)
       } finally {

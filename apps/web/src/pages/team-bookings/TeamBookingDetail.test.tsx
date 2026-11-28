@@ -3,7 +3,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { api, type Schemas, unwrap } from '../../api/client.ts'
 import { isOrganizationContextChanged, RequestError } from '../../api/errors.ts'
 import { loadProfile } from '../../api/resources.ts'
@@ -24,6 +24,10 @@ import { TeamBookingDetailPage } from './TeamBookingDetail.tsx'
 const ID = 'b0000000-0000-7000-8000-000000000001'
 const GET = `GET /api/v1/team/bookings/${ID}`
 const CANCEL = `POST /api/v1/team/bookings/${ID}/cancel`
+const HANDOFF_PREVIEW = `GET /api/v1/team/bookings/${ID}/handoff-preview`
+const OFFER_ID = 'b0000000-0000-7000-8000-000000000002'
+const HANDOFF_APPLY = `POST /api/v1/team/bookings/${ID}/handoff-offers/${OFFER_ID}/apply`
+const REPLACEMENT_ID = 'b0000000-0000-7000-8000-000000000003'
 const TEAM: Schemas['Me'] = {
   ...ME,
   organization: { ...ME.organization, personal: false, name: 'Research team' },
@@ -111,6 +115,8 @@ describe('team admin booking detail', () => {
     expect(api.to(GET)[0]?.headers.get('x-expected-organization-id')).toBe(TEAM.organization.id)
     expect(screen.queryByRole('button', { name: /Reschedule/ })).toBeNull()
     expect(screen.queryByRole('button', { name: /Retry/ })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Booking handoff' })).toBeNull()
+    expect(api.to(HANDOFF_PREVIEW)).toHaveLength(0)
     expect(api.calls.some((call) => call.path.startsWith('/api/v1/bookings/'))).toBe(false)
   })
 
@@ -203,5 +209,113 @@ describe('team admin booking detail', () => {
       '',
     ])
     await expect(verifyExpectedTeam(mutant)).rejects.toMatchObject({ name: 'AssertionError' })
+  })
+})
+
+describe('team booking handoff', () => {
+  const preview = {
+    candidateName: 'Replacement host name',
+    start: BOOKING.start,
+    end: BOOKING.end,
+    evaluatedAt: '2030-03-01T01:00:00Z',
+    availability: 'available',
+    locationKind: 'zoom',
+  } as const
+  const offer = {
+    id: OFFER_ID,
+    version: 3,
+    expiresAt: '2030-03-02T00:00:00Z',
+  }
+
+  it('requires a fresh approval check after losing the result of a confirm request', async () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2030-03-01T01:00:00Z') })
+    try {
+      let committed = false
+      const calls = server({
+        [GET]: () =>
+          json(200, {
+            ...BOOKING,
+            status: committed ? 'cancelled' : 'confirmed',
+            departureHandoffEnabled: true,
+          }),
+        [HANDOFF_PREVIEW]: () =>
+          json(
+            200,
+            committed
+              ? {
+                  offer: null,
+                  preview: null,
+                  receipt: {
+                    sourceBookingId: ID,
+                    replacementBookingId: REPLACEMENT_ID,
+                    conference: 'failed',
+                    oldConferenceCleanup: 'unresolved',
+                  },
+                }
+              : { offer: { ...offer, state: 'ready' }, preview, receipt: null },
+          ),
+        [HANDOFF_APPLY]: () => {
+          committed = true
+          return json(503, { error: 'unavailable' })
+        },
+      })
+      open()
+      const user = userEvent.setup()
+      const handoff = within(await screen.findByRole('region', { name: 'Booking handoff' }))
+      await user.click(handoff.getByRole('button', { name: 'Preview handoff' }))
+      await handoff.findByText('All participants have approved.')
+      expect(document.activeElement).toBe(handoff.getByRole('region', { name: 'Handoff status' }))
+      expect(calls.to(HANDOFF_PREVIEW)[0]?.headers.get('x-expected-organization-id')).toBe(
+        TEAM.organization.id,
+      )
+      const confirm = handoff.getByRole('button', { name: 'Confirm handoff' })
+      await user.click(confirm)
+      await handoff.findByText(/Could not confirm whether the handoff completed/)
+      expect((confirm as HTMLButtonElement).disabled).toBe(true)
+      expect(handoff.queryByText('Booking handoff completed.')).toBeNull()
+      await user.click(confirm)
+      expect(calls.to(HANDOFF_APPLY)).toHaveLength(1)
+      expect(calls.to(HANDOFF_APPLY)[0]?.body).toEqual({ version: 3 })
+      expect(calls.to(HANDOFF_APPLY)[0]?.headers.get('x-expected-organization-id')).toBe(
+        TEAM.organization.id,
+      )
+      await user.click(handoff.getByRole('button', { name: 'Refresh handoff' }))
+      await handoff.findByText('Booking handoff completed.')
+      expect(handoff.getByText(/The replacement meeting link could not be verified/)).toBeDefined()
+      expect(
+        handoff.getByText(/Cleanup of the original meeting could not be verified/),
+      ).toBeDefined()
+      expect(
+        handoff.getByRole('link', { name: 'View replacement booking' }).getAttribute('href'),
+      ).toBe(`/app/bookings/${REPLACEMENT_ID}`)
+      expect(handoff.queryByRole('button', { name: 'Confirm handoff' })).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('blocks submit when a displayed ready offer expires before the next interaction', async () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2030-03-01T01:00:00Z') })
+    try {
+      const calls = server({
+        [GET]: () => json(200, { ...BOOKING, departureHandoffEnabled: true }),
+        [HANDOFF_PREVIEW]: () =>
+          json(200, { offer: { ...offer, state: 'ready' }, preview, receipt: null }),
+      })
+      open()
+      const user = userEvent.setup()
+      const handoff = within(await screen.findByRole('region', { name: 'Booking handoff' }))
+      await user.click(handoff.getByRole('button', { name: 'Preview handoff' }))
+      await handoff.findByText('All participants have approved.')
+      const confirm = handoff.getByRole('button', { name: 'Confirm handoff' })
+      vi.setSystemTime(new Date(offer.expiresAt))
+      await user.click(confirm)
+      await handoff.findByText(/Consent has expired/)
+      expect((confirm as HTMLButtonElement).disabled).toBe(true)
+      expect(handoff.queryByText('The proposed time is available.')).toBeNull()
+      expect(calls.to(HANDOFF_APPLY)).toHaveLength(0)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

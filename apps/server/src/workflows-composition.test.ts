@@ -14,8 +14,8 @@ const serverUrl = process.env.DATABASE_URL
 const publicUrl = 'http://localhost'
 const subject = 'Workflow composition test'
 
-describe.skipIf(!serverUrl)('workflow opt-in across real server roles', () => {
-  it('captures and delivers only with explicit opt-in', async () => {
+describe.skipIf(!serverUrl)('workflow defaults across real server roles', () => {
+  it('captures and delivers by default and honors the explicit emergency stop', async () => {
     const owned = await createTestDatabase(serverUrl as string)
     const db = createDb(owned.pool)
     const smtp = fakeSmtpServer()
@@ -78,7 +78,6 @@ describe.skipIf(!serverUrl)('workflow opt-in across real server roles', () => {
         WEBHOOK_ENCRYPTION_KEY: randomBytes(32).toString('base64'),
         WEBHOOK_PRIVATE_TARGETS: target,
       }
-      const enabledEnv = { ...env, WORKFLOWS_ENABLED: 'true' }
       const handle = 'workflow-composition'
       await db
         .insertInto('profiles')
@@ -114,7 +113,7 @@ describe.skipIf(!serverUrl)('workflow opt-in across real server roles', () => {
         return booking.id
       }
 
-      web = await startServer({ ...enabledEnv, HOURMERE_ROLE: 'web' })
+      web = await startServer({ ...env, HOURMERE_ROLE: 'web' })
       const endpointResponse = await post(`${appUrl(web)}/webhooks`, {
         url: `http://${target}/workflow`,
         events: ['workflow.executed'],
@@ -155,26 +154,18 @@ describe.skipIf(!serverUrl)('workflow opt-in across real server roles', () => {
       await web.close()
       web = undefined
 
-      // These bookings match definitions that are already enabled in storage.
-      for (const [hour, flag] of [
-        [10, undefined],
-        [11, ''],
-      ] as const) {
-        web = await startServer({
-          ...env,
-          HOURMERE_ROLE: 'web',
-          ...(flag !== undefined ? { WORKFLOWS_ENABLED: flag } : {}),
-        })
-        const instance = await fetch(`${appUrl(web)}/instance`)
-        expect(await instance.json()).toMatchObject({ workflowsEnabled: false })
-        await book(web, hour)
-        expect(await db.selectFrom('workflow_enrollments').select('id').execute()).toEqual([])
-        expect(await db.selectFrom('workflow_runs').select('id').execute()).toEqual([])
-        await web.close()
-        web = undefined
-      }
+      const stoppedEnv = { ...env, WORKFLOWS_ENABLED: 'false' }
+      web = await startServer({ ...stoppedEnv, HOURMERE_ROLE: 'web' })
+      const stoppedInstance = await fetch(`${appUrl(web)}/instance`)
+      expect(await stoppedInstance.json()).toMatchObject({ workflowsEnabled: false })
+      // The booking matches definitions that are already enabled in storage.
+      await book(web, 10)
+      expect(await db.selectFrom('workflow_enrollments').select('id').execute()).toEqual([])
+      expect(await db.selectFrom('workflow_runs').select('id').execute()).toEqual([])
+      await web.close()
+      web = undefined
 
-      worker = await startServer({ ...env, HOURMERE_ROLE: 'worker', WORKFLOWS_ENABLED: '' })
+      worker = await startServer({ ...stoppedEnv, HOURMERE_ROLE: 'worker' })
       const health = await fetch(`http://127.0.0.1:${worker.port}/api/health`)
       expect(health.status).toBe(200)
       await health.body?.cancel()
@@ -197,7 +188,7 @@ describe.skipIf(!serverUrl)('workflow opt-in across real server roles', () => {
       await worker.close()
       worker = undefined
 
-      web = await startServer({ ...enabledEnv, HOURMERE_ROLE: 'web' })
+      web = await startServer({ ...env, HOURMERE_ROLE: 'web', WORKFLOWS_ENABLED: '' })
       const instance = await fetch(`${appUrl(web)}/instance`)
       expect(await instance.json()).toMatchObject({ workflowsEnabled: true })
       const bookingId = await book(web, 12)
@@ -210,7 +201,7 @@ describe.skipIf(!serverUrl)('workflow opt-in across real server roles', () => {
       expect(workflowEmails()).toEqual([])
       expect(requests).toEqual([])
 
-      worker = await startServer({ ...enabledEnv, HOURMERE_ROLE: 'worker' })
+      worker = await startServer({ ...env, HOURMERE_ROLE: 'worker' })
       await vi.waitFor(
         async () => {
           expect(

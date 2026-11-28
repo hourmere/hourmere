@@ -1,30 +1,38 @@
 ---
-title: Single sign-on (OIDC)
-description: Turn on organization OIDC single sign-on, set up a team's identity provider, and understand what stays available when it is off.
+title: Single sign-on
+description: Set up a team identity provider with OIDC or SAML single sign-on and recover access when sign-in fails.
 ---
 
 Organization single sign-on lets a team's members sign in to that team through the team's
-own OpenID Connect (OIDC) identity provider, and lets the team require it. It is available
-to every installation, including self-hosted ones, without a subscription or license
-requirement. **It is off by default.** SAML is being built and is not available yet.
+OpenID Connect (OIDC) or SAML 2.0 identity provider, and lets the team require it. It is
+available to every installation, including self-hosted ones, without a subscription or
+license requirement. **Both protocols are on by default.** An upgrade on an instance
+with no SSO configuration adds SSO navigation and sign-in options. Team SSO still
+requires a configured provider, and enforcement requires a team owner to turn it on.
 
-## Turn it on
+## Instance configuration
 
-The instance operator sets two variables and restarts the server (web and worker alike):
+Set an encryption key before teams set up providers. Use the same settings
+on web and worker. For Compose, update the private `.env` and run
+`./scripts/compose-up.sh -d --wait` to recreate the affected services. For direct
+deployments, update the process environment and restart each role.
 
 | Variable | Value |
 |---|---|
-| `SSO_OIDC_ENABLED` | `true`. Empty or unset follows the release default, which is off for now; `false` keeps it off; any other value stops startup. |
+| `SSO_OIDC_ENABLED` | Unset, empty or `true` enables OIDC. `false` turns it off. Other values stop startup. |
+| `SSO_SAML_ENABLED` | Unset, empty or `true` enables SAML. `false` turns it off. Other values stop startup. |
 | `SSO_ENCRYPTION_KEY` | An independent 32-byte base64 key (`openssl rand -base64 32`) that seals identity provider configuration. Keep it stable and backed up privately: without it saved providers cannot be read. |
 
 Hourmere also needs a canonical HTTPS `PUBLIC_URL` and working SMTP, because every first
 enrollment and every sensitive change is confirmed through the member's own mailbox. An
 identity provider on a private network, or on a port other than 443, must be listed in
-[`SSO_PRIVATE_TARGETS`](/docs/configuration#private-identity-providers). See the
-[configuration reference](/docs/configuration) for all three settings.
+[`SSO_PRIVATE_TARGETS`](/docs/configuration#private-identity-providers) when Hourmere
+fetches data from it. See the [configuration reference](/docs/configuration).
 
-`GET /api/v1/instance` reports the effective state as `ssoOidcEnabled`; `ssoSamlEnabled`
-is always `false` for now.
+`GET /api/v1/instance` reports the effective state of each protocol as `ssoOidcEnabled`
+and `ssoSamlEnabled`. A `.env` created by `scripts/setup.sh` or copied from `.env.example`
+with empty settings uses the new default after an upgrade, including through Compose.
+Older `.env` files that omit either switch also use the default for that protocol.
 
 ## Set up a team
 
@@ -32,17 +40,27 @@ A team owner or administrator opens **Settings → Single sign-on** in the team'
 
 1. In **SSO domains**, generate a challenge for the team's exact email domain, publish the
    TXT record it shows in DNS, and choose **Verify domain**. Hourmere rechecks the record
-   regularly; a domain whose record disappears stops authorizing new sign-ins.
-2. In **Identity providers**, create an OIDC provider with the issuer, client ID and client
-   secret from your identity provider, and associate the verified domain. Then register
-   `https://<your Hourmere host>/api/auth/sso/callback/<providerId>` as the redirect URL
-   at your identity provider. The provider ID is listed by the CLI command
-   `sso providers list` and by `GET /api/v1/team/sso/providers`.
+   daily. A missing record or failed DNS lookup freezes new trust, including new links and
+   just-in-time admission. Existing linked members can still sign in while the current
+   verification remains unexpired and they meet the other sign-in requirements.
+2. In **Identity providers**, create a provider and associate the verified domain.
+
+   - For OIDC, enter the issuer, client ID and client secret. In the identity provider,
+     register the exact redirect URL `https://<your Hourmere host>/api/auth/sso/callback/<providerId>`.
+   - For SAML, enter the IdP entity ID, sign-in URL and signing certificates, paste IdP
+     metadata XML, or import IdP metadata by HTTPS URL. Use the Hourmere service provider
+     metadata in the provider form to register the exact ACS URL and stable entity ID in
+     the IdP. Configure it to sign assertions with a supported certificate. In Keycloak,
+     enable **Sign assertions**.
+
+   The CLI command `hourmere sso providers list` and `GET /api/v1/team/sso/providers`
+   list the provider ID for the selected team.
+
 3. Choose **Test provider**. After a passing test of the current revision, a team owner can
    enable the provider. Editing a provider creates a new revision that needs a new test.
-4. Give members the team's sign-in link,
-   `https://<your Hourmere host>/sign-in?sso=<providerId>`. The sign-in page never looks a
-   provider up by email address or domain.
+4. Give members the team's sign-in link. For OIDC use
+   `https://<your Hourmere host>/sign-in?sso=<providerId>`. For SAML append `&saml=1`.
+   Members choose their provider through this link.
 
 Changes to SSO settings ask you to verify your identity first, through a link sent to your
 Hourmere mailbox or, once the team requires SSO, through a fresh sign-in at the identity
@@ -63,63 +81,127 @@ New people join by invitation unless the team chooses **Just-in-time admission**
 ## Require SSO
 
 In **SSO enforcement** a team owner can require SSO for the team. This needs an enabled,
-owner-tested provider with a verified domain and at least one owner who has accepted
-**recovery enrollment**. Once required:
+owner-tested provider for a protocol that is on, with a verified domain and at least one
+current owner who has accepted **recovery enrollment**.
 
 - team data is available only to browser sessions that signed in through the team's
-  provider; personal spaces are unaffected;
+  provider; personal spaces are unaffected.
 - API keys and connected apps (MCP OAuth) in the team's space need an **SSO delegation**,
   which their owner binds under **API keys** or **Connected apps** after a fresh SSO
-  sign-in, and which expires;
+  sign-in. Each lease lasts at most 30 days and can end sooner when the credential
+  expires or a validated IdP session deadline arrives. MCP token refresh never renews it.
 - an enrolled owner can use **SSO recovery** from Settings to turn the requirement off
-  without the identity provider, after confirming their mailbox. A self-hosting operator
-  can also turn it off with the
-  [operator recovery command](https://github.com/hourmere/hourmere/blob/main/docs/sso.md#operator-recovery-runbook).
+  without the identity provider, after confirming their mailbox. When all enrolled owners
+  lose mailbox access, the instance operator can turn off enforcement for the affected team.
+  See the [backup and recovery drill](/docs/self-hosting#sso-backup-and-recovery-drill).
+
+### Repair a provider during recovery
+
+1. Sign in using your usual Hourmere method. From personal **Settings**, open **SSO recovery**,
+   select the enforced team, choose **Start recovery** and verify your Hourmere mailbox.
+   The session stays in your personal space.
+2. Under **Repair identity providers**, choose **Edit**, or add a replacement provider
+   for a protocol enabled on the instance. For OIDC, choose **Replace client secret**
+   if it changed. For SAML, use **Download service provider metadata** to check the ACS
+   URL and entity ID to register at the IdP. In the SAML editor, choose manual entry,
+   metadata XML or metadata URL. Saved certificates and metadata are write-only. When
+   replacing signing certificates, enter the complete trusted set. For a planned rotation,
+   include the old and new certificates during the overlap, then remove the old certificate
+   after the IdP switches. Save the repair.
+3. Choose **Verify again to continue recovery**, verify your mailbox and select **Test provider**.
+   Follow **Continue to identity provider** and complete the test in the new tab. Each
+   revision needs its own passing test.
+4. Back in recovery, verify your mailbox again, choose **Check provider test result** and
+   **Enable provider** once the current revision passes and an associated domain is verified.
+
+Each save, test or enable action uses a separate recovery grant. Repair needs an available
+IdP to complete the test. During an outage, choose **Stop requiring SSO** after verifying
+your mailbox, keeping the team's current admission mode. You can inspect a provider and
+stop requiring SSO even if its protocol is off. The repair controls appear for enabled
+protocols only.
 
 ## What off means
 
-Turning `SSO_OIDC_ENABLED` off (or leaving it unset) **never lifts a team's stored SSO
-requirement**. For a team that already has SSO configuration:
+Turning either protocol off preserves the team's stored SSO requirement. For a team
+that already has SSO configuration:
 
-- Everything that adds trust stops and answers `404 sso_disabled`: sign-in, callbacks,
-  provider creation, editing, tests and enabling, account linking, step-up, delegation
-  binding, new domain challenges and verification, just-in-time admission, recovery
-  enrollment, and turning the requirement on.
-- Existing browser proofs and delegations are suspended, not revoked. They work again if
-  the setting returns before their own deadline, which nothing extends. Meanwhile members
-  of a team that requires SSO cannot reach that team; their personal spaces still work.
-- Reads, recovery and everything that removes trust stay available, each with its usual
-  mailbox confirmation: SSO recovery, turning the requirement off, disabling or deleting a
-  provider, deleting a domain, unlinking, retiring a member's link and revoking a
-  delegation. On a team that requires SSO, an enrolled owner uses SSO recovery first.
+- Requests that add trust through the disabled protocol return `404 sso_disabled`. This
+  includes sign-in, callbacks, SAML ACS and metadata, provider creation, editing, tests
+  and enabling, account linking, step-up and delegation binding. Starting enforcement
+  requires a usable provider for an enabled protocol. Domain challenges and verification,
+  just-in-time admission and recovery enrollment require at least one enabled protocol.
+- Pending attempts for the disabled protocol cannot complete while it is off. Existing
+  browser proofs and delegations for it are suspended. They can resume if still valid
+  when the protocol is re-enabled, with their original deadlines. Enforced team access
+  still requires a live proof or delegation from an enabled protocol. Personal spaces
+  and access through the other protocol retain their own rules.
+- Reads, recovery and trust-reducing writes keep their normal authorization. Mailbox
+  proof stays available for recovery and supported trust-reducing writes, including
+  self-unlink. Administrative trust-reducing writes that require SSO step-up return
+  `403 sso_required` when the enforced team has no available step-up. An enrolled owner
+  can turn off team enforcement in **SSO recovery**, then use mailbox confirmation for
+  tasks such as deactivating or retiring a provider, deleting a domain or retiring links.
+  A member can revoke their own SAML delegation without a live SSO proof. When OIDC is
+  off on an enforced team, the revoke request returns `403 sso_required` for an OIDC
+  delegation or an unknown binding ID.
 - Domain rechecks keep running, so verification state is current when the setting returns.
 
-A team that never configured SSO sees no SSO controls while the setting is off.
+A team that never configured SSO sees no SSO controls while both protocols are off.
 
 ## Limitations
 
-- OIDC only; SAML is not available yet and no setting enables it.
-- Microsoft Entra ID does not emit `auth_time` unless configured as an optional claim;
-  without it, every fresh verification at Entra also asks for mailbox confirmation.
-- Signing out of the identity provider leaves the Hourmere session active until it expires.
-  To revoke team access after someone leaves the identity provider, remove the member in
-  Hourmere or configure directory deprovisioning through [SCIM](/docs/scim).
+- SAML sign-in starts at Hourmere. The IdP must send a signed, unencrypted assertion.
+  Signing only the response is insufficient. Linking uses a persistent NameID by default
+  or a configured immutable subject attribute. A passing provider test checks the test
+  account and current revision. Each member still needs a valid stable identifier.
+- If Entra OIDC omits `auth_time`, or a SAML IdP omits `AuthnInstant` or returns an old
+  instant when Hourmere requests fresh authentication with `ForceAuthn`, the member must
+  confirm their mailbox as part of step-up. Entra can supply `auth_time` as an optional claim.
+- SAML single logout is unavailable. IdP logout or IdP-only deactivation does not
+  immediately end Hourmere access. Browser proofs last at most eight hours and delegated
+  access at most 30 days. For prompt revocation, remove the member in Hourmere or use
+  directory deprovisioning through [SCIM](/docs/scim).
+- Domain claims cover one exact domain. Expired claims remain exclusive until explicitly
+  retired. There is no automatic transfer, IdP group-to-role mapping, service-account
+  exemption, or instance-wide forced SSO.
 
-REST, MCP and CLI coverage is listed in the [API key](/docs/api-keys) and
-[MCP](/docs/mcp) scope tables; the full design is in
+See the [REST](/docs/rest), [MCP](/docs/mcp) and [CLI](/docs/cli) guides for read examples
+and the [API key scope table](/docs/api-keys) for permissions. The full design is in
 [docs/sso.md](https://github.com/hourmere/hourmere/blob/main/docs/sso.md).
 
 ## 中文说明
 
-组织单点登录（OIDC）默认关闭。实例运营者设置 `SSO_OIDC_ENABLED=true` 和独立的
-`SSO_ENCRYPTION_KEY`（32 字节 base64）并重启后生效；留空或不设置时使用版本默认值（目前为
-关闭），其他取值会阻止启动。SAML 仍在开发中，没有可启用它的设置。
+组织单点登录的 OIDC 和 SAML 默认开启。留空、不设置或设为 `true` 会启用对应协议，分别设置
+`SSO_OIDC_ENABLED=false` 或 `SSO_SAML_ENABLED=false` 可关闭，其他取值会阻止启动。升级时，
+由 `scripts/setup.sh` 生成或从 `.env.example` 复制的 `.env` 若留空，直接部署和 Compose 部署都
+会使用新默认值。从未配置单点登录的实例升级后会显示相关导航和登录选项，团队仍须配置提供方，
+强制单点登录需要团队所有者开启。保存提供方前，请配置独立的 `SSO_ENCRYPTION_KEY`（32 字节
+base64）。网页和后台进程使用相同的设置。Compose 部署修改私有 `.env` 后运行
+`./scripts/compose-up.sh -d --wait`，其他部署修改进程环境后重启各角色。可用
+`GET /api/v1/instance` 检查两种协议的实际状态。
 
-团队所有者或管理员在团队空间的**设置 → 单点登录**中验证域名、创建并测试 OIDC 身份提供方，
-由所有者启用后把登录链接发给成员。成员在**设置**的**你的团队登录方式**中关联或解除关联账号。
+团队所有者或管理员在团队空间的**设置 → 单点登录**中验证域名、创建并测试身份提供方。SAML
+支持手动填写身份提供方资料和签名证书、粘贴元数据 XML 或通过 HTTPS 网址导入元数据。使用
+Hourmere 的服务提供方元数据在身份提供方登记准确的 ACS 网址和固定的实体 ID，并开启断言签名。
+由所有者启用通过测试的版本后，把登录链接发给成员。SAML 登录链接末尾加上 `&saml=1`。
+成员在**设置**的**你的团队登录方式**中关联或解除关联账号。
 所有者可在**强制单点登录**中要求团队使用单点登录，前提是至少一位所有者已完成恢复登记。
 
-关闭该设置不会解除团队已保存的强制要求：登录、关联、新配置等增加信任的操作返回
-`404 sso_disabled`；已有的浏览器证明和委托被暂停而非撤销，在各自期限内重新开启设置后继续
-有效；读取、恢复以及停用或删除身份提供方、删除域名、解除关联、撤销委托、关闭强制等降低信任
-的操作保持可用。从未配置过单点登录的团队在关闭时看不到任何相关选项。
+关闭任一协议时，团队已保存的强制要求继续生效。使用该协议登录、关联或添加配置会返回
+`404 sso_disabled`，进行中的尝试在关闭期间也无法完成。该协议的浏览器证明和委托会暂停，
+重新启用时仍在各自期限内且满足当前验证条件才可恢复。两种协议均关闭时，不能新增域名验证、
+开启即时入组或进行恢复登记。读取、恢复及降低信任的操作保留原有授权。强制单点登录的团队如果
+无法进行单点登录重新认证，须由已登记的所有者先通过邮箱恢复关闭强制要求，才能用邮箱验证完成
+需要重新认证的管理操作。域名复查仍会继续。
+从未配置过单点登录的团队在两种协议都关闭时看不到相关选项。
+
+已登记的所有者可用原有方式登录，在个人**设置**的**单点登录恢复**中选择团队并验证邮箱。
+SAML 启用时，可下载服务提供方元数据，并为身份提供方手动填写完整的替换证书、粘贴元数据 XML
+或通过 HTTPS 网址导入元数据。已保存的证书和元数据仅供写入。保存修复、在新标签页测试新版本、
+返回查看测试结果并重新启用，各需一次邮箱验证。身份提供方中断时，可以验证邮箱并关闭强制要求。
+协议关闭时仍可查看配置和关闭强制要求。若所有恢复所有者均无法使用邮箱，由实例运维人员按
+[备份与恢复演练](/docs/self-hosting#sso-backup-and-recovery-drill)关闭受影响团队的强制要求。
+
+SAML 须从 Hourmere 发起，并提交已签名、未加密的断言。身份提供方退出登录或停用用户后，
+Hourmere 的浏览器证明最多有效八小时，委托最多有效三十天。需及时撤销访问权限时，请在
+Hourmere 移除成员或通过 [SCIM](/docs/scim) 取消配置。

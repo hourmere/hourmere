@@ -19,5 +19,5 @@ if (flag !== '--resource-test' || !target.success || extra.length > 0 || !url) {
   )
   process.exitCode = 1
 } else {
-  process.exitCode = await runScimTeamMappingRecovery(url, target.data, true)
+  process.exitCode = await runScimTeamMappingRecovery(url, target.data)
 }

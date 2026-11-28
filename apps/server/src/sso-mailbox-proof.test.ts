@@ -1092,8 +1092,8 @@ describe.skipIf(!databaseUrl)('SSO mailbox proof', () => {
     await expectProductionAvailable(control)
     // Without the operator setting marker the composition would be hard-off again.
     const mutant = await sourceCopy<typeof server>('./server.ts', [
-      'ssoOperatorSetting: true }',
-      'ssoOperatorSetting: false }',
+      'ssoOperatorSetting: true,',
+      'ssoOperatorSetting: false,',
     ])
     await expect(expectProductionAvailable(mutant)).rejects.toMatchObject({
       name: 'AssertionError',
@@ -1228,7 +1228,7 @@ describe.skipIf(!databaseUrl)('SSO mailbox proof', () => {
   })
 })
 
-/** The app startServer assembles answers 404 sso_disabled on both endpoints, before anything. */
+/** The app startServer assembles keeps mailbox proof available with both protocols off. */
 async function expectProductionAvailable(module: typeof server) {
   const refusing = createDb(createPool('postgres://mailbox-proof@127.0.0.1:9/production'))
   const unavailable = async (): Promise<never> => {
@@ -1240,9 +1240,8 @@ async function expectProductionAvailable(module: typeof server) {
       DATABASE_URL: 'postgres://mailbox-proof@127.0.0.1:9/production',
       BETTER_AUTH_SECRET: SECRET,
       PUBLIC_URL: PUBLIC_URL,
-      // Unset, empty and false are the same setting-off state; SAML is not a setting.
-      SSO_OIDC_ENABLED: '',
-      SSO_SAML_ENABLED: 'true',
+      SSO_OIDC_ENABLED: 'false',
+      SSO_SAML_ENABLED: 'false',
       SCIM_PROVISIONING_ENABLED: 'false',
     })
     const app = nativeCreateApp(
