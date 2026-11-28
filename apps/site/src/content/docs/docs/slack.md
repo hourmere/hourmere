@@ -1,98 +1,136 @@
 ---
 title: Slack booking notifications
-description: Send booking updates to Slack using a private incoming-webhook URL.
+description: Send booking updates to a Slack channel with an incoming webhook.
 ---
 
-Connect one Slack destination to each personal or team organization in **Settings →
-Integrations → Slack booking notifications**. Paste an existing Slack incoming-webhook
-URL, select booking creation, cancellation and/or rescheduling, and save. Optionally
-choose an event type to restrict notifications. Choose **All event types** to receive
-notifications for every event type in that organization. You can pause notifications, replace the URL or delete the
-destination at any time. An unavailable saved event type retains its filter; it never
-silently expands to all event types. Permanently deleting the filtered event type also
-deletes its Slack destination and retained deliveries. **Send test message** queues a synthetic sample; check the
-chosen Slack channel to confirm that it arrived.
+Send booking updates to one Slack channel per Hourmere personal or team organization.
+The personal owner or a current team owner or admin can manage the destination.
 
-Hourmere does not install a Slack app or perform Slack OAuth. A workspace administrator
-must supply an incoming-webhook URL already authorized for the intended channel. Follow
-[Slack's incoming-webhook instructions](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks/)
-to obtain one. Slack controls which channel receives messages; Hourmere cannot change it
-independently of the URL. No Slack account or workspace is created by Hourmere.
+## Create a Slack app and choose a channel
 
-## Permissions and secrets
+1. In [Slack's app dashboard](https://api.slack.com/apps), choose **Create New App →
+   From scratch**. Name the app and select the Slack workspace where you want to post.
+2. Open **Incoming Webhooks**, turn on **Activate Incoming Webhooks**, and choose
+   **Add New Webhook to Workspace**. If your workspace requires app approval, ask its
+   app manager to approve the installation.
+3. Pick the channel and select **Authorize**. For a private channel, join it before
+   authorizing. Copy the new URL from **Webhook URLs for Your Workspace**.
+   [Slack's incoming-webhook guide](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks/)
 
-Only the personal owner or current team owners/admins can manage a destination. Ordinary
-team members cannot inspect or change it. Switching spaces changes the destination you
-manage. Stale browser writes are rejected and require reloading before retrying. Creating,
-changing, pausing, resuming, testing and deleting a destination, and the automatic pause
-after a 404/410, are recorded in the [audit log](/docs/audit-log) with the subscribed
-events only, never the URL.
+Slack grants the `incoming-webhook` scope for channel-bound posting. The installation
+runs in Slack. Hourmere requests no Slack OAuth scopes and has no Slack redirect URL to
+register. The webhook URL is the only Slack credential you enter in Hourmere.
+[Slack's scope reference](https://docs.slack.dev/reference/scopes/incoming-webhook/)
 
-The URL is a bearer secret. It is encrypted at rest and returned only in masked form,
-including immediately after saving. Keep the original in a secure secret store if needed.
-The browser clears the URL after submission, including a failed submission; enter it again
-to retry. Never paste it into logs, source control, shell history or support messages.
+## Connect in Hourmere
 
-Only HTTPS URLs under `https://hooks.slack.com/services/` are accepted. Slack documents
-the `slack-gov.com` domain for GovSlack, but its guides do not name the exact incoming-webhook
-host. GovSlack and regional hosts are currently unsupported.
-User information, query parameters, fragments and alternate ports are refused. Each
-attempt rechecks the URL and public DNS addresses through the outbound guard, pins the
-validated address to the socket and does not follow redirects. Private-webhook target
-exceptions do not apply to Slack.
+1. Switch to the personal or team space that owns the bookings. Open **Settings →
+   Integrations → Slack booking notifications**.
+2. Paste the **Slack incoming-webhook URL**, select the events to post, and choose an
+   **Event type filter** or **All event types**. Leave **Enable Slack notifications**
+   checked and select **Save Slack destination**.
+3. Select **Send test message** and look for **Hourmere: test notification** in the
+   selected channel. Hourmere confirms that it queued the test. Confirm delivery in Slack.
+
+The URL is a bearer secret. Anyone who has it can post to its channel. Hourmere encrypts
+it at rest, displays and returns only a masked URL, and clears the URL input when it
+submits a save. Keep the original in a secret store and out of logs, shell history and
+support messages.
+
+To switch channels, authorize a new webhook in Slack for the desired channel, then
+save it in **Replacement Slack webhook URL** and test it. Queued deliveries use the
+current URL, so an older booking update can arrive in the new channel. If Hourmere
+reports that the active space changed, reload before editing.
 
 ## What is sent
 
-Messages use Block Kit and a plain-text fallback. They contain the booking ID, event-type
-title, start/end times with UTC offset, status, and an authenticated admin booking link.
-Personal destinations also include the invitee name. Team destinations send only the
-listed booking fields and omit attendee and host details. Neither sends email addresses,
-custom answers, free-text booking titles, cancellation reasons, management tokens,
-conference URLs or calendar credentials.
-
-User-controlled text is the event-type title and, for personal destinations, the invitee
-name. Hourmere escapes `&`, `<` and `>` as `&amp;`, `&lt;` and `&gt;`, replaces `@` with
-the full-width `＠`, and sends the message as `plain_text` with Slack formatting (`mrkdwn`)
-and link unfurling turned off. That text therefore cannot mention people or channels
-(including `@here` and `<!channel>`), apply formatting or form a labelled link such as
-`<https://example.com|label>`. Hourmere does not alter web addresses in that text: Slack
-may show a plain address or domain name as a clickable link that displays the address
-itself, just as it does for the admin booking link.
-
-Every Slack event type uses the same message layout. The first line names the event type:
+Each message starts with `Hourmere:` followed by the event type.
 
 <!-- slack-events:start -->
-| Event type | Sent when | First line |
-|---|---|---|
-| `booking.created` | A booking is made | `Hourmere: booking.created` |
-| `booking.rescheduled` | A booking moves to a new time | `Hourmere: booking.rescheduled` |
-| `booking.cancelled` | A booking is cancelled | `Hourmere: booking.cancelled` |
-| `booking.reschedule_requested` | A host asks the invitee to choose a new time | `Hourmere: booking.reschedule_requested` |
-| `booking.reschedule_request_expired` | That request expires without a new time | `Hourmere: booking.reschedule_request_expired` |
+| Event type | Sent when |
+|---|---|
+| `booking.created` | A booking is made |
+| `booking.rescheduled` | A booking moves to a new time |
+| `booking.cancelled` | A booking is cancelled |
+| `booking.reschedule_requested` | A host asks the invitee to choose a new time |
+| `booking.reschedule_request_expired` | That request expires without a new time |
 <!-- slack-events:end -->
 
-The remaining lines are the same for every event type. Request events keep the booking's
-current times and `confirmed` status. They do not include the request ID or its message.
-Attendee no-show changes are not sent to Slack; they are available only through
-[signed webhooks](/docs/webhooks).
+The settings page offers creation, cancellation and rescheduling. Subscribe to the
+two reschedule-request events through REST, MCP or the CLI. Saving in Settings
+preserves those subscriptions. Requests and expirations show the booking's current
+time and `confirmed` status. Moving a booking sends a reschedule update, and a
+separate later cancellation sends its own update. Attendee no-show changes are
+available through signed webhooks. [Signed webhooks](/docs/webhooks)
 
-Times use the personal organization owner’s public profile time zone, including the UTC
-offset at the booking instant. There is no team organization time-zone setting; team
-destinations use UTC (`+00:00`) explicitly. A missing personal profile also falls back to
-UTC. Event titles and personal invitee names are truncated before escaping to keep both
-Slack blocks and the stored payload within their size limits.
+Messages include the booking ID, event-type title, start and end with UTC offset,
+status, and a link to the booking in the authenticated Hourmere app when the configured
+origin fits the payload limit. Personal destinations also include the booker's name and
+use the personal owner's profile time zone, falling back to UTC if the profile is missing.
+Team destinations use UTC and omit all attendee and host details. Hourmere omits email
+addresses, custom answers, free-text booking titles, cancellation reasons, reschedule
+request IDs and notes, attendee management links, and meeting links. Anyone with access
+to the channel can see the message text.
+Opening the booking link requires the relevant Hourmere access.
 
-Rescheduling emits a reschedule notification, without an additional cancellation for the
-old booking. A later cancellation emits its own event. The saved snapshot is immutable;
-arrival order need not match booking order. Stored UTC instants preserve the actual
-meeting time across daylight-saving changes.
+Hourmere truncates event-type titles and booker names and sends Block Kit plain text
+with Slack formatting and link previews disabled. User-supplied text cannot create
+mentions or labelled links. Slack may make a plain web address in that text clickable.
 
-Each attempt uses the destination's current URL, enabled state, subscriptions and
-event-type filter, including retries of older snapshots. Replacing the URL can send
-already queued notifications to the new channel. Paused, unsubscribed or filtered-out
-deliveries are permanently skipped when processed; reenabling or broadening the filter
-does not replay skipped events. Changes wait for an in-flight attempt to finish.
-The sample notification has no booking and bypasses the event-type filter.
+## Pause, disconnect or revoke
+
+- To pause delivery, clear **Enable Slack notifications** and save. Re-enable it to
+  receive future updates. Pausing does not retract messages in Slack.
+- To disconnect from Hourmere, select **Delete Slack destination** and confirm.
+  This removes the saved URL and retained delivery records. Pending jobs for that
+  destination skip.
+- To revoke the URL itself, remove that webhook in the Slack app's settings. You can
+  also remove the app from the workspace to revoke its installation. If you want
+  to reconnect, authorize a new webhook and save its URL in Hourmere.
+  [Slack's app removal guide](https://slack.com/help/articles/360003125231-Remove-apps-and-custom-integrations-from-your-workspace)
+
+Hourmere records changes, tests and automatic pauses in the [audit log](/docs/audit-log).
+The audit details contain the subscribed events. They omit the webhook URL.
+
+## Rate limits and delivery failures
+
+Hourmere allows five authorized test attempts per organization per minute per server
+process, shared by REST and MCP. Only one sample can be pending per destination,
+including during retries. A sample bypasses the event-type filter.
+
+Slack generally allows one message per second per channel, with short bursts. Hourmere
+serializes sends per destination and uses its normal retry schedule for Slack HTTP
+429 responses. It does not use Slack's `Retry-After` header to reschedule the attempt.
+[Slack's rate limits](https://docs.slack.dev/apis/web-api/rate-limits/)
+
+Hourmere treats a 2xx response as delivered. A 404 or 410 ends the delivery attempt
+without further retries and pauses the destination. This can happen if the webhook
+has been revoked or the channel is unavailable. Refresh Settings to see the pause.
+Check the channel and installation in Slack, then save a working URL and re-enable
+notifications. Other non-2xx responses and transport failures use the bounded retry
+schedule, with up to 13 total attempts and backoff starting at one minute, capped
+at one hour. Exhausting those retries fails that delivery and leaves the destination
+enabled. A worker that cannot acquire the destination's send lock within ten seconds
+retries later on the same budget. Settings has no Slack delivery history. Check the
+channel to verify receipt.
+
+## Self-hosting
+
+Set these variables on both the web and worker processes. With a single process
+serving HTTP and running jobs, set them there.
+
+| Variable | Value |
+|---|---|
+| `WEBHOOKS_ENABLED` | Set to `true` to capture and deliver Slack notifications and signed webhooks. Defaults to `false`. |
+| `WEBHOOK_ENCRYPTION_KEY` | An independent key of 32 random bytes encoded as base64. Use the same key on web and worker, and back it up securely. Losing it makes existing saved URLs unreadable. |
+| `PUBLIC_URL` | Your public Hourmere origin, used to build the booking link in the message. |
+
+Keep a worker running and allow it to reach `hooks.slack.com` over HTTPS. Store the
+webhook URL in the organization settings. The same Slack app setup works with a
+self-hosted Hourmere instance. Disabling `WEBHOOKS_ENABLED` stops new capture, and
+queued deliveries processed while disabled are skipped.
+See the [configuration reference](/docs/configuration) and
+[webhook delivery limits](/docs/webhooks#delivery-and-operational-limits).
 
 ## REST, MCP and CLI
 
@@ -104,75 +142,39 @@ The sample notification has no booking and bypasses the event-type filter.
 | Delete | `DELETE /slack-destinations/{id}` | `delete_slack_destination` | `slack delete` |
 | Test | `POST /slack-destinations/{id}/test` | `test_slack_destination` | `slack test` |
 
-Creation accepts `{ url, events, isActive?, eventTypeId? }`. `events` is a nonempty,
-duplicate-free selection of the five event types listed under [What is sent](#what-is-sent).
-The settings page offers booking created, cancelled and rescheduled. Use REST, MCP or the
-CLI to subscribe to the two reschedule-request events; saving from the settings page keeps
-them. `eventTypeId` is a UUID belonging to this organization or null. Update accepts the same
-fields optionally; omitting a field preserves it, and null clears the event-type filter.
-Responses contain only destination metadata and a masked URL. `pauseReason` is
-`url_rejected` after Slack answered 404/410 and stays until you replace the URL or enable
-the destination. It is null while the destination is active and after you pause an active
-destination. Treat any other value as paused. Test returns a `deliveryId`
-and HTTP 202, which acknowledges queueing rather than Slack acceptance. While a sample is
-pending (including retries), another test receives HTTP 409 `slack_test_pending`. REST and
-MCP share a limit of five test requests per minute per organization in each server process
-(HTTP 429 on REST). Only requests from a current owner/admin for an existing destination
-count; refused (403) and unknown-destination (404) requests do not, so team members cannot
-use up the admins' limit. Once the limit is reached, authorized requests receive the
-rate-limit response before the destination lookup, without waiting for an active delivery.
-The pending-sample guard applies across all server instances.
+Creation accepts `{ url, events, isActive?, eventTypeId? }`. Select at least one event
+without duplicates. The event-type UUID must belong to the same organization.
+Update accepts any of the same fields. Omit a field to keep it, or pass
+`eventTypeId: null` to clear the filter. `pauseReason` is `url_rejected` after a
+404 or 410 pause. Replacing the URL or explicitly enabling the destination clears
+that reason. A manual pause of an active destination leaves it null.
 
-API keys need `read` or `full` to list and `full` to create, update, delete or test;
-organization ownership/admin permission still applies. Browser-session writes require
-`X-Expected-Organization-Id`; reads accept it too. MCP and CLI use the same service checks.
-Use the CLI's JSON input support to supply configuration privately; avoid putting a secret
-URL directly in a shell command. Consult `hourmere --help` (or `npm run --silent cli -- --help` from source) for command options.
+REST test returns HTTP 202 and a `deliveryId` on enqueue, HTTP 409
+`slack_test_pending` while a sample is pending, and HTTP 429 with `Retry-After`
+when the test budget is exhausted. Refused or unknown-destination requests do not
+use the budget. Once exhausted, the budget check can reject an authorized request
+before looking up its destination.
 
-## Self-hosting and delivery
+API keys need `read` or `full` to list and `full` to change or test. The organization
+role check still applies. Session writes require `X-Expected-Organization-Id`, which
+reads also accept. Use the CLI's JSON input support to provide the URL privately.
+See [CLI](/docs/cli) for command options.
 
-The complete feature is available to self-hosters. Configure a stable, independent
-`WEBHOOK_ENCRYPTION_KEY` (32 random bytes in base64) on both web and worker processes,
-and keep a worker running. Back up the key securely; losing it makes saved URLs
-unreadable. Set `WEBHOOKS_ENABLED=true` on both web and worker. Setting it to `false`
-stops new Slack capture and outbound delivery as well as generic webhooks; queued work
-processed while disabled is skipped.
+## Known limits
 
-Slack reuses Hourmere's webhook transactional outbox, durable delivery IDs, bounded retry
-schedule and failure tracking. Booking changes and notification enqueue commit or roll
-back together. Replaying a successful booking request does not enqueue another event.
-The existing retry budget is thirteen total attempts, starting at one minute and doubling
-with jitter up to one hour. A Slack 404/410 instead stops after one attempt and pauses
-the destination. Settings then says Slack rejected the URL; replace it and enable
-notifications before testing again. A destination you pause yourself shows only that
-notifications are paused. Sends to one destination run one at a time across workers. A
-worker waits at most 10 seconds for another worker's send. After that, it retries later
-on the normal schedule, and that run counts as one of the thirteen attempts. See [webhook delivery limits](/docs/webhooks#delivery-and-operational-limits).
-
-Slack incoming webhooks do **not** verify Hourmere's outbound webhook signature, and
-Slack request signing is for requests sent by Slack, not incoming-webhook delivery.
-The inherited integrity guarantees are the encrypted destination, HTTPS transport,
-immutable transactional snapshot and controlled retries; this is not a claim that Slack
-validates an Hourmere HMAC signature.
-
-## Known limitations
-
-- Slack messages currently use English. The settings interface supports
+- Only commercial Slack incoming-webhook URLs under `https://hooks.slack.com/services/`
+  are accepted. GovSlack and other hosts are unsupported. URLs with user information,
+  query parameters, fragments or an explicit port are refused. Each attempt checks
+  public DNS and the HTTPS destination. Private-target exceptions and redirects are unavailable.
+- Hourmere uses the current enabled state, subscriptions and event-type filter for each
+  attempt. Skipped deliveries are final. An unavailable saved event type keeps its
+  filter. Permanently deleting the event type removes that filtered destination and its
+  retained deliveries.
+- No backfill, manual replay, custom message templates, interactive actions, or Slack
+  message editing and deletion. Messages are in English. The Hourmere settings support
   English and Simplified Chinese.
-- One destination per organization; the channel is determined by its webhook URL.
-- Notifications are minimal operational updates, not full booking summaries. No custom
-  message template, interactive actions or channel selection is supported.
-- Slack may turn a plain web address or domain name in an event-type title or a personal
-  invitee name into a clickable link. Mentions, formatting and labelled links are blocked.
-- The settings page lists three of the five event types; manage the reschedule-request
-  events through REST, MCP or the CLI.
-- Attendee no-show changes are not posted to Slack; subscribe a
-  [signed webhook](/docs/webhooks) to receive them.
-- Delivery is at least once. A worker interrupted after Slack accepts a message can retry
-  it, and Slack incoming webhooks do not deduplicate Hourmere delivery IDs. Duplicate
-  messages are possible. There is no exactly-once or ordering guarantee.
-- Saving validates configuration, not Slack availability. A queued test is not proof of
-  delivery. No past bookings are backfilled; pausing does not retract messages already sent.
-- No Slack app installation, OAuth, message edit/delete or manual delivery replay is offered.
-- Use **Send test message** and check the intended channel after setup or URL replacement.
-  Hourmere cannot confirm who can read that channel.
+- Booking notifications are captured with the booking change. A retry after an ambiguous
+  transport result can post a duplicate, and messages can arrive out of order. Imported
+  bookings are skipped, and pending deliveries expire after 30 days.
+- Slack incoming webhooks use the secret URL and HTTPS to accept posts. They do not
+  verify Hourmere's signed-webhook HMAC.
