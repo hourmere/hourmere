@@ -12,6 +12,7 @@ export interface InvitationMailLimits extends NotificationMailLimits {
   invitationInviterMaxPerDay?: number | undefined
   invitationTeamMaxPerHour?: number | undefined
   invitationTeamMaxPerDay?: number | undefined
+  invitationGlobalRecipientMultiplier?: number | undefined
   scimInvitationMaxPerHour?: number | undefined
   scimInvitationMaxPerDay?: number | undefined
 }
@@ -71,7 +72,7 @@ export async function invitationEmailBudgetAvailable(
   const recipientMaxPerDay = deps.mailRecipientMaxPerDay ?? 20
   // Keep an abuse ceiling across sources and tenants while leaving room for the
   // same person to be provisioned into multiple organizations.
-  const globalRecipientMultiplier = 4
+  const globalRecipientMultiplier = deps.invitationGlobalRecipientMultiplier ?? 4
   if (
     Number(counts.recipientHour) >= recipientMaxPerHour ||
     Number(counts.recipientDay) >= recipientMaxPerDay ||
