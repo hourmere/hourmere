@@ -1,3 +1,4 @@
+import { tokens } from '@hourmere/design-tokens'
 import { describe, expect, it } from 'vitest'
 import styles from './styles.css?raw'
 
@@ -23,7 +24,7 @@ describe('admin polish CSS protections', () => {
   })
 
   it('uses one six-step type scale throughout the shared stylesheet', () => {
-    const tokens = rule(':root')
+    const root = rule(':root')
     for (const [name, size] of [
       ['xs', '0.8125rem'],
       ['sm', '0.875rem'],
@@ -31,8 +32,9 @@ describe('admin polish CSS protections', () => {
       ['lg', '1.125rem'],
       ['xl', '1.5rem'],
       ['2xl', '1.75rem'],
-    ]) {
-      expect(tokens).toContain(`--text-${name}: ${size};`)
+    ] as const) {
+      expect(root).toContain(`--text-${name}: var(--hm-text-${name});`)
+      expect(tokens[`--hm-text-${name}`]).toBe(size)
     }
     const sizes = [...styles.matchAll(/font-size:\s*([^;]+);/g)].map((match) => match[1])
     expect(sizes.length).toBeGreaterThan(20)
