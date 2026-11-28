@@ -7,6 +7,7 @@ import {
   departureHandoffIssue,
   HANDOFF_MAIL_STATES,
   HANDOFF_PREVIEW_ISSUES,
+  type HasPendingHandoffCancellation,
   readDepartureHandoffAdminPreview,
 } from '@hourmere/scheduling/departure-handoff-admin'
 import {
@@ -39,6 +40,7 @@ import {
 
 export interface DepartureHandoffs {
   store: DepartureHandoffAdminStore
+  hasPendingCancellation?: HasPendingHandoffCancellation
   enqueue?: EnqueueDepartureHandoffEmail | undefined
   enqueueRun?: EnqueueDepartureHandoffRun | undefined
   now?: () => Temporal.Instant
@@ -384,6 +386,7 @@ export function departureHandoffRoutes(
             handoffs.store,
             capabilities,
             deps.smtpConfigured,
+            handoffs.hasPendingCancellation,
           ),
           200,
         )

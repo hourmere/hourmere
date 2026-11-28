@@ -111,6 +111,21 @@ export type NotificationKind = (typeof NOTIFICATION_KINDS)[number]
 
 export const BOOKING_NOTIFICATION_JOB = 'booking-notification'
 
+export async function hasPendingHandoffCancellation(db: Db, bookingId: string): Promise<boolean> {
+  // The handoff and this job commit together. A skipped or exhausted job cannot make
+  // further progress, even after pg-boss prunes its terminal history.
+  const result = await sql`
+    SELECT 1 FROM pgboss.job
+    WHERE name = ${BOOKING_NOTIFICATION_JOB}
+      AND policy = 'exclusive'
+      AND state <= 'active'
+      AND COALESCE(singleton_key, '') = ${`${bookingId}:cancelled`}
+      AND data = ${JSON.stringify({ bookingId, kind: 'cancelled', handoff: 'source' })}::jsonb
+    LIMIT 1
+  `.execute(db)
+  return result.rows.length > 0
+}
+
 /**
  * How long before a meeting its reminder goes out: an absolute 24 hours, so across a
  * daylight saving change it arrives an hour earlier or later on the clock.

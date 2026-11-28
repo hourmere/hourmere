@@ -3,6 +3,14 @@ import { createHmac, randomUUID } from 'node:crypto'
 import { createAuth, createAuthPool, createCallerResolver, type Principal } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { createJobs } from '@hourmere/jobs'
+import {
+  BOOKING_NOTIFICATION_JOB,
+  bookingNotificationJob,
+  bookingNotifier,
+  hasPendingHandoffCancellation,
+  type NotificationQueue,
+} from '@hourmere/notifications'
 import type { BookingNotifier } from '@hourmere/scheduling'
 import type { EnqueueDepartureHandoffEmail } from '@hourmere/scheduling/departure-handoff-proposals'
 import type { EnqueueDepartureHandoffRun } from '@hourmere/scheduling/departure-handoff-queue'
@@ -29,6 +37,7 @@ describe.skipIf(!serverUrl)('departure handoff browser routes', () => {
   let pool: ReturnType<typeof createAuthPool>
   let auth: ReturnType<typeof createAuth>
   let storage: Awaited<ReturnType<typeof handoffTestRecords>>
+  let stopJobs: (() => Promise<void>) | undefined
 
   beforeAll(async () => {
     owned = await createTestDatabase(serverUrl as string, undefined, { tag: 'handoff_admin' })
@@ -46,8 +55,12 @@ describe.skipIf(!serverUrl)('departure handoff browser routes', () => {
   })
 
   afterAll(async () => {
-    await pool?.end()
-    await owned?.drop()
+    try {
+      await stopJobs?.()
+    } finally {
+      await pool?.end()
+      await owned?.drop()
+    }
   })
 
   function application(
@@ -58,10 +71,13 @@ describe.skipIf(!serverUrl)('departure handoff browser routes', () => {
       enqueue?: EnqueueDepartureHandoffEmail
       smtpConfigured?: boolean
       enqueueRun?: EnqueueDepartureHandoffRun
+      mailQueue?: NotificationQueue
     } = {},
   ) {
     const readLatest = vi.fn(storage.store.readLatest)
-    const notify = vi.fn<BookingNotifier>(async () => {})
+    const notify = vi.fn<BookingNotifier>(
+      options.mailQueue ? bookingNotifier(options.mailQueue) : async () => {},
+    )
     const app = createApp({
       publicUrl: origin,
       authHandler: auth.handler,
@@ -80,6 +96,7 @@ describe.skipIf(!serverUrl)('departure handoff browser routes', () => {
           departureHandoffs: {
             store: { ...storage.store, readLatest },
             now: () => HANDOFF_NOW,
+            ...(options.mailQueue && { hasPendingCancellation: hasPendingHandoffCancellation }),
             ...(options.enqueue && { enqueue: options.enqueue }),
             ...(options.enqueueRun && { enqueueRun: options.enqueueRun }),
           },
@@ -744,7 +761,23 @@ describe.skipIf(!serverUrl)('departure handoff browser routes', () => {
 
   it('reports both attendee mail states only on the authorized handoff receipt', async () => {
     const f = await fixture()
-    const { app, notify } = application()
+    const mailQueue = createJobs({
+      connectionString: owned.url,
+      definitions: [
+        bookingNotificationJob({
+          db,
+          secret,
+          publicUrl: origin,
+          mailer: { send: async () => {} },
+        }),
+      ],
+      work: false,
+      migrate: true,
+      maxConnections: 2,
+    })
+    stopJobs = () => mailQueue.stop()
+    await mailQueue.start()
+    const { app, notify } = application({ mailQueue })
     const path = preview(f.base)
     const applied = await app.request(apply(f.base, f.input.offerId), post(f.headers))
     expect(applied.status).toBe(200)
@@ -789,8 +822,34 @@ describe.skipIf(!serverUrl)('departure handoff browser routes', () => {
     expect(await (await read()).json()).toMatchObject({
       receipt: { mail: { cancellation: 'pending', confirmation: 'pending' } },
     })
-    expect(await (await read(application({ smtpConfigured: false }).app)).json()).toMatchObject({
+    expect(
+      await (await read(application({ smtpConfigured: false, mailQueue }).app)).json(),
+    ).toMatchObject({
       receipt: { mail: { cancellation: 'unavailable', confirmation: 'unavailable' } },
+    })
+
+    const jobKey = `${sourceBookingId}:cancelled`
+    for (const state of ['retry', 'active', 'failed', 'cancelled', 'completed']) {
+      const updated = await owned.pool.query(
+        `UPDATE pgboss.job SET state = $1 WHERE name = $2 AND singleton_key = $3`,
+        [state, BOOKING_NOTIFICATION_JOB, jobKey],
+      )
+      expect(updated.rowCount).toBe(1)
+      expect(await (await read()).json()).toMatchObject({
+        receipt: {
+          mail: {
+            cancellation: state === 'retry' || state === 'active' ? 'pending' : 'incomplete',
+            confirmation: 'pending',
+          },
+        },
+      })
+    }
+    await owned.pool.query(`DELETE FROM pgboss.job WHERE name = $1 AND singleton_key = $2`, [
+      BOOKING_NOTIFICATION_JOB,
+      jobKey,
+    ])
+    expect(await (await read()).json()).toMatchObject({
+      receipt: { mail: { cancellation: 'incomplete', confirmation: 'pending' } },
     })
 
     await db

@@ -29,6 +29,9 @@ export interface DepartureHandoffAdminStore extends DepartureHandoffApplyStore {
   ): Promise<({ id: string } & DepartureHandoffOffer) | undefined>
 }
 
+/** Check cancellation work using the caller's authorized receipt snapshot. */
+export type HasPendingHandoffCancellation = (db: Db, bookingId: string) => Promise<boolean>
+
 export const HANDOFF_PREVIEW_ISSUES = [
   'calendar_sync_unavailable',
   'location_unavailable',
@@ -67,6 +70,7 @@ export function readDepartureHandoffAdminPreview(
   store: DepartureHandoffAdminStore,
   capabilities: TeamSsoCapabilities = ssoHardOff,
   mailDeliveryAvailable = true,
+  hasPendingCancellation?: HasPendingHandoffCancellation,
 ) {
   return withDepartureHandoffRead(
     ctx,
@@ -93,6 +97,7 @@ export function readDepartureHandoffAdminPreview(
             saved.committed,
             now,
             mailDeliveryAvailable,
+            hasPendingCancellation,
           ),
         }
       }
@@ -184,6 +189,7 @@ async function committedReceipt(
   committed: { replacementBookingId: string },
   now: Temporal.Instant,
   mailDeliveryAvailable: boolean,
+  hasPendingCancellation?: HasPendingHandoffCancellation,
 ) {
   // Scope the edge's destination as well as its source, even if the backing store
   // already enforces same-team foreign keys. Project status, never provider identifiers.
@@ -208,7 +214,14 @@ async function committedReceipt(
       views.get(replacement.id)?.conference?.status,
     ),
     ...(oldConferenceCleanup && { oldConferenceCleanup }),
-    mail: await readHandoffMailState(db, source.id, replacement, now, mailDeliveryAvailable),
+    mail: await readHandoffMailState(
+      db,
+      source.id,
+      replacement,
+      now,
+      mailDeliveryAvailable,
+      hasPendingCancellation,
+    ),
   }
 }
 
@@ -218,6 +231,7 @@ async function readHandoffMailState(
   replacement: { id: string; status: string; start_at: Date | null },
   now: Temporal.Instant,
   mailDeliveryAvailable: boolean,
+  hasPendingCancellation?: HasPendingHandoffCancellation,
 ) {
   const receipts = await db
     .selectFrom('booking_attendees as a')
@@ -255,8 +269,11 @@ async function readHandoffMailState(
     replacement.start_at === null ||
     replacement.start_at.getTime() <= now.epochMilliseconds ||
     Boolean(outbox?.exhausted_at || outbox?.skipped_at)
+  const cancellationClosed = hasPendingCancellation
+    ? !(await hasPendingCancellation(db, sourceId))
+    : false
   return {
-    cancellation: state(sourceId),
+    cancellation: state(sourceId, cancellationClosed),
     confirmation: state(replacement.id, confirmationClosed),
   }
 }

@@ -296,6 +296,7 @@ describe.skipIf(!databaseUrl)('departure handoff booking mail in PostgreSQL', ()
       expect(worker.sent.map(({ to }) => to).sort()).toEqual(
         [...attendees, ...attendees, fixture.candidate.email].sort(),
       )
+      for (const message of worker.sent) expect(message.sensitive).toBe(true)
       for (const recipient of attendees) {
         const messages = worker.sent.filter(({ to }) => to === recipient)
         const [cancellationMail, confirmationMail] = cancelFirst
@@ -401,6 +402,7 @@ describe.skipIf(!databaseUrl)('departure handoff booking mail in PostgreSQL', ()
     await worker.run(cancellation.data, cancellation.id)
     expect(worker.sent.map(({ to }) => to)).toEqual([fixture.departing.email, ...attendees])
     for (const message of worker.sent) {
+      expect(message.sensitive).toBe(true)
       expect(message.subject).toMatch(/^Host changed · /)
       expect(message.text).toContain('The original booking was cancelled.')
       expect(message.attachments).toBeUndefined()
@@ -413,6 +415,7 @@ describe.skipIf(!databaseUrl)('departure handoff booking mail in PostgreSQL', ()
     worker.sent.length = 0
     // A provider can release confirmation later, with only the booking ID and kind.
     await worker.run({ bookingId: replacementBookingId, kind: 'confirmed' })
+    for (const message of worker.sent) expect(message.sensitive).toBe(true)
     const replacement = worker.sent.find(({ to }) => to === attendees[0])
     if (!replacement) throw new Error('Missing replacement invitation')
     expect(replacement.subject).toMatch(/^Host changed · /)
@@ -457,6 +460,7 @@ describe.skipIf(!databaseUrl)('departure handoff booking mail in PostgreSQL', ()
       const confirmation = requireJob(jobs, replacementBookingId, 'confirmed')
       await worker.run(cancellation.data, cancellation.id)
       await worker.run(confirmation.data, confirmation.id)
+      for (const message of worker.sent) expect(message.sensitive).toBe(true)
       for (const attendee of attendees) {
         const notices = worker.sent.filter(({ to }) => to === attendee)
         expect(notices).toHaveLength(2)

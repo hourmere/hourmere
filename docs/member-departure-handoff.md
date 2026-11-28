@@ -378,8 +378,11 @@ manually. The replacement uses a fresh UID and starts at sequence zero. Its invi
 manage link belong to the replacement booking.
 
 The staged administrator receipt reports when the mail server accepts each notice for all
-attendees. Refresh the handoff status after the background worker runs. Mail-server acceptance
-does not confirm inbox receipt. Replaying a committed handoff does not queue another notice.
+attendees. If the cancellation job finishes, is skipped, or exhausts its retries before
+acceptance is recorded for every attendee, the cancellation status is **Email delivery
+incomplete**. Refresh the handoff status after the background worker runs. Mail-server
+acceptance does not confirm inbox receipt. Replaying a committed handoff does not queue
+another notice.
 
 ### Staged automatic handoff runs
 
@@ -454,6 +457,7 @@ those bookings and leaves their ordinary booking flows in place.
 提交后，外部会议仍可处于待创建或失败状态，由对应主持人使用原有恢复流程处理。
 预发布已提供提议生命周期、确认链接投递和参与者页面及接口。生产功能保持关闭。
 交接提交后，系统会排队发送原预约取消邮件和新预约确认邮件，管理员可刷新回执查看投递状态。
+若取消邮件任务已结束、被跳过或耗尽重试，且仍有参与者缺少邮件服务器接受记录，回执会显示邮件投递未完成。
 旧会议的取消沿用原 ICS UID 与原日历组织者，新邀请使用新 UID。Google Meet 和 Zoom
 按各自预约链的固定组织者身份处理。Outlook 和 Teams 按旧链固定的写回状态清理，新 Teams
 会议要求实例启用 Microsoft 日历，并复核接任主持人的写入资格。任一条件不满足时返回

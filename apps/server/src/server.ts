@@ -77,6 +77,7 @@ import {
   departureHandoffCleanupJob,
   departureHandoffEmailJob,
   groupHostMailJob,
+  hasPendingHandoffCancellation,
   type InvitationEmailQueue,
   invitationEmailJob,
   invitationEmailRepairJob,
@@ -1047,6 +1048,7 @@ export function productionAppOptions({
       departureHandoffs: productionDepartureHandoffsEnabled
         ? {
             store: departureHandoffStore,
+            hasPendingCancellation: hasPendingHandoffCancellation,
             enqueue: enqueueDepartureHandoffEmail,
             enqueueRun: enqueueDepartureHandoffRun,
           }
