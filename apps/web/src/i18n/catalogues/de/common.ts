@@ -676,4 +676,33 @@ export const common = {
     'Dieses Team hat derzeit keine öffentlichen Termine.',
   'This team page is unavailable.': 'Diese Teamseite ist nicht verfügbar.',
   'Couldn’t load this team page.': 'Diese Teamseite konnte nicht geladen werden.',
+
+  // Departure booking handoff
+  'departureHandoff.title': 'Terminübergabe prüfen',
+  'departureHandoff.allMustAccept':
+    'Die buchende Person und alle Gäste müssen zustimmen, bevor das Team den aktuellen Termin ersetzen kann.',
+  'departureHandoff.privateLink':
+    'Halten Sie diesen Link vertraulich. Wer ihn hat, kann in Ihrem Namen antworten.',
+  'departureHandoff.deadline': 'Antwort erbeten bis',
+  'departureHandoff.current': 'Aktueller Termin',
+  'departureHandoff.proposed': 'Vorgeschlagener Termin',
+  'departureHandoff.duration': 'Dauer',
+  'departureHandoff.answers': 'Antworten, die mit dem neuen Gastgeber geteilt werden',
+  'departureHandoff.decision': 'Ihre Entscheidung',
+  'departureHandoff.accept': 'Zustimmen',
+  'departureHandoff.decline': 'Ablehnen',
+  'departureHandoff.submit': 'Entscheidung absenden',
+  'departureHandoff.submitting': 'Entscheidung wird gesendet…',
+  'departureHandoff.accepted': 'Zustimmung gespeichert',
+  'departureHandoff.declined': 'Ablehnung gespeichert',
+  'departureHandoff.refused': 'Das Team kann diese Übergabe nicht durchführen.',
+  'departureHandoff.unavailable': 'Dieser Link zur Terminübergabe ist nicht verfügbar',
+  'departureHandoff.recovery':
+    'Verwenden Sie den zuletzt erhaltenen Link oder wenden Sie sich an das Team.',
+  'departureHandoff.readAgain': 'Vorschlag erneut prüfen',
+  'departureHandoff.loadError': 'Der Vorschlag konnte nicht geladen werden. Prüfen Sie ihn erneut.',
+  'departureHandoff.uncertain':
+    'Wir konnten nicht bestätigen, dass Ihre Entscheidung gespeichert wurde. Prüfen Sie den Vorschlag vor einem erneuten Versuch.',
+  'departureHandoff.rateLimited':
+    'Zu viele Versuche. Warten Sie einen Moment, bevor Sie den Vorschlag erneut prüfen.',
 } as const

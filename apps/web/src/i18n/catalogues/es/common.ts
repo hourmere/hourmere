@@ -668,4 +668,33 @@ export const common = {
     'Este equipo no tiene eventos públicos en este momento.',
   'This team page is unavailable.': 'Esta página de equipo no está disponible.',
   'Couldn’t load this team page.': 'No se pudo cargar esta página de equipo.',
+
+  // Departure booking handoff
+  'departureHandoff.title': 'Revisar el traspaso de la reserva',
+  'departureHandoff.allMustAccept':
+    'La persona que hizo la reserva y todos los invitados deben aceptar antes de que el equipo pueda sustituir la reserva actual.',
+  'departureHandoff.privateLink':
+    'Mantenga este enlace en privado. Cualquiera que lo tenga puede responder en su nombre.',
+  'departureHandoff.deadline': 'Responda antes de',
+  'departureHandoff.current': 'Reserva actual',
+  'departureHandoff.proposed': 'Reserva propuesta',
+  'departureHandoff.duration': 'Duración',
+  'departureHandoff.answers': 'Respuestas que se compartirán con el nuevo anfitrión',
+  'departureHandoff.decision': 'Su decisión',
+  'departureHandoff.accept': 'Aceptar',
+  'departureHandoff.decline': 'Rechazar',
+  'departureHandoff.submit': 'Enviar decisión',
+  'departureHandoff.submitting': 'Enviando decisión…',
+  'departureHandoff.accepted': 'Aceptación registrada',
+  'departureHandoff.declined': 'Rechazo registrado',
+  'departureHandoff.refused': 'El equipo no puede completar este traspaso.',
+  'departureHandoff.unavailable': 'Este enlace de traspaso no está disponible',
+  'departureHandoff.recovery':
+    'Use el enlace más reciente que recibió o póngase en contacto con el equipo.',
+  'departureHandoff.readAgain': 'Consultar de nuevo la propuesta',
+  'departureHandoff.loadError': 'No se pudo cargar la propuesta. Vuelva a consultarla.',
+  'departureHandoff.uncertain':
+    'No pudimos confirmar que se registró su decisión. Consulte la propuesta antes de volver a intentarlo.',
+  'departureHandoff.rateLimited':
+    'Demasiados intentos. Espere un momento antes de volver a consultar la propuesta.',
 } as const

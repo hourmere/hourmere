@@ -12,6 +12,8 @@ import {
 } from './client.ts'
 
 export const COMMANDS = {
+  'booking-handoff offer': 'read_booking_handoff_offer',
+  'booking-handoff answer': 'answer_booking_handoff_offer',
   'polls create': 'create_meeting_poll',
   'polls list': 'list_meeting_polls',
   'polls get': 'get_meeting_poll',
@@ -124,6 +126,7 @@ export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [-
        hourmere polls list|get|results|close|cancel|delete|finalize --input -
        hourmere polls create|invite|resend-invitation|remove-voter|remove-unverified|rotate-link --input -
        hourmere polls view|join|recover|verify|vote|withdraw|reminder-opt-out --input -
+       hourmere booking-handoff offer|answer --input -
        hourmere one-time-links create|list|revoke [--input FILE|-] [--url ORIGIN]
        hourmere branding get|set [--input FILE|-]
        hourmere audit-log list|settings|set-retention [--input FILE|-] [--url ORIGIN]
@@ -203,6 +206,10 @@ Meeting polls
       and optional responses. withdraw takes the voting token and expectedBallotRevision.
       On poll_changed, use view and reconcile before submitting again.
     reminder-opt-out takes the separate opt-out token from the poll email.
+Private booking handoff offers (staged)
+  booking-handoff offer takes {token}. Answer only after reviewing the returned terms.
+  booking-handoff answer takes {token, version, decision}, with accept or decline.
+  Pass JSON on stdin (--input -). Keep the token out of command arguments and logs.
 Waitlists: event-waitlist, set-event-waitlist, waitlist-entries, remove-waitlist-entry,
            join-waitlist, resend-waitlist-verification (arguments through JSON input).
 SSO: sso providers list (optional limit 1–100, cursor), sso policy. Team owner/admin only,
@@ -305,6 +312,7 @@ function parse(argv: readonly string[]): Options {
         ? `${first} ${parts.shift()} ${parts.shift() ?? ''}`
         : `${first} ${parts.shift() ?? ''}`
       : first === 'polls' ||
+          first === 'booking-handoff' ||
           first === 'one-time-links' ||
           first === 'branding' ||
           first === 'webhooks' ||
@@ -405,6 +413,8 @@ function parse(argv: readonly string[]): Options {
   }
   if (command.startsWith('polls ') && (options.input !== '-' || options.output))
     throw new CliError('poll_stdin_required')
+  if (command.startsWith('booking-handoff ') && (options.input !== '-' || options.output))
+    throw new CliError('handoff_stdin_required')
   if (options.clearSuccessRedirect && options.successRedirect)
     throw new CliError('invalid_success_redirect_options')
   if (command === 'one-time-links create' && options.output)
@@ -531,6 +541,8 @@ export async function runCli(options: {
       }
       if (typeof input.idempotencyKey === 'string') idempotencyKey = input.idempotencyKey
     }
+    if (args.command.startsWith('booking-handoff ') && typeof input.token === 'string')
+      secrets.push(input.token)
     const slackUrl =
       args.command.startsWith('slack ') && typeof input.url === 'string' ? input.url : ''
     if (slackUrl) secrets.push(slackUrl)

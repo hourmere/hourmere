@@ -26,7 +26,7 @@ export function departureHandoffEmail(input: {
   const introduction = mailMessage(language, 'departureHandoff.introduction')
   const privacy = mailMessage(language, 'departureHandoff.privacy')
   const link = mailMessage(language, 'departureHandoff.review')
-  const url = `${origin.origin}/booking-handoffs/offer#token=${input.recipientId}.${input.secret}`
+  const url = `${origin.origin}/booking/handoff#token=${input.recipientId}.${input.secret}`
   return {
     to: input.to,
     sensitive: true,

@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { z } from '@hono/zod-openapi'
 import type { ApiKeyScope, CallerResolver, Principal } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
+import { departureHandoffStore } from '@hourmere/scheduling/departure-handoff-store'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { describe, expect, it, vi } from 'vitest'
 import { runCli } from '../../../../tools/cli/src/cli.ts'
@@ -73,6 +74,8 @@ const all = [
   'submit_meeting_poll_vote',
   'withdraw_meeting_poll_vote',
   'opt_out_meeting_poll_reminder',
+  'read_booking_handoff_offer',
+  'answer_booking_handoff_offer',
   'list_meeting_polls',
   'get_meeting_poll',
   'get_meeting_poll_results',
@@ -145,6 +148,7 @@ const configurationWrites = new Set([
   'remove_waitlist_entry',
 ])
 const writes = new Set([
+  'answer_booking_handoff_offer',
   'enroll_meeting_poll_voter',
   'recover_meeting_poll_voter',
   'verify_meeting_poll_voter',
@@ -224,6 +228,7 @@ const denial = {
 }
 const catalog = productTools({
   db: {} as Db,
+  departureHandoffs: { store: departureHandoffStore },
   slotSnippetsEnabled: true,
   routingFormsEnabled: true,
   workflowsEnabled: true,
@@ -564,6 +569,8 @@ describe('CLI scope parity', () => {
     ['set-no-show', 'set_attendee_no_show'],
     ['booking-activity', 'get_booking_activity'],
     ['polls view', 'read_meeting_poll'],
+    ['booking-handoff offer', 'read_booking_handoff_offer'],
+    ['booking-handoff answer', 'answer_booking_handoff_offer'],
     ['polls join', 'enroll_meeting_poll_voter'],
     ['polls recover', 'recover_meeting_poll_voter'],
     ['polls verify', 'verify_meeting_poll_voter'],

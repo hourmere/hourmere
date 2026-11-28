@@ -425,6 +425,14 @@
     "mcp": "read_meeting_poll",
     "cli": "polls view"
   },
+  "readBookingHandoffOffer": {
+    "mcp": "read_booking_handoff_offer",
+    "cli": "booking-handoff offer"
+  },
+  "answerBookingHandoffOffer": {
+    "mcp": "answer_booking_handoff_offer",
+    "cli": "booking-handoff answer"
+  },
   "enrollMeetingPollVoter": {
     "mcp": "enroll_meeting_poll_voter",
     "cli": "polls join"

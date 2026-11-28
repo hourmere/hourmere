@@ -43,6 +43,7 @@ import {
   ConferencesPage,
   ConnectedAppsPage,
   CreateTeamPage,
+  DepartureHandoffOfferPage,
   EditRoutingFormPage,
   EmbeddedBookingPage,
   EmbeddedTeamBookingPage,
@@ -153,6 +154,7 @@ export const appRoutes = createRoutesFromElements(
     <Route path="/poll/voter" element={<MeetingPollPage entry="voter" />} />
     <Route path="/poll/recover" element={<MeetingPollPage entry="recover" />} />
     <Route path="/poll/reminder-opt-out" element={<MeetingPollPage entry="optOut" />} />
+    <Route path="/booking/handoff" element={<DepartureHandoffOfferPage />} />
     <Route path="/booking" element={<ManageBookingPage />} />
     <Route path={CHECKOUT_RETURN_PATH} element={<CheckoutReturnPage />} />
     <Route

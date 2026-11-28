@@ -18,7 +18,7 @@ import {
   isPublicRoutingFormPage,
   isPublicRoutingFormPath,
 } from './routing-form-privacy.ts'
-import { securityHeaders } from './security-headers.ts'
+import { isPrivateHandoffPath, securityHeaders } from './security-headers.ts'
 
 const token = `00000000-0000-4000-8000-000000000091.${'w'.repeat(43)}`
 const encodedToken = [...token].map((letter) => `%${letter.charCodeAt(0).toString(16)}`).join('')
@@ -214,6 +214,7 @@ describe('waitlist capability privacy source-copy controls', () => {
         'isOneTimeCapabilityPath',
         'isOneTimeLinkPath',
         'isPublicRoutingFormPath',
+        'isPrivateHandoffPath',
         'isSlackDestinationPath',
         'isSsoTrustPath',
         'isCalDavConnectionPath',
@@ -229,6 +230,7 @@ describe('waitlist capability privacy source-copy controls', () => {
         isOneTimeCapabilityPath,
         isOneTimeLinkPath,
         isPublicRoutingFormPath,
+        isPrivateHandoffPath,
         (path: string) => /^\/api\/v1\/slack-destinations(?:\/|$)/i.test(path),
         (path: string) => /^\/api\/v1\/team\/sso\/(?:providers|domains)(?:\/|$)/i.test(path),
         (path: string) => /^\/api\/v1\/calendar-connections\/caldav(?:\/|$)/i.test(path),
@@ -271,6 +273,7 @@ describe('waitlist capability privacy source-copy controls', () => {
         'isOneTimeCapabilityPath',
         'isOneTimeLinkPath',
         'isPublicRoutingFormPath',
+        'isPrivateHandoffPath',
         'isSlackDestinationPath',
         'isSsoTrustPath',
         'isCalDavConnectionPath',
@@ -286,6 +289,7 @@ describe('waitlist capability privacy source-copy controls', () => {
         isOneTimeCapabilityPath,
         isOneTimeLinkPath,
         isPublicRoutingFormPath,
+        isPrivateHandoffPath,
         (path: string) => /^\/api\/v1\/slack-destinations(?:\/|$)/i.test(path),
         (path: string) => /^\/api\/v1\/team\/sso\/(?:providers|domains)(?:\/|$)/i.test(path),
         (path: string) => /^\/api\/v1\/calendar-connections\/caldav(?:\/|$)/i.test(path),

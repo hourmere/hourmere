@@ -82,6 +82,8 @@ to pass a private continuation to the invitee.
 | `submit_meeting_poll_vote` | — | `polls vote` | `full, bookings` |
 | `withdraw_meeting_poll_vote` | — | `polls withdraw` | `full, bookings` |
 | `opt_out_meeting_poll_reminder` | — | `polls reminder-opt-out` | `full, bookings` |
+| `read_booking_handoff_offer` | — | `booking-handoff offer` | `full, read, bookings` |
+| `answer_booking_handoff_offer` | — | `booking-handoff answer` | `full, bookings` |
 | `list_routing_forms` | — | `routing-forms list` | `full, read` |
 | `get_routing_form` | — | `routing-forms get` | `full, read` |
 | `create_routing_form` | — | `routing-forms create` | `full` |
@@ -786,6 +788,20 @@ are available without a flag.
 投票需完整选项、`consent: true` 和 `expectedBallotRevision`；过期版本返回
 `poll_changed`，应重新读取并核对，不要自动重试。退订使用专用邮件令牌。
 浏览器投票页面和主持人管理工具已提供，无功能开关。
+
+## Private booking handoff offers
+
+The staged tools `read_booking_handoff_offer` and `answer_booking_handoff_offer`
+require the recipient's private token from the offer email. An API key must have
+`read`, `bookings` or `full` scope to review it. Answering requires `bookings`
+or `full` and the exact reviewed `version`. Submit `decision` as `accept` or
+`decline` after the recipient chooses. Declining closes the offer version.
+A decision by itself leaves the original booking confirmed.
+
+Use `booking-handoff offer --input -` and `booking-handoff answer --input -` in
+the CLI. Both take JSON on standard input. Keep the token out of command arguments,
+shell history and logs. These operations remain disabled in production.
+See [the staged participant flow](member-departure-handoff.md#staged-participant-flow).
 
 ## Duplicate an event type
 

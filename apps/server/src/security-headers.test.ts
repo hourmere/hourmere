@@ -272,6 +272,19 @@ describe('security headers', () => {
     )
   })
 
+  it('keeps the handoff offer page and equivalent paths private', async () => {
+    for (const path of ['/booking/handoff', '/BOOKING/handoff/', '/%62ooking/%68andoff']) {
+      const response = await app.request(path)
+      expect(response.status).toBe(200)
+      expect(securityHeadersOf(response)).toEqual({ ...APP_PAGE, referrer: 'no-referrer' })
+      expect(response.headers.get('cache-control')).toBe('no-store')
+      expect(response.headers.get('x-robots-tag')).toBe('noindex, nofollow')
+    }
+    expect((await app.request('/booking-handoffs/offer')).headers.get('referrer-policy')).toBe(
+      'strict-origin-when-cross-origin',
+    )
+  })
+
   it('keeps public routing form HTML private only while the capability is enabled', async () => {
     const enabled = createApp(deps({ webDist: dist, routingFormsEnabled: true }))
     for (const path of [

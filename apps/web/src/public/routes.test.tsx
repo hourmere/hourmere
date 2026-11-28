@@ -339,3 +339,12 @@ it.each(['/poll/legacy-event', '/team/poll/legacy-event'])(
     expect(api.calls.some((call) => /\/me$|\/api\/auth/.test(call.path))).toBe(false)
   },
 )
+
+it('keeps the existing booking-handoffs handle usable with the handoff page under booking', async () => {
+  const event = { ...EVENT, handle: 'booking-handoffs', slug: 'offer' }
+  const api = fakeApi(eventRoutes(event))
+  renderApp('/booking-handoffs/offer')
+  expect(await screen.findByRole('heading', { level: 1, name: event.title })).toBeDefined()
+  expect(api.to('GET /api/v1/public/booking-handoffs/offer')).toHaveLength(1)
+  expect(api.to('POST /api/v1/booking-handoffs/offer')).toHaveLength(0)
+})
