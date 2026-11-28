@@ -49,14 +49,17 @@ test('Chinese Analytics dates stay whole at 320px', async ({ page, app }) => {
   await page.getByLabel('开始日期', { exact: true }).fill('2026-09-21')
   await page.getByLabel('结束日期', { exact: true }).fill('2026-10-20')
   await page.getByRole('button', { name: '更新统计', exact: true }).click()
-  const heading = page.getByRole('heading', { name: '2026-09-21 至 2026-10-20' })
+  const date = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeZone: 'UTC' })
+  const start = date.format(new Date('2026-09-21'))
+  const end = date.format(new Date('2026-10-20'))
+  const heading = page.getByRole('heading', { name: `${start} 至 ${end}`, exact: true })
   await expect(heading).toBeVisible()
   expect(await heading.evaluate((element) => getComputedStyle(element).textWrap)).toBe('balance')
-  const dates = await heading.locator('.nowrap').evaluateAll((spans) =>
-    spans.map((span) => {
+  const dates = await heading.locator('time.nowrap').evaluateAll((elements) =>
+    elements.map((element) => {
       const range = document.createRange()
-      range.selectNodeContents(span)
-      return { date: span.textContent, lines: range.getClientRects().length }
+      range.selectNodeContents(element)
+      return { date: element.getAttribute('datetime'), lines: range.getClientRects().length }
     }),
   )
   expect(dates).toEqual([

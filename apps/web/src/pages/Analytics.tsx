@@ -9,6 +9,7 @@ import { TimeZonePicker } from '../components/TimeZonePicker.tsx'
 import { isKnownTimeZone } from '../format.ts'
 import { useLoad, usePageTitle } from '../hooks.ts'
 import { useI18n } from '../i18n/runtime.tsx'
+import { BookingActionCharts } from './BookingActionCharts.tsx'
 
 interface Filters {
   startDate: string
@@ -148,7 +149,7 @@ function ActivityForm({ timeZone }: { timeZone: string }) {
 }
 
 function ActivityReport({ filters }: { filters: Filters }) {
-  const { t, ui, locale: displayLocale } = useI18n()
+  const { t, ui, formatLocale } = useI18n()
 
   const load = useCallback(
     async (signal: AbortSignal): Promise<Schemas['BookingActivity'] | null> => {
@@ -185,11 +186,19 @@ function ActivityReport({ filters }: { filters: Filters }) {
       </p>
     )
   const data = report.data
+  const number = new Intl.NumberFormat(formatLocale)
+  const date = new Intl.DateTimeFormat(formatLocale, { dateStyle: 'medium', timeZone: 'UTC' })
+  const formatDate = (label: string) => date.format(new Date(label))
   return (
     <section className="panel stack analytics-summary" aria-labelledby="activity-summary">
       <h2 id="activity-summary">
-        <span className="nowrap">{data.startDate}</span> {t('to')}{' '}
-        <span className="nowrap">{data.endDate}</span>
+        <time className="nowrap" dateTime={data.startDate}>
+          {formatDate(data.startDate)}
+        </time>{' '}
+        {t('to')}{' '}
+        <time className="nowrap" dateTime={data.endDate}>
+          {formatDate(data.endDate)}
+        </time>
       </h2>
       <p>
         {t('Reporting time zone: {0}. Days can have 23 or 25 hours when the clocks change.', {
@@ -199,23 +208,19 @@ function ActivityReport({ filters }: { filters: Filters }) {
       <dl className="metric-cards">
         <div>
           <dt>{t('Bookings created')}</dt>
-          <dd>{new Intl.NumberFormat(displayLocale).format(data.totals.created)}</dd>
+          <dd>{number.format(data.totals.created)}</dd>
         </div>
         <div>
           <dt>{t('Reschedules')}</dt>
-          <dd>{new Intl.NumberFormat(displayLocale).format(data.totals.rescheduled)}</dd>
+          <dd>{number.format(data.totals.rescheduled)}</dd>
         </div>
         <div>
           <dt>{t('Cancellations')}</dt>
-          <dd>{new Intl.NumberFormat(displayLocale).format(data.totals.cancelled)}</dd>
+          <dd>{number.format(data.totals.cancelled)}</dd>
         </div>
         <div>
           <dt>{t('No-shows')}</dt>
-          <dd>
-            {data.totals.noShows == null
-              ? '—'
-              : new Intl.NumberFormat(displayLocale).format(data.totals.noShows)}
-          </dd>
+          <dd>{data.totals.noShows == null ? '—' : number.format(data.totals.noShows)}</dd>
         </div>
       </dl>
       <p className="hint">
@@ -226,12 +231,7 @@ function ActivityReport({ filters }: { filters: Filters }) {
           'No-shows count each attendee currently marked as a no-show, by the meeting date, on bookings that are still confirmed.',
         )}
       </p>
-      {data.totals.noShows != null &&
-        data.totals.created +
-          data.totals.rescheduled +
-          data.totals.cancelled +
-          (data.totals.noShows ?? 0) ===
-          0 && <p>{t('No booking activity was recorded in this range.')}</p>}
+      <BookingActionCharts report={data} />
       <div className="table-container">
         <table className="table table-analytics">
           <caption className="analytics-caption">{t('Daily booking activity')}</caption>
@@ -248,28 +248,20 @@ function ActivityReport({ filters }: { filters: Filters }) {
             {data.data.map((day) => (
               <tr key={day.date}>
                 <th scope="row" data-label={t('Date')} className="nowrap">
-                  {day.date}
+                  <time dateTime={day.date}>{formatDate(day.date)}</time>
                 </th>
                 <td data-label={t('Bookings created')} className="nowrap">
-                  <div className="table-value">
-                    {new Intl.NumberFormat(displayLocale).format(day.created)}
-                  </div>
+                  <div className="table-value">{number.format(day.created)}</div>
                 </td>
                 <td data-label={t('Reschedules')} className="nowrap">
-                  <div className="table-value">
-                    {new Intl.NumberFormat(displayLocale).format(day.rescheduled)}
-                  </div>
+                  <div className="table-value">{number.format(day.rescheduled)}</div>
                 </td>
                 <td data-label={t('Cancellations')} className="nowrap">
-                  <div className="table-value">
-                    {new Intl.NumberFormat(displayLocale).format(day.cancelled)}
-                  </div>
+                  <div className="table-value">{number.format(day.cancelled)}</div>
                 </td>
                 <td data-label={t('No-shows')} className="nowrap">
                   <div className="table-value">
-                    {day.noShows == null
-                      ? '—'
-                      : new Intl.NumberFormat(displayLocale).format(day.noShows)}
+                    {day.noShows == null ? '—' : number.format(day.noShows)}
                   </div>
                 </td>
               </tr>

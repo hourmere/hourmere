@@ -464,4 +464,13 @@ export const admin = {
     'Ce transfert traite jusqu’à {count} réservations approuvées par tous, avec au moins {seconds} secondes entre deux réservations. Vous pouvez le suspendre ou l’arrêter.',
   'Remaining bookings will not be processed. Their original bookings stay unchanged.':
     'Les réservations restantes ne seront pas traitées. Les réservations d’origine correspondantes resteront inchangées.',
+  // Booking activity charts and daily table
+  'Bookings created': 'Réservations créées',
+  Reschedules: 'Replanifications',
+  Cancellations: 'Annulations',
+  'Daily booking activity': 'Activité quotidienne des réservations',
+  'No booking activity was recorded in this range.':
+    'Aucune activité de réservation n’a été enregistrée sur cette période.',
+  'Loading booking activity…': 'Chargement de l’activité des réservations…',
+  'Could not load booking activity.': 'Impossible de charger l’activité des réservations.',
 }

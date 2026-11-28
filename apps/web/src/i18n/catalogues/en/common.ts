@@ -689,4 +689,10 @@ export const common = {
     'Too many attempts. Wait a moment before checking the offer again.',
   'departureHandoff.currentUntilComplete':
     'Your current booking stays confirmed until the team completes the handoff.',
+  // Booking activity charts
+  'Booking actions over time': 'Booking actions over time',
+  'The charts share a count scale. See the daily table below for exact counts.':
+    'The charts share a count scale. See the daily table below for exact counts.',
+  'No booking actions were recorded in this range.':
+    'No booking actions were recorded in this range.',
 } as const

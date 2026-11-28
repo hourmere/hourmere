@@ -3,17 +3,22 @@ title: Booking activity
 description: View bounded daily booking activity and no-show counts for your organization.
 ---
 
-`/app/analytics` shows first-party booking activity in the current organization: four
-totals and a daily table. Choose inclusive start/end dates (at most 90 calendar dates) and
-an IANA reporting time zone. The initial view covers 30 dates ending today in the profile's
-time zone, or UTC before onboarding. A day can have 23 or 25 hours across daylight saving;
-a date skipped by a time-zone change has zero activity.
+`/app/analytics` shows four totals, charts of daily booking actions, and a table with exact
+daily counts for the current organization. Choose inclusive start/end dates (at most 90
+calendar dates) and an IANA reporting time zone. The initial view covers 30 dates ending
+today in the profile's time zone, or UTC before onboarding. A day can have 23 or 25 hours
+across daylight saving, and a date skipped by a time-zone change has zero activity.
 
-Personal reports belong only to the personal account owner. Team reports cover the whole
-acting organization and require its current owner/admin role, including for API keys.
-Ordinary team members, even hosts of some team bookings, receive `403 insufficient_role`.
-The page explains that permission requirement. Membership and roles are checked from the
-database in the same statement that aggregates the counts.
+The charts show how many bookings were created, rescheduled and cancelled each day. They
+share a count scale so you can compare their bar heights. The totals and daily table also
+show no-shows, which are counted by meeting date.
+
+Personal reports belong only to the personal account owner. Under the default team roles,
+current owners and admins can report across the whole acting organization, including with
+an API key. When custom roles are available, a current `analytics.read` grant can also
+permit team reports with an eligible credential. Callers without report access, including
+ordinary team members who host some team bookings, receive `403 insufficient_role`.
+Membership, permissions and aggregate counts are checked against the same database snapshot.
 
 The authenticated REST endpoint accepts session cookies or an API key with `read` or
 `full` scope. `read` is recommended for analytics and reporting; a `bookings` key receives

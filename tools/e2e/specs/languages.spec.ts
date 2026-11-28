@@ -670,7 +670,12 @@ for (const selected of ['en', 'zh-CN'] as const) {
     await expect(page.getByLabel(/^(Start date|开始日期)$/)).toHaveValue(today)
     await page.getByLabel(/^(End date|结束日期)$/).fill(today)
     await page.getByRole('button', { name: /^(Update report|更新统计)$/ }).click()
-    await expect(page.getByRole('rowheader', { name: today, exact: true })).toHaveCount(1)
+    const todayLabel = new Intl.DateTimeFormat(other(selected), {
+      dateStyle: 'medium',
+      timeZone: 'UTC',
+    }).format(new Date(today))
+    await expect(page.getByRole('rowheader')).toHaveCount(1)
+    await expect(page.getByRole('rowheader', { name: todayLabel, exact: true })).toBeVisible()
     await expect(page.locator('dl.metric-cards dd').first()).toHaveText('1')
     await selectAdminLanguage(page, selected)
     await expect(

@@ -468,4 +468,13 @@ export const admin = {
     'In diesem Lauf werden bis zu {count} Buchungen verarbeitet, denen alle zugestimmt haben. Zwischen den Buchungen liegen mindestens {seconds} Sekunden. Du kannst den Lauf pausieren oder stoppen.',
   'Remaining bookings will not be processed. Their original bookings stay unchanged.':
     'Die verbleibenden Buchungen werden nicht verarbeitet. Die ursprünglichen Buchungen bleiben unverändert.',
+  // Booking activity charts and daily table
+  'Bookings created': 'Neue Buchungen',
+  Reschedules: 'Terminverschiebungen',
+  Cancellations: 'Stornierungen',
+  'Daily booking activity': 'Tägliche Buchungsaktivität',
+  'No booking activity was recorded in this range.':
+    'In diesem Zeitraum wurde keine Buchungsaktivität erfasst.',
+  'Loading booking activity…': 'Buchungsaktivität wird geladen…',
+  'Could not load booking activity.': 'Die Buchungsaktivität konnte nicht geladen werden.',
 }

@@ -698,4 +698,10 @@ export const common = {
     'Muitas tentativas. Aguarde um momento antes de consultar a proposta novamente.',
   'departureHandoff.currentUntilComplete':
     'Seu agendamento atual continua confirmado até a equipe concluir a transferência.',
+  // Booking activity charts
+  'Booking actions over time': 'Evolução das ações de agendamento',
+  'The charts share a count scale. See the daily table below for exact counts.':
+    'Os gráficos usam a mesma escala. Consulte a tabela abaixo para ver os totais exatos de cada dia.',
+  'No booking actions were recorded in this range.':
+    'Nenhuma ação de agendamento foi registrada nesse período.',
 } as const

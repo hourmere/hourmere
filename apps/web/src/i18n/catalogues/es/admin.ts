@@ -461,4 +461,13 @@ export const admin = {
     'Se procesarán hasta {count} reservas aprobadas por todos, con al menos {seconds} segundos entre reservas. Puedes pausar o detener el traspaso.',
   'Remaining bookings will not be processed. Their original bookings stay unchanged.':
     'Las reservas pendientes no se procesarán. Esas reservas originales quedarán sin cambios.',
+  // Booking activity charts and daily table
+  'Bookings created': 'Reservas creadas',
+  Reschedules: 'Reprogramaciones',
+  Cancellations: 'Cancelaciones',
+  'Daily booking activity': 'Actividad diaria de reservas',
+  'No booking activity was recorded in this range.':
+    'No se registró actividad de reservas en este período.',
+  'Loading booking activity…': 'Cargando la actividad de reservas…',
+  'Could not load booking activity.': 'No se pudo cargar la actividad de reservas.',
 }

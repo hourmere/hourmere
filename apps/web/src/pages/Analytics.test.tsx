@@ -5,6 +5,7 @@ import { chooseLanguage } from '../i18n/store.ts'
 import styles from '../styles.css?raw'
 import { fakeApi, json, later, profile, renderApp, signedIn } from '../test/fake-api.tsx'
 import { initialActivityFilters } from './Analytics.tsx'
+import { shapeBookingActions } from './BookingActionCharts.tsx'
 
 const result = {
   startDate: '2026-03-29',
@@ -18,6 +19,33 @@ const result = {
 }
 const query = (path: string) => Object.fromEntries(new URL(path, 'http://x').searchParams)
 
+describe('booking action chart data', () => {
+  it('keeps every date in order, shares the highest action count and excludes no-shows', () => {
+    const days = result.data.map((day) => ({ ...day, noShows: 99 }))
+    const { maxCount, series } = shapeBookingActions(days)
+    expect(maxCount).toBe(4)
+    expect(series.map(({ action }) => action)).toEqual(['created', 'rescheduled', 'cancelled'])
+    expect(series.map(({ points }) => points.map(({ date }) => date))).toEqual([
+      ['2026-03-29', '2026-03-30'],
+      ['2026-03-29', '2026-03-30'],
+      ['2026-03-29', '2026-03-30'],
+    ])
+    expect(series.map(({ points }) => points.map(({ count }) => count))).toEqual([
+      [4, 0],
+      [2, 0],
+      [0, 1],
+    ])
+  })
+
+  it('returns an empty scale for no rows and for an API zero-filled range', () => {
+    expect(shapeBookingActions([]).maxCount).toBe(0)
+    expect(
+      shapeBookingActions([{ date: '2026-03-29', created: 0, rescheduled: 0, cancelled: 0 }])
+        .maxCount,
+    ).toBe(0)
+  })
+})
+
 describe('booking activity page', () => {
   it('defaults to 30 date labels in the chosen local zone, without browser Temporal', () => {
     expect(initialActivityFilters('America/Los_Angeles', new Date('2026-03-01T01:00:00Z'))).toEqual(
@@ -25,7 +53,7 @@ describe('booking activity page', () => {
     )
     expect(initialActivityFilters('unknown', new Date('2026-03-01T01:00:00Z')).timeZone).toBe('UTC')
   })
-  it('shows action definitions, count-only totals and an accessible daily table', async () => {
+  it('shows charts on one scale with exact values in the accessible daily table', async () => {
     const api = fakeApi({
       ...signedIn,
       ...profile(),
@@ -33,6 +61,31 @@ describe('booking activity page', () => {
     })
     renderApp('/app/analytics')
     const table = await screen.findByRole('table', { name: 'Daily booking activity' })
+    const charts = screen.getByRole('region', { name: 'Booking actions over time' })
+    expect(
+      within(charts).getByText(
+        'The charts share a count scale. See the daily table below for exact counts.',
+      ),
+    ).toBeDefined()
+    const figures = within(charts).getAllByRole('figure')
+    expect(figures.map((figure) => figure.querySelector('figcaption')?.textContent)).toEqual([
+      'Bookings created',
+      'Reschedules',
+      'Cancellations',
+    ])
+    expect(figures.map((figure) => figure.querySelector('svg')?.getAttribute('viewBox'))).toEqual([
+      '0 0 2 4',
+      '0 0 2 4',
+      '0 0 2 4',
+    ])
+    expect(figures.map((figure) => figure.querySelector('rect')?.getAttribute('height'))).toEqual([
+      '4',
+      '2',
+      '1',
+    ])
+    expect(
+      figures.every((figure) => figure.querySelector('svg')?.closest('[aria-hidden="true"]')),
+    ).toBe(true)
     const heading = screen.getByRole('heading', { name: 'Booking activity', level: 1 })
     expect(heading.closest('.page-intro')?.querySelector('.lede')).not.toBeNull()
     const form = screen.getByRole('button', { name: 'Update report' }).closest('form')
@@ -67,7 +120,20 @@ describe('booking activity page', () => {
       within(table)
         .getAllByRole('rowheader')
         .map((cell) => cell.textContent),
-    ).toEqual(['2026-03-29', '2026-03-30'])
+    ).toEqual(['Mar 29, 2026', 'Mar 30, 2026'])
+    expect(
+      within(table)
+        .getAllByRole('row')
+        .slice(1)
+        .map((row) =>
+          within(row)
+            .getAllByRole('cell')
+            .map((cell) => cell.textContent),
+        ),
+    ).toEqual([
+      ['4', '2', '0', '1'],
+      ['0', '0', '1', '2'],
+    ])
     expect(
       screen.getByText(/Cancellations exclude the old booking withdrawn during a move/),
     ).toBeDefined()
@@ -114,12 +180,32 @@ describe('booking activity page', () => {
         json(200, { ...result, startDate: '2026-09-21', endDate: '2026-10-20' }),
     })
     renderApp('/app/analytics')
-    const heading = await screen.findByRole('heading', { name: '2026-09-21 至 2026-10-20' })
-    expect([...heading.querySelectorAll('.nowrap')].map((date) => date.textContent)).toEqual([
-      '2026-09-21',
-      '2026-10-20',
-    ])
+    const heading = await screen.findByRole('heading', { name: '2026年9月21日 至 2026年10月20日' })
+    expect(
+      [...heading.querySelectorAll('time.nowrap')].map((date) => date.getAttribute('datetime')),
+    ).toEqual(['2026-09-21', '2026-10-20'])
     expect(styles).toMatch(/\.nowrap\s*\{\s*white-space: nowrap;/)
+  })
+  it('formats chart axes and table values with the selected locale and keeps the report day', async () => {
+    chooseLanguage('zh-CN')
+    fakeApi({
+      ...signedIn,
+      ...profile(),
+      'GET /api/v1/analytics/bookings': () =>
+        json(200, {
+          ...result,
+          timeZone: 'America/Los_Angeles',
+          totals: { ...result.totals, created: 1200 },
+          data: result.data.map((day) => ({ ...day, created: day.created * 300 })),
+        }),
+    })
+    renderApp('/app/analytics')
+    const table = await screen.findByRole('table')
+    expect(within(table).getByRole('rowheader', { name: '2026年3月29日' })).toBeDefined()
+    expect(within(table).getByRole('cell', { name: '1,200' })).toBeDefined()
+    const chart = screen.getAllByRole('figure')[0]
+    expect(chart?.querySelector('.analytics-chart-counts span')?.textContent).toBe('1,200')
+    expect(chart?.querySelector('.analytics-chart-dates span')?.textContent).toBe('3月29日')
   })
   it('treats a range with only no-shows as activity and tolerates older servers without the count', async () => {
     const zero = { created: 0, rescheduled: 0, cancelled: 0 }
@@ -136,6 +222,8 @@ describe('booking activity page', () => {
     })
     const view = renderApp('/app/analytics')
     await screen.findByRole('table', { name: 'Daily booking activity' })
+    expect(screen.getByText('No booking actions were recorded in this range.')).toBeDefined()
+    expect(screen.queryByRole('figure')).toBeNull()
     expect(screen.queryByText('No booking activity was recorded in this range.')).toBeNull()
     expect(document.querySelectorAll('.metric-cards dd')[3]?.textContent).toBe('2')
     view.unmount()
@@ -155,11 +243,15 @@ describe('booking activity page', () => {
           ...result,
           ...query(path),
           totals: { created: 0, rescheduled: 0, cancelled: 0, noShows: 0 },
-          data: [],
+          data: [
+            { date: query(path).startDate, created: 0, rescheduled: 0, cancelled: 0, noShows: 0 },
+          ],
         }),
     })
     renderApp('/app/analytics')
     await screen.findByText('No booking activity was recorded in this range.')
+    expect(screen.queryByRole('figure')).toBeNull()
+    expect(screen.getByRole('table', { name: 'Daily booking activity' })).toBeDefined()
     expect(query(api.to('GET /api/v1/analytics/bookings')[0]?.path ?? '').timeZone).toBe('UTC')
     await user.clear(screen.getByLabelText('Start date'))
     await user.type(screen.getByLabelText('Start date'), '2026-03-01')
@@ -208,6 +300,7 @@ describe('booking activity page', () => {
     renderApp('/app/analytics')
     await screen.findByText(/Your current team role does not permit this report/)
     expect(screen.queryByRole('table')).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Booking actions over time' })).toBeNull()
   })
   it('shows loading and recovers after a retry', async () => {
     const user = userEvent.setup()
@@ -222,9 +315,14 @@ describe('booking activity page', () => {
     renderApp('/app/analytics')
     await screen.findByText('Loading booking activity…')
     expect(screen.getByText('Loading booking activity…').closest('.page-skeleton')).not.toBeNull()
+    expect(screen.queryByRole('region', { name: 'Booking actions over time' })).toBeNull()
     await delayed.answer(json(500, { error: 'internal_error' }))
-    await screen.findByRole('alert')
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'Could not load booking activity.',
+    )
+    expect(screen.queryByRole('region', { name: 'Booking actions over time' })).toBeNull()
     await user.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByRole('region', { name: 'Booking actions over time' })).toBeDefined()
     await screen.findByRole('table')
   })
   it('does not replace a newer report with a stale response', async () => {

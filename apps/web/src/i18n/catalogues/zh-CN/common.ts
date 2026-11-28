@@ -659,4 +659,9 @@ export const common = {
   'departureHandoff.uncertain': '无法确认你的决定是否已记录。再次尝试前，请先重新查看提议。',
   'departureHandoff.rateLimited': '尝试次数过多，请稍候再查看提议。',
   'departureHandoff.currentUntilComplete': '团队完成交接之前，当前预约仍保持确认。',
+  // Booking activity charts
+  'Booking actions over time': '预约操作趋势',
+  'The charts share a count scale. See the daily table below for exact counts.':
+    '各图表使用相同的数量刻度。具体数量请见下方每日统计表。',
+  'No booking actions were recorded in this range.': '此日期范围内没有新建、改期或取消预约的记录。',
 } as const

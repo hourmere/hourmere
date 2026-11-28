@@ -708,4 +708,10 @@ export const common = {
     'Zu viele Versuche. Warten Sie einen Moment, bevor Sie den Vorschlag erneut prüfen.',
   'departureHandoff.currentUntilComplete':
     'Ihr aktueller Termin bleibt bestätigt, bis das Team die Übergabe abgeschlossen hat.',
+  // Booking activity charts
+  'Booking actions over time': 'Buchungsvorgänge im Zeitverlauf',
+  'The charts share a count scale. See the daily table below for exact counts.':
+    'Die Diagramme verwenden dieselbe Skala. Die genauen Anzahlen pro Tag stehen in der Tabelle unten.',
+  'No booking actions were recorded in this range.':
+    'In diesem Zeitraum wurden keine Buchungsvorgänge erfasst.',
 } as const
