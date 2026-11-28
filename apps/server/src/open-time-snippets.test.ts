@@ -9,6 +9,7 @@ import {
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { escapeHtml } from '@hourmere/mail'
 import { createFixtures, createTestTeam, createTestUser } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { runCli } from '../../../tools/cli/src/cli.ts'
@@ -66,6 +67,20 @@ async function runSnippetCli(app: App, key: string, input: object) {
   })
   return { code, stdout, stderr }
 }
+
+function expectSnippetLink(html: string, url: string, label: string) {
+  expect(html).toContain(`href="${escapeHtml(url)}"`)
+  expect(html).toContain(`>${escapeHtml(label)}</a>`)
+}
+
+it('checks HTML links with multiple query separators and escaped label text', () => {
+  const url = 'https://example.test/chat?start=2030-03-10&durationMinutes=60&locale=en'
+  const label = `R&D's "office hours" <60 min>`
+  const html =
+    '<a href="https://example.test/chat?start=2030-03-10&amp;durationMinutes=60&amp;locale=en">R&amp;D&#39;s &quot;office hours&quot; &lt;60 min&gt;</a>'
+
+  expectSnippetLink(html, url, label)
+})
 
 describe.skipIf(!bootstrap)('real REST, MCP and CLI snippet parity across time zones', () => {
   const organizerZone = 'America/Los_Angeles'
@@ -192,8 +207,7 @@ describe.skipIf(!bootstrap)('real REST, MCP and CLI snippet parity across time z
       )
       for (const { label, url } of rest.slots) {
         expect(rest.text).toContain(`${label}\n${url}`)
-        expect(rest.html).toContain(`href="${url.replace('&', '&amp;')}"`)
-        expect(rest.html).toContain(`>${label}</a>`)
+        expectSnippetLink(rest.html, url, label)
       }
 
       const mcp = await requestSnippetMcp(app, key, input)
