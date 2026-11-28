@@ -23,11 +23,13 @@ export default defineConfig<FixtureOptions>({
   // The host-copy regression checks paste from the system clipboard across engines.
   // Serialize this lane so another browser cannot replace its clipboard mid-assertion.
   workers: suite === 'cross-engine' ? 1 : functional.workers,
+  // Test titles are static. Keep individual durations in CI logs for shard tuning.
+  reporter: ['layout', 'a11y'].includes(suite) ? 'list' : functional.reporter,
   testMatch:
     suite === 'cross-engine'
       ? ['**/cross-engine.spec.ts', '**/host-slot-picker.spec.ts']
       : `**/${suite}.spec.ts`,
-  // Layout uses one browser session per viewport and locale. Axe batches registry
+  // Layout groups the booking-only locale with US English. Axe batches registry
   // states so they have time to finish within the same deadline.
   timeout: ['layout', 'a11y'].includes(suite) ? 480_000 : 120_000,
   // Preserve only masked visual comparisons, never traces, video or failure DOM.

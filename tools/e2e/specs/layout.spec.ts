@@ -1,8 +1,22 @@
+import type { Page } from '@playwright/test'
 import { a11yFindings, scanA11y } from '../a11y.ts'
-import { AUDIT_GUEST_NAME, AUDIT_HOST_NOTE, AUDIT_TEAM_NAME, AUDIT_TITLE } from '../audit-data.ts'
-import { auditLocales, auditPages, openAuditPage, settleAuditLayout } from '../audit-pages.ts'
+import {
+  AUDIT_GUEST_NAME,
+  AUDIT_HOST_NOTE,
+  AUDIT_NOW,
+  AUDIT_TEAM_NAME,
+  AUDIT_TITLE,
+} from '../audit-data.ts'
+import {
+  type AuditPageId,
+  auditLocales,
+  auditPages,
+  openAuditPage,
+  settleAuditLayout,
+} from '../audit-pages.ts'
 import { expect, test } from '../fixtures.ts'
 import { layoutViewports, measureKeyboard, measureLayout } from '../layout.ts'
+import { layoutViewportTag } from '../layout-shards.ts'
 import {
   type AuditLocale,
   type AuditReport,
@@ -15,7 +29,10 @@ import {
 test.describe('successive isolated OAuth audit apps', () => {
   test.describe.configure({ mode: 'serial' })
   for (let attempt = 1; attempt <= 7; attempt++)
-    test(`prepares consent in isolated app ${attempt}`, async ({ page, app }) => {
+    test(`prepares consent in isolated app ${attempt}`, { tag: '@layout-oauth' }, async ({
+      page,
+      app,
+    }) => {
       await openAuditPage(page, app, 'oauth-consent')
       await expect(page.getByRole('button', { name: 'Allow access', exact: true })).toBeVisible()
       await expect(page.getByText('Synthetic audit connector', { exact: true })).toBeVisible()
@@ -31,7 +48,9 @@ for (const viewport of [
   test.describe(`page preparation ${viewport.width}x${viewport.height}`, () => {
     test.use({ viewport, isMobile: viewport.width <= 480, hasTouch: viewport.width <= 480 })
     for (const locale of ['en-US', 'zh-CN'] as const)
-      test(`prepare additional required page states ${locale}`, async ({ page, app }) => {
+      test(`prepare additional required page states ${locale}`, {
+        tag: '@layout-preparation',
+      }, async ({ page, app }) => {
         const selectors = {
           host: '.host-header > .host-avatar',
           booking: '.event-title + .host-identity',
@@ -43,8 +62,8 @@ for (const viewport of [
           'oauth-consent': 'button.button-primary',
         } as const
         for (const { id } of auditPages) {
-          await openAuditPage(page, app, id, { locale })
           if (!(id in selectors)) continue
+          await openAuditPage(page, app, id, { locale })
           const selector = selectors[id as keyof typeof selectors]
           await expect(page.locator(selector)).toBeVisible()
           if (id === 'host')
@@ -136,7 +155,10 @@ for (const viewport of [
   test.describe(`event types readiness caption at ${viewport.width}px`, () => {
     test.use({ viewport })
     for (const locale of ['en-US', 'zh-CN'] as const)
-      test(`uses the available table width ${locale}`, async ({ page, app }) => {
+      test(`uses the available table width ${locale}`, { tag: '@layout-readiness' }, async ({
+        page,
+        app,
+      }) => {
         await openAuditPage(page, app, 'event-types', { locale })
         const table = page.locator('.table-event-types')
         await expect(table.locator('caption')).toHaveText(
@@ -162,7 +184,9 @@ test.describe('notification editor at 320px', () => {
   const viewport = { width: 320, height: 568 }
   test.use({ viewport, isMobile: true, hasTouch: true, notificationEditor: true })
   for (const locale of ['en-US', 'zh-CN'] as const)
-    test(`saved reminder, follow-up and host note fit ${locale}`, async ({ page, app }) => {
+    test(`saved reminder, follow-up and host note fit ${locale}`, {
+      tag: '@layout-notifications',
+    }, async ({ page, app }) => {
       await openAuditPage(page, app, 'event-type-editor', { locale })
       const editor = page.locator('.notifications-editor')
       const reminders = editor.locator('fieldset[id="notifications.reminders"]')
@@ -192,7 +216,6 @@ test.describe('notification editor at 320px', () => {
       expect(await addLocation.evaluate((element) => element.getBoundingClientRect().height)).toBe(
         0,
       )
-      await page.evaluate(settleAuditLayout)
       expect(await page.evaluate(measureLayout, viewport)).toEqual([])
       await locationGroup.locator('summary').click()
       await expect(addLocation).toBeVisible()
@@ -208,10 +231,9 @@ test.describe('team administrator bookings at 320px', () => {
   const viewport = { width: 320, height: 568 }
   test.use({ viewport, isMobile: true, hasTouch: true })
   for (const locale of ['en-US', 'zh-CN'] as const)
-    test(`supports long names, keyboard detail and focus return ${locale}`, async ({
-      page,
-      app,
-    }) => {
+    test(`supports long names, keyboard detail and focus return ${locale}`, {
+      tag: '@layout-team-bookings',
+    }, async ({ page, app }) => {
       await openAuditPage(page, app, 'team-bookings', { locale })
       const opener = page
         .locator('.team-bookings-list')
@@ -219,7 +241,6 @@ test.describe('team administrator bookings at 320px', () => {
       await expect(opener).toBeVisible()
       await expect(page.locator('main').getByText(AUDIT_TEAM_NAME, { exact: true })).toBeVisible()
       const inspect = async () => {
-        await page.evaluate(settleAuditLayout)
         expect(await page.evaluate(measureLayout, viewport)).toEqual([])
         const scan = await scanA11y(page)
         expect(a11yFindings('team-bookings', scan.violations, []).findings).toEqual([])
@@ -231,6 +252,7 @@ test.describe('team administrator bookings at 320px', () => {
       await page.keyboard.press('Enter')
       await expect(filters).toHaveAttribute('open', '')
       await expect(filters.locator('input[type="datetime-local"]')).toHaveCount(4)
+      await page.evaluate(settleAuditLayout)
       await inspect()
       await filterToggle.focus()
       await page.keyboard.press('Enter')
@@ -249,12 +271,14 @@ test.describe('team administrator bookings at 320px', () => {
       await expect(close).toBeFocused()
       await expect(page).toHaveURL(/\/app\/bookings\/[^/?]+$/)
       await expect(detail.locator('li').filter({ hasText: AUDIT_GUEST_NAME })).toBeVisible()
+      await page.evaluate(settleAuditLayout)
       await inspect()
       const cancel = detail.getByRole('button', { name: /^(Cancel booking…|取消预约…)$/ })
       await cancel.focus()
       await page.keyboard.press('Enter')
       await expect(detail.locator('form')).toBeVisible()
       await expect(detail.getByRole('textbox')).toBeFocused()
+      await page.evaluate(settleAuditLayout)
       await inspect()
       await detail.getByRole('button', { name: /^(Keep booking|保留预约)$/ }).focus()
       await page.keyboard.press('Enter')
@@ -280,7 +304,9 @@ for (const viewport of [
     test.describe(`booking polish ${viewport.width}px ${theme}`, () => {
       test.use({ viewport, colorScheme: theme, isMobile: phone, hasTouch: phone })
       for (const locale of ['en-US', 'zh-CN'] as const) {
-        test(`keeps the booking states readable and operable ${locale}`, async ({ page, app }) => {
+        test(`keeps the booking states readable and operable ${locale}`, {
+          tag: '@layout-booking-polish',
+        }, async ({ page, app }) => {
           const sizes = new Set<number>()
           for (const id of [
             'booking',
@@ -365,7 +391,7 @@ for (const viewport of [
 for (const viewport of layoutViewports) {
   const mobileViewport = viewport.width <= 480 || (viewport.width <= 960 && viewport.height <= 430)
   for (const theme of ['light', 'dark'] as const) {
-    for (const locale of ['en-US', 'zh-CN', 'en-GB'] as const) {
+    for (const locale of ['en-US', 'zh-CN'] as const) {
       test.describe(`${viewport.width}x${viewport.height} ${theme} ${locale}`, () => {
         test.use({
           viewport,
@@ -374,37 +400,52 @@ for (const viewport of layoutViewports) {
           isMobile: mobileViewport,
           hasTouch: mobileViewport,
         })
-        test('measure every page', async ({ page, app }) => {
-          await page.emulateMedia({ colorScheme: theme })
+        test('measure every page', { tag: layoutViewportTag(viewport) }, async ({ page, app }) => {
+          await page.clock.setFixedTime(new Date(AUDIT_NOW))
           const reports: AuditReport[] = []
-          for (const state of auditPages) {
-            if (!(auditLocales(state.id) as readonly AuditLocale[]).includes(locale)) continue
+          const scan = async (target: Page, id: AuditPageId, scanLocale: AuditLocale) => {
             const report: AuditReport = {
               version: 1,
               kind: 'layout',
-              page: state.id,
+              page: id,
               theme,
-              locale,
+              locale: scanLocale,
               viewport,
               findings: [],
             }
             let phase: 'navigate' | 'layout' | 'keyboard' = 'navigate'
             try {
-              await openAuditPage(page, app, state.id, { locale })
+              await openAuditPage(target, app, id, { locale: scanLocale, clockFixed: true })
               phase = 'layout'
-              report.findings.push(...(await page.evaluate(measureLayout, viewport)))
+              report.findings.push(...(await target.evaluate(measureLayout, viewport)))
               phase = 'keyboard'
               // Leave focus on the open disclosure's trigger so Tab reaches its controls.
               // The corresponding closed pages still scan from the skip link.
               const fromCurrentFocus =
-                state.id === 'admin-account-menu' ||
-                (state.id === 'admin-integrations' && viewport.width < 960)
-              report.findings.push(...(await measureKeyboard(page, { fromCurrentFocus })))
+                id === 'admin-account-menu' || (id === 'admin-integrations' && viewport.width < 960)
+              report.findings.push(...(await measureKeyboard(target, { fromCurrentFocus })))
             } catch {
               report.findings.push({ code: 'scan-error', phase })
             }
             await writeAuditReport(report)
             reports.push(report)
+          }
+          if (locale === 'en-US' && auditLocales('booking').includes('en-GB')) {
+            await test.step('booking en-GB', async () => {
+              // Reuse the server before other states write data, with a separate page
+              // so its British English navigator preferences cannot affect en-US.
+              const britishPage = await page.context().newPage()
+              try {
+                await britishPage.bringToFront()
+                await scan(britishPage, 'booking', 'en-GB')
+              } finally {
+                await britishPage.close()
+              }
+              await page.bringToFront()
+            })
+          }
+          for (const { id } of auditPages) {
+            if (auditLocales(id).includes(locale)) await scan(page, id, locale)
           }
           assertAuditFindings(reports)
         })
@@ -413,10 +454,9 @@ for (const viewport of layoutViewports) {
   }
 }
 
-test('organization list supports an audit burst and still requires a session', async ({
-  page,
-  app,
-}) => {
+test('organization list supports an audit burst and still requires a session', {
+  tag: '@layout-org-budget',
+}, async ({ page, app }) => {
   const url = `${app.url}/api/auth/organization/list`
   const status = async () => {
     const response = await page.request.get(url)
@@ -426,7 +466,7 @@ test('organization list supports an audit burst and still requires a session', a
   }
   expect(await status()).toBe(401)
   await app.auditSignIn(true)
-  // A full page-preparation run can exceed the normal 100-request budget from one IP.
+  // A full layout scan can exceed the normal 100-request budget from one IP.
   for (let batch = 0; batch < 11; batch++) {
     const statuses = await Promise.all(Array.from({ length: 10 }, status))
     expect(statuses).toEqual(Array<number>(10).fill(200))
