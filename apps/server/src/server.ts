@@ -301,6 +301,7 @@ export function productRoutes({
   successRedirectPolicy = { publicUrl, allowIpHosts: successRedirectAllowIpHosts },
   bookingMaxInviteeReschedules,
   bookingExportMaxConcurrent,
+  teamBookingBulk,
   hostedSignupUrl,
   privacyPolicyUrl,
   termsUrl,
@@ -354,6 +355,10 @@ export function productRoutes({
   successRedirectPolicy?: ServiceContext['successRedirectPolicy']
   bookingMaxInviteeReschedules?: number | undefined
   bookingExportMaxConcurrent?: number | undefined
+  teamBookingBulk?: {
+    bulkSelectionSecret: string
+    enqueueBulkCancellation: EnqueueBulkCancellation
+  }
   hostedSignupUrl?: string
   privacyPolicyUrl?: string
   termsUrl?: string
@@ -562,6 +567,7 @@ export function productRoutes({
       db,
       notify,
       departureHandoffEnabled: Boolean(departureHandoffs && notify),
+      ...teamBookingBulk,
     }),
     departureHandoffRoutes({
       db,
@@ -572,7 +578,7 @@ export function productRoutes({
       automaticZoom,
       microsoftCalendarEnabled,
     }),
-    teamBookingBulkPreviewRoutes({ db, ssoCapabilities }),
+    teamBookingBulkPreviewRoutes({ db, ssoCapabilities, ...teamBookingBulk }),
     teamInvitationRoutes({ db, invitationMailLimits }),
     memberDepartureImpactRoutes({ db }),
     memberRemovalRoutes({
@@ -792,6 +798,7 @@ export interface ProductionAppDeps extends RecurringBookingAdmissionDeps {
   zoomConference: ConferenceDeps['zoom']
   enqueueCalendarSync: CalendarDeps['enqueueSync']
   enqueueCalendarWritebackRecovery: CalendarDeps['enqueueWritebackRecovery']
+  enqueueBulkCancellation?: EnqueueBulkCancellation
   /** The job queue SSO mailbox proof emails are enqueued on. */
   mailboxProofQueue: MailboxProofQueue
   scimMappingNotices: ScimMappingNoticeQueue
@@ -829,6 +836,7 @@ export function productionAppOptions({
   zoomConference,
   enqueueCalendarSync,
   enqueueCalendarWritebackRecovery,
+  enqueueBulkCancellation,
   mailboxProofQueue,
   scimMappingNotices,
   ssoLinkRemovalQueue,
@@ -957,6 +965,13 @@ export function productionAppOptions({
       successRedirectPolicy,
       bookingMaxInviteeReschedules: config.BOOKING_MAX_INVITEE_RESCHEDULES,
       bookingExportMaxConcurrent: config.BOOKING_EXPORT_MAX_CONCURRENT,
+      ...(config.TEAM_BOOKING_BULK_CANCELLATION_ENABLED &&
+        enqueueBulkCancellation && {
+          teamBookingBulk: {
+            bulkSelectionSecret: config.BETTER_AUTH_SECRET,
+            enqueueBulkCancellation,
+          },
+        }),
       auditLogRetentionDays: config.AUDIT_LOG_RETENTION_DAYS,
       hostedSignupUrl: config.HOSTED_SIGNUP_URL,
       privacyPolicyUrl: config.PRIVACY_POLICY_URL,
@@ -1352,8 +1367,7 @@ async function start(
     log: (line) => console.info(line),
   })
   const workflowWorker = { db, now: () => Temporal.Now.instant(), workflowsEnabled }
-  // Bulk cancellation stays hard-off until the browser and release acceptance slice.
-  const bulkCancellationEnabled = false
+  const bulkCancellationEnabled = config.TEAM_BOOKING_BULK_CANCELLATION_ENABLED
   const enqueueBulkCancellation: EnqueueBulkCancellation = (transaction, batchId, startAfter) =>
     jobs.enqueue(
       TEAM_BOOKING_BULK_JOB,
@@ -1711,6 +1725,7 @@ async function start(
         webhookQueue: jobs,
         notify,
         notifyAttendeeNoShow,
+        enqueueBulkCancellation,
         googleCalendar,
         microsoftCalendar,
         caldavCalendar,
