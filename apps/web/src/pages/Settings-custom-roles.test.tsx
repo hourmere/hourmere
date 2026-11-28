@@ -109,7 +109,9 @@ function settings({
         total: 2,
       }),
     [`GET ${modePath}`]: () =>
-      json(200, { enabled: mode, policyVersion: { ...policyVersion, teamEpoch }, renewals: [] }),
+      actor.trim() === 'owner'
+        ? json(200, { enabled: mode, policyVersion: { ...policyVersion, teamEpoch }, renewals: [] })
+        : json(403, { error: 'team_management_access_denied' }),
     [`PUT ${modePath}`]: ({ body }) => {
       mode = (body as { enabled: boolean }).enabled
       return json(200, {
@@ -207,6 +209,15 @@ describe('custom roles in team settings', () => {
     expect(screen.queryByRole('region', { name: 'Roles and permissions' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Change custom role for Casey' })).toBeNull()
     expect(requests.to(`GET ${modePath}`)).toHaveLength(0)
+  })
+
+  it('shows the role management section to a legacy Owner and respects server denial', async () => {
+    const requests = settings({ actor: 'admin, owner', initial: [coordinator] })
+    const panel = within(await screen.findByRole('region', { name: 'Roles and permissions' }))
+    expect((await panel.findByRole('alert')).textContent).toContain('Could not load custom roles.')
+    expect(panel.queryByRole('button', { name: 'Edit custom role Coordinator' })).toBeNull()
+    expect(requests.to(`GET ${modePath}`)).toHaveLength(1)
+    expect(requests.to(`GET ${rolesPath}`)).toHaveLength(0)
   })
 
   it('shows the impact before an Owner can enable custom roles', async () => {

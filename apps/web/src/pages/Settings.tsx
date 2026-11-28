@@ -137,8 +137,7 @@ export function SettingsPage() {
   const customRolesAvailable = teamBrowser && shell?.customRolesAvailable === true
   const customRoleRenewalAvailable =
     customRolesAvailable || (teamBrowser && shell?.customRoleRenewalAvailable === true)
-  const showCustomRoles =
-    customRolesAvailable && role.status === 'ready' && role.data?.trim() === 'owner'
+  const showCustomRoles = customRolesAvailable && roles.includes('owner')
   const customRoles = useCustomRolesSettings(organizationId, showCustomRoles)
   const customPermissions = useCustomRolePermissions(organizationId, customRoleRenewalAvailable)
   const customRoleProof = {
@@ -322,7 +321,7 @@ export function SettingsPage() {
       )}
       {customRoleRenewalAvailable && (
         <CustomRoleRenewal
-          key={organizationId}
+          key={`custom-role-renewal-${organizationId}`}
           context={customRoleProof}
           view={customPermissions}
           onRenewed={customRoles.reload}
@@ -330,7 +329,7 @@ export function SettingsPage() {
       )}
       {showCustomRoles && (
         <CustomRolesSettings
-          key={organizationId}
+          key={`custom-roles-${organizationId}`}
           settings={customRoles}
           context={customRoleProof}
         />

@@ -439,16 +439,17 @@ describe.skipIf(!serverUrl)('ownership transfer service', () => {
     await expect(confirm(f, id, proof)).resolves.toMatchObject({ status: 'complete' })
   })
 
-  it('clears the recipient’s custom assignment and advances its generation atomically with transfer', async () => {
+  it('clears the recipient’s custom assignment and advances both generations atomically with transfer', async () => {
     const f = await fixture()
     const organizationId = f.team.id
     const memberId = f.recipient.membershipId
-    const authorization = () =>
+    const initiatorId = f.owner.membershipId
+    const authorization = (membershipId: string) =>
       db
         .selectFrom('team_member_authorizations')
         .select(['generation', 'fixed_role'])
         .where('organization_id', '=', organizationId)
-        .where('member_id', '=', memberId)
+        .where('member_id', '=', membershipId)
         .executeTakeFirstOrThrow()
     const assignment = () =>
       db
@@ -458,8 +459,29 @@ describe.skipIf(!serverUrl)('ownership transfer service', () => {
         .where('member_id', '=', memberId)
         .executeTakeFirst()
 
-    // Seed a retained assignment while both custom-role switches are off.
+    // Retain the initiator's renewed owner authority and the recipient's assignment while
+    // both custom-role switches are off.
     const role = await db.transaction().execute(async (trx) => {
+      const { generation } = await trx
+        .updateTable('team_member_authorizations')
+        .set({ generation: 3 })
+        .where('organization_id', '=', organizationId)
+        .where('member_id', '=', initiatorId)
+        .returning('generation')
+        .executeTakeFirstOrThrow()
+      await trx
+        .insertInto('team_credential_authorizations')
+        .values({
+          organization_id: organizationId,
+          member_id: initiatorId,
+          user_id: f.owner.principal.user.id,
+          session_id: f.owner.principal.sessionId,
+          member_generation: generation,
+          policy_epoch: 0,
+          master_epoch: 0,
+          permission_ids: ['members.assign_role'],
+        })
+        .execute()
       const { id } = await trx
         .insertInto('custom_roles')
         .values({ organization_id: organizationId, active_revision: 1 })
@@ -487,8 +509,10 @@ describe.skipIf(!serverUrl)('ownership transfer service', () => {
         .execute()
       return id
     })
-    const before = await authorization()
+    const before = await authorization(memberId)
+    const initiatorBefore = await authorization(initiatorId)
     expect(before).toEqual({ generation: 2, fixed_role: 'member' })
+    expect(initiatorBefore).toEqual({ generation: 3, fixed_role: 'owner' })
     expect(await assignment()).toEqual({ role_id: role })
     const { id, proof } = await prepared(f)
     const failingDeps = {
@@ -503,16 +527,21 @@ describe.skipIf(!serverUrl)('ownership transfer service', () => {
       'Synthetic failure after role updates',
     )
     await assertPending(f, id, proof)
-    expect(await authorization()).toEqual(before)
+    expect(await authorization(memberId)).toEqual(before)
+    expect(await authorization(initiatorId)).toEqual(initiatorBefore)
     expect(await assignment()).toEqual({ role_id: role })
 
     expect(completed(await confirm(f, id, proof)).recipient).toEqual({
       membershipId: memberId,
       role: 'owner',
     })
-    expect(await authorization()).toEqual({
+    expect(await authorization(memberId)).toEqual({
       generation: before.generation + 1,
       fixed_role: 'owner',
+    })
+    expect(await authorization(initiatorId)).toEqual({
+      generation: initiatorBefore.generation + 1,
+      fixed_role: 'admin',
     })
     expect(await assignment()).toBeUndefined()
     expect(

@@ -683,10 +683,22 @@ edits carry the expected authorization generation and role revision. Stale edits
 return `409 role_revision_conflict`. Role archival requires all assignments to be
 cleared first.
 
+The event types, routing forms and workflows pages still show controls based on fixed
+roles. Server authorization governs every action. Align these pages with effective
+permissions before rollout. After an instance has used custom roles, turning off
+the instance runtime switch makes `POST /api/v1/teams/{teamId}/permissions/renew`
+return `404 custom_roles_disabled`. Members with an authorization generation greater
+than 1 can renew once the operator turns the switch back on.
+
 中文：自定义角色尚未开放，相关接口统一返回 `404 custom_roles_disabled`。现有邀请、
 成员角色及预约权限继续适用。开放后，仅固定所有者可通过同源浏览器会话管理角色和分配，
 写入须提供预期团队和版本，并重新验证身份。保存时版本不一致会返回
 `409 role_revision_conflict`。
+
+活动类型、路由表单和工作流页面仍按固定角色显示控件，每次操作均以服务端授权为准。
+正式启用前须对齐这些页面的权限显示。实例使用过自定义角色后，关闭实例运行时开关会使
+权限续签接口返回 `404 custom_roles_disabled`。授权代际大于 1 的成员须等到开关恢复后
+才能续签。
 
 Team invitations default to `member`; owners and admins may invite only that role,
 including when resending. Historical invitations with an elevated or custom stored role

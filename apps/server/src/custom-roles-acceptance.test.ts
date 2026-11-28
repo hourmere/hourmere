@@ -16,6 +16,7 @@ import {
   createTestUser,
   type TestUser,
 } from '@hourmere/scheduling/testing'
+import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import { proveMailbox } from '../../../packages/db/src/sso-identity-fixtures.ts'
@@ -764,6 +765,26 @@ describe.skipIf(!databaseUrl)('custom roles across REST, API keys, MCP OAuth and
 
   it('keeps newly acquired Admin authority behind renewal and key replacement after native promotion', async () => {
     const f = await fixture()
+    const bookingId = await createFixtures(db).booking(
+      f.team.id,
+      [f.owner.id],
+      '2026-12-01T12:00:00Z',
+      '2026-12-01T12:30:00Z',
+      { attendee: { name: 'Private invitee', email: privateEmail } },
+    )
+    const invitationEmail = 'private-invitation@example.test'
+    const { id: invitationId } = await db
+      .insertInto('auth.invitation')
+      .values({
+        organizationId: f.team.id,
+        inviterId: f.owner.id,
+        email: invitationEmail,
+        role: 'member',
+        status: 'pending',
+        expiresAt: sql<Date>`clock_timestamp() + interval '1 hour'`,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
     const legacy = await issueKey(f.memberBrowser, 'full')
     await changeMode(f.ownerBrowser, true, 0)
     await assignCoordinator(f)
@@ -781,6 +802,15 @@ describe.skipIf(!databaseUrl)('custom roles across REST, API keys, MCP OAuth and
     const audit = '/api/v1/audit-events'
     const ssoPolicy = '/api/v1/team/sso/policy'
     expect((await request(audit, f.memberBrowser.headers)).status).toBe(403)
+    const managementReads = [
+      ['/api/v1/team/invitations', { id: invitationId, email: invitationEmail }],
+      ['/api/v1/team/bookings', { id: bookingId, attendees: [{ email: privateEmail }] }],
+    ] as const
+    for (const [path] of managementReads) {
+      const stale = await request(path, f.memberBrowser.headers)
+      expect(stale.status, path).toBe(403)
+      expect(await stale.json(), path).toMatchObject({ error: 'team_management_access_denied' })
+    }
     for (const { key } of [legacy, issued]) {
       expect((await request('/api/v1/bookings', bearer(key))).status).toBe(200)
       expect((await request(audit, bearer(key))).status).toBe(403)
@@ -793,6 +823,11 @@ describe.skipIf(!databaseUrl)('custom roles across REST, API keys, MCP OAuth and
 
     const adminReview = await renewBrowser(f.memberBrowser, 3, 1)
     expect((await request(audit, f.memberBrowser.headers)).status).toBe(200)
+    for (const [path, adminResult] of managementReads) {
+      const current = await request(path, f.memberBrowser.headers)
+      expect(current.status, path).toBe(200)
+      expect(await current.json(), path).toMatchObject({ data: [adminResult] })
+    }
     const renewed = await issueKey(f.memberBrowser, 'full', adminReview)
     expect((await request(audit, bearer(renewed.key))).status).toBe(200)
     expect((await request(ssoPolicy, bearer(renewed.key))).status).toBe(200)

@@ -179,6 +179,7 @@ custom authorization needs renewal and shows the impact. An initial opt-in witho
 assignments has no affected credentials. Drain older authorization writers before
 activation and enforce a minimum compatible binary across web, worker, auth and job entry
 points. Opt-in advances a team policy epoch under the organization lock.
+Complete the [enablement checklist](#enablement-checklist) before rollout.
 
 **Version boundary.** A version-bound team operation is an operation authorized through
 a custom grant. Authority the credential already holds under a fixed-role or independent
@@ -257,6 +258,13 @@ and current fixed authority. Fixed-role promotions, ownership transfer, departur
 SCIM revocation still clear dormant assignments and advance the affected authorization
 generation in the same transaction while either switch is off. Advance the policy epoch
 on both disable and re-enable.
+
+Turning off the instance runtime switch after use makes
+`POST /api/v1/teams/{teamId}/permissions/renew` return `404 custom_roles_disabled`.
+Members with an authorization generation greater than 1 cannot renew while that switch
+is off. Affected sessions waiting to use newly acquired fixed Admin or Owner authority
+remain restricted until the operator restores the switch and the member renews.
+
 The instance-wide master switch also advances the effective policy epoch for opted-in
 teams on both transitions, without changing their opt-in settings. These epoch changes
 apply only to custom authority. Explicit renewal is required before restored custom
@@ -339,6 +347,30 @@ re-enabling the team setting. Affected credentials lose custom actions as soon a
 either switch closes or the membership generation changes. Bringing a switch back
 does not restore a previously issued custom ceiling. Fixed-role credentials for
 memberships outside this boundary continue to work across switch changes.
+
+The event types, routing forms and workflows pages still use fixed roles to decide
+which controls to show. A Member with a custom grant may have access through the
+service while the browser hides the action. An affected Admin awaiting renewal may
+see controls whose requests return 403. Server authorization is authoritative for
+every request.
+
+中文：活动类型、路由表单和工作流页面仍按固定角色显示控件。获得自定义授权的普通成员可能
+无法在浏览器中看到相关操作，等待续签的管理员也可能看到提交后返回 403 的控件。每次请求
+以服务端授权为准，正式启用前须对齐这三个页面的权限显示。
+
+实例使用过此功能后，如果关闭实例运行时开关，浏览器权限续签接口将返回
+`404 custom_roles_disabled`。授权代际大于 1 的成员须等到开关恢复后才能续签；受影响的
+会话须完成续签后才能使用新取得的固定管理员或所有者权限。
+
+### Enablement checklist
+
+- Align the event types, routing forms and workflows pages with effective permissions.
+  Verify that custom-granted Members can reach allowed actions and that affected Admins
+  awaiting renewal are guided to renew before using newly acquired authority. Preserve
+  all server authorization checks.
+- Rehearse disabling the instance runtime switch after use. Verify that browser renewal
+  returns `404 custom_roles_disabled` while it is off and that members with an
+  authorization generation greater than 1 can renew after the operator turns it back on.
 
 ## Test plan for the implementation
 
