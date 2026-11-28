@@ -1,7 +1,14 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { chooseLanguage } from '../../i18n/store.ts'
+import {
+  AppShell,
+  BookingDetailPage,
+  BookingsPage,
+  RequireSession,
+  SessionLayout,
+} from '../../lazy-pages.tsx'
 import type { Me } from '../../session.tsx'
 import {
   fakeApi,
@@ -14,6 +21,11 @@ import {
   signedInAs,
 } from '../../test/fake-api.tsx'
 import { BOOKING_ID, booking } from '../../test/fixtures.ts'
+import { resolveLazy } from '../../test/resolve-lazy.ts'
+
+beforeAll(() =>
+  resolveLazy(SessionLayout, RequireSession, AppShell, BookingDetailPage, BookingsPage),
+)
 
 const team: Me = {
   ...ME,
@@ -72,11 +84,13 @@ describe('host booking mail links', () => {
   ] as const)('switches from %s to the booking team before loading it', async (_name, initial) => {
     const api = server(initial)
     renderApp(emailLink)
+    await waitFor(() => expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(1))
     const people = await screen.findByRole('region', { name: 'People' })
     expect(within(people).getByText(/Berta Berlin/)).toBeDefined()
     expect(api.active().organization.id).toBe(team.organization.id)
-    expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(1)
-    const change = api.to('POST /api/auth/organization/set-active')[0]
+    const switches = api.to('POST /api/auth/organization/set-active')
+    expect(switches).toHaveLength(1)
+    const [change] = switches
     expect(change?.body).toEqual({ organizationId: team.organization.id })
     expect(change?.headers.get('X-Expected-Organization-Id')).toBe(initial.organization.id)
     expect(api.to(`GET /api/v1/bookings/${BOOKING_ID}`)).toHaveLength(2)
