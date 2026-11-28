@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createLogMailer, departureHandoffEmail, type Mailer } from '@hourmere/mail'
+import { departureHandoffRecipientHash } from '@hourmere/scheduling/departure-handoff-delivery'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
   createDepartureHandoffEmailQueue,
@@ -143,7 +144,7 @@ async function seed(db: Db) {
       .select(['delivery.state', 'recipient.token_digest', 'source.status'])
       .where('delivery.job_id', '=', jobId)
       .executeTakeFirstOrThrow()
-  return { email, bookingId, recipientId, jobId, previousDigest, read }
+  return { email, organizationId, bookingId, recipientId, jobId, previousDigest, read }
 }
 
 describe.skipIf(!serverUrl)('PostgreSQL handoff delivery outcomes', () => {
@@ -196,6 +197,52 @@ describe.skipIf(!serverUrl)('PostgreSQL handoff delivery outcomes', () => {
     await deliverDepartureHandoffEmail(deps, { recipientId }, { id: jobId })
     expect(exchange).toHaveBeenCalledTimes(1)
     expect(await read()).toEqual(saved)
+  })
+
+  it('marks a queued fourth delivery unavailable without sending or retrying', async () => {
+    const { email, organizationId, bookingId, recipientId, jobId, previousDigest, read } =
+      await seed(db)
+    await db
+      .insertInto('departure_handoff_send_budgets')
+      .values({
+        organization_id: organizationId,
+        source_booking_id: bookingId,
+        recipient_hash: departureHandoffRecipientHash(bookingId, email),
+        counted_sends: 3,
+      })
+      .execute()
+    expect(await read()).toMatchObject({ state: 'queued' })
+
+    const send = vi.fn()
+    const exchange = vi.fn<NonNullable<Mailer['sendWorkflowAttempt']>>(async () => 'sent')
+    const deps = {
+      db,
+      mailer: { send, sendWorkflowAttempt: exchange },
+      publicUrl,
+      secret: mailBudgetKey,
+      now,
+    }
+    const deliver = () => deliverDepartureHandoffEmail(deps, { recipientId }, { id: jobId })
+
+    await expect(deliver()).resolves.toBeUndefined()
+    const saved = await read()
+    expect(saved).toEqual({
+      state: 'unavailable',
+      token_digest: previousDigest,
+      status: 'confirmed',
+    })
+
+    await expect(deliver()).resolves.toBeUndefined()
+    expect(await read()).toEqual(saved)
+    expect(exchange).not.toHaveBeenCalled()
+    expect(send).not.toHaveBeenCalled()
+    expect(
+      await db
+        .selectFrom('departure_handoff_send_budgets')
+        .select('counted_sends')
+        .where('source_booking_id', '=', bookingId)
+        .executeTakeFirst(),
+    ).toEqual({ counted_sends: 3 })
   })
 
   it('keeps the last digest when a send is unavailable or suppressed by shared mail limits', async () => {

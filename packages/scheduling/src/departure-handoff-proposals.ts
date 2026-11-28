@@ -25,6 +25,8 @@ import { isUuid } from './internal.ts'
 import { cleanInviteeEmail } from './text.ts'
 
 const MAX_VERSION = 2_147_483_647
+const CLEANUP_BATCH_SIZE = 100
+const CLEANUP_MAX_BATCHES = 10
 const queueDeadline = sql<Date>`clock_timestamp() - interval '20 minutes'`
 
 export const DEPARTURE_HANDOFF_PROPOSAL_STATES = [
@@ -551,9 +553,15 @@ export function resendDepartureHandoffProposal(
  * Keep version identifiers so an old offer cannot become the current version again. */
 export async function cleanupDepartureHandoffProposals(db: Db, now: Temporal.Instant) {
   const cutoff = now.subtract({ hours: 48 }).toString()
-  const candidates = await db
+  const eligibleOffers = db
     .selectFrom('departure_handoff_offers as offer')
-    .select(['organization_id', 'source_booking_id', 'id', 'version'])
+    .select([
+      'organization_id',
+      'source_booking_id',
+      'id',
+      'version',
+      utc('expires_at').as('expiry'),
+    ])
     .where('expires_at', '<=', sql<Date>`${now.toString()}::timestamptz`)
     .where((eb) =>
       eb.or([
@@ -572,39 +580,52 @@ export async function cleanupDepartureHandoffProposals(db: Db, now: Temporal.Ins
         ]),
       ]),
     )
-    .orderBy('expires_at')
-    .limit(100)
-    .execute()
-  for (const candidate of candidates) {
-    await db.transaction().execute(async (trx) => {
-      const key = {
-        organizationId: candidate.organization_id,
-        sourceBookingId: candidate.source_booking_id,
-      }
-      const team = await trx
-        .selectFrom('auth.organization')
-        .select('id')
-        .where('id', '=', key.organizationId)
-        .forShare()
-        .skipLocked()
-        .executeTakeFirst()
-      if (
-        !team ||
-        !(await lockDepartureHandoffSource(trx, key.organizationId, key.sourceBookingId, true))
-      )
-        return
-      const offer = await offerStatusRows(trx, key)
-        .where('id', '=', candidate.id)
-        .where('version', '=', candidate.version)
-        .forUpdate()
-        .executeTakeFirst()
-      if (!offer) return
-      if (offer.state === 'live') await closeOffer(trx, key, offer, 'expired')
-      if (Temporal.Instant.compare(offer.expiresAt, cutoff) <= 0)
-        await trx
-          .deleteFrom('departure_handoff_recipients')
-          .where('id', 'in', recipients(trx, key, offer).select('id'))
-          .execute()
-    })
+    .orderBy(['expires_at', 'organization_id', 'source_booking_id', 'version'])
+    .limit(CLEANUP_BATCH_SIZE)
+  let cursor: InferResult<typeof eligibleOffers>[number] | undefined
+  for (let batch = 0; batch < CLEANUP_MAX_BATCHES; batch++) {
+    // Advance past skipped locks for this run. The next run starts from the oldest expiry again.
+    const page = cursor
+      ? eligibleOffers.where(sql<boolean>`
+          (expires_at, organization_id, source_booking_id, version) >
+          (${cursor.expiry}::timestamptz, ${cursor.organization_id}::uuid,
+           ${cursor.source_booking_id}::uuid, ${cursor.version}::int)
+        `)
+      : eligibleOffers
+    const candidates = await page.execute()
+    for (const candidate of candidates) {
+      await db.transaction().execute(async (trx) => {
+        const key = {
+          organizationId: candidate.organization_id,
+          sourceBookingId: candidate.source_booking_id,
+        }
+        const team = await trx
+          .selectFrom('auth.organization')
+          .select('id')
+          .where('id', '=', key.organizationId)
+          .forShare()
+          .skipLocked()
+          .executeTakeFirst()
+        if (
+          !team ||
+          !(await lockDepartureHandoffSource(trx, key.organizationId, key.sourceBookingId, true))
+        )
+          return
+        const offer = await offerStatusRows(trx, key)
+          .where('id', '=', candidate.id)
+          .where('version', '=', candidate.version)
+          .forUpdate()
+          .executeTakeFirst()
+        if (!offer) return
+        if (offer.state === 'live') await closeOffer(trx, key, offer, 'expired')
+        if (Temporal.Instant.compare(offer.expiresAt, cutoff) <= 0)
+          await trx
+            .deleteFrom('departure_handoff_recipients')
+            .where('id', 'in', recipients(trx, key, offer).select('id'))
+            .execute()
+      })
+    }
+    if (candidates.length < CLEANUP_BATCH_SIZE) return
+    cursor = candidates.at(-1)
   }
 }

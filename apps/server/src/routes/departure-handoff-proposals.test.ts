@@ -8,6 +8,7 @@ import {
   deliverDepartureHandoffEmail,
   departureHandoffEmailJob,
 } from '@hourmere/notifications'
+import { applyDepartureHandoff } from '@hourmere/scheduling/departure-handoff-admin'
 import { departureHandoffTokenDigest } from '@hourmere/scheduling/departure-handoff-delivery'
 import {
   cleanupDepartureHandoffProposals,
@@ -16,6 +17,7 @@ import {
   resendDepartureHandoffProposal,
   withdrawDepartureHandoffProposal,
 } from '@hourmere/scheduling/departure-handoff-proposals'
+import { departureHandoffStore } from '@hourmere/scheduling/departure-handoff-store'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
   createHandoffTestFixture,
@@ -505,6 +507,58 @@ describe.skipIf(!serverUrl)('departure handoff proposals and delivery', () => {
     await f.expectSourcePreserved()
   })
 
+  it('prunes recipient email rows while preserving the committed handoff receipt and offer version', async () => {
+    const f = await fixture()
+    const offer = await f.propose()
+    const recipients = await f.recipients(offer)
+    expect(recipients.map(({ recipient_key }) => recipient_key)).toEqual([
+      bookerMailbox,
+      guestMailbox,
+    ])
+    const recipientIds = recipients.map(({ id }) => id)
+    // The recipient decision service is staged separately. Record consent in the real offer rows.
+    await db
+      .updateTable('departure_handoff_recipients')
+      .set({ decision: 'approved', decided_at: f.ctx.now().toString() })
+      .where('id', 'in', recipientIds)
+      .execute()
+    const result = await applyDepartureHandoff(f.ctx, f.key(offer), departureHandoffStore)
+    const receipt = () =>
+      db
+        .selectFrom('departure_booking_handoffs')
+        .selectAll()
+        .where('source_booking_id', '=', f.booking.id)
+        .executeTakeFirstOrThrow()
+    const version = () =>
+      db
+        .selectFrom('departure_handoff_offers')
+        .selectAll()
+        .where('organization_id', '=', f.team.id)
+        .where('source_booking_id', '=', f.booking.id)
+        .where('id', '=', offer.id)
+        .where('version', '=', offer.version)
+        .executeTakeFirstOrThrow()
+    const committedReceipt = await receipt()
+    expect(committedReceipt).toMatchObject({
+      offer_id: offer.id,
+      offer_version: offer.version,
+      replacement_booking_id: result.replacementBookingId,
+    })
+    expect(committedReceipt.recipient_ids.toSorted()).toEqual(recipientIds.toSorted())
+    const committedVersion = await version()
+    f.setNow(
+      Temporal.Instant.from(committedVersion.expires_at.toISOString()).add({
+        hours: 48,
+        seconds: 1,
+      }),
+    )
+
+    await expect(cleanupDepartureHandoffProposals(db, f.ctx.now())).resolves.toBeUndefined()
+    expect(await f.recipients(offer)).toEqual([])
+    expect(await receipt()).toEqual(committedReceipt)
+    expect(await version()).toEqual(committedVersion)
+  })
+
   it('refuses ordinary members, API keys, stale organization context and foreign booking ids', async () => {
     const f = await fixture()
     const foreign = await fixture()
@@ -535,6 +589,42 @@ describe.skipIf(!serverUrl)('departure handoff proposals and delivery', () => {
     }
     expect(enqueueNothing).not.toHaveBeenCalled()
     await f.expectSourcePreserved()
+  })
+
+  it('prunes more than one batch of proposal versions with the same expiry in one run', async () => {
+    const f = await fixture()
+    const offer = await f.propose()
+    await f.withdraw(offer)
+    const versions = db
+      .selectFrom('departure_handoff_offers')
+      .where('source_booking_id', '=', f.booking.id)
+    const first = await versions.selectAll().executeTakeFirstOrThrow()
+    const backlog = Array.from({ length: 100 }, (_, index) => ({ ...first, version: index + 2 }))
+    await db.insertInto('departure_handoff_offers').values(backlog).execute()
+    const mailboxRows = db
+      .selectFrom('departure_handoff_recipients')
+      .where('source_booking_id', '=', f.booking.id)
+    await db
+      .insertInto('departure_handoff_recipients')
+      .values(
+        backlog.map((version) => ({
+          organization_id: version.organization_id,
+          source_booking_id: version.source_booking_id,
+          offer_id: version.id,
+          offer_version: version.version,
+          recipient_key: bookerMailbox,
+        })),
+      )
+      .execute()
+    expect(await mailboxRows.select('id').execute()).toHaveLength(102)
+
+    await cleanupDepartureHandoffProposals(
+      db,
+      Temporal.Instant.from(offer.expiresAt).add({ hours: 49 }),
+    )
+
+    expect(await mailboxRows.select('id').execute()).toEqual([])
+    expect(await versions.select('version').execute()).toHaveLength(101)
   })
 
   it('blocks a routing snapshot before writing an offer or queuing mail', async () => {

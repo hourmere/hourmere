@@ -2847,9 +2847,11 @@ has a definitive result. A duplicate job cannot reclaim an intent. A resend uses
 key scoped to the version's recipient row.
 
 `departure_handoff_send_budgets` retains the count and a source-specific mailbox hash until
-the source booking is deleted. The hourly bounded cleanup closes expired versions and
-removes their mailbox and delivery rows 48 hours after the offer deadline. Offer version
-identifiers and committed consent receipts keep their existing retention rules.
+the source booking is deleted. The hourly cleanup closes expired versions and removes
+their mailbox and delivery rows 48 hours after the offer deadline. Each run walks eligible
+versions in expiry order, processing up to 10 batches of 100 and deferring locked rows and
+any remaining backlog to later runs. Offer version identifiers and committed consent
+receipts keep their existing retention rules.
 
 ## Audit events
 
