@@ -14,17 +14,17 @@ import { parse } from 'yaml'
 // - versioning-strategy lockfile-only when every dependency left is an exact version;
 // - any target-branch, because a branch that does not exist cannot be detected offline;
 // - a schedule that is not a fixed interval, because a cron expression may never fire.
-// Ignore rules are judged per dependency, with every rule that matches it counted together.
-// This assumes, without an offline check of Dependabot's documentation, that Dependabot skips
-// a version any matching rule ignores and that a rule ignores both its versions and its
-// update types. So a rule for majors and another for minors and patches leave nothing.
+// Matching allow rules contribute their update types, or all types when the list is empty
+// (dependabot-core updater/lib/dependabot/job.rb, collect_permitted_update_types).
+// Dependabot then filters out the union of versions and update types from all matching ignore
+// rules (dependabot-core common/lib/dependabot/config/ignore_condition.rb, ignored_versions,
+// and common/lib/dependabot/config/update_config.rb, ignored_versions_for).
 // Where a rule cannot be judged exactly, it errs towards "off": an ignore rule with versions
 // counts as silencing its dependencies, whether or not it also lists update types, because
 // this test cannot tell which versions remain; an allow rule for indirect dependencies allows
 // no direct one; and peer dependencies are not counted.
-// Limits, not judged: whether new versions exist upstream; ignore rules that keep one update
-// type, such as majors only, for every dependency; and settings this test does not model,
-// such as exclude-paths, registries or milestone.
+// Limits: this test accepts any remaining update type and does not check for new versions
+// upstream or model settings such as exclude-paths, registries or milestone.
 
 interface Update {
   'package-ecosystem': string
@@ -34,7 +34,7 @@ interface Update {
   groups?: unknown
   'open-pull-requests-limit'?: unknown
   ignore?: { 'dependency-name': string; versions?: string[]; 'update-types'?: string[] }[]
-  allow?: { 'dependency-name'?: string; 'dependency-type'?: string }[]
+  allow?: { 'dependency-name'?: string; 'dependency-type'?: string; 'update-types'?: string[] }[]
   'versioning-strategy'?: string
   'target-branch'?: string
 }
@@ -84,14 +84,13 @@ const matches = (pattern: string, name: string) =>
       .join('.*')}$`,
     'i',
   ).test(name)
-// Whether the ignore rules that match a dependency, taken together, leave it no update. A rule
-// with neither versions nor update types ignores every version, and a versions list counts
-// as silencing too. Otherwise the rules' update types must cover major, minor and patch.
-const silenced = (ignore: Rule[], name: string) => {
+// A rule with neither versions nor update types ignores every version. A versions list counts
+// as silencing too. Otherwise the matching rules must ignore every allowed update type.
+const silenced = (ignore: Rule[], name: string, allowed: string[]) => {
   const rules = ignore.filter((rule) => matches(rule['dependency-name'], name))
   if (rules.some((rule) => rule.versions?.length || !rule['update-types']?.length)) return true
   const types = new Set(rules.flatMap((rule) => rule['update-types'] ?? []))
-  return levels.every((level) => types.has(level))
+  return allowed.every((level) => types.has(level))
 }
 
 // With an allow list, only the direct dependencies one of its rules matches are updated.
@@ -105,6 +104,14 @@ const dependencyTypes: Record<string, string[]> = {
 const allows = (rule: NonNullable<Update['allow']>[number], name: string, type: string) =>
   matches(rule['dependency-name'] ?? '*', name) &&
   (dependencyTypes[rule['dependency-type'] ?? 'all'] ?? []).includes(type)
+
+function allowedLevels(allow: Update['allow'], name: string, type: string) {
+  if (!allow) return levels
+  const rules = allow.filter((rule) => allows(rule, name, type))
+  return levels.filter((level) =>
+    rules.some((rule) => !rule['update-types']?.length || rule['update-types'].includes(level)),
+  )
+}
 
 // An exact version, optionally behind an npm: alias, is a range lockfile-only cannot leave.
 const exact = (spec: string) =>
@@ -129,8 +136,7 @@ function updatesOff(candidate: Config) {
     if (ignore.some((rule) => /^\*+$/.test(rule['dependency-name'])))
       off('an ignore rule names every dependency')
     const eligible = directDependencies(update.directory).filter(
-      ({ name, type }) =>
-        (update.allow?.some((rule) => allows(rule, name, type)) ?? true) && !silenced(ignore, name),
+      ({ name, type }) => !silenced(ignore, name, allowedLevels(update.allow, name, type)),
     )
     if (eligible.length === 0) off('no direct dependency is left for version updates')
     if (
@@ -198,6 +204,27 @@ const fixtures: { name: string; change: (candidate: Config) => void; reason: str
     reason: '/tools/zapier-hourmere: no direct dependency is left for version updates',
   },
   {
+    name: 'empty versions and update types on every dependency',
+    change: (candidate) => {
+      entry(candidate, '/tools/zapier-hourmere').ignore = directDependencies(
+        '/tools/zapier-hourmere',
+      ).map(({ name }) => ({ 'dependency-name': name, versions: [], 'update-types': [] }))
+    },
+    reason: '/tools/zapier-hourmere: no direct dependency is left for version updates',
+  },
+  {
+    name: 'an ignore-all versions range in a separate rule from major updates',
+    change: (candidate) => {
+      entry(candidate, '/tools/zapier-hourmere').ignore = directDependencies(
+        '/tools/zapier-hourmere',
+      ).flatMap(({ name }) => [
+        { 'dependency-name': name, versions: ['>=0'] },
+        { 'dependency-name': name, 'update-types': ['version-update:semver-major'] },
+      ])
+    },
+    reason: '/tools/zapier-hourmere: no direct dependency is left for version updates',
+  },
+  {
     name: 'majors and the other update types ignored by separate rules',
     change: (candidate) => {
       entry(candidate, '/tools/zapier-hourmere').ignore = directDependencies(
@@ -209,6 +236,18 @@ const fixtures: { name: string; change: (candidate: Config) => void; reason: str
           'update-types': ['version-update:semver-minor', 'version-update:semver-patch'],
         },
       ])
+    },
+    reason: '/tools/zapier-hourmere: no direct dependency is left for version updates',
+  },
+  {
+    name: 'only major updates allowed and every major update ignored',
+    change: (candidate) => {
+      const zapier = entry(candidate, '/tools/zapier-hourmere')
+      zapier.allow = [{ 'dependency-type': 'all', 'update-types': ['version-update:semver-major'] }]
+      zapier.ignore = directDependencies(zapier.directory).map(({ name }) => ({
+        'dependency-name': name,
+        'update-types': ['version-update:semver-major'],
+      }))
     },
     reason: '/tools/zapier-hourmere: no direct dependency is left for version updates',
   },
@@ -279,6 +318,26 @@ it('keeps a dependency whose rules together leave one update type', () => {
     { 'dependency-name': name, 'update-types': ['version-update:semver-major'] },
     { 'dependency-name': name, 'update-types': ['version-update:semver-minor'] },
   ])
+  expect(updatesOff(candidate)).not.toContain(
+    '/tools/zapier-hourmere: no direct dependency is left for version updates',
+  )
+})
+
+it.each([
+  { name: 'a minor-only rule', updateTypes: ['version-update:semver-minor'] },
+  { name: 'an unrestricted rule' },
+])('keeps updates when a matching major-only allow rule is joined by $name', ({ updateTypes }) => {
+  const candidate = structuredClone(config)
+  const zapier = entry(candidate, '/tools/zapier-hourmere')
+  const dependencies = directDependencies(zapier.directory)
+  zapier.allow = [
+    { 'dependency-type': 'all', 'update-types': ['version-update:semver-major'] },
+    { 'dependency-name': 'typescript', 'update-types': updateTypes },
+  ]
+  zapier.ignore = dependencies.map(({ name }) => ({
+    'dependency-name': name,
+    'update-types': ['version-update:semver-major'],
+  }))
   expect(updatesOff(candidate)).not.toContain(
     '/tools/zapier-hourmere: no direct dependency is left for version updates',
   )
