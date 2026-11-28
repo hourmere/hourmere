@@ -29,7 +29,7 @@ export interface DepartureHandoffEligibilityInput {
 
 /** Internal facts for a preview or an apply that already holds the source and host locks. */
 export async function getDepartureHandoffEligibility(
-  ctx: ServiceContext,
+  ctx: Pick<ServiceContext, 'db' | 'now' | 'scimResourcesEnabled'>,
   organizationId: string,
   input: DepartureHandoffEligibilityInput,
   now = ctx.now(),

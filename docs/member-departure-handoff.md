@@ -318,12 +318,41 @@ previously active link. A queued attempt that has not been claimed within 20 min
 be replaced by a fresh resend request. If SMTP was already in flight when an offer was
 withdrawn or superseded, the recipient may still receive a message whose link is revoked.
 
-Recipient decision endpoints and pages, handoff-specific replacement notifications and
-calendar attachments, and rollout remain pending.
+### Staged participant flow
+
+Open the private link from the offer email at `/booking/handoff` to see the current and proposed times,
+hosts and location. The booker can also review their saved answers that would be
+shared with the new host. Keep the link private. Opening the page records no decision.
+Choose **Accept** or **Decline**, then submit. The source booking stays confirmed
+until the team completes the handoff. It can do so only if the booker and every
+distinct guest approve the same version. A decline closes that version and invalidates
+its other links. An unanswered guest blocks the handoff through expiry.
+
+An unavailable link shows one recovery message whether it expired, was withdrawn,
+was replaced or was already used. Contact the team that sent the link if you still
+need help. A fresh version requires a fresh decision from each recipient.
+
+To review programmatically, send the private fragment token as `{token}` to
+`POST /api/v1/booking-handoffs/offer`. To answer, send `{token, version, decision}`
+to `POST /api/v1/booking-handoffs/answer` with the reviewed version and `accept` or
+`decline`. The answer response contains the recorded decision. Both operations
+return `404 handoff_offer_unavailable` for unavailable links or versions. A browser
+session and an API key grant no participant authority. If a bearer is supplied, it
+must be valid and have the scope for the operation. CLI commands use JSON on standard
+input with `--input -`.
+
+The page clears the fragment before requesting the offer. It and the API responses
+are served with no-store and no-referrer headers. Offer and answer operations share
+a rate limit of 30 requests per minute per trusted IP bucket on each server process.
+Production admission remains off, and handoff-specific replacement notifications,
+calendar attachments and rollout remain pending.
 
 中文：预发布管理员可创建、查看、撤回和换版交接提议，也可向尚未决定的收件人重发私密链接。
 同一源预约的每个规范化邮箱最多发送三次，包含首发和送达不确定的尝试。重试同一请求时请沿用
 `Idempotency-Key`。撤回、过期或换版都会使旧链接失效，源预约仍保持确认。生产环境保持关闭。
+参与者可用邮件里的私密链接查看原预约和拟议预约。预订人还可查看将分享给新主持人的已保存答案。
+打开链接不会记录决定。请选择接受或拒绝，再提交。任何来宾拒绝或尚未回复都会阻止交接。
+链接过期、被撤回、换版或已经使用时，页面统一提示联系发件团队。
 Provider cleanup and creation reuse existing workers. Zoom lost-response recovery is
 exercised with a fake, and handoff-specific Google and Microsoft lifecycle acceptance remains
 open. Bounded automatic handoff is a separate follow-on.
@@ -361,8 +390,8 @@ those bookings and leaves their ordinary booking flows in place.
 查看接任主持人、时段和地点类型。来宾尚未回复、同意已过期、日历状态未知或时段不可用时，
 界面禁止确认。确认时在锁内重新复核。提交结果不确定时，先刷新查看回执，再决定是否重试。
 提交后，外部会议仍可处于待创建或失败状态，由对应主持人使用原有恢复流程处理。
-生产存储已就绪，功能保持关闭。提议生命周期与确认链接投递、参与者页面和接口、交接专用邮件与
-日历附件及上线启用仍待后续阶段。
+预发布已提供提议生命周期、确认链接投递和参与者页面及接口。生产功能保持关闭。
+交接专用邮件、日历附件及上线启用留待后续阶段。
 旧会议的取消沿用原 ICS UID 与原日历组织者，新邀请使用新 UID。Google Meet 和 Zoom
 按各自预约链的固定组织者身份处理。Outlook 和 Teams 按旧链固定的写回状态清理，新 Teams
 会议要求实例启用 Microsoft 日历，并复核接任主持人的写入资格。任一条件不满足时返回

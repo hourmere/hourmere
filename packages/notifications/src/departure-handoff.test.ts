@@ -35,7 +35,7 @@ it('renders a private link in the fragment and explains unanimous consent in bot
     })
     const url = new URL(mail.text.match(/https:\/\/\S+/)?.[0] as string)
     expect(url.origin).toBe(publicUrl)
-    expect(url.pathname).toBe('/booking-handoffs/offer')
+    expect(url.pathname).toBe('/booking/handoff')
     expect(url.search).toBe('')
     expect(url.hash).toBe(`#token=${recipientId}.${secret}`)
     expect(mail).toMatchObject({ to: 'booker@example.test', sensitive: true })

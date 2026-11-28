@@ -7,6 +7,7 @@ import {
   type Principal,
 } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
+import { departureHandoffStore } from '@hourmere/scheduling/departure-handoff-store'
 import { describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
 import { authenticated, json, type RouteModule } from './openapi.ts'
@@ -51,6 +52,7 @@ function fixture(scope: ApiKeyScope) {
     publicUrl: 'http://localhost',
     routes: productRoutes({
       db,
+      departureHandoffs: { store: departureHandoffStore },
       routingFormsEnabled: true,
       notify,
       mcpAuth: { handler: async () => new Response(null) },

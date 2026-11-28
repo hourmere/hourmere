@@ -166,6 +166,8 @@ Team booking bulk cancellation preview, confirmation and status return 404 until
 | `POST /api/v1/public/meeting-polls/vote` | Public or manage token; check a supplied key | `full, bookings` |
 | `POST /api/v1/public/meeting-polls/withdraw` | Public or manage token; check a supplied key | `full, bookings` |
 | `POST /api/v1/public/meeting-polls/reminder-opt-out` | Public or manage token; check a supplied key | `full, bookings` |
+| `POST /api/v1/booking-handoffs/offer` | Public or manage token; check a supplied key | `full, read, bookings` |
+| `POST /api/v1/booking-handoffs/answer` | Public or manage token; check a supplied key | `full, bookings` |
 | `GET /api/v1/analytics/bookings` | Session or API key | `full, read` |
 | `GET /api/v1/routing-forms` | Session or API key | `full, read` |
 | `GET /api/v1/routing-forms/{id}` | Session or API key | `full, read` |
@@ -384,6 +386,8 @@ Team booking bulk cancellation preview, confirmation and status return 404 until
 | `submit_meeting_poll_vote` | — | `polls vote` | `full, bookings` |
 | `withdraw_meeting_poll_vote` | — | `polls withdraw` | `full, bookings` |
 | `opt_out_meeting_poll_reminder` | — | `polls reminder-opt-out` | `full, bookings` |
+| `read_booking_handoff_offer` | — | `booking-handoff offer` | `full, read, bookings` |
+| `answer_booking_handoff_offer` | — | `booking-handoff answer` | `full, bookings` |
 | `list_routing_forms` | — | `routing-forms list` | `full, read` |
 | `get_routing_form` | — | `routing-forms get` | `full, read` |
 | `create_routing_form` | — | `routing-forms create` | `full` |

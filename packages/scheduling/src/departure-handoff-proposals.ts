@@ -14,6 +14,7 @@ import {
 } from './departure-handoff-access.ts'
 import { departureHandoffDeadline, readDepartureHandoffTerms } from './departure-handoff-apply.ts'
 import {
+  closeDepartureHandoffOffer,
   DEPARTURE_HANDOFF_SEND_LIMIT,
   departureHandoffRecipientHash,
   lockDepartureHandoffSource,
@@ -270,31 +271,11 @@ async function closeOffer(
   offer: OfferStatusRow,
   reason: CloseReason,
 ): Promise<OfferStatusRow> {
-  await db
-    .updateTable('departure_handoff_offers')
-    .set({ state: 'closed', close_reason: reason })
-    .where('organization_id', '=', key.organizationId)
-    .where('source_booking_id', '=', key.sourceBookingId)
-    .where('id', '=', offer.id)
-    .where('version', '=', offer.version)
-    .execute()
-  const closedRecipients = await db
-    .updateTable('departure_handoff_recipients')
-    .set({ token_digest: null })
-    .where('id', 'in', recipients(db, key, offer).select('id'))
-    .returning('id')
-    .execute()
-  if (closedRecipients.length)
-    await db
-      .updateTable('departure_handoff_deliveries')
-      .set({ state: 'skipped' })
-      .where(
-        'recipient_id',
-        'in',
-        closedRecipients.map(({ id }) => id),
-      )
-      .where('state', '=', 'queued')
-      .execute()
+  await closeDepartureHandoffOffer(
+    db,
+    { ...key, offerId: offer.id, version: offer.version },
+    reason,
+  )
   return { ...offer, state: 'closed', close_reason: reason }
 }
 

@@ -19,6 +19,43 @@ export function departureHandoffTokenDigest(recipientId: string, token: string) 
     .digest('hex')
 }
 
+/** The caller holds the source and exact offer locks. A null reason leaves the decline
+ * in the recipient's immutable decision. */
+export async function closeDepartureHandoffOffer(
+  db: Db,
+  key: { organizationId: string; sourceBookingId: string; offerId: string; version: number },
+  reason: 'withdrawn' | 'superseded' | 'expired' | null,
+) {
+  await db
+    .updateTable('departure_handoff_offers')
+    .set({ state: 'closed', close_reason: reason })
+    .where('organization_id', '=', key.organizationId)
+    .where('source_booking_id', '=', key.sourceBookingId)
+    .where('id', '=', key.offerId)
+    .where('version', '=', key.version)
+    .execute()
+  const recipients = await db
+    .updateTable('departure_handoff_recipients')
+    .set({ token_digest: null })
+    .where('organization_id', '=', key.organizationId)
+    .where('source_booking_id', '=', key.sourceBookingId)
+    .where('offer_id', '=', key.offerId)
+    .where('offer_version', '=', key.version)
+    .returning('id')
+    .execute()
+  if (recipients.length)
+    await db
+      .updateTable('departure_handoff_deliveries')
+      .set({ state: 'skipped' })
+      .where(
+        'recipient_id',
+        'in',
+        recipients.map(({ id }) => id),
+      )
+      .where('state', '=', 'queued')
+      .execute()
+}
+
 /** Acquire the source lock after the organization lock and before any offer or recipient. */
 export async function lockDepartureHandoffSource(
   db: Db,
