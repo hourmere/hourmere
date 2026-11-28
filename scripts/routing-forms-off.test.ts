@@ -1035,6 +1035,9 @@ describe('routing forms remain hard-off with configuration and public metadata i
       'packages/scheduling/src/index.ts',
       'apps/web/src/App.tsx',
       'apps/web/src/i18n/catalogues/en/admin.ts',
+      'apps/web/src/i18n/catalogues/de/common.ts',
+      'apps/web/src/i18n/catalogues/fr/widget.ts',
+      'apps/web/src/i18n/catalogues/zh-CN/admin.ts',
       'tools/cli/src/cli.ts',
     ])
       expect(reached, file).toContain(file)

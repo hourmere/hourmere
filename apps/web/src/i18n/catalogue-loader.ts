@@ -3,7 +3,7 @@ import { type Catalog, registerCatalog } from './catalogues.ts'
 
 export const INITIAL_LOCALE_WAIT_MS = 300
 
-type CatalogueSource = (attempt: number) => Promise<Catalog>
+export type CatalogueSource = (attempt: number) => Promise<Catalog>
 type CatalogueStatus = 'pending' | 'ready' | 'failed'
 
 const listeners = new Set<() => void>()
@@ -60,23 +60,3 @@ export function createCatalogueLoader(sources: Record<string, CatalogueSource>, 
 }
 
 export type CatalogueLoader = ReturnType<typeof createCatalogueLoader>
-
-export function chunkSources(urls: Record<string, string>, group: string) {
-  return Object.fromEntries(
-    Object.entries(urls).map(([path, url]) => [
-      path,
-      async (attempt: number): Promise<Catalog> => {
-        // Browsers cache failed imports by module URL for the lifetime of the page.
-        const target = new URL(url, import.meta.url)
-        if (attempt) target.searchParams.set('retry', String(attempt))
-        const module: Record<string, Catalog | undefined> = await import(
-          /* @vite-ignore */ target.href
-        )
-        const catalogue = module[group]
-        if (!catalogue || typeof catalogue !== 'object')
-          throw new Error('Invalid interface catalogue')
-        return catalogue
-      },
-    ]),
-  )
-}

@@ -102,7 +102,7 @@ describe('lazy interface catalogues', () => {
   })
 
   it('allows choosing English while the only other account language is downloading', async () => {
-    const chinese = Promise.withResolvers<Catalog>()
+    const chinese = finish(loadChinese)
     const admin = createCatalogueLoader(
       { './catalogues/zh-CN/admin.ts': () => chinese.promise },
       'admin',
