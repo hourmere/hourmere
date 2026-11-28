@@ -291,8 +291,10 @@ ordinary cancellation and confirmation for two independent booking chains. If th
 uncertain, refresh to see the committed receipt before trying again. The receipt reports
 meeting readiness and old cleanup status when available. Pending or failed provider work
 leaves the booking changes committed. The corresponding provider account owner can follow
-the ordinary recovery process for that account. The administrator sees no join links,
-provider identifiers or credentials in the handoff results.
+the ordinary recovery process for that account. If a calendar connection was removed
+before the handoff, that account's owner must delete any remaining copies in that calendar.
+The administrator sees no join links, provider identifiers or credentials in the handoff
+results.
 
 The staged GET is `/api/v1/team/bookings/{id}/handoff-preview`. Apply uses
 `POST /api/v1/team/bookings/{id}/handoff-offers/{offerId}/apply` and the exact offer
@@ -354,9 +356,14 @@ bookings. Administrators can refresh the receipt to check email acceptance. See
 参与者可用邮件里的私密链接查看原预约和拟议预约。预订人还可查看将分享给新主持人的已保存答案。
 打开链接不会记录决定。请选择接受或拒绝，再提交。任何来宾拒绝或尚未回复都会阻止交接。
 链接过期、被撤回、换版或已经使用时，页面统一提示联系发件团队。
-Provider cleanup and creation reuse existing workers. Zoom lost-response recovery is
-exercised with a fake, and handoff-specific Google and Microsoft lifecycle acceptance remains
-open.
+
+交接提交后，后台任务使用原主持人固定的账户和日历清理旧条目，并在接任主持人符合资格时写入新条目。
+如果原授权已撤销或无法核验清理结果，交接回执会提示原账户所有者检查日历或会议。新预约仍保持确认。
+如果日历连接在交接前已被移除，该账户的所有者必须删除该日历中仍保留的副本。
+
+Provider cleanup and creation reuse existing workers. Google Calendar, Meet, Outlook, Teams
+and Zoom handoffs use real PostgreSQL and fake providers for lifecycle acceptance, including
+revocation and ambiguous responses.
 
 ### Staged booking handoff mail
 

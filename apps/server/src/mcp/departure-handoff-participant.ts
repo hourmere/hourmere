@@ -52,13 +52,13 @@ export function departureHandoffParticipantTools(deps: ParticipantHandoffDeps): 
       name: 'answer_booking_handoff_offer',
       title: 'Accept or decline your booking handoff offer',
       description:
-        'Record your decision only after you have reviewed the exact version with your private token. A decline closes that version. A decision does not change a booking. API keys need bookings or full scope.',
+        'Record your decision only after you have reviewed the exact version with your private token. A successful answer consumes the token. A decline closes that version. A decision does not change a booking. API keys need bookings or full scope.',
       input: ParticipantAnswerInput,
       output: ParticipantAnswerOutput,
       annotations: {
         readOnlyHint: false,
         destructiveHint: true,
-        idempotentHint: true,
+        idempotentHint: false,
         openWorldHint: false,
       },
       ...privateOffer,

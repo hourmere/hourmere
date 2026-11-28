@@ -141,20 +141,33 @@ describe('buildIcs', () => {
   })
 
   it('preserves mixed-direction calendar and contact values as literal text', () => {
-    const title = '🗓 12 موعد; English, 中文'
-    const host = 'נועה (Noa)'
-    const description = 'موعد <fixture@example.test>\n\nNext: 中文'
-    const { event } = parse(
-      buildIcs({
-        ...base,
-        summary: title,
-        description,
-        organizer: { ...base.organizer, name: host },
-      }),
-    )
+    const title = '🗓 12 موعد; English, צוות'
+    const organizer = { name: 'נועה (Noa)', email: 'noa@example.test' }
+    const attendee = { name: 'ليلى (Layla)', email: 'layla+calendar@example.test' }
+    const description =
+      'موعد <layla+calendar@example.test> (https://video.example.test/room?team=12&layout=grid)\n\nNext: שלום'
+    const location = 'شارع النور (Oak St), Room 12; Building \\ A'
+    const ics = buildIcs({
+      ...base,
+      summary: title,
+      description,
+      location,
+      organizer,
+      attendees: [attendee],
+    })
+    expectWellFormed(ics)
+    expect(ics).toContain('\r\n ')
+    expect(ics).not.toMatch(/[\u202a-\u202e\u2066-\u2069]/u)
+    // Snapshot the physical lines, including folds between mixed-direction text runs.
+    expect(physicalLines(ics)).toMatchSnapshot()
+    const { event } = parse(ics)
     expect(event.getFirstPropertyValue('summary')).toBe(title)
     expect(event.getFirstPropertyValue('description')).toBe(description)
-    expect(event.getFirstProperty('organizer')?.getParameter('cn')).toBe(host)
+    expect(event.getFirstPropertyValue('location')).toBe(location)
+    expect(event.getFirstProperty('organizer')?.getParameter('cn')).toBe(organizer.name)
+    expect(event.getFirstPropertyValue('organizer')).toBe(`mailto:${organizer.email}`)
+    expect(event.getFirstProperty('attendee')?.getParameter('cn')).toBe(attendee.name)
+    expect(event.getFirstPropertyValue('attendee')).toBe(`mailto:${attendee.email}`)
   })
 
   it('quotes names in parameters, replacing what a quoted value cannot hold', () => {

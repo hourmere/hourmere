@@ -66,8 +66,29 @@ const routes = {
 
 describe('Routing draft preview', () => {
   it('validates answers, pins the team and renders the server match and trace', async () => {
+    const questionLabel = '🙂 ما الموضوع؟ (Topic)'
+    const optionLabel = 'תמיכה (Support)'
+    const lines = [
+      'تواصل مع support@example.test (Support)',
+      'Instructions: https://example.test/help?lang=en&step=2',
+    ] as const
+    const mixedForm = {
+      ...form,
+      questions: [
+        {
+          ...form.questions[0],
+          label: questionLabel,
+          options: [{ id: support, label: optionLabel }],
+        },
+        form.questions[1],
+      ],
+    }
     const pending = later()
-    const api = fakeApi({ ...routes, [preview]: () => pending.response })
+    const api = fakeApi({
+      ...routes,
+      [read]: () => json(200, mixedForm),
+      [preview]: () => pending.response,
+    })
     renderApp(routingFormPath(id, team.id))
     const user = userEvent.setup()
     const panel = within(await screen.findByTestId('routing-preview', {}, { timeout: 4_000 }))
@@ -76,7 +97,13 @@ describe('Routing draft preview', () => {
     await user.click(run)
     expect(panel.getByRole('alert').textContent).toContain('Answer this required question.')
     expect(api.to(preview)).toHaveLength(0)
-    await user.selectOptions(panel.getByRole('combobox', { name: 'What do you need?' }), support)
+    const select = panel.getByRole('combobox', { name: questionLabel })
+    expect(panel.getByText(questionLabel, { selector: 'label bdi' }).textContent).toBe(
+      questionLabel,
+    )
+    const option = within(select).getByRole('option', { name: optionLabel })
+    expect(option.dir).toBe('auto')
+    await user.selectOptions(select, option)
     const emailInput = panel.getByRole('textbox', { name: /Contact email/ })
     await user.type(emailInput, 'not-an-address')
     await user.click(run)
@@ -89,12 +116,19 @@ describe('Routing draft preview', () => {
       'Running preview…',
     )
     expect(panel.queryByTestId('routing-preview-result')).toBeNull()
-    await pending.answer(json(200, result))
+    await pending.answer(
+      json(200, { ...result, target: { kind: 'message', message: lines.join('\n\n') } }),
+    )
     const output = within(await panel.findByTestId('routing-preview-result'))
     expect(output.getByRole('status').textContent).toContain('Matched: Rule 1.')
-    expect(output.getByText('Contact the support desk.')).toBeTruthy()
-    expect(output.getByRole('list', { name: 'Evaluated rules' }).textContent).toContain(
-      'What do you need? Matched',
+    const message = output.getByText(lines[0], { selector: 'p bdi' }).parentElement
+    expect(message?.textContent).toBe(lines.join('\n\n'))
+    expect(Array.from(message?.querySelectorAll('bdi') ?? [], (line) => line.textContent)).toEqual(
+      lines,
+    )
+    const trace = within(output.getByRole('list', { name: 'Evaluated rules' }))
+    expect(trace.getByText(questionLabel, { selector: 'bdi' }).parentElement?.textContent).toBe(
+      `${questionLabel} Matched`,
     )
     expect(api.to(preview)).toHaveLength(1)
     expect(api.to(preview)[0]?.headers.get('X-Expected-Organization-Id')).toBe(team.id)

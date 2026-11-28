@@ -140,6 +140,74 @@ it('reports the absence of a default schedule when the loaded schedule list is e
   expect(summary('When people can book')).toBe('No default schedule · Default timing rules')
 })
 
+it.each([
+  {
+    locale: 'en',
+    basics: 'Basics',
+    kind: 'Where the meeting happens',
+    locations: 'Location options and conferencing',
+    timing: 'When people can book',
+    timingSuffix: ' · Default timing rules',
+    label: /^Location label/,
+    add: 'Add location option',
+    basicsPrefix: '30 min · ',
+    defaultSuffix: ' (default location) · ',
+  },
+  {
+    locale: 'zh-CN',
+    basics: '基本信息',
+    kind: '会议地点',
+    locations: '地点选项与视频会议',
+    timing: '何时可预约',
+    timingSuffix: '；默认预约时间规则',
+    label: /^地点名称/,
+    add: '添加地点选项',
+    basicsPrefix: '30 分钟；',
+    defaultSuffix: '（默认地点）；',
+  },
+] as const)(
+  'isolates location and schedule names inside the $locale editor summaries',
+  async (copy) => {
+    chooseLanguage(copy.locale)
+    const scheduleName = 'שעות (Weekdays)'
+    fakeApi({
+      ...signedInAs(ME),
+      ...profile(),
+      'GET /api/v1/schedules': () => json(200, { data: [schedule({ name: scheduleName })] }),
+    })
+    const user = userEvent.setup()
+    renderApp('/app/event-types/new')
+    const basics = within(await screen.findByRole('region', { name: copy.basics }))
+    const timing = disclosure(copy.timing)
+    expect(
+      within(timing).getByText(scheduleName, { selector: 'bdi' }).parentElement?.textContent,
+    ).toBe(`${scheduleName}${copy.timingSuffix}`)
+    await user.selectOptions(basics.getByLabelText(copy.kind), 'google_meet')
+    const header = disclosure(copy.locations)
+    await user.click(header)
+    const controls = within(header.closest('details') as HTMLDetailsElement)
+    const label = 'قاعة (Room 2) — booking@example.test'
+    const firstLabel = controls.getByLabelText<HTMLInputElement>(copy.label)
+    expect(firstLabel.dir).toBe('auto')
+    fireEvent.change(firstLabel, { target: { value: label } })
+    await user.selectOptions(controls.getByLabelText(copy.add), 'in_person')
+    await user.click(controls.getByRole('button', { name: copy.add }))
+    const other = 'אולם (Hall 7)'
+    const secondLabel = controls.getAllByLabelText(copy.label)[1]
+    if (!secondLabel) throw new Error('Missing second location label')
+    fireEvent.change(secondLabel, { target: { value: other } })
+    await user.click(header)
+
+    const basicsSummary = basics.getByText(label, { selector: 'bdi' }).parentElement
+    expect(basicsSummary?.textContent).toBe(`${copy.basicsPrefix}${label}`)
+    const locationsSummary = header.querySelector('.event-settings-summary')
+    expect(locationsSummary?.textContent).toBe(`${label}${copy.defaultSuffix}${other}`)
+    expect(
+      Array.from(locationsSummary?.querySelectorAll('bdi') ?? [], (name) => name.textContent),
+    ).toEqual([label, other])
+  },
+)
+
 it('summarizes team scheduling and the selected host count as the assignment changes', async () => {
   chooseLanguage('zh-CN')
   const team = { ...ME, organization: { ...ME.organization, personal: false } }
@@ -150,7 +218,7 @@ it('summarizes team scheduling and the selected host count as the assignment cha
       json(200, {
         data: [
           { id: ME.user.id, name: 'Ada' },
-          { id: 'peer', name: 'Peer' },
+          { id: 'peer', name: 'ليلى (Layla) [7]' },
         ],
         nextAfter: null,
       }),
@@ -163,7 +231,9 @@ it('summarizes team scheduling and the selected host count as the assignment cha
   await user.click(header)
   const controls = within(header.closest('details') as HTMLDetailsElement)
   await user.selectOptions(controls.getByRole('combobox'), 'collective')
-  await user.click(await controls.findByRole('checkbox', { name: 'Peer' }))
+  const peer = await controls.findByRole('checkbox', { name: 'ليلى (Layla) [7]' })
+  expect(peer.closest('label')?.querySelector('bdi')?.textContent).toBe('ليلى (Layla) [7]')
+  await user.click(peer)
   await user.click(header)
   expect(summary('主持人')).toBe('共同主持；已选 2 位主持人')
   expect(summary('何时可预约')).toBe('使用主持人的可用时间；默认预约时间规则')

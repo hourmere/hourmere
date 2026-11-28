@@ -388,12 +388,12 @@ function ConferenceStatus({ receipt }: { receipt: NonNullable<Preview['receipt']
         </p>
       )}
       {receipt.oldConferenceCleanup === 'pending' && (
-        <p>{t('Cleanup of the original meeting is pending.')}</p>
+        <p>{t('Cleanup in the original calendar or meeting account is pending.')}</p>
       )}
       {receipt.oldConferenceCleanup === 'unresolved' && (
         <p>
           {t(
-            'Cleanup of the original meeting could not be verified. Ask the original meeting account owner to check for a remaining meeting.',
+            'Cleanup in the original calendar or meeting account could not be verified. Ask the account owner to check for remaining entries.',
           )}
         </p>
       )}

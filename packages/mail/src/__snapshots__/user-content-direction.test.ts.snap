@@ -1,0 +1,250 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`mixed-direction transactional mail > isolates a mixed poll title and leaves the voting and opt-out URLs in their original order 1`] = `
+{
+  "html": "<p>Use your private link to take part in <bdi>📅 42 مراجعة (Review) &amp; צוות</bdi>.<br><a href="https://calendar.example.test/poll/voter#vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv" rel="noreferrer"><bdi dir="ltr">https://calendar.example.test/poll/voter#vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv</bdi></a></p>
+<p>Stop reminder emails for this poll.<br><a href="https://calendar.example.test/poll/reminder-opt-out#ooooooooooooooooooooooooooooooooooooooooooo" rel="noreferrer"><bdi dir="ltr">https://calendar.example.test/poll/reminder-opt-out#ooooooooooooooooooooooooooooooooooooooooooo</bdi></a></p>",
+  "subject": "View meeting poll: 📅 42 مراجعة (Review) & צוות",
+  "text": "Hourmere
+
+Use your private link to take part in 📅 42 مراجعة (Review) & צוות.
+https://calendar.example.test/poll/voter#vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+
+This link is valid until Saturday, November 21, 2026 at 10:00 AM (UTC).
+
+Opening this link does not confirm your email or submit a vote.
+
+Stop reminder emails for this poll.
+https://calendar.example.test/poll/reminder-opt-out#ooooooooooooooooooooooooooooooooooooooooooo
+",
+}
+`;
+
+exports[`mixed-direction transactional mail > keeps a mixed waitlist title and escaped verification URL intact in both alternatives 1`] = `
+{
+  "html": "<p>请确认此邮箱，以加入<span class="cjk-quote">“</span><bdi>📅 42 مراجعة (Review) &amp; צוות</bdi><span class="cjk-quote">”</span>的候补名单。仅打开链接不会确认申请。</p>
+<p>请打开链接，然后在页面上确认：<br><a href="https://calendar.example.test/booking/waitlist/verify#token=019a278e-3ff2-7a91-8fe0-1846a52d0b22.vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv&amp;management=019a278e-3ff2-7a91-8fe0-1846a52d0b22.mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm" rel="noreferrer"><bdi dir="ltr">https://calendar.example.test/booking/waitlist/verify#token=019a278e-3ff2-7a91-8fe0-1846a52d0b22.vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv&amp;management=019a278e-3ff2-7a91-8fe0-1846a52d0b22.mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm</bdi></a></p>
+<p>如需退出候补名单，请打开以下链接并确认退出：<br><a href="https://calendar.example.test/booking/waitlist/remove#019a278e-3ff2-7a91-8fe0-1846a52d0b22.mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm" rel="noreferrer"><bdi dir="ltr">https://calendar.example.test/booking/waitlist/remove#019a278e-3ff2-7a91-8fe0-1846a52d0b22.mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm</bdi></a></p>",
+  "subject": "确认候补申请：📅 42 مراجعة (Review) & צוות",
+  "text": "Hourmere
+
+请确认此邮箱，以加入“📅 42 مراجعة (Review) & צוות”的候补名单。仅打开链接不会确认申请。
+
+请打开链接，然后在页面上确认：
+https://calendar.example.test/booking/waitlist/verify#token=019a278e-3ff2-7a91-8fe0-1846a52d0b22.vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv&management=019a278e-3ff2-7a91-8fe0-1846a52d0b22.mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm
+
+此验证链接将于 2026年11月21日星期六 10:00（UTC，GMT+00:00） 过期，最迟在提交申请后 30 分钟失效。
+
+建议时段会提供给所有符合条件的候补者。不会为任何人预留时段；以最先成功完成的预约为准。部分邮件可能无法送达或延迟送达。
+
+如需退出候补名单，请打开以下链接并确认退出：
+https://calendar.example.test/booking/waitlist/remove#019a278e-3ff2-7a91-8fe0-1846a52d0b22.mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm
+
+如果你没有提交此申请，可以忽略本邮件，或通过上方链接撤销申请。
+",
+}
+`;
+
+exports[`mixed-direction transactional mail > keeps cancellation details isolated and leaves out the old join and manage links 1`] = `
+{
+  "html": "<p>你与<bdi>נועה (Noa) [12]</bdi>、<bdi>عمر (Omar)</bdi>和<bdi>王安</bdi>的会议已取消。</p>
+<tr><td>活动</td><td><bdi>📅 42 مراجعة (Review) &amp; צוות</bdi></td></tr>
+<tr><td>地点</td><td><bdi>חדר וידאו (Video room)</bdi></td></tr>
+<tr><td>主持人</td><td><bdi>נועה (Noa) [12]</bdi>、<bdi>عمر (Omar)</bdi>和<bdi>王安</bdi></td></tr>
+<tr><td>原因</td><td><bdi>تم التأجيل (Postponed)</bdi><br><bdi>צרו קשר (Contact us)</bdi></td></tr>
+<p>你收到此邮件，是因为你通过 Hourmere 预约了与<bdi>נועה (Noa) [12]</bdi>、<bdi>عمر (Omar)</bdi>和<bdi>王安</bdi>的会议。</p>",
+  "subject": "已取消：与נועה (Noa) [12]、عمر (Omar)和王安的📅 42 مراجعة (Review) & צוות，11月20日周五，10:00（UTC，GMT+00:00）",
+  "text": "Hourmere
+
+你与נועה (Noa) [12]、عمر (Omar)和王安的会议已取消。
+
+活动：📅 42 مراجعة (Review) & צוות
+时间：2026年11月20日星期五，10:00 至 10:30（UTC，GMT+00:00）
+地点：חדר וידאו (Video room)
+主持人：נועה (Noa) [12]、عمر (Omar)和王安
+原因：تم التأجيل (Postponed)
+  צרו קשר (Contact us)
+
+你收到此邮件，是因为你通过 Hourmere 预约了与נועה (Noa) [12]、عمر (Omar)和王安的会议。
+",
+}
+`;
+
+exports[`mixed-direction transactional mail > keeps meeting and management actions distinct from their displayed text in en 1`] = `
+{
+  "html": "<p>Your meeting with <bdi>נועה (Noa) [12]</bdi>, <bdi>عمر (Omar)</bdi>, and <bdi>王安</bdi> is booked.</p>
+<tr><td>What</td><td><bdi>📅 42 مراجعة (Review) &amp; צוות</bdi></td></tr>
+<tr><td>Where</td><td><bdi>חדר וידאו (Video room)</bdi></td></tr>
+<tr><td>Host</td><td><bdi>נועה (Noa) [12]</bdi>, <bdi>عمر (Omar)</bdi>, and <bdi>王安</bdi></td></tr>
+<a href="https://video.example.test/room?team=42&amp;layout=grid">Join meeting</a>
+<p><a href="https://video.example.test/room?team=42&amp;layout=grid"><bdi dir="ltr">https://video.example.test/room?team=42&amp;layout=grid</bdi></a></p>
+<a href="https://calendar.example.test/booking#token=fixture&amp;action=reschedule">Reschedule</a>
+<a href="https://calendar.example.test/booking#token=fixture&amp;action=cancel">Cancel</a>
+<p>You received this email because you booked a meeting with <bdi>נועה (Noa) [12]</bdi>, <bdi>عمر (Omar)</bdi>, and <bdi>王安</bdi> via Hourmere.</p>",
+  "subject": "Confirmed: 📅 42 مراجعة (Review) & צוות with נועה (Noa) [12], عمر (Omar), and 王安 on Fri, Nov 20, 10:00 AM (UTC, GMT+00:00)",
+  "text": "Hourmere
+
+Your meeting with נועה (Noa) [12], عمر (Omar), and 王安 is booked.
+
+What: 📅 42 مراجعة (Review) & צוות
+When: Friday, November 20, 2026, 10:00 AM – 10:30 AM (UTC, GMT+00:00)
+Where: חדר וידאו (Video room)
+Host: נועה (Noa) [12], عمر (Omar), and 王安
+
+Join meeting
+https://video.example.test/room?team=42&layout=grid
+
+Need to make a change?
+Use these links to change or cancel:
+Reschedule: https://calendar.example.test/booking#token=fixture&action=reschedule
+Cancel: https://calendar.example.test/booking#token=fixture&action=cancel
+
+You received this email because you booked a meeting with נועה (Noa) [12], عمر (Omar), and 王安 via Hourmere.
+",
+}
+`;
+
+exports[`mixed-direction transactional mail > keeps meeting and management actions distinct from their displayed text in zh-CN 1`] = `
+{
+  "html": "<p>你与<bdi>נועה (Noa) [12]</bdi>、<bdi>عمر (Omar)</bdi>和<bdi>王安</bdi>的会议已预约。</p>
+<tr><td>活动</td><td><bdi>📅 42 مراجعة (Review) &amp; צוות</bdi></td></tr>
+<tr><td>地点</td><td><bdi>חדר וידאו (Video room)</bdi></td></tr>
+<tr><td>主持人</td><td><bdi>נועה (Noa) [12]</bdi>、<bdi>عمر (Omar)</bdi>和<bdi>王安</bdi></td></tr>
+<a href="https://video.example.test/room?team=42&amp;layout=grid">加入会议</a>
+<p><a href="https://video.example.test/room?team=42&amp;layout=grid"><bdi dir="ltr">https://video.example.test/room?team=42&amp;layout=grid</bdi></a></p>
+<a href="https://calendar.example.test/booking#token=fixture&amp;action=reschedule">改期</a>
+<a href="https://calendar.example.test/booking#token=fixture&amp;action=cancel">取消</a>
+<p>你收到此邮件，是因为你通过 Hourmere 预约了与<bdi>נועה (Noa) [12]</bdi>、<bdi>عمر (Omar)</bdi>和<bdi>王安</bdi>的会议。</p>",
+  "subject": "已确认：与נועה (Noa) [12]、عمر (Omar)和王安的📅 42 مراجعة (Review) & צוות，11月20日周五，10:00（UTC，GMT+00:00）",
+  "text": "Hourmere
+
+你与נועה (Noa) [12]、عمر (Omar)和王安的会议已预约。
+
+活动：📅 42 مراجعة (Review) & צוות
+时间：2026年11月20日星期五，10:00 至 10:30（UTC，GMT+00:00）
+地点：חדר וידאו (Video room)
+主持人：נועה (Noa) [12]、عمر (Omar)和王安
+
+加入会议
+https://video.example.test/room?team=42&layout=grid
+
+需要更改预约吗？
+请使用以下链接更改或取消预约：
+改期：https://calendar.example.test/booking#token=fixture&action=reschedule
+取消：https://calendar.example.test/booking#token=fixture&action=cancel
+
+你收到此邮件，是因为你通过 Hourmere 预约了与נועה (Noa) [12]、عمر (Omar)和王安的会议。
+",
+}
+`;
+
+exports[`mixed-direction transactional mail > preserves booking names, address and private answers in en 1`] = `
+{
+  "html": "<p><bdi>ليلى (Layla)</bdi> booked a meeting with you.</p>
+<tr><td>What</td><td><bdi>📅 42 مراجعة (Review) &amp; צוות</bdi></td></tr>
+<tr><td>Where</td><td><bdi>شارع النور (Oak St), Room 42</bdi></td></tr>
+<tr><td>Invitee</td><td><bdi>ليلى (Layla)</bdi> &lt;<bdi dir="ltr">layla+booking@example.test</bdi>&gt;</td></tr>
+<tr><td>Guests</td><td><bdi>יעל (Yael)</bdi> &lt;<bdi dir="ltr">yael@example.test</bdi>&gt;</td></tr>
+<p><span><bdi>מה הנושא? (Topic)</bdi></span><br><bdi>للاطلاع (https://video.example.test/room?team=42&amp;layout=grid) وللتواصل &lt;layla+booking@example.test&gt;</bdi><br><bdi>Follow up: שלום</bdi></p>
+<p>You received this email because <bdi>ليلى (Layla)</bdi> booked a meeting with you via Hourmere.</p>",
+  "subject": "New booking: 📅 42 مراجعة (Review) & צוות with ليلى (Layla) on Fri, Nov 20, 10:00 AM (UTC, GMT+00:00)",
+  "text": "Hourmere
+
+ليلى (Layla) booked a meeting with you.
+
+What: 📅 42 مراجعة (Review) & צוות
+When: Friday, November 20, 2026, 10:00 AM – 10:30 AM (UTC, GMT+00:00)
+Where: شارع النور (Oak St), Room 42
+Invitee: ليلى (Layla) <layla+booking@example.test>
+Guests: יעל (Yael) <yael@example.test>
+
+Answers
+מה הנושא? (Topic)
+  للاطلاع (https://video.example.test/room?team=42&layout=grid) وللتواصل <layla+booking@example.test>
+  Follow up: שלום
+
+You received this email because ليلى (Layla) booked a meeting with you via Hourmere.
+",
+}
+`;
+
+exports[`mixed-direction transactional mail > preserves booking names, address and private answers in zh-CN 1`] = `
+{
+  "html": "<p><bdi>ليلى (Layla)</bdi>预约了与你的会议。</p>
+<tr><td>活动</td><td><bdi>📅 42 مراجعة (Review) &amp; צוות</bdi></td></tr>
+<tr><td>地点</td><td><bdi>شارع النور (Oak St), Room 42</bdi></td></tr>
+<tr><td>预约人</td><td><bdi>ليلى (Layla)</bdi> &lt;<bdi dir="ltr">layla+booking@example.test</bdi>&gt;</td></tr>
+<tr><td>来宾</td><td><bdi>יעל (Yael)</bdi> &lt;<bdi dir="ltr">yael@example.test</bdi>&gt;</td></tr>
+<p><span><bdi>מה הנושא? (Topic)</bdi></span><br><bdi>للاطلاع (https://video.example.test/room?team=42&amp;layout=grid) وللتواصل &lt;layla+booking@example.test&gt;</bdi><br><bdi>Follow up: שלום</bdi></p>
+<p>你收到此邮件，是因为<bdi>ليلى (Layla)</bdi>通过 Hourmere 预约了与你的会议。</p>",
+  "subject": "新预约：与ليلى (Layla)的📅 42 مراجعة (Review) & צוות，11月20日周五，10:00（UTC，GMT+00:00）",
+  "text": "Hourmere
+
+ليلى (Layla)预约了与你的会议。
+
+活动：📅 42 مراجعة (Review) & צוות
+时间：2026年11月20日星期五，10:00 至 10:30（UTC，GMT+00:00）
+地点：شارع النور (Oak St), Room 42
+预约人：ليلى (Layla) <layla+booking@example.test>
+来宾：יעל (Yael) <yael@example.test>
+
+回答
+מה הנושא? (Topic)
+  للاطلاع (https://video.example.test/room?team=42&layout=grid) وللتواصل <layla+booking@example.test>
+  Follow up: שלום
+
+你收到此邮件，是因为ليلى (Layla)通过 Hourmere 预约了与你的会议。
+",
+}
+`;
+
+exports[`mixed-direction transactional mail > preserves the inviter and team name order around the invitation button and fallback URL 1`] = `
+{
+  "html": "<p><bdi>נועה (Noa) [12]</bdi> 邀请你加入 Hourmere 上的团队「<bdi>فريق التصميم (Design) &amp; צוות</bdi>」。</p>
+<p>请使用受邀邮箱 <bdi dir="ltr">layla+booking@example.test</bdi> 登录并完成邮箱验证，然后在邀请页面接受邀请。邮箱别名不能代替此地址。</p>
+<a href="https://calendar.example.test/app/join?invitationId=019a278e-3ff2-7a91-8fe0-1846a52d0b22">查看并接受邀请</a>
+<p>如果按钮无法使用，请将此链接复制到浏览器中：<br><a href="https://calendar.example.test/app/join?invitationId=019a278e-3ff2-7a91-8fe0-1846a52d0b22"><bdi dir="ltr">https://calendar.example.test/app/join?invitationId=019a278e-3ff2-7a91-8fe0-1846a52d0b22</bdi></a></p>",
+  "subject": "邀请你加入团队：فريق التصميم (Design) & צוות",
+  "text": "Hourmere
+
+נועה (Noa) [12] 邀请你加入 Hourmere 上的团队「فريق التصميم (Design) & צוות」。
+
+请使用受邀邮箱 layla+booking@example.test 登录并完成邮箱验证，然后在邀请页面接受邀请。邮箱别名不能代替此地址。
+
+仅登录不会加入团队；你需要在页面上明确接受邀请。
+
+邀请有效期至：2026年11月21日，10:00（UTC）。
+
+查看并接受邀请
+https://calendar.example.test/app/join?invitationId=019a278e-3ff2-7a91-8fe0-1846a52d0b22
+
+如果你不认识此团队或不想加入，可以忽略此邮件。
+",
+}
+`;
+
+exports[`mixed-direction transactional mail > renders a multiline follow-up note without turning embedded contact text into links 1`] = `
+{
+  "html": "<p>The scheduled time for your meeting with <bdi>נועה (Noa) [12]</bdi>, <bdi>عمر (Omar)</bdi>, and <bdi>王安</bdi> has ended.</p>
+<tr><td>What</td><td><bdi>📅 42 مراجعة (Review) &amp; צוות</bdi></td></tr>
+<tr><td>Host</td><td><bdi>נועה (Noa) [12]</bdi>, <bdi>عمر (Omar)</bdi>, and <bdi>王安</bdi></td></tr>
+<p><bdi>للاطلاع (https://video.example.test/room?team=42&amp;layout=grid) وللتواصل &lt;layla+booking@example.test&gt;</bdi><br><br><bdi>Follow up: שלום</bdi></p>
+<p>You received this email because you booked a meeting with <bdi>נועה (Noa) [12]</bdi>, <bdi>عمر (Omar)</bdi>, and <bdi>王安</bdi> via Hourmere.</p>",
+  "subject": "Scheduled meeting time has ended: 📅 42 مراجعة (Review) & צוות",
+  "text": "Hourmere
+
+The scheduled time for your meeting with נועה (Noa) [12], عمر (Omar), and 王安 has ended.
+
+What: 📅 42 مراجعة (Review) & צוות
+When: Friday, November 20, 2026, 10:00 AM – 10:30 AM (UTC, GMT+00:00)
+Host: נועה (Noa) [12], عمر (Omar), and 王安
+
+Note from the host
+للاطلاع (https://video.example.test/room?team=42&layout=grid) وللتواصل <layla+booking@example.test>
+
+Follow up: שלום
+
+You received this email because you booked a meeting with נועה (Noa) [12], عمر (Omar), and 王安 via Hourmere.
+",
+}
+`;

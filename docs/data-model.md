@@ -2882,6 +2882,12 @@ The run marks remaining items stopped on operator stop, expiry, lost authority o
 that the former host is again a member. The run-level audit carries no mailbox or session ID.
 See the [staged run operations](member-departure-handoff.md#staged-automatic-handoff-runs).
 
+`departure_handoff_calendar_cleanup` records each source chain's pinned ordinary Google
+Calendar or Microsoft destination during apply. Calendar and connection IDs are historical
+snapshots. They survive disconnection so the receipt can report unresolved cleanup or retain
+a verified completion. The rows are deleted with the source booking. Existing automatic
+conference intents retain their own lifecycle state. Admin receipts project only the outcome.
+
 ## Audit events
 
 `audit_events` is the append-only management journal available to every instance.

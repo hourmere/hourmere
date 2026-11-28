@@ -193,6 +193,29 @@ describe.skipIf(!adminUrl)('departure handoff participant consent', () => {
     ).toBe(true)
   })
 
+  it('hides closed terms even when the recipient digest is still present', async () => {
+    const s = await setup()
+    const b = await s.issueToken(1, booker)
+    await expect(s.read(b.token)).resolves.toMatchObject({ version: s.initial.version })
+
+    // Leave the digest intact to exercise the offer state guard independently.
+    const { offerId, version, bookingId, teamId } = s.key(s.initial)
+    await db
+      .updateTable('departure_handoff_offers')
+      .set({ state: 'closed', close_reason: 'withdrawn' })
+      .where('organization_id', '=', teamId)
+      .where('source_booking_id', '=', bookingId)
+      .where('id', '=', offerId)
+      .where('version', '=', version)
+      .executeTakeFirstOrThrow()
+
+    const digest = departureHandoffTokenDigest(b.id, b.secret)
+    expect(await s.rows(version)).toContainEqual(
+      expect.objectContaining({ id: b.id, token_digest: digest, decision: null }),
+    )
+    await expect(s.read(b.token)).rejects.toMatchObject(unavailable)
+  })
+
   it('refuses newly edited terms and a different expected version', async () => {
     const s = await setup()
     const b = await s.issueToken(1, booker)

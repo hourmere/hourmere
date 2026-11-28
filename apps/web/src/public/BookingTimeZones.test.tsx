@@ -148,13 +148,15 @@ describe('cross-zone public booking details', () => {
 
   it('lists collective host display names without inventing a single host’s zone or time', async () => {
     const user = userEvent.setup()
+    const first = 'آدا (Ada)'
+    const second = 'גרייס (Grace)'
     fakeApi(
       eventRoutes(
         {
           ...EVENT_IN_LA,
           hosts: [
-            { name: 'Ada', timeZone: 'America/Los_Angeles' },
-            { name: 'Grace', timeZone: 'America/New_York' },
+            { name: first, timeZone: 'America/Los_Angeles' },
+            { name: second, timeZone: 'America/New_York' },
           ],
         },
         [START],
@@ -163,11 +165,11 @@ describe('cross-zone public booking details', () => {
     renderApp('/ada/intro')
     const required = await screen.findByText(/^Required hosts:/)
     expect(required.textContent).toMatchInlineSnapshot(
-      '"Required hosts: Ada (America/Los Angeles), Grace (America/New York)"',
+      '"Required hosts: آدا (Ada) (America/Los Angeles), גרייס (Grace) (America/New York)"',
     )
     expect(Array.from(required.querySelectorAll('bdi'), (host) => host.textContent)).toEqual([
-      'Ada',
-      'Grace',
+      first,
+      second,
     ])
     expect(screen.queryByText(/^Host's time zone:/)).toBeNull()
     await chooseDay(user, '2026-11-11')
@@ -175,7 +177,7 @@ describe('cross-zone public booking details', () => {
     expect(document.querySelector('.host-local-time')).toBeNull()
     await selectPublicLanguage(user, 'zh-CN')
     expect(required.textContent).toMatchInlineSnapshot(
-      '"必选主持人：Ada（America/Los Angeles）、Grace（America/New York）"',
+      '"必选主持人：آدا (Ada)（America/Los Angeles）、גרייס (Grace)（America/New York）"',
     )
   })
 

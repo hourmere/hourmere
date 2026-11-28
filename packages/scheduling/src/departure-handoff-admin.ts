@@ -272,7 +272,16 @@ async function readNewConferenceState(
   if (location?.kind === 'microsoft_teams') {
     const teams = (await readTeamsMeetingLocations(db, [replacement])).get(replacement.id)
     if (teams?.status === 'ready') return 'ready'
-    if (teams?.status === 'join_url_pending') return 'pending'
+    if (teams?.status === 'join_url_pending') {
+      const target = await db
+        .selectFrom('booking_calendar_targets')
+        .select('root_booking_id')
+        .where('root_booking_id', '=', replacement.id)
+        .where('microsoft_writeback', 'is not', null)
+        .executeTakeFirst()
+      // An admitted Teams root has a target at commit. A disconnect can remove it.
+      return target ? 'pending' : 'failed'
+    }
     return teams ? 'failed' : 'unknown'
   }
   return automaticConference(location) ? 'unknown' : 'not_required'
@@ -284,26 +293,56 @@ async function readCleanupState(
   status?: 'pending' | 'ready' | 'failed',
 ): Promise<CleanupState | undefined> {
   if (status === 'failed') return 'unresolved'
-  if (status === 'pending') return 'pending'
   const microsoft = parseLocation(source.location)?.kind === 'microsoft_teams'
   const root = await conferenceRoot(db, source.id)
   if (!root) return 'unresolved'
 
-  const outlook = await db
-    .selectFrom('booking_calendar_targets')
-    .select([
-      sql<string | null>`microsoft_writeback->>'status'`.as('status'),
-      sql<boolean>`microsoft_writeback->>'revision' LIKE '%:false'`.as('cleanup'),
-    ])
-    .where('root_booking_id', '=', root)
-    .where('microsoft_writeback', 'is not', null)
-    .executeTakeFirst()
-  if (outlook) {
-    if (!outlook.cleanup) return 'pending'
-    if (outlook.status === 'failed') return 'unresolved'
-    if (outlook.status !== 'succeeded') return 'pending'
+  const pinned = await db
+    .selectFrom('departure_handoff_calendar_cleanup as cleanup')
+    .leftJoin('calendars as calendar', (join) =>
+      join
+        .onRef('calendar.id', '=', 'cleanup.calendar_id')
+        .onRef('calendar.connection_id', '=', 'cleanup.connection_id'),
+    )
+    .select(['cleanup.status', 'cleanup.provider', 'calendar.id as connected'])
+    .where('cleanup.source_booking_id', '=', source.id)
+    .execute()
+  const copyStates = pinned.map(({ status, connected }) =>
+    connected || status === 'complete' ? status : 'unresolved',
+  )
+  if (!pinned.some(({ provider }) => provider === 'microsoft')) {
+    // Older staged receipts predate destination snapshots.
+    const outlook = await db
+      .selectFrom('booking_calendar_targets')
+      .select([
+        sql<string | null>`microsoft_writeback->>'status'`.as('status'),
+        sql<boolean>`microsoft_writeback->>'revision' LIKE '%:false'`.as('cleanup'),
+      ])
+      .where('root_booking_id', '=', root)
+      .where('microsoft_writeback', 'is not', null)
+      .executeTakeFirst()
+    if (outlook)
+      copyStates.push(
+        outlook.cleanup && outlook.status === 'succeeded'
+          ? 'complete'
+          : outlook.cleanup && outlook.status === 'failed'
+            ? 'unresolved'
+            : 'pending',
+      )
+    else if (microsoft) copyStates.push('unresolved')
   }
-  if (microsoft && !outlook) return 'unresolved'
-  if (status === 'ready' || outlook) return 'complete'
+  if (status) {
+    const mirrors = await db
+      .selectFrom('booking_conference_mirrors')
+      .select('state')
+      .where('root_booking_id', '=', root)
+      .where('calendar_id', 'is not', null)
+      .execute()
+    if (mirrors.some(({ state }) => state === 'failed')) return 'unresolved'
+    if (mirrors.some(({ state }) => state === 'pending')) copyStates.push('pending')
+  }
+  if (copyStates.includes('unresolved')) return 'unresolved'
+  if (status === 'pending' || copyStates.includes('pending')) return 'pending'
+  if (status === 'ready' || copyStates.length) return 'complete'
   return automaticConference(parseLocation(source.location)) ? 'unresolved' : undefined
 }

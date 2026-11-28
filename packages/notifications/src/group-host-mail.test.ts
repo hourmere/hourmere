@@ -499,8 +499,9 @@ describe.skipIf(!process.env.DATABASE_URL)('slot host communications', () => {
     expect(f.sent).toHaveLength(0)
     expect((await rows(f.slot)).find((r) => r.kind === 'calendar')?.state).toBe('skipped')
   })
-  it('uses full-width Chinese punctuation for host mail', async () => {
-    const f = await fixture()
+  it('keeps mixed titles isolated from Chinese host mail and literal in the calendar', async () => {
+    const title = '📅 12 مراجعة (Review) & צוות'
+    const f = await fixture({ title })
     await db
       .insertInto('profiles')
       .values({
@@ -515,8 +516,13 @@ describe.skipIf(!process.env.DATABASE_URL)('slot host communications', () => {
       f.deps,
       must((await rows(f.slot)).find((r) => r.kind === 'calendar')).id,
     )
-    expect(f.sent[0]?.subject).toBe('团体活动更新：Group class')
+    expect(f.sent[0]?.subject).toBe(`团体活动更新：${title}`)
     expect(f.sent[0]?.text).toContain('已预订席位：2。')
+    expect(f.sent[0]?.text).toContain(`\n${title}\n`)
+    expect(f.sent[0]?.html).toContain(
+      '团体活动更新<br><bdi>📅 12 مراجعة (Review) &amp; צוות</bdi><br>',
+    )
+    expect(f.sent[0]?.attachments?.[0]?.content).toContain(`SUMMARY:${title}\r\n`)
   })
   async function verifyLease(change?: [string, string]) {
     const f = await fixture()

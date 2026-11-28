@@ -41,7 +41,7 @@ import { EventTypeEditorLayout } from './EventTypeEditorLayout.tsx'
 import { useEditorReadiness } from './editor-readiness.ts'
 import { teamReadinessBlocksSharing } from './event-readiness.ts'
 import './event-settings-summaries.css'
-import { eventSettingsSummaries } from './event-settings-summaries.ts'
+import { type EventSettingsSummary, eventSettingsSummaries } from './event-settings-summaries.tsx'
 import {
   changeLocationKind,
   comparable,
@@ -663,8 +663,8 @@ function EventTypeForm({
         <fieldset className="form-fieldset" disabled={saving} role="presentation">
           <section className="panel" aria-labelledby="basics-heading">
             <h2 id="basics-heading">{t('Basics')}</h2>
-            <p className="event-settings-summary" title={summaries.basics}>
-              {summaries.basics}
+            <p className="event-settings-summary" title={summaryText(summaries.basics)}>
+              {summaryContent(summaries.basics)}
             </p>
             <div className="stack">
               <Field
@@ -1804,7 +1804,7 @@ function SettingsGroup({
   children,
 }: {
   label: MessageKey
-  summary: string
+  summary: EventSettingsSummary
   initiallyOpen: boolean
   children: ReactNode
 }) {
@@ -1814,11 +1814,19 @@ function SettingsGroup({
     <details className="panel event-settings-group" open={open}>
       <summary>
         {t(label)}
-        <span className="event-settings-summary" title={summary}>
-          {summary}
+        <span className="event-settings-summary" title={summaryText(summary)}>
+          {summaryContent(summary)}
         </span>
       </summary>
       <div className="stack">{children}</div>
     </details>
   )
+}
+
+function summaryText(summary: EventSettingsSummary) {
+  return typeof summary === 'string' ? summary : summary.text
+}
+
+function summaryContent(summary: EventSettingsSummary) {
+  return typeof summary === 'string' ? summary : summary.content
 }

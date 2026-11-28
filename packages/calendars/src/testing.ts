@@ -69,6 +69,7 @@ export function fakeGoogle(now?: () => number) {
     storedEvents: new Map<string, Record<string, unknown>>(),
     conferencePollsBeforeReady: 1,
     conferenceOutcome: 'success' as 'success' | 'failure',
+    conferenceUrl: 'https://meet.google.com/abc-defg-hij',
     importedConferenceRequestMode: 'ignore_duplicate' as 'ignore_duplicate' | 'process_duplicate',
     conferencePatchEtagRaceOnce: false,
     conferenceRequests: new Map<
@@ -94,9 +95,7 @@ export function fakeGoogle(now?: () => number) {
         ...(status === 'success'
           ? {
               conferenceSolution: { key: { type: 'hangoutsMeet' } },
-              entryPoints: [
-                { entryPointType: 'video', uri: 'https://meet.google.com/abc-defg-hij' },
-              ],
+              entryPoints: [{ entryPointType: 'video', uri: controls.conferenceUrl }],
             }
           : {}),
       },

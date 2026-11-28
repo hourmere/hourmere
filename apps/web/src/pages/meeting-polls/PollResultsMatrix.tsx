@@ -96,12 +96,12 @@ export function PollResultsMatrix({
             {results.roster.map((voter) => (
               <tr key={voter.voterId}>
                 <th scope="row" data-private>
-                  <bdi>{voter.name}</bdi>
+                  <bdi>{voter.name}</bdi>{' '}
                   <span className="meeting-poll-cell-detail">
                     <bdi dir="ltr">
                       <BreakableText>{voter.email}</BreakableText>
                     </bdi>
-                  </span>
+                  </span>{' '}
                   <span className="meeting-poll-cell-detail">
                     {t(VOTER_STATUS[voter.status] ?? 'Unknown')}
                   </span>
