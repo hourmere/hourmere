@@ -56,7 +56,7 @@
     "eslint": "9.29.0",
     "n8n-workflow": "2.45.1",
     "typescript": "5.9.3",
-    "vitest": "5.1.0"
+    "vitest": "5.1.1"
   },
   "publishConfig": {
     "registry": "https://registry.invalid/"
