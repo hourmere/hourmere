@@ -3604,4 +3604,7 @@ export const admin = {
   'Mail server acceptance unconfirmed': '邮件服务器尚未确认接收',
   'Email delivery incomplete': '邮件投递未完成',
   'Email delivery unavailable': '邮件投递不可用',
+
+  // Effective team page permissions
+  'No event types yet.': '还没有活动类型。',
 } as const

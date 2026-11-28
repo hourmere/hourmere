@@ -14,6 +14,7 @@ import { useI18n } from '../../i18n/runtime.tsx'
 import type { MessageKey } from '../../i18n/translate.ts'
 import { PATHS, routingFormPath } from '../../paths.ts'
 import { randomKey } from '../../public/api.ts'
+import { useTeamPagePermissions } from '../../team-page-permissions.ts'
 import { useUnsavedChanges } from '../../unsaved-changes.tsx'
 import { RoutingFormPreview } from './RoutingFormPreview.tsx'
 import { RoutingFormPublication, type RoutingPublicationAction } from './RoutingFormPublication.tsx'
@@ -176,6 +177,7 @@ export function RoutingFormEditor({
   personalOwnerId: string | null
 }) {
   const { t } = useI18n()
+  const permissions = useTeamPagePermissions()
   const navigate = useNavigate()
   const mounted = useMounted()
   const inFlight = useRef(false)
@@ -189,6 +191,12 @@ export function RoutingFormEditor({
     null,
   )
   const [current, setCurrent] = useState(form)
+  const canSave =
+    permissions.status === 'fixed' ||
+    permissions.allows(current ? 'routing_forms.update' : 'routing_forms.create')
+  const canPreview = permissions.status === 'fixed' || permissions.allows('routing_forms.preview')
+  const canPublish = permissions.status === 'fixed' || permissions.allows('routing_forms.publish')
+  const canArchive = permissions.status === 'fixed' || permissions.allows('routing_forms.archive')
   const [draft, setDraft] = useState<RoutingDraft>(() =>
     form
       ? fieldsFrom(form)
@@ -237,7 +245,7 @@ export function RoutingFormEditor({
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (inFlight.current || blocked) return
+    if (!canSave || inFlight.current || blocked) return
     if (
       overlap &&
       dirty &&
@@ -361,6 +369,7 @@ export function RoutingFormEditor({
   }
 
   async function changePublication(action: RoutingPublicationAction) {
+    if (action === 'publish' ? !canPublish : !canSave) return
     if (!current || inFlight.current || blocked || (action === 'publish' && dirty)) return
     const body =
       action === 'publish'
@@ -446,7 +455,7 @@ export function RoutingFormEditor({
   }
 
   async function archive() {
-    if (!current || inFlight.current || blocked) return
+    if (!canArchive || !current || inFlight.current || blocked) return
     inFlight.current = true
     setBusy('archive')
     setAttempt((value) => value + 1)
@@ -494,7 +503,7 @@ export function RoutingFormEditor({
             )}
           </p>
         )}
-        <fieldset className="form-fieldset" disabled={!!busy || blocked || !!pending}>
+        <fieldset className="form-fieldset" disabled={!canSave || !!busy || blocked || !!pending}>
           <div className="panel">
             <Field id={titleField} label={t('Title')} error={errors[titleField]}>
               {(control) => (
@@ -559,14 +568,16 @@ export function RoutingFormEditor({
             </div>
           )}
         </fieldset>
-        <div className="form-actions">
-          <button type="submit" className="button button-primary" disabled={!!busy || blocked}>
-            {busy === 'save' ? t('Saving…') : t('Save draft')}
-          </button>
-          {saved && <span role="status">{t('Draft saved.')}</span>}
-        </div>
+        {canSave && (
+          <div className="form-actions">
+            <button type="submit" className="button button-primary" disabled={!!busy || blocked}>
+              {busy === 'save' ? t('Saving…') : t('Save draft')}
+            </button>
+            {saved && <span role="status">{t('Draft saved.')}</span>}
+          </div>
+        )}
       </form>
-      {current && (
+      {current && canPreview && (
         <RoutingFormPreview
           key={current.draftRevision}
           form={current}
@@ -583,6 +594,8 @@ export function RoutingFormEditor({
           draft={draft}
           dirty={dirty}
           disabled={!!busy || blocked}
+          canPublish={canPublish}
+          canEditDraft={canSave}
           busy={busy === 'publish' || busy === 'disable' || busy === 'enable' ? busy : null}
           status={publicationStatus}
           publishedNumber={publishedNumber}
@@ -592,7 +605,7 @@ export function RoutingFormEditor({
           onRepair={repair}
         />
       )}
-      {current && (
+      {current && canArchive && (
         <fieldset
           className="form-fieldset"
           disabled={(!!busy && busy !== 'archive') || blocked}

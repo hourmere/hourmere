@@ -10,6 +10,7 @@ import { CopyButton } from '../../components/CopyButton.tsx'
 import { parseWhole } from '../../components/forms.tsx'
 import { EVENT_TYPE, PROFILE as PROFILE_RULES } from '../../limits.ts'
 import * as paths from '../../paths.ts'
+import { teamPageAllows } from '../../team-page-permissions.ts'
 import { compileSourceCopy } from '../../test/compile-source-copy.ts'
 import { ME, PROFILE } from '../../test/fake-api.tsx'
 import { eventType } from '../../test/fixtures.ts'
@@ -289,6 +290,7 @@ describe('first-run editor production-source negative controls', () => {
         PROFILE: PROFILE_RULES,
         validSchedule,
         teamReadinessBlocksSharing,
+        teamPageAllows,
         useI18n: () => ({ t: (text: string) => text }),
         useTeamManagementAccess: () => ({ status: 'ready', role: 'owner' }),
       })

@@ -15,7 +15,7 @@ import {
   withScimResources,
 } from '@hourmere/auth'
 import { embedParent } from '@hourmere/core/embed'
-import { isConnectionTimeout } from '@hourmere/db'
+import { type Db, isConnectionTimeout } from '@hourmere/db'
 import { withAuditRequest } from '@hourmere/db/audit'
 import {
   DomainError,
@@ -37,7 +37,7 @@ import { requireCaller } from './caller.ts'
 import { clientIp, withClientIp } from './client-ip.ts'
 import { errorAliasFor } from './error-aliases.ts'
 import type { McpModule } from './mcp/endpoint.ts'
-import { describeCaller, Me } from './me.ts'
+import { describeCaller, describeTeamManagementPermissions, Me } from './me.ts'
 import {
   isOneTimeCapabilityPath,
   isOneTimeLinkPath,
@@ -91,6 +91,8 @@ export interface AppDeps {
   authHandler: (request: Request) => Promise<Response>
   /** Identifies the caller of authenticated routes (session cookie or API key). */
   resolveCaller: CallerResolver
+  /** Database for the browser caller's versioned team permission summary. */
+  teamPermissionsDb?: Db
   /** PUBLIC_URL: cookie-authenticated writes must come from its origin. */
   publicUrl: string
   /** Exact parent origins allowed to embed dedicated public booking pages. */
@@ -434,6 +436,7 @@ export function createApp({
   stripeWebhook,
   authHandler,
   resolveCaller,
+  teamPermissionsDb,
   publicUrl,
   embedOrigins = [],
   hstsMaxAge = DEFAULT_HSTS_MAX_AGE,
@@ -809,8 +812,20 @@ export function createApp({
         access?.stored,
       ))
     const ssoRecoveryTeams = !access?.suspended && c.var.ssoRecoveryTeams
+    const teamPermissions =
+      teamPermissionsDb &&
+      (await describeTeamManagementPermissions(
+        teamPermissionsDb,
+        principal,
+        access?.allowed !== false,
+      ))
     return c.json(
-      { ...identity, ...(sso && { sso }), ...(ssoRecoveryTeams && { ssoRecoveryTeams }) },
+      {
+        ...identity,
+        ...teamPermissions,
+        ...(sso && { sso }),
+        ...(ssoRecoveryTeams && { ssoRecoveryTeams }),
+      },
       200,
     )
   })

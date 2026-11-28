@@ -16,6 +16,8 @@ export function ZoomMeetingFields({
   userId,
   personal,
   session,
+  canEditLocation = true,
+  canChangeAccount = true,
   set,
 }: {
   draft: EventTypeDraft
@@ -24,6 +26,8 @@ export function ZoomMeetingFields({
   userId: string
   personal: boolean
   session: boolean
+  canEditLocation?: boolean
+  canChangeAccount?: boolean
   set: <K extends keyof EventTypeDraft>(key: K, value: EventTypeDraft[K]) => void
 }) {
   const { t } = useI18n()
@@ -37,7 +41,10 @@ export function ZoomMeetingFields({
         <input
           type="checkbox"
           checked={draft.autoCreateZoom}
-          disabled={(!enabled || !ownHost) && !draft.autoCreateZoom}
+          disabled={
+            !canEditLocation ||
+            ((!enabled || !ownHost || !canChangeAccount) && !draft.autoCreateZoom)
+          }
           onChange={(e) => set('autoCreateZoom', e.target.checked)}
         />
         {t('Create a unique Zoom meeting for each booking')}
@@ -58,7 +65,7 @@ export function ZoomMeetingFields({
         </p>
       )}
       {draft.autoCreateZoom && enabled && ownHost && (
-        <ZoomAccounts draft={draft} errors={errors} set={set} />
+        <ZoomAccounts draft={draft} errors={errors} set={set} disabled={!canChangeAccount} />
       )}
     </div>
   )
@@ -67,7 +74,10 @@ function ZoomAccounts({
   draft,
   errors,
   set,
-}: Pick<Parameters<typeof ZoomMeetingFields>[0], 'draft' | 'errors' | 'set'>) {
+  disabled,
+}: Pick<Parameters<typeof ZoomMeetingFields>[0], 'draft' | 'errors' | 'set'> & {
+  disabled: boolean
+}) {
   const { t, ui } = useI18n()
   const [state, reload] = useLoad(load)
   const accounts =
@@ -94,7 +104,7 @@ function ZoomAccounts({
           <select
             {...props}
             value={draft.zoomConnectionId}
-            disabled={state.status !== 'ready'}
+            disabled={disabled || state.status !== 'ready'}
             onChange={(e) => set('zoomConnectionId', e.target.value)}
           >
             <option value="">{t('Choose an account')}</option>

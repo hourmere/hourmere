@@ -49,6 +49,15 @@ describe('fresh slot picker permission checks', () => {
     },
   )
 
+  it('denies an unrenewed Admin before reading the event or native role', async () => {
+    const api = fakeApi(signedInAs({ ...team, teamManagementPermissions: ['event_types.read'] }))
+    await expect(
+      verifySlotPickerAccess(team, eventType({ ownerUserId: null }), PROFILE),
+    ).rejects.toThrow('picker_access_denied')
+    expect(api.to(memberRoute)).toHaveLength(0)
+    expect(api.to(eventRoute)).toHaveLength(0)
+  })
+
   it.each([
     { ...ME, user: { ...ME.user, id: 'different-user' } },
     { ...ME, organization: { ...ME.organization, id: 'different-organization' } },

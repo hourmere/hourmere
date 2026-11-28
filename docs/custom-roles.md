@@ -348,15 +348,18 @@ either switch closes or the membership generation changes. Bringing a switch bac
 does not restore a previously issued custom ceiling. Fixed-role credentials for
 memberships outside this boundary continue to work across switch changes.
 
-The event types, routing forms and workflows pages still use fixed roles to decide
-which controls to show. A Member with a custom grant may have access through the
-service while the browser hides the action. An affected Admin awaiting renewal may
-see controls whose requests return 403. Server authorization is authoritative for
-every request.
+The event types, routing forms and workflows pages use the active browser session’s
+effective permissions for memberships whose authorization generation has advanced.
+The browser reads the allowed team-wide operations from `GET /api/v1/me`. A Member
+with a current custom grant can use the corresponding controls. An affected Admin
+awaiting renewal sees the actions their current session can use and, when renewal is
+available, a link to renew in Settings. Every operation still applies the server’s
+current authorization, feature and resource checks. Fixed-role sessions outside the
+generation boundary retain the existing interface.
 
-中文：活动类型、路由表单和工作流页面仍按固定角色显示控件。获得自定义授权的普通成员可能
-无法在浏览器中看到相关操作，等待续签的管理员也可能看到提交后返回 403 的控件。每次请求
-以服务端授权为准，正式启用前须对齐这三个页面的权限显示。
+中文：活动类型、路由表单和工作流页面按当前浏览器会话的有效权限显示控件。普通成员续签后
+可以使用已获授权的操作。等待续签的管理员只能看到当前会话可用的操作，续签功能可用时可从
+页面进入设置续签。不受授权代际限制的固定角色继续使用原有界面。每次操作仍由服务端检查权限。
 
 实例使用过此功能后，如果关闭实例运行时开关，浏览器权限续签接口将返回
 `404 custom_roles_disabled`。授权代际大于 1 的成员须等到开关恢复后才能续签；受影响的
@@ -364,11 +367,9 @@ every request.
 
 ### Enablement checklist
 
-- Align the event types, routing forms and workflows pages with effective permissions.
-  Verify that custom-granted Members can reach allowed actions and that affected Admins
-  awaiting renewal are guided to renew before using newly acquired authority. Preserve
-  all server authorization checks.
-- Rehearse disabling the instance runtime switch after use. Verify that browser renewal
+- [x] Align the event types, routing forms and workflows pages with effective permissions.
+  Cover custom-granted Members, affected Admins awaiting renewal, and fixed-role UI compatibility.
+- [ ] Rehearse disabling the instance runtime switch after use. Verify that browser renewal
   returns `404 custom_roles_disabled` while it is off and that members with an
   authorization generation greater than 1 can renew after the operator turns it back on.
 

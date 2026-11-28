@@ -33,6 +33,7 @@ import {
 import { randomHex } from '../../random.ts'
 import { type Me, useMe, useSession } from '../../session.tsx'
 import { useTeamManagementAccess } from '../../team-management.tsx'
+import { teamPageAllows } from '../../team-page-permissions.ts'
 import { useUnsavedChanges } from '../../unsaved-changes.tsx'
 import { MissingRecord } from '../NotFound.tsx'
 import { ConfigurationChecks } from './ConfigurationChecks.tsx'
@@ -109,13 +110,25 @@ function paymentAvailabilityReason(availability: Loaded['paymentAvailability']):
 /** Creates an event type (/app/event-types/new) or edits one (/app/event-types/:id). */
 export function EventTypeEditorPage() {
   const { id } = useParams()
+  const me = useMe()
+  const { t } = useI18n()
+  if (!teamPageAllows(me, id === undefined ? 'event_types.create' : 'event_types.read', true)) {
+    return (
+      <>
+        <PageHeader title={t(id === undefined ? 'New event type' : 'Edit event type')} />
+        <p role="status">{t("You don't have permission to do that.")}</p>
+        <Link to={PATHS.eventTypes}>{t('Back to event types')}</Link>
+      </>
+    )
+  }
   // Starts over for another event type, rather than showing the previous one while loading.
   return <EventTypeEditor key={id ?? 'new'} id={id} />
 }
 
 function EventTypeEditor({ id }: { id: string | undefined }) {
   const { t, ui } = useI18n()
-  const { organization } = useMe()
+  const { organization, teamManagementPermissions } = useMe()
+  const usesEffective = teamManagementPermissions !== undefined
 
   const load = useCallback(
     async (signal: AbortSignal): Promise<Loaded | 'missing'> => {
@@ -132,7 +145,7 @@ function EventTypeEditor({ id }: { id: string | undefined }) {
           loadSchedules(signal),
           loadProfile(signal),
           unwrap(api.GET('/api/v1/instance', { signal })),
-          id === undefined || organization.personal
+          id === undefined || organization.personal || usesEffective
             ? unwrap(api.GET('/api/v1/calendar-connections', { signal })).catch(() => null)
             : null,
           id === undefined
@@ -170,7 +183,7 @@ function EventTypeEditor({ id }: { id: string | undefined }) {
         paymentAvailability: instance.eventTypePaymentAvailability,
       }
     },
-    [id, organization.personal],
+    [id, organization.personal, usesEffective],
   )
   const [state, reload] = useLoad(load)
   usePageTitle(id === undefined ? 'New event type' : 'Edit event type')
@@ -221,9 +234,30 @@ function EventTypeForm({
 
   const me = useMe()
   const access = useTeamManagementAccess()
-  const canAssignHosts =
+  const fixedCanAssignHosts =
     me.principal.kind !== 'session' || (access.status === 'ready' && access.role !== null)
-  const teamRoleUnresolved = !canAssignHosts && access.status !== 'ready'
+  const usesEffective =
+    me.teamManagementPermissions !== undefined && eventType?.ownerUserId !== me.user.id
+  const can = (operation: string, fixedAllowed = true) =>
+    usesEffective ? teamPageAllows(me, operation, false) : fixedAllowed
+  const canEditDetails = can(eventType ? 'event_types.update' : 'event_types.create')
+  const canChangeHostSettings = can('event_types.assign_hosts', fixedCanAssignHosts)
+  const canListCandidates = can('event_types.list_host_candidates', fixedCanAssignHosts)
+  const showHostPicker = canChangeHostSettings || canListCandidates
+  const canActivateRoundRobin = can('event_types.activate_round_robin', fixedCanAssignHosts)
+  const canEditNotifications = can('event_notifications.update')
+  const canEditRedirect = can('event_types.update_success_redirect')
+  const canEditWaitlist = can('waitlists.update_settings')
+  const canSave =
+    canEditDetails ||
+    canChangeHostSettings ||
+    canEditNotifications ||
+    canEditRedirect ||
+    canEditWaitlist
+  const BasicsSection = canEditDetails ? 'section' : 'fieldset'
+  const TimingFields = canEditDetails ? 'div' : 'fieldset'
+  const canReadTeamReadiness = teamPageAllows(me, 'readiness.read_team', fixedCanAssignHosts)
+  const teamRoleUnresolved = !usesEffective && !showHostPicker && access.status !== 'ready'
   const role = access.status === 'ready' ? (access.roles?.join(',') ?? null) : null
   // A form keeps the organization it started in; submitting never adopts another tab's
   // active organization. RequireSession remounts it after a confirmed context reload.
@@ -235,6 +269,12 @@ function EventTypeForm({
   const message = useFlash()
   const [shareFocusVersion, setShareFocusVersion] = useState(message ? 1 : 0)
   const [saved, setSaved] = useState<EventType | null>(eventType)
+  const knownHosts = canListCandidates
+    ? undefined
+    : [...new Set([me.user.id, ...(saved?.hosts ?? []).map((host) => host.userId)])].map((id) => ({
+        id,
+        name: id === me.user.id ? me.user.name : '',
+      }))
   const showHosts =
     !me.organization.personal && (!teamRoleUnresolved || saved?.schedulingType === 'round_robin')
   const [baseline, setBaseline] = useState(() =>
@@ -268,7 +308,9 @@ function EventTypeForm({
     teamsIssue = microsoftTeamsCalendarIssue
   } else if (draft.hostUserIds[0] !== me.user.id) {
     teamsIssue = 'The assigned host must configure Microsoft Teams in their own signed-in session.'
-  } else if (!canAssignHosts) {
+  } else if (usesEffective) {
+    teamsIssue = microsoftTeamsCalendarIssue
+  } else if (!showHostPicker) {
     teamsIssue = 'Could not verify Microsoft Teams availability for the host.'
   } else if (teamsHostStatus === 'unavailable') {
     teamsIssue =
@@ -369,6 +411,7 @@ function EventTypeForm({
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
+    if (!canSave) return
     // Display-unit choices are local presentation, not a reason to write stale settings.
     if (saved && !dirty) {
       setStatus('No changes to save.')
@@ -401,8 +444,23 @@ function EventTypeForm({
     invalidateReadiness()
     statusRef.current?.focus()
     setSaving(true)
-    const body = saved ? toPatchInput(draft, baseline) : toInput(draft)
+    const body = saved ? toPatchInput(draft, baseline, usesEffective) : toInput(draft)
     try {
+      if (usesEffective) {
+        if (!saved && !canChangeHostSettings) {
+          // The server supplies the caller as the individual event's host.
+          delete body.hosts
+          delete body.schedulingType
+          delete body.conferenceOrganizer
+          delete body.scheduleId
+          delete body.zoomConnectionId
+        }
+        if (saved && Object.keys(body).some((field) => !can(patchPermission(field)))) {
+          setStatus("You don't have permission to do that.")
+          setSaving(false)
+          return
+        }
+      }
       if (saved) {
         const updated = await unwrap(
           api.PATCH('/api/v1/event-types/{id}', {
@@ -461,7 +519,13 @@ function EventTypeForm({
   }
 
   async function roundRobinAction(action: 'activate' | 'defaults') {
-    if (!saved || dirty || saving) return
+    if (
+      !saved ||
+      dirty ||
+      saving ||
+      (action === 'activate' ? !canActivateRoundRobin : !canChangeHostSettings)
+    )
+      return
     const poolProblem = validateDraft(draft).hosts
     if (poolProblem) {
       setErrors({ hosts: poolProblem })
@@ -510,7 +574,7 @@ function EventTypeForm({
   }
 
   async function remove() {
-    if (!saved) return
+    if (!saved || !can('event_types.delete')) return
     try {
       await unwrap(
         api.DELETE('/api/v1/event-types/{id}', { params: { path: { id: saved.id } }, headers }),
@@ -633,13 +697,11 @@ function EventTypeForm({
             ) : readiness.status === 'unavailable' ? (
               <>
                 <p>{t('Readiness checks are unavailable for this account.')}</p>
-                {me.principal.kind === 'session' &&
-                  access.status === 'ready' &&
-                  access.role !== null && (
-                    <button type="button" className="button button-small" onClick={retryReadiness}>
-                      {t('Retry checks')}
-                    </button>
-                  )}
+                {me.principal.kind === 'session' && canReadTeamReadiness && (
+                  <button type="button" className="button button-small" onClick={retryReadiness}>
+                    {t('Retry checks')}
+                  </button>
+                )}
               </>
             ) : (
               <>
@@ -661,7 +723,11 @@ function EventTypeForm({
         )}
 
         <fieldset className="form-fieldset" disabled={saving} role="presentation">
-          <section className="panel" aria-labelledby="basics-heading">
+          <BasicsSection
+            className="panel"
+            aria-labelledby="basics-heading"
+            disabled={!canEditDetails || undefined}
+          >
             <h2 id="basics-heading">{t('Basics')}</h2>
             <p className="event-settings-summary" title={summaryText(summaries.basics)}>
               {summaryContent(summaries.basics)}
@@ -831,7 +897,7 @@ function EventTypeForm({
               </Field>
               <LocationFields draft={draft} errors={errors} set={set} teamsIssue={teamsIssue} />
             </div>
-          </section>
+          </BasicsSection>
           {!editing &&
             draft.schedulingType === 'individual' &&
             ownSchedule &&
@@ -857,6 +923,7 @@ function EventTypeForm({
           <SettingsGroup
             label="Description and visibility"
             summary={summaries.visibility}
+            disabled={!canEditDetails}
             initiallyOpen={changed('description', 'position', 'isActive', 'isHidden')}
           >
             <div className="stack">
@@ -955,6 +1022,7 @@ function EventTypeForm({
           <SettingsGroup
             label="Group events"
             summary={summaries.group}
+            disabled={!canEditDetails}
             initiallyOpen={draft.bookingMode === 'group'}
           >
             <Field id="bookingMode" label={t('Booking mode')} error={errors.bookingMode}>
@@ -996,6 +1064,7 @@ function EventTypeForm({
           <SettingsGroup
             label="Additional durations"
             summary={summaries.durations}
+            disabled={!canEditDetails}
             initiallyOpen={editing && baseline.allowedDurationsMinutes.length > 1}
           >
             <DurationsEditor
@@ -1012,6 +1081,7 @@ function EventTypeForm({
           </SettingsGroup>
           <SettingsGroup
             label="Payments"
+            disabled={!canEditDetails}
             summary={t(
               draft.payment.enabled
                 ? 'Payment required'
@@ -1031,11 +1101,15 @@ function EventTypeForm({
           </SettingsGroup>
           {showHosts && (
             <SettingsGroup label="Hosts" summary={summaries.hosts} initiallyOpen={editing}>
-              {!me.organization.personal && canAssignHosts && (
+              {!me.organization.personal && showHostPicker && (
                 <HostAssignment
                   organizationId={me.organization.id}
                   currentUserId={me.user.id}
-                  role={role}
+                  role={usesEffective ? (canReadTeamReadiness ? role : null) : role}
+                  effectiveReadiness={usesEffective ? canReadTeamReadiness : undefined}
+                  canListCandidates={canListCandidates}
+                  canAssign={canChangeHostSettings}
+                  knownHosts={knownHosts}
                   draft={draft}
                   error={errors.hosts}
                   organizerError={errors.conferenceOrganizer}
@@ -1043,13 +1117,21 @@ function EventTypeForm({
                   onTeamsReadiness={setTeamsHost}
                 />
               )}
-              {!me.organization.personal && !canAssignHosts && access.status === 'ready' && (
-                <ReadOnlyHosts draft={draft} me={me} role={role} onReload={confirmReload} />
-              )}
+              {!me.organization.personal &&
+                !showHostPicker &&
+                (usesEffective || access.status === 'ready') && (
+                  <ReadOnlyHosts
+                    draft={draft}
+                    me={me}
+                    role={role}
+                    onReload={confirmReload}
+                    usesEffective={usesEffective}
+                  />
+                )}
 
               {!me.organization.personal &&
                 (saved?.schedulingType === 'round_robin' ||
-                  (canAssignHosts && draft.schedulingType === 'round_robin')) && (
+                  (canChangeHostSettings && draft.schedulingType === 'round_robin')) && (
                   <section className="panel" aria-labelledby="round-robin-heading">
                     <h2 id="round-robin-heading">{t('Round-robin activation')}</h2>
                     <p>
@@ -1064,33 +1146,39 @@ function EventTypeForm({
                         'Save the pool first, then activate it here. Saving changes never activates a dormant pool.',
                       )}
                     </p>
-                    {access.status === 'ready' && !canAssignHosts && (
+                    {!usesEffective && access.status === 'ready' && !showHostPicker && (
                       <p>{t('Only team owners and admins can change host assignments.')}</p>
                     )}
-                    {canAssignHosts &&
+                    {(canChangeHostSettings || canActivateRoundRobin) &&
                       saved?.schedulingType === 'round_robin' &&
                       !saved.roundRobinActive && (
                         <>
-                          <p>
-                            {t(
-                              'This uses each selected host’s current default availability. Activation is a separate action.',
-                            )}
-                          </p>
-                          <button
-                            type="button"
-                            disabled={dirty || saving}
-                            onClick={() => roundRobinAction('defaults')}
-                          >
-                            {t('Use hosts’ default availability')}
-                          </button>
-                          <button
-                            type="button"
-                            className="button button-primary"
-                            disabled={dirty || saving}
-                            onClick={() => roundRobinAction('activate')}
-                          >
-                            {t('Activate round robin')}
-                          </button>
+                          {canChangeHostSettings && (
+                            <>
+                              <p>
+                                {t(
+                                  'This uses each selected host’s current default availability. Activation is a separate action.',
+                                )}
+                              </p>
+                              <button
+                                type="button"
+                                disabled={dirty || saving}
+                                onClick={() => roundRobinAction('defaults')}
+                              >
+                                {t('Use hosts’ default availability')}
+                              </button>
+                            </>
+                          )}
+                          {canActivateRoundRobin && (
+                            <button
+                              type="button"
+                              className="button button-primary"
+                              disabled={dirty || saving}
+                              onClick={() => roundRobinAction('activate')}
+                            >
+                              {t('Activate round robin')}
+                            </button>
+                          )}
                           {dirty && <p>{t('Save your changes before using these actions.')}</p>}
                         </>
                       )}
@@ -1101,6 +1189,7 @@ function EventTypeForm({
           <SettingsGroup
             label="Location options and conferencing"
             summary={summaries.locations}
+            disabled={!canEditDetails && !canChangeHostSettings}
             initiallyOpen={
               editing &&
               ((saved?.locations?.length ?? 0) > 1 ||
@@ -1113,12 +1202,14 @@ function EventTypeForm({
             <h2 id="location-heading" tabIndex={-1}>
               {t('Location')}
             </h2>
-            <OrderedLocationsEditor
-              draft={draft}
-              errors={errors}
-              set={set}
-              teamsIssue={teamsIssue}
-            />
+            <ReadOnlyFields disabled={!canEditDetails && canChangeHostSettings}>
+              <OrderedLocationsEditor
+                draft={draft}
+                errors={errors}
+                set={set}
+                teamsIssue={teamsIssue}
+              />
+            </ReadOnlyFields>
             {orderedLocations(draft).some((option) => option.kind === 'zoom') && (
               <ZoomMeetingFields
                 draft={{ ...draft, autoCreateZoom: hasAutomaticLocation(draft, 'zoom') }}
@@ -1128,6 +1219,8 @@ function EventTypeForm({
                 userId={me.user.id}
                 personal={me.organization.personal}
                 session={me.principal.kind === 'session'}
+                canEditLocation={canEditDetails}
+                canChangeAccount={canChangeHostSettings || !usesEffective}
               />
             )}
             {orderedLocations(draft).some((option) => option.kind === 'google_meet') && (
@@ -1136,7 +1229,10 @@ function EventTypeForm({
                   <input
                     type="checkbox"
                     checked={hasAutomaticLocation(draft, 'google_meet')}
-                    disabled={!automaticGoogleMeet && !hasAutomaticLocation(draft, 'google_meet')}
+                    disabled={
+                      !canEditDetails ||
+                      (!automaticGoogleMeet && !hasAutomaticLocation(draft, 'google_meet'))
+                    }
                     onChange={(e) => set('autoCreateMeet', e.target.checked)}
                   />
                   {t('Create a unique Google Meet link for each booking')}
@@ -1175,6 +1271,7 @@ function EventTypeForm({
           <SettingsGroup
             label="Reminders and follow-ups"
             summary={summaries.notifications}
+            disabled={!canEditNotifications}
             initiallyOpen={changed('notifications')}
           >
             <label className="checkbox">
@@ -1207,6 +1304,7 @@ function EventTypeForm({
           <SettingsGroup
             label="Booking form"
             summary={summaries.bookingForm}
+            disabled={!canEditDetails}
             initiallyOpen={changed('questions', 'allowGuests')}
           >
             <section className="panel" aria-labelledby="questions-heading">
@@ -1235,6 +1333,7 @@ function EventTypeForm({
           <SettingsGroup
             label="After booking"
             summary={summaries.afterBooking}
+            disabled={!canEditRedirect}
             initiallyOpen={changed(
               'successRedirectUrl',
               'successRedirectParameters',
@@ -1310,6 +1409,7 @@ function EventTypeForm({
                     {(props) => (
                       <select
                         {...props}
+                        disabled={usesEffective && !canChangeHostSettings}
                         value={draft.scheduleId}
                         onChange={(e) => set('scheduleId', e.target.value)}
                       >
@@ -1333,7 +1433,10 @@ function EventTypeForm({
                     )}
                   </Field>
                 )}
-                <div className="field-grid">
+                <TimingFields
+                  className={canEditDetails ? 'field-grid' : 'form-fieldset field-grid'}
+                  disabled={!canEditDetails || undefined}
+                >
                   <MinutesField
                     id="slotStepMinutes"
                     label={t('Start times every')}
@@ -1470,7 +1573,7 @@ function EventTypeForm({
                   <p className="field-hint">
                     {t('Rescheduling also closes when the cancellation deadline passes.')}
                   </p>
-                </div>
+                </TimingFields>
               </div>
             </section>
           </SettingsGroup>
@@ -1481,19 +1584,23 @@ function EventTypeForm({
             {editing ? t('Back to event types') : t('Cancel')}
           </Link>
         </div>
-        <StickyFormActions>
-          <button type="submit" className="button button-primary" disabled={saving}>
-            {saving ? t('Saving…') : editing ? t('Save changes') : t('Create event type')}
-          </button>
-          <p className="form-status" role="status" tabIndex={-1} ref={statusRef}>
-            {uiText(status || (dirty && editing ? 'Unsaved changes' : ''))}
-          </p>
-        </StickyFormActions>
+        {canSave && (
+          <StickyFormActions>
+            <button type="submit" className="button button-primary" disabled={saving}>
+              {saving ? t('Saving…') : editing ? t('Save changes') : t('Create event type')}
+            </button>
+            <p className="form-status" role="status" tabIndex={-1} ref={statusRef}>
+              {uiText(status || (dirty && editing ? 'Unsaved changes' : ''))}
+            </p>
+          </StickyFormActions>
+        )}
       </form>
 
-      {saved && <OneTimeLinks event={saved} disabled={contextChanged} />}
+      {saved && can('one_time_links.read') && (
+        <OneTimeLinks event={saved} disabled={contextChanged} />
+      )}
 
-      {saved && (
+      {saved && can('event_types.delete') && (
         <section className="panel panel-danger" aria-labelledby="delete-heading">
           <h2 id="delete-heading">{t('Delete this event type')}</h2>
           <p>
@@ -1547,10 +1654,14 @@ function EventTypeForm({
         }
         canReadBranding={
           me.principal.kind === 'session' &&
-          (me.organization.personal ||
-            (access.status === 'ready' &&
-              access.roles?.some((teamRole) => teamRole === 'owner' || teamRole === 'admin') ===
-                true))
+          teamPageAllows(
+            me,
+            'branding.read',
+            me.organization.personal ||
+              (access.status === 'ready' &&
+                access.roles?.some((teamRole) => teamRole === 'owner' || teamRole === 'admin') ===
+                  true),
+          )
         }
       >
         {settings}
@@ -1801,11 +1912,13 @@ function SettingsGroup({
   label,
   summary,
   initiallyOpen,
+  disabled,
   children,
 }: {
   label: MessageKey
   summary: EventSettingsSummary
   initiallyOpen: boolean
+  disabled?: boolean
   children: ReactNode
 }) {
   const { t } = useI18n()
@@ -1818,9 +1931,47 @@ function SettingsGroup({
           {summaryContent(summary)}
         </span>
       </summary>
-      <div className="stack">{children}</div>
+      <div className="stack">
+        <ReadOnlyFields disabled={disabled}>{children}</ReadOnlyFields>
+      </div>
     </details>
   )
+}
+
+function ReadOnlyFields({
+  disabled,
+  children,
+}: {
+  disabled?: boolean | undefined
+  children: ReactNode
+}) {
+  return disabled ? (
+    <fieldset className="form-fieldset" disabled role="presentation">
+      {children}
+    </fieldset>
+  ) : (
+    children
+  )
+}
+
+function patchPermission(field: string) {
+  switch (field) {
+    case 'hosts':
+    case 'schedulingType':
+    case 'scheduleId':
+    case 'conferenceOrganizer':
+    case 'zoomConnectionId':
+      return 'event_types.assign_hosts'
+    case 'notifications':
+    case 'smsRemindersEnabled':
+      return 'event_notifications.update'
+    case 'successRedirect':
+      return 'event_types.update_success_redirect'
+    case 'waitlist':
+      return 'waitlists.update_settings'
+    default:
+      return 'event_types.update'
+  }
 }
 
 function summaryText(summary: EventSettingsSummary) {

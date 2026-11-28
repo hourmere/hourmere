@@ -732,7 +732,11 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
 }
 
 /** Preserve saved authorization and dormant pools during ordinary metadata edits. */
-export function toPatchInput(draft: EventTypeDraft, baseline: EventTypeDraft): EventTypeBody {
+export function toPatchInput(
+  draft: EventTypeDraft,
+  baseline: EventTypeDraft,
+  changedFieldsOnly = false,
+): EventTypeBody {
   const body = toInput(draft)
   if (draft.bookingMode === baseline.bookingMode) delete body.bookingMode
   else {
@@ -812,6 +816,25 @@ export function toPatchInput(draft: EventTypeDraft, baseline: EventTypeDraft): E
     if (draft.scheduleId === baseline.scheduleId) delete body.scheduleId
   }
   if (draft.schedulingType !== 'individual' && sameHosts) delete body.scheduleId
+  if (changedFieldsOnly) {
+    const previous = toInput(baseline)
+    // A grant for one setting need not carry authority to rewrite unrelated fields.
+    for (const field of [
+      'title',
+      'slug',
+      'description',
+      'slotStepMinutes',
+      'questions',
+      'position',
+      'isActive',
+      'isHidden',
+      'allowGuests',
+      'smsRemindersEnabled',
+    ] as const) {
+      if (JSON.stringify(body[field]) === JSON.stringify(previous[field])) delete body[field]
+    }
+    if (sameHosts && draft.scheduleId === baseline.scheduleId) delete body.scheduleId
+  }
   return body
 }
 

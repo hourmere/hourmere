@@ -19,16 +19,18 @@ export function useMemberReadiness(
   currentUserId: string | undefined,
   role: string | null,
   members: Pick<ListedOrganizationMember, 'id'>[],
+  effectiveReadiness?: boolean,
 ) {
+  const canRead = effectiveReadiness ?? Boolean(role)
   const memberIds = members
     .map((member) => member.id)
     .sort()
     .join(',')
   const [version, setVersion] = useState(0)
-  const context = `${organizationId}:${currentUserId}:${role}:${memberIds}:${version}`
+  const context = `${organizationId}:${currentUserId}:${role}:${canRead}:${memberIds}:${version}`
   const [result, setResult] = useState<{ context: string; state: State }>()
   useEffect(() => {
-    if (!currentUserId || !role || !memberIds) return
+    if (!currentUserId || !canRead || !memberIds) return
     let controller: AbortController | undefined
     let refreshTimer: ReturnType<typeof setTimeout> | undefined
     const load = () => {
@@ -104,7 +106,7 @@ export function useMemberReadiness(
       window.removeEventListener('focus', refresh)
       document.removeEventListener('visibilitychange', visible)
     }
-  }, [organizationId, currentUserId, role, memberIds, context])
+  }, [organizationId, currentUserId, canRead, memberIds, context])
   const state: State = result?.context === context ? result.state : { status: 'loading' }
   return [state, () => setVersion((value) => value + 1)] as const
 }

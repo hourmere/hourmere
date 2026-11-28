@@ -10,6 +10,7 @@ import { useI18n } from '../../i18n/runtime.tsx'
 import { PATHS, routingFormPath } from '../../paths.ts'
 import { useMe } from '../../session.tsx'
 import { useTeamManagementAccess } from '../../team-management.tsx'
+import { useTeamPagePermissions } from '../../team-page-permissions.ts'
 import { RoutingFormEditor } from './RoutingFormEditor.tsx'
 import { getRoutingForm, listRoutingForms } from './routing-form-api.ts'
 
@@ -18,16 +19,25 @@ const formId = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i
 export function RoutingFormsPage() {
   const { t } = useI18n()
   const me = useMe()
+  const permissions = useTeamPagePermissions()
+  const createOnly =
+    permissions.status === 'ready' &&
+    permissions.allows('routing_forms.create') &&
+    !permissions.allows('routing_forms.read')
   usePageTitle('Routing forms')
   return (
     <>
       <PageHeader title={t('Routing forms')} />
-      <ManagerAccess list>
-        <RoutingFormList
-          key={`${me.user.id}:${me.organization.id}`}
-          organizationId={me.organization.id}
-        />
-      </ManagerAccess>
+      {createOnly ? (
+        <NewRoutingFormLink />
+      ) : (
+        <RoutingAccess operation="routing_forms.read" list>
+          <RoutingFormList
+            key={`${me.user.id}:${me.organization.id}`}
+            organizationId={me.organization.id}
+          />
+        </RoutingAccess>
+      )}
     </>
   )
 }
@@ -40,13 +50,13 @@ export function NewRoutingFormPage() {
     <div data-testid="routing-form-new">
       <BackToList />
       <PageHeader title={t('New routing form')} />
-      <ManagerAccess>
+      <RoutingAccess operation="routing_forms.create">
         <RoutingFormEditor
           key={`${me.user.id}:${me.organization.id}`}
           organizationId={me.organization.id}
           personalOwnerId={me.organization.personal ? me.user.id : null}
         />
-      </ManagerAccess>
+      </RoutingAccess>
     </div>
   )
 }
@@ -54,16 +64,21 @@ export function NewRoutingFormPage() {
 export function EditRoutingFormPage() {
   const { t } = useI18n()
   const me = useMe()
+  const permissions = useTeamPagePermissions()
   const { id = '' } = useParams()
   const [query] = useSearchParams()
   const spaces = query.getAll('organizationId')
   const organizationId = me.organization.id
-  usePageTitle('Edit routing form')
+  const title =
+    permissions.status === 'fixed' || permissions.allows('routing_forms.update')
+      ? 'Edit routing form'
+      : 'Details'
+  usePageTitle(title)
   return (
     <>
       <BackToList />
-      <PageHeader title={t('Edit routing form')} />
-      <ManagerAccess>
+      <PageHeader title={t(title)} />
+      <RoutingAccess operation="routing_forms.read">
         {formId.test(id) &&
         (spaces.length === 0 || (spaces.length === 1 && spaces[0] === organizationId)) ? (
           <RoutingFormEdit
@@ -75,7 +90,7 @@ export function EditRoutingFormPage() {
         ) : (
           <UnavailableForm />
         )}
-      </ManagerAccess>
+      </RoutingAccess>
     </>
   )
 }
@@ -89,15 +104,30 @@ function BackToList() {
   )
 }
 
-function ManagerAccess({ list = false, children }: { list?: boolean; children: ReactNode }) {
+function RoutingAccess({
+  operation,
+  list = false,
+  children,
+}: {
+  operation: 'routing_forms.read' | 'routing_forms.create'
+  list?: boolean
+  children: ReactNode
+}) {
   const { t } = useI18n()
   const me = useMe()
   const access = useTeamManagementAccess()
+  const permissions = useTeamPagePermissions()
   if (me.principal.kind !== 'session')
     return (
       <Denied list={list}>{t('Use a browser session without an Authorization header.')}</Denied>
     )
   if (me.organization.personal) return children
+  if (permissions.status === 'ready')
+    return permissions.allows(operation) ? (
+      children
+    ) : (
+      <Denied list={list}>{t("You don't have permission to do that.")}</Denied>
+    )
   if (access.status === 'loading') return <Loading list={list} />
   if (access.status === 'error') return <LoadError list={list} retry={access.reload} />
   if (!access.role)
@@ -160,8 +190,20 @@ function loadResult<T>(request: Promise<T>) {
   )
 }
 
+function NewRoutingFormLink() {
+  const { t } = useI18n()
+  return (
+    <div className="form-actions">
+      <Link to={PATHS.newRoutingForm} className="button button-primary">
+        {t('New routing form')}
+      </Link>
+    </div>
+  )
+}
+
 function RoutingFormList({ organizationId }: { organizationId: string }) {
   const { t } = useI18n()
+  const permissions = useTeamPagePermissions()
   const load = useCallback(
     (signal: AbortSignal) => loadResult(listRoutingForms(organizationId, signal)),
     [organizationId],
@@ -174,11 +216,9 @@ function RoutingFormList({ organizationId }: { organizationId: string }) {
   const { data } = state.data.value
   return (
     <>
-      <div className="form-actions">
-        <Link to={PATHS.newRoutingForm} className="button button-primary">
-          {t('New routing form')}
-        </Link>
-      </div>
+      {(permissions.status === 'fixed' || permissions.allows('routing_forms.create')) && (
+        <NewRoutingFormLink />
+      )}
       {data.length ? (
         <ul className="card-list plain-list" data-testid="routing-forms-list">
           {data.map((form) => (
