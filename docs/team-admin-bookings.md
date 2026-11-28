@@ -44,7 +44,7 @@ List items use this explicit whitelist:
 | `canManageNoShow` | Additive boolean indicating whether attendance can currently be changed: after the scheduled start, while confirmed and not imported read-only. |
 | `attendees` | `{ id, name, email, timeZone, isBooker, noShowMarkedAt, noShowMarkedBy }` for the invitee and guests. Each row has its own attendee ID, even when emails match. The nullable marker fields record the marking instant and account ID; both are null when unmarked. IDs and marker fields are additive. |
 
-The list envelope contains only `data` and opaque `nextCursor` (null on the last page).
+The ordinary list envelope contains `data` and opaque `nextCursor` (null on the last page).
 The additional fields are read-only and limited to these list/detail reads. A missing public profile
 produces a null host zone; private schedule and calendar data are never a fallback.
 An enabled event can retain its public path after its host configuration is repaired,
@@ -108,10 +108,21 @@ metadata/links, attribution and creation timestamps. It does not widen the white
 The same bounded range, streaming limits and file privacy guidance apply as documented in
 [CSV booking exports](https://hourmere.com/docs/booking-export).
 
-The [bulk cancellation contract](team-booking-bulk-cancellation.md) describes a future
-release. The preview route returns 404 in production, and booking lists omit page proofs
-until the feature is enabled. Team administrators can still cancel individual bookings.
+## Bulk cancellation
 
+Bulk cancellation is off by default pending operator acceptance. Enable it with
+`TEAM_BOOKING_BULK_CANCELLATION_ENABLED=true` on the app server and any separate workers.
+While the switch is off, list responses omit page proofs and the bulk routes return 404.
+Team administrators can still cancel individual bookings.
+
+When enabled, an opted-in list read also returns `bulkPageToken` and `bulkPageExpiresAt`.
+The proof covers a single returned page. The preview and status interfaces return booking
+IDs and outcome codes. The browser uses the existing list fields for recognizable labels
+in the confirmation and keeps only the submitted receipt reference for recovery in the
+current tab. See the [bulk cancellation contract](team-booking-bulk-cancellation.md) for
+authorization and execution details.
+
+## Departure handoff
 
 The [departure handoff design](member-departure-handoff.md#staged-administrator-flow) describes
 the staged owner/admin preview and confirmation for one future booking. Production keeps the
