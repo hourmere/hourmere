@@ -152,3 +152,55 @@
   min-width: 24px;
   padding-block: 0.125rem;
 }
+
+.team-bulk-toolbar {
+  margin-block: var(--space-4);
+}
+
+.team-bulk-toolbar .form-actions,
+.team-bulk-dialog .form-actions {
+  flex-wrap: wrap;
+}
+
+.team-bulk-toolbar .button,
+.team-bulk-dialog .button {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.team-bulk-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
+  margin-inline-end: var(--space-2);
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+.team-bulk-check input {
+  margin: 0;
+}
+
+.team-bulk-dialog {
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
+}
+
+.team-bulk-dialog .details {
+  margin-block: var(--space-3);
+}
+
+.team-bulk-items {
+  display: grid;
+  gap: var(--space-3);
+  padding-inline-start: var(--space-5);
+  margin-block: var(--space-4);
+}
+
+.team-bulk-item {
+  padding-block-end: var(--space-2);
+  border-block-end: 1px solid var(--border);
+}

@@ -363,7 +363,11 @@ describe('team bookings list and DTO details', () => {
     expect(query(api.to(LIST)[1]?.path ?? '')).not.toHaveProperty('endAfter')
     await user.click(screen.getByRole('link', { name: 'All bookings' }))
     await waitFor(() => expect(api.to(LIST)).toHaveLength(3))
-    expect(query(api.to(LIST)[2]?.path ?? '')).toEqual({ order: 'asc', limit: '25' })
+    expect(query(api.to(LIST)[2]?.path ?? '')).toEqual({
+      order: 'asc',
+      limit: '25',
+      bulkSelection: 'true',
+    })
   })
 
   it('sends all server time filters and clears them explicitly', async () => {
@@ -386,6 +390,7 @@ describe('team bookings list and DTO details', () => {
     expect(query(api.to(LIST)[1]?.path ?? '')).toEqual({
       order: 'asc',
       limit: '25',
+      bulkSelection: 'true',
       ...Object.fromEntries(
         Object.entries(values).map(([name, [, value]]) => {
           const [year = 0, month = 1, day = 1, hour = 0, minute = 0] = value

@@ -3537,6 +3537,64 @@ export const admin = {
   'Changes are unavailable for this paid booking. Contact your instance operator about cancellation or refunds.':
     'Changes are unavailable for this paid booking. Contact your instance operator about cancellation or refunds.',
 
+  // Team booking bulk cancellation
+  'Select bookings to cancel': 'Select bookings to cancel',
+  'Select this page': 'Select this page',
+  'Exit selection': 'Exit selection',
+  'Select booking: {event}, {time}': 'Select booking: {event}, {time}',
+  '{count} selected on this page (maximum {limit}).':
+    '{count} selected on this page (maximum {limit}).',
+  'Review cancellation': 'Review cancellation',
+  'Refresh bookings': 'Refresh bookings',
+  'Review bulk cancellation': 'Review bulk cancellation',
+  'Bulk cancellation status': 'Bulk cancellation status',
+  'View bulk cancellation': 'View bulk cancellation',
+  'Retry submission': 'Retry submission',
+  'Cancel {count} booking': 'Cancel {count} booking',
+  'Cancel {count} bookings': 'Cancel {count} bookings',
+  '{count} selected. {eligible} eligible to cancel.':
+    '{count} selected. {eligible} eligible to cancel.',
+  'Cancellation is irreversible. Existing cancellation notifications will be queued as applicable. Some bookings may become ineligible before they are processed.':
+    'Cancellation is irreversible. Existing cancellation notifications will be queued as applicable. Some bookings may become ineligible before they are processed.',
+  'Selection expired or changed. Refresh the bookings and select again.':
+    'Selection expired or changed. Refresh the bookings and select again.',
+  'The confirmation expired. Select bookings again to start a new cancellation.':
+    'The confirmation expired. Select bookings again to start a new cancellation.',
+  'This batch is no longer available. Refresh the bookings before starting again.':
+    'This batch is no longer available. Refresh the bookings before starting again.',
+  'Checking whether your cancellation was accepted…':
+    'Checking whether your cancellation was accepted…',
+  'Your cancellation has not been confirmed yet. You can safely retry this submission.':
+    'Your cancellation has not been confirmed yet. You can safely retry this submission.',
+  'Bulk cancellation queued': 'Bulk cancellation queued',
+  'Bulk cancellation in progress': 'Bulk cancellation in progress',
+  'Bulk cancellation completed': 'Bulk cancellation completed',
+  '{cancelled} cancelled, {pending} pending, {other} skipped or failed.':
+    '{cancelled} cancelled, {pending} pending, {other} skipped or failed.',
+  'Closing this view does not stop an accepted cancellation.':
+    'Closing this view does not stop an accepted cancellation.',
+  'To try an unsuccessful booking again, refresh the list and select it if it is still eligible.':
+    'To try an unsuccessful booking again, refresh the list and select it if it is still eligible.',
+  'Eligible to cancel': 'Eligible to cancel',
+  'Awaiting processing': 'Awaiting processing',
+  'Already cancelled': 'Already cancelled',
+  'Booking already started': 'Booking already started',
+  'Unsupported booking (including paid or imported bookings)':
+    'Unsupported booking (including paid or imported bookings)',
+  'Booking unavailable': 'Booking unavailable',
+  'A required host left the team': 'A required host left the team',
+  'Team authority was lost': 'Team authority was lost',
+  'Could not process the booking': 'Could not process the booking',
+  'No bookings on this page can be selected.': 'No bookings on this page can be selected.',
+  'The team has reached its bulk cancellation limit. Try again shortly.':
+    'The team has reached its bulk cancellation limit. Try again shortly.',
+  'Try again in {seconds} seconds.': 'Try again in {seconds} seconds.',
+  'Filters applied': 'Filters applied',
+  'Submission could not be confirmed. This page will keep checking its status.':
+    'Submission could not be confirmed. This page will keep checking its status.',
+  'No selected bookings are eligible for cancellation. Review a fresh selection.':
+    'No selected bookings are eligible for cancellation. Review a fresh selection.',
+
   // Custom team roles
   'Custom roles are unavailable.': 'Custom roles are unavailable.',
   'The role or assignment changed. Reload before saving.':
