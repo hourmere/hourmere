@@ -41,8 +41,8 @@ The website at hourmere.com is separate from your Hourmere instance.
   and optional host notes, with delivery limits and configuration examples.
 - [Troubleshoot availability](/docs/availability-troubleshooting): see why a time cannot be
   booked, from the admin, REST, MCP or CLI.
-- [Open-time snippets for agents](/docs/open-time-snippets): draft an email with current
-  alternatives and direct booking links through REST, MCP or CLI.
+- [Share available times in email](/docs/open-time-snippets) covers picking times in the
+  dashboard, pasting direct booking links, and generating snippets through REST, MCP or CLI.
 - [REST quickstart](/docs/rest): create an API key and find, book and manage a time slot.
 - [CSV booking export](/docs/booking-export): download a bounded date range for reporting,
   with personal-owner and team-administrator permissions.

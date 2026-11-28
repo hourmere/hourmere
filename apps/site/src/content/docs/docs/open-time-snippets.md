@@ -1,18 +1,52 @@
 ---
-title: Open-time snippets for agents
-description: Draft an email with current open times and direct booking links through REST, MCP or CLI.
+title: Share available times in email
+description: Pick open times in the dashboard or generate an email snippet through REST, MCP or CLI.
 ---
 
-Ask an agent: **“Reply to this email with three times next week.”** Hourmere can supply
-current alternatives and ready-to-use plain text and HTML. The agent can put the returned
-`text` or `html` in your email draft. Generating a snippet does not send the email, create a
-booking or reserve any time.
+Share a short list of times for one meeting. Each time has its own link to your
+booking page. Paste the list into your email draft and send it from your email app.
+
+## Pick and copy times
+
+1. In **Event types**, open the saved event type in the personal or team space that
+   owns it. Save any edits you want to share. Under **View and share**, click
+   **Pick open times**.
+2. Choose a **Meeting length**, **Email language** and **Display time zone**. The
+   availability date uses that zone. Select one to ten times under **Available times**.
+   Change the date to pick times on additional days. Changing the meeting length clears
+   the selection.
+3. Click **Preview email**. Choose **Copy rich text** for linked time labels in a
+   rich-text composer, or **Copy plain text** to include the full URL below each time.
+   If clipboard access is unavailable, select and copy the complete plain-text preview.
+   Hourmere checks the selected times again before copying. If a time is marked
+   **No longer offered**, use **Remove time**, select a replacement if needed, and
+   preview again.
+4. Paste into your draft and keep the availability notice.
+
+Only the saved event type is used. The operator must enable `SLOT_SNIPPETS_ENABLED`
+for **Pick open times** to appear to personal owners or team owners and admins. The
+event must be active and round-robin events must be activated.
+
+## What recipients see
+
+The email lists the event title, meeting length and each proposed time with its time
+zone and UTC offset. The labels stay in the email language and display zone you chose.
+For a time that crosses a daylight-saving change, the label shows the offset at each
+end. The booking page uses the invitee’s own language and time zone.
+
+If the linked time is still available, the booking page opens with it selected. The
+invitee fills in the usual booking form and confirms there. If someone has already
+taken the time, the page says **That time is no longer available. Please pick another
+one.** and shows the normal time picker. The invitation offers alternatives for one
+meeting without holding any of them. Anyone with a forwarded link can open an active
+unlisted event, so share those links only with the people you intend to invite.
 
 ## Prepare the event and access
 
-Save an active event type with its hosts, working hours and public address configured.
-Personal types require their owner; team types require a current team owner or admin in
-the acting organization. Ordinary team membership or being an assigned host is insufficient.
+To generate from a script or ask an agent to offer three times next week, save an active
+event type with its hosts, working hours and public address configured. Personal types
+require their owner. In the acting team, owners and admins can generate snippets.
+Ordinary team membership and host assignment alone do not grant access.
 Use `catalog` / MCP `list_event_types` to find the event type ID, or use its saved `slug`
 in the current organization. Supply exactly one of `eventTypeId` and `slug`. If a slug
 is ambiguous, `400 ambiguous_event_type_slug` asks you to use the ID instead.
@@ -22,12 +56,11 @@ permissions. `read` is sufficient because this operation reads current availabil
 formats reusable public links; it creates no booking, one-time capability or reservation,
 and changes no configuration. MCP OAuth uses the existing `mcp:tools` grant.
 
-The instance operator must enable `SLOT_SNIPPETS_ENABLED` (default `false`). This is the
-same rollout setting as the saved-event **Copy open times** picker. Self-hosted instances
-have the complete REST, MCP, CLI and browser feature, with no subscription requirement.
-Deploy the public direct-slot booking pages on the same instance before enabling it.
-Hidden/unlisted active events remain usable through their direct links, just as in the
-picker; forwarding a snippet also forwards access to that unlisted address.
+The instance operator must enable `SLOT_SNIPPETS_ENABLED` (default `false`). Self-hosted
+instances have the complete REST, MCP, CLI and browser feature, with no subscription
+requirement. Deploy the public direct-slot booking pages on the same instance before
+enabling it. Set `PUBLIC_URL` to the instance's public HTTPS address so the links can
+be opened from email.
 
 ## When the feature is off
 
@@ -56,17 +89,20 @@ subject to the same permissions and availability checks.
 ## Draft three times next week
 
 Resolve “next week” using the sender's intended time zone and current date before calling
-the tool. For example, a request made on November 6, 2026 for next week in Los Angeles
-uses local midnight Monday, November 9 through Monday, November 16:
+the tool. In this example, the organizer’s week runs from midnight on Monday, March 8,
+2027 in Los Angeles to midnight the following Monday. Daylight saving changes the UTC
+offset during that week. The recipient is in Shanghai, so the email labels use Shanghai
+time.
 
 ```json
 {
   "slug": "intro",
-  "from": "2026-11-09T00:00:00-08:00",
-  "to": "2026-11-16T00:00:00-08:00",
+  "from": "2027-03-08T00:00:00-08:00",
+  "to": "2027-03-15T00:00:00-07:00",
   "count": 3,
-  "displayTimeZone": "America/Los_Angeles",
-  "locale": "en"
+  "displayTimeZone": "Asia/Shanghai",
+  "locale": "en",
+  "durationMinutes": 30
 }
 ```
 
@@ -85,10 +121,12 @@ npm run --silent cli -- open-time-snippet --json --input snippet-request.json
 hourmere open-time-snippet --json --input snippet-request.json
 ```
 
-For MCP, call **`generate_open_time_snippet`** with the same JSON object. All three
-entry points use the same service and the browser's snippet formatter. Keep the returned
-notice about availability in the draft. Select `locale: "zh-CN"` for Simplified Chinese;
-English, German, French, Spanish and Brazilian Portuguese are supported too.
+For MCP, call **`generate_open_time_snippet`** with the same JSON object as the tool
+arguments. All three entry points use the same service and the browser's snippet
+formatter. Use the returned `text` in a plain-text draft or insert `html` as formatted
+content. Keep the availability notice in the draft. Select `locale: "zh-CN"` for
+Simplified Chinese. English, German, French, Spanish and Brazilian Portuguese are
+supported too.
 
 ## Request and response reference
 

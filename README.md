@@ -118,8 +118,8 @@ deployed on the same instance. Email language and display zone affect labels onl
 the booking page keeps the invitee’s own preferences.
 Agents can generate the same text/HTML with `POST /api/v1/open-time-snippets`, MCP
 `generate_open_time_snippet` or CLI `open-time-snippet --json`. A `read` key suffices
-with owner/admin permission; see [the agent guide](https://hourmere.com/docs/open-time-snippets)
-for bounded ranges, examples and taken-time fallback.
+with owner/admin permission. The [email sharing guide](docs/open-time-snippets.md)
+covers the picker, taken-time fallback and examples for each interface.
 **Availability → Troubleshoot availability** explains, for one event type and day, which
 times can be booked and why the others cannot (working hours, buffers, limits, busy calendars
 and more). Agents get the same answer from `GET /api/v1/event-types/{id}/availability-troubleshooting`,
