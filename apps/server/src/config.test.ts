@@ -139,6 +139,20 @@ describe('loadConfig', () => {
     }
   })
 
+  it('requires explicit opt-in for team booking bulk cancellation in every process role', () => {
+    const setting = 'TEAM_BOOKING_BULK_CANCELLATION_ENABLED'
+    for (const HOURMERE_ROLE of ['all', 'web', 'worker']) {
+      const env = { ...base, HOURMERE_ROLE }
+      for (const value of [undefined, '', 'false'])
+        expect(loadConfig({ ...env, [setting]: value })[setting]).toBe(false)
+      expect(loadConfig({ ...env, [setting]: 'true' })[setting]).toBe(true)
+      for (const value of ['yes', '1', 'TRUE', ' '])
+        expect(() => loadConfig({ ...env, [setting]: value })).toThrow(
+          `${setting} must be true, false or empty`,
+        )
+    }
+  })
+
   it('allows operators to disable follow-up host notes in every process role', () => {
     for (const HOURMERE_ROLE of ['all', 'web', 'worker']) {
       const env = { ...base, HOURMERE_ROLE }

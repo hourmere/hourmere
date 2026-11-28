@@ -40,7 +40,6 @@ const BulkCancellationPreview = z
   })
   .openapi('BulkCancellationPreview')
 
-/** Only test composition supplies a proof secret until the release gate is implemented. */
 export function teamBookingBulkPreviewRoutes(deps: BulkCancellationRouteDeps): RouteModule {
   return (shared) => {
     const { app, caller } = shared
