@@ -181,19 +181,25 @@ describe.skipIf(!process.env.DATABASE_URL)(
       })
     })
     it.each([404, 410])(
-      'atomically pauses revoked HTTP %s destinations after one attempt',
+      'atomically pauses a Slack HTTP %s rejection even if worker shutdown races the response',
       async (status) => {
         const f = await fixture()
         await f.capture()
         const sample = await testSlackDestination(f.ctx, settings, f.destination.id, queue)
+        const shutdown = new AbortController()
         const transport = vi.fn(async () => {
           await new Promise((resolve) => setTimeout(resolve, 50))
+          shutdown.abort()
           return status
         })
         await expect(
           Promise.all(
             (await f.rows()).map((row) =>
-              deliverWebhook({ db, ...settings, transport, now: () => now }, row.id, signal()),
+              deliverWebhook(
+                { db, ...settings, transport, now: () => now },
+                row.id,
+                shutdown.signal,
+              ),
             ),
           ),
         ).resolves.toEqual([undefined, undefined])
@@ -207,6 +213,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
         expect(rows.find((row) => row.status === 'failed')).toMatchObject({
           attempts: 1,
           http_status: status,
+          last_error: 'http_error',
         })
         expect(rows.filter((row) => row.status === 'skipped')).toHaveLength(1)
         await deliverWebhook(
