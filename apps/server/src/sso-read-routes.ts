@@ -29,6 +29,9 @@ const accountReads = new Set([
   'GET /api/v1/mcp-oauth/connections',
 ])
 
+// This service checks ordinary SSO access for the explicitly requested team before context drift.
+const ownershipTransfer = 'GET /api/v1/teams/{teamId}/ownership-transfer'
+
 const readClasses = new Set(['booking_read', 'other_read', 'audit_read', 'diagnostic_read'])
 const postReads = new Set(
   API_KEY_REST_OPERATIONS.filter(
@@ -44,6 +47,7 @@ export function teamReadRoute(operation: string) {
     !path?.startsWith('/api/v1/') ||
     publicOperations.has(operation) ||
     accountReads.has(operation) ||
+    operation === ownershipTransfer ||
     (method !== 'GET' && method !== 'HEAD' && !postReads.has(operation))
   )
     return

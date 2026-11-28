@@ -257,6 +257,11 @@ const classes = {
     'POST /api/v1/team/members/{memberUserId}/removal',
     'GET /api/v1/team/members/{memberUserId}/removal-handling',
     'POST /api/v1/teams/{teamId}/leave',
+    'GET /api/v1/teams/{teamId}/ownership-transfer',
+    'POST /api/v1/teams/{teamId}/ownership-transfer',
+    'POST /api/v1/teams/{teamId}/ownership-transfer/{transferId}/confirm',
+    'POST /api/v1/teams/{teamId}/ownership-transfer/{transferId}/revoke',
+    'POST /api/v1/teams/{teamId}/ownership-transfer/{transferId}/decline',
     'GET /api/v1/teams/{teamId}/member-readiness',
     'GET /api/v1/teams/{teamId}/readiness',
     ...customRoleOperations,
@@ -450,6 +455,16 @@ describe.skipIf(!process.env.DATABASE_URL)(
           // SSO reads answer sso_disabled before any scope check while hard-off; enable
           // them here so the matrix proves their scope enforcement.
           ssoOidcEnabled: true,
+          ownershipTransfer: {
+            db,
+            publicUrl,
+            capabilities: { ssoOidcEnabled: true, ssoSamlEnabled: false },
+            notificationQueue: {
+              enqueue: async () => {
+                throw new Error('No transfer should be queued')
+              },
+            },
+          },
           mcpAuth: auth,
           publicUrl,
           googleCalendar: calendar.google,
@@ -536,6 +551,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
       if (template === '/api/v1/bookings/export.csv') path += `?from=${start}&to=${end}`
       if (kind === 'session_only') {
+        if (template.startsWith('/api/v1/teams/{teamId}/ownership-transfer')) {
+          headers.origin = publicUrl
+          headers['X-Expected-Organization-Id'] = teamId
+        }
         if (customRoleOperations.some((route) => route === operation)) {
           return {
             method,
@@ -566,6 +585,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
           .replaceAll('{bindingId}', randomUUID())
           .replaceAll('{enrollmentId}', randomUUID())
           .replaceAll('{offerId}', randomUUID())
+          .replaceAll('{transferId}', randomUUID())
           .replaceAll('{invitationId}', randomUUID())
           .replaceAll('{operationId}', randomUUID())
           .replaceAll('{memberUserId}', owner.user.id)
@@ -1107,14 +1127,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 211-operation contract and all 633 scope combinations', () => {
+    it('covers the exact 216-operation contract and all 648 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(211)
-      expect(new Set(ids).size).toBe(211)
+      expect(ids).toHaveLength(216)
+      expect(new Set(ids).size).toBe(216)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(633)
+      expect(cases).toHaveLength(648)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {

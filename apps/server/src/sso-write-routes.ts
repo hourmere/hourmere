@@ -51,6 +51,11 @@ const writeExceptions = new Set([
   'POST /api/v1/scim/team-mappings',
   'DELETE /api/v1/scim/team-mappings/{id}',
   'POST /api/v1/scim/team-mappings/consent',
+  // Ownership transfer rechecks bound-team SSO, context and membership under the team lock.
+  'POST /api/v1/teams/{teamId}/ownership-transfer',
+  'POST /api/v1/teams/{teamId}/ownership-transfer/{transferId}/confirm',
+  'POST /api/v1/teams/{teamId}/ownership-transfer/{transferId}/revoke',
+  'POST /api/v1/teams/{teamId}/ownership-transfer/{transferId}/decline',
 ])
 
 /** New versioned writes inherit enforcement unless their operation has an exact exception. */

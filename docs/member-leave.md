@@ -88,8 +88,7 @@ Owners may remove admins and members; admins may remove members only. Owner-targ
 requests receive the uniform team access denial before any write; only the owner’s own
 safe departure is allowed. REST immediate removal refuses self targets; use safe departure
 for dependency checks and the personal fallback.
-Assigning an owner role and full ownership transfer remain unavailable at launch.
+Direct owner assignment remains unavailable. A separate [ownership transfer](team-ownership-transfer.md)
+can be enabled by the operator and takes effect only when the named recipient confirms.
 `/organization/delete` is refused with `403 TEAM_OPERATION_NOT_SUPPORTED` for HTTP and
-trusted server-side calls before any booking-history cascade. There is no separate
-ownership-transfer endpoint on this instance.
-See the [post-launch transfer design](team-ownership-transfer.md) for the proposed confirmation flow.
+trusted server-side calls before any booking-history cascade.
