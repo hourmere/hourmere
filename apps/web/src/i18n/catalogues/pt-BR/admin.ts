@@ -462,4 +462,13 @@ export const admin = {
     'Esta execução processa até {count} reservas aprovadas por todos, com um intervalo mínimo de {seconds} segundos entre elas. Você pode pausar ou parar a execução.',
   'Remaining bookings will not be processed. Their original bookings stay unchanged.':
     'As reservas restantes não serão processadas. As reservas originais correspondentes permanecerão inalteradas.',
+  // Booking activity charts and daily table
+  'Bookings created': 'Agendamentos criados',
+  Reschedules: 'Reagendamentos',
+  Cancellations: 'Cancelamentos',
+  'Daily booking activity': 'Atividade diária de agendamentos',
+  'No booking activity was recorded in this range.':
+    'Nenhuma atividade de agendamento foi registrada nesse período.',
+  'Loading booking activity…': 'Carregando a atividade de agendamentos…',
+  'Could not load booking activity.': 'Não foi possível carregar a atividade de agendamentos.',
 }

@@ -700,4 +700,10 @@ export const common = {
     'Demasiados intentos. Espere un momento antes de volver a consultar la propuesta.',
   'departureHandoff.currentUntilComplete':
     'Su reserva actual sigue confirmada hasta que el equipo complete el traspaso.',
+  // Booking activity charts
+  'Booking actions over time': 'Evolución de las operaciones de reserva',
+  'The charts share a count scale. See the daily table below for exact counts.':
+    'Los gráficos usan la misma escala. Puedes consultar las cifras exactas de cada día en la tabla de abajo.',
+  'No booking actions were recorded in this range.':
+    'No se registraron operaciones de reserva en este período.',
 } as const

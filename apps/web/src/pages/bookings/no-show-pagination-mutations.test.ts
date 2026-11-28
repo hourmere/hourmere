@@ -107,10 +107,11 @@ it.each([
 it('detects reporting an unknown no-show total as zero', () => {
   const source = readFileSync('apps/web/src/pages/Analytics.tsx', 'utf8')
   const expression = source.match(
-    /data\.totals\.noShows == null\s*\? '—'\s*: new Intl.NumberFormat\(displayLocale\).format\(data.totals.noShows\)/,
+    /data\.totals\.noShows == null\s*\? '—'\s*: number\.format\(data\.totals\.noShows\)/,
   )?.[0]
   if (!expression) throw new Error('Missing unknown count presentation')
   negativeControl(expression, "'—'", "'0'", (code) => {
-    expect(new Function('data', 'displayLocale', `return ${code}`)({ totals: {} }, 'en')).toBe('—')
+    const renderCount = new Function('data', 'number', `return ${code}`)
+    expect(renderCount({ totals: {} }, new Intl.NumberFormat('en'))).toBe('—')
   })
 })
