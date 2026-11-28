@@ -7,11 +7,15 @@ import {
   useLocation,
   useNavigate,
 } from 'react-router'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from '../../App.tsx'
 import type { Schemas } from '../../api/client.ts'
+import { AppShell, RequireSession, SessionLayout, TeamBookingsPage } from '../../lazy-pages.tsx'
 import { fakeApi, json, later, ME, profile, type Routes, signedInAs } from '../../test/fake-api.tsx'
+import { resolveLazy } from '../../test/resolve-lazy.ts'
 import { teamBookingPanelApi } from '../../test/team-booking-panel-api.ts'
+
+beforeAll(() => resolveLazy(SessionLayout, RequireSession, AppShell, TeamBookingsPage))
 
 const TEAM: Schemas['Me'] = {
   ...ME,
@@ -168,7 +172,8 @@ describe('team booking panel', () => {
     const trigger = await screen.findByRole('button', { name: 'First team meeting' })
     const row = within(trigger.closest('tr') as HTMLElement)
     await user.click(trigger)
-    await user.click(detail().getByRole('button', { name: 'Mark Grace as a no-show' }))
+    const panel = within(await screen.findByRole('region', { name: 'Team booking details' }))
+    await user.click(panel.getByRole('button', { name: 'Mark Grace as a no-show' }))
     await waitFor(() => expect(row.getByText('No-show')).toBeTruthy())
     expect(detail().getByRole('button', { name: 'Clear no-show for Grace' })).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Close details' }))

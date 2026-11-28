@@ -236,6 +236,8 @@ const classes = {
     'POST /api/v1/team/bookings/{id}/handoff-offers/{offerId}/resend',
     'POST /api/v1/team/bookings/{id}/handoff-offers/{offerId}/apply',
     'POST /api/v1/team/bookings/bulk-cancellations/preview',
+    'POST /api/v1/team/bookings/bulk-cancellations/{id}/confirm',
+    'GET /api/v1/team/bookings/bulk-cancellations/{id}',
     'GET /api/v1/team/invitations',
     'GET /api/v1/team/invitations/{invitationId}',
     'POST /api/v1/team/invitations/{invitationId}/cancel',
@@ -544,8 +546,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
           .replaceAll('{memberUserId}', owner.user.id)
           .replaceAll('{teamId}', teamId)
           .replaceAll('{organizationId}', teamId)
-        const bulkPreviewOff = template === '/api/v1/team/bookings/bulk-cancellations/preview'
-        const error = bulkPreviewOff
+        const bulkCancellationOff = template.startsWith('/api/v1/team/bookings/bulk-cancellations/')
+        const error = bulkCancellationOff
           ? 'not_found'
           : template === '/api/v1/bookings/{id}/organization'
             ? 'booking_not_found'
@@ -563,7 +565,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
           path,
           payload,
           headers,
-          expectedStatus: bulkPreviewOff || error === 'booking_not_found' ? 404 : 403,
+          expectedStatus: bulkCancellationOff || error === 'booking_not_found' ? 404 : 403,
           nativeError: error,
           cleanupEvent,
           cleanupSchedule,
@@ -1080,14 +1082,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 200-operation contract and all 600 scope combinations', () => {
+    it('covers the exact 202-operation contract and all 606 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(200)
-      expect(new Set(ids).size).toBe(200)
+      expect(ids).toHaveLength(202)
+      expect(new Set(ids).size).toBe(202)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(600)
+      expect(cases).toHaveLength(606)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {

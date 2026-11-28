@@ -4932,6 +4932,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/team/bookings/bulk-cancellations/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the status of a team booking cancellation batch
+         * @description Unavailable until bulk cancellation is released. Requires a verified team owner/admin browser session and scopes the receipt to that account and team. Admitted results retain the preview order.
+         */
+        get: operations["getTeamBookingBulkCancellation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/team/bookings/bulk-cancellations/{id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm a previewed team booking cancellation batch
+         * @description Unavailable until bulk cancellation is released. Requires a verified team owner/admin browser session and a same-origin Origin or Referer. Submit only the issued ID in the path. Repeating confirmation returns the same batch and its current state.
+         */
+        post: operations["confirmTeamBookingBulkCancellation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/team/bookings/bulk-cancellations/preview": {
         parameters: {
             query?: never;
@@ -6155,6 +6195,12 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AdmittedBulkCancellation: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            state: "queued" | "running" | "completed";
+        };
         ArchiveRoutingForm: {
             expectedRevision: number;
         };
@@ -6528,6 +6574,32 @@ export interface components {
                 code: "eligible" | "already_cancelled" | "booking_started" | "booking_not_supported" | "booking_unavailable" | "booking_host_departed";
             }[];
         };
+        BulkCancellationStatus: {
+            /** Format: date-time */
+            expiresAt: string;
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            state: "awaiting_confirmation";
+        } | (components["schemas"]["AdmittedBulkCancellation"] & {
+            counts: {
+                already_cancelled: number;
+                authorization_lost: number;
+                booking_host_departed: number;
+                booking_not_supported: number;
+                booking_started: number;
+                booking_unavailable: number;
+                cancelled: number;
+                pending: number;
+                processing_failed: number;
+            };
+            items: {
+                /** Format: uuid */
+                bookingId: string;
+                /** @enum {string} */
+                code: "pending" | "cancelled" | "already_cancelled" | "booking_started" | "booking_not_supported" | "booking_unavailable" | "booking_host_departed" | "authorization_lost" | "processing_failed";
+            }[];
+        });
         CalendarConnection: {
             accountEmail: string | null;
             calendars: {
@@ -20794,11 +20866,171 @@ export interface operations {
             };
         };
     };
+    getTeamBookingBulkCancellation: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required: the team where the selection started */
+                "x-expected-organization-id": string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current state of the receipt or admitted batch */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkCancellationStatus"];
+                };
+            };
+            /** @description invalid_request: use the issued UUID */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied: requires a current team owner/admin session without Authorization sso_required: This team requires a current SSO proof. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description bulk_cancellation_not_found: no receipt for this account in this team; not_found: bulk cancellation is unavailable */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed: reload the page before trying this team write again; bulk_confirmation_expired: preview expired */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited: rolling request limit; Retry-After gives seconds to wait */
+            429: {
+                headers: {
+                    "Retry-After": number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    confirmTeamBookingBulkCancellation: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required: the team where the selection started */
+                "x-expected-organization-id": string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The previously admitted batch has completed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdmittedBulkCancellation"];
+                };
+            };
+            /** @description The batch is queued or running */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdmittedBulkCancellation"];
+                };
+            };
+            /** @description invalid_request: use the issued UUID and an empty request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description team_management_access_denied: requires a current team owner/admin session without Authorization sso_required: This team requires a current SSO proof. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description bulk_cancellation_not_found: no receipt for this account in this team; not_found: bulk cancellation is unavailable */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed: reload the page before trying this team write again; bulk_confirmation_expired: preview expired; bulk_no_eligible_bookings: preview contains no eligible bookings */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Request body is too large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited: rolling request limit; bulk_queue_full: team or instance at capacity; Retry-After gives seconds to wait */
+            429: {
+                headers: {
+                    "Retry-After": number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     previewTeamBookingBulkCancellation: {
         parameters: {
             query?: never;
             header: {
-                /** @description Required: the organization where the selection started */
+                /** @description Required: the team where the selection started */
                 "x-expected-organization-id": string;
             };
             path?: never;
@@ -20861,6 +21093,16 @@ export interface operations {
             /** @description Request body is too large */
             413: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description rate_limited: rolling request limit; Retry-After gives seconds to wait */
+            429: {
+                headers: {
+                    "Retry-After": number;
                     [name: string]: unknown;
                 };
                 content: {

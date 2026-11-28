@@ -9,7 +9,7 @@ import { createDb } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs, routingRetentionJob } from '@hourmere/jobs'
 import { createFixtures, createTestUser } from '@hourmere/scheduling/testing'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { productApp } from './routes/test-app.ts'
 import { parseRoutingFormsEnabled, resolveRoutingFormsEnabled } from './routing-form-setting.ts'
 import { productRoutes, startServer } from './server.ts'
@@ -49,6 +49,24 @@ describe.skipIf(!databaseUrl)('routing retention in server composition', () => {
   let owned: TestDatabase
   beforeAll(async () => {
     owned = await createTestDatabase(databaseUrl as string, undefined, { tag: 'routing_ret_app' })
+    // Prepare the schema once. The server starts below exercise role-specific registration.
+    const installer = createJobs({
+      connectionString: owned.url,
+      definitions: [],
+      migrate: true,
+      work: false,
+      maxConnections: 1,
+      log: () => {},
+    })
+    try {
+      await installer.start()
+    } finally {
+      await installer.stop()
+    }
+  })
+  beforeEach(async () => {
+    // A persisted schedule from another role could conceal a missing registration.
+    await owned.pool.query('DELETE FROM pgboss.schedule WHERE name=$1', [queueName])
   })
   afterAll(async () => {
     await owned?.drop()
@@ -65,6 +83,7 @@ describe.skipIf(!databaseUrl)('routing retention in server composition', () => {
     try {
       const server = await factory({
         DATABASE_URL: owned.url,
+        AUTO_MIGRATE: 'false',
         HOURMERE_ROLE: role,
         PORT: '0',
         PUBLIC_URL: 'http://localhost',
@@ -89,35 +108,31 @@ describe.skipIf(!databaseUrl)('routing retention in server composition', () => {
       )
     ).rows
 
-  it('installs the 15-minute schedule in worker roles only', async () => {
+  it('creates the queue without scheduling retention in the web role', async () => {
     await withServer('web', startServer, async () => {
       expect(await schedule()).toEqual([])
       expect(
         (await owned.pool.query('SELECT name FROM pgboss.queue WHERE name=$1', [queueName])).rows,
       ).toHaveLength(1)
     })
-    for (const role of ['worker', 'all'] as const) {
-      await withServer(role, startServer, async () => {
-        expect(
-          await schedule(),
-          'running worker roles install the routing retention schedule',
-        ).toEqual([{ name: queueName, cron: '*/15 * * * *', data: {} }])
-      })
-    }
   })
+
+  async function verifySchedule(role: 'worker' | 'all', factory: typeof startServer) {
+    await withServer(role, factory, async () => {
+      expect(
+        await schedule(),
+        'running worker roles install the routing retention schedule',
+      ).toEqual([{ name: queueName, cron: '*/15 * * * *', data: {} }])
+    })
+  }
+
+  it.each(['worker', 'all'] as const)('installs the 15-minute schedule in the %s role', (role) =>
+    verifySchedule(role, startServer),
+  )
 
   it('detects source-copy removal of the production registration', async () => {
     const copy = await sourceCopy()
-    // Remove only this test's queue metadata so the earlier registration cannot conceal it.
-    await owned.pool.query('DELETE FROM pgboss.schedule WHERE name=$1', [queueName])
-    await expect(
-      withServer('worker', copy.startServer, async () => {
-        expect(
-          await schedule(),
-          'running worker roles install the routing retention schedule',
-        ).toEqual([{ name: queueName, cron: '*/15 * * * *', data: {} }])
-      }),
-    ).rejects.toMatchObject({
+    await expect(verifySchedule('worker', copy.startServer)).rejects.toMatchObject({
       name: 'AssertionError',
       message: expect.stringContaining('install the routing retention schedule'),
     })
@@ -248,7 +263,7 @@ describe.skipIf(!databaseUrl)('routing retention in server composition', () => {
           cleanupVersions: async () => ({ next: null }),
         }),
       ],
-      migrate: true,
+      migrate: false,
       work: false,
       maxConnections: 1,
       log: () => {},

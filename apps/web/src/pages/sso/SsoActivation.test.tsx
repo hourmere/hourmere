@@ -1,7 +1,8 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import type { Schemas } from '../../api/client.ts'
+import { AppShell, RequireSession, SessionLayout, SsoSetupPage } from '../../lazy-pages.tsx'
 import { PATHS } from '../../paths.ts'
 import {
   type Call,
@@ -14,7 +15,10 @@ import {
   renderApp,
   signedInAs,
 } from '../../test/fake-api.tsx'
+import { resolveLazy } from '../../test/resolve-lazy.ts'
 import type { SsoProvider } from './setup.ts'
+
+beforeAll(() => resolveLazy(SessionLayout, RequireSession, AppShell, SsoSetupPage))
 
 const team = {
   id: '00000000-0000-7000-8000-000000000050',
@@ -174,12 +178,7 @@ describe('SSO provider activation', () => {
       [testProvider]: () => json(200, { url: idpUrl, attemptId: proofAttemptId }),
     })
 
-    // The first visit loads the signed-in shell and lazy settings route before fetching providers.
-    const test = await screen.findByRole(
-      'button',
-      { name: `Test provider ${draft.displayName}` },
-      { timeout: 3000 },
-    )
+    const test = await screen.findByRole('button', { name: `Test provider ${draft.displayName}` })
     expect(screen.getAllByRole('button', { name: /^Test provider / })).toEqual([test])
     expect(requests.to(testProvider)).toHaveLength(0)
     expect(requests.to(activateProvider)).toHaveLength(0)

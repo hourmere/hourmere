@@ -2,9 +2,16 @@ import { BroadcastChannel } from 'node:worker_threads'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, useLocation } from 'react-router'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { App } from '../../App.tsx'
 import type { Schemas } from '../../api/client.ts'
+import {
+  AppShell,
+  MailboxProofPage,
+  RequireSession,
+  SessionLayout,
+  SettingsPage,
+} from '../../lazy-pages.tsx'
 import { PATHS } from '../../paths.ts'
 import { selectAdminLanguage } from '../../test/account-menu.ts'
 import {
@@ -20,7 +27,12 @@ import {
   renderApp,
   signedInAs,
 } from '../../test/fake-api.tsx'
+import { resolveLazy } from '../../test/resolve-lazy.ts'
 import { openMailboxProofChannel } from './member-protocol.ts'
+
+beforeAll(() =>
+  resolveLazy(SessionLayout, RequireSession, AppShell, SettingsPage, MailboxProofPage),
+)
 
 const team = {
   id: '00000000-0000-7000-8000-000000000041',
