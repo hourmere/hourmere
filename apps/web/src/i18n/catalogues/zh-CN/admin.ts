@@ -3478,4 +3478,9 @@ export const admin = {
   'Verify your identity for this ownership transfer.': '请验证身份以继续此次所有权转移。',
   'Owner roles change only through a confirmed transfer. The team must retain at least one owner.':
     '只有确认转移后，才能变更所有者角色。团队必须至少保留一名所有者。',
+  // Departure handoff calendar cleanup
+  'Cleanup in the original calendar or meeting account is pending.':
+    '原日历或会议账户仍有待处理的清理工作。',
+  'Cleanup in the original calendar or meeting account could not be verified. Ask the account owner to check for remaining entries.':
+    '无法确认原日历或会议账户中的条目是否已清理。请账户所有者检查是否仍有条目。',
 } as const

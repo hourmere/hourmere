@@ -16,6 +16,7 @@ import {
 } from '@hourmere/scheduling/series-confirmation'
 import { sql } from 'kysely'
 import { z } from 'zod'
+import { canWriteHandoffReplacement } from './departure-handoff-provider-access.ts'
 import { GoogleCalendarError } from './google.ts'
 import {
   type GoogleEvent,
@@ -316,6 +317,11 @@ export async function runConferenceProviderWork(
           return { error: 'calendar_unavailable', knownNoCreate: c.create }
         const client = deps.google?.client
         if (!client) return { error: 'calendar_unavailable', knownNoCreate: c.create }
+        if (
+          c.booking.status === 'confirmed' &&
+          !(await canWriteHandoffReplacement(trx, c.resourceId, c.organizer_user_id))
+        )
+          return { error: 'organizer_unavailable', knownNoCreate: c.create }
         const value = valueFor(c)
         let found: GoogleEvent | undefined
         if (c.create) {
@@ -382,6 +388,8 @@ export async function runConferenceProviderWork(
         )
           return observed
         if (!calendar.supports_google_meet) return { event: found, error: 'calendar_unavailable' }
+        if (!(await canWriteHandoffReplacement(trx, c.resourceId, c.organizer_user_id)))
+          return { event: found, error: 'organizer_unavailable' }
         const updated = await client.createConferenceEvent(
           token,
           calendar.external_id,

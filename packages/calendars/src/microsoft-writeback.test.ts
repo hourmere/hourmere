@@ -11,9 +11,19 @@ import {
   type PublicContext,
   rescheduleManagedBooking,
 } from '@hourmere/scheduling'
+import {
+  applyDepartureHandoff,
+  readDepartureHandoffAdminPreview,
+} from '@hourmere/scheduling/departure-handoff-admin'
+import { readTeamsMeetingLocations } from '@hourmere/scheduling/teams-meeting-locations'
 import { createFixtures } from '@hourmere/scheduling/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  createHandoffTestFixture,
+  HANDOFF_NOW,
+  handoffTestRecords,
+} from '../../scheduling/src/departure-handoff-apply-test-fixture.ts'
 import { calendarBookingNotifier, redispatchBookingCalendar } from './booking-events.ts'
 import { calendarEncryptionKey, encryptCredential } from './credentials.ts'
 import {
@@ -65,6 +75,7 @@ type GraphEvent = EventTimes & {
 type Call = {
   calendar: string
   method: 'GET' | 'POST' | 'PATCH' | 'DELETE'
+  authorization: string | null
   transactionId?: string
   id?: string
   ifMatch?: string | null
@@ -107,6 +118,7 @@ function graph(now: () => number) {
     beforeDelete?: () => Response | undefined
     afterPatch?: () => Response | undefined | Promise<Response | undefined>
     omitTeamsJoinUrl?: boolean
+    joinUrl?: string
     omitTeamsInPatchResponse?: boolean
     reconnect?: { account: string; calendars: string[]; sharedCalendars?: string[] }
   } = { allowedOnlineMeetingProviders: ['teamsForBusiness'] }
@@ -150,6 +162,7 @@ function graph(now: () => number) {
       if (url.origin !== 'https://graph.microsoft.com' || !segment)
         throw new Error('Unexpected synthetic Graph endpoint')
       const calendar = decodeURIComponent(segment)
+      const authorization = new Headers(init?.headers).get('authorization')
       if (eventSegment) {
         const id = decodeURIComponent(eventSegment)
         const saved = [...events].find(
@@ -162,7 +175,15 @@ function graph(now: () => number) {
           throw new Error('Unexpected synthetic Graph event method')
         const ifMatch = new Headers(init?.headers).get('If-Match')
         const body = init?.body ? (JSON.parse(String(init.body)) as EventTimes) : undefined
-        calls.push({ calendar, method, id, transactionId: event?.transactionId, ifMatch, body })
+        calls.push({
+          calendar,
+          method,
+          authorization,
+          id,
+          transactionId: event?.transactionId,
+          ifMatch,
+          body,
+        })
         const failure =
           method === 'PATCH'
             ? controls.beforePatch?.()
@@ -186,7 +207,7 @@ function graph(now: () => number) {
       if (init?.method === 'POST') {
         const body = JSON.parse(String(init.body))
         const transactionId = String(body.transactionId)
-        calls.push({ calendar, method: 'POST', transactionId, body })
+        calls.push({ calendar, method: 'POST', authorization, transactionId, body })
         const failure = controls.beforeCreate?.()
         if (failure) return failure
         const key = JSON.stringify([calendar, transactionId])
@@ -205,7 +226,9 @@ function graph(now: () => number) {
             body.onlineMeetingProvider === 'teamsForBusiness' && {
               isOnlineMeeting: true,
               onlineMeetingProvider: 'teamsForBusiness',
-              ...(!controls.omitTeamsJoinUrl && { onlineMeeting: { joinUrl: teamsJoinUrl } }),
+              ...(!controls.omitTeamsJoinUrl && {
+                onlineMeeting: { joinUrl: controls.joinUrl ?? teamsJoinUrl },
+              }),
             }),
         }
         events.set(key, event)
@@ -218,7 +241,7 @@ function graph(now: () => number) {
         url.searchParams.get('$filter') ?? '',
       )?.[1]
       if (!transactionId) throw new Error('Missing synthetic Graph recovery filter')
-      calls.push({ calendar, method: 'GET', transactionId })
+      calls.push({ calendar, method: 'GET', authorization, transactionId })
       const failure = await controls.beforeLookup?.(calendar)
       if (failure) return failure
       const event = events.get(JSON.stringify([calendar, transactionId]))
@@ -277,14 +300,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       await database?.drop()
     })
 
-    function credentials(userId: string, expiresAt: number) {
+    function credentials(userId: string, expiresAt: number, accessToken = 'fake-access') {
       return encryptCredential(
         calendarEncryptionKey(TEST_CALENDAR_KEY),
         tokenAad(userId, `graph-account-${userId}`, 'microsoft'),
-        JSON.stringify({ accessToken: 'fake-access', refreshToken: 'fake-refresh', expiresAt }),
+        JSON.stringify({ accessToken, refreshToken: 'fake-refresh', expiresAt }),
       )
     }
-    async function connect(userId: string) {
+    async function connect(userId: string, accessToken?: string) {
       const connection = await db
         .insertInto('calendar_connections')
         .values({
@@ -292,7 +315,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
           provider: 'microsoft',
           external_account_id: `graph-account-${userId}`,
           scopes: [scope],
-          credentials: credentials(userId, now + 86_400_000),
+          credentials: credentials(userId, now + 86_400_000, accessToken),
         })
         .returning('id')
         .executeTakeFirstOrThrow()
@@ -489,6 +512,431 @@ describe.skipIf(!process.env.DATABASE_URL)(
         attempts: 6,
       })
     }
+
+    describe('departure handoff', () => {
+      const oldCalendarName = 'outlook-departing'
+      const newCalendarName = 'outlook-successor'
+      const oldAccess = 'fake-departing-graph-access'
+      const newAccess = 'fake-successor-graph-access'
+      const newJoinUrl = 'https://teams.microsoft.com/l/meetup-join/synthetic-successor/0'
+
+      async function setup(teams = true) {
+        now = HANDOFF_NOW.epochMilliseconds
+        const configureDestination = async (userId: string, name: string, access: string) => {
+          const connectionId = await connect(userId, access)
+          const calendarId = await calendar(connectionId, name)
+          await db
+            .insertInto('profiles')
+            .values({
+              user_id: userId,
+              handle: `handoff-${userId.slice(-12)}`,
+              time_zone: 'America/Los_Angeles',
+              destination_calendar_id: calendarId,
+            })
+            .execute()
+          return { connectionId, calendarId, userId }
+        }
+        const changeDefault = (userId: string, calendarId: string) =>
+          db
+            .updateTable('profiles')
+            .set({ destination_calendar_id: calendarId })
+            .where('user_id', '=', userId)
+            .execute()
+        let source: Awaited<ReturnType<typeof configureDestination>> | undefined
+        let target: Awaited<ReturnType<typeof configureDestination>> | undefined
+        const fixture = await createHandoffTestFixture(db, {
+          now: context().now,
+          sourceContext: context(),
+          applyContext: context(),
+          configureSource: async ({ departing, eventTypeId }) => {
+            source = await configureDestination(departing.id, oldCalendarName, oldAccess)
+            await db
+              .updateTable('event_types')
+              .set({
+                location: JSON.stringify(
+                  teams
+                    ? { kind: 'microsoft_teams' }
+                    : { kind: 'in_person', address: 'Private office address' },
+                ),
+              })
+              .where('id', '=', eventTypeId)
+              .execute()
+          },
+          configureTarget: async ({ candidate }) => {
+            target = await configureDestination(candidate.id, newCalendarName, newAccess)
+          },
+        })
+        if (!source || !target) throw new Error('Missing handoff destinations')
+        const records = handoffTestRecords(db)
+        const apply = async () => {
+          await db
+            .deleteFrom('auth.member')
+            .where('organizationId', '=', fixture.team.id)
+            .where('userId', '=', fixture.departing.id)
+            .execute()
+          await records.offer(fixture.ctx, fixture.input, { departingUserId: fixture.departing.id })
+          return replay()
+        }
+        const replay = () => applyDepartureHandoff(fixture.ctx, fixture.input, records.store)
+        const receipt = async () =>
+          (await readDepartureHandoffAdminPreview(fixture.ctx, fixture.input, records.store))
+            .receipt
+        return { ...fixture, source, target, apply, replay, receipt, changeDefault }
+      }
+
+      const pinned = (bookingId: string) =>
+        db
+          .selectFrom('booking_calendar_targets')
+          .select(['user_id', 'calendar_id', 'microsoft_writeback'])
+          .where('root_booking_id', '=', bookingId)
+          .executeTakeFirstOrThrow()
+
+      it.each([false, true])(
+        'cleans its original destination and writes a fresh successor copy (Teams: %s)',
+        async (teams) => {
+          const handoff = await setup(teams)
+          const sourceId = handoff.booking.id
+          await work({ bookingId: sourceId })
+          const oldEvent = provider.posts()[0]
+          expect(oldEvent).toMatchObject({
+            calendar: oldCalendarName,
+            authorization: `Bearer ${oldAccess}`,
+            body: { isOnlineMeeting: teams },
+          })
+          await handoff.changeDefault(
+            handoff.departing.id,
+            await calendar(handoff.source.connectionId, 'outlook-departing-other'),
+          )
+          const callCount = provider.calls.length
+          const applied = await handoff.apply()
+          const replacementId = applied.replacementBookingId
+          expect(provider.calls).toHaveLength(callCount)
+          expect(queued).toEqual([
+            { bookingId: sourceId },
+            { bookingId: sourceId },
+            { bookingId: replacementId },
+          ])
+          expect(await handoff.replay()).toEqual(applied)
+          expect(queued).toHaveLength(3)
+          expect(await pinned(sourceId)).toMatchObject({
+            calendar_id: handoff.source.calendarId,
+            user_id: handoff.departing.id,
+          })
+          const fresh = await pinned(replacementId)
+          expect(fresh).toMatchObject({
+            calendar_id: handoff.target.calendarId,
+            user_id: handoff.candidate.id,
+            microsoft_writeback: { status: 'pending', ...(teams && { teamsStatus: 'pending' }) },
+          })
+          expect(fresh.microsoft_writeback).not.toHaveProperty('teamsJoinUrl')
+          expect(await handoff.receipt()).toEqual({
+            sourceBookingId: sourceId,
+            replacementBookingId: replacementId,
+            oldConferenceCleanup: 'pending',
+            conference: teams ? 'pending' : 'not_required',
+          })
+
+          await handoff.changeDefault(
+            handoff.candidate.id,
+            await calendar(handoff.target.connectionId, 'outlook-successor-other'),
+          )
+          provider.controls.joinUrl = newJoinUrl
+          await work({ bookingId: replacementId })
+          await work({ bookingId: sourceId })
+          await work({ bookingId: sourceId })
+          expect(provider.posts()).toHaveLength(2)
+          expect(provider.posts()[1]).toMatchObject({
+            calendar: newCalendarName,
+            authorization: `Bearer ${newAccess}`,
+            body: { isOnlineMeeting: teams },
+          })
+          expect(provider.posts()[1]?.transactionId).not.toBe(oldEvent?.transactionId)
+          expect(provider.capabilityReads).toEqual(teams ? [oldCalendarName, newCalendarName] : [])
+          expect(deletes()).toEqual([
+            expect.objectContaining({
+              calendar: oldCalendarName,
+              authorization: `Bearer ${oldAccess}`,
+              id: eventId,
+              transactionId: oldEvent?.transactionId,
+              ifMatch: etag,
+            }),
+          ])
+          expect(provider.events.size).toBe(1)
+          expect(await mappings(sourceId)).toEqual([])
+          expect(await mappings(replacementId)).toMatchObject([
+            { calendar_id: handoff.target.calendarId },
+          ])
+          expect(await handoff.receipt()).toEqual({
+            sourceBookingId: sourceId,
+            replacementBookingId: replacementId,
+            oldConferenceCleanup: 'complete',
+            conference: teams ? 'ready' : 'not_required',
+          })
+          if (teams) {
+            const location = { kind: 'microsoft_teams' }
+            const bookings = [
+              { id: sourceId, location },
+              { id: replacementId, location },
+            ]
+            const meetingLocations = await readTeamsMeetingLocations(db, bookings)
+            expect(meetingLocations.get(sourceId)).toMatchObject({
+              status: 'ready',
+              url: teamsJoinUrl,
+            })
+            expect(meetingLocations.get(replacementId)).toMatchObject({
+              status: 'ready',
+              url: newJoinUrl,
+            })
+            expect(
+              (await readTeamsMeetingLocations(db, bookings, { activeOnly: true })).get(sourceId),
+            ).toEqual({ kind: 'microsoft_teams', status: 'join_url_pending' })
+          }
+        },
+      )
+
+      it('keeps cleanup unresolved after revocation and retries only with the original account', async () => {
+        const handoff = await setup()
+        const sourceId = handoff.booking.id
+        await work({ bookingId: sourceId })
+        const { replacementBookingId } = await handoff.apply()
+        await db
+          .updateTable('calendar_connections')
+          .set({ status: 'needs_reauth' })
+          .where('id', '=', handoff.source.connectionId)
+          .execute()
+        const calls = provider.calls.length
+        await work({ bookingId: sourceId })
+        expect(provider.calls).toHaveLength(calls)
+        expect(await pinned(sourceId)).toMatchObject({
+          microsoft_writeback: { status: 'failed', reason: 'needs_reauth' },
+        })
+        expect(await mappings(sourceId)).toMatchObject([{ external_event_id: eventId }])
+        expect(provider.events.size).toBe(1)
+        provider.controls.joinUrl = newJoinUrl
+        await work({ bookingId: replacementBookingId })
+        expect(await handoff.receipt()).toEqual({
+          sourceBookingId: sourceId,
+          replacementBookingId,
+          oldConferenceCleanup: 'unresolved',
+          conference: 'ready',
+        })
+        expect(provider.posts()).toHaveLength(2)
+        expect(provider.events.size).toBe(2)
+        await db
+          .updateTable('calendar_connections')
+          .set({ status: 'active' })
+          .where('id', '=', handoff.source.connectionId)
+          .execute()
+        await bookingCalendarRecoveryJob(
+          deps,
+          async () => {},
+          async () => {},
+        ).handler(
+          { connectionId: handoff.source.connectionId },
+          { id: 'synthetic-recovery', signal: signal(), attempt: 1 },
+        )
+        await work({ bookingId: sourceId })
+        expect(deletes()).toEqual([
+          expect.objectContaining({
+            calendar: oldCalendarName,
+            authorization: `Bearer ${oldAccess}`,
+          }),
+        ])
+        expect(provider.posts()).toHaveLength(2)
+        expect(provider.events.size).toBe(1)
+        expect(await handoff.receipt()).toMatchObject({ oldConferenceCleanup: 'complete' })
+      })
+
+      it.each([false, true])(
+        'keeps the old Outlook cleanup outcome after the pinned connection is removed (completed: %s)',
+        async (completed) => {
+          const handoff = await setup(false)
+          const sourceId = handoff.booking.id
+          await work({ bookingId: sourceId })
+          const { replacementBookingId } = await handoff.apply()
+          if (completed) await work({ bookingId: sourceId })
+          await db
+            .deleteFrom('calendar_connections')
+            .where('id', '=', handoff.source.connectionId)
+            .execute()
+          const calls = provider.calls.length
+          await work({ bookingId: sourceId })
+          expect(provider.calls).toHaveLength(calls)
+          expect(await handoff.receipt()).toEqual({
+            sourceBookingId: sourceId,
+            replacementBookingId,
+            oldConferenceCleanup: completed ? 'complete' : 'unresolved',
+            conference: 'not_required',
+          })
+        },
+      )
+
+      it('reconciles ambiguous creates on each root and polls the same Teams meeting for its link', async () => {
+        const handoff = await setup()
+        const sourceId = handoff.booking.id
+        provider.controls.afterCreate = async () => graphError(503, 'ServiceUnavailable')
+        await work({ bookingId: sourceId })
+        expect(await mappings(sourceId)).toEqual([])
+        expect(await pinned(sourceId)).toMatchObject({
+          microsoft_writeback: { status: 'retrying', lookupOnly: true },
+        })
+        const { replacementBookingId } = await handoff.apply()
+        const oldPost = provider.posts()[0]
+        provider.controls.omitTeamsJoinUrl = true
+        let bookingLocks: (boolean | undefined)[] = []
+        let committedReplacement: string | undefined
+        provider.controls.afterCreate = async () => {
+          bookingLocks = await db.transaction().execute(async (trx) => {
+            const result: (boolean | undefined)[] = []
+            for (const hostId of [handoff.departing.id, handoff.candidate.id].sort()) {
+              const lock = await sql<{ acquired: boolean }>`SELECT pg_try_advisory_xact_lock(
+                hashtextextended(${`booking-host:${hostId}`}, 0)) AS acquired`.execute(trx)
+              result.push(lock.rows[0]?.acquired)
+            }
+            return result
+          })
+          committedReplacement = (await handoff.receipt())?.replacementBookingId
+          return graphError(503, 'ServiceUnavailable')
+        }
+        await work({ bookingId: replacementBookingId })
+        expect(bookingLocks).toEqual([true, true])
+        expect(committedReplacement).toBe(replacementBookingId)
+        expect(await mappings(replacementBookingId)).toEqual([])
+        expect(await handoff.receipt()).toMatchObject({
+          oldConferenceCleanup: 'pending',
+          conference: 'pending',
+        })
+
+        now += 30_000
+        await work({ bookingId: sourceId })
+        expect(deletes()).toEqual([
+          expect.objectContaining({
+            calendar: oldCalendarName,
+            authorization: `Bearer ${oldAccess}`,
+            transactionId: oldPost?.transactionId,
+          }),
+        ])
+        await work({ bookingId: replacementBookingId })
+        expect(await pinned(replacementBookingId)).toMatchObject({
+          microsoft_writeback: { status: 'retrying', teamsStatus: 'join_url_pending' },
+        })
+        expect((await pinned(replacementBookingId)).microsoft_writeback).not.toHaveProperty(
+          'teamsJoinUrl',
+        )
+        expect(await handoff.receipt()).toMatchObject({
+          oldConferenceCleanup: 'complete',
+          conference: 'pending',
+        })
+        const [stored] = [...provider.events]
+        if (!stored) throw new Error('Missing successor Graph event')
+        const [marker, event] = stored
+        expect(event.transactionId).toBe(provider.posts()[1]?.transactionId)
+        expect(event.transactionId).not.toBe(oldPost?.transactionId)
+        provider.events.set(marker, { ...event, onlineMeeting: { joinUrl: newJoinUrl } })
+        now += 60_000
+        await work({ bookingId: replacementBookingId })
+        expect(provider.posts()).toHaveLength(2)
+        expect(await mappings(replacementBookingId)).toMatchObject([
+          { external_event_id: event.id },
+        ])
+        expect(await handoff.receipt()).toMatchObject({ conference: 'ready' })
+      })
+
+      it.each(['permissions_missing', 'teams_unavailable'] as const)(
+        'rechecks the pinned successor destination at write time (%s)',
+        async (outcome) => {
+          const handoff = await setup()
+          const sourceId = handoff.booking.id
+          const { replacementBookingId } = await handoff.apply()
+          if (outcome === 'permissions_missing') {
+            await db
+              .updateTable('calendar_connections')
+              .set({ scopes: ['Calendars.ReadBasic'] })
+              .where('id', '=', handoff.target.connectionId)
+              .execute()
+          } else provider.controls.allowedOnlineMeetingProviders = []
+
+          await work({ bookingId: sourceId })
+          expect(provider.calls).toEqual([])
+          expect(await handoff.receipt()).toMatchObject({ oldConferenceCleanup: 'complete' })
+          await work({ bookingId: replacementBookingId })
+          if (outcome === 'permissions_missing') {
+            expect(provider.capabilityReads).toEqual([])
+            expect(provider.posts()).toEqual([])
+            expect(await pinned(replacementBookingId)).toMatchObject({
+              microsoft_writeback: {
+                status: 'failed',
+                reason: 'permissions_missing',
+                teamsStatus: 'pending',
+              },
+            })
+          } else {
+            expect(provider.capabilityReads).toEqual([newCalendarName])
+            expect(provider.posts()).toEqual([
+              expect.objectContaining({
+                calendar: newCalendarName,
+                authorization: `Bearer ${newAccess}`,
+                body: expect.objectContaining({ isOnlineMeeting: false }),
+              }),
+            ])
+            expect(await pinned(replacementBookingId)).toMatchObject({
+              microsoft_writeback: { status: 'succeeded', teamsStatus: 'teams_unavailable' },
+            })
+          }
+          expect(await handoff.receipt()).toEqual({
+            sourceBookingId: sourceId,
+            replacementBookingId,
+            oldConferenceCleanup: 'complete',
+            conference: 'failed',
+          })
+        },
+      )
+
+      it.each([false, true])(
+        'blocks successor Teams creation after the host leaves (during Graph lookup: %s)',
+        async (duringLookup) => {
+          const handoff = await setup()
+          const { replacementBookingId } = await handoff.apply()
+          const removeSuccessor = async () => {
+            await db
+              .deleteFrom('auth.member')
+              .where('organizationId', '=', handoff.team.id)
+              .where('userId', '=', handoff.candidate.id)
+              .execute()
+          }
+          if (duringLookup) {
+            provider.controls.beforeLookup = async () => {
+              await removeSuccessor()
+              return undefined
+            }
+          } else await removeSuccessor()
+          await work({ bookingId: replacementBookingId })
+          expect(provider.capabilityReads).toEqual(duringLookup ? [newCalendarName] : [])
+          expect(provider.calls.map(({ method }) => method)).toEqual(duringLookup ? ['GET'] : [])
+          expect(provider.events.size).toBe(0)
+          expect(await mappings(replacementBookingId)).toEqual([])
+          expect(await pinned(replacementBookingId)).toMatchObject({
+            microsoft_writeback: { status: 'failed', reason: 'calendar_unavailable' },
+          })
+          expect(await handoff.receipt()).toMatchObject({ conference: 'failed' })
+        },
+      )
+
+      it('blocks successor Teams creation after a managed membership is suspended', async () => {
+        const handoff = await setup()
+        const { replacementBookingId } = await handoff.apply()
+        await f.suspendManagedChildMembership(handoff.team.id, handoff.candidate.id)
+
+        await work({ bookingId: replacementBookingId })
+
+        expect(provider.capabilityReads).toEqual([])
+        expect(provider.calls).toEqual([])
+        expect(await pinned(replacementBookingId)).toMatchObject({
+          microsoft_writeback: { status: 'failed', reason: 'calendar_unavailable' },
+        })
+        expect(await handoff.receipt()).toMatchObject({ conference: 'failed' })
+      })
+    })
 
     it.each([false, true])(
       'updates the pinned copy across DST and deletes it on cancellation (Teams: %s)',

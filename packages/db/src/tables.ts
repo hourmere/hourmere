@@ -725,6 +725,14 @@ export interface DepartureBookingHandoffs {
   source_booking_id: string;
 }
 
+export interface DepartureHandoffCalendarCleanup {
+  calendar_id: string;
+  connection_id: string;
+  provider: string;
+  source_booking_id: string;
+  status: Generated<string>;
+}
+
 export interface DepartureHandoffDeliveries {
   created_at: Generated<Timestamp>;
   job_id: string;
@@ -2133,6 +2141,7 @@ export interface DB {
   custom_role_revisions: CustomRoleRevisions;
   custom_roles: CustomRoles;
   departure_booking_handoffs: DepartureBookingHandoffs;
+  departure_handoff_calendar_cleanup: DepartureHandoffCalendarCleanup;
   departure_handoff_deliveries: DepartureHandoffDeliveries;
   departure_handoff_offers: DepartureHandoffOffers;
   departure_handoff_recipients: DepartureHandoffRecipients;

@@ -211,6 +211,12 @@ any remaining copy in Outlook. If disconnection removed the target, only manual 
 in Outlook is available. The replacement host's credentials cannot be used to reconcile
 the old event.
 
+For an ordinary Google Calendar copy, the cleanup worker checks the old chain UID and
+any saved event ID on the original destination before cancelling the copy. After a lost
+response, it can verify that the same event is already cancelled. An inaccessible account
+or a copy whose identity cannot be verified leaves cleanup unresolved. The receipt shows
+only the cleanup outcome, including when the original target has been disconnected.
+
 For a new Teams booking, admission requires Microsoft calendars to be enabled on the
 instance and the new host to have an eligible owned Microsoft destination with
 `Calendars.ReadWrite`. If either check fails, return `location_unavailable`. After commit
@@ -344,8 +350,8 @@ input with `--input -`.
 The page clears the fragment before requesting the offer. It and the API responses
 are served with no-store and no-referrer headers. Offer and answer operations share
 a rate limit of 30 requests per minute per trusted IP bucket on each server process.
-Production admission remains off, and handoff-specific replacement notifications,
-calendar attachments and rollout remain pending.
+Production admission remains off. Handoff-specific replacement notifications, calendar
+attachments and rollout remain pending.
 
 中文：预发布管理员可创建、查看、撤回和换版交接提议，也可向尚未决定的收件人重发私密链接。
 同一源预约的每个规范化邮箱最多发送三次，包含首发和送达不确定的尝试。重试同一请求时请沿用
@@ -353,9 +359,13 @@ calendar attachments and rollout remain pending.
 参与者可用邮件里的私密链接查看原预约和拟议预约。预订人还可查看将分享给新主持人的已保存答案。
 打开链接不会记录决定。请选择接受或拒绝，再提交。任何来宾拒绝或尚未回复都会阻止交接。
 链接过期、被撤回、换版或已经使用时，页面统一提示联系发件团队。
-Provider cleanup and creation reuse existing workers. Zoom lost-response recovery is
-exercised with a fake, and handoff-specific Google and Microsoft lifecycle acceptance remains
-open. Bounded automatic handoff is a separate follow-on.
+
+交接提交后，后台任务使用原主持人固定的账户和日历清理旧条目，并在接任主持人符合资格时写入新条目。
+如果原授权已撤销或无法核验清理结果，交接回执会提示原账户所有者检查日历或会议。新预约仍保持确认。
+
+Provider cleanup and creation reuse existing workers. Google Calendar, Meet, Outlook, Teams
+and Zoom handoffs use real PostgreSQL and fake providers for lifecycle acceptance, including
+revocation and ambiguous responses. Bounded automatic handoff is a separate follow-on.
 
 | Step | Deliverable and acceptance |
 | --- | --- |

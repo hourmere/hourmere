@@ -796,7 +796,8 @@ require the recipient's private token from the offer email. An API key must have
 `read`, `bookings` or `full` scope to review it. Answering requires `bookings`
 or `full` and the exact reviewed `version`. Submit `decision` as `accept` or
 `decline` after the recipient chooses. Declining closes the offer version.
-A decision by itself leaves the original booking confirmed.
+A decision by itself leaves the original booking confirmed. A successful answer
+consumes the token. Repeating the request returns `handoff_offer_unavailable`.
 
 Use `booking-handoff offer --input -` and `booking-handoff answer --input -` in
 the CLI. Both take JSON on standard input. Keep the token out of command arguments,

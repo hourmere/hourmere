@@ -58,6 +58,13 @@ function expectPrivate(response: Response) {
 }
 
 describe('participant handoff transport privacy', () => {
+  it('advertises that answering a handoff offer is non-idempotent', () => {
+    const answer = productTools({ db: {} as Db }).find(
+      ({ name }) => name === 'answer_booking_handoff_offer',
+    )
+    expect(answer?.annotations.idempotentHint).toBe(false)
+  })
+
   it('hard-disables both operations before reading input', async () => {
     const app = appFor({} as Db, { enabled: false })
     for (const action of ['offer', 'answer']) {

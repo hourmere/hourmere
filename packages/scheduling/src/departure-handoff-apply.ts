@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { ssoHardOff, type TeamSsoCapabilities } from '@hourmere/auth'
 import type { Database } from '@hourmere/db'
 import { auditActor } from '@hourmere/db/audit'
-import type { Transaction } from 'kysely'
+import { sql, type Transaction } from 'kysely'
 import { selectDurationMinutes } from './availability.ts'
 import {
   auditBooking,
@@ -334,6 +334,36 @@ export async function applyDepartureHandoff(
         .select(['notifications', 'reschedule_cutoff_minutes', 'cancel_cutoff_minutes'])
         .where('id', '=', event.id)
         .executeTakeFirstOrThrow()
+      // Capture the historical destinations before cancellation queues its work. A
+      // disconnected calendar cascades its normal writeback rows, but not this receipt.
+      await sql`
+        WITH RECURSIVE chain(id, rescheduled_from_id) AS (
+          SELECT id, rescheduled_from_id FROM bookings
+            WHERE id = ${source.sourceBookingId} AND organization_id = ${source.organizationId}
+          UNION ALL
+          SELECT b.id, b.rescheduled_from_id FROM bookings b JOIN chain ON b.id = chain.rescheduled_from_id
+            WHERE b.organization_id = ${source.organizationId}
+        ) CYCLE id SET is_cycle USING path,
+        root AS (SELECT id FROM chain WHERE rescheduled_from_id IS NULL AND NOT is_cycle),
+        destinations AS (
+          SELECT target.calendar_id, target.user_id,
+            CASE WHEN target.microsoft_writeback IS NULL THEN 'google' ELSE 'microsoft' END AS provider
+          FROM root JOIN booking_calendar_targets target ON target.root_booking_id = root.id
+          UNION
+          SELECT event.calendar_id, host.user_id, 'google'
+          FROM chain JOIN booking_calendar_events event ON event.booking_id = chain.id
+            JOIN booking_hosts host ON host.booking_id = chain.id WHERE NOT is_cycle
+        )
+        INSERT INTO departure_handoff_calendar_cleanup (source_booking_id, calendar_id, connection_id, provider)
+        SELECT ${source.sourceBookingId}, c.id, cc.id, cc.provider
+          FROM destinations d JOIN calendars c ON c.id = d.calendar_id
+          JOIN calendar_connections cc ON cc.id = c.connection_id AND cc.user_id = d.user_id
+          WHERE cc.provider = d.provider AND (
+            cc.provider = 'microsoft' OR NOT EXISTS (
+              SELECT 1 FROM root JOIN booking_conferences conf ON conf.root_booking_id = root.id
+            )
+          )
+      `.execute(trx)
       await cancelTeamBookingInTransaction(
         trx,
         { ...actor, organizationId: source.organizationId },

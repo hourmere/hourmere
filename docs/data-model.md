@@ -2864,6 +2864,12 @@ versions in expiry order, processing up to 10 batches of 100 and deferring locke
 any remaining backlog to later runs. Offer version identifiers and committed consent
 receipts keep their existing retention rules.
 
+`departure_handoff_calendar_cleanup` records each source chain's pinned ordinary Google
+Calendar or Microsoft destination during apply. Calendar and connection IDs are historical
+snapshots. They survive disconnection so the receipt can report unresolved cleanup or retain
+a verified completion. The rows are deleted with the source booking. Existing automatic
+conference intents retain their own lifecycle state. Admin receipts project only the outcome.
+
 ## Audit events
 
 `audit_events` is the append-only management journal available to every instance.

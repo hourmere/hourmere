@@ -1,0 +1,12 @@
+{
+  "migration": "0204_departure_handoff_calendar_cleanup.sql",
+  "objects": {
+    "constraint public.departure_handoff_calendar_cleanup.departure_handoff_calendar_cleanup_pkey": "PRIMARY KEY (source_booking_id, calendar_id)",
+    "constraint public.departure_handoff_calendar_cleanup.departure_handoff_calendar_cleanup_provider_check": "CHECK ((provider = ANY (ARRAY['google'::text, 'microsoft'::text])))",
+    "constraint public.departure_handoff_calendar_cleanup.departure_handoff_calendar_cleanup_source_fk": "FOREIGN KEY (source_booking_id) REFERENCES bookings(id) ON DELETE CASCADE",
+    "constraint public.departure_handoff_calendar_cleanup.departure_handoff_calendar_cleanup_status_check": "CHECK ((status = ANY (ARRAY['pending'::text, 'complete'::text, 'unresolved'::text])))",
+    "not_null public.departure_handoff_calendar_cleanup.connection_id": "NOT NULL",
+    "not_null public.departure_handoff_calendar_cleanup.provider": "NOT NULL",
+    "not_null public.departure_handoff_calendar_cleanup.status": "NOT NULL DEFAULT 'pending'::text"
+  }
+}
