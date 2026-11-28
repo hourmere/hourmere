@@ -39,7 +39,7 @@ type TeamSession = Pick<Extract<Principal, { kind: 'session' }>, 'sessionId'> & 
   user: { id: string }
 }
 
-type TeamAccessPrincipal = Pick<Principal, 'scimResourcesEnabled'> & {
+type TeamAccessPrincipal = Pick<Principal, 'scimResourcesEnabled' | 'customRoleAuthorization'> & {
   user: Pick<CallerUser, 'id'> & Partial<CallerUser>
   organization: Pick<CallerOrganization, 'id'> & Partial<CallerOrganization>
 } & ({ kind: 'session'; sessionId: string } | { kind: 'api_key' | 'oauth' })
@@ -139,11 +139,23 @@ export async function checkTeamManagementAccess(
     context?.includeRecoveryOwner,
     context?.includeScimManaged,
     principal.scimResourcesEnabled === true,
+    true,
   )
-  const { personal, role } = membership
+  const { personal } = membership
+  let { role } = membership
 
   // Refuse a session invalidated since caller resolution, including email-proof rotation.
   const session = await teamSession(db, principal, Boolean(lock))
+
+  if (
+    role !== 'member' &&
+    membership.versionBound &&
+    !personal &&
+    !(await mayUseTeamManagementAuthority(db, principal, authorizationTeamId, role))
+  ) {
+    if (!allowMemberRead) throw denied()
+    role = 'member'
+  }
 
   // A stale browser page may now be in personal space or a member-only team. Validate
   // its expected team's authority before distinguishing a context change. Self-service
@@ -177,6 +189,40 @@ export async function checkTeamManagementAccess(
   }
 }
 
+async function mayUseTeamManagementAuthority(
+  db: Db,
+  principal: Extract<TeamAccessPrincipal, { kind: 'session' }>,
+  teamId: string,
+  role: 'owner' | 'admin',
+) {
+  const binding = principal.customRoleAuthorization?.credential
+  if (principal.customRoleAuthorization && !binding) return false
+  const current = await db
+    .selectFrom('team_credential_authorizations as credential')
+    .innerJoin(
+      'team_member_authorizations as authorization',
+      'authorization.member_id',
+      'credential.member_id',
+    )
+    .select('credential.id')
+    .where('credential.session_id', '=', principal.sessionId)
+    .where('credential.organization_id', '=', teamId)
+    .where('credential.user_id', '=', principal.user.id)
+    .where('authorization.organization_id', '=', teamId)
+    .where('authorization.user_id', '=', principal.user.id)
+    .whereRef('credential.member_generation', '=', 'authorization.generation')
+    .where(
+      sql<boolean>`${role === 'owner' ? 'members.assign_role' : 'members.read_private'} = ANY(credential.permission_ids)`,
+    )
+    .$if(binding !== undefined, (query) =>
+      query
+        .where('credential.id', '=', binding?.authorizationId as string)
+        .where('credential.credential_generation', '=', binding?.generation as number),
+    )
+    .executeTakeFirst()
+  return Boolean(current)
+}
+
 /** Shared current-team policy for session management and durable invitation senders. */
 export async function checkTeamManagementMembership(
   db: Db,
@@ -188,7 +234,8 @@ export async function checkTeamManagementMembership(
   includeRecoveryOwner = false,
   includeScimManaged = false,
   scimResourcesEnabled = false,
-): Promise<TeamReader & { personal: boolean }> {
+  includeVersionBoundary = false,
+): Promise<TeamReader & { personal: boolean; versionBound?: true }> {
   const personal = await db
     .selectFrom('personal_organizations')
     .select('organization_id')
@@ -205,6 +252,19 @@ export async function checkTeamManagementMembership(
     .where((eb) => eb.not(scimSuspended(teamId, userId, scimResourcesEnabled)))
   if (lock) memberQuery = memberQuery.forShare()
   const member = await memberQuery
+    .$if(includeVersionBoundary, (query) =>
+      query.select((eb) =>
+        eb
+          .exists(
+            eb
+              .selectFrom('team_member_authorizations')
+              .select('member_id')
+              .whereRef('member_id', '=', 'auth.member.id')
+              .where('generation', '>', 1),
+          )
+          .as('versionBound'),
+      ),
+    )
     .$if(includeRecoveryOwner, (query) => query.select(ssoRecoveryOwner))
     .$if(includeScimManaged, (query) =>
       query.select(scimManagedMember(teamId, userId).as('scimManaged')),
@@ -226,6 +286,7 @@ export async function checkTeamManagementMembership(
     organizationId: teamId,
     role,
     personal: Boolean(personal),
+    ...(member?.versionBound && { versionBound: true }),
     ...(member?.recoveryOwner && { recoveryOwner: true }),
     ...(member?.scimManaged && { scimManaged: true }),
   }

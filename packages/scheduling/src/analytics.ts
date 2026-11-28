@@ -4,6 +4,7 @@ import { sql } from 'kysely'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { validTimeZone } from './internal.ts'
+import { allowsManagedTeamOperations } from './team-permission.ts'
 
 export const MAX_ANALYTICS_DAYS = 90
 export interface ActivityCounts {
@@ -73,6 +74,40 @@ export async function getBookingActivity(
   input: { startDate: unknown; endDate: unknown; timeZone: unknown },
 ): Promise<BookingActivity> {
   const range = activityRange(input)
+  if (!ctx.principal.customRoleAuthorization?.credential) return readActivity(ctx, range, false)
+  return ctx.db
+    .transaction()
+    .setIsolationLevel('repeatable read')
+    .execute(async (trx) => {
+      const member = await trx
+        .selectFrom('auth.member as member')
+        .leftJoin(
+          'team_member_authorizations as authorization',
+          'authorization.member_id',
+          'member.id',
+        )
+        .select(['member.role', 'authorization.generation'])
+        .where('member.organizationId', '=', ctx.principal.organization.id)
+        .where('member.userId', '=', ctx.principal.user.id)
+        .executeTakeFirst()
+      const fixedManager =
+        member?.role.split(',').some((role) => ['owner', 'admin'].includes(role.trim())) ?? false
+      const authorized = await allowsManagedTeamOperations(
+        trx,
+        ctx.principal,
+        ['analytics.read'],
+        fixedManager,
+        member?.generation ?? null,
+      )
+      return readActivity({ ...ctx, db: trx }, range, authorized)
+    })
+}
+
+async function readActivity(
+  ctx: ServiceContext,
+  range: ReturnType<typeof activityRange>,
+  authorized: boolean,
+): Promise<BookingActivity> {
   const first = range.bins[0]
   const last = range.bins.at(-1)
   if (!first || !last) throw new Error('Empty validated activity range')
@@ -94,11 +129,13 @@ export async function getBookingActivity(
     WITH access AS (
       SELECT 1 FROM auth.member m
       LEFT JOIN personal_organizations p ON p.organization_id = m."organizationId"
+      LEFT JOIN team_member_authorizations a ON a.member_id = m.id
       WHERE m."organizationId" = ${organizationId} AND m."userId" = ${userId}
-        AND (p.user_id = ${userId} OR (p.organization_id IS NULL AND EXISTS (
+        AND (p.user_id = ${userId} OR (p.organization_id IS NULL AND (${authorized}::boolean OR
+          (COALESCE(a.generation, 1) = 1 AND EXISTS (
           SELECT 1 FROM unnest(string_to_array(m.role, ',')) role
           WHERE btrim(role) IN ('owner', 'admin')
-        )))
+        )))))
     ), bins(date, starts, ends) AS (VALUES ${bins}), activity AS (
       SELECT b.created_at AS at,
         (b.rescheduled_from_id IS NULL)::integer AS created,

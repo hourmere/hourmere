@@ -4,7 +4,10 @@ import { type AuditAction, writeAuditEvent } from '@hourmere/db/audit'
 import { scimSuspended } from '@hourmere/db/scim-suspension'
 import { sql } from 'kysely'
 import type { Principal } from './caller.ts'
-import { resolveTeamPermissions } from './custom-role-permissions.ts'
+import {
+  getTeamCredentialAuthorization,
+  resolveTeamPermissions,
+} from './custom-role-permissions.ts'
 import { isUuid } from './organizations.ts'
 import { ssoRecoveryOwner } from './sso-recovery-membership.ts'
 import { checkTeamManagementAccess, teamManagementDenied, teamSession } from './team-management.ts'
@@ -80,6 +83,27 @@ function requireBrowserRoleAccess({ enabled, principal }: RoleAccess) {
   return principal
 }
 
+export async function requireFixedRoleOwner(trx: Db, principal: Principal, organizationId: string) {
+  const credential = principal.customRoleAuthorization
+    ? principal.customRoleAuthorization.credential
+    : await getTeamCredentialAuthorization(trx, principal)
+  const resolved = await resolveTeamPermissions(
+    trx,
+    principal,
+    organizationId,
+    [
+      {
+        operation: 'members.assign_role',
+        fixed: ({ role, emailVerified }) =>
+          emailVerified && role.trim() === 'owner' ? 'elevated' : 'denied',
+        versionedFixed: true,
+      },
+    ],
+    { ...(credential && { credential }) },
+  )
+  if (!resolved?.decisions[0]?.allowed) throw teamManagementDenied()
+}
+
 async function lockRoleAccess(trx: Db, access: RoleAccess, lock: true | 'share') {
   const principal = requireBrowserRoleAccess(access)
   if (!trx.isTransaction) throw new Error('Custom role access requires a transaction')
@@ -87,13 +111,7 @@ async function lockRoleAccess(trx: Db, access: RoleAccess, lock: true | 'share')
     expectedOrganizationId: access.expectedOrganizationId,
     allowPersonal: false,
   })
-  const resolved = await resolveTeamPermissions(trx, principal, organizationId, [
-    {
-      operation: 'members.assign_role',
-      fixed: ({ role }) => (role.trim() === 'owner' ? 'elevated' : 'denied'),
-    },
-  ])
-  if (!resolved?.decisions[0]?.allowed) throw teamManagementDenied()
+  await requireFixedRoleOwner(trx, principal, organizationId)
   const master = await trx
     .selectFrom('custom_role_master_policy')
     .select(['enabled', 'policy_epoch'])
@@ -324,19 +342,15 @@ function personalData(role: CustomRoleView) {
   return personalDataPermissionIds.length ? { personalDataPermissionIds } : {}
 }
 
-async function prepareAssignment(
-  trx: Db,
-  scope: LockedRoleAccess,
-  command: Extract<CustomRoleCommand, { kind: 'assign' }>,
-): Promise<ApplyWrite> {
+async function assignmentState(trx: Db, scope: LockedRoleAccess, memberId: string, write: boolean) {
   const { organizationId, principal } = scope
-  if (!isUuid(command.memberId)) throw teamManagementDenied()
+  if (!isUuid(memberId)) throw teamManagementDenied()
   const member = await trx
     .selectFrom('auth.member')
     .select(['id', 'userId', 'role'])
     .select(ssoRecoveryOwner)
     .where('organizationId', '=', organizationId)
-    .where('id', '=', command.memberId)
+    .where('id', '=', memberId)
     .where(({ not, ref, exists, selectFrom }) =>
       not(
         scimSuspended(organizationId, ref('userId'), principal.scimResourcesEnabled === true),
@@ -379,7 +393,7 @@ async function prepareAssignment(
     .where('organization_id', '=', organizationId)
     .where('member_id', '=', member.id)
     .where('user_id', '=', member.userId)
-  const grant = await authorization.forUpdate().executeTakeFirst()
+  const grant = await (write ? authorization.forUpdate() : authorization).executeTakeFirst()
   if (grant?.fixed_role !== 'member') throw teamManagementDenied()
   const assignments = trx
     .selectFrom('custom_role_assignments')
@@ -387,8 +401,57 @@ async function prepareAssignment(
     .where('organization_id', '=', organizationId)
     .where('member_id', '=', member.id)
     .where('user_id', '=', member.userId)
-  const assignment = await assignments.forUpdate().executeTakeFirst()
-  const current = assignment && (await lockedRole(trx, organizationId, assignment.role_id))
+  const assignment = await (write ? assignments.forUpdate() : assignments).executeTakeFirst()
+  const current =
+    assignment &&
+    (write
+      ? await lockedRole(trx, organizationId, assignment.role_id)
+      : await roleQuery(trx, organizationId)
+          .where('role.id', '=', assignment.role_id)
+          .executeTakeFirst())
+  return { member, authorization, grant, current }
+}
+
+export async function readCustomRoleAssignment(
+  db: Db,
+  access: RoleAccess & { memberId: string; ssoCapabilities: TeamSsoCapabilities },
+): Promise<Extract<CustomRoleWriteResult, { kind: 'assignment' }>> {
+  return db.transaction().execute(async (trx) => {
+    const scope = await lockRoleAccess(trx, access, 'share')
+    await lockTeamSsoProof(
+      { capabilities: access.ssoCapabilities },
+      trx,
+      { userId: scope.principal.user.id, sessionId: scope.principal.sessionId },
+      scope.organizationId,
+      () => {
+        throw teamManagementDenied()
+      },
+      { organizationLocked: true },
+    )
+    const { member, grant, current } = await assignmentState(trx, scope, access.memberId, false)
+    return {
+      kind: 'assignment',
+      memberId: member.id,
+      generation: grant.generation,
+      roleId: current?.id ?? null,
+      revision: current?.revision ?? null,
+    }
+  })
+}
+
+async function prepareAssignment(
+  trx: Db,
+  scope: LockedRoleAccess,
+  command: Extract<CustomRoleCommand, { kind: 'assign' }>,
+): Promise<ApplyWrite> {
+  const { organizationId, principal } = scope
+  const { member, authorization, grant, current } = await assignmentState(
+    trx,
+    scope,
+    command.memberId,
+    true,
+  )
+
   const next =
     command.roleId === null
       ? null

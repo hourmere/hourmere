@@ -152,4 +152,131 @@ export const admin = {
     'Nenhuma das reservas selecionadas pode ser cancelada. Revise uma nova seleção.',
   Bookings: 'Reservas',
   Order: 'Ordem',
+
+  // Custom team roles
+  'Roles and permissions': 'Funções e permissões',
+  'Loading custom roles…': 'Carregando funções personalizadas…',
+  'Could not load custom roles.': 'Não foi possível carregar as funções personalizadas.',
+  'Shared team roster and event types, plus personal settings and assigned-host actions.':
+    'Lista compartilhada de membros e tipos de evento, configurações pessoais e ações de anfitrião atribuído.',
+  'Member access plus team settings, invitations, eligible member removal, scheduling and team integrations.':
+    'Acesso de membro, configurações da equipe, convites, remoção de membros elegíveis, agendamento e integrações da equipe.',
+  'Admin access plus fixed role changes, ownership transfer, audit retention and custom role management.':
+    'Acesso de administrador, alterações de funções fixas, transferência de propriedade, retenção da auditoria e gestão de funções personalizadas.',
+  'Fixed roles are read-only here. Custom roles keep base Member access. They cannot grant member management, private booking data or team exports.':
+    'As funções fixas são somente leitura aqui. As funções personalizadas mantêm o acesso básico de membro. Elas não concedem acesso à gestão de membros, aos dados privados de reservas ou às exportações da equipe.',
+  'Custom roles are on for this team.':
+    'As funções personalizadas estão ativadas para esta equipe.',
+  'Custom roles are off for this team.':
+    'As funções personalizadas estão desativadas para esta equipe.',
+  'Turn off custom roles': 'Desativar funções personalizadas',
+  'Turn on custom roles': 'Ativar funções personalizadas',
+  'Turning off custom roles pauses their additional access and keeps the saved roles and assignments.':
+    'Desativar as funções suspende o acesso adicional e preserva as funções e atribuições salvas.',
+  'Turning on custom roles lets owners publish roles and assign them to eligible Members.':
+    'A ativação permite que proprietários publiquem funções e as atribuam a membros elegíveis.',
+  'Members assigned a custom role who must renew after activation: {count}':
+    'Membros com função personalizada que precisam renovar o acesso após a ativação: {count}',
+  'Confirm turning off custom roles': 'Confirmar desativação das funções personalizadas',
+  'Confirm turning on custom roles': 'Confirmar ativação das funções personalizadas',
+  'Custom roles turned off.': 'Funções personalizadas desativadas.',
+  'Custom roles turned on.': 'Funções personalizadas ativadas.',
+  'Custom roles': 'Funções personalizadas',
+  'Create custom role': 'Criar função personalizada',
+  'No custom roles have been published.': 'Nenhuma função personalizada foi publicada.',
+  'Revision {revision}': 'Versão {revision}',
+  'Edit custom role': 'Editar função personalizada',
+  'Edit custom role {name}': 'Editar função personalizada {name}',
+  'Archive custom role': 'Arquivar função personalizada',
+  'Archive custom role {name}': 'Arquivar função personalizada {name}',
+  'Archiving removes the role from future assignments and keeps its revision history.':
+    'Funções arquivadas não podem mais ser atribuídas e mantêm o histórico de versões.',
+  'Custom role name': 'Nome da função personalizada',
+  'Each preset adds only the actions shown. Base Member access continues in every area.':
+    'Cada predefinição adiciona apenas as ações exibidas. O acesso básico de membro é mantido em todas as áreas.',
+  'Publishing updates every member assigned this role. Affected members must renew to use additional access.':
+    'A publicação atualiza a função de todos os membros que a têm atribuída. Eles precisam renovar o acesso para usar as ações adicionais.',
+  'Custom role archived.': 'Função personalizada arquivada.',
+  'Custom role published.': 'Função personalizada publicada.',
+  'Confirm archive': 'Confirmar arquivamento',
+  'Create and publish role': 'Criar e publicar função',
+  'Publish new revision': 'Publicar nova versão',
+  'Access preset for {area}': 'Predefinição de acesso para {area}',
+  'No additional access': 'Sem acesso adicional',
+  Custom: 'Personalizado',
+  'Team setup readiness': 'Prontidão da configuração da equipe',
+  Branding: 'Identidade visual',
+  'View aggregate booking activity': 'Ver atividade agregada de reservas',
+  'View team branding': 'Ver identidade visual da equipe',
+  'Edit team branding': 'Editar identidade visual da equipe',
+  'Upload the team logo': 'Enviar logotipo da equipe',
+  'Edit event notifications': 'Editar notificações de eventos',
+  'Activate round-robin events': 'Ativar eventos de distribuição alternada',
+  'Assign hosts': 'Atribuir anfitriões',
+  'Create event types': 'Criar tipos de evento',
+  'Delete event types': 'Excluir tipos de evento',
+  'Duplicate event types': 'Duplicar tipos de evento',
+  'View eligible hosts and their readiness': 'Ver anfitriões elegíveis e sua prontidão',
+  'Edit event types': 'Editar tipos de evento',
+  'View team setup readiness': 'Ver a prontidão da configuração da equipe',
+  'Preview routing with sample data': 'Pré-visualizar o encaminhamento com dados de exemplo',
+  'View routing forms': 'Ver formulários de encaminhamento',
+  'Preview workflows with sample data': 'Pré-visualizar fluxos de trabalho com dados de exemplo',
+  'View workflow definitions': 'Ver definições de fluxos de trabalho',
+  'View workflow run metadata': 'Ver metadados de execuções de fluxos de trabalho',
+  'Change custom role': 'Alterar função personalizada',
+  'Change custom role for {name}': 'Alterar função personalizada de {name}',
+  'Custom role assignment saved.': 'Atribuição da função personalizada salva.',
+  'Loading the current assignment…': 'Carregando a atribuição atual…',
+  'Could not load the current assignment.': 'Não foi possível carregar a atribuição atual.',
+  'Your access to this assignment could not be verified.':
+    'Não foi possível verificar seu acesso a esta atribuição.',
+  'Custom role for this member': 'Função personalizada deste membro',
+  'Fixed Member only': 'Apenas função fixa de membro',
+  'The member keeps base Member access.': 'O membro mantém o acesso básico de membro.',
+  'Additional actions gained': 'Ações adicionais concedidas',
+  'Additional actions lost': 'Ações adicionais removidas',
+  'Affected members must verify in their browser, replace their API keys and reconnect their MCP apps to use additional access.':
+    'Os membros afetados precisam se verificar no navegador, substituir as chaves de API e reconectar os aplicativos MCP para usar o acesso adicional.',
+  'Save custom role assignment': 'Salvar atribuição da função personalizada',
+  None: 'Nenhuma',
+  'Your fixed team role applies.': 'Sua função fixa na equipe se aplica.',
+  'Your access to make this change could not be verified.':
+    'Não foi possível verificar sua permissão para fazer esta alteração.',
+  'The change could not be saved. Try again.':
+    'Não foi possível salvar a alteração. Tente novamente.',
+  'Confirm your identity before changing team roles.':
+    'Confirme sua identidade antes de alterar as funções da equipe.',
+  'Your team access was renewed.': 'Seu acesso à equipe foi renovado.',
+  'Your current team access could not be checked.':
+    'Não foi possível verificar seu acesso atual à equipe.',
+  'Renew team access': 'Renovar acesso à equipe',
+  'Your team permissions changed. Verify your identity to use your current access in this browser.':
+    'Suas permissões de equipe mudaram. Confirme sua identidade para usar seu acesso atual neste navegador.',
+  'Replace affected API keys and reconnect affected MCP apps separately.':
+    'Substitua as chaves de API afetadas e reconecte separadamente os aplicativos MCP afetados.',
+  'Confirm your identity to renew team access.':
+    'Confirme sua identidade para renovar o acesso à equipe.',
+  'Verify and renew team access': 'Verificar e renovar o acesso à equipe',
+  'Review team access for this key': 'Revisar o acesso à equipe desta chave',
+  'Base team role: {role}': 'Função básica na equipe: {role}',
+  'Additional team actions available within this scope':
+    'Ações adicionais da equipe disponíveis neste escopo',
+  'Confirm and create key': 'Confirmar e criar chave',
+  'Renew your browser’s team access in Settings before issuing a new credential.':
+    'Renove o acesso do navegador à equipe nas configurações antes de emitir uma nova credencial.',
+  'Review team access for this connection': 'Revisar o acesso à equipe desta conexão',
+  'Additional team actions available to this app':
+    'Ações adicionais da equipe disponíveis para este aplicativo',
+  'Team actions available in this browser': 'Ações da equipe disponíveis neste navegador',
+  'Your custom role adds these actions in this team.':
+    'Sua função personalizada adiciona estas ações nesta equipe.',
+  'Your current team permissions do not include viewing branding.':
+    'Suas permissões atuais na equipe não incluem visualizar a identidade visual.',
+  'Some memberships have an ambiguous fixed role. Resolve their roles before turning on custom roles.':
+    'Alguns membros têm uma função fixa ambígua. Corrija essas funções antes de ativar as funções personalizadas.',
+  'Team access changed. Review it again before creating the key.':
+    'O acesso à equipe mudou. Revise-o novamente antes de criar a chave.',
+  'Team access changed. Restart this connection from your AI app.':
+    'O acesso à equipe mudou. Reinicie a conexão pelo seu aplicativo de IA.',
 }

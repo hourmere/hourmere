@@ -211,8 +211,20 @@ describe.skipIf(!serverUrl)('audit log protections under source-copy mutation', 
     ],
     [
       'memberRefused',
-      "if (roles.includes('admin')) return 'admin'",
-      "if (roles.length) return 'admin'",
+      [
+        "const fixed = roles.includes('owner') || roles.includes('admin')",
+        '  if (!(await allowsManagedTeamOperations(db, principal, [operation], fixed, row.generation)))',
+        '    throw denied()',
+        "  if (roles.includes('owner')) return 'owner'",
+        "  if (roles.includes('admin')) return 'admin'",
+      ].join('\n'),
+      [
+        'const fixed = roles.length > 0',
+        '  if (!(await allowsManagedTeamOperations(db, principal, [operation], fixed, row.generation)))',
+        '    throw denied()',
+        "  if (roles.includes('owner')) return 'owner'",
+        "  if (fixed) return 'admin'",
+      ].join('\n'),
     ],
     [
       'organizationScoped',

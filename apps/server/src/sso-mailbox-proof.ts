@@ -26,6 +26,7 @@ import { z } from 'zod'
 import { withClientIpHeader } from './client-ip.ts'
 import { createRateLimiter, type RateLimiter, rateLimitKey } from './rate-limit.ts'
 import {
+  isCustomRoleProofOperation,
   isOwnershipTransferProofOperation,
   requireSsoRetained,
   SCIM_MAPPING_CONSENT,
@@ -210,6 +211,7 @@ export interface MailboxProofDeliveryDeps {
   scimMappingConsentEnabled?: boolean
   /** Set only when the ownership transfer transport is enabled. */
   ownershipTransferEnabled?: boolean
+  customRolesEnabled?: boolean
   db: Db
   mailer: Mailer
   publicUrl: string
@@ -230,9 +232,10 @@ function attemptEnabled(
     capabilities,
     scimMappingConsentEnabled,
     ownershipTransferEnabled,
+    customRolesEnabled,
   }: Pick<
     MailboxProofDeliveryDeps,
-    'capabilities' | 'scimMappingConsentEnabled' | 'ownershipTransferEnabled'
+    'capabilities' | 'scimMappingConsentEnabled' | 'ownershipTransferEnabled' | 'customRolesEnabled'
   >,
 ) {
   if (
@@ -241,6 +244,8 @@ function attemptEnabled(
     attempt.operation === samlAdmissionOperation
   )
     return capabilities.ssoSamlEnabled
+  if (isCustomRoleProofOperation(attempt.operation))
+    return customRolesEnabled === true && attempt.kind === 'fresh_proof'
   if (isOwnershipTransferProofOperation(attempt.operation))
     return ownershipTransferEnabled === true && attempt.kind === 'fresh_proof'
   return attempt.operation === SCIM_MAPPING_CONSENT
@@ -259,6 +264,7 @@ export async function deliverMailboxProof(
   signal?: AbortSignal,
 ): Promise<void> {
   if (
+    !deps.customRolesEnabled &&
     !deps.ownershipTransferEnabled &&
     !deps.scimMappingConsentEnabled &&
     !ssoRetained(deps.capabilities)
@@ -344,6 +350,7 @@ export interface MailboxProofConsumeDeps {
   /** Allow mailbox proof for SCIM mapping consent when provisioning is enabled. */
   scimMappingConsentEnabled?: boolean
   ownershipTransferEnabled?: boolean
+  customRolesEnabled?: boolean
   db: Db
   limits?: Partial<MailboxProofLimits> | undefined
   now?: MailboxProofClock | undefined
@@ -361,7 +368,7 @@ export async function consumeMailboxProof(
   input: { attemptId: string; token: string },
   presenter: Presenter,
 ): Promise<boolean> {
-  if (!deps.ownershipTransferEnabled && !deps.scimMappingConsentEnabled)
+  if (!deps.customRolesEnabled && !deps.ownershipTransferEnabled && !deps.scimMappingConsentEnabled)
     requireSsoRetained(deps.capabilities)
   const clock = deps.now ?? databaseClock
   return deps.db.transaction().execute(async (trx) => {
@@ -475,6 +482,7 @@ export const MailboxProofConsumeInput = MailboxProofSendInput.extend({
 export function mailboxProofRoutes(deps: {
   capabilities: SsoCapabilities
   ownershipTransferEnabled?: boolean
+  customRolesEnabled?: boolean
   db: Db
   queue: MailboxProofQueue
   limits?: Partial<MailboxProofLimits> | undefined
@@ -500,7 +508,11 @@ export function mailboxProofRoutes(deps: {
         schema: z.ZodType<T>,
       ): Promise<Response | { input: T; presenter: Presenter; language: InterfaceLanguage }> {
         // While every protocol is off: before Origin, input, rate limits or any lookup.
-        if (!deps.ownershipTransferEnabled && !scimMappingConsentEnabled)
+        if (
+          !deps.customRolesEnabled &&
+          !deps.ownershipTransferEnabled &&
+          !scimMappingConsentEnabled
+        )
           requireSsoRetained(deps.capabilities)
         c.header('Cache-Control', 'no-store')
         if (c.req.method !== 'POST') return c.json({ error: 'method_not_allowed' }, 405)

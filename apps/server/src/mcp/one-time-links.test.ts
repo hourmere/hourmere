@@ -472,7 +472,7 @@ describe('one-time link MCP adapters and security mutations', () => {
     [
       'discovery',
       // biome-ignore lint/suspicious/noTemplateCurlyInString: exact source-copy mutation
-      ['|| !apiKeyAllows(caller, `mcp:${tool.name}`)) continue', '|| false) continue'],
+      ['!apiKeyAllows(caller, `mcp:${tool.name}`)', 'false'],
     ],
     ['hidden known dispatch', ['if (known && !visible.has(known.tool.name))', 'if (false)']],
   ] as const)('kills bypassing scope %s filtering', async (_name, change) => {

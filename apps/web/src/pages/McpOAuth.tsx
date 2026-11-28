@@ -16,11 +16,20 @@ import { msg } from '../i18n/translate.ts'
 import { signInPath } from '../next-path.ts'
 import { PATHS } from '../paths.ts'
 import { PageStatus, useSession } from '../session.tsx'
+import { PermissionList } from './custom-roles/PermissionList.tsx'
+import { fixedRoleLabel } from './custom-roles/permissions.ts'
 import { SsoDelegation } from './sso/SsoDelegation.tsx'
 
 // The authorization URL comes from the connecting app; schema details are not useful
 // guidance here. Reuse the localized restart message without changing API error handling.
 function authorizationError(error: unknown): unknown {
+  if (error instanceof RequestError && error.code === 'team_authorization_review_required')
+    return new RequestError(
+      error.status,
+      error.code,
+      error.message,
+      msg('Team access changed. Restart this connection from your AI app.'),
+    )
   if (error instanceof RequestError && error.code === 'sso_required')
     return new RequestError(
       error.status,
@@ -97,20 +106,42 @@ function Authorization({ email }: { email: string }) {
   const [organizationId, setOrganizationId] = useState('')
   const [busy, setBusy] = useState(false),
     [error, setError] = useState<UiText>('')
+  const [invalidReview, setInvalidReview] = useState(false)
+  const selected = info.status === 'ready' ? info.data.selectedOrganization : undefined
+  const renewalNeeded = selected?.teamAuthorizationRenewalRequired === true
+  const authorizationId = selected?.teamCredentialAuthorizationId
+  const reviewNeeded = selected?.teamAuthorizationReviewRequired === true
+  const teamRole = fixedRoleLabel(selected?.teamFixedRole)
+
   async function submit(accept: boolean) {
+    if (accept && consent && (invalidReview || renewalNeeded || (reviewNeeded && !authorizationId)))
+      return
+    const reviewedTeamAuthorization = accept && reviewNeeded && authorizationId
     setBusy(true)
     setError('')
     try {
       const result =
         consent && intentId
           ? await unwrap(
-              api.POST('/api/v1/mcp-oauth/consent', { body: { oauthQuery, intentId, accept } }),
+              api.POST('/api/v1/mcp-oauth/consent', {
+                body: {
+                  oauthQuery,
+                  intentId,
+                  accept,
+                  ...(reviewedTeamAuthorization && { reviewedTeamAuthorization: true }),
+                },
+                ...(reviewedTeamAuthorization && {
+                  headers: { 'X-Hourmere-Reviewed-Team-Authorization': reviewedTeamAuthorization },
+                }),
+              }),
             )
           : await unwrap(
               api.POST('/api/v1/mcp-oauth/select', { body: { oauthQuery, organizationId } }),
             )
       if (mounted.current) goTo(result.redirectUrl)
     } catch (err) {
+      if (err instanceof RequestError && err.code === 'team_authorization_review_required')
+        setInvalidReview(true)
       setError(errorMessage(authorizationError(err)))
       setBusy(false)
     }
@@ -179,6 +210,24 @@ function Authorization({ email }: { email: string }) {
                 'This app can use MCP tools with your permissions in this organization: view event types and availability, and create, view, reschedule or cancel bookings. It receives booking details, including attendee information and answers. It cannot manage your account or API keys.',
               )}
             </p>
+            {consent && reviewNeeded && !renewalNeeded && selected && (
+              <div className="stack">
+                <h2>{t('Review team access for this connection')}</h2>
+                {teamRole && <p>{t('Base team role: {role}', { role: t(teamRole) })}</p>}
+                <p>{t('Additional team actions available to this app')}</p>
+                <PermissionList ids={selected.teamPermissionIds ?? []} />
+              </div>
+            )}
+            {consent && renewalNeeded && (
+              <div className="alert" role="alert">
+                <p>
+                  {t(
+                    'Renew your browser’s team access in Settings before issuing a new credential.',
+                  )}
+                </p>
+                <Link to={PATHS.settings}>{t('Settings')}</Link>
+              </div>
+            )}
             {info.data.scopes.includes('offline_access') && (
               <p>
                 {text(
@@ -202,7 +251,11 @@ function Authorization({ email }: { email: string }) {
               disabled={
                 busy ||
                 (!consent && !organizationId) ||
-                (consent && !info.data.selectedOrganization)
+                (consent &&
+                  (!selected ||
+                    invalidReview ||
+                    renewalNeeded ||
+                    (reviewNeeded && !authorizationId)))
               }
               onClick={() => submit(true)}
             >

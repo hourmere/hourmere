@@ -1,5 +1,6 @@
 import { invitationEmailAccepted } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
+import { sql } from 'kysely'
 import { type ScimReply, type ScimResourceRequest, scimError } from './scim.ts'
 import { SCIM_URN } from './scim-discovery.ts'
 import { SCIM_USER_ID } from './scim-users.ts'
@@ -372,6 +373,8 @@ export async function lockScimTokenConnection(
     .select('connection_id')
     .where('token_id', '=', principal.tokenId)
     .where('organization_id', '=', principal.organizationId)
+    .where(sql<boolean>`coalesce((SELECT protocol_version FROM scim_token_protocol_versions
+      WHERE token_id = scim_token_connections.token_id), 1) = 1`)
     .executeTakeFirst()
   if (!token || !binding) throw unauthorized()
   return binding.connection_id

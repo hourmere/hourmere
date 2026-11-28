@@ -9,6 +9,19 @@ export function isOwnershipTransferProofOperation(operation: string | null) {
   return operation === CREATE_OWNERSHIP_TRANSFER || operation === CONFIRM_OWNERSHIP_TRANSFER
 }
 
+const customRoleProofOperations = new Set([
+  'customRoles_create',
+  'customRoles_publish',
+  'customRoles_archive',
+  'customRoles_assign',
+  'customRoles_permissionsMode',
+  'customRoles_renew',
+])
+
+export function isCustomRoleProofOperation(operation: string | null) {
+  return operation !== null && customRoleProofOperations.has(operation)
+}
+
 export interface SsoCapabilities {
   readonly ssoOidcEnabled: boolean
   readonly ssoSamlEnabled: boolean

@@ -1,5 +1,6 @@
 import type { Db } from '@hourmere/db'
 import { auditActor } from '@hourmere/db/audit'
+import { advanceAffectedMembership } from '@hourmere/db/custom-role-authorization'
 import { createAuthEndpoint, sensitiveSessionMiddleware } from 'better-auth/api'
 import { sql } from 'kysely'
 import { z } from 'zod'
@@ -61,6 +62,13 @@ async function completeReadmission(
   const member = await trx
     .selectFrom('auth.member')
     .select(['id', 'userId', 'organizationId'])
+    .select((eb) =>
+      eb
+        .selectFrom('team_member_authorizations')
+        .select('generation')
+        .whereRef('member_id', '=', 'auth.member.id')
+        .as('authorizationGeneration'),
+    )
     .where('organizationId', '=', team.id)
     .where('userId', '=', userId)
     .where('role', '=', 'member')
@@ -135,6 +143,12 @@ async function completeReadmission(
     .set({ cleared_at: sql<Date>`clock_timestamp()` })
     .where('id', '=', blocks[0].id)
     .executeTakeFirst()
+  if ((member.authorizationGeneration ?? 1) > 1) {
+    await sql`SELECT clear_ineligible_custom_role_assignment(${team.id}::uuid, ${member.id}::uuid)`.execute(
+      trx,
+    )
+    await advanceAffectedMembership(trx, team.id, member.id, member.authorizationGeneration)
+  }
   await finishScimClaim(
     { organizationId: team.id, userId, audit: auditActor(principal) },
     scimUserId,

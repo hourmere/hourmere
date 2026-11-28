@@ -24,6 +24,7 @@ import {
   uploadBrandLogo,
 } from './branding.ts'
 import { DomainError } from './errors.ts'
+import { allowsManagedTeamOperations, lockVersionedTeamWrite } from './team-permission.ts'
 import { createTestTeam, createTestUser, testContext } from './testing.ts'
 
 const png = () =>
@@ -269,8 +270,8 @@ describe.skipIf(!process.env.DATABASE_URL)('organization branding', () => {
       await expect(
         verify(
           serviceCopy([
-            'export async function getBrandLogo(ctx: ServiceContext, hash: string) {\n  await authorize(ctx.db, ctx)',
-            'export async function getBrandLogo(ctx: ServiceContext, hash: string) {',
+            'export async function getBrandLogo(ctx: ServiceContext, hash: string) {\n  const row = await authorizedRead(ctx, (db) =>',
+            'export async function getBrandLogo(ctx: ServiceContext, hash: string) {\n  const row = await ((run) => run(ctx.db))((db) =>',
           ]),
         ),
       ).rejects.toMatchObject({ name: 'AssertionError' })
@@ -340,7 +341,7 @@ describe.skipIf(!process.env.DATABASE_URL)('organization branding', () => {
       }
       await verify(serviceCopy())
       await expect(
-        verify(serviceCopy(['      await authorize(trx, ctx)', '      void 0'])),
+        verify(serviceCopy(['      await authorize(trx, ctx, operation)', '      void 0'])),
       ).rejects.toMatchObject({ name: 'AssertionError' })
       await verify(serviceCopy())
     },
@@ -375,7 +376,7 @@ describe.skipIf(!process.env.DATABASE_URL)('organization branding', () => {
     await expect(
       verify(
         serviceCopy([
-          'await authorize(trx, ctx, true)',
+          'await authorize(trx, ctx, operation, true)',
           '// removed final membership authorization',
         ]),
       ),
@@ -574,6 +575,8 @@ function serviceCopy(replacement?: readonly [string, string]) {
     'auditActor',
     'writeAuditEvent',
     'teamWriteTransaction',
+    'allowsManagedTeamOperations',
+    'lockVersionedTeamWrite',
     `${script}; return {normalizeBrandLogo,getBranding,setBranding,uploadBrandLogo,getBrandLogo,getPublicBranding,getPublicBrandLogo,getEmailBranding}`,
   )(
     createHash,
@@ -584,6 +587,8 @@ function serviceCopy(replacement?: readonly [string, string]) {
     auditActor,
     writeAuditEvent,
     teamWriteTransaction,
+    allowsManagedTeamOperations,
+    lockVersionedTeamWrite,
   ) as typeof import('./branding.ts')
 }
 describe('logo source-copy mutations', () => {

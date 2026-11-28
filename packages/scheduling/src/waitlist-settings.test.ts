@@ -536,8 +536,8 @@ describe.skipIf(!serverUrl)('internal waitlist settings', () => {
 
   it('detects source-copy bypass of manager entry access', async () => {
     const copy = await sourceCopy([
-      'else if (!current.canManageTeam) throw insufficientRole()',
-      'else if (false) throw insufficientRole()',
+      '!(await managedEventAccess(db, ctx, current, [operation], true))',
+      'false',
     ])
     await expectKilled(copy, assertEntries)
   })
@@ -552,8 +552,8 @@ describe.skipIf(!serverUrl)('internal waitlist settings', () => {
   it.each([
     [
       'team permission',
-      'else if (!current.canManageTeam) throw insufficientRole()',
-      'else if (false) throw insufficientRole()',
+      '!(await managedEventAccess(db, ctx, current, [operation], true))',
+      'false',
       assertRoles,
     ],
     [

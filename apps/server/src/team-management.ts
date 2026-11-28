@@ -48,10 +48,18 @@ export function organizationWriteAccess(principal: Principal, expectedOrganizati
     // A missing header cannot distinguish a personal form from an old team form whose
     // session has since switched or fallen back to personal after membership removal.
     if (expectedOrganizationId === undefined) throw contextChanged()
-    await check(db, principal, organizationId, true, {
-      expectedOrganizationId,
-      allowPersonal: true,
-    })
+    await check(
+      db,
+      principal,
+      organizationId,
+      true,
+      {
+        expectedOrganizationId,
+        allowPersonal: true,
+      },
+      principal.customRoleAuthorization?.available === true &&
+        expectedOrganizationId.toLowerCase() === principal.organization.id.toLowerCase(),
+    )
     if (targetId !== undefined) {
       // Do not distinguish another organization's object from a missing object. The same
       // recoverable refusal also prevents an expected=current forgery targeting another team.
@@ -82,6 +90,7 @@ export function organizationContextAccess(
   expectedOrganizationId: string | undefined,
   write = false,
   lock: boolean | 'key share' = false,
+  admitCustomMember = false,
 ) {
   return async (db: Db, organizationId: string): Promise<void> => {
     if (principal.kind !== 'session') return
@@ -100,12 +109,22 @@ export function organizationContextAccess(
           .where('user_id', '=', principal.user.id)
           .executeTakeFirst()
       : undefined
-    await check(db, principal, organizationId, lock, {
-      expectedOrganizationId,
-      allowPersonal:
-        ownPersonal !== undefined ||
+    // This is context admission. The operation's service checks grants on its own snapshot.
+    await check(
+      db,
+      principal,
+      organizationId,
+      lock,
+      {
+        expectedOrganizationId,
+        allowPersonal:
+          ownPersonal !== undefined ||
+          expectedOrganizationId.toLowerCase() === principal.organization.id.toLowerCase(),
+      },
+      admitCustomMember &&
+        principal.customRoleAuthorization?.available === true &&
         expectedOrganizationId.toLowerCase() === principal.organization.id.toLowerCase(),
-    })
+    )
   }
 }
 

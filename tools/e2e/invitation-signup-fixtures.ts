@@ -13,6 +13,7 @@ import { createFixtures } from '../../packages/scheduling/src/testing.ts'
 import { startFixtureServer } from './fixture-server.ts'
 import { test as base, expect } from './fixtures.ts'
 import { listenOwned, type OwnedListener } from './listeners.ts'
+import { smtpTextBody } from './smtp-text-body.ts'
 
 interface InvitationSignupState {
   accountExists: boolean
@@ -38,23 +39,6 @@ export interface InvitationSignupApp {
   invalidate: (status: 'expired' | 'canceled') => Promise<void>
   accountExists: (email: string) => Promise<boolean>
   completedSignInJobs: () => Promise<number>
-}
-
-/** Read only the loopback SMTP sink's text body; never print its one-time links. */
-function textBody(message: string): string {
-  const plain = message.match(
-    /Content-Type: text\/plain[^\r\n]*\r\n([\s\S]*?)\r\n\r\n([\s\S]*?)(?:\r\n--|$)/i,
-  )
-  if (!plain) throw new Error('SMTP mail must contain a plain-text body')
-  const [, headers = '', body = ''] = plain
-  if (/Content-Transfer-Encoding: base64/i.test(headers))
-    return Buffer.from(body.replaceAll(/\s/g, ''), 'base64').toString('utf8')
-  if (!/Content-Transfer-Encoding: quoted-printable/i.test(headers)) return body
-  return body
-    .replaceAll(/=\r\n/g, '')
-    .replaceAll(/=([0-9A-F]{2})/gi, (_, byte: string) =>
-      String.fromCharCode(Number.parseInt(byte, 16)),
-    )
 }
 
 export const test = base.extend<{
@@ -194,7 +178,7 @@ export const test = base.extend<{
             !smtp.received.to.some((recipient) => recipient.includes(`<${email}>`))
           )
             return undefined
-          const link = textBody(smtp.received.data).match(/https?:\/\/[^\s<>]+/)?.[0]
+          const link = smtpTextBody(smtp.received.data).match(/https?:\/\/[^\s<>]+/)?.[0]
           if (!link) return undefined
           const target = new URL(link)
           const expected = kind === 'invitation' ? '/app/join' : '/sign-in/confirm'

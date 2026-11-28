@@ -3,6 +3,7 @@ import {
   lockTeamSsoProof,
   type Principal,
   removeSsoRecoveryOwner,
+  requireFixedRoleOwner,
   SsoRecoveryRequiredError,
   TeamManagementError,
   teamRoles,
@@ -11,6 +12,7 @@ import {
 } from '@hourmere/auth'
 import type { Database, Db } from '@hourmere/db'
 import { auditActor, writeAuditEvent } from '@hourmere/db/audit'
+import { advanceAffectedMembership } from '@hourmere/db/custom-role-authorization'
 import { retirePendingOwnershipTransfer } from '@hourmere/db/ownership-transfer'
 import { scimManagedMember, scimSuspended } from '@hourmere/db/scim-suspension'
 import { checkTeamWriteDeadline } from '@hourmere/db/team-write'
@@ -96,6 +98,11 @@ async function teamMembers(db: Db, organizationId: string, userIds: string[], lo
     .innerJoin('auth.user as account', 'account.id', 'member.userId')
     .select(['member.id', 'member.userId', 'member.role', 'account.name', 'account.emailVerified'])
     .select((eb) => [
+      eb
+        .selectFrom('team_member_authorizations')
+        .select('generation')
+        .whereRef('member_id', '=', 'member.id')
+        .as('authorizationGeneration'),
       scimSuspended(organizationId, eb.ref('member.userId'), true).as('suspended'),
       sql<boolean>`(
         ${scimManagedMember(organizationId, eb.ref('member.userId'))}
@@ -162,6 +169,8 @@ async function authorizeActor(
   let session: Awaited<ReturnType<typeof teamSession>>
   try {
     session = await teamSession(db, principal, lock)
+    if (owner(actor) && (actor.authorizationGeneration ?? 1) > 1)
+      await requireFixedRoleOwner(db, principal, organizationId)
   } catch (error) {
     if (error instanceof TeamManagementError) throw denied()
     throw error
@@ -621,6 +630,12 @@ export async function confirmOwnershipTransfer(
               .where('organizationId', '=', organizationId)
               .returning('id')
               .executeTakeFirstOrThrow()
+            await advanceAffectedMembership(
+              trx,
+              organizationId,
+              member.id,
+              member.authorizationGeneration,
+            )
             await writeAuditEvent(trx, {
               ...auditActor(actor),
               organizationId,

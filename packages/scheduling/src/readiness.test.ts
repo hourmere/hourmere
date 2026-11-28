@@ -2092,7 +2092,7 @@ describe.skipIf(!serverUrl)('booking readiness from current cached facts (real P
     await expect(
       verifyOwn(
         sourceCopy([
-          "    .$if(actor.role === 'member', (query) => query.where('m.userId', '=', actor.userId))",
+          "    .$if(!(actor.readTeam ?? actor.role !== 'member'), (query) =>\n      query.where('m.userId', '=', actor.userId),\n    )",
           '',
         ]).getTeamMemberReadiness,
       ),

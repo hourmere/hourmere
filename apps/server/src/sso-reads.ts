@@ -1,6 +1,6 @@
 import type { Principal } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
-import { DomainError } from '@hourmere/scheduling'
+import { allowsManagedTeamOperations, DomainError } from '@hourmere/scheduling'
 import { sql } from 'kysely'
 import { z } from 'zod'
 import { requireSsoRetained, type SsoCapabilities, samlLinkRecoveryAvailable } from './sso.ts'
@@ -14,7 +14,12 @@ export interface SsoReadDeps {
 const denied = () => new DomainError('forbidden', 'team_management_access_denied')
 
 /** Every adapter uses the same current membership and credential boundary. */
-export async function authorizeSsoRead(deps: SsoReadDeps, principal: Principal) {
+export async function authorizeSsoRead(
+  deps: SsoReadDeps,
+  principal: Principal,
+  operations: readonly ('sso.read_policy' | 'sso.read_providers' | 'sso.read_links')[] = [],
+  recovery = false,
+) {
   requireSsoRetained(deps.capabilities)
   if (
     principal.organization.personal ||
@@ -26,7 +31,8 @@ export async function authorizeSsoRead(deps: SsoReadDeps, principal: Principal) 
     .selectFrom('auth.member as m')
     .innerJoin('auth.user as u', 'u.id', 'm.userId')
     .leftJoin('personal_organizations as p', 'p.organization_id', 'm.organizationId')
-    .select(['m.role', 'p.user_id'])
+    .leftJoin('team_member_authorizations as authorization', 'authorization.member_id', 'm.id')
+    .select(['m.role', 'p.user_id', 'authorization.generation'])
     .where('m.organizationId', '=', principal.organization.id)
     .where('m.userId', '=', principal.user.id)
     .where('u.emailVerified', '=', true)
@@ -37,14 +43,22 @@ export async function authorizeSsoRead(deps: SsoReadDeps, principal: Principal) 
     !member.role.split(',').some((role) => ['owner', 'admin'].includes(role.trim()))
   )
     throw denied()
+  // An approved recovery context is bound by the recovery-only REST middleware.
+  if (
+    !recovery &&
+    operations.length > 0 &&
+    !(await allowsManagedTeamOperations(deps.db, principal, operations, true, member.generation))
+  )
+    throw denied()
 }
 
 export async function getSsoPolicy(
   deps: SsoReadDeps,
   principal: Principal,
   checkedPolicy?: TeamReadPolicy | null,
+  recovery = false,
 ) {
-  await authorizeSsoRead(deps, principal)
+  await authorizeSsoRead(deps, principal, ['sso.read_policy'], recovery)
   const policy =
     checkedPolicy === undefined
       ? await deps.db
@@ -113,9 +127,15 @@ export async function listSsoProviders(
     cursor?: string | undefined
     limit?: number | undefined
     includeRecoveryLinks?: boolean
+    recovery?: boolean
   } = {},
 ) {
-  await authorizeSsoRead(deps, principal)
+  await authorizeSsoRead(
+    deps,
+    principal,
+    query.includeRecoveryLinks ? ['sso.read_providers', 'sso.read_links'] : ['sso.read_providers'],
+    query.recovery,
+  )
   const limit = query.limit ?? 50
   if (!Number.isInteger(limit) || limit < 1 || limit > 100)
     throw new DomainError('invalid', 'invalid_limit')

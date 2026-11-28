@@ -105,6 +105,12 @@ export async function revokeScimTeamCredentials(
 ) {
   await retirePendingOwnershipTransfer(trx, { organizationId, userId })
 
+  // Clear a dormant assignment while this membership is still addressable. The
+  // assignment trigger advances its generation and the shared function journals it.
+  await sql`SELECT clear_ineligible_custom_role_assignment(organization_id, member_id)
+    FROM custom_role_assignments
+    WHERE organization_id = ${organizationId}::uuid AND user_id = ${userId}::uuid`.execute(trx)
+
   // Delete by indexed account ID in one batch. A simultaneous rolling refresh only
   // updates the existing row, so it either completes before deletion or finds no session.
   await trx

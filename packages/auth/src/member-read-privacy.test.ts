@@ -5,6 +5,10 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createAuthMiddleware, getSessionFromCtx } from 'better-auth/api'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import {
+  getTeamCredentialAuthorization,
+  resolveTeamPermissions,
+} from './custom-role-permissions.ts'
 import { type Auth, createAuth, createAuthPool } from './index.ts'
 import { memberReadPrivacy } from './member-read-privacy.ts'
 import { isUuid } from './organizations.ts'
@@ -257,7 +261,9 @@ describe.skipIf(!serverUrl)('organization member read privacy', () => {
     const bindings = {
       createAuthMiddleware,
       getSessionFromCtx,
+      getTeamCredentialAuthorization,
       isUuid,
+      resolveTeamPermissions,
       teamRoles,
       teamRoleDenied,
     }
@@ -306,7 +312,10 @@ describe.skipIf(!serverUrl)('organization member read privacy', () => {
       name: 'verified-identity requirement',
       role: 'owner',
       emailVerified: false,
-      replace: ['if (!actor?.emailVerified) return false', 'if (!actor) return false'],
+      replace: [
+        'if (!actor?.emailVerified || !canReadPrivateTeamRoster(actor.role)) return false',
+        'if (!actor || !canReadPrivateTeamRoster(actor.role)) return false',
+      ],
     },
   ] as const)('detects removal of $name with a real HTTP assertion failure', async (mutation) => {
     const f = await fixture(

@@ -9,25 +9,38 @@ import { useI18n } from '../i18n/runtime.tsx'
 import type { UiText } from '../i18n/translate.ts'
 import { useUnsavedChanges } from '../unsaved-changes.tsx'
 
+type BrandAccess = { read: boolean; update: boolean; upload: boolean }
+const manageBranding: BrandAccess = { read: true, update: true, upload: true }
+
 export function BrandSettings({
   organizationId,
   canManage,
+  permissionView,
 }: {
   organizationId: string
   canManage: boolean | null
+  permissionView?: BrandAccess
 }) {
   const { t } = useI18n()
   const [open, setOpen] = useState(false)
+  const access = permissionView ?? (canManage ? manageBranding : undefined)
+  const editable = access?.update || access?.upload
   return (
     <section className="panel" aria-labelledby="branding-heading">
       <h2 id="branding-heading">{t('Booking page branding')}</h2>
       <p>
         {t('Use this space’s logo and primary colour on booking pages, embeds and booking emails.')}
       </p>
-      {canManage === null ? (
+      {!permissionView && canManage === null ? (
         <p role="status">{t('Branding access has not been confirmed.')}</p>
-      ) : !canManage ? (
-        <p>{t('Only the personal owner or team owners and admins can manage branding.')}</p>
+      ) : !access?.read ? (
+        <p>
+          {t(
+            permissionView
+              ? 'Your current team permissions do not include viewing branding.'
+              : 'Only the personal owner or team owners and admins can manage branding.',
+          )}
+        </p>
       ) : (
         <>
           <button
@@ -38,11 +51,11 @@ export function BrandSettings({
             onClick={() => setOpen(true)}
             disabled={open}
           >
-            {t('Manage branding')}
+            {t(editable ? 'Manage branding' : 'View team branding')}
           </button>
           {open && (
             <div id="branding-editor">
-              <BrandLoader organizationId={organizationId} />
+              <BrandLoader organizationId={organizationId} access={access} />
             </div>
           )}
         </>
@@ -51,7 +64,7 @@ export function BrandSettings({
   )
 }
 
-function BrandLoader({ organizationId }: { organizationId: string }) {
+function BrandLoader({ organizationId, access }: { organizationId: string; access: BrandAccess }) {
   const { t, ui } = useI18n()
   const load = useCallback(
     (signal: AbortSignal) =>
@@ -76,7 +89,17 @@ function BrandLoader({ organizationId }: { organizationId: string }) {
         </button>
       </div>
     )
-  return <BrandForm organizationId={organizationId} initial={state.data} />
+  if (!access.update && !access.upload)
+    return (
+      <BrandPreviews
+        organizationId={organizationId}
+        hash={state.data.brandLogo}
+        colour={state.data.brandPrimaryColor ?? ''}
+        file={null}
+        editable={false}
+      />
+    )
+  return <BrandForm organizationId={organizationId} initial={state.data} access={access} />
 }
 
 type Brand = {
@@ -86,7 +109,15 @@ type Brand = {
   backgroundContrast: number | null
 }
 
-function BrandForm({ organizationId, initial }: { organizationId: string; initial: Brand }) {
+function BrandForm({
+  organizationId,
+  initial,
+  access,
+}: {
+  organizationId: string
+  initial: Brand
+  access: BrandAccess
+}) {
   const { t, ui } = useI18n()
   const mounted = useMounted()
   const [saved, setSaved] = useState(initial)
@@ -124,9 +155,10 @@ function BrandForm({ organizationId, initial }: { organizationId: string; initia
     try {
       let next = saved
       const patch: { brandPrimaryColor?: string | null; brandLogo?: string | null } = {}
-      if (colour !== (saved.brandPrimaryColor ?? '')) patch.brandPrimaryColor = colour || null
-      if (!file && logo !== saved.brandLogo) patch.brandLogo = logo
-      if (file) {
+      if (access.update && colour !== (saved.brandPrimaryColor ?? ''))
+        patch.brandPrimaryColor = colour || null
+      if (access.update && !file && logo !== saved.brandLogo) patch.brandLogo = logo
+      if (access.upload && file) {
         const result = await unwrap(
           api.POST('/api/v1/branding/logo', {
             headers: { 'X-Expected-Organization-Id': organizationId, 'Content-Type': file.type },
@@ -181,85 +213,97 @@ function BrandForm({ organizationId, initial }: { organizationId: string; initia
         </p>
       )}
       <fieldset className="form-fieldset stack" disabled={busy || stale}>
-        <Field
-          id="brand-colour"
-          label={t('Primary colour')}
-          hint={t('Enter a colour in #RRGGBB format, or leave it empty to clear it.')}
-        >
-          {(props) => (
-            <input
-              {...props}
-              value={colour}
-              maxLength={7}
-              autoCapitalize="none"
-              spellCheck={false}
-              onChange={(event) => {
-                setColour(event.target.value)
-                setSuccess(false)
-              }}
-            />
-          )}
-        </Field>
-        <p className="hint">
-          {t(
-            'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against white (#FFFFFF) is reported separately.',
-          )}
-        </p>
-        <Field
-          id="brand-logo"
-          label={t('Brand logo')}
-          hint={t(
-            'Choose a valid PNG, JPEG or WebP image up to 512 KiB and 2048 × 2048 pixels. SVG and animated images are not supported.',
-          )}
-        >
-          {(props) => (
-            <input
-              {...props}
-              ref={fileInput}
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              onChange={(event) => {
-                setFile(event.target.files?.[0] ?? null)
-                setSuccess(false)
-              }}
-            />
-          )}
-        </Field>
-        <p className="hint">
-          {t(
-            'Logos are converted to PNG, at most 512 pixels on the longest side and 64 KiB. Smaller images are not enlarged.',
-          )}
-        </p>
+        {access.update && (
+          <>
+            <Field
+              id="brand-colour"
+              label={t('Primary colour')}
+              hint={t('Enter a colour in #RRGGBB format, or leave it empty to clear it.')}
+            >
+              {(props) => (
+                <input
+                  {...props}
+                  value={colour}
+                  maxLength={7}
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  onChange={(event) => {
+                    setColour(event.target.value)
+                    setSuccess(false)
+                  }}
+                />
+              )}
+            </Field>
+            <p className="hint">
+              {t(
+                'Black or white button text is selected automatically for at least 4.5:1 contrast. Contrast against white (#FFFFFF) is reported separately.',
+              )}
+            </p>
+          </>
+        )}
+        {access.upload && (
+          <>
+            <Field
+              id="brand-logo"
+              label={t('Brand logo')}
+              hint={t(
+                'Choose a valid PNG, JPEG or WebP image up to 512 KiB and 2048 × 2048 pixels. SVG and animated images are not supported.',
+              )}
+            >
+              {(props) => (
+                <input
+                  {...props}
+                  ref={fileInput}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  onChange={(event) => {
+                    setFile(event.target.files?.[0] ?? null)
+                    setSuccess(false)
+                  }}
+                />
+              )}
+            </Field>
+            <p className="hint">
+              {t(
+                'Logos are converted to PNG, at most 512 pixels on the longest side and 64 KiB. Smaller images are not enlarged.',
+              )}
+            </p>
+          </>
+        )}
         {logo && <p>{t('A logo is saved for this space.')}</p>}
-        {(logo || file) && (
+        {((access.update && logo) || file) && (
           <button
             type="button"
             className="button"
             onClick={() => {
-              setLogo(null)
+              setLogo(access.update ? null : saved.brandLogo)
               setFile(null)
               if (fileInput.current) fileInput.current.value = ''
               setSuccess(false)
             }}
           >
-            {t('Remove logo')}
+            {t(access.update ? 'Remove logo' : 'Cancel')}
           </button>
         )}
-        <button
-          type="button"
-          className="button"
-          disabled={!colour && !logo && !file}
-          onClick={() => {
-            setColour('')
-            setLogo(null)
-            setFile(null)
-            if (fileInput.current) fileInput.current.value = ''
-            setSuccess(false)
-          }}
-        >
-          {t('Reset to default')}
-        </button>
-        <p className="hint">{t('Reset clears the logo and colour when you save branding.')}</p>
+        {access.update && (
+          <>
+            <button
+              type="button"
+              className="button"
+              disabled={!colour && !logo && !file}
+              onClick={() => {
+                setColour('')
+                setLogo(null)
+                setFile(null)
+                if (fileInput.current) fileInput.current.value = ''
+                setSuccess(false)
+              }}
+            >
+              {t('Reset to default')}
+            </button>
+            <p className="hint">{t('Reset clears the logo and colour when you save branding.')}</p>
+          </>
+        )}
         <button type="submit" className="button button-primary" disabled={!dirty}>
           {busy ? t('Saving…') : t('Save branding')}
         </button>
@@ -284,11 +328,13 @@ function BrandPreviews({
   hash,
   file,
   colour,
+  editable = true,
 }: {
   organizationId: string
   hash: string | null
   file: File | null
   colour: string
+  editable?: boolean
 }) {
   const { t } = useI18n()
   const load = useCallback(
@@ -322,11 +368,13 @@ function BrandPreviews({
   return (
     <section className="stack" aria-label={t('Booking page preview')}>
       <h3>{t('Booking page preview')}</h3>
-      <p className="hint">
-        {t(
-          'Sample only. Changes apply after saving. Colours adjust in each theme for readable text and controls.',
-        )}
-      </p>
+      {editable && (
+        <p className="hint">
+          {t(
+            'Sample only. Changes apply after saving. Colours adjust in each theme for readable text and controls.',
+          )}
+        </p>
+      )}
       {preview.status === 'loading' && (hash || file) && (
         <p role="status">{t('Loading logo preview…')}</p>
       )}

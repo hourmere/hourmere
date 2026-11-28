@@ -15,7 +15,8 @@
     "./follow-up-note": "./src/follow-up-note.ts",
     "./public-avatar": "./src/public-avatar.ts",
     "./slot-snippet": "./src/slot-snippet.ts",
-    "./payment": "./src/payment.ts"
+    "./payment": "./src/payment.ts",
+    "./custom-role-catalogue": "./src/custom-role-catalogue.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"

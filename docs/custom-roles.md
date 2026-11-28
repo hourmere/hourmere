@@ -315,7 +315,32 @@ reactivate superseded credentials.
   Simplified Chinese. Keep the roles screen unavailable while hard-off and present
   readiness errors and unknown states neutrally.
 
-### Test plan for the implementation
+### Team setup and credential renewal
+
+Custom roles are staged behind the instance and team switches, which both start off.
+After operator rollout, a fixed Owner can open **Settings → Roles and permissions**,
+review the affected memberships, and verify their identity to enable or disable the
+team setting. An Owner can publish a role's first revision from the editor, publish
+later revisions with the changes shown, and archive a role after removing its
+assignments. **Settings → Members** shows which permissions change before a fixed
+Member receives a role or returns to base Member. Saving a role or assignment does
+not add authority to an existing session, key, or OAuth grant.
+
+Affected members can review their team's current authorization and verify their
+identity in Settings. To give an API key the updated authority, use the reviewed
+browser session to create a replacement key for that team and select its immutable
+scope. To update an MCP OAuth connection, select the same team and approve its
+current authorization. The new consent supersedes the previous team grant for
+that client. Ordinary browser refreshes, team switches, and OAuth token refreshes
+carry the existing ceilings.
+
+During staging, verify with the same team and client before and after disabling and
+re-enabling the team setting. Affected credentials lose custom actions as soon as
+either switch closes or the membership generation changes. Bringing a switch back
+does not restore a previously issued custom ceiling. Fixed-role credentials for
+memberships outside this boundary continue to work across switch changes.
+
+## Test plan for the implementation
 
 | Area | Acceptance checks |
 | --- | --- |

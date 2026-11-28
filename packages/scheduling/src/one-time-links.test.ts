@@ -1494,10 +1494,7 @@ describe.skipIf(!serverUrl)('one-time booking link service', () => {
 
   it('detects removed team role authorization with a real assertion failure', async () => {
     await mutation(
-      [
-        "if (event.owner_user_id === null && !roles.includes('owner') && !roles.includes('admin'))",
-        'if (false)',
-      ],
+      ['if (event.owner_user_id === null && !teamManager)', 'if (false)'],
       async (module) => {
         const owner = await createTestUser(db)
         const member = await createTestUser(db)
@@ -1555,7 +1552,7 @@ describe.skipIf(!serverUrl)('one-time booking link service', () => {
   it('detects removed persisted-key revalidation with a real assertion failure', async () => {
     await mutation(
       [
-        "if (ctx.principal.kind === 'api_key') await requireActiveApiKey(trx, ctx.principal, Date.now)",
+        "if (!ctx.principal.customRoleAuthorization?.credential && ctx.principal.kind === 'api_key')\n      await requireActiveApiKey(trx, ctx.principal, Date.now)",
         '',
       ],
       async (module) => {

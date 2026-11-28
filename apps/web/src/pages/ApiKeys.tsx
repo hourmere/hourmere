@@ -1,4 +1,5 @@
 import { type FormEvent, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router'
 import {
   API_KEY_NAME_MAX_LENGTH,
   type ApiKey,
@@ -11,17 +12,21 @@ import {
   listOrganizations,
 } from '../api/auth.ts'
 import { api, unwrap } from '../api/client.ts'
+import { loadTeamPermissions } from '../api/custom-roles.ts'
 import { errorMessage, RequestError } from '../api/errors.ts'
 import { CopyButton } from '../components/CopyButton.tsx'
 import { EmptyState } from '../components/EmptyState.tsx'
 import { OrganizationContextConflict } from '../components/OrganizationContextConflict.tsx'
 import { PageHeader } from '../components/PageHeader.tsx'
 import { PageSkeleton } from '../components/PageSkeleton.tsx'
-import { useLoad, usePageTitle } from '../hooks.ts'
+import { useLoad, useMounted, usePageTitle } from '../hooks.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import { msg, type UiText } from '../i18n/translate.ts'
+import { PATHS } from '../paths.ts'
 import { type Me, useMe } from '../session.tsx'
 import { useConfirmLeave, useUnsavedChanges } from '../unsaved-changes.tsx'
+import { PermissionList } from './custom-roles/PermissionList.tsx'
+import { fixedRoleLabel, keyPermissions } from './custom-roles/permissions.ts'
 import { SsoDelegation } from './sso/SsoDelegation.tsx'
 
 const DAY = 24 * 60 * 60
@@ -225,6 +230,12 @@ export function ApiKeysPage() {
         <CreateKeyForm
           key={replacement?.id ?? 'new'}
           organization={me.organization}
+          checkTeamAuthorization={
+            instance.status === 'ready' &&
+            (instance.data.customRolesAvailable === true ||
+              instance.data.customRoleRenewalAvailable === true) &&
+            !me.organization.personal
+          }
           replacement={replacement}
           onCancelReplacement={() => {
             if (confirmLeave()) setReplacement(null)
@@ -341,6 +352,7 @@ export function ApiKeysPage() {
 
 function CreateKeyForm({
   organization: openedOrganization,
+  checkTeamAuthorization,
   replacement,
   onCancelReplacement,
   onCreatingChange,
@@ -348,6 +360,7 @@ function CreateKeyForm({
 }: {
   /** The organization the person is working in (GET /api/v1/me); new keys act in it. */
   organization: Me['organization']
+  checkTeamAuthorization: boolean
   replacement: Replacement | null
   onCancelReplacement: () => void
   onCreatingChange: (creating: boolean) => void
@@ -371,29 +384,69 @@ function CreateKeyForm({
   const nameHint = useId()
   const scopeHint = useId()
   const nameInput = useRef<HTMLInputElement>(null)
+  const reviewHeading = useRef<HTMLHeadingElement>(null)
+  const request = useRef<AbortController | null>(null)
+  const mounted = useMounted()
+  useEffect(() => () => request.current?.abort(), [])
+  const [review, setReview] = useState<{
+    authorizationId: string
+    permissionIds: string[]
+    fixedRole?: string
+  } | null>(null)
+  const [renewalNeeded, setRenewalNeeded] = useState(false)
+  useEffect(() => {
+    if (review) reviewHeading.current?.focus()
+  }, [review])
   useUnsavedChanges(Boolean(name || expiresIn || scope !== 'bookings'))
 
   useEffect(() => {
     if (replacement) nameInput.current?.focus()
   }, [replacement])
 
-  async function submit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-    if (creating) return
+  async function issue(approved: boolean) {
+    if (request.current || (approved && !review) || (!approved && review)) return
+    const controller = new AbortController()
+    request.current = controller
     setCreating(true)
     onCreatingChange(true)
     setError(null)
     setContextError(null)
+    setRenewalNeeded(false)
     try {
+      if (checkTeamAuthorization && !approved) {
+        const permissions = await loadTeamPermissions(organization.id, controller.signal).catch(
+          (error) => {
+            if (error instanceof RequestError && error.code === 'custom_roles_disabled') return null
+            throw error
+          },
+        )
+        if (!mounted.current || controller.signal.aborted) return
+        if (permissions?.renewalRequired) {
+          setRenewalNeeded(true)
+          return
+        }
+        if (permissions?.credentialAuthorizationId) {
+          setReview({
+            authorizationId: permissions.credentialAuthorizationId,
+            permissionIds: keyPermissions(permissions.permissionIds, scope),
+            ...(permissions.fixedRole && { fixedRole: permissions.fixedRole }),
+          })
+          return
+        }
+      }
       const key = await createApiKey(
         name.trim(),
         expiresIn ? Number(expiresIn) : null,
         organization.id,
         scope,
+        approved ? review?.authorizationId : undefined,
       )
-      onCreated(key)
+      if (mounted.current) onCreated(key)
     } catch (err) {
-      if (
+      if (!mounted.current || controller.signal.aborted) return
+      if (err instanceof RequestError && err.code === 'TEAM_AUTHORIZATION_REVIEW_REQUIRED') {
+        setError('Team access changed. Review it again before creating the key.')
+      } else if (
         err instanceof RequestError &&
         err.status === 403 &&
         (err.code === 'USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION' ||
@@ -411,11 +464,22 @@ function CreateKeyForm({
         setError(msg('Could not create the key. {0}', { '0': errorMessage(err) }))
         setContextError(err)
       }
-      setCreating(false)
-      onCreatingChange(false)
+      setReview(null)
+    } finally {
+      request.current = null
+      if (mounted.current) {
+        setCreating(false)
+        onCreatingChange(false)
+      }
     }
   }
 
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    void issue(false)
+  }
+
+  const reviewedRole = fixedRoleLabel(review?.fixedRole)
   return (
     <section aria-labelledby="create-heading" className="panel">
       <h2 id="create-heading">{t('Create a key')}</h2>
@@ -446,7 +510,7 @@ function CreateKeyForm({
         {organization.personal && t(', your personal organization')}
         {t('.')}
       </p>
-      <form className="form-row" onSubmit={submit}>
+      <form className="form-row" onSubmit={submit} inert={review !== null}>
         <fieldset className="api-key-scopes" aria-describedby={scopeHint} disabled={creating}>
           <legend>{t('Scope')}</legend>
           <p id={scopeHint} className="hint">
@@ -504,6 +568,49 @@ function CreateKeyForm({
           {creating ? t('Creating…') : t('Create key')}
         </button>
       </form>
+      {review && (
+        <div className="alert stack">
+          <h3 ref={reviewHeading} tabIndex={-1}>
+            {t('Review team access for this key')}
+          </h3>
+          <p>
+            <strong dir="auto">{organization.name}</strong> ·{' '}
+            {t(SCOPE_OPTIONS.find(({ value }) => value === scope)?.name ?? 'Read only')}
+          </p>
+          {reviewedRole && <p>{t('Base team role: {role}', { role: t(reviewedRole) })}</p>}
+          <p>{t('Additional team actions available within this scope')}</p>
+          <PermissionList ids={review.permissionIds} />
+          <div className="form-actions">
+            <button
+              type="button"
+              className="button"
+              disabled={creating}
+              onClick={() => {
+                setReview(null)
+                requestAnimationFrame(() => nameInput.current?.focus())
+              }}
+            >
+              {t('Cancel')}
+            </button>
+            <button
+              type="button"
+              className="button button-primary"
+              disabled={creating}
+              onClick={() => void issue(true)}
+            >
+              {creating ? t('Creating…') : t('Confirm and create key')}
+            </button>
+          </div>
+        </div>
+      )}
+      {renewalNeeded && (
+        <div className="alert" role="alert">
+          <p>
+            {t('Renew your browser’s team access in Settings before issuing a new credential.')}
+          </p>
+          <Link to={PATHS.settings}>{t('Settings')}</Link>
+        </div>
+      )}
       {error && (
         <p className="alert alert-error" role="alert">
           {ui(error)}

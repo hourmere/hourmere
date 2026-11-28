@@ -44,8 +44,11 @@ export async function mappingMember(
     role: string
     memberVersion: string
     mailbox: string
+    authorizationGeneration: number | null
   }>`
-    SELECT m.id, m.role, m.xmin::text AS "memberVersion", lower(btrim(u.email)) AS mailbox
+    SELECT m.id, m.role, m.xmin::text AS "memberVersion", lower(btrim(u.email)) AS mailbox,
+      (SELECT generation FROM team_member_authorizations WHERE member_id = m.id)
+        AS "authorizationGeneration"
     FROM auth.member m JOIN auth."user" u ON u.id = m."userId"
     WHERE m."organizationId" = ${organizationId}::uuid AND u.id = ${userId}::uuid
       AND u."emailVerified"

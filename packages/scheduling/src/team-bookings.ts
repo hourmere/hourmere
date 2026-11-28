@@ -13,6 +13,7 @@ import {
   type TeamAdminBookingRecord,
   toTeamAdminBooking,
 } from './team-admin-booking.ts'
+import { allowsManagedTeamOperations } from './team-permission.ts'
 
 const denied = () => new DomainError('forbidden', 'team_management_access_denied')
 
@@ -85,7 +86,8 @@ async function teamManager(ctx: ServiceContext): Promise<string> {
     .innerJoin('auth.user as user', 'user.id', 'session.userId')
     .innerJoin('auth.member as member', 'member.userId', 'user.id')
     .innerJoin('auth.organization as organization', 'organization.id', 'member.organizationId')
-    .select(['organization.id', 'member.role'])
+    .leftJoin('team_member_authorizations as authorization', 'authorization.member_id', 'member.id')
+    .select(['organization.id', 'member.role', 'authorization.generation'])
     .where('session.id', '=', principal.sessionId)
     .where('session.userId', '=', principal.user.id)
     .where('session.expiresAt', '>', sql<Date>`clock_timestamp()`)
@@ -103,7 +105,17 @@ async function teamManager(ctx: ServiceContext): Promise<string> {
     )
     .executeTakeFirst()
   const roles = membership?.role.split(',').map((role) => role.trim()) ?? []
-  if (!membership || (!roles.includes('owner') && !roles.includes('admin'))) throw denied()
+  if (
+    !membership ||
+    !(await allowsManagedTeamOperations(
+      db,
+      principal,
+      ['team_bookings.read'],
+      roles.includes('owner') || roles.includes('admin'),
+      membership.generation,
+    ))
+  )
+    throw denied()
   return membership.id
 }
 

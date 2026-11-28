@@ -8,6 +8,7 @@ import {
   type createMcpOAuthResolver,
   escapeControlCharacters,
 } from '@hourmere/auth'
+import type { Db } from '@hourmere/db'
 import { type AuthInfo, createMcpHandler, McpServer } from '@modelcontextprotocol/server'
 import type { Context } from 'hono'
 import { createMiddleware } from 'hono/factory'
@@ -20,6 +21,7 @@ import { requireTeamRead, type SsoTeamReadDeps, teamReadAccess } from '../sso-te
 import { withTeamWriteAccess } from '../sso-write-middleware.ts'
 import { teamWriteTool } from '../sso-write-routes.ts'
 import { VERSION } from '../version.ts'
+import { hiddenVersionedTools } from './team-tools.ts'
 import {
   clip,
   type McpCaller,
@@ -278,6 +280,7 @@ function postOnly() {
 export interface McpEndpointOptions {
   /** Served to every caller, in this order (clients may cache the list). */
   tools: readonly Tool[]
+  db?: Db | undefined
   oauth?: {
     resolve: ReturnType<typeof createMcpOAuthResolver>
     handler: (request: Request) => Promise<Response>
@@ -291,11 +294,11 @@ export interface McpEndpointOptions {
  * Optional OAuth and metadata are supplied by the composition root. API keys keep their
  * existing resolver and rate limits; cookies never authenticate a JSON-RPC request.
  */
-export function mcpEndpoint({ tools, oauth }: McpEndpointOptions): McpModule {
+export function mcpEndpoint({ tools, oauth, db }: McpEndpointOptions): McpModule {
   const prepared = prepareTools(tools)
-  const makeHandler = (prepared: ReturnType<typeof prepareTools>) =>
+  const makeHandler = (prepared: ReturnType<typeof prepareTools>, db?: Db) =>
     createMcpHandler(
-      ({ authInfo }) => {
+      async ({ authInfo }) => {
         const caller = callerOf(authInfo)
         const server = new McpServer(SERVER_INFO, {
           // The tools never change while the server runs, so there is nothing to subscribe to.
@@ -310,6 +313,7 @@ export function mcpEndpoint({ tools, oauth }: McpEndpointOptions): McpModule {
           typeof authInfo?.extra?.trustedIp === 'string' ? authInfo.extra.trustedIp : undefined,
           authInfo?.extra?.checkTeamRead as ToolCall['checkTeamRead'],
           authInfo?.extra?.runTeamWrite as ToolCall['runTeamWrite'],
+          db && (await hiddenVersionedTools(db, caller)),
         )
         return server
       },
@@ -329,6 +333,7 @@ export function mcpEndpoint({ tools, oauth }: McpEndpointOptions): McpModule {
   }) => {
     const handler = makeHandler(
       additionalTools?.length ? prepareTools([...tools, ...additionalTools]) : prepared,
+      db ?? ssoTeamReads?.db,
     )
     if (oauth) {
       for (const path of [

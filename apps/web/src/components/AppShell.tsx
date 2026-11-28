@@ -59,6 +59,8 @@ export type AppShellContext = {
   ssoStored: boolean | undefined
   showSsoSettings: boolean
   scimResourcesEnabled: boolean
+  customRolesAvailable?: boolean
+  customRoleRenewalAvailable?: boolean
 }
 
 function keepActiveVisible(list: HTMLUListElement) {
@@ -356,6 +358,11 @@ function Shell() {
                   ssoOidcEnabled,
                   ssoSamlEnabled,
                   ssoStored,
+                  customRolesAvailable:
+                    instance.status === 'ready' && instance.data?.customRolesAvailable === true,
+                  customRoleRenewalAvailable:
+                    instance.status === 'ready' &&
+                    instance.data?.customRoleRenewalAvailable === true,
                   scimResourcesEnabled:
                     instance.status === 'ready' && instance.data?.scimResourcesEnabled === true,
                   showSsoSettings:

@@ -3601,4 +3601,122 @@ export const admin = {
     'The role or assignment changed. Reload before saving.',
   'Clear this role’s assignments before archiving it.':
     'Clear this role’s assignments before archiving it.',
+  'Roles and permissions': 'Roles and permissions',
+  'Loading custom roles…': 'Loading custom roles…',
+  'Could not load custom roles.': 'Could not load custom roles.',
+  'Shared team roster and event types, plus personal settings and assigned-host actions.':
+    'Shared team roster and event types, plus personal settings and assigned-host actions.',
+  'Member access plus team settings, invitations, eligible member removal, scheduling and team integrations.':
+    'Member access plus team settings, invitations, eligible member removal, scheduling and team integrations.',
+  'Admin access plus fixed role changes, ownership transfer, audit retention and custom role management.':
+    'Admin access plus fixed role changes, ownership transfer, audit retention and custom role management.',
+  'Fixed roles are read-only here. Custom roles keep base Member access. They cannot grant member management, private booking data or team exports.':
+    'Fixed roles are read-only here. Custom roles keep base Member access. They cannot grant member management, private booking data or team exports.',
+  'Custom roles are on for this team.': 'Custom roles are on for this team.',
+  'Custom roles are off for this team.': 'Custom roles are off for this team.',
+  'Turn off custom roles': 'Turn off custom roles',
+  'Turn on custom roles': 'Turn on custom roles',
+  'Turning off custom roles pauses their additional access and keeps the saved roles and assignments.':
+    'Turning off custom roles pauses their additional access and keeps the saved roles and assignments.',
+  'Turning on custom roles lets owners publish roles and assign them to eligible Members.':
+    'Turning on custom roles lets owners publish roles and assign them to eligible Members.',
+  'Members assigned a custom role who must renew after activation: {count}':
+    'Members assigned a custom role who must renew after activation: {count}',
+  'Confirm turning off custom roles': 'Confirm turning off custom roles',
+  'Confirm turning on custom roles': 'Confirm turning on custom roles',
+  'Custom roles turned off.': 'Custom roles turned off.',
+  'Custom roles turned on.': 'Custom roles turned on.',
+  'Custom roles': 'Custom roles',
+  'Create custom role': 'Create custom role',
+  'No custom roles have been published.': 'No custom roles have been published.',
+  'Edit custom role': 'Edit custom role',
+  'Edit custom role {name}': 'Edit custom role {name}',
+  'Archive custom role': 'Archive custom role',
+  'Archive custom role {name}': 'Archive custom role {name}',
+  'Archiving removes the role from future assignments and keeps its revision history.':
+    'Archiving removes the role from future assignments and keeps its revision history.',
+  'Custom role name': 'Custom role name',
+  'Each preset adds only the actions shown. Base Member access continues in every area.':
+    'Each preset adds only the actions shown. Base Member access continues in every area.',
+  'Publishing updates every member assigned this role. Affected members must renew to use additional access.':
+    'Publishing updates every member assigned this role. Affected members must renew to use additional access.',
+  'Custom role archived.': 'Custom role archived.',
+  'Custom role published.': 'Custom role published.',
+  'Confirm archive': 'Confirm archive',
+  'Create and publish role': 'Create and publish role',
+  'Publish new revision': 'Publish new revision',
+  'Access preset for {area}': 'Access preset for {area}',
+  'No additional access': 'No additional access',
+  Custom: 'Custom',
+  'Team setup readiness': 'Team setup readiness',
+  Branding: 'Branding',
+  'View aggregate booking activity': 'View aggregate booking activity',
+  'View team branding': 'View team branding',
+  'Edit team branding': 'Edit team branding',
+  'Upload the team logo': 'Upload the team logo',
+  'Edit event notifications': 'Edit event notifications',
+  'Activate round-robin events': 'Activate round-robin events',
+  'Assign hosts': 'Assign hosts',
+  'Create event types': 'Create event types',
+  'Delete event types': 'Delete event types',
+  'Duplicate event types': 'Duplicate event types',
+  'View eligible hosts and their readiness': 'View eligible hosts and their readiness',
+  'Edit event types': 'Edit event types',
+  'View team setup readiness': 'View team setup readiness',
+  'Preview routing with sample data': 'Preview routing with sample data',
+  'View routing forms': 'View routing forms',
+  'Preview workflows with sample data': 'Preview workflows with sample data',
+  'View workflow definitions': 'View workflow definitions',
+  'View workflow run metadata': 'View workflow run metadata',
+  'Change custom role': 'Change custom role',
+  'Change custom role for {name}': 'Change custom role for {name}',
+  'Custom role assignment saved.': 'Custom role assignment saved.',
+  'Loading the current assignment…': 'Loading the current assignment…',
+  'Could not load the current assignment.': 'Could not load the current assignment.',
+  'Your access to this assignment could not be verified.':
+    'Your access to this assignment could not be verified.',
+  'Custom role for this member': 'Custom role for this member',
+  'Fixed Member only': 'Fixed Member only',
+  'The member keeps base Member access.': 'The member keeps base Member access.',
+  'Additional actions gained': 'Additional actions gained',
+  'Additional actions lost': 'Additional actions lost',
+  'Affected members must verify in their browser, replace their API keys and reconnect their MCP apps to use additional access.':
+    'Affected members must verify in their browser, replace their API keys and reconnect their MCP apps to use additional access.',
+  'Save custom role assignment': 'Save custom role assignment',
+  'Your fixed team role applies.': 'Your fixed team role applies.',
+  'Your access to make this change could not be verified.':
+    'Your access to make this change could not be verified.',
+  'The change could not be saved. Try again.': 'The change could not be saved. Try again.',
+  'Confirm your identity before changing team roles.':
+    'Confirm your identity before changing team roles.',
+  'Your team access was renewed.': 'Your team access was renewed.',
+  'Your current team access could not be checked.':
+    'Your current team access could not be checked.',
+  'Renew team access': 'Renew team access',
+  'Your team permissions changed. Verify your identity to use your current access in this browser.':
+    'Your team permissions changed. Verify your identity to use your current access in this browser.',
+  'Replace affected API keys and reconnect affected MCP apps separately.':
+    'Replace affected API keys and reconnect affected MCP apps separately.',
+  'Confirm your identity to renew team access.': 'Confirm your identity to renew team access.',
+  'Verify and renew team access': 'Verify and renew team access',
+  'Review team access for this key': 'Review team access for this key',
+  'Base team role: {role}': 'Base team role: {role}',
+  'Additional team actions available within this scope':
+    'Additional team actions available within this scope',
+  'Confirm and create key': 'Confirm and create key',
+  'Renew your browser’s team access in Settings before issuing a new credential.':
+    'Renew your browser’s team access in Settings before issuing a new credential.',
+  'Review team access for this connection': 'Review team access for this connection',
+  'Additional team actions available to this app': 'Additional team actions available to this app',
+  'Team actions available in this browser': 'Team actions available in this browser',
+  'Your custom role adds these actions in this team.':
+    'Your custom role adds these actions in this team.',
+  'Your current team permissions do not include viewing branding.':
+    'Your current team permissions do not include viewing branding.',
+  'Some memberships have an ambiguous fixed role. Resolve their roles before turning on custom roles.':
+    'Some memberships have an ambiguous fixed role. Resolve their roles before turning on custom roles.',
+  'Team access changed. Review it again before creating the key.':
+    'Team access changed. Review it again before creating the key.',
+  'Team access changed. Restart this connection from your AI app.':
+    'Team access changed. Restart this connection from your AI app.',
 } as const

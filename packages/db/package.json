@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./custom-role-authorization": "./src/custom-role-authorization.ts",
     "./testing": "./src/testing.ts",
     "./migration-replay": "./src/testing/migration-replay.ts",
     "./test-database-registry": "./src/test-database-registry.ts",

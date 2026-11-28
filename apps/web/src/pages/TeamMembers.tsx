@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router'
 import { type ListedOrganizationMember, listOrganizationMembers } from '../api/auth.ts'
+import type { CustomTeamRole } from '../api/custom-roles.ts'
 import { errorMessage, RequestError } from '../api/errors.ts'
 import { BreakableText } from '../components/BreakableText.tsx'
 import { MemberReadiness } from '../components/team-members/MemberReadiness.tsx'
@@ -20,6 +21,8 @@ import { UserContentMessage } from '../components/UserContent.tsx'
 import { useI18n } from '../i18n/runtime.tsx'
 import type { MessageKey, UiText } from '../i18n/translate.ts'
 import { PATHS } from '../paths.ts'
+import { CustomRoleAssignmentButton } from './custom-roles/CustomRoleAssignment.tsx'
+import type { RoleProofContext } from './custom-roles/role-write.tsx'
 import { SsoRecoveryNomination } from './sso/SsoRecoveryEnrollment.tsx'
 import { TeamInvitations } from './TeamInvitations.tsx'
 
@@ -109,6 +112,7 @@ export function TeamMembers({
   onLeft = () => {},
   onReload = () => {},
   canNominateRecoveryOwner = false,
+  customRoleAssignments,
 }: {
   organizationId: string
   role: string | null
@@ -116,6 +120,11 @@ export function TeamMembers({
   onLeft?: () => void
   onReload?: () => void
   canNominateRecoveryOwner?: boolean
+  customRoleAssignments?: {
+    roles: CustomTeamRole[]
+    context: RoleProofContext
+    reload: () => void
+  } | null
 }) {
   const { t } = useI18n()
   const { hash, key } = useLocation()
@@ -135,6 +144,7 @@ export function TeamMembers({
   const [selectedMember, setSelectedMember] = useState<ListedOrganizationMember | null>(null)
   const [reviewOpen, setReviewOpen] = useState(false)
   const [roleReviewOpen, setRoleReviewOpen] = useState(false)
+  const [customRoleReviewOpen, setCustomRoleReviewOpen] = useState(false)
   const [nomineeId, setNomineeId] = useState<string | null>(null)
   const removalOpener = useRef<HTMLButtonElement | null>(null)
   const nominationOpener = useRef<HTMLButtonElement | null>(null)
@@ -304,7 +314,11 @@ export function TeamMembers({
                       role={role}
                       currentUserId={currentUserId}
                       disabled={
-                        reviewOpen || selectedMember !== null || roleReviewOpen || nominating
+                        reviewOpen ||
+                        selectedMember !== null ||
+                        roleReviewOpen ||
+                        customRoleReviewOpen ||
+                        nominating
                       }
                       scimSuspended={blockers.includes('scim_suspension')}
                       onReviewChange={setRoleReviewOpen}
@@ -318,12 +332,36 @@ export function TeamMembers({
                       }
                       onReload={onReload}
                     />
+                    {role?.trim() === 'owner' &&
+                      customRoleAssignments &&
+                      !own &&
+                      member.role.trim() === 'member' &&
+                      blockers.length === 0 && (
+                        <CustomRoleAssignmentButton
+                          context={customRoleAssignments.context}
+                          roles={customRoleAssignments.roles}
+                          member={member}
+                          disabled={
+                            reviewOpen ||
+                            selectedMember !== null ||
+                            roleReviewOpen ||
+                            customRoleReviewOpen ||
+                            nominating
+                          }
+                          onReviewChange={setCustomRoleReviewOpen}
+                          onReload={customRoleAssignments.reload}
+                        />
+                      )}
                     <RemoveMemberButton
                       member={member}
                       role={role}
                       currentUserId={currentUserId}
                       disabled={
-                        reviewOpen || selectedMember !== null || roleReviewOpen || nominating
+                        reviewOpen ||
+                        selectedMember !== null ||
+                        roleReviewOpen ||
+                        customRoleReviewOpen ||
+                        nominating
                       }
                       onSelect={(target, opener) => {
                         removalOpener.current = opener
@@ -337,7 +375,11 @@ export function TeamMembers({
                             type="button"
                             className="button button-small button-wrap user-content"
                             disabled={
-                              reviewOpen || selectedMember !== null || roleReviewOpen || nominating
+                              reviewOpen ||
+                              selectedMember !== null ||
+                              roleReviewOpen ||
+                              customRoleReviewOpen ||
+                              nominating
                             }
                             onClick={(event) => {
                               nominationOpener.current = event.currentTarget

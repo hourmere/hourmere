@@ -79,6 +79,73 @@ describe('MCP connection approval', () => {
       expect(goTo).toHaveBeenCalledWith('https://connector.test/callback?code=synthetic')
     },
   )
+  it('reviews selected team actions before explicitly approving a new grant', async () => {
+    const user = userEvent.setup()
+    const intentId = '00000000-0000-7000-8000-000000000004'
+    const authorizationId = '00000000-0000-7000-8000-000000000005'
+    const requests = fakeApi({
+      ...signedIn,
+      'POST /api/v1/mcp-oauth/request': () =>
+        json(200, {
+          ...info,
+          selectedOrganization: {
+            ...info.organizations[1],
+            teamAuthorizationReviewRequired: true,
+            teamCredentialAuthorizationId: authorizationId,
+            teamPermissionIds: ['branding.read'],
+            teamFixedRole: 'member',
+          },
+        }),
+      'POST /api/v1/mcp-oauth/consent': () =>
+        json(200, { redirectUrl: 'https://connector.test/callback?code=synthetic' }),
+    })
+    renderApp(`/oauth/consent?${query}#intent=${intentId}`)
+    await screen.findByRole('heading', { name: 'Review team access for this connection' })
+    expect(screen.getByText('View team branding')).toBeDefined()
+    expect(requests.to('POST /api/v1/mcp-oauth/consent')).toHaveLength(0)
+    await user.click(screen.getByRole('button', { name: 'Allow access' }))
+    const approved = requests.to('POST /api/v1/mcp-oauth/consent')[0]
+    expect(approved?.body).toEqual({
+      oauthQuery: query,
+      intentId,
+      accept: true,
+      reviewedTeamAuthorization: true,
+    })
+    expect(approved?.headers.get('X-Hourmere-Reviewed-Team-Authorization')).toBe(authorizationId)
+  })
+
+  it('blocks consent from a stale team authorization and keeps denial available', async () => {
+    const user = userEvent.setup()
+    const intentId = '00000000-0000-7000-8000-000000000004'
+    const requests = fakeApi({
+      ...signedIn,
+      'POST /api/v1/mcp-oauth/request': () =>
+        json(200, {
+          ...info,
+          selectedOrganization: {
+            ...info.organizations[1],
+            teamAuthorizationRenewalRequired: true,
+            teamAuthorizationReviewRequired: true,
+            teamPermissionIds: ['branding.read'],
+          },
+        }),
+      'POST /api/v1/mcp-oauth/consent': () =>
+        json(200, { redirectUrl: 'https://connector.test/callback?error=access_denied' }),
+    })
+    renderApp(`/oauth/consent?${query}#intent=${intentId}`)
+    await screen.findByText(
+      'Renew your browser’s team access in Settings before issuing a new credential.',
+    )
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Allow access' }).disabled).toBe(
+      true,
+    )
+    expect(requests.to('POST /api/v1/mcp-oauth/consent')).toHaveLength(0)
+    await user.click(screen.getByRole('button', { name: 'Deny' }))
+    const denied = requests.to('POST /api/v1/mcp-oauth/consent')[0]
+    expect(denied?.body).toEqual({ oauthQuery: query, intentId, accept: false })
+    expect(denied?.headers.has('X-Hourmere-Reviewed-Team-Authorization')).toBe(false)
+  })
+
   it('keeps explicit organization approval and grant wording intact across language changes', async () => {
     const user = userEvent.setup()
     const api = fakeApi({

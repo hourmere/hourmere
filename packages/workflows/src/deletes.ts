@@ -44,6 +44,7 @@ export async function deleteWorkflowDefinition(
       identity.owner_user_id
         ? { kind: 'personal', id: identity.owner_user_id }
         : { kind: 'team', id: identity.organization_id },
+      ['workflows.delete'],
     )
     const current = await trx
       .selectFrom('workflow_definitions')

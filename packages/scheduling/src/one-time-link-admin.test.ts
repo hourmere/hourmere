@@ -725,7 +725,7 @@ describe.skipIf(!serverUrl)('one-time link administration', () => {
   it('mutation: persisted credential checks on metadata and revocation', async () => {
     await mutation(
       [
-        "if (ctx.principal.kind === 'api_key') await requireActiveApiKey(db, ctx.principal, Date.now)",
+        "if (!ctx.principal.customRoleAuthorization?.credential && ctx.principal.kind === 'api_key')\n    await requireActiveApiKey(db, ctx.principal, Date.now)",
         '',
       ],
       verifyReadKeyStatus,
@@ -759,19 +759,22 @@ describe.skipIf(!serverUrl)('one-time link administration', () => {
     )
   })
   it('mutation: current event management authority on metadata reads', async () => {
-    await mutation(['await authorizedEvent(db, ctx, eventTypeId)', 'void 0'], async (module) => {
-      const owner = await createTestUser(db)
-      const member = await createTestUser(db)
-      const team = await createTestTeam(db, [
-        { user: owner, role: 'owner' },
-        { user: member, role: 'member' },
-      ])
-      const eventTypeId = await fixtures.eventType(team.id, null)
-      const ctx = testContext(db, session(team.as(member)))
-      await expect(module.listOneTimeBookingLinks(ctx, { eventTypeId })).rejects.toMatchObject({
-        code: 'insufficient_role',
-      })
-    })
+    await mutation(
+      ['await authorizedEvent(db, ctx, eventTypeId, operation)', '{ canReadCreatorEmail: false }'],
+      async (module) => {
+        const owner = await createTestUser(db)
+        const member = await createTestUser(db)
+        const team = await createTestTeam(db, [
+          { user: owner, role: 'owner' },
+          { user: member, role: 'member' },
+        ])
+        const eventTypeId = await fixtures.eventType(team.id, null)
+        const ctx = testContext(db, session(team.as(member)))
+        await expect(module.listOneTimeBookingLinks(ctx, { eventTypeId })).rejects.toMatchObject({
+          code: 'insufficient_role',
+        })
+      },
+    )
   })
   it('mutation: duplicate create payload binding', async () => {
     await mutation(['if (!same)', 'if (false)'], async (module) => {

@@ -153,4 +153,131 @@ export const admin = {
     'No se puede cancelar ninguna de las reservas seleccionadas. Revisa una nueva selección.',
   Bookings: 'Reservas',
   Order: 'Orden',
+
+  // Custom team roles
+  'Roles and permissions': 'Roles y permisos',
+  'Loading custom roles…': 'Cargando roles personalizados…',
+  'Could not load custom roles.': 'No se pudieron cargar los roles personalizados.',
+  'Shared team roster and event types, plus personal settings and assigned-host actions.':
+    'Lista compartida y tipos de eventos del equipo, ajustes personales y acciones como anfitrión asignado.',
+  'Member access plus team settings, invitations, eligible member removal, scheduling and team integrations.':
+    'Acceso de miembro más ajustes del equipo, invitaciones, eliminación de miembros elegibles, programación e integraciones del equipo.',
+  'Admin access plus fixed role changes, ownership transfer, audit retention and custom role management.':
+    'Acceso de administrador más cambios de roles fijos, transferencia de propiedad, retención de auditoría y gestión de roles personalizados.',
+  'Fixed roles are read-only here. Custom roles keep base Member access. They cannot grant member management, private booking data or team exports.':
+    'Los roles fijos son de solo lectura aquí. Los roles personalizados conservan el acceso básico de miembro. No permiten gestionar miembros, acceder a datos privados de reservas ni exportar datos del equipo.',
+  'Custom roles are on for this team.':
+    'Los roles personalizados están activados para este equipo.',
+  'Custom roles are off for this team.':
+    'Los roles personalizados están desactivados para este equipo.',
+  'Turn off custom roles': 'Desactivar roles personalizados',
+  'Turn on custom roles': 'Activar roles personalizados',
+  'Turning off custom roles pauses their additional access and keeps the saved roles and assignments.':
+    'Al desactivar los roles, se suspenden sus accesos adicionales y se conservan los roles y asignaciones guardados.',
+  'Turning on custom roles lets owners publish roles and assign them to eligible Members.':
+    'Al activar los roles, los propietarios pueden publicarlos y asignarlos a miembros elegibles.',
+  'Members assigned a custom role who must renew after activation: {count}':
+    'Miembros con rol personalizado que deben renovar su acceso tras la activación: {count}',
+  'Confirm turning off custom roles': 'Confirmar desactivación de roles personalizados',
+  'Confirm turning on custom roles': 'Confirmar activación de roles personalizados',
+  'Custom roles turned off.': 'Roles personalizados desactivados.',
+  'Custom roles turned on.': 'Roles personalizados activados.',
+  'Custom roles': 'Roles personalizados',
+  'Create custom role': 'Crear rol personalizado',
+  'No custom roles have been published.': 'No se han publicado roles personalizados.',
+  'Revision {revision}': 'Versión {revision}',
+  'Edit custom role': 'Editar rol personalizado',
+  'Edit custom role {name}': 'Editar rol personalizado {name}',
+  'Archive custom role': 'Archivar rol personalizado',
+  'Archive custom role {name}': 'Archivar rol personalizado {name}',
+  'Archiving removes the role from future assignments and keeps its revision history.':
+    'Los roles archivados ya no se pueden asignar y conservan su historial de versiones.',
+  'Custom role name': 'Nombre del rol personalizado',
+  'Each preset adds only the actions shown. Base Member access continues in every area.':
+    'Cada opción predefinida añade solo las acciones que se muestran. El acceso básico de miembro se conserva en todas las áreas.',
+  'Publishing updates every member assigned this role. Affected members must renew to use additional access.':
+    'La publicación actualiza el rol de todos los miembros que lo tienen asignado. Deben renovar su acceso para usar las acciones adicionales.',
+  'Custom role archived.': 'Rol personalizado archivado.',
+  'Custom role published.': 'Rol personalizado publicado.',
+  'Confirm archive': 'Confirmar archivo',
+  'Create and publish role': 'Crear y publicar rol',
+  'Publish new revision': 'Publicar nueva versión',
+  'Access preset for {area}': 'Acceso predefinido para {area}',
+  'No additional access': 'Sin acceso adicional',
+  Custom: 'Personalizado',
+  'Team setup readiness': 'Estado de configuración del equipo',
+  Branding: 'Marca',
+  'View aggregate booking activity': 'Ver actividad agregada de reservas',
+  'View team branding': 'Ver la marca del equipo',
+  'Edit team branding': 'Editar la marca del equipo',
+  'Upload the team logo': 'Subir el logotipo del equipo',
+  'Edit event notifications': 'Editar notificaciones de eventos',
+  'Activate round-robin events': 'Activar eventos de asignación rotativa',
+  'Assign hosts': 'Asignar anfitriones',
+  'Create event types': 'Crear tipos de eventos',
+  'Delete event types': 'Eliminar tipos de eventos',
+  'Duplicate event types': 'Duplicar tipos de eventos',
+  'View eligible hosts and their readiness':
+    'Ver anfitriones elegibles y su estado de configuración',
+  'Edit event types': 'Editar tipos de eventos',
+  'View team setup readiness': 'Ver el estado de configuración del equipo',
+  'Preview routing with sample data': 'Previsualizar el enrutamiento con datos de ejemplo',
+  'View routing forms': 'Ver formularios de enrutamiento',
+  'Preview workflows with sample data': 'Previsualizar flujos de trabajo con datos de ejemplo',
+  'View workflow definitions': 'Ver definiciones de flujos de trabajo',
+  'View workflow run metadata': 'Ver metadatos de ejecuciones de flujos de trabajo',
+  'Change custom role': 'Cambiar rol personalizado',
+  'Change custom role for {name}': 'Cambiar rol personalizado de {name}',
+  'Custom role assignment saved.': 'Asignación de rol personalizado guardada.',
+  'Loading the current assignment…': 'Cargando la asignación actual…',
+  'Could not load the current assignment.': 'No se pudo cargar la asignación actual.',
+  'Your access to this assignment could not be verified.':
+    'No se pudo verificar tu acceso a esta asignación.',
+  'Custom role for this member': 'Rol personalizado de este miembro',
+  'Fixed Member only': 'Solo rol fijo de miembro',
+  'The member keeps base Member access.': 'El miembro conserva el acceso básico de miembro.',
+  'Additional actions gained': 'Acciones adicionales concedidas',
+  'Additional actions lost': 'Acciones adicionales retiradas',
+  'Affected members must verify in their browser, replace their API keys and reconnect their MCP apps to use additional access.':
+    'Los miembros afectados deben verificarse en el navegador, reemplazar sus claves de API y volver a conectar sus aplicaciones MCP para usar el acceso adicional.',
+  'Save custom role assignment': 'Guardar asignación del rol personalizado',
+  None: 'Ninguna',
+  'Your fixed team role applies.': 'Se aplica tu rol fijo en el equipo.',
+  'Your access to make this change could not be verified.':
+    'No se pudo verificar tu permiso para realizar este cambio.',
+  'The change could not be saved. Try again.': 'No se pudo guardar el cambio. Inténtalo de nuevo.',
+  'Confirm your identity before changing team roles.':
+    'Confirma tu identidad antes de cambiar los roles del equipo.',
+  'Your team access was renewed.': 'Se renovó tu acceso al equipo.',
+  'Your current team access could not be checked.':
+    'No se pudo comprobar tu acceso actual al equipo.',
+  'Renew team access': 'Renovar el acceso al equipo',
+  'Your team permissions changed. Verify your identity to use your current access in this browser.':
+    'Tus permisos del equipo han cambiado. Verifica tu identidad para usar tu acceso actual en este navegador.',
+  'Replace affected API keys and reconnect affected MCP apps separately.':
+    'Reemplaza por separado las claves de API afectadas y vuelve a conectar las aplicaciones MCP afectadas.',
+  'Confirm your identity to renew team access.':
+    'Confirma tu identidad para renovar el acceso al equipo.',
+  'Verify and renew team access': 'Verificar y renovar el acceso al equipo',
+  'Review team access for this key': 'Revisar el acceso al equipo de esta clave',
+  'Base team role: {role}': 'Rol básico del equipo: {role}',
+  'Additional team actions available within this scope':
+    'Acciones adicionales del equipo disponibles en este alcance',
+  'Confirm and create key': 'Confirmar y crear clave',
+  'Renew your browser’s team access in Settings before issuing a new credential.':
+    'Renueva el acceso de tu navegador al equipo en Ajustes antes de emitir una nueva credencial.',
+  'Review team access for this connection': 'Revisar el acceso al equipo de esta conexión',
+  'Additional team actions available to this app':
+    'Acciones adicionales del equipo disponibles para esta aplicación',
+  'Team actions available in this browser': 'Acciones del equipo disponibles en este navegador',
+  'Your custom role adds these actions in this team.':
+    'Tu rol personalizado añade estas acciones en este equipo.',
+  'Your current team permissions do not include viewing branding.':
+    'Tus permisos actuales del equipo no incluyen ver la marca.',
+  'Some memberships have an ambiguous fixed role. Resolve their roles before turning on custom roles.':
+    'Algunos miembros tienen un rol fijo ambiguo. Resuelve esos roles antes de activar los roles personalizados.',
+  'Team access changed. Review it again before creating the key.':
+    'El acceso al equipo ha cambiado. Revísalo antes de crear la clave.',
+  'Team access changed. Restart this connection from your AI app.':
+    'El acceso al equipo ha cambiado. Reinicia la conexión desde tu aplicación de IA.',
 }

@@ -10,7 +10,9 @@
 // `workflows_disabled` while workflows are off. The unguarded services are the internal entry
 // points that tests call directly with injected dependencies, as hard-off.ts describes.
 
+import type { Principal } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
+import { allowsManagedTeamOperations } from '@hourmere/scheduling'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { derivePurposeKey, openSecret, sealSecret } from '@hourmere/scheduling/sealed-secret'
 import { sql } from 'kysely'
@@ -48,7 +50,7 @@ export interface WorkflowReader {
 
 export interface WorkflowReadContext {
   db: Db
-  principal: WorkflowReader
+  principal: WorkflowReader | Principal
 }
 
 /** A definition as the reads return it: its current revision and the live enabled flag. */
@@ -111,7 +113,11 @@ function uuid(value: unknown): string | undefined {
  * verified user's own personal organization, or a team it currently owns or administers. An
  * ordinary member, a removed or unverified user and anything malformed read nothing.
  */
-async function readableOwner(db: Db, reader: WorkflowReader): Promise<WorkflowOwner | undefined> {
+async function readableOwner(
+  db: Db,
+  reader: WorkflowReadContext['principal'],
+  operation: 'workflows.read' | 'workflows.read_runs' = 'workflows.read',
+): Promise<WorkflowOwner | undefined> {
   const userId = uuid(reader.user.id)
   const organizationId = uuid(reader.organization.id)
   if (!userId || !organizationId) return undefined
@@ -120,7 +126,8 @@ async function readableOwner(db: Db, reader: WorkflowReader): Promise<WorkflowOw
     .innerJoin('auth.user as u', 'u.id', 'm.userId')
     .innerJoin('auth.organization as o', 'o.id', 'm.organizationId')
     .leftJoin('personal_organizations as p', 'p.organization_id', 'm.organizationId')
-    .select(['m.role', 'p.user_id as personalUserId'])
+    .leftJoin('team_member_authorizations as authorization', 'authorization.member_id', 'm.id')
+    .select(['m.role', 'p.user_id as personalUserId', 'authorization.generation'])
     .where('m.organizationId', '=', organizationId)
     .where('m.userId', '=', userId)
     .where('u.emailVerified', '=', true)
@@ -132,9 +139,18 @@ async function readableOwner(db: Db, reader: WorkflowReader): Promise<WorkflowOw
       : undefined
   // Better Auth stores several roles comma-separated.
   const roles = membership.role.split(',').map((role) => role.trim())
-  return roles.includes('owner') || roles.includes('admin')
-    ? { kind: 'team', organizationId }
-    : undefined
+  const fixedManager = roles.includes('owner') || roles.includes('admin')
+  const allowed =
+    'kind' in reader
+      ? await allowsManagedTeamOperations(
+          db,
+          reader,
+          [operation],
+          fixedManager,
+          membership.generation,
+        )
+      : fixedManager && (membership.generation === null || membership.generation === 1)
+  return allowed ? { kind: 'team', organizationId } : undefined
 }
 
 /** The owner's live definitions with their current revision. */
@@ -314,7 +330,7 @@ async function readWorkflowRuns(ctx: RunHistoryContext, id: string, input: RunHi
     .transaction()
     .setIsolationLevel('repeatable read')
     .execute(async (trx) => {
-      const owner = await readableOwner(trx, ctx.principal)
+      const owner = await readableOwner(trx, ctx.principal, 'workflows.read_runs')
       if (!owner) throw notFound()
       const workflow = await workflowIdentitiesOf(trx, owner)
         .select('d.id')

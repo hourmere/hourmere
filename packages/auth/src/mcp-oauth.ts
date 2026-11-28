@@ -19,6 +19,7 @@ import {
 import { jwt } from 'better-auth/plugins/jwt'
 import { sql, type Transaction } from 'kysely'
 import type { Principal } from './caller.ts'
+import { withTeamCredential } from './custom-role-permissions.ts'
 import type { Auth } from './index.ts'
 import { isUuid } from './organizations.ts'
 import { lockSsoDelegation, ssoDelegationStatus } from './sso-delegation-access.ts'
@@ -27,6 +28,7 @@ import { ssoHardOff, type TeamSsoCapabilities } from './team-sso.ts'
 export const MCP_OAUTH_SCOPE = 'mcp:tools'
 export const MCP_OAUTH_SCOPES = [MCP_OAUTH_SCOPE, 'offline_access']
 export const MCP_OAUTH_CONSENT_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000
+const TEAM_AUTHORIZATION_CLAIM = 'https://hourmere.com/team-authorization'
 const hashOAuthToken = (token: string) => createHash('sha256').update(token).digest('base64url')
 const invalidGrant = () =>
   new APIError('BAD_REQUEST', {
@@ -50,6 +52,8 @@ export interface BoundMcpOAuthIntent {
   sessionId: string
   organizationId: string
   grantId: string
+  atomicConsent?: boolean
+  forceConsent?: boolean
 }
 const intents = new AsyncLocalStorage<
   Readonly<BoundMcpOAuthIntent & { transaction: Transaction<Database> | undefined }>
@@ -63,6 +67,16 @@ export function withMcpOAuthIntent<T>(
   // The broker already holds an app-pool client while invoking the native provider.
   // Its membership callback must reuse that client rather than wait for a second one.
   return intents.run(Object.freeze({ ...intent, transaction }), fn)
+}
+
+export function mcpOAuthConsentTransaction() {
+  const intent = intents.getStore()
+  return intent?.atomicConsent ? intent.transaction : undefined
+}
+
+export function mcpOAuthForcedConsentReference() {
+  const intent = intents.getStore()
+  return intent?.forceConsent ? intent.grantId : undefined
 }
 
 export function hasMcpOAuthIntent(): boolean {
@@ -336,10 +350,19 @@ export function mcpOAuthPlugins(
       customAccessTokenClaims: async ({ user, referenceId, scopes }) => {
         if (!user || !referenceId || !isUuid(referenceId)) throw invalidGrant()
         const grant = await db
-          .selectFrom('mcp_oauth_grants')
-          .select('organization_id')
-          .where('id', '=', referenceId)
-          .where('user_id', '=', user.id)
+          .selectFrom('mcp_oauth_grants as grant')
+          .leftJoin(
+            'team_credential_authorizations as ceiling',
+            'ceiling.oauth_grant_id',
+            'grant.id',
+          )
+          .select([
+            'grant.organization_id',
+            'ceiling.id as authorizationId',
+            'ceiling.credential_generation',
+          ])
+          .where('grant.id', '=', referenceId)
+          .where('grant.user_id', '=', user.id)
           .executeTakeFirst()
         if (!grant) throw invalidGrant()
         await requireMembership(
@@ -363,6 +386,9 @@ export function mcpOAuthPlugins(
         return {
           'https://hourmere.com/organization': grant.organization_id,
           'https://hourmere.com/grant': referenceId,
+          ...(grant.authorizationId && {
+            [TEAM_AUTHORIZATION_CLAIM]: `${grant.authorizationId}:${grant.credential_generation}`,
+          }),
         }
       },
     }),
@@ -413,11 +439,13 @@ export function createMcpOAuthResolver({
   db,
   publicUrl,
   ssoCapabilities = ssoHardOff,
+  customRolesEnabled = false,
 }: {
   auth: Auth
   db: Db
   publicUrl: string
   ssoCapabilities?: TeamSsoCapabilities
+  customRolesEnabled?: boolean | undefined
 }) {
   const { issuer, resource } = mcpOAuthUrls(publicUrl)
   return async (
@@ -551,6 +579,7 @@ export function createMcpOAuthResolver({
           .onRef('m.userId', '=', 'grant_row.user_id')
           .onRef('m.organizationId', '=', 'grant_row.organization_id'),
       )
+      .leftJoin('team_member_authorizations as authorization', 'authorization.member_id', 'm.id')
       .innerJoin('auth.user as u', 'u.id', 'grant_row.user_id')
       .innerJoin('auth.organization as o', 'o.id', 'grant_row.organization_id')
       .leftJoin('personal_organizations as p', 'p.organization_id', 'o.id')
@@ -566,6 +595,7 @@ export function createMcpOAuthResolver({
         'p.user_id as personalOwnerId',
         'c.scopes',
         'c.resources',
+        'authorization.generation as memberGeneration',
       ])
       .select(grantDelegationStatus(ssoCapabilities))
       .select((eb) => scimProvisioned(eb.ref('o.id')).as('scimProvisioned'))
@@ -598,12 +628,14 @@ export function createMcpOAuthResolver({
     )
       return invalid
     await touchClient(db, payload.client_id)
-    return {
-      ok: true,
-      principal: {
+    const principal = await withTeamCredential<Extract<Principal, { kind: 'oauth' }>>(
+      db,
+      {
         kind: 'oauth',
         oauthConsentId: row.id,
         oauthGrantId: grantId,
+        ...(!scopes.includes('offline_access') &&
+          typeof payload.sid === 'string' && { oauthSessionId: payload.sid }),
         ssoDelegationStatus: row.ssoDelegationStatus,
         ...(row.scimProvisioned && { scimProvisioned: true }),
         ...(ssoCapabilities.scimResourcesEnabled && { scimResourcesEnabled: true as const }),
@@ -617,6 +649,19 @@ export function createMcpOAuthResolver({
           personal: row.personalOwnerId !== null,
         },
       },
+      customRolesEnabled,
+      row.memberGeneration ?? 1,
+    )
+    const option = principal.customRoleAuthorization
+    const accepted = option?.credential
+    if (
+      accepted &&
+      (payload[TEAM_AUTHORIZATION_CLAIM] !== `${accepted.authorizationId}:${accepted.generation}` ||
+        (!scopes.includes('offline_access') && !principal.oauthSessionId))
+    ) {
+      // A legacy/online token retains its original non-versioned authority.
+      principal.customRoleAuthorization = { available: option?.available === true }
     }
+    return { ok: true, principal }
   }
 }

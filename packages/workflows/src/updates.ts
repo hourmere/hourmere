@@ -35,6 +35,11 @@ export async function updateWorkflowDefinition(
   if (!parsed.success) throw invalid()
   if (!uuidSchema.safeParse(id).success) throw notFound()
   const { expectedRevision, ...patch } = parsed.data
+  const operations: string[] = []
+  if (patch.enabled !== undefined)
+    operations.push(patch.enabled ? 'workflows.enable' : 'workflows.disable')
+  if (operations.length === 0 || Object.keys(patch).some((field) => field !== 'enabled'))
+    operations.push('workflows.update')
   return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     await ctx.prepareOrganizationWrite?.(trx)
     // This lookup reveals nothing outside the current organization; lock and re-read below.
@@ -52,6 +57,7 @@ export async function updateWorkflowDefinition(
       identity.owner_user_id
         ? { kind: 'personal', id: identity.owner_user_id }
         : { kind: 'team', id: identity.organization_id },
+      operations,
     )
     const current = await trx
       .selectFrom('workflow_definitions as d')

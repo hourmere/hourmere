@@ -11,6 +11,7 @@ import type { PublicContext, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { lockOrganization } from './hosts.ts'
 import { isConstraintViolation, isUuid, SQLSTATE, timestamp } from './internal.ts'
+import { allowsManagedTeamOperations, lockVersionedTeamWrite } from './team-permission.ts'
 import { cleanText } from './text.ts'
 
 export { ONE_TIME_LINK_PREFILL_EMAIL_MAX, ONE_TIME_LINK_PREFILL_NAME_MAX }
@@ -106,10 +107,11 @@ export async function createOneTimeBookingLink(
     await sql`SELECT pg_advisory_xact_lock(hashtextextended(${`hourmere.one-time-links:${ctx.principal.organization.id}`}, 0))`.execute(
       trx,
     )
-    const event = await authorizedEvent(trx, ctx, input.eventTypeId)
+    const event = await authorizedEvent(trx, ctx, input.eventTypeId, 'one_time_links.create')
     if (!event.is_active || event.deleted_at !== null)
       throw new DomainError('invalid', 'event_type_inactive')
-    if (ctx.principal.kind === 'api_key') await requireActiveApiKey(trx, ctx.principal, Date.now)
+    if (!ctx.principal.customRoleAuthorization?.credential && ctx.principal.kind === 'api_key')
+      await requireActiveApiKey(trx, ctx.principal, Date.now)
     if (retry !== undefined) {
       const previous = await trx
         .selectFrom('one_time_booking_links')
@@ -183,7 +185,7 @@ export async function createOneTimeBookingLink(
       })
       .returning('id')
       .executeTakeFirstOrThrow()
-    const row = await metadataQuery(trx, ctx, event.id)
+    const row = await metadataQuery(trx, ctx, event.id, event.canReadCreatorEmail)
       .where('id', '=', inserted.id)
       .executeTakeFirstOrThrow()
     return { ...toLink(row, false), token }
@@ -202,8 +204,8 @@ export async function listOneTimeBookingLinks(
   if (input.after !== undefined && !isUuid(input.after))
     throw new DomainError('invalid', 'invalid_cursor')
   return ctx.db.transaction().execute(async (trx) => {
-    await authorizeAdminRead(trx, ctx, input.eventTypeId)
-    const rows = await metadataQuery(trx, ctx, input.eventTypeId)
+    const { canReadCreatorEmail } = await authorizeAdminRead(trx, ctx, input.eventTypeId)
+    const rows = await metadataQuery(trx, ctx, input.eventTypeId, canReadCreatorEmail)
       .$if(input.after !== undefined, (query) => query.where('id', '<', input.after as string))
       .orderBy('id', 'desc')
       .limit(limit + 1)
@@ -219,8 +221,8 @@ export async function getOneTimeBookingLink(
 ): Promise<OneTimeBookingLink> {
   requireReadScope(ctx)
   return ctx.db.transaction().execute(async (trx) => {
-    await authorizeAdminRead(trx, ctx, input.eventTypeId)
-    const row = await metadataQuery(trx, ctx, input.eventTypeId)
+    const { canReadCreatorEmail } = await authorizeAdminRead(trx, ctx, input.eventTypeId)
+    const row = await metadataQuery(trx, ctx, input.eventTypeId, canReadCreatorEmail)
       .where('id', '=', isUuid(input.id) ? input.id : '00000000-0000-0000-0000-000000000000')
       .executeTakeFirst()
     if (!row) throw linkNotFound()
@@ -236,8 +238,13 @@ export async function revokeManagedOneTimeBookingLink(
   requireWriteScope(ctx)
   return teamWriteTransaction(ctx.db.transaction(), async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, input.eventTypeId)
-    await authorizeAdminRead(trx, ctx, input.eventTypeId)
-    const row = await metadataQuery(trx, ctx, input.eventTypeId)
+    const { canReadCreatorEmail } = await authorizeAdminRead(
+      trx,
+      ctx,
+      input.eventTypeId,
+      'one_time_links.revoke',
+    )
+    const row = await metadataQuery(trx, ctx, input.eventTypeId, canReadCreatorEmail)
       .where('id', '=', isUuid(input.id) ? input.id : '00000000-0000-0000-0000-000000000000')
       .forUpdate()
       .executeTakeFirst()
@@ -256,28 +263,40 @@ export async function revokeManagedOneTimeBookingLink(
         )
         .execute()
     }
-    const current = await metadataQuery(trx, ctx, input.eventTypeId)
+    const current = await metadataQuery(trx, ctx, input.eventTypeId, canReadCreatorEmail)
       .where('id', '=', row.id)
       .executeTakeFirstOrThrow()
     return toLink(current, current.expired)
   })
 }
 
-async function authorizeAdminRead(db: Db, ctx: ServiceContext, eventTypeId: string) {
+async function authorizeAdminRead(
+  db: Db,
+  ctx: ServiceContext,
+  eventTypeId: string,
+  operation = 'one_time_links.read',
+) {
   if (!isUuid(eventTypeId)) throw eventNotFound()
   await lockWriteOwner(db, ctx)
-  await authorizedEvent(db, ctx, eventTypeId)
-  if (ctx.principal.kind === 'api_key') await requireActiveApiKey(db, ctx.principal, Date.now)
+  const event = await authorizedEvent(db, ctx, eventTypeId, operation)
+  if (!ctx.principal.customRoleAuthorization?.credential && ctx.principal.kind === 'api_key')
+    await requireActiveApiKey(db, ctx.principal, Date.now)
+  return event
 }
 
-function metadataQuery(db: Db, ctx: ServiceContext, eventTypeId: string) {
+function metadataQuery(
+  db: Db,
+  ctx: ServiceContext,
+  eventTypeId: string,
+  canReadCreatorEmail: boolean,
+) {
   return db
     .selectFrom('one_time_booking_links')
     .select(metadataColumns)
     .select(
       sql<string | null>`(
       SELECT COALESCE(NULLIF(btrim(creator.name), ''),
-        CASE WHEN ${ctx.principal.kind === 'session'} AND EXISTS (
+        CASE WHEN ${canReadCreatorEmail} AND ${ctx.principal.kind === 'session'} AND EXISTS (
           SELECT 1 FROM auth.member AS viewer
           WHERE viewer."organizationId" = one_time_booking_links.organization_id
             AND viewer."userId" = ${ctx.principal.user.id}
@@ -350,16 +369,10 @@ export async function revokeOneTimeBookingLink(ctx: ServiceContext, id: string):
   await ctx.db.transaction().execute(async (trx) => {
     await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id)
     const personal = await lockWriteOwner(trx, ctx)
-    if (ctx.principal.kind === 'api_key') await requireActiveApiKey(trx, ctx.principal, Date.now)
-    const membership = await trx
-      .selectFrom('auth.member')
-      .select('role')
-      .where('organizationId', '=', ctx.principal.organization.id)
-      .where('userId', '=', ctx.principal.user.id)
-      .forShare()
-      .executeTakeFirst()
-    const roles = membership?.role.split(',').map((role) => role.trim()) ?? []
-    const teamManager = !personal && (roles.includes('owner') || roles.includes('admin'))
+    await lockOneTimeLinkCredential(trx, ctx)
+    const membership = await oneTimeLinkMembership(trx, ctx)
+    const teamManager =
+      !personal && (await managesTeamLinks(trx, ctx, membership, 'one_time_links.revoke'))
     // All IDs use the same authorization and conditional-write query. Filter before
     // locking the event, so absent and terminal links take the same no-op path.
     await trx
@@ -496,14 +509,46 @@ async function lockWriteOwner(db: Db, ctx: ServiceContext) {
   return personal
 }
 
-async function authorizedEvent(db: Db, ctx: ServiceContext, eventTypeId: string) {
-  const membership = await db
-    .selectFrom('auth.member')
-    .select('role')
-    .where('organizationId', '=', ctx.principal.organization.id)
-    .where('userId', '=', ctx.principal.user.id)
-    .forShare()
+function oneTimeLinkMembership(db: Db, ctx: ServiceContext) {
+  return db
+    .selectFrom('auth.member as member')
+    .leftJoin('team_member_authorizations as authorization', 'authorization.member_id', 'member.id')
+    .select(['member.role', 'authorization.generation'])
+    .where('member.organizationId', '=', ctx.principal.organization.id)
+    .where('member.userId', '=', ctx.principal.user.id)
+    .forShare('member')
     .executeTakeFirst()
+}
+
+async function lockOneTimeLinkCredential(db: Db, ctx: ServiceContext) {
+  if (ctx.principal.customRoleAuthorization?.credential)
+    await lockVersionedTeamWrite(db, ctx.principal, Date.now)
+  else if (ctx.principal.kind === 'api_key') await requireActiveApiKey(db, ctx.principal, Date.now)
+}
+
+async function managesTeamLinks(
+  db: Db,
+  ctx: ServiceContext,
+  membership: Awaited<ReturnType<typeof oneTimeLinkMembership>>,
+  operation: string,
+) {
+  const roles = membership?.role.split(',').map((role) => role.trim()) ?? []
+  return allowsManagedTeamOperations(
+    db,
+    ctx.principal,
+    [operation],
+    roles.includes('owner') || roles.includes('admin'),
+    membership?.generation ?? null,
+  )
+}
+
+async function authorizedEvent(
+  db: Db,
+  ctx: ServiceContext,
+  eventTypeId: string,
+  operation: string,
+) {
+  const membership = await oneTimeLinkMembership(db, ctx)
   if (!membership) throw insufficientRole()
   const event = await db
     .selectFrom('event_types')
@@ -520,12 +565,15 @@ async function authorizedEvent(db: Db, ctx: ServiceContext, eventTypeId: string)
     .where('organization_id', '=', event.organization_id)
     .executeTakeFirst()
   if (personal && event.owner_user_id !== personal.user_id) throw eventNotFound()
-  const roles = membership.role.split(',').map((role) => role.trim())
-  if (event.owner_user_id === null && !roles.includes('owner') && !roles.includes('admin'))
-    throw insufficientRole()
+  const versioned = !!ctx.principal.customRoleAuthorization?.credential
+  if (versioned) await lockOneTimeLinkCredential(db, ctx)
+  const teamManager = !personal && (await managesTeamLinks(db, ctx, membership, operation))
+  if (event.owner_user_id === null && !teamManager) throw insufficientRole()
   return {
     ...event,
-    memberLimited: !personal && !roles.includes('owner') && !roles.includes('admin'),
+    memberLimited: !personal && !teamManager,
+    canReadCreatorEmail:
+      !!personal || membership.generation === null || membership.generation === 1 || teamManager,
   }
 }
 

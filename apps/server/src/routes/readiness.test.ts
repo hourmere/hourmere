@@ -21,6 +21,7 @@ import { createDb, type Db } from '@hourmere/db'
 import { scimProvisioned, scimSuspended } from '@hourmere/db/scim-suspension'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import {
+  allowsManagedTeamOperations,
   getSelfReadiness,
   getTeamMemberReadiness,
   getTeamReadiness,
@@ -39,6 +40,7 @@ import { createMiddleware } from 'hono/factory'
 import { sql } from 'kysely'
 import pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { withTeamCredential } from '../../../../packages/auth/src/custom-role-permissions.ts'
 import { isMember } from '../../../../packages/auth/src/organizations.ts'
 import { ssoRecoveryTeamsFor } from '../../../../packages/auth/src/sso-recovery-membership.ts'
 import { signTestMcpAccessToken } from '../../../../packages/auth/src/testing.ts'
@@ -115,6 +117,7 @@ function readRouteCopy(
     {
       createRoute,
       z,
+      allowsManagedTeamOperations,
       getSelfReadiness,
       getTeamReadiness,
       getTeamMemberReadiness,
@@ -377,6 +380,7 @@ describe.skipIf(!process.env.DATABASE_URL)('booking readiness real authenticatio
           ssoHardOff,
           ssoRecoveryTeamsFor,
           withScimResources,
+          withTeamCredential,
         },
         'createCallerResolver',
         mutation,
