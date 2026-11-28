@@ -41,21 +41,29 @@ Create, withdraw, resend and run controls use REST. Send requests from the Hourm
 in the current verified owner or admin browser session. Send `X-Expected-Organization-Id`
 with the active team's ID. Use session authentication for these actions.
 
-| Action | Method and path | Request |
+Proposal requests start at `/api/v1/team/bookings/{id}/handoff-offers`. Use the original
+booking ID for `{id}` and append the suffix where shown.
+
+| Action | Method and suffix | Request |
 | --- | --- | --- |
-| Create a proposal | `POST /api/v1/team/bookings/{id}/handoff-offers` | `departingUserId` and optional `start`, `durationMinutes` and `locationOptionId`. Add `previous` with `offerId` and `version` to create a fresh version. |
-| Read recipient and delivery status | `GET /api/v1/team/bookings/{id}/handoff-offers/{offerId}` | Omit `version` for the latest version, or supply it as a query parameter. |
-| Resend to one pending recipient | `POST /api/v1/team/bookings/{id}/handoff-offers/{offerId}/resend` | `version` and `recipientId`. Send a random UUID as `Idempotency-Key` and reuse it to retry the same request. |
-| Withdraw a version | `POST /api/v1/team/bookings/{id}/handoff-offers/{offerId}/withdraw` | `version`. |
-| Start an automatic run | `POST /api/v1/team/bookings/handoff-runs` | `departingUserId` and a new UUID as `runId`. Reuse that ID to retry the same start. |
-| Read a run receipt | `GET /api/v1/team/bookings/handoff-runs/{runId}` | No request body. |
-| Control a run | `POST /api/v1/team/bookings/handoff-runs/{runId}/control` | `action` of `pause`, `resume` or `stop`. |
+| Create a proposal | `POST` to the base path | `departingUserId` and optional `start`, `durationMinutes` and `locationOptionId`. Add `previous` with `offerId` and `version` to create a fresh version. |
+| Read recipient and delivery status | `GET /{offerId}` | Omit `version` for the latest version, or supply it as a query parameter. |
+| Resend to one pending recipient | `POST /{offerId}/resend` | `version` and `recipientId`. Send a random UUID as `Idempotency-Key` and reuse it to retry the same request. |
+| Withdraw a version | `POST /{offerId}/withdraw` | `version`. |
 
 Each normalized mailbox has three sends per original booking across all versions. The first
 send and send attempts with uncertain delivery count. When the worker claims a resend, the
 previous link stops working. A new version invalidates all old links and approvals. A queued
 send unclaimed for 20 minutes can be replaced by a fresh resend request. If delivery runs out
 or a participant cannot respond, coordinate rebooking directly with them.
+
+Automatic run requests start at `/api/v1/team/bookings/handoff-runs`.
+
+| Action | Method and suffix | Request |
+| --- | --- | --- |
+| Start an automatic run | `POST` to the base path | `departingUserId` and a new UUID as `runId`. Reuse that ID to retry the same start. |
+| Read a run receipt | `GET /{runId}` | No request body. |
+| Control a run | `POST /{runId}/control` | `action` of `pause`, `resume` or `stop`. |
 
 An automatic run starts only when a current owner or admin explicitly requests it after the
 host has left. It selects up to ten live, fully approved versions, in earliest-expiry order.
@@ -114,7 +122,7 @@ Version history, committed receipts and the source-specific hashed send counts f
 
 1. 团队所有者或管理员先修复活动类型，将符合资格的接任者设为唯一主持人。仅支持尚未开始且已确认的
    团队单人模式预约。团体、集体、轮询、导入、重复、关联会议投票、来自路由表单，以及带付款记录或手动会议链接的预约均不支持交接。
-2. 使用上表的 REST 接口创建提议。请求须来自同一实例和当前已验证的团队管理会话，并用
+2. 使用上方的 REST 接口创建提议。请求须来自同一实例和当前已验证的团队管理会话，并用
    `X-Expected-Organization-Id` 指定当前团队。打开**团队预约**，选择原预约，再点**试算交接**。
    核对接任主持人、时间和地点类型。试算不会占用拟议时段。时段有冲突或日历状态无法核验时，不能确认。
 3. 预订人和每个不同邮箱的来宾都要打开各自最新邮件里的私密链接。核对**当前预约**和**拟议预约**，
