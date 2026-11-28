@@ -281,6 +281,67 @@ describe('CLI transport and arguments', () => {
     })
   })
 
+  async function verifyHandoffTokenPrivacy(runner = runCli) {
+    const offerToken = `12345678-1234-4123-8123-123456789abc.${'h'.repeat(43)}`
+    const offer = await run(
+      ['booking-handoff', 'offer', '--input', '-', '--json'],
+      { token: offerToken },
+      {
+        runner,
+        fetch: async () => response({ token: offerToken, note: `Offer token: ${offerToken}` }),
+      },
+    )
+    // Use an error-code-shaped input so the echoed value reaches the output redactor.
+    const answerToken = 'synthetic_handoff_error_sentinel'
+    const answer = await run(
+      ['booking-handoff', 'answer', '--input', '-'],
+      { token: answerToken, version: 1, decision: 'accept' },
+      {
+        runner,
+        fetch: async () =>
+          Response.json({
+            jsonrpc: '2.0',
+            id: 1,
+            result: {
+              isError: true,
+              content: [{ type: 'text', text: JSON.stringify({ error: `echo_${answerToken}` }) }],
+            },
+          }),
+      },
+    )
+    expect(offer.code).toBe(0)
+    expect(answer.code).toBe(1)
+    expect([
+      (offer.stdout + offer.stderr).includes(offerToken),
+      (answer.stdout + answer.stderr).includes(answerToken),
+    ]).toEqual([false, false])
+    expect(JSON.parse(offer.stdout)).toEqual({
+      token: '[redacted]',
+      note: 'Offer token: [redacted]',
+    })
+    expect(JSON.parse(answer.stderr)).toEqual({
+      error: 'echo_[redacted]',
+      outcomeMayBeUnknown: true,
+    })
+  }
+
+  it('redacts handoff tokens in offer JSON, displayed text and answer errors', () =>
+    verifyHandoffTokenPrivacy())
+
+  it('detects removing handoff token redaction from a CLI source copy', async () => {
+    const copy = guardCopy(
+      sourceCopy([
+        "    if (args.command.startsWith('booking-handoff ') && typeof input.token === 'string')\n" +
+          '      secrets.push(input.token)\n',
+        '',
+      ]),
+    )
+    await verifyHandoffTokenPrivacy(sourceCopy())
+    await expectKilled(copy, verifyHandoffTokenPrivacy, {
+      outcome: { actual: [true, true], expected: [false, false] },
+    })
+  })
+
   it.each([
     { handle: 'host' },
     { teamSlug: 'team' },
