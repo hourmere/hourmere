@@ -31,7 +31,7 @@ existing `<bdi>` boundaries in the routing preview, publication, rules and targe
 | [Team members](../apps/web/src/pages/TeamMembers.tsx), [member actions](../apps/web/src/components/team-members/TeamMemberActions.tsx) and [space switcher](../apps/web/src/components/SpaceSwitcher.tsx) | Isolate display names and team names next to role, status and current-space labels. Include the name slots in role, removal and recovery dialogs. |
 | [Profile settings](../apps/web/src/pages/Settings.tsx), [event list](../apps/web/src/pages/event-types/EventTypes.tsx) and [event editor](../apps/web/src/pages/event-types/EventTypeEditor.tsx) | Apply automatic direction to editable display names, titles and descriptions. Isolate titles in list rows and action labels where markup is available, and custom location and schedule names in editor summaries. Include [host assignment](../apps/web/src/pages/event-types/HostAssignment.tsx) names. |
 | [Personal bookings](../apps/web/src/pages/bookings/Bookings.tsx), [booking detail](../apps/web/src/pages/bookings/BookingDetail.tsx) and [team bookings](../apps/web/src/pages/team-bookings/TeamBookings.tsx) | Isolate event titles, shown host and attendee names, and custom answers. Give generated booking titles separate name and event slots. Give verbatim historical and custom titles a single boundary, preserving the distinction in [booking title formatting](../apps/web/src/pages/bookings/booking-format.ts). |
-| [Routing editor preview](../apps/web/src/pages/routing-forms/RoutingFormPreview.tsx), [public routing](../apps/web/src/public/RoutingFormPage.tsx) and [public poll](../apps/web/src/public/MeetingPollPage.tsx) | Cover form or poll titles, descriptions, custom questions, options and answers, plus routing messages. Apply the same pattern to voter names and event titles in [host poll results](../apps/web/src/pages/meeting-polls/MeetingPollResults.tsx). Keep routing on its existing rollout policy while testing with fixtures. |
+| [Routing editor preview](../apps/web/src/pages/routing-forms/RoutingFormPreview.tsx), [public routing](../apps/web/src/public/RoutingFormPage.tsx) and [public poll](../apps/web/src/public/MeetingPollPage.tsx) | Cover form or poll titles, descriptions, custom questions, options and answers, plus routing messages. In the routing editor, isolate option names from mapping labels and give authored questions, choices and text controls their own direction. Apply the same pattern to voter names and event titles in [host poll results](../apps/web/src/pages/meeting-polls/MeetingPollResults.tsx). Keep routing on its existing rollout policy while testing with fixtures. |
 | [Routing continuation](../apps/web/src/public/RoutingContinuationPage.tsx) | Isolate the event title and host name in its own booking header and confirmation. The shared description handles prose. |
 
 ## Rendering decisions
@@ -94,6 +94,7 @@ depend on how the browser or platform presents their text.
 
 中文：预约页面、管理后台和 HTML 邮件会按姓名、标题、说明等内容各自确定文字方向。
 团队预约主页的活动说明逐行确定方向，活动编辑器的摘要分别隔离自定义地点和时间表名称。
+分流编辑器的选项名称和自定义文字控件也各自确定方向。
 界面仍按所选语言排版。纯文本邮件、邮件主题和日历文件保留原始文字，由客户端决定
 显示方向。浏览器标签页标题、纯文本无障碍标签和原生下拉菜单由浏览器或平台呈现。
 

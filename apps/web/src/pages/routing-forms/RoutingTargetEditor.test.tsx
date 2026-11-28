@@ -15,7 +15,7 @@ type Target = Schemas['RoutingForm']['fallback']
 const uuid = (number: number) => `00000000-0000-4000-9000-${String(number).padStart(12, '0')}`
 const team = uuid(1)
 const otherTeam = uuid(2)
-const smallOption = { id: uuid(4), label: 'Small team' }
+const smallOption = { id: uuid(4), label: 'צוות קטן (Small team)' }
 const largeOption = { id: uuid(5), label: 'Large team' }
 const size = {
   id: uuid(3),
@@ -26,6 +26,7 @@ const size = {
 } satisfies Schemas['RoutingForm']['questions'][number]
 const contact = { id: uuid(6), label: 'Work email', required: true, type: 'email' } as const
 const questions = [size, contact]
+const bookingQuestion = 'حجم الفريق (Team size)'
 const janeEvent = {
   id: uuid(7),
   organizationId: team,
@@ -38,7 +39,13 @@ const janeEvent = {
   title: 'Consultation',
   slug: 'jane-consultation',
   questions: [
-    { id: 'size', type: 'select', label: 'Team size', required: true, options: ['Small', 'Large'] },
+    {
+      id: 'size',
+      type: 'select',
+      label: bookingQuestion,
+      required: true,
+      options: ['Small', 'Large'],
+    },
     { id: 'phone', type: 'phone', label: 'Phone', required: true },
     { id: 'notes', type: 'long_text', label: 'Notes', required: false },
   ],
@@ -104,7 +111,7 @@ describe('Routing destinations and mappings', () => {
     })
     const changes = vi.fn<(target: Target) => void>()
     render(<Editor initial={message} onChange={changes} />)
-    expect(screen.getByRole('textbox', { name: 'Message to show' })).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: 'Message to show' }).dir).toBe('auto')
     expect(api.calls).toEqual([])
 
     const user = userEvent.setup()
@@ -147,7 +154,10 @@ describe('Routing destinations and mappings', () => {
     const stale = 'Choose a current booking option for each routing option.'
     await screen.findByText(stale)
     const user = userEvent.setup()
-    const small = screen.getByRole('combobox', { name: 'Booking option for “Small team”' })
+    const name = `Booking option for “${smallOption.label}”`
+    const small = screen.getByRole('combobox', { name })
+    const label = screen.getByText(smallOption.label, { selector: 'label bdi' })
+    expect(label.closest('label')?.textContent).toBe(name)
     expect(small.getAttribute('aria-describedby')).toBe('fallback.mappings.0.options-error')
     expect(
       within(small).getByRole('option', { name: 'Previous booking option unavailable' }),
@@ -307,10 +317,10 @@ describe('Routing destinations and mappings', () => {
     )
     await user.click(await fallback.findByRole('button', { name: 'Add an answer mapping' }))
     await user.selectOptions(fallback.getByRole('combobox', { name: 'Routing question' }), size.id)
-    await user.selectOptions(
-      fallback.getByRole('combobox', { name: 'Booking field' }),
-      'question:size',
-    )
+    const field = fallback.getByRole('combobox', { name: 'Booking field' })
+    const fieldOption = within(field).getByRole('option', { name: bookingQuestion })
+    expect(fieldOption.dir).toBe('auto')
+    await user.selectOptions(field, fieldOption)
     const save = screen.getByRole('button', { name: 'Save draft' })
     await user.click(save)
     expect(screen.getByRole('alert').textContent).toContain(
@@ -319,7 +329,7 @@ describe('Routing destinations and mappings', () => {
     expect(api.to(`PATCH ${path}`)).toHaveLength(0)
 
     await user.selectOptions(
-      fallback.getByRole('combobox', { name: 'Booking option for “Small team”' }),
+      fallback.getByRole('combobox', { name: `Booking option for “${smallOption.label}”` }),
       'Small',
     )
     await user.selectOptions(
