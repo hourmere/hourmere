@@ -1,0 +1,23 @@
+{
+  "migration": "0201_departure_handoff_delivery.sql",
+  "objects": {
+    "constraint public.departure_handoff_deliveries.departure_handoff_deliveries_created_at_check": "CHECK (isfinite(created_at))",
+    "constraint public.departure_handoff_deliveries.departure_handoff_deliveries_pkey": "PRIMARY KEY (job_id)",
+    "constraint public.departure_handoff_deliveries.departure_handoff_deliveries_recipient_fk": "FOREIGN KEY (recipient_id) REFERENCES departure_handoff_recipients(id) ON DELETE CASCADE",
+    "constraint public.departure_handoff_deliveries.departure_handoff_deliveries_request_key": "UNIQUE NULLS NOT DISTINCT (recipient_id, request_key)",
+    "constraint public.departure_handoff_deliveries.departure_handoff_deliveries_state_check": "CHECK ((state = ANY (ARRAY['queued'::text, 'unknown'::text, 'sent'::text, 'failed'::text, 'unavailable'::text, 'skipped'::text])))",
+    "constraint public.departure_handoff_offers.departure_handoff_offers_close_reason_check": "CHECK (((close_reason IS NULL) OR ((state = 'closed'::text) AND (close_reason = ANY (ARRAY['withdrawn'::text, 'superseded'::text, 'expired'::text])))))",
+    "constraint public.departure_handoff_recipients.departure_handoff_recipients_token_digest_check": "CHECK (((token_digest IS NULL) OR ((decision IS NULL) AND (token_digest ~ '^[a-f0-9]{64}$'::text))))",
+    "constraint public.departure_handoff_send_budgets.departure_handoff_send_budgets_counted_sends_check": "CHECK (((counted_sends >= 1) AND (counted_sends <= 3)))",
+    "constraint public.departure_handoff_send_budgets.departure_handoff_send_budgets_pkey": "PRIMARY KEY (organization_id, source_booking_id, recipient_hash)",
+    "constraint public.departure_handoff_send_budgets.departure_handoff_send_budgets_recipient_hash_check": "CHECK ((recipient_hash ~ '^[a-f0-9]{64}$'::text))",
+    "constraint public.departure_handoff_send_budgets.departure_handoff_send_budgets_source_fk": "FOREIGN KEY (source_booking_id, organization_id) REFERENCES bookings(id, organization_id) ON DELETE CASCADE",
+    "index public.departure_handoff_deliveries.departure_handoff_deliveries_one_queued": "CREATE UNIQUE INDEX departure_handoff_deliveries_one_queued ON public.departure_handoff_deliveries USING btree (recipient_id) WHERE (state = 'queued'::text)",
+    "index public.departure_handoff_offers.departure_handoff_offers_expiry_idx": "CREATE INDEX departure_handoff_offers_expiry_idx ON public.departure_handoff_offers USING btree (expires_at, organization_id, source_booking_id, version)",
+    "index public.departure_handoff_recipients.departure_handoff_recipients_token_digest_key": "CREATE UNIQUE INDEX departure_handoff_recipients_token_digest_key ON public.departure_handoff_recipients USING btree (token_digest) WHERE (token_digest IS NOT NULL)",
+    "not_null public.departure_handoff_deliveries.created_at": "NOT NULL DEFAULT clock_timestamp()",
+    "not_null public.departure_handoff_deliveries.recipient_id": "NOT NULL",
+    "not_null public.departure_handoff_deliveries.state": "NOT NULL DEFAULT 'queued'::text",
+    "not_null public.departure_handoff_send_budgets.counted_sends": "NOT NULL"
+  }
+}

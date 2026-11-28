@@ -188,5 +188,9 @@
   "ownershipTransfer.offered.subject": "团队所有权转移邀请",
   "ownershipTransfer.offered.message": "你收到了{team}的所有权转移邀请。请登录并选择该团队，在团队设置中查看邀请。",
   "ownershipTransfer.confirmed.subject": "团队所有权转移已完成",
-  "ownershipTransfer.confirmed.message": "{team}的所有权转移已完成。请登录并选择该团队，在团队设置中查看当前角色。"
+  "ownershipTransfer.confirmed.message": "{team}的所有权转移已完成。请登录并选择该团队，在团队设置中查看当前角色。",
+  "departureHandoff.subject": "查看预约变更提议",
+  "departureHandoff.introduction": "团队管理员提议更换你的预约。预约人及每位来宾都同意后，团队才能更换预约。若提议过期，原预约仍然有效。",
+  "departureHandoff.privacy": "请妥善保管此链接。任何持有该链接的人都可以代你答复。仅最新链接有效。",
+  "departureHandoff.review": "查看提议"
 }

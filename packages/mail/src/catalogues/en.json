@@ -188,5 +188,9 @@
   "ownershipTransfer.offered.subject": "Team ownership transfer offer",
   "ownershipTransfer.offered.message": "You were offered ownership of {team}. Sign in and select the team to review the offer in its settings.",
   "ownershipTransfer.confirmed.subject": "Team ownership transfer completed",
-  "ownershipTransfer.confirmed.message": "The ownership transfer for {team} was completed. Sign in and select the team to see its current roles in settings."
+  "ownershipTransfer.confirmed.message": "The ownership transfer for {team} was completed. Sign in and select the team to see its current roles in settings.",
+  "departureHandoff.subject": "Review a proposed change to your booking",
+  "departureHandoff.introduction": "A team administrator has proposed a replacement for your booking. The booker and every guest must agree before the team can replace it. The current booking stays confirmed if the proposal expires.",
+  "departureHandoff.privacy": "Keep this link private. Anyone with it can respond on your behalf. Only the latest link works.",
+  "departureHandoff.review": "Review the proposal"
 }

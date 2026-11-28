@@ -188,5 +188,9 @@
   "ownershipTransfer.offered.subject": "Propuesta de transferencia de propiedad del equipo",
   "ownershipTransfer.offered.message": "Le han ofrecido la propiedad de {team}. Inicie sesión y seleccione el equipo para revisar la propuesta en su configuración.",
   "ownershipTransfer.confirmed.subject": "Transferencia de propiedad del equipo completada",
-  "ownershipTransfer.confirmed.message": "Se ha completado la transferencia de propiedad de {team}. Inicie sesión y seleccione el equipo para ver los roles actuales en su configuración."
+  "ownershipTransfer.confirmed.message": "Se ha completado la transferencia de propiedad de {team}. Inicie sesión y seleccione el equipo para ver los roles actuales en su configuración.",
+  "departureHandoff.subject": "Revise el cambio propuesto para su reserva",
+  "departureHandoff.introduction": "Un administrador del equipo ha propuesto sustituir su reserva. La persona que hizo la reserva y todos los invitados deben dar su consentimiento para que el equipo pueda sustituirla. Si caduca la propuesta, la reserva actual sigue confirmada.",
+  "departureHandoff.privacy": "Mantenga este enlace en privado. Cualquiera que lo tenga puede responder en su nombre. Solo funciona el enlace más reciente.",
+  "departureHandoff.review": "Revisar la propuesta"
 }

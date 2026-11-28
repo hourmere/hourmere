@@ -8,6 +8,15 @@ import {
   HANDOFF_PREVIEW_ISSUES,
   readDepartureHandoffAdminPreview,
 } from '@hourmere/scheduling/departure-handoff-admin'
+import {
+  createDepartureHandoffProposal,
+  DEPARTURE_HANDOFF_DELIVERY_STATES,
+  DEPARTURE_HANDOFF_PROPOSAL_STATES,
+  type EnqueueDepartureHandoffEmail,
+  readDepartureHandoffProposal,
+  resendDepartureHandoffProposal,
+  withdrawDepartureHandoffProposal,
+} from '@hourmere/scheduling/departure-handoff-proposals'
 import type { MiddlewareHandler } from 'hono'
 import { routeBodyLimit } from '../body-limit.ts'
 import type { CallerEnv } from '../caller.ts'
@@ -28,6 +37,7 @@ import {
 
 export interface DepartureHandoffs {
   store: DepartureHandoffAdminStore
+  enqueue?: EnqueueDepartureHandoffEmail | undefined
   now?: () => Temporal.Instant
 }
 
@@ -67,6 +77,29 @@ const Preview = z
   })
   .openapi('DepartureHandoffPreview')
 
+const Proposal = z
+  .object({
+    id: z.uuid(),
+    version: z.number().int().positive(),
+    expiresAt: z.iso.datetime(),
+    state: z.enum(DEPARTURE_HANDOFF_PROPOSAL_STATES),
+    recipients: z.array(
+      z.object({
+        id: z.uuid(),
+        attendeeIds: z.array(z.uuid()),
+        decision: z.enum(['pending', 'approved', 'declined']),
+        delivery: z.enum(DEPARTURE_HANDOFF_DELIVERY_STATES),
+        resendAvailable: z.boolean(),
+      }),
+    ),
+  })
+  .openapi('DepartureHandoffProposal')
+
+const Version = z.number().int().positive().max(2_147_483_647)
+const BookingParams = z.object({ id: z.uuid() })
+const OfferParams = BookingParams.extend({ offerId: z.uuid() })
+const proposalPath = '/api/v1/team/bookings/{id}/handoff-offers' as const
+
 const Headers = z.object({
   'x-expected-organization-id': z
     .string()
@@ -101,6 +134,217 @@ export function departureHandoffRoutes(
       404: 'Handoffs are disabled or the source or offer is unavailable in the current team.',
       409: `${ORGANIZATION_CONTEXT_CHANGED}; the current booking, offer, consent or slot changed`,
     })
+    const proposalErrors = {
+      ...errors,
+      503: {
+        description: 'Required calendar availability or the mail outbox is unavailable',
+        content: json(ErrorBody),
+      },
+    }
+    const proposalAccess = (principal: Parameters<typeof context>[0], expected?: string) => ({
+      teamId: principal.organization.id,
+      expectedOrganizationId: expected ?? '',
+    })
+    const writeContext = (principal: Parameters<typeof context>[0]) => ({
+      ...context(principal),
+      lockOrganizationContext: organizationContextWriteLock(principal),
+    })
+    const proposalFailure = (error: unknown): never => {
+      const issue = departureHandoffIssue(error)
+      if (issue && error instanceof DomainError && issue !== error.code)
+        throw new DomainError('conflict', issue)
+      throw error
+    }
+    app.openapi(
+      createRoute({
+        method: 'post',
+        path: proposalPath,
+        operationId: 'createDepartureHandoffProposal',
+        summary: 'Create a handoff proposal or supersede its current version',
+        description:
+          'Creates an offer and queues a private link for each distinct mailbox. Supply the latest offer ID and version in previous to replace an existing offer. The source remains confirmed and this does not reserve the proposed slot. Disabled in production.',
+        tags: ['Team bookings'],
+        security: [{ session: [] }],
+        middleware: writeMiddleware,
+        request: {
+          params: BookingParams,
+          headers: Headers,
+          body: {
+            required: true,
+            content: json(
+              z.strictObject({
+                departingUserId: z.uuid(),
+                start: z.iso.datetime({ offset: true }).optional(),
+                durationMinutes: z.number().int().positive().optional(),
+                locationOptionId: z.string().min(1).max(128).optional(),
+                previous: z.strictObject({ offerId: z.uuid(), version: Version }).optional(),
+              }),
+            ),
+          },
+        },
+        responses: {
+          201: {
+            description: 'Created proposal and queued delivery status',
+            content: json(Proposal),
+          },
+          ...proposalErrors,
+        },
+      }),
+      async (c) => {
+        if (!handoffs?.enqueue) throw disabled()
+        const { principal } = c.var
+        c.header('Cache-Control', 'no-store')
+        const result = await createDepartureHandoffProposal(
+          writeContext(principal),
+          {
+            ...proposalAccess(principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+            bookingId: c.req.valid('param').id,
+            ...c.req.valid('json'),
+          },
+          handoffs.enqueue,
+          capabilities,
+        ).catch(proposalFailure)
+        return c.json(result, 201)
+      },
+    )
+    app.openapi(
+      createRoute({
+        method: 'get',
+        path: `${proposalPath}/{offerId}`,
+        operationId: 'readDepartureHandoffProposal',
+        summary: 'Read a handoff proposal and recipient delivery status',
+        description:
+          'Defaults to the latest version. Returns opaque recipient IDs, matching source attendee IDs, decisions and safe delivery states. Disabled in production.',
+        tags: ['Team bookings'],
+        security: [{ session: [] }],
+        middleware: access.middleware,
+        request: {
+          params: OfferParams,
+          headers: Headers,
+          query: z.object({
+            version: z.coerce.number().int().positive().max(2_147_483_647).optional(),
+          }),
+        },
+        responses: {
+          200: { description: 'Current or historical proposal status', content: json(Proposal) },
+          ...errors,
+        },
+      }),
+      async (c) => {
+        if (!handoffs?.enqueue) throw disabled()
+        const { principal } = c.var
+        const { id, offerId } = c.req.valid('param')
+        c.header('Cache-Control', 'no-store')
+        return c.json(
+          await readDepartureHandoffProposal(
+            context(principal),
+            {
+              ...proposalAccess(principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+              bookingId: id,
+              offerId,
+              version: c.req.valid('query').version,
+            },
+            capabilities,
+          ),
+          200,
+        )
+      },
+    )
+    app.openapi(
+      createRoute({
+        method: 'post',
+        path: `${proposalPath}/{offerId}/withdraw`,
+        operationId: 'withdrawDepartureHandoffProposal',
+        summary: 'Withdraw a handoff proposal version',
+        description:
+          'Revokes the private links for the exact version and leaves the source booking confirmed. Disabled in production.',
+        tags: ['Team bookings'],
+        security: [{ session: [] }],
+        middleware: writeMiddleware,
+        request: {
+          params: OfferParams,
+          headers: Headers,
+          body: { required: true, content: json(z.strictObject({ version: Version })) },
+        },
+        responses: {
+          200: { description: 'Proposal status after withdrawal', content: json(Proposal) },
+          ...errors,
+        },
+      }),
+      async (c) => {
+        if (!handoffs?.enqueue) throw disabled()
+        const { principal } = c.var
+        const { id, offerId } = c.req.valid('param')
+        c.header('Cache-Control', 'no-store')
+        return c.json(
+          await withdrawDepartureHandoffProposal(
+            writeContext(principal),
+            {
+              ...proposalAccess(principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+              bookingId: id,
+              offerId,
+              version: c.req.valid('json').version,
+            },
+            capabilities,
+          ),
+          200,
+        )
+      },
+    )
+    app.openapi(
+      createRoute({
+        method: 'post',
+        path: `${proposalPath}/{offerId}/resend`,
+        operationId: 'resendDepartureHandoffProposal',
+        summary: 'Queue a new private link for one pending recipient',
+        description:
+          'Use the same Idempotency-Key to retry a request for the same recipient and version. The delivery worker revokes the older link when it claims the new send. Each mailbox can receive up to three sends for the source booking across versions. Disabled in production.',
+        tags: ['Team bookings'],
+        security: [{ session: [] }],
+        middleware: writeMiddleware,
+        request: {
+          params: OfferParams,
+          headers: Headers.extend({
+            'idempotency-key': z
+              .uuid()
+              .optional()
+              .openapi({
+                description: 'Random UUID scoped to this offer version and recipient.',
+                param: { required: true },
+              }),
+          }),
+          body: {
+            required: true,
+            content: json(z.strictObject({ version: Version, recipientId: z.uuid() })),
+          },
+        },
+        responses: {
+          200: { description: 'Proposal status after queueing or replay', content: json(Proposal) },
+          ...proposalErrors,
+        },
+      }),
+      async (c) => {
+        if (!handoffs?.enqueue) throw disabled()
+        const { principal } = c.var
+        const { id, offerId } = c.req.valid('param')
+        c.header('Cache-Control', 'no-store')
+        return c.json(
+          await resendDepartureHandoffProposal(
+            writeContext(principal),
+            {
+              ...proposalAccess(principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+              bookingId: id,
+              offerId,
+              ...c.req.valid('json'),
+              requestKey: c.req.header('Idempotency-Key') ?? '',
+            },
+            handoffs.enqueue,
+            capabilities,
+          ),
+          200,
+        )
+      },
+    )
     app.openapi(
       createRoute({
         method: 'get',
@@ -184,12 +428,7 @@ export function departureHandoffRoutes(
             },
             handoffs.store,
             capabilities,
-          ).catch((error: unknown) => {
-            const issue = departureHandoffIssue(error)
-            if (issue && error instanceof DomainError && issue !== error.code)
-              throw new DomainError('conflict', issue)
-            throw error
-          }),
+          ).catch(proposalFailure),
           200,
         )
       },

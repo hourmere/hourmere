@@ -4812,6 +4812,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/team/bookings/{id}/handoff-offers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a handoff proposal or supersede its current version
+         * @description Creates an offer and queues a private link for each distinct mailbox. Supply the latest offer ID and version in previous to replace an existing offer. The source remains confirmed and this does not reserve the proposed slot. Disabled in production.
+         */
+        post: operations["createDepartureHandoffProposal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/team/bookings/{id}/handoff-offers/{offerId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a handoff proposal and recipient delivery status
+         * @description Defaults to the latest version. Returns opaque recipient IDs, matching source attendee IDs, decisions and safe delivery states. Disabled in production.
+         */
+        get: operations["readDepartureHandoffProposal"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/team/bookings/{id}/handoff-offers/{offerId}/apply": {
         parameters: {
             query?: never;
@@ -4826,6 +4866,46 @@ export interface paths {
          * @description Requires a current owner/admin browser session and a same-origin write. Rechecks team authority, exact version, all recipient approvals, the currently offered slot and meeting eligibility in one transaction. Replays return the same limited receipt. Provider and mail work runs after commit.
          */
         post: operations["applyDepartureHandoff"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/team/bookings/{id}/handoff-offers/{offerId}/resend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Queue a new private link for one pending recipient
+         * @description Use the same Idempotency-Key to retry a request for the same recipient and version. The delivery worker revokes the older link when it claims the new send. Each mailbox can receive up to three sends for the source booking across versions. Disabled in production.
+         */
+        post: operations["resendDepartureHandoffProposal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/team/bookings/{id}/handoff-offers/{offerId}/withdraw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Withdraw a handoff proposal version
+         * @description Revokes the private links for the exact version and leaves the source booking confirmed. Disabled in production.
+         */
+        post: operations["withdrawDepartureHandoffProposal"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6978,6 +7058,25 @@ export interface components {
                 /** Format: uuid */
                 sourceBookingId: string;
             } | null;
+        };
+        DepartureHandoffProposal: {
+            /** Format: date-time */
+            expiresAt: string;
+            /** Format: uuid */
+            id: string;
+            recipients: {
+                attendeeIds: string[];
+                /** @enum {string} */
+                decision: "pending" | "approved" | "declined";
+                /** @enum {string} */
+                delivery: "not_requested" | "queued" | "unknown" | "sent" | "failed" | "unavailable" | "skipped";
+                /** Format: uuid */
+                id: string;
+                resendAvailable: boolean;
+            }[];
+            /** @enum {string} */
+            state: "live" | "withdrawn" | "superseded" | "expired" | "closed";
+            version: number;
         };
         DepartureHandoffReceipt: {
             /** Format: uuid */
@@ -20323,6 +20422,192 @@ export interface operations {
             };
         };
     };
+    createDepartureHandoffProposal: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required team where the booking was opened. Reload if the active space changed. */
+                "x-expected-organization-id": string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    departingUserId: string;
+                    durationMinutes?: number;
+                    locationOptionId?: string;
+                    previous?: {
+                        /** Format: uuid */
+                        offerId: string;
+                        version: number;
+                    };
+                    /** Format: date-time */
+                    start?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Created proposal and queued delivery status */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepartureHandoffProposal"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Verified team owner/admin browser session required. Authorization headers are denied. sso_required: This team requires a current SSO proof. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Handoffs are disabled or the source or offer is unavailable in the current team. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed: reload the page before trying this team write again; the current booking, offer, consent or slot changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Required calendar availability or the mail outbox is unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    readDepartureHandoffProposal: {
+        parameters: {
+            query?: {
+                version?: number;
+            };
+            header: {
+                /** @description Required team where the booking was opened. Reload if the active space changed. */
+                "x-expected-organization-id": string;
+            };
+            path: {
+                id: string;
+                offerId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current or historical proposal status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepartureHandoffProposal"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Verified team owner/admin browser session required. Authorization headers are denied. sso_required: This team requires a current SSO proof. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Handoffs are disabled or the source or offer is unavailable in the current team. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed: reload the page before trying this team write again; the current booking, offer, consent or slot changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     applyDepartureHandoff: {
         parameters: {
             query?: never;
@@ -20409,6 +20694,191 @@ export interface operations {
             };
             /** @description Required calendar availability is unknown */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    resendDepartureHandoffProposal: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Random UUID scoped to this offer version and recipient. */
+                "idempotency-key": string;
+                /** @description Required team where the booking was opened. Reload if the active space changed. */
+                "x-expected-organization-id": string;
+            };
+            path: {
+                id: string;
+                offerId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    recipientId: string;
+                    version: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Proposal status after queueing or replay */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepartureHandoffProposal"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Verified team owner/admin browser session required. Authorization headers are denied. sso_required: This team requires a current SSO proof. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Handoffs are disabled or the source or offer is unavailable in the current team. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed: reload the page before trying this team write again; the current booking, offer, consent or slot changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Required calendar availability or the mail outbox is unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    withdrawDepartureHandoffProposal: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required team where the booking was opened. Reload if the active space changed. */
+                "x-expected-organization-id": string;
+            };
+            path: {
+                id: string;
+                offerId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    version: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Proposal status after withdrawal */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepartureHandoffProposal"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No valid session or API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Verified team owner/admin browser session required. Authorization headers are denied. sso_required: This team requires a current SSO proof. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Handoffs are disabled or the source or offer is unavailable in the current team. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description organization_context_changed: reload the page before trying this team write again; the current booking, offer, consent or slot changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The API key's rate limit is used up */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

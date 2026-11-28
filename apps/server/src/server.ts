@@ -69,10 +69,13 @@ import {
   bookingNotificationJob,
   bookingNotifier,
   conferenceNotificationDispatchJob,
+  createDepartureHandoffEmailQueue,
   createInvitationEmailDispatcher,
   createInvitationEmailRepairer,
   createMeetingPollEmailWorker,
   createWaitlistEmailWorker,
+  departureHandoffCleanupJob,
+  departureHandoffEmailJob,
   groupHostMailJob,
   type InvitationEmailQueue,
   invitationEmailJob,
@@ -107,6 +110,10 @@ import {
   scanWaitlists,
   verifyWaitlist,
 } from '@hourmere/scheduling'
+import {
+  cleanupDepartureHandoffProposals,
+  type EnqueueDepartureHandoffEmail,
+} from '@hourmere/scheduling/departure-handoff-proposals'
 import { departureHandoffStore } from '@hourmere/scheduling/departure-handoff-store'
 import {
   captureWorkflowWebhook,
@@ -765,6 +772,7 @@ export function productTools({
 
 /** What the running server's app options need beyond the configuration. */
 export interface ProductionAppDeps extends RecurringBookingAdmissionDeps {
+  enqueueDepartureHandoffEmail?: EnqueueDepartureHandoffEmail
   enqueueScimInvitation: ReturnType<typeof createInvitationEmailDispatcher>
   config: Config
   db: Db
@@ -818,6 +826,7 @@ export function productionAppOptions({
   checkDb,
   waitlist,
   invitationMailLimits,
+  enqueueDepartureHandoffEmail,
   enqueueScimInvitation,
   webhookSettings,
   webhookQueue,
@@ -984,7 +993,7 @@ export function productionAppOptions({
       routingFormsEnabled,
       routingSecret: config.BETTER_AUTH_SECRET,
       departureHandoffs: productionDepartureHandoffsEnabled
-        ? { store: departureHandoffStore }
+        ? { store: departureHandoffStore, enqueue: enqueueDepartureHandoffEmail }
         : undefined,
       workflowRunCursorSecret: config.BETTER_AUTH_SECRET,
       workflowsEnabled,
@@ -1480,6 +1489,14 @@ async function start(
       ),
       scimMappingNoticeJob(db, mailer),
       bookingNotificationJob(notificationDeps),
+      departureHandoffEmailJob(productionDepartureHandoffsEnabled ? notificationDeps : undefined),
+      ...(productionDepartureHandoffsEnabled
+        ? [
+            departureHandoffCleanupJob(() =>
+              cleanupDepartureHandoffProposals(db, Temporal.Now.instant()),
+            ),
+          ]
+        : []),
       rescheduleRequestExpiryJob({
         db,
         notify: async (trx, event, now) => {
@@ -1705,6 +1722,7 @@ async function start(
         },
         invitationMailLimits,
         webhookSettings,
+        enqueueDepartureHandoffEmail: createDepartureHandoffEmailQueue(jobs),
         enqueueScimInvitation: createInvitationEmailDispatcher(invitationDeliveryDeps),
         webhookQueue: jobs,
         notify,

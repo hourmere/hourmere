@@ -530,6 +530,8 @@ describe.skipIf(!serverUrl)('departure booking handoff migration', () => {
             'The exact-offer foreign key and the offer’s source foreign key already enforce and cascade this binding.',
           'constraint public.departure_handoff_offers.departure_handoff_offers_pkey':
             'Recipient and receipt foreign keys need this target key, which PostgreSQL cannot drop in isolation.',
+          'constraint public.departure_handoff_recipients.departure_handoff_recipients_pkey':
+            'The delivery foreign key needs this target key, which PostgreSQL cannot drop in isolation.',
         },
       })
       expect(report.problems).toEqual([])

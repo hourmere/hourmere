@@ -25,6 +25,10 @@ const fixedOutsideV1: ReadonlySet<string> = new Set([
   'team_bookings.confirm_bulk_cancellation',
   'team_bookings.read_bulk_cancellation',
   'team_bookings.preview_handoff',
+  'team_bookings.create_handoff_proposal',
+  'team_bookings.read_handoff_proposal',
+  'team_bookings.withdraw_handoff_proposal',
+  'team_bookings.resend_handoff_proposal',
   'team_bookings.apply_handoff',
 ])
 
@@ -141,6 +145,19 @@ const teamRest = new Map<string, readonly string[]>([
   ['GET /api/v1/team/bookings/{id}', ['team_bookings.read']],
   ['POST /api/v1/team/bookings/{id}/cancel', ['team_bookings.cancel']],
   ['GET /api/v1/team/bookings/{id}/handoff-preview', ['team_bookings.preview_handoff']],
+  ['POST /api/v1/team/bookings/{id}/handoff-offers', ['team_bookings.create_handoff_proposal']],
+  [
+    'GET /api/v1/team/bookings/{id}/handoff-offers/{offerId}',
+    ['team_bookings.read_handoff_proposal'],
+  ],
+  [
+    'POST /api/v1/team/bookings/{id}/handoff-offers/{offerId}/withdraw',
+    ['team_bookings.withdraw_handoff_proposal'],
+  ],
+  [
+    'POST /api/v1/team/bookings/{id}/handoff-offers/{offerId}/resend',
+    ['team_bookings.resend_handoff_proposal'],
+  ],
   [
     'POST /api/v1/team/bookings/{id}/handoff-offers/{offerId}/apply',
     ['team_bookings.apply_handoff'],

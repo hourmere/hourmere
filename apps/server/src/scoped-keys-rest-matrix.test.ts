@@ -239,6 +239,10 @@ const classes = {
     'GET /api/v1/team/bookings/{id}',
     'POST /api/v1/team/bookings/{id}/cancel',
     'GET /api/v1/team/bookings/{id}/handoff-preview',
+    'POST /api/v1/team/bookings/{id}/handoff-offers',
+    'GET /api/v1/team/bookings/{id}/handoff-offers/{offerId}',
+    'POST /api/v1/team/bookings/{id}/handoff-offers/{offerId}/withdraw',
+    'POST /api/v1/team/bookings/{id}/handoff-offers/{offerId}/resend',
     'POST /api/v1/team/bookings/{id}/handoff-offers/{offerId}/apply',
     'POST /api/v1/team/bookings/bulk-cancellations/preview',
     'POST /api/v1/team/bookings/bulk-cancellations/{id}/confirm',
@@ -1101,14 +1105,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     }
 
-    it('covers the exact 205-operation contract and all 615 scope combinations', () => {
+    it('covers the exact 209-operation contract and all 627 scope combinations', () => {
       const ids = Object.values(classes).flat()
-      expect(ids).toHaveLength(205)
-      expect(new Set(ids).size).toBe(205)
+      expect(ids).toHaveLength(209)
+      expect(new Set(ids).size).toBe(209)
       expect([...ids].sort()).toEqual(
         API_KEY_REST_OPERATIONS.map((operation) => operation.id).sort(),
       )
-      expect(cases).toHaveLength(615)
+      expect(cases).toHaveLength(627)
     })
 
     it.each(cases)('$scope $operation', async ({ operation, kind, scope }) => {
