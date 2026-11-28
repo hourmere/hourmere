@@ -37,10 +37,13 @@ describe('team booking bulk cancellation design facts', () => {
   it('excludes paid bookings, including rescheduled successors, using the shared predicate', () => {
     expect(prose).toContain('Paid bookings are excluded from bulk cancellation.')
     expect(prose).toContain(
-      'Reuse the shared paid-binding predicate from `assertBookingLocallyManaged` and `unavailablePaidManagementIds`.',
+      'Preview and execution use the same `bookingPaymentBindings` lookup as `assertBookingLocallyManaged`.',
     )
     expect(prose).toContain(
       'the root (`booking_id`) or the current booking (`current_booking_id`).',
+    )
+    expect(prose).toContain(
+      'A stored payment hold deadline, payment confirmation timestamp or payment reference also makes a booking ineligible.',
     )
   })
 

@@ -7,7 +7,8 @@ import {
 import { createMiddleware } from 'hono/factory'
 import { sql } from 'kysely'
 import type { CallerEnv } from '../caller.ts'
-import { ErrorBody, json, type RouteModule, type ServiceDeps } from '../openapi.ts'
+import { ErrorBody, json, type RouteModule } from '../openapi.ts'
+import { takeBulkReadBudget } from '../team-booking-bulk-admission.ts'
 import {
   BulkPreviewSelectionSchema,
   bulkPageBinding,
@@ -19,6 +20,12 @@ import {
   ORGANIZATION_CONTEXT_CHANGED,
   teamManagementAccess,
 } from '../team-management.ts'
+import {
+  type BulkCancellationRouteDeps,
+  bulkExpectedTeamHeader,
+  bulkThrottleResponse,
+  teamBookingBulkAdmissionRoutes,
+} from './team-booking-bulk-admission.ts'
 
 const BulkCancellationPreview = z
   .object({
@@ -34,10 +41,9 @@ const BulkCancellationPreview = z
   .openapi('BulkCancellationPreview')
 
 /** Only test composition supplies a proof secret until the release gate is implemented. */
-export function teamBookingBulkPreviewRoutes(
-  deps: ServiceDeps & { bulkSelectionSecret?: string },
-): RouteModule {
-  return ({ app, caller }) => {
+export function teamBookingBulkPreviewRoutes(deps: BulkCancellationRouteDeps): RouteModule {
+  return (shared) => {
+    const { app, caller } = shared
     const { db, bulkSelectionSecret } = deps
     const access = teamManagementAccess(db, caller)
     const hardOff = createMiddleware<CallerEnv>(async (c, next) => {
@@ -59,15 +65,7 @@ export function teamBookingBulkPreviewRoutes(
           ...typeof access.middleware,
         ],
         request: {
-          headers: z.object({
-            'x-expected-organization-id': z
-              .string()
-              .optional()
-              .openapi({
-                description: 'Required: the organization where the selection started',
-                param: { required: true },
-              }),
-          }),
+          headers: bulkExpectedTeamHeader,
           body: { required: true, content: json(BulkPreviewSelectionSchema) },
         },
         responses: {
@@ -90,6 +88,7 @@ export function teamBookingBulkPreviewRoutes(
             content: json(ErrorBody),
           },
           413: { description: 'Request body is too large', content: json(ErrorBody) },
+          429: bulkThrottleResponse,
         },
       }),
       async (c) => {
@@ -101,13 +100,22 @@ export function teamBookingBulkPreviewRoutes(
           principal.organization.id,
           async (trx, actor) => {
             const binding = bulkPageBinding(principal, actor)
-            const proof = verifyBulkPageSelection(
-              bulkSelectionSecret,
-              binding,
-              pageToken,
-              bookingIds,
-              await databaseWallTime(trx),
-            )
+            const limited = await takeBulkReadBudget(trx, binding, 'preview')
+            if (limited) return limited
+            let proof: ReturnType<typeof verifyBulkPageSelection>
+            try {
+              proof = verifyBulkPageSelection(
+                bulkSelectionSecret,
+                binding,
+                pageToken,
+                bookingIds,
+                await databaseWallTime(trx),
+              )
+            } catch (error) {
+              // A refused proof still counts as a preview attempt.
+              if (error instanceof DomainError) return error
+              throw error
+            }
             const items = await teamBookingBulkPreview(trx, actor.organizationId, proof.bookingIds)
             const expiresAt = proof.expiresAt
             const receipt = await trx
@@ -136,7 +144,7 @@ export function teamBookingBulkPreviewRoutes(
               )
               .returning('id')
               .executeTakeFirst()
-            if (!receipt) throw new DomainError('conflict', 'bulk_selection_changed')
+            if (!receipt) return new DomainError('conflict', 'bulk_selection_changed')
             await trx
               .insertInto('team_booking_bulk_cancellation_items')
               .values(
@@ -152,11 +160,17 @@ export function teamBookingBulkPreviewRoutes(
           },
           { expectedOrganizationId: c.req.header(EXPECTED_ORGANIZATION_HEADER) ?? '' },
         )
+        if (preview instanceof DomainError) throw preview
+        if ('error' in preview) {
+          c.header('Retry-After', String(preview.retryAfterSeconds))
+          return c.json({ error: preview.error }, 429)
+        }
         return c.json(preview, 200)
       },
       (result, c) => {
         if (!result.success) return c.json({ error: 'invalid_request' }, 400)
       },
     )
+    teamBookingBulkAdmissionRoutes(deps)(shared)
   }
 }

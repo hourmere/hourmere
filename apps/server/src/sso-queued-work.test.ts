@@ -328,7 +328,13 @@ it('classifies every production worker by its source of authority', () => {
     throw new Error(`Unclassified production job definition syntax: ${value.type}`)
   }
 
-  const authenticated = ['invitationEmailJob', 'meetingPollEmailJob', 'webhookDeliveryJob']
+  const authenticated = [
+    'invitationEmailJob',
+    'meetingPollEmailJob',
+    // The recovery wake only dispatches work. Each item rechecks the submitting session.
+    'teamBookingBulkCancellationJobs',
+    'webhookDeliveryJob',
+  ]
   const lifecycle = [
     'bookingCalendarJob',
     'bookingCalendarRecoveryJob',

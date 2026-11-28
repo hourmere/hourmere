@@ -127,6 +127,23 @@ describe.skipIf(!serverUrl)('audit journal', () => {
       ['organization.branding_updated', { logo: 'removed', primaryColor: 'cleared' }],
       ['booking.attendee_no_show_changed', { attendeeId: randomUUID(), noShow: 'marked' }],
       ['booking.attendee_no_show_changed', { attendeeId: randomUUID(), noShow: 'unmarked' }],
+      ['booking.bulk_cancellation_admitted', { selectedCount: 2 }],
+      [
+        'booking.bulk_cancellation_completed',
+        {
+          counts: {
+            pending: 0,
+            cancelled: 1,
+            already_cancelled: 0,
+            booking_started: 0,
+            booking_not_supported: 1,
+            booking_unavailable: 0,
+            booking_host_departed: 0,
+            authorization_lost: 0,
+            processing_failed: 0,
+          },
+        },
+      ],
     ] as [AuditEvent['action'], Record<string, unknown>][]
     for (const [action, details] of cases) {
       await db.transaction().execute((trx) => writeAuditEvent(trx, { ...event, action, details }))
@@ -226,6 +243,34 @@ describe.skipIf(!serverUrl)('audit journal', () => {
         JSON.stringify(details),
       ).rejects.toMatchObject({ constraint: 'audit_events_details_check' })
   }, 120_000)
+  it('refuses nested bulk cancellation details before inserting audit events', async () => {
+    for (const details of [
+      { counts: { email: 'invitee@example.test' } },
+      {
+        counts: {
+          pending: 0,
+          cancelled: 'private reason',
+          already_cancelled: 0,
+          booking_started: 0,
+          booking_not_supported: 1,
+          booking_unavailable: 0,
+          booking_host_departed: 0,
+          authorization_lost: 0,
+          processing_failed: 0,
+        },
+      },
+    ]) {
+      await expect(
+        db.transaction().execute((trx) =>
+          writeAuditEvent(trx, {
+            ...event,
+            action: 'booking.bulk_cancellation_completed',
+            details,
+          }),
+        ),
+      ).rejects.toThrow('allow-listed')
+    }
+  })
   it('rolls back the change when audit fails and the event when the change fails', async () => {
     const id = randomUUID()
     await expect(

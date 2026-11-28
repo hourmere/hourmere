@@ -20,13 +20,14 @@ Cancel is the existing team management action that administrators can apply to s
 appointments for the same operational reason. The bulk interface has no free-text reason
 field. The existing individual interfaces retain their own access rules for rescheduling,
 deleting, changing hosts, attendance, refunds and provider or notification retries.
-Imported records are ineligible. Paid bookings are excluded from bulk cancellation.
-Reuse the shared paid-binding predicate from `assertBookingLocallyManaged` and
-`unavailablePaidManagementIds`. A booking is excluded if it has a stored payment hold
-deadline or a Checkout attempt references it as the root (`booking_id`) or the current
+Imported records and bookings connected to them through rescheduling are ineligible.
+Paid bookings are excluded from bulk cancellation. Preview and execution use the same
+`bookingPaymentBindings` lookup as `assertBookingLocallyManaged`. A Checkout attempt
+makes the referenced booking ineligible as either the root (`booking_id`) or the current
 booking (`current_booking_id`). The current booking reference also covers rescheduled
-paid successors. Immutable online payment terms on the booking also make it ineligible.
-Use these stored facts under lock. Paid events are personal-only.
+paid successors. A stored payment hold deadline, payment confirmation timestamp or
+payment reference also makes a booking ineligible. Recheck these stored facts under
+lock before cancellation. Paid events are personal-only.
 Cancellation of a selected seat or occurrence uses existing group or series rules, including
 any required slot or series bookkeeping. It never adds a sibling, successor, other series
 member or other group seat to the selection.
@@ -154,7 +155,7 @@ Each entry has one of these codes.
 | `cancelled` | This batch committed that booking's cancellation and its normal durable side effects. |
 | `already_cancelled` | Previously cancelled, including a rescheduled predecessor. No cancellation side effects from this batch. |
 | `booking_started` | The same-team booking was confirmed but had already started at eligibility check. |
-| `booking_not_supported` | The same-team entry was imported, held for payment or otherwise ineligible by its stored payment or lifecycle policy. |
+| `booking_not_supported` | The same-team entry belongs to an imported chain or is ineligible by its stored payment or lifecycle policy. |
 | `booking_unavailable` | No booking with this ID exists in the bound team. Missing and outside-team rows share the same code, with no foreign metadata. |
 | `booking_host_departed` | An otherwise eligible booking has a saved required host who is no longer a member of the team. No host identity is added to the result. |
 | `authorization_lost` | The original authority or active team stopped permitting write work. |

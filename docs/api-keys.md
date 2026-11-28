@@ -117,7 +117,7 @@ because an endpoint uses GET or a tool advertises itself as read-only.
 
 Routing operations return `routing_forms_disabled` while routing is off.
 
-Team booking bulk cancellation preview returns 404 until the feature is released.
+Team booking bulk cancellation preview, confirmation and status return 404 until release.
 
 <!-- api-key-scope-table:start -->
 
@@ -286,6 +286,8 @@ Team booking bulk cancellation preview returns 404 until the feature is released
 | `GET /api/v1/team/bookings/{id}/handoff-preview` | Browser session only | — |
 | `POST /api/v1/team/bookings/{id}/handoff-offers/{offerId}/apply` | Browser session only | — |
 | `POST /api/v1/team/bookings/bulk-cancellations/preview` | Browser session only | — |
+| `POST /api/v1/team/bookings/bulk-cancellations/{id}/confirm` | Browser session only | — |
+| `GET /api/v1/team/bookings/bulk-cancellations/{id}` | Browser session only | — |
 | `GET /api/v1/team/invitations` | Browser session only | — |
 | `GET /api/v1/team/invitations/{invitationId}` | Browser session only | — |
 | `POST /api/v1/team/invitations/{invitationId}/cancel` | Browser session only | — |
