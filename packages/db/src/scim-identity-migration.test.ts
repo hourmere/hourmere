@@ -21,6 +21,7 @@ const dependentMigrations = [
   '0197_custom_role_storage.sql',
   // 0198 extends the audit details constraint that 0197 replaces.
   '0198_team_booking_bulk_execution.sql',
+  '0200_custom_role_membership_lifecycle.sql',
 ]
 
 async function records(pool: pg.Pool, tables?: { schema: string; name: string }[]) {

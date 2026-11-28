@@ -165,6 +165,7 @@ import { brandingRoutes } from './routes/branding.ts'
 import { caldavRoutes } from './routes/caldav.ts'
 import { calendarRoutes } from './routes/calendars.ts'
 import { conferenceRoutes } from './routes/conferences.ts'
+import { customRoleRoutes } from './routes/custom-roles.ts'
 import { type DepartureHandoffs, departureHandoffRoutes } from './routes/departure-handoffs.ts'
 import { eventTypeRoutes } from './routes/event-types.ts'
 import { instanceRoutes } from './routes/instance.ts'
@@ -432,6 +433,7 @@ export function productRoutes({
     brandingRoutes({ db }),
     auditLogRoutes({ db, auditLogRetentionDays }),
     ssoRoutes({ db, capabilities: ssoCapabilities }),
+    customRoleRoutes({ db, publicUrl, capabilities: ssoCapabilities }),
     ssoPolicyRoutes({
       db,
       publicUrl,

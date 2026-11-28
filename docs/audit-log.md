@@ -273,12 +273,12 @@ details, bodies, answers, URLs and secrets.
 Workflow events use the space's existing audit permissions and retention. Workflows remain
 hard-off.
 
-## Reserved custom-role actions
+## Custom-role actions
 
 The [custom-role storage](custom-roles.md#storage-migration-and-credential-versions)
-migration reserves the following actions. Custom roles are hard-off and the application
-does not emit these events yet. The journal uses its existing team, actor, target and time
-columns. Each action requires `outcome: succeeded` and `masterEpoch` and omits the
+migration reserves the following actions. The browser management routes are hard-off.
+The membership lifecycle can emit a clearance when a fixed-role update removes an
+assignment. The journal uses its existing team, actor, target and time columns. Each action requires `outcome: succeeded` and `masterEpoch` and omits the
 credential's session ID. A clearance can also record a trusted user, SCIM token or system
 actor when the membership lifecycle removes the assignment.
 

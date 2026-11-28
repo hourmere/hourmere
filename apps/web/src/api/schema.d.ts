@@ -5776,6 +5776,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/teams/{teamId}/members/{memberId}/custom-role": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set or clear a current member’s custom role */
+        put: operations["assignCustomTeamRole"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/teams/{teamId}/permissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the current browser session’s team-wide permission decisions */
+        get: operations["getTeamPermissions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/teams/{teamId}/readiness": {
         parameters: {
             query?: never;
@@ -5858,6 +5892,43 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/teams/{teamId}/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the team’s active custom roles */
+        get: operations["listCustomTeamRoles"];
+        put?: never;
+        /** Create a custom role and publish its first revision */
+        post: operations["createCustomTeamRole"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/teams/{teamId}/roles/{roleId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read a custom role and its published revision */
+        get: operations["getCustomTeamRole"];
+        put?: never;
+        post?: never;
+        /** Archive a custom role with no current assignments */
+        delete: operations["archiveCustomTeamRole"];
+        options?: never;
+        head?: never;
+        /** Publish a new immutable revision of a custom role */
+        patch: operations["publishCustomTeamRole"];
         trace?: never;
     };
     "/api/v1/webhooks": {
@@ -6849,6 +6920,24 @@ export interface components {
                 /** @enum {string} */
                 type: "after_end";
             };
+        };
+        CustomTeamRole: {
+            archived: boolean;
+            catalogueVersion: number;
+            /** Format: uuid */
+            id: string;
+            name: string;
+            permissionIds: string[];
+            revision: number;
+        };
+        CustomTeamRoleAssignment: {
+            generation: number;
+            kind: string;
+            /** Format: uuid */
+            memberId: string;
+            revision: number | null;
+            /** Format: uuid */
+            roleId: string | null;
         };
         DeleteWorkflowInput: {
             expectedRevision: number;
@@ -9721,6 +9810,18 @@ export interface components {
              * @enum {string}
              */
             status: "pending" | "accepted" | "canceled" | "rejected" | "expired" | "unknown";
+        };
+        TeamPermissions: {
+            decisions: {
+                allowed: boolean;
+                operation: string;
+                source: string | null;
+            }[];
+            membershipGeneration: number | null;
+            policyVersion: {
+                masterEpoch: number;
+                teamEpoch: number;
+            } | null;
         };
         /** @description Unknown required checks use not_checked with completeness=partial and checkedAt=null; attempted checks that fail use check_failed with a safe reason and attempt time. Neither means satisfied or no available slots. availability remains not_checked because no slot search is performed. */
         TeamReadinessPage: {
@@ -22589,6 +22690,490 @@ export interface operations {
                         };
                         impact?: components["schemas"]["MemberDepartureImpact"];
                     };
+                };
+            };
+        };
+    };
+    assignCustomTeamRole: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required on writes. Identifies the team in which the edit began. */
+                "X-Expected-Organization-Id"?: string;
+            };
+            path: {
+                memberId: string;
+                teamId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    expectedGeneration: number;
+                    expectedRevision: number | null;
+                    /** Format: uuid */
+                    proofAttemptId?: string;
+                    /** Format: uuid */
+                    roleId: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description The current assignment */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        kind: string;
+                        role: components["schemas"]["CustomTeamRole"];
+                    } | components["schemas"]["CustomTeamRoleAssignment"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Team management access denied or fresh verification required sso_required: This team requires a current SSO proof. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoFreshProofChallenge"] | components["schemas"]["Error"] | components["schemas"]["Error"];
+                };
+            };
+            /** @description Custom roles unavailable */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Team context changed, role revision conflict or role in use */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getTeamPermissions: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required on writes. Identifies the team in which the edit began. */
+                "X-Expected-Organization-Id"?: string;
+            };
+            path: {
+                teamId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Decisions for supported fixed checks and current custom grants. Target and field checks are performed by each operation. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TeamPermissions"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Team management access denied sso_required: This team requires a current SSO proof. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Custom roles unavailable */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Team context changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listCustomTeamRoles: {
+        parameters: {
+            query?: {
+                after?: string;
+                limit?: number;
+            };
+            header?: {
+                /** @description Required on writes. Identifies the team in which the edit began. */
+                "X-Expected-Organization-Id"?: string;
+            };
+            path: {
+                teamId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page ordered by role ID */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomTeamRole"][];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Team management access denied sso_required: This team requires a current SSO proof. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Custom roles unavailable */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Team context changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    createCustomTeamRole: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required on writes. Identifies the team in which the edit began. */
+                "X-Expected-Organization-Id"?: string;
+            };
+            path: {
+                teamId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    permissionIds: string[];
+                    /** Format: uuid */
+                    proofAttemptId?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The created role */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        kind: string;
+                        role: components["schemas"]["CustomTeamRole"];
+                    } | components["schemas"]["CustomTeamRoleAssignment"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Team management access denied or fresh verification required sso_required: This team requires a current SSO proof. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoFreshProofChallenge"] | components["schemas"]["Error"] | components["schemas"]["Error"];
+                };
+            };
+            /** @description Custom roles unavailable */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Team context changed, role revision conflict or role in use */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getCustomTeamRole: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required on writes. Identifies the team in which the edit began. */
+                "X-Expected-Organization-Id"?: string;
+            };
+            path: {
+                roleId: string;
+                teamId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The requested role */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomTeamRole"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Team management access denied sso_required: This team requires a current SSO proof. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Custom roles unavailable */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Team context changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    archiveCustomTeamRole: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required on writes. Identifies the team in which the edit began. */
+                "X-Expected-Organization-Id"?: string;
+            };
+            path: {
+                roleId: string;
+                teamId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    expectedRevision: number;
+                    /** Format: uuid */
+                    proofAttemptId?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The archived role */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        kind: string;
+                        role: components["schemas"]["CustomTeamRole"];
+                    } | components["schemas"]["CustomTeamRoleAssignment"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Team management access denied or fresh verification required sso_required: This team requires a current SSO proof. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoFreshProofChallenge"] | components["schemas"]["Error"] | components["schemas"]["Error"];
+                };
+            };
+            /** @description Custom roles unavailable */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Team context changed, role revision conflict or role in use */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    publishCustomTeamRole: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required on writes. Identifies the team in which the edit began. */
+                "X-Expected-Organization-Id"?: string;
+            };
+            path: {
+                roleId: string;
+                teamId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    expectedRevision: number;
+                    name: string;
+                    permissionIds: string[];
+                    /** Format: uuid */
+                    proofAttemptId?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The published role */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        kind: string;
+                        role: components["schemas"]["CustomTeamRole"];
+                    } | components["schemas"]["CustomTeamRoleAssignment"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Team management access denied or fresh verification required sso_required: This team requires a current SSO proof. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoFreshProofChallenge"] | components["schemas"]["Error"] | components["schemas"]["Error"];
+                };
+            };
+            /** @description Custom roles unavailable */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Team context changed, role revision conflict or role in use */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };

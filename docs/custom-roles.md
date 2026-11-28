@@ -159,6 +159,13 @@ comma-separated role tokens and operation-specific exceptions. Map existing know
 to the matching fixed policy and record one baseline generation for each membership.
 Avoid a blanket precedence rule for legacy multi-token rows. Leave an ambiguous row on
 the fixed path while the team is off and block activation until the owner resolves it.
+
+The membership lifecycle keeps the snapshot in sync with live native role tokens. New
+teams receive a disabled policy at commit, after personal-space classification. New
+members receive a baseline authorization row. A missing policy or member row always
+uses the fixed path and grants no custom permissions. Promotion and ownership-transfer
+writes clear an ineligible assignment, advance its generation and record the automatic
+clearance in the same transaction even when both switches are off.
 Backfill cannot infer an owner or promote a member. Verify a fresh install, repeat
 migration and representative predecessor data. While hard-off, ordinary fixed-role
 traffic uses the existing path and custom roles cannot be written, assigned or resolved.

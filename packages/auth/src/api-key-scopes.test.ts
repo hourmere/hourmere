@@ -177,6 +177,13 @@ const restContract = {
     'POST /api/v1/teams/{teamId}/leave',
     'GET /api/v1/teams/{teamId}/member-readiness',
     'GET /api/v1/teams/{teamId}/readiness',
+    'GET /api/v1/teams/{teamId}/permissions',
+    'GET /api/v1/teams/{teamId}/roles',
+    'GET /api/v1/teams/{teamId}/roles/{roleId}',
+    'POST /api/v1/teams/{teamId}/roles',
+    'PATCH /api/v1/teams/{teamId}/roles/{roleId}',
+    'DELETE /api/v1/teams/{teamId}/roles/{roleId}',
+    'PUT /api/v1/teams/{teamId}/members/{memberId}/custom-role',
   ],
   audit_read: ['GET /api/v1/audit-events', 'GET /api/v1/audit-log/settings'],
   other_write: [

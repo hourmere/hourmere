@@ -3594,4 +3594,11 @@ export const admin = {
     'Submission could not be confirmed. This page will keep checking its status.',
   'No selected bookings are eligible for cancellation. Review a fresh selection.':
     'No selected bookings are eligible for cancellation. Review a fresh selection.',
+
+  // Custom team roles
+  'Custom roles are unavailable.': 'Custom roles are unavailable.',
+  'The role or assignment changed. Reload before saving.':
+    'The role or assignment changed. Reload before saving.',
+  'Clear this role’s assignments before archiving it.':
+    'Clear this role’s assignments before archiving it.',
 } as const
