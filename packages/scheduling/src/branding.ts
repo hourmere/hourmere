@@ -292,6 +292,22 @@ export interface PublicBranding {
   logoUrl: string | null
 }
 
+function publicPrimaryColor(color: string | null): string | null {
+  return color && /^#[0-9a-fA-F]{6}$/.test(color) && brandContrast(color).buttonTextContrast >= 4.5
+    ? color.toUpperCase()
+    : null
+}
+
+/** The public palette for consumers that do not use or decode the space's logo. */
+export async function getPublicBrandPrimaryColor(db: Db, organizationId: string) {
+  const row = await db
+    .selectFrom('organization_branding')
+    .select('brand_primary_color')
+    .where('organization_id', '=', organizationId)
+    .executeTakeFirst()
+  return publicPrimaryColor(row?.brand_primary_color ?? null)
+}
+
 async function readBranding(db: Db, organizationId: string) {
   const row = await db
     .selectFrom('organization_branding as b')
@@ -315,11 +331,7 @@ async function readBranding(db: Db, organizationId: string) {
     .where('b.organization_id', '=', organizationId)
     .executeTakeFirst()
   if (!row) return undefined
-  const color = row.brand_primary_color
-  const primaryColor =
-    color && /^#[0-9a-fA-F]{6}$/.test(color) && brandContrast(color).buttonTextContrast >= 4.5
-      ? color.toUpperCase()
-      : null
+  const primaryColor = publicPrimaryColor(row.brand_primary_color)
   // Legacy PNG rows are normalized on read, without a blocking rewrite or changing saved references.
   let logo: Buffer | undefined
   if (row.data) {

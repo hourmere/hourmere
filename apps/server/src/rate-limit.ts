@@ -10,10 +10,12 @@ export interface RateLimit {
   windowSeconds: number
 }
 
-/** Limits for the unauthenticated /api/v1 endpoints (public pages and invitee links). */
+/** Limits for unauthenticated endpoints (public pages and invitee links). */
 export const PUBLIC_RATE_LIMITS = {
   /** Public event page. */
   page: { limit: 120, windowSeconds: 60 },
+  /** Preview images, shared across personal and team event URLs. */
+  ogImage: { limit: 60, windowSeconds: 60 },
   /** Available slots. */
   slots: { limit: 120, windowSeconds: 60 },
   /** Creating a booking. */

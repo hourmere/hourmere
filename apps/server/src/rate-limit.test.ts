@@ -105,6 +105,7 @@ describe('createRateLimiter', () => {
   it('has the documented public limits', () => {
     expect(PUBLIC_RATE_LIMITS).toEqual({
       page: { limit: 120, windowSeconds: 60 },
+      ogImage: { limit: 60, windowSeconds: 60 },
       slots: { limit: 120, windowSeconds: 60 },
       book: { limit: 10, windowSeconds: 60 },
       manage: { limit: 30, windowSeconds: 60 },
