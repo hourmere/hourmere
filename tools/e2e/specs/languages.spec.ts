@@ -1,5 +1,5 @@
 import type { Locator, Page } from '@playwright/test'
-import { selectAdminLanguage } from '../account-menu.ts'
+import { accountMenuPanel, selectAdminLanguage } from '../account-menu.ts'
 import { revealEventSetting } from '../event-settings.ts'
 import { expect, fillInvitee, pickSlot, test } from '../fixtures.ts'
 import { selectPublicLanguage } from '../public-language.ts'
@@ -477,20 +477,27 @@ for (const selected of ['en', 'zh-CN'] as const) {
         exact: true,
       }),
     ).toBeVisible()
-    await page
-      .getByRole('link', {
-        name: other(selected) === 'en' ? 'Back to event types' : '返回活动类型',
+    const savedEventLink = (language: Language) =>
+      page.getByRole('link', {
+        name: language === 'en' ? 'Edit Settings' : '编辑 Settings',
         exact: true,
       })
-      .click()
-    await expect.poll(() => new URL(page.url()).pathname).toBe('/app/event-types')
-    await selectAdminLanguage(page, selected)
-    const savedEventLink = page.getByRole('link', {
-      name: selected === 'en' ? 'Edit Settings' : '编辑 Settings',
-      exact: true,
+    await test.step('Switch back after the saved event list is ready', async () => {
+      await page
+        .getByRole('link', {
+          name: other(selected) === 'en' ? 'Back to event types' : '返回活动类型',
+          exact: true,
+        })
+        .click()
+      await expect(page).toHaveURL(`${app.url}/app/event-types`)
+      // The shell focuses main after navigation, which closes an open account menu.
+      await expect(page.getByRole('main')).toBeFocused()
+      await expect(savedEventLink(other(selected))).toBeVisible()
+      await selectAdminLanguage(page, selected)
+      await expect(accountMenuPanel(page)).toBeHidden()
+      await expect(savedEventLink(selected)).toBeVisible()
     })
-    await expect(savedEventLink).toBeVisible()
-    await savedEventLink.click()
+    await savedEventLink(selected).click()
     await revealEventSetting(page.locator('#minimumNoticeMinutes'))
     for (const [unit, minutes, days, canonicalMinutes, canonicalDays] of [
       ['minutes', '90', '2880', 90, 2],
